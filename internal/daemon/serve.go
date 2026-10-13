@@ -21,6 +21,10 @@ type Options struct {
 	Idle time.Duration
 	// Ready, when set, receives the endpoint once daemon.json is published.
 	Ready func(Endpoint)
+	// TakeOver, when set, asks a running daemon to step down and keeps trying
+	// for the workspace until this long has passed, so a daemon that is started
+	// again in between is asked to step down too.
+	TakeOver time.Duration
 }
 
 // Serve runs the workspace's daemon until ctx ends, /shutdown is posted, or it idles out.
@@ -28,7 +32,7 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 	if err := Prepare(paths); err != nil {
 		return err
 	}
-	held, err := lock(paths.Lock())
+	held, err := acquire(paths, opts.TakeOver)
 	if err != nil {
 		return err
 	}
@@ -72,6 +76,19 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 	quit, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stop()
 	return httpSrv.Shutdown(quit)
+}
+
+// acquire takes the lifetime lock, stepping a running daemon aside for up to takeOver.
+func acquire(paths Paths, takeOver time.Duration) (*os.File, error) {
+	deadline := time.Now().Add(takeOver)
+	for {
+		held, err := lock(paths.Lock())
+		if !errors.Is(err, ErrRunning) || takeOver <= 0 || !time.Now().Before(deadline) {
+			return held, err
+		}
+		Stop(paths, time.Until(deadline))
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func idles(ctx context.Context, srv *Server, idle time.Duration, cancel func()) {

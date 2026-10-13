@@ -181,3 +181,33 @@ func TestAnIdleDaemonEnds(t *testing.T) {
 		t.Fatal("the daemon did not idle out")
 	}
 }
+
+func TestTakeOverStepsARunningDaemonAside(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the lock is not exclusive here")
+	}
+	p := workspace(t)
+	first := make(chan Endpoint, 1)
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- Serve(context.Background(), p, Options{Ready: func(ep Endpoint) { first <- ep }})
+	}()
+	ep1 := <-first
+	ctx, cancel := context.WithCancel(context.Background())
+	second := make(chan Endpoint, 1)
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- Serve(ctx, p, Options{TakeOver: 10 * time.Second, Ready: func(ep Endpoint) { second <- ep }})
+	}()
+	ep2 := <-second
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := Healthy(p); !ok || got.InstanceID != ep2.InstanceID || ep2.InstanceID == ep1.InstanceID {
+		t.Fatalf("healthy = %v, %v", got, ok)
+	}
+	cancel()
+	if err := <-secondDone; err != nil {
+		t.Fatal(err)
+	}
+}
