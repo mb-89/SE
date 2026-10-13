@@ -27,7 +27,9 @@ issues without a permission prompt, and only that form.
    other sessions.
 4. Commit, then write the landing answers: a YAML file outside the checkout
    (`../landing-<n>.yaml`), one key per question in `spec/landing.yaml`, each
-   answered in a few lines ("none" is an answer; an empty field is not). Then
+   answered in a few lines as a block (`key: |`, the text indented below it),
+   since a bare ` #39` would be read as a YAML comment ("none" is an answer;
+   an empty field is not). Then
    `./src/plugin/bin/se issue land --answers ../landing-<n>.yaml`. It refuses
    missing, empty or unknown keys, runs the check, pushes, posts the answers
    on the issue, opens the PR (`Fixes #<n>`) and turns on auto-merge with
@@ -66,7 +68,8 @@ took. `se` is the absolute path of `./src/plugin/bin/se` in this checkout.
      Run every command there. The issue's text, below, is the whole
      specification; follow <path>/CLAUDE.md. Do the work and commit. Write
      <path>-landing.yaml, answering every question in <path>/spec/landing.yaml
-     by its key ("none" is an answer; an empty field is not), then run
+     by its key, each as a block (`key: |`, the text indented below it) ("none"
+     is an answer; an empty field is not), then run
      <se> issue land --workspace <path> --answers <path>-landing.yaml.
      Answer only the PR number and link.
      <the issue's body>`
