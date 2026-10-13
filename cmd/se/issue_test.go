@@ -19,9 +19,9 @@ func recordedIssues(t *testing.T) *[][]string {
 	t.Helper()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
-			{"number":3,"title":"three","body":"do it","state":"open","html_url":"u3","issue_dependencies_summary":{"total_blocked_by":0}},
+			{"number":3,"title":"three","body":"do it","state":"open","html_url":"u3"},
 			{"number":2,"title":"two","body":"","state":"open","html_url":"u2","issue_dependencies_summary":{"total_blocked_by":1}},
-			{"number":1,"title":"one","body":"","state":"open","html_url":"u1","issue_dependencies_summary":{"total_blocked_by":0}}]`,
+			{"number":1,"title":"one","body":"","state":"open","html_url":"u1"}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[{"ref":"refs/heads/issue-1"}]`,
 		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
@@ -154,6 +154,7 @@ func TestIssueNewCreatesTheIssueAndItsLinks(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	want := [][]string{
+		{"api", "--paginate", "repos/o/r/issues?labels=se&state=open&per_page=100"},
 		{"api", "repos/o/r/issues/1"},
 		{"api", "repos/o/r/issues/3"},
 		{"api", "-X", "POST", "-f", "title=ten", "-f", "body=the body\n", "-f", "labels[]=se", "repos/o/r/issues"},
@@ -188,6 +189,8 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	check = func(dir string) error { checked = dir; return nil }
 	gh = func(args ...string) ([]byte, error) {
 		switch args[len(args)-1] {
+		case "repos/o/r/issues?labels=se&state=open&per_page=100":
+			return []byte(`[]`), nil
 		case "repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100":
 			return []byte(`[]`), nil
 		case "repos/o/r/issues/6":
@@ -206,6 +209,58 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	code, out, _ = se(t, "issue", "land", "--json", "--workspace", ws, "--repo", "o/r")
 	if code != 0 || out != `{"issue":6,"number":14,"url":"u14","created":true,"merged":false}`+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
+	}
+}
+
+func TestIssueNextInNamesTheTreesReadyLeaves(t *testing.T) {
+	old := gh
+	t.Cleanup(func() { gh = old })
+	answers := map[string]string{
+		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
+			{"number":1,"title":"root","state":"open","html_url":"u1","sub_issues_summary":{"total":2}},
+			{"number":2,"title":"two","state":"open","html_url":"u2"},
+			{"number":3,"title":"three","state":"open","html_url":"u3","labels":[{"name":"se-review"}],"sub_issues_summary":{"total":1}}]`,
+		"repos/o/r/git/matching-refs/heads/issue-":   `[]`,
+		"repos/o/r/issues/1/sub_issues?per_page=100": `[{"number":2,"state":"open"},{"number":3,"state":"open"}]`,
+		"repos/o/r/issues/3/sub_issues?per_page=100": `[{"number":4,"state":"closed"}]`,
+	}
+	for _, n := range []int{1, 2, 3} {
+		answers[fmt.Sprintf("repos/o/r/issues/%d/dependencies/blocked_by?per_page=100", n)] = `[]`
+	}
+	gh = func(args ...string) ([]byte, error) {
+		if a, ok := answers[args[len(args)-1]]; ok {
+			return []byte(a), nil
+		}
+		return nil, fmt.Errorf("not recorded: %v", args)
+	}
+	code, out, errs := se(t, "issue", "next", "--repo", "o/r")
+	if code != 0 || !strings.Contains(out, "#1 is a parent: it holds no work. Coordinate its tree: se issue next --in 1 --take") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	code, out, errs = se(t, "issue", "next", "--in", "1", "--repo", "o/r")
+	if code != 0 || out != "Ready: #2 two\nu2\nReady for review: #3 three\nu3\n" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	code, out, _ = se(t, "issue", "next", "--in", "1", "--json", "--repo", "o/r")
+	if code != 0 || !strings.Contains(out, `"root":1,"closed":false,"ready":[{"number":2`) {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+	code, out, errs = se(t, "issue", "next", "--in", "3", "--repo", "o/r")
+	if code != 0 || out != "Ready for review: #3 three\nu3\n" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+}
+
+func TestIssueNewTakesAParent(t *testing.T) {
+	calls := recordedIssues(t)
+	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--parent", "3")
+	if code != 1 || !strings.Contains(errs, "making it a sub-issue of #3") {
+		// The recording holds no sub-issue endpoint, so the link fails after the create.
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	last := (*calls)[len(*calls)-1]
+	if want := []string{"api", "-X", "POST", "-F", "sub_issue_id=110", "repos/o/r/issues/3/sub_issues"}; !reflect.DeepEqual(last, want) {
+		t.Fatalf("%q", last)
 	}
 }
 
