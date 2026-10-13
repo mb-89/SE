@@ -97,7 +97,7 @@ func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 	a := claimed7(t)
 	g := newGithub(t, pr70("false", "dirty"))
 	took, ok, err := Source{Repo: repo, GH: g.gh}.Take(a, 0)
-	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || *took.Takeover != (Takeover{PR: 70, URL: "p70", Count: 1}) {
+	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || *took.Takeover != (Takeover{PR: 70, URL: "p70", Count: 1, Why: "PR #70 conflicts with main"}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 	if got := run(t, a, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-7" {

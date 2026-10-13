@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./plugin/bin/se issue:*)"
+      "Bash(./plugin/bin/se issue:*)",
+      "Bash(./plugin/bin/se fleet:*)"
     ]
   },
   "hooks": {

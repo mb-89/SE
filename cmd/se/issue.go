@@ -372,8 +372,11 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string) (Re
 		head = fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
 	}
 	if t := i.Takeover; t != nil {
-		head = fmt.Sprintf("Took over #%d %s, on branch %s: its PR #%d conflicts with main (takeover %d).\n%s\n%s\nMerge origin/main into %s (never rebase, never force-push), resolve the conflict, and land it again with se issue land.",
-			i.Number, i.Title, branch, t.PR, t.Count, i.URL, t.URL, branch)
+		head = fmt.Sprintf("Took over #%d %s, on branch %s: %s (takeover %d).\n%s", i.Number, i.Title, branch, t.Why, t.Count, i.URL)
+		if t.URL != "" {
+			head += "\n" + t.URL
+		}
+		head += fmt.Sprintf("\nMerge origin/main into %s (never rebase, never force-push), resolve any conflict, make it green, and land it again with se issue land.", branch)
 	}
 	if fanout != "" {
 		head += "\n" + fanout

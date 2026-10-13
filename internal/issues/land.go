@@ -97,6 +97,13 @@ func (s Source) Land(dir, session string, check func(dir string) error) (Landing
 		l.Created = true
 	}
 	l.Number, l.URL = pr.Number, pr.URL
+	l.Merged, err = s.autoMerge(pr)
+	return l, err
+}
+
+// autoMerge turns on auto-merge, squashing, for the PR; merged is true where
+// nothing was left to wait for and it was merged at once instead.
+func (s Source) autoMerge(pr pull) (merged bool, err error) {
 	_, err = s.GH("api", "-f", "query="+autoMerge, "-f", "id="+pr.NodeID, "graphql")
 	if err != nil && strings.Contains(err.Error(), "GraphQL is not available") {
 		// A Claude Code cloud session reaches GitHub through a proxy that
@@ -107,13 +114,13 @@ func (s Source) Land(dir, session string, check func(dir string) error) (Landing
 		// A PR with nothing left to wait for takes no auto-merge; it is
 		// merged now, the way auto-merge would have.
 		if !strings.Contains(err.Error(), "clean status") {
-			return l, fmt.Errorf("PR #%d (%s) is open, but auto-merge is not on: %w", pr.Number, pr.URL, err)
+			return false, fmt.Errorf("PR #%d (%s) is open, but auto-merge is not on: %w", pr.Number, pr.URL, err)
 		}
 		path := fmt.Sprintf("repos/%s/pulls/%d/merge", s.Repo, pr.Number)
 		if _, err := s.GH("api", "-X", "PUT", "-f", "merge_method=squash", path); err != nil {
-			return l, fmt.Errorf("PR #%d (%s) is open, but merging it failed: %w", pr.Number, pr.URL, err)
+			return false, fmt.Errorf("PR #%d (%s) is open, but merging it failed: %w", pr.Number, pr.URL, err)
 		}
-		l.Merged = true
+		return true, nil
 	}
-	return l, nil
+	return false, nil
 }
