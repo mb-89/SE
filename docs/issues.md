@@ -10,14 +10,10 @@ choice is deterministic and no prompt restates it.
 - **Fleet work**: an open issue carrying the label `se`. Other issues are not
   the fleet's.
 - **Blockers**: an issue waits while any of its blockers is open. Blockers are
-  GitHub's native "blocked by" links, plus any line in the body of the form
-
-      Blocked by: #12, #14
-
-  Agents write the body line because their GitHub tools cannot set native
-  links. Both count. The line starts with `Blocked by:` (markdown emphasis
-  around it is fine); a "blocked by" in the middle of a sentence is not a
-  blocker.
+  GitHub's native "blocked by" links, and nothing else; a "Blocked by: #12"
+  line in an issue's body does not block it. An `se` command that writes those
+  links comes in a separate issue; agents never write dependencies any other
+  way.
 - **Claimed**: an issue whose branch `issue-<n>` exists on origin is claimed. A
   box claims an issue by pushing that branch from the current `origin/main`. A
   push is atomic, so if two boxes race, the second push is refused and that box

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -128,15 +127,11 @@ func (s Source) Survey() ([]Status, error) {
 	for _, r := range refs {
 		claimed[strings.TrimPrefix(r.Ref, "refs/heads/")] = true
 	}
-	// What is known open or closed, so each blocker is asked about once.
-	isOpen := map[int]bool{}
 	var fleet []issue
 	for _, i := range open {
-		if i.PullRequest != nil {
-			continue
+		if i.PullRequest == nil {
+			fleet = append(fleet, i)
 		}
-		isOpen[i.Number] = true
-		fleet = append(fleet, i)
 	}
 	sort.Slice(fleet, func(a, b int) bool { return fleet[a].Number < fleet[b].Number })
 	var out []Status
@@ -147,7 +142,7 @@ func (s Source) Survey() ([]Status, error) {
 			out = append(out, st)
 			continue
 		}
-		blockers, err := s.openBlockers(i, isOpen)
+		blockers, err := s.openBlockers(i)
 		if err != nil {
 			return nil, err
 		}
@@ -163,60 +158,24 @@ func (s Source) Survey() ([]Status, error) {
 	return out, nil
 }
 
-// openBlockers names the issue's blockers that are still open, native links
-// and body lines both, in ascending order.
-func (s Source) openBlockers(i issue, isOpen map[int]bool) ([]int, error) {
-	seen := map[int]bool{}
+// openBlockers names the issue's blockers that are still open, in ascending
+// order. Blockers are GitHub's native "blocked by" links and nothing else.
+func (s Source) openBlockers(i issue) ([]int, error) {
+	if i.Dependencies != nil && i.Dependencies.TotalBlockedBy == 0 {
+		return nil, nil
+	}
+	native, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d/dependencies/blocked_by?per_page=100", s.Repo, i.Number), true)
+	if err != nil {
+		return nil, err
+	}
 	var blocking []int
-	add := func(n int, open bool) {
-		if open && !seen[n] {
-			seen[n] = true
-			blocking = append(blocking, n)
+	for _, b := range native {
+		if b.State == "open" {
+			blocking = append(blocking, b.Number)
 		}
-	}
-	if i.Dependencies == nil || i.Dependencies.TotalBlockedBy > 0 {
-		native, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d/dependencies/blocked_by?per_page=100", s.Repo, i.Number), true)
-		if err != nil {
-			return nil, err
-		}
-		for _, b := range native {
-			isOpen[b.Number] = b.State == "open"
-			add(b.Number, b.State == "open")
-		}
-	}
-	for _, n := range BodyBlockers(i.Body) {
-		open, known := isOpen[n]
-		if !known {
-			got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
-			if err != nil {
-				return nil, err
-			}
-			open = got[0].State == "open"
-			isOpen[n] = open
-		}
-		add(n, open)
 	}
 	sort.Ints(blocking)
 	return blocking, nil
-}
-
-var (
-	blockedLine = regexp.MustCompile(`(?im)^[^\w#\n]*blocked by[*_ \t]*:(.*)$`)
-	issueRef    = regexp.MustCompile(`#(\d+)\b`)
-)
-
-// BodyBlockers reads the issues a body names on its "Blocked by: #12, #14"
-// lines, the form agents write since their tools cannot set native links.
-func BodyBlockers(body string) []int {
-	var out []int
-	for _, line := range blockedLine.FindAllStringSubmatch(body, -1) {
-		for _, ref := range issueRef.FindAllStringSubmatch(line[1], -1) {
-			if n, err := strconv.Atoi(ref[1]); err == nil {
-				out = append(out, n)
-			}
-		}
-	}
-	return out
 }
 
 // Next is the lowest-numbered ready issue; ok is false when none is ready.

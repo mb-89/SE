@@ -64,7 +64,8 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 		}
 		return string(data)
 	}
-	// Recorded from mb-89/SE: #5 claimed, #6 "Blocked by: #5", #7 free.
+	// Recorded from mb-89/SE: #5 claimed; #6 says "Blocked by: #5" in its
+	// body, which is no blocker, as only native links are.
 	gh := recorded(t, map[string]string{
 		"repos/mb-89/SE/issues?labels=se&state=open&per_page=100": read("issues.json"),
 		"repos/mb-89/SE/git/matching-refs/heads/issue-":           read("refs.json"),
@@ -74,14 +75,14 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"claimed by issue-5", "blocked by #5", ""}
+	want := []string{"claimed by issue-5", "", ""}
 	for k, st := range all {
 		if st.Number != 5+k || st.Why != want[k] {
 			t.Errorf("%d: #%d %q, want #%d %q", k, st.Number, st.Why, 5+k, want[k])
 		}
 	}
 	next, ok, err := s.Next()
-	if err != nil || !ok || next.Number != 7 || !strings.Contains(next.URL, "/issues/7") {
+	if err != nil || !ok || next.Number != 6 || !strings.Contains(next.URL, "/issues/6") {
 		t.Fatalf("next = %+v %v %v", next, ok, err)
 	}
 }
@@ -119,23 +120,6 @@ func TestAClaimedBranchHoldsItsIssue(t *testing.T) {
 	}
 }
 
-func TestBodyLinesBlockWhileTheirIssuesAreOpen(t *testing.T) {
-	got := survey(t, map[string]string{
-		listPath: `[` + open(2, "") +
-			`,` + open(5, "Why\n\nBlocked by: #2, #3\n") + // #2 open (listed), #3 closed
-			`,` + open(6, "**Blocked by:** #3") + // closed blocker only
-			`,` + open(7, "Blocked by: #8") + // open, not a fleet issue
-			`,` + open(9, "This is not blocked by: #2, it says so mid-line") + `]`,
-		refsPath:             `[]`,
-		"repos/o/r/issues/3": `{"number":3,"state":"closed"}`,
-		"repos/o/r/issues/8": `{"number":8,"state":"open"}`,
-	})
-	want := map[int]string{2: "", 5: "blocked by #2", 6: "", 7: "blocked by #8", 9: ""}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("%v, want %v", got, want)
-	}
-}
-
 func TestNativeLinksBlockWhileTheirIssuesAreOpen(t *testing.T) {
 	native := func(n, total int) string {
 		return fmt.Sprintf(`{"number":%d,"title":"t","state":"open","issue_dependencies_summary":{"total_blocked_by":%d}}`, n, total)
@@ -144,15 +128,16 @@ func TestNativeLinksBlockWhileTheirIssuesAreOpen(t *testing.T) {
 		listPath: `[` + native(4, 2) + `,` + native(5, 1) + `,` + native(6, 0) +
 			// Where the API leaves the summary out, the links are asked for.
 			`,{"number":7,"state":"open"}` +
-			// A native and a body blocker together, named once each.
-			`,{"number":8,"state":"open","body":"Blocked by: #20, #21","issue_dependencies_summary":{"total_blocked_by":1}}]`,
+			// A body line is no blocker; only the native link counts.
+			`,{"number":8,"state":"open","body":"Blocked by: #20, #22","issue_dependencies_summary":{"total_blocked_by":1}}` +
+			`,{"number":9,"state":"open","body":"Blocked by: #20","issue_dependencies_summary":{"total_blocked_by":0}}]`,
 		refsPath: `[]`,
 		"repos/o/r/issues/4/dependencies/blocked_by?per_page=100": `[{"number":20,"state":"open"},{"number":21,"state":"closed"}]`,
 		"repos/o/r/issues/5/dependencies/blocked_by?per_page=100": `[{"number":21,"state":"closed"}]`,
 		"repos/o/r/issues/7/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/issues/8/dependencies/blocked_by?per_page=100": `[{"number":20,"state":"open"}]`,
 	})
-	want := map[int]string{4: "blocked by #20", 5: "", 6: "", 7: "", 8: "blocked by #20"}
+	want := map[int]string{4: "blocked by #20", 5: "", 6: "", 7: "", 8: "blocked by #20", 9: ""}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%v, want %v", got, want)
 	}
@@ -161,25 +146,15 @@ func TestNativeLinksBlockWhileTheirIssuesAreOpen(t *testing.T) {
 func TestNothingReady(t *testing.T) {
 	for name, list := range map[string]string{
 		"no issues": `[]`,
-		"all held":  `[` + open(1, "") + `,` + open(2, "Blocked by: #1") + `]`,
+		"all held":  `[` + open(1, "") + `,{"number":2,"state":"open","issue_dependencies_summary":{"total_blocked_by":1}}]`,
 	} {
-		gh := recorded(t, map[string]string{listPath: list, refsPath: `[{"ref":"refs/heads/issue-1"}]`})
+		gh := recorded(t, map[string]string{
+			listPath: list,
+			refsPath: `[{"ref":"refs/heads/issue-1"}]`,
+			"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
+		})
 		if next, ok, err := (Source{Repo: repo, GH: gh}).Next(); err != nil || ok {
 			t.Errorf("%s: %+v %v %v", name, next, ok, err)
-		}
-	}
-}
-
-func TestBodyBlockers(t *testing.T) {
-	for body, want := range map[string][]int{
-		"Blocked by: #12, #14":                {12, 14},
-		"x\n- blocked by: #3\nBlocked by: #4": {3, 4},
-		"> **Blocked by**: #7 and #8":         {7, 8},
-		"Not blocked by: #1":                  nil,
-		"Blocked by #1":                       nil,
-	} {
-		if got := BodyBlockers(body); !reflect.DeepEqual(got, want) {
-			t.Errorf("%q: %v, want %v", body, got, want)
 		}
 	}
 }
@@ -274,8 +249,9 @@ func TestATakeRefusedMovesToTheNextIssue(t *testing.T) {
 
 func TestTakeRefusesAnIssueThatIsNotReady(t *testing.T) {
 	gh := recorded(t, map[string]string{
-		listPath: `[` + open(1, "") + `,` + open(2, "Blocked by: #1") + `]`,
+		listPath: `[` + open(1, "") + `,{"number":2,"state":"open","issue_dependencies_summary":{"total_blocked_by":1}}]`,
 		refsPath: `[]`,
+		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
 	})
 	s := Source{Repo: repo, GH: gh}
 	if _, _, err := s.Take(t.TempDir(), 2); err == nil || !strings.Contains(err.Error(), "blocked by #1") {

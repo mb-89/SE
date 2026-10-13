@@ -14,9 +14,10 @@ func recordedIssues(t *testing.T) {
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
 			{"number":3,"title":"three","body":"do it","state":"open","html_url":"u3","issue_dependencies_summary":{"total_blocked_by":0}},
-			{"number":2,"title":"two","body":"Blocked by: #1","state":"open","html_url":"u2","issue_dependencies_summary":{"total_blocked_by":0}},
+			{"number":2,"title":"two","body":"","state":"open","html_url":"u2","issue_dependencies_summary":{"total_blocked_by":1}},
 			{"number":1,"title":"one","body":"","state":"open","html_url":"u1","issue_dependencies_summary":{"total_blocked_by":0}}]`,
-		"repos/o/r/git/matching-refs/heads/issue-": `[{"ref":"refs/heads/issue-1"}]`,
+		"repos/o/r/git/matching-refs/heads/issue-":                `[{"ref":"refs/heads/issue-1"}]`,
+		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
 	}
 	old := gh
 	gh = func(args ...string) ([]byte, error) {
