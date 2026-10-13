@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -77,14 +78,14 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, next." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, next, review." {
 		t.Fatalf("%+v", r)
 	}
 }
 
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, next." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, next, review." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -93,7 +94,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue next, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, next.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, next, review.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -183,12 +184,19 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	git(root, "clone", "-q", origin, ws)
 	git(ws, "checkout", "-q", "-b", "issue-6")
 	git(ws, "commit", "-q", "--allow-empty", "-m", "work")
-	old, oldCheck := gh, check
-	t.Cleanup(func() { gh, check = old, oldCheck })
+	old, oldCheck, oldSession := gh, check, sessionID
+	t.Cleanup(func() { gh, check, sessionID = old, oldCheck, oldSession })
 	checked := ""
 	check = func(dir string) error { checked = dir; return nil }
+	sessionID = func() string { return "s1" }
+	recorded := ""
 	gh = func(args ...string) ([]byte, error) {
 		switch args[len(args)-1] {
+		case "repos/o/r/issues/6/comments?per_page=100":
+			return []byte(`[{"body":` + strconv.Quote(recorded) + `}]`), nil
+		case "repos/o/r/issues/6/comments":
+			recorded = strings.TrimPrefix(args[len(args)-2], "body=")
+			return []byte(`{}`), nil
 		case "repos/o/r/issues?labels=se&state=open&per_page=100":
 			return []byte(`[]`), nil
 		case "repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100":
@@ -209,6 +217,10 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	code, out, _ = se(t, "issue", "land", "--json", "--workspace", ws, "--repo", "o/r")
 	if code != 0 || out != `{"issue":6,"number":14,"url":"u14","created":true,"merged":false}`+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
+	}
+	// The leaf records its worker once, however often it lands.
+	if want := "Worked by session s1 in " + ws + "."; !strings.HasPrefix(recorded, want) || !strings.Contains(recorded, `<!-- se-worker {"session":"s1","workspace":`) {
+		t.Fatalf("recorded %q", recorded)
 	}
 }
 
@@ -247,6 +259,17 @@ func TestIssueNextInNamesTheTreesReadyLeaves(t *testing.T) {
 	}
 	code, out, errs = se(t, "issue", "next", "--in", "3", "--repo", "o/r")
 	if code != 0 || out != "Ready for review: #3 three\nu3\n" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	// A take inside finds no leaf, and names the review and its reviewer's worktree.
+	ws := filepath.Join(t.TempDir(), "SE")
+	code, out, errs = se(t, "issue", "next", "--in", "3", "--take", "--json", "--repo", "o/r", "--workspace", ws)
+	wt := "git fetch -q origin main \\u0026\\u0026 git worktree add --detach " + filepath.Join(filepath.Dir(ws), "review-3-1") + " origin/main"
+	if code != 0 || !strings.HasPrefix(out, `{"ready":false,"closed":false,"review":[{"number":3,`) || !strings.Contains(out, `"worktree":"`+wt+`"`) {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	code, out, errs = se(t, "issue", "next", "--in", "3", "--take", "--repo", "o/r", "--workspace", ws)
+	if code != 0 || !strings.HasPrefix(out, "Nothing inside #3 is ready.\n\nReady for review: #3 three\nu3\nA reviewer that worked none of its tree works in a fresh worktree:\ngit fetch") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 }
@@ -314,5 +337,44 @@ func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 	code, out, _ := se(t, "issue", "next", "--take", "--json", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"fanout":"Fan-out refused: 429 Too Many Requests"`) {
 		t.Fatalf("exit %d, %q", code, out)
+	}
+}
+
+func TestIssueNewReviewLabelsItSeReview(t *testing.T) {
+	calls := recordedIssues(t)
+	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--review")
+	if code != 0 || out != "Created #10 ten\nu10\nLabelled se-review: it is reviewed once its sub-issues have closed.\n" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	last := (*calls)[len(*calls)-1]
+	if want := []string{"api", "-X", "POST", "-f", "title=ten", "-f", "body=b", "-f", "labels[]=se", "-f", "labels[]=se-review", "repos/o/r/issues"}; !reflect.DeepEqual(last, want) {
+		t.Fatalf("%q", last)
+	}
+}
+
+func TestIssueReviewReadsItsWords(t *testing.T) {
+	calls := recordedIssues(t)
+	old := sessionID
+	t.Cleanup(func() { sessionID = old })
+	sessionID = func() string { return "" }
+	for args, want := range map[string]string{
+		"pass":                     "pass or fail, then an issue number",
+		"maybe 3 --why x":          "pass or fail, then an issue number",
+		"pass x --why x":           `an issue number, not "x"`,
+		"pass 3 4 --why x":         "pass or fail, then an issue number",
+		"pass 3":                   "needs --why",
+		"fail 3 --why x":           "a fail needs a --fix",
+		"--why x pass #3":          "CLAUDE_CODE_SESSION_ID is not set",
+		"fail --why x 3 --fix a b": "pass or fail, then an issue number",
+	} {
+		code, _, errs := se(t, append([]string{"issue", "review", "--repo", "o/r"}, strings.Fields(args)...)...)
+		if code != 1 || !strings.Contains(errs, want) {
+			t.Errorf("%s: exit %d, %q, want %q", args, code, errs, want)
+		}
+	}
+	for _, c := range *calls {
+		if strings.Contains(strings.Join(c, " "), "-X") {
+			t.Fatalf("a refused review wrote %v", c)
+		}
 	}
 }

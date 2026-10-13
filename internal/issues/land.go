@@ -45,8 +45,10 @@ func Issued(dir string) (int, error) {
 // Land brings the issue branch checked out in dir to main: check must pass on
 // a clean tree of an issue with no open sub-issues, then the branch is pushed, its PR against main opened (or,
 // where it is open already, found), and auto-merge turned on with squash. Run
-// again after a fix, it pushes and reports the same PR.
-func (s Source) Land(dir string, check func(dir string) error) (Landing, error) {
+// again after a fix, it pushes and reports the same PR. Where session is set,
+// the leaf records who worked it, so a review of its tree can refuse that
+// worker.
+func (s Source) Land(dir, session string, check func(dir string) error) (Landing, error) {
 	n, err := Issued(dir)
 	if err != nil {
 		return Landing{}, err
@@ -68,6 +70,9 @@ func (s Source) Land(dir string, check func(dir string) error) (Landing, error) 
 	}
 	branch := Branch(n)
 	if _, err := git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
+		return Landing{}, err
+	}
+	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
 		return Landing{}, err
 	}
 	l := Landing{Issue: n}
