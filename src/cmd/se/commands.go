@@ -181,7 +181,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	cmd, ok := commands[name]
-	if *session && !(ok && cmd.Installed) {
+	if *session && (!ok || !cmd.Installed) {
 		if code, handed := handsOver(*workspace, args, stdout, stderr); handed {
 			return code
 		}

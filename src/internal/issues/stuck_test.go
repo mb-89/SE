@@ -1,3 +1,4 @@
+// Internal test package: it uses the unexported comment type and drives stake.
 package issues
 
 import (

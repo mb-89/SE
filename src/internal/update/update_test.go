@@ -1,4 +1,4 @@
-package update
+package update_test
 
 import (
 	"errors"
@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/update"
 )
 
 func repo(t *testing.T, branch string) string {
@@ -61,7 +63,7 @@ func shallow(t *testing.T) (origin, clone string) {
 func TestAShallowCloneIsPulledAndRebuilt(t *testing.T) {
 	origin, clone := shallow(t)
 	out := filepath.Join(clone, "src", "plugin", "bin", "se")
-	r, err := Run(clone, out)
+	r, err := update.Run(clone, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +79,7 @@ func TestACurrentCheckoutIsNotRebuilt(t *testing.T) {
 	origin, clone := shallow(t)
 	run(t, clone, "pull", "-q", "--ff-only", "origin", "main")
 	out := filepath.Join(clone, "se")
-	r, err := Run(clone, out)
+	r, err := update.Run(clone, out)
 	if err != nil || r.From != r.To || r.To != run(t, origin, "rev-parse", "--short", "HEAD") {
 		t.Fatalf("%+v %v", r, err)
 	}
@@ -92,8 +94,8 @@ func TestAFailedPullIsAnErrorThatTouchedNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := run(t, clone, "rev-parse", "HEAD")
-	_, err := Run(clone, filepath.Join(clone, "se"))
-	var untouched *Untouched
+	_, err := update.Run(clone, filepath.Join(clone, "se"))
+	var untouched *update.Untouched
 	if err == nil || errors.As(err, &untouched) {
 		t.Fatalf("err = %v", err)
 	}
@@ -103,16 +105,16 @@ func TestAFailedPullIsAnErrorThatTouchedNothing(t *testing.T) {
 }
 
 func TestAFolderOutsideGitIsLeftAlone(t *testing.T) {
-	var untouched *Untouched
-	if _, err := Run(t.TempDir(), "se"); !errors.As(err, &untouched) {
+	var untouched *update.Untouched
+	if _, err := update.Run(t.TempDir(), "se"); !errors.As(err, &untouched) {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestAnUpdateRefusesABranch(t *testing.T) {
 	dir := repo(t, "feature")
-	_, err := Run(dir, filepath.Join(dir, "se"))
-	var untouched *Untouched
+	_, err := update.Run(dir, filepath.Join(dir, "se"))
+	var untouched *update.Untouched
 	if !errors.As(err, &untouched) || !strings.Contains(err.Error(), "not main") {
 		t.Fatalf("err = %v", err)
 	}
@@ -124,8 +126,8 @@ func TestAnUpdateRefusesUncommittedWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	run(t, dir, "add", "f")
-	_, err := Run(dir, filepath.Join(dir, "se"))
-	var untouched *Untouched
+	_, err := update.Run(dir, filepath.Join(dir, "se"))
+	var untouched *update.Untouched
 	if !errors.As(err, &untouched) || !strings.Contains(err.Error(), "uncommitted") {
 		t.Fatalf("err = %v", err)
 	}
@@ -142,11 +144,11 @@ func TestACheckoutIsKnownByItsModule(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if got := IsCheckout(dir); got != want {
+		if got := update.IsCheckout(dir); got != want {
 			t.Errorf("%q: %v, want %v", mod, got, want)
 		}
 	}
-	if IsCheckout(t.TempDir()) {
+	if update.IsCheckout(t.TempDir()) {
 		t.Error("a folder without go.mod is a checkout")
 	}
 }

@@ -356,7 +356,9 @@ test('a checkout that is current says nothing and does not reload', async ($, on
 test('a checkout that is no clean main is left alone, noted in one line', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
-  w.startUpdate = { text: 'SE left its checkout as it is: /me/SE/src/plugin/../.. is on topic, not main; the installed SE updates from main alone.' }
+  w.startUpdate = {
+    text: 'SE left its checkout as it is: /me/SE/src/plugin/../.. is on topic, not main; the installed SE updates from main alone.',
+  }
   await $.session.start(starts)
   await clock.settle()
   expect(w.toasts).toEqual([w.startUpdate.text])
