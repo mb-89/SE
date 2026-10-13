@@ -31,6 +31,9 @@ type Issue struct {
 	// Parent is true for an issue with sub-issues: it holds no work of its
 	// own, and taking it means coordinating them.
 	Parent bool `json:"parent,omitempty"`
+	// Takeover is set where the take took over a claimed issue whose PR
+	// conflicts with main.
+	Takeover *Takeover `json:"takeover,omitempty"`
 }
 
 // Branch is the branch whose presence on origin claims issue n.
@@ -133,6 +136,8 @@ type Status struct {
 	// closed: it waits for its review, which is not work, but its coordinator
 	// starts the reviewer.
 	Review bool `json:"review,omitempty"`
+	// claimed is true for a leaf whose branch exists on origin.
+	claimed bool
 }
 
 // Ready says whether the issue may be taken: a ready leaf is work, a ready
@@ -298,8 +303,10 @@ func (s Source) survey() ([]Status, tree, error) {
 		i := t.byNum[n]
 		_, parent := t.subs[n]
 		st := &Status{Issue: Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, Parent: parent}, Above: t.above[n]}
-		if !parent && claimed[Branch(n)] {
-			st.Why = "claimed by " + Branch(n)
+		if i.labelled(PersonLabel) {
+			st.Why = "waits for a person (" + PersonLabel + ")"
+		} else if !parent && claimed[Branch(n)] {
+			st.Why, st.claimed = "claimed by "+Branch(n), true
 		} else if st.Why, err = held(n); err != nil {
 			return nil, tree{}, err
 		}
@@ -371,7 +378,9 @@ func (s Source) Next() (next Issue, ok bool, err error) {
 }
 
 // Take claims an issue at the top in the git checkout dir: want, when it is
-// above zero, else the next ready one. Where another box claimed a leaf first,
+// above zero, else the next ready one. Without want, a claimed leaf whose PR
+// conflicts with main comes first, whatever its age: it is taken over and its
+// branch checked out as it stands (see takeOver). Where another box claimed a leaf first,
 // it moves on to the next ready issue. A parent's branch claims its whole
 // tree; where it exists already, Take picks the tree up from that claim. ok is
 // false when nothing was left to take.
@@ -381,6 +390,11 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 		return Issue{}, false, err
 	}
 	var order []Issue
+	if want == 0 {
+		if took, ok, err := s.takeOver(dir, all); err != nil || ok {
+			return took, ok, err
+		}
+	}
 	if want > 0 {
 		found := false
 		for _, st := range all {
@@ -550,14 +564,19 @@ func claimTree(dir string, n int) (bool, error) {
 	if claimed, err := Claim(dir, n); err != nil || claimed {
 		return claimed, err
 	}
+	return true, pickUp(dir, n)
+}
+
+// pickUp checks out issue n's branch as it stands on origin.
+func pickUp(dir string, n int) error {
 	branch := Branch(n)
 	if _, err := git(dir, "fetch", "-q", "origin", "refs/heads/"+branch+":refs/remotes/origin/"+branch); err != nil {
-		return false, err
+		return err
 	}
 	if _, err := git(dir, "checkout", "-q", "-B", branch, "--track", "origin/"+branch); err != nil {
-		return false, fmt.Errorf("could not check out %s: %w", branch, err)
+		return fmt.Errorf("could not check out %s: %w", branch, err)
 	}
-	return true, nil
+	return nil
 }
 
 // Claim pushes the current origin/main as issue n's branch and checks it out.

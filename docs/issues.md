@@ -23,7 +23,27 @@ choice is deterministic and no prompt restates it.
   box claims an issue by pushing that branch from the current `origin/main`. A
   push is atomic, so if two boxes race, the second push is refused and that box
   moves to the next issue.
-- **Order**: the lowest issue number among the ready ones.
+- **Order**: the lowest issue number among the ready ones, after any
+  conflicted claim (below).
+- **Conflicted claims are taken over at once.** GitHub runs no CI on a PR
+  that conflicts with main and sends nothing that wakes its box, so a
+  conflicted claim would sit forever. Before offering anything else,
+  `se issue next --take` looks at every claimed leaf's open PR; one GitHub
+  reports as not mergeable (`mergeable` false, `mergeable_state` `dirty`) is
+  taken next, whatever its age. A `null` `mergeable` means GitHub has not
+  computed it yet: `se` asks again shortly, and while it stays `null` it is no
+  conflict. The box taking it checks out `issue-<n>` as it stands, merges
+  `origin/main` into it (never a rebase, never a force-push), resolves the
+  conflict and lands it again with `se issue land`.
+- **A takeover is recorded** on the issue as a comment carrying the marker
+  `<!-- se:takeover N -->` (stuck work writes the same marker), so the count
+  survives every box; a conflict takeover also records the PR head it found,
+  `<!-- se:takeover-head SHA -->`. A PR still conflicted at that same head is
+  a takeover in flight and is left to its box. Of two boxes writing the same
+  `N` at once, the earlier comment wins and the other box deletes its own. A
+  second conflict takeover of the same issue instead labels it `se-person`,
+  assigns the repository's owner, and leaves it out of the queue.
+- **Waits for a person**: an issue labelled `se-person` is never ready.
 - **Done**: the PR's body says `Fixes #n`, so GitHub closes the issue when the
   PR merges, and the issues it blocked become ready.
 
@@ -96,7 +116,11 @@ push is refused because another box claimed the issue first, it moves to the
 next ready issue. It prints what it took, or that nothing is ready. `--take N`
 refuses an issue that is not ready, or a sub-issue, and says why. There is no
 separate `take` command. Taking a parent whose branch exists already checks
-that branch out: the tree is picked up from its claim.
+that branch out: the tree is picked up from its claim. Plain `--take` first
+takes over a conflicted claim (see [The rules](#the-rules)): it prints
+`Took over #<n> …` with the PR, and the instruction to merge `origin/main`
+into the branch and land it again (with `--json`: the issue's `takeover`,
+`{"pr","url","count"}`); `--take N` takes over nothing.
 Once it has claimed an issue, `--take` fires the routine once (the fan-out,
 below) and adds a line saying what the fire did; with `--json` that line is
 the field `fanout`.
@@ -134,8 +158,12 @@ Every issue in the list is looked up before anything is written, so a list
 naming an issue that does not exist, or a pull request, creates nothing; so
 does a `--parent` that does not exist. The
 body comes from `--body` or from `--body-file`, one of them. `--review` labels
-it `se-review` as well (see [Reviews](#reviews)). A session has it as
-`/se issue new`.
+it `se-review` as well (see [Reviews](#reviews)). Where nothing blocks the
+issue it created (every issue in `--blocked-by` is closed, or it is `none`),
+it fires the routine once, as the fan-out does, and adds a line saying what
+the fire did (with `--json`: the field `fanout`); otherwise a new ready issue
+would wait for the next merge or the schedule. A blocked issue fires nothing.
+A session has it as `/se issue new`.
 
 `se issue review` passes or fails a parent ready for review; see
 [Reviews](#reviews). A session has it as `/se issue review`.
@@ -212,6 +240,8 @@ work. So boxes start boxes, mechanically, never by an agent's choice:
 - **Fan-out:** whenever `se issue next --take` has claimed an issue, it fires
   the routine `SE work` once, so another box starts and takes the next ready
   issue. That box fires again after its own claim, and so on.
+- **A new ready issue** fires it too: `se issue new` fires once when nothing
+  blocks the issue it created.
 - **The end:** a box that finds nothing ready claims nothing and fires
   nothing, so the fan-out ends by itself. Such a box leaves at once.
 - **No cap** on boxes in flight; the owner decided against one. The only limit

@@ -39,27 +39,36 @@ func ParseBlockedBy(s string) ([]int, error) {
 type lookup struct {
 	ID          int64            `json:"id"`
 	Number      int              `json:"number"`
+	State       string           `json:"state"`
 	PullRequest *json.RawMessage `json:"pull_request"`
 }
 
 // ids reads each issue's id, which the link endpoints take in place of its
 // number; an issue that does not exist, or a pull request, is refused.
 func (s Source) ids(numbers []int) (map[int]int64, error) {
+	out, _, err := s.lookup(numbers)
+	return out, err
+}
+
+// lookup is ids, and also says whether every one of the issues is closed.
+func (s Source) lookup(numbers []int) (map[int]int64, bool, error) {
 	out := map[int]int64{}
+	closed := true
 	for _, n := range numbers {
 		got, err := api[lookup](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
 		if err != nil {
 			if strings.Contains(err.Error(), "HTTP 404") || strings.Contains(err.Error(), "HTTP 410") {
-				return nil, fmt.Errorf("#%d does not exist in %s", n, s.Repo)
+				return nil, false, fmt.Errorf("#%d does not exist in %s", n, s.Repo)
 			}
-			return nil, err
+			return nil, false, err
 		}
 		if got[0].PullRequest != nil {
-			return nil, fmt.Errorf("#%d is a pull request, not an issue", n)
+			return nil, false, fmt.Errorf("#%d is a pull request, not an issue", n)
 		}
 		out[n] = got[0].ID
+		closed = closed && got[0].State == "closed"
 	}
-	return out, nil
+	return out, closed, nil
 }
 
 // Block adds GitHub's native "blocked by" link from issue n to each of
@@ -90,18 +99,19 @@ func (s Source) link(n int, blockers []int, ids map[int]int64) error {
 // true), makes it a sub-issue of parent where that is above zero, and links it
 // as blocked by each of blockedBy. The
 // parent and the blockers are checked before the issue is created, so naming
-// an issue that does not exist creates nothing.
-func (s Source) Create(title, body string, parent int, blockedBy []int, review bool) (Issue, error) {
+// an issue that does not exist creates nothing. ready is true when nothing
+// blocks the created issue: each of blockedBy is closed already.
+func (s Source) Create(title, body string, parent int, blockedBy []int, review bool) (made Issue, ready bool, err error) {
 	if strings.TrimSpace(title) == "" {
-		return Issue{}, fmt.Errorf("an issue needs a --title")
+		return Issue{}, false, fmt.Errorf("an issue needs a --title")
 	}
-	ids, err := s.ids(blockedBy)
+	ids, ready, err := s.lookup(blockedBy)
 	if err != nil {
-		return Issue{}, err
+		return Issue{}, false, err
 	}
 	if parent > 0 {
 		if _, err := s.ids([]int{parent}); err != nil {
-			return Issue{}, err
+			return Issue{}, false, err
 		}
 	}
 	path := fmt.Sprintf("repos/%s/issues", s.Repo)
@@ -111,21 +121,21 @@ func (s Source) Create(title, body string, parent int, blockedBy []int, review b
 	}
 	out, err := s.GH(append(args, path)...)
 	if err != nil {
-		return Issue{}, err
+		return Issue{}, false, err
 	}
 	var i issue
 	if err := json.Unmarshal(out, &i); err != nil || i.Number == 0 {
-		return Issue{}, fmt.Errorf("gh api %s answered no issue: %v", path, err)
+		return Issue{}, false, fmt.Errorf("gh api %s answered no issue: %v", path, err)
 	}
 	created := Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL}
 	if parent > 0 {
 		path := fmt.Sprintf("repos/%s/issues/%d/sub_issues", s.Repo, parent)
 		if _, err := s.GH("api", "-X", "POST", "-F", fmt.Sprintf("sub_issue_id=%d", i.ID), path); err != nil {
-			return created, fmt.Errorf("created #%d (%s), but making it a sub-issue of #%d: %w", i.Number, i.URL, parent, err)
+			return created, false, fmt.Errorf("created #%d (%s), but making it a sub-issue of #%d: %w", i.Number, i.URL, parent, err)
 		}
 	}
 	if err := s.link(i.Number, blockedBy, ids); err != nil {
-		return created, fmt.Errorf("created #%d (%s), but %w", i.Number, i.URL, err)
+		return created, false, fmt.Errorf("created #%d (%s), but %w", i.Number, i.URL, err)
 	}
-	return created, nil
+	return created, ready, nil
 }
