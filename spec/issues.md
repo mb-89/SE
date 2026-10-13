@@ -1,5 +1,7 @@
 # Issues: how the fleet picks its work
 
+Reader: whoever changes how the fleet picks, claims, nests, lands or reviews its work.
+
 SE's work items are GitHub issues. These rules say which issue a box may work
 on next, how it claims it, and how issues and their dependencies are created.
 They live here and nowhere else; `se issue next`, `se issue new`,
@@ -147,12 +149,16 @@ the agents' queue until a person has looked.
 
 ## The commands
 
-    se issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
-    se issue resume N [--json] [--repo OWNER/NAME]
-    se issue land --answers FILE [--json] [--repo OWNER/NAME]
-    se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--final] [--json] [--repo OWNER/NAME]
-    se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
-    se review brief N [--claims] [--json] [--repo OWNER/NAME]
+<!-- se:manifest usage issue review -->
+```
+se issue land --answers FILE [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--final] [--json] [--repo OWNER/NAME]
+se issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
+se issue resume N [--json] [--repo OWNER/NAME]
+se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
+se review brief N [--claims] [--json] [--repo OWNER/NAME]
+```
+<!-- /se:manifest -->
 
 Every one of them first closes the parents whose sub-issues are all closed.
 

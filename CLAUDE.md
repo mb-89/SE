@@ -1,5 +1,7 @@
 # How work lands
 
+Reader: an agent working in this repository.
+
 SE's design principles, which the retro and the overhaul measure against, are in [spec/principles.md](spec/principles.md).
 
 1. Work on your own branch. main takes merged PRs alone.
@@ -7,7 +9,7 @@ SE's design principles, which the retro and the overhaul measure against, are in
 3. Once check.sh passes, open one PR against main and turn on auto-merge (squash).
 4. A red CI run on your PR is yours: fix it on the same branch and push.
 5. Create no other branches: no backups, no heartbeats, no rescue branches.
-6. Agents create SE issues only through `se issue new`, and set their dependencies only with its `--blocked-by`.
-7. As much as possible is mechanized; as little as possible relies on agent judgment. Every step that can be a deterministic `se` command, with tests, is one. A box keeps only what needs judgment: doing the issue's work and fixing a red CI run.
-8. An ad hoc script you write while working (a check, a query, a one-off helper) is committed under `src/scripts/` in the same PR, named for what it does, with one comment line at the top saying why it was needed. Nothing else in the repository depends on `src/scripts/`.
-9. A new skill goes to `src/plugin/skills/<name>/SKILL.md`, never to `.claude/skills/`. Plugin skills appear as `se:<name>`.
+6. Create SE issues and their dependencies only as [spec/issues.md](spec/issues.md#the-rules) says.
+7. Mechanize first, as [principle 1](spec/principles.md) says: what can be a tested `se` command is one, not a step an agent remembers.
+8. An ad hoc script you write while working goes to `src/scripts/`, in the same PR, as [its README](src/scripts/README.md) says.
+9. A new skill goes to `src/plugin/skills/<name>/SKILL.md`, never into this repository's `.claude` folder. Plugin skills appear as `se:<name>`.

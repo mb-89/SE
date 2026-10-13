@@ -1,0 +1,45 @@
+# Cloud boxes: SE in a cloud environment
+
+Reader: whoever sets up or changes a cloud environment that runs SE.
+
+A cloud environment that runs SE gets it from its setup script:
+
+```sh
+#!/bin/bash
+set -u
+rm -rf /opt/se
+git clone --depth 1 https://github.com/mb-89/SE /opt/se \
+  && (cd /opt/se && go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se) \
+  || echo "SE setup failed; sessions start without SE"
+exit 0
+```
+
+and from these environment variables:
+
+    CLAUDE_CODE_PLUGIN_DIRS=/opt/se/src/plugin
+    SE_DEFAULT=on
+
+SE lives in `/opt/se` and not in the session's own checkout: every session of
+the environment has `/opt/se`, whatever repos are attached to it, and a box
+working on SE never runs the plugin code it is editing. `SE_DEFAULT=on` starts
+every session switched on. The fan-out's own variables are in
+[spec/issues.md](issues.md#fan-out).
+
+The setup script's result is cached, so `/opt/se` can be many commits behind
+when a session starts. The plugin therefore updates its own checkout at every
+session start, whether or not SE is on: a clean `main` is pulled from
+`origin/main` (a shallow clone too), `se` is rebuilt if anything changed, and
+the plugin reloads once `session.start` has answered. A checkout that is not a
+clean `main`, such as a person's working clone, is left as it is, and a failed
+pull or build never holds the session up; either is said in one line.
+
+## Hooks on cloud boxes
+
+Changes to `src/plugin/hooks` reach cloud boxes only when the environment's setup
+script is changed, which rebuilds its cache. `/reload-plugins` is refused over
+a remote connection, and the update at session start loads a new `se` at once
+but not the hooks module that is already running; whether watching the plugin
+folder (`CLAUDE_CODE_PLUGIN_DIR_WATCH=1`) reloads them has not been seen on a
+box (#28). New behaviour therefore belongs in `se`, not in the hooks.
+`/se status` names the commits the loaded hooks, the plugin's checkout and the
+running `se` came from, and whether they agree.

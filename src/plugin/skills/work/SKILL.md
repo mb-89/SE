@@ -5,6 +5,8 @@ description: Take the next ready se issue, do its work, and land it with se issu
 
 # Work: take the next se issue and land it
 
+Reader: the agent of a box, running this skill.
+
 Every step that can be an `se` command is one. Yours are doing the issue's
 work and fixing a red CI run; follow the rest as written. `se` is
 `./src/plugin/bin/se`; build it first with
@@ -39,10 +41,8 @@ those.
    answered in a few lines as a block (`key: |`, the text indented below it),
    since a bare ` #39` would be read as a YAML comment ("none" is an answer;
    an empty field is not). Then
-   `./src/plugin/bin/se issue land --answers ../landing-<n>.yaml`. It refuses
-   missing, empty or unknown keys, runs the check, pushes, posts the answers
-   on the issue, opens the PR (`Fixes #<n>`) and turns on auto-merge with
-   squash.
+   `./src/plugin/bin/se issue land --answers ../landing-<n>.yaml`; it says
+   what is missing, and lands the rest (`se help issue land`).
 5. Subscribe to the PR's activity (`subscribe_pr_activity`). On red CI, fix it
    on the same branch, commit, bring the answers up to date, and run
    `./src/plugin/bin/se issue land --answers ../landing-<n>.yaml` again.

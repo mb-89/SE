@@ -5,6 +5,8 @@ description: When se issue next --take takes nothing, check what is broken in th
 
 # Coordination: nothing to take, so check what is broken
 
+Reader: the agent of a box that took nothing.
+
 The rules are [spec/coordination.md](../../../../spec/coordination.md). `se` is
 `./src/plugin/bin/se`, called exactly as `./src/plugin/bin/se …`, one command per call.
 You are on `origin/main`, as the work skill left you.
@@ -12,9 +14,7 @@ You are on `origin/main`, as the work skill left you.
 1. `./src/plugin/bin/se fleet check`. If it says `healthy`, end the session: say
    nothing anywhere.
 2. `./src/plugin/bin/se fleet fix`. It applies every remedy that needs no
-   checkout, records each on its issue, and sends a finding that is back after
-   its fix to a person. Its other lines, `did: left to this box: …`, are the
-   takeovers.
+   checkout; its lines `did: left to this box: …` are the takeovers.
 3. For the first takeover it names, run its remedy:
    `./src/plugin/bin/se issue next --take <n>`.
    - If it says the issue went to a person, or another box took it over, or
