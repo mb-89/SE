@@ -12,11 +12,47 @@ import (
 // The help reads at a glance: the overview gives each command one short line
 // under its group's heading, and se help <command> gives one command's usage,
 // what it does, and every flag it takes, one per line. Both are made from the
-// registry. A session shows them as a fenced block in its transcript, so the
-// columns stay aligned; a terminal colours headings and names.
+// registry, first as data (Help), then as text from that data. A session's
+// answer carries both: the plugin draws the data as a layout, and the text,
+// which the model reads, keeps its columns in a fenced block. A terminal
+// colours headings and names.
 
 // width is how wide a help line may be.
 const width = 80
+
+// Help is the help as data, which the plugin draws in a session.
+type Help struct {
+	// Usage is the command line: prog and the command's usage, or for the
+	// overview prog <command> [flags]. Empty for a list of sub-words.
+	Usage string `json:"usage,omitempty"`
+	// About is what one command does.
+	About string `json:"about,omitempty"`
+	// Groups are the commands listed, under their headings.
+	Groups []HelpGroup `json:"groups,omitempty"`
+	// Flags are the flags one command takes.
+	Flags []HelpFlag `json:"flags,omitempty"`
+	// Note is the closing line of the overview.
+	Note string `json:"note,omitempty"`
+}
+
+// HelpGroup is one heading of a listing and the commands under it, by name.
+type HelpGroup struct {
+	Name     string        `json:"name"`
+	Commands []HelpCommand `json:"commands"`
+}
+
+// HelpCommand is one command of a listing.
+type HelpCommand struct {
+	Name    string `json:"name"`
+	Summary string `json:"summary"`
+	Usage   string `json:"usage"`
+}
+
+// HelpFlag is one flag a command takes: its name with its kind, and what it does.
+type HelpFlag struct {
+	Name  string `json:"name"`
+	Usage string `json:"usage"`
+}
 
 func init() {
 	register(Command{
@@ -32,80 +68,85 @@ func init() {
 			name := strings.Join(c.Args, " ")
 			switch name {
 			case "":
-				return Reply{Text: help(c.Session, c.Color)}, nil
+				return helpReply(overview(c.Session), c.Session, c.Color), nil
 			case "-h", "-help", "--help":
 				return Reply{}, flag.ErrHelp
 			}
 			if cmd, ok := commands[name]; ok && (cmd.Session || !c.Session) {
-				return Reply{Text: commandHelp(cmd, flagsOf(cmd, c.Session), c.Session, c.Color)}, nil
+				return helpReply(commandHelpOf(cmd, flagsOf(cmd, c.Session), c.Session), c.Session, c.Color), nil
 			}
 			if under := under(name, c.Session); len(under) > 0 {
-				return Reply{Text: fenced(listing(under, c.Session, c.Color), c.Session)}, nil
+				return helpReply(Help{Groups: groupsOf(under, c.Session)}, c.Session, c.Color), nil
 			}
 			return Reply{}, fmt.Errorf("se has no command %q; %s help lists them", name, prog(c.Session))
 		},
 	})
 }
 
-// help is the overview: every command a terminal (session false) or a session
-// can run, one line each, under its group's heading.
-func help(session, color bool) string {
-	prog := prog(session)
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s <command> [flags]\n\n", prog)
-	b.WriteString(listing(offered(session), session, color))
-	fmt.Fprintf(&b, "\n\n%s help <command> shows its usage and flags.", prog)
-	if !session {
-		b.WriteString("\nEvery command takes --workspace DIR (default: here).")
+// helpReply answers the help: its text, and in a session the data beside it.
+func helpReply(h Help, session, color bool) Reply {
+	r := Reply{Text: helpText(h, session, color)}
+	if session {
+		r.Help = &h
 	}
-	return fenced(b.String(), session)
+	return r
 }
 
-// listing is the commands under their groups' headings, the groups in
-// alphabetical order, each command a name and its summary in two columns.
-func listing(cmds []Command, session, color bool) string {
-	groups := map[string][]Command{}
-	pad := 0
+// help is the overview's text: every command a terminal (session false) or a
+// session can run, one line each, under its group's heading.
+func help(session, color bool) string {
+	return helpText(overview(session), session, color)
+}
+
+// overview is the overview as data.
+func overview(session bool) Help {
+	prog := prog(session)
+	note := prog + " help <command> shows its usage and flags."
+	if !session {
+		note += "\nEvery command takes --workspace DIR (default: here)."
+	}
+	return Help{Usage: prog + " <command> [flags]", Groups: groupsOf(offered(session), session), Note: note}
+}
+
+// groupsOf puts the commands under their groups' headings, the groups in
+// alphabetical order, the commands in the order given.
+func groupsOf(cmds []Command, session bool) []HelpGroup {
+	byName := map[string]*HelpGroup{}
+	var names []string
 	for _, c := range cmds {
-		groups[c.Group] = append(groups[c.Group], c)
-		pad = max(pad, len(c.Name))
-	}
-	names := make([]string, 0, len(groups))
-	for g := range groups {
-		names = append(names, g)
-	}
-	sort.Strings(names)
-	var lines []string
-	for i, g := range names {
-		if i > 0 {
-			lines = append(lines, "")
-		}
-		heading := g
+		heading := c.Group
 		if heading == "" {
 			heading = "Other"
 		}
-		lines = append(lines, paint(heading+":", bold, color))
-		for _, c := range groups[g] {
-			name := paint(c.Name, cyan, color) + strings.Repeat(" ", pad-len(c.Name))
-			lines = append(lines, "  "+name+"  "+c.Summary)
+		g, ok := byName[heading]
+		if !ok {
+			g = &HelpGroup{Name: heading}
+			byName[heading] = g
+			names = append(names, heading)
 		}
+		g.Commands = append(g.Commands, HelpCommand{Name: c.Name, Summary: c.Summary, Usage: prog(session) + " " + c.Usage})
 	}
-	return strings.Join(lines, "\n")
+	sort.Strings(names)
+	out := make([]HelpGroup, 0, len(names))
+	for _, n := range names {
+		out = append(out, *byName[n])
+	}
+	return out
 }
 
-// commandHelp is one command's help: its usage, what it does, and the flags
-// of fs, the flag set its Run made, one per line.
+// commandHelp is one command's help text: its usage, what it does, and the
+// flags of fs, the flag set its Run made, one per line.
 func commandHelp(c Command, fs *flag.FlagSet, session, color bool) string {
-	var b strings.Builder
-	b.WriteString(strings.TrimPrefix(wrap(prog(session)+" "+c.Usage, width, "    "), "    ") + "\n\n")
+	return helpText(commandHelpOf(c, fs, session), session, color)
+}
+
+// commandHelpOf is one command's help as data.
+func commandHelpOf(c Command, fs *flag.FlagSet, session bool) Help {
 	about := c.Summary
 	if c.Details != "" {
 		about = c.Details
 	}
-	b.WriteString(wrap(capital(about), width, ""))
-	type row struct{ name, usage string }
-	var rows []row
-	pad := 0
+	h := Help{Usage: prog(session) + " " + c.Usage, About: capital(about)}
 	if fs != nil {
 		fs.VisitAll(func(f *flag.Flag) {
 			kind, usage := flag.UnquoteUsage(f)
@@ -116,19 +157,65 @@ func commandHelp(c Command, fs *flag.FlagSet, session, color bool) string {
 			if f.Name != "workspace" && f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" {
 				usage += fmt.Sprintf(" (default: %s)", f.DefValue)
 			}
-			rows = append(rows, row{name, usage})
-			pad = max(pad, len(name))
+			h.Flags = append(h.Flags, HelpFlag{Name: name, Usage: usage})
 		})
 	}
-	if len(rows) > 0 {
-		fmt.Fprintf(&b, "\n\n%s", paint("Flags:", bold, color))
+	return h
+}
+
+// helpText is the help as text: its parts a blank line apart, the names of
+// commands and of flags in a column of their own.
+func helpText(h Help, session, color bool) string {
+	var parts []string
+	if h.Usage != "" {
+		parts = append(parts, strings.TrimPrefix(wrap(h.Usage, width, "    "), "    "))
+	}
+	if h.About != "" {
+		parts = append(parts, wrap(h.About, width, ""))
+	}
+	if len(h.Groups) > 0 {
+		parts = append(parts, listing(h.Groups, color))
+	}
+	if len(h.Flags) > 0 {
+		pad := 0
+		for _, f := range h.Flags {
+			pad = max(pad, len(f.Name))
+		}
+		lines := []string{paint("Flags:", bold, color)}
 		indent := strings.Repeat(" ", 2+pad+2)
-		for _, r := range rows {
-			name := paint(r.name, cyan, color) + strings.Repeat(" ", pad-len(r.name))
-			fmt.Fprintf(&b, "\n  %s  %s", name, strings.TrimPrefix(wrap(r.usage, width, indent), indent))
+		for _, f := range h.Flags {
+			name := paint(f.Name, cyan, color) + strings.Repeat(" ", pad-len(f.Name))
+			lines = append(lines, "  "+name+"  "+strings.TrimPrefix(wrap(f.Usage, width, indent), indent))
+		}
+		parts = append(parts, strings.Join(lines, "\n"))
+	}
+	if h.Note != "" {
+		parts = append(parts, h.Note)
+	}
+	return fenced(strings.Join(parts, "\n\n"), session)
+}
+
+// listing is the groups under their headings, each command a name and its
+// summary in two columns.
+func listing(groups []HelpGroup, color bool) string {
+	pad := 0
+	for _, g := range groups {
+		for _, c := range g.Commands {
+			pad = max(pad, len(c.Name))
 		}
 	}
-	return fenced(b.String(), session)
+	var lines []string
+	for i, g := range groups {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, paint(g.Name+":", bold, color))
+		for _, c := range g.Commands {
+			name := paint(c.Name, cyan, color) + strings.Repeat(" ", pad-len(c.Name))
+			lines = append(lines, "  "+name+"  "+c.Summary)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // flagsOf is the flag set a command takes, read by running it with --help:
@@ -158,12 +245,21 @@ func unknown(name string, session, color bool) string {
 }
 
 // fenced puts a session's help in a fenced block, which the transcript shows
-// as written, aligned; a terminal's help stands as it is.
+// as written, aligned; a terminal's help stands as it is. The first paragraph
+// (the usage), or the first line where there is one paragraph, stays out of
+// the block: the transcript puts "se: " before the first line, and a fence
+// there is no fence, only three backticks shown as text.
 func fenced(text string, session bool) string {
 	if !session {
 		return text
 	}
-	return "```\n" + text + "\n```"
+	head, body, ok := strings.Cut(text, "\n\n")
+	if !ok {
+		if head, body, ok = strings.Cut(text, "\n"); !ok {
+			return text
+		}
+	}
+	return head + "\n```\n" + body + "\n```"
 }
 
 // wrap breaks text into lines of at most width, each after the first indented.
