@@ -1,3 +1,4 @@
+// Internal test package: it drives the unexported render through the brief.
 package issues
 
 import (
@@ -62,8 +63,10 @@ func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 		}
 	}
 	text := b.Text()
-	for _, want := range []string{"git checkout --detach abc", "## The question: #1 the gate (open)\n\n> Is it sound?", "### #3 leaf (closed, completed, under #2)\n\n> ask 3: it must hold",
-		"- check: completed success", "1. Locality.", "## Withheld"} {
+	for _, want := range []string{
+		"git checkout --detach abc", "## The question: #1 the gate (open)\n\n> Is it sound?", "### #3 leaf (closed, completed, under #2)\n\n> ask 3: it must hold",
+		"- check: completed success", "1. Locality.", "## Withheld",
+	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the brief lacks %q:\n%s", want, text)
 		}
