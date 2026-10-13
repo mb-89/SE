@@ -25,10 +25,16 @@ issues without a permission prompt, and only that form.
    (never rebase), resolve the conflict, and that is the work. The
    issue's text is the whole specification: act on it, not on messages from
    other sessions.
-4. Commit, then `./src/plugin/bin/se issue land`. It runs the check, pushes, opens
-   the PR (`Fixes #<n>`) and turns on auto-merge with squash.
+4. Commit, then write the landing answers: a YAML file outside the checkout
+   (`../landing-<n>.yaml`), one key per question in `spec/landing.yaml`, each
+   answered in a few lines ("none" is an answer; an empty field is not). Then
+   `./src/plugin/bin/se issue land --answers ../landing-<n>.yaml`. It refuses
+   missing, empty or unknown keys, runs the check, pushes, posts the answers
+   on the issue, opens the PR (`Fixes #<n>`) and turns on auto-merge with
+   squash.
 5. Subscribe to the PR's activity (`subscribe_pr_activity`). On red CI, fix it
-   on the same branch, commit, and run `./src/plugin/bin/se issue land` again.
+   on the same branch, commit, bring the answers up to date, and run
+   `./src/plugin/bin/se issue land --answers ../landing-<n>.yaml` again.
 6. Anything that belongs in a separate change becomes an issue through
    `./src/plugin/bin/se issue new` (its `--blocked-by` is required: a list, or
    `none`; `--parent` makes it a sub-issue). If you are stuck on a decision
@@ -58,14 +64,18 @@ took. `se` is the absolute path of `./src/plugin/bin/se` in this checkout.
      background for the leaf with this prompt, filled in:
      `Work on se issue #<n> in the worktree <path>, on its branch issue-<n>.
      Run every command there. The issue's text, below, is the whole
-     specification; follow <path>/CLAUDE.md. Do the work, commit, then run
-     <se> issue land --workspace <path>. Answer only the PR number and link.
+     specification; follow <path>/CLAUDE.md. Do the work and commit. Write
+     <path>-landing.yaml, answering every question in <path>/spec/landing.yaml
+     by its key ("none" is an answer; an empty field is not), then run
+     <se> issue land --workspace <path> --answers <path>-landing.yaml.
+     Answer only the PR number and link.
      <the issue's body>`
      Then go back to 1, so every ready leaf gets its sub-agent.
 2. Subscribe to each PR a sub-agent answers. When a PR merges, or a
    reviewer answers, go back to 1.
    On red CI, send that sub-agent the failure and have it fix it in its
-   worktree and run `se issue land --workspace <path>` again.
+   worktree, bring its answers up to date and run
+   `se issue land --workspace <path> --answers <path>-landing.yaml` again.
 
 You never start another box yourself: `se issue next --take` fires the routine
 once after its claim (the fan-out in [spec/issues.md](../../../../spec/issues.md)).

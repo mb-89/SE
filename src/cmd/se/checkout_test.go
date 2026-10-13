@@ -65,7 +65,7 @@ func installed(t *testing.T) string {
 func scratch(t *testing.T) string {
 	t.Helper()
 	root, dst := repoRoot(t), t.TempDir()
-	for _, part := range []string{"go.mod", "src/cmd", "src/internal"} {
+	for _, part := range []string{"go.mod", "go.sum", "src/cmd", "src/internal"} {
 		err := filepath.WalkDir(filepath.Join(root, part), func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err

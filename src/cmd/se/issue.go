@@ -261,14 +261,29 @@ func init() {
 	})
 	register(Command{
 		Name:    "issue land",
-		Usage:   "issue land [--json] [--repo OWNER/NAME]",
+		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "check, push and open the PR of an issue-N branch, auto-merge on",
-		Details: "on an issue-N branch of a leaf: pass tests/check.sh, push, open its PR against main (Fixes #N), or find it open, and turn on auto-merge (squash).",
+		Details: "on an issue-N branch of a leaf: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), pass tests/check.sh, push, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N), or find it open, and turn on auto-merge (squash).",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue land")
+			file := fs.String("answers", "", "the landing answers, a YAML `FILE` keyed as spec/landing.yaml")
 			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			if *file == "" {
+				return Reply{}, fmt.Errorf("issue land takes --answers FILE: an answer to every question in %s", issues.QuestionsFile)
+			}
+			if !filepath.IsAbs(*file) {
+				*file = filepath.Join(c.Workspace, *file)
+			}
+			qs, err := issues.Questions(c.Workspace)
+			if err != nil {
+				return Reply{}, err
+			}
+			answers, err := issues.ReadAnswers(*file)
+			if err != nil {
 				return Reply{}, err
 			}
 			s, err := src()
@@ -278,7 +293,7 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			l, err := s.Land(c.Workspace, sessionID(), check)
+			l, err := s.Land(c.Workspace, sessionID(), qs, answers, check)
 			if err != nil {
 				return Reply{}, err
 			}

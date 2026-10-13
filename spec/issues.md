@@ -144,7 +144,7 @@ the agents' queue until a person has looked.
 
     se issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
     se issue resume N [--json] [--repo OWNER/NAME]
-    se issue land [--json] [--repo OWNER/NAME]
+    se issue land --answers FILE [--json] [--repo OWNER/NAME]
     se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--json] [--repo OWNER/NAME]
     se issue review pass|fail N --why TEXT [--fix TITLE]... [--json] [--repo OWNER/NAME]
 
@@ -192,16 +192,46 @@ parents ready for review, each with the command that makes its reviewer's
 fresh worktree (`review`: a list of issues, each with its `worktree`). That claim fires nothing:
 the leaf is worked on by a sub-agent inside the coordinator's box.
 
-`se issue land` runs on the checked-out `issue-<n>` branch. It refuses an
+`se issue land` runs on the checked-out `issue-<n>` branch. It refuses
+without an answer to each landing question (see [Landing
+answers](#landing-answers)), refuses an
 issue with open sub-issues ("a parent holds no work") and a tree with
 uncommitted changes, runs `tests/check.sh` and goes on only if it passes,
 pushes the branch, records on the leaf who worked it (see
-[Reviews](#reviews)), opens one PR against main titled after the issue with the
+[Reviews](#reviews)), posts the landing answers on the issue, opens one PR against main titled after the issue with the
 body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left
 to wait for is squash-merged at once. It prints the PR's number and link (with
 `--json`: `{"issue","number","url","created","merged"}`). Where the branch's PR
 is open already, it pushes and reports that PR, so running it again after a
-fix for red CI is safe. A session has it as `/se issue land`.
+fix for red CI is safe, and updates the answers it posted before. A session
+has it as `/se issue land`.
+
+### Landing answers
+
+Each landed issue is a chapter of the record: transcripts are kept nowhere,
+so the answers are the record, and the retro reads the same questions across
+every issue closed in its window. The questions are one list,
+[spec/landing.yaml](landing.yaml) (key, question and a one-line hint each),
+the only place they are written; `se issue land` and the retro both read it.
+
+- `--answers FILE` is YAML keyed by the same keys, each answer text (a
+  relative FILE is read from the workspace). `land` refuses, before it checks
+  or pushes anything, while a key is missing or its answer empty, and refuses
+  a key the list does not know, naming each key at fault. "none" is an
+  answer; an empty field is not. The file stands outside the checkout, so
+  the tree stays clean.
+- After the push and before it opens or finds the PR, `land` posts the
+  answers on the issue as one comment opening with `<!-- se:landing -->`:
+  each answer under its question, then the facts it knows without asking,
+  and the same again in a fenced YAML block (`issue`, `answers` in the
+  list's order, `facts`) right under the marker `<!-- se:landing-yaml -->`,
+  which the retro parses.
+- The facts: when the branch was created (the claim, from GitHub's activity
+  record) and the minutes from it to landing; the branch's commits, merges
+  excluded; its takeovers, from their markers; and its merges of main, all
+  counted against `origin/main`.
+- Landing again (after a CI fix, say) updates that comment rather than
+  adding a second.
 
 `se issue new` creates an issue labelled `se` on the repository, makes it a
 sub-issue of `--parent` where that is given, and links it as blocked by each

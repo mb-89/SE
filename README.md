@@ -22,7 +22,7 @@ command, `/se`, which takes words the way a command line does:
 | `/se restart` | stops this workspace's daemon and starts it again; in an SE checkout, rebuilt from its source first |
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
 | `/se issue next` | names the next `se` issue, stuck work before new work, or says that none is ready; `--take` claims it, or takes a stuck one over; `--in ROOT` names the ready leaves inside a parent's tree; `--person` lists the issues waiting on a person |
-| `/se issue land` | on an `issue-<n>` branch: passes the check, pushes, opens its PR against main (`Fixes #<n>`) and turns on auto-merge (squash) |
+| `/se issue land` | on an `issue-<n>` branch, with `--answers FILE` answering every question in [spec/landing.yaml](spec/landing.yaml): passes the check, pushes, posts the answers on the issue, opens its PR against main (`Fixes #<n>`) and turns on auto-merge (squash) |
 | `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent`; `--review` labels it `se-review` |
 | `/se issue resume` | for a person: takes an issue off `se-person` and puts it back in the queue |
 | `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree: `pass` closes it, `fail` creates fix leaves under it |
