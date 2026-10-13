@@ -468,6 +468,8 @@ type Fixed struct {
 	Ready bool `json:"ready,omitempty"`
 	// Take is true where the fix is this box's takeover, by its Remedy.
 	Take bool `json:"take,omitempty"`
+	// Failed is why the remedy failed, where it did; Did says so too.
+	Failed string `json:"failed,omitempty"`
 }
 
 // fleetMark records a fix on the finding's issue: the finding's key and the
@@ -480,8 +482,11 @@ var fleetMark = regexp.MustCompile(`<!-- se:fleet (\S+) (\d+) -->`)
 // becomes an issue, labelled se-person where it is a judgment. A takeover is
 // left to the box, which runs its remedy. Each fix is recorded on the
 // finding's issue; a finding that is back after its fix goes to a person, and
-// one that is reported already, its issue still open, is left as it is.
-func (s Source) Fix(findings []Finding) ([]Fixed, error) {
+// one that is reported already, its issue still open, is left as it is. A
+// leftover branch is deleted by a push from the checkout dir, the transport
+// se issue land pushes through. A remedy that fails is reported in its Fixed,
+// and the remedies after it are still applied.
+func (s Source) Fix(dir string, findings []Finding) []Fixed {
 	var out []Fixed
 	for _, f := range findings {
 		x := Fixed{Finding: f}
@@ -491,16 +496,17 @@ func (s Source) Fix(findings []Finding) ([]Fixed, error) {
 		case f.takeover():
 			x.Did, x.Take = "left to this box: "+f.Remedy, true
 		default:
-			if err := s.fix(&x); err != nil {
-				return out, err
+			if err := s.fix(dir, &x); err != nil {
+				x.Failed = err.Error()
+				x.Did = "failed: " + x.Failed
 			}
 		}
 		out = append(out, x)
 	}
-	return out, nil
+	return out
 }
 
-func (s Source) fix(x *Fixed) error {
+func (s Source) fix(dir string, x *Fixed) error {
 	f := x.Finding
 	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, f.Issue), true)
 	if err != nil {
@@ -540,7 +546,7 @@ func (s Source) fix(x *Fixed) error {
 			x.Did = fmt.Sprintf("merged PR #%d, which had nothing left to wait for", f.PR)
 		}
 	case f.spent:
-		if _, err := s.GH("api", "-X", "DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, Branch(f.Issue))); err != nil {
+		if _, err := git(dir, "push", "-q", "origin", "--delete", Branch(f.Issue)); err != nil {
 			return fmt.Errorf("deleting %s: %w", Branch(f.Issue), err)
 		}
 		x.Did = fmt.Sprintf("deleted %s at %s, which main holds whole", Branch(f.Issue), f.head)

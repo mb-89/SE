@@ -53,7 +53,9 @@ and only then leaves.**
    - a green PR with auto-merge off gets auto-merge turned on (`se fleet fix`);
    - a leftover claim whose issue is closed (or no open `se` issue) and whose
      branch main holds whole (no commit main lacks) has its branch deleted
-     (`se fleet fix`): nothing is lost, and nothing else could clear it;
+     (`se fleet fix`, by `git push origin --delete` from the workspace, the
+     transport `se issue land` pushes through): nothing is lost, and nothing
+     else could clear it;
    - an impossible block, any other leftover claim, or anything else with no remedy is
      reported as an issue (`se fleet fix`, through the same code as
      `se issue new`), labelled `se-person` and assigned to the repository's
@@ -74,7 +76,8 @@ and only then leaves.**
 
 `se fleet check [--json]` lists the findings. `se fleet fix [--json]` runs the
 same check and applies every remedy that needs no checkout, in order, and
-names the takeovers it leaves to the box; an issue it made that a box may
+names the takeovers it leaves to the box; a remedy that fails is reported and
+the remedies after it are still applied; an issue it made that a box may
 take fires the routine once. `se issue next --take <n>` on a claimed leaf
 takes it over where the check finds it stuck, and refuses a claim whose work
 is moving.

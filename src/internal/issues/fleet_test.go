@@ -270,15 +270,42 @@ func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 	if f.What != "issue-19 claims #19, which is closed (not planned), and main holds all its commits" || f.Remedy != "se fleet fix deletes issue-19: main holds all its commits" {
 		t.Fatalf("%+v", f)
 	}
-	done, err := Source{Repo: repo, GH: w.gh, Now: clock}.Fix([]Finding{f})
-	if err != nil || done[0].Did != "deleted issue-19 at c19, which main holds whole" || done[0].Made != 0 {
-		t.Fatalf("%+v %v", done, err)
+	// The branch goes by a git push from the checkout, never the REST API,
+	// which the boxes' proxy refuses.
+	origin, a, _ := boxes(t)
+	run(t, a, "push", "-q", "origin", "main:issue-19")
+	done := Source{Repo: repo, GH: w.gh, Now: clock}.Fix(a, []Finding{f})
+	if done[0].Did != "deleted issue-19 at c19, which main holds whole" || done[0].Made != 0 || done[0].Failed != "" {
+		t.Fatalf("%+v", done)
 	}
-	if !wrote(w, "DELETE repos/o/r/git/refs/heads/issue-19") || len(w.writes) != 2 {
+	if got := run(t, origin, "branch", "--list", "issue-19"); got != "" {
+		t.Fatalf("origin still has %q", got)
+	}
+	if len(w.writes) != 1 || wrote(w, "DELETE repos/o/r/git/refs/heads/issue-19") {
 		t.Fatalf("writes %q", w.writes)
 	}
 	if len(w.comments[19]) != 1 || !strings.Contains(w.comments[19][0].Body, "<!-- se:fleet leftover-branch 0 -->") {
 		t.Fatalf("#19 has no record: %+v", w.comments[19])
+	}
+}
+
+func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
+	w := newWorld(t, []string{item(5, 0), item(8, 0)}, 19)
+	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned"}`
+	w.ahead(19, 0)
+	w.answers[links(8)] = "[" + dep(3, "closed", "not_planned", true) + "]"
+	// The workspace is no checkout, so the push that deletes issue-19 fails.
+	done := Source{Repo: repo, GH: w.gh, Now: clock}.Fix(t.TempDir(), w.check())
+	var dids []string
+	for _, d := range done {
+		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
+	}
+	if len(done) != 2 || !strings.HasPrefix(done[0].Did, "failed: deleting issue-19: git push -q origin --delete issue-19: ") || done[0].Failed == "" ||
+		dids[1] != "impossible block #8: reported it as #101" || done[1].Failed != "" {
+		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
+	}
+	if len(w.comments[19]) != 0 || len(w.comments[8]) != 1 {
+		t.Fatalf("records: #19 %+v, #8 %+v", w.comments[19], w.comments[8])
 	}
 }
 
@@ -389,10 +416,7 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 	w.answers[links(9)] = "[" + dep(4, "open", "", false) + "]"
 	s := Source{Repo: repo, GH: w.gh, Now: clock}
 	found := w.check()
-	done, err := s.Fix(found)
-	if err != nil {
-		t.Fatal(err)
-	}
+	done := s.Fix(t.TempDir(), found)
 	var dids []string
 	for _, d := range done {
 		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
@@ -421,10 +445,7 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 		w.answers[fmt.Sprintf("repos/o/r/issues/%d", n)] = fmt.Sprintf(`{"number":%d,"state":"open"}`, n)
 	}
 	w.writes = nil
-	done, err = s.Fix(w.check())
-	if err != nil {
-		t.Fatal(err)
-	}
+	done = s.Fix(t.TempDir(), w.check())
 	dids = nil
 	for _, d := range done {
 		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
@@ -449,8 +470,8 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 		t.Fatalf("#104 is not labelled se-person: %q", w.writes)
 	}
 	// A takeover is left to the box; a person is only reported.
-	x, err := s.Fix([]Finding{{Kind: ConflictedPR, Issue: 7}, {Kind: WaitingOnPerson, Issue: 12}})
-	if err != nil || !x[0].Take || x[1].Take || x[1].Did != "reported; it waits for a person" {
-		t.Fatalf("%+v %v", x, err)
+	x := s.Fix(t.TempDir(), []Finding{{Kind: ConflictedPR, Issue: 7}, {Kind: WaitingOnPerson, Issue: 12}})
+	if !x[0].Take || x[1].Take || x[1].Did != "reported; it waits for a person" {
+		t.Fatalf("%+v", x)
 	}
 }
