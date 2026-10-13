@@ -31,13 +31,14 @@ func recordedIssues(t *testing.T) *[][]string {
 		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/pulls?base=main&state=open&per_page=100":       `[]`,
-		"repos/o/r/issues/1":                                   `{"id":101,"number":1,"state":"open"}`,
-		"repos/o/r/issues/3":                                   `{"id":103,"number":3,"state":"open"}`,
-		"repos/o/r/issues/5":                                   `{"id":105,"number":5,"state":"closed"}`,
-		"repos/o/r/issues/4":                                   `{"id":104,"number":4,"pull_request":{}}`,
-		"repos/o/r/issues":                                     `{"id":110,"number":10,"title":"ten","html_url":"u10"}`,
-		"repos/o/r/issues/10/dependencies/blocked_by":          `{"id":101}`,
-		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1": `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
+		"repos/o/r/issues/1": `{"id":101,"number":1,"state":"open"}`,
+		"repos/o/r/issues/3": `{"id":103,"number":3,"state":"open"}`,
+		"repos/o/r/issues/5": `{"id":105,"number":5,"state":"closed"}`,
+		"repos/o/r/issues/4": `{"id":104,"number":4,"pull_request":{}}`,
+		"repos/o/r/issues":   `{"id":110,"number":10,"title":"ten","html_url":"u10"}`,
+		"repos/o/r/issues?labels=se-retro&state=closed&per_page=100": `[]`,
+		"repos/o/r/issues/10/dependencies/blocked_by":                `{"id":101}`,
+		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":       `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
 	}
 	var calls [][]string
 	old, oldFire := gh, fire
@@ -165,7 +166,7 @@ func TestIssueNewCreatesTheIssueAndItsLinks(t *testing.T) {
 		{"api", "--paginate", "repos/o/r/issues?labels=se&state=open&per_page=100"},
 		{"api", "repos/o/r/issues/1"},
 		{"api", "repos/o/r/issues/3"},
-		{"api", "-X", "POST", "-f", "title=ten", "-f", "body=the body\n", "-f", "labels[]=se", "repos/o/r/issues"},
+		{"api", "-X", "POST", "-f", "title=ten", "-f", "body=the body\n\n<!-- se:new -->", "-f", "labels[]=se", "repos/o/r/issues"},
 		{"api", "-X", "POST", "-F", "issue_id=101", "repos/o/r/issues/10/dependencies/blocked_by"},
 		{"api", "-X", "POST", "-F", "issue_id=103", "repos/o/r/issues/10/dependencies/blocked_by"},
 	}
@@ -427,7 +428,7 @@ func TestIssueNewReviewLabelsItSeReview(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	last := (*calls)[len(*calls)-1]
-	if want := []string{"api", "-X", "POST", "-f", "title=ten", "-f", "body=b", "-f", "labels[]=se", "-f", "labels[]=se-review", "repos/o/r/issues"}; !reflect.DeepEqual(last, want) {
+	if want := []string{"api", "-X", "POST", "-f", "title=ten", "-f", "body=b\n\n<!-- se:new -->", "-f", "labels[]=se", "-f", "labels[]=se-review", "repos/o/r/issues"}; !reflect.DeepEqual(last, want) {
 		t.Fatalf("%q", last)
 	}
 }

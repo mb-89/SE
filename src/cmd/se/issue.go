@@ -471,6 +471,9 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string) (Re
 	if fanout != "" {
 		head += "\n" + fanout
 	}
+	if i.Retro {
+		head += fmt.Sprintf("\n\n#%d is a retro (%s): follow the retro skill, src/plugin/skills/retro/SKILL.md, from se retro collect %d", i.Number, issues.RetroLabel, i.Number)
+	}
 	if i.Parent {
 		head += fmt.Sprintf("\n\n#%d is a parent: it holds no work. Coordinate its tree: se issue next --in %d --take", i.Number, i.Number)
 	}

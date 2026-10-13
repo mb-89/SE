@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(./src/plugin/bin/se issue:*)",
-      "Bash(./src/plugin/bin/se fleet:*)"
+      "Bash(./src/plugin/bin/se fleet:*)",
+      "Bash(./src/plugin/bin/se retro:*)"
     ]
   },
   "hooks": {

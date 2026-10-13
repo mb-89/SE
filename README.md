@@ -28,6 +28,7 @@ command, `/se`, which takes words the way a command line does:
 | `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent`; `--review` labels it `se-review` |
 | `/se issue resume` | for a person: takes an issue off `se-person` and puts it back in the queue |
 | `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree: `pass` closes it, `fail` creates fix leaves under it |
+| `/se retro new` | starts a retro over everything closed since the last one: `--field TEXT` carries the person's field feedback, `--no-field` none, `--unattended` never asks; `/se retro collect` and `/se retro report` are its box's |
 | `/se fleet check` | lists what is broken in the fleet (a stalled root, a conflicted, red or unmerged PR, a stale or leftover claim, an impossible block, an issue waiting on a person), each with its remedy; says `healthy` when nothing is |
 | `/se fleet fix` | applies every remedy `fleet check` names that needs no checkout, records it on its issue, and names the takeovers left to the box |
 | `/se ui` | opens SE's control panel, a pane of buttons that draws on every surface, the phone included: the on/off toggle top left, then a button for each command that takes no typed words (`status`, `restart`, `update`, `issue next`); a press runs what typing `/se <name>` runs |
@@ -91,7 +92,10 @@ merge into main, on a schedule, and through fan-out, where each claim by
 as ready issues and the fan-out ends when nothing is ready. A box that finds nothing to take
 follows the coordination skill before it leaves: `se fleet check` lists what
 is broken, and the box fixes what has a known remedy; the rules are
-[spec/coordination.md](spec/coordination.md). Fan-out needs a
+[spec/coordination.md](spec/coordination.md). A retro (`se retro new`) checks whether
+the rules held across everything closed since the last one, scores the last
+retro's fixes and turns what it finds into issues, a person's where they are
+controversial; the rules are [spec/retro.md](spec/retro.md). Fan-out needs a
 one-time setup by the owner: an API trigger on the routine, with its fire URL
 in `SE_ROUTINE_FIRE_URL` and its token in `SE_ROUTINE_FIRE_TOKEN` in the cloud
 environment; without them `se` says fan-out is off and claims as before. The

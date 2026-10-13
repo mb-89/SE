@@ -1,0 +1,566 @@
+package issues
+
+import (
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// The marks that cut a retro's report into its parts: the report itself, the
+// box's judgment (rendered from the block), the facts se retro collect wrote,
+// the machine-readable block, and the matrix, which only the draft carries.
+const (
+	reportMark   = "<!-- se:retro-report -->"
+	judgmentMark = "<!-- se:retro-judgment -->"
+	factsMark    = "<!-- se:retro-facts -->"
+	reportBlock  = "<!-- se:retro-yaml -->"
+	matrixMark   = "<!-- se:retro-matrix -->"
+)
+
+// Report is a retro's machine-readable block. se retro collect fills the
+// facts; the box fills Findings, Classes and WentWell; se retro report fills
+// each finding's Issue. The next retro reads it first.
+type Report struct {
+	Retro    int     `yaml:"retro"`
+	Attended bool    `yaml:"attended"`
+	Window   Window  `yaml:"window"`
+	Metrics  Metrics `yaml:"metrics"`
+	Checks   []Check `yaml:"checks"`
+	Previous *Score  `yaml:"previous,omitempty"`
+	// Findings, Classes and WentWell are the box's judgment.
+	Findings []Lesson `yaml:"findings"`
+	Classes  []Class  `yaml:"classes"`
+	WentWell []string `yaml:"went_well"`
+}
+
+// Lesson is one finding of a retro: what went wrong, the class it belongs to,
+// and the fix it asks for. It becomes an issue.
+type Lesson struct {
+	Title string `yaml:"title"`
+	Class string `yaml:"class"`
+	Body  string `yaml:"body"`
+	// Home is the fix's kind, cheapest durable first: check, refusal, gate,
+	// field (a prefilled one), guidance, or removal.
+	Home string `yaml:"home"`
+	// Controversial sends its issue to a person; Why says which rule makes it so.
+	Controversial bool   `yaml:"controversial"`
+	Why           string `yaml:"why,omitempty"`
+	// Check is the rule check it answers, Metric the metric it should move;
+	// the next retro scores it by them.
+	Check  string `yaml:"check,omitempty"`
+	Metric string `yaml:"metric,omitempty"`
+	// Retro marks a finding about the retro itself.
+	Retro bool `yaml:"retro,omitempty"`
+	// Issue is the issue it became.
+	Issue int `yaml:"issue,omitempty"`
+}
+
+// Class is a group of findings of one kind and its cheapest durable fix.
+type Class struct {
+	Name string `yaml:"name"`
+	Fix  string `yaml:"fix"`
+}
+
+// homes are the kinds of fix a finding may ask for, in order of preference.
+var homes = []string{"check", "refusal", "gate", "field", "guidance", "removal"}
+
+// Draft is the report draft se retro collect writes: the facts as text, the
+// block, and the matrix below it.
+func (c Collected) Draft(qs []Question) (string, error) {
+	r := Report{Retro: c.Retro, Attended: c.Attended, Window: c.Window, Metrics: c.Metrics, Checks: c.Checks,
+		Previous: c.Score, Findings: []Lesson{}, Classes: []Class{}, WentWell: []string{}}
+	if r.Checks == nil {
+		r.Checks = []Check{}
+	}
+	var b strings.Builder
+	b.WriteString(c.facts())
+	text, err := r.assemble(b.String())
+	if err != nil {
+		return "", err
+	}
+	return text + "\n" + matrixMark + "\n" + c.matrix(qs), nil
+}
+
+// facts is the mechanical half of the report as text.
+func (c Collected) facts() string {
+	var b strings.Builder
+	w := c.Window
+	scope := "The repository's whole history: no retro has closed before"
+	if w.Previous > 0 {
+		scope = fmt.Sprintf("Everything closed since the retro #%d closed, %s", w.Previous, w.Since.Format(time.RFC3339))
+	}
+	fmt.Fprintf(&b, "## The window\n%s, up to %s: %d closed `se` issues, %d merged PRs, %d commits on main.\n",
+		scope, w.Until.Format(time.RFC3339), len(c.Rows), c.PRs, c.Commits)
+
+	b.WriteString("\n## Rule checks\n")
+	for _, k := range checkKinds {
+		var broke []Check
+		for _, x := range c.Checks {
+			if x.Kind == k.kind {
+				broke = append(broke, x)
+			}
+		}
+		if len(broke) == 0 {
+			fmt.Fprintf(&b, "- **%s** (`%s`): held.\n", k.rule, k.kind)
+			continue
+		}
+		fmt.Fprintf(&b, "- **%s** (`%s`): broken %s.\n", k.rule, k.kind, times(len(broke)))
+		for j, x := range broke {
+			if j == 20 {
+				fmt.Fprintf(&b, "  - … and %d more, in the block below.\n", len(broke)-20)
+				break
+			}
+			fmt.Fprintf(&b, "  - %s: %s\n", x.Subject, x.What)
+		}
+	}
+
+	b.WriteString("\n## Counts\n| | in the window | per closed issue |\n|---|---|---|\n")
+	for _, name := range []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand"} {
+		fmt.Fprintf(&b, "| %s | %g | %g |\n", name, c.Metrics[name], c.Metrics[name+"_per_issue"])
+	}
+	known := 0
+	for _, r := range c.Rows {
+		if r.Minutes >= 0 {
+			known++
+		}
+	}
+	fmt.Fprintf(&b, "\nClaim to merge: median %s over the %d issues whose claim and merge are both on record.\n", span(int(c.Metrics["claim_to_merge_minutes"])), known)
+
+	b.WriteString("\n## Metrics against the previous retros\n")
+	if len(c.History) == 0 {
+		b.WriteString("This is the first retro with a report: the trend starts here.\n")
+	} else {
+		b.WriteString("| metric |")
+		for _, h := range c.History {
+			fmt.Fprintf(&b, " #%d |", h.Retro)
+		}
+		b.WriteString(" now | since the last |\n|---|")
+		b.WriteString(strings.Repeat("---|", len(c.History)+2) + "\n")
+		last := c.History[len(c.History)-1].Metrics
+		for _, name := range metricNames {
+			fmt.Fprintf(&b, "| %s |", name)
+			for _, h := range c.History {
+				if v, ok := h.Metrics[name]; ok {
+					fmt.Fprintf(&b, " %g |", v)
+				} else {
+					b.WriteString(" – |")
+				}
+			}
+			fmt.Fprintf(&b, " %g | %s |\n", c.Metrics[name], trend(name, last, c.Metrics))
+		}
+	}
+
+	b.WriteString("\n## The previous retro\n")
+	if c.Score == nil {
+		b.WriteString("None: this is the first retro.\n")
+	} else {
+		sc := c.Score
+		fmt.Fprintf(&b, "#%d found %d, of which %d became issues and %d of those closed as completed; %d recurred.\n",
+			sc.Retro, sc.Findings, sc.Issues, sc.Closed, sc.Recurred)
+		if len(sc.Items) > 0 {
+			b.WriteString("\n| finding | class | issue | state | recurred | metric |\n|---|---|---|---|---|---|\n")
+		}
+		for _, it := range sc.Items {
+			issue, metric := "–", "–"
+			if it.Issue > 0 {
+				issue = fmt.Sprintf("#%d", it.Issue)
+			}
+			if it.Metric != "" {
+				metric = fmt.Sprintf("%s %g → %g", it.Metric, it.Before, it.Now)
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %v | %s |\n", it.Title, it.Class, issue, it.State, it.Recurred, metric)
+		}
+	}
+
+	b.WriteString("\n## Scripts\n")
+	if len(c.Scripts) == 0 {
+		b.WriteString("None was added under `src/scripts/` in the window.\n")
+	}
+	groups := map[string][]Script{}
+	var names []string
+	for _, sc := range c.Scripts {
+		if groups[sc.Group] == nil {
+			names = append(names, sc.Group)
+		}
+		groups[sc.Group] = append(groups[sc.Group], sc)
+	}
+	sort.Strings(names)
+	for _, g := range names {
+		fmt.Fprintf(&b, "- **%s**\n", g)
+		for _, sc := range groups[g] {
+			why := sc.Why
+			if why == "" {
+				why = "no comment line says why"
+			}
+			fmt.Fprintf(&b, "  - `%s` (PR #%d): %s\n", sc.Path, sc.PR, why)
+		}
+	}
+	return b.String()
+}
+
+// trend says how a metric moved since the last retro, and whether that is
+// the right way.
+func trend(name string, last, now Metrics) string {
+	before, ok := last[name]
+	switch {
+	case !ok:
+		return "new"
+	case now[name] == before:
+		return "same"
+	case (now[name] < before) == lowerIsBetter(name):
+		return fmt.Sprintf("better (%+g)", now[name]-before)
+	}
+	return fmt.Sprintf("worse (%+g)", now[name]-before)
+}
+
+// matrix is every closed issue × every landing question, a question at a time.
+func (c Collected) matrix(qs []Question) string {
+	var b strings.Builder
+	b.WriteString("## The matrix\nEvery closed issue's landing answer, a question at a time; \"none\" answers are left out. It stays in the draft, not in the posted report.\n")
+	missing := []string{}
+	for _, r := range c.Rows {
+		if r.Answers == nil {
+			missing = append(missing, fmt.Sprintf("#%d", r.Number))
+		}
+	}
+	if len(missing) > 0 {
+		fmt.Fprintf(&b, "\nNo landing answers: %s.\n", strings.Join(missing, ", "))
+	}
+	for _, q := range qs {
+		fmt.Fprintf(&b, "\n### `%s`: %s\n", q.Key, q.Question)
+		said := 0
+		for _, r := range c.Rows {
+			a, ok := r.Answers[q.Key]
+			if !ok || nothing(a) {
+				continue
+			}
+			said++
+			fmt.Fprintf(&b, "- #%d %s: %s\n", r.Number, r.Title, strings.ReplaceAll(strings.TrimSpace(a), "\n", "\n  "))
+		}
+		if said == 0 {
+			b.WriteString("Nothing but none.\n")
+		}
+	}
+	return b.String()
+}
+
+// assemble is the report as text: the judgment rendered from the block, then
+// the facts, then the block.
+func (r Report) assemble(facts string) (string, error) {
+	data, err := yaml.Marshal(r)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s\n# Retro #%d: the report\n\n%s\n%s\n%s\n%s\n\n%s\n```yaml\n%s```\n",
+		reportMark, r.Retro, judgmentMark, r.judgment(), factsMark, strings.TrimSpace(facts), reportBlock, data), nil
+}
+
+// judgment renders the box's half of the report from the block.
+func (r Report) judgment() string {
+	if len(r.Findings) == 0 && len(r.WentWell) == 0 {
+		return "The box judges here: it fills `findings`, `classes` and `went_well` in the block below, and `se retro report` writes this part from them.\n"
+	}
+	var b strings.Builder
+	b.WriteString("## Findings\n")
+	for _, cl := range r.Classes {
+		var in []Lesson
+		for _, f := range r.Findings {
+			if f.Class == cl.Name && !f.Retro {
+				in = append(in, f)
+			}
+		}
+		if len(in) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n### %s (%d)\nFix: %s\n", cl.Name, len(in), cl.Fix)
+		for _, f := range in {
+			b.WriteString(f.line())
+		}
+	}
+	b.WriteString("\n## What went well\n")
+	for _, w := range r.WentWell {
+		fmt.Fprintf(&b, "- %s\n", w)
+	}
+	b.WriteString("\n## The retro itself\n")
+	if r.Previous != nil {
+		fmt.Fprintf(&b, "The last retro's findings: %d became issues, %d of those closed, %d recurred anyway.\n", r.Previous.Issues, r.Previous.Closed, r.Previous.Recurred)
+	} else {
+		b.WriteString("No retro before this one to score.\n")
+	}
+	proposals := 0
+	for _, f := range r.Findings {
+		if f.Retro {
+			if proposals == 0 {
+				b.WriteString("\nProposals for the retro itself:\n")
+			}
+			proposals++
+			b.WriteString(f.line())
+		}
+	}
+	if proposals == 0 {
+		b.WriteString("No proposal to change the retro itself.\n")
+	}
+	return b.String()
+}
+
+func (f Lesson) line() string {
+	who := "normal queue"
+	if f.Controversial {
+		who = "for a person: " + f.Why
+	}
+	s := fmt.Sprintf("- **%s** (%s; %s)", f.Title, f.Home, who)
+	if f.Issue > 0 {
+		s += fmt.Sprintf(": #%d", f.Issue)
+	}
+	return s + "\n"
+}
+
+// ParseReport reads a report, a draft or a posted one, back: its block and
+// its facts as text.
+func ParseReport(text string) (r Report, facts string, err error) {
+	if !strings.Contains(text, reportMark) {
+		return Report{}, "", errors.New("it is no retro report: the mark " + reportMark + " is missing")
+	}
+	if cut, _, ok := strings.Cut(text, matrixMark); ok {
+		text = cut
+	}
+	head, rest, ok := strings.Cut(text, reportBlock+"\n```yaml\n")
+	if !ok {
+		return Report{}, "", errors.New("the report carries no machine-readable block under " + reportBlock)
+	}
+	block, _, ok := strings.Cut("\n"+rest, "\n```")
+	if !ok {
+		return Report{}, "", errors.New("the report's block is not closed")
+	}
+	if err := yaml.Unmarshal([]byte(block), &r); err != nil {
+		return Report{}, "", fmt.Errorf("the report's block: %v", err)
+	}
+	if _, f, ok := strings.Cut(head, factsMark); ok {
+		facts = f
+	}
+	return r, strings.TrimSpace(facts), nil
+}
+
+// judged refuses a report whose judgment is not complete: every finding
+// needs a title, a class the classes name, a body and a home, and a reason
+// where it is controversial; every class a fix; and something went well.
+func (r Report) judged() error {
+	var why []string
+	classes := map[string]bool{}
+	for _, c := range r.Classes {
+		if strings.TrimSpace(c.Name) == "" || strings.TrimSpace(c.Fix) == "" {
+			why = append(why, fmt.Sprintf("class %q needs a name and a fix", c.Name))
+		}
+		classes[c.Name] = true
+	}
+	for k, f := range r.Findings {
+		name := fmt.Sprintf("finding %d (%q)", k+1, f.Title)
+		switch {
+		case strings.TrimSpace(f.Title) == "" || strings.TrimSpace(f.Body) == "":
+			why = append(why, name+" needs a title and a body")
+		case !classes[f.Class]:
+			why = append(why, fmt.Sprintf("%s names class %q, which classes does not", name, f.Class))
+		case !contains(homes, f.Home):
+			why = append(why, fmt.Sprintf("%s has home %q, not one of %s", name, f.Home, strings.Join(homes, ", ")))
+		case f.Controversial && strings.TrimSpace(f.Why) == "":
+			why = append(why, name+" is controversial without a why")
+		case f.Check != "" && kindOrder(f.Check) == len(checkKinds):
+			why = append(why, fmt.Sprintf("%s names check %q, which is no rule check", name, f.Check))
+		case f.Metric != "" && !contains(metricNames, f.Metric):
+			why = append(why, fmt.Sprintf("%s names metric %q, which is no metric", name, f.Metric))
+		}
+	}
+	if len(r.WentWell) == 0 {
+		why = append(why, "went_well is empty: record what went well")
+	}
+	if len(why) == 0 {
+		return nil
+	}
+	return fmt.Errorf("the report's judgment is not complete, so nothing was written: %s", strings.Join(why, "; "))
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// postedReport is the last report posted on issue n, nil where it has none.
+func (s Source) postedReport(n int) (*Report, error) {
+	text, _, err := s.lastReport(n)
+	if err != nil || text == "" {
+		return nil, err
+	}
+	r, _, err := ParseReport(text)
+	if err != nil {
+		return nil, fmt.Errorf("the report on #%d: %w", n, err)
+	}
+	return &r, nil
+}
+
+// lastReport is the text of the last report comment on issue n, and whether
+// a person resumed the issue after it.
+func (s Source) lastReport(n int) (text string, resumed bool, err error) {
+	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, n), true)
+	if err != nil {
+		return "", false, err
+	}
+	for _, c := range comments {
+		switch {
+		case strings.HasPrefix(c.Body, reportMark):
+			text, resumed = c.Body, false
+		case strings.Contains(c.Body, "<!-- se:resume -->") && text != "":
+			resumed = true
+		}
+	}
+	return text, resumed, nil
+}
+
+// Posted is the report already on retro n, for a box that picks it up after
+// the owner decided; "" where there is none.
+func (s Source) Posted(n int) (string, error) {
+	if _, err := s.retroIssue(n); err != nil {
+		return "", err
+	}
+	text, _, err := s.lastReport(n)
+	return text, err
+}
+
+// Filed is what se retro report did.
+type Filed struct {
+	Retro int `json:"retro"`
+	// Stopped is true where the report waits for the owner; else the issues
+	// were created and the retro closed.
+	Stopped bool `json:"stopped"`
+	// Issues are the issues created, Person those of them for a person.
+	Issues []int `json:"issues"`
+	Person []int `json:"person"`
+	// Ready is true where an issue it created is ready, so the routine fires.
+	Ready bool `json:"-"`
+}
+
+// FileReport files retro n's report, the text of a draft the box judged. An
+// attended retro the owner has not decided yet gets the report posted on it
+// and goes to the owner (se-person). An unattended one, or one a person
+// resumed after its report, gets one issue per finding, through the same code
+// as se issue new, an se-person one where it is controversial; the report,
+// with those issues, is posted as its closing comment, and it closes. Either
+// way its branch issue-n goes, so the next box can claim it again.
+func (s Source) FileReport(n int, draft string) (Filed, error) {
+	r, facts, err := ParseReport(draft)
+	if err != nil {
+		return Filed{}, err
+	}
+	if r.Retro != n {
+		return Filed{}, fmt.Errorf("the report is retro #%d's, not #%d's", r.Retro, n)
+	}
+	if err := r.judged(); err != nil {
+		return Filed{}, err
+	}
+	i, err := s.retroIssue(n)
+	if err != nil {
+		return Filed{}, err
+	}
+	posted, resumed, err := s.lastReport(n)
+	if err != nil {
+		return Filed{}, err
+	}
+	unattended := strings.Contains(i.Body, "<!-- se:retro unattended -->")
+	base := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
+	out := Filed{Retro: n, Issues: []int{}, Person: []int{}}
+	if !unattended && !resumed {
+		text, err := r.assemble(facts)
+		if err != nil {
+			return Filed{}, err
+		}
+		if err := s.postReport(n, text, posted != ""); err != nil {
+			return Filed{}, err
+		}
+		reason := fmt.Sprintf("The retro's report is above, for the owner. Move findings between controversial and not in a comment, then run `se issue resume %d`: the next box creates the issues as decided and closes the retro.", n)
+		if err := s.flag(Issue{Number: n, Title: i.Title, URL: i.URL}, reason, ""); err != nil {
+			return Filed{}, err
+		}
+		out.Stopped = true
+		return out, s.dropBranch(n)
+	}
+	owner, _, _ := strings.Cut(s.Repo, "/")
+	for k := range r.Findings {
+		f := &r.Findings[k]
+		if f.Issue > 0 {
+			continue
+		}
+		labels := []string{Label}
+		body := fmt.Sprintf("%s\n\nFound by the retro #%d, class **%s**; the fix it asks for is a %s.", strings.TrimSpace(f.Body), n, f.Class, f.Home)
+		if f.Controversial {
+			labels = append(labels, PersonLabel)
+			body += "\n\nControversial, so it waits for a person: " + f.Why
+		}
+		made, ready, err := s.create(f.Title, body, 0, nil, labels)
+		if err != nil {
+			return out, err
+		}
+		f.Issue = made.Number
+		out.Issues = append(out.Issues, made.Number)
+		if f.Controversial {
+			out.Person = append(out.Person, made.Number)
+			if _, err := s.GH("api", "-X", "POST", "-f", "assignees[]="+owner, fmt.Sprintf("repos/%s/issues/%d/assignees", s.Repo, made.Number)); err != nil {
+				return out, fmt.Errorf("created #%d, but assigning it to @%s: %w", made.Number, owner, err)
+			}
+		} else {
+			out.Ready = out.Ready || ready
+		}
+	}
+	text, err := r.assemble(facts)
+	if err != nil {
+		return out, err
+	}
+	if err := s.postReport(n, text, false); err != nil {
+		return out, err
+	}
+	if _, err := s.GH("api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", base); err != nil {
+		return out, fmt.Errorf("closing the retro #%d: %w", n, err)
+	}
+	return out, s.dropBranch(n)
+}
+
+// postReport posts the report on retro n, or, where update is set, writes it
+// over the report posted before.
+func (s Source) postReport(n int, text string, update bool) error {
+	if update {
+		comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, n), true)
+		if err != nil {
+			return err
+		}
+		var last int64
+		for _, c := range comments {
+			if strings.HasPrefix(c.Body, reportMark) {
+				last = c.ID
+			}
+		}
+		if last != 0 {
+			_, err := s.GH("api", "-X", "PATCH", "-f", "body="+text, fmt.Sprintf("repos/%s/issues/comments/%d", s.Repo, last))
+			return err
+		}
+	}
+	if _, err := s.GH("api", "-X", "POST", "-f", "body="+text, fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, n)); err != nil {
+		return fmt.Errorf("posting the report on #%d: %w", n, err)
+	}
+	return nil
+}
+
+// dropBranch deletes the claim issue-n, where it exists: a retro lands no
+// branch, and a later box claims it afresh.
+func (s Source) dropBranch(n int) error {
+	_, err := s.GH("api", "-X", "DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, Branch(n)))
+	if err != nil && (strings.Contains(err.Error(), "HTTP 422") || strings.Contains(err.Error(), "HTTP 404")) {
+		return nil
+	}
+	return err
+}

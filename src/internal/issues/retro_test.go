@@ -1,0 +1,395 @@
+package issues
+
+import (
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
+
+// rqs are the landing questions the retro tests read.
+var rqs = []Question{{Key: "done", Question: "What does it deliver?"}, {Key: "by-hand", Question: "What did you do by hand?"}}
+
+var (
+	prevClosed = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	since      = "&since=2026-10-01T00:00:00Z"
+)
+
+func closedIssue(n int, reason, closed, body string, extra string) string {
+	return fmt.Sprintf(`{"number":%d,"title":"t%d","state":"closed","state_reason":%q,"closed_at":%q,"body":%q,"labels":[{"name":"se"}]%s}`, n, n, reason, closed, body, extra)
+}
+
+func landing(t *testing.T, n int, answers map[string]string, claimed time.Time) string {
+	t.Helper()
+	body, err := Landed{Issue: n, Answers: answers, Facts: Facts{Claimed: claimed, Landed: claimed.Add(time.Hour)}}.Comment(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func jsonComments(bodies ...string) string {
+	var parts []string
+	for k, b := range bodies {
+		parts = append(parts, fmt.Sprintf(`{"id":%d,"body":%q,"created_at":"2026-10-0%dT00:00:00Z"}`, 100+k, b, k+2))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+// previousReport is retro #20's report: one finding on the fixes check, one
+// on a metric, one that made no issue.
+func previousReport(t *testing.T) string {
+	t.Helper()
+	text, err := Report{Retro: 20, Attended: true, Window: Window{Until: prevClosed},
+		Metrics: Metrics{"closed": 2, "conflicts": 1, "conflicts_per_issue": 0.5, "ci_reruns_per_issue": 0},
+		Findings: []Lesson{
+			{Title: "PRs without Fixes", Class: "landing", Body: "b", Home: "check", Check: "fixes", Issue: 21},
+			{Title: "Conflicts", Class: "merging", Body: "b", Home: "gate", Metric: "conflicts_per_issue", Issue: 22},
+			{Title: "Kept as is", Class: "merging", Body: "b", Home: "guidance"},
+		},
+		Classes:  []Class{{"landing", "a check"}, {"merging", "a gate"}},
+		WentWell: []string{"fan-out"},
+	}.assemble("## The window\nold facts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return text
+}
+
+// retroRepo records o/r with retro #30 open. later says whether retro #20
+// closed before it; then the window opens at its closing.
+func retroRepo(t *testing.T, later bool, body string) map[string]string {
+	t.Helper()
+	at := func(day, hour int) string {
+		return time.Date(2026, 10, day, hour, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	}
+	a := map[string]string{
+		"repos/o/r/issues/30":                                        fmt.Sprintf(`{"number":30,"title":"SE retro","state":"open","html_url":"u30","body":%q,"labels":[{"name":"se"},{"name":"se-retro"}]}`, body),
+		"repos/o/r/issues/30/comments?per_page=100":                  `[]`,
+		"repos/o/r/issues?labels=se-retro&state=closed&per_page=100": `[]`,
+		"repos/o/r/pulls?state=closed&base=main&per_page=100": `[` +
+			`{"number":49,"body":"Fixes #19","merged_at":"2026-09-29T00:00:00Z","merge_commit_sha":"m49","head":{"sha":"h49"}},` +
+			`{"number":50,"title":"fifty","body":"Fixes #23","merged_at":"2026-10-02T11:30:00Z","merge_commit_sha":"m50","head":{"sha":"h50"}},` +
+			`{"number":51,"title":"fifty-one","body":"for #24","merged_at":"` + at(3, 9) + `","merge_commit_sha":"m51","head":{"sha":"h51"}},` +
+			`{"number":52,"title":"closed","body":"Fixes #25","merged_at":null}]`,
+		"repos/o/r/commits/h50/check-runs?filter=all&per_page=100": `{"check_runs":[{"id":1,"name":"check","status":"completed","conclusion":"failure"},{"id":2,"name":"check","status":"completed","conclusion":"success"}]}`,
+		"repos/o/r/commits/h51/check-runs?filter=all&per_page=100": `{"check_runs":[{"id":3,"name":"check","status":"completed","conclusion":"failure"}]}`,
+		"repos/o/r/pulls/50/files?per_page=100":                    `[{"filename":"src/scripts/check-claims.sh","status":"added","patch":"@@ -0,0 +1,3 @@\n+#!/bin/sh\n+# Lists claims with no PR, since fleet check had no such view.\n+gh api x"},{"filename":"src/x.go","status":"added"}]`,
+		"repos/o/r/pulls/51/files?per_page=100":                    `[]`,
+		"repos/o/r/issues/23/comments?per_page=100": jsonComments(
+			"<!-- se:takeover 1 -->\n<!-- se:takeover-head abc -->\nTaken over.",
+			landing(t, 23, map[string]string{"done": "it works", "by-hand": "wrote src/scripts/check-claims.sh"}, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))),
+		"repos/o/r/issues/24/comments?per_page=100": jsonComments("<!-- se:person -->\nStuck twice."),
+		"repos/o/r/issues/25/comments?per_page=100": `[]`,
+		"repos/o/r/issues/26/comments?per_page=100": `[]`,
+	}
+	closed := []string{
+		closedIssue(23, "completed", at(2, 12), "work\n\n"+NewMark, ""),
+		closedIssue(24, "completed", at(3, 10), "by hand", ""),
+		closedIssue(25, "not_planned", at(3, 11), NewMark, ""),
+		closedIssue(26, "completed", at(3, 12), NewMark, `,"sub_issues_summary":{"total":2,"completed":2}`),
+	}
+	commits := `[{"sha":"x99","commit":{"message":"pushed straight\n\nto main"}},{"sha":"m51","commit":{"message":"m"}},{"sha":"m50","commit":{"message":"m"}}]`
+	if !later {
+		closed = append(closed, closedIssue(19, "completed", "2026-09-29T00:00:00Z", NewMark, ""))
+		a["repos/o/r/issues/19/comments?per_page=100"] = jsonComments(landing(t, 19, map[string]string{"done": "old", "by-hand": "none"}, time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)))
+		a["repos/o/r/commits/h49/check-runs?filter=all&per_page=100"] = `{"check_runs":[{"id":9,"name":"check","status":"completed","conclusion":"success"}]}`
+		a["repos/o/r/pulls/49/files?per_page=100"] = `[]`
+		a["repos/o/r/issues?labels=se&state=closed&per_page=100"] = "[" + strings.Join(closed, ",") + "]"
+		a["repos/o/r/commits?sha=main&per_page=100"] = commits[:len(commits)-1] + `,{"sha":"m49","commit":{"message":"m"}},{"sha":"first","commit":{"message":"the first commit"}}]`
+		return a
+	}
+	// GitHub's since is about updates: #19 closed before the window but was
+	// touched after it, so the list holds it and the window leaves it out.
+	closed = append(closed, closedIssue(19, "completed", "2026-09-29T00:00:00Z", NewMark, ""))
+	a["repos/o/r/issues?labels=se-retro&state=closed&per_page=100"] = `[{"number":10,"state":"closed","closed_at":"2026-09-01T00:00:00Z"},{"number":20,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`
+	a["repos/o/r/issues/10/comments?per_page=100"] = `[]`
+	a["repos/o/r/issues/20/comments?per_page=100"] = jsonComments(previousReport(t))
+	a["repos/o/r/issues/21"] = `{"number":21,"state":"closed","state_reason":"completed"}`
+	a["repos/o/r/issues/22"] = `{"number":22,"state":"open"}`
+	a["repos/o/r/issues?labels=se&state=closed&per_page=100"+since] = "[" + strings.Join(closed, ",") + "]"
+	a["repos/o/r/commits?sha=main&per_page=100"+since] = commits
+	return a
+}
+
+func collect(t *testing.T, later bool) Collected {
+	t.Helper()
+	gh, _ := writes(t, retroRepo(t, later, "<!-- se:retro attended -->"))
+	c, err := Source{Repo: repo, GH: gh, Now: clock}.Collect(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func rows(c Collected) []int {
+	var ns []int
+	for _, r := range c.Rows {
+		ns = append(ns, r.Number)
+	}
+	return ns
+}
+
+func TestTheFirstRetroCoversTheWholeHistory(t *testing.T) {
+	c := collect(t, false)
+	if c.Window.Previous != 0 || !c.Window.Since.IsZero() || !c.Window.Until.Equal(now) || !c.Attended {
+		t.Fatalf("%+v", c.Window)
+	}
+	if got := rows(c); !reflect.DeepEqual(got, []int{19, 23, 24, 25, 26}) || c.PRs != 3 || c.Commits != 5 {
+		t.Fatalf("rows %v, %d PRs, %d commits", got, c.PRs, c.Commits)
+	}
+	if c.Previous != nil || c.Score != nil || len(c.History) != 0 {
+		t.Fatalf("a first retro scores nothing: %+v %+v", c.Previous, c.Score)
+	}
+}
+
+func TestALaterRetroCoversWhatClosedSinceTheLastOne(t *testing.T) {
+	c := collect(t, true)
+	if c.Window.Previous != 20 || !c.Window.Since.Equal(prevClosed) {
+		t.Fatalf("%+v", c.Window)
+	}
+	if got := rows(c); !reflect.DeepEqual(got, []int{23, 24, 25, 26}) || c.PRs != 2 || c.Commits != 3 {
+		t.Fatalf("rows %v, %d PRs, %d commits", got, c.PRs, c.Commits)
+	}
+}
+
+func TestEachRuleCheck(t *testing.T) {
+	c := collect(t, true)
+	var got []string
+	for _, x := range c.Checks {
+		got = append(got, x.Kind+" "+x.Subject)
+	}
+	want := []string{
+		"fixes PR #51",          // its body names no Fixes #n
+		"ci PR #51",             // its last run failed; #50's rerun passed
+		"outside-pr commit x99", // no merged PR made it
+		"mark #24",              // not made by se issue new
+		"answers #24",           // completed leaf, no answers; #25 not planned, #26 a parent
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%q", got)
+	}
+	if !strings.Contains(c.Checks[1].What, "check failure") || !strings.Contains(c.Checks[2].What, "pushed straight:") {
+		t.Fatalf("%+v", c.Checks)
+	}
+}
+
+func TestTheCountsAndScripts(t *testing.T) {
+	c := collect(t, true)
+	want := Metrics{"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1,
+		"conflicts_per_issue": 0.25, "takeovers_per_issue": 0.25, "ci_reruns_per_issue": 0.25, "person_flags_per_issue": 0.25, "by_hand_per_issue": 0.25,
+		"claim_to_merge_minutes": 90}
+	if !reflect.DeepEqual(c.Metrics, want) {
+		t.Fatalf("%v", c.Metrics)
+	}
+	if want := []Script{{"src/scripts/check-claims.sh", 50, "Lists claims with no PR, since fleet check had no such view.", "check"}}; !reflect.DeepEqual(c.Scripts, want) {
+		t.Fatalf("%+v", c.Scripts)
+	}
+}
+
+func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
+	c := collect(t, false)
+	draft, err := c.Draft(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, matrix, _ := strings.Cut(draft, matrixMark)
+	for _, want := range []string{
+		"No landing answers: #24, #25, #26.",
+		"### `done`: What does it deliver?\n- #19 t19: old\n- #23 t23: it works\n",
+		// #19's by-hand answer is none, so it is left out.
+		"### `by-hand`: What did you do by hand?\n- #23 t23: wrote src/scripts/check-claims.sh\n",
+	} {
+		if !strings.Contains(matrix, want) {
+			t.Errorf("the matrix lacks %q:\n%s", want, matrix)
+		}
+	}
+	r, facts, err := ParseReport(draft)
+	if err != nil || r.Retro != 30 || len(r.Checks) != len(c.Checks) || !strings.HasPrefix(facts, "## The window") || strings.Contains(facts, "The matrix") {
+		t.Fatalf("%+v %q %v", r, facts, err)
+	}
+}
+
+func TestThePreviousRetroIsScored(t *testing.T) {
+	c := collect(t, true)
+	dropped := true
+	want := &Score{Retro: 20, Findings: 3, Issues: 2, Closed: 1, Recurred: 1, Items: []ScoreItem{
+		// The fixes check broke again, so its class recurred though its issue closed.
+		{Title: "PRs without Fixes", Class: "landing", Issue: 21, State: "completed", Recurred: true},
+		{Title: "Conflicts", Class: "merging", Issue: 22, State: "open", Metric: "conflicts_per_issue", Before: 0.5, Now: 0.25, Dropped: &dropped},
+		{Title: "Kept as is", Class: "merging", State: "none"},
+	}}
+	if !reflect.DeepEqual(c.Score, want) {
+		t.Fatalf("%+v\nwant %+v", c.Score, want)
+	}
+}
+
+func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
+	c := collect(t, true)
+	if len(c.History) != 1 || c.History[0].Retro != 20 {
+		t.Fatalf("history %+v: #10 posted no report, #20 did", c.History)
+	}
+	draft, err := c.Draft(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"| metric | #20 | now | since the last |",
+		"| conflicts_per_issue | 0.5 | 0.25 | better (-0.25) |",
+		"| closed | 2 | 4 | better (+2) |",
+		"| ci_reruns_per_issue | 0 | 0.25 | worse (+0.25) |",
+		"| takeovers | – | 1 | new |",
+	} {
+		if !strings.Contains(draft, want) {
+			t.Errorf("the draft lacks %q", want)
+		}
+	}
+	r, _, err := ParseReport(draft)
+	if err != nil || !reflect.DeepEqual(r.Metrics, c.Metrics) || r.Previous == nil || r.Previous.Retro != 20 {
+		t.Fatalf("the block: %+v %v", r, err)
+	}
+}
+
+// judged is retro #30's draft with the box's judgment filled in: one
+// controversial finding and one for the normal queue.
+func judged(t *testing.T, edit func(*Report)) string {
+	t.Helper()
+	r := Report{Retro: 30, Attended: true, Metrics: Metrics{"closed": 4}, Checks: []Check{},
+		Findings: []Lesson{
+			{Title: "Refuse a PR without Fixes", Class: "landing", Body: "PR #51 said no Fixes.", Home: "refusal", Check: "fixes"},
+			{Title: "Drop the lease", Class: "claims", Body: "It trades speed for safety.", Home: "removal", Controversial: true, Why: "it trades one metric against another"},
+		},
+		Classes:  []Class{{"landing", "se issue land refuses"}, {"claims", "a person decides"}},
+		WentWell: []string{"the landing answers"},
+	}
+	if edit != nil {
+		edit(&r)
+	}
+	text, err := r.assemble("## The window\nfacts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return text + "\n" + matrixMark + "\n## The matrix\nbig"
+}
+
+func TestAnAttendedRetroStopsForTheOwner(t *testing.T) {
+	answers := retroRepo(t, true, "<!-- se:retro attended -->")
+	answers["repos/o/r/issues/30/comments"] = `{"id":1}`
+	answers["repos/o/r/issues/30/labels"] = `[]`
+	answers["repos/o/r/issues/30/assignees"] = `{}`
+	gh, calls := writes(t, answers)
+	f, err := Source{Repo: repo, GH: gh}.FileReport(30, judged(t, nil))
+	if err != nil || !f.Stopped || len(f.Issues) != 0 {
+		t.Fatalf("%+v %v", f, err)
+	}
+	var writes []string
+	for _, c := range *calls {
+		if c[1] == "-X" {
+			writes = append(writes, c[2]+" "+c[len(c)-1])
+		}
+	}
+	want := []string{
+		"POST repos/o/r/issues/30/comments", // the report
+		"POST repos/o/r/issues/30/labels",
+		"POST repos/o/r/issues/30/assignees",
+		"POST repos/o/r/issues/30/comments", // why it waits on a person
+		"DELETE repos/o/r/git/refs/heads/issue-30",
+	}
+	if !reflect.DeepEqual(writes, want) {
+		t.Fatalf("%q", writes)
+	}
+	report := (*calls)[2][4]
+	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease** (removal; for a person: it trades one metric against another)", "- the landing answers", reportBlock} {
+		if !strings.Contains(report, part) {
+			t.Errorf("the report lacks %q:\n%s", part, report)
+		}
+	}
+	if strings.Contains(report, "The matrix") {
+		t.Errorf("the posted report carries the matrix")
+	}
+	if label := (*calls)[3]; label[4] != "labels[]="+PersonLabel {
+		t.Fatalf("%q", label)
+	}
+}
+
+func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
+	never := func(args ...string) ([]byte, error) {
+		t.Fatalf("gh %v for a refused report", args)
+		return nil, nil
+	}
+	for name, edit := range map[string]func(*Report){
+		"nothing went well":        func(r *Report) { r.WentWell = nil },
+		"an unknown class":         func(r *Report) { r.Findings[0].Class = "nope" },
+		"controversial, no why":    func(r *Report) { r.Findings[1].Why = "" },
+		"a home that is no fix":    func(r *Report) { r.Findings[0].Home = "hope" },
+		"a check that is no check": func(r *Report) { r.Findings[0].Check = "vibes" },
+	} {
+		if _, err := (Source{Repo: repo, GH: never}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func fileFindings(t *testing.T, answers map[string]string) (Filed, [][]string) {
+	t.Helper()
+	answers["repos/o/r/issues"] = `{"number":40,"id":4000,"html_url":"u40"}`
+	answers["repos/o/r/issues/40/assignees"] = `{}`
+	answers["repos/o/r/issues/30/comments"] = `{"id":1}`
+	gh, calls := writes(t, answers)
+	f, err := Source{Repo: repo, GH: gh}.FileReport(30, judged(t, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f, *calls
+}
+
+func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
+	f, calls := fileFindings(t, retroRepo(t, true, "<!-- se:retro unattended -->"))
+	if f.Stopped || !reflect.DeepEqual(f.Issues, []int{40, 40}) || !reflect.DeepEqual(f.Person, []int{40}) || !f.Ready {
+		t.Fatalf("%+v", f)
+	}
+	var created [][]string
+	var writes []string
+	for _, c := range calls {
+		if c[len(c)-1] == "repos/o/r/issues" {
+			created = append(created, c)
+		}
+		if c[1] == "-X" {
+			writes = append(writes, c[2]+" "+c[len(c)-1])
+		}
+	}
+	// The normal finding is labelled se alone; the controversial one se-person too.
+	if len(created) != 2 || created[0][len(created[0])-2] != "labels[]=se" ||
+		created[1][len(created[1])-4] != "labels[]=se" || created[1][len(created[1])-2] != "labels[]="+PersonLabel {
+		t.Fatalf("%q", created)
+	}
+	if !strings.HasPrefix(created[0][4], "title=Refuse a PR without Fixes") || !strings.Contains(created[0][6], "Found by the retro #30, class **landing**") || !strings.HasSuffix(created[0][6], NewMark) {
+		t.Fatalf("%q", created[0])
+	}
+	want := []string{
+		"POST repos/o/r/issues",
+		"POST repos/o/r/issues",
+		"POST repos/o/r/issues/40/assignees",
+		"POST repos/o/r/issues/30/comments",
+		"PATCH repos/o/r/issues/30",
+		"DELETE repos/o/r/git/refs/heads/issue-30",
+	}
+	if !reflect.DeepEqual(writes, want) {
+		t.Fatalf("%q", writes)
+	}
+	for _, c := range calls {
+		if c[len(c)-1] == "repos/o/r/issues/30/comments" && !strings.Contains(c[4], "issue: 40") {
+			t.Fatalf("the closing report names no issue: %s", c[4])
+		}
+	}
+}
+
+func TestAResumedRetroCreatesTheIssuesAsDecided(t *testing.T) {
+	answers := retroRepo(t, true, "<!-- se:retro attended -->")
+	answers["repos/o/r/issues/30/comments?per_page=100"] = jsonComments(judged(t, nil), "<!-- se:person -->\nwaits", "move finding 2 to normal", "<!-- se:resume -->\nResumed.")
+	f, _ := fileFindings(t, answers)
+	if f.Stopped || len(f.Issues) != 2 {
+		t.Fatalf("%+v", f)
+	}
+}

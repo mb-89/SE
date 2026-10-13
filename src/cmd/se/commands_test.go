@@ -66,6 +66,7 @@ func TestTheHelpGroupsTheCommands(t *testing.T) {
 		"Issues":  {"issue land", "issue new", "issue next", "issue resume", "issue review"},
 		"Daemon":  {"serve", "start", "stop"},
 		"Fleet":   {"fleet check", "fleet fix"},
+		"Retro":   {"retro collect", "retro new", "retro report"},
 	}
 	terminal := help(false, false)
 	for group, names := range want {
@@ -88,7 +89,7 @@ func TestACommandStandsUnderTheGroupItRegisters(t *testing.T) {
 		Run: func(c *Call) (Reply, error) { return Reply{}, nil }})
 	t.Cleanup(func() { delete(commands, "zz probe") })
 	for _, session := range []bool{false, true} {
-		if h := help(session, false); !strings.Contains(h, "Probes:\n  zz probe      probe the help\n") {
+		if h := help(session, false); !regexp.MustCompile(`Probes:\n  zz probe +probe the help\n`).MatchString(h) {
 			t.Errorf("session %v:\n%s", session, h)
 		}
 	}

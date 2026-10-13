@@ -113,7 +113,7 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 		t.Fatalf("%+v %v", r, err)
 	}
 	want := [][]string{
-		{"api", "-X", "POST", "-f", "title=fix it", "-f", "body=A fix the review of #1 asks for. Its findings:\n\nit breaks", "-f", "labels[]=se", "repos/o/r/issues"},
+		{"api", "-X", "POST", "-f", "title=fix it", "-f", "body=A fix the review of #1 asks for. Its findings:\n\nit breaks\n\n<!-- se:new -->", "-f", "labels[]=se", "repos/o/r/issues"},
 		{"api", "-X", "POST", "-F", "sub_issue_id=1003", "repos/o/r/issues/1/sub_issues"},
 		{"api", "-X", "POST", "-f", "body=Review failed, by session box in /b/review-1-1.\n\nit breaks\n\nFixes:\n- #3 fix it", "repos/o/r/issues/1/comments"},
 	}
