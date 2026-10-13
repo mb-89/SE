@@ -48,7 +48,7 @@ func init() {
 				return Reply{}, err
 			}
 			s.Now = clock
-			b, err := s.Brief(c.Workspace, w)
+			b, err := s.Briefing(c.Workspace, w)
 			if err != nil {
 				return Reply{}, err
 			}

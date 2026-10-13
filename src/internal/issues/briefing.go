@@ -110,9 +110,9 @@ type Counts struct {
 	InTrees int `json:"in_trees"`
 }
 
-// Brief reads GitHub and the checkout dir and says where SE stands. It writes
+// Briefing reads GitHub and the checkout dir and says where SE stands. It writes
 // nothing but what every se issue command writes.
-func (s Source) Brief(dir string, w Window) (Briefing, error) {
+func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 	b := Briefing{Repo: s.Repo, At: s.now().UTC().Truncate(time.Second), InFlight: []Flight{}}
 	b.About = about(dir, s.Repo)
 	all, t, err := s.survey()
