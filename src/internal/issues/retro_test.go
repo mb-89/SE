@@ -2,6 +2,7 @@
 package issues
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -396,5 +397,46 @@ func TestAResumedRetroCreatesTheIssuesAsDecided(t *testing.T) {
 	f, _ := fileFindings(t, answers)
 	if f.Stopped || len(f.Issues) != 2 {
 		t.Fatalf("%+v", f)
+	}
+}
+
+func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
+	answers := retroRepo(t, true, "<!-- se:retro attended -->")
+	for _, p := range []string{"repos/o/r/issues/30/comments", "repos/o/r/issues/30/labels", "repos/o/r/issues/30/assignees"} {
+		answers[p] = `{}`
+	}
+	inner, _ := writes(t, answers)
+	gh := func(args ...string) ([]byte, error) {
+		if len(args) > 2 && args[2] == "DELETE" {
+			return nil, errors.New("gh: Write access to this GitHub API path is not permitted through this proxy. (HTTP 403)")
+		}
+		return inner(args...)
+	}
+	f, err := Source{Repo: repo, GH: gh}.FileReport(30, judged(t, nil))
+	if err != nil || !f.Stopped || !strings.HasPrefix(f.Left, "issue-30 stays (") || !strings.Contains(f.Left, "se fleet prune") {
+		t.Fatalf("%+v %v", f, err)
+	}
+}
+
+func TestFiledAgainBeforeTheOwnerDecidedItOnlyUpdatesTheReport(t *testing.T) {
+	answers := retroRepo(t, true, "<!-- se:retro attended -->")
+	answers["repos/o/r/issues/30"] = strings.Replace(answers["repos/o/r/issues/30"], `{"name":"se-retro"}`, `{"name":"se-retro"},{"name":"se-person"}`, 1)
+	answers["repos/o/r/issues/30/comments?per_page=100"] = jsonComments(judged(t, nil), "<!-- se:person -->\nwaits")
+	answers["repos/o/r/issues/comments/100"] = `{}`
+	gh, calls := writes(t, answers)
+	if f, err := (Source{Repo: repo, GH: gh}).FileReport(30, judged(t, nil)); err != nil || !f.Stopped {
+		t.Fatalf("%+v %v", f, err)
+	}
+	var writes []string
+	for _, c := range *calls {
+		if c[1] == "-X" {
+			writes = append(writes, c[2]+" "+c[len(c)-1])
+		}
+	}
+	if want := []string{"PATCH repos/o/r/issues/comments/100", "DELETE repos/o/r/git/refs/heads/issue-30"}; !reflect.DeepEqual(writes, want) {
+		t.Fatalf("%q", writes)
+	}
+	if body := (*calls)[len(*calls)-2][4]; !strings.Contains(body, "**Drop the lease**") || !strings.Contains(body, "\n  It trades speed for safety.\n") {
+		t.Fatalf("the finding's body is not under it: %s", body)
 	}
 }

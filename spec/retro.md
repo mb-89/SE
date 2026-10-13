@@ -70,7 +70,8 @@ What earlier versions taught, and how this design answers it:
   rule `check` or the `metric` it should move, which the next retro scores it
   by, and `retro: true` for a finding about the retro itself), `classes`
   (`name`, `fix`) and `went_well`. A finding's `home` is one of `check`,
-  `refusal`, `gate`, `field`, `guidance` or `removal`.
+  `refusal`, `gate`, `field` (a prefilled one), `command` (an `se` command
+  for a step done by hand), `guidance` or `removal`.
 - **Who decides (the owner's rule for retros and overhauls alike):** every
   finding becomes an issue through the same code as `se issue new`.
   - A **non-controversial** finding goes into the normal queue.
@@ -102,8 +103,10 @@ What earlier versions taught, and how this design answers it:
   - **Unattended:** `se retro report` creates the issues at once, by the rule
     above, and closes the retro.
 
-  Either way it deletes the retro's claim, `issue-N`: a retro lands no branch,
-  and a resumed retro is claimed afresh.
+  Either way it deletes the retro's claim, `issue-N`: a retro lands no
+  branch. Where the box's token may not delete branches, it says so and goes
+  on: `se fleet prune` removes the branch once the retro is closed, and a
+  resumed retro's stale claim is taken over like any stuck claim.
 - **The retro reviews itself**, every time, as a fixed part of the report:
   - **Metrics against the previous retros:** conflicts, takeovers, CI reruns,
     `se-person` flags, `by-hand` mentions and time from claim to merge, each

@@ -32,7 +32,7 @@ Tell them the issue it created. A box takes it from there.
    - `findings`: what went wrong, blamelessly: the rule, tool or prompt that
      produced it, not who. Each with a `title` (the fix, as an issue title), a
      `class`, a `body` (what happened, with issue and PR numbers, and the fix),
-     a `home` (`check`, `refusal`, `gate`, `field`, `guidance` or `removal`:
+     a `home` (`check`, `refusal`, `gate`, `field`, `command`, `guidance` or `removal`:
      the cheapest durable one, guidance last), and `controversial` with its
      `why` when it changes a principle, trades one metric against another,
      you are not sure, or it recurred after an earlier fix. Name the rule

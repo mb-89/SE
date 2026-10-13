@@ -148,10 +148,13 @@ func init() {
 				}{filed, fanout})
 				return Reply{Text: string(data)}, err
 			}
-			if filed.Stopped {
-				return Reply{Text: fmt.Sprintf("Posted the report on the retro #%d and gave it to the owner (%s): they decide, then run se issue resume %d. End here.", n, issues.PersonLabel, n)}, nil
-			}
 			text := fmt.Sprintf("Created %d issue(s) from the retro #%d's findings, %d of them for a person: %s. The report is its closing comment, and it is closed.", len(filed.Issues), n, len(filed.Person), numbers(filed.Issues))
+			if filed.Stopped {
+				text = fmt.Sprintf("Posted the report on the retro #%d and gave it to the owner (%s): they decide, then run se issue resume %d. End here.", n, issues.PersonLabel, n)
+			}
+			if filed.Left != "" {
+				text += "\n" + filed.Left + "."
+			}
 			if fanout != "" {
 				text += "\n" + fanout
 			}

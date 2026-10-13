@@ -44,7 +44,8 @@ type Lesson struct {
 	Class string `yaml:"class"`
 	Body  string `yaml:"body"`
 	// Home is the fix's kind, cheapest durable first: check, refusal, gate,
-	// field (a prefilled one), guidance, or removal.
+	// field (a prefilled one), command (an se command for a step done by
+	// hand), guidance, or removal.
 	Home string `yaml:"home"`
 	// Controversial sends its issue to a person; Why says which rule makes it so.
 	Controversial bool   `yaml:"controversial"`
@@ -66,7 +67,7 @@ type Class struct {
 }
 
 // homes are the kinds of fix a finding may ask for, in order of preference.
-var homes = []string{"check", "refusal", "gate", "field", "guidance", "removal"}
+var homes = []string{"check", "refusal", "gate", "field", "command", "guidance", "removal"}
 
 // Draft is the report draft se retro collect writes: the facts as text, the
 // block, and the matrix below it.
@@ -326,7 +327,7 @@ func (f Lesson) line() string {
 	if f.Issue > 0 {
 		s += fmt.Sprintf(": #%d", f.Issue)
 	}
-	return s + "\n"
+	return s + "\n  " + strings.ReplaceAll(strings.TrimSpace(f.Body), "\n", "\n  ") + "\n"
 }
 
 // ParseReport reads a report, a draft or a posted one, back: its block and
@@ -452,6 +453,9 @@ type Filed struct {
 	// Issues are the issues created, Person those of them for a person.
 	Issues []int `json:"issues"`
 	Person []int `json:"person"`
+	// Left says why the claim issue-N is still there, where its deletion was
+	// refused.
+	Left string `json:"left,omitempty"`
 	// Ready is true where an issue it created is ready, so the routine fires.
 	Ready bool `json:"-"`
 }
@@ -494,11 +498,15 @@ func (s Source) FileReport(n int, draft string) (Filed, error) {
 			return Filed{}, err
 		}
 		reason := fmt.Sprintf("The retro's report is above, for the owner. Move findings between controversial and not in a comment, then run `se issue resume %d`: the next box creates the issues as decided and closes the retro.", n)
-		if err := s.flag(Issue{Number: n, Title: i.Title, URL: i.URL}, reason, ""); err != nil {
-			return Filed{}, err
+		// Filed again before the owner decided, it only updates the report.
+		if !i.labelled(PersonLabel) {
+			if err := s.flag(Issue{Number: n, Title: i.Title, URL: i.URL}, reason, ""); err != nil {
+				return Filed{}, err
+			}
 		}
 		out.Stopped = true
-		return out, s.dropBranch(n)
+		out.Left = s.dropBranch(n)
+		return out, nil
 	}
 	owner, _, _ := strings.Cut(s.Repo, "/")
 	for k := range r.Findings {
@@ -537,7 +545,8 @@ func (s Source) FileReport(n int, draft string) (Filed, error) {
 	if _, err := s.GH("api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", base); err != nil {
 		return out, fmt.Errorf("closing the retro #%d: %w", n, err)
 	}
-	return out, s.dropBranch(n)
+	out.Left = s.dropBranch(n)
+	return out, nil
 }
 
 // postReport posts the report on retro n, or, where update is set, writes it
@@ -566,11 +575,13 @@ func (s Source) postReport(n int, text string, update bool) error {
 }
 
 // dropBranch deletes the claim issue-n, where it exists: a retro lands no
-// branch, and a later box claims it afresh.
-func (s Source) dropBranch(n int) error {
+// branch. It never fails the report: where the deletion is refused (a box's
+// token may not delete branches), it answers why the branch stays and what
+// removes it.
+func (s Source) dropBranch(n int) string {
 	_, err := s.GH("api", "-X", "DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, Branch(n)))
-	if err != nil && (strings.Contains(err.Error(), "HTTP 422") || strings.Contains(err.Error(), "HTTP 404")) {
-		return nil
+	if err == nil || strings.Contains(err.Error(), "HTTP 422") || strings.Contains(err.Error(), "HTTP 404") {
+		return ""
 	}
-	return err
+	return fmt.Sprintf("%s stays (%v): se fleet prune removes it once the retro is closed, and a resumed retro's stale claim is taken over", Branch(n), err)
 }
