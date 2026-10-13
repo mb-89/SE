@@ -73,8 +73,10 @@ func (s Source) Strays() ([]Stray, error) {
 		}
 		at := got[0].Commit.Committer.Date
 		if s.now().Sub(at) > Fresh {
-			out = append(out, Stray{Branch: b, SHA: r.Object.SHA,
-				Why: fmt.Sprintf("its last commit is from %s and it has no open PR", at.UTC().Format(time.RFC3339))})
+			out = append(out, Stray{
+				Branch: b, SHA: r.Object.SHA,
+				Why: fmt.Sprintf("its last commit is from %s and it has no open PR", at.UTC().Format(time.RFC3339)),
+			})
 		}
 	}
 	sort.SliceStable(out, func(a, b int) bool { return out[a].Branch < out[b].Branch })
