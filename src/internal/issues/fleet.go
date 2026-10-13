@@ -25,6 +25,10 @@ const (
 // Kinds is every kind of finding, in the order se fleet check lists them.
 var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, LeftoverClaim, ImpossibleBlock, WaitingOnPerson}
 
+// Grace is how long the prune workflow has to delete a leftover claim of a
+// closed issue before se fleet fix reports it.
+var Grace = 24 * time.Hour
+
 // Quiet is how long claimed work goes without a push before it is not moving.
 var Quiet = time.Hour
 
@@ -49,6 +53,10 @@ type Finding struct {
 	// spent is true for a leftover claim whose branch main holds whole:
 	// deleting it loses nothing.
 	spent bool
+	// prunable is true for a leftover claim of a closed issue with no open
+	// PR: the prune workflow deletes its branch. closed is when it closed.
+	prunable bool
+	closed   time.Time
 	// key names the finding in the record its fix leaves.
 	key string
 }
@@ -79,6 +87,8 @@ func (f *Finding) setRemedy() {
 		f.Remedy = fmt.Sprintf("se issue next --take %d, merge origin/main into %s, make it green, se issue land", f.Issue, Branch(f.Issue))
 	case f.cause() == GreenUnmerged && !f.autoMerge:
 		f.Remedy = "se fleet fix turns auto-merge on"
+	case f.prunable:
+		f.Remedy = fmt.Sprintf("the prune workflow deletes %s; se fleet fix reports it only if it is still there a day after #%d closed", Branch(f.Issue), f.Issue)
 	case f.spent:
 		f.Remedy = "se fleet fix deletes " + Branch(f.Issue) + ": main holds all its commits"
 	case f.judgment || f.cause() == GreenUnmerged:
@@ -355,9 +365,12 @@ func (s Source) checks(sha string) (red []string, pending bool, err error) {
 }
 
 // leftovers is the issue-<n> branches whose issue is no open se issue. One
-// that main holds whole is spent: its fix deletes it.
+// whose issue is closed and that has no open PR is prunable: the prune
+// workflow deletes it. Any other that main holds whole is spent: its fix
+// deletes it.
 func (s Source) leftovers(t tree, refs []ref) ([]Finding, error) {
 	var out []Finding
+	var open map[string]bool
 	for _, r := range refs {
 		b := strings.TrimPrefix(r.Ref, "refs/heads/")
 		n, err := strconv.Atoi(strings.TrimPrefix(b, "issue-"))
@@ -390,6 +403,23 @@ func (s Source) leftovers(t tree, refs []ref) ([]Finding, error) {
 		}
 		f := Finding{Kind: LeftoverClaim, Issue: n, head: r.Object.SHA, key: "leftover-claim",
 			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why)}
+		if i.State == "closed" && i.PullRequest == nil {
+			if open == nil {
+				pulls, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?state=open&per_page=100", s.Repo), true)
+				if err != nil {
+					return nil, err
+				}
+				open = map[string]bool{}
+				for _, p := range pulls {
+					open[p.Head.Ref] = true
+				}
+			}
+			if !open[b] {
+				f.prunable, f.closed = true, i.ClosedAt
+				out = append(out, f)
+				continue
+			}
+		}
 		if cmp[0].AheadBy == 0 {
 			f.spent, f.key = true, "leftover-branch"
 			f.What += ", and main holds all its commits"
@@ -490,6 +520,13 @@ func (s Source) Fix(findings []Finding) ([]Fixed, error) {
 			x.Did = "reported; it waits for a person"
 		case f.takeover():
 			x.Did, x.Take = "left to this box: "+f.Remedy, true
+		case f.prunable && s.now().Sub(f.closed) < Grace:
+			x.Did = fmt.Sprintf("left to the prune workflow until a day after #%d closed", f.Issue)
+		case f.prunable:
+			x.What += ", and is still there a day after it closed: the prune workflow did not delete it"
+			if err := s.fix(&x); err != nil {
+				return out, err
+			}
 		default:
 			if err := s.fix(&x); err != nil {
 				return out, err
