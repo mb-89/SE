@@ -11,10 +11,11 @@ The principles its design is measured against are in
 
     ./RUNME.sh
 
-It needs `go`, `git`, `claude` and `gh`, the GitHub CLI that `se issue` reads
-GitHub through. It builds `se`, installs the Go debugger, and installs the
-plugin for your user, so every Claude session on this machine has one
-command, `/se`, which takes words the way a command line does:
+It needs `go`, `git`, `claude`, `npm` and `gh`, the GitHub CLI that `se issue`
+reads GitHub through. It builds `se`, installs the Go debugger and the pinned
+linters, and installs the plugin for your user, so every Claude session on
+this machine has one command, `/se`, which takes words the way a command line
+does:
 
 | command | what it does |
 |---|---|
@@ -25,12 +26,14 @@ command, `/se`, which takes words the way a command line does:
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
 | `/se issue next` | names the next `se` issue, stuck work before new work, or says that none is ready; `--take` claims it, or takes a stuck one over; `--in ROOT` names the ready leaves inside a parent's tree; `--person` lists the issues waiting on a person |
 | `/se issue land` | on an `issue-<n>` branch, with `--answers FILE` answering every question in [spec/landing.yaml](spec/landing.yaml): passes the check, pushes, posts the answers on the issue, opens its PR against main (`Fixes #<n>`) and turns on auto-merge (squash) |
-| `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent`; `--review` labels it `se-review` |
+| `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent`; `--review` labels it `se-review`, `--final` labels it `se-final` |
 | `/se issue resume` | for a person: takes an issue off `se-person` and puts it back in the queue |
-| `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree: `pass` closes it, `fail` creates fix leaves under it |
+| `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree, with its report (`--report`): `pass` closes it, `fail` leaves it open; every finding becomes an `se-final` issue, a blocking one under it |
+| `/se review brief` | prints what a reviewer of a gate starts from: its question, its tree's texts, the pinned commit, its CI and `spec/principles.md`; the workers' accounts only with `--claims` |
 | `/se retro new` | starts a retro over everything closed since the last one: `--field TEXT` carries the person's field feedback, `--no-field` none, `--unattended` never asks; `/se retro collect` and `/se retro report` are its box's |
 | `/se fleet check` | lists what is broken in the fleet (a stalled root, a conflicted, red or unmerged PR, a stale or leftover claim, an impossible block, an issue waiting on a person), each with its remedy; says `healthy` when nothing is |
 | `/se fleet fix` | applies every remedy `fleet check` names that needs no checkout, records it on its issue, and names the takeovers left to the box |
+| `/se fleet prune` | lists the stray branches: an `issue-<n>` branch whose issue is closed, a `claude/*` branch more than an hour old, each with no open PR; `--apply` deletes them, as the prune workflow does every hour |
 | `/se ui` | opens SE's control panel, a pane of buttons that draws on every surface, the phone included: the on/off toggle top left, then a button for each command that takes no typed words (`status`, `restart`, `update`, `issue next`); a press runs what typing `/se <name>` runs |
 | `/se help`, `/se` | lists these, one short line each, under their groups |
 | `/se help <command>` | shows that command's usage and every flag it takes; `<command> --help` does too |
@@ -76,9 +79,11 @@ one a box may take, and `se issue next --take` claims it by pushing its branch
 `--blocked-by` writes GitHub's native "blocked by" links. Issues nest: leaves
 are work, parents coordinate their sub-issues and close by themselves, except
 an `se-review` parent, which `se issue review` passes or fails by an agent that
-worked none of its tree. A claim nothing was pushed to for 3 hours is stuck:
-the next box takes it over once, and a second time it goes to a person
-(`se issue next --person`, `se issue resume`). The
+worked none of its tree, by the rules of [spec/review.md](spec/review.md)
+(the skill `se:review`). A claim nothing was pushed to for 3 hours is stuck:
+the next box takes it over once, which labels it `se-final`, and a final issue
+that fails again goes to a person (`se issue next --person`,
+`se issue resume`). The
 rules for which
 issue is ready, how a claim works, and how issues are made live in
 [spec/issues.md](spec/issues.md). `se issue land` brings the claimed issue's
@@ -115,6 +120,25 @@ answers a `Reply`: the text to show and, for a session, the effects the plugin
 applies (switch forwarding on or off, where the daemon now answers, reload the
 plugins, open the control panel). The help on both sides is made from what registered, and the plugin
 hands every word typed after `/se` to `se --session`, so nothing else changes.
+
+## Checks
+
+`tests/check.sh` is the one definition of green; the pre-push hook and CI run
+it. Before the tests it runs the linters and SE's own rules, and each check
+reports how long it took:
+
+- **SE's rules**: `go run ./src/cmd/rules` checks every file git tracks or
+  would track against each rule in `src/internal/rules`. A rule is one file
+  that calls `register` in its `init`, with a test beside it; registering it is
+  all it takes for the battery to run it. A finding names the file, the line
+  and the rule.
+- **Go**: `golangci-lint`, configured in `.golangci.yml`, with a small set of
+  linters and `gofumpt` as the formatter.
+- **The plugin's TypeScript**: `biome`, configured in `biome.jsonc`.
+
+The linters' versions are pinned in `tests/tools.sh`, which `RUNME.sh` and CI
+run to install them; the check refuses any other version. A linter that is
+switched off, or a finding excluded, carries a one-line reason in its config.
 
 ## Debugging the daemon
 

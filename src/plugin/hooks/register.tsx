@@ -7,15 +7,19 @@
 // the event to the session's log. While SE is off, every hook hands the event
 // straight on and contacts nothing. /se ui opens a pane of buttons: the on/off
 // toggle and the commands se offers as buttons, each pressed as /se <words>.
+// /se help draws as a layout: se answers the help as data beside its text, and
+// the command's output row draws that data, headings and two aligned columns.
 
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { SeActive, SeButtons } from '../types'
+import type { SeActive, SeButtons, SeHelp } from '../types'
 
 const ACTIVE = { plugin: 'se', key: 'active' } as const
 // The commands se offered as buttons when /se ui last opened the pane.
 const BUTTONS = { plugin: 'se', key: 'buttons' } as const
 const PANE = 'se-ui'
+// The help se answered for each /se line that asked for it, by its words.
+const HELPS = { plugin: 'se', key: 'helps' } as const
 // The folder the daemon owns in a workspace, and its endpoint record there.
 export const RUNTIME = '.se/.runtime'
 const ENDPOINT = `${RUNTIME}/daemon.json`
@@ -39,6 +43,7 @@ export type Reply = {
   endpoint?: Endpoint
   reload?: boolean
   panel?: { buttons: SeButtons }
+  help?: SeHelp
 }
 
 // The module's copy of the flag, so an event costs nothing while SE is off.
@@ -96,6 +101,74 @@ export const register: Register = on => {
         {buttons.map(name => (
           <Button key={`run ${name}`} label={name} onPress={() => presses($, name)} />
         ))}
+      </Box>
+    )
+  })
+
+  // /se help's output row: the help se answered as data, drawn as a layout. A
+  // row whose words carried no help, or an error, is drawn as its text.
+  on('ui.render', { component: 'CommandOutput', props: { command: 'se' } }, async ($, e, next) => {
+    if (e.props.isErrored) return next(e)
+    const { value: helps = {} } = await $.state.get(HELPS)
+    const help = helps[wordsOf(e.props.args).join(' ')]
+    if (!help) return next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    const groups = help.groups ?? []
+    const flags = help.flags ?? []
+    // The left column is as wide as its longest name, and two cells more.
+    const left =
+      2 + Math.max(0, ...groups.flatMap(g => g.commands.map(c => c.name.length)), ...flags.map(f => f.name.length))
+    const row = (key: string, name: string, about: string) => (
+      <Box key={key} flexDirection="row">
+        <Box width={left} flexShrink={0}>
+          <Text color="suggestion">{name}</Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1}>
+          <Text>{about}</Text>
+        </Box>
+      </Box>
+    )
+    const parts = []
+    if (help.usage) {
+      parts.push(
+        <Box key="usage">
+          <Text bold>{help.usage}</Text>
+        </Box>,
+      )
+    }
+    if (help.about) {
+      parts.push(
+        <Box key="about">
+          <Text>{help.about}</Text>
+        </Box>,
+      )
+    }
+    for (const g of groups) {
+      parts.push(
+        <Box key={`group ${g.name}`} flexDirection="column">
+          <Text bold>{g.name}</Text>
+          {g.commands.map(c => row(`command ${c.name}`, c.name, c.summary))}
+        </Box>,
+      )
+    }
+    if (flags.length > 0) {
+      parts.push(
+        <Box key="flags" flexDirection="column">
+          <Text bold>Flags</Text>
+          {flags.map(f => row(`flag ${f.name}`, f.name, f.usage))}
+        </Box>,
+      )
+    }
+    if (help.note) {
+      parts.push(
+        <Box key="note">
+          <Text dimColor>{help.note}</Text>
+        </Box>,
+      )
+    }
+    return (
+      <Box flexDirection="column" rowGap={1}>
+        {parts}
       </Box>
     )
   })
@@ -165,9 +238,24 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
 }
 
 // /se <words>: hands the words to se and applies its reply; answers the text to show.
+// Help se answered is kept for the output row to draw; a line that no longer
+// answers help draws as its text.
 async function runs($: EngineInterface, args: string): Promise<string> {
-  const asked = await asks($, args.split(/\s+/).filter(Boolean))
-  return typeof asked === 'string' ? asked : applies($, asked)
+  const words = wordsOf(args)
+  const asked = await asks($, words)
+  if (typeof asked === 'string') return asked
+  const key = words.join(' ')
+  const { value: helps = {} } = await $.state.get(HELPS)
+  if (asked.help) await $.state.set(HELPS, { ...helps, [key]: asked.help })
+  else if (key in helps) {
+    const { [key]: _, ...rest } = helps
+    await $.state.set(HELPS, rest)
+  }
+  return applies($, asked)
+}
+
+function wordsOf(args: string): string[] {
+  return args.split(/\s+/).filter(Boolean)
 }
 
 // A press runs what typing /se <words> runs; its answer is a line of the

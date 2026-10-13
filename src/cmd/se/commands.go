@@ -54,6 +54,8 @@ type Reply struct {
 	Reload bool `json:"reload,omitempty"`
 	// Panel, when set, asks the plugin to open /se ui with these buttons.
 	Panel *Panel `json:"panel,omitempty"`
+	// Help, when set, is the help Text says, as data the plugin draws.
+	Help *Help `json:"help,omitempty"`
 }
 
 // Panel is what /se ui draws beside its on/off toggle.
@@ -181,7 +183,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	cmd, ok := commands[name]
-	if *session && !(ok && cmd.Installed) {
+	if *session && (!ok || !cmd.Installed) {
 		if code, handed := handsOver(*workspace, args, stdout, stderr); handed {
 			return code
 		}
@@ -195,10 +197,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case ok:
 		reply, err = cmd.Run(call)
 		if errors.Is(err, flag.ErrHelp) {
-			reply, err = Reply{Text: commandHelp(cmd, call.flags, *session, color)}, nil
+			reply, err = helpReply(commandHelpOf(cmd, call.flags, *session), *session, color), nil
 		}
 	case name == "":
-		reply = Reply{Text: help(*session, errColor)}
+		reply = helpReply(overview(*session), *session, errColor)
 		if !*session {
 			fmt.Fprintln(stderr, reply.Text)
 			return 2

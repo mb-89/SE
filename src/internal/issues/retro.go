@@ -17,9 +17,10 @@ const RetroLabel = "se-retro"
 // the retro can tell an issue it made from one made by hand.
 const NewMark = "<!-- se:new -->"
 
-// retroMode is the mark a retro's body carries: who started it, and so
-// whether its box stops for the owner before it creates the findings' issues.
-var retroMode = regexp.MustCompile(`<!-- se:retro (attended|unattended) -->`)
+// unattendedMark is in the body of a retro nobody waits for: its box creates
+// the findings' issues at once. A retro a person started carries
+// <!-- se:retro attended --> instead, and its box stops for the owner.
+const unattendedMark = "<!-- se:retro unattended -->"
 
 // Retro is the retro se retro new created.
 type Retro struct {
@@ -110,8 +111,8 @@ func (w Window) since() string {
 	return "&since=" + w.Since.UTC().Format(time.RFC3339)
 }
 
-// Check is one rule a retro found broken in its window.
-type Check struct {
+// Broken is one rule a retro found broken in its window.
+type Broken struct {
 	// Kind is the rule: fixes, ci, outside-pr, mark or answers (see checkKinds).
 	Kind    string `yaml:"kind" json:"kind"`
 	Subject string `yaml:"subject" json:"subject"`
@@ -174,12 +175,12 @@ type Collected struct {
 	PRs      int
 	Commits  int
 	Reruns   int
-	Checks   []Check
+	Checks   []Broken
 	Scripts  []Script
 	Metrics  Metrics
 	// Previous is the last closed retro's report, Score how it fared; History
 	// is every closed retro's metrics, oldest first.
-	Previous *Report
+	Previous *RetroReport
 	Score    *Score
 	History  []Past
 }
@@ -219,7 +220,7 @@ func (s Source) Collect(n int) (Collected, error) {
 	if err != nil {
 		return Collected{}, err
 	}
-	c := Collected{Retro: n, Attended: !strings.Contains(i.Body, "<!-- se:retro unattended -->"), Window: Window{Until: s.now().UTC().Truncate(time.Second)}}
+	c := Collected{Retro: n, Attended: !strings.Contains(i.Body, unattendedMark), Window: Window{Until: s.now().UTC().Truncate(time.Second)}}
 	last, ok, retros, err := s.lastRetro(n)
 	if err != nil {
 		return Collected{}, err
@@ -270,7 +271,7 @@ func (s Source) Collect(n int) (Collected, error) {
 
 	for _, p := range inWindow {
 		if fixesLine.FindString(p.Body) == "" {
-			c.Checks = append(c.Checks, Check{"fixes", fmt.Sprintf("PR #%d", p.Number), fmt.Sprintf("%s: its body names no `Fixes #n`", p.Title)})
+			c.Checks = append(c.Checks, Broken{"fixes", fmt.Sprintf("PR #%d", p.Number), fmt.Sprintf("%s: its body names no `Fixes #n`", p.Title)})
 		}
 		red, reruns, err := s.mergedCI(p.Head.SHA)
 		if err != nil {
@@ -278,7 +279,7 @@ func (s Source) Collect(n int) (Collected, error) {
 		}
 		c.Reruns += reruns
 		if red != "" {
-			c.Checks = append(c.Checks, Check{"ci", fmt.Sprintf("PR #%d", p.Number), fmt.Sprintf("%s: %s", p.Title, red)})
+			c.Checks = append(c.Checks, Broken{"ci", fmt.Sprintf("PR #%d", p.Number), fmt.Sprintf("%s: %s", p.Title, red)})
 		}
 		scripts, err := s.scriptsOf(p.Number)
 		if err != nil {
@@ -301,7 +302,7 @@ func (s Source) Collect(n int) (Collected, error) {
 		m := commits[k]
 		if !viaPR[m.SHA] {
 			subject, _, _ := strings.Cut(m.Commit.Message, "\n")
-			c.Checks = append(c.Checks, Check{"outside-pr", "commit " + short(m.SHA), subject + ": no merged PR made it"})
+			c.Checks = append(c.Checks, Broken{"outside-pr", "commit " + short(m.SHA), subject + ": no merged PR made it"})
 		}
 	}
 
@@ -347,12 +348,12 @@ func short(sha string) string {
 
 // row reads one closed issue: its landing answers, its marks, the PR that
 // fixed it, and the rules it broke.
-func (s Source) row(x past, fixedBy map[int]merged) (Row, []Check, error) {
+func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 	r := Row{Number: x.Number, Title: x.Title, Reason: x.StateReason, Minutes: -1}
 	subject := "#" + strconv.Itoa(x.Number)
-	var checks []Check
+	var checks []Broken
 	if !strings.Contains(x.Body, NewMark) {
-		checks = append(checks, Check{"mark", subject, x.Title + ": not made by `se issue new`"})
+		checks = append(checks, Broken{"mark", subject, x.Title + ": not made by `se issue new`"})
 	}
 	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, x.Number), true)
 	if err != nil {
@@ -368,7 +369,7 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Check, error) {
 		r.Person += len(personMark.FindAllString(c.Body, -1))
 		l, ok, err := ParseLanding(c.Body)
 		if ok && err != nil {
-			checks = append(checks, Check{"answers", subject, x.Title + ": " + err.Error()})
+			checks = append(checks, Broken{"answers", subject, x.Title + ": " + err.Error()})
 		}
 		if ok && err == nil {
 			landed = &l
@@ -386,7 +387,7 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Check, error) {
 	if landed != nil {
 		r.Answers = landed.Answers
 	} else if work {
-		checks = append(checks, Check{"answers", subject, x.Title + ": closed as completed without landing answers"})
+		checks = append(checks, Broken{"answers", subject, x.Title + ": closed as completed without landing answers"})
 	}
 	return r, checks, nil
 }
@@ -569,7 +570,7 @@ type ScoreItem struct {
 
 // score reads how each finding of the previous report fared: did its issue
 // close, did the rule check it named break again, did its metric drop.
-func (s Source) score(prev Report, checks []Check, now Metrics) (Score, error) {
+func (s Source) score(prev RetroReport, checks []Broken, now Metrics) (Score, error) {
 	broke := map[string]bool{}
 	for _, c := range checks {
 		broke[c.Kind] = true

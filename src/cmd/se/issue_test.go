@@ -1,3 +1,4 @@
+// Internal test package: package main cannot be imported.
 package main
 
 import (
@@ -408,8 +409,13 @@ func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 	recordedIssues(t)
 	root := t.TempDir()
 	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
-	for _, args := range [][]string{{root, "init", "-q", "--bare", "-b", "main", origin}, {root, "clone", "-q", origin, ws},
-		{ws, "checkout", "-q", "-b", "main"}, {ws, "commit", "-q", "--allow-empty", "-m", "start"}, {ws, "push", "-q", "origin", "main"}} {
+	for _, args := range [][]string{
+		{root, "init", "-q", "--bare", "-b", "main", origin},
+		{root, "clone", "-q", origin, ws},
+		{ws, "checkout", "-q", "-b", "main"},
+		{ws, "commit", "-q", "--allow-empty", "-m", "start"},
+		{ws, "push", "-q", "origin", "main"},
+	} {
 		if out, err := exec.Command("git", append([]string{"-C", args[0], "-c", "user.name=t", "-c", "user.email=t@t"}, args[1:]...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
@@ -438,15 +444,23 @@ func TestIssueReviewReadsItsWords(t *testing.T) {
 	old := sessionID
 	t.Cleanup(func() { sessionID = old })
 	sessionID = func() string { return "" }
+	dir := t.TempDir()
+	good, bad := filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(good, []byte(`{"commit":"c","requirements":[{"item":"i","evidence":"e"}],"clean":["x"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bad, []byte(`{"verdict":"pass"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for args, want := range map[string]string{
-		"pass":                     "pass or fail, then an issue number",
-		"maybe 3 --why x":          "pass or fail, then an issue number",
-		"pass x --why x":           `an issue number, not "x"`,
-		"pass 3 4 --why x":         "pass or fail, then an issue number",
-		"pass 3":                   "needs --why",
-		"fail 3 --why x":           "a fail needs a --fix",
-		"--why x pass #3":          "CLAUDE_CODE_SESSION_ID is not set",
-		"fail --why x 3 --fix a b": "pass or fail, then an issue number",
+		"pass":                          "pass or fail, then an issue number",
+		"maybe 3 --report " + good:      "pass or fail, then an issue number",
+		"pass x --report " + good:       `an issue number, not "x"`,
+		"pass 3 4 --report " + good:     "pass or fail, then an issue number",
+		"pass 3":                        "needs --report",
+		"pass 3 --report " + bad:        "is not a review report",
+		"pass 3 --report /no/such.json": "no such file",
+		"--report " + good + " pass #3": "CLAUDE_CODE_SESSION_ID is not set",
 	} {
 		code, _, errs := se(t, append([]string{"issue", "review", "--repo", "o/r"}, strings.Fields(args)...)...)
 		if code != 1 || !strings.Contains(errs, want) {
@@ -457,6 +471,28 @@ func TestIssueReviewReadsItsWords(t *testing.T) {
 		if strings.Contains(strings.Join(c, " "), "-X") {
 			t.Fatalf("a refused review wrote %v", c)
 		}
+	}
+}
+
+func TestReviewBriefReadsOneIssueNumber(t *testing.T) {
+	recordedIssues(t)
+	for _, args := range []string{"", "x", "3 4"} {
+		code, _, errs := se(t, append([]string{"review", "brief", "--repo", "o/r"}, strings.Fields(args)...)...)
+		if code != 1 || !strings.Contains(errs, "review brief takes one issue number") {
+			t.Errorf("%q: exit %d, %q", args, code, errs)
+		}
+	}
+}
+
+func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
+	calls := recordedIssues(t)
+	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--final")
+	if code != 0 || out != "Created #10 ten\nu10\nLabelled se-final: if it fails, it goes to a person.\nFired.\n" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	last := (*calls)[len(*calls)-1]
+	if want := []string{"api", "-X", "POST", "-f", "title=ten", "-f", "body=b\n\n<!-- se:new -->", "-f", "labels[]=se", "-f", "labels[]=se-final", "repos/o/r/issues"}; !reflect.DeepEqual(last, want) {
+		t.Fatalf("%q", last)
 	}
 }
 

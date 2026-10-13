@@ -1,0 +1,19 @@
+# golangci-lint lints and formats the Go code; tests/check.sh runs it.
+version: "2"
+linters:
+  default: none
+  enable: [govet, staticcheck, errcheck, ineffassign, unused]
+  settings:
+    errcheck:
+      # Closing, removing and writing to stderr are best effort: their error has nowhere to go.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (net.Listener).Close
+        - os.Remove
+        - os.RemoveAll
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - io.WriteString
+formatters:
+  enable: [gofumpt]

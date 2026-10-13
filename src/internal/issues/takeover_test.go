@@ -1,8 +1,10 @@
+// Internal test package: it uses the unexported comment type, asks and pause.
 package issues
 
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -111,6 +113,10 @@ func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 	if len(g.comments) != 1 || !strings.Contains(g.comments[0].Body, "<!-- se:takeover 1 -->") || !strings.Contains(g.comments[0].Body, "<!-- se:takeover-head abc -->") {
 		t.Fatalf("comments %+v", g.comments)
 	}
+	// The takeover makes #7 final.
+	if w := g.writes[len(g.writes)-1]; !reflect.DeepEqual(w, []string{"api", "-X", "POST", "-f", "labels[]=se-final", "repos/o/r/issues/7/labels"}) {
+		t.Fatalf("writes %q", g.writes)
+	}
 	// Named with --take N, the issue named is taken, and no PR is asked.
 	g = newPulls(t)
 	_, b, _ := boxes(t)
@@ -149,10 +155,16 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 	}
 }
 
+// finalSeven is the recorded list with #7 labelled se-final.
+func finalSeven(g *pulls) {
+	g.answers[listPath] = `[` + open(5, "new work") + `,{"number":7,"title":"old work","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-final"}]}]`
+}
+
 func TestASecondConflictTakeoverGoesToAPerson(t *testing.T) {
 	noPause(t)
 	_, a, _ := boxes(t)
 	g := newPulls(t, pr70("false", "dirty"))
+	finalSeven(g)
 	// The first takeover found head 0ld; the PR conflicts again at abc.
 	g.comments = []comment{{ID: 1, Body: "Taken over.\n<!-- se:takeover 1 -->\n<!-- se:takeover-head 0ld -->"}}
 	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
@@ -217,13 +229,14 @@ func TestAConflictAfterAStuckTakeoverGoesToAPerson(t *testing.T) {
 	noPause(t)
 	_, a, _ := boxes(t)
 	g := newPulls(t, pr70("false", "dirty"))
-	// #7 was taken over once already, stuck; its PR now conflicts.
+	// #7 was taken over once already, stuck, so it is final; its PR now conflicts.
+	finalSeven(g)
 	g.comments = []comment{{ID: 1, Body: "<!-- se:takeover 1 -->\nTaken over: nothing was pushed."}}
 	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	if len(g.comments) != 2 || !strings.HasPrefix(g.comments[1].Body, "<!-- se:person -->\nPR #70 conflicts with main again") {
+	if len(g.comments) != 2 || !strings.HasPrefix(g.comments[1].Body, "<!-- se:person -->\nPR #70 conflicts with main on its final attempt") {
 		t.Fatalf("comments %+v", g.comments)
 	}
 }

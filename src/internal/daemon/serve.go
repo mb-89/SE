@@ -86,7 +86,7 @@ func acquire(paths Paths, takeOver time.Duration) (*os.File, error) {
 		if !errors.Is(err, ErrRunning) || takeOver <= 0 || !time.Now().Before(deadline) {
 			return held, err
 		}
-		Stop(paths, time.Until(deadline))
+		_ = Stop(paths, time.Until(deadline))
 		time.Sleep(50 * time.Millisecond)
 	}
 }

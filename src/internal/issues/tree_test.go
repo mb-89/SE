@@ -1,3 +1,4 @@
+// Internal test package: it drives the unexported claimTree.
 package issues
 
 import (

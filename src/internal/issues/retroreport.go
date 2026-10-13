@@ -21,16 +21,16 @@ const (
 	matrixMark   = "<!-- se:retro-matrix -->"
 )
 
-// Report is a retro's machine-readable block. se retro collect fills the
+// RetroReport is a retro's machine-readable block. se retro collect fills the
 // facts; the box fills Findings, Classes and WentWell; se retro report fills
 // each finding's Issue. The next retro reads it first.
-type Report struct {
-	Retro    int     `yaml:"retro"`
-	Attended bool    `yaml:"attended"`
-	Window   Window  `yaml:"window"`
-	Metrics  Metrics `yaml:"metrics"`
-	Checks   []Check `yaml:"checks"`
-	Previous *Score  `yaml:"previous,omitempty"`
+type RetroReport struct {
+	Retro    int      `yaml:"retro"`
+	Attended bool     `yaml:"attended"`
+	Window   Window   `yaml:"window"`
+	Metrics  Metrics  `yaml:"metrics"`
+	Checks   []Broken `yaml:"checks"`
+	Previous *Score   `yaml:"previous,omitempty"`
 	// Findings, Classes and WentWell are the box's judgment.
 	Findings []Lesson `yaml:"findings"`
 	Classes  []Class  `yaml:"classes"`
@@ -71,10 +71,12 @@ var homes = []string{"check", "refusal", "gate", "field", "guidance", "removal"}
 // Draft is the report draft se retro collect writes: the facts as text, the
 // block, and the matrix below it.
 func (c Collected) Draft(qs []Question) (string, error) {
-	r := Report{Retro: c.Retro, Attended: c.Attended, Window: c.Window, Metrics: c.Metrics, Checks: c.Checks,
-		Previous: c.Score, Findings: []Lesson{}, Classes: []Class{}, WentWell: []string{}}
+	r := RetroReport{
+		Retro: c.Retro, Attended: c.Attended, Window: c.Window, Metrics: c.Metrics, Checks: c.Checks,
+		Previous: c.Score, Findings: []Lesson{}, Classes: []Class{}, WentWell: []string{},
+	}
 	if r.Checks == nil {
-		r.Checks = []Check{}
+		r.Checks = []Broken{}
 	}
 	var b strings.Builder
 	b.WriteString(c.facts())
@@ -98,7 +100,7 @@ func (c Collected) facts() string {
 
 	b.WriteString("\n## Rule checks\n")
 	for _, k := range checkKinds {
-		var broke []Check
+		var broke []Broken
 		for _, x := range c.Checks {
 			if x.Kind == k.kind {
 				broke = append(broke, x)
@@ -108,7 +110,7 @@ func (c Collected) facts() string {
 			fmt.Fprintf(&b, "- **%s** (`%s`): held.\n", k.rule, k.kind)
 			continue
 		}
-		fmt.Fprintf(&b, "- **%s** (`%s`): broken %s.\n", k.rule, k.kind, times(len(broke)))
+		fmt.Fprintf(&b, "- **%s** (`%s`): broken %s.\n", k.rule, k.kind, count(len(broke)))
 		for j, x := range broke {
 			if j == 20 {
 				fmt.Fprintf(&b, "  - … and %d more, in the block below.\n", len(broke)-20)
@@ -202,6 +204,14 @@ func (c Collected) facts() string {
 	return b.String()
 }
 
+// count says how often: once, 2 times.
+func count(n int) string {
+	if n == 1 {
+		return "once"
+	}
+	return fmt.Sprintf("%d times", n)
+}
+
 // trend says how a metric moved since the last retro, and whether that is
 // the right way.
 func trend(name string, last, now Metrics) string {
@@ -250,7 +260,7 @@ func (c Collected) matrix(qs []Question) string {
 
 // assemble is the report as text: the judgment rendered from the block, then
 // the facts, then the block.
-func (r Report) assemble(facts string) (string, error) {
+func (r RetroReport) assemble(facts string) (string, error) {
 	data, err := yaml.Marshal(r)
 	if err != nil {
 		return "", err
@@ -260,7 +270,7 @@ func (r Report) assemble(facts string) (string, error) {
 }
 
 // judgment renders the box's half of the report from the block.
-func (r Report) judgment() string {
+func (r RetroReport) judgment() string {
 	if len(r.Findings) == 0 && len(r.WentWell) == 0 {
 		return "The box judges here: it fills `findings`, `classes` and `went_well` in the block below, and `se retro report` writes this part from them.\n"
 	}
@@ -321,23 +331,23 @@ func (f Lesson) line() string {
 
 // ParseReport reads a report, a draft or a posted one, back: its block and
 // its facts as text.
-func ParseReport(text string) (r Report, facts string, err error) {
+func ParseReport(text string) (r RetroReport, facts string, err error) {
 	if !strings.Contains(text, reportMark) {
-		return Report{}, "", errors.New("it is no retro report: the mark " + reportMark + " is missing")
+		return RetroReport{}, "", errors.New("it is no retro report: the mark " + reportMark + " is missing")
 	}
 	if cut, _, ok := strings.Cut(text, matrixMark); ok {
 		text = cut
 	}
 	head, rest, ok := strings.Cut(text, reportBlock+"\n```yaml\n")
 	if !ok {
-		return Report{}, "", errors.New("the report carries no machine-readable block under " + reportBlock)
+		return RetroReport{}, "", errors.New("the report carries no machine-readable block under " + reportBlock)
 	}
 	block, _, ok := strings.Cut("\n"+rest, "\n```")
 	if !ok {
-		return Report{}, "", errors.New("the report's block is not closed")
+		return RetroReport{}, "", errors.New("the report's block is not closed")
 	}
 	if err := yaml.Unmarshal([]byte(block), &r); err != nil {
-		return Report{}, "", fmt.Errorf("the report's block: %v", err)
+		return RetroReport{}, "", fmt.Errorf("the report's block: %v", err)
 	}
 	if _, f, ok := strings.Cut(head, factsMark); ok {
 		facts = f
@@ -348,7 +358,7 @@ func ParseReport(text string) (r Report, facts string, err error) {
 // judged refuses a report whose judgment is not complete: every finding
 // needs a title, a class the classes name, a body and a home, and a reason
 // where it is controversial; every class a fix; and something went well.
-func (r Report) judged() error {
+func (r RetroReport) judged() error {
 	var why []string
 	classes := map[string]bool{}
 	for _, c := range r.Classes {
@@ -393,7 +403,7 @@ func contains(list []string, s string) bool {
 }
 
 // postedReport is the last report posted on issue n, nil where it has none.
-func (s Source) postedReport(n int) (*Report, error) {
+func (s Source) postedReport(n int) (*RetroReport, error) {
 	text, _, err := s.lastReport(n)
 	if err != nil || text == "" {
 		return nil, err
@@ -472,7 +482,7 @@ func (s Source) FileReport(n int, draft string) (Filed, error) {
 	if err != nil {
 		return Filed{}, err
 	}
-	unattended := strings.Contains(i.Body, "<!-- se:retro unattended -->")
+	unattended := strings.Contains(i.Body, unattendedMark)
 	base := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
 	out := Filed{Retro: n, Issues: []int{}, Person: []int{}}
 	if !unattended && !resumed {

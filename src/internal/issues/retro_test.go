@@ -1,3 +1,4 @@
+// Internal test package: it uses the package's recorded-gh fakes and unexported parts.
 package issues
 
 import (
@@ -41,7 +42,8 @@ func jsonComments(bodies ...string) string {
 // on a metric, one that made no issue.
 func previousReport(t *testing.T) string {
 	t.Helper()
-	text, err := Report{Retro: 20, Attended: true, Window: Window{Until: prevClosed},
+	text, err := RetroReport{
+		Retro: 20, Attended: true, Window: Window{Until: prevClosed},
 		Metrics: Metrics{"closed": 2, "conflicts": 1, "conflicts_per_issue": 0.5, "ci_reruns_per_issue": 0},
 		Findings: []Lesson{
 			{Title: "PRs without Fixes", Class: "landing", Body: "b", Home: "check", Check: "fixes", Issue: 21},
@@ -177,9 +179,11 @@ func TestEachRuleCheck(t *testing.T) {
 
 func TestTheCountsAndScripts(t *testing.T) {
 	c := collect(t, true)
-	want := Metrics{"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1,
+	want := Metrics{
+		"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1,
 		"conflicts_per_issue": 0.25, "takeovers_per_issue": 0.25, "ci_reruns_per_issue": 0.25, "person_flags_per_issue": 0.25, "by_hand_per_issue": 0.25,
-		"claim_to_merge_minutes": 90}
+		"claim_to_merge_minutes": 90,
+	}
 	if !reflect.DeepEqual(c.Metrics, want) {
 		t.Fatalf("%v", c.Metrics)
 	}
@@ -253,9 +257,10 @@ func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
 
 // judged is retro #30's draft with the box's judgment filled in: one
 // controversial finding and one for the normal queue.
-func judged(t *testing.T, edit func(*Report)) string {
+func judged(t *testing.T, edit func(*RetroReport)) string {
 	t.Helper()
-	r := Report{Retro: 30, Attended: true, Metrics: Metrics{"closed": 4}, Checks: []Check{},
+	r := RetroReport{
+		Retro: 30, Attended: true, Metrics: Metrics{"closed": 4}, Checks: []Broken{},
 		Findings: []Lesson{
 			{Title: "Refuse a PR without Fixes", Class: "landing", Body: "PR #51 said no Fixes.", Home: "refusal", Check: "fixes"},
 			{Title: "Drop the lease", Class: "claims", Body: "It trades speed for safety.", Home: "removal", Controversial: true, Why: "it trades one metric against another"},
@@ -318,12 +323,12 @@ func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 		t.Fatalf("gh %v for a refused report", args)
 		return nil, nil
 	}
-	for name, edit := range map[string]func(*Report){
-		"nothing went well":        func(r *Report) { r.WentWell = nil },
-		"an unknown class":         func(r *Report) { r.Findings[0].Class = "nope" },
-		"controversial, no why":    func(r *Report) { r.Findings[1].Why = "" },
-		"a home that is no fix":    func(r *Report) { r.Findings[0].Home = "hope" },
-		"a check that is no check": func(r *Report) { r.Findings[0].Check = "vibes" },
+	for name, edit := range map[string]func(*RetroReport){
+		"nothing went well":        func(r *RetroReport) { r.WentWell = nil },
+		"an unknown class":         func(r *RetroReport) { r.Findings[0].Class = "nope" },
+		"controversial, no why":    func(r *RetroReport) { r.Findings[1].Why = "" },
+		"a home that is no fix":    func(r *RetroReport) { r.Findings[0].Home = "hope" },
+		"a check that is no check": func(r *RetroReport) { r.Findings[0].Check = "vibes" },
 	} {
 		if _, err := (Source{Repo: repo, GH: never}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 			t.Errorf("%s: %v", name, err)

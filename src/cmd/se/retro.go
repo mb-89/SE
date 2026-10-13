@@ -30,7 +30,7 @@ func init() {
 			}
 			given := map[string]bool{}
 			fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
-			if n := len(given) - btoi(given["json"]) - btoi(given["repo"]) - btoi(given["workspace"]); n != 1 || !(given["field"] || given["no-field"] || given["unattended"]) {
+			if btoi(given["field"])+btoi(given["no-field"])+btoi(given["unattended"]) != 1 {
 				return Reply{}, fmt.Errorf("retro new takes one of --field TEXT (ask the person for their field feedback), --no-field and --unattended")
 			}
 			if given["field"] && strings.TrimSpace(*field) == "" {

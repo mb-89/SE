@@ -1,0 +1,7 @@
+# The models SE runs, set here and nowhere else (spec/review.md).
+# box: what the routine's boxes run; the floor for every agent.
+box: opus
+# reviewer: what a gate's reviewer sub-agent runs, never weaker than box:
+# a stronger model where one is available. The work skill reads this line
+# through `se issue next --in ROOT --take --json` ("model" of each review).
+reviewer: opus

@@ -25,6 +25,10 @@ const (
 // Kinds is every kind of finding, in the order se fleet check lists them.
 var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, LeftoverClaim, ImpossibleBlock, WaitingOnPerson}
 
+// Grace is how long the prune workflow has to delete a leftover claim of a
+// closed issue before se fleet fix reports it.
+var Grace = 24 * time.Hour
+
 // Quiet is how long claimed work goes without a push before it is not moving.
 var Quiet = time.Hour
 
@@ -46,6 +50,13 @@ type Finding struct {
 	autoMerge bool
 	// judgment is true where only a person can decide the fix.
 	judgment bool
+	// spent is true for a leftover claim whose branch main holds whole:
+	// deleting it loses nothing.
+	spent bool
+	// prunable is true for a leftover claim of a closed issue with no open
+	// PR: the prune workflow deletes its branch. closed is when it closed.
+	prunable bool
+	closed   time.Time
 	// key names the finding in the record its fix leaves.
 	key string
 }
@@ -76,6 +87,10 @@ func (f *Finding) setRemedy() {
 		f.Remedy = fmt.Sprintf("se issue next --take %d, merge origin/main into %s, make it green, se issue land", f.Issue, Branch(f.Issue))
 	case f.cause() == GreenUnmerged && !f.autoMerge:
 		f.Remedy = "se fleet fix turns auto-merge on"
+	case f.prunable:
+		f.Remedy = fmt.Sprintf("the prune workflow deletes %s; se fleet fix reports it only if it is still there a day after #%d closed", Branch(f.Issue), f.Issue)
+	case f.spent:
+		f.Remedy = "se fleet fix deletes " + Branch(f.Issue) + ": main holds all its commits"
 	case f.judgment || f.cause() == GreenUnmerged:
 		f.Remedy = "se fleet fix reports it as an " + PersonLabel + " issue"
 	default:
@@ -170,8 +185,10 @@ func (s Source) Check() ([]Finding, error) {
 	}
 	for _, n := range t.numbers() {
 		if t.byNum[n].labelled(PersonLabel) {
-			out = append(out, Finding{Kind: WaitingOnPerson, Issue: n, Holds: holds[n],
-				What: fmt.Sprintf("#%d waits for a person (%s)%s", n, PersonLabel, holding(holds[n]))})
+			out = append(out, Finding{
+				Kind: WaitingOnPerson, Issue: n, Holds: holds[n],
+				What: fmt.Sprintf("#%d waits for a person (%s)%s", n, PersonLabel, holding(holds[n])),
+			})
 		}
 	}
 	for _, f := range claims {
@@ -277,8 +294,10 @@ func (s Source) claimFinding(n int, p openPull, open bool, sha string) (*Finding
 		}
 		switch {
 		case len(closed) > 0 && !merged:
-			f = &Finding{Kind: LeftoverClaim, PR: closed[0].Number, key: "leftover-claim",
-				What: fmt.Sprintf("%s claims #%d, but its PR #%d was closed unmerged", b, n, closed[0].Number)}
+			f = &Finding{
+				Kind: LeftoverClaim, PR: closed[0].Number, key: "leftover-claim",
+				What: fmt.Sprintf("%s claims #%d, but its PR #%d was closed unmerged", b, n, closed[0].Number),
+			}
 		case len(closed) == 0 && quiet:
 			f = &Finding{Kind: NoPR, head: sha, What: fmt.Sprintf("%s has no PR, and %s", b, since)}
 		}
@@ -299,8 +318,10 @@ func (s Source) claimFinding(n int, p openPull, open bool, sha string) (*Finding
 			case len(red) == 0 && !pending && p.Mergeable != nil && *p.Mergeable && p.AutoMerge == nil:
 				f = &Finding{Kind: GreenUnmerged, What: fmt.Sprintf("PR #%d is green and merges, but auto-merge is off", p.Number)}
 			case len(red) == 0 && !pending && p.Mergeable != nil && *p.Mergeable && quiet:
-				f = &Finding{Kind: GreenUnmerged, autoMerge: true,
-					What: fmt.Sprintf("PR #%d is green with auto-merge on, but sits unmerged (%s), and %s", p.Number, p.State, since)}
+				f = &Finding{
+					Kind: GreenUnmerged, autoMerge: true,
+					What: fmt.Sprintf("PR #%d is green with auto-merge on, but sits unmerged (%s), and %s", p.Number, p.State, since),
+				}
 			}
 		}
 		if f != nil {
@@ -349,9 +370,13 @@ func (s Source) checks(sha string) (red []string, pending bool, err error) {
 	return red, pending, nil
 }
 
-// leftovers is the issue-<n> branches whose issue is no open se issue.
+// leftovers is the issue-<n> branches whose issue is no open se issue. One
+// whose issue is closed and that has no open PR is prunable: the prune
+// workflow deletes it. Any other that main holds whole is spent: its fix
+// deletes it.
 func (s Source) leftovers(t tree, refs []ref) ([]Finding, error) {
 	var out []Finding
+	var open map[string]bool
 	for _, r := range refs {
 		b := strings.TrimPrefix(r.Ref, "refs/heads/")
 		n, err := strconv.Atoi(strings.TrimPrefix(b, "issue-"))
@@ -376,8 +401,38 @@ func (s Source) leftovers(t tree, refs []ref) ([]Finding, error) {
 		default:
 			why = "not labelled " + Label
 		}
-		out = append(out, Finding{Kind: LeftoverClaim, Issue: n, key: "leftover-claim",
-			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why)})
+		cmp, err := api[struct {
+			AheadBy int `json:"ahead_by"`
+		}](s, fmt.Sprintf("repos/%s/compare/main...%s?per_page=1", s.Repo, r.Object.SHA), false)
+		if err != nil {
+			return nil, err
+		}
+		f := Finding{
+			Kind: LeftoverClaim, Issue: n, head: r.Object.SHA, key: "leftover-claim",
+			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why),
+		}
+		if i.State == "closed" && i.PullRequest == nil {
+			if open == nil {
+				pulls, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?state=open&per_page=100", s.Repo), true)
+				if err != nil {
+					return nil, err
+				}
+				open = map[string]bool{}
+				for _, p := range pulls {
+					open[p.Head.Ref] = true
+				}
+			}
+			if !open[b] {
+				f.prunable, f.closed = true, i.ClosedAt
+				out = append(out, f)
+				continue
+			}
+		}
+		if cmp[0].AheadBy == 0 {
+			f.spent, f.key = true, "leftover-branch"
+			f.What += ", and main holds all its commits"
+		}
+		out = append(out, f)
 	}
 	return out, nil
 }
@@ -396,11 +451,15 @@ func (s Source) impossible(t tree, deps map[int][]issue) []Finding {
 			ours := d.labelled(Label) && (d.RepositoryURL == "" || strings.HasSuffix(d.RepositoryURL, repoURL))
 			switch {
 			case d.State == "closed" && d.StateReason == "not_planned":
-				out = append(out, Finding{Kind: ImpossibleBlock, Issue: n, key: fmt.Sprintf("impossible-block-%d", d.Number),
-					What: fmt.Sprintf("#%d is blocked by #%d, which was closed as not planned", n, d.Number)})
+				out = append(out, Finding{
+					Kind: ImpossibleBlock, Issue: n, key: fmt.Sprintf("impossible-block-%d", d.Number),
+					What: fmt.Sprintf("#%d is blocked by #%d, which was closed as not planned", n, d.Number),
+				})
 			case d.State == "open" && !ours:
-				out = append(out, Finding{Kind: ImpossibleBlock, Issue: n, judgment: true, key: fmt.Sprintf("impossible-block-%d", d.Number),
-					What: fmt.Sprintf("#%d is blocked by %s, which is no %s issue, so no box moves it", n, d.URL, Label)})
+				out = append(out, Finding{
+					Kind: ImpossibleBlock, Issue: n, judgment: true, key: fmt.Sprintf("impossible-block-%d", d.Number),
+					What: fmt.Sprintf("#%d is blocked by %s, which is no %s issue, so no box moves it", n, d.URL, Label),
+				})
 			case d.State == "open":
 				links[n] = append(links[n], d.Number)
 			}
@@ -434,8 +493,10 @@ func (s Source) impossible(t tree, deps map[int][]issue) []Finding {
 		for k, m := range path {
 			words[k] = "#" + strconv.Itoa(m)
 		}
-		out = append(out, Finding{Kind: ImpossibleBlock, Issue: n, judgment: true, key: "impossible-block-cycle",
-			What: "a cycle of blocks: " + strings.Join(words, " is blocked by ")})
+		out = append(out, Finding{
+			Kind: ImpossibleBlock, Issue: n, judgment: true, key: "impossible-block-cycle",
+			What: "a cycle of blocks: " + strings.Join(words, " is blocked by "),
+		})
 	}
 	return out
 }
@@ -458,7 +519,8 @@ type Fixed struct {
 var fleetMark = regexp.MustCompile(`<!-- se:fleet (\S+) (\d+) -->`)
 
 // Fix applies, in order, the remedy of every finding that needs no checkout:
-// auto-merge goes on where it is off, and a finding with no other remedy
+// auto-merge goes on where it is off, a spent leftover branch is deleted, and
+// a finding with no other remedy
 // becomes an issue, labelled se-person where it is a judgment. A takeover is
 // left to the box, which runs its remedy. Each fix is recorded on the
 // finding's issue; a finding that is back after its fix goes to a person, and
@@ -472,6 +534,13 @@ func (s Source) Fix(findings []Finding) ([]Fixed, error) {
 			x.Did = "reported; it waits for a person"
 		case f.takeover():
 			x.Did, x.Take = "left to this box: "+f.Remedy, true
+		case f.prunable && s.now().Sub(f.closed) < Grace:
+			x.Did = fmt.Sprintf("left to the prune workflow until a day after #%d closed", f.Issue)
+		case f.prunable:
+			x.What += ", and is still there a day after it closed: the prune workflow did not delete it"
+			if err := s.fix(&x); err != nil {
+				return out, err
+			}
 		default:
 			if err := s.fix(&x); err != nil {
 				return out, err
@@ -521,6 +590,11 @@ func (s Source) fix(x *Fixed) error {
 		if merged {
 			x.Did = fmt.Sprintf("merged PR #%d, which had nothing left to wait for", f.PR)
 		}
+	case f.spent:
+		if _, err := s.GH("api", "-X", "DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, Branch(f.Issue))); err != nil {
+			return fmt.Errorf("deleting %s: %w", Branch(f.Issue), err)
+		}
+		x.Did = fmt.Sprintf("deleted %s at %s, which main holds whole", Branch(f.Issue), f.head)
 	default:
 		person := f.judgment || f.cause() == GreenUnmerged
 		if x.Made, err = s.report(f, person); err != nil {
@@ -571,7 +645,7 @@ func atoi(s string) int {
 
 // takeOverClaim takes over claimed leaf st, named by se issue next --take N,
 // where se fleet check finds it stuck: its branch is checked out as it stands.
-// Stuck again after a takeover, it goes to a person instead.
+// A takeover labels it se-final; a final issue stuck goes to a person instead.
 func (s Source) takeOverClaim(dir string, st Status) (took Issue, ok bool, err error) {
 	refs, err := api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/%s", s.Repo, Branch(st.Number)), true)
 	if err != nil {
@@ -591,13 +665,13 @@ func (s Source) takeOverClaim(dir string, st Status) (took Issue, ok bool, err e
 	}
 	k := m.takeovers + 1
 	heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, f.head)
-	if m.takeovers > 0 {
-		reason := fmt.Sprintf("Stuck again: %s. It was taken over %s already, so it waits for a person. "+
-			"`se issue resume %d` puts it back in the queue.", f.What, times(m.takeovers), st.Number)
+	if st.Final {
+		reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s, so it waits for a person. "+
+			"`se issue resume %d` puts it back in the queue.", FinalLabel, f.What, st.Number)
 		if err := s.flag(st.Issue, reason, heads); err != nil {
 			return Issue{}, false, err
 		}
-		return Issue{}, false, fmt.Errorf("#%d was taken over before and is stuck again (%s), so it went to a person: labelled %s", st.Number, f.What, PersonLabel)
+		return Issue{}, false, fmt.Errorf("#%d is final and stuck (%s), so it went to a person: labelled %s", st.Number, f.What, PersonLabel)
 	}
 	body := fmt.Sprintf("Taken over: %s at %s. This box merges main into %s, makes it green and lands it again.", f.What, f.head, Branch(st.Number)) + heads
 	won, err := s.markTakeover(st.Number, k, body)
@@ -606,6 +680,9 @@ func (s Source) takeOverClaim(dir string, st Status) (took Issue, ok bool, err e
 	}
 	if !won {
 		return Issue{}, false, fmt.Errorf("#%d was taken over by another box just now", st.Number)
+	}
+	if err := s.finalize(st.Number); err != nil {
+		return Issue{}, false, err
 	}
 	if err := pickUp(dir, st.Number); err != nil {
 		return Issue{}, false, err
