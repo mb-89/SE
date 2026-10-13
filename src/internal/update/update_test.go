@@ -37,8 +37,8 @@ func shallow(t *testing.T) (origin, clone string) {
 	t.Helper()
 	origin = repo(t, "main")
 	for name, text := range map[string]string{
-		"go.mod":         "module github.com/mb-89/SE\n\ngo 1.21\n",
-		"cmd/se/main.go": "package main\n\nfunc main() {}\n",
+		"go.mod":             "module github.com/mb-89/SE\n\ngo 1.21\n",
+		"src/cmd/se/main.go": "package main\n\nfunc main() {}\n",
 	} {
 		path := filepath.Join(origin, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -60,7 +60,7 @@ func shallow(t *testing.T) (origin, clone string) {
 
 func TestAShallowCloneIsPulledAndRebuilt(t *testing.T) {
 	origin, clone := shallow(t)
-	out := filepath.Join(clone, "plugin", "bin", "se")
+	out := filepath.Join(clone, "src", "plugin", "bin", "se")
 	r, err := Run(clone, out)
 	if err != nil {
 		t.Fatal(err)

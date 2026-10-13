@@ -72,7 +72,7 @@ func Build(repo, out string) error {
 	if head, err := Head(repo); err == nil {
 		args = append(args, "-ldflags", Ldflags(head))
 	}
-	cmd := exec.Command("go", append(args, "./cmd/se")...)
+	cmd := exec.Command("go", append(args, "./src/cmd/se")...)
 	cmd.Dir = repo
 	if said, err := cmd.CombinedOutput(); err != nil {
 		os.Remove(fresh)

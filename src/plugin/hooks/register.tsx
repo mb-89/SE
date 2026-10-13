@@ -28,7 +28,7 @@ const RESTART_EVERY = 60_000
 
 type Endpoint = { address: string; token: string }
 
-// What the plugin tells se on every session call (see cmd/se/commit.go).
+// What the plugin tells se on every session call (see src/cmd/se/commit.go).
 const HOOKS_COMMIT = 'SE_HOOKS_COMMIT'
 const PLUGIN_CHECKOUT = 'SE_PLUGIN_CHECKOUT'
 
@@ -263,7 +263,7 @@ export function bodyOf(session: string, event: string, e: unknown): string {
 
 // The checkout the plugin was loaded from.
 function checkoutOf($: EngineInterface): string {
-  return `${$.plugin.root}/..`
+  return `${$.plugin.root}/../..`
 }
 
 // The commit the plugin's checkout is at, or '' where git does not say.
@@ -277,13 +277,13 @@ async function headOf($: EngineInterface): Promise<string> {
 }
 
 // se under the plugin folder, built from the checkout where it is missing,
-// with the commit it was built from embedded (see cmd/se/commit.go).
+// with the commit it was built from embedded (see src/cmd/se/commit.go).
 async function builds($: EngineInterface): Promise<{ path: string; failed?: string }> {
   const path = binaryOf($.plugin.root)
   if (await $.fs.exists(path)) return { path }
   const head = await headOf($)
   const ldflags = head ? ['-ldflags', `-X main.commit=${head}`] : []
-  const built = await $.process.run(['go', 'build', ...ldflags, '-o', path, './cmd/se'], {
+  const built = await $.process.run(['go', 'build', ...ldflags, '-o', path, './src/cmd/se'], {
     cwd: checkoutOf($),
     timeoutMs: STARTING,
   })

@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/internal/daemon"
-	"github.com/mb-89/SE/internal/update"
+	"github.com/mb-89/SE/src/internal/daemon"
+	"github.com/mb-89/SE/src/internal/update"
 )
 
 // repoRoot is the SE checkout these tests run in.
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	root, err := filepath.Abs("../..")
+	root, err := filepath.Abs("../../..")
 	if err != nil || !update.IsCheckout(root) {
 		t.Fatalf("the tests do not run in an SE checkout: %s %v", root, err)
 	}
@@ -65,7 +65,7 @@ func installed(t *testing.T) string {
 func scratch(t *testing.T) string {
 	t.Helper()
 	root, dst := repoRoot(t), t.TempDir()
-	for _, part := range []string{"go.mod", "cmd", "internal"} {
+	for _, part := range []string{"go.mod", "src/cmd", "src/internal"} {
 		err := filepath.WalkDir(filepath.Join(root, part), func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -183,13 +183,13 @@ func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
 	t.Cleanup(func() { daemon.Stop(paths, 5*time.Second) })
 
 	// The checkout changes a summary and adds a command.
-	helpGo := filepath.Join(ws, "cmd", "se", "help.go")
+	helpGo := filepath.Join(ws, "src", "cmd", "se", "help.go")
 	src, err := os.ReadFile(helpGo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	write(t, helpGo, strings.Replace(string(src), `"list the commands, or show one: help <command>"`, `"list the commands, as edited"`, 1))
-	write(t, filepath.Join(ws, "cmd", "se", "hello.go"), `package main
+	write(t, filepath.Join(ws, "src", "cmd", "se", "hello.go"), `package main
 
 func init() {
 	register(Command{Name: "hello", Usage: "hello", Summary: "say hello", Session: true,
@@ -223,7 +223,7 @@ func init() {
 	}
 
 	// Source that does not build leaves the daemon to the installed se, and says why.
-	write(t, filepath.Join(ws, "cmd", "se", "broken.go"), "package main\n\nfunc broken() { undefinedThing() }\n")
+	write(t, filepath.Join(ws, "src", "cmd", "se", "broken.go"), "package main\n\nfunc broken() { undefinedThing() }\n")
 	r = in(t, ws, "restart")
 	if r.Endpoint == nil || !strings.Contains(r.Text, "does not build") || !strings.Contains(r.Text, "undefinedThing") {
 		t.Fatalf("broken restart: %+v", r)
@@ -236,7 +236,7 @@ func init() {
 	}
 
 	// Once it builds again, /se on starts the rebuilt se.
-	os.Remove(filepath.Join(ws, "cmd", "se", "broken.go"))
+	os.Remove(filepath.Join(ws, "src", "cmd", "se", "broken.go"))
 	if err := daemon.Stop(paths, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -270,8 +270,8 @@ func TestTheDebuggerServesTheSourceItDebugs(t *testing.T) {
 		t.Fatal("launch.json has no configuration")
 	}
 	for _, c := range launch.Configurations {
-		if c.Program != "${workspaceFolder}/cmd/se" || len(c.Args) == 0 || c.Args[0] != "serve" {
-			t.Errorf("%s: debugs %s %v, want se serve from ${workspaceFolder}/cmd/se", c.Name, c.Program, c.Args)
+		if c.Program != "${workspaceFolder}/src/cmd/se" || len(c.Args) == 0 || c.Args[0] != "serve" {
+			t.Errorf("%s: debugs %s %v, want se serve from ${workspaceFolder}/src/cmd/se", c.Name, c.Program, c.Args)
 		}
 	}
 	if commands["serve"].Session {

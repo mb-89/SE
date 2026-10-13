@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mb-89/SE/internal/issues"
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
 // gh is how the issue commands reach GitHub; tests put recorded answers here.
