@@ -86,7 +86,8 @@ hands every word typed after `/se` to `se --session`, so nothing else changes.
 ## Debugging the daemon
 
 Open this folder in VS Code and run **se: debug this workspace's daemon**. It
-stops the running daemon and starts `se serve` under the debugger. Set a
+starts `se serve --takeover` under the debugger: the running daemon is asked to
+step down, and if the plugin starts another meanwhile, that one is too. Set a
 breakpoint in `event` in `internal/daemon/server.go`: every event a session in
 that workspace raises stops there, and the session waits until you continue.
 The plugin finds the debugged daemon through `.se/.runtime/daemon.json`.

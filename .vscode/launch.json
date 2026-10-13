@@ -7,8 +7,7 @@
       "request": "launch",
       "mode": "debug",
       "program": "${workspaceFolder}/cmd/se",
-      "args": ["serve", "--workspace", "${workspaceFolder}", "--idle", "0"],
-      "preLaunchTask": "se: stop the running daemon"
+      "args": ["serve", "--workspace", "${workspaceFolder}", "--idle", "0", "--takeover"]
     },
     {
       "name": "se: debug another workspace's daemon",
@@ -16,7 +15,7 @@
       "request": "launch",
       "mode": "debug",
       "program": "${workspaceFolder}/cmd/se",
-      "args": ["serve", "--workspace", "${input:workspace}", "--idle", "0"]
+      "args": ["serve", "--workspace", "${input:workspace}", "--idle", "0", "--takeover"]
     }
   ],
   "inputs": [
