@@ -15,6 +15,16 @@ for tool in claude go git; do
     exit 1
   fi
 done
+# se issue reads GitHub through gh, which owns the authentication. On a cloud
+# box gh reaches the API without a login of its own.
+if ! command -v gh >/dev/null 2>&1; then
+  echo "RUNME: gh is missing; install it from https://cli.github.com (brew install gh, winget install GitHub.cli, or your distribution's gh package)" >&2
+  exit 1
+fi
+if ! gh auth status >/dev/null 2>&1 && ! gh api rate_limit >/dev/null 2>&1; then
+  echo "RUNME: gh cannot reach GitHub; run gh auth login, then RUNME.sh again" >&2
+  exit 1
+fi
 git -C "$root" config core.hooksPath .githooks
 (cd "$root" && go build -o plugin/bin/se ./cmd/se)
 if ! command -v dlv >/dev/null 2>&1 && [ ! -x "$(go env GOPATH)/bin/dlv" ]; then
