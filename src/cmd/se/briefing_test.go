@@ -1,3 +1,4 @@
+// Internal test package: package main cannot be imported.
 package main
 
 import (

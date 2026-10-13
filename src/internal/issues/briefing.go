@@ -156,7 +156,7 @@ func (s Source) Brief(dir string, w Window) (Briefing, error) {
 	var done []closedIssue
 	for _, i := range closed {
 		if i.PullRequest == nil {
-			done = append(done, closedIssue{i, i.closedAt()})
+			done = append(done, closedIssue{i, i.ClosedAt})
 		}
 	}
 	sort.Slice(done, func(a, c int) bool {
@@ -190,11 +190,6 @@ func (s Source) Brief(dir string, w Window) (Briefing, error) {
 type closedIssue struct {
 	issue
 	at time.Time
-}
-
-func (i issue) closedAt() time.Time {
-	at, _ := time.Parse(time.RFC3339, i.ClosedAt)
-	return at
 }
 
 // window picks the closed issues, newest first, that w chooses, and says which.
@@ -374,7 +369,8 @@ func about(dir, repo string) About {
 		if l == "" && len(para) > 0 {
 			break
 		}
-		if l != "" && !(strings.HasPrefix(l, "#") && len(para) == 0) {
+		// The title above the first paragraph is no part of it.
+		if l != "" && (len(para) > 0 || !strings.HasPrefix(l, "#")) {
 			para = append(para, l)
 		}
 	}

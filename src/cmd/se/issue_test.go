@@ -1,3 +1,4 @@
+// Internal test package: package main cannot be imported.
 package main
 
 import (
@@ -407,8 +408,13 @@ func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 	recordedIssues(t)
 	root := t.TempDir()
 	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
-	for _, args := range [][]string{{root, "init", "-q", "--bare", "-b", "main", origin}, {root, "clone", "-q", origin, ws},
-		{ws, "checkout", "-q", "-b", "main"}, {ws, "commit", "-q", "--allow-empty", "-m", "start"}, {ws, "push", "-q", "origin", "main"}} {
+	for _, args := range [][]string{
+		{root, "init", "-q", "--bare", "-b", "main", origin},
+		{root, "clone", "-q", origin, ws},
+		{ws, "checkout", "-q", "-b", "main"},
+		{ws, "commit", "-q", "--allow-empty", "-m", "start"},
+		{ws, "push", "-q", "origin", "main"},
+	} {
 		if out, err := exec.Command("git", append([]string{"-C", args[0], "-c", "user.name=t", "-c", "user.email=t@t"}, args[1:]...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}

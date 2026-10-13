@@ -1,3 +1,4 @@
+// Internal test package: it uses the unexported comment type, asks and pause.
 package issues
 
 import (

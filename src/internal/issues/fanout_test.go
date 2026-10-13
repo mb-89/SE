@@ -1,4 +1,4 @@
-package issues
+package issues_test
 
 import (
 	"io"
@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
 // fake is a routine trigger that answers status and body and records each fire.
@@ -28,7 +30,7 @@ func env(vars map[string]string) func(string) string {
 
 func TestAFireCarriesTheTriggersHeaders(t *testing.T) {
 	url, fires, bodies := fake(t, 200, `{"type":"routine_fire","claude_code_session_url":"https://claude.ai/code/session_x"}`)
-	note := Fire(env(map[string]string{FireURLVar: url, FireTokenVar: "sekrit"}), http.DefaultClient)
+	note := issues.Fire(env(map[string]string{issues.FireURLVar: url, issues.FireTokenVar: "sekrit"}), http.DefaultClient)
 	if note != "Fan-out fired the routine: https://claude.ai/code/session_x" {
 		t.Fatalf("%q", note)
 	}
@@ -53,8 +55,8 @@ func TestAFireCarriesTheTriggersHeaders(t *testing.T) {
 
 func TestUnsetVariablesTurnFanOutOff(t *testing.T) {
 	url, fires, _ := fake(t, 200, `{}`)
-	for _, vars := range []map[string]string{{}, {FireURLVar: url}, {FireTokenVar: "sekrit"}} {
-		if note := Fire(env(vars), http.DefaultClient); !strings.HasPrefix(note, "Fan-out is off") || strings.Contains(note, "sekrit") {
+	for _, vars := range []map[string]string{{}, {issues.FireURLVar: url}, {issues.FireTokenVar: "sekrit"}} {
+		if note := issues.Fire(env(vars), http.DefaultClient); !strings.HasPrefix(note, "Fan-out is off") || strings.Contains(note, "sekrit") {
 			t.Errorf("%v: %q", vars, note)
 		}
 	}
@@ -65,11 +67,11 @@ func TestUnsetVariablesTurnFanOutOff(t *testing.T) {
 
 func TestARefusedOrFailedFireIsReported(t *testing.T) {
 	url, _, _ := fake(t, 429, `{"error":{"type":"rate_limit_error","message":"sekrit fires an hour"}}`)
-	note := Fire(env(map[string]string{FireURLVar: url, FireTokenVar: "sekrit"}), http.DefaultClient)
+	note := issues.Fire(env(map[string]string{issues.FireURLVar: url, issues.FireTokenVar: "sekrit"}), http.DefaultClient)
 	if !strings.HasPrefix(note, "Fan-out refused: 429") || strings.Contains(note, "sekrit") {
 		t.Fatalf("%q", note)
 	}
-	note = Fire(env(map[string]string{FireURLVar: "http://127.0.0.1:1/sekrit", FireTokenVar: "sekrit"}), http.DefaultClient)
+	note = issues.Fire(env(map[string]string{issues.FireURLVar: "http://127.0.0.1:1/sekrit", issues.FireTokenVar: "sekrit"}), http.DefaultClient)
 	if !strings.HasPrefix(note, "Fan-out failed:") || strings.Contains(note, "sekrit") {
 		t.Fatalf("%q", note)
 	}
