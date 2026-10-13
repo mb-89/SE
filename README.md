@@ -33,6 +33,7 @@ does:
 | `/se fleet check` | lists what is broken in the fleet (a stalled root, a conflicted, red or unmerged PR, a stale or leftover claim, an impossible block, an issue waiting on a person), each with its remedy; says `healthy` when nothing is |
 | `/se fleet fix` | applies every remedy `fleet check` names that needs no checkout, records it on its issue, and names the takeovers left to the box |
 | `/se fleet prune` | lists the stray branches: an `issue-<n>` branch whose issue is closed, a `claude/*` branch more than an hour old, each with no open PR; `--apply` deletes them, as the prune workflow does every hour |
+| `/se briefing` | says where SE stands: what waits on you (every `se-person` issue and report waiting, with what it holds up), what is in flight, what closed recently with each one's `done` answer, the last retro, what `issue next` would take, and what SE is; `--since` or `--last` sets the window. The skill `se:briefing` presents it and asks what you want to work on |
 | `/se ui` | opens SE's control panel, a pane of buttons that draws on every surface, the phone included: the on/off toggle top left, then a button for each command that takes no typed words (`status`, `restart`, `update`, `issue next`); a press runs what typing `/se <name>` runs |
 | `/se help`, `/se` | lists these, one short line each, under their groups |
 | `/se help <command>` | shows that command's usage and every flag it takes; `<command> --help` does too |

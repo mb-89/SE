@@ -1,4 +1,4 @@
-// Internal test package: it drives the unexported check, render, blockers and lastVerdict.
+// Internal test package: it uses the fakes of the package's other internal tests.
 package issues
 
 import (
