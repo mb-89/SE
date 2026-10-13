@@ -4,7 +4,7 @@ SE's work items are GitHub issues. These rules say which issue a box may work
 on next, how it claims it, and how issues and their dependencies are created.
 They live here and nowhere else; `se issue next`, `se issue new`,
 `se issue land`, `se issue review` and `se issue resume` (in
-`internal/issues`) are their one implementation, so the
+`src/internal/issues`) are their one implementation, so the
 choice is deterministic and no prompt restates it.
 
 ## The rules
@@ -106,7 +106,7 @@ the agents' queue until a person has looked.
 - **Stuck** is decided by a timer, not judgment. A claimed leaf (claimed at
   the top or with `--in`) is stuck when nothing has been pushed to its branch
   `issue-<n>` (or its PR), nor a takeover recorded, for longer than the lease:
-  3 hours, `Lease` in `internal/issues/stuck.go`. That is under the routine's
+  3 hours, `Lease` in `src/internal/issues/stuck.go`. That is under the routine's
   4-hour schedule, so a scheduled box always catches it. The last push is
   GitHub's activity on the branch (`/repos/{owner}/{repo}/activity`), its
   creation included; a branch GitHub keeps no push record of is stuck. A
@@ -282,7 +282,7 @@ routine `SE work`, whose whole prompt is
 
     run the work skill
 
-and the work skill is [.claude/skills/work/SKILL.md](../.claude/skills/work/SKILL.md).
+and the work skill is [src/plugin/skills/work/SKILL.md](../src/plugin/skills/work/SKILL.md), `se:work` in a session.
 The routine has two triggers:
 
 - a GitHub trigger on `pull_request.closed` with is-merged = true and base

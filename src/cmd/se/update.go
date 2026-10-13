@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/SE/internal/daemon"
-	"github.com/mb-89/SE/internal/update"
+	"github.com/mb-89/SE/src/internal/daemon"
+	"github.com/mb-89/SE/src/internal/update"
 )
 
 func init() {
@@ -36,8 +36,8 @@ func init() {
 				return Reply{}, err
 			}
 			if *repo == "" {
-				// se is built to <checkout>/plugin/bin/se.
-				*repo = filepath.Dir(filepath.Dir(filepath.Dir(exe)))
+				// se is built to <checkout>/src/plugin/bin/se.
+				*repo = filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(exe))))
 			}
 			r, err := update.Run(*repo, exe)
 			var untouched *update.Untouched

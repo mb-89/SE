@@ -11,6 +11,6 @@ done
 echo "check: gofmt"; unformatted=$(gofmt -l .); [ -z "$unformatted" ] || { echo "$unformatted" >&2; exit 1; }
 echo "check: go vet"; go vet ./...
 echo "check: go test"; go test ./...
-echo "check: plugin validate"; claude plugin validate plugin
+echo "check: plugin validate"; claude plugin validate src/plugin
 echo "check: marketplace validate"; claude plugin validate .
-echo "check: plugin test"; claude plugin test plugin
+echo "check: plugin test"; claude plugin test src/plugin

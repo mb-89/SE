@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mb-89/SE/internal/daemon"
+	"github.com/mb-89/SE/src/internal/daemon"
 )
 
 // Command is one word se answers. A command is one file that calls register

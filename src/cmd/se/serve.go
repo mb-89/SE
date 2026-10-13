@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mb-89/SE/internal/daemon"
+	"github.com/mb-89/SE/src/internal/daemon"
 )
 
 func init() {

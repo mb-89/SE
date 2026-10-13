@@ -317,7 +317,7 @@ test('a restart whose build failed shows why, and still moves to the daemon', as
   await $.command.run(se('on'))
   w.live = '127.0.0.1:4500'
   w.replies.restart = {
-    text: "SE's daemon restarted at 127.0.0.1:4500 (pid 8). This checkout's se does not build, so the daemon runs the installed se (/se/plugin/bin/se):\ngo build: exit status 1\n./x.go:3: undefined: y",
+    text: "SE's daemon restarted at 127.0.0.1:4500 (pid 8). This checkout's se does not build, so the daemon runs the installed se (/se/src/plugin/bin/se):\ngo build: exit status 1\n./x.go:3: undefined: y",
     endpoint: { address: '127.0.0.1:4500', token: 'tok5' },
   }
   const said = await $.command.run(se('restart'))
@@ -356,7 +356,7 @@ test('a checkout that is current says nothing and does not reload', async ($, on
 test('a checkout that is no clean main is left alone, noted in one line', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
-  w.startUpdate = { text: 'SE left its checkout as it is: /me/SE/plugin/.. is on topic, not main; the installed SE updates from main alone.' }
+  w.startUpdate = { text: 'SE left its checkout as it is: /me/SE/src/plugin/../.. is on topic, not main; the installed SE updates from main alone.' }
   await $.session.start(starts)
   await clock.settle()
   expect(w.toasts).toEqual([w.startUpdate.text])

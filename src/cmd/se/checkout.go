@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/mb-89/SE/internal/daemon"
-	"github.com/mb-89/SE/internal/update"
+	"github.com/mb-89/SE/src/internal/daemon"
+	"github.com/mb-89/SE/src/internal/update"
 )
 
 // A workspace that is an SE checkout runs its own se: every daemon start builds

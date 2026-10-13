@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/internal/update"
+	"github.com/mb-89/SE/src/internal/update"
 )
 
 const (

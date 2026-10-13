@@ -6,11 +6,11 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/mb-89/SE/internal/update"
+	"github.com/mb-89/SE/src/internal/update"
 )
 
 // commit is the SE commit this se was built from. Every build sets it:
-// go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o plugin/bin/se ./cmd/se
+// go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se
 var commit string
 
 // What the plugin tells se on every session call: the commit its hooks were
@@ -37,7 +37,7 @@ func builtFrom() string {
 }
 
 // pluginCheckout is the checkout the session's plugin was loaded from: the one
-// the plugin names, else the one this se was built into (<checkout>/plugin/bin/se).
+// the plugin names, else the one this se was built into (<checkout>/src/plugin/bin/se).
 func pluginCheckout() string {
 	if repo := os.Getenv(pluginRepoEnv); repo != "" {
 		return repo
@@ -46,7 +46,7 @@ func pluginCheckout() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Dir(filepath.Dir(filepath.Dir(exe)))
+	return filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(exe))))
 }
 
 // commits says where the session's SE came from: the commit its hooks were

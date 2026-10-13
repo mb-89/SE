@@ -1,5 +1,5 @@
 // Package issues picks the fleet's next GitHub issue and claims it. The rules
-// it follows live in docs/issues.md; this is their one implementation.
+// it follows live in spec/issues.md; this is their one implementation.
 package issues
 
 import (

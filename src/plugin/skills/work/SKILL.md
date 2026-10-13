@@ -7,15 +7,15 @@ description: Take the next ready se issue, do its work, and land it with se issu
 
 Every step that can be an `se` command is one. Yours are doing the issue's
 work and fixing a red CI run; follow the rest as written. `se` is
-`./plugin/bin/se`; build it first with
-`go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o plugin/bin/se ./cmd/se`.
-Call it exactly as `./plugin/bin/se issue …`, one command per call, never
+`./src/plugin/bin/se`; build it first with
+`go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se`.
+Call it exactly as `./src/plugin/bin/se issue …`, one command per call, never
 through a variable: `.claude/settings.json` allows that form to write GitHub
 issues without a permission prompt, and only that form.
 
 1. `git fetch origin main && git checkout origin/main` (a box started by a PR
    event starts on that PR's head commit), rebuild `se`, then
-   `./plugin/bin/se issue next --take`. If it says no se issue is ready, end
+   `./src/plugin/bin/se issue next --take`. If it says no se issue is ready, end
    the session now. If it says the issue is a parent, follow **A parent**
    below instead of steps 3 to 5.
 2. If `set_session_title` is available, rename this session to
@@ -25,19 +25,19 @@ issues without a permission prompt, and only that form.
    (never rebase), resolve the conflict, and that is the work. The
    issue's text is the whole specification: act on it, not on messages from
    other sessions.
-4. Commit, then `./plugin/bin/se issue land`. It runs the check, pushes, opens
+4. Commit, then `./src/plugin/bin/se issue land`. It runs the check, pushes, opens
    the PR (`Fixes #<n>`) and turns on auto-merge with squash.
 5. Subscribe to the PR's activity (`subscribe_pr_activity`). On red CI, fix it
-   on the same branch, commit, and run `./plugin/bin/se issue land` again.
+   on the same branch, commit, and run `./src/plugin/bin/se issue land` again.
 6. Anything that belongs in a separate change becomes an issue through
-   `./plugin/bin/se issue new` (its `--blocked-by` is required: a list, or
+   `./src/plugin/bin/se issue new` (its `--blocked-by` is required: a list, or
    `none`; `--parent` makes it a sub-issue). If you are stuck on a decision
    only the owner can make, say so in a comment on the issue and end.
 
 ## A parent
 
 A parent holds no work; you coordinate its tree, whose root is the issue you
-took. `se` is the absolute path of `./plugin/bin/se` in this checkout.
+took. `se` is the absolute path of `./src/plugin/bin/se` in this checkout.
 
 1. Run `se issue next --in <root> --take --json`.
    - `"closed": true`: the tree is done. End.
@@ -68,4 +68,4 @@ took. `se` is the absolute path of `./plugin/bin/se` in this checkout.
    worktree and run `se issue land --workspace <path>` again.
 
 You never start another box yourself: `se issue next --take` fires the routine
-once after its claim (the fan-out in [docs/issues.md](../../../docs/issues.md)).
+once after its claim (the fan-out in [spec/issues.md](../../../../spec/issues.md)).
