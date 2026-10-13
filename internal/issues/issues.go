@@ -74,11 +74,6 @@ type issue struct {
 	Labels      []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
-	// Dependencies is GitHub's count of native "blocked by" links; absent
-	// where the API does not report it.
-	Dependencies *struct {
-		TotalBlockedBy int `json:"total_blocked_by"`
-	} `json:"issue_dependencies_summary"`
 }
 
 // api reads a gh api path, every page of it, into out. A paginated list comes
@@ -127,7 +122,7 @@ type Status struct {
 	Reason string `json:"reason,omitempty"`
 	// Since is when its branch last saw a push or a takeover.
 	Since time.Time `json:"-"`
-	// blockers are its open blockers, ascending.
+	// blockers are its open blockers, ascending; read for unclaimed issues.
 	blockers []int
 }
 
@@ -167,9 +162,6 @@ func (s Source) Survey() ([]Status, error) {
 	var out []Status
 	for _, i := range fleet {
 		st := Status{Issue: Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL}}
-		if st.blockers, err = s.openBlockers(i); err != nil {
-			return nil, err
-		}
 		for _, l := range i.Labels {
 			st.Person = st.Person || l.Name == PersonLabel
 		}
@@ -199,7 +191,13 @@ func (s Source) Survey() ([]Status, error) {
 				st.Stuck = true
 				st.Why += ", stuck: nothing pushed since " + st.Since.UTC().Format(time.RFC3339)
 			}
-		case len(st.blockers) > 0:
+		default:
+			if st.blockers, err = s.openBlockers(i); err != nil {
+				return nil, err
+			}
+			if len(st.blockers) == 0 {
+				break
+			}
 			names := make([]string, len(st.blockers))
 			for k, b := range st.blockers {
 				names[k] = "#" + strconv.Itoa(b)
@@ -213,10 +211,13 @@ func (s Source) Survey() ([]Status, error) {
 
 // openBlockers names the issue's blockers that are still open, in ascending
 // order. Blockers are GitHub's native "blocked by" links and nothing else.
+//
+// The links are asked for on every unclaimed issue, one request each, and the
+// list's issue_dependencies_summary is not read: right after a link is written
+// that summary can still count 0, and trusting it would make a blocked issue
+// ready. The fleet is small, so one request per issue is cheap, and it is
+// the only answer that cannot lag a link.
 func (s Source) openBlockers(i issue) ([]int, error) {
-	if i.Dependencies != nil && i.Dependencies.TotalBlockedBy == 0 {
-		return nil, nil
-	}
 	native, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d/dependencies/blocked_by?per_page=100", s.Repo, i.Number), true)
 	if err != nil {
 		return nil, err

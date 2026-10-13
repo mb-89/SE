@@ -11,6 +11,7 @@ import (
 
 // github answers gh api calls like recorded, and keeps each issue's comments:
 // a comment posted is read back by the next read. It records every write.
+// Links not recorded answer none.
 type github struct {
 	t        *testing.T
 	answers  map[string]string
@@ -51,6 +52,10 @@ func (g *github) gh(args ...string) ([]byte, error) {
 		return []byte(`{}`), nil
 	}
 	a, ok := g.answers[path]
+	if !ok && strings.HasSuffix(path, "/dependencies/blocked_by?per_page=100") {
+		// An issue whose links are not recorded is blocked by nothing.
+		a, ok = `[]`, true
+	}
 	if !ok {
 		g.t.Fatalf("gh api %s was not recorded", path)
 	}

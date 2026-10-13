@@ -86,6 +86,9 @@ its link, how many open fleet issues it blocks and why it waits (with
 `se issue resume N` is the person's: it refuses an issue that is not open and
 labelled `se-person`, else records the resume and removes the label. There is no separate `take`
 command.
+Once it has claimed an issue, `--take` fires the routine once (the fan-out,
+below) and adds a line saying what the fire did; with `--json` that line is
+the field `fanout`.
 
 `se issue land` runs on the checked-out `issue-<n>` branch. It refuses a tree
 with uncommitted changes, runs `tests/check.sh` and goes on only if it passes,
@@ -125,5 +128,35 @@ The routine has two triggers:
   issues that merge unblocked;
 - a schedule, every 4 hours.
 
-No agent ever starts another box. A box whose `se issue next --take` finds
-nothing ready leaves at once.
+It also has an API trigger, which `se` fires for the fan-out.
+
+### Fan-out
+
+One merge starts one box, but there should be as many boxes as there is ready
+work. So boxes start boxes, mechanically, never by an agent's choice:
+
+- **Fan-out:** whenever `se issue next --take` has claimed an issue, it fires
+  the routine `SE work` once, so another box starts and takes the next ready
+  issue. That box fires again after its own claim, and so on.
+- **The end:** a box that finds nothing ready claims nothing and fires
+  nothing, so the fan-out ends by itself. Such a box leaves at once.
+- **No cap** on boxes in flight; the owner decided against one. The only limit
+  is the routine's own: 30 fires an hour. A fire refused for that is reported
+  and the box goes on.
+- **How it fires:** an HTTP POST of the body `{}` to the URL in
+  `SE_ROUTINE_FIRE_URL`, with the headers
+  `Authorization: Bearer $SE_ROUTINE_FIRE_TOKEN`,
+  `anthropic-beta: experimental-cc-routine-2026-04-01`,
+  `anthropic-version: 2023-06-01` and `Content-Type: application/json`; the
+  route is documented at <https://code.claude.com/docs/en/routines>. `se`
+  prints the started session's link from the answer.
+- **Never fails a claim:** where either variable is unset (on a desk, say),
+  `se` says in one line that fan-out is off; a failed or refused fire is
+  reported the same way. The claim stands either way. The token is never
+  printed.
+
+The owner's one-time setup: add an API trigger to the routine `SE work`, and
+put its fire URL in `SE_ROUTINE_FIRE_URL` and its token in
+`SE_ROUTINE_FIRE_TOKEN` in the cloud environment the routine's boxes run in.
+
+No agent starts another box; only this fan-out and the triggers above do.
