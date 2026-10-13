@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "se: debug this workspace's daemon",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/se",
+      "args": ["serve", "--workspace", "${workspaceFolder}", "--idle", "0"],
+      "preLaunchTask": "se: stop the running daemon"
+    },
+    {
+      "name": "se: debug another workspace's daemon",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/se",
+      "args": ["serve", "--workspace", "${input:workspace}", "--idle", "0"]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "workspace",
+      "type": "promptString",
+      "description": "The workspace folder the Claude session works in (stop its daemon first: se stop --workspace <folder>)"
+    }
+  ]
+}

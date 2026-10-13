@@ -9,4 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sh ./check.sh
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The plugin checks run offline; the CLI needs no login for them.
+      - run: npm i -g @anthropic-ai/claude-code@2.1.296
+      - run: sh ./tests/check.sh
