@@ -37,11 +37,13 @@ func recordedIssues(t *testing.T) *[][]string {
 		"repos/o/r/issues/5": `{"id":105,"number":5,"state":"closed"}`,
 		"repos/o/r/issues/4": `{"id":104,"number":4,"pull_request":{}}`,
 		"repos/o/r/issues":   `{"id":110,"number":10,"title":"ten","html_url":"u10"}`,
-		"repos/o/r/issues?labels=se-retro&state=closed&per_page=100": `[]`,
-		"repos/o/r/issues?labels=se-retro&state=open&per_page=100":   `[]`,
-		"repos/o/r/issues?labels=se&state=closed&per_page=100":       `[{"number":5,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`,
-		"repos/o/r/issues/10/dependencies/blocked_by":                `{"id":101}`,
-		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":       `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
+		"repos/o/r/issues?labels=se-retro&state=closed&per_page=100":    `[]`,
+		"repos/o/r/issues?labels=se-retro&state=open&per_page=100":      `[]`,
+		"repos/o/r/issues?labels=se-overhaul&state=closed&per_page=100": `[]`,
+		"repos/o/r/issues?labels=se-overhaul&state=open&per_page=100":   `[]`,
+		"repos/o/r/issues?labels=se&state=closed&per_page=100":          `[{"number":5,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`,
+		"repos/o/r/issues/10/dependencies/blocked_by":                   `{"id":101}`,
+		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":          `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
 	}
 	var calls [][]string
 	old, oldFire := gh, fire
@@ -65,7 +67,7 @@ func recordedIssues(t *testing.T) *[][]string {
 func TestIssueNextNamesTheNextReadyIssue(t *testing.T) {
 	recordedIssues(t)
 	code, out, errs := se(t, "issue", "next", "--repo", "o/r")
-	if code != 0 || out != "#3 three\nu3\n\ndo it\n\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n" {
+	if code != 0 || out != "#3 three\nu3\n\ndo it\n\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n\n0 retros closed and no overhaul has closed yet; an overhaul is due at 5.\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, _ = se(t, "issue", "next", "--json", "--repo", "o/r")
@@ -294,12 +296,14 @@ func TestIssueNextInNamesTheTreesReadyLeaves(t *testing.T) {
 			{"number":1,"title":"root","state":"open","html_url":"u1","sub_issues_summary":{"total":2}},
 			{"number":2,"title":"two","state":"open","html_url":"u2"},
 			{"number":3,"title":"three","state":"open","html_url":"u3","labels":[{"name":"se-review"}],"sub_issues_summary":{"total":1}}]`,
-		"repos/o/r/git/matching-refs/heads/issue-":                   `[]`,
-		"repos/o/r/issues/1/sub_issues?per_page=100":                 `[{"number":2,"state":"open"},{"number":3,"state":"open"}]`,
-		"repos/o/r/issues?labels=se-retro&state=closed&per_page=100": `[]`,
-		"repos/o/r/issues?labels=se-retro&state=open&per_page=100":   `[]`,
-		"repos/o/r/issues?labels=se&state=closed&per_page=100":       `[]`,
-		"repos/o/r/issues/3/sub_issues?per_page=100":                 `[{"number":4,"state":"closed"}]`,
+		"repos/o/r/git/matching-refs/heads/issue-":                      `[]`,
+		"repos/o/r/issues/1/sub_issues?per_page=100":                    `[{"number":2,"state":"open"},{"number":3,"state":"open"}]`,
+		"repos/o/r/issues?labels=se-retro&state=closed&per_page=100":    `[]`,
+		"repos/o/r/issues?labels=se-retro&state=open&per_page=100":      `[]`,
+		"repos/o/r/issues?labels=se-overhaul&state=closed&per_page=100": `[]`,
+		"repos/o/r/issues?labels=se-overhaul&state=open&per_page=100":   `[]`,
+		"repos/o/r/issues?labels=se&state=closed&per_page=100":          `[]`,
+		"repos/o/r/issues/3/sub_issues?per_page=100":                    `[{"number":4,"state":"closed"}]`,
 	}
 	for _, n := range []int{1, 2, 3} {
 		answers[fmt.Sprintf("repos/o/r/issues/%d/dependencies/blocked_by?per_page=100", n)] = `[]`

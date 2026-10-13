@@ -73,7 +73,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			path := draftPath(c, *out, n)
+			path := draftPath(c, *out, "retro", n)
 			s, err := src()
 			if err != nil {
 				return Reply{}, err
@@ -125,7 +125,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			data, err := os.ReadFile(draftPath(c, *file, n))
+			data, err := os.ReadFile(draftPath(c, *file, "retro", n))
 			if err != nil {
 				return Reply{}, err
 			}
@@ -196,11 +196,12 @@ func numbered(c *Call, fs *flag.FlagSet, name string) (int, error) {
 	return n, nil
 }
 
-// draftPath is where a retro's draft lives: FILE, relative to the workspace,
-// or ../retro-N.md beside it, so the checkout stays clean.
-func draftPath(c *Call, file string, n int) string {
+// draftPath is where the draft of a run (a retro, an overhaul) lives: FILE,
+// relative to the workspace, or ../KIND-N.md beside it, so the checkout stays
+// clean.
+func draftPath(c *Call, file, kind string, n int) string {
 	if file == "" {
-		return filepath.Join(filepath.Dir(c.Workspace), fmt.Sprintf("retro-%d.md", n))
+		return filepath.Join(filepath.Dir(c.Workspace), fmt.Sprintf("%s-%d.md", kind, n))
 	}
 	if filepath.IsAbs(file) {
 		return file

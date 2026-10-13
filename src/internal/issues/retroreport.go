@@ -419,13 +419,19 @@ func (s Source) postedReport(n int) (*RetroReport, error) {
 // lastReport is the text of the last report comment on issue n, and whether
 // a person resumed the issue after it.
 func (s Source) lastReport(n int) (text string, resumed bool, err error) {
+	return s.lastPosted(n, reportMark)
+}
+
+// lastPosted is the text of the last comment on issue n that opens with mark,
+// and whether a person resumed the issue after it.
+func (s Source) lastPosted(n int, mark string) (text string, resumed bool, err error) {
 	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, n), true)
 	if err != nil {
 		return "", false, err
 	}
 	for _, c := range comments {
 		switch {
-		case strings.HasPrefix(c.Body, reportMark):
+		case strings.HasPrefix(c.Body, mark):
 			text, resumed = c.Body, false
 		case strings.Contains(c.Body, "<!-- se:resume -->") && text != "":
 			resumed = true
@@ -446,6 +452,7 @@ func (s Source) Posted(n int) (string, error) {
 
 // Filed is what se retro report did.
 type Filed struct {
+	// Retro is the issue of the run filed: the retro, or the overhaul.
 	Retro int `json:"retro"`
 	// Stopped is true where the report waits for the owner; else the issues
 	// were created and the retro closed.
@@ -482,22 +489,55 @@ func (s Source) FileReport(n int, draft string) (Filed, error) {
 	if err != nil {
 		return Filed{}, err
 	}
-	posted, resumed, err := s.lastReport(n)
+	run := filing{kind: "retro", mark: reportMark, unattended: strings.Contains(i.Body, unattendedMark), assemble: func() (string, error) { return r.assemble(facts) }}
+	run.mint = func(out *Filed) error {
+		for k := range r.Findings {
+			f := &r.Findings[k]
+			if f.Issue > 0 {
+				continue
+			}
+			body := fmt.Sprintf("%s\n\nFound by the retro #%d, class **%s**; the fix it asks for is a %s.", strings.TrimSpace(f.Body), n, f.Class, f.Home)
+			var err error
+			if f.Issue, err = s.mint(f.Title, body, f.Controversial, f.Why, out); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return s.fileRun(i, run)
+}
+
+// filing is a run (a retro, an overhaul) whose judged report is filed: its
+// kind, the mark its report opens with, whether nobody waits for it, how its
+// report is written, and how its findings become issues.
+type filing struct {
+	kind, mark string
+	unattended bool
+	assemble   func() (string, error)
+	mint       func(out *Filed) error
+}
+
+// fileRun files run's report on its issue i, by the owner's rule: a run a person
+// started, whose owner has not decided yet, gets the report posted on it and
+// goes to the owner (se-person); an unattended one, or one a person resumed
+// after its report, gets its findings minted, the report, with their issues,
+// as its closing comment, and closes. Either way its claim issue-N goes.
+func (s Source) fileRun(i issue, run filing) (Filed, error) {
+	n := i.Number
+	posted, resumed, err := s.lastPosted(n, run.mark)
 	if err != nil {
 		return Filed{}, err
 	}
-	unattended := strings.Contains(i.Body, unattendedMark)
-	base := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
 	out := Filed{Retro: n, Issues: []int{}, Person: []int{}}
-	if !unattended && !resumed {
-		text, err := r.assemble(facts)
+	if !run.unattended && !resumed {
+		text, err := run.assemble()
 		if err != nil {
 			return Filed{}, err
 		}
-		if err := s.postReport(n, text, posted != ""); err != nil {
+		if err := s.postMarked(n, run.mark, text, posted != ""); err != nil {
 			return Filed{}, err
 		}
-		reason := fmt.Sprintf("The retro's report is above, for the owner. Move findings between controversial and not in a comment, then run `se issue resume %d`: the next box creates the issues as decided and closes the retro.", n)
+		reason := fmt.Sprintf("The %s's report is above, for the owner. Move findings between controversial and not in a comment, then run `se issue resume %d`: the next box creates the issues as decided and closes the %s.", run.kind, n, run.kind)
 		// Filed again before the owner decided, it only updates the report.
 		if !i.labelled(PersonLabel) {
 			if err := s.flag(Issue{Number: n, Title: i.Title, URL: i.URL}, reason, ""); err != nil {
@@ -505,53 +545,55 @@ func (s Source) FileReport(n int, draft string) (Filed, error) {
 			}
 		}
 		out.Stopped = true
-		out.Left = s.dropBranch(n)
+		out.Left = s.dropBranch(n, run.kind)
 		return out, nil
 	}
-	owner, _, _ := strings.Cut(s.Repo, "/")
-	for k := range r.Findings {
-		f := &r.Findings[k]
-		if f.Issue > 0 {
-			continue
-		}
-		labels := []string{Label}
-		body := fmt.Sprintf("%s\n\nFound by the retro #%d, class **%s**; the fix it asks for is a %s.", strings.TrimSpace(f.Body), n, f.Class, f.Home)
-		if f.Controversial {
-			labels = append(labels, PersonLabel)
-			body += "\n\nControversial, so it waits for a person: " + f.Why
-		}
-		made, ready, err := s.create(f.Title, body, 0, nil, labels)
-		if err != nil {
-			return out, err
-		}
-		f.Issue = made.Number
-		out.Issues = append(out.Issues, made.Number)
-		if f.Controversial {
-			out.Person = append(out.Person, made.Number)
-			if _, err := s.GH("api", "-X", "POST", "-f", "assignees[]="+owner, fmt.Sprintf("repos/%s/issues/%d/assignees", s.Repo, made.Number)); err != nil {
-				return out, fmt.Errorf("created #%d, but assigning it to @%s: %w", made.Number, owner, err)
-			}
-		} else {
-			out.Ready = out.Ready || ready
-		}
+	if err := run.mint(&out); err != nil {
+		return out, err
 	}
-	text, err := r.assemble(facts)
+	text, err := run.assemble()
 	if err != nil {
 		return out, err
 	}
-	if err := s.postReport(n, text, false); err != nil {
+	if err := s.postMarked(n, run.mark, text, false); err != nil {
 		return out, err
 	}
-	if _, err := s.GH("api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", base); err != nil {
-		return out, fmt.Errorf("closing the retro #%d: %w", n, err)
+	if _, err := s.GH("api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)); err != nil {
+		return out, fmt.Errorf("closing the %s #%d: %w", run.kind, n, err)
 	}
-	out.Left = s.dropBranch(n)
+	out.Left = s.dropBranch(n, run.kind)
 	return out, nil
 }
 
-// postReport posts the report on retro n, or, where update is set, writes it
-// over the report posted before.
-func (s Source) postReport(n int, text string, update bool) error {
+// mint creates one finding's issue through the same code as se issue new: a
+// controversial one labelled se-person and assigned to the owner, so it waits
+// for a person, the rest in the normal queue. It records the issue in out.
+func (s Source) mint(title, body string, controversial bool, why string, out *Filed) (int, error) {
+	labels := []string{Label}
+	if controversial {
+		labels = append(labels, PersonLabel)
+		body += "\n\nControversial, so it waits for a person: " + why
+	}
+	made, ready, err := s.create(title, body, 0, nil, labels)
+	if err != nil {
+		return 0, err
+	}
+	out.Issues = append(out.Issues, made.Number)
+	if !controversial {
+		out.Ready = out.Ready || ready
+		return made.Number, nil
+	}
+	out.Person = append(out.Person, made.Number)
+	owner, _, _ := strings.Cut(s.Repo, "/")
+	if _, err := s.GH("api", "-X", "POST", "-f", "assignees[]="+owner, fmt.Sprintf("repos/%s/issues/%d/assignees", s.Repo, made.Number)); err != nil {
+		return made.Number, fmt.Errorf("created #%d, but assigning it to @%s: %w", made.Number, owner, err)
+	}
+	return made.Number, nil
+}
+
+// postMarked posts text, a report opening with mark, on issue n, or, where
+// update is set, writes it over the last such report posted before.
+func (s Source) postMarked(n int, mark, text string, update bool) error {
 	if update {
 		comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, n), true)
 		if err != nil {
@@ -559,7 +601,7 @@ func (s Source) postReport(n int, text string, update bool) error {
 		}
 		var last int64
 		for _, c := range comments {
-			if strings.HasPrefix(c.Body, reportMark) {
+			if strings.HasPrefix(c.Body, mark) {
 				last = c.ID
 			}
 		}
@@ -578,10 +620,10 @@ func (s Source) postReport(n int, text string, update bool) error {
 // branch. It never fails the report: where the deletion is refused (a box's
 // token may not delete branches), it answers why the branch stays and what
 // removes it.
-func (s Source) dropBranch(n int) string {
+func (s Source) dropBranch(n int, kind string) string {
 	_, err := s.GH("api", "-X", "DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, Branch(n)))
 	if err == nil || strings.Contains(err.Error(), "HTTP 422") || strings.Contains(err.Error(), "HTTP 404") {
 		return ""
 	}
-	return fmt.Sprintf("%s stays (%v): se fleet prune removes it once the retro is closed, and a resumed retro's stale claim is taken over", Branch(n), err)
+	return fmt.Sprintf("%s stays (%v): se fleet prune removes it once the %s is closed, and a resumed %s's stale claim is taken over", Branch(n), err, kind, kind)
 }

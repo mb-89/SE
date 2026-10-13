@@ -37,11 +37,12 @@ What earlier versions taught, and how this design answers it:
     `<!-- se:retro unattended -->`.
 - **The cadence:** retros happen without anyone remembering them. When
   `se issue next --take` runs, before offering anything else, it counts the
-  `se` issues closed since the last closed `se-retro` issue closed, retros not
-  counted (with none closed yet, the whole history). At `RetroCadence` (10,
+  `se` issues closed since the last closed `se-retro` issue closed, retros and
+  overhauls not counted (with none closed yet, the whole history). At `RetroCadence` (10,
   in `src/internal/issues/cadence.go`) or more, with no `se-retro` issue open,
   it starts an unattended retro, as `se retro new --unattended` does, and
-  takes it ahead of all other work. An open `se-retro` issue, attended or not,
+  takes it ahead of all other work but a due overhaul
+  ([overhaul.md](overhaul.md)). An open `se-retro` issue, attended or not,
   means no second one is started. `--take N` names its issue and skips the
   cadence. The plain `se issue next` only reports the count, and that a retro
   is due.
