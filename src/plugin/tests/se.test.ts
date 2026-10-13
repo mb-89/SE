@@ -386,7 +386,9 @@ test('a checkout that is current says nothing and does not reload', async ($, on
 test('a checkout that is no clean main is left alone, noted in one line', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
-  w.startUpdate = { text: 'SE left its checkout as it is: /me/SE/src/plugin/../.. is on topic, not main; the installed SE updates from main alone.' }
+  w.startUpdate = {
+    text: 'SE left its checkout as it is: /me/SE/src/plugin/../.. is on topic, not main; the installed SE updates from main alone.',
+  }
   await $.session.start(starts)
   await clock.settle()
   expect(w.toasts).toEqual([w.startUpdate.text])
@@ -595,7 +597,10 @@ test('a /se answer that is no help is drawn as its text', async ($, on) => {
     expect(JSON.stringify(await ui.drawn())).toContain('No SE daemon answers for /work.')
     await ui.unmount()
     // An errored help row is drawn as its text too.
-    const errored = await $.ui.mount({ ...output('help', 'se help: failed', surface), props: { command: 'se', args: 'help', text: 'se help: failed', isErrored: true } })
+    const errored = await $.ui.mount({
+      ...output('help', 'se help: failed', surface),
+      props: { command: 'se', args: 'help', text: 'se help: failed', isErrored: true },
+    })
     expect(await errored.find({ key: 'usage' })).toBeUndefined()
     await errored.unmount()
   }

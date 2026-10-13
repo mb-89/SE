@@ -17,4 +17,5 @@ jobs:
           node-version: 22
       # The plugin checks run offline; the CLI needs no login for them.
       - run: npm i -g @anthropic-ai/claude-code@2.1.296
+      - run: sh ./tests/tools.sh install
       - run: sh ./tests/check.sh

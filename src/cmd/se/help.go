@@ -134,12 +134,6 @@ func groupsOf(cmds []Command, session bool) []HelpGroup {
 	return out
 }
 
-// commandHelp is one command's help text: its usage, what it does, and the
-// flags of fs, the flag set its Run made, one per line.
-func commandHelp(c Command, fs *flag.FlagSet, session, color bool) string {
-	return helpText(commandHelpOf(c, fs, session), session, color)
-}
-
 // commandHelpOf is one command's help as data.
 func commandHelpOf(c Command, fs *flag.FlagSet, session bool) Help {
 	about := c.Summary

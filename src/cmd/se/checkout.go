@@ -87,5 +87,5 @@ func withdraw(path string) {
 		return
 	}
 	os.Remove(path + ".old")
-	os.Rename(path, path+".old")
+	_ = os.Rename(path, path+".old")
 }

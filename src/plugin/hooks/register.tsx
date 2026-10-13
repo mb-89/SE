@@ -116,7 +116,8 @@ export const register: Register = on => {
     const groups = help.groups ?? []
     const flags = help.flags ?? []
     // The left column is as wide as its longest name, and two cells more.
-    const left = 2 + Math.max(0, ...groups.flatMap(g => g.commands.map(c => c.name.length)), ...flags.map(f => f.name.length))
+    const left =
+      2 + Math.max(0, ...groups.flatMap(g => g.commands.map(c => c.name.length)), ...flags.map(f => f.name.length))
     const row = (key: string, name: string, about: string) => (
       <Box key={key} flexDirection="row">
         <Box width={left} flexShrink={0}>

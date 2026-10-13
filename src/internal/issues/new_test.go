@@ -1,3 +1,4 @@
+// Internal test package: its fake GitHub serves the package's other internal tests.
 package issues
 
 import (

@@ -185,8 +185,10 @@ func (s Source) Check() ([]Finding, error) {
 	}
 	for _, n := range t.numbers() {
 		if t.byNum[n].labelled(PersonLabel) {
-			out = append(out, Finding{Kind: WaitingOnPerson, Issue: n, Holds: holds[n],
-				What: fmt.Sprintf("#%d waits for a person (%s)%s", n, PersonLabel, holding(holds[n]))})
+			out = append(out, Finding{
+				Kind: WaitingOnPerson, Issue: n, Holds: holds[n],
+				What: fmt.Sprintf("#%d waits for a person (%s)%s", n, PersonLabel, holding(holds[n])),
+			})
 		}
 	}
 	for _, f := range claims {
@@ -292,8 +294,10 @@ func (s Source) claimFinding(n int, p openPull, open bool, sha string) (*Finding
 		}
 		switch {
 		case len(closed) > 0 && !merged:
-			f = &Finding{Kind: LeftoverClaim, PR: closed[0].Number, key: "leftover-claim",
-				What: fmt.Sprintf("%s claims #%d, but its PR #%d was closed unmerged", b, n, closed[0].Number)}
+			f = &Finding{
+				Kind: LeftoverClaim, PR: closed[0].Number, key: "leftover-claim",
+				What: fmt.Sprintf("%s claims #%d, but its PR #%d was closed unmerged", b, n, closed[0].Number),
+			}
 		case len(closed) == 0 && quiet:
 			f = &Finding{Kind: NoPR, head: sha, What: fmt.Sprintf("%s has no PR, and %s", b, since)}
 		}
@@ -314,8 +318,10 @@ func (s Source) claimFinding(n int, p openPull, open bool, sha string) (*Finding
 			case len(red) == 0 && !pending && p.Mergeable != nil && *p.Mergeable && p.AutoMerge == nil:
 				f = &Finding{Kind: GreenUnmerged, What: fmt.Sprintf("PR #%d is green and merges, but auto-merge is off", p.Number)}
 			case len(red) == 0 && !pending && p.Mergeable != nil && *p.Mergeable && quiet:
-				f = &Finding{Kind: GreenUnmerged, autoMerge: true,
-					What: fmt.Sprintf("PR #%d is green with auto-merge on, but sits unmerged (%s), and %s", p.Number, p.State, since)}
+				f = &Finding{
+					Kind: GreenUnmerged, autoMerge: true,
+					What: fmt.Sprintf("PR #%d is green with auto-merge on, but sits unmerged (%s), and %s", p.Number, p.State, since),
+				}
 			}
 		}
 		if f != nil {
@@ -401,8 +407,10 @@ func (s Source) leftovers(t tree, refs []ref) ([]Finding, error) {
 		if err != nil {
 			return nil, err
 		}
-		f := Finding{Kind: LeftoverClaim, Issue: n, head: r.Object.SHA, key: "leftover-claim",
-			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why)}
+		f := Finding{
+			Kind: LeftoverClaim, Issue: n, head: r.Object.SHA, key: "leftover-claim",
+			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why),
+		}
 		if i.State == "closed" && i.PullRequest == nil {
 			if open == nil {
 				pulls, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?state=open&per_page=100", s.Repo), true)
@@ -443,11 +451,15 @@ func (s Source) impossible(t tree, deps map[int][]issue) []Finding {
 			ours := d.labelled(Label) && (d.RepositoryURL == "" || strings.HasSuffix(d.RepositoryURL, repoURL))
 			switch {
 			case d.State == "closed" && d.StateReason == "not_planned":
-				out = append(out, Finding{Kind: ImpossibleBlock, Issue: n, key: fmt.Sprintf("impossible-block-%d", d.Number),
-					What: fmt.Sprintf("#%d is blocked by #%d, which was closed as not planned", n, d.Number)})
+				out = append(out, Finding{
+					Kind: ImpossibleBlock, Issue: n, key: fmt.Sprintf("impossible-block-%d", d.Number),
+					What: fmt.Sprintf("#%d is blocked by #%d, which was closed as not planned", n, d.Number),
+				})
 			case d.State == "open" && !ours:
-				out = append(out, Finding{Kind: ImpossibleBlock, Issue: n, judgment: true, key: fmt.Sprintf("impossible-block-%d", d.Number),
-					What: fmt.Sprintf("#%d is blocked by %s, which is no %s issue, so no box moves it", n, d.URL, Label)})
+				out = append(out, Finding{
+					Kind: ImpossibleBlock, Issue: n, judgment: true, key: fmt.Sprintf("impossible-block-%d", d.Number),
+					What: fmt.Sprintf("#%d is blocked by %s, which is no %s issue, so no box moves it", n, d.URL, Label),
+				})
 			case d.State == "open":
 				links[n] = append(links[n], d.Number)
 			}
@@ -481,8 +493,10 @@ func (s Source) impossible(t tree, deps map[int][]issue) []Finding {
 		for k, m := range path {
 			words[k] = "#" + strconv.Itoa(m)
 		}
-		out = append(out, Finding{Kind: ImpossibleBlock, Issue: n, judgment: true, key: "impossible-block-cycle",
-			What: "a cycle of blocks: " + strings.Join(words, " is blocked by ")})
+		out = append(out, Finding{
+			Kind: ImpossibleBlock, Issue: n, judgment: true, key: "impossible-block-cycle",
+			What: "a cycle of blocks: " + strings.Join(words, " is blocked by "),
+		})
 	}
 	return out
 }
