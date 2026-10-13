@@ -369,8 +369,8 @@ func about(dir, repo string) About {
 		if l == "" && len(para) > 0 {
 			break
 		}
-		// The title above the first paragraph is no part of it.
-		if l != "" && (len(para) > 0 || !strings.HasPrefix(l, "#")) {
+		// The title and the reader line above the first paragraph are no part of it.
+		if l != "" && (len(para) > 0 || !strings.HasPrefix(l, "#") && !strings.HasPrefix(l, "Reader: ")) {
 			para = append(para, l)
 		}
 	}

@@ -1,5 +1,7 @@
 # Review: how a gate is reviewed
 
+Reader: whoever changes how a gate is reviewed, and the reviewer checking a rule.
+
 A gate is an issue labelled `se-review` (see [Reviews](issues.md#reviews)): it
 is reviewed once its sub-issues have closed, by an agent that worked none of
 them. These rules say **how** that agent works. The skill `se:review`
@@ -136,9 +138,14 @@ finding shows again. A finding's `title` becomes its issue's title.
 
 ## The commands
 
-    se review brief N [--claims] [--json] [--repo OWNER/NAME]
-    se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
-    se issue new ... --final
+<!-- se:manifest usage review -->
+```
+se review brief N [--claims] [--json] [--repo OWNER/NAME]
+```
+<!-- /se:manifest -->
+
+`se issue review` and `se issue new --final` are in
+[spec/issues.md](issues.md#the-commands).
 
 `se review brief` prints the brief as Markdown (with `--json`:
 `{"gate","tree","commit","ci","principles","rereview","claims"}`). It reads,

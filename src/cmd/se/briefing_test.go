@@ -92,7 +92,7 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 func briefed(t *testing.T, args ...string) string {
 	t.Helper()
 	dir := t.TempDir()
-	readme := "# SE\n\nSE is a test. It has parts. They talk.\nIt is small. This is cut.\n\n## Install\n"
+	readme := "# SE\n\nReader: a person meeting SE.\n\nSE is a test. It has parts. They talk.\nIt is small. This is cut.\n\n## Install\n"
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(readme), 0o644); err != nil {
 		t.Fatal(err)
 	}

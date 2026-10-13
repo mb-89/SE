@@ -1,5 +1,7 @@
 # Coordination: a box that finds nothing to take
 
+Reader: whoever changes what a box does when it finds nothing to take.
+
 On 13 October the fleet stopped twice while open issues remained. Every box
 found "No se issue is ready" and left, and nobody looked at why nothing was
 ready. Both times the cause was visible on GitHub in a minute: one claimed
@@ -79,7 +81,15 @@ and only then leaves.**
 
 ## The commands
 
-`se fleet check [--json]` lists the findings. `se fleet fix [--json]` runs the
+<!-- se:manifest usage fleet -->
+```
+se fleet check [--json] [--repo OWNER/NAME]
+se fleet fix [--json] [--repo OWNER/NAME]
+se fleet prune [--apply] [--json] [--repo OWNER/NAME]
+```
+<!-- /se:manifest -->
+
+`se fleet check` lists the findings. `se fleet fix` runs the
 same check and applies every remedy that needs no checkout, in order, and
 names the takeovers it leaves to the box; a remedy that fails is reported and
 the remedies after it are still applied; an issue it made that a box may
