@@ -16,10 +16,12 @@ func init() {
 	register(Command{
 		Name:    "serve",
 		Usage:   "serve [--idle D] [--takeover]",
-		Summary: "run this workspace's daemon in the foreground (the debugger's way in); --idle 0 never idles out",
+		Group:   "Daemon",
+		Summary: "run this workspace's daemon in the foreground",
+		Details: "run this workspace's daemon in the foreground: the debugger's way in.",
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("serve")
-			idle := fs.Duration("idle", 30*time.Minute, "end after this long without an event; 0 never")
+			idle := fs.Duration("idle", 30*time.Minute, "end after this long (`D`) without an event; 0 never")
 			takeover := fs.Bool("takeover", false, "ask a daemon already running for this workspace to step down, and take its place")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err

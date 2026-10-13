@@ -4,7 +4,9 @@ func init() {
 	register(Command{
 		Name:    "ui",
 		Usage:   "ui",
-		Summary: "open SE's control panel: the on/off toggle and a button for each command that takes no words",
+		Group:   "Session",
+		Summary: "open SE's control panel: the on/off toggle and command buttons",
+		Details: "open SE's control panel, a pane of buttons every surface draws, the phone included: the on/off toggle top left, then a button for each command registered as one (a command that takes no typed words). A press runs what typing /se <name> runs.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			if err := c.Parse(c.Flags("ui")); err != nil {

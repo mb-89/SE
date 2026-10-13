@@ -11,7 +11,9 @@ func init() {
 	register(Command{
 		Name:    "status",
 		Usage:   "status",
-		Summary: "say whether a daemon answers for this workspace, and which commits the session's SE came from",
+		Group:   "Session",
+		Summary: "say whether a daemon answers, and which commits SE came from",
+		Details: "say whether a daemon answers for this workspace, and which commits the session's SE came from.",
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {

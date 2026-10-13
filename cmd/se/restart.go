@@ -12,7 +12,9 @@ func init() {
 	register(Command{
 		Name:      "restart",
 		Usage:     "restart",
-		Summary:   "stop this workspace's daemon and start it again; in an SE checkout, se is rebuilt from its source first",
+		Group:     "Session",
+		Summary:   "restart the daemon; in an SE checkout, rebuild se first",
+		Details:   "stop this workspace's daemon and start it again. In an SE checkout, se is rebuilt from its source first.",
 		Session:   true,
 		Installed: true,
 		Button:    true,
