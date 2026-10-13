@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -59,6 +61,70 @@ func init() {
 			return issueReply(*asJSON, took, ok, issues.Branch(took.Number))
 		},
 	})
+	register(Command{
+		Name:    "issue new",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--json] [--repo OWNER/NAME]",
+		Summary: "create an se issue, linked as blocked by each issue named (GitHub's native links), and name it",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "issue new")
+			title := fs.String("title", "", "the issue's title")
+			body := fs.String("body", "", "the issue's body")
+			bodyFile := fs.String("body-file", "", "a file holding the issue's body")
+			blockedBy := fs.String("blocked-by", "", "the issues that block it, as N,M, or none")
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			given := map[string]bool{}
+			fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+			if !given["blocked-by"] {
+				return Reply{}, fmt.Errorf("issue new needs --blocked-by: the issues that block it, as N,M, or none")
+			}
+			blockers, err := issues.ParseBlockedBy(*blockedBy)
+			if err != nil {
+				return Reply{}, err
+			}
+			if given["body"] == given["body-file"] {
+				return Reply{}, fmt.Errorf("issue new takes one of --body and --body-file")
+			}
+			if given["body-file"] {
+				path := *bodyFile
+				if !filepath.IsAbs(path) {
+					path = filepath.Join(c.Workspace, path)
+				}
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return Reply{}, err
+				}
+				*body = string(data)
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			made, err := s.Create(*title, *body, blockers)
+			if err != nil {
+				return Reply{}, err
+			}
+			if *asJSON {
+				data, err := json.Marshal(struct {
+					Number    int    `json:"number"`
+					URL       string `json:"url"`
+					BlockedBy []int  `json:"blocked_by"`
+				}{made.Number, made.URL, append([]int{}, blockers...)})
+				return Reply{Text: string(data)}, err
+			}
+			text := fmt.Sprintf("Created #%d %s\n%s", made.Number, made.Title, made.URL)
+			if len(blockers) > 0 {
+				names := make([]string, len(blockers))
+				for k, b := range blockers {
+					names[k] = "#" + strconv.Itoa(b)
+				}
+				text += "\nBlocked by " + strings.Join(names, ", ") + "."
+			}
+			return Reply{Text: text}, nil
+		},
+	})
 }
 
 // takeFlag is --take, alone or as --take=N; a bare --take N is read by the
@@ -89,7 +155,7 @@ func (t *takeFlag) Set(v string) error {
 	return nil
 }
 
-// issueFlags is the flag set of issue next; src reads the issues of
+// issueFlags is the flag set every issue command takes; src reads the issues of
 // --repo, or of the workspace's origin, once the flags are parsed.
 func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Source, error), asJSON *bool) {
 	fs = c.Flags(name)
