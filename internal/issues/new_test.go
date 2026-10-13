@@ -73,8 +73,37 @@ func TestCreateNamesTheIssueWhoseLinkFailed(t *testing.T) {
 		"repos/o/r/issues/8": `{"id":808,"number":8}`,
 		"repos/o/r/issues":   `{"number":11,"title":"t","html_url":"u11"}`,
 	})
-	made, err := Source{Repo: repo, GH: gh}.Create("t", "b", []int{8})
+	made, err := Source{Repo: repo, GH: gh}.Create("t", "b", 0, []int{8})
 	if made.Number != 11 || err == nil || !strings.Contains(err.Error(), "created #11 (u11), but linking #11 as blocked by #8") {
 		t.Fatalf("%+v %v", made, err)
+	}
+}
+
+func TestCreateMakesASubIssueOfItsParent(t *testing.T) {
+	gh, calls := writes(t, map[string]string{
+		"repos/o/r/issues/1":            `{"id":101,"number":1}`,
+		"repos/o/r/issues":              `{"id":1100,"number":11,"title":"t","html_url":"u11"}`,
+		"repos/o/r/issues/1/sub_issues": `{}`,
+	})
+	if _, err := (Source{Repo: repo, GH: gh}).Create("t", "b", 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"api", "repos/o/r/issues/1"},
+		{"api", "-X", "POST", "-f", "title=t", "-f", "body=b", "-f", "labels[]=se", "repos/o/r/issues"},
+		{"api", "-X", "POST", "-F", "sub_issue_id=1100", "repos/o/r/issues/1/sub_issues"},
+	}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("%q", *calls)
+	}
+	// A parent that does not exist creates nothing.
+	*calls = nil
+	if _, err := (Source{Repo: repo, GH: gh}).Create("t", "b", 9, nil); err == nil || !strings.Contains(err.Error(), "#9 does not exist") {
+		t.Fatalf("%v", err)
+	}
+	for _, c := range *calls {
+		if c[1] == "-X" {
+			t.Fatalf("wrote %v", c)
+		}
 	}
 }

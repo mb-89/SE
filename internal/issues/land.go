@@ -43,7 +43,7 @@ func Issued(dir string) (int, error) {
 }
 
 // Land brings the issue branch checked out in dir to main: check must pass on
-// a clean tree, then the branch is pushed, its PR against main opened (or,
+// a clean tree of an issue with no open sub-issues, then the branch is pushed, its PR against main opened (or,
 // where it is open already, found), and auto-merge turned on with squash. Run
 // again after a fix, it pushes and reports the same PR.
 func (s Source) Land(dir string, check func(dir string) error) (Landing, error) {
@@ -55,6 +55,13 @@ func (s Source) Land(dir string, check func(dir string) error) (Landing, error) 
 		return Landing{}, err
 	} else if dirty != "" {
 		return Landing{}, fmt.Errorf("land pushes commits, and %s has changes not committed:\n%s", dir, dirty)
+	}
+	got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
+	if err != nil {
+		return Landing{}, err
+	}
+	if subs := got[0].SubIssues; subs != nil && subs.Total > subs.Completed {
+		return Landing{}, fmt.Errorf("#%d has open sub-issues, and a parent holds no work: its sub-issues land, and it closes by itself", n)
 	}
 	if err := check(dir); err != nil {
 		return Landing{}, fmt.Errorf("the check failed, so nothing was pushed: %w", err)
@@ -73,10 +80,6 @@ func (s Source) Land(dir string, check func(dir string) error) (Landing, error) 
 	if len(open) > 0 {
 		pr = open[0]
 	} else {
-		got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
-		if err != nil {
-			return Landing{}, err
-		}
 		path := fmt.Sprintf("repos/%s/pulls", s.Repo)
 		out, err := s.GH("api", "-X", "POST", "-f", "title="+got[0].Title, "-f", "head="+branch, "-f", "base=main",
 			"-f", fmt.Sprintf("body=Fixes #%d", n), path)

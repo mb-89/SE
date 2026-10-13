@@ -12,12 +12,17 @@ import (
 const (
 	pullsPath = "repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100"
 	pr14      = `{"number":14,"node_id":"PR_14","html_url":"https://github.com/o/r/pull/14"}`
+	issue6    = "repos/o/r/issues/6"
+	leaf6     = `{"number":6,"title":"the work","sub_issues_summary":{"total":0,"completed":0}}`
 )
 
 // landGH answers land's gh calls by path, fails those in fail, and keeps
 // every call it was asked.
 func landGH(t *testing.T, answers map[string]string, fail map[string]string) (GH, *[][]string) {
 	t.Helper()
+	if _, ok := answers[issue6]; !ok {
+		answers[issue6] = leaf6
+	}
 	var calls [][]string
 	return func(args ...string) ([]byte, error) {
 		calls = append(calls, args)
@@ -49,10 +54,9 @@ func passes(string) error { return nil }
 func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	origin, a := claimed(t)
 	gh, calls := landGH(t, map[string]string{
-		pullsPath:            `[]`,
-		"repos/o/r/issues/6": `{"number":6,"title":"the work"}`,
-		"repos/o/r/pulls":    pr14,
-		"graphql":            `{"data":{}}`,
+		pullsPath:         `[]`,
+		"repos/o/r/pulls": pr14,
+		"graphql":         `{"data":{}}`,
 	}, nil)
 	l, err := Source{Repo: repo, GH: gh}.Land(a, passes)
 	if err != nil {
@@ -65,8 +69,8 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 		t.Fatalf("origin's issue-6 is %s, want %s", got, want)
 	}
 	want := [][]string{
-		{"api", "--paginate", pullsPath},
 		{"api", "repos/o/r/issues/6"},
+		{"api", "--paginate", pullsPath},
 		{"api", "-X", "POST", "-f", "title=the work", "-f", "head=issue-6", "-f", "base=main", "-f", "body=Fixes #6", "repos/o/r/pulls"},
 		{"api", "-f", "query=" + autoMerge, "-f", "id=PR_14", "graphql"},
 	}
@@ -139,8 +143,15 @@ func TestLandSaysWhenAutoMergeFails(t *testing.T) {
 
 func TestLandRefusesBeforePushing(t *testing.T) {
 	origin, a := claimed(t)
+	// It reads the issue, and nothing else.
 	never := func(t *testing.T) GH {
-		return func(args ...string) ([]byte, error) { t.Fatalf("gh %v after a refusal", args); return nil, nil }
+		return func(args ...string) ([]byte, error) {
+			if reflect.DeepEqual(args, []string{"api", issue6}) {
+				return []byte(leaf6), nil
+			}
+			t.Fatalf("gh %v after a refusal", args)
+			return nil, nil
+		}
 	}
 	fails := func(string) error { return errors.New("go test: FAIL") }
 	if _, err := (Source{Repo: repo, GH: never(t)}).Land(a, fails); err == nil || !strings.Contains(err.Error(), "nothing was pushed: go test: FAIL") {
@@ -157,6 +168,22 @@ func TestLandRefusesBeforePushing(t *testing.T) {
 	run(t, a, "checkout", "-q", "main")
 	if _, err := (Source{Repo: repo, GH: never(t)}).Land(a, passes); err == nil || !strings.Contains(err.Error(), "issue-<n> branch") {
 		t.Fatalf("%v", err)
+	}
+	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, origin, "rev-parse", "main"); got != want {
+		t.Fatalf("a refused land moved issue-6 to %s", got)
+	}
+}
+
+func TestLandRefusesAParent(t *testing.T) {
+	origin, a := claimed(t)
+	gh, calls := landGH(t, map[string]string{issue6: `{"number":6,"title":"the tree","sub_issues_summary":{"total":2,"completed":1}}`}, nil)
+	checked := false
+	_, err := Source{Repo: repo, GH: gh}.Land(a, func(string) error { checked = true; return nil })
+	if err == nil || !strings.Contains(err.Error(), "a parent holds no work") || checked {
+		t.Fatalf("%v, checked %v", err, checked)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("%q", *calls)
 	}
 	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, origin, "rev-parse", "main"); got != want {
 		t.Fatalf("a refused land moved issue-6 to %s", got)

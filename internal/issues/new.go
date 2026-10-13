@@ -86,16 +86,22 @@ func (s Source) link(n int, blockers []int, ids map[int]int64) error {
 	return nil
 }
 
-// Create opens a fleet issue, labelled se, and links it as blocked by each of
-// blockedBy. The blockers are checked before the issue is created, so a list
-// naming an issue that does not exist creates nothing.
-func (s Source) Create(title, body string, blockedBy []int) (Issue, error) {
+// Create opens a fleet issue, labelled se, makes it a sub-issue of parent
+// where that is above zero, and links it as blocked by each of blockedBy. The
+// parent and the blockers are checked before the issue is created, so naming
+// an issue that does not exist creates nothing.
+func (s Source) Create(title, body string, parent int, blockedBy []int) (Issue, error) {
 	if strings.TrimSpace(title) == "" {
 		return Issue{}, fmt.Errorf("an issue needs a --title")
 	}
 	ids, err := s.ids(blockedBy)
 	if err != nil {
 		return Issue{}, err
+	}
+	if parent > 0 {
+		if _, err := s.ids([]int{parent}); err != nil {
+			return Issue{}, err
+		}
 	}
 	path := fmt.Sprintf("repos/%s/issues", s.Repo)
 	out, err := s.GH("api", "-X", "POST", "-f", "title="+title, "-f", "body="+body, "-f", "labels[]="+Label, path)
@@ -107,6 +113,12 @@ func (s Source) Create(title, body string, blockedBy []int) (Issue, error) {
 		return Issue{}, fmt.Errorf("gh api %s answered no issue: %v", path, err)
 	}
 	created := Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL}
+	if parent > 0 {
+		path := fmt.Sprintf("repos/%s/issues/%d/sub_issues", s.Repo, parent)
+		if _, err := s.GH("api", "-X", "POST", "-F", fmt.Sprintf("sub_issue_id=%d", i.ID), path); err != nil {
+			return created, fmt.Errorf("created #%d (%s), but making it a sub-issue of #%d: %w", i.Number, i.URL, parent, err)
+		}
+	}
 	if err := s.link(i.Number, blockedBy, ids); err != nil {
 		return created, fmt.Errorf("created #%d (%s), but %w", i.Number, i.URL, err)
 	}

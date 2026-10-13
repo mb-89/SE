@@ -21,9 +21,9 @@ command, `/se`, which takes words the way a command line does:
 | `/se status` | says whether a daemon answers for this workspace |
 | `/se restart` | stops this workspace's daemon and starts it again; in an SE checkout, rebuilt from its source first |
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
-| `/se issue next` | names the next ready `se` issue, or says that none is ready; `--take` claims it |
+| `/se issue next` | names the next ready `se` issue, or says that none is ready; `--take` claims it; `--in ROOT` names the ready leaves inside a parent's tree |
 | `/se issue land` | on an `issue-<n>` branch: passes the check, pushes, opens its PR against main (`Fixes #<n>`) and turns on auto-merge (squash) |
-| `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required) |
+| `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent` |
 | `/se help`, `/se` | lists these |
 
 On a terminal, `se help` lists every command, those above and the ones a
@@ -62,7 +62,9 @@ and hands nothing to the checkout's build.
 SE's work items are GitHub issues labelled `se`. `se issue next` names the next
 one a box may take, and `se issue next --take` claims it by pushing its branch
 `issue-<n>`. Issues are created with `se issue new`, whose required
-`--blocked-by` writes GitHub's native "blocked by" links. The rules for which
+`--blocked-by` writes GitHub's native "blocked by" links. Issues nest: leaves
+are work, parents coordinate their sub-issues and close by themselves. The
+rules for which
 issue is ready, how a claim works, and how issues are made live in
 [docs/issues.md](docs/issues.md). `se issue land` brings the claimed issue's
 branch to main through one PR on auto-merge.
