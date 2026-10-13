@@ -1,0 +1,14 @@
+# Soft budgets for tests/check.sh, in milliseconds: one per step, by the name
+# check.sh gives it, and one for the battery's total. Each started as a
+# measurement (a warm local run) with headroom for a cold CI runner. An overrun
+# is reported (the check's output, the CI summary, the PR body, the landing
+# facts) and passes; `hard: true` on a budget makes its overrun fail the check.
+total: {ms: 300000, hard: false}
+steps:
+  se rules: {ms: 5000, hard: false}
+  golangci-lint: {ms: 120000, hard: false}
+  biome: {ms: 5000, hard: false}
+  go test: {ms: 120000, hard: false}
+  plugin validate: {ms: 15000, hard: false}
+  marketplace validate: {ms: 15000, hard: false}
+  plugin test: {ms: 30000, hard: false}

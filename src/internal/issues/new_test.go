@@ -91,7 +91,7 @@ func TestCreateMakesASubIssueOfItsParent(t *testing.T) {
 	}
 	want := [][]string{
 		{"api", "repos/o/r/issues/1"},
-		{"api", "-X", "POST", "-f", "title=t", "-f", "body=b", "-f", "labels[]=se", "repos/o/r/issues"},
+		{"api", "-X", "POST", "-f", "title=t", "-f", "body=b\n\n<!-- se:new -->", "-f", "labels[]=se", "repos/o/r/issues"},
 		{"api", "-X", "POST", "-F", "sub_issue_id=1100", "repos/o/r/issues/1/sub_issues"},
 	}
 	if !reflect.DeepEqual(*calls, want) {

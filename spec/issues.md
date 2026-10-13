@@ -15,7 +15,9 @@ choice is deterministic and no prompt restates it.
   the fleet's.
 - **Created**: fleet issues are created with `se issue new` and no other way.
   It labels the issue `se` and requires `--blocked-by`, so every issue declares
-  its dependencies when it is made, even if that is `none`.
+  its dependencies when it is made, even if that is `none`. Every body it
+  writes ends in the mark `<!-- se:new -->`, which the retro checks
+  ([retro.md](retro.md)).
 - **Blockers**: an issue waits while any of its blockers is open. Blockers are
   GitHub's native "blocked by" links, and nothing else; a "Blocked by: #12"
   line in an issue's body does not block it. `se issue new --blocked-by` is

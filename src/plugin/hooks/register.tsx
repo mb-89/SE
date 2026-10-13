@@ -9,8 +9,12 @@
 // toggle and the commands se offers as buttons, each pressed as /se <words>.
 // /se help draws as a layout: se answers the help as data beside its text, and
 // the command's output row draws that data, headings and two aligned columns.
+// Anything a person waits on gives feedback within a second and never blocks:
+// every call into se goes through within, which shows the call is working at
+// the one-second mark and lets the session go on; and while SE is on, each
+// call's duration is a row of the daemon's log, se.call.
 
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { SeActive, SeButtons, SeHelp } from '../types'
 
@@ -29,6 +33,8 @@ const STARTING = 300_000
 const UPDATING = 120_000
 // A daemon found down is started again at most this often.
 const RESTART_EVERY = 60_000
+// What a person waits on shows it is working after this long, and holds nothing up.
+export const FEEDBACK = 1_000
 
 type Endpoint = { address: string; token: string }
 
@@ -60,6 +66,10 @@ let starting: Promise<string> | null = null
 // Events raised while a start runs, the start's own among them, sent once it answers.
 const waiting: string[] = []
 const WAITING_CAP = 1000
+// The session start's update and daemon start, while they run past session.start's answer.
+let settingUp: Promise<void> | null = null
+// What the status line says is working, one line per call still running past FEEDBACK.
+const working: string[] = []
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -71,14 +81,10 @@ export const register: Register = on => {
     root = e.cwd
     // Before the update, which may move the checkout under these hooks.
     hooksCommit = await headOf($)
-    await updatesItself($)
-    const { value } = await $.state.get(ACTIVE)
-    if (value === undefined) {
-      if ((await $.env.get('SE_DEFAULT')) === 'on') await switchOn($)
-    } else {
-      active = value
-      if (active) await starts($)
-    }
+    // A setup that fails leaves the session as it is; the session goes on either way.
+    const setup = setsUp($).catch(() => {})
+    settingUp = setup
+    await within($, 'updating itself', setup)
     return next(e)
   })
 
@@ -174,11 +180,78 @@ export const register: Register = on => {
   })
 
   // The bridge never holds an event up for good: a failure here passes it on.
+  // Events raised while the session start's setup runs wait for it: sent if it
+  // switched SE on, dropped if not.
   on('*', async ($, e, next) => {
-    if (!active || next.is('engine.create', e)) return next(e)
-    await forwards($, next.event, e).catch(() => {})
+    if (next.is('engine.create', e) || (!active && !settingUp)) return next(e)
+    if (!active) {
+      if (waiting.length < WAITING_CAP) waiting.push(bodyOf(await $.session.id(), next.event, e))
+      return next(e)
+    }
+    await within(
+      $,
+      'reaching its daemon',
+      forwards($, next.event, e).catch(() => {}),
+    )
     return next(e)
   }).catch(($, e, next) => next(e))
+}
+
+// The session start's road: the update, then SE on as this session last had
+// it (or as SE_DEFAULT says), its daemon started.
+async function setsUp($: EngineInterface): Promise<void> {
+  try {
+    await updatesItself($)
+    const { value } = await $.state.get(ACTIVE)
+    if (value === undefined) {
+      if ((await $.env.get('SE_DEFAULT')) === 'on') await switchOn($)
+    } else {
+      active = value
+      if (active) await starts($)
+    }
+  } finally {
+    settingUp = null
+    if (!active) waiting.splice(0)
+  }
+}
+
+// The hard rule, kept in this one place: work a person waits on that is not
+// done within FEEDBACK shows on the status line that it is working, and the
+// caller goes on without it. Answers the work's value when it was done in time,
+// else the work itself, to finish in the background.
+async function within<T>(
+  $: EngineInterface,
+  doing: string,
+  work: Promise<T>,
+): Promise<{ done: true; value: T } | { done: false; later: Promise<T> }> {
+  let timer: Timer | undefined
+  const late = new Promise<null>(resolve => {
+    timer = $.clock.after(FEEDBACK, () => resolve(null))
+  })
+  const first = await Promise.race([work.then(value => ({ value })), late])
+  if (first) {
+    timer?.cancel()
+    return { done: true, value: first.value }
+  }
+  const line = `se: ${doing}…`
+  working.push(line)
+  $.ui.status(line)
+  const later = work.finally(() => {
+    working.splice(working.indexOf(line), 1)
+    $.ui.status(working.at(-1))
+  })
+  return { done: false, later }
+}
+
+// Times one call into se and, while SE is on, records it in the daemon's log as an se.call row.
+async function timed<T>($: EngineInterface, words: string[], call: () => Promise<T>): Promise<T> {
+  const began = await $.clock.now()
+  try {
+    return await call()
+  } finally {
+    const ms = (await $.clock.now()) - began
+    if (active) await forwards($, 'se.call', { words, ms }).catch(() => {})
+  }
 }
 
 // Brings the checkout the plugin was loaded from to the newest main, whether or
@@ -197,10 +270,12 @@ async function asks($: EngineInterface, words: string[], timeoutMs = STARTING): 
     const bin = await builds($)
     if (bin.failed) return bin.failed
     root = await $.session.root()
-    const ran = await $.process.run([bin.path, '--session', '--workspace', root, ...words], {
-      timeoutMs,
-      env: { [HOOKS_COMMIT]: hooksCommit, [PLUGIN_CHECKOUT]: checkoutOf($) },
-    })
+    const ran = await timed($, words, () =>
+      $.process.run([bin.path, '--session', '--workspace', root, ...words], {
+        timeoutMs,
+        env: { [HOOKS_COMMIT]: hooksCommit, [PLUGIN_CHECKOUT]: checkoutOf($) },
+      }),
+    )
     const said = parsed(ran.stdout) as Reply | null
     if (typeof said?.text !== 'string') return `se did not answer: ${failed(ran)}`
     return said
@@ -237,11 +312,22 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
   return `${reply.text} The plugins reload now.`
 }
 
-// /se <words>: hands the words to se and applies its reply; answers the text to show.
-// Help se answered is kept for the output row to draw; a line that no longer
-// answers help draws as its text.
+// /se <words>: hands the words to se and applies its reply; answers the text
+// to show. One se does not answer within FEEDBACK answers that it is working,
+// and its answer follows as a line of the transcript.
 async function runs($: EngineInterface, args: string): Promise<string> {
   const words = wordsOf(args)
+  const typed = ['/se', ...words].join(' ')
+  const ran = await within($, typed, answers($, words))
+  if (ran.done) return ran.value
+  void ran.later.then(text => $.ui.log(text))
+  return `${typed} is still working; its answer follows here.`
+}
+
+// Hands the words to se and applies its reply; answers the text to show.
+// Help se answered is kept for the output row to draw; a line that no longer
+// answers help draws as its text.
+async function answers($: EngineInterface, words: string[]): Promise<string> {
   const asked = await asks($, words)
   if (typeof asked === 'string') return asked
   const key = words.join(' ')
@@ -289,7 +375,9 @@ async function startsOnce($: EngineInterface): Promise<string> {
   try {
     const { path: bin, failed: unbuilt } = await builds($)
     if (unbuilt) return unbuilt
-    const ran = await $.process.run([bin, 'start', '--workspace', root], { timeoutMs: STARTING })
+    const ran = await timed($, ['start'], () =>
+      $.process.run([bin, 'start', '--workspace', root], { timeoutMs: STARTING }),
+    )
     const said = parsed(ran.stdout) as Endpoint | null
     if (ran.exitCode !== 0 || !said?.address) return failed(ran)
     endpoint = { address: said.address, token: said.token }

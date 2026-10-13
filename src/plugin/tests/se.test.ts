@@ -1,5 +1,5 @@
 import type { On } from 'claude-code'
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, type MockClock, mock, test } from 'claude-code/testing'
 
 const ROOT = '/work'
 const DAEMON = { address: '127.0.0.1:4100', token: 'tok' }
@@ -30,6 +30,12 @@ type World = {
   opened: { id: string; title?: string }[]
   // Every line the plugin logged to the transcript.
   logs: string[]
+  // Every status line the plugin set; undefined is a cleared one.
+  statuses: (string | undefined)[]
+  // How long the fake se takes to answer, by the words typed after /se.
+  takes: Record<string, number>
+  // The clock beneath the plugin, which moves only when the test moves it.
+  clock: MockClock
 }
 
 const HELP = '/se <command>\n\n  /se help   list the commands'
@@ -77,6 +83,9 @@ function world(on: On, env: Record<string, string> = {}): World {
     envs: {},
     opened: [],
     logs: [],
+    statuses: [],
+    takes: {},
+    clock: mock.clock(on),
     replies: {
       '': { text: HELP },
       on: { text: 'SE is on.', active: true, endpoint: DAEMON },
@@ -103,6 +112,10 @@ function world(on: On, env: Record<string, string> = {}): World {
     w.opened.push({ id: e.id, title: e.title })
     return { value: { isPlaced: true } }
   })
+  on('ui.status', ($, e) => {
+    w.statuses.push(e.text)
+    return { value: undefined }
+  })
   on('ui.log', ($, e) => {
     w.logs.push(e.text)
     return { value: undefined }
@@ -115,7 +128,7 @@ function world(on: On, env: Record<string, string> = {}): World {
       ? { value: w.endpointFile }
       : { deny: `ENOENT: ${e.path}` },
   )
-  on('process.run', ($, e) => {
+  on('process.run', async ($, e) => {
     const argv = [...e.argv]
     if (argv[0] === 'git') {
       return { value: { exitCode: w.head ? 0 : 128, stdout: w.head ? `${w.head}\n` : '', stderr: '' } }
@@ -126,11 +139,15 @@ function world(on: On, env: Record<string, string> = {}): World {
     if (verb === 'build') w.built = true
     if (verb === '--session' && argv[4] === 'update' && argv[5] === '--session-start') {
       if (w.movesTo) w.head = w.movesTo
+      const takes = w.takes['update --session-start']
+      if (takes) await w.clock.sleep(takes)
       if (typeof w.startUpdate === 'string') return { value: { exitCode: 1, stdout: '', stderr: w.startUpdate } }
       return { value: { exitCode: 0, stdout: JSON.stringify(w.startUpdate), stderr: '' } }
     }
     if (verb === '--session') {
       const words = argv.slice(4).join(' ')
+      const takes = w.takes[words]
+      if (takes) await w.clock.sleep(takes)
       if (words === 'on') w.live = DAEMON.address
       const reply = w.replies[words] ?? { text: `${HELP}\n\nse has no command "${words}".` }
       return { value: { exitCode: 0, stdout: JSON.stringify(reply), stderr: '' } }
@@ -177,6 +194,90 @@ const verbs = (w: World) =>
           : argv[1],
   )
 const posted = (w: World) => w.posts.map(p => p.event)
+
+test('an se call past one second says it is working at one second, and holds nothing up', async ($, on) => {
+  const w = world(on)
+  const clock = w.clock
+  w.takes.slow = 5000
+  w.replies.slow = { text: 'slow is done.' }
+  await $.session.start(starts)
+  let said: { text?: string } | undefined
+  const running = $.command.run(se('slow')).then(out => {
+    said = out
+  })
+  await clock.advance(999)
+  expect(w.statuses).toEqual([])
+  expect(said).toBeUndefined()
+  await clock.advance(1)
+  await running
+  // At one second the status line says what is working, and the command answers.
+  expect(w.statuses).toEqual(['se: /se slow…'])
+  expect(said?.text).toBe('/se slow is still working; its answer follows here.')
+  // The session goes on meanwhile.
+  expect((await $.attribution.text(probe)).text).toBe('probe')
+  expect(w.logs).toEqual([])
+  await clock.advance(4000)
+  // se's answer follows in the transcript, and the status line clears.
+  expect(w.logs).toEqual(['slow is done.'])
+  expect(w.statuses).toEqual(['se: /se slow…', undefined])
+})
+
+test('an se call within one second answers as it is, with no status line', async ($, on) => {
+  const w = world(on)
+  const clock = w.clock
+  w.takes.status = 999
+  await $.session.start(starts)
+  const running = $.command.run(se('status'))
+  await clock.advance(999)
+  expect((await running)?.text).toBe('No SE daemon answers for /work.')
+  await clock.advance(5000)
+  expect(w.statuses).toEqual([])
+  expect(w.logs).toEqual([])
+})
+
+test('a slow update at session start does not hold the session up', async ($, on) => {
+  const w = world(on, { SE_DEFAULT: 'on' })
+  const clock = w.clock
+  w.takes['update --session-start'] = 5000
+  let started = false
+  const starting = $.session.start(starts).then(() => {
+    started = true
+  })
+  await clock.advance(999)
+  expect(started).toBe(false)
+  await clock.advance(1)
+  await starting
+  expect(started).toBe(true)
+  expect(w.statuses).toEqual(['se: updating itself…'])
+  // An event raised meanwhile waits for the daemon the setup starts.
+  await $.attribution.text(probe)
+  expect(posted(w)).toEqual([])
+  await clock.advance(4000)
+  expect(verbs(w)).toEqual([UPDATE, 'start'])
+  expect(posted(w)).toContain('attribution.text')
+  expect(w.statuses).toEqual(['se: updating itself…', undefined])
+})
+
+test('events raised while a slow setup leaves SE off are dropped', async ($, on) => {
+  const w = world(on)
+  const clock = w.clock
+  w.takes['update --session-start'] = 5000
+  const starting = $.session.start(starts)
+  await clock.advance(1000)
+  await starting
+  await $.attribution.text(probe)
+  await clock.advance(4000)
+  await $.command.run(se('on'))
+  expect(posted(w)).not.toContain('attribution.text')
+})
+
+test('while SE is on, each se call is a row of the daemon log with its duration', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('on'))
+  await $.command.run(se('status'))
+  expect(posted(w)).toContain('se.call')
+})
 
 test('off by default: events pass, nothing starts, nothing is posted', async ($, on) => {
   const w = world(on)
@@ -299,7 +400,7 @@ test('a daemon that is down never holds the event up', async ($, on) => {
 
 test('/se update applies the new endpoint and reloads once it has answered', async ($, on) => {
   const w = world(on)
-  const clock = mock.clock(on)
+  const clock = w.clock
   await $.session.start(starts)
   await $.command.run(se('on'))
   w.ran = []
@@ -321,7 +422,7 @@ test('/se update applies the new endpoint and reloads once it has answered', asy
 
 test('/se restart moves the session to the daemon se answers, without a reload', async ($, on) => {
   const w = world(on)
-  const clock = mock.clock(on)
+  const clock = w.clock
   await $.session.start(starts)
   await $.command.run(se('on'))
   w.ran = []
@@ -359,7 +460,7 @@ test('a restart whose build failed shows why, and still moves to the daemon', as
 
 test('session start updates the checkout the plugin came from, then reloads once start has answered', async ($, on) => {
   const w = world(on, { SE_DEFAULT: 'on' })
-  const clock = mock.clock(on)
+  const clock = w.clock
   w.startUpdate = { text: 'SE updated aaa → bbb.', reload: true }
   await $.session.start(starts)
   const update = w.ran.find(argv => argv[5] === '--session-start') ?? []
@@ -376,7 +477,7 @@ test('session start updates the checkout the plugin came from, then reloads once
 
 test('a checkout that is current says nothing and does not reload', async ($, on) => {
   const w = world(on)
-  const clock = mock.clock(on)
+  const clock = w.clock
   await $.session.start(starts)
   await clock.settle()
   expect(w.toasts).toEqual([])
@@ -385,7 +486,7 @@ test('a checkout that is current says nothing and does not reload', async ($, on
 
 test('a checkout that is no clean main is left alone, noted in one line', async ($, on) => {
   const w = world(on)
-  const clock = mock.clock(on)
+  const clock = w.clock
   w.startUpdate = {
     text: 'SE left its checkout as it is: /me/SE/src/plugin/../.. is on topic, not main; the installed SE updates from main alone.',
   }
@@ -397,7 +498,7 @@ test('a checkout that is no clean main is left alone, noted in one line', async 
 
 test('a failed update does not block session start: the session goes on and says so', async ($, on) => {
   const w = world(on, { SE_DEFAULT: 'on' })
-  const clock = mock.clock(on)
+  const clock = w.clock
   w.startUpdate = 'fatal: unable to access origin\nCould not resolve host'
   await $.session.start(starts)
   await clock.settle()

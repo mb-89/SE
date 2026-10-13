@@ -37,6 +37,8 @@ type Issue struct {
 	// Parent is true for an issue with sub-issues: it holds no work of its
 	// own, and taking it means coordinating them.
 	Parent bool `json:"parent,omitempty"`
+	// Retro is true for an issue labelled se-retro: the retro skill does it.
+	Retro bool `json:"retro,omitempty"`
 	// Takeover is set for a leaf a take takes over, stuck for the first time
 	// or its PR in conflict with main: taking it continues its branch and PR
 	// as they stand.
@@ -348,7 +350,7 @@ func (s Source) survey() ([]Status, tree, error) {
 	for _, n := range t.numbers() {
 		i := t.byNum[n]
 		_, parent := t.subs[n]
-		st := &Status{Issue: Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, Parent: parent}, Above: t.above[n], Final: i.labelled(FinalLabel)}
+		st := &Status{Issue: Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, Parent: parent, Retro: i.labelled(RetroLabel)}, Above: t.above[n], Final: i.labelled(FinalLabel)}
 		switch {
 		case i.labelled(PersonLabel):
 			st.Person, st.Why = true, "waits on a person"

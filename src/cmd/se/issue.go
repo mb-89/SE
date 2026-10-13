@@ -276,7 +276,7 @@ func init() {
 		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "check, push and open the PR of an issue-N branch, auto-merge on",
-		Details: "on an issue-N branch of a leaf: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), pass tests/check.sh, push, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N), or find it open, and turn on auto-merge (squash).",
+		Details: "on an issue-N branch of a leaf: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), pass tests/check.sh, push, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash).",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue land")
@@ -558,6 +558,9 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string) (Re
 	}
 	if fanout != "" {
 		head += "\n" + fanout
+	}
+	if i.Retro {
+		head += fmt.Sprintf("\n\n#%d is a retro (%s): follow the retro skill, src/plugin/skills/retro/SKILL.md, from se retro collect %d", i.Number, issues.RetroLabel, i.Number)
 	}
 	if i.Parent {
 		head += fmt.Sprintf("\n\n#%d is a parent: it holds no work. Coordinate its tree: se issue next --in %d --take", i.Number, i.Number)

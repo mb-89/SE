@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"gopkg.in/yaml.v3"
 )
 
@@ -107,6 +108,12 @@ type Facts struct {
 	Commits    int `yaml:"commits"`
 	Takeovers  int `yaml:"takeovers"`
 	MainMerges int `yaml:"main_merges"`
+	// BatteryMs is how long the battery this land ran took, Slowest its
+	// slowest tests, and Overruns each budget it went over; empty where the
+	// check left no profile.
+	BatteryMs int64    `yaml:"battery_ms,omitempty"`
+	Slowest   []string `yaml:"slowest_tests,omitempty"`
+	Overruns  []string `yaml:"budget_overruns,omitempty"`
 }
 
 // Landed is the record a landing leaves on its issue.
@@ -151,6 +158,12 @@ func (l Landed) Comment(qs []Question) (string, error) {
 	}
 	fmt.Fprintf(&b, "\n### Facts\n- claim to landing: %s\n- landed: %s\n- commits: %d\n- takeovers: %d\n- main merges: %d\n",
 		took, f.Landed.UTC().Format(time.RFC3339), f.Commits, f.Takeovers, f.MainMerges)
+	if f.BatteryMs > 0 {
+		fmt.Fprintf(&b, "- battery: %dms\n", f.BatteryMs)
+		for _, o := range f.Overruns {
+			fmt.Fprintf(&b, "- **over budget:** %s\n", o)
+		}
+	}
 	data, err := yaml.Marshal(record{Issue: l.Issue, Answers: answers, Facts: f})
 	if err != nil {
 		return "", err
@@ -201,6 +214,16 @@ func ParseLanding(body string) (l Landed, ok bool, err error) {
 // its branch's history and GitHub's record of the branch's creation.
 func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 	f := Facts{Landed: s.now().UTC().Truncate(time.Second), Takeovers: marksOf(comments).takeovers}
+	profile, profiled, err := battery.Load(dir)
+	if err != nil {
+		return Facts{}, err
+	}
+	if profiled {
+		f.BatteryMs, f.Overruns = profile.TotalMs, profile.Overruns
+		for _, t := range profile.Slowest {
+			f.Slowest = append(f.Slowest, t.String())
+		}
+	}
 	count := func(args ...string) (int, error) {
 		out, err := git(dir, append([]string{"rev-list", "--count"}, args...)...)
 		if err != nil {
@@ -212,7 +235,6 @@ func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 	if _, err := git(dir, "fetch", "-q", "origin", "main"); err != nil {
 		return Facts{}, err
 	}
-	var err error
 	if f.Commits, err = count("--no-merges", "origin/main..HEAD"); err != nil {
 		return Facts{}, err
 	}
