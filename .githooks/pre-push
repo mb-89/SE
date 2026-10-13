@@ -1,2 +1,2 @@
 #!/bin/sh
-exec sh ./check.sh
+exec sh ./tests/check.sh

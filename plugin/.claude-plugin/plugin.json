@@ -1,0 +1,7 @@
+{
+  "name": "se",
+  "version": "0.1.0",
+  "description": "SE: /se-on logs every session event under .se/.runtime, /se-off stops it.",
+  "author": { "name": "mb-89" },
+  "types": "./types/index.d.ts"
+}

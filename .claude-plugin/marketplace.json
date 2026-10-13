@@ -1,0 +1,13 @@
+{
+  "name": "se",
+  "owner": {
+    "name": "mb-89"
+  },
+  "description": "SE, installed user-wide from this repository.",
+  "plugins": [
+    {
+      "name": "se",
+      "source": "./plugin"
+    }
+  ]
+}
