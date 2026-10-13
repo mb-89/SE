@@ -25,12 +25,12 @@ const (
 // facts; the box fills Findings, Classes and WentWell; se retro report fills
 // each finding's Issue. The next retro reads it first.
 type RetroReport struct {
-	Retro    int      `yaml:"retro"`
-	Attended bool     `yaml:"attended"`
-	Window   Window   `yaml:"window"`
-	Metrics  Metrics  `yaml:"metrics"`
-	Checks   []Broken `yaml:"checks"`
-	Previous *Score   `yaml:"previous,omitempty"`
+	Retro    int         `yaml:"retro"`
+	Attended bool        `yaml:"attended"`
+	Window   RetroWindow `yaml:"window"`
+	Metrics  Metrics     `yaml:"metrics"`
+	Checks   []Broken    `yaml:"checks"`
+	Previous *Score      `yaml:"previous,omitempty"`
 	// Findings, Classes and WentWell are the box's judgment.
 	Findings []Lesson `yaml:"findings"`
 	Classes  []Class  `yaml:"classes"`

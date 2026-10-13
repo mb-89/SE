@@ -47,7 +47,7 @@ func init() {
 			fanout := fire()
 			if *asJSON {
 				data, err := json.Marshal(struct {
-					issues.Retro
+					issues.RetroIssue
 					Fanout string `json:"fanout"`
 				}{r, fanout})
 				return Reply{Text: string(data)}, err

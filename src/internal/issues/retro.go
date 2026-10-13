@@ -9,10 +9,6 @@ import (
 	"time"
 )
 
-// RetroLabel marks a retro: an issue that checks SE's rules across everything
-// closed since the last retro. spec/retro.md has the rules.
-const RetroLabel = "se-retro"
-
 // NewMark is what se issue new leaves at the end of every body it writes, so
 // the retro can tell an issue it made from one made by hand.
 const NewMark = "<!-- se:new -->"
@@ -22,8 +18,8 @@ const NewMark = "<!-- se:new -->"
 // <!-- se:retro attended --> instead, and its box stops for the owner.
 const unattendedMark = "<!-- se:retro unattended -->"
 
-// Retro is the retro se retro new created.
-type Retro struct {
+// RetroIssue is the retro se retro new created.
+type RetroIssue struct {
 	Issue
 	// Previous is the last closed retro, whose closing opens this one's
 	// window; 0 where there is none, and the window is the whole history.
@@ -60,13 +56,13 @@ func (s Source) lastRetro(n int) (last past, ok bool, all []past, err error) {
 // NewRetro creates a retro issue, labelled se and se-retro: field is the
 // person's field feedback ("" for none), unattended says nobody waits for its
 // report. It goes through the same code as se issue new.
-func (s Source) NewRetro(field string, unattended bool) (Retro, error) {
+func (s Source) NewRetro(field string, unattended bool) (RetroIssue, error) {
 	last, ok, _, err := s.lastRetro(0)
 	if err != nil {
-		return Retro{}, err
+		return RetroIssue{}, err
 	}
 	window := "the repository's whole history: no retro has closed yet"
-	r := Retro{Unattended: unattended}
+	r := RetroIssue{Unattended: unattended}
 	if ok {
 		r.Previous = last.Number
 		window = fmt.Sprintf("everything closed since the retro #%d closed, %s", last.Number, last.ClosedAt.UTC().Format(time.RFC3339))
@@ -87,24 +83,26 @@ func (s Source) NewRetro(field string, unattended bool) (Retro, error) {
 	title := "SE retro " + s.now().UTC().Format("2006-01-02")
 	made, _, err := s.create(title, body, 0, nil, []string{Label, RetroLabel})
 	if err != nil {
-		return Retro{}, err
+		return RetroIssue{}, err
 	}
 	r.Issue = made
 	return r, nil
 }
 
-// Window is what a retro looks at: everything closed after Since, the closing
+// RetroWindow is what a retro looks at: everything closed after Since, the closing
 // of the retro Previous, up to Until. A zero Since is the whole history.
-type Window struct {
+type RetroWindow struct {
 	Previous int       `yaml:"previous"`
 	Since    time.Time `yaml:"since,omitempty"`
 	Until    time.Time `yaml:"until"`
 }
 
-func (w Window) holds(t time.Time) bool { return !t.IsZero() && t.After(w.Since) && !t.After(w.Until) }
+func (w RetroWindow) holds(t time.Time) bool {
+	return !t.IsZero() && t.After(w.Since) && !t.After(w.Until)
+}
 
 // since is the query that narrows a list to what changed in the window.
-func (w Window) since() string {
+func (w RetroWindow) since() string {
 	if w.Since.IsZero() {
 		return ""
 	}
@@ -170,7 +168,7 @@ type merged struct {
 type Collected struct {
 	Retro    int
 	Attended bool
-	Window   Window
+	Window   RetroWindow
 	Rows     []Row
 	PRs      int
 	Commits  int
@@ -220,7 +218,7 @@ func (s Source) Collect(n int) (Collected, error) {
 	if err != nil {
 		return Collected{}, err
 	}
-	c := Collected{Retro: n, Attended: !strings.Contains(i.Body, unattendedMark), Window: Window{Until: s.now().UTC().Truncate(time.Second)}}
+	c := Collected{Retro: n, Attended: !strings.Contains(i.Body, unattendedMark), Window: RetroWindow{Until: s.now().UTC().Truncate(time.Second)}}
 	last, ok, retros, err := s.lastRetro(n)
 	if err != nil {
 		return Collected{}, err

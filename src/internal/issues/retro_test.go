@@ -18,7 +18,7 @@ var (
 	since      = "&since=2026-10-01T00:00:00Z"
 )
 
-func closedIssue(n int, reason, closed, body string, extra string) string {
+func closedJSON(n int, reason, closed, body string, extra string) string {
 	return fmt.Sprintf(`{"number":%d,"title":"t%d","state":"closed","state_reason":%q,"closed_at":%q,"body":%q,"labels":[{"name":"se"}]%s}`, n, n, reason, closed, body, extra)
 }
 
@@ -44,7 +44,7 @@ func jsonComments(bodies ...string) string {
 func previousReport(t *testing.T) string {
 	t.Helper()
 	text, err := RetroReport{
-		Retro: 20, Attended: true, Window: Window{Until: prevClosed},
+		Retro: 20, Attended: true, Window: RetroWindow{Until: prevClosed},
 		Metrics: Metrics{"closed": 2, "conflicts": 1, "conflicts_per_issue": 0.5, "ci_reruns_per_issue": 0},
 		Findings: []Lesson{
 			{Title: "PRs without Fixes", Class: "landing", Body: "b", Home: "check", Check: "fixes", Issue: 21},
@@ -88,14 +88,14 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 		"repos/o/r/issues/26/comments?per_page=100": `[]`,
 	}
 	closed := []string{
-		closedIssue(23, "completed", at(2, 12), "work\n\n"+NewMark, ""),
-		closedIssue(24, "completed", at(3, 10), "by hand", ""),
-		closedIssue(25, "not_planned", at(3, 11), NewMark, ""),
-		closedIssue(26, "completed", at(3, 12), NewMark, `,"sub_issues_summary":{"total":2,"completed":2}`),
+		closedJSON(23, "completed", at(2, 12), "work\n\n"+NewMark, ""),
+		closedJSON(24, "completed", at(3, 10), "by hand", ""),
+		closedJSON(25, "not_planned", at(3, 11), NewMark, ""),
+		closedJSON(26, "completed", at(3, 12), NewMark, `,"sub_issues_summary":{"total":2,"completed":2}`),
 	}
 	commits := `[{"sha":"x99","commit":{"message":"pushed straight\n\nto main"}},{"sha":"m51","commit":{"message":"m"}},{"sha":"m50","commit":{"message":"m"}}]`
 	if !later {
-		closed = append(closed, closedIssue(19, "completed", "2026-09-29T00:00:00Z", NewMark, ""))
+		closed = append(closed, closedJSON(19, "completed", "2026-09-29T00:00:00Z", NewMark, ""))
 		a["repos/o/r/issues/19/comments?per_page=100"] = jsonComments(landing(t, 19, map[string]string{"done": "old", "by-hand": "none"}, time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)))
 		a["repos/o/r/commits/h49/check-runs?filter=all&per_page=100"] = `{"check_runs":[{"id":9,"name":"check","status":"completed","conclusion":"success"}]}`
 		a["repos/o/r/pulls/49/files?per_page=100"] = `[]`
@@ -105,7 +105,7 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 	}
 	// GitHub's since is about updates: #19 closed before the window but was
 	// touched after it, so the list holds it and the window leaves it out.
-	closed = append(closed, closedIssue(19, "completed", "2026-09-29T00:00:00Z", NewMark, ""))
+	closed = append(closed, closedJSON(19, "completed", "2026-09-29T00:00:00Z", NewMark, ""))
 	a["repos/o/r/issues?labels=se-retro&state=closed&per_page=100"] = `[{"number":10,"state":"closed","closed_at":"2026-09-01T00:00:00Z"},{"number":20,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`
 	a["repos/o/r/issues/10/comments?per_page=100"] = `[]`
 	a["repos/o/r/issues/20/comments?per_page=100"] = jsonComments(previousReport(t))
