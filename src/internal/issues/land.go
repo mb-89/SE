@@ -42,15 +42,20 @@ func Issued(dir string) (int, error) {
 	return n, nil
 }
 
-// Land brings the issue branch checked out in dir to main: check must pass on
-// a clean tree of an issue with no open sub-issues, then the branch is pushed, its PR against main opened (or,
-// where it is open already, found), and auto-merge turned on with squash. Run
-// again after a fix, it pushes and reports the same PR. Where session is set,
-// the leaf records who worked it, so a review of its tree can refuse that
-// worker.
-func (s Source) Land(dir, session string, check func(dir string) error) (Landing, error) {
+// Land brings the issue branch checked out in dir to main: answers must
+// answer every question in qs, and check must pass on a clean tree of an
+// issue with no open sub-issues; then the branch is pushed, the answers
+// posted on the issue, its PR against main opened (or, where it is open
+// already, found), and auto-merge turned on with squash. Run again after a
+// fix, it pushes, updates the answers and reports the same PR. Where session
+// is set, the leaf records who worked it, so a review of its tree can refuse
+// that worker.
+func (s Source) Land(dir, session string, qs []Question, answers map[string]string, check func(dir string) error) (Landing, error) {
 	n, err := Issued(dir)
 	if err != nil {
+		return Landing{}, err
+	}
+	if err := answered(qs, answers); err != nil {
 		return Landing{}, err
 	}
 	if dirty, err := git(dir, "status", "--porcelain"); err != nil {
@@ -73,6 +78,9 @@ func (s Source) Land(dir, session string, check func(dir string) error) (Landing
 		return Landing{}, err
 	}
 	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
+		return Landing{}, err
+	}
+	if err := s.postLanding(dir, n, qs, answers); err != nil {
 		return Landing{}, err
 	}
 	l := Landing{Issue: n}

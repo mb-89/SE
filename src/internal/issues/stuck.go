@@ -49,6 +49,11 @@ func (s Source) marks(n int) (marks, error) {
 	if err != nil {
 		return marks{}, err
 	}
+	return marksOf(all), nil
+}
+
+// marksOf reads the marks out of an issue's comments, oldest first.
+func marksOf(all []comment) marks {
 	m := marks{winners: map[int]int64{}}
 	for _, c := range all {
 		round := 0
@@ -76,7 +81,7 @@ func (s Source) marks(n int) (marks, error) {
 			}
 		}
 	}
-	return m, nil
+	return m
 }
 
 // lastPush is when issue n's branch last saw a push, its creation included;
