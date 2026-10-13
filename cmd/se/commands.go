@@ -19,6 +19,8 @@ import (
 // in its init; the help and the session's /se are made from what registered.
 type Command struct {
 	// Name is the word that runs it: se <name>, or /se <name> in a session.
+	// A name of two words, "issue next", is a sub-word of its first: the first
+	// word alone then lists its sub-words.
 	Name string
 	// Usage is the command line after se, the name first: "serve [--idle D]".
 	Usage string
@@ -117,13 +119,29 @@ func offered(session bool) []Command {
 	return out
 }
 
+// subWords lists the second words of the commands under first that a terminal
+// (session false) or a session can run.
+func subWords(first string, session bool) []string {
+	var out []string
+	for _, c := range offered(session) {
+		if rest, ok := strings.CutPrefix(c.Name, first+" "); ok && first != "" {
+			out = append(out, rest)
+		}
+	}
+	return out
+}
+
+func prog(session bool) string {
+	if session {
+		return "/se"
+	}
+	return "se"
+}
+
 // help is the help made from the registry: on a terminal every command, in a
 // session the ones offered as /se <name>.
 func help(session bool) string {
-	prog := "se"
-	if session {
-		prog = "/se"
-	}
+	prog := prog(session)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s <command>\n\n", prog)
 	w := tabwriter.NewWriter(&b, 0, 0, 3, ' ', 0)
@@ -153,6 +171,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() > 0 {
 		name, call.Args = fs.Arg(0), fs.Args()[1:]
 	}
+	if len(call.Args) > 0 {
+		if _, sub := commands[name+" "+call.Args[0]]; sub {
+			name, call.Args = name+" "+call.Args[0], call.Args[1:]
+		}
+	}
 	cmd, ok := commands[name]
 	if *session && !(ok && cmd.Installed) {
 		if code, handed := handsOver(*workspace, args, stdout, stderr); handed {
@@ -172,6 +195,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	case name == "":
 		reply = Reply{Text: help(*session)}
+		if !*session {
+			fmt.Fprintln(stderr, reply.Text)
+			return 2
+		}
+	case len(subWords(name, *session)) > 0:
+		reply = Reply{Text: fmt.Sprintf("%s %s takes a word: %s.", prog(*session), name, strings.Join(subWords(name, *session), ", "))}
 		if !*session {
 			fmt.Fprintln(stderr, reply.Text)
 			return 2
