@@ -21,11 +21,11 @@ command, `/se`, which takes words the way a command line does:
 | `/se status` | says whether a daemon answers for this workspace |
 | `/se restart` | stops this workspace's daemon and starts it again; in an SE checkout, rebuilt from its source first |
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
-| `/se issue next` | names the next ready `se` issue, or says that none is ready |
+| `/se issue next` | names the next ready `se` issue, or says that none is ready; `--take` claims it |
 | `/se help`, `/se` | lists these |
 
 On a terminal, `se help` lists every command, those above and the ones a
-session is not offered: `se serve`, `se start`, `se stop` and `se issue take`.
+session is not offered: `se serve`, `se start` and `se stop`.
 
 The plugin is read from the checkout you ran `RUNME.sh` in.
 
@@ -58,7 +58,7 @@ and hands nothing to the checkout's build.
 ## Issues
 
 SE's work items are GitHub issues labelled `se`. `se issue next` names the next
-one a box may take, and `se issue take` claims it by pushing its branch
+one a box may take, and `se issue next --take` claims it by pushing its branch
 `issue-<n>`. The rules for which issue is ready, and how a claim works, live in
 [docs/issues.md](docs/issues.md).
 

@@ -16,33 +16,14 @@ var gh issues.GH = issues.Gh
 func init() {
 	register(Command{
 		Name:    "issue next",
-		Usage:   "issue next [--json] [--repo OWNER/NAME]",
-		Summary: "name the next ready se issue, or say that none is ready",
+		Usage:   "issue next [--take [N]] [--json] [--repo OWNER/NAME]",
+		Summary: "name the next ready se issue, or say that none is ready; --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue next")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			s, err := src()
-			if err != nil {
-				return Reply{}, err
-			}
-			next, ok, err := s.Next()
-			if err != nil {
-				return Reply{}, err
-			}
-			return issueReply(*asJSON, next, ok, "")
-		},
-	})
-	register(Command{
-		Name:    "issue take",
-		Usage:   "issue take [N] [--json] [--repo OWNER/NAME]",
-		Summary: "claim the next ready se issue, or issue N: push its branch issue-N from origin/main and check it out",
-		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue take")
-			want := 0
-			// The issue's number may stand before, between or after the flags.
+			take := &takeFlag{}
+			fs.Var(take, "take", "claim the issue: the next ready one, or --take N")
+			// --take N: the number may stand after --take, between or after the other flags.
 			for rest := c.Args; ; {
 				if err := fs.Parse(rest); err != nil {
 					return Reply{}, err
@@ -51,10 +32,10 @@ func init() {
 					break
 				}
 				n, err := strconv.Atoi(strings.TrimPrefix(fs.Arg(0), "#"))
-				if err != nil || n <= 0 || want != 0 {
-					return Reply{}, fmt.Errorf("issue take takes one issue number, not %q", fs.Arg(0))
+				if !take.set || err != nil || n <= 0 || take.n != 0 {
+					return Reply{}, fmt.Errorf("issue next takes one issue number, after --take, not %q", fs.Arg(0))
 				}
-				want, rest = n, fs.Args()[1:]
+				take.n, rest = n, fs.Args()[1:]
 			}
 			c.Args = nil
 			if err := c.Parse(fs); err != nil {
@@ -64,7 +45,14 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			took, ok, err := s.Take(c.Workspace, want)
+			if !take.set {
+				next, ok, err := s.Next()
+				if err != nil {
+					return Reply{}, err
+				}
+				return issueReply(*asJSON, next, ok, "")
+			}
+			took, ok, err := s.Take(c.Workspace, take.n)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -73,7 +61,35 @@ func init() {
 	})
 }
 
-// issueFlags is the flag set both issue commands take; src reads the issues of
+// takeFlag is --take, alone or as --take=N; a bare --take N is read by the
+// command, since a flag that may stand alone cannot take the next word.
+type takeFlag struct {
+	set bool
+	n   int
+}
+
+func (t *takeFlag) IsBoolFlag() bool { return true }
+
+func (t *takeFlag) String() string { return "" }
+
+func (t *takeFlag) Set(v string) error {
+	t.set = true
+	switch v {
+	case "true":
+		return nil
+	case "false":
+		t.set = false
+		return nil
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(v, "#"))
+	if err != nil || n <= 0 {
+		return fmt.Errorf("--take takes an issue number, not %q", v)
+	}
+	t.n = n
+	return nil
+}
+
+// issueFlags is the flag set of issue next; src reads the issues of
 // --repo, or of the workspace's origin, once the flags are parsed.
 func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Source, error), asJSON *bool) {
 	fs = c.Flags(name)

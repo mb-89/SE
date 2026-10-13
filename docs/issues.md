@@ -22,21 +22,21 @@ choice is deterministic and no prompt restates it.
 - **Done**: the PR's body says `Fixes #n`, so GitHub closes the issue when the
   PR merges, and the issues it blocked become ready.
 
-## The commands
+## The command
 
-    se issue next [--json] [--repo OWNER/NAME]
-    se issue take [N] [--json] [--repo OWNER/NAME]
+    se issue next [--take [N]] [--json] [--repo OWNER/NAME]
 
 `se issue next` prints the next ready issue (number, title, link and body), or
 says that none is ready; it exits 0 either way. A session has it as
 `/se issue next`.
 
-`se issue take` claims the next ready issue, or issue `N`: it pushes
-`origin/main` as `issue-<n>` (a push that may only create the branch, never move
-it), then checks the branch out. Where the push is refused because another box
-claimed the issue first, it moves to the next ready issue. It prints what it
-took, or that nothing is ready. `take N` refuses an issue that is not ready and
-says why.
+`se issue next --take` claims the next ready issue, and `--take N` (or
+`--take=N`) issue `N`: it pushes `origin/main` as `issue-<n>` (a push that may
+only create the branch, never move it), then checks the branch out. Where the
+push is refused because another box claimed the issue first, it moves to the
+next ready issue. It prints what it took, or that nothing is ready. `--take N`
+refuses an issue that is not ready and says why. There is no separate `take`
+command.
 
-Both read GitHub through `gh api`, which owns the authentication, and work on
+It reads GitHub through `gh api`, which owns the authentication, and works on
 the repository of the workspace's `origin` unless `--repo` names another.
