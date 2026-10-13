@@ -18,10 +18,10 @@ func pr70(mergeable, state string) string {
 	return fmt.Sprintf(`{"number":70,"html_url":"p70","mergeable":%s,"mergeable_state":%q,"head":{"ref":"issue-7","sha":"abc"}}`, mergeable, state)
 }
 
-// github is a recorded repository with #5 ready and #7 claimed, its PR #70
+// pulls is a recorded repository with #5 ready and #7 claimed, its PR #70
 // answering pr. It keeps #7's comments, so a takeover's marker is written and
 // read back, and every write it was asked.
-type github struct {
+type pulls struct {
 	t        *testing.T
 	answers  map[string]string
 	pr       []string // #70 as asked, one answer per ask; the last repeats
@@ -31,16 +31,18 @@ type github struct {
 	writes [][]string
 }
 
-func newGithub(t *testing.T, pr ...string) *github {
-	g := &github{t: t, pr: pr, answers: unblocked(map[string]string{
+func newPulls(t *testing.T, pr ...string) *pulls {
+	g := &pulls{t: t, pr: pr, answers: unblocked(map[string]string{
 		listPath:      `[` + open(5, "new work") + `,` + open(7, "old work") + `]`,
 		refsPath:      `[{"ref":"refs/heads/issue-7"}]`,
 		openPullsPath: `[{"number":70,"head":{"ref":"issue-7"}},{"number":71,"head":{"ref":"someone-else"}}]`,
+		// #7's branch saw a push inside the lease: it is not stuck.
+		activity(7): pushed(fresh),
 	}, 5)}
 	return g
 }
 
-func (g *github) gh(args ...string) ([]byte, error) {
+func (g *pulls) gh(args ...string) ([]byte, error) {
 	g.t.Helper()
 	path := args[len(args)-1]
 	if args[1] == "-X" {
@@ -95,8 +97,8 @@ func noPause(t *testing.T) *int {
 func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 	noPause(t)
 	a := claimed7(t)
-	g := newGithub(t, pr70("false", "dirty"))
-	took, ok, err := Source{Repo: repo, GH: g.gh}.Take(a, 0)
+	g := newPulls(t, pr70("false", "dirty"))
+	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
 	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || *took.Takeover != (Takeover{PR: 70, URL: "p70", Count: 1}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -110,9 +112,9 @@ func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 		t.Fatalf("comments %+v", g.comments)
 	}
 	// Named with --take N, the issue named is taken, and no PR is asked.
-	g = newGithub(t)
+	g = newPulls(t)
 	_, b, _ := boxes(t)
-	if took, ok, err := (Source{Repo: repo, GH: g.gh}).Take(b, 5); err != nil || !ok || took.Number != 5 || took.Takeover != nil {
+	if took, ok, err := (Source{Repo: repo, GH: g.gh, Now: clock}).Take(b, 5); err != nil || !ok || took.Number != 5 || took.Takeover != nil {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 }
@@ -126,8 +128,8 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 	} {
 		paused := noPause(t)
 		_, a, _ := boxes(t)
-		g := newGithub(t, answers...)
-		took, ok, err := Source{Repo: repo, GH: g.gh}.Take(a, 0)
+		g := newPulls(t, answers...)
+		took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
 		if err != nil || !ok || took.Number != 5 || took.Takeover != nil || len(g.comments) != 0 {
 			t.Errorf("%s: took %+v %v %v", name, took, ok, err)
 		}
@@ -141,8 +143,8 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 	// A null answer that turns dirty is a conflict.
 	noPause(t)
 	a := claimed7(t)
-	g := newGithub(t, pr70("null", "unknown"), pr70("false", "dirty"))
-	if took, ok, err := (Source{Repo: repo, GH: g.gh}).Take(a, 0); err != nil || !ok || took.Number != 7 {
+	g := newPulls(t, pr70("null", "unknown"), pr70("false", "dirty"))
+	if took, ok, err := (Source{Repo: repo, GH: g.gh, Now: clock}).Take(a, 0); err != nil || !ok || took.Number != 7 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 }
@@ -150,10 +152,10 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 func TestASecondConflictTakeoverGoesToAPerson(t *testing.T) {
 	noPause(t)
 	_, a, _ := boxes(t)
-	g := newGithub(t, pr70("false", "dirty"))
+	g := newPulls(t, pr70("false", "dirty"))
 	// The first takeover found head 0ld; the PR conflicts again at abc.
 	g.comments = []comment{{ID: 1, Body: "Taken over.\n<!-- se:takeover 1 -->\n<!-- se:takeover-head 0ld -->"}}
-	took, ok, err := Source{Repo: repo, GH: g.gh}.Take(a, 0)
+	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -175,10 +177,11 @@ func TestASecondConflictTakeoverGoesToAPerson(t *testing.T) {
 	}
 	// Labelled se-person, #7 has left the queue.
 	got := survey(t, unblocked(map[string]string{
-		listPath: `[{"number":7,"state":"open","labels":[{"name":"se"},{"name":"se-person"}]}]`,
-		refsPath: `[{"ref":"refs/heads/issue-7"}]`,
+		listPath:  `[{"number":7,"state":"open","labels":[{"name":"se"},{"name":"se-person"}]}]`,
+		refsPath:  `[{"ref":"refs/heads/issue-7"}]`,
+		comments7: `[]`,
 	}))
-	if got[7] != "waits for a person (se-person)" {
+	if got[7] != "waits on a person" {
 		t.Fatalf("%v", got)
 	}
 }
@@ -186,10 +189,10 @@ func TestASecondConflictTakeoverGoesToAPerson(t *testing.T) {
 func TestATakeoverInFlightIsLeftToItsBox(t *testing.T) {
 	noPause(t)
 	_, a, _ := boxes(t)
-	g := newGithub(t, pr70("false", "dirty"))
+	g := newPulls(t, pr70("false", "dirty"))
 	// A box took #7 over at this very head and has not landed the merge yet.
 	g.comments = []comment{{ID: 1, Body: "<!-- se:takeover 1 -->\n<!-- se:takeover-head abc -->"}}
-	took, ok, err := Source{Repo: repo, GH: g.gh}.Take(a, 0)
+	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 || len(g.writes) != 0 {
 		t.Fatalf("took %+v %v %v, writes %q", took, ok, err, g.writes)
 	}
@@ -198,14 +201,29 @@ func TestATakeoverInFlightIsLeftToItsBox(t *testing.T) {
 func TestOfTwoBoxesTakingOverAtOnceTheFirstMarkerWins(t *testing.T) {
 	noPause(t)
 	_, a, _ := boxes(t)
-	g := newGithub(t, pr70("false", "dirty"))
+	g := newPulls(t, pr70("false", "dirty"))
 	g.before = &comment{ID: 50, Body: "<!-- se:takeover 1 -->\n<!-- se:takeover-head abc -->"}
-	took, ok, err := Source{Repo: repo, GH: g.gh}.Take(a, 0)
+	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 	last := g.writes[len(g.writes)-1]
 	if strings.Join(last, " ") != "api -X DELETE repos/o/r/issues/comments/101" {
 		t.Fatalf("the losing marker was not withdrawn: %q", g.writes)
+	}
+}
+
+func TestAConflictAfterAStuckTakeoverGoesToAPerson(t *testing.T) {
+	noPause(t)
+	_, a, _ := boxes(t)
+	g := newPulls(t, pr70("false", "dirty"))
+	// #7 was taken over once already, stuck; its PR now conflicts.
+	g.comments = []comment{{ID: 1, Body: "<!-- se:takeover 1 -->\nTaken over: nothing was pushed."}}
+	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
+	if err != nil || !ok || took.Number != 5 {
+		t.Fatalf("took %+v %v %v", took, ok, err)
+	}
+	if len(g.comments) != 2 || !strings.HasPrefix(g.comments[1].Body, "<!-- se:person -->\nPR #70 conflicts with main again") {
+		t.Fatalf("comments %+v", g.comments)
 	}
 }

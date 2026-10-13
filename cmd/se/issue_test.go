@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // recordedIssues answers the issue commands' gh calls for o/r: #1 claimed,
@@ -28,12 +29,13 @@ func recordedIssues(t *testing.T) *[][]string {
 		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/pulls?base=main&state=open&per_page=100":       `[]`,
-		"repos/o/r/issues/1":                          `{"id":101,"number":1,"state":"open"}`,
-		"repos/o/r/issues/3":                          `{"id":103,"number":3,"state":"open"}`,
-		"repos/o/r/issues/5":                          `{"id":105,"number":5,"state":"closed"}`,
-		"repos/o/r/issues/4":                          `{"id":104,"number":4,"pull_request":{}}`,
-		"repos/o/r/issues":                            `{"id":110,"number":10,"title":"ten","html_url":"u10"}`,
-		"repos/o/r/issues/10/dependencies/blocked_by": `{"id":101}`,
+		"repos/o/r/issues/1":                                   `{"id":101,"number":1,"state":"open"}`,
+		"repos/o/r/issues/3":                                   `{"id":103,"number":3,"state":"open"}`,
+		"repos/o/r/issues/5":                                   `{"id":105,"number":5,"state":"closed"}`,
+		"repos/o/r/issues/4":                                   `{"id":104,"number":4,"pull_request":{}}`,
+		"repos/o/r/issues":                                     `{"id":110,"number":10,"title":"ten","html_url":"u10"}`,
+		"repos/o/r/issues/10/dependencies/blocked_by":          `{"id":101}`,
+		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1": `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
 	}
 	var calls [][]string
 	old, oldFire := gh, fire
@@ -81,14 +83,14 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, next, review." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, next, resume, review." {
 		t.Fatalf("%+v", r)
 	}
 }
 
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, next, review." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, next, resume, review." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -97,7 +99,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue next, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, next, review.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, next, resume, review.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -401,5 +403,50 @@ func TestIssueReviewReadsItsWords(t *testing.T) {
 		if strings.Contains(strings.Join(c, " "), "-X") {
 			t.Fatalf("a refused review wrote %v", c)
 		}
+	}
+}
+
+func TestIssueNextPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
+	answers := map[string]string{
+		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
+			{"number":7,"title":"seven","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-person"}]},
+			{"number":8,"title":"eight","state":"open","html_url":"u8"}]`,
+		"repos/o/r/git/matching-refs/heads/issue-":                `[]`,
+		"repos/o/r/issues/7/comments?per_page=100":                `[{"id":1,"body":"<!-- se:person -->\nStuck a second time."}]`,
+		"repos/o/r/issues/7/dependencies/blocked_by?per_page=100": `[]`,
+		"repos/o/r/issues/8/dependencies/blocked_by?per_page=100": `[{"number":7,"state":"open"}]`,
+		"repos/o/r/issues/7":                                      `{"number":7,"title":"seven","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-person"}]}`,
+		"repos/o/r/issues/7/comments":                             `{"id":2}`,
+		"repos/o/r/issues/7/labels/se-person":                     `[]`,
+	}
+	var writes []string
+	old := gh
+	gh = func(args ...string) ([]byte, error) {
+		if args[1] == "-X" {
+			writes = append(writes, args[2]+" "+args[len(args)-1])
+		}
+		a, ok := answers[args[len(args)-1]]
+		if !ok {
+			return nil, fmt.Errorf("not recorded: %v", args)
+		}
+		return []byte(a), nil
+	}
+	t.Cleanup(func() { gh = old })
+	code, out, errs := se(t, "issue", "next", "--person", "--repo", "o/r")
+	if code != 0 || out != "#7 seven\nu7\nBlocks 1 open issue(s).\nStuck a second time.\n" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if code, _, errs := se(t, "issue", "next", "--person", "--take", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "--person alone") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	if code, _, errs := se(t, "issue", "resume", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "one issue number") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	code, out, errs = se(t, "issue", "resume", "#7", "--repo", "o/r")
+	if code != 0 || out != "Resumed #7 seven: back in the queue, its takeover count reset.\nu7\n" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if want := []string{"POST repos/o/r/issues/7/comments", "DELETE repos/o/r/issues/7/labels/se-person"}; !reflect.DeepEqual(writes, want) {
+		t.Fatalf("writes %q", writes)
 	}
 }

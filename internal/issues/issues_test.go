@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const repo = "o/r"
@@ -47,13 +48,36 @@ func links(n int) string {
 	return fmt.Sprintf("repos/o/r/issues/%d/dependencies/blocked_by?per_page=100", n)
 }
 
+// now is the tests' clock; a branch pushed at fresh is inside the lease, one
+// pushed at stale is not.
+var (
+	now   = time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	clock = func() time.Time { return now }
+	fresh = now.Add(-time.Hour).Format(time.RFC3339)
+	stale = now.Add(-4 * time.Hour).Format(time.RFC3339)
+)
+
+func activity(n int) string {
+	return fmt.Sprintf("repos/o/r/activity?ref=refs/heads/issue-%d&per_page=1", n)
+}
+
+func pushed(when string) string { return `[{"timestamp":"` + when + `"}]` }
+
+// pushedAt records that each claimed branch issue-<n> was last pushed at when.
+func pushedAt(answers map[string]string, when string, ns ...int) map[string]string {
+	for _, n := range ns {
+		answers[activity(n)] = pushed(when)
+	}
+	return answers
+}
+
 func open(n int, body string) string {
 	return fmt.Sprintf(`{"number":%d,"title":"t%d","body":%q,"state":"open","html_url":"u%d","issue_dependencies_summary":{"total_blocked_by":0}}`, n, n, body, n)
 }
 
 func survey(t *testing.T, answers map[string]string) map[int]string {
 	t.Helper()
-	all, err := Source{Repo: repo, GH: recorded(t, answers)}.Survey()
+	all, err := Source{Repo: repo, GH: recorded(t, answers), Now: clock}.Survey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,8 +108,9 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 		"repos/mb-89/SE/git/matching-refs/heads/issue-":                read("refs.json"),
 		"repos/mb-89/SE/issues/6/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/mb-89/SE/issues/7/dependencies/blocked_by?per_page=100": `[]`,
+		"repos/mb-89/SE/activity?ref=refs/heads/issue-5&per_page=1":    pushed(fresh),
 	})
-	s := Source{Repo: "mb-89/SE", GH: gh}
+	s := Source{Repo: "mb-89/SE", GH: gh, Now: clock}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -125,11 +150,11 @@ func TestLowestReadyNumberComesFirst(t *testing.T) {
 }
 
 func TestAClaimedBranchHoldsItsIssue(t *testing.T) {
-	got := survey(t, unblocked(map[string]string{
+	got := survey(t, pushedAt(unblocked(map[string]string{
 		listPath: `[` + open(1, "") + `,` + open(2, "") + `,` + open(12, "") + `]`,
 		// issue-12 is not issue-1; issue-2-old is not issue-2.
 		refsPath: `[{"ref":"refs/heads/issue-1"},{"ref":"refs/heads/issue-2-old"}]`,
-	}, 2, 12))
+	}, 2, 12), fresh, 1))
 	if !reflect.DeepEqual(got, map[int]string{1: "claimed by issue-1", 2: "", 12: ""}) {
 		t.Fatalf("%v", got)
 	}
@@ -163,11 +188,12 @@ func TestAStaleSummaryDoesNotMakeABlockedIssueReady(t *testing.T) {
 	// Right after #6 is linked as blocked by #8, the list's summary can
 	// still count 0; the links already name #8.
 	gh := recorded(t, map[string]string{
-		listPath: `[` + open(6, "") + `,` + open(8, "") + `]`,
-		refsPath: `[{"ref":"refs/heads/issue-8"}]`,
-		links(6): `[{"number":8,"state":"open"}]`,
+		listPath:    `[` + open(6, "") + `,` + open(8, "") + `]`,
+		refsPath:    `[{"ref":"refs/heads/issue-8"}]`,
+		links(6):    `[{"number":8,"state":"open"}]`,
+		activity(8): pushed(fresh),
 	})
-	s := Source{Repo: repo, GH: gh}
+	s := Source{Repo: repo, GH: gh, Now: clock}
 	if next, ok, err := s.Next(); err != nil || ok {
 		t.Fatalf("next = %+v %v %v", next, ok, err)
 	}
@@ -185,8 +211,9 @@ func TestNothingReady(t *testing.T) {
 			listPath: list,
 			refsPath: `[{"ref":"refs/heads/issue-1"}]`,
 			"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
+			activity(1): pushed(fresh),
 		})
-		if next, ok, err := (Source{Repo: repo, GH: gh}).Next(); err != nil || ok {
+		if next, ok, err := (Source{Repo: repo, GH: gh, Now: clock}).Next(); err != nil || ok {
 			t.Errorf("%s: %+v %v %v", name, next, ok, err)
 		}
 	}

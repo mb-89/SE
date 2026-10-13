@@ -21,9 +21,10 @@ command, `/se`, which takes words the way a command line does:
 | `/se status` | says whether a daemon answers for this workspace, and which commits the loaded hooks, the plugin's checkout and the running `se` came from, and whether they agree |
 | `/se restart` | stops this workspace's daemon and starts it again; in an SE checkout, rebuilt from its source first |
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
-| `/se issue next` | names the next ready `se` issue, or says that none is ready; `--take` claims it; `--in ROOT` names the ready leaves inside a parent's tree |
+| `/se issue next` | names the next `se` issue, stuck work before new work, or says that none is ready; `--take` claims it, or takes a stuck one over; `--in ROOT` names the ready leaves inside a parent's tree; `--person` lists the issues waiting on a person |
 | `/se issue land` | on an `issue-<n>` branch: passes the check, pushes, opens its PR against main (`Fixes #<n>`) and turns on auto-merge (squash) |
 | `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent`; `--review` labels it `se-review` |
+| `/se issue resume` | for a person: takes an issue off `se-person` and puts it back in the queue |
 | `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree: `pass` closes it, `fail` creates fix leaves under it |
 | `/se ui` | opens SE's control panel, a pane of buttons that draws on every surface, the phone included: the on/off toggle top left, then a button for each command that takes no typed words (`status`, `restart`, `update`, `issue next`); a press runs what typing `/se <name>` runs |
 | `/se help`, `/se` | lists these, one short line each, under their groups |
@@ -70,7 +71,9 @@ one a box may take, and `se issue next --take` claims it by pushing its branch
 `--blocked-by` writes GitHub's native "blocked by" links. Issues nest: leaves
 are work, parents coordinate their sub-issues and close by themselves, except
 an `se-review` parent, which `se issue review` passes or fails by an agent that
-worked none of its tree. The
+worked none of its tree. A claim nothing was pushed to for 3 hours is stuck:
+the next box takes it over once, and a second time it goes to a person
+(`se issue next --person`, `se issue resume`). The
 rules for which
 issue is ready, how a claim works, and how issues are made live in
 [docs/issues.md](docs/issues.md). `se issue land` brings the claimed issue's
