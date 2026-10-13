@@ -59,8 +59,15 @@ func repoOf(root string) (*rules.Repo, error) {
 	return &rules.Repo{
 		Root:  root,
 		Paths: paths,
+		// A folder git ignores by a pattern ending in / matches only as a
+		// folder, which a fresh checkout may not hold: so p/ is asked too.
 		Ignored: func(p string) bool {
-			return exec.Command("git", "-C", root, "check-ignore", "-q", "--no-index", filepath.FromSlash(p)).Run() == nil
+			for _, q := range []string{p, p + "/"} {
+				if exec.Command("git", "-C", root, "check-ignore", "-q", "--no-index", filepath.FromSlash(q)).Run() == nil {
+					return true
+				}
+			}
+			return false
 		},
 		Commands: commandFlags(),
 		Manifest: func(name, at string) (string, error) { return manifest(root, paths, name, at) },

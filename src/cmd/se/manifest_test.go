@@ -88,3 +88,15 @@ func TestTheRulesKnowSesCommands(t *testing.T) {
 		t.Fatalf("rules (exit %d): %s", code, errs)
 	}
 }
+
+func TestAFolderGitIgnoresCountsThoughNoCheckoutHoldsIt(t *testing.T) {
+	ws := prose(t, map[string]string{
+		".gitignore": "a/bin/\n",
+		"a/x.md":     "# X\n\nReader: anyone.\n",
+		"README.md":  "# SE\n\nReader: a person meeting SE.\n\n`a/bin` and `a/bin/se` are built; `a/gone` is not.\n",
+	})
+	code, _, errs := se(t, "--workspace", ws, "rules")
+	if code != 1 || !strings.Contains(errs, "README.md:5: repo-path: no such path: a/gone") || strings.Count(errs, "repo-path: ") != 1 {
+		t.Fatalf("rules (exit %d): %s", code, errs)
+	}
+}
