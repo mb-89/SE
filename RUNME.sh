@@ -1,9 +1,9 @@
 #!/bin/sh
-# Installs SE for this user: builds se, installs the debugger, and makes this
-# checkout the marketplace "se", so the plugin se loads in every Claude session
-# on this machine. Run it again any time; it changes nothing that already
-# stands. Run it from the checkout that should stay on main: /se update keeps
-# that one current, and the sessions you work in run it.
+# Installs SE for this user: builds se, installs the debugger and the pinned
+# linters, and makes this checkout the marketplace "se", so the plugin se loads
+# in every Claude session on this machine. Run it again any time; it changes
+# nothing that already stands. Run it from the checkout that should stay on
+# main: /se update keeps that one current, and the sessions you work in run it.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # The debugger the VS Code launch configuration drives, pinned.
@@ -27,6 +27,8 @@ if ! gh auth status >/dev/null 2>&1 && ! gh api rate_limit >/dev/null 2>&1; then
 fi
 git -C "$root" config core.hooksPath .githooks
 (cd "$root" && go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se)
+# The battery's linters, at the versions tests/tools.sh pins.
+sh "$root/tests/tools.sh" install
 if ! command -v dlv >/dev/null 2>&1 && [ ! -x "$(go env GOPATH)/bin/dlv" ]; then
   go install "github.com/go-delve/delve/cmd/dlv@$DLV"
 fi

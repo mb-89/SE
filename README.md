@@ -11,10 +11,11 @@ The principles its design is measured against are in
 
     ./RUNME.sh
 
-It needs `go`, `git`, `claude` and `gh`, the GitHub CLI that `se issue` reads
-GitHub through. It builds `se`, installs the Go debugger, and installs the
-plugin for your user, so every Claude session on this machine has one
-command, `/se`, which takes words the way a command line does:
+It needs `go`, `git`, `claude`, `npm` and `gh`, the GitHub CLI that `se issue`
+reads GitHub through. It builds `se`, installs the Go debugger and the pinned
+linters, and installs the plugin for your user, so every Claude session on
+this machine has one command, `/se`, which takes words the way a command line
+does:
 
 | command | what it does |
 |---|---|
@@ -111,6 +112,25 @@ answers a `Reply`: the text to show and, for a session, the effects the plugin
 applies (switch forwarding on or off, where the daemon now answers, reload the
 plugins, open the control panel). The help on both sides is made from what registered, and the plugin
 hands every word typed after `/se` to `se --session`, so nothing else changes.
+
+## Checks
+
+`tests/check.sh` is the one definition of green; the pre-push hook and CI run
+it. Before the tests it runs the linters and SE's own rules, and each check
+reports how long it took:
+
+- **SE's rules**: `go run ./src/cmd/rules` checks every file git tracks or
+  would track against each rule in `src/internal/rules`. A rule is one file
+  that calls `register` in its `init`, with a test beside it; registering it is
+  all it takes for the battery to run it. A finding names the file, the line
+  and the rule.
+- **Go**: `golangci-lint`, configured in `.golangci.yml`, with a small set of
+  linters and `gofumpt` as the formatter.
+- **The plugin's TypeScript**: `biome`, configured in `biome.jsonc`.
+
+The linters' versions are pinned in `tests/tools.sh`, which `RUNME.sh` and CI
+run to install them; the check refuses any other version. A linter that is
+switched off, or a finding excluded, carries a one-line reason in its config.
 
 ## Debugging the daemon
 

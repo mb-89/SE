@@ -1,3 +1,4 @@
+// Internal test package: package main cannot be imported.
 package main
 
 import (
@@ -84,8 +85,10 @@ func TestTheHelpGroupsTheCommands(t *testing.T) {
 }
 
 func TestACommandStandsUnderTheGroupItRegisters(t *testing.T) {
-	register(Command{Name: "zz probe", Usage: "zz probe", Group: "Probes", Summary: "probe the help", Session: true,
-		Run: func(c *Call) (Reply, error) { return Reply{}, nil }})
+	register(Command{
+		Name: "zz probe", Usage: "zz probe", Group: "Probes", Summary: "probe the help", Session: true,
+		Run: func(c *Call) (Reply, error) { return Reply{}, nil },
+	})
 	t.Cleanup(func() { delete(commands, "zz probe") })
 	for _, session := range []bool{false, true} {
 		if h := help(session, false); !strings.Contains(h, "Probes:\n  zz probe      probe the help\n") {

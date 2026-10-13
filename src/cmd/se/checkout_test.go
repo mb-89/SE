@@ -1,3 +1,4 @@
+// Internal test package: package main cannot be imported.
 package main
 
 import (
@@ -180,7 +181,7 @@ func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
 	se := installed(t)
 	ws := scratch(t)
 	paths := daemon.Paths{Workspace: ws}
-	t.Cleanup(func() { daemon.Stop(paths, 5*time.Second) })
+	t.Cleanup(func() { _ = daemon.Stop(paths, 5*time.Second) })
 
 	// The checkout changes a summary and adds a command.
 	helpGo := filepath.Join(ws, "src", "cmd", "se", "help.go")
