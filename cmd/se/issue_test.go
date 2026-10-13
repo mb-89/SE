@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -74,14 +75,14 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: new, next." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, next." {
 		t.Fatalf("%+v", r)
 	}
 }
 
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: new, next." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, next." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -90,7 +91,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue next, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: new, next.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, next.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -162,6 +163,46 @@ func TestIssueNewCreatesTheIssueAndItsLinks(t *testing.T) {
 	}
 	code, out, _ = se(t, "issue", "new", "--json", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none")
 	if code != 0 || out != `{"number":10,"url":"u10","blocked_by":[]}`+"\n" {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+}
+
+func TestIssueLandNamesThePR(t *testing.T) {
+	root := t.TempDir()
+	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
+	git := func(dir string, args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git(root, "init", "-q", "--bare", "-b", "main", origin)
+	git(root, "clone", "-q", origin, ws)
+	git(ws, "checkout", "-q", "-b", "issue-6")
+	git(ws, "commit", "-q", "--allow-empty", "-m", "work")
+	old, oldCheck := gh, check
+	t.Cleanup(func() { gh, check = old, oldCheck })
+	checked := ""
+	check = func(dir string) error { checked = dir; return nil }
+	gh = func(args ...string) ([]byte, error) {
+		switch args[len(args)-1] {
+		case "repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100":
+			return []byte(`[]`), nil
+		case "repos/o/r/issues/6":
+			return []byte(`{"number":6,"title":"six"}`), nil
+		case "repos/o/r/pulls":
+			return []byte(`{"number":14,"node_id":"PR_14","html_url":"u14"}`), nil
+		case "graphql":
+			return []byte(`{}`), nil
+		}
+		return nil, fmt.Errorf("not recorded: %v", args)
+	}
+	code, out, errs := se(t, "issue", "land", "--workspace", ws, "--repo", "o/r")
+	if code != 0 || out != "Pushed issue-6 and opened PR #14, auto-merge (squash) on.\nu14\n" || checked != ws {
+		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
+	}
+	code, out, _ = se(t, "issue", "land", "--json", "--workspace", ws, "--repo", "o/r")
+	if code != 0 || out != `{"issue":6,"number":14,"url":"u14","created":true,"merged":false}`+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 }

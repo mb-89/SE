@@ -1,0 +1,164 @@
+package issues
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+const (
+	pullsPath = "repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100"
+	pr14      = `{"number":14,"node_id":"PR_14","html_url":"https://github.com/o/r/pull/14"}`
+)
+
+// landGH answers land's gh calls by path, fails those in fail, and keeps
+// every call it was asked.
+func landGH(t *testing.T, answers map[string]string, fail map[string]string) (GH, *[][]string) {
+	t.Helper()
+	var calls [][]string
+	return func(args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		path := args[len(args)-1]
+		if msg, ok := fail[path]; ok {
+			return nil, errors.New(msg)
+		}
+		a, ok := answers[path]
+		if !ok {
+			t.Fatalf("gh %v was not recorded", args)
+		}
+		return []byte(a), nil
+	}, &calls
+}
+
+// claimed is box a on issue-6, claimed from origin's main, with one commit of work.
+func claimed(t *testing.T) (origin, a string) {
+	t.Helper()
+	origin, a, _ = boxes(t)
+	if ok, err := Claim(a, 6); err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	run(t, a, "commit", "-q", "--allow-empty", "-m", "work")
+	return origin, a
+}
+
+func passes(string) error { return nil }
+
+func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
+	origin, a := claimed(t)
+	gh, calls := landGH(t, map[string]string{
+		pullsPath:            `[]`,
+		"repos/o/r/issues/6": `{"number":6,"title":"the work"}`,
+		"repos/o/r/pulls":    pr14,
+		"graphql":            `{"data":{}}`,
+	}, nil)
+	l, err := Source{Repo: repo, GH: gh}.Land(a, passes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Landing{Issue: 6, Number: 14, URL: "https://github.com/o/r/pull/14", Created: true}); l != want {
+		t.Fatalf("%+v", l)
+	}
+	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("origin's issue-6 is %s, want %s", got, want)
+	}
+	want := [][]string{
+		{"api", "--paginate", pullsPath},
+		{"api", "repos/o/r/issues/6"},
+		{"api", "-X", "POST", "-f", "title=the work", "-f", "head=issue-6", "-f", "base=main", "-f", "body=Fixes #6", "repos/o/r/pulls"},
+		{"api", "-f", "query=" + autoMerge, "-f", "id=PR_14", "graphql"},
+	}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("gh calls\n%q\nwant\n%q", *calls, want)
+	}
+	if !strings.Contains(autoMerge, "mergeMethod: SQUASH") {
+		t.Fatal(autoMerge)
+	}
+}
+
+func TestLandAgainPushesAndReportsTheOpenPR(t *testing.T) {
+	origin, a := claimed(t)
+	run(t, a, "push", "-q", "origin", "HEAD:issue-6")
+	run(t, a, "commit", "-q", "--allow-empty", "-m", "fix ci")
+	gh, calls := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`, "graphql": `{"data":{}}`}, nil)
+	l, err := Source{Repo: repo, GH: gh}.Land(a, passes)
+	if err != nil || l.Created || l.Number != 14 {
+		t.Fatalf("%+v %v", l, err)
+	}
+	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("origin's issue-6 is %s, want %s", got, want)
+	}
+	for _, c := range *calls {
+		if strings.Contains(strings.Join(c, " "), "POST") {
+			t.Fatalf("opened a second PR: %v", c)
+		}
+	}
+}
+
+func TestLandMergesAPRWithNothingToWaitFor(t *testing.T) {
+	_, a := claimed(t)
+	gh, calls := landGH(t, map[string]string{
+		pullsPath:                  `[` + pr14 + `]`,
+		"repos/o/r/pulls/14/merge": `{"merged":true}`,
+	}, map[string]string{"graphql": "gh: Pull request Pull request is in clean status (enablePullRequestAutoMerge)"})
+	l, err := Source{Repo: repo, GH: gh}.Land(a, passes)
+	if err != nil || !l.Merged {
+		t.Fatalf("%+v %v", l, err)
+	}
+	last := (*calls)[len(*calls)-1]
+	if want := []string{"api", "-X", "PUT", "-f", "merge_method=squash", "repos/o/r/pulls/14/merge"}; !reflect.DeepEqual(last, want) {
+		t.Fatalf("%q", last)
+	}
+}
+
+func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
+	_, a := claimed(t)
+	gh, calls := landGH(t, map[string]string{
+		pullsPath:                           `[` + pr14 + `]`,
+		"repos/o/r/pulls/14/ccr/auto_merge": `{"enabled":true,"merge_method":"squash"}`,
+	}, map[string]string{"graphql": "gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (HTTP 403)"})
+	l, err := Source{Repo: repo, GH: gh}.Land(a, passes)
+	if err != nil || l.Merged || l.Number != 14 {
+		t.Fatalf("%+v %v", l, err)
+	}
+	last := (*calls)[len(*calls)-1]
+	if want := []string{"api", "-X", "PUT", "-f", "merge_method=squash", "repos/o/r/pulls/14/ccr/auto_merge"}; !reflect.DeepEqual(last, want) {
+		t.Fatalf("%q", last)
+	}
+}
+
+func TestLandSaysWhenAutoMergeFails(t *testing.T) {
+	_, a := claimed(t)
+	gh, _ := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`}, map[string]string{"graphql": "gh: auto-merge is not allowed"})
+	if _, err := (Source{Repo: repo, GH: gh}).Land(a, passes); err == nil || !strings.Contains(err.Error(), "PR #14") || !strings.Contains(err.Error(), "auto-merge is not on") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestLandRefusesBeforePushing(t *testing.T) {
+	origin, a := claimed(t)
+	never := func(t *testing.T) GH {
+		return func(args ...string) ([]byte, error) { t.Fatalf("gh %v after a refusal", args); return nil, nil }
+	}
+	fails := func(string) error { return errors.New("go test: FAIL") }
+	if _, err := (Source{Repo: repo, GH: never(t)}).Land(a, fails); err == nil || !strings.Contains(err.Error(), "nothing was pushed: go test: FAIL") {
+		t.Fatalf("%v", err)
+	}
+	if err := os.WriteFile(filepath.Join(a, "x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checked := false
+	if _, err := (Source{Repo: repo, GH: never(t)}).Land(a, func(string) error { checked = true; return nil }); err == nil || !strings.Contains(err.Error(), "not committed") || checked {
+		t.Fatalf("%v, checked %v", err, checked)
+	}
+	run(t, a, "stash", "-u", "-q")
+	run(t, a, "checkout", "-q", "main")
+	if _, err := (Source{Repo: repo, GH: never(t)}).Land(a, passes); err == nil || !strings.Contains(err.Error(), "issue-<n> branch") {
+		t.Fatalf("%v", err)
+	}
+	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, origin, "rev-parse", "main"); got != want {
+		t.Fatalf("a refused land moved issue-6 to %s", got)
+	}
+}
