@@ -32,7 +32,8 @@ func recordedIssues(t *testing.T) *[][]string {
 		"repos/o/r/issues/10/dependencies/blocked_by": `{"id":101}`,
 	}
 	var calls [][]string
-	old := gh
+	old, oldFire := gh, fire
+	fire = func() string { t.Error("fired the routine without a claim"); return "" }
 	gh = func(args ...string) ([]byte, error) {
 		calls = append(calls, args)
 		path := args[len(args)-1]
@@ -45,7 +46,7 @@ func recordedIssues(t *testing.T) *[][]string {
 		}
 		return []byte(a), nil
 	}
-	t.Cleanup(func() { gh = old })
+	t.Cleanup(func() { gh, fire = old, oldFire })
 	return &calls
 }
 
@@ -204,6 +205,59 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	}
 	code, out, _ = se(t, "issue", "land", "--json", "--workspace", ws, "--repo", "o/r")
 	if code != 0 || out != `{"issue":6,"number":14,"url":"u14","created":true,"merged":false}`+"\n" {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+}
+
+func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
+	recordedIssues(t)
+	root := t.TempDir()
+	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
+	git := func(dir string, args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git(root, "init", "-q", "--bare", "-b", "main", origin)
+	git(root, "clone", "-q", origin, ws)
+	git(ws, "checkout", "-q", "-b", "main")
+	git(ws, "commit", "-q", "--allow-empty", "-m", "start")
+	git(ws, "push", "-q", "origin", "main")
+	fires := 0
+	fire = func() string { fires++; return "Fan-out fired the routine: s1" }
+	// Naming an issue and failing to take one fire nothing.
+	if code, _, _ := se(t, "issue", "next", "--repo", "o/r", "--workspace", ws); code != 0 || fires != 0 {
+		t.Fatalf("exit %d, %d fires", code, fires)
+	}
+	if code, _, _ := se(t, "issue", "next", "--take", "2", "--repo", "o/r", "--workspace", ws); code != 1 || fires != 0 {
+		t.Fatalf("exit %d, %d fires", code, fires)
+	}
+	code, out, errs := se(t, "issue", "next", "--take", "--repo", "o/r", "--workspace", ws)
+	if code != 0 || fires != 1 || out != "Took #3 three, on branch issue-3.\nu3\nFan-out fired the routine: s1\n\ndo it\n" {
+		t.Fatalf("exit %d, %d fires, %q %q", code, fires, out, errs)
+	}
+	// #3 is now claimed on origin, but the recorded refs do not say so: the
+	// take is refused, moves on, finds nothing else and fires nothing.
+	git(ws, "checkout", "-q", "main")
+	if code, out, _ := se(t, "issue", "next", "--take", "--json", "--repo", "o/r", "--workspace", ws); code != 0 || fires != 1 || out != `{"ready":false}`+"\n" {
+		t.Fatalf("exit %d, %d fires, %q", code, fires, out)
+	}
+}
+
+func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
+	recordedIssues(t)
+	root := t.TempDir()
+	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
+	for _, args := range [][]string{{root, "init", "-q", "--bare", "-b", "main", origin}, {root, "clone", "-q", origin, ws},
+		{ws, "checkout", "-q", "-b", "main"}, {ws, "commit", "-q", "--allow-empty", "-m", "start"}, {ws, "push", "-q", "origin", "main"}} {
+		if out, err := exec.Command("git", append([]string{"-C", args[0], "-c", "user.name=t", "-c", "user.email=t@t"}, args[1:]...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	fire = func() string { return "Fan-out refused: 429 Too Many Requests" }
+	code, out, _ := se(t, "issue", "next", "--take", "--json", "--repo", "o/r", "--workspace", ws)
+	if code != 0 || !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"fanout":"Fan-out refused: 429 Too Many Requests"`) {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 }
