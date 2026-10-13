@@ -1,3 +1,4 @@
+// Internal test package: it uses the fakes of the package's other internal tests.
 package issues
 
 import (
