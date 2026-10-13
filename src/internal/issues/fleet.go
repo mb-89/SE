@@ -645,7 +645,7 @@ func atoi(s string) int {
 
 // takeOverClaim takes over claimed leaf st, named by se issue next --take N,
 // where se fleet check finds it stuck: its branch is checked out as it stands.
-// Stuck again after a takeover, it goes to a person instead.
+// A takeover labels it se-final; a final issue stuck goes to a person instead.
 func (s Source) takeOverClaim(dir string, st Status) (took Issue, ok bool, err error) {
 	refs, err := api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/%s", s.Repo, Branch(st.Number)), true)
 	if err != nil {
@@ -665,13 +665,13 @@ func (s Source) takeOverClaim(dir string, st Status) (took Issue, ok bool, err e
 	}
 	k := m.takeovers + 1
 	heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, f.head)
-	if m.takeovers > 0 {
-		reason := fmt.Sprintf("Stuck again: %s. It was taken over %s already, so it waits for a person. "+
-			"`se issue resume %d` puts it back in the queue.", f.What, times(m.takeovers), st.Number)
+	if st.Final {
+		reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s, so it waits for a person. "+
+			"`se issue resume %d` puts it back in the queue.", FinalLabel, f.What, st.Number)
 		if err := s.flag(st.Issue, reason, heads); err != nil {
 			return Issue{}, false, err
 		}
-		return Issue{}, false, fmt.Errorf("#%d was taken over before and is stuck again (%s), so it went to a person: labelled %s", st.Number, f.What, PersonLabel)
+		return Issue{}, false, fmt.Errorf("#%d is final and stuck (%s), so it went to a person: labelled %s", st.Number, f.What, PersonLabel)
 	}
 	body := fmt.Sprintf("Taken over: %s at %s. This box merges main into %s, makes it green and lands it again.", f.What, f.head, Branch(st.Number)) + heads
 	won, err := s.markTakeover(st.Number, k, body)
@@ -680,6 +680,9 @@ func (s Source) takeOverClaim(dir string, st Status) (took Issue, ok bool, err e
 	}
 	if !won {
 		return Issue{}, false, fmt.Errorf("#%d was taken over by another box just now", st.Number)
+	}
+	if err := s.finalize(st.Number); err != nil {
+		return Issue{}, false, err
 	}
 	if err := pickUp(dir, st.Number); err != nil {
 		return Issue{}, false, err

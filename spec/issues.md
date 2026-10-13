@@ -36,14 +36,16 @@ choice is deterministic and no prompt restates it.
   conflict. The box taking it checks out `issue-<n>` as it stands, merges
   `origin/main` into it (never a rebase, never a force-push), resolves the
   conflict and lands it again with `se issue land`.
-- **A takeover is recorded** on the issue as a comment carrying the marker
-  `<!-- se:takeover N -->` (stuck work writes the same marker), so the count
-  survives every box; a conflict takeover also records the PR head it found,
-  `<!-- se:takeover-head SHA -->`. A PR still conflicted at that same head is
-  a takeover in flight and is left to its box. Of two boxes writing the same
-  `N` at once, the earlier comment wins and the other box deletes its own. A
-  conflict on an issue taken over before, for a conflict or stuck, instead
-  goes to a person, as a second stuck claim does (below).
+- **A takeover makes the issue final**: it labels it `se-final`, the single
+  record that it was taken over (see [spec/review.md](review.md), rule 5),
+  and records it as a comment carrying the marker `<!-- se:takeover N -->`
+  (stuck work writes the same marker), the human-readable record; a conflict
+  takeover also records the PR head it found, `<!-- se:takeover-head SHA -->`.
+  A PR still conflicted at that same head is a takeover in flight and is left
+  to its box. Of two boxes writing the same `N` at once, the earlier comment
+  wins and the other box deletes its own. A conflict on an issue that is
+  already `se-final` (taken over before, for a conflict or stuck, or filed by
+  a review) instead goes to a person, as a final stuck claim does (below).
 - **Waits on a person**: an issue labelled `se-person` is never ready.
 - **Done**: the PR's body says `Fixes #n`, so GitHub closes the issue when the
   PR merges, and the issues it blocked become ready.
@@ -118,12 +120,13 @@ the agents' queue until a person has looked.
   continues the existing branch and PR: at the top it checks `issue-<n>` out
   as it stands, inside a tree its worktree command checks it out. `se`
   records the takeover on the issue as a comment carrying the marker
-  `<!-- se:takeover <round> -->`, so the count survives the box. Of two boxes
-  taking over one issue, the first comment of the round wins; the other
-  deletes its own and moves on. A takeover renews the lease, and counts
-  against the issue as a conflict takeover does.
-- **Second stuck: to a person.** A leaf that was taken over once already and
-  is stuck again gets the label `se-person`, is assigned to the repository
+  `<!-- se:takeover <round> -->`, and labels it `se-final`, as a conflict
+  takeover does. Of two boxes taking over one issue, the first comment of the
+  round wins; the other deletes its own and moves on. A takeover renews the
+  lease.
+- **Final and stuck: to a person.** A leaf labelled `se-final` (taken over
+  once already, or filed by a review) that is stuck gets the label
+  `se-person`, is assigned to the repository
   owner (so GitHub notifies them), and gets a comment saying why, with the
   marker `<!-- se:person -->`. This sweep runs inside every `se issue next`.
   The issue leaves the queue: `se issue next` never offers an `se-person`
@@ -135,18 +138,19 @@ the agents' queue until a person has looked.
 - **The person's side:**
   - `se issue next --person` lists every issue waiting on a person, with its
     reason and how many open issues it blocks, directly or through a tree.
-  - `se issue resume <n>` removes the label and puts the issue back in the
-    queue, its takeover count reset (a comment with the marker
-    `<!-- se:resume -->`). A claim still stale is then taken over by the next
-    box, as a first takeover.
+  - `se issue resume <n>` removes the label, and `se-final` with it, and puts
+    the issue back in the queue, its takeover count reset (a comment with the
+    marker `<!-- se:resume -->`). A claim still stale is then taken over by
+    the next box, as a first takeover.
 
 ## The commands
 
     se issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
     se issue resume N [--json] [--repo OWNER/NAME]
     se issue land --answers FILE [--json] [--repo OWNER/NAME]
-    se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--json] [--repo OWNER/NAME]
-    se issue review pass|fail N --why TEXT [--fix TITLE]... [--json] [--repo OWNER/NAME]
+    se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--final] [--json] [--repo OWNER/NAME]
+    se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
+    se review brief N [--claims] [--json] [--repo OWNER/NAME]
 
 Every one of them first closes the parents whose sub-issues are all closed.
 
@@ -174,7 +178,7 @@ into the branch and land it again (with `--json`: the issue's `takeover`,
 `{"pr","url","count","why"}`). `--take N` takes over claimed leaf `N`, at
 any depth, where `se fleet check` finds it stuck (a conflicted or red PR, or
 no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.md));
-taken over before, it goes to a person instead. A claim whose work is moving
+labelled `se-final`, it goes to a person instead. A claim whose work is moving
 is refused.
 Once it has claimed an issue, `--take` fires the routine once (the fan-out,
 below) and adds a line saying what the fire did; with `--json` that line is
@@ -246,15 +250,19 @@ Every issue in the list is looked up before anything is written, so a list
 naming an issue that does not exist, or a pull request, creates nothing; so
 does a `--parent` that does not exist. The
 body comes from `--body` or from `--body-file`, one of them. `--review` labels
-it `se-review` as well (see [Reviews](#reviews)). Where nothing blocks the
+it `se-review` as well (see [Reviews](#reviews)), and `--final` labels it
+`se-final`, its last attempt before a person (see
+[spec/review.md](review.md), rule 5). Where nothing blocks the
 issue it created (every issue in `--blocked-by` is closed, or it is `none`),
 it fires the routine once, as the fan-out does, and adds a line saying what
 the fire did (with `--json`: the field `fanout`); otherwise a new ready issue
 would wait for the next merge or the schedule. A blocked issue fires nothing.
 A session has it as `/se issue new`.
 
-`se issue review` passes or fails a parent ready for review; see
-[Reviews](#reviews). A session has it as `/se issue review`.
+`se issue review` passes or fails a parent ready for review, and
+`se review brief` is what its reviewer starts from; see [Reviews](#reviews)
+and [spec/review.md](review.md). A session has them as `/se issue review` and
+`/se review brief`.
 
 `se issue next --person` lists every open issue labelled `se-person`, each
 with its reason and how many open issues it blocks, directly or through a tree
@@ -282,14 +290,17 @@ through `se`, with every verdict on the reviewed issue's thread.
   it, it does not close by itself (see [Nesting](#nesting-leaves-are-work-parents-coordinate)).
   `se issue next --in` names it apart from the work, and at the top its tree
   is ready, so any box takes the tree and starts its reviewer.
-- **Pass**: `se issue review pass N --why "<verdict>"` posts the verdict on N
-  and closes it as completed; the parents it completes then close by
-  themselves.
-- **Fail**: `se issue review fail N --why "<findings>" --fix "<title>"`
-  (`--fix` repeats, at least once) posts the findings on N and creates one fix
-  leaf per `--fix`, a sub-issue of N made as `se issue new --parent N
-  --blocked-by none` would, its body the findings. N stays open: the fixes are
-  work inside it, and once they have landed it is ready for review again.
+- **How it is reviewed** is [spec/review.md](review.md): the reviewer starts
+  from `se review brief N` and ends with its report.
+- **Pass**: `se issue review pass N --report PATH` posts the report on N and
+  closes it as completed; the parents it completes then close by themselves.
+- **Fail**: `se issue review fail N --report PATH` posts the report on N. Each
+  blocking finding becomes an `se-final` sub-issue of N, made as
+  `se issue new --parent N --blocked-by none --final` would, its body the
+  finding. N stays open: the fixes are work inside it, and once they have
+  landed it is ready for review again, as a re-review.
+- **Either way**, the non-blocking findings (five at most) become `se-final`
+  issues in the normal queue.
 - **Who worked a leaf** is recorded by `se issue land`: a comment on the leaf,
   `Worked by session S in W.`, with the marker
   `<!-- se-worker {"session":S,"workspace":W} -->`, once per worker. S is the

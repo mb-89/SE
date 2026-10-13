@@ -140,7 +140,9 @@ func TestATakeoverComesBeforeNewWorkAndContinuesTheBranch(t *testing.T) {
 	if got := run(t, b, "rev-parse", "--abbrev-ref", "@{upstream}"); got != "origin/issue-5" {
 		t.Fatalf("b tracks %s", got)
 	}
-	if len(g.writes) != 1 || !strings.Contains(strings.Join(g.writes[0], " "), "<!-- se:takeover 1 -->") {
+	// The takeover is recorded, and makes #5 final.
+	if len(g.writes) != 2 || !strings.Contains(strings.Join(g.writes[0], " "), "<!-- se:takeover 1 -->") ||
+		!reflect.DeepEqual(g.writes[1], []string{"api", "-X", "POST", "-f", "labels[]=se-final", "repos/o/r/issues/5/labels"}) {
 		t.Fatalf("writes %q", g.writes)
 	}
 	// The takeover renewed the lease: the next box finds #5 claimed, not
@@ -180,9 +182,10 @@ func TestOfTwoTakeoversTheFirstCommentWins(t *testing.T) {
 	}
 }
 
-func TestASecondStaleClaimGoesToAPerson(t *testing.T) {
+func TestAStaleFinalClaimGoesToAPerson(t *testing.T) {
+	// #5 is se-final: taken over once already, or filed by a review.
 	g := newGithub(t, map[string]string{
-		listPath:    list(node(5, 0), node(6, 0)),
+		listPath:    list(node(5, 0, FinalLabel), node(6, 0)),
 		refsPath:    refs(5),
 		activity(5): pushed(stale),
 	})
@@ -190,7 +193,7 @@ func TestASecondStaleClaimGoesToAPerson(t *testing.T) {
 	s := g.source()
 	var flagged []int
 	s.Flagged = func(i Issue, reason string) {
-		if !strings.HasPrefix(reason, "Stuck a second time: it was taken over once") {
+		if !strings.HasPrefix(reason, "Stuck on its final attempt (labelled se-final)") {
 			t.Errorf("reason %q", reason)
 		}
 		flagged = append(flagged, i.Number)
@@ -206,7 +209,7 @@ func TestASecondStaleClaimGoesToAPerson(t *testing.T) {
 	if len(g.writes) != 3 || !reflect.DeepEqual(g.writes[:2], want) {
 		t.Fatalf("writes %q", g.writes)
 	}
-	if c := g.writes[2]; c[len(c)-1] != "repos/o/r/issues/5/comments" || !strings.HasPrefix(c[len(c)-2], "body=<!-- se:person -->\nStuck a second time") {
+	if c := g.writes[2]; c[len(c)-1] != "repos/o/r/issues/5/comments" || !strings.HasPrefix(c[len(c)-2], "body=<!-- se:person -->\nStuck on its final attempt") {
 		t.Fatalf("comment %q", c)
 	}
 	if _, _, err := s.Take(t.TempDir(), 5); err == nil || !strings.Contains(err.Error(), "waits on a person") {
@@ -288,7 +291,7 @@ func TestAStuckLeafInATreeIsTakenOverFirst(t *testing.T) {
 	if got := run(t, b, "rev-parse", "--abbrev-ref", "HEAD"); got != "main" {
 		t.Fatalf("b moved to %s", got)
 	}
-	if len(g.writes) != 1 || !strings.Contains(strings.Join(g.writes[0], " "), "<!-- se:takeover 1 -->") {
+	if len(g.writes) != 2 || !strings.Contains(strings.Join(g.writes[0], " "), "<!-- se:takeover 1 -->") || g.writes[1][4] != "labels[]=se-final" {
 		t.Fatalf("writes %q", g.writes)
 	}
 	// Taken over, #11 is claimed again; #12 is next.
@@ -312,7 +315,7 @@ func TestAParentsClaimIsNeverStuck(t *testing.T) {
 
 func TestResumeResetsTheTakeoverCount(t *testing.T) {
 	g := newGithub(t, map[string]string{
-		"repos/o/r/issues/5": node(5, 0, PersonLabel),
+		"repos/o/r/issues/5": node(5, 0, FinalLabel, PersonLabel),
 		"repos/o/r/issues/6": node(6, 0),
 		listPath:             list(node(5, 0)),
 		refsPath:             refs(5),
@@ -327,8 +330,10 @@ func TestResumeResetsTheTakeoverCount(t *testing.T) {
 	if i, err := s.Resume(5); err != nil || i.Number != 5 {
 		t.Fatalf("%+v %v", i, err)
 	}
-	if len(g.writes) != 2 || g.writes[0][len(g.writes[0])-1] != "repos/o/r/issues/5/comments" ||
-		!reflect.DeepEqual(g.writes[1], []string{"api", "-X", "DELETE", "repos/o/r/issues/5/labels/se-person"}) {
+	// It is no longer final either: it gets one more attempt.
+	if len(g.writes) != 3 || g.writes[0][len(g.writes[0])-1] != "repos/o/r/issues/5/comments" ||
+		!reflect.DeepEqual(g.writes[1], []string{"api", "-X", "DELETE", "repos/o/r/issues/5/labels/se-final"}) ||
+		!reflect.DeepEqual(g.writes[2], []string{"api", "-X", "DELETE", "repos/o/r/issues/5/labels/se-person"}) {
 		t.Fatalf("writes %q", g.writes)
 	}
 	// Back in the queue, still stale: the next take takes it over, round one.
@@ -336,7 +341,7 @@ func TestResumeResetsTheTakeoverCount(t *testing.T) {
 	if err != nil || !all[0].Stuck || all[0].Takeovers != 0 || !all[0].Takeable() {
 		t.Fatalf("%+v %v", all, err)
 	}
-	if len(g.writes) != 2 {
+	if len(g.writes) != 3 {
 		t.Fatalf("the survey flagged it again: %q", g.writes)
 	}
 }

@@ -54,15 +54,12 @@ took. `se` is the absolute path of `./src/plugin/bin/se` in this checkout.
    - `"closed": true`: the tree is done. End.
    - For each issue in `"review"` that no sub-agent of yours is reviewing
      already: run its `worktree` command, and start one fresh sub-agent in
-     the background, never one that worked a leaf, with this prompt, filled
-     in:
-     `Review se issue #<n> in the worktree <path>. Run every command there.
-     You worked none of #<n>'s tree. Review the work its closed sub-issues
-     landed on main against #<n>'s text, below, and end with exactly one of
-     <se> issue review pass <n> --workspace <path> --why "<verdict>" or
-     <se> issue review fail <n> --workspace <path> --why "<findings>"
-     --fix "<title>" (one --fix per fix leaf). Answer only what that command printed.
-     <the issue's body>`
+     the background, never one that worked a leaf, on the review's `model`
+     (from `spec/models.yaml`; where it is empty, the model you run), with
+     this prompt, filled in, and nothing else of the tree or its work:
+     `Review se gate #<n> in the worktree <path>, with se at <se>. You worked
+     none of #<n>'s tree. Read <path>/src/plugin/skills/review/SKILL.md and
+     follow it exactly. Answer only what its last command printed.`
    - `"ready": false`: no leaf inside is ready. If no sub-agent of yours is
      still running, end (a later box picks the tree up); else wait for one.
    - Otherwise run its `worktree` command, and start one sub-agent in the
