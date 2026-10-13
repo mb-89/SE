@@ -42,7 +42,7 @@ step() {
   printf '%s\t%s\n' "$name" "$took" >>"$battery/steps.tsv"
 }
 
-step "se rules" go run ./src/cmd/rules
+step "se rules" go run ./src/cmd/se rules
 step "golangci-lint" golangci-lint run ./...
 step "biome" biome check --error-on-warnings
 step "go test" go run ./src/cmd/battery gotest ./...

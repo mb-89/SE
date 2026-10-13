@@ -1,5 +1,7 @@
 # Design principles
 
+Reader: whoever designs, reviews or judges a change to SE, and the retro and the overhaul.
+
 The list SE's design is measured against. The retro (#40) checks the
 principles it can check mechanically; the overhaul judges the rest. Each
 principle is one sentence and one paragraph, and names what checks it.
@@ -53,9 +55,10 @@ principle is one sentence and one paragraph, and names what checks it.
 
 9. **Performance is measured, and a person never waits blind.**
    The battery, every test, each `se` command and each plugin hook record
-   their duration, and soft budgets in one file (`spec/budgets.yaml`) report
-   what grows (#50). One hard rule: anything a person waits on gives feedback
-   within 1 second and never blocks.
+   their duration, and soft budgets in one file
+   ([spec/budgets.yaml](budgets.yaml)) report what grows (#50). One hard
+   rule: anything a person waits on gives feedback within 1 second and never
+   blocks.
    Checked by: the battery and the bridgehead; retro, mechanically (trend).
 
 10. **Lint and style checks are part of the battery.**
@@ -93,3 +96,38 @@ principle is one sentence and one paragraph, and names what checks it.
     Fix what produced a bad outcome (a rule, a tool, a prompt), never just the
     outcome.
     Checked by: retro and overhaul, by design.
+
+17. **Consistency.**
+    The system agrees with itself: every part still fits the parts that rely
+    on it, and nothing describes behaviour other than what the code does.
+    Checked by: the battery (mechanical checks, generated manifests); the
+    reviewer (in its scope: does anything in or around the change now
+    disagree?); the retro (what became inconsistent in its window); the
+    overhaul (the whole system).
+
+18. **Talk only about what you own.**
+    Every element either owns content and talks only about itself, or is a
+    manifest: a generated map that points at owners and says nothing about
+    their content. A hand-written element that describes something it does
+    not own (the README listing what commands do, a skill restating a spec
+    rule, CLAUDE.md copying a process) is a defect. It points instead, or
+    becomes a generated manifest (`se help manifest`).
+    Checked by: the battery (manifests regenerate identically; every `se`
+    command, path and link prose names exists); the reviewer, the retro and
+    the overhaul (hand-written restatements are findings).
+
+19. **Write for your reader.**
+    Before writing prose, name who reads it and what they need from it. Then:
+    - **bottom line up front:** the first lines say what the reader most needs;
+    - **progressive disclosure:** simple first, detail only further down and
+      only as far as this reader needs it;
+    - **point, don't explain:** where someone else explains it in more
+      detail, reference them (principle 18).
+
+    What a reader doesn't need leaves, even if it is true and owned. Each
+    prose file names its readers in one line at the top, `Reader: …`, under
+    its title (for example: README, a person meeting SE for the first time;
+    CLAUDE.md, an agent working in this repo; a skill, the agent running it;
+    `spec/`, whoever changes that part).
+    Checked by: the battery (the line is there); the reviewer, the retro and
+    the overhaul (prose that serves no named reader is a finding).

@@ -16,7 +16,7 @@ func init() {
 	})
 }
 
-func testPackage(path string, text []byte) []Finding {
+func testPackage(_ *Repo, path string, text []byte) []Finding {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, text, parser.PackageClauseOnly|parser.ParseComments)
 	if err != nil {

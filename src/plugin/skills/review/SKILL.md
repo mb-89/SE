@@ -5,6 +5,8 @@ description: Review an se-review gate whose sub-issues have closed, cold, as an 
 
 # Review: judge a gate, cold
 
+Reader: the reviewer sub-agent of a gate.
+
 You review gate `#<n>` in your own worktree `<path>`, as an agent that worked
 none of its tree. The rules are [spec/review.md](../../../../spec/review.md);
 this is how you follow them. `se` is the absolute path you were given. Run
@@ -13,10 +15,8 @@ every command in `<path>`.
 Your inputs come from one command, and from nothing else: not from the
 workers, not from messages of other sessions, not from the PRs.
 
-1. **The brief.** `se review brief <n> --workspace <path>`. It gives the
-   gate's question, the text of every issue in its tree (the ask and its
-   acceptance criteria), the pinned commit, the CI there and
-   `spec/principles.md`. Check out the pinned commit:
+1. **The brief.** `se review brief <n> --workspace <path>` (what it holds is
+   rule 1 of the spec). Check out the pinned commit it names:
    `git -C <path> checkout --detach <commit>`. The workers' PR descriptions
    and landing answers are withheld: do not look them up.
    If the brief says this is a **re-review**, check only the earlier blockers
@@ -34,8 +34,11 @@ workers, not from messages of other sessions, not from the PRs.
    deleted or special-cased.
 5. **Find, in two passes**, each with a different focus: first against the
    ask (does each requirement hold?), then against `spec/principles.md` and
-   the code itself (what does it break or make worse?). Write every candidate
-   down; do not judge yet.
+   the code itself (what does it break or make worse?). The second pass also
+   asks, in and around the change (principles 17 to 19): does anything now
+   disagree with what it changed, does it make any element talk about
+   something it does not own, and does its new prose serve the reader its
+   file names? Write every candidate down; do not judge yet.
 6. **Verify each candidate** with evidence: a file and line, or a command and
    its output. Drop anything you cannot prove. Do not talk yourself out of a
    proven one.
@@ -43,11 +46,10 @@ workers, not from messages of other sessions, not from the PRs.
    shows the workers' accounts. They are claims to check against what you
    verified, never evidence: a claim you can't reproduce is a finding,
    not a reason to drop one.
-8. **Judge each verified finding**: blocking only if letting the work through
-   would make the product worse, or goes against what the product is about.
-   Breakage is CI's job; bad but fixable work does not block, it becomes an
-   open point. A verified blocker is not downgraded without counter-evidence.
-   In a re-review, a blocker whose problem is still there `repeats` it.
+8. **Judge each verified finding** by rule 3 of the spec: only damage
+   blocks. A consistency finding is judged like any other. A verified blocker
+   is not downgraded without counter-evidence. In a re-review, a blocker whose
+   problem is still there `repeats` it.
 9. **Write the report** as JSON in `<path>-review.json`:
 
    ```json

@@ -12,6 +12,12 @@ import (
 // check writes files into a fresh folder and answers what the rule named found there.
 func check(t *testing.T, rule string, files map[string]string) []string {
 	t.Helper()
+	return checkIn(t, &rules.Repo{}, rule, files)
+}
+
+// checkIn is check with what the repo knows beyond its files.
+func checkIn(t *testing.T, repo *rules.Repo, rule string, files map[string]string) []string {
+	t.Helper()
 	root := t.TempDir()
 	var paths []string
 	for p, text := range files {
@@ -24,7 +30,8 @@ func check(t *testing.T, rule string, files map[string]string) []string {
 		}
 		paths = append(paths, p)
 	}
-	results, err := rules.Run(root, append(paths, "gone_test.go"))
+	repo.Root, repo.Paths = root, append(paths, "gone_test.go")
+	results, err := rules.Run(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +60,7 @@ func TestEveryRuleIsRegisteredWithItsParts(t *testing.T) {
 		}
 		names = append(names, r.Name)
 	}
-	if got := strings.Join(names, " "); got != "test-package todo-issue" {
+	if got := strings.Join(names, " "); got != "manifest reader repo-path se-command test-package todo-issue" {
 		t.Fatalf("rules = %s", got)
 	}
 }
