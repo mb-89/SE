@@ -18,7 +18,7 @@ command, `/se`, which takes words the way a command line does:
 |---|---|
 | `/se on` | starts this workspace's daemon and forwards every event of the session to it |
 | `/se off` | stops forwarding, for this session |
-| `/se status` | says whether a daemon answers for this workspace |
+| `/se status` | says whether a daemon answers for this workspace, and which commits the loaded hooks, the plugin's checkout and the running `se` came from, and whether they agree |
 | `/se restart` | stops this workspace's daemon and starts it again; in an SE checkout, rebuilt from its source first |
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
 | `/se issue next` | names the next ready `se` issue, or says that none is ready; `--take` claims it; `--in ROOT` names the ready leaves inside a parent's tree |
@@ -121,7 +121,7 @@ A cloud environment that runs SE gets it from its setup script:
 set -u
 rm -rf /opt/se
 git clone --depth 1 https://github.com/mb-89/SE /opt/se \
-  && (cd /opt/se && go build -o plugin/bin/se ./cmd/se) \
+  && (cd /opt/se && go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o plugin/bin/se ./cmd/se) \
   || echo "SE setup failed; sessions start without SE"
 exit 0
 ```
@@ -143,6 +143,18 @@ session start, whether or not SE is on: a clean `main` is pulled from
 the plugin reloads once `session.start` has answered. A checkout that is not a
 clean `main`, such as a person's working clone, is left as it is, and a failed
 pull or build never holds the session up; either is said in one line.
+
+### Hooks on cloud boxes
+
+Changes to `plugin/hooks` reach cloud boxes only when the environment's setup
+script is changed, which rebuilds its cache. `/reload-plugins` is refused over
+a remote connection, and the update at session start loads a new `se` at once
+but not the hooks module that is already running; whether watching the plugin
+folder (`CLAUDE_CODE_PLUGIN_DIR_WATCH=1`) reloads them has not been seen on a
+box (#28). New behaviour therefore belongs in `se`, not in the hooks.
+`/se status` names the commit the loaded hooks came from, the commit the
+plugin's checkout is at and the commit the running `se` was built from, and
+says whether they agree.
 
 ## Check
 
