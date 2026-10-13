@@ -24,11 +24,12 @@ func recordedIssues(t *testing.T) *[][]string {
 			{"number":1,"title":"one","body":"","state":"open","html_url":"u1","issue_dependencies_summary":{"total_blocked_by":0}}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[{"ref":"refs/heads/issue-1"}]`,
 		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
-		"repos/o/r/issues/1":                                      `{"id":101,"number":1}`,
-		"repos/o/r/issues/3":                                      `{"id":103,"number":3}`,
-		"repos/o/r/issues/4":                                      `{"id":104,"number":4,"pull_request":{}}`,
-		"repos/o/r/issues":                                        `{"id":110,"number":10,"title":"ten","html_url":"u10"}`,
-		"repos/o/r/issues/10/dependencies/blocked_by":             `{"id":101}`,
+		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
+		"repos/o/r/issues/1":                          `{"id":101,"number":1}`,
+		"repos/o/r/issues/3":                          `{"id":103,"number":3}`,
+		"repos/o/r/issues/4":                          `{"id":104,"number":4,"pull_request":{}}`,
+		"repos/o/r/issues":                            `{"id":110,"number":10,"title":"ten","html_url":"u10"}`,
+		"repos/o/r/issues/10/dependencies/blocked_by": `{"id":101}`,
 	}
 	var calls [][]string
 	old := gh
