@@ -5,13 +5,17 @@
 // event the engine raises is posted to the workspace's se daemon before it
 // goes on, unchanged. The daemon owns what happens to it: today it appends
 // the event to the session's log. While SE is off, every hook hands the event
-// straight on and contacts nothing.
+// straight on and contacts nothing. /se ui opens a pane of buttons: the on/off
+// toggle and the commands se offers as buttons, each pressed as /se <words>.
 
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { SeActive } from '../types'
+import type { SeActive, SeButtons } from '../types'
 
 const ACTIVE = { plugin: 'se', key: 'active' } as const
+// The commands se offered as buttons when /se ui last opened the pane.
+const BUTTONS = { plugin: 'se', key: 'buttons' } as const
+const PANE = 'se-ui'
 // The folder the daemon owns in a workspace, and its endpoint record there.
 export const RUNTIME = '.se/.runtime'
 const ENDPOINT = `${RUNTIME}/daemon.json`
@@ -29,7 +33,13 @@ const HOOKS_COMMIT = 'SE_HOOKS_COMMIT'
 const PLUGIN_CHECKOUT = 'SE_PLUGIN_CHECKOUT'
 
 // What se --session answers: the text to show and the effects to apply.
-export type Reply = { text: string; active?: boolean; endpoint?: Endpoint; reload?: boolean }
+export type Reply = {
+  text: string
+  active?: boolean
+  endpoint?: Endpoint
+  reload?: boolean
+  panel?: { buttons: SeButtons }
+}
 
 // The module's copy of the flag, so an event costs nothing while SE is off.
 // $.state holds the session's value across a reload; session.start reads it back.
@@ -67,10 +77,27 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'se' }, async ($, e) => {
-    const words = e.args.split(/\s+/).filter(Boolean)
-    const asked = await asks($, words)
-    return { text: typeof asked === 'string' ? asked : await applies($, asked) }
+  on('command.run', { command: 'se' }, async ($, e) => ({ text: await runs($, e.args) }))
+
+  // Every surface draws Box, Text and Button, the phone too, so the pane uses no other.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Button } = $.ui.resolve(e)
+    const { value: isOn = false } = await $.state.get(ACTIVE)
+    const { value: buttons = [] } = await $.state.get(BUTTONS)
+    return (
+      <Box flexDirection="row" flexWrap="wrap" columnGap={1} width={e.props.bodyColumns}>
+        <Button
+          key="toggle"
+          label={isOn ? 'SE on' : 'SE off'}
+          variant={isOn ? 'primary' : undefined}
+          dimColor={!isOn}
+          onPress={() => presses($, isOn ? 'off' : 'on')}
+        />
+        {buttons.map(name => (
+          <Button key={`run ${name}`} label={name} onPress={() => presses($, name)} />
+        ))}
+      </Box>
+    )
   })
 
   // The bridge never holds an event up for good: a failure here passes it on.
@@ -121,6 +148,10 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
     active = reply.active
     await $.state.set(ACTIVE, reply.active)
   }
+  if (reply.panel) {
+    await $.state.set(BUTTONS, reply.panel.buttons)
+    await $.ui.open({ id: PANE, title: 'SE' })
+  }
   if (!reply.reload) return reply.text
   // A command.run hook cannot run another command: the reload waits until this one has answered.
   $.clock.after(0, async () => {
@@ -131,6 +162,19 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
     }
   })
   return `${reply.text} The plugins reload now.`
+}
+
+// /se <words>: hands the words to se and applies its reply; answers the text to show.
+async function runs($: EngineInterface, args: string): Promise<string> {
+  const asked = await asks($, args.split(/\s+/).filter(Boolean))
+  return typeof asked === 'string' ? asked : applies($, asked)
+}
+
+// A press runs what typing /se <words> runs; its answer is a line of the
+// transcript, where a command's answer shows. (A plugin's $.command.run skips
+// the plugin's own hooks, so it cannot reach /se.)
+async function presses($: EngineInterface, words: string): Promise<void> {
+  $.ui.log(await runs($, words))
 }
 
 // Switches SE on and starts the daemon; answers why the daemon did not start, or ''.

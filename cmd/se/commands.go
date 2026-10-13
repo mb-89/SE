@@ -34,6 +34,9 @@ type Command struct {
 	// Installed keeps it in the installed se when the session works in an SE
 	// checkout; every other /se word goes to the se built from that checkout.
 	Installed bool
+	// Button offers it as a button in /se ui, pressed as /se <name> is typed.
+	// Only a session command that takes no typed words is one.
+	Button bool
 	// Run does it and answers what to show, and in a session what the plugin applies.
 	Run func(c *Call) (Reply, error)
 }
@@ -49,6 +52,14 @@ type Reply struct {
 	Endpoint *Endpoint `json:"endpoint,omitempty"`
 	// Reload asks the plugin to reload the session's plugins.
 	Reload bool `json:"reload,omitempty"`
+	// Panel, when set, asks the plugin to open /se ui with these buttons.
+	Panel *Panel `json:"panel,omitempty"`
+}
+
+// Panel is what /se ui draws beside its on/off toggle.
+type Panel struct {
+	// Buttons are the names of the commands offered as buttons, in order.
+	Buttons []string `json:"buttons"`
 }
 
 // Endpoint is the part of daemon.json the plugin posts with.

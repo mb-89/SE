@@ -15,6 +15,7 @@ func init() {
 		Summary: "say whether a daemon answers, and which commits SE came from",
 		Details: "say whether a daemon answers for this workspace, and which commits the session's SE came from.",
 		Session: true,
+		Button:  true,
 		Run: func(c *Call) (Reply, error) {
 			if err := c.Parse(c.Flags("status")); err != nil {
 				return Reply{}, err

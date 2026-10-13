@@ -48,6 +48,7 @@ func init() {
 		Summary: "name the next ready se issue; --take claims it",
 		Details: "name the next ready se issue at the top, or say that none is ready. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree.",
 		Session: true,
+		Button:  true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue next")
 			take := &takeFlag{}
