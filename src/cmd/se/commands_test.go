@@ -107,9 +107,9 @@ func TestNoOverviewLineIsLongerThan80(t *testing.T) {
 	}
 }
 
-func TestTheSessionHelpIsAFencedBlock(t *testing.T) {
+func TestTheSessionHelpIsAFencedBlockAfterItsFirstLine(t *testing.T) {
 	h := help(true, false)
-	if !strings.HasPrefix(h, "```\n/se <command>") || !strings.HasSuffix(h, "\n```") {
+	if !strings.HasPrefix(h, "/se <command> [flags]\n```\nFleet:") || !strings.HasSuffix(h, "\n```") {
 		t.Fatalf("%q", h)
 	}
 	if strings.HasPrefix(help(false, false), "```") {
@@ -166,7 +166,8 @@ func TestTheHelpOfACommand(t *testing.T) {
 	if _, flagged, _ := se(t, "issue", "next", "--help"); flagged != out {
 		t.Errorf("se issue next --help:\n%s\nwant:\n%s", flagged, out)
 	}
-	if r := session(t, "help", "issue", "next"); r.Text != "```\n/se"+strings.TrimSuffix(strings.TrimPrefix(out, "se"), "\n")+"\n```" {
+	usage, rest, _ := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(out, "se"), "\n"), "\n\n")
+	if r := session(t, "help", "issue", "next"); r.Text != "/se"+usage+"\n```\n"+rest+"\n```" {
 		t.Errorf("/se help issue next:\n%s", r.Text)
 	}
 }
@@ -288,5 +289,49 @@ func TestOnlySessionCommandsWithoutTypedWordsAreButtons(t *testing.T) {
 		if asks {
 			t.Errorf("%s is a button but its usage %q asks for a word", name, c.Usage)
 		}
+	}
+}
+
+func TestNoSessionHelpOpensAFenceOnItsFirstLine(t *testing.T) {
+	for _, words := range [][]string{{"help"}, {"help", "issue"}, {"help", "issue", "next"}, {"issue", "next", "--help"}, {"frob"}} {
+		r := session(t, words...)
+		if first, _, _ := strings.Cut(r.Text, "\n"); strings.Contains(first, "```") {
+			t.Errorf("/se %s opens a fence on its first line: %q", strings.Join(words, " "), first)
+		}
+	}
+}
+
+func TestTheSessionHelpCarriesItsData(t *testing.T) {
+	r := session(t, "help")
+	if r.Help == nil || r.Help.Usage != "/se <command> [flags]" || len(r.Help.Flags) != 0 {
+		t.Fatalf("%+v", r.Help)
+	}
+	listed := map[string]string{}
+	for _, g := range r.Help.Groups {
+		for _, c := range g.Commands {
+			listed[c.Name] = g.Name
+			if c.Summary != commands[c.Name].Summary || c.Usage != "/se "+commands[c.Name].Usage {
+				t.Errorf("%s: %+v", c.Name, c)
+			}
+		}
+	}
+	for name, c := range commands {
+		if want := map[bool]string{true: c.Group}[c.Session]; listed[name] != want {
+			t.Errorf("%s stands under %q, want %q", name, listed[name], want)
+		}
+	}
+	one := session(t, "help", "issue", "next")
+	if one.Help == nil || one.Help.Usage == "" || one.Help.About == "" || len(one.Help.Groups) != 0 {
+		t.Fatalf("%+v", one.Help)
+	}
+	flags := map[string]bool{}
+	for _, f := range one.Help.Flags {
+		flags[f.Name] = f.Usage != ""
+	}
+	if !flags["--in ROOT"] || !flags["--take"] || !flags["--workspace DIR"] {
+		t.Fatalf("%+v", one.Help.Flags)
+	}
+	if r := session(t, "status"); r.Help != nil {
+		t.Fatalf("/se status carries help: %+v", r.Help)
 	}
 }
