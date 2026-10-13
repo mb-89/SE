@@ -87,11 +87,23 @@ coordinates it. A session has it as
 only create the branch, never move it), then checks the branch out. Where the
 push is refused because another box claimed the issue first, it moves to the
 next ready issue. It prints what it took, or that nothing is ready. `--take N`
-refuses an issue that is not ready and says why. There is no separate `take`
-command.
+refuses an issue that is not ready, or a sub-issue, and says why. There is no
+separate `take` command. Taking a parent whose branch exists already checks
+that branch out: the tree is picked up from its claim.
 Once it has claimed an issue, `--take` fires the routine once (the fan-out,
 below) and adds a line saying what the fire did; with `--json` that line is
 the field `fanout`.
+
+`se issue next --in ROOT` names what is ready inside ROOT's tree: its ready
+leaves at any depth, lowest number first, and apart from them the `se-review`
+parents ready for review; or says that nothing is ready, or that ROOT has
+closed (with `--json`: `{"root","closed","ready","review"}`). With `--take`
+(or `--take N`) it claims the lowest ready leaf (or leaf `N`), moving on where
+another box claimed it first: it pushes `origin/main` as `issue-<n>` and
+fetches it, checking nothing out, and prints the leaf with the command that
+checks it out in its own worktree beside the checkout (with `--json`:
+`{"ready","closed","issue","branch","worktree"}`). That claim fires nothing:
+the leaf is worked on by a sub-agent inside the coordinator's box.
 
 `se issue land` runs on the checked-out `issue-<n>` branch. It refuses an
 issue with open sub-issues ("a parent holds no work") and a tree with
