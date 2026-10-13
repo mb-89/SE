@@ -66,7 +66,7 @@ func TestTheHelpGroupsTheCommands(t *testing.T) {
 		"Session": {"help", "off", "on", "restart", "status", "ui", "update"},
 		"Issues":  {"issue land", "issue new", "issue next", "issue resume", "issue review"},
 		"Daemon":  {"serve", "start", "stop"},
-		"Fleet":   {"fleet check", "fleet fix"},
+		"Fleet":   {"fleet check", "fleet fix", "fleet prune"},
 	}
 	terminal := help(false, false)
 	for group, names := range want {

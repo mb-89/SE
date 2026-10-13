@@ -1,0 +1,31 @@
+# Deletes stray issue-<n> and claude/* branches with the repository's own
+# token, since cloud sessions cannot delete branches (spec/coordination.md).
+name: prune
+on:
+  issues:
+    types: [closed]
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: "23 * * * *"
+permissions:
+  contents: write
+  issues: read
+  pull-requests: read
+concurrency:
+  group: prune
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go build -o se ./src/cmd/se
+      # Its output names every branch it deleted, and why.
+      - run: ./se fleet prune --apply --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -51,7 +51,7 @@ func init() {
 		Usage:   "fleet fix [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "fix what fleet check finds that needs no checkout",
-		Details: "run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim's branch main holds whole is deleted, and a finding with no other remedy becomes an se issue, or an se-person one where it is a judgment. Each fix is recorded on the finding's issue, and a finding back after its fix goes to a person. A takeover is named for the box to run. A ready issue it made fires the routine once.",
+		Details: "run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted, and a finding with no other remedy becomes an se issue, or an se-person one where it is a judgment. Each fix is recorded on the finding's issue, and a finding back after its fix goes to a person. A takeover is named for the box to run. A ready issue it made fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet fix")
@@ -94,6 +94,54 @@ func init() {
 			}
 			if fanout != "" {
 				lines = append(lines, fanout)
+			}
+			return Reply{Text: strings.Join(lines, "\n")}, nil
+		},
+	})
+	register(Command{
+		Name:    "fleet prune",
+		Usage:   "fleet prune [--apply] [--json] [--repo OWNER/NAME]",
+		Group:   "Fleet",
+		Summary: "list the stray branches; --apply deletes them",
+		Details: "list every issue-<n> branch whose issue is closed and every claude/* branch whose last commit is more than an hour old, each with no open PR. --apply deletes them; without it nothing is deleted. It never touches main or any other branch. The prune workflow runs it with the repository's token.",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "fleet prune")
+			apply := fs.Bool("apply", false, "delete the branches it lists")
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			strays, err := s.Strays()
+			if err != nil {
+				return Reply{}, err
+			}
+			var pruneErr error
+			if *apply {
+				strays, pruneErr = s.Prune(strays)
+			}
+			lines := make([]string, len(strays))
+			for k, b := range strays {
+				verb := "stray"
+				if b.Deleted {
+					verb = "deleted"
+				}
+				lines[k] = fmt.Sprintf("%s %s at %s: %s", verb, b.Branch, b.SHA, b.Why)
+			}
+			if pruneErr != nil {
+				return Reply{}, fmt.Errorf("%w\n%s", pruneErr, strings.Join(lines, "\n"))
+			}
+			if *asJSON {
+				data, err := json.Marshal(struct {
+					Strays []issues.Stray `json:"strays"`
+				}{append([]issues.Stray{}, strays...)})
+				return Reply{Text: string(data)}, err
+			}
+			if len(strays) == 0 {
+				return Reply{Text: "no stray branches"}, nil
 			}
 			return Reply{Text: strings.Join(lines, "\n")}, nil
 		},
