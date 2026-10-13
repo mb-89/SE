@@ -56,7 +56,8 @@ func Build(repo, out string) error {
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return err
 	}
-	fresh := out + ".new"
+	// Two starts may build at once; each builds to a file of its own.
+	fresh := fmt.Sprintf("%s.%d.new", out, os.Getpid())
 	cmd := exec.Command("go", "build", "-o", fresh, "./cmd/se")
 	cmd.Dir = repo
 	if said, err := cmd.CombinedOutput(); err != nil {
@@ -72,6 +73,23 @@ func Build(repo, out string) error {
 		}
 	}
 	return os.Rename(fresh, out)
+}
+
+// Module is the module path an SE checkout's go.mod declares.
+const Module = "github.com/mb-89/SE"
+
+// IsCheckout says whether dir is an SE checkout: its go.mod declares SE's module.
+func IsCheckout(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if words := strings.Fields(line); len(words) == 2 && words[0] == "module" {
+			return strings.Trim(words[1], `"`) == Module
+		}
+	}
+	return false
 }
 
 func git(repo string, args ...string) (string, error) {

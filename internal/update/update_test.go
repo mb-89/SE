@@ -46,3 +46,23 @@ func TestAnUpdateRefusesUncommittedWork(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestACheckoutIsKnownByItsModule(t *testing.T) {
+	for mod, want := range map[string]bool{
+		"module github.com/mb-89/SE\n\ngo 1.24\n": true,
+		"// SE\nmodule \"github.com/mb-89/SE\"\n": true,
+		"module github.com/mb-89/SE/sub\n":        false,
+		"module example.com/other\n":              false,
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := IsCheckout(dir); got != want {
+			t.Errorf("%q: %v, want %v", mod, got, want)
+		}
+	}
+	if IsCheckout(t.TempDir()) {
+		t.Error("a folder without go.mod is a checkout")
+	}
+}

@@ -234,3 +234,41 @@ test('/se update applies the new endpoint and reloads once it has answered', asy
   await $.attribution.text(probe)
   expect(w.posts.at(-1)?.auth).toBe('Bearer tok3')
 })
+
+test('/se restart moves the session to the daemon se answers, without a reload', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await $.session.start(starts)
+  await $.command.run(se('on'))
+  w.ran = []
+  // The old daemon is gone; the restarted one answers on a new port with a new token.
+  w.live = '127.0.0.1:4400'
+  w.replies.restart = {
+    text: "SE's daemon restarted at 127.0.0.1:4400 (pid 7). The daemon runs se built from this checkout.",
+    endpoint: { address: '127.0.0.1:4400', token: 'tok4' },
+  }
+  const said = await $.command.run(se('restart'))
+  expect(said?.text ?? '').toContain('built from this checkout')
+  expect(verbs(w)).toEqual(['/se restart'])
+  await clock.settle()
+  expect(w.reloads).toBe(0)
+  await $.attribution.text(probe)
+  expect(w.posts.at(-1)?.url).toBe('http://127.0.0.1:4400/event')
+  expect(w.posts.at(-1)?.auth).toBe('Bearer tok4')
+})
+
+test('a restart whose build failed shows why, and still moves to the daemon', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('on'))
+  w.live = '127.0.0.1:4500'
+  w.replies.restart = {
+    text: "SE's daemon restarted at 127.0.0.1:4500 (pid 8). This checkout's se does not build, so the daemon runs the installed se (/se/plugin/bin/se):\ngo build: exit status 1\n./x.go:3: undefined: y",
+    endpoint: { address: '127.0.0.1:4500', token: 'tok5' },
+  }
+  const said = await $.command.run(se('restart'))
+  expect(said?.text ?? '').toContain('does not build')
+  expect(said?.text ?? '').toContain('undefined: y')
+  await $.attribution.text(probe)
+  expect(w.posts.at(-1)?.auth).toBe('Bearer tok5')
+})

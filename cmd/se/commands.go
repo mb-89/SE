@@ -26,6 +26,9 @@ type Command struct {
 	Summary string
 	// Session offers it inside a Claude session as /se <name>.
 	Session bool
+	// Installed keeps it in the installed se when the session works in an SE
+	// checkout; every other /se word goes to the se built from that checkout.
+	Installed bool
 	// Run does it and answers what to show, and in a session what the plugin applies.
 	Run func(c *Call) (Reply, error)
 }
@@ -151,6 +154,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		name, call.Args = fs.Arg(0), fs.Args()[1:]
 	}
 	cmd, ok := commands[name]
+	if *session && !(ok && cmd.Installed) {
+		if code, handed := handsOver(*workspace, args, stdout, stderr); handed {
+			return code
+		}
+	}
 	if ok && *session && !cmd.Session {
 		ok = false
 	}
@@ -195,5 +203,5 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// executable is this se, where the daemon it starts runs from.
-func executable() (string, error) { return os.Executable() }
+// executable is this se, the installed one when it runs from the plugin.
+var executable = os.Executable

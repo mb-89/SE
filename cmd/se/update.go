@@ -11,10 +11,11 @@ import (
 
 func init() {
 	register(Command{
-		Name:    "update",
-		Usage:   "update [--repo DIR]",
-		Summary: "pull main into the installed SE checkout, rebuild se, restart a running daemon and reload the plugin",
-		Session: true,
+		Name:      "update",
+		Usage:     "update [--repo DIR]",
+		Summary:   "pull main into the installed SE checkout, rebuild se, restart a running daemon and reload the plugin",
+		Session:   true,
+		Installed: true,
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("update")
 			repo := fs.String("repo", "", "the installed SE checkout (default: the one this binary was built into)")
@@ -45,13 +46,13 @@ func init() {
 			if err := daemon.Stop(c.Paths(), 5*time.Second); err != nil {
 				return reply, fmt.Errorf("updated %s → %s, but the old daemon did not stop: %w", r.From, r.To, err)
 			}
-			ep, err := daemon.Start(c.Paths(), exe, startWait)
+			ep, note, err := startDaemon(c.Paths())
 			if err != nil {
-				reply.Text += fmt.Sprintf(" The daemon did not start again: %v.", err)
+				reply.Text = joined(reply.Text+fmt.Sprintf(" The daemon did not start again: %v.", err), note)
 				return reply, nil
 			}
 			reply.Endpoint = endpointOf(ep)
-			reply.Text += " Its daemon restarted."
+			reply.Text = joined(reply.Text+" Its daemon restarted.", note)
 			return reply, nil
 		},
 	})

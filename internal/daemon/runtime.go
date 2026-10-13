@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -31,6 +32,14 @@ func (p Paths) Endpoint() string  { return filepath.Join(p.Runtime(), "daemon.js
 func (p Paths) Lock() string      { return filepath.Join(p.Runtime(), "daemon.lock") }
 func (p Paths) Logs() string      { return filepath.Join(p.Runtime(), "logs") }
 func (p Paths) DaemonLog() string { return filepath.Join(p.Logs(), "daemon.log") }
+
+// Bin is where se built from a workspace that is an SE checkout lands.
+func (p Paths) Bin() string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(p.Runtime(), "bin", "se.exe")
+	}
+	return filepath.Join(p.Runtime(), "bin", "se")
+}
 
 // Prepare makes the runtime folder and the file that keeps it out of git.
 func Prepare(p Paths) error {

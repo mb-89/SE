@@ -18,6 +18,7 @@ takes words the way a command line does:
 | `/se on` | starts this workspace's daemon and forwards every event of the session to it |
 | `/se off` | stops forwarding, for this session |
 | `/se status` | says whether a daemon answers for this workspace |
+| `/se restart` | stops this workspace's daemon and starts it again; in an SE checkout, rebuilt from its source first |
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
 | `/se help`, `/se` | lists these |
 
@@ -29,8 +30,28 @@ The plugin is read from the checkout you ran `RUNME.sh` in.
 ## SE working on SE
 
 Keep two clones. Run `RUNME.sh` in one that stays on main; `/se update` keeps
-it current, and it is the SE every session runs under. Work on SE in the other
-clone, on a branch. That way a session never runs the code it is editing.
+it current, and it is the SE every session runs under: the plugin and the
+installed `se` in its `plugin/bin`. Work on SE in the other clone, on a branch.
+
+A workspace that is itself an SE checkout (its `go.mod` declares
+`module github.com/mb-89/SE`) runs its own `se`. Whenever `se` starts that
+workspace's daemon (`/se on`, `/se restart`, or the plugin starting a daemon it
+found down) it first builds `se` from the checkout's source into
+`.se/.runtime/bin/`, and the daemon runs that build. The session's `/se` words
+go to that build too, so a command you add or change in the checkout is offered
+and listed by `/se help` after the restart. So: edit the Go code, type
+`/se restart`, and the edited daemon and commands are in place, without leaving
+the session.
+
+`/se on`, `/se restart` and `/se update` always run in the installed `se`, so
+the way to rebuild never depends on the code being edited. If the checkout's
+source does not build, the daemon runs the installed `se`, every `/se` word is
+answered by it, and the command's answer says so with the build error; fix the
+code and `/se restart` again.
+
+Any other workspace runs the installed `se`, and nothing is built there. A
+terminal `se` (`se serve` under the debugger among them) runs as it was built
+and hands nothing to the checkout's build.
 
 ## Adding a command
 
@@ -49,6 +70,10 @@ stops the running daemon and starts `se serve` under the debugger. Set a
 breakpoint in `event` in `internal/daemon/server.go`: every event a session in
 that workspace raises stops there, and the session waits until you continue.
 The plugin finds the debugged daemon through `.se/.runtime/daemon.json`.
+
+The debugger builds `se serve` from the source open in VS Code, so the
+breakpoint is in the code that runs. `/se restart` ends the debugged daemon and
+puts the checkout's build back in its place.
 
 For a session working in another folder, run
 `se stop --workspace <folder>` and then **se: debug another workspace's daemon**.
