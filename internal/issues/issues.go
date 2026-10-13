@@ -433,6 +433,14 @@ type Tree struct {
 	Ready []Issue `json:"ready"`
 	// Review is the se-review parents whose sub-issues are all closed.
 	Review []Issue `json:"review"`
+	// rounds counts each review parent's sub-issues, which names its reviewer's worktree.
+	rounds map[int]int
+}
+
+// ReviewWorktree is the command that makes the fresh worktree, beside the
+// checkout dir, that the reviewer of n works in.
+func (tr Tree) ReviewWorktree(dir string, n int) string {
+	return ReviewWorktree(dir, n, tr.rounds[n])
 }
 
 // In says what is ready inside root's tree: its ready leaves at any depth,
@@ -447,7 +455,7 @@ func (s Source) in(root int) (Tree, []Status, error) {
 	if err != nil {
 		return Tree{}, nil, err
 	}
-	tr := Tree{Root: root, Ready: []Issue{}, Review: []Issue{}}
+	tr := Tree{Root: root, Ready: []Issue{}, Review: []Issue{}, rounds: map[int]int{}}
 	if t.closed[root] {
 		tr.Closed = true
 		return tr, nil, nil
@@ -476,6 +484,7 @@ func (s Source) in(root int) (Tree, []Status, error) {
 		switch {
 		case st.Review:
 			tr.Review = append(tr.Review, st.Issue)
+			tr.rounds[st.Number] = len(t.subs[st.Number])
 		case st.Ready() && !st.Parent:
 			tr.Ready = append(tr.Ready, st.Issue)
 		}

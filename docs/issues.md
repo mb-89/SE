@@ -2,8 +2,9 @@
 
 SE's work items are GitHub issues. These rules say which issue a box may work
 on next, how it claims it, and how issues and their dependencies are created.
-They live here and nowhere else; `se issue next`, `se issue new` and
-`se issue land` (in `internal/issues`) are their one implementation, so the
+They live here and nowhere else; `se issue next`, `se issue new`,
+`se issue land` and `se issue review` (in `internal/issues`) are their one
+implementation, so the
 choice is deterministic and no prompt restates it.
 
 ## The rules
@@ -44,7 +45,7 @@ follows from its structure alone:
 - **Except for reviews.** A parent labelled `se-review` never closes by
   itself. Once its sub-issues are all closed it is *ready for review*, which
   is not work: it is never taken as a leaf, and it keeps blocking its
-  dependents until it is closed (reviews are #15).
+  dependents until it is closed by its review (see [Reviews](#reviews)).
 - **Order** comes from native "blocked by" links and nothing else. A leaf is
   ready when it is open, not claimed, and neither it nor any of its ancestors
   has an open blocker: with milestone M2 blocked by M1, no leaf of M2 starts
@@ -72,7 +73,8 @@ follows from its structure alone:
 
     se issue next [--in ROOT] [--take [N]] [--json] [--repo OWNER/NAME]
     se issue land [--json] [--repo OWNER/NAME]
-    se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--json] [--repo OWNER/NAME]
+    se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--json] [--repo OWNER/NAME]
+    se issue review pass|fail N --why TEXT [--fix TITLE]... [--json] [--repo OWNER/NAME]
 
 Every one of them first closes the parents whose sub-issues are all closed.
 
@@ -102,13 +104,16 @@ closed (with `--json`: `{"root","closed","ready","review"}`). With `--take`
 another box claimed it first: it pushes `origin/main` as `issue-<n>` and
 fetches it, checking nothing out, and prints the leaf with the command that
 checks it out in its own worktree beside the checkout (with `--json`:
-`{"ready","closed","issue","branch","worktree"}`). That claim fires nothing:
+`{"ready","closed","issue","branch","worktree","review"}`). It also names the
+parents ready for review, each with the command that makes its reviewer's
+fresh worktree (`review`: a list of issues, each with its `worktree`). That claim fires nothing:
 the leaf is worked on by a sub-agent inside the coordinator's box.
 
 `se issue land` runs on the checked-out `issue-<n>` branch. It refuses an
 issue with open sub-issues ("a parent holds no work") and a tree with
 uncommitted changes, runs `tests/check.sh` and goes on only if it passes,
-pushes the branch, opens one PR against main titled after the issue with the
+pushes the branch, records on the leaf who worked it (see
+[Reviews](#reviews)), opens one PR against main titled after the issue with the
 body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left
 to wait for is squash-merged at once. It prints the PR's number and link (with
 `--json`: `{"issue","number","url","created","merged"}`). Where the branch's PR
@@ -123,14 +128,58 @@ comma-separated list of issue numbers (`--blocked-by 5,8`) or the word `none`.
 Every issue in the list is looked up before anything is written, so a list
 naming an issue that does not exist, or a pull request, creates nothing; so
 does a `--parent` that does not exist. The
-body comes from `--body` or from `--body-file`, one of them. A session has it
-as `/se issue new`.
+body comes from `--body` or from `--body-file`, one of them. `--review` labels
+it `se-review` as well (see [Reviews](#reviews)). A session has it as
+`/se issue new`.
+
+`se issue review` passes or fails a parent ready for review; see
+[Reviews](#reviews). A session has it as `/se issue review`.
 
 They read and write GitHub through `gh api` (the links through
 `/repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by`, the tree through
 `/repos/{owner}/{repo}/issues/{n}/sub_issues`), which owns the
 authentication, and work on the repository of the workspace's `origin` unless
 `--repo` names another.
+
+## Reviews
+
+Some issues, typically milestones, need a review before they count as done,
+and a review is never done by an agent that did the reviewed work. GitHub
+issues have no review of their own, so a review is plain issue mechanics, all
+through `se`, with every verdict on the reviewed issue's thread.
+
+- **The marker** is the label `se-review` on the reviewed issue itself, set by
+  `se issue new --review`. Its sub-issues are the work; the issue is its own
+  review.
+- **Ready for review**: once its sub-issues have all closed and nothing blocks
+  it, it does not close by itself (see [Nesting](#nesting-leaves-are-work-parents-coordinate)).
+  `se issue next --in` names it apart from the work.
+- **Pass**: `se issue review pass N --why "<verdict>"` posts the verdict on N
+  and closes it as completed; the parents it completes then close by
+  themselves.
+- **Fail**: `se issue review fail N --why "<findings>" --fix "<title>"`
+  (`--fix` repeats, at least once) posts the findings on N and creates one fix
+  leaf per `--fix`, a sub-issue of N made as `se issue new --parent N
+  --blocked-by none` would, its body the findings. N stays open: the fixes are
+  work inside it, and once they have landed it is ready for review again.
+- **Who worked a leaf** is recorded by `se issue land`: a comment on the leaf,
+  `Worked by session S in W.`, with the marker
+  `<!-- se-worker {"session":S,"workspace":W} -->`, once per worker. S is the
+  Claude Code session (`CLAUDE_CODE_SESSION_ID`), W the workspace it landed
+  from. Sub-agents of one box share a session and each works in its own
+  worktree, so the two together tell them apart. Without a session, nothing is
+  recorded.
+- **Separation, mechanically**: `se issue review` reads every leaf in N's tree,
+  open or closed, at any depth, and refuses where the agent running it (its
+  session and workspace) worked one of them. It also refuses, rather than
+  guess, where it cannot tell: when `CLAUDE_CODE_SESSION_ID` is unset, or a
+  leaf records no worker. A leaf closed as not planned or as a duplicate
+  landed no work and is not asked. A refused review writes nothing.
+- **The reviewer** is a fresh sub-agent of the coordinator that worked none of
+  the tree, in a fresh worktree of `origin/main` beside the checkout,
+  `review-<n>-<k>` (k counts N's sub-issues, so every round after a fail gets
+  its own). `se issue next --in ROOT --take` names the command that makes it.
+  It ends with `se issue review pass|fail`.
 
 ## The routine
 
