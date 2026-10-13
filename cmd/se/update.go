@@ -15,12 +15,15 @@ func init() {
 	register(Command{
 		Name:      "update",
 		Usage:     "update [--repo DIR] [--session-start]",
-		Summary:   "pull main into the installed SE checkout, rebuild se, restart a running daemon and reload the plugin",
+		Group:     "Session",
+		Summary:   "pull main into the installed SE, rebuild se and reload",
+		Details:   "pull main into the installed SE checkout, rebuild se, restart a running daemon and reload the plugin.",
 		Session:   true,
 		Installed: true,
+		Button:    true,
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("update")
-			repo := fs.String("repo", "", "the installed SE checkout (default: the one this binary was built into)")
+			repo := fs.String("repo", "", "the installed SE checkout `DIR` (default: the one this binary was built into)")
 			// The plugin updates its own checkout as a session starts: nothing
 			// there may fail the session, and an update that changed nothing is silent.
 			start := fs.Bool("session-start", false, "as the plugin runs it at session start: never fail, say nothing when nothing changed")

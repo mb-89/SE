@@ -99,7 +99,7 @@ func TestAFreshClaimIsNotStuckAndAStaleOneIs(t *testing.T) {
 	if all[0].Why != "claimed by issue-1" || all[1].Why != "claimed by issue-2, stuck: nothing was pushed to issue-2 since 2026-10-13T08:00:00Z" {
 		t.Fatalf("%q %q", all[0].Why, all[1].Why)
 	}
-	if all[2].Takeovers != 1 || all[2].Takeover || !all[1].Takeover {
+	if all[2].Takeovers != 1 || all[2].Takeover != nil || all[1].Takeover == nil {
 		t.Fatalf("%+v", all)
 	}
 	if len(g.writes) != 0 {
@@ -119,13 +119,15 @@ func TestATakeoverComesBeforeNewWorkAndContinuesTheBranch(t *testing.T) {
 		listPath:    list(node(3, 0), node(5, 0)),
 		refsPath:    refs(5),
 		activity(5): pushed(stale),
+		// #5 has no PR yet, so none conflicts.
+		openPullsPath: `[]`,
 	})
 	s := g.source()
-	if next, ok, err := s.Next(); err != nil || !ok || next.Number != 5 || !next.Takeover {
+	if next, ok, err := s.Next(); err != nil || !ok || next.Number != 5 || next.Takeover == nil {
 		t.Fatalf("next = %+v %v %v", next, ok, err)
 	}
 	took, ok, err := s.Take(b, 0)
-	if err != nil || !ok || took.Number != 5 || !took.Takeover {
+	if err != nil || !ok || took.Number != 5 || took.Takeover == nil {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 	if got := run(t, b, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-5" {
@@ -165,7 +167,7 @@ func TestOfTwoTakeoversTheFirstCommentWins(t *testing.T) {
 	}
 	// Another box read the same survey and commented first.
 	g.say(5, "<!-- se:takeover 1 -->")
-	if ok, err := s.takeOver(b, all[0], true); err != nil || ok {
+	if ok, err := s.takeOverStuck(b, all[0], true); err != nil || ok {
 		t.Fatalf("lost race answered %v %v", ok, err)
 	}
 	if got := run(t, b, "rev-parse", "--abbrev-ref", "HEAD"); got != "main" {
@@ -271,11 +273,11 @@ func TestAStuckLeafInATreeIsTakenOverFirst(t *testing.T) {
 		t.Fatalf("next %+v %v %v", next, ok, err)
 	}
 	tr, err := s.In(10)
-	if err != nil || !reflect.DeepEqual(numbers(tr.Ready), []int{11, 12}) || !tr.Ready[0].Takeover || tr.Ready[1].Takeover {
+	if err != nil || !reflect.DeepEqual(numbers(tr.Ready), []int{11, 12}) || tr.Ready[0].Takeover == nil || tr.Ready[1].Takeover != nil {
 		t.Fatalf("%+v %v", tr, err)
 	}
 	took, ok, _, err := s.TakeIn(b, 10, 0)
-	if err != nil || !ok || took.Number != 11 || !took.Takeover {
+	if err != nil || !ok || took.Number != 11 || took.Takeover == nil {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 	// The branch is fetched as it stands, nothing checked out.
@@ -302,7 +304,7 @@ func TestAParentsClaimIsNeverStuck(t *testing.T) {
 		refsPath:     refs(10),
 		subsPath(10): subs(11),
 	})
-	if next, ok, err := g.source().Next(); err != nil || !ok || next.Number != 10 || next.Takeover {
+	if next, ok, err := g.source().Next(); err != nil || !ok || next.Number != 10 || next.Takeover != nil {
 		t.Fatalf("next %+v %v %v", next, ok, err)
 	}
 }

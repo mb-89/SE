@@ -15,8 +15,9 @@ import (
 )
 
 // recordedIssues answers the issue commands' gh calls for o/r: #1 claimed,
-// #2 blocked by #1, #3 ready, #4 a pull request, #9 does not exist; a new
-// issue comes back as #10. It answers the calls made, in order.
+// with no open PR, #2 blocked by #1, #3 ready, #4 a pull request, #9 does not
+// exist, #5 is closed; a new issue comes back as #10. It answers the calls
+// made, in order. A fire answers "Fired." unless a test counts them.
 func recordedIssues(t *testing.T) *[][]string {
 	t.Helper()
 	answers := map[string]string{
@@ -27,8 +28,10 @@ func recordedIssues(t *testing.T) *[][]string {
 		"repos/o/r/git/matching-refs/heads/issue-":                `[{"ref":"refs/heads/issue-1"}]`,
 		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
-		"repos/o/r/issues/1":                                   `{"id":101,"number":1}`,
-		"repos/o/r/issues/3":                                   `{"id":103,"number":3}`,
+		"repos/o/r/pulls?base=main&state=open&per_page=100":       `[]`,
+		"repos/o/r/issues/1":                                   `{"id":101,"number":1,"state":"open"}`,
+		"repos/o/r/issues/3":                                   `{"id":103,"number":3,"state":"open"}`,
+		"repos/o/r/issues/5":                                   `{"id":105,"number":5,"state":"closed"}`,
 		"repos/o/r/issues/4":                                   `{"id":104,"number":4,"pull_request":{}}`,
 		"repos/o/r/issues":                                     `{"id":110,"number":10,"title":"ten","html_url":"u10"}`,
 		"repos/o/r/issues/10/dependencies/blocked_by":          `{"id":101}`,
@@ -36,7 +39,7 @@ func recordedIssues(t *testing.T) *[][]string {
 	}
 	var calls [][]string
 	old, oldFire := gh, fire
-	fire = func() string { t.Error("fired the routine without a claim"); return "" }
+	fire = func() string { return "Fired." }
 	gh = func(args ...string) ([]byte, error) {
 		calls = append(calls, args)
 		path := args[len(args)-1]
@@ -74,10 +77,10 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "issue", "next", "--repo", "o/r"); !strings.HasPrefix(r.Text, "#3 three") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--repo", "o/r"); r.Text != "Created #10 ten\nu10" {
+	if r := session(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--repo", "o/r"); r.Text != "Created #10 ten\nu10\nFired." {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "help"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
+	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
 	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, next, resume, review." {
@@ -168,7 +171,7 @@ func TestIssueNewCreatesTheIssueAndItsLinks(t *testing.T) {
 		t.Fatalf("gh calls\n%q\nwant\n%q", *calls, want)
 	}
 	code, out, _ = se(t, "issue", "new", "--json", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none")
-	if code != 0 || out != `{"number":10,"url":"u10","blocked_by":[]}`+"\n" {
+	if code != 0 || out != `{"number":10,"url":"u10","blocked_by":[],"fanout":"Fired."}`+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 }
@@ -325,6 +328,28 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 	}
 }
 
+func TestANewIssueFiresTheRoutineOnlyWhenNothingBlocksIt(t *testing.T) {
+	recordedIssues(t)
+	fires := 0
+	fire = func() string { fires++; return "Fan-out fired the routine: s1" }
+	// #1 is open: the new issue is blocked, so no box would find it ready.
+	if code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "1,5"); code != 0 || fires != 0 || strings.Contains(out, "Fan-out") {
+		t.Fatalf("exit %d, %d fires, %q %q", code, fires, out, errs)
+	}
+	// #5 is closed: nothing blocks it, so it fires once.
+	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "5")
+	if code != 0 || fires != 1 || out != "Created #10 ten\nu10\nBlocked by #5.\nFan-out fired the routine: s1\n" {
+		t.Fatalf("exit %d, %d fires, %q %q", code, fires, out, errs)
+	}
+	// A failed or refused fire is reported and never fails the creation.
+	fire = func() string {
+		return "Fan-out is off: SE_ROUTINE_FIRE_URL and SE_ROUTINE_FIRE_TOKEN are not both set."
+	}
+	if code, out, _ := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none"); code != 0 || !strings.HasSuffix(out, "Fan-out is off: SE_ROUTINE_FIRE_URL and SE_ROUTINE_FIRE_TOKEN are not both set.\n") {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+}
+
 func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 	recordedIssues(t)
 	root := t.TempDir()
@@ -345,7 +370,7 @@ func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 func TestIssueNewReviewLabelsItSeReview(t *testing.T) {
 	calls := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--review")
-	if code != 0 || out != "Created #10 ten\nu10\nLabelled se-review: it is reviewed once its sub-issues have closed.\n" {
+	if code != 0 || out != "Created #10 ten\nu10\nLabelled se-review: it is reviewed once its sub-issues have closed.\nFired.\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	last := (*calls)[len(*calls)-1]

@@ -68,7 +68,11 @@ func Build(repo, out string) error {
 	}
 	// Two starts may build at once; each builds to a file of its own.
 	fresh := fmt.Sprintf("%s.%d.new", out, os.Getpid())
-	cmd := exec.Command("go", "build", "-o", fresh, "./cmd/se")
+	args := []string{"build", "-o", fresh}
+	if head, err := Head(repo); err == nil {
+		args = append(args, "-ldflags", Ldflags(head))
+	}
+	cmd := exec.Command("go", append(args, "./cmd/se")...)
 	cmd.Dir = repo
 	if said, err := cmd.CombinedOutput(); err != nil {
 		os.Remove(fresh)
@@ -84,6 +88,13 @@ func Build(repo, out string) error {
 	}
 	return os.Rename(fresh, out)
 }
+
+// Head is the commit repo is at.
+func Head(repo string) (string, error) { return git(repo, "rev-parse", "HEAD") }
+
+// Ldflags embeds commit in se as the commit it was built from; every build of
+// se passes them (see main.commit).
+func Ldflags(commit string) string { return "-X main.commit=" + commit }
 
 // Module is the module path an SE checkout's go.mod declares.
 const Module = "github.com/mb-89/SE"

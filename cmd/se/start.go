@@ -10,7 +10,9 @@ func init() {
 	register(Command{
 		Name:    "start",
 		Usage:   "start",
-		Summary: "answer the running daemon, or start one in the background; prints its address and token as JSON",
+		Group:   "Daemon",
+		Summary: "start the daemon in the background, or find it running",
+		Details: "answer the running daemon, or start one in the background. Prints its address and token as JSON.",
 		Run: func(c *Call) (Reply, error) {
 			if err := c.Parse(c.Flags("start")); err != nil {
 				return Reply{}, err

@@ -16,8 +16,8 @@ import (
 // gh is how the issue commands reach GitHub; tests put recorded answers here.
 var gh issues.GH = issues.Gh
 
-// fire is the fan-out after a claim: it fires the routine once and answers a
-// line saying what happened. Tests put a fake here.
+// fire is the fan-out after a claim, and after the creation of a ready issue:
+// it fires the routine once and answers a line saying what happened. Tests put a fake here.
 var fire = issues.FireFromEnv
 
 // sessionID names the session se runs in, which land records as the leaf's
@@ -44,13 +44,16 @@ func init() {
 	register(Command{
 		Name:    "issue next",
 		Usage:   "issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]",
-		Summary: "name the next se issue at the top, stuck work before new work, or say that none is ready; --take claims it (or issue N): its branch issue-N, pushed from origin/main, or a stuck one's as it stands, checked out; a claim fires the routine once (fan-out); --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree; --person lists the issues waiting on a person. A claim stuck a second time goes to a person on the way",
+		Group:   "Issues",
+		Summary: "name the next se issue, stuck work first; --take claims it",
+		Details: "name the next ready se issue at the top, stuck work before new work, or say that none is ready. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the 3-hour lease is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.",
 		Session: true,
+		Button:  true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue next")
 			take := &takeFlag{}
-			fs.Var(take, "take", "claim the issue: the next ready one, or --take N")
-			in := fs.Int("in", 0, "look inside this issue's tree for its ready leaves")
+			fs.Var(take, "take", "claim the next ready issue, or issue N as --take N")
+			in := fs.Int("in", 0, "look inside the tree of issue `ROOT` for its ready leaves")
 			person := fs.Bool("person", false, "list the issues waiting on a person")
 			// --take N: the number may stand after --take, between or after the other flags.
 			for rest := c.Args; ; {
@@ -118,7 +121,9 @@ func init() {
 	register(Command{
 		Name:    "issue resume",
 		Usage:   "issue resume N [--json] [--repo OWNER/NAME]",
-		Summary: "for a person: take issue N off se-person and put it back in the queue, its takeover count reset",
+		Group:   "Issues",
+		Summary: "for a person: put issue N back in the queue",
+		Details: "for a person: take issue N off se-person and put it back in the queue, its takeover count reset.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue resume")
@@ -167,15 +172,17 @@ func init() {
 	register(Command{
 		Name:    "issue new",
 		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--json] [--repo OWNER/NAME]",
-		Summary: "create an se issue, linked as blocked by each issue named (GitHub's native links), as a sub-issue of --parent, and name it; --review labels it se-review",
+		Group:   "Issues",
+		Summary: "create an se issue, with its blockers and its parent",
+		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --review labels it se-review. A ready issue, one nothing open blocks, fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
-			title := fs.String("title", "", "the issue's title")
-			body := fs.String("body", "", "the issue's body")
-			bodyFile := fs.String("body-file", "", "a file holding the issue's body")
-			blockedBy := fs.String("blocked-by", "", "the issues that block it, as N,M, or none")
-			parent := fs.Int("parent", 0, "the issue it is a sub-issue of")
+			title := fs.String("title", "", "the issue's title `T`")
+			body := fs.String("body", "", "the issue's body `B`")
+			bodyFile := fs.String("body-file", "", "a file `PATH` holding the issue's body")
+			blockedBy := fs.String("blocked-by", "", "the issues that block it, as `N,M`, or none")
+			parent := fs.Int("parent", 0, "the issue `N` it is a sub-issue of")
 			review := fs.Bool("review", false, "label it se-review: it is reviewed once its sub-issues have closed")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
@@ -213,9 +220,13 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			made, err := s.Create(*title, *body, *parent, blockers, *review)
+			made, ready, err := s.Create(*title, *body, *parent, blockers, *review)
 			if err != nil {
 				return Reply{}, err
+			}
+			fanout := ""
+			if ready {
+				fanout = fire()
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
@@ -224,7 +235,8 @@ func init() {
 					BlockedBy []int  `json:"blocked_by"`
 					Parent    int    `json:"parent,omitempty"`
 					Review    bool   `json:"review,omitempty"`
-				}{made.Number, made.URL, append([]int{}, blockers...), *parent, *review})
+					Fanout    string `json:"fanout,omitempty"`
+				}{made.Number, made.URL, append([]int{}, blockers...), *parent, *review, fanout})
 				return Reply{Text: string(data)}, err
 			}
 			text := fmt.Sprintf("Created #%d %s\n%s", made.Number, made.Title, made.URL)
@@ -241,13 +253,18 @@ func init() {
 				}
 				text += "\nBlocked by " + strings.Join(names, ", ") + "."
 			}
+			if fanout != "" {
+				text += "\n" + fanout
+			}
 			return Reply{Text: text}, nil
 		},
 	})
 	register(Command{
 		Name:    "issue land",
 		Usage:   "issue land [--json] [--repo OWNER/NAME]",
-		Summary: "on an issue-N branch of a leaf: pass tests/check.sh, push, open its PR against main (Fixes #N), or find it open, and turn on auto-merge (squash)",
+		Group:   "Issues",
+		Summary: "check, push and open the PR of an issue-N branch, auto-merge on",
+		Details: "on an issue-N branch of a leaf: pass tests/check.sh, push, open its PR against main (Fixes #N), or find it open, and turn on auto-merge (squash).",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue land")
@@ -288,13 +305,15 @@ func init() {
 	register(Command{
 		Name:    "issue review",
 		Usage:   "issue review pass|fail N --why TEXT [--fix TITLE]... [--json] [--repo OWNER/NAME]",
-		Summary: "review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree: pass posts the verdict and closes it; fail posts the findings and creates a fix leaf under it per --fix",
+		Group:   "Issues",
+		Summary: "pass or fail a parent whose sub-issues have closed",
+		Details: "review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree. pass posts the verdict and closes it; fail posts the findings and creates a fix leaf under it per --fix.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue review")
-			why := fs.String("why", "", "the verdict, or the findings")
+			why := fs.String("why", "", "the verdict, or the findings, as `TEXT`")
 			var fixes fixList
-			fs.Var(&fixes, "fix", "the title of a fix leaf a fail creates (repeat it for each)")
+			fs.Var(&fixes, "fix", "the `TITLE` of a fix leaf a fail creates (repeat it for each)")
 			// The words pass|fail and N may stand before, between or after the flags.
 			var words []string
 			for rest := c.Args; ; {
@@ -385,7 +404,7 @@ func (t *takeFlag) Set(v string) error {
 func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Source, error), asJSON *bool) {
 	fs = c.Flags(name)
 	asJSON = fs.Bool("json", false, "answer JSON")
-	repo := fs.String("repo", "", "the repository as OWNER/NAME (default: the workspace's origin)")
+	repo := fs.String("repo", "", "the repository as `OWNER/NAME` (default: the workspace's origin)")
 	return fs, func() (issues.Source, error) {
 		if *repo == "" {
 			r, err := issues.Repo(c.Workspace)
@@ -418,12 +437,16 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string) (Re
 		return Reply{Text: "No se issue is ready."}, nil
 	}
 	head := fmt.Sprintf("#%d %s\n%s", i.Number, i.Title, i.URL)
+	t := i.Takeover
 	switch {
-	case branch != "" && i.Takeover:
+	case branch != "" && t != nil && t.PR != 0:
+		head = fmt.Sprintf("Took over #%d %s, on branch %s: its PR #%d conflicts with main (takeover %d).\n%s\n%s\nMerge origin/main into %s (never rebase, never force-push), resolve the conflict, and land it again with se issue land.",
+			i.Number, i.Title, branch, t.PR, t.Count, i.URL, t.URL, branch)
+	case branch != "" && t != nil:
 		head = fmt.Sprintf("Took over #%d %s, on branch %s as it stands: it was stuck. Continue the branch and its PR.\n%s", i.Number, i.Title, branch, i.URL)
 	case branch != "":
 		head = fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
-	case i.Takeover:
+	case t != nil:
 		head += fmt.Sprintf("\nIt is stuck: a take takes it over and continues its branch %s.", issues.Branch(i.Number))
 	}
 	if fanout != "" {
@@ -478,7 +501,7 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 		return Reply{Text: treeText(work) + reviewText(c, tr)}, nil
 	}
 	did := "Took #%d %s, on branch %s.\n%s\n\nWork in its own worktree:\n%s"
-	if took.Takeover {
+	if took.Takeover != nil {
 		did = "Took over #%d %s, on branch %s as it stands: it was stuck.\n%s\n\nContinue the branch and its PR in its own worktree:\n%s"
 	}
 	text := fmt.Sprintf(did, took.Number, took.Title, issues.Branch(took.Number), took.URL, worktree) + reviewText(c, tr)
@@ -499,7 +522,7 @@ func treeText(tr issues.Tree) string {
 	var lines []string
 	for _, i := range tr.Ready {
 		what := "Ready"
-		if i.Takeover {
+		if i.Takeover != nil {
 			what = "Stuck, to take over"
 		}
 		lines = append(lines, fmt.Sprintf("%s: #%d %s\n%s", what, i.Number, i.Title, i.URL))

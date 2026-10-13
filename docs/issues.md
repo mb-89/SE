@@ -23,8 +23,28 @@ choice is deterministic and no prompt restates it.
   box claims an issue by pushing that branch from the current `origin/main`. A
   push is atomic, so if two boxes race, the second push is refused and that box
   moves to the next issue.
-- **Order**: stuck work first (see [Stuck work](#stuck-work)), then the
-  lowest issue number among the ready ones.
+- **Order**: any conflicted claim first (below), then stuck work (see
+  [Stuck work](#stuck-work)), then the lowest issue number among the ready
+  ones.
+- **Conflicted claims are taken over at once.** GitHub runs no CI on a PR
+  that conflicts with main and sends nothing that wakes its box, so a
+  conflicted claim would sit forever. Before offering anything else,
+  `se issue next --take` looks at every claimed leaf's open PR; one GitHub
+  reports as not mergeable (`mergeable` false, `mergeable_state` `dirty`) is
+  taken next, whatever its age. A `null` `mergeable` means GitHub has not
+  computed it yet: `se` asks again shortly, and while it stays `null` it is no
+  conflict. The box taking it checks out `issue-<n>` as it stands, merges
+  `origin/main` into it (never a rebase, never a force-push), resolves the
+  conflict and lands it again with `se issue land`.
+- **A takeover is recorded** on the issue as a comment carrying the marker
+  `<!-- se:takeover N -->` (stuck work writes the same marker), so the count
+  survives every box; a conflict takeover also records the PR head it found,
+  `<!-- se:takeover-head SHA -->`. A PR still conflicted at that same head is
+  a takeover in flight and is left to its box. Of two boxes writing the same
+  `N` at once, the earlier comment wins and the other box deletes its own. A
+  conflict on an issue taken over before, for a conflict or stuck, instead
+  goes to a person, as a second stuck claim does (below).
+- **Waits on a person**: an issue labelled `se-person` is never ready.
 - **Done**: the PR's body says `Fixes #n`, so GitHub closes the issue when the
   PR merges, and the issues it blocked become ready.
 
@@ -46,18 +66,22 @@ follows from its structure alone:
 - **Except for reviews.** A parent labelled `se-review` never closes by
   itself. Once its sub-issues are all closed it is *ready for review*, which
   is not work: it is never taken as a leaf, and it keeps blocking its
-  dependents until it is closed by its review (see [Reviews](#reviews)).
+  dependents until it is closed by its review (see [Reviews](#reviews)). It
+  still makes its tree ready at the top, so a box takes the tree and its
+  coordinator starts the reviewer.
 - **Order** comes from native "blocked by" links and nothing else. A leaf is
   ready when it is open, not claimed, and neither it nor any of its ancestors
   has an open blocker: with milestone M2 blocked by M1, no leaf of M2 starts
   before M1 has closed.
 - **The top**: `se issue next` offers only issues without a parent. A parent
-  there is ready while some leaf inside it is; a sub-issue is never offered at
-  the top.
+  there is ready while some leaf inside it is, or some parent in its tree
+  (itself included) is ready for review; a sub-issue is never offered at the
+  top. So a review never waits on the coordinator that was running when its
+  last leaf merged: any later box takes the tree and starts the reviewer.
 - **The tree's claim**: taking a parent at the top pushes `issue-<root>`,
   which claims the whole tree. That claim does not hold the tree from other
-  boxes: a later box that finds a leaf ready inside it takes the parent again
-  and picks the tree up from the claim. The leaves' own claims keep two
+  boxes: a later box that finds a leaf or a review ready inside it takes the
+  parent again and picks the tree up from the claim. The leaves' own claims keep two
   coordinators from taking one leaf twice.
 - **Leaves inside a tree** are claimed by `se issue next --in <root> --take`,
   each with its own branch `issue-<n>` from `origin/main`, and worked on in
@@ -67,8 +91,9 @@ follows from its structure alone:
   leaf.
 - **The coordinator** is the box that took the parent. It starts one sub-agent
   per ready leaf inside its own box (no separate cloud sessions), each in the
-  leaf's worktree, and repeats until the root has closed. When nothing inside
-  is ready while the root is open, it ends; a later box picks the tree up.
+  leaf's worktree, and one reviewer per parent ready for review, and repeats
+  until the root has closed. When nothing inside is ready while the root is
+  open, it ends; a later box picks the tree up.
 
 ## Stuck work
 
@@ -94,8 +119,9 @@ the agents' queue until a person has looked.
   as it stands, inside a tree its worktree command checks it out. `se`
   records the takeover on the issue as a comment carrying the marker
   `<!-- se:takeover <round> -->`, so the count survives the box. Of two boxes
-  taking over one issue, the first comment of the round wins; the other moves
-  on. A takeover renews the lease.
+  taking over one issue, the first comment of the round wins; the other
+  deletes its own and moves on. A takeover renews the lease, and counts
+  against the issue as a conflict takeover does.
 - **Second stuck: to a person.** A leaf that was taken over once already and
   is stuck again gets the label `se-person`, is assigned to the repository
   owner (so GitHub notifies them), and gets a comment saying why, with the
@@ -141,7 +167,11 @@ push is refused because another box claimed the issue first, it moves to the
 next ready issue. It prints what it took, or that nothing is ready. `--take N`
 refuses an issue that is not ready, or a sub-issue, and says why. There is no
 separate `take` command. Taking a parent whose branch exists already checks
-that branch out: the tree is picked up from its claim.
+that branch out: the tree is picked up from its claim. Plain `--take` first
+takes over a conflicted claim (see [The rules](#the-rules)): it prints
+`Took over #<n> …` with the PR, and the instruction to merge `origin/main`
+into the branch and land it again (with `--json`: the issue's `takeover`,
+`{"pr","url","count"}`); `--take N` takes over nothing.
 Once it has claimed an issue, `--take` fires the routine once (the fan-out,
 below) and adds a line saying what the fire did; with `--json` that line is
 the field `fanout`.
@@ -182,8 +212,12 @@ Every issue in the list is looked up before anything is written, so a list
 naming an issue that does not exist, or a pull request, creates nothing; so
 does a `--parent` that does not exist. The
 body comes from `--body` or from `--body-file`, one of them. `--review` labels
-it `se-review` as well (see [Reviews](#reviews)). A session has it as
-`/se issue new`.
+it `se-review` as well (see [Reviews](#reviews)). Where nothing blocks the
+issue it created (every issue in `--blocked-by` is closed, or it is `none`),
+it fires the routine once, as the fan-out does, and adds a line saying what
+the fire did (with `--json`: the field `fanout`); otherwise a new ready issue
+would wait for the next merge or the schedule. A blocked issue fires nothing.
+A session has it as `/se issue new`.
 
 `se issue review` passes or fails a parent ready for review; see
 [Reviews](#reviews). A session has it as `/se issue review`.
@@ -212,7 +246,8 @@ through `se`, with every verdict on the reviewed issue's thread.
   review.
 - **Ready for review**: once its sub-issues have all closed and nothing blocks
   it, it does not close by itself (see [Nesting](#nesting-leaves-are-work-parents-coordinate)).
-  `se issue next --in` names it apart from the work.
+  `se issue next --in` names it apart from the work, and at the top its tree
+  is ready, so any box takes the tree and starts its reviewer.
 - **Pass**: `se issue review pass N --why "<verdict>"` posts the verdict on N
   and closes it as completed; the parents it completes then close by
   themselves.
@@ -265,6 +300,8 @@ work. So boxes start boxes, mechanically, never by an agent's choice:
 - **Fan-out:** whenever `se issue next --take` has claimed an issue, it fires
   the routine `SE work` once, so another box starts and takes the next ready
   issue. That box fires again after its own claim, and so on.
+- **A new ready issue** fires it too: `se issue new` fires once when nothing
+  blocks the issue it created.
 - **The end:** a box that finds nothing ready claims nothing and fires
   nothing, so the fan-out ends by itself. Such a box leaves at once.
 - **No cap** on boxes in flight; the owner decided against one. The only limit

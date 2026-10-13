@@ -12,7 +12,9 @@ func init() {
 	register(Command{
 		Name:      "on",
 		Usage:     "on",
-		Summary:   "switch SE on: start this workspace's daemon and forward every event of the session to it",
+		Group:     "Session",
+		Summary:   "switch SE on: start the daemon, forward this session's events",
+		Details:   "switch SE on: start this workspace's daemon and forward every event of the session to it.",
 		Session:   true,
 		Installed: true,
 		Run: func(c *Call) (Reply, error) {

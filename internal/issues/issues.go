@@ -32,9 +32,10 @@ type Issue struct {
 	// Parent is true for an issue with sub-issues: it holds no work of its
 	// own, and taking it means coordinating them.
 	Parent bool `json:"parent,omitempty"`
-	// Takeover is true for a leaf stuck for the first time: taking it
-	// continues its branch and PR as they stand.
-	Takeover bool `json:"takeover,omitempty"`
+	// Takeover is set for a leaf a take takes over, stuck for the first time
+	// or its PR in conflict with main: taking it continues its branch and PR
+	// as they stand.
+	Takeover *Takeover `json:"takeover,omitempty"`
 }
 
 // Branch is the branch whose presence on origin claims issue n.
@@ -146,7 +147,8 @@ type Status struct {
 	// Above is the open fleet issue this one is a sub-issue of; 0 at the top.
 	Above int `json:"above,omitempty"`
 	// Review is true for a parent labelled se-review whose sub-issues are all
-	// closed: it waits for its review, which is not work.
+	// closed: it waits for its review, which is not work, but its coordinator
+	// starts the reviewer.
 	Review bool `json:"review,omitempty"`
 	// Stuck is set for a claimed leaf nothing was pushed to for longer than
 	// the lease; Takeovers counts its takeovers since a person last resumed
@@ -161,15 +163,18 @@ type Status struct {
 	// a person; urgent is set where taking it continues stuck work.
 	waits  int
 	urgent bool
+	// claimed is true for a leaf whose branch exists on origin.
+	claimed bool
 }
 
 // Ready says whether the issue may be taken as new work: a ready leaf is
-// work, a ready parent has work inside.
-func (s Status) Ready() bool { return s.Why == "" && !s.Review }
+// work, a ready parent has work or a review inside it, or is ready for review
+// itself.
+func (s Status) Ready() bool { return s.Why == "" }
 
 // Takeable says whether a take may have it: ready, or a leaf stuck for the
 // first time, which is taken over.
-func (s Status) Takeable() bool { return s.Ready() || s.Takeover }
+func (s Status) Takeable() bool { return s.Ready() || s.Takeover != nil }
 
 // tree is the open fleet issues and their sub-issues.
 type tree struct {
@@ -339,7 +344,7 @@ func (s Source) survey() ([]Status, tree, error) {
 			}
 			st.Reason = m.reason
 		case !parent && claimed[Branch(n)]:
-			st.Why = "claimed by " + Branch(n)
+			st.Why, st.claimed = "claimed by "+Branch(n), true
 			if err := s.lease(st); err != nil {
 				return nil, tree{}, err
 			}
@@ -349,7 +354,8 @@ func (s Source) survey() ([]Status, tree, error) {
 					return nil, tree{}, err
 				}
 			} else if st.Stuck {
-				st.Takeover, st.urgent = true, true
+				st.Takeover = &Takeover{Count: st.Takeovers + 1, Stale: st.since()}
+				st.urgent = true
 				st.Why += ", stuck: " + st.since()
 			}
 		default:
@@ -384,8 +390,9 @@ func (s Source) survey() ([]Status, tree, error) {
 			st.Why = fmt.Sprintf("#%d waits on a person", st.waits)
 		}
 	}
-	// A parent is ready while a leaf anywhere inside it may be taken, and
-	// urgent while one inside is stuck.
+	// A parent is ready while a leaf anywhere inside it may be taken, or a
+	// parent inside it is ready for review, and urgent while a leaf inside is
+	// stuck.
 	var inside func(n int, urgent bool) bool
 	inside = func(n int, urgent bool) bool {
 		for _, c := range t.subs[n] {
@@ -393,10 +400,10 @@ func (s Source) survey() ([]Status, tree, error) {
 			if !ok {
 				continue
 			}
-			if st.Parent && st.Why == "" && inside(c.Number, urgent) {
+			if st.Parent && st.Why == "" && (st.Review && !urgent || inside(c.Number, urgent)) {
 				return true
 			}
-			if !st.Parent && st.Takeable() && (!urgent || st.Takeover) {
+			if !st.Parent && st.Takeable() && (!urgent || st.Takeover != nil) {
 				return true
 			}
 		}
@@ -440,7 +447,11 @@ func (s Source) openBlockers(i issue) ([]int, error) {
 
 // Next is the issue at the top, one that is no sub-issue, that a take would
 // have: stuck work first, a leaf to take over or a parent with one inside,
-// then the lowest-numbered ready one; ok is false when there is none.
+// then the lowest-numbered ready one; ok is false when there is none. A
+// parent there is ready while a leaf inside it is ready or a parent in its
+// tree, itself included, is ready for review, so that a box takes the tree
+// and starts the reviewer. Next asks no PR whether it conflicts; only Take
+// does.
 func (s Source) Next() (next Issue, ok bool, err error) {
 	all, err := s.Survey()
 	if err != nil {
@@ -473,15 +484,22 @@ func takeOrder(all []Status, want int) []Status {
 }
 
 // Take claims an issue at the top in the git checkout dir: want, when it is
-// above zero, else the one Next names. Where another box claimed a leaf first,
-// it moves on to the next one. A leaf stuck for the first time is taken over:
-// its branch is checked out as it stands. A parent's branch claims its whole
+// above zero, else the one Next names. Without want, a claimed leaf whose PR
+// conflicts with main comes first, whatever its age (see takeOverConflict).
+// Where another box claimed a leaf first, it moves on to the next one. A leaf
+// stuck for the first time is taken over: its branch is checked out as it
+// stands. A parent's branch claims its whole
 // tree; where it exists already, Take picks the tree up from that claim. ok is
 // false when nothing was left to take.
 func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 	all, err := s.Survey()
 	if err != nil {
 		return Issue{}, false, err
+	}
+	if want == 0 {
+		if took, ok, err := s.takeOverConflict(dir, all); err != nil || ok {
+			return took, ok, err
+		}
 	}
 	if want > 0 {
 		found := false
@@ -494,7 +512,7 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 				return Issue{}, false, fmt.Errorf("#%d is a sub-issue of #%d; it is taken with --in", want, st.Above)
 			}
 			if !st.Takeable() {
-				return Issue{}, false, fmt.Errorf("#%d is not ready: %s", want, st.why())
+				return Issue{}, false, fmt.Errorf("#%d is not ready: %s", want, st.Why)
 			}
 		}
 		if !found {
@@ -504,8 +522,8 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 	for _, st := range takeOrder(all, want) {
 		var claimed bool
 		switch {
-		case st.Takeover:
-			claimed, err = s.takeOver(dir, st, true)
+		case st.Takeover != nil:
+			claimed, err = s.takeOverStuck(dir, st, true)
 		case st.Parent:
 			claimed, err = claimTree(dir, st.Number)
 		default:
@@ -519,13 +537,6 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 		}
 	}
 	return Issue{}, false, nil
-}
-
-func (s Status) why() string {
-	if s.Review {
-		return "it waits for its review, which is not work"
-	}
-	return s.Why
 }
 
 // Tree is where the work inside one issue's tree stands.
@@ -605,7 +616,7 @@ func (s Source) in(root int) (Tree, []Status, error) {
 		case st.Review:
 			tr.Review = append(tr.Review, st.Issue)
 			tr.rounds[st.Number] = len(t.subs[st.Number])
-		case st.Takeover:
+		case st.Takeover != nil:
 			tr.Ready = append(tr.Ready, st.Issue)
 		case st.Ready() && !st.Parent:
 			fresh = append(fresh, st.Issue)
@@ -661,8 +672,8 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 	}
 	for _, i := range order {
 		var claimed bool
-		if i.Takeover {
-			claimed, err = s.takeOver(dir, byNum[i.Number], false)
+		if i.Takeover != nil {
+			claimed, err = s.takeOverStuck(dir, byNum[i.Number], false)
 		} else {
 			claimed, err = stake(dir, i.Number)
 		}
@@ -690,14 +701,19 @@ func claimTree(dir string, n int) (bool, error) {
 	if claimed, err := Claim(dir, n); err != nil || claimed {
 		return claimed, err
 	}
+	return true, pickUp(dir, n)
+}
+
+// pickUp checks out issue n's branch as it stands on origin.
+func pickUp(dir string, n int) error {
 	branch := Branch(n)
-	if _, err := git(dir, "fetch", "-q", "origin", "refs/heads/"+branch+":refs/remotes/origin/"+branch); err != nil {
-		return false, err
+	if _, err := git(dir, "fetch", "-q", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch); err != nil {
+		return err
 	}
 	if _, err := git(dir, "checkout", "-q", "-B", branch, "--track", "origin/"+branch); err != nil {
-		return false, fmt.Errorf("could not check out %s: %w", branch, err)
+		return fmt.Errorf("could not check out %s: %w", branch, err)
 	}
-	return true, nil
+	return nil
 }
 
 // Claim pushes the current origin/main as issue n's branch and checks it out.

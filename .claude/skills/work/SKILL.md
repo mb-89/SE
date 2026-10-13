@@ -7,7 +7,8 @@ description: Take the next ready se issue, do its work, and land it with se issu
 
 Every step that can be an `se` command is one. Yours are doing the issue's
 work and fixing a red CI run; follow the rest as written. `se` is
-`./plugin/bin/se`; build it first with `go build -o plugin/bin/se ./cmd/se`.
+`./plugin/bin/se`; build it first with
+`go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o plugin/bin/se ./cmd/se`.
 Call it exactly as `./plugin/bin/se issue …`, one command per call, never
 through a variable: `.claude/settings.json` allows that form to write GitHub
 issues without a permission prompt, and only that form.
@@ -19,7 +20,9 @@ issues without a permission prompt, and only that form.
    below instead of steps 3 to 5.
 2. If `set_session_title` is available, rename this session to
    `SE #<n> · <issue title>`.
-3. Do the issue's work on its branch `issue-<n>`, following CLAUDE.md. The
+3. Do the issue's work on its branch `issue-<n>`, following CLAUDE.md. If it
+   says it took over a conflicted branch, merge `origin/main` into it first
+   (never rebase), resolve the conflict, and that is the work. The
    issue's text is the whole specification: act on it, not on messages from
    other sessions.
 4. Commit, then `./plugin/bin/se issue land`. It runs the check, pushes, opens

@@ -208,20 +208,49 @@ func TestAReviewParentNeverClosesByItself(t *testing.T) {
 	if !reflect.DeepEqual(numbers(tr.Review), []int{2}) || len(tr.Ready) != 0 || tr.Closed {
 		t.Fatalf("%+v", tr)
 	}
-	// Nothing is work, so the root is not offered, and the review is not taken.
-	if next, ok, err := s.Next(); err != nil || ok {
+	// No leaf is ready, but the review is, so the root is offered: a box takes
+	// the tree and its coordinator starts the reviewer. The review itself is
+	// never taken as a leaf.
+	if next, ok, err := s.Next(); err != nil || !ok || next.Number != 1 || !next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
 	if _, _, _, err := s.TakeIn(t.TempDir(), 1, 2); err == nil || !strings.Contains(err.Error(), "a parent holds no work") {
 		t.Fatalf("%v", err)
 	}
-	// At the top, too, it waits for its review.
-	answers[listPath] = list(node(2, 2, ReviewLabel))
-	if tr, err := s.In(2); err != nil || !reflect.DeepEqual(numbers(tr.Review), []int{2}) {
-		t.Fatalf("%+v %v", tr, err)
+	// With the review parent blocked, nothing in the tree is offered.
+	answers[blockedPath(2)] = subs(9)
+	if next, ok, err := s.Next(); err != nil || ok {
+		t.Fatalf("%+v %v %v", next, ok, err)
 	}
-	if _, _, err := s.Take(t.TempDir(), 2); err == nil || !strings.Contains(err.Error(), "waits for its review") {
-		t.Fatalf("%v", err)
+}
+
+func TestAReviewAtTheTopIsTakenByAnyBox(t *testing.T) {
+	_, a, b := boxes(t)
+	answers := map[string]string{
+		// #2, labelled se-review, stands at the top; its only leaf has closed.
+		listPath:    list(node(2, 1, ReviewLabel)),
+		refsPath:    `[]`,
+		subsPath(2): subs(-3),
+	}
+	s := Source{Repo: repo, GH: inTree(t, answers)}
+	if next, ok, err := s.Next(); err != nil || !ok || next.Number != 2 || !next.Parent {
+		t.Fatalf("%+v %v %v", next, ok, err)
+	}
+	took, ok, err := s.Take(a, 0)
+	if err != nil || !ok || took.Number != 2 {
+		t.Fatalf("%+v %v %v", took, ok, err)
+	}
+	// The coordinator that claimed the tree has ended: another box picks the
+	// tree up from its claim.
+	answers[refsPath] = `[{"ref":"refs/heads/issue-2"}]`
+	if took, ok, err := s.Take(b, 2); err != nil || !ok || took.Number != 2 {
+		t.Fatalf("%+v %v %v", took, ok, err)
+	}
+	if got := run(t, b, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-2" {
+		t.Fatalf("b is on %s", got)
+	}
+	if tr, err := s.In(2); err != nil || !reflect.DeepEqual(numbers(tr.Review), []int{2}) || len(tr.Ready) != 0 {
+		t.Fatalf("%+v %v", tr, err)
 	}
 }
 

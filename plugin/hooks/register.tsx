@@ -5,13 +5,17 @@
 // event the engine raises is posted to the workspace's se daemon before it
 // goes on, unchanged. The daemon owns what happens to it: today it appends
 // the event to the session's log. While SE is off, every hook hands the event
-// straight on and contacts nothing.
+// straight on and contacts nothing. /se ui opens a pane of buttons: the on/off
+// toggle and the commands se offers as buttons, each pressed as /se <words>.
 
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { SeActive } from '../types'
+import type { SeActive, SeButtons } from '../types'
 
 const ACTIVE = { plugin: 'se', key: 'active' } as const
+// The commands se offered as buttons when /se ui last opened the pane.
+const BUTTONS = { plugin: 'se', key: 'buttons' } as const
+const PANE = 'se-ui'
 // The folder the daemon owns in a workspace, and its endpoint record there.
 export const RUNTIME = '.se/.runtime'
 const ENDPOINT = `${RUNTIME}/daemon.json`
@@ -24,12 +28,25 @@ const RESTART_EVERY = 60_000
 
 type Endpoint = { address: string; token: string }
 
+// What the plugin tells se on every session call (see cmd/se/commit.go).
+const HOOKS_COMMIT = 'SE_HOOKS_COMMIT'
+const PLUGIN_CHECKOUT = 'SE_PLUGIN_CHECKOUT'
+
 // What se --session answers: the text to show and the effects to apply.
-export type Reply = { text: string; active?: boolean; endpoint?: Endpoint; reload?: boolean }
+export type Reply = {
+  text: string
+  active?: boolean
+  endpoint?: Endpoint
+  reload?: boolean
+  panel?: { buttons: SeButtons }
+}
 
 // The module's copy of the flag, so an event costs nothing while SE is off.
 // $.state holds the session's value across a reload; session.start reads it back.
 let active: SeActive = false
+// The commit of the checkout these hooks were loaded from, read as they load.
+// It lives in the module, not $.state, so a reload shows the new one.
+let hooksCommit = ''
 let root = ''
 let endpoint: Endpoint | null = null
 let lastStart = 0
@@ -47,6 +64,8 @@ export const register: Register = on => {
       argumentHint: '<command>',
     })
     root = e.cwd
+    // Before the update, which may move the checkout under these hooks.
+    hooksCommit = await headOf($)
     await updatesItself($)
     const { value } = await $.state.get(ACTIVE)
     if (value === undefined) {
@@ -58,10 +77,27 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'se' }, async ($, e) => {
-    const words = e.args.split(/\s+/).filter(Boolean)
-    const asked = await asks($, words)
-    return { text: typeof asked === 'string' ? asked : await applies($, asked) }
+  on('command.run', { command: 'se' }, async ($, e) => ({ text: await runs($, e.args) }))
+
+  // Every surface draws Box, Text and Button, the phone too, so the pane uses no other.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Button } = $.ui.resolve(e)
+    const { value: isOn = false } = await $.state.get(ACTIVE)
+    const { value: buttons = [] } = await $.state.get(BUTTONS)
+    return (
+      <Box flexDirection="row" flexWrap="wrap" columnGap={1} width={e.props.bodyColumns}>
+        <Button
+          key="toggle"
+          label={isOn ? 'SE on' : 'SE off'}
+          variant={isOn ? 'primary' : undefined}
+          dimColor={!isOn}
+          onPress={() => presses($, isOn ? 'off' : 'on')}
+        />
+        {buttons.map(name => (
+          <Button key={`run ${name}`} label={name} onPress={() => presses($, name)} />
+        ))}
+      </Box>
+    )
   })
 
   // The bridge never holds an event up for good: a failure here passes it on.
@@ -77,7 +113,7 @@ export const register: Register = on => {
 // holds the session up: what happened, if anything, is one line in a toast,
 // and a reload, when the update brought a new SE, waits until session.start has answered.
 async function updatesItself($: EngineInterface): Promise<void> {
-  const asked = await asks($, ['update', '--session-start', '--repo', `${$.plugin.root}/..`], UPDATING)
+  const asked = await asks($, ['update', '--session-start', '--repo', checkoutOf($)], UPDATING)
   const said = typeof asked === 'string' ? `SE did not update itself: ${asked}` : await applies($, asked)
   if (said) $.ui.toast(said.split('\n')[0])
 }
@@ -88,7 +124,10 @@ async function asks($: EngineInterface, words: string[], timeoutMs = STARTING): 
     const bin = await builds($)
     if (bin.failed) return bin.failed
     root = await $.session.root()
-    const ran = await $.process.run([bin.path, '--session', '--workspace', root, ...words], { timeoutMs })
+    const ran = await $.process.run([bin.path, '--session', '--workspace', root, ...words], {
+      timeoutMs,
+      env: { [HOOKS_COMMIT]: hooksCommit, [PLUGIN_CHECKOUT]: checkoutOf($) },
+    })
     const said = parsed(ran.stdout) as Reply | null
     if (typeof said?.text !== 'string') return `se did not answer: ${failed(ran)}`
     return said
@@ -109,6 +148,10 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
     active = reply.active
     await $.state.set(ACTIVE, reply.active)
   }
+  if (reply.panel) {
+    await $.state.set(BUTTONS, reply.panel.buttons)
+    await $.ui.open({ id: PANE, title: 'SE' })
+  }
   if (!reply.reload) return reply.text
   // A command.run hook cannot run another command: the reload waits until this one has answered.
   $.clock.after(0, async () => {
@@ -119,6 +162,19 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
     }
   })
   return `${reply.text} The plugins reload now.`
+}
+
+// /se <words>: hands the words to se and applies its reply; answers the text to show.
+async function runs($: EngineInterface, args: string): Promise<string> {
+  const asked = await asks($, args.split(/\s+/).filter(Boolean))
+  return typeof asked === 'string' ? asked : applies($, asked)
+}
+
+// A press runs what typing /se <words> runs; its answer is a line of the
+// transcript, where a command's answer shows. (A plugin's $.command.run skips
+// the plugin's own hooks, so it cannot reach /se.)
+async function presses($: EngineInterface, words: string): Promise<void> {
+  $.ui.log(await runs($, words))
 }
 
 // Switches SE on and starts the daemon; answers why the daemon did not start, or ''.
@@ -205,12 +261,30 @@ export function bodyOf(session: string, event: string, e: unknown): string {
   }
 }
 
-// se under the plugin folder, built from the checkout where it is missing.
+// The checkout the plugin was loaded from.
+function checkoutOf($: EngineInterface): string {
+  return `${$.plugin.root}/..`
+}
+
+// The commit the plugin's checkout is at, or '' where git does not say.
+async function headOf($: EngineInterface): Promise<string> {
+  try {
+    const ran = await $.process.run(['git', 'rev-parse', 'HEAD'], { cwd: checkoutOf($), timeoutMs: 10_000 })
+    return ran.exitCode === 0 ? String(ran.stdout ?? '').trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+// se under the plugin folder, built from the checkout where it is missing,
+// with the commit it was built from embedded (see cmd/se/commit.go).
 async function builds($: EngineInterface): Promise<{ path: string; failed?: string }> {
   const path = binaryOf($.plugin.root)
   if (await $.fs.exists(path)) return { path }
-  const built = await $.process.run(['go', 'build', '-o', path, './cmd/se'], {
-    cwd: `${$.plugin.root}/..`,
+  const head = await headOf($)
+  const ldflags = head ? ['-ldflags', `-X main.commit=${head}`] : []
+  const built = await $.process.run(['go', 'build', ...ldflags, '-o', path, './cmd/se'], {
+    cwd: checkoutOf($),
     timeoutMs: STARTING,
   })
   return built.exitCode === 0 ? { path } : { path, failed: `se is not built and go build failed: ${failed(built)}` }
