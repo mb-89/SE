@@ -273,14 +273,29 @@ func init() {
 	})
 	register(Command{
 		Name:    "issue land",
-		Usage:   "issue land [--json] [--repo OWNER/NAME]",
+		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "check, push and open the PR of an issue-N branch, auto-merge on",
-		Details: "on an issue-N branch of a leaf: pass tests/check.sh, push, open its PR against main (Fixes #N), or find it open, and turn on auto-merge (squash).",
+		Details: "on an issue-N branch of a leaf: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), pass tests/check.sh, push, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N), or find it open, and turn on auto-merge (squash).",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue land")
+			file := fs.String("answers", "", "the landing answers, a YAML `FILE` keyed as spec/landing.yaml")
 			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			if *file == "" {
+				return Reply{}, fmt.Errorf("issue land takes --answers FILE: an answer to every question in %s", issues.QuestionsFile)
+			}
+			if !filepath.IsAbs(*file) {
+				*file = filepath.Join(c.Workspace, *file)
+			}
+			qs, err := issues.Questions(c.Workspace)
+			if err != nil {
+				return Reply{}, err
+			}
+			answers, err := issues.ReadAnswers(*file)
+			if err != nil {
 				return Reply{}, err
 			}
 			s, err := src()
@@ -290,7 +305,7 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			l, err := s.Land(c.Workspace, sessionID(), check)
+			l, err := s.Land(c.Workspace, sessionID(), qs, answers, check)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -318,7 +333,7 @@ func init() {
 		Name:    "issue review",
 		Usage:   "issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "pass or fail a parent whose sub-issues have closed, with its report",
+		Summary: "pass or fail a gate whose sub-issues have closed, by its report",
 		Details: "review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree, with the report in the JSON file PATH (spec/review.md). It refuses a pass where a requirement lacks evidence, and a report without its checked-and-clean list. Every finding becomes an se-final issue: a blocking one a sub-issue of N, a non-blocking one in the queue (five at most). pass posts the report and closes N; fail posts it, and N waits for its fixes. A re-review that finds an earlier blocker's problem again sends N to a person.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
@@ -527,11 +542,15 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string) (Re
 	head := fmt.Sprintf("#%d %s\n%s", i.Number, i.Title, i.URL)
 	t := i.Takeover
 	switch {
-	case branch != "" && t != nil && t.PR != 0:
+	case branch != "" && t != nil && t.PR != 0 && t.Stale == "":
 		head = fmt.Sprintf("Took over #%d %s, on branch %s: its PR #%d conflicts with main (takeover %d).\n%s\n%s\nMerge origin/main into %s (never rebase, never force-push), resolve the conflict, and land it again with se issue land.",
 			i.Number, i.Title, branch, t.PR, t.Count, i.URL, t.URL, branch)
 	case branch != "" && t != nil:
-		head = fmt.Sprintf("Took over #%d %s, on branch %s as it stands: it was stuck. Continue the branch and its PR.\n%s", i.Number, i.Title, branch, i.URL)
+		head = fmt.Sprintf("Took over #%d %s, on branch %s as it stands: it was stuck, %s (takeover %d).\n%s", i.Number, i.Title, branch, t.Stale, t.Count, i.URL)
+		if t.URL != "" {
+			head += "\n" + t.URL
+		}
+		head += fmt.Sprintf("\nMerge origin/main into %s (never rebase, never force-push), continue the branch and its PR, make it green, and land it again with se issue land.", branch)
 	case branch != "":
 		head = fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
 	case t != nil:

@@ -21,7 +21,7 @@ type Report struct {
 	// with its evidence.
 	Requirements []Requirement `json:"requirements"`
 	// Findings are the verified findings, each judged blocking or not.
-	Findings []Finding `json:"findings"`
+	Findings []ReviewFinding `json:"findings"`
 	// Clean is what was examined and found sound, so a rubber-stamp shows.
 	Clean []string `json:"clean"`
 }
@@ -35,8 +35,8 @@ type Requirement struct {
 	Blocker int `json:"blocker,omitempty"`
 }
 
-// Finding is one verified finding.
-type Finding struct {
+// ReviewFinding is one verified finding of a review.
+type ReviewFinding struct {
 	Title string `json:"title"`
 	// Evidence is a file and line, or a command and its output.
 	Evidence string `json:"evidence"`
@@ -139,7 +139,7 @@ func hashes(ns []int) string {
 }
 
 // body is the text of the issue a finding becomes.
-func (f Finding) body(gate int) string {
+func (f ReviewFinding) body(gate int) string {
 	judged := "Not blocking: the review of #%d passes over it, and it is an open point."
 	if f.Blocking {
 		judged = "Blocking: the review of #%d waits for it, as a sub-issue of it."

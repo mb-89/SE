@@ -3,6 +3,7 @@ package issues
 import (
 	"encoding/base64"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -161,6 +162,9 @@ func (s Source) file(path, commit string) (string, error) {
 	return string(data), nil
 }
 
+// htmlComment is a mark se leaves in a comment, which is no part of its account.
+var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
+
 // claims reads the workers' accounts of the tree's closed leaves: each one's
 // merged PR, from its branch issue-<n>, and its comments.
 func (s Source) claims(tree []BriefIssue) ([]Account, error) {
@@ -196,7 +200,7 @@ func (s Source) claims(tree []BriefIssue) ([]Account, error) {
 			return nil, err
 		}
 		for _, m := range comments {
-			if body := strings.TrimSpace(workerMark.ReplaceAllString(mark.ReplaceAllString(m.Body, ""), "")); body != "" {
+			if body := strings.TrimSpace(htmlComment.ReplaceAllString(m.Body, "")); body != "" {
 				c.Comments = append(c.Comments, body)
 			}
 		}

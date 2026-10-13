@@ -132,7 +132,7 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 		return Reviewed{}, err
 	}
 	r := Reviewed{Issue: n, Passed: pass, Fixes: []Issue{}, Filed: []Issue{}}
-	var again []Finding
+	var again []ReviewFinding
 	for k := range rep.Findings {
 		f := &rep.Findings[k]
 		switch {

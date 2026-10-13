@@ -1,0 +1,45 @@
+# The landing questions: every landed issue answers them, `se issue land`
+# refuses without an answer to each, and the retro reads them across issues.
+# This is the only place they are written.
+- key: done
+  question: What does this change deliver, in one line?
+  hint: One line a reader of the changelog understands.
+- key: timeline
+  question: What did you do, in order? A short timeline of the steps, the turns and what each led to.
+  hint: A few lines, one per step or turn, oldest first.
+- key: decided
+  question: What did you have to decide that the issue didn't say?
+  hint: Each choice the issue left open, and what you chose.
+- key: well
+  question: What worked well and should stay as it is?
+  hint: A command, a rule or a piece of guidance that saved time.
+- key: cost
+  question: "What cost time: wrong turns, retries, failing commands, red CI, conflicts?"
+  hint: What it was and roughly how long it took.
+- key: by-hand
+  question: What did you do by hand, or script, that should be an `se` command? Name any script you put in `src/scripts/`.
+  hint: The step, and the command it should be.
+- key: rules
+  question: Did a rule (CLAUDE.md, `spec/issues.md`, the skill) get in your way, or did you bend one? Which?
+  hint: The rule, where it lives, and what happened.
+- key: guidance
+  question: Was any guidance wrong, missing or contradictory? Where?
+  hint: The file and the passage.
+- key: lacked
+  question: "What did the box lack or get refused: a tool, a permission, a host, an install?"
+  hint: What was missing, and how you got around it.
+- key: proof
+  question: Which test or check fails without this change?
+  hint: The test's name, or the check and what it catches.
+- key: left
+  question: What is left undone, and where did it go? (issue number, or "nothing")
+  hint: An issue number for each piece, or "nothing".
+- key: doubt
+  question: What are you unsure about in what you shipped?
+  hint: The part you would review first.
+- key: improve
+  question: "One improvement, with its home: a check, a refusal, a gate, a prefilled field, or guidance."
+  hint: The improvement, and the file or command it belongs in.
+- key: else
+  question: Anything else you noticed.
+  hint: Anything that fits none of the questions above.

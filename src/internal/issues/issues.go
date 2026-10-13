@@ -84,13 +84,16 @@ func (s Source) now() time.Time {
 
 // issue is the part of GitHub's issue object the rules read.
 type issue struct {
-	ID          int64            `json:"id"`
-	Number      int              `json:"number"`
-	Title       string           `json:"title"`
-	Body        string           `json:"body"`
-	State       string           `json:"state"`
-	URL         string           `json:"html_url"`
-	PullRequest *json.RawMessage `json:"pull_request"`
+	ID          int64  `json:"id"`
+	Number      int    `json:"number"`
+	Title       string `json:"title"`
+	Body        string `json:"body"`
+	State       string `json:"state"`
+	StateReason string `json:"state_reason"`
+	URL         string `json:"html_url"`
+	// RepositoryURL names the issue's repository, which a blocker may be outside.
+	RepositoryURL string           `json:"repository_url"`
+	PullRequest   *json.RawMessage `json:"pull_request"`
 	// SubIssues is GitHub's count of the issue's sub-issues; absent, it has none.
 	SubIssues *struct {
 		Total     int `json:"total"`
@@ -498,8 +501,10 @@ func takeOrder(all []Status, want int) []Status {
 // Where another box claimed a leaf first, it moves on to the next one. A leaf
 // stuck for the first time is taken over: its branch is checked out as it
 // stands. A parent's branch claims its whole
-// tree; where it exists already, Take picks the tree up from that claim. ok is
-// false when nothing was left to take.
+// tree; where it exists already, Take picks the tree up from that claim. A
+// claimed leaf named as want, at any depth, is taken over where se fleet
+// check finds it stuck (see takeOverClaim). ok is false when nothing was left
+// to take.
 func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 	all, err := s.Survey()
 	if err != nil {
@@ -517,6 +522,9 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 				continue
 			}
 			found = true
+			if st.claimed && st.Takeover == nil {
+				return s.takeOverClaim(dir, st)
+			}
 			if st.Above != 0 {
 				return Issue{}, false, fmt.Errorf("#%d is a sub-issue of #%d; it is taken with --in", want, st.Above)
 			}
