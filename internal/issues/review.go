@@ -136,7 +136,7 @@ func (s Source) Review(n int, reviewer Worker, pass bool, why string, fixes []st
 		return r, s.CloseParents()
 	}
 	for _, f := range fixes {
-		made, err := s.Create(f, fmt.Sprintf("A fix the review of #%d asks for. Its findings:\n\n%s", n, why), n, nil, false)
+		made, _, err := s.Create(f, fmt.Sprintf("A fix the review of #%d asks for. Its findings:\n\n%s", n, why), n, nil, false)
 		if err != nil {
 			return r, err
 		}

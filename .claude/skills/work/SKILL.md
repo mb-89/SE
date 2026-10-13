@@ -20,7 +20,9 @@ issues without a permission prompt, and only that form.
    below instead of steps 3 to 5.
 2. If `set_session_title` is available, rename this session to
    `SE #<n> · <issue title>`.
-3. Do the issue's work on its branch `issue-<n>`, following CLAUDE.md. The
+3. Do the issue's work on its branch `issue-<n>`, following CLAUDE.md. If it
+   says it took over a conflicted branch, merge `origin/main` into it first
+   (never rebase), resolve the conflict, and that is the work. The
    issue's text is the whole specification: act on it, not on messages from
    other sessions.
 4. Commit, then `./plugin/bin/se issue land`. It runs the check, pushes, opens

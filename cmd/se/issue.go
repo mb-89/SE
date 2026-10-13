@@ -16,8 +16,8 @@ import (
 // gh is how the issue commands reach GitHub; tests put recorded answers here.
 var gh issues.GH = issues.Gh
 
-// fire is the fan-out after a claim: it fires the routine once and answers a
-// line saying what happened. Tests put a fake here.
+// fire is the fan-out after a claim, and after the creation of a ready issue:
+// it fires the routine once and answers a line saying what happened. Tests put a fake here.
 var fire = issues.FireFromEnv
 
 // sessionID names the session se runs in, which land records as the leaf's
@@ -46,7 +46,7 @@ func init() {
 		Usage:   "issue next [--in ROOT] [--take [N]] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "name the next ready se issue; --take claims it",
-		Details: "name the next ready se issue at the top, or say that none is ready. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree.",
+		Details: "name the next ready se issue at the top, or say that none is ready. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree.",
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -105,7 +105,7 @@ func init() {
 		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "create an se issue, with its blockers and its parent",
-		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --review labels it se-review.",
+		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --review labels it se-review. A ready issue, one nothing open blocks, fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -151,9 +151,13 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			made, err := s.Create(*title, *body, *parent, blockers, *review)
+			made, ready, err := s.Create(*title, *body, *parent, blockers, *review)
 			if err != nil {
 				return Reply{}, err
+			}
+			fanout := ""
+			if ready {
+				fanout = fire()
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
@@ -162,7 +166,8 @@ func init() {
 					BlockedBy []int  `json:"blocked_by"`
 					Parent    int    `json:"parent,omitempty"`
 					Review    bool   `json:"review,omitempty"`
-				}{made.Number, made.URL, append([]int{}, blockers...), *parent, *review})
+					Fanout    string `json:"fanout,omitempty"`
+				}{made.Number, made.URL, append([]int{}, blockers...), *parent, *review, fanout})
 				return Reply{Text: string(data)}, err
 			}
 			text := fmt.Sprintf("Created #%d %s\n%s", made.Number, made.Title, made.URL)
@@ -178,6 +183,9 @@ func init() {
 					names[k] = "#" + strconv.Itoa(b)
 				}
 				text += "\nBlocked by " + strings.Join(names, ", ") + "."
+			}
+			if fanout != "" {
+				text += "\n" + fanout
 			}
 			return Reply{Text: text}, nil
 		},
@@ -362,6 +370,10 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string) (Re
 	head := fmt.Sprintf("#%d %s\n%s", i.Number, i.Title, i.URL)
 	if branch != "" {
 		head = fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
+	}
+	if t := i.Takeover; t != nil {
+		head = fmt.Sprintf("Took over #%d %s, on branch %s: its PR #%d conflicts with main (takeover %d).\n%s\n%s\nMerge origin/main into %s (never rebase, never force-push), resolve the conflict, and land it again with se issue land.",
+			i.Number, i.Title, branch, t.PR, t.Count, i.URL, t.URL, branch)
 	}
 	if fanout != "" {
 		head += "\n" + fanout
