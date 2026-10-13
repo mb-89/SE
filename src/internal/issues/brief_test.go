@@ -62,7 +62,7 @@ func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 		}
 	}
 	text := b.Text()
-	for _, want := range []string{"git checkout --detach abc", "## The question: #1 the gate (open)\n\nIs it sound?", "### #3 leaf (closed, completed, under #2)\n\nask 3: it must hold",
+	for _, want := range []string{"git checkout --detach abc", "## The question: #1 the gate (open)\n\n> Is it sound?", "### #3 leaf (closed, completed, under #2)\n\n> ask 3: it must hold",
 		"- check: completed success", "1. Locality.", "## Withheld"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the brief lacks %q:\n%s", want, text)
@@ -83,7 +83,7 @@ func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 	if want := []Account{{Issue: 3, PR: 30, URL: "p30", Body: "Fixes #3. This is bug-free.", Comments: []string{"Landing answers: all tested.", "Worked by session s in /w."}}, {Issue: 5}}; !reflect.DeepEqual(b.Claims, want) {
 		t.Fatalf("claims %+v", b.Claims)
 	}
-	if text := b.Text(); !strings.Contains(text, "## Claims to check, never evidence") || !strings.Contains(text, "PR #30 p30 says:\n\nFixes #3. This is bug-free.") {
+	if text := b.Text(); !strings.Contains(text, "## Claims to check, never evidence") || !strings.Contains(text, "PR #30 p30 says:\n\n> Fixes #3. This is bug-free.") {
 		t.Fatal(text)
 	}
 }

@@ -209,6 +209,20 @@ func (s Source) claims(tree []BriefIssue) ([]Account, error) {
 	return out, nil
 }
 
+// quote sets a text another wrote apart as a Markdown quote, so its headings
+// stay inside it.
+func quote(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "> (empty)"
+	}
+	lines := strings.Split(text, "\n")
+	for k, l := range lines {
+		lines[k] = strings.TrimRight("> "+l, " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // Text is the brief as a reviewer reads it.
 func (b Brief) Text() string {
 	var w strings.Builder
@@ -218,7 +232,7 @@ func (b Brief) Text() string {
 		fmt.Fprintf(&w, "\nThis is a re-review: the review at %s failed. Check only the earlier blockers, %s, and the code changed since: `%s`. Raise no new non-blocking finding.\n",
 			r.Since, hashes(r.Blockers), r.Diff)
 	}
-	fmt.Fprintf(&w, "\n## The question: #%d %s (%s)\n\n%s\n", b.Gate.Number, b.Gate.Title, b.Gate.State, strings.TrimSpace(b.Gate.Body))
+	fmt.Fprintf(&w, "\n## The question: #%d %s (%s)\n\n%s\n", b.Gate.Number, b.Gate.Title, b.Gate.State, quote(b.Gate.Body))
 	fmt.Fprintf(&w, "\n## Its tree\n")
 	if len(b.Tree) == 0 {
 		w.WriteString("\nNo sub-issues.\n")
@@ -228,7 +242,7 @@ func (b Brief) Text() string {
 		if i.Reason != "" {
 			state += ", " + i.Reason
 		}
-		fmt.Fprintf(&w, "\n### #%d %s (%s, under #%d)\n\n%s\n", i.Number, i.Title, state, i.Above, strings.TrimSpace(i.Body))
+		fmt.Fprintf(&w, "\n### #%d %s (%s, under #%d)\n\n%s\n", i.Number, i.Title, state, i.Above, quote(i.Body))
 	}
 	fmt.Fprintf(&w, "\n## CI at %s\n\n", b.Commit)
 	if len(b.CI) == 0 {
@@ -251,10 +265,10 @@ func (b Brief) Text() string {
 	for _, c := range b.Claims {
 		fmt.Fprintf(&w, "\n### #%d\n", c.Issue)
 		if c.PR != 0 {
-			fmt.Fprintf(&w, "\nPR #%d %s says:\n\n%s\n", c.PR, c.URL, strings.TrimSpace(c.Body))
+			fmt.Fprintf(&w, "\nPR #%d %s says:\n\n%s\n", c.PR, c.URL, quote(c.Body))
 		}
 		for _, m := range c.Comments {
-			fmt.Fprintf(&w, "\nA comment says:\n\n%s\n", m)
+			fmt.Fprintf(&w, "\nA comment says:\n\n%s\n", quote(m))
 		}
 	}
 	return w.String()
