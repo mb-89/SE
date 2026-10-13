@@ -5,6 +5,8 @@ description: Start an SE overhaul, or, as the box that took one, judge SE agains
 
 # Overhaul: is the design still right?
 
+Reader: the agent starting an overhaul with a person, or the box that took one.
+
 The rules are [spec/overhaul.md](../../../../spec/overhaul.md). `se` is
 `./src/plugin/bin/se`, called exactly as `./src/plugin/bin/se overhaul …`,
 one command per call.

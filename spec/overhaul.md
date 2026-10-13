@@ -1,5 +1,7 @@
 # Overhaul: is the design still right?
 
+Reader: whoever changes how an overhaul runs, and the box judging one.
+
 The retro ([retro.md](retro.md)) checks whether the rules held over its
 window. The overhaul asks the bigger question, rarely: is the design still
 right? Are we drifting from the design principles
