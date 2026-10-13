@@ -45,18 +45,22 @@ follows from its structure alone:
 - **Except for reviews.** A parent labelled `se-review` never closes by
   itself. Once its sub-issues are all closed it is *ready for review*, which
   is not work: it is never taken as a leaf, and it keeps blocking its
-  dependents until it is closed by its review (see [Reviews](#reviews)).
+  dependents until it is closed by its review (see [Reviews](#reviews)). It
+  still makes its tree ready at the top, so a box takes the tree and its
+  coordinator starts the reviewer.
 - **Order** comes from native "blocked by" links and nothing else. A leaf is
   ready when it is open, not claimed, and neither it nor any of its ancestors
   has an open blocker: with milestone M2 blocked by M1, no leaf of M2 starts
   before M1 has closed.
 - **The top**: `se issue next` offers only issues without a parent. A parent
-  there is ready while some leaf inside it is; a sub-issue is never offered at
-  the top.
+  there is ready while some leaf inside it is, or some parent in its tree
+  (itself included) is ready for review; a sub-issue is never offered at the
+  top. So a review never waits on the coordinator that was running when its
+  last leaf merged: any later box takes the tree and starts the reviewer.
 - **The tree's claim**: taking a parent at the top pushes `issue-<root>`,
   which claims the whole tree. That claim does not hold the tree from other
-  boxes: a later box that finds a leaf ready inside it takes the parent again
-  and picks the tree up from the claim. The leaves' own claims keep two
+  boxes: a later box that finds a leaf or a review ready inside it takes the
+  parent again and picks the tree up from the claim. The leaves' own claims keep two
   coordinators from taking one leaf twice.
 - **Leaves inside a tree** are claimed by `se issue next --in <root> --take`,
   each with its own branch `issue-<n>` from `origin/main`, and worked on in
@@ -66,8 +70,9 @@ follows from its structure alone:
   leaf.
 - **The coordinator** is the box that took the parent. It starts one sub-agent
   per ready leaf inside its own box (no separate cloud sessions), each in the
-  leaf's worktree, and repeats until the root has closed. When nothing inside
-  is ready while the root is open, it ends; a later box picks the tree up.
+  leaf's worktree, and one reviewer per parent ready for review, and repeats
+  until the root has closed. When nothing inside is ready while the root is
+  open, it ends; a later box picks the tree up.
 
 ## The commands
 
@@ -153,7 +158,8 @@ through `se`, with every verdict on the reviewed issue's thread.
   review.
 - **Ready for review**: once its sub-issues have all closed and nothing blocks
   it, it does not close by itself (see [Nesting](#nesting-leaves-are-work-parents-coordinate)).
-  `se issue next --in` names it apart from the work.
+  `se issue next --in` names it apart from the work, and at the top its tree
+  is ready, so any box takes the tree and starts its reviewer.
 - **Pass**: `se issue review pass N --why "<verdict>"` posts the verdict on N
   and closes it as completed; the parents it completes then close by
   themselves.

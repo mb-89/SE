@@ -130,13 +130,14 @@ type Status struct {
 	// Above is the open fleet issue this one is a sub-issue of; 0 at the top.
 	Above int `json:"above,omitempty"`
 	// Review is true for a parent labelled se-review whose sub-issues are all
-	// closed: it waits for its review, which is not work.
+	// closed: it waits for its review, which is not work, but its coordinator
+	// starts the reviewer.
 	Review bool `json:"review,omitempty"`
 }
 
 // Ready says whether the issue may be taken: a ready leaf is work, a ready
-// parent has work inside.
-func (s Status) Ready() bool { return s.Why == "" && !s.Review }
+// parent has work or a review inside it, or is ready for review itself.
+func (s Status) Ready() bool { return s.Why == "" }
 
 // tree is the open fleet issues and their sub-issues.
 type tree struct {
@@ -308,11 +309,12 @@ func (s Source) survey() ([]Status, tree, error) {
 		byNum[n] = st
 		out = append(out, st)
 	}
-	// A parent is ready while a leaf anywhere inside it is.
+	// A parent is ready while a leaf anywhere inside it is, or a parent inside
+	// it is ready for review.
 	var inside func(n int) bool
 	inside = func(n int) bool {
 		for _, c := range t.subs[n] {
-			if st, ok := byNum[c.Number]; ok && st.Why == "" && (!st.Parent || inside(c.Number)) {
+			if st, ok := byNum[c.Number]; ok && st.Why == "" && (!st.Parent || st.Review || inside(c.Number)) {
 				return true
 			}
 		}
@@ -352,7 +354,9 @@ func (s Source) openBlockers(i issue) ([]int, error) {
 }
 
 // Next is the lowest-numbered ready issue at the top, one that is no
-// sub-issue; ok is false when none is ready.
+// sub-issue; ok is false when none is ready. A parent there is ready while a
+// leaf inside it is ready or a parent in its tree, itself included, is ready
+// for review, so that a box takes the tree and starts the reviewer.
 func (s Source) Next() (next Issue, ok bool, err error) {
 	all, err := s.Survey()
 	if err != nil {
@@ -388,7 +392,7 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 				return Issue{}, false, fmt.Errorf("#%d is a sub-issue of #%d; it is taken with --in", want, st.Above)
 			}
 			if !st.Ready() {
-				return Issue{}, false, fmt.Errorf("#%d is not ready: %s", want, st.why())
+				return Issue{}, false, fmt.Errorf("#%d is not ready: %s", want, st.Why)
 			}
 			order = append(order, st.Issue)
 		}
@@ -415,13 +419,6 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 		}
 	}
 	return Issue{}, false, nil
-}
-
-func (s Status) why() string {
-	if s.Review {
-		return "it waits for its review, which is not work"
-	}
-	return s.Why
 }
 
 // Tree is where the work inside one issue's tree stands.
