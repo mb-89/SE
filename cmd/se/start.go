@@ -2,9 +2,8 @@ package main
 
 import (
 	"encoding/json"
-	"time"
-
-	"github.com/mb-89/SE/internal/daemon"
+	"fmt"
+	"os"
 )
 
 func init() {
@@ -16,13 +15,13 @@ func init() {
 			if err := c.Parse(c.Flags("start")); err != nil {
 				return Reply{}, err
 			}
-			exe, err := executable()
+			ep, note, err := startDaemon(c.Paths())
 			if err != nil {
 				return Reply{}, err
 			}
-			ep, err := daemon.Start(c.Paths(), exe, 10*time.Second)
-			if err != nil {
-				return Reply{}, err
+			// stdout is the endpoint the plugin reads; the note goes beside it.
+			if note != "" {
+				fmt.Fprintln(os.Stderr, "se:", note)
 			}
 			said, err := json.Marshal(ep)
 			return Reply{Text: string(said), Endpoint: endpointOf(ep)}, err
