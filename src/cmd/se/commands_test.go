@@ -36,7 +36,7 @@ func TestEveryCommandSaysWhatItIs(t *testing.T) {
 
 func TestTheSessionIsOfferedItsCommandsAlone(t *testing.T) {
 	want := map[string]bool{
-		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue next": true, "issue new": true, "issue land": true, "issue review": true, "ui": true, "fleet check": true, "fleet fix": true,
+		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue next": true, "issue new": true, "issue land": true, "issue review": true, "ui": true, "fleet check": true, "fleet fix": true, "briefing": true,
 		"serve": false, "start": false, "stop": false,
 	}
 	for name, offered := range want {
@@ -65,7 +65,7 @@ func TestTheHelpGroupsTheCommands(t *testing.T) {
 		"Session": {"help", "off", "on", "restart", "status", "ui", "update"},
 		"Issues":  {"issue land", "issue new", "issue next", "issue resume", "issue review"},
 		"Daemon":  {"serve", "start", "stop"},
-		"Fleet":   {"fleet check", "fleet fix"},
+		"Fleet":   {"briefing", "fleet check", "fleet fix"},
 	}
 	terminal := help(false, false)
 	for group, names := range want {

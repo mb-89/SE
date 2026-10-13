@@ -238,6 +238,11 @@ func (s Source) Waiting() ([]Waiting, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.waiting(all, t)
+}
+
+// waiting is Waiting on a survey already read.
+func (s Source) waiting(all []Status, t tree) ([]Waiting, error) {
 	// held links each open issue to the open issues it holds: its dependents,
 	// and the rest of its tree, which is never offered while it waits.
 	held := map[int][]int{}
