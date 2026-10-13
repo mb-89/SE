@@ -26,7 +26,7 @@ if ! gh auth status >/dev/null 2>&1 && ! gh api rate_limit >/dev/null 2>&1; then
   exit 1
 fi
 git -C "$root" config core.hooksPath .githooks
-(cd "$root" && go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o plugin/bin/se ./cmd/se)
+(cd "$root" && go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se)
 if ! command -v dlv >/dev/null 2>&1 && [ ! -x "$(go env GOPATH)/bin/dlv" ]; then
   go install "github.com/go-delve/delve/cmd/dlv@$DLV"
 fi

@@ -11,7 +11,7 @@ and only then leaves.**
 
 1. **The work skill hands over.** When `se issue next --take` takes nothing,
    the box runs the coordination skill,
-   [.claude/skills/coordination/SKILL.md](../.claude/skills/coordination/SKILL.md),
+   [src/plugin/skills/coordination/SKILL.md](../src/plugin/skills/coordination/SKILL.md),
    before it ends.
 2. **The diagnosis is a command, not judgment.** `se fleet check` reads
    GitHub and lists every finding, each with its kind, its issue, its PR where

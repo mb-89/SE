@@ -21,9 +21,10 @@ command, `/se`, which takes words the way a command line does:
 | `/se status` | says whether a daemon answers for this workspace, and which commits the loaded hooks, the plugin's checkout and the running `se` came from, and whether they agree |
 | `/se restart` | stops this workspace's daemon and starts it again; in an SE checkout, rebuilt from its source first |
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
-| `/se issue next` | names the next ready `se` issue, or says that none is ready; `--take` claims it; `--in ROOT` names the ready leaves inside a parent's tree |
+| `/se issue next` | names the next `se` issue, stuck work before new work, or says that none is ready; `--take` claims it, or takes a stuck one over; `--in ROOT` names the ready leaves inside a parent's tree; `--person` lists the issues waiting on a person |
 | `/se issue land` | on an `issue-<n>` branch: passes the check, pushes, opens its PR against main (`Fixes #<n>`) and turns on auto-merge (squash) |
 | `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent`; `--review` labels it `se-review` |
+| `/se issue resume` | for a person: takes an issue off `se-person` and puts it back in the queue |
 | `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree: `pass` closes it, `fail` creates fix leaves under it |
 | `/se fleet check` | lists what is broken in the fleet (a stalled root, a conflicted, red or unmerged PR, a stale or leftover claim, an impossible block, an issue waiting on a person), each with its remedy; says `healthy` when nothing is |
 | `/se fleet fix` | applies every remedy `fleet check` names that needs no checkout, records it on its issue, and names the takeovers left to the box |
@@ -42,7 +43,7 @@ start it pulls that checkout's `main` as `/se update` does, when it is a clean
 
 Keep two clones. Run `RUNME.sh` in one that stays on main; `/se update` keeps
 it current, and it is the SE every session runs under: the plugin and the
-installed `se` in its `plugin/bin`. Work on SE in the other clone, on a branch.
+installed `se` in its `src/plugin/bin`. Work on SE in the other clone, on a branch.
 
 A workspace that is itself an SE checkout (its `go.mod` declares
 `module github.com/mb-89/SE`) runs its own `se`. Whenever `se` starts that
@@ -72,14 +73,16 @@ one a box may take, and `se issue next --take` claims it by pushing its branch
 `--blocked-by` writes GitHub's native "blocked by" links. Issues nest: leaves
 are work, parents coordinate their sub-issues and close by themselves, except
 an `se-review` parent, which `se issue review` passes or fails by an agent that
-worked none of its tree. The
+worked none of its tree. A claim nothing was pushed to for 3 hours is stuck:
+the next box takes it over once, and a second time it goes to a person
+(`se issue next --person`, `se issue resume`). The
 rules for which
 issue is ready, how a claim works, and how issues are made live in
-[docs/issues.md](docs/issues.md). `se issue land` brings the claimed issue's
+[spec/issues.md](spec/issues.md). `se issue land` brings the claimed issue's
 branch to main through one PR on auto-merge.
 
 A box (a cloud session working unattended) follows the work skill,
-[.claude/skills/work/SKILL.md](.claude/skills/work/SKILL.md): take the next
+[src/plugin/skills/work/SKILL.md](src/plugin/skills/work/SKILL.md) (`se:work` in a session): take the next
 ready issue, do it, land it. The routine `SE work` starts the boxes: on every
 merge into main, on a schedule, and through fan-out, where each claim by
 `se issue next --take` fires the routine once more, so there are as many boxes
@@ -90,11 +93,11 @@ is broken, and the box fixes what has a known remedy; the rules are
 one-time setup by the owner: an API trigger on the routine, with its fire URL
 in `SE_ROUTINE_FIRE_URL` and its token in `SE_ROUTINE_FIRE_TOKEN` in the cloud
 environment; without them `se` says fan-out is off and claims as before. The
-details are in [docs/issues.md](docs/issues.md).
+details are in [spec/issues.md](spec/issues.md).
 
 ## Adding a command
 
-A command is one file in `cmd/se`. Its `init` calls `register` with the
+A command is one file in `src/cmd/se`. Its `init` calls `register` with the
 command's name (two words, like `issue next`, make the second a sub-word of
 the first), its usage line, its group (the help's heading it stands under), a
 short summary (one help line of at most 80 columns, no flags), the details its
@@ -112,7 +115,7 @@ hands every word typed after `/se` to `se --session`, so nothing else changes.
 Open this folder in VS Code and run **se: debug this workspace's daemon**. It
 starts `se serve --takeover` under the debugger: the running daemon is asked to
 step down, and if the plugin starts another meanwhile, that one is too. Set a
-breakpoint in `event` in `internal/daemon/server.go`: every event a session in
+breakpoint in `event` in `src/internal/daemon/server.go`: every event a session in
 that workspace raises stops there, and the session waits until you continue.
 The plugin finds the debugged daemon through `.se/.runtime/daemon.json`.
 
@@ -132,14 +135,14 @@ A cloud environment that runs SE gets it from its setup script:
 set -u
 rm -rf /opt/se
 git clone --depth 1 https://github.com/mb-89/SE /opt/se \
-  && (cd /opt/se && go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o plugin/bin/se ./cmd/se) \
+  && (cd /opt/se && go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se) \
   || echo "SE setup failed; sessions start without SE"
 exit 0
 ```
 
 and from these environment variables:
 
-    CLAUDE_CODE_PLUGIN_DIRS=/opt/se/plugin
+    CLAUDE_CODE_PLUGIN_DIRS=/opt/se/src/plugin
     SE_DEFAULT=on
 
 SE lives in `/opt/se` and not in the session's own checkout: every session of
@@ -157,7 +160,7 @@ pull or build never holds the session up; either is said in one line.
 
 ### Hooks on cloud boxes
 
-Changes to `plugin/hooks` reach cloud boxes only when the environment's setup
+Changes to `src/plugin/hooks` reach cloud boxes only when the environment's setup
 script is changed, which rebuilds its cache. `/reload-plugins` is refused over
 a remote connection, and the update at session start loads a new `se` at once
 but not the hooks module that is already running; whether watching the plugin

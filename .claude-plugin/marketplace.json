@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "se",
-      "source": "./plugin"
+      "source": "./src/plugin"
     }
   ]
 }
