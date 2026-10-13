@@ -85,7 +85,9 @@ type issue struct {
 	Body        string `json:"body"`
 	State       string `json:"state"`
 	StateReason string `json:"state_reason"`
-	URL         string `json:"html_url"`
+	// ClosedAt is when a closed issue closed; zero while it is open.
+	ClosedAt time.Time `json:"closed_at"`
+	URL      string    `json:"html_url"`
 	// RepositoryURL names the issue's repository, which a blocker may be outside.
 	RepositoryURL string           `json:"repository_url"`
 	PullRequest   *json.RawMessage `json:"pull_request"`

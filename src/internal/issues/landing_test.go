@@ -1,3 +1,4 @@
+// Internal test package: it uses the fakes of the package's other internal tests.
 package issues
 
 import (
@@ -56,8 +57,11 @@ func TestLandRefusesAnswersMissingEmptyOrUnknown(t *testing.T) {
 func TestReadAnswersTakesTextAndRefusesAList(t *testing.T) {
 	dir := t.TempDir()
 	good, bad := filepath.Join(dir, "good.yaml"), filepath.Join(dir, "bad.yaml")
-	os.WriteFile(good, []byte("done: one line\ntimeline: |\n  first\n  then\nleft:\n"), 0o644)
-	os.WriteFile(bad, []byte("done:\n  - a\n  - b\n"), 0o644)
+	for path, text := range map[string]string{good: "done: one line\ntimeline: |\n  first\n  then\nleft:\n", bad: "done:\n  - a\n  - b\n"} {
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	got, err := ReadAnswers(good)
 	if want := map[string]string{"done": "one line", "timeline": "first\nthen\n", "left": ""}; err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("%q %v", got, err)

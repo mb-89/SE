@@ -51,7 +51,11 @@ and only then leaves.**
      box merges `origin/main` into it, makes it green and lands it again with
      `se issue land`;
    - a green PR with auto-merge off gets auto-merge turned on (`se fleet fix`);
-   - a leftover claim whose issue is closed (or no open `se` issue) and whose
+   - a leftover claim whose issue is closed and whose branch has no open PR
+     is left to the prune workflow, which deletes the branch (see **Pruning**
+     below); `se fleet fix` reports it as an issue only if the branch is
+     still there a day after the issue closed (the workflow failed);
+   - any other leftover claim whose issue is no open `se` issue and whose
      branch main holds whole (no commit main lacks) has its branch deleted
      (`se fleet fix`, by `git push origin --delete` from the workspace, the
      transport `se issue land` pushes through): nothing is lost, and nothing
@@ -81,3 +85,14 @@ the remedies after it are still applied; an issue it made that a box may
 take fires the routine once. `se issue next --take <n>` on a claimed leaf
 takes it over where the check finds it stuck, and refuses a claim whose work
 is moving.
+
+## Pruning
+
+Cloud sessions cannot delete branches, so GitHub does it, with the
+repository's own token. `se fleet prune` lists every `issue-<n>` branch whose
+issue is closed and every `claude/*` branch whose last commit is more than an
+hour old (so a session that has just pushed can still open its PR), each with
+no open PR; `--apply` deletes them. It never touches `main` or any other
+branch. The workflow `.github/workflows/prune.yml` runs
+`se fleet prune --apply` when an issue or a PR closes, and every hour, and
+its output names what it deleted.
