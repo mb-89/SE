@@ -113,6 +113,22 @@ func TestLandMergesAPRWithNothingToWaitFor(t *testing.T) {
 	}
 }
 
+func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
+	_, a := claimed(t)
+	gh, calls := landGH(t, map[string]string{
+		pullsPath:                           `[` + pr14 + `]`,
+		"repos/o/r/pulls/14/ccr/auto_merge": `{"enabled":true,"merge_method":"squash"}`,
+	}, map[string]string{"graphql": "gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (HTTP 403)"})
+	l, err := Source{Repo: repo, GH: gh}.Land(a, passes)
+	if err != nil || l.Merged || l.Number != 14 {
+		t.Fatalf("%+v %v", l, err)
+	}
+	last := (*calls)[len(*calls)-1]
+	if want := []string{"api", "-X", "PUT", "-f", "merge_method=squash", "repos/o/r/pulls/14/ccr/auto_merge"}; !reflect.DeepEqual(last, want) {
+		t.Fatalf("%q", last)
+	}
+}
+
 func TestLandSaysWhenAutoMergeFails(t *testing.T) {
 	_, a := claimed(t)
 	gh, _ := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`}, map[string]string{"graphql": "gh: auto-merge is not allowed"})

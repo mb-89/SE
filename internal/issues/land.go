@@ -89,7 +89,13 @@ func (s Source) Land(dir string, check func(dir string) error) (Landing, error) 
 		l.Created = true
 	}
 	l.Number, l.URL = pr.Number, pr.URL
-	if _, err := s.GH("api", "-f", "query="+autoMerge, "-f", "id="+pr.NodeID, "graphql"); err != nil {
+	_, err = s.GH("api", "-f", "query="+autoMerge, "-f", "id="+pr.NodeID, "graphql")
+	if err != nil && strings.Contains(err.Error(), "GraphQL is not available") {
+		// A Claude Code cloud session reaches GitHub through a proxy that
+		// refuses GraphQL and offers auto-merge as a REST route instead.
+		_, err = s.GH("api", "-X", "PUT", "-f", "merge_method=squash", fmt.Sprintf("repos/%s/pulls/%d/ccr/auto_merge", s.Repo, pr.Number))
+	}
+	if err != nil {
 		// A PR with nothing left to wait for takes no auto-merge; it is
 		// merged now, the way auto-merge would have.
 		if !strings.Contains(err.Error(), "clean status") {
