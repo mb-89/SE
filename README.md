@@ -144,6 +144,18 @@ the plugin reloads once `session.start` has answered. A checkout that is not a
 clean `main`, such as a person's working clone, is left as it is, and a failed
 pull or build never holds the session up; either is said in one line.
 
+### Hooks on cloud boxes
+
+Changes to `plugin/hooks` reach cloud boxes only when the environment's setup
+script is changed, which rebuilds its cache. `/reload-plugins` is refused over
+a remote connection, and the update at session start loads a new `se` at once
+but not the hooks module that is already running; whether watching the plugin
+folder (`CLAUDE_CODE_PLUGIN_DIR_WATCH=1`) reloads them has not been seen on a
+box (#28). New behaviour therefore belongs in `se`, not in the hooks.
+`/se status` names the commit the loaded hooks came from, the commit the
+plugin's checkout is at and the commit the running `se` was built from, and
+says whether they agree.
+
 ## Check
 
     sh ./tests/check.sh
