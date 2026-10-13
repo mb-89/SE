@@ -14,15 +14,37 @@ type World = {
   // What `se start` says on stderr when it fails; null while it starts.
   startFails: string | null
   endpointFile: string | null
+  // What the fake se answers a session call, by the words typed after /se.
+  replies: Record<string, unknown>
+  reloads: number
 }
+
+const HELP = '/se <command>\n\n  /se help   list the commands'
 
 // The world beneath the plugin: a workspace, an se binary and its daemon, all in memory.
 function world(on: On, env: Record<string, string> = {}): World {
-  const w: World = { ran: [], posts: [], live: null, built: true, startFails: null, endpointFile: null }
+  const w: World = {
+    ran: [],
+    posts: [],
+    live: null,
+    built: true,
+    startFails: null,
+    endpointFile: null,
+    reloads: 0,
+    replies: {
+      '': { text: HELP },
+      on: { text: 'SE is on.', active: true, endpoint: DAEMON },
+      off: { text: 'SE is off.', active: false },
+      update: { text: 'SE updated aaa → bbb. Its daemon restarted.', endpoint: DAEMON, reload: true },
+    },
+  }
   mock.env(on, env)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
-  on('command.run', { command: 'reload-plugins' }, () => ({ text: 'reloaded' }))
+  on('command.run', { command: 'reload-plugins' }, () => {
+    w.reloads++
+    return { text: 'reloaded' }
+  })
   on('session.root', () => ({ value: ROOT }))
   on('session.id', () => ({ value: 's1' }))
   on('fs.exists', ($, e) => ({ value: e.path.endsWith('/bin/se') ? w.built : false }))
@@ -36,15 +58,18 @@ function world(on: On, env: Record<string, string> = {}): World {
     w.ran.push(argv)
     const verb = argv[0] === 'go' ? 'build' : argv[1]
     if (verb === 'build') w.built = true
+    if (verb === '--session') {
+      const words = argv.slice(4).join(' ')
+      if (words === 'on') w.live = DAEMON.address
+      const reply = w.replies[words] ?? { text: `${HELP}\n\nse has no command "${words}".` }
+      return { value: { exitCode: 0, stdout: JSON.stringify(reply), stderr: '' } }
+    }
     if (verb === 'start' && w.startFails !== null) {
       return { value: { exitCode: 1, stdout: '', stderr: w.startFails } }
     }
     if (verb === 'start') {
       w.live = DAEMON.address
       return { value: { exitCode: 0, stdout: JSON.stringify(DAEMON), stderr: '' } }
-    }
-    if (verb === 'update') {
-      return { value: { exitCode: 0, stdout: '{"from":"aaa","to":"bbb"}', stderr: '' } }
     }
     return { value: { exitCode: 0, stdout: '', stderr: '' } }
   })
@@ -64,9 +89,10 @@ function world(on: On, env: Record<string, string> = {}): World {
 }
 
 const starts = { cwd: ROOT, surface: null, isInteractive: false }
-const run = (command: string) => ({ command, args: '' }) as never
+const se = (args: string) => ({ command: 'se', args }) as never
 const probe = { kind: 'commit', text: 'probe' } as const
-const verbs = (w: World) => w.ran.map(argv => (argv[0] === 'go' ? 'build' : argv[1]))
+const verbs = (w: World) =>
+  w.ran.map(argv => (argv[0] === 'go' ? 'build' : argv[1] === '--session' ? `/se ${argv.slice(4).join(' ')}`.trim() : argv[1]))
 const posted = (w: World) => w.posts.map(p => p.event)
 
 test('off by default: events pass, nothing starts, nothing is posted', async ($, on) => {
@@ -78,14 +104,14 @@ test('off by default: events pass, nothing starts, nothing is posted', async ($,
   expect(w.posts).toEqual([])
 })
 
-test('/se-on starts the daemon and forwards what follows', async ($, on) => {
+test('/se on hands its words to se and forwards what follows', async ($, on) => {
   const w = world(on)
   await $.session.start(starts)
-  const said = await $.command.run(run('se-on'))
+  const said = await $.command.run(se('on'))
   expect(said?.text ?? '').toContain('SE is on.')
-  const start = w.ran.find(argv => argv[1] === 'start') ?? []
-  expect(start[0]).toMatch(/\/bin\/se$/)
-  expect(start.slice(1)).toEqual(['start', '--workspace', ROOT])
+  const call = w.ran.find(argv => argv[1] === '--session') ?? []
+  expect(call[0]).toMatch(/\/bin\/se$/)
+  expect(call.slice(1)).toEqual(['--session', '--workspace', ROOT, 'on'])
   await $.attribution.text(probe)
   expect(w.posts.find(p => p.event === 'attribution.text')).toEqual({
     url: `http://${DAEMON.address}/event`,
@@ -95,14 +121,41 @@ test('/se-on starts the daemon and forwards what follows', async ($, on) => {
   })
 })
 
-test('/se-off stops forwarding', async ($, on) => {
+test('/se off stops forwarding', async ($, on) => {
   const w = world(on)
   await $.session.start(starts)
-  await $.command.run(run('se-on'))
-  await $.command.run(run('se-off'))
+  await $.command.run(se('on'))
+  await $.command.run(se('off'))
   const before = w.posts.length
   await $.attribution.text(probe)
   expect(w.posts.length).toBe(before)
+})
+
+test('a bare /se shows the help se answers', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  const said = await $.command.run(se(''))
+  expect(said?.text).toBe(HELP)
+  expect(verbs(w)).toEqual(['/se'])
+})
+
+test('the plugin knows no command: any words go to se as typed', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  const said = await $.command.run(se('  frob   --now '))
+  expect(said?.text ?? '').toContain('se has no command "frob --now".')
+  expect(w.ran.at(-1)?.slice(4)).toEqual(['frob', '--now'])
+  // A reply without effects switches nothing.
+  await $.attribution.text(probe)
+  expect(w.posts).toEqual([])
+})
+
+test('a se that does not answer says so', async ($, on) => {
+  const w = world(on)
+  w.replies.status = 'not json'
+  await $.session.start(starts)
+  const said = await $.command.run(se('status'))
+  expect(said?.text ?? '').toContain('se did not answer')
 })
 
 test('SE_DEFAULT=on starts the session switched on', async ($, on) => {
@@ -115,26 +168,34 @@ test('SE_DEFAULT=on starts the session switched on', async ($, on) => {
   expect(posted(w)).toContain('attribution.text')
 })
 
-test('a missing se is built from the checkout before it starts', async ($, on) => {
+test('a missing se is built from the checkout before it runs', async ($, on) => {
   const w = world(on)
   w.built = false
   await $.session.start(starts)
-  await $.command.run(run('se-on'))
+  await $.command.run(se('on'))
+  expect(verbs(w).slice(0, 2)).toEqual(['build', '/se on'])
+})
+
+test('a missing se is built before the default start too', async ($, on) => {
+  const w = world(on, { SE_DEFAULT: 'on' })
+  w.built = false
+  await $.session.start(starts)
   expect(verbs(w).slice(0, 2)).toEqual(['build', 'start'])
 })
 
-test('/se-on says so when the daemon does not start', async ($, on) => {
-  const w = world(on)
+test('SE_DEFAULT=on says nothing when the daemon does not start, and passes events', async ($, on) => {
+  const w = world(on, { SE_DEFAULT: 'on' })
   w.startFails = 'no room'
   await $.session.start(starts)
-  const said = await $.command.run(run('se-on'))
-  expect(said?.text ?? '').toContain('did not start: no room')
+  const out = await $.attribution.text({ kind: 'commit', text: 'still here' })
+  expect(out.text).toBe('still here')
+  expect(w.posts).toEqual([])
 })
 
 test('a daemon that moved is found again through daemon.json', async ($, on) => {
   const w = world(on)
   await $.session.start(starts)
-  await $.command.run(run('se-on'))
+  await $.command.run(se('on'))
   // The daemon restarts under the debugger, on a new port with a new token.
   w.live = '127.0.0.1:4200'
   w.endpointFile = JSON.stringify({ address: '127.0.0.1:4200', token: 'tok2' })
@@ -146,18 +207,30 @@ test('a daemon that moved is found again through daemon.json', async ($, on) => 
 test('a daemon that is down never holds the event up', async ($, on) => {
   const w = world(on)
   await $.session.start(starts)
-  await $.command.run(run('se-on'))
+  await $.command.run(se('on'))
   w.live = null
   const out = await $.attribution.text({ kind: 'commit', text: 'still here' })
   expect(out.text).toBe('still here')
 })
 
-test('/se-update updates, restarts the daemon and reloads', async ($, on) => {
+test('/se update applies the new endpoint and reloads once it has answered', async ($, on) => {
   const w = world(on)
+  const clock = mock.clock(on)
   await $.session.start(starts)
-  await $.command.run(run('se-on'))
+  await $.command.run(se('on'))
   w.ran = []
-  const said = await $.command.run(run('se-update'))
+  w.live = '127.0.0.1:4300'
+  w.replies.update = {
+    text: 'SE updated aaa → bbb. Its daemon restarted.',
+    endpoint: { address: '127.0.0.1:4300', token: 'tok3' },
+    reload: true,
+  }
+  const said = await $.command.run(se('update'))
   expect(said?.text ?? '').toContain('aaa → bbb')
-  expect(verbs(w)).toEqual(['update', 'stop', 'start'])
+  expect(said?.text ?? '').toContain('The plugins reload now.')
+  expect(verbs(w)).toEqual(['/se update'])
+  await clock.settle()
+  expect(w.reloads).toBe(1)
+  await $.attribution.text(probe)
+  expect(w.posts.at(-1)?.auth).toBe('Bearer tok3')
 })

@@ -10,21 +10,37 @@ today it appends the event to the session's log under `.se/.runtime/logs/`.
     ./RUNME.sh
 
 That builds `se`, installs the Go debugger, and installs the plugin for your
-user, so every Claude session on this machine has these commands:
+user, so every Claude session on this machine has one command, `/se`, which
+takes words the way a command line does:
 
 | command | what it does |
 |---|---|
-| `/se-on` | starts this workspace's daemon and forwards every event to it |
-| `/se-off` | stops forwarding, for this session |
-| `/se-update` | pulls main into the installed checkout, rebuilds `se`, restarts the daemon and reloads the plugin |
+| `/se on` | starts this workspace's daemon and forwards every event of the session to it |
+| `/se off` | stops forwarding, for this session |
+| `/se status` | says whether a daemon answers for this workspace |
+| `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
+| `/se help`, `/se` | lists these |
+
+On a terminal, `se help` lists every command, those above and the ones a
+session is not offered: `se serve`, `se start` and `se stop`.
 
 The plugin is read from the checkout you ran `RUNME.sh` in.
 
 ## SE working on SE
 
-Keep two clones. Run `RUNME.sh` in one that stays on main; `/se-update` keeps
+Keep two clones. Run `RUNME.sh` in one that stays on main; `/se update` keeps
 it current, and it is the SE every session runs under. Work on SE in the other
 clone, on a branch. That way a session never runs the code it is editing.
+
+## Adding a command
+
+A command is one file in `cmd/se`. Its `init` calls `register` with the
+command's name, its usage line, a one-line summary, whether a session is
+offered it as `/se <name>`, and the function that runs it. The function
+answers a `Reply`: the text to show and, for a session, the effects the plugin
+applies (switch forwarding on or off, where the daemon now answers, reload the
+plugins). The help on both sides is made from what registered, and the plugin
+hands every word typed after `/se` to `se --session`, so nothing else changes.
 
 ## Debugging the daemon
 

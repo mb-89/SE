@@ -1,4 +1,4 @@
-// SE's session state: whether /se-on holds for this session.
+// SE's session state: whether /se on holds for this session.
 export type SeActive = boolean
 
 declare module 'claude-code' {
