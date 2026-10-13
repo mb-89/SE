@@ -1,11 +1,30 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(./plugin/bin/se issue:*)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "git config core.hooksPath .githooks" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git config core.hooksPath .githooks"
+          }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "matcher": "Bash",
-        "hooks": [ { "type": "command", "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/no-skip.sh\"" } ] }
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/no-skip.sh\""
+          }
+        ]
+      }
     ]
   }
 }

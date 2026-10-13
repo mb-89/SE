@@ -8,6 +8,9 @@ description: Take the next ready se issue, do its work, and land it with se issu
 Every step that can be an `se` command is one. Yours are doing the issue's
 work and fixing a red CI run; follow the rest as written. `se` is
 `./plugin/bin/se`; build it first with `go build -o plugin/bin/se ./cmd/se`.
+Call it exactly as `./plugin/bin/se issue …`, one command per call, never
+through a variable: `.claude/settings.json` allows that form to write GitHub
+issues without a permission prompt, and only that form.
 
 1. `git fetch origin main && git checkout origin/main` (a box started by a PR
    event starts on that PR's head commit), rebuild `se`, then
