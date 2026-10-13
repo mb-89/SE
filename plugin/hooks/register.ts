@@ -24,12 +24,19 @@ const RESTART_EVERY = 60_000
 
 type Endpoint = { address: string; token: string }
 
+// What the plugin tells se on every session call (see cmd/se/commit.go).
+const HOOKS_COMMIT = 'SE_HOOKS_COMMIT'
+const PLUGIN_CHECKOUT = 'SE_PLUGIN_CHECKOUT'
+
 // What se --session answers: the text to show and the effects to apply.
 export type Reply = { text: string; active?: boolean; endpoint?: Endpoint; reload?: boolean }
 
 // The module's copy of the flag, so an event costs nothing while SE is off.
 // $.state holds the session's value across a reload; session.start reads it back.
 let active: SeActive = false
+// The commit of the checkout these hooks were loaded from, read as they load.
+// It lives in the module, not $.state, so a reload shows the new one.
+let hooksCommit = ''
 let root = ''
 let endpoint: Endpoint | null = null
 let lastStart = 0
@@ -47,6 +54,8 @@ export const register: Register = on => {
       argumentHint: '<command>',
     })
     root = e.cwd
+    // Before the update, which may move the checkout under these hooks.
+    hooksCommit = await headOf($)
     await updatesItself($)
     const { value } = await $.state.get(ACTIVE)
     if (value === undefined) {
@@ -77,7 +86,7 @@ export const register: Register = on => {
 // holds the session up: what happened, if anything, is one line in a toast,
 // and a reload, when the update brought a new SE, waits until session.start has answered.
 async function updatesItself($: EngineInterface): Promise<void> {
-  const asked = await asks($, ['update', '--session-start', '--repo', `${$.plugin.root}/..`], UPDATING)
+  const asked = await asks($, ['update', '--session-start', '--repo', checkoutOf($)], UPDATING)
   const said = typeof asked === 'string' ? `SE did not update itself: ${asked}` : await applies($, asked)
   if (said) $.ui.toast(said.split('\n')[0])
 }
@@ -88,7 +97,10 @@ async function asks($: EngineInterface, words: string[], timeoutMs = STARTING): 
     const bin = await builds($)
     if (bin.failed) return bin.failed
     root = await $.session.root()
-    const ran = await $.process.run([bin.path, '--session', '--workspace', root, ...words], { timeoutMs })
+    const ran = await $.process.run([bin.path, '--session', '--workspace', root, ...words], {
+      timeoutMs,
+      env: { [HOOKS_COMMIT]: hooksCommit, [PLUGIN_CHECKOUT]: checkoutOf($) },
+    })
     const said = parsed(ran.stdout) as Reply | null
     if (typeof said?.text !== 'string') return `se did not answer: ${failed(ran)}`
     return said
@@ -205,12 +217,30 @@ export function bodyOf(session: string, event: string, e: unknown): string {
   }
 }
 
-// se under the plugin folder, built from the checkout where it is missing.
+// The checkout the plugin was loaded from.
+function checkoutOf($: EngineInterface): string {
+  return `${$.plugin.root}/..`
+}
+
+// The commit the plugin's checkout is at, or '' where git does not say.
+async function headOf($: EngineInterface): Promise<string> {
+  try {
+    const ran = await $.process.run(['git', 'rev-parse', 'HEAD'], { cwd: checkoutOf($), timeoutMs: 10_000 })
+    return ran.exitCode === 0 ? String(ran.stdout ?? '').trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+// se under the plugin folder, built from the checkout where it is missing,
+// with the commit it was built from embedded (see cmd/se/commit.go).
 async function builds($: EngineInterface): Promise<{ path: string; failed?: string }> {
   const path = binaryOf($.plugin.root)
   if (await $.fs.exists(path)) return { path }
-  const built = await $.process.run(['go', 'build', '-o', path, './cmd/se'], {
-    cwd: `${$.plugin.root}/..`,
+  const head = await headOf($)
+  const ldflags = head ? ['-ldflags', `-X main.commit=${head}`] : []
+  const built = await $.process.run(['go', 'build', ...ldflags, '-o', path, './cmd/se'], {
+    cwd: checkoutOf($),
     timeoutMs: STARTING,
   })
   return built.exitCode === 0 ? { path } : { path, failed: `se is not built and go build failed: ${failed(built)}` }

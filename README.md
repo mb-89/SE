@@ -18,7 +18,7 @@ command, `/se`, which takes words the way a command line does:
 |---|---|
 | `/se on` | starts this workspace's daemon and forwards every event of the session to it |
 | `/se off` | stops forwarding, for this session |
-| `/se status` | says whether a daemon answers for this workspace |
+| `/se status` | says whether a daemon answers for this workspace, and which commits the loaded hooks, the plugin's checkout and the running `se` came from, and whether they agree |
 | `/se restart` | stops this workspace's daemon and starts it again; in an SE checkout, rebuilt from its source first |
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
 | `/se issue next` | names the next ready `se` issue, or says that none is ready; `--take` claims it; `--in ROOT` names the ready leaves inside a parent's tree |
@@ -121,7 +121,7 @@ A cloud environment that runs SE gets it from its setup script:
 set -u
 rm -rf /opt/se
 git clone --depth 1 https://github.com/mb-89/SE /opt/se \
-  && (cd /opt/se && go build -o plugin/bin/se ./cmd/se) \
+  && (cd /opt/se && go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o plugin/bin/se ./cmd/se) \
   || echo "SE setup failed; sessions start without SE"
 exit 0
 ```

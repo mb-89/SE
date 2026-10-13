@@ -20,6 +20,12 @@ type World = {
   startUpdate: unknown
   reloads: number
   toasts: string[]
+  // The commit git says the plugin's checkout is at.
+  head: string
+  // Where the update at session start moves the checkout, if anywhere.
+  movesTo: string | null
+  // The environment each se session call was given, by its words.
+  envs: Record<string, Record<string, string>>
 }
 
 const HELP = '/se <command>\n\n  /se help   list the commands'
@@ -36,6 +42,9 @@ function world(on: On, env: Record<string, string> = {}): World {
     startUpdate: { text: '' },
     reloads: 0,
     toasts: [],
+    head: 'aaa111',
+    movesTo: null,
+    envs: {},
     replies: {
       '': { text: HELP },
       on: { text: 'SE is on.', active: true, endpoint: DAEMON },
@@ -64,10 +73,15 @@ function world(on: On, env: Record<string, string> = {}): World {
   )
   on('process.run', ($, e) => {
     const argv = [...e.argv]
+    if (argv[0] === 'git') {
+      return { value: { exitCode: w.head ? 0 : 128, stdout: w.head ? `${w.head}\n` : '', stderr: '' } }
+    }
     w.ran.push(argv)
+    if (argv[1] === '--session') w.envs[argv.slice(4).join(' ')] = { ...(e.init?.env ?? {}) }
     const verb = argv[0] === 'go' ? 'build' : argv[1]
     if (verb === 'build') w.built = true
     if (verb === '--session' && argv[4] === 'update' && argv[5] === '--session-start') {
+      if (w.movesTo) w.head = w.movesTo
       if (typeof w.startUpdate === 'string') return { value: { exitCode: 1, stdout: '', stderr: w.startUpdate } }
       return { value: { exitCode: 0, stdout: JSON.stringify(w.startUpdate), stderr: '' } }
     }
@@ -347,4 +361,41 @@ test('a failed update does not block session start: the session goes on and says
   expect(verbs(w)).toContain('start')
   await $.attribution.text(probe)
   expect(posted(w)).toContain('attribution.text')
+})
+
+test('/se status tells se the commit the hooks were loaded from, and their checkout', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('status'))
+  expect(w.envs.status?.SE_HOOKS_COMMIT).toBe('aaa111')
+  expect(w.envs.status?.SE_PLUGIN_CHECKOUT).toMatch(/\/\.\.$/)
+})
+
+test('the hooks keep the commit they loaded from when the update moves the checkout, until they load again', async ($, on) => {
+  const w = world(on)
+  w.movesTo = 'bbb222'
+  await $.session.start(starts)
+  await $.command.run(se('status'))
+  expect(w.envs.status?.SE_HOOKS_COMMIT).toBe('aaa111')
+  // A reload runs session.start again: the hooks are now the checkout's.
+  w.movesTo = null
+  await $.session.start(starts)
+  await $.command.run(se('status'))
+  expect(w.envs.status?.SE_HOOKS_COMMIT).toBe('bbb222')
+})
+
+test('hooks whose checkout git cannot read tell se no commit', async ($, on) => {
+  const w = world(on)
+  w.head = ''
+  await $.session.start(starts)
+  await $.command.run(se('status'))
+  expect(w.envs.status?.SE_HOOKS_COMMIT).toBe('')
+})
+
+test('a missing se is built with the commit it is built from', async ($, on) => {
+  const w = world(on)
+  w.built = false
+  await $.session.start(starts)
+  const build = w.ran.find(argv => argv[0] === 'go') ?? []
+  expect(build.slice(0, 4)).toEqual(['go', 'build', '-ldflags', '-X main.commit=aaa111'])
 })
