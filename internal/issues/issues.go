@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Label marks an issue as the fleet's work.
@@ -31,6 +32,9 @@ type Issue struct {
 	// Parent is true for an issue with sub-issues: it holds no work of its
 	// own, and taking it means coordinating them.
 	Parent bool `json:"parent,omitempty"`
+	// Takeover is true for a leaf stuck for the first time: taking it
+	// continues its branch and PR as they stand.
+	Takeover bool `json:"takeover,omitempty"`
 }
 
 // Branch is the branch whose presence on origin claims issue n.
@@ -59,6 +63,17 @@ type Source struct {
 	// Repo is OWNER/NAME.
 	Repo string
 	GH   GH
+	// Now is the clock the lease is read against; nil is the wall clock.
+	Now func() time.Time
+	// Flagged hears of each issue the sweep gave to a person, and why.
+	Flagged func(i Issue, reason string)
+}
+
+func (s Source) now() time.Time {
+	if s.Now == nil {
+		return time.Now()
+	}
+	return s.Now()
 }
 
 // issue is the part of GitHub's issue object the rules read.
@@ -125,18 +140,36 @@ type Status struct {
 	Issue
 	// Why is empty for a ready issue, else what holds it: "claimed by
 	// issue-7", "blocked by #3, #4", "#2 is blocked by #3" (an ancestor's
-	// blocker), "nothing inside is ready" (a parent).
+	// blocker), "waits on a person", "#5 waits on a person" (a parent whose
+	// tree holds it), "nothing inside is ready" (a parent).
 	Why string `json:"why,omitempty"`
 	// Above is the open fleet issue this one is a sub-issue of; 0 at the top.
 	Above int `json:"above,omitempty"`
 	// Review is true for a parent labelled se-review whose sub-issues are all
 	// closed: it waits for its review, which is not work.
 	Review bool `json:"review,omitempty"`
+	// Stuck is set for a claimed leaf nothing was pushed to for longer than
+	// the lease; Takeovers counts its takeovers since a person last resumed
+	// it, and Since is when its branch last saw a push or a takeover.
+	Stuck     bool      `json:"stuck,omitempty"`
+	Takeovers int       `json:"takeovers,omitempty"`
+	Since     time.Time `json:"-"`
+	// Person is set for an issue labelled se-person; Reason says why.
+	Person bool   `json:"person,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// waits is the lowest issue in its tree, itself included, that waits on
+	// a person; urgent is set where taking it continues stuck work.
+	waits  int
+	urgent bool
 }
 
-// Ready says whether the issue may be taken: a ready leaf is work, a ready
-// parent has work inside.
+// Ready says whether the issue may be taken as new work: a ready leaf is
+// work, a ready parent has work inside.
 func (s Status) Ready() bool { return s.Why == "" && !s.Review }
+
+// Takeable says whether a take may have it: ready, or a leaf stuck for the
+// first time, which is taken over.
+func (s Status) Takeable() bool { return s.Ready() || s.Takeover }
 
 // tree is the open fleet issues and their sub-issues.
 type tree struct {
@@ -297,10 +330,32 @@ func (s Source) survey() ([]Status, tree, error) {
 		i := t.byNum[n]
 		_, parent := t.subs[n]
 		st := &Status{Issue: Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, Parent: parent}, Above: t.above[n]}
-		if !parent && claimed[Branch(n)] {
+		switch {
+		case i.labelled(PersonLabel):
+			st.Person, st.Why = true, "waits on a person"
+			m, err := s.marks(n)
+			if err != nil {
+				return nil, tree{}, err
+			}
+			st.Reason = m.reason
+		case !parent && claimed[Branch(n)]:
 			st.Why = "claimed by " + Branch(n)
-		} else if st.Why, err = held(n); err != nil {
-			return nil, tree{}, err
+			if err := s.lease(st); err != nil {
+				return nil, tree{}, err
+			}
+			// The sweep: stuck a second time goes to a person.
+			if st.Stuck && st.Takeovers > 0 {
+				if err := s.toPerson(st); err != nil {
+					return nil, tree{}, err
+				}
+			} else if st.Stuck {
+				st.Takeover, st.urgent = true, true
+				st.Why += ", stuck: " + st.since()
+			}
+		default:
+			if st.Why, err = held(n); err != nil {
+				return nil, tree{}, err
+			}
 		}
 		if parent && st.Why == "" && t.done(n) {
 			st.Review = true
@@ -308,11 +363,40 @@ func (s Source) survey() ([]Status, tree, error) {
 		byNum[n] = st
 		out = append(out, st)
 	}
-	// A parent is ready while a leaf anywhere inside it is.
-	var inside func(n int) bool
-	inside = func(n int) bool {
+	// A tree holding an issue that waits on a person is never offered.
+	var waits func(n int) int
+	waits = func(n int) int {
+		w := 0
+		if byNum[n].Person {
+			w = n
+		}
 		for _, c := range t.subs[n] {
-			if st, ok := byNum[c.Number]; ok && st.Why == "" && (!st.Parent || inside(c.Number)) {
+			if _, ok := byNum[c.Number]; ok {
+				if x := waits(c.Number); x != 0 && (w == 0 || x < w) {
+					w = x
+				}
+			}
+		}
+		return w
+	}
+	for _, st := range out {
+		if st.waits = waits(st.Number); st.waits != 0 && st.Why == "" {
+			st.Why = fmt.Sprintf("#%d waits on a person", st.waits)
+		}
+	}
+	// A parent is ready while a leaf anywhere inside it may be taken, and
+	// urgent while one inside is stuck.
+	var inside func(n int, urgent bool) bool
+	inside = func(n int, urgent bool) bool {
+		for _, c := range t.subs[n] {
+			st, ok := byNum[c.Number]
+			if !ok {
+				continue
+			}
+			if st.Parent && st.Why == "" && inside(c.Number, urgent) {
+				return true
+			}
+			if !st.Parent && st.Takeable() && (!urgent || st.Takeover) {
 				return true
 			}
 		}
@@ -320,8 +404,11 @@ func (s Source) survey() ([]Status, tree, error) {
 	}
 	all := make([]Status, len(out))
 	for k, st := range out {
-		if st.Parent && st.Why == "" && !st.Review && !inside(st.Number) {
-			st.Why = "nothing inside is ready"
+		if st.Parent && st.Why == "" && !st.Review {
+			if !inside(st.Number, false) {
+				st.Why = "nothing inside is ready"
+			}
+			st.urgent = inside(st.Number, true)
 		}
 		all[k] = *st
 	}
@@ -351,24 +438,44 @@ func (s Source) openBlockers(i issue) ([]int, error) {
 	return blocking, nil
 }
 
-// Next is the lowest-numbered ready issue at the top, one that is no
-// sub-issue; ok is false when none is ready.
+// Next is the issue at the top, one that is no sub-issue, that a take would
+// have: stuck work first, a leaf to take over or a parent with one inside,
+// then the lowest-numbered ready one; ok is false when there is none.
 func (s Source) Next() (next Issue, ok bool, err error) {
 	all, err := s.Survey()
 	if err != nil {
 		return Issue{}, false, err
 	}
-	for _, st := range all {
-		if st.Above == 0 && st.Ready() {
-			return st.Issue, true, nil
-		}
+	if order := takeOrder(all, 0); len(order) > 0 {
+		return order[0].Issue, true, nil
 	}
 	return Issue{}, false, nil
 }
 
+// takeOrder lists the issues at the top a take may have, in the order it
+// tries them: want first, when it is above zero, then the urgent ones, then
+// the rest, each lowest number first.
+func takeOrder(all []Status, want int) []Status {
+	var order []Status
+	for _, st := range all {
+		if st.Number == want {
+			order = append(order, st)
+		}
+	}
+	for _, urgent := range []bool{true, false} {
+		for _, st := range all {
+			if st.Above == 0 && st.Takeable() && st.urgent == urgent && st.Number != want {
+				order = append(order, st)
+			}
+		}
+	}
+	return order
+}
+
 // Take claims an issue at the top in the git checkout dir: want, when it is
-// above zero, else the next ready one. Where another box claimed a leaf first,
-// it moves on to the next ready issue. A parent's branch claims its whole
+// above zero, else the one Next names. Where another box claimed a leaf first,
+// it moves on to the next one. A leaf stuck for the first time is taken over:
+// its branch is checked out as it stands. A parent's branch claims its whole
 // tree; where it exists already, Take picks the tree up from that claim. ok is
 // false when nothing was left to take.
 func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
@@ -376,7 +483,6 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 	if err != nil {
 		return Issue{}, false, err
 	}
-	var order []Issue
 	if want > 0 {
 		found := false
 		for _, st := range all {
@@ -387,31 +493,29 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 			if st.Above != 0 {
 				return Issue{}, false, fmt.Errorf("#%d is a sub-issue of #%d; it is taken with --in", want, st.Above)
 			}
-			if !st.Ready() {
+			if !st.Takeable() {
 				return Issue{}, false, fmt.Errorf("#%d is not ready: %s", want, st.why())
 			}
-			order = append(order, st.Issue)
 		}
 		if !found {
 			return Issue{}, false, fmt.Errorf("#%d is not an open issue labelled %s", want, Label)
 		}
 	}
-	for _, st := range all {
-		if st.Above == 0 && st.Ready() && st.Number != want {
-			order = append(order, st.Issue)
+	for _, st := range takeOrder(all, want) {
+		var claimed bool
+		switch {
+		case st.Takeover:
+			claimed, err = s.takeOver(dir, st, true)
+		case st.Parent:
+			claimed, err = claimTree(dir, st.Number)
+		default:
+			claimed, err = Claim(dir, st.Number)
 		}
-	}
-	for _, i := range order {
-		claim := Claim
-		if i.Parent {
-			claim = claimTree
-		}
-		claimed, err := claim(dir, i.Number)
 		if err != nil {
 			return Issue{}, false, err
 		}
 		if claimed {
-			return i, true, nil
+			return st.Issue, true, nil
 		}
 	}
 	return Issue{}, false, nil
@@ -429,10 +533,13 @@ type Tree struct {
 	Root int `json:"root"`
 	// Closed is true once the root has closed: the tree is done.
 	Closed bool `json:"closed"`
-	// Ready is the leaves that may be taken, lowest number first.
+	// Ready is the leaves that may be taken: those to take over first, then
+	// the new work, each lowest number first.
 	Ready []Issue `json:"ready"`
 	// Review is the se-review parents whose sub-issues are all closed.
 	Review []Issue `json:"review"`
+	// Why says what holds the whole tree: an issue in it waits on a person.
+	Why string `json:"why,omitempty"`
 	// rounds counts each review parent's sub-issues, which names its reviewer's worktree.
 	rounds map[int]int
 }
@@ -472,35 +579,56 @@ func (s Source) in(root int) (Tree, []Status, error) {
 		return Tree{}, nil, fmt.Errorf("#%d is not an issue labelled %s", root, Label)
 	}
 	var inside []Status
+	top := root
+	for t.above[top] != 0 {
+		top = t.above[top]
+	}
 	for _, st := range all {
 		m := st.Number
 		for m != root && t.above[m] != 0 {
 			m = t.above[m]
 		}
+		if st.Number == top && st.waits != 0 {
+			tr.Why = fmt.Sprintf("#%d waits on a person", st.waits)
+		}
 		if m != root {
 			continue
 		}
 		inside = append(inside, st)
+	}
+	if tr.Why != "" {
+		return tr, nil, nil
+	}
+	var fresh []Issue
+	for _, st := range inside {
 		switch {
 		case st.Review:
 			tr.Review = append(tr.Review, st.Issue)
 			tr.rounds[st.Number] = len(t.subs[st.Number])
-		case st.Ready() && !st.Parent:
+		case st.Takeover:
 			tr.Ready = append(tr.Ready, st.Issue)
+		case st.Ready() && !st.Parent:
+			fresh = append(fresh, st.Issue)
 		}
 	}
+	tr.Ready = append(tr.Ready, fresh...)
 	return tr, inside, nil
 }
 
 // TakeIn claims a leaf inside root's tree: want, when it is above zero, else
-// the lowest ready one, moving on where another box claimed it first. It
+// the first of tr.Ready, moving on where another box claimed it first. It
 // pushes the leaf's branch from origin/main and fetches it, checking nothing
 // out, so several leaves can be in flight at once, each in its own worktree.
+// A leaf stuck for the first time is taken over: its branch is fetched as it
+// stands.
 // ok is false when nothing was left to take; tr says where the tree stands.
 func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree, err error) {
 	tr, inside, err := s.in(root)
 	if err != nil || tr.Closed {
 		return Issue{}, false, tr, err
+	}
+	if tr.Why != "" && want > 0 {
+		return Issue{}, false, tr, fmt.Errorf("#%d is not ready: %s", want, tr.Why)
 	}
 	var order []Issue
 	if want > 0 {
@@ -513,7 +641,7 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 			if st.Parent {
 				return Issue{}, false, tr, fmt.Errorf("#%d is a parent: a parent holds no work", want)
 			}
-			if !st.Ready() {
+			if !st.Takeable() {
 				return Issue{}, false, tr, fmt.Errorf("#%d is not ready: %s", want, st.Why)
 			}
 			order = append(order, st.Issue)
@@ -527,8 +655,17 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 			order = append(order, i)
 		}
 	}
+	byNum := map[int]Status{}
+	for _, st := range inside {
+		byNum[st.Number] = st
+	}
 	for _, i := range order {
-		claimed, err := stake(dir, i.Number)
+		var claimed bool
+		if i.Takeover {
+			claimed, err = s.takeOver(dir, byNum[i.Number], false)
+		} else {
+			claimed, err = stake(dir, i.Number)
+		}
 		if err != nil {
 			return Issue{}, false, tr, err
 		}

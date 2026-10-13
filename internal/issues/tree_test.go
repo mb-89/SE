@@ -59,7 +59,7 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 		refsPath:    `[]`,
 		subsPath(1): subs(2, 3),
 	}
-	s := Source{Repo: repo, GH: inTree(t, answers)}
+	s := Source{Repo: repo, GH: inTree(t, answers), Now: clock}
 	next, ok, err := s.Next()
 	if err != nil || !ok || next.Number != 1 || !next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
@@ -76,6 +76,7 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 	}
 	// Nor with every leaf at the top claimed.
 	answers[refsPath] = `[{"ref":"refs/heads/issue-4"}]`
+	answers[activity(4)] = pushed(fresh)
 	if next, ok, err := s.Next(); err != nil || ok {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
@@ -110,8 +111,9 @@ func TestInOffersTheReadyLeavesAtAnyDepth(t *testing.T) {
 		blockedPath(14): subs(11),
 		blockedPath(16): subs(-17),
 		blockedPath(50): subs(30),
+		activity(15):    pushed(fresh),
 	}
-	s := Source{Repo: repo, GH: inTree(t, answers)}
+	s := Source{Repo: repo, GH: inTree(t, answers), Now: clock}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)

@@ -3,8 +3,8 @@
 SE's work items are GitHub issues. These rules say which issue a box may work
 on next, how it claims it, and how issues and their dependencies are created.
 They live here and nowhere else; `se issue next`, `se issue new`,
-`se issue land` and `se issue review` (in `internal/issues`) are their one
-implementation, so the
+`se issue land`, `se issue review` and `se issue resume` (in
+`internal/issues`) are their one implementation, so the
 choice is deterministic and no prompt restates it.
 
 ## The rules
@@ -23,7 +23,8 @@ choice is deterministic and no prompt restates it.
   box claims an issue by pushing that branch from the current `origin/main`. A
   push is atomic, so if two boxes race, the second push is refused and that box
   moves to the next issue.
-- **Order**: the lowest issue number among the ready ones.
+- **Order**: stuck work first (see [Stuck work](#stuck-work)), then the
+  lowest issue number among the ready ones.
 - **Done**: the PR's body says `Fixes #n`, so GitHub closes the issue when the
   PR merges, and the issues it blocked become ready.
 
@@ -69,24 +70,73 @@ follows from its structure alone:
   leaf's worktree, and repeats until the root has closed. When nothing inside
   is ready while the root is open, it ends; a later box picks the tree up.
 
+## Stuck work
+
+A box can stall: its session dies, or it waits forever. Its issue then stays
+claimed, and the queue behind it stops. Releasing and escalating stuck work is
+mechanical, done inside `se issue next` by every box, never left to an
+agent's memory. Work that needs a decision goes to a **person**, and leaves
+the agents' queue until a person has looked.
+
+- **Stuck** is decided by a timer, not judgment. A claimed leaf (claimed at
+  the top or with `--in`) is stuck when nothing has been pushed to its branch
+  `issue-<n>` (or its PR), nor a takeover recorded, for longer than the lease:
+  3 hours, `Lease` in `internal/issues/stuck.go`. That is under the routine's
+  4-hour schedule, so a scheduled box always catches it. The last push is
+  GitHub's activity on the branch (`/repos/{owner}/{repo}/activity`), its
+  creation included; a branch GitHub keeps no push record of is stuck. A
+  parent's claim is never stuck: it does not hold its tree anyway.
+- **First stuck: taken over.** A stuck leaf goes before new work: at the top,
+  `se issue next --take` takes it over before any ready issue, and a parent
+  with a stuck leaf inside before any other parent or leaf; inside a tree,
+  `--in ROOT --take` takes it over before any ready leaf. The new box
+  continues the existing branch and PR: at the top it checks `issue-<n>` out
+  as it stands, inside a tree its worktree command checks it out. `se`
+  records the takeover on the issue as a comment carrying the marker
+  `<!-- se:takeover <round> -->`, so the count survives the box. Of two boxes
+  taking over one issue, the first comment of the round wins; the other moves
+  on. A takeover renews the lease.
+- **Second stuck: to a person.** A leaf that was taken over once already and
+  is stuck again gets the label `se-person`, is assigned to the repository
+  owner (so GitHub notifies them), and gets a comment saying why, with the
+  marker `<!-- se:person -->`. This sweep runs inside every `se issue next`.
+  The issue leaves the queue: `se issue next` never offers an `se-person`
+  issue, or a tree containing one (at the top, nor with `--in`). Its
+  dependents stay blocked through their native links.
+- **No self-flagging.** A box cannot flag its own issue for a person: no
+  command does it. A box that cannot go on comments on the issue and ends;
+  its claim then goes stale, and the timer does the rest.
+- **The person's side:**
+  - `se issue next --person` lists every issue waiting on a person, with its
+    reason and how many open issues it blocks, directly or through a tree.
+  - `se issue resume <n>` removes the label and puts the issue back in the
+    queue, its takeover count reset (a comment with the marker
+    `<!-- se:resume -->`). A claim still stale is then taken over by the next
+    box, as a first takeover.
+
 ## The commands
 
-    se issue next [--in ROOT] [--take [N]] [--json] [--repo OWNER/NAME]
+    se issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
+    se issue resume N [--json] [--repo OWNER/NAME]
     se issue land [--json] [--repo OWNER/NAME]
     se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--json] [--repo OWNER/NAME]
     se issue review pass|fail N --why TEXT [--fix TITLE]... [--json] [--repo OWNER/NAME]
 
 Every one of them first closes the parents whose sub-issues are all closed.
 
-`se issue next` prints the next ready issue at the top (number, title, link
-and body), or says that none is ready; it exits 0 either way. A parent is
+`se issue next` prints the next issue at the top a take would have (number,
+title, link and body): stuck work first, then the lowest ready one; or it
+says that none is ready; it exits 0 either way. A stuck leaf is marked as one
+(with `--json`: `"takeover": true`). Each issue its sweep gave to a person is
+named in a line before the answer (with `--json`: the field `flagged`). A parent is
 marked as one (with `--json`: `"parent": true`), with the command that
 coordinates it. A session has it as
 `/se issue next`.
 
 `se issue next --take` claims the next ready issue, and `--take N` (or
 `--take=N`) issue `N`: it pushes `origin/main` as `issue-<n>` (a push that may
-only create the branch, never move it), then checks the branch out. Where the
+only create the branch, never move it), then checks the branch out; a stuck
+leaf it takes over instead, checking its branch out as it stands. Where the
 push is refused because another box claimed the issue first, it moves to the
 next ready issue. It prints what it took, or that nothing is ready. `--take N`
 refuses an issue that is not ready, or a sub-issue, and says why. There is no
@@ -96,13 +146,16 @@ Once it has claimed an issue, `--take` fires the routine once (the fan-out,
 below) and adds a line saying what the fire did; with `--json` that line is
 the field `fanout`.
 
-`se issue next --in ROOT` names what is ready inside ROOT's tree: its ready
-leaves at any depth, lowest number first, and apart from them the `se-review`
-parents ready for review; or says that nothing is ready, or that ROOT has
-closed (with `--json`: `{"root","closed","ready","review"}`). With `--take`
-(or `--take N`) it claims the lowest ready leaf (or leaf `N`), moving on where
+`se issue next --in ROOT` names what is ready inside ROOT's tree: its stuck
+leaves to take over, then its ready leaves, at any depth, lowest number first,
+and apart from them the `se-review` parents ready for review; or says that
+nothing is ready (with why, where the tree holds an issue waiting on a
+person), or that ROOT has closed (with `--json`:
+`{"root","closed","ready","review","why"}`). With `--take`
+(or `--take N`) it claims the first of those leaves (or leaf `N`), moving on where
 another box claimed it first: it pushes `origin/main` as `issue-<n>` and
-fetches it, checking nothing out, and prints the leaf with the command that
+fetches it, checking nothing out (a stuck leaf it takes over and fetches as
+it stands), and prints the leaf with the command that
 checks it out in its own worktree beside the checkout (with `--json`:
 `{"ready","closed","issue","branch","worktree","review"}`). It also names the
 parents ready for review, each with the command that makes its reviewer's
@@ -134,6 +187,12 @@ it `se-review` as well (see [Reviews](#reviews)). A session has it as
 
 `se issue review` passes or fails a parent ready for review; see
 [Reviews](#reviews). A session has it as `/se issue review`.
+
+`se issue next --person` lists every open issue labelled `se-person`, each
+with its reason and how many open issues it blocks, directly or through a tree
+(with `--json`: a list of `{"number","title","url","reason","blocks"}`), or
+says that none waits on a person. `se issue resume N` is the person's: it
+refuses an issue not labelled `se-person`; see [Stuck work](#stuck-work).
 
 They read and write GitHub through `gh api` (the links through
 `/repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by`, the tree through

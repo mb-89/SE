@@ -43,14 +43,15 @@ var check = func(dir string) error {
 func init() {
 	register(Command{
 		Name:    "issue next",
-		Usage:   "issue next [--in ROOT] [--take [N]] [--json] [--repo OWNER/NAME]",
-		Summary: "name the next ready se issue at the top, or say that none is ready; --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out; a claim fires the routine once (fan-out); --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree",
+		Usage:   "issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]",
+		Summary: "name the next se issue at the top, stuck work before new work, or say that none is ready; --take claims it (or issue N): its branch issue-N, pushed from origin/main, or a stuck one's as it stands, checked out; a claim fires the routine once (fan-out); --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree; --person lists the issues waiting on a person. A claim stuck a second time goes to a person on the way",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue next")
 			take := &takeFlag{}
 			fs.Var(take, "take", "claim the issue: the next ready one, or --take N")
 			in := fs.Int("in", 0, "look inside this issue's tree for its ready leaves")
+			person := fs.Bool("person", false, "list the issues waiting on a person")
 			// --take N: the number may stand after --take, between or after the other flags.
 			for rest := c.Args; ; {
 				if err := fs.Parse(rest); err != nil {
@@ -69,22 +70,38 @@ func init() {
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
+			if *person && (take.set || *in != 0) {
+				return Reply{}, fmt.Errorf("issue next takes --person alone, without --take or --in")
+			}
 			s, err := src()
 			if err != nil {
 				return Reply{}, err
+			}
+			var flagged []string
+			s.Flagged = func(i issues.Issue, reason string) {
+				flagged = append(flagged, fmt.Sprintf("Gave #%d %s to a person: %s", i.Number, i.Title, reason))
+			}
+			if *person {
+				waiting, err := s.Waiting()
+				if err != nil {
+					return Reply{}, err
+				}
+				return waitingReply(*asJSON, waiting, flagged)
 			}
 			if *in < 0 {
 				return Reply{}, fmt.Errorf("--in takes an issue number, not %d", *in)
 			}
 			if *in > 0 {
-				return inReply(c, s, *asJSON, *in, take)
+				r, err := inReply(c, s, *asJSON, *in, take)
+				return sweptReply(r, err, *asJSON, flagged)
 			}
 			if !take.set {
 				next, ok, err := s.Next()
 				if err != nil {
 					return Reply{}, err
 				}
-				return issueReply(*asJSON, next, ok, "", "")
+				r, err := issueReply(*asJSON, next, ok, "", "")
+				return sweptReply(r, err, *asJSON, flagged)
 			}
 			took, ok, err := s.Take(c.Workspace, take.n)
 			if err != nil {
@@ -94,7 +111,57 @@ func init() {
 			if ok {
 				fanout = fire()
 			}
-			return issueReply(*asJSON, took, ok, issues.Branch(took.Number), fanout)
+			r, err := issueReply(*asJSON, took, ok, issues.Branch(took.Number), fanout)
+			return sweptReply(r, err, *asJSON, flagged)
+		},
+	})
+	register(Command{
+		Name:    "issue resume",
+		Usage:   "issue resume N [--json] [--repo OWNER/NAME]",
+		Summary: "for a person: take issue N off se-person and put it back in the queue, its takeover count reset",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "issue resume")
+			var words []string
+			for rest := c.Args; ; {
+				if err := fs.Parse(rest); err != nil {
+					return Reply{}, err
+				}
+				if fs.NArg() == 0 {
+					break
+				}
+				words, rest = append(words, fs.Arg(0)), fs.Args()[1:]
+			}
+			c.Args = nil
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			n := 0
+			if len(words) == 1 {
+				n, _ = strconv.Atoi(strings.TrimPrefix(words[0], "#"))
+			}
+			if n <= 0 {
+				return Reply{}, fmt.Errorf("issue resume takes one issue number, not %q", strings.Join(words, " "))
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			if err := s.CloseParents(); err != nil {
+				return Reply{}, err
+			}
+			i, err := s.Resume(n)
+			if err != nil {
+				return Reply{}, err
+			}
+			if *asJSON {
+				data, err := json.Marshal(struct {
+					Number  int  `json:"number"`
+					Resumed bool `json:"resumed"`
+				}{i.Number, true})
+				return Reply{Text: string(data)}, err
+			}
+			return Reply{Text: fmt.Sprintf("Resumed #%d %s: back in the queue, its takeover count reset.\n%s", i.Number, i.Title, i.URL)}, nil
 		},
 	})
 	register(Command{
@@ -351,8 +418,13 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string) (Re
 		return Reply{Text: "No se issue is ready."}, nil
 	}
 	head := fmt.Sprintf("#%d %s\n%s", i.Number, i.Title, i.URL)
-	if branch != "" {
+	switch {
+	case branch != "" && i.Takeover:
+		head = fmt.Sprintf("Took over #%d %s, on branch %s as it stands: it was stuck. Continue the branch and its PR.\n%s", i.Number, i.Title, branch, i.URL)
+	case branch != "":
 		head = fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
+	case i.Takeover:
+		head += fmt.Sprintf("\nIt is stuck: a take takes it over and continues its branch %s.", issues.Branch(i.Number))
 	}
 	if fanout != "" {
 		head += "\n" + fanout
@@ -405,7 +477,11 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 		work.Review = nil
 		return Reply{Text: treeText(work) + reviewText(c, tr)}, nil
 	}
-	text := fmt.Sprintf("Took #%d %s, on branch %s.\n%s\n\nWork in its own worktree:\n%s", took.Number, took.Title, issues.Branch(took.Number), took.URL, worktree) + reviewText(c, tr)
+	did := "Took #%d %s, on branch %s.\n%s\n\nWork in its own worktree:\n%s"
+	if took.Takeover {
+		did = "Took over #%d %s, on branch %s as it stands: it was stuck.\n%s\n\nContinue the branch and its PR in its own worktree:\n%s"
+	}
+	text := fmt.Sprintf(did, took.Number, took.Title, issues.Branch(took.Number), took.URL, worktree) + reviewText(c, tr)
 	return Reply{Text: strings.TrimRight(text+"\n\n"+took.Body, "\n")}, nil
 }
 
@@ -414,12 +490,19 @@ func treeText(tr issues.Tree) string {
 	if tr.Closed {
 		return fmt.Sprintf("#%d is closed.", tr.Root)
 	}
+	if tr.Why != "" {
+		return fmt.Sprintf("Nothing inside #%d is ready: %s.", tr.Root, tr.Why)
+	}
 	if len(tr.Ready)+len(tr.Review) == 0 {
 		return fmt.Sprintf("Nothing inside #%d is ready.", tr.Root)
 	}
 	var lines []string
 	for _, i := range tr.Ready {
-		lines = append(lines, fmt.Sprintf("Ready: #%d %s\n%s", i.Number, i.Title, i.URL))
+		what := "Ready"
+		if i.Takeover {
+			what = "Stuck, to take over"
+		}
+		lines = append(lines, fmt.Sprintf("%s: #%d %s\n%s", what, i.Number, i.Title, i.URL))
 	}
 	for _, i := range tr.Review {
 		lines = append(lines, fmt.Sprintf("Ready for review: #%d %s\n%s", i.Number, i.Title, i.URL))
@@ -450,4 +533,42 @@ func reviewText(c *Call, tr issues.Tree) string {
 		text += fmt.Sprintf("\n\nReady for review: #%d %s\n%s\nA reviewer that worked none of its tree works in a fresh worktree:\n%s", r.Number, r.Title, r.URL, r.Worktree)
 	}
 	return text
+}
+
+// sweptReply adds to a reply of issue next the issues its sweep gave to a
+// person: lines before the text, or with --json the field "flagged".
+func sweptReply(r Reply, err error, asJSON bool, flagged []string) (Reply, error) {
+	if err != nil || len(flagged) == 0 {
+		return r, err
+	}
+	if !asJSON {
+		r.Text = strings.Join(flagged, "\n") + "\n\n" + r.Text
+		return r, nil
+	}
+	var answer map[string]any
+	if err := json.Unmarshal([]byte(r.Text), &answer); err != nil {
+		return Reply{}, err
+	}
+	answer["flagged"] = flagged
+	data, err := json.Marshal(answer)
+	return Reply{Text: string(data)}, err
+}
+
+// waitingReply lists the issues waiting on a person.
+func waitingReply(asJSON bool, waiting []issues.Waiting, flagged []string) (Reply, error) {
+	if asJSON {
+		data, err := json.Marshal(waiting)
+		return Reply{Text: string(data)}, err
+	}
+	if len(waiting) == 0 {
+		return sweptReply(Reply{Text: "No se issue waits on a person."}, nil, false, flagged)
+	}
+	var b strings.Builder
+	for k, w := range waiting {
+		if k > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "#%d %s\n%s\nBlocks %d open issue(s).\n%s", w.Number, w.Title, w.URL, w.Blocks, w.Reason)
+	}
+	return sweptReply(Reply{Text: b.String()}, nil, false, flagged)
 }
