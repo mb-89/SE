@@ -171,10 +171,10 @@ func init() {
 	})
 	register(Command{
 		Name:    "issue new",
-		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--json] [--repo OWNER/NAME]",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--final] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "create an se issue, with its blockers and its parent",
-		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --review labels it se-review. A ready issue, one nothing open blocks, fires the routine once.",
+		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --review labels it se-review; --final labels it se-final, its last attempt before a person. A ready issue, one nothing open blocks, fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -184,6 +184,7 @@ func init() {
 			blockedBy := fs.String("blocked-by", "", "the issues that block it, as `N,M`, or none")
 			parent := fs.Int("parent", 0, "the issue `N` it is a sub-issue of")
 			review := fs.Bool("review", false, "label it se-review: it is reviewed once its sub-issues have closed")
+			final := fs.Bool("final", false, "label it se-final: if it fails, it goes to a person")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
@@ -220,7 +221,14 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			made, ready, err := s.Create(*title, *body, *parent, blockers, *review)
+			var labels []string
+			if *review {
+				labels = append(labels, issues.ReviewLabel)
+			}
+			if *final {
+				labels = append(labels, issues.FinalLabel)
+			}
+			made, ready, err := s.Create(*title, *body, *parent, blockers, labels...)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -235,8 +243,9 @@ func init() {
 					BlockedBy []int  `json:"blocked_by"`
 					Parent    int    `json:"parent,omitempty"`
 					Review    bool   `json:"review,omitempty"`
+					Final     bool   `json:"final,omitempty"`
 					Fanout    string `json:"fanout,omitempty"`
-				}{made.Number, made.URL, append([]int{}, blockers...), *parent, *review, fanout})
+				}{made.Number, made.URL, append([]int{}, blockers...), *parent, *review, *final, fanout})
 				return Reply{Text: string(data)}, err
 			}
 			text := fmt.Sprintf("Created #%d %s\n%s", made.Number, made.Title, made.URL)
@@ -245,6 +254,9 @@ func init() {
 			}
 			if *review {
 				text += "\nLabelled " + issues.ReviewLabel + ": it is reviewed once its sub-issues have closed."
+			}
+			if *final {
+				text += "\nLabelled " + issues.FinalLabel + ": if it fails, it goes to a person."
 			}
 			if len(blockers) > 0 {
 				names := make([]string, len(blockers))
@@ -304,16 +316,14 @@ func init() {
 func init() {
 	register(Command{
 		Name:    "issue review",
-		Usage:   "issue review pass|fail N --why TEXT [--fix TITLE]... [--json] [--repo OWNER/NAME]",
+		Usage:   "issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "pass or fail a parent whose sub-issues have closed",
-		Details: "review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree. pass posts the verdict and closes it; fail posts the findings and creates a fix leaf under it per --fix.",
+		Summary: "pass or fail a parent whose sub-issues have closed, with its report",
+		Details: "review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree, with the report in the JSON file PATH (spec/review.md). It refuses a pass where a requirement lacks evidence, and a report without its checked-and-clean list. Every finding becomes an se-final issue: a blocking one a sub-issue of N, a non-blocking one in the queue (five at most). pass posts the report and closes N; fail posts it, and N waits for its fixes. A re-review that finds an earlier blocker's problem again sends N to a person.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue review")
-			why := fs.String("why", "", "the verdict, or the findings, as `TEXT`")
-			var fixes fixList
-			fs.Var(&fixes, "fix", "the `TITLE` of a fix leaf a fail creates (repeat it for each)")
+			report := fs.String("report", "", "the review's report, a JSON file at `PATH`")
 			// The words pass|fail and N may stand before, between or after the flags.
 			var words []string
 			for rest := c.Args; ; {
@@ -336,39 +346,117 @@ func init() {
 			if err != nil || n <= 0 {
 				return Reply{}, fmt.Errorf("issue review takes an issue number, not %q", words[1])
 			}
+			if *report == "" {
+				return Reply{}, fmt.Errorf("issue review needs --report: the review's report, a JSON file (spec/review.md)")
+			}
+			path := *report
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(c.Workspace, path)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return Reply{}, err
+			}
+			var rep issues.Report
+			dec := json.NewDecoder(strings.NewReader(string(data)))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&rep); err != nil {
+				return Reply{}, fmt.Errorf("the report %s is not a review report (spec/review.md): %v", *report, err)
+			}
 			s, err := src()
 			if err != nil {
 				return Reply{}, err
 			}
 			reviewer := issues.Worker{Session: sessionID(), Workspace: c.Workspace}
-			r, err := s.Review(n, reviewer, words[0] == "pass", *why, fixes)
+			r, err := s.Review(n, reviewer, words[0] == "pass", rep)
 			if err != nil {
 				return Reply{}, err
 			}
+			// A filed finding is a ready issue in the queue: it fires once.
+			fanout := ""
+			if len(r.Filed) > 0 {
+				fanout = fire()
+			}
 			if *asJSON {
-				data, err := json.Marshal(r)
+				data, err := json.Marshal(struct {
+					issues.Reviewed
+					Fanout string `json:"fanout,omitempty"`
+				}{r, fanout})
 				return Reply{Text: string(data)}, err
 			}
-			if r.Passed {
-				return Reply{Text: fmt.Sprintf("Passed #%d: the verdict is on it, and it is closed.", n)}, nil
+			var lines []string
+			switch {
+			case r.Person:
+				lines = append(lines, fmt.Sprintf("#%d's re-review found an earlier blocker's problem again: the report is on it, and it waits on a person.", n))
+			case r.Passed:
+				lines = append(lines, fmt.Sprintf("Passed #%d: the report is on it, and it is closed.", n))
+			default:
+				lines = append(lines, fmt.Sprintf("Failed #%d: the report is on it, and its blocking findings are sub-issues of it:", n))
 			}
-			lines := []string{fmt.Sprintf("Failed #%d: the findings are on it, and its fixes are sub-issues of it:", n)}
 			for _, f := range r.Fixes {
 				lines = append(lines, fmt.Sprintf("#%d %s\n%s", f.Number, f.Title, f.URL))
+			}
+			if len(r.Filed) > 0 {
+				lines = append(lines, "Filed, not blocking:")
+			}
+			for _, f := range r.Filed {
+				lines = append(lines, fmt.Sprintf("#%d %s\n%s", f.Number, f.Title, f.URL))
+			}
+			if r.Unfiled > 0 {
+				lines = append(lines, fmt.Sprintf("%d more non-blocking finding(s) counted, not filed.", r.Unfiled))
+			}
+			if fanout != "" {
+				lines = append(lines, fanout)
 			}
 			return Reply{Text: strings.Join(lines, "\n")}, nil
 		},
 	})
-}
-
-// fixList is --fix, which may repeat.
-type fixList []string
-
-func (f *fixList) String() string { return strings.Join(*f, ", ") }
-
-func (f *fixList) Set(v string) error {
-	*f = append(*f, v)
-	return nil
+	register(Command{
+		Name:    "review brief",
+		Usage:   "review brief N [--claims] [--json] [--repo OWNER/NAME]",
+		Group:   "Reviews",
+		Summary: "everything a reviewer of gate N starts from",
+		Details: "print the brief of gate N's review: its question, the text of every issue in its tree, main's head as the pinned commit, the CI there and spec/principles.md; for a re-review, the earlier blockers and the diff since. The workers' PR descriptions and comments are withheld; --claims adds them, once the findings are verified, as claims to check.",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "review brief")
+			claims := fs.Bool("claims", false, "add the workers' accounts, as claims to check, once the findings are verified")
+			var words []string
+			for rest := c.Args; ; {
+				if err := fs.Parse(rest); err != nil {
+					return Reply{}, err
+				}
+				if fs.NArg() == 0 {
+					break
+				}
+				words, rest = append(words, fs.Arg(0)), fs.Args()[1:]
+			}
+			c.Args = nil
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			n := 0
+			if len(words) == 1 {
+				n, _ = strconv.Atoi(strings.TrimPrefix(words[0], "#"))
+			}
+			if n <= 0 {
+				return Reply{}, fmt.Errorf("review brief takes one issue number, not %q", strings.Join(words, " "))
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			b, err := s.Brief(n, *claims)
+			if err != nil {
+				return Reply{}, err
+			}
+			if *asJSON {
+				data, err := json.Marshal(b)
+				return Reply{Text: string(data)}, err
+			}
+			return Reply{Text: strings.TrimRight(b.Text(), "\n")}, nil
+		},
+	})
 }
 
 // takeFlag is --take, alone or as --take=N; a bare --take N is read by the
@@ -534,16 +622,18 @@ func treeText(tr issues.Tree) string {
 }
 
 // reviewAt is a parent ready for review, with the command that makes its
-// reviewer's fresh worktree.
+// reviewer's fresh worktree and the model its reviewer runs (spec/models.yaml;
+// empty: the box's own).
 type reviewAt struct {
 	issues.Issue
 	Worktree string `json:"worktree"`
+	Model    string `json:"model,omitempty"`
 }
 
 func reviews(c *Call, tr issues.Tree) []reviewAt {
 	out := []reviewAt{}
 	for _, i := range tr.Review {
-		out = append(out, reviewAt{i, tr.ReviewWorktree(c.Workspace, i.Number)})
+		out = append(out, reviewAt{i, tr.ReviewWorktree(c.Workspace, i.Number), issues.ReviewerModel(c.Workspace)})
 	}
 	return out
 }
@@ -554,6 +644,9 @@ func reviewText(c *Call, tr issues.Tree) string {
 	text := ""
 	for _, r := range reviews(c, tr) {
 		text += fmt.Sprintf("\n\nReady for review: #%d %s\n%s\nA reviewer that worked none of its tree works in a fresh worktree:\n%s", r.Number, r.Title, r.URL, r.Worktree)
+		if r.Model != "" {
+			text += "\nIts reviewer runs the model " + r.Model + " (" + issues.ModelsPath + ")."
+		}
 	}
 	return text
 }

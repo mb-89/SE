@@ -128,12 +128,12 @@ func (s Status) since() string {
 	return "nothing was pushed to " + Branch(s.Number) + " since " + s.Since.UTC().Format(time.RFC3339)
 }
 
-// toPerson gives an issue stuck a second time to a person: it is labelled
+// toPerson gives a final issue that is stuck to a person: it is labelled
 // se-person, assigned to the repository's owner and told why.
 func (s Source) toPerson(st *Status) error {
-	reason := fmt.Sprintf("Stuck a second time: it was taken over %s, and %s, longer than the %s lease. "+
+	reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s, longer than the %s lease. "+
 		"A person decides how it goes on; `se issue resume %d` puts it back in the queue.",
-		times(st.Takeovers), st.since(), Lease, st.Number)
+		FinalLabel, st.since(), Lease, st.Number)
 	if err := s.flag(st.Issue, reason, ""); err != nil {
 		return err
 	}
@@ -161,15 +161,16 @@ func (s Source) flag(i Issue, reason, marks string) error {
 	return nil
 }
 
-func times(n int) string {
-	if n == 1 {
-		return "once"
+// finalize labels issue n se-final: its next failure goes to a person.
+func (s Source) finalize(n int) error {
+	if _, err := s.GH("api", "-X", "POST", "-f", "labels[]="+FinalLabel, fmt.Sprintf("repos/%s/issues/%d/labels", s.Repo, n)); err != nil {
+		return fmt.Errorf("labelling #%d %s: %w", n, FinalLabel, err)
 	}
-	return fmt.Sprintf("%d times", n)
+	return nil
 }
 
-// takeOverStuck continues a stuck leaf: it records the takeover on the issue,
-// then fetches the leaf's branch as it stands and, where checkout is set,
+// takeOverStuck continues a stuck leaf: it records the takeover on the issue
+// and labels it se-final, then fetches the leaf's branch as it stands and, where checkout is set,
 // checks it out in dir. Of two boxes taking over one issue, the first comment
 // wins; the other answers false and changes nothing in dir.
 func (s Source) takeOverStuck(dir string, st Status, checkout bool) (took bool, err error) {
@@ -177,6 +178,9 @@ func (s Source) takeOverStuck(dir string, st Status, checkout bool) (took bool, 
 		st.Takeover.Count, st.since(), Lease)
 	if won, err := s.markTakeover(st.Number, st.Takeover.Count, body); err != nil || !won {
 		return false, err
+	}
+	if err := s.finalize(st.Number); err != nil {
+		return true, err
 	}
 	if !checkout {
 		branch := Branch(st.Number)
@@ -271,8 +275,9 @@ func (s Source) Waiting() ([]Waiting, error) {
 }
 
 // Resume gives issue n back to the boxes: it removes the se-person label and
-// records a resume, which resets its takeover count. A claim that is still
-// stale is taken over by the next box.
+// the se-final one, and records a resume, which resets its takeover count, so
+// it gets one more attempt. A claim that is still stale is taken over by the
+// next box.
 func (s Source) Resume(n int) (Issue, error) {
 	base := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
 	got, err := api[issue](s, base, false)
@@ -285,12 +290,17 @@ func (s Source) Resume(n int) (Issue, error) {
 	}
 	// The resume is recorded before the label goes, so an issue back in the
 	// queue never keeps its old takeover count.
-	body := "<!-- se:resume -->\nResumed by a person: back in the queue, its takeover count reset."
+	body := "<!-- se:resume -->\nResumed by a person: back in the queue, its takeover count reset, no longer final."
 	if _, err := s.GH("api", "-X", "POST", "-f", "body="+body, base+"/comments"); err != nil {
 		return Issue{}, err
 	}
-	if _, err := s.GH("api", "-X", "DELETE", base+"/labels/"+PersonLabel); err != nil {
-		return Issue{}, err
+	for _, l := range []string{FinalLabel, PersonLabel} {
+		if !i.labelled(l) {
+			continue
+		}
+		if _, err := s.GH("api", "-X", "DELETE", base+"/labels/"+l); err != nil {
+			return Issue{}, err
+		}
 	}
 	return Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL}, nil
 }

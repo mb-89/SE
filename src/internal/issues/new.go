@@ -95,13 +95,13 @@ func (s Source) link(n int, blockers []int, ids map[int]int64) error {
 	return nil
 }
 
-// Create opens a fleet issue, labelled se (and se-review where review is
-// true), makes it a sub-issue of parent where that is above zero, and links it
-// as blocked by each of blockedBy. The
+// Create opens a fleet issue, labelled se and each of labels (se-review,
+// se-final), makes it a sub-issue of parent where that is above zero, and
+// links it as blocked by each of blockedBy. The
 // parent and the blockers are checked before the issue is created, so naming
 // an issue that does not exist creates nothing. ready is true when nothing
 // blocks the created issue: each of blockedBy is closed already.
-func (s Source) Create(title, body string, parent int, blockedBy []int, review bool) (made Issue, ready bool, err error) {
+func (s Source) Create(title, body string, parent int, blockedBy []int, labels ...string) (made Issue, ready bool, err error) {
 	if strings.TrimSpace(title) == "" {
 		return Issue{}, false, fmt.Errorf("an issue needs a --title")
 	}
@@ -116,8 +116,8 @@ func (s Source) Create(title, body string, parent int, blockedBy []int, review b
 	}
 	path := fmt.Sprintf("repos/%s/issues", s.Repo)
 	args := []string{"api", "-X", "POST", "-f", "title=" + title, "-f", "body=" + body, "-f", "labels[]=" + Label}
-	if review {
-		args = append(args, "-f", "labels[]="+ReviewLabel)
+	for _, l := range labels {
+		args = append(args, "-f", "labels[]="+l)
 	}
 	out, err := s.GH(append(args, path)...)
 	if err != nil {

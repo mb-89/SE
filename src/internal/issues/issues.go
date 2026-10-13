@@ -23,6 +23,11 @@ const Label = "se"
 // so it never closes by itself.
 const ReviewLabel = "se-review"
 
+// FinalLabel marks an issue on its last attempt: one a review filed for a
+// finding, or one taken over once already. A final issue that fails again goes
+// to a person instead of another round.
+const FinalLabel = "se-final"
+
 // Issue is one fleet issue.
 type Issue struct {
 	Number int    `json:"number"`
@@ -151,11 +156,15 @@ type Status struct {
 	// starts the reviewer.
 	Review bool `json:"review,omitempty"`
 	// Stuck is set for a claimed leaf nothing was pushed to for longer than
-	// the lease; Takeovers counts its takeovers since a person last resumed
-	// it, and Since is when its branch last saw a push or a takeover.
+	// the lease; Takeovers is its last takeover round since a person last
+	// resumed it, which only settles two boxes racing for one round (the
+	// label se-final is the record of a takeover), and Since is when its
+	// branch last saw a push or a takeover.
 	Stuck     bool      `json:"stuck,omitempty"`
 	Takeovers int       `json:"takeovers,omitempty"`
 	Since     time.Time `json:"-"`
+	// Final is set for an issue labelled se-final: on its last attempt.
+	Final bool `json:"final,omitempty"`
 	// Person is set for an issue labelled se-person; Reason says why.
 	Person bool   `json:"person,omitempty"`
 	Reason string `json:"reason,omitempty"`
@@ -334,7 +343,7 @@ func (s Source) survey() ([]Status, tree, error) {
 	for _, n := range t.numbers() {
 		i := t.byNum[n]
 		_, parent := t.subs[n]
-		st := &Status{Issue: Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, Parent: parent}, Above: t.above[n]}
+		st := &Status{Issue: Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, Parent: parent}, Above: t.above[n], Final: i.labelled(FinalLabel)}
 		switch {
 		case i.labelled(PersonLabel):
 			st.Person, st.Why = true, "waits on a person"
@@ -348,8 +357,8 @@ func (s Source) survey() ([]Status, tree, error) {
 			if err := s.lease(st); err != nil {
 				return nil, tree{}, err
 			}
-			// The sweep: stuck a second time goes to a person.
-			if st.Stuck && st.Takeovers > 0 {
+			// The sweep: a final issue stuck goes to a person.
+			if st.Stuck && st.Final {
 				if err := s.toPerson(st); err != nil {
 					return nil, tree{}, err
 				}

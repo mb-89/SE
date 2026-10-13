@@ -3,6 +3,7 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -75,31 +76,30 @@ func (s Source) record(n int, w Worker) error {
 type Reviewed struct {
 	Issue  int  `json:"issue"`
 	Passed bool `json:"passed"`
-	// Fixes are the fix leaves a failed review created under the issue.
+	// Fixes are the issues the blocking findings became: se-final sub-issues
+	// of the gate, so it is reviewed again once they have landed.
 	Fixes []Issue `json:"fixes"`
+	// Filed are the issues the non-blocking findings became, se-final, in
+	// the normal queue; Unfiled counts those past the first MaxFiled.
+	Filed   []Issue `json:"filed"`
+	Unfiled int     `json:"unfiled"`
+	// Person is set where a re-review found a final issue's problem again:
+	// the gate then waits on a person.
+	Person bool `json:"person,omitempty"`
 }
 
 // Review passes or fails issue n, a parent labelled se-review whose
-// sub-issues are all closed, as reviewer. It refuses a reviewer who worked any
-// leaf of n's tree, and a tree with a leaf whose worker is not recorded. A pass
-// posts why as a comment and closes n, which can complete its parent; a fail
-// posts why and creates one fix leaf under n per title in fixes, so n is ready
-// for review again once they have landed.
-func (s Source) Review(n int, reviewer Worker, pass bool, why string, fixes []string) (Reviewed, error) {
-	switch {
-	case strings.TrimSpace(why) == "":
-		return Reviewed{}, fmt.Errorf("a review needs --why: the verdict, or the findings")
-	case pass && len(fixes) > 0:
-		return Reviewed{}, fmt.Errorf("a pass takes no --fix")
-	case !pass && len(fixes) == 0:
-		return Reviewed{}, fmt.Errorf("a fail needs a --fix for each fix leaf it creates")
-	case reviewer.Session == "":
+// sub-issues are all closed, as reviewer, with its report rep. It refuses a
+// reviewer who worked any leaf of n's tree, a tree with a leaf whose worker is
+// not recorded, and a report that breaks the rules of spec/review.md (see
+// Report.check). Every verified finding becomes an se-final issue: a blocking
+// one a sub-issue of n, a non-blocking one in the normal queue, at most
+// MaxFiled of them. The report goes on n with its machine-readable block; a
+// pass closes n, which can complete its parent. A blocking finding that
+// repeats an earlier blocker sends n to a person.
+func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed, error) {
+	if reviewer.Session == "" {
 		return Reviewed{}, fmt.Errorf("%s is not set, so this reviewer cannot be told apart from the workers of #%d's tree; nothing was reviewed", SessionVar, n)
-	}
-	for _, f := range fixes {
-		if strings.TrimSpace(f) == "" {
-			return Reviewed{}, fmt.Errorf("a --fix needs a title")
-		}
 	}
 	all, t, err := s.survey()
 	if err != nil {
@@ -121,34 +121,66 @@ func (s Source) Review(n int, reviewer Worker, pass bool, why string, fixes []st
 	case !st.Review:
 		return Reviewed{}, fmt.Errorf("#%d is not ready for review: its sub-issues are not all closed", n)
 	}
+	earlier, err := s.lastVerdict(n)
+	if err != nil {
+		return Reviewed{}, err
+	}
+	if err := rep.check(pass, earlier.blockers()); err != nil {
+		return Reviewed{}, err
+	}
 	if err := s.separate(n, n, reviewer); err != nil {
 		return Reviewed{}, err
 	}
-	r := Reviewed{Issue: n, Passed: pass, Fixes: []Issue{}}
-	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
-	if pass {
-		if _, err := s.GH("api", "-X", "POST", "-f", fmt.Sprintf("body=Review passed, by %s.\n\n%s", reviewer, why), path+"/comments"); err != nil {
-			return r, fmt.Errorf("posting the verdict on #%d: %w", n, err)
+	r := Reviewed{Issue: n, Passed: pass, Fixes: []Issue{}, Filed: []Issue{}}
+	var again []Finding
+	for k := range rep.Findings {
+		f := &rep.Findings[k]
+		switch {
+		case f.Repeats > 0:
+			again = append(again, *f)
+			continue
+		case !f.Blocking && len(r.Filed) == MaxFiled:
+			r.Unfiled++
+			continue
 		}
+		parent := 0
+		if f.Blocking {
+			parent = n
+		}
+		made, _, err := s.Create(f.Title, f.body(n), parent, nil, FinalLabel)
+		if err != nil {
+			return r, err
+		}
+		f.Issue = made.Number
+		if f.Blocking {
+			r.Fixes = append(r.Fixes, made)
+		} else {
+			r.Filed = append(r.Filed, made)
+		}
+	}
+	v := Verdict{Passed: pass, Rereview: earlier.failed(), Unfiled: r.Unfiled, Report: rep}
+	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
+	if _, err := s.GH("api", "-X", "POST", "-f", "body="+v.render(reviewer), path+"/comments"); err != nil {
+		return r, fmt.Errorf("posting the report on #%d: %w", n, err)
+	}
+	if len(again) > 0 {
+		names := make([]string, len(again))
+		for k, f := range again {
+			names[k] = fmt.Sprintf("#%d (%s)", f.Repeats, f.Title)
+		}
+		reason := fmt.Sprintf("Its re-review finds the problem of %s again. Each was a final attempt (labelled %s), so it gets no other round: "+
+			"a person decides how #%d goes on; `se issue resume %d` puts it back in the queue.", strings.Join(names, ", "), FinalLabel, n, n)
+		if err := s.flag(st.Issue, reason, ""); err != nil {
+			return r, err
+		}
+		r.Person = true
+		return r, nil
+	}
+	if pass {
 		if _, err := s.GH("api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", path); err != nil {
 			return r, fmt.Errorf("closing #%d: %w", n, err)
 		}
 		return r, s.CloseParents()
-	}
-	for _, f := range fixes {
-		made, _, err := s.Create(f, fmt.Sprintf("A fix the review of #%d asks for. Its findings:\n\n%s", n, why), n, nil, false)
-		if err != nil {
-			return r, err
-		}
-		r.Fixes = append(r.Fixes, made)
-	}
-	names := make([]string, len(r.Fixes))
-	for k, f := range r.Fixes {
-		names[k] = fmt.Sprintf("- #%d %s", f.Number, f.Title)
-	}
-	body := fmt.Sprintf("Review failed, by %s.\n\n%s\n\nFixes:\n%s", reviewer, why, strings.Join(names, "\n"))
-	if _, err := s.GH("api", "-X", "POST", "-f", "body="+body, path+"/comments"); err != nil {
-		return r, fmt.Errorf("posting the findings on #%d: %w", n, err)
 	}
 	return r, nil
 }
@@ -196,4 +228,24 @@ func (s Source) separate(root, n int, reviewer Worker) error {
 func ReviewWorktree(dir string, n, round int) string {
 	return fmt.Sprintf("git fetch -q origin main && git worktree add --detach %s origin/main",
 		filepath.Join(filepath.Dir(dir), fmt.Sprintf("review-%d-%d", n, round)))
+}
+
+// ModelsPath is the one place the models SE runs are set.
+const ModelsPath = "spec/models.yaml"
+
+// ReviewerModel reads the reviewer's model from spec/models.yaml in the
+// checkout dir, the line "reviewer: <model>"; where it is not set, the
+// reviewer runs the box's model, the floor, and the answer is empty.
+func ReviewerModel(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, ModelsPath))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if k, v, ok := strings.Cut(line, ":"); ok && strings.TrimSpace(k) == "reviewer" {
+			v, _, _ = strings.Cut(v, "#")
+			return strings.Trim(strings.TrimSpace(v), `"'`)
+		}
+	}
+	return ""
 }
