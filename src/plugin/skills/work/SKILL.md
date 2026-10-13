@@ -9,14 +9,17 @@ Every step that can be an `se` command is one. Yours are doing the issue's
 work and fixing a red CI run; follow the rest as written. `se` is
 `./src/plugin/bin/se`; build it first with
 `go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se`.
-Call it exactly as `./src/plugin/bin/se issue …`, one command per call, never
-through a variable: `.claude/settings.json` allows that form to write GitHub
-issues without a permission prompt, and only that form.
+Call it exactly as `./src/plugin/bin/se issue …` (or `./src/plugin/bin/se fleet …`),
+one command per call, never through a variable: `.claude/settings.json` allows
+those forms to write GitHub issues without a permission prompt, and only
+those.
 
 1. `git fetch origin main && git checkout origin/main` (a box started by a PR
    event starts on that PR's head commit), rebuild `se`, then
-   `./src/plugin/bin/se issue next --take`. If it says no se issue is ready, end
-   the session now. If it says the issue is a parent, follow **A parent**
+   `./src/plugin/bin/se issue next --take`. If it says no se issue is ready,
+   follow the coordination skill,
+   [src/plugin/skills/coordination/SKILL.md](../coordination/SKILL.md), which
+   checks what is broken and fixes it before the session ends. If it says the issue is a parent, follow **A parent**
    below instead of steps 3 to 5.
 2. If `set_session_title` is available, rename this session to
    `SE #<n> · <issue title>`.

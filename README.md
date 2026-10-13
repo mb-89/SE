@@ -28,6 +28,8 @@ command, `/se`, which takes words the way a command line does:
 | `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent`; `--review` labels it `se-review` |
 | `/se issue resume` | for a person: takes an issue off `se-person` and puts it back in the queue |
 | `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree: `pass` closes it, `fail` creates fix leaves under it |
+| `/se fleet check` | lists what is broken in the fleet (a stalled root, a conflicted, red or unmerged PR, a stale or leftover claim, an impossible block, an issue waiting on a person), each with its remedy; says `healthy` when nothing is |
+| `/se fleet fix` | applies every remedy `fleet check` names that needs no checkout, records it on its issue, and names the takeovers left to the box |
 | `/se ui` | opens SE's control panel, a pane of buttons that draws on every surface, the phone included: the on/off toggle top left, then a button for each command that takes no typed words (`status`, `restart`, `update`, `issue next`); a press runs what typing `/se <name>` runs |
 | `/se help`, `/se` | lists these, one short line each, under their groups |
 | `/se help <command>` | shows that command's usage and every flag it takes; `<command> --help` does too |
@@ -86,7 +88,10 @@ A box (a cloud session working unattended) follows the work skill,
 ready issue, do it, land it. The routine `SE work` starts the boxes: on every
 merge into main, on a schedule, and through fan-out, where each claim by
 `se issue next --take` fires the routine once more, so there are as many boxes
-as ready issues and the fan-out ends when nothing is ready. Fan-out needs a
+as ready issues and the fan-out ends when nothing is ready. A box that finds nothing to take
+follows the coordination skill before it leaves: `se fleet check` lists what
+is broken, and the box fixes what has a known remedy; the rules are
+[spec/coordination.md](spec/coordination.md). Fan-out needs a
 one-time setup by the owner: an API trigger on the routine, with its fire URL
 in `SE_ROUTINE_FIRE_URL` and its token in `SE_ROUTINE_FIRE_TOKEN` in the cloud
 environment; without them `se` says fan-out is off and claims as before. The

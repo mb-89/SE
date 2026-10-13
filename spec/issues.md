@@ -171,7 +171,11 @@ that branch out: the tree is picked up from its claim. Plain `--take` first
 takes over a conflicted claim (see [The rules](#the-rules)): it prints
 `Took over #<n> …` with the PR, and the instruction to merge `origin/main`
 into the branch and land it again (with `--json`: the issue's `takeover`,
-`{"pr","url","count"}`); `--take N` takes over nothing.
+`{"pr","url","count","why"}`). `--take N` takes over claimed leaf `N`, at
+any depth, where `se fleet check` finds it stuck (a conflicted or red PR, or
+no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.md));
+taken over before, it goes to a person instead. A claim whose work is moving
+is refused.
 Once it has claimed an issue, `--take` fires the routine once (the fan-out,
 below) and adds a line saying what the fire did; with `--json` that line is
 the field `fanout`.
