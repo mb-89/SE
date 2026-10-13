@@ -394,8 +394,10 @@ func (s Source) leftovers(t tree, refs []ref) ([]Finding, error) {
 		if err != nil {
 			return nil, err
 		}
-		f := Finding{Kind: LeftoverClaim, Issue: n, head: r.Object.SHA, key: "leftover-claim",
-			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why)}
+		f := Finding{
+			Kind: LeftoverClaim, Issue: n, head: r.Object.SHA, key: "leftover-claim",
+			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why),
+		}
 		if cmp[0].AheadBy == 0 {
 			f.spent, f.key = true, "leftover-branch"
 			f.What += ", and main holds all its commits"

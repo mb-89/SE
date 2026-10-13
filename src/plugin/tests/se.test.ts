@@ -597,7 +597,10 @@ test('a /se answer that is no help is drawn as its text', async ($, on) => {
     expect(JSON.stringify(await ui.drawn())).toContain('No SE daemon answers for /work.')
     await ui.unmount()
     // An errored help row is drawn as its text too.
-    const errored = await $.ui.mount({ ...output('help', 'se help: failed', surface), props: { command: 'se', args: 'help', text: 'se help: failed', isErrored: true } })
+    const errored = await $.ui.mount({
+      ...output('help', 'se help: failed', surface),
+      props: { command: 'se', args: 'help', text: 'se help: failed', isErrored: true },
+    })
     expect(await errored.find({ key: 'usage' })).toBeUndefined()
     await errored.unmount()
   }
