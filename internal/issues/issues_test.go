@@ -34,6 +34,19 @@ const (
 	refsPath = "repos/o/r/git/matching-refs/heads/issue-"
 )
 
+// unblocked records an empty "blocked by" answer for each issue n, as every
+// unclaimed issue's links are asked for.
+func unblocked(answers map[string]string, ns ...int) map[string]string {
+	for _, n := range ns {
+		answers[links(n)] = `[]`
+	}
+	return answers
+}
+
+func links(n int) string {
+	return fmt.Sprintf("repos/o/r/issues/%d/dependencies/blocked_by?per_page=100", n)
+}
+
 func open(n int, body string) string {
 	return fmt.Sprintf(`{"number":%d,"title":"t%d","body":%q,"state":"open","html_url":"u%d","issue_dependencies_summary":{"total_blocked_by":0}}`, n, n, body, n)
 }
@@ -67,8 +80,10 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 	// Recorded from mb-89/SE: #5 claimed; #6 says "Blocked by: #5" in its
 	// body, which is no blocker, as only native links are.
 	gh := recorded(t, map[string]string{
-		"repos/mb-89/SE/issues?labels=se&state=open&per_page=100": read("issues.json"),
-		"repos/mb-89/SE/git/matching-refs/heads/issue-":           read("refs.json"),
+		"repos/mb-89/SE/issues?labels=se&state=open&per_page=100":      read("issues.json"),
+		"repos/mb-89/SE/git/matching-refs/heads/issue-":                read("refs.json"),
+		"repos/mb-89/SE/issues/6/dependencies/blocked_by?per_page=100": `[]`,
+		"repos/mb-89/SE/issues/7/dependencies/blocked_by?per_page=100": `[]`,
 	})
 	s := Source{Repo: "mb-89/SE", GH: gh}
 	all, err := s.Survey()
@@ -89,20 +104,20 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 
 func TestOnlyOpenSeIssuesAreTheFleets(t *testing.T) {
 	// The list is already filtered by label and state; a pull request in it is dropped.
-	got := survey(t, map[string]string{
+	got := survey(t, unblocked(map[string]string{
 		listPath: `[` + open(4, "") + `,{"number":3,"state":"open","pull_request":{}}]`,
 		refsPath: `[]`,
-	})
+	}, 4))
 	if !reflect.DeepEqual(got, map[int]string{4: ""}) {
 		t.Fatalf("%v", got)
 	}
 }
 
 func TestLowestReadyNumberComesFirst(t *testing.T) {
-	gh := recorded(t, map[string]string{
+	gh := recorded(t, unblocked(map[string]string{
 		listPath: `[` + open(9, "") + `,` + open(3, "") + `]` + `[` + open(5, "") + `]`, // two pages
 		refsPath: `[]`,
-	})
+	}, 3, 5, 9))
 	next, ok, err := Source{Repo: repo, GH: gh}.Next()
 	if err != nil || !ok || next.Number != 3 || next.Title != "t3" {
 		t.Fatalf("%+v %v %v", next, ok, err)
@@ -110,11 +125,11 @@ func TestLowestReadyNumberComesFirst(t *testing.T) {
 }
 
 func TestAClaimedBranchHoldsItsIssue(t *testing.T) {
-	got := survey(t, map[string]string{
+	got := survey(t, unblocked(map[string]string{
 		listPath: `[` + open(1, "") + `,` + open(2, "") + `,` + open(12, "") + `]`,
 		// issue-12 is not issue-1; issue-2-old is not issue-2.
 		refsPath: `[{"ref":"refs/heads/issue-1"},{"ref":"refs/heads/issue-2-old"}]`,
-	})
+	}, 2, 12))
 	if !reflect.DeepEqual(got, map[int]string{1: "claimed by issue-1", 2: "", 12: ""}) {
 		t.Fatalf("%v", got)
 	}
@@ -126,7 +141,6 @@ func TestNativeLinksBlockWhileTheirIssuesAreOpen(t *testing.T) {
 	}
 	got := survey(t, map[string]string{
 		listPath: `[` + native(4, 2) + `,` + native(5, 1) + `,` + native(6, 0) +
-			// Where the API leaves the summary out, the links are asked for.
 			`,{"number":7,"state":"open"}` +
 			// A body line is no blocker; only the native link counts.
 			`,{"number":8,"state":"open","body":"Blocked by: #20, #22","issue_dependencies_summary":{"total_blocked_by":1}}` +
@@ -134,12 +148,31 @@ func TestNativeLinksBlockWhileTheirIssuesAreOpen(t *testing.T) {
 		refsPath: `[]`,
 		"repos/o/r/issues/4/dependencies/blocked_by?per_page=100": `[{"number":20,"state":"open"},{"number":21,"state":"closed"}]`,
 		"repos/o/r/issues/5/dependencies/blocked_by?per_page=100": `[{"number":21,"state":"closed"}]`,
+		"repos/o/r/issues/6/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/issues/7/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/issues/8/dependencies/blocked_by?per_page=100": `[{"number":20,"state":"open"}]`,
+		"repos/o/r/issues/9/dependencies/blocked_by?per_page=100": `[]`,
 	})
 	want := map[int]string{4: "blocked by #20", 5: "", 6: "", 7: "", 8: "blocked by #20", 9: ""}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%v, want %v", got, want)
+	}
+}
+
+func TestAStaleSummaryDoesNotMakeABlockedIssueReady(t *testing.T) {
+	// Right after #6 is linked as blocked by #8, the list's summary can
+	// still count 0; the links already name #8.
+	gh := recorded(t, map[string]string{
+		listPath: `[` + open(6, "") + `,` + open(8, "") + `]`,
+		refsPath: `[{"ref":"refs/heads/issue-8"}]`,
+		links(6): `[{"number":8,"state":"open"}]`,
+	})
+	s := Source{Repo: repo, GH: gh}
+	if next, ok, err := s.Next(); err != nil || ok {
+		t.Fatalf("next = %+v %v %v", next, ok, err)
+	}
+	if _, _, err := s.Take(t.TempDir(), 6); err == nil || !strings.Contains(err.Error(), "blocked by #8") {
+		t.Fatalf("%v", err)
 	}
 }
 
@@ -228,10 +261,10 @@ func TestTheSecondClaimIsRefused(t *testing.T) {
 func TestATakeRefusedMovesToTheNextIssue(t *testing.T) {
 	_, a, b := boxes(t)
 	// Both boxes read the same issues; a claims #5 before b pushes.
-	gh := recorded(t, map[string]string{
+	gh := recorded(t, unblocked(map[string]string{
 		listPath: `[` + open(5, "") + `,` + open(6, "") + `]`,
 		refsPath: `[]`,
-	})
+	}, 5, 6))
 	s := Source{Repo: repo, GH: gh}
 	if took, ok, err := s.Take(a, 0); err != nil || !ok || took.Number != 5 {
 		t.Fatalf("a took %+v %v %v", took, ok, err)
@@ -251,7 +284,8 @@ func TestTakeRefusesAnIssueThatIsNotReady(t *testing.T) {
 	gh := recorded(t, map[string]string{
 		listPath: `[` + open(1, "") + `,{"number":2,"state":"open","issue_dependencies_summary":{"total_blocked_by":1}}]`,
 		refsPath: `[]`,
-		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
+		links(1): `[]`,
+		links(2): `[{"number":1,"state":"open"}]`,
 	})
 	s := Source{Repo: repo, GH: gh}
 	if _, _, err := s.Take(t.TempDir(), 2); err == nil || !strings.Contains(err.Error(), "blocked by #1") {

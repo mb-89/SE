@@ -19,19 +19,21 @@ func recordedIssues(t *testing.T) *[][]string {
 	t.Helper()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
-			{"number":3,"title":"three","body":"do it","state":"open","html_url":"u3","issue_dependencies_summary":{"total_blocked_by":0}},
+			{"number":3,"title":"three","body":"do it","state":"open","html_url":"u3"},
 			{"number":2,"title":"two","body":"","state":"open","html_url":"u2","issue_dependencies_summary":{"total_blocked_by":1}},
-			{"number":1,"title":"one","body":"","state":"open","html_url":"u1","issue_dependencies_summary":{"total_blocked_by":0}}]`,
+			{"number":1,"title":"one","body":"","state":"open","html_url":"u1"}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[{"ref":"refs/heads/issue-1"}]`,
 		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
-		"repos/o/r/issues/1":                                      `{"id":101,"number":1}`,
-		"repos/o/r/issues/3":                                      `{"id":103,"number":3}`,
-		"repos/o/r/issues/4":                                      `{"id":104,"number":4,"pull_request":{}}`,
-		"repos/o/r/issues":                                        `{"id":110,"number":10,"title":"ten","html_url":"u10"}`,
-		"repos/o/r/issues/10/dependencies/blocked_by":             `{"id":101}`,
+		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
+		"repos/o/r/issues/1":                          `{"id":101,"number":1}`,
+		"repos/o/r/issues/3":                          `{"id":103,"number":3}`,
+		"repos/o/r/issues/4":                          `{"id":104,"number":4,"pull_request":{}}`,
+		"repos/o/r/issues":                            `{"id":110,"number":10,"title":"ten","html_url":"u10"}`,
+		"repos/o/r/issues/10/dependencies/blocked_by": `{"id":101}`,
 	}
 	var calls [][]string
-	old := gh
+	old, oldFire := gh, fire
+	fire = func() string { t.Error("fired the routine without a claim"); return "" }
 	gh = func(args ...string) ([]byte, error) {
 		calls = append(calls, args)
 		path := args[len(args)-1]
@@ -44,7 +46,7 @@ func recordedIssues(t *testing.T) *[][]string {
 		}
 		return []byte(a), nil
 	}
-	t.Cleanup(func() { gh = old })
+	t.Cleanup(func() { gh, fire = old, oldFire })
 	return &calls
 }
 
@@ -215,12 +217,15 @@ func TestIssueNextInNamesTheTreesReadyLeaves(t *testing.T) {
 	t.Cleanup(func() { gh = old })
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
-			{"number":1,"title":"root","state":"open","html_url":"u1","sub_issues_summary":{"total":2},"issue_dependencies_summary":{"total_blocked_by":0}},
-			{"number":2,"title":"two","state":"open","html_url":"u2","issue_dependencies_summary":{"total_blocked_by":0}},
-			{"number":3,"title":"three","state":"open","html_url":"u3","labels":[{"name":"se-review"}],"sub_issues_summary":{"total":1},"issue_dependencies_summary":{"total_blocked_by":0}}]`,
+			{"number":1,"title":"root","state":"open","html_url":"u1","sub_issues_summary":{"total":2}},
+			{"number":2,"title":"two","state":"open","html_url":"u2"},
+			{"number":3,"title":"three","state":"open","html_url":"u3","labels":[{"name":"se-review"}],"sub_issues_summary":{"total":1}}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":   `[]`,
 		"repos/o/r/issues/1/sub_issues?per_page=100": `[{"number":2,"state":"open"},{"number":3,"state":"open"}]`,
 		"repos/o/r/issues/3/sub_issues?per_page=100": `[{"number":4,"state":"closed"}]`,
+	}
+	for _, n := range []int{1, 2, 3} {
+		answers[fmt.Sprintf("repos/o/r/issues/%d/dependencies/blocked_by?per_page=100", n)] = `[]`
 	}
 	gh = func(args ...string) ([]byte, error) {
 		if a, ok := answers[args[len(args)-1]]; ok {
@@ -256,5 +261,58 @@ func TestIssueNewTakesAParent(t *testing.T) {
 	last := (*calls)[len(*calls)-1]
 	if want := []string{"api", "-X", "POST", "-F", "sub_issue_id=110", "repos/o/r/issues/3/sub_issues"}; !reflect.DeepEqual(last, want) {
 		t.Fatalf("%q", last)
+	}
+}
+
+func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
+	recordedIssues(t)
+	root := t.TempDir()
+	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
+	git := func(dir string, args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git(root, "init", "-q", "--bare", "-b", "main", origin)
+	git(root, "clone", "-q", origin, ws)
+	git(ws, "checkout", "-q", "-b", "main")
+	git(ws, "commit", "-q", "--allow-empty", "-m", "start")
+	git(ws, "push", "-q", "origin", "main")
+	fires := 0
+	fire = func() string { fires++; return "Fan-out fired the routine: s1" }
+	// Naming an issue and failing to take one fire nothing.
+	if code, _, _ := se(t, "issue", "next", "--repo", "o/r", "--workspace", ws); code != 0 || fires != 0 {
+		t.Fatalf("exit %d, %d fires", code, fires)
+	}
+	if code, _, _ := se(t, "issue", "next", "--take", "2", "--repo", "o/r", "--workspace", ws); code != 1 || fires != 0 {
+		t.Fatalf("exit %d, %d fires", code, fires)
+	}
+	code, out, errs := se(t, "issue", "next", "--take", "--repo", "o/r", "--workspace", ws)
+	if code != 0 || fires != 1 || out != "Took #3 three, on branch issue-3.\nu3\nFan-out fired the routine: s1\n\ndo it\n" {
+		t.Fatalf("exit %d, %d fires, %q %q", code, fires, out, errs)
+	}
+	// #3 is now claimed on origin, but the recorded refs do not say so: the
+	// take is refused, moves on, finds nothing else and fires nothing.
+	git(ws, "checkout", "-q", "main")
+	if code, out, _ := se(t, "issue", "next", "--take", "--json", "--repo", "o/r", "--workspace", ws); code != 0 || fires != 1 || out != `{"ready":false}`+"\n" {
+		t.Fatalf("exit %d, %d fires, %q", code, fires, out)
+	}
+}
+
+func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
+	recordedIssues(t)
+	root := t.TempDir()
+	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
+	for _, args := range [][]string{{root, "init", "-q", "--bare", "-b", "main", origin}, {root, "clone", "-q", origin, ws},
+		{ws, "checkout", "-q", "-b", "main"}, {ws, "commit", "-q", "--allow-empty", "-m", "start"}, {ws, "push", "-q", "origin", "main"}} {
+		if out, err := exec.Command("git", append([]string{"-C", args[0], "-c", "user.name=t", "-c", "user.email=t@t"}, args[1:]...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	fire = func() string { return "Fan-out refused: 429 Too Many Requests" }
+	code, out, _ := se(t, "issue", "next", "--take", "--json", "--repo", "o/r", "--workspace", ws)
+	if code != 0 || !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"fanout":"Fan-out refused: 429 Too Many Requests"`) {
+		t.Fatalf("exit %d, %q", code, out)
 	}
 }

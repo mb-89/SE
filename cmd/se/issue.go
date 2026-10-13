@@ -16,6 +16,10 @@ import (
 // gh is how the issue commands reach GitHub; tests put recorded answers here.
 var gh issues.GH = issues.Gh
 
+// fire is the fan-out after a claim: it fires the routine once and answers a
+// line saying what happened. Tests put a fake here.
+var fire = issues.FireFromEnv
+
 // check is what issue land runs before it pushes: the repo's one definition of
 // green. It answers the check's output when it fails.
 var check = func(dir string) error {
@@ -36,7 +40,7 @@ func init() {
 	register(Command{
 		Name:    "issue next",
 		Usage:   "issue next [--in ROOT] [--take [N]] [--json] [--repo OWNER/NAME]",
-		Summary: "name the next ready se issue at the top, or say that none is ready; --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out; --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree",
+		Summary: "name the next ready se issue at the top, or say that none is ready; --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out; a claim fires the routine once (fan-out); --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue next")
@@ -76,13 +80,17 @@ func init() {
 				if err != nil {
 					return Reply{}, err
 				}
-				return issueReply(*asJSON, next, ok, "")
+				return issueReply(*asJSON, next, ok, "", "")
 			}
 			took, ok, err := s.Take(c.Workspace, take.n)
 			if err != nil {
 				return Reply{}, err
 			}
-			return issueReply(*asJSON, took, ok, issues.Branch(took.Number))
+			fanout := ""
+			if ok {
+				fanout = fire()
+			}
+			return issueReply(*asJSON, took, ok, issues.Branch(took.Number), fanout)
 		},
 	})
 	register(Command{
@@ -247,14 +255,15 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 }
 
 // issueReply shows the issue, or that there was none; branch names the branch
-// a take checked out.
-func issueReply(asJSON bool, i issues.Issue, ok bool, branch string) (Reply, error) {
+// a take checked out, and fanout what its fan-out did.
+func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string) (Reply, error) {
 	if asJSON {
 		answer := struct {
 			Ready  bool          `json:"ready"`
 			Issue  *issues.Issue `json:"issue,omitempty"`
 			Branch string        `json:"branch,omitempty"`
-		}{Ready: ok}
+			Fanout string        `json:"fanout,omitempty"`
+		}{Ready: ok, Fanout: fanout}
 		if ok {
 			answer.Issue, answer.Branch = &i, branch
 		}
@@ -267,6 +276,9 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch string) (Reply, err
 	head := fmt.Sprintf("#%d %s\n%s", i.Number, i.Title, i.URL)
 	if branch != "" {
 		head = fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
+	}
+	if fanout != "" {
+		head += "\n" + fanout
 	}
 	if i.Parent {
 		head += fmt.Sprintf("\n\n#%d is a parent: it holds no work. Coordinate its tree: se issue next --in %d --take", i.Number, i.Number)

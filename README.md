@@ -71,8 +71,14 @@ branch to main through one PR on auto-merge.
 
 A box (a cloud session working unattended) follows the work skill,
 [.claude/skills/work/SKILL.md](.claude/skills/work/SKILL.md): take the next
-ready issue, do it, land it. The routine `SE work` starts the boxes; how is in
-[docs/issues.md](docs/issues.md).
+ready issue, do it, land it. The routine `SE work` starts the boxes: on every
+merge into main, on a schedule, and through fan-out, where each claim by
+`se issue next --take` fires the routine once more, so there are as many boxes
+as ready issues and the fan-out ends when nothing is ready. Fan-out needs a
+one-time setup by the owner: an API trigger on the routine, with its fire URL
+in `SE_ROUTINE_FIRE_URL` and its token in `SE_ROUTINE_FIRE_TOKEN` in the cloud
+environment; without them `se` says fan-out is off and claims as before. The
+details are in [docs/issues.md](docs/issues.md).
 
 ## Adding a command
 

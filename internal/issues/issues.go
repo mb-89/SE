@@ -70,11 +70,6 @@ type issue struct {
 	State       string           `json:"state"`
 	URL         string           `json:"html_url"`
 	PullRequest *json.RawMessage `json:"pull_request"`
-	// Dependencies is GitHub's count of native "blocked by" links; absent
-	// where the API does not report it.
-	Dependencies *struct {
-		TotalBlockedBy int `json:"total_blocked_by"`
-	} `json:"issue_dependencies_summary"`
 	// SubIssues is GitHub's count of the issue's sub-issues; absent, it has none.
 	SubIssues *struct {
 		Total     int `json:"total"`
@@ -335,10 +330,13 @@ func (s Source) survey() ([]Status, tree, error) {
 
 // openBlockers names the issue's blockers that are still open, in ascending
 // order. Blockers are GitHub's native "blocked by" links and nothing else.
+//
+// The links are asked for on every unclaimed issue, one request each, and the
+// list's issue_dependencies_summary is not read: right after a link is written
+// that summary can still count 0, and trusting it would make a blocked issue
+// ready. The fleet is small, so one request per issue is cheap, and it is
+// the only answer that cannot lag a link.
 func (s Source) openBlockers(i issue) ([]int, error) {
-	if i.Dependencies != nil && i.Dependencies.TotalBlockedBy == 0 {
-		return nil, nil
-	}
 	native, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d/dependencies/blocked_by?per_page=100", s.Repo, i.Number), true)
 	if err != nil {
 		return nil, err

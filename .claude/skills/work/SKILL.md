@@ -48,3 +48,6 @@ took. `se` is the absolute path of `./plugin/bin/se` in this checkout.
 2. Subscribe to each PR a sub-agent answers. When a PR merges, go back to 1.
    On red CI, send that sub-agent the failure and have it fix it in its
    worktree and run `se issue land --workspace <path>` again.
+
+You never start another box yourself: `se issue next --take` fires the routine
+once after its claim (the fan-out in [docs/issues.md](../../../docs/issues.md)).

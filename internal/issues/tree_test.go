@@ -7,15 +7,14 @@ import (
 	"testing"
 )
 
-// node is an open se issue with subs sub-issues and blockers native blockers;
-// labels are its labels beyond se.
-func node(n, subs, blockers int, labels ...string) string {
+// node is an open se issue with subs sub-issues; labels are its labels beyond se.
+func node(n, subs int, labels ...string) string {
 	ls := `{"name":"se"}`
 	for _, l := range labels {
 		ls += fmt.Sprintf(`,{"name":%q}`, l)
 	}
-	return fmt.Sprintf(`{"id":%d,"number":%d,"title":"t%d","state":"open","html_url":"u%d","labels":[%s],"sub_issues_summary":{"total":%d},"issue_dependencies_summary":{"total_blocked_by":%d}}`,
-		1000+n, n, n, n, ls, subs, blockers)
+	return fmt.Sprintf(`{"id":%d,"number":%d,"title":"t%d","state":"open","html_url":"u%d","labels":[%s],"sub_issues_summary":{"total":%d}}`,
+		1000+n, n, n, n, ls, subs)
 }
 
 // subs lists sub-issues as GitHub does: "5" is open, "-5" closed.
@@ -31,6 +30,20 @@ func subs(ns ...int) string {
 	return "[" + strings.Join(out, ",") + "]"
 }
 
+// inTree answers like recorded, and an issue's links it holds no answer for
+// as none, since every unclaimed issue's links are asked for.
+func inTree(t *testing.T, answers map[string]string) GH {
+	t.Helper()
+	gh := recorded(t, answers)
+	return func(args ...string) ([]byte, error) {
+		path := args[len(args)-1]
+		if _, ok := answers[path]; !ok && strings.HasSuffix(path, "/dependencies/blocked_by?per_page=100") {
+			return []byte(`[]`), nil
+		}
+		return gh(args...)
+	}
+}
+
 func subsPath(n int) string { return fmt.Sprintf("repos/o/r/issues/%d/sub_issues?per_page=100", n) }
 
 func blockedPath(n int) string {
@@ -42,11 +55,11 @@ func list(nodes ...string) string { return "[" + strings.Join(nodes, ",") + "]" 
 func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 	answers := map[string]string{
 		// #1 is a parent of #2 and #3; #4 stands alone.
-		listPath:    list(node(3, 0, 0), node(2, 0, 0), node(1, 2, 0), node(4, 0, 0)),
+		listPath:    list(node(3, 0), node(2, 0), node(1, 2), node(4, 0)),
 		refsPath:    `[]`,
 		subsPath(1): subs(2, 3),
 	}
-	s := Source{Repo: repo, GH: recorded(t, answers)}
+	s := Source{Repo: repo, GH: inTree(t, answers)}
 	next, ok, err := s.Next()
 	if err != nil || !ok || next.Number != 1 || !next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
@@ -55,7 +68,7 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	// With the parent blocked, its sub-issues are still not offered.
-	answers[listPath] = list(node(3, 0, 0), node(2, 0, 0), node(1, 2, 1), node(4, 0, 0))
+	answers[listPath] = list(node(3, 0), node(2, 0), node(1, 2), node(4, 0))
 	answers[blockedPath(1)] = subs(9)
 	next, ok, err = s.Next()
 	if err != nil || !ok || next.Number != 4 || next.Parent {
@@ -71,21 +84,21 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 func TestInOffersTheReadyLeavesAtAnyDepth(t *testing.T) {
 	answers := map[string]string{
 		listPath: list(
-			node(10, 6, 0),  // the root
-			node(11, 0, 1),  // blocked by #30, outside the tree
-			node(12, 1, 1),  // a parent blocked by #40, outside
-			node(13, 0, 0),  // inside #12, so held by #12's blocker
-			node(14, 0, 1),  // blocked by #11, inside
-			node(15, 0, 0),  // claimed
-			node(16, 0, 1),  // its blocker #17 is closed
-			node(18, 1, 0),  // a parent whose leaf #19 is ready
-			node(19, 0, 0),  // two levels down
-			node(20, 1, 0),  // another tree
-			node(21, 0, 0),  // inside #20
-			node(30, 0, 0),  // at the top
-			node(40, 0, 0),  // at the top
-			node(50, 1, 1),  // a root blocked by #30
-			node(51, 0, 0)), // inside #50, so held by its root's blocker
+			node(10, 6),  // the root
+			node(11, 0),  // blocked by #30, outside the tree
+			node(12, 1),  // a parent blocked by #40, outside
+			node(13, 0),  // inside #12, so held by #12's blocker
+			node(14, 0),  // blocked by #11, inside
+			node(15, 0),  // claimed
+			node(16, 0),  // its blocker #17 is closed
+			node(18, 1),  // a parent whose leaf #19 is ready
+			node(19, 0),  // two levels down
+			node(20, 1),  // another tree
+			node(21, 0),  // inside #20
+			node(30, 0),  // at the top
+			node(40, 0),  // at the top
+			node(50, 1),  // a root blocked by #30
+			node(51, 0)), // inside #50, so held by its root's blocker
 		refsPath:        `[{"ref":"refs/heads/issue-15"},{"ref":"refs/heads/issue-10"}]`,
 		subsPath(10):    subs(11, 12, 14, 15, 16, 18, -17),
 		subsPath(12):    subs(13),
@@ -98,7 +111,7 @@ func TestInOffersTheReadyLeavesAtAnyDepth(t *testing.T) {
 		blockedPath(16): subs(-17),
 		blockedPath(50): subs(30),
 	}
-	s := Source{Repo: repo, GH: recorded(t, answers)}
+	s := Source{Repo: repo, GH: inTree(t, answers)}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +159,7 @@ func TestParentsCloseByThemselvesDeepestFirst(t *testing.T) {
 	gh, calls := writes(t, map[string]string{
 		// #1 holds #2 and a closed #3; #2 holds only closed sub-issues, so
 		// once #2 closes, #1 does too. #6 still has an open sub-issue.
-		listPath:                      list(node(1, 2, 0), node(2, 2, 0), node(6, 2, 0), node(7, 0, 0)),
+		listPath:                      list(node(1, 2), node(2, 2), node(6, 2), node(7, 0)),
 		subsPath(1):                   subs(2, -3),
 		subsPath(2):                   subs(-4, -5),
 		subsPath(6):                   subs(7, -8),
@@ -179,13 +192,13 @@ func TestAReviewParentNeverClosesByItself(t *testing.T) {
 	answers := map[string]string{
 		// #1 is the root; #2, labelled se-review, has only closed sub-issues;
 		// #5 waits on #2.
-		listPath:       list(node(1, 2, 0), node(2, 2, 0, ReviewLabel), node(5, 0, 1)),
+		listPath:       list(node(1, 2), node(2, 2, ReviewLabel), node(5, 0)),
 		refsPath:       `[]`,
 		subsPath(1):    subs(2, 5),
 		subsPath(2):    subs(-3, -4),
 		blockedPath(5): subs(2),
 	}
-	s := Source{Repo: repo, GH: recorded(t, answers)} // a write would not be recorded
+	s := Source{Repo: repo, GH: inTree(t, answers)} // a write would not be recorded
 	tr, err := s.In(1)
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +214,7 @@ func TestAReviewParentNeverClosesByItself(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	// At the top, too, it waits for its review.
-	answers[listPath] = list(node(2, 2, 0, ReviewLabel))
+	answers[listPath] = list(node(2, 2, ReviewLabel))
 	if tr, err := s.In(2); err != nil || !reflect.DeepEqual(numbers(tr.Review), []int{2}) {
 		t.Fatalf("%+v %v", tr, err)
 	}
@@ -213,11 +226,11 @@ func TestAReviewParentNeverClosesByItself(t *testing.T) {
 func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
 	origin, a, b := boxes(t)
 	answers := map[string]string{
-		listPath:    list(node(1, 2, 0), node(2, 0, 0), node(3, 0, 0)),
+		listPath:    list(node(1, 2), node(2, 0), node(3, 0)),
 		refsPath:    `[]`,
 		subsPath(1): subs(2, 3),
 	}
-	s := Source{Repo: repo, GH: recorded(t, answers)}
+	s := Source{Repo: repo, GH: inTree(t, answers)}
 	if ok, err := claimTree(a, 1); err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
@@ -256,13 +269,13 @@ func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
 
 func TestInSaysWhenTheRootHasClosed(t *testing.T) {
 	answers := map[string]string{
-		listPath:                      list(node(1, 1, 0)),
+		listPath:                      list(node(1, 1)),
 		refsPath:                      `[]`,
 		subsPath(1):                   subs(-2),
 		"repos/o/r/issues/1/comments": `{}`,
 		"repos/o/r/issues/1":          `{}`,
 	}
-	s := Source{Repo: repo, GH: recorded(t, answers)}
+	s := Source{Repo: repo, GH: inTree(t, answers)}
 	if tr, err := s.In(1); err != nil || !tr.Closed {
 		t.Fatalf("%+v %v", tr, err)
 	}
