@@ -29,7 +29,9 @@ command, `/se`, which takes words the way a command line does:
 On a terminal, `se help` lists every command, those above and the ones a
 session is not offered: `se serve`, `se start` and `se stop`.
 
-The plugin is read from the checkout you ran `RUNME.sh` in.
+The plugin is read from the checkout you ran `RUNME.sh` in. At every session
+start it pulls that checkout's `main` as `/se update` does, when it is a clean
+`main` (see [Cloud boxes](#cloud-boxes)).
 
 ## SE working on SE
 
@@ -107,13 +109,35 @@ For a session working in another folder, run
 
 ## Cloud boxes
 
-On a box that works on SE itself, set these in the environment's variables:
+A cloud environment that runs SE gets it from its setup script:
 
-    CLAUDE_CODE_PLUGIN_DIRS=/home/user/SE/plugin
+```sh
+#!/bin/bash
+set -u
+rm -rf /opt/se
+git clone --depth 1 https://github.com/mb-89/SE /opt/se \
+  && (cd /opt/se && go build -o plugin/bin/se ./cmd/se) \
+  || echo "SE setup failed; sessions start without SE"
+exit 0
+```
+
+and from these environment variables:
+
+    CLAUDE_CODE_PLUGIN_DIRS=/opt/se/plugin
     SE_DEFAULT=on
 
-`SE_DEFAULT=on` starts every session switched on. The plugin builds `se` from
-the checkout the first time it needs it.
+SE lives in `/opt/se` and not in the session's own checkout: every session of
+the environment has `/opt/se`, whatever repos are attached to it, and a box
+working on SE never runs the plugin code it is editing. `SE_DEFAULT=on` starts
+every session switched on.
+
+The setup script's result is cached, so `/opt/se` can be many commits behind
+when a session starts. The plugin therefore updates its own checkout at every
+session start, whether or not SE is on: a clean `main` is pulled from
+`origin/main` (a shallow clone too), `se` is rebuilt if anything changed, and
+the plugin reloads once `session.start` has answered. A checkout that is not a
+clean `main`, such as a person's working clone, is left as it is, and a failed
+pull or build never holds the session up; either is said in one line.
 
 ## Check
 
