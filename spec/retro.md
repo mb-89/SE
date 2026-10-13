@@ -1,5 +1,7 @@
 # Retro: do SE's rules hold across what landed?
 
+Reader: whoever changes how a retro runs, and the box judging one.
+
 A retro is not a review of single issues. It checks whether SE's rules held
 across everything that landed since the last retro, scores whether the last
 retro's fixes worked, and turns what it finds into fixes for the machinery. In
@@ -60,6 +62,9 @@ What earlier versions taught, and how this design answers it:
     classes recur?
 - **The judgment half (the box):**
   - read the draft;
+  - look for what became inconsistent in the window, a hand-written element
+    that now restates what another owns, and prose that serves no reader its
+    file names (principles 17 to 19); each is a finding like any other;
   - group findings into classes, where three of a kind is a property of the
     machinery;
   - pick each class's cheapest durable fix;
@@ -129,9 +134,13 @@ What earlier versions taught, and how this design answers it:
 
 ## The commands
 
-    se retro new (--field TEXT | --no-field | --unattended) [--json] [--repo OWNER/NAME]
-    se retro collect N [--out FILE] [--json] [--repo OWNER/NAME]
-    se retro report N [--draft FILE] [--json] [--repo OWNER/NAME]
+<!-- se:manifest usage retro -->
+```
+se retro collect N [--out FILE] [--json] [--repo OWNER/NAME]
+se retro new (--field TEXT | --no-field | --unattended) [--json] [--repo OWNER/NAME]
+se retro report N [--draft FILE] [--json] [--repo OWNER/NAME]
+```
+<!-- /se:manifest -->
 
 `new` is offered in a session as `/se retro new`; all three are, as
 `/se retro <word>`. They read and write GitHub through `gh api`, as the issue

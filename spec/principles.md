@@ -55,9 +55,10 @@ principle is one sentence and one paragraph, and names what checks it.
 
 9. **Performance is measured, and a person never waits blind.**
    The battery, every test, each `se` command and each plugin hook record
-   their duration, and soft budgets in one file (#50) report what grows. One
-   hard rule: anything a person waits on gives feedback
-   within 1 second and never blocks.
+   their duration, and soft budgets in one file
+   ([spec/budgets.yaml](budgets.yaml)) report what grows (#50). One hard
+   rule: anything a person waits on gives feedback within 1 second and never
+   blocks.
    Checked by: the battery and the bridgehead; retro, mechanically (trend).
 
 10. **Lint and style checks are part of the battery.**
