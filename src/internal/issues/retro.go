@@ -36,7 +36,13 @@ type past struct {
 // lastRetro is the closed retro that closed last, apart from n; ok is false
 // where none has closed.
 func (s Source) lastRetro(n int) (last past, ok bool, all []past, err error) {
-	list, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100", s.Repo, RetroLabel), true)
+	return s.lastClosed(RetroLabel, n)
+}
+
+// lastClosed is the closed issue labelled label that closed last, apart from
+// n, and all of them, oldest first; ok is false where none has closed.
+func (s Source) lastClosed(label string, n int) (last past, ok bool, all []past, err error) {
+	list, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100", s.Repo, label), true)
 	if err != nil {
 		return past{}, false, nil, err
 	}

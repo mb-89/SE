@@ -46,7 +46,7 @@ func init() {
 		Usage:   "issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "name the next se issue, stuck work first; --take claims it",
-		Details: "name the next ready se issue at the top, stuck work before new work, or say that none is ready. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended retro where 10 se issues have closed since the last retro closed and none is open (the plain form reports the count); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the 3-hour lease is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.",
+		Details: "name the next ready se issue at the top, stuck work before new work, or say that none is ready. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where 5 retros have closed since the last overhaul closed and none is open, else an unattended retro where 10 se issues have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the 3-hour lease is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.",
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -103,25 +103,29 @@ func init() {
 				if err != nil {
 					return Reply{}, err
 				}
-				cad, err := s.Cadence()
-				if err != nil {
-					return Reply{}, err
+				var cads []issues.Cadence
+				for _, read := range []func() (issues.Cadence, error){s.Cadence, s.OverhaulCadence} {
+					cad, err := read()
+					if err != nil {
+						return Reply{}, err
+					}
+					cads = append(cads, cad)
 				}
-				r, err := issueReply(*asJSON, next, ok, "", "", &cad)
+				r, err := issueReply(*asJSON, next, ok, "", "", cads...)
 				return sweptReply(r, err, *asJSON, flagged)
 			}
-			// A retro the cadence has made due comes before all other work.
+			// An overhaul, then a retro, the cadence has made due comes
+			// before all other work.
 			var took issues.Issue
 			var ok bool
-			var cad *issues.Cadence
+			var started []issues.Cadence
 			if take.n == 0 {
 				var due issues.Cadence
-				took, ok, due, err = s.TakeRetro(c.Workspace)
-				if err != nil {
+				if took, ok, due, err = s.TakeDue(c.Workspace); err != nil {
 					return Reply{}, err
 				}
 				if ok {
-					cad = &due
+					started = append(started, due)
 				}
 			}
 			if !ok {
@@ -133,7 +137,7 @@ func init() {
 			if ok {
 				fanout = fire()
 			}
-			r, err := issueReply(*asJSON, took, ok, issues.Branch(took.Number), fanout, cad)
+			r, err := issueReply(*asJSON, took, ok, issues.Branch(took.Number), fanout, started...)
 			return sweptReply(r, err, *asJSON, flagged)
 		},
 	})
@@ -540,17 +544,26 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 }
 
 // issueReply shows the issue, or that there was none; branch names the branch
-// a take checked out, fanout what its fan-out did, and cad, where it is not
-// nil, where the retro cadence stands.
-func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string, cad *issues.Cadence) (Reply, error) {
+// a take checked out, fanout what its fan-out did, and cads where the retro
+// and overhaul cadences stand. A take passes the one cadence that started its
+// issue, if any.
+func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string, cads ...issues.Cadence) (Reply, error) {
 	if asJSON {
 		answer := struct {
-			Ready  bool            `json:"ready"`
-			Issue  *issues.Issue   `json:"issue,omitempty"`
-			Branch string          `json:"branch,omitempty"`
-			Fanout string          `json:"fanout,omitempty"`
-			Retros *issues.Cadence `json:"retros,omitempty"`
-		}{Ready: ok, Fanout: fanout, Retros: cad}
+			Ready     bool            `json:"ready"`
+			Issue     *issues.Issue   `json:"issue,omitempty"`
+			Branch    string          `json:"branch,omitempty"`
+			Fanout    string          `json:"fanout,omitempty"`
+			Retros    *issues.Cadence `json:"retros,omitempty"`
+			Overhauls *issues.Cadence `json:"overhauls,omitempty"`
+		}{Ready: ok, Fanout: fanout}
+		for k := range cads {
+			if cads[k].Kind == "overhaul" {
+				answer.Overhauls = &cads[k]
+			} else {
+				answer.Retros = &cads[k]
+			}
+		}
 		if ok {
 			answer.Issue, answer.Branch = &i, branch
 		}
@@ -558,8 +571,8 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string, cad
 		return Reply{Text: string(data)}, err
 	}
 	tail := ""
-	if cad != nil {
-		tail = "\n\n" + cad.Line()
+	for _, cad := range cads {
+		tail += "\n\n" + cad.Line()
 	}
 	if !ok {
 		return Reply{Text: "No se issue is ready." + tail}, nil
@@ -576,9 +589,10 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string, cad
 			head += "\n" + t.URL
 		}
 		head += fmt.Sprintf("\nMerge origin/main into %s (never rebase, never force-push), continue the branch and its PR, make it green, and land it again with se issue land.", branch)
-	case branch != "" && cad != nil:
-		head = fmt.Sprintf("Started the unattended retro #%d %s, as %d se issues closed since the last one (the cadence is %d), and took it, on branch %s.\n%s",
-			i.Number, i.Title, cad.Closed, issues.RetroCadence, branch, i.URL)
+	case branch != "" && len(cads) > 0:
+		cad := cads[0]
+		head = fmt.Sprintf("Started the unattended %s #%d %s, as %d %s closed since the last one (the cadence is %d), and took it, on branch %s.\n%s",
+			cad.Kind, i.Number, i.Title, cad.Closed, cad.Counts(), cad.Every, branch, i.URL)
 		tail = ""
 	case branch != "":
 		head = fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
@@ -590,6 +604,9 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string, cad
 	}
 	if i.Retro {
 		head += fmt.Sprintf("\n\n#%d is a retro (%s): follow the retro skill, src/plugin/skills/retro/SKILL.md, from se retro collect %d", i.Number, issues.RetroLabel, i.Number)
+	}
+	if i.Overhaul {
+		head += fmt.Sprintf("\n\n#%d is an overhaul (%s): follow the overhaul skill, src/plugin/skills/overhaul/SKILL.md, from se overhaul read %d", i.Number, issues.OverhaulLabel, i.Number)
 	}
 	if i.Parent {
 		head += fmt.Sprintf("\n\n#%d is a parent: it holds no work. Coordinate its tree: se issue next --in %d --take", i.Number, i.Number)

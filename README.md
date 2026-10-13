@@ -31,6 +31,7 @@ does:
 | `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree, with its report (`--report`): `pass` closes it, `fail` leaves it open; every finding becomes an `se-final` issue, a blocking one under it |
 | `/se review brief` | prints what a reviewer of a gate starts from: its question, its tree's texts, the pinned commit, its CI and `spec/principles.md`; the workers' accounts only with `--claims` |
 | `/se retro new` | starts a retro over everything closed since the last one: `--field TEXT` carries the person's field feedback, `--no-field` none, `--unattended` never asks; `/se retro collect` and `/se retro report` are its box's |
+| `/se overhaul new` | starts an overhaul, which asks whether the design is still right: every principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last five runs; `--unattended` never stops for you; `/se overhaul read` and `/se overhaul file` are its box's |
 | `/se fleet check` | lists what is broken in the fleet (a stalled root, a conflicted, red or unmerged PR, a stale or leftover claim, an impossible block, an issue waiting on a person), each with its remedy; says `healthy` when nothing is |
 | `/se fleet fix` | applies every remedy `fleet check` names that needs no checkout, records it on its issue, and names the takeovers left to the box |
 | `/se fleet prune` | lists the stray branches: an `issue-<n>` branch whose issue is closed, a `claude/*` branch more than an hour old, each with no open PR; `--apply` deletes them, as the prune workflow does every hour |
@@ -101,7 +102,10 @@ is broken, and the box fixes what has a known remedy; the rules are
 [spec/coordination.md](spec/coordination.md). A retro (`se retro new`) checks whether
 the rules held across everything closed since the last one, scores the last
 retro's fixes and turns what it finds into issues, a person's where they are
-controversial; the rules are [spec/retro.md](spec/retro.md). Fan-out needs a
+controversial; the rules are [spec/retro.md](spec/retro.md). Every five
+retros, an overhaul (`se overhaul new`) asks the bigger question, whether the
+design is still right, against the principles and the outside world; the rules
+are [spec/overhaul.md](spec/overhaul.md). Fan-out needs a
 one-time setup by the owner: an API trigger on the routine, with its fire URL
 in `SE_ROUTINE_FIRE_URL` and its token in `SE_ROUTINE_FIRE_TOKEN` in the cloud
 environment; without them `se` says fan-out is off and claims as before. The

@@ -44,7 +44,7 @@ func TestRetroNewCreatesTheRetroAndFires(t *testing.T) {
 }
 
 func TestTakingARetroHandsItToTheRetroSkill(t *testing.T) {
-	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE retro", Retro: true}, true, "issue-30", "", nil)
+	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE retro", Retro: true}, true, "issue-30", "")
 	if err != nil || !strings.Contains(r.Text, "#30 is a retro (se-retro): follow the retro skill, src/plugin/skills/retro/SKILL.md, from se retro collect 30") {
 		t.Fatalf("%q %v", r.Text, err)
 	}
