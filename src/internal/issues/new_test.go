@@ -74,7 +74,7 @@ func TestCreateNamesTheIssueWhoseLinkFailed(t *testing.T) {
 		"repos/o/r/issues/8": `{"id":808,"number":8}`,
 		"repos/o/r/issues":   `{"number":11,"title":"t","html_url":"u11"}`,
 	})
-	made, _, err := Source{Repo: repo, GH: gh}.Create("t", "b", 0, []int{8}, false)
+	made, _, err := Source{Repo: repo, GH: gh}.Create("t", "b", 0, []int{8})
 	if made.Number != 11 || err == nil || !strings.Contains(err.Error(), "created #11 (u11), but linking #11 as blocked by #8") {
 		t.Fatalf("%+v %v", made, err)
 	}
@@ -86,7 +86,7 @@ func TestCreateMakesASubIssueOfItsParent(t *testing.T) {
 		"repos/o/r/issues":              `{"id":1100,"number":11,"title":"t","html_url":"u11"}`,
 		"repos/o/r/issues/1/sub_issues": `{}`,
 	})
-	if _, _, err := (Source{Repo: repo, GH: gh}).Create("t", "b", 1, nil, false); err != nil {
+	if _, _, err := (Source{Repo: repo, GH: gh}).Create("t", "b", 1, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{
@@ -99,7 +99,7 @@ func TestCreateMakesASubIssueOfItsParent(t *testing.T) {
 	}
 	// A parent that does not exist creates nothing.
 	*calls = nil
-	if _, _, err := (Source{Repo: repo, GH: gh}).Create("t", "b", 9, nil, false); err == nil || !strings.Contains(err.Error(), "#9 does not exist") {
+	if _, _, err := (Source{Repo: repo, GH: gh}).Create("t", "b", 9, nil); err == nil || !strings.Contains(err.Error(), "#9 does not exist") {
 		t.Fatalf("%v", err)
 	}
 	for _, c := range *calls {

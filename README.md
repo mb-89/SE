@@ -26,11 +26,13 @@ does:
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
 | `/se issue next` | names the next `se` issue, stuck work before new work, or says that none is ready; `--take` claims it, or takes a stuck one over; `--in ROOT` names the ready leaves inside a parent's tree; `--person` lists the issues waiting on a person |
 | `/se issue land` | on an `issue-<n>` branch, with `--answers FILE` answering every question in [spec/landing.yaml](spec/landing.yaml): passes the check, pushes, posts the answers on the issue, opens its PR against main (`Fixes #<n>`) and turns on auto-merge (squash) |
-| `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent`; `--review` labels it `se-review` |
+| `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent`; `--review` labels it `se-review`, `--final` labels it `se-final` |
 | `/se issue resume` | for a person: takes an issue off `se-person` and puts it back in the queue |
-| `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree: `pass` closes it, `fail` creates fix leaves under it |
+| `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree, with its report (`--report`): `pass` closes it, `fail` leaves it open; every finding becomes an `se-final` issue, a blocking one under it |
+| `/se review brief` | prints what a reviewer of a gate starts from: its question, its tree's texts, the pinned commit, its CI and `spec/principles.md`; the workers' accounts only with `--claims` |
 | `/se fleet check` | lists what is broken in the fleet (a stalled root, a conflicted, red or unmerged PR, a stale or leftover claim, an impossible block, an issue waiting on a person), each with its remedy; says `healthy` when nothing is |
 | `/se fleet fix` | applies every remedy `fleet check` names that needs no checkout, records it on its issue, and names the takeovers left to the box |
+| `/se fleet prune` | lists the stray branches: an `issue-<n>` branch whose issue is closed, a `claude/*` branch more than an hour old, each with no open PR; `--apply` deletes them, as the prune workflow does every hour |
 | `/se ui` | opens SE's control panel, a pane of buttons that draws on every surface, the phone included: the on/off toggle top left, then a button for each command that takes no typed words (`status`, `restart`, `update`, `issue next`); a press runs what typing `/se <name>` runs |
 | `/se help`, `/se` | lists these, one short line each, under their groups |
 | `/se help <command>` | shows that command's usage and every flag it takes; `<command> --help` does too |
@@ -76,9 +78,11 @@ one a box may take, and `se issue next --take` claims it by pushing its branch
 `--blocked-by` writes GitHub's native "blocked by" links. Issues nest: leaves
 are work, parents coordinate their sub-issues and close by themselves, except
 an `se-review` parent, which `se issue review` passes or fails by an agent that
-worked none of its tree. A claim nothing was pushed to for 3 hours is stuck:
-the next box takes it over once, and a second time it goes to a person
-(`se issue next --person`, `se issue resume`). The
+worked none of its tree, by the rules of [spec/review.md](spec/review.md)
+(the skill `se:review`). A claim nothing was pushed to for 3 hours is stuck:
+the next box takes it over once, which labels it `se-final`, and a final issue
+that fails again goes to a person (`se issue next --person`,
+`se issue resume`). The
 rules for which
 issue is ready, how a claim works, and how issues are made live in
 [spec/issues.md](spec/issues.md). `se issue land` brings the claimed issue's

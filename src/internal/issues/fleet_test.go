@@ -55,6 +55,7 @@ func newWorld(t *testing.T, items []string, claimed ...int) *world {
 	w := &world{t: t, comments: map[int][]comment{}, made: 100, answers: map[string]string{
 		listPath:      "[" + strings.Join(items, ",") + "]",
 		openPullsPath: `[]`,
+		allPullsPath:  `[]`,
 	}}
 	var refs []string
 	for _, n := range claimed {
@@ -256,19 +257,39 @@ func TestAClaimWithNoPRIsFoundOnceItIsQuiet(t *testing.T) {
 
 func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	w := newWorld(t, []string{item(5, 0)}, 19)
-	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned"}`
+	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-13T11:00:00Z"}`
 	f := only(t, w.check(), LeftoverClaim, 19)
-	if f.What != "issue-19 claims #19, which is closed (not planned)" || f.Remedy != "se fleet fix reports it as an se issue" {
+	if f.What != "issue-19 claims #19, which is closed (not planned)" ||
+		f.Remedy != "the prune workflow deletes issue-19; se fleet fix reports it only if it is still there a day after #19 closed" {
+		t.Fatalf("%+v", f)
+	}
+	// Within a day of the close, se fleet fix leaves it to the prune
+	// workflow and writes nothing.
+	s := Source{Repo: repo, GH: w.gh, Now: clock}
+	done, err := s.Fix([]Finding{f})
+	if err != nil || done[0].Did != "left to the prune workflow until a day after #19 closed" || len(w.writes) != 0 {
+		t.Fatalf("%+v %v, writes %q", done, err, w.writes)
+	}
+	// A day later the workflow failed: it becomes an se issue.
+	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-12T11:00:00Z"}`
+	done, err = s.Fix(w.check())
+	if err != nil || done[0].Did != "reported it as #101" || !done[0].Ready ||
+		done[0].What != "issue-19 claims #19, which is closed (not planned), and is still there a day after it closed: the prune workflow did not delete it" {
+		t.Fatalf("%+v %v", done, err)
+	}
+	// With an open PR, the workflow leaves it, so se fleet fix reports it.
+	w.answers[allPullsPath] = `[{"number":90,"head":{"ref":"issue-19","sha":"c19"}}]`
+	if f := only(t, w.check(), LeftoverClaim, 19); f.Remedy != "se fleet fix reports it as an se issue" {
 		t.Fatalf("%+v", f)
 	}
 }
 
 func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 	w := newWorld(t, []string{item(5, 0)}, 19)
-	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned"}`
+	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"open"}`
 	w.ahead(19, 0)
 	f := only(t, w.check(), LeftoverClaim, 19)
-	if f.What != "issue-19 claims #19, which is closed (not planned), and main holds all its commits" || f.Remedy != "se fleet fix deletes issue-19: main holds all its commits" {
+	if f.What != "issue-19 claims #19, which is not labelled se, and main holds all its commits" || f.Remedy != "se fleet fix deletes issue-19: main holds all its commits" {
 		t.Fatalf("%+v", f)
 	}
 	done, err := Source{Repo: repo, GH: w.gh, Now: clock}.Fix([]Finding{f})
@@ -322,7 +343,7 @@ func TestAnIssueWaitingOnAPersonIsReportedWithWhatItHoldsUp(t *testing.T) {
 // head, is hours old. #38 waits on #17, #39 on #38, the parent #51 on #38,
 // and so does its sub-issue #52. Nothing is ready, and every box left.
 func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing.T) {
-	w := newWorld(t, []string{item(17, 0), item(38, 0), item(39, 0), item(51, 1), item(52, 0)}, 17)
+	w := newWorld(t, []string{item(17, 0, FinalLabel), item(38, 0), item(39, 0), item(51, 1), item(52, 0)}, 17)
 	w.answers[subsPath(51)] = `[` + item(52, 0) + `]`
 	w.answers[links(38)] = "[" + dep(17, "open", "", true) + "]"
 	w.answers[links(39)] = "[" + dep(38, "open", "", true) + "]"
@@ -337,8 +358,8 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 		f.Remedy != "se issue next --take 17, merge origin/main into issue-17, make it green, se issue land" {
 		t.Fatalf("%+v", f)
 	}
-	// Its remedy, run: the takeover was made once already, so #17 goes to a
-	// person.
+	// Its remedy, run: the takeover was made once already, so #17 is
+	// se-final and goes to a person.
 	_, _, err := Source{Repo: repo, GH: w.gh, Now: clock}.Take(t.TempDir(), 17)
 	if err == nil || !strings.Contains(err.Error(), "went to a person") {
 		t.Fatalf("%v", err)
@@ -364,6 +385,10 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	if c := w.comments[7]; len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:takeover 1 -->") || !strings.Contains(c[0].Body, "<!-- se:takeover-head c7 -->") {
 		t.Fatalf("%+v", c)
 	}
+	// The takeover makes #7 final: stuck again, it goes to a person.
+	if !wrote(w, "labels[]=se-final repos/o/r/issues/7/labels") {
+		t.Fatalf("writes %q", w.writes)
+	}
 	// Moving work is no takeover.
 	w.pushed(7, recent)
 	w.comments[7] = nil
@@ -385,7 +410,7 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 	w := newWorld(t, []string{item(5, 0), item(7, 0), item(8, 0), item(9, 0)}, 7, 19)
 	w.pr(7, "true", "clean", false, "check:success")
 	w.pushed(7, recent)
-	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned"}`
+	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-11T12:00:00Z"}`
 	w.answers[links(8)] = "[" + dep(3, "closed", "not_planned", true) + "]"
 	w.answers[links(9)] = "[" + dep(4, "open", "", false) + "]"
 	s := Source{Repo: repo, GH: w.gh, Now: clock}
