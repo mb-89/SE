@@ -4,6 +4,8 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -29,6 +31,20 @@ func reviewGH(t *testing.T, answers map[string]string) (GH, *[][]string) {
 		t.Fatalf("gh %v was not recorded", args)
 		return nil, nil
 	}, &wrote
+}
+
+// passing is a report a pass may post: every requirement has its evidence.
+var passing = Report{
+	Commit:       "c0ffee",
+	Requirements: []Requirement{{Item: "it holds", Evidence: "go test ./... ok"}},
+	Clean:        []string{"the tests: none weakened"},
+}
+
+// failing is passing with one blocking finding.
+func failing(title string) Report {
+	r := passing
+	r.Findings = []ReviewFinding{{Title: title, Evidence: "x.go:3", Blocking: true, Why: "it breaks"}}
+	return r
 }
 
 func commentsPath(n int) string { return fmt.Sprintf("repos/o/r/issues/%d/comments?per_page=100", n) }
@@ -80,7 +96,7 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 	if tr, err := s.In(1); err != nil || !reflect.DeepEqual(numbers(tr.Ready), []int{2}) || len(tr.Review) != 0 {
 		t.Fatalf("%+v %v", tr, err)
 	}
-	if _, err := s.Review(1, reviewer, true, "fine", nil); err == nil || !strings.Contains(err.Error(), "not ready for review") {
+	if _, err := s.Review(1, reviewer, true, passing); err == nil || !strings.Contains(err.Error(), "not ready for review") {
 		t.Fatalf("%v", err)
 	}
 
@@ -97,7 +113,7 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 	}
 
 	// The leaf's worker may not review it.
-	if _, err := s.Review(1, worker, true, "fine", nil); err == nil || !strings.Contains(err.Error(), "session box in /b/issue-2 worked #2 in #1's tree") {
+	if _, err := s.Review(1, worker, true, passing); err == nil || !strings.Contains(err.Error(), "session box in /b/issue-2 worked #2 in #1's tree") {
 		t.Fatalf("%v", err)
 	}
 	if len(*wrote) != 0 {
@@ -109,17 +125,21 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 	answers["repos/o/r/issues"] = `{"id":1003,"number":3,"title":"fix it","html_url":"u3"}`
 	answers["repos/o/r/issues/1/sub_issues"] = `{}`
 	answers["repos/o/r/issues/1/comments"] = `{}`
-	r, err := s.Review(1, reviewer, false, "it breaks", []string{"fix it"})
+	r, err := s.Review(1, reviewer, false, failing("fix it"))
 	if err != nil || r.Passed || !reflect.DeepEqual(numbers(r.Fixes), []int{3}) {
 		t.Fatalf("%+v %v", r, err)
 	}
-	want := [][]string{
-		{"api", "-X", "POST", "-f", "title=fix it", "-f", "body=A fix the review of #1 asks for. Its findings:\n\nit breaks", "-f", "labels[]=se", "repos/o/r/issues"},
-		{"api", "-X", "POST", "-F", "sub_issue_id=1003", "repos/o/r/issues/1/sub_issues"},
-		{"api", "-X", "POST", "-f", "body=Review failed, by session box in /b/review-1-1.\n\nit breaks\n\nFixes:\n- #3 fix it", "repos/o/r/issues/1/comments"},
-	}
-	if !reflect.DeepEqual(*wrote, want) {
-		t.Fatalf("%q\nwant %q", *wrote, want)
+	// The blocking finding is an se-final sub-issue of #1; the report goes on #1.
+	if w := *wrote; len(w) != 3 ||
+		!reflect.DeepEqual(w[0][:4], []string{"api", "-X", "POST", "-f"}) || w[0][4] != "title=fix it" ||
+		!strings.HasPrefix(w[0][6], "body=Blocking: the review of #1 waits for it") ||
+		!reflect.DeepEqual(w[0][7:], []string{"-f", "labels[]=se", "-f", "labels[]=se-final", "repos/o/r/issues"}) ||
+		!reflect.DeepEqual(w[1], []string{"api", "-X", "POST", "-F", "sub_issue_id=1003", "repos/o/r/issues/1/sub_issues"}) ||
+		w[2][5] != "repos/o/r/issues/1/comments" ||
+		!strings.HasPrefix(w[2][4], "body=## Review: FAIL\n\nBy session box in /b/review-1-1, at c0ffee.") ||
+		!strings.Contains(w[2][4], "- **fix it** (blocking, #3)") ||
+		!strings.Contains(w[2][4], `<!-- se:review {"passed":false,"rereview":false,`) {
+		t.Fatalf("%q", w)
 	}
 	*wrote = nil
 
@@ -137,21 +157,18 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 	if tr, err := s.In(1); err != nil || !reflect.DeepEqual(numbers(tr.Review), []int{1}) || !strings.HasSuffix(tr.ReviewWorktree("/b/SE", 1), "/b/review-1-2 origin/main") {
 		t.Fatalf("%+v %v", tr, err)
 	}
-	if _, err := s.Review(1, fixer, true, "fine", nil); err == nil || !strings.Contains(err.Error(), "worked #3") {
+	if _, err := s.Review(1, fixer, true, passing); err == nil || !strings.Contains(err.Error(), "worked #3") {
 		t.Fatalf("%v", err)
 	}
 
 	// A pass by a different agent closes it.
-	r, err = s.Review(1, reviewer, true, "it holds", nil)
+	r, err = s.Review(1, reviewer, true, passing)
 	if err != nil || !r.Passed || len(r.Fixes) != 0 {
 		t.Fatalf("%+v %v", r, err)
 	}
-	want = [][]string{
-		{"api", "-X", "POST", "-f", "body=Review passed, by session box in /b/review-1-1.\n\nit holds", "repos/o/r/issues/1/comments"},
-		{"api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", "repos/o/r/issues/1"},
-	}
-	if !reflect.DeepEqual(*wrote, want) {
-		t.Fatalf("%q\nwant %q", *wrote, want)
+	if w := *wrote; len(w) != 2 || w[0][5] != "repos/o/r/issues/1/comments" || !strings.HasPrefix(w[0][4], "body=## Review: PASS\n") ||
+		!reflect.DeepEqual(w[1], []string{"api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", "repos/o/r/issues/1"}) {
+		t.Fatalf("%q", w)
 	}
 }
 
@@ -179,7 +196,7 @@ func TestAPassClosesTheParentItCompletes(t *testing.T) {
 		}
 		return closing(args...)
 	}
-	if _, err := s.Review(2, Worker{Session: "b", Workspace: "/w"}, true, "ok", nil); err != nil {
+	if _, err := s.Review(2, Worker{Session: "b", Workspace: "/w"}, true, passing); err != nil {
 		t.Fatal(err)
 	}
 	last := (*wrote)[len(*wrote)-1]
@@ -203,24 +220,19 @@ func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
 	s := Source{Repo: repo, GH: gh}
 	r := Worker{Session: "r", Workspace: "/r"}
 	for _, c := range []struct {
-		n     int
-		who   Worker
-		pass  bool
-		why   string
-		fixes []string
-		want  string
+		n    int
+		who  Worker
+		pass bool
+		rep  Report
+		want string
 	}{
-		{1, r, true, "", nil, "needs --why"},
-		{1, r, true, "ok", []string{"x"}, "a pass takes no --fix"},
-		{1, r, false, "bad", nil, "a fail needs a --fix"},
-		{1, r, false, "bad", []string{" "}, "a --fix needs a title"},
-		{1, Worker{Workspace: "/r"}, true, "ok", nil, SessionVar + " is not set"},
-		{9, r, true, "ok", nil, "#9 is not an open issue labelled se"},
-		{7, r, true, "ok", nil, "#7 is not labelled se-review"},
-		{1, r, true, "ok", nil, "#3 in #1's tree records no worker"},
-		{1, Worker{Session: "w", Workspace: "/w/"}, true, "ok", nil, "worked #4 in #1's tree"},
+		{1, Worker{Workspace: "/r"}, true, passing, SessionVar + " is not set"},
+		{9, r, true, passing, "#9 is not an open issue labelled se"},
+		{7, r, true, passing, "#7 is not labelled se-review"},
+		{1, r, true, passing, "#3 in #1's tree records no worker"},
+		{1, Worker{Session: "w", Workspace: "/w/"}, true, passing, "worked #4 in #1's tree"},
 	} {
-		if _, err := s.Review(c.n, c.who, c.pass, c.why, c.fixes); err == nil || !strings.Contains(err.Error(), c.want) {
+		if _, err := s.Review(c.n, c.who, c.pass, c.rep); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%+v: %v", c, err)
 		}
 	}
@@ -231,7 +243,27 @@ func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
 	answers[commentsPath(3)] = workedBy(Worker{Session: "w", Workspace: "/w3"})
 	answers["repos/o/r/issues/1/comments"] = `{}`
 	answers["repos/o/r/issues/1"] = `{}`
-	if _, err := s.Review(1, Worker{Session: "other", Workspace: "/w"}, true, "ok", nil); err != nil {
+	if _, err := s.Review(1, Worker{Session: "other", Workspace: "/w"}, true, passing); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTheReviewerModelIsOneLineOfSpecModels(t *testing.T) {
+	dir := t.TempDir()
+	if got := ReviewerModel(dir); got != "" {
+		t.Fatalf("without the file: %q", got)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "spec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ModelsPath), []byte("# models\nbox: opus\nreviewer: \"fable\" # stronger\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReviewerModel(dir); got != "fable" {
+		t.Fatalf("%q", got)
+	}
+	// The repository's own setting is never empty.
+	if got := ReviewerModel("../../.."); got == "" {
+		t.Fatal("spec/models.yaml sets no reviewer")
 	}
 }

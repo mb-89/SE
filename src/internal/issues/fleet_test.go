@@ -370,7 +370,7 @@ func TestAnIssueWaitingOnAPersonIsReportedWithWhatItHoldsUp(t *testing.T) {
 // head, is hours old. #38 waits on #17, #39 on #38, the parent #51 on #38,
 // and so does its sub-issue #52. Nothing is ready, and every box left.
 func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing.T) {
-	w := newWorld(t, []string{item(17, 0), item(38, 0), item(39, 0), item(51, 1), item(52, 0)}, 17)
+	w := newWorld(t, []string{item(17, 0, FinalLabel), item(38, 0), item(39, 0), item(51, 1), item(52, 0)}, 17)
 	w.answers[subsPath(51)] = `[` + item(52, 0) + `]`
 	w.answers[links(38)] = "[" + dep(17, "open", "", true) + "]"
 	w.answers[links(39)] = "[" + dep(38, "open", "", true) + "]"
@@ -385,8 +385,8 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 		f.Remedy != "se issue next --take 17, merge origin/main into issue-17, make it green, se issue land" {
 		t.Fatalf("%+v", f)
 	}
-	// Its remedy, run: the takeover was made once already, so #17 goes to a
-	// person.
+	// Its remedy, run: the takeover was made once already, so #17 is
+	// se-final and goes to a person.
 	_, _, err := Source{Repo: repo, GH: w.gh, Now: clock}.Take(t.TempDir(), 17)
 	if err == nil || !strings.Contains(err.Error(), "went to a person") {
 		t.Fatalf("%v", err)
@@ -411,6 +411,10 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	}
 	if c := w.comments[7]; len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:takeover 1 -->") || !strings.Contains(c[0].Body, "<!-- se:takeover-head c7 -->") {
 		t.Fatalf("%+v", c)
+	}
+	// The takeover makes #7 final: stuck again, it goes to a person.
+	if !wrote(w, "labels[]=se-final repos/o/r/issues/7/labels") {
+		t.Fatalf("writes %q", w.writes)
 	}
 	// Moving work is no takeover.
 	w.pushed(7, recent)
