@@ -4,6 +4,8 @@ SE is a Claude plugin with a Go program behind it. The plugin is the
 bridgehead: while SE is on, it posts every event of the session to `se`, the
 workspace's daemon, before the event goes on. `se` decides what happens to it;
 today it appends the event to the session's log under `.se/.runtime/logs/`.
+The principles its design is measured against are in
+[spec/principles.md](spec/principles.md).
 
 ## Install
 
