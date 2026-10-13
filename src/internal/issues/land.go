@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/mb-89/SE/src/internal/battery"
 )
 
 // Landing is where an issue's PR stands once se issue land is done.
@@ -46,7 +48,8 @@ func Issued(dir string) (int, error) {
 // answer every question in qs, and check must pass on a clean tree of an
 // issue with no open sub-issues; then the branch is pushed, the answers
 // posted on the issue, its PR against main opened (or, where it is open
-// already, found), and auto-merge turned on with squash. Run again after a
+// already, found) with the battery's profile in its body, and auto-merge
+// turned on with squash. Run again after a
 // fix, it pushes, updates the answers and reports the same PR. Where session
 // is set, the leaf records who worked it, so a review of its tree can refuse
 // that worker.
@@ -73,6 +76,14 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	if err := check(dir); err != nil {
 		return Landing{}, fmt.Errorf("the check failed, so nothing was pushed: %w", err)
 	}
+	body := fmt.Sprintf("Fixes #%d", n)
+	profile, profiled, err := battery.Load(dir)
+	if err != nil {
+		return Landing{}, err
+	}
+	if profiled {
+		body += "\n\n" + profile.Markdown()
+	}
 	branch := Branch(n)
 	if _, err := git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
 		return Landing{}, err
@@ -92,10 +103,16 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	var pr pull
 	if len(open) > 0 {
 		pr = open[0]
+		// The body shows the profile of the battery this land ran.
+		if profiled {
+			if _, err := s.GH("api", "-X", "PATCH", "-f", "body="+body, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, pr.Number)); err != nil {
+				return Landing{}, err
+			}
+		}
 	} else {
 		path := fmt.Sprintf("repos/%s/pulls", s.Repo)
 		out, err := s.GH("api", "-X", "POST", "-f", "title="+got[0].Title, "-f", "head="+branch, "-f", "base=main",
-			"-f", fmt.Sprintf("body=Fixes #%d", n), path)
+			"-f", "body="+body, path)
 		if err != nil {
 			return Landing{}, err
 		}
