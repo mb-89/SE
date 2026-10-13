@@ -2,9 +2,9 @@
 
 SE's work items are GitHub issues. These rules say which issue a box may work
 on next, how it claims it, and how issues and their dependencies are created.
-They live here and nowhere else; `se issue next` and `se issue new` (in
-`internal/issues`) are their one implementation, so the choice is deterministic
-and no prompt restates it.
+They live here and nowhere else; `se issue next`, `se issue new` and
+`se issue land` (in `internal/issues`) are their one implementation, so the
+choice is deterministic and no prompt restates it.
 
 ## The rules
 
@@ -29,6 +29,7 @@ and no prompt restates it.
 ## The commands
 
     se issue next [--take [N]] [--json] [--repo OWNER/NAME]
+    se issue land [--json] [--repo OWNER/NAME]
     se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--json] [--repo OWNER/NAME]
 
 `se issue next` prints the next ready issue (number, title, link and body), or
@@ -43,6 +44,15 @@ next ready issue. It prints what it took, or that nothing is ready. `--take N`
 refuses an issue that is not ready and says why. There is no separate `take`
 command.
 
+`se issue land` runs on the checked-out `issue-<n>` branch. It refuses a tree
+with uncommitted changes, runs `tests/check.sh` and goes on only if it passes,
+pushes the branch, opens one PR against main titled after the issue with the
+body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left
+to wait for is squash-merged at once. It prints the PR's number and link (with
+`--json`: `{"issue","number","url","created","merged"}`). Where the branch's PR
+is open already, it pushes and reports that PR, so running it again after a
+fix for red CI is safe. A session has it as `/se issue land`.
+
 `se issue new` creates an issue labelled `se` on the repository and links it as
 blocked by each issue `--blocked-by` names, then prints its number and link
 (with `--json`: `{"number","url","blocked_by"}`). `--blocked-by` is required: a
@@ -56,3 +66,21 @@ Both read and write GitHub through `gh api` (the links through
 `/repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by`), which owns the
 authentication, and work on the repository of the workspace's `origin` unless
 `--repo` names another.
+
+## The routine
+
+Boxes are cloud sessions that work unattended. Every box is started by the
+routine `SE work`, whose whole prompt is
+
+    run the work skill
+
+and the work skill is [.claude/skills/work/SKILL.md](../.claude/skills/work/SKILL.md).
+The routine has two triggers:
+
+- a GitHub trigger on `pull_request.closed` with is-merged = true and base
+  branch = main, so every merge into main starts a box, which may find the
+  issues that merge unblocked;
+- a schedule, every 4 hours.
+
+No agent ever starts another box. A box whose `se issue next --take` finds
+nothing ready leaves at once.

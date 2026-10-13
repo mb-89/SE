@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,6 +15,22 @@ import (
 
 // gh is how the issue commands reach GitHub; tests put recorded answers here.
 var gh issues.GH = issues.Gh
+
+// check is what issue land runs before it pushes: the repo's one definition of
+// green. It answers the check's output when it fails.
+var check = func(dir string) error {
+	cmd := exec.Command("sh", "./tests/check.sh")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+		if len(lines) > 40 {
+			lines = lines[len(lines)-40:]
+		}
+		return fmt.Errorf("sh ./tests/check.sh: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+	return nil
+}
 
 func init() {
 	register(Command{
@@ -123,6 +140,41 @@ func init() {
 				text += "\nBlocked by " + strings.Join(names, ", ") + "."
 			}
 			return Reply{Text: text}, nil
+		},
+	})
+	register(Command{
+		Name:    "issue land",
+		Usage:   "issue land [--json] [--repo OWNER/NAME]",
+		Summary: "on an issue-N branch: pass tests/check.sh, push, open its PR against main (Fixes #N), or find it open, and turn on auto-merge (squash)",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "issue land")
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			l, err := s.Land(c.Workspace, check)
+			if err != nil {
+				return Reply{}, err
+			}
+			if *asJSON {
+				data, err := json.Marshal(l)
+				return Reply{Text: string(data)}, err
+			}
+			did := "Pushed issue-%d; its PR #%d is open"
+			if l.Created {
+				did = "Pushed issue-%d and opened PR #%d"
+			}
+			text := fmt.Sprintf(did, l.Issue, l.Number)
+			if l.Merged {
+				text += "; nothing was left to wait for, so it is merged (squash)."
+			} else {
+				text += ", auto-merge (squash) on."
+			}
+			return Reply{Text: text + "\n" + l.URL}, nil
 		},
 	})
 }

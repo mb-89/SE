@@ -34,7 +34,7 @@ func TestEveryCommandSaysWhatItIs(t *testing.T) {
 
 func TestTheSessionIsOfferedItsCommandsAlone(t *testing.T) {
 	want := map[string]bool{
-		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue next": true, "issue new": true,
+		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue next": true, "issue new": true, "issue land": true,
 		"serve": false, "start": false, "stop": false,
 	}
 	for name, offered := range want {
