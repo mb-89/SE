@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
 // recordedIssues answers the issue commands' gh calls for o/r: #1 claimed,
@@ -188,21 +190,50 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	}
 	git(root, "init", "-q", "--bare", "-b", "main", origin)
 	git(root, "clone", "-q", origin, ws)
+	git(ws, "checkout", "-q", "-b", "main")
+	git(ws, "commit", "-q", "--allow-empty", "-m", "start")
+	git(ws, "push", "-q", "origin", "main")
 	git(ws, "checkout", "-q", "-b", "issue-6")
-	git(ws, "commit", "-q", "--allow-empty", "-m", "work")
+	spec, err := os.ReadFile(filepath.Join("..", "..", "..", issues.QuestionsFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, "spec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, issues.QuestionsFile), spec, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(ws, "add", "spec")
+	git(ws, "commit", "-q", "-m", "work")
+	// The answers stand outside the checkout, so its tree stays clean.
+	answers := filepath.Join(root, "answers.yaml")
+	if err := os.WriteFile(answers, []byte("done: one\ntimeline: two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	old, oldCheck, oldSession := gh, check, sessionID
 	t.Cleanup(func() { gh, check, sessionID = old, oldCheck, oldSession })
 	checked := ""
 	check = func(dir string) error { checked = dir; return nil }
 	sessionID = func() string { return "s1" }
-	recorded := ""
+	recorded, landed := "", ""
 	gh = func(args ...string) ([]byte, error) {
 		switch args[len(args)-1] {
 		case "repos/o/r/issues/6/comments?per_page=100":
-			return []byte(`[{"body":` + strconv.Quote(recorded) + `}]`), nil
+			return []byte(`[{"id":1,"body":` + strconv.Quote(recorded) + `},{"id":2,"body":` + strconv.Quote(landed) + `}]`), nil
 		case "repos/o/r/issues/6/comments":
-			recorded = strings.TrimPrefix(args[len(args)-2], "body=")
+			body := strings.TrimPrefix(args[len(args)-2], "body=")
+			if strings.HasPrefix(body, "<!-- se:landing -->") {
+				landed = body
+			} else {
+				recorded = body
+			}
 			return []byte(`{}`), nil
+		case "repos/o/r/issues/comments/2":
+			landed = strings.TrimPrefix(args[len(args)-2], "body=")
+			return []byte(`{}`), nil
+		case "repos/o/r/activity?ref=refs/heads/issue-6&activity_type=branch_creation&per_page=100":
+			return []byte(`[]`), nil
 		case "repos/o/r/issues?labels=se&state=open&per_page=100":
 			return []byte(`[]`), nil
 		case "repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100":
@@ -217,12 +248,34 @@ func TestIssueLandNamesThePR(t *testing.T) {
 		return nil, fmt.Errorf("not recorded: %v", args)
 	}
 	code, out, errs := se(t, "issue", "land", "--workspace", ws, "--repo", "o/r")
+	if code == 0 || !strings.Contains(errs, "takes --answers FILE") || checked != "" {
+		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
+	}
+	code, out, errs = se(t, "issue", "land", "--answers", answers, "--workspace", ws, "--repo", "o/r")
+	if code == 0 || !strings.Contains(errs, "missing: decided, well,") || checked != "" {
+		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
+	}
+	all := ""
+	qs, err := issues.Questions(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range qs {
+		all += q.Key + ": none\n"
+	}
+	if err := os.WriteFile(answers, []byte(all), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs = se(t, "issue", "land", "--answers", answers, "--workspace", ws, "--repo", "o/r")
 	if code != 0 || out != "Pushed issue-6 and opened PR #14, auto-merge (squash) on.\nu14\n" || checked != ws {
 		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
 	}
-	code, out, _ = se(t, "issue", "land", "--json", "--workspace", ws, "--repo", "o/r")
+	code, out, _ = se(t, "issue", "land", "--json", "--answers", answers, "--workspace", ws, "--repo", "o/r")
 	if code != 0 || out != `{"issue":6,"number":14,"url":"u14","created":true,"merged":false}`+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
+	}
+	if l, ok, err := issues.ParseLanding(landed); err != nil || !ok || len(l.Answers) != len(qs) || l.Answers["else"] != "none" {
+		t.Fatalf("landed %+v %v %v", l, ok, err)
 	}
 	// The leaf records its worker once, however often it lands.
 	if want := "Worked by session s1 in " + ws + "."; !strings.HasPrefix(recorded, want) || !strings.Contains(recorded, `<!-- se-worker {"session":"s1","workspace":`) {

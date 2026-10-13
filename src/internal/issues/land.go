@@ -42,15 +42,20 @@ func Issued(dir string) (int, error) {
 	return n, nil
 }
 
-// Land brings the issue branch checked out in dir to main: check must pass on
-// a clean tree of an issue with no open sub-issues, then the branch is pushed, its PR against main opened (or,
-// where it is open already, found), and auto-merge turned on with squash. Run
-// again after a fix, it pushes and reports the same PR. Where session is set,
-// the leaf records who worked it, so a review of its tree can refuse that
-// worker.
-func (s Source) Land(dir, session string, check func(dir string) error) (Landing, error) {
+// Land brings the issue branch checked out in dir to main: answers must
+// answer every question in qs, and check must pass on a clean tree of an
+// issue with no open sub-issues; then the branch is pushed, the answers
+// posted on the issue, its PR against main opened (or, where it is open
+// already, found), and auto-merge turned on with squash. Run again after a
+// fix, it pushes, updates the answers and reports the same PR. Where session
+// is set, the leaf records who worked it, so a review of its tree can refuse
+// that worker.
+func (s Source) Land(dir, session string, qs []Question, answers map[string]string, check func(dir string) error) (Landing, error) {
 	n, err := Issued(dir)
 	if err != nil {
+		return Landing{}, err
+	}
+	if err := answered(qs, answers); err != nil {
 		return Landing{}, err
 	}
 	if dirty, err := git(dir, "status", "--porcelain"); err != nil {
@@ -75,6 +80,9 @@ func (s Source) Land(dir, session string, check func(dir string) error) (Landing
 	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
 		return Landing{}, err
 	}
+	if err := s.postLanding(dir, n, qs, answers); err != nil {
+		return Landing{}, err
+	}
 	l := Landing{Issue: n}
 	owner, _, _ := strings.Cut(s.Repo, "/")
 	open, err := api[pull](s, fmt.Sprintf("repos/%s/pulls?head=%s:%s&base=main&state=open&per_page=100", s.Repo, owner, branch), true)
@@ -97,6 +105,13 @@ func (s Source) Land(dir, session string, check func(dir string) error) (Landing
 		l.Created = true
 	}
 	l.Number, l.URL = pr.Number, pr.URL
+	l.Merged, err = s.autoMerge(pr)
+	return l, err
+}
+
+// autoMerge turns on auto-merge, squashing, for the PR; merged is true where
+// nothing was left to wait for and it was merged at once instead.
+func (s Source) autoMerge(pr pull) (merged bool, err error) {
 	_, err = s.GH("api", "-f", "query="+autoMerge, "-f", "id="+pr.NodeID, "graphql")
 	if err != nil && strings.Contains(err.Error(), "GraphQL is not available") {
 		// A Claude Code cloud session reaches GitHub through a proxy that
@@ -107,13 +122,13 @@ func (s Source) Land(dir, session string, check func(dir string) error) (Landing
 		// A PR with nothing left to wait for takes no auto-merge; it is
 		// merged now, the way auto-merge would have.
 		if !strings.Contains(err.Error(), "clean status") {
-			return l, fmt.Errorf("PR #%d (%s) is open, but auto-merge is not on: %w", pr.Number, pr.URL, err)
+			return false, fmt.Errorf("PR #%d (%s) is open, but auto-merge is not on: %w", pr.Number, pr.URL, err)
 		}
 		path := fmt.Sprintf("repos/%s/pulls/%d/merge", s.Repo, pr.Number)
 		if _, err := s.GH("api", "-X", "PUT", "-f", "merge_method=squash", path); err != nil {
-			return l, fmt.Errorf("PR #%d (%s) is open, but merging it failed: %w", pr.Number, pr.URL, err)
+			return false, fmt.Errorf("PR #%d (%s) is open, but merging it failed: %w", pr.Number, pr.URL, err)
 		}
-		l.Merged = true
+		return true, nil
 	}
-	return l, nil
+	return false, nil
 }

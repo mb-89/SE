@@ -1,6 +1,7 @@
 package issues
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -34,6 +35,9 @@ type openPull struct {
 	URL       string `json:"html_url"`
 	Mergeable *bool  `json:"mergeable"`
 	State     string `json:"mergeable_state"`
+	// AutoMerge is GitHub's auto-merge request; null while auto-merge is off.
+	AutoMerge *json.RawMessage `json:"auto_merge"`
+	NodeID    string           `json:"node_id"`
 	Head      struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
@@ -69,25 +73,37 @@ func (s Source) conflicts(all []Status) ([]conflict, error) {
 		if !ok {
 			continue
 		}
-		for k := 0; k < asks; k++ {
-			if k > 0 {
-				pause()
-			}
-			got, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, p.Number), false)
-			if err != nil {
-				return nil, err
-			}
-			if p = got[0]; p.Mergeable != nil {
-				break
-			}
+		if p, err = s.mergeability(p); err != nil {
+			return nil, err
 		}
-		if p.Mergeable != nil && !*p.Mergeable && p.State == "dirty" {
+		if p.dirty() {
 			out = append(out, conflict{st, p})
 		}
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Number < out[b].Number })
 	return out, nil
 }
+
+// mergeability asks GitHub for the PR until it has computed whether it
+// merges, asks times at most.
+func (s Source) mergeability(p openPull) (openPull, error) {
+	for k := 0; k < asks; k++ {
+		if k > 0 {
+			pause()
+		}
+		got, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, p.Number), false)
+		if err != nil {
+			return openPull{}, err
+		}
+		if p = got[0]; p.Mergeable != nil {
+			break
+		}
+	}
+	return p, nil
+}
+
+// dirty says whether the PR conflicts with its base.
+func (p openPull) dirty() bool { return p.Mergeable != nil && !*p.Mergeable && p.State == "dirty" }
 
 // takeOverConflict takes over the first conflict it can, lowest number
 // first, and checks its branch out in dir. A conflict whose last takeover

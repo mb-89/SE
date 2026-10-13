@@ -4,6 +4,8 @@ SE is a Claude plugin with a Go program behind it. The plugin is the
 bridgehead: while SE is on, it posts every event of the session to `se`, the
 workspace's daemon, before the event goes on. `se` decides what happens to it;
 today it appends the event to the session's log under `.se/.runtime/logs/`.
+The principles its design is measured against are in
+[spec/principles.md](spec/principles.md).
 
 ## Install
 
@@ -23,10 +25,12 @@ does:
 | `/se restart` | stops this workspace's daemon and starts it again; in an SE checkout, rebuilt from its source first |
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
 | `/se issue next` | names the next `se` issue, stuck work before new work, or says that none is ready; `--take` claims it, or takes a stuck one over; `--in ROOT` names the ready leaves inside a parent's tree; `--person` lists the issues waiting on a person |
-| `/se issue land` | on an `issue-<n>` branch: passes the check, pushes, opens its PR against main (`Fixes #<n>`) and turns on auto-merge (squash) |
+| `/se issue land` | on an `issue-<n>` branch, with `--answers FILE` answering every question in [spec/landing.yaml](spec/landing.yaml): passes the check, pushes, posts the answers on the issue, opens its PR against main (`Fixes #<n>`) and turns on auto-merge (squash) |
 | `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent`; `--review` labels it `se-review` |
 | `/se issue resume` | for a person: takes an issue off `se-person` and puts it back in the queue |
 | `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree: `pass` closes it, `fail` creates fix leaves under it |
+| `/se fleet check` | lists what is broken in the fleet (a stalled root, a conflicted, red or unmerged PR, a stale or leftover claim, an impossible block, an issue waiting on a person), each with its remedy; says `healthy` when nothing is |
+| `/se fleet fix` | applies every remedy `fleet check` names that needs no checkout, records it on its issue, and names the takeovers left to the box |
 | `/se ui` | opens SE's control panel, a pane of buttons that draws on every surface, the phone included: the on/off toggle top left, then a button for each command that takes no typed words (`status`, `restart`, `update`, `issue next`); a press runs what typing `/se <name>` runs |
 | `/se help`, `/se` | lists these, one short line each, under their groups |
 | `/se help <command>` | shows that command's usage and every flag it takes; `<command> --help` does too |
@@ -85,7 +89,10 @@ A box (a cloud session working unattended) follows the work skill,
 ready issue, do it, land it. The routine `SE work` starts the boxes: on every
 merge into main, on a schedule, and through fan-out, where each claim by
 `se issue next --take` fires the routine once more, so there are as many boxes
-as ready issues and the fan-out ends when nothing is ready. Fan-out needs a
+as ready issues and the fan-out ends when nothing is ready. A box that finds nothing to take
+follows the coordination skill before it leaves: `se fleet check` lists what
+is broken, and the box fixes what has a known remedy; the rules are
+[spec/coordination.md](spec/coordination.md). Fan-out needs a
 one-time setup by the owner: an API trigger on the routine, with its fire URL
 in `SE_ROUTINE_FIRE_URL` and its token in `SE_ROUTINE_FIRE_TOKEN` in the cloud
 environment; without them `se` says fan-out is off and claims as before. The
