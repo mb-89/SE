@@ -11,6 +11,7 @@ func init() {
 	register(Command{
 		Name:    "status",
 		Usage:   "status",
+		Group:   "Session",
 		Summary: "say whether a daemon answers for this workspace",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {

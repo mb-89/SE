@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/mb-89/SE/internal/daemon"
 )
@@ -24,8 +23,12 @@ type Command struct {
 	Name string
 	// Usage is the command line after se, the name first: "serve [--idle D]".
 	Usage string
-	// Summary is the help's one line about it.
+	// Group is the heading it stands under in the help: "Session", "Issues".
+	Group string
+	// Summary is the help's one short line about it, no flags.
 	Summary string
+	// Details is what se help <name> says beyond the usage and the flags.
+	Details string
 	// Session offers it inside a Claude session as /se <name>.
 	Session bool
 	// Installed keeps it in the installed se when the session works in an SE
@@ -68,6 +71,10 @@ type Call struct {
 	Workspace string
 	// Session is set when a Claude session called through /se.
 	Session bool
+	// Color is set when the help may colour what it prints.
+	Color bool
+	// flags is the flag set Flags made, which the command's help lists.
+	flags *flag.FlagSet
 }
 
 var commands = map[string]Command{}
@@ -84,7 +91,8 @@ func register(c Command) {
 func (c *Call) Flags(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.StringVar(&c.Workspace, "workspace", c.Workspace, "the workspace the daemon serves")
+	fs.StringVar(&c.Workspace, "workspace", c.Workspace, "the workspace `DIR` the daemon serves (default: here)")
+	c.flags = fs
 	return fs
 }
 
@@ -138,23 +146,6 @@ func prog(session bool) string {
 	return "se"
 }
 
-// help is the help made from the registry: on a terminal every command, in a
-// session the ones offered as /se <name>.
-func help(session bool) string {
-	prog := prog(session)
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s <command>\n\n", prog)
-	w := tabwriter.NewWriter(&b, 0, 0, 3, ' ', 0)
-	for _, c := range offered(session) {
-		fmt.Fprintf(w, "  %s %s\t%s\n", prog, c.Usage, c.Summary)
-	}
-	w.Flush()
-	if !session {
-		b.WriteString("\nEvery command takes --workspace DIR, the workspace the daemon serves (default: here).\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
 // run is se: it reads --session and --workspace, then the command's name, and
 // runs that command. It answers the exit code.
 func run(args []string, stdout, stderr io.Writer) int {
@@ -163,10 +154,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	session := fs.Bool("session", false, "called by the plugin from a session: answer JSON")
 	workspace := fs.String("workspace", ".", "the workspace the daemon serves")
 	if err := fs.Parse(args); err != nil {
-		fmt.Fprintf(stderr, "se: %v\n%s\n", err, help(false))
+		fmt.Fprintf(stderr, "se: %v\n%s\n", err, help(false, colors(stderr)))
 		return 2
 	}
-	call := &Call{Workspace: *workspace, Session: *session}
+	// The help is coloured on a terminal alone, never in a session's answer.
+	color, errColor := !*session && colors(stdout), !*session && colors(stderr)
+	call := &Call{Workspace: *workspace, Session: *session, Color: color}
 	name := ""
 	if fs.NArg() > 0 {
 		name, call.Args = fs.Arg(0), fs.Args()[1:]
@@ -191,10 +184,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case ok:
 		reply, err = cmd.Run(call)
 		if errors.Is(err, flag.ErrHelp) {
-			reply, err = Reply{Text: help(*session)}, nil
+			reply, err = Reply{Text: commandHelp(cmd, call.flags, *session, color)}, nil
 		}
 	case name == "":
-		reply = Reply{Text: help(*session)}
+		reply = Reply{Text: help(*session, errColor)}
 		if !*session {
 			fmt.Fprintln(stderr, reply.Text)
 			return 2
@@ -206,7 +199,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	default:
-		reply = Reply{Text: fmt.Sprintf("%s\n\nse has no command %q.", help(*session), name)}
+		reply = Reply{Text: unknown(name, *session, errColor)}
 		if !*session {
 			fmt.Fprintln(stderr, reply.Text)
 			return 2

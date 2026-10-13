@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -46,43 +48,169 @@ func TestTheSessionIsOfferedItsCommandsAlone(t *testing.T) {
 }
 
 func TestTheHelpIsMadeFromTheRegistry(t *testing.T) {
-	terminal, inSession := help(false), help(true)
+	terminal, inSession := help(false, false), help(true, false)
 	for name, c := range commands {
-		if !strings.Contains(terminal, "se "+c.Usage) || !strings.Contains(terminal, c.Summary) {
+		line := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(name) + ` +` + regexp.QuoteMeta(c.Summary) + `$`)
+		if !line.MatchString(terminal) {
 			t.Errorf("the terminal help leaves out %s:\n%s", name, terminal)
 		}
-		if got := strings.Contains(inSession, "/se "+name); got != c.Session {
+		if got := line.MatchString(inSession); got != c.Session {
 			t.Errorf("the session help lists %s: %v, want %v:\n%s", name, got, c.Session, inSession)
 		}
 	}
 }
 
+func TestTheHelpGroupsTheCommands(t *testing.T) {
+	want := map[string][]string{
+		"Session": {"help", "off", "on", "restart", "status", "update"},
+		"Issues":  {"issue land", "issue new", "issue next", "issue review"},
+		"Daemon":  {"serve", "start", "stop"},
+	}
+	terminal := help(false, false)
+	for group, names := range want {
+		block := regexp.MustCompile(`(?m)^` + group + `:\n((?:  .*\n?)+)`).FindStringSubmatch(terminal)
+		if block == nil {
+			t.Fatalf("no group %s:\n%s", group, terminal)
+		}
+		var got []string
+		for _, line := range strings.Split(strings.TrimRight(block[1], "\n"), "\n") {
+			got = append(got, strings.Join(strings.Fields(strings.Split(line, "  ")[1]), " "))
+		}
+		if strings.Join(got, ",") != strings.Join(names, ",") {
+			t.Errorf("%s lists %q, want %q", group, got, names)
+		}
+	}
+}
+
+func TestACommandStandsUnderTheGroupItRegisters(t *testing.T) {
+	register(Command{Name: "zz probe", Usage: "zz probe", Group: "Probes", Summary: "probe the help", Session: true,
+		Run: func(c *Call) (Reply, error) { return Reply{}, nil }})
+	t.Cleanup(func() { delete(commands, "zz probe") })
+	for _, session := range []bool{false, true} {
+		if h := help(session, false); !strings.Contains(h, "Probes:\n  zz probe      probe the help\n") {
+			t.Errorf("session %v:\n%s", session, h)
+		}
+	}
+}
+
+func TestNoOverviewLineIsLongerThan80(t *testing.T) {
+	for _, session := range []bool{false, true} {
+		for _, line := range strings.Split(help(session, false), "\n") {
+			if len(line) > 80 {
+				t.Errorf("%d characters: %q", len(line), line)
+			}
+		}
+	}
+}
+
+func TestTheSessionHelpIsAFencedBlock(t *testing.T) {
+	h := help(true, false)
+	if !strings.HasPrefix(h, "```\n/se <command>") || !strings.HasSuffix(h, "\n```") {
+		t.Fatalf("%q", h)
+	}
+	if strings.HasPrefix(help(false, false), "```") {
+		t.Fatal("the terminal help is fenced")
+	}
+}
+
+func TestAColouredHelpColoursHeadingsAndNamesAlone(t *testing.T) {
+	plain, colored := help(false, false), help(false, true)
+	if strings.Contains(plain, "\x1b[") || !strings.Contains(colored, "\x1b[1mSession:\x1b[0m") || !strings.Contains(colored, "\x1b[36mstatus\x1b[0m") {
+		t.Fatalf("%q", colored)
+	}
+	if got := regexp.MustCompile("\x1b\\[[0-9]*m").ReplaceAllString(colored, ""); got != plain {
+		t.Fatalf("the colours move the text:\n%s", got)
+	}
+}
+
+func TestAPipeAndASessionGetNoColour(t *testing.T) {
+	if _, out, _ := se(t, "help"); strings.Contains(out, "\x1b[") {
+		t.Fatalf("%q", out)
+	}
+	if colors(os.Stdout) && os.Getenv("NO_COLOR") == "" {
+		t.Skip("stdout is a terminal")
+	}
+	if r := session(t, "help"); strings.Contains(r.Text, "\x1b[") {
+		t.Fatalf("%q", r.Text)
+	}
+}
+
+func TestTheHelpOfACommand(t *testing.T) {
+	code, out, _ := se(t, "help", "issue", "next")
+	if code != 0 {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+	for _, want := range []string{
+		"se issue next [--in ROOT]",
+		"Name the next ready se issue",
+		"Flags:\n",
+		"\n  --in ROOT          look inside the tree of issue ROOT for its ready leaves\n",
+		"\n  --take             claim the next ready issue",
+		"\n  --json ",
+		"\n  --repo OWNER/NAME ",
+		"\n  --workspace DIR ",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) > 80 {
+			t.Errorf("%d characters: %q", len(line), line)
+		}
+	}
+	if _, flagged, _ := se(t, "issue", "next", "--help"); flagged != out {
+		t.Errorf("se issue next --help:\n%s\nwant:\n%s", flagged, out)
+	}
+	if r := session(t, "help", "issue", "next"); r.Text != "```\n/se"+strings.TrimSuffix(strings.TrimPrefix(out, "se"), "\n")+"\n```" {
+		t.Errorf("/se help issue next:\n%s", r.Text)
+	}
+}
+
+func TestEveryCommandHasItsHelp(t *testing.T) {
+	for name, c := range commands {
+		code, out, _ := se(t, "help", name)
+		if code != 0 || !strings.HasPrefix(out, "se "+strings.Fields(c.Usage)[0]) {
+			t.Errorf("se help %s: exit %d, %q", name, code, out)
+		}
+	}
+}
+
+func TestHelpOfAnUnknownCommand(t *testing.T) {
+	if code, _, errs := se(t, "help", "frob"); code != 1 || !strings.Contains(errs, `"frob"`) {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	if _, out, _ := se(t, "help", "issue"); !strings.Contains(out, "  issue next") || strings.Contains(out, "  status") {
+		t.Fatalf("se help issue: %q", out)
+	}
+}
+
 func TestHelpOnATerminal(t *testing.T) {
 	code, out, _ := se(t, "help")
-	if code != 0 || out != help(false)+"\n" {
+	if code != 0 || out != help(false, false)+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 }
 
 func TestABareSeShowsTheHelp(t *testing.T) {
-	if code, _, errs := se(t); code != 2 || !strings.Contains(errs, help(false)) {
+	if code, _, errs := se(t); code != 2 || !strings.Contains(errs, help(false, false)) {
 		t.Fatalf("terminal: exit %d, %q", code, errs)
 	}
-	if r := session(t); r.Text != help(true) || r.Active != nil || r.Endpoint != nil || r.Reload {
+	if r := session(t); r.Text != help(true, false) || r.Active != nil || r.Endpoint != nil || r.Reload {
 		t.Fatalf("session: %+v", r)
 	}
-	if r := session(t, "help"); r.Text != help(true) {
+	if r := session(t, "help"); r.Text != help(true, false) {
 		t.Fatalf("session help: %+v", r)
 	}
 }
 
 func TestAnUnknownWordShowsTheHelpAndNamesIt(t *testing.T) {
 	r := session(t, "frob")
-	if !strings.HasPrefix(r.Text, help(true)) || !strings.Contains(r.Text, `"frob"`) {
+	if !strings.HasPrefix(r.Text, help(true, false)) || !strings.Contains(r.Text, `"frob"`) {
 		t.Fatalf("%q", r.Text)
 	}
 	code, _, errs := se(t, "frob")
-	if code != 2 || !strings.Contains(errs, help(false)) || !strings.Contains(errs, `"frob"`) {
+	if code != 2 || !strings.Contains(errs, help(false, false)) || !strings.Contains(errs, `"frob"`) {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }

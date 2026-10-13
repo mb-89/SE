@@ -4,7 +4,9 @@ func init() {
 	register(Command{
 		Name:    "off",
 		Usage:   "off",
-		Summary: "switch SE off for this session; the daemon runs on for other sessions",
+		Group:   "Session",
+		Summary: "switch SE off for this session; the daemon runs on",
+		Details: "switch SE off for this session. The daemon runs on for other sessions.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			if err := c.Parse(c.Flags("off")); err != nil {
