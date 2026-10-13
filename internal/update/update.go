@@ -17,23 +17,33 @@ type Result struct {
 	Built string `json:"built"`
 }
 
-// Run pulls main into repo and builds se to out. It refuses a checkout that is
-// not on a clean main, since that holds work an update would pull under.
+// Untouched is the error of an update that left the checkout as it was, since
+// it is no clean main: it holds work an update would pull under.
+type Untouched struct{ Reason string }
+
+func (u *Untouched) Error() string { return u.Reason }
+
+// Run pulls main into repo and, when that brought anything, builds se to out.
+// It refuses, with an *Untouched, a checkout that is not on a clean main. A
+// shallow clone (git clone --depth 1) updates like a full one.
 func Run(repo, out string) (Result, error) {
 	var r Result
+	if inside, err := git(repo, "rev-parse", "--is-inside-work-tree"); err != nil || inside != "true" {
+		return r, &Untouched{fmt.Sprintf("%s is no git checkout", repo)}
+	}
 	branch, err := git(repo, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return r, err
 	}
 	if branch != "main" {
-		return r, fmt.Errorf("%s is on %s, not main; the installed SE updates from main alone", repo, branch)
+		return r, &Untouched{fmt.Sprintf("%s is on %s, not main; the installed SE updates from main alone", repo, branch)}
 	}
 	dirty, err := git(repo, "status", "--porcelain", "--untracked-files=no")
 	if err != nil {
 		return r, err
 	}
 	if dirty != "" {
-		return r, fmt.Errorf("%s holds uncommitted changes; commit or drop them first", repo)
+		return r, &Untouched{fmt.Sprintf("%s holds uncommitted changes; commit or drop them first", repo)}
 	}
 	if r.From, err = git(repo, "rev-parse", "--short", "HEAD"); err != nil {
 		return r, err
@@ -41,7 +51,7 @@ func Run(repo, out string) (Result, error) {
 	if _, err := git(repo, "pull", "--ff-only", "origin", "main"); err != nil {
 		return r, err
 	}
-	if r.To, err = git(repo, "rev-parse", "--short", "HEAD"); err != nil {
+	if r.To, err = git(repo, "rev-parse", "--short", "HEAD"); err != nil || r.To == r.From {
 		return r, err
 	}
 	if err := Build(repo, out); err != nil {

@@ -17,6 +17,8 @@ export const RUNTIME = '.se/.runtime'
 const ENDPOINT = `${RUNTIME}/daemon.json`
 // How long a start may take: a first start builds se from the checkout.
 const STARTING = 300_000
+// How long the update at session start may take: a pull and a rebuild.
+const UPDATING = 120_000
 // A daemon found down is started again at most this often.
 const RESTART_EVERY = 60_000
 
@@ -45,6 +47,7 @@ export const register: Register = on => {
       argumentHint: '<command>',
     })
     root = e.cwd
+    await updatesItself($)
     const { value } = await $.state.get(ACTIVE)
     if (value === undefined) {
       if ((await $.env.get('SE_DEFAULT')) === 'on') await switchOn($)
@@ -69,15 +72,23 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 }
 
+// Brings the checkout the plugin was loaded from to the newest main, whether or
+// not SE is on. se leaves a checkout that is no clean main alone; nothing here
+// holds the session up: what happened, if anything, is one line in a toast,
+// and a reload, when the update brought a new SE, waits until session.start has answered.
+async function updatesItself($: EngineInterface): Promise<void> {
+  const asked = await asks($, ['update', '--session-start', '--repo', `${$.plugin.root}/..`], UPDATING)
+  const said = typeof asked === 'string' ? `SE did not update itself: ${asked}` : await applies($, asked)
+  if (said) $.ui.toast(said.split('\n')[0])
+}
+
 // Hands the words to se as a session call; answers its reply, or why there is none.
-async function asks($: EngineInterface, words: string[]): Promise<Reply | string> {
+async function asks($: EngineInterface, words: string[], timeoutMs = STARTING): Promise<Reply | string> {
   try {
     const bin = await builds($)
     if (bin.failed) return bin.failed
     root = await $.session.root()
-    const ran = await $.process.run([bin.path, '--session', '--workspace', root, ...words], {
-      timeoutMs: STARTING,
-    })
+    const ran = await $.process.run([bin.path, '--session', '--workspace', root, ...words], { timeoutMs })
     const said = parsed(ran.stdout) as Reply | null
     if (typeof said?.text !== 'string') return `se did not answer: ${failed(ran)}`
     return said

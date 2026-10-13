@@ -16,7 +16,10 @@ type World = {
   endpointFile: string | null
   // What the fake se answers a session call, by the words typed after /se.
   replies: Record<string, unknown>
+  // What se answers the update at session start; a string is what it fails with on stderr.
+  startUpdate: unknown
   reloads: number
+  toasts: string[]
 }
 
 const HELP = '/se <command>\n\n  /se help   list the commands'
@@ -30,7 +33,9 @@ function world(on: On, env: Record<string, string> = {}): World {
     built: true,
     startFails: null,
     endpointFile: null,
+    startUpdate: { text: '' },
     reloads: 0,
+    toasts: [],
     replies: {
       '': { text: HELP },
       on: { text: 'SE is on.', active: true, endpoint: DAEMON },
@@ -45,6 +50,10 @@ function world(on: On, env: Record<string, string> = {}): World {
     w.reloads++
     return { text: 'reloaded' }
   })
+  on('ui.toast', ($, e) => {
+    w.toasts.push(e.text)
+    return { value: undefined }
+  })
   on('session.root', () => ({ value: ROOT }))
   on('session.id', () => ({ value: 's1' }))
   on('fs.exists', ($, e) => ({ value: e.path.endsWith('/bin/se') ? w.built : false }))
@@ -58,6 +67,10 @@ function world(on: On, env: Record<string, string> = {}): World {
     w.ran.push(argv)
     const verb = argv[0] === 'go' ? 'build' : argv[1]
     if (verb === 'build') w.built = true
+    if (verb === '--session' && argv[4] === 'update' && argv[5] === '--session-start') {
+      if (typeof w.startUpdate === 'string') return { value: { exitCode: 1, stdout: '', stderr: w.startUpdate } }
+      return { value: { exitCode: 0, stdout: JSON.stringify(w.startUpdate), stderr: '' } }
+    }
     if (verb === '--session') {
       const words = argv.slice(4).join(' ')
       if (words === 'on') w.live = DAEMON.address
@@ -91,8 +104,18 @@ function world(on: On, env: Record<string, string> = {}): World {
 const starts = { cwd: ROOT, surface: null, isInteractive: false }
 const se = (args: string) => ({ command: 'se', args }) as never
 const probe = { kind: 'commit', text: 'probe' } as const
+// The update at session start shows as UPDATE; the session's other calls, by what was typed.
+const UPDATE = '/se update --session-start'
 const verbs = (w: World) =>
-  w.ran.map(argv => (argv[0] === 'go' ? 'build' : argv[1] === '--session' ? `/se ${argv.slice(4).join(' ')}`.trim() : argv[1]))
+  w.ran.map(argv =>
+    argv[0] === 'go'
+      ? 'build'
+      : argv[5] === '--session-start'
+        ? UPDATE
+        : argv[1] === '--session'
+          ? `/se ${argv.slice(4).join(' ')}`.trim()
+          : argv[1],
+  )
 const posted = (w: World) => w.posts.map(p => p.event)
 
 test('off by default: events pass, nothing starts, nothing is posted', async ($, on) => {
@@ -100,7 +123,8 @@ test('off by default: events pass, nothing starts, nothing is posted', async ($,
   await $.session.start(starts)
   const out = await $.attribution.text(probe)
   expect(out.text).toBe('probe')
-  expect(w.ran).toEqual([])
+  // The update at session start runs whether or not SE is on; nothing else does.
+  expect(verbs(w)).toEqual([UPDATE])
   expect(w.posts).toEqual([])
 })
 
@@ -109,7 +133,7 @@ test('/se on hands its words to se and forwards what follows', async ($, on) => 
   await $.session.start(starts)
   const said = await $.command.run(se('on'))
   expect(said?.text ?? '').toContain('SE is on.')
-  const call = w.ran.find(argv => argv[1] === '--session') ?? []
+  const call = w.ran.find(argv => argv[4] === 'on') ?? []
   expect(call[0]).toMatch(/\/bin\/se$/)
   expect(call.slice(1)).toEqual(['--session', '--workspace', ROOT, 'on'])
   await $.attribution.text(probe)
@@ -136,7 +160,7 @@ test('a bare /se shows the help se answers', async ($, on) => {
   await $.session.start(starts)
   const said = await $.command.run(se(''))
   expect(said?.text).toBe(HELP)
-  expect(verbs(w)).toEqual(['/se'])
+  expect(verbs(w)).toEqual([UPDATE, '/se'])
 })
 
 test('the plugin knows no command: any words go to se as typed', async ($, on) => {
@@ -173,14 +197,14 @@ test('a missing se is built from the checkout before it runs', async ($, on) => 
   w.built = false
   await $.session.start(starts)
   await $.command.run(se('on'))
-  expect(verbs(w).slice(0, 2)).toEqual(['build', '/se on'])
+  expect(verbs(w).slice(0, 3)).toEqual(['build', UPDATE, '/se on'])
 })
 
 test('a missing se is built before the default start too', async ($, on) => {
   const w = world(on, { SE_DEFAULT: 'on' })
   w.built = false
   await $.session.start(starts)
-  expect(verbs(w).slice(0, 2)).toEqual(['build', 'start'])
+  expect(verbs(w).slice(0, 3)).toEqual(['build', UPDATE, 'start'])
 })
 
 test('SE_DEFAULT=on says nothing when the daemon does not start, and passes events', async ($, on) => {
@@ -271,4 +295,56 @@ test('a restart whose build failed shows why, and still moves to the daemon', as
   expect(said?.text ?? '').toContain('undefined: y')
   await $.attribution.text(probe)
   expect(w.posts.at(-1)?.auth).toBe('Bearer tok5')
+})
+
+test('session start updates the checkout the plugin came from, then reloads once start has answered', async ($, on) => {
+  const w = world(on, { SE_DEFAULT: 'on' })
+  const clock = mock.clock(on)
+  w.startUpdate = { text: 'SE updated aaa → bbb.', reload: true }
+  await $.session.start(starts)
+  const update = w.ran.find(argv => argv[5] === '--session-start') ?? []
+  expect(update.slice(1, 6)).toEqual(['--session', '--workspace', ROOT, 'update', '--session-start'])
+  expect(update[6]).toBe('--repo')
+  expect(update[7]).toMatch(/\/\.\.$/)
+  // The update comes before the daemon starts, so the daemon is the new se's.
+  expect(verbs(w).slice(0, 2)).toEqual([UPDATE, 'start'])
+  expect(w.toasts).toEqual(['SE updated aaa → bbb. The plugins reload now.'])
+  expect(w.reloads).toBe(0)
+  await clock.settle()
+  expect(w.reloads).toBe(1)
+})
+
+test('a checkout that is current says nothing and does not reload', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await $.session.start(starts)
+  await clock.settle()
+  expect(w.toasts).toEqual([])
+  expect(w.reloads).toBe(0)
+})
+
+test('a checkout that is no clean main is left alone, noted in one line', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  w.startUpdate = { text: 'SE left its checkout as it is: /me/SE/plugin/.. is on topic, not main; the installed SE updates from main alone.' }
+  await $.session.start(starts)
+  await clock.settle()
+  expect(w.toasts).toEqual([w.startUpdate.text])
+  expect(w.reloads).toBe(0)
+})
+
+test('a failed update does not block session start: the session goes on and says so', async ($, on) => {
+  const w = world(on, { SE_DEFAULT: 'on' })
+  const clock = mock.clock(on)
+  w.startUpdate = 'fatal: unable to access origin\nCould not resolve host'
+  await $.session.start(starts)
+  await clock.settle()
+  expect(w.toasts.length).toBe(1)
+  expect(w.toasts[0]).toContain('SE did not update itself')
+  expect(w.toasts[0]).not.toContain('\n')
+  expect(w.reloads).toBe(0)
+  // The session started on, as asked, with the SE it has.
+  expect(verbs(w)).toContain('start')
+  await $.attribution.text(probe)
+  expect(posted(w)).toContain('attribution.text')
 })
