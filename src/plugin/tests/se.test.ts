@@ -33,6 +33,32 @@ type World = {
 }
 
 const HELP = '/se <command>\n\n  /se help   list the commands'
+// The help se answers as data beside its text (Help in src/cmd/se/help.go).
+const OVERVIEW = {
+  usage: '/se <command> [flags]',
+  groups: [
+    {
+      name: 'Issues',
+      commands: [{ name: 'issue next', summary: 'name the next se issue', usage: '/se issue next [--take [N]]' }],
+    },
+    {
+      name: 'Session',
+      commands: [
+        { name: 'help', summary: 'list the commands, or show one', usage: '/se help [<command>]' },
+        { name: 'on', summary: 'switch SE on', usage: '/se on' },
+      ],
+    },
+  ],
+  note: '/se help <command> shows its usage and flags.',
+}
+const ISSUE_NEXT = {
+  usage: '/se issue next [--take [N]]',
+  about: 'Name the next ready se issue.',
+  flags: [
+    { name: '--take', usage: 'claim the next ready issue' },
+    { name: '--workspace DIR', usage: 'the workspace DIR the daemon serves' },
+  ],
+}
 
 // The world beneath the plugin: a workspace, an se binary and its daemon, all in memory.
 function world(on: On, env: Record<string, string> = {}): World {
@@ -58,6 +84,8 @@ function world(on: On, env: Record<string, string> = {}): World {
       update: { text: 'SE updated aaa → bbb. Its daemon restarted.', endpoint: DAEMON, reload: true },
       status: { text: 'No SE daemon answers for /work.' },
       ui: { text: "SE's control panel is open.", panel: { buttons: ['issue next', 'status'] } },
+      help: { text: HELP, help: OVERVIEW },
+      'help issue next': { text: '/se issue next [--take [N]]\n```\n…\n```', help: ISSUE_NEXT },
     },
   }
   mock.env(on, env)
@@ -128,6 +156,8 @@ function world(on: On, env: Record<string, string> = {}): World {
     return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
   })
   on('attribution.text', ($, e) => ({ text: e.text }))
+  // The engine's own output row: the text as it came.
+  on('ui.render', { component: 'CommandOutput' }, ($, e) => ({ type: 'Text', children: [e.props.text] }) as never)
   return w
 }
 
@@ -503,4 +533,80 @@ test('a command se does not offer as a button does not appear', async ($, on) =>
   expect(await ui.find({ key: 'run issue new' })).toBeUndefined()
   expect(await ui.find({ type: 'Button', text: /issue new/ })).toBeUndefined()
   expect(w.opened.length).toBe(1)
+})
+
+// A /se line's output row, as the transcript raises it for the words typed.
+const output = (args: string, text: string, surface: (typeof SURFACES)[number]) =>
+  ({
+    plugin: 'se',
+    surface,
+    component: 'CommandOutput',
+    requestId: `row ${args}`,
+    props: { command: 'se', args, text, isErrored: false },
+  }) as const
+
+test('/se help draws its groups and two columns on every surface', async ($, on) => {
+  world(on)
+  await $.session.start(starts)
+  const said = await $.command.run(se('help'))
+  expect(said?.text).toBe(HELP)
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount(output('help', HELP, surface))
+    expect((await ui.find({ key: 'usage' }))?.text).toBe('/se <command> [flags]')
+    expect((await ui.find({ key: 'group Issues' }))?.text).toContain('Issues')
+    expect((await ui.find({ key: 'group Session' }))?.text).toContain('Session')
+    const row = await ui.find({ key: 'command issue next' })
+    expect(row?.props.flexDirection).toBe('row')
+    // Two columns: the name in a box as wide as every row's, the summary beside it.
+    const [name, summary] = (row?.children ?? []) as { props: { width?: number } }[]
+    expect(name?.props.width).toBe('issue next'.length + 2)
+    expect((await ui.find({ key: 'command on' }))?.children[0]).toMatchObject({ props: { width: 12 } })
+    expect(JSON.stringify(summary)).toContain('name the next se issue')
+    expect((await ui.find({ key: 'note' }))?.text).toBe('/se help <command> shows its usage and flags.')
+    await ui.unmount()
+  }
+})
+
+test('/se help <command> draws its usage and one row per flag on every surface', async ($, on) => {
+  world(on)
+  await $.session.start(starts)
+  const said = await $.command.run(se('help issue next'))
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount(output('help issue next', said?.text ?? '', surface))
+    expect((await ui.find({ key: 'usage' }))?.text).toBe('/se issue next [--take [N]]')
+    expect((await ui.find({ key: 'about' }))?.text).toBe('Name the next ready se issue.')
+    expect((await ui.find({ key: 'flag --take' }))?.text).toContain('claim the next ready issue')
+    expect((await ui.find({ key: 'flag --workspace DIR' }))?.children[0]).toMatchObject({
+      props: { width: '--workspace DIR'.length + 2 },
+    })
+    expect(await ui.find({ key: 'group Issues' })).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+test('a /se answer that is no help is drawn as its text', async ($, on) => {
+  world(on)
+  await $.session.start(starts)
+  await $.command.run(se('help'))
+  const said = await $.command.run(se('status'))
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount(output('status', said?.text ?? '', surface))
+    expect(await ui.find({ key: 'usage' })).toBeUndefined()
+    expect(JSON.stringify(await ui.drawn())).toContain('No SE daemon answers for /work.')
+    await ui.unmount()
+    // An errored help row is drawn as its text too.
+    const errored = await $.ui.mount({ ...output('help', 'se help: failed', surface), props: { command: 'se', args: 'help', text: 'se help: failed', isErrored: true } })
+    expect(await errored.find({ key: 'usage' })).toBeUndefined()
+    await errored.unmount()
+  }
+})
+
+test('a line that no longer answers help draws as its text', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('help'))
+  w.replies.help = { text: 'se has moved on.' }
+  await $.command.run(se('help'))
+  const ui = await $.ui.mount(output('help', 'se has moved on.', 'desktop'))
+  expect(await ui.find({ key: 'usage' })).toBeUndefined()
 })
