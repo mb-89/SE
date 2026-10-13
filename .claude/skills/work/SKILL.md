@@ -27,4 +27,5 @@ work and fixing a red CI run; follow the rest as written. `se` is
    `none`). If you are stuck on a decision only the owner can make, say so in
    a comment on the issue and end.
 
-Nothing here starts another box: the routine does that.
+You never start another box yourself: `se issue next --take` fires the routine
+once after its claim (the fan-out in [docs/issues.md](../../../docs/issues.md)).
