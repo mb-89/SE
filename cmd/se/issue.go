@@ -44,13 +44,15 @@ func init() {
 	register(Command{
 		Name:    "issue next",
 		Usage:   "issue next [--in ROOT] [--take [N]] [--json] [--repo OWNER/NAME]",
-		Summary: "name the next ready se issue at the top, or say that none is ready; --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out; a claim fires the routine once (fan-out); --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree",
+		Group:   "Issues",
+		Summary: "name the next ready se issue; --take claims it",
+		Details: "name the next ready se issue at the top, or say that none is ready. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue next")
 			take := &takeFlag{}
-			fs.Var(take, "take", "claim the issue: the next ready one, or --take N")
-			in := fs.Int("in", 0, "look inside this issue's tree for its ready leaves")
+			fs.Var(take, "take", "claim the next ready issue, or issue N as --take N")
+			in := fs.Int("in", 0, "look inside the tree of issue `ROOT` for its ready leaves")
 			// --take N: the number may stand after --take, between or after the other flags.
 			for rest := c.Args; ; {
 				if err := fs.Parse(rest); err != nil {
@@ -100,15 +102,17 @@ func init() {
 	register(Command{
 		Name:    "issue new",
 		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--json] [--repo OWNER/NAME]",
-		Summary: "create an se issue, linked as blocked by each issue named (GitHub's native links), as a sub-issue of --parent, and name it; --review labels it se-review",
+		Group:   "Issues",
+		Summary: "create an se issue, with its blockers and its parent",
+		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --review labels it se-review.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
-			title := fs.String("title", "", "the issue's title")
-			body := fs.String("body", "", "the issue's body")
-			bodyFile := fs.String("body-file", "", "a file holding the issue's body")
-			blockedBy := fs.String("blocked-by", "", "the issues that block it, as N,M, or none")
-			parent := fs.Int("parent", 0, "the issue it is a sub-issue of")
+			title := fs.String("title", "", "the issue's title `T`")
+			body := fs.String("body", "", "the issue's body `B`")
+			bodyFile := fs.String("body-file", "", "a file `PATH` holding the issue's body")
+			blockedBy := fs.String("blocked-by", "", "the issues that block it, as `N,M`, or none")
+			parent := fs.Int("parent", 0, "the issue `N` it is a sub-issue of")
 			review := fs.Bool("review", false, "label it se-review: it is reviewed once its sub-issues have closed")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
@@ -180,7 +184,9 @@ func init() {
 	register(Command{
 		Name:    "issue land",
 		Usage:   "issue land [--json] [--repo OWNER/NAME]",
-		Summary: "on an issue-N branch of a leaf: pass tests/check.sh, push, open its PR against main (Fixes #N), or find it open, and turn on auto-merge (squash)",
+		Group:   "Issues",
+		Summary: "check, push and open the PR of an issue-N branch, auto-merge on",
+		Details: "on an issue-N branch of a leaf: pass tests/check.sh, push, open its PR against main (Fixes #N), or find it open, and turn on auto-merge (squash).",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue land")
@@ -221,13 +227,15 @@ func init() {
 	register(Command{
 		Name:    "issue review",
 		Usage:   "issue review pass|fail N --why TEXT [--fix TITLE]... [--json] [--repo OWNER/NAME]",
-		Summary: "review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree: pass posts the verdict and closes it; fail posts the findings and creates a fix leaf under it per --fix",
+		Group:   "Issues",
+		Summary: "pass or fail a parent whose sub-issues have closed",
+		Details: "review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree. pass posts the verdict and closes it; fail posts the findings and creates a fix leaf under it per --fix.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue review")
-			why := fs.String("why", "", "the verdict, or the findings")
+			why := fs.String("why", "", "the verdict, or the findings, as `TEXT`")
 			var fixes fixList
-			fs.Var(&fixes, "fix", "the title of a fix leaf a fail creates (repeat it for each)")
+			fs.Var(&fixes, "fix", "the `TITLE` of a fix leaf a fail creates (repeat it for each)")
 			// The words pass|fail and N may stand before, between or after the flags.
 			var words []string
 			for rest := c.Args; ; {
@@ -318,7 +326,7 @@ func (t *takeFlag) Set(v string) error {
 func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Source, error), asJSON *bool) {
 	fs = c.Flags(name)
 	asJSON = fs.Bool("json", false, "answer JSON")
-	repo := fs.String("repo", "", "the repository as OWNER/NAME (default: the workspace's origin)")
+	repo := fs.String("repo", "", "the repository as `OWNER/NAME` (default: the workspace's origin)")
 	return fs, func() (issues.Source, error) {
 		if *repo == "" {
 			r, err := issues.Repo(c.Workspace)

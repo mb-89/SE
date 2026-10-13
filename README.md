@@ -25,7 +25,8 @@ command, `/se`, which takes words the way a command line does:
 | `/se issue land` | on an `issue-<n>` branch: passes the check, pushes, opens its PR against main (`Fixes #<n>`) and turns on auto-merge (squash) |
 | `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required), as a sub-issue of `--parent`; `--review` labels it `se-review` |
 | `/se issue review` | passes or fails an `se-review` parent whose sub-issues have closed, as an agent that worked none of its tree: `pass` closes it, `fail` creates fix leaves under it |
-| `/se help`, `/se` | lists these |
+| `/se help`, `/se` | lists these, one short line each, under their groups |
+| `/se help <command>` | shows that command's usage and every flag it takes; `<command> --help` does too |
 
 On a terminal, `se help` lists every command, those above and the ones a
 session is not offered: `se serve`, `se start` and `se stop`.
@@ -89,8 +90,11 @@ details are in [docs/issues.md](docs/issues.md).
 
 A command is one file in `cmd/se`. Its `init` calls `register` with the
 command's name (two words, like `issue next`, make the second a sub-word of
-the first), its usage line, a one-line summary, whether a session is
-offered it as `/se <name>`, and the function that runs it. The function
+the first), its usage line, its group (the help's heading it stands under), a
+short summary (one help line of at most 80 columns, no flags), the details its
+own help adds, whether a session is offered it as `/se <name>`, and the
+function that runs it. Its flags, made with `Call.Flags`, are what
+`se help <name>` lists, so the function parses them before it does anything. The function
 answers a `Reply`: the text to show and, for a session, the effects the plugin
 applies (switch forwarding on or off, where the daemon now answers, reload the
 plugins). The help on both sides is made from what registered, and the plugin

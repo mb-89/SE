@@ -10,6 +10,7 @@ func init() {
 	register(Command{
 		Name:    "stop",
 		Usage:   "stop",
+		Group:   "Daemon",
 		Summary: "end this workspace's daemon",
 		Run: func(c *Call) (Reply, error) {
 			if err := c.Parse(c.Flags("stop")); err != nil {

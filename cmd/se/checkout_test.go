@@ -163,12 +163,12 @@ func TestOnlySessionWordsGoToTheCheckoutsSe(t *testing.T) {
 		}
 	}
 	// A terminal se, the debugger's se serve among them, runs as it was built.
-	if code, out, _ := se(t, "--workspace", ws, "help"); code != 0 || out != help(false)+"\n" {
+	if code, out, _ := se(t, "--workspace", ws, "help"); code != 0 || out != help(false, false)+"\n" {
 		t.Errorf("terminal help: exit %d, %q", code, out)
 	}
 	// An se the installed one handed the words to answers them itself.
 	t.Setenv(handedOver, "1")
-	if r := in(t, ws, "help"); r.Text != help(true) {
+	if r := in(t, ws, "help"); r.Text != help(true, false) {
 		t.Errorf("handed over: %q", r.Text)
 	}
 }
@@ -188,7 +188,7 @@ func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(t, helpGo, strings.Replace(string(src), `"list the commands"`, `"list the commands, as edited"`, 1))
+	write(t, helpGo, strings.Replace(string(src), `"list the commands, or show one: help <command>"`, `"list the commands, as edited"`, 1))
 	write(t, filepath.Join(ws, "cmd", "se", "hello.go"), `package main
 
 func init() {
@@ -208,7 +208,7 @@ func init() {
 		t.Fatalf("the daemon runs %s, want %s", exe, paths.Bin())
 	}
 	help := in(t, ws, "help").Text
-	if !strings.Contains(help, "as edited") || !strings.Contains(help, "/se hello") {
+	if !strings.Contains(help, "as edited") || !strings.Contains(help, "\n  hello ") {
 		t.Fatalf("help after the restart:\n%s", help)
 	}
 	if got := in(t, ws, "hello").Text; got != "hello from the checkout" {
@@ -244,7 +244,7 @@ func init() {
 	if r.Endpoint == nil || !strings.Contains(r.Text, "built from this checkout") {
 		t.Fatalf("on: %+v", r)
 	}
-	if help := in(t, ws, "help").Text; !strings.Contains(help, "/se hello") {
+	if help := in(t, ws, "help").Text; !strings.Contains(help, "\n  hello ") {
 		t.Fatalf("help after on:\n%s", help)
 	}
 }
