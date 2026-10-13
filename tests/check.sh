@@ -34,7 +34,7 @@ step() {
   echo "check: $name took $(($(now) - start))ms"
 }
 
-step "se rules" go run ./src/cmd/rules
+step "se rules" go run ./src/cmd/se rules
 step "golangci-lint" golangci-lint run ./...
 step "biome" biome check --error-on-warnings
 step "go test" go test ./...

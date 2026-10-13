@@ -24,7 +24,7 @@ func init() {
 	})
 }
 
-func todoIssue(p string, text []byte) []Finding {
+func todoIssue(_ *Repo, p string, text []byte) []Finding {
 	var found []Finding
 	for i, line := range bytes.Split(text, []byte("\n")) {
 		if marker.Match(line) && !numbered.Match(line) {
