@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -16,33 +18,14 @@ var gh issues.GH = issues.Gh
 func init() {
 	register(Command{
 		Name:    "issue next",
-		Usage:   "issue next [--json] [--repo OWNER/NAME]",
-		Summary: "name the next ready se issue, or say that none is ready",
+		Usage:   "issue next [--take [N]] [--json] [--repo OWNER/NAME]",
+		Summary: "name the next ready se issue, or say that none is ready; on a terminal, --take claims it (or issue N) by pushing its branch issue-N",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue next")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			s, err := src()
-			if err != nil {
-				return Reply{}, err
-			}
-			next, ok, err := s.Next()
-			if err != nil {
-				return Reply{}, err
-			}
-			return issueReply(*asJSON, next, ok, "")
-		},
-	})
-	register(Command{
-		Name:    "issue take",
-		Usage:   "issue take [N] [--json] [--repo OWNER/NAME]",
-		Summary: "claim the next ready se issue, or issue N: push its branch issue-N from origin/main and check it out",
-		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue take")
-			want := 0
-			// The issue's number may stand before, between or after the flags.
+			var take takeFlag
+			fs.Var(&take, "take", "claim the next ready issue, or issue N")
+			// --take's number may stand right after it, or anywhere among the flags.
 			for rest := c.Args; ; {
 				if err := fs.Parse(rest); err != nil {
 					return Reply{}, err
@@ -51,29 +34,136 @@ func init() {
 					break
 				}
 				n, err := strconv.Atoi(strings.TrimPrefix(fs.Arg(0), "#"))
-				if err != nil || n <= 0 || want != 0 {
-					return Reply{}, fmt.Errorf("issue take takes one issue number, not %q", fs.Arg(0))
+				if !take.set || err != nil || n <= 0 || take.n != 0 {
+					return Reply{}, fmt.Errorf("issue next takes one issue number, after --take, not %q", fs.Arg(0))
 				}
-				want, rest = n, fs.Args()[1:]
+				take.n, rest = n, fs.Args()[1:]
 			}
 			c.Args = nil
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
+			if take.set && c.Session {
+				return Reply{}, fmt.Errorf("--take claims an issue from a terminal, not from a session")
+			}
 			s, err := src()
 			if err != nil {
 				return Reply{}, err
 			}
-			took, ok, err := s.Take(c.Workspace, want)
+			if !take.set {
+				next, ok, err := s.Next()
+				if err != nil {
+					return Reply{}, err
+				}
+				return issueReply(*asJSON, next, ok, "")
+			}
+			took, ok, err := s.Take(c.Workspace, take.n)
 			if err != nil {
 				return Reply{}, err
 			}
 			return issueReply(*asJSON, took, ok, issues.Branch(took.Number))
 		},
 	})
+	register(Command{
+		Name:    "issue new",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--json] [--repo OWNER/NAME]",
+		Summary: "create an se issue, linked as blocked by each issue named (GitHub's native links), and name it",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "issue new")
+			title := fs.String("title", "", "the issue's title")
+			body := fs.String("body", "", "the issue's body")
+			bodyFile := fs.String("body-file", "", "a file holding the issue's body")
+			blockedBy := fs.String("blocked-by", "", "the issues that block it, as N,M, or none")
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			given := map[string]bool{}
+			fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+			if !given["blocked-by"] {
+				return Reply{}, fmt.Errorf("issue new needs --blocked-by: the issues that block it, as N,M, or none")
+			}
+			blockers, err := issues.ParseBlockedBy(*blockedBy)
+			if err != nil {
+				return Reply{}, err
+			}
+			if given["body"] == given["body-file"] {
+				return Reply{}, fmt.Errorf("issue new takes one of --body and --body-file")
+			}
+			if given["body-file"] {
+				path := *bodyFile
+				if !filepath.IsAbs(path) {
+					path = filepath.Join(c.Workspace, path)
+				}
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return Reply{}, err
+				}
+				*body = string(data)
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			made, err := s.Create(*title, *body, blockers)
+			if err != nil {
+				return Reply{}, err
+			}
+			if *asJSON {
+				data, err := json.Marshal(struct {
+					Number    int    `json:"number"`
+					URL       string `json:"url"`
+					BlockedBy []int  `json:"blocked_by"`
+				}{made.Number, made.URL, append([]int{}, blockers...)})
+				return Reply{Text: string(data)}, err
+			}
+			text := fmt.Sprintf("Created #%d %s\n%s", made.Number, made.Title, made.URL)
+			if len(blockers) > 0 {
+				names := make([]string, len(blockers))
+				for k, b := range blockers {
+					names[k] = "#" + strconv.Itoa(b)
+				}
+				text += "\nBlocked by " + strings.Join(names, ", ") + "."
+			}
+			return Reply{Text: text}, nil
+		},
+	})
 }
 
-// issueFlags is the flag set both issue commands take; src reads the issues of
+// takeFlag is --take: alone it claims the next ready issue, --take=N or
+// --take N claims issue N.
+type takeFlag struct {
+	set bool
+	n   int
+}
+
+func (t *takeFlag) IsBoolFlag() bool { return true }
+
+func (t *takeFlag) String() string {
+	if t == nil || t.n == 0 {
+		return ""
+	}
+	return strconv.Itoa(t.n)
+}
+
+func (t *takeFlag) Set(v string) error {
+	switch v {
+	case "true":
+		t.set = true
+		return nil
+	case "false":
+		t.set, t.n = false, 0
+		return nil
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(v, "#"))
+	if err != nil || n <= 0 {
+		return fmt.Errorf("--take takes one issue number, not %q", v)
+	}
+	t.set, t.n = true, n
+	return nil
+}
+
+// issueFlags is the flag set every issue command takes; src reads the issues of
 // --repo, or of the workspace's origin, once the flags are parsed.
 func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Source, error), asJSON *bool) {
 	fs = c.Flags(name)
