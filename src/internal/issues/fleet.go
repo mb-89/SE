@@ -46,6 +46,9 @@ type Finding struct {
 	autoMerge bool
 	// judgment is true where only a person can decide the fix.
 	judgment bool
+	// spent is true for a leftover claim whose branch main holds whole:
+	// deleting it loses nothing.
+	spent bool
 	// key names the finding in the record its fix leaves.
 	key string
 }
@@ -76,6 +79,8 @@ func (f *Finding) setRemedy() {
 		f.Remedy = fmt.Sprintf("se issue next --take %d, merge origin/main into %s, make it green, se issue land", f.Issue, Branch(f.Issue))
 	case f.cause() == GreenUnmerged && !f.autoMerge:
 		f.Remedy = "se fleet fix turns auto-merge on"
+	case f.spent:
+		f.Remedy = "se fleet fix deletes " + Branch(f.Issue) + ": main holds all its commits"
 	case f.judgment || f.cause() == GreenUnmerged:
 		f.Remedy = "se fleet fix reports it as an " + PersonLabel + " issue"
 	default:
@@ -349,7 +354,8 @@ func (s Source) checks(sha string) (red []string, pending bool, err error) {
 	return red, pending, nil
 }
 
-// leftovers is the issue-<n> branches whose issue is no open se issue.
+// leftovers is the issue-<n> branches whose issue is no open se issue. One
+// that main holds whole is spent: its fix deletes it.
 func (s Source) leftovers(t tree, refs []ref) ([]Finding, error) {
 	var out []Finding
 	for _, r := range refs {
@@ -376,8 +382,19 @@ func (s Source) leftovers(t tree, refs []ref) ([]Finding, error) {
 		default:
 			why = "not labelled " + Label
 		}
-		out = append(out, Finding{Kind: LeftoverClaim, Issue: n, key: "leftover-claim",
-			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why)})
+		cmp, err := api[struct {
+			AheadBy int `json:"ahead_by"`
+		}](s, fmt.Sprintf("repos/%s/compare/main...%s?per_page=1", s.Repo, r.Object.SHA), false)
+		if err != nil {
+			return nil, err
+		}
+		f := Finding{Kind: LeftoverClaim, Issue: n, head: r.Object.SHA, key: "leftover-claim",
+			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why)}
+		if cmp[0].AheadBy == 0 {
+			f.spent, f.key = true, "leftover-branch"
+			f.What += ", and main holds all its commits"
+		}
+		out = append(out, f)
 	}
 	return out, nil
 }
@@ -458,7 +475,8 @@ type Fixed struct {
 var fleetMark = regexp.MustCompile(`<!-- se:fleet (\S+) (\d+) -->`)
 
 // Fix applies, in order, the remedy of every finding that needs no checkout:
-// auto-merge goes on where it is off, and a finding with no other remedy
+// auto-merge goes on where it is off, a spent leftover branch is deleted, and
+// a finding with no other remedy
 // becomes an issue, labelled se-person where it is a judgment. A takeover is
 // left to the box, which runs its remedy. Each fix is recorded on the
 // finding's issue; a finding that is back after its fix goes to a person, and
@@ -521,6 +539,11 @@ func (s Source) fix(x *Fixed) error {
 		if merged {
 			x.Did = fmt.Sprintf("merged PR #%d, which had nothing left to wait for", f.PR)
 		}
+	case f.spent:
+		if _, err := s.GH("api", "-X", "DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, Branch(f.Issue))); err != nil {
+			return fmt.Errorf("deleting %s: %w", Branch(f.Issue), err)
+		}
+		x.Did = fmt.Sprintf("deleted %s at %s, which main holds whole", Branch(f.Issue), f.head)
 	default:
 		person := f.judgment || f.cause() == GreenUnmerged
 		if x.Made, err = s.report(f, person); err != nil {

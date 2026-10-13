@@ -51,7 +51,10 @@ and only then leaves.**
      box merges `origin/main` into it, makes it green and lands it again with
      `se issue land`;
    - a green PR with auto-merge off gets auto-merge turned on (`se fleet fix`);
-   - an impossible block, a leftover claim, or anything else with no remedy is
+   - a leftover claim whose issue is closed (or no open `se` issue) and whose
+     branch main holds whole (no commit main lacks) has its branch deleted
+     (`se fleet fix`): nothing is lost, and nothing else could clear it;
+   - an impossible block, any other leftover claim, or anything else with no remedy is
      reported as an issue (`se fleet fix`, through the same code as
      `se issue new`), labelled `se-person` and assigned to the repository's
      owner where it is a judgment: a cycle, a blocker outside the fleet, a

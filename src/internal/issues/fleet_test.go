@@ -58,6 +58,7 @@ func newWorld(t *testing.T, items []string, claimed ...int) *world {
 	var refs []string
 	for _, n := range claimed {
 		refs = append(refs, fmt.Sprintf(`{"ref":"refs/heads/issue-%d","object":{"sha":"c%d"}}`, n, n))
+		w.ahead(n, 1)
 	}
 	w.answers[refsPath] = "[" + strings.Join(refs, ",") + "]"
 	for _, it := range items {
@@ -68,6 +69,11 @@ func newWorld(t *testing.T, items []string, claimed ...int) *world {
 		w.answers[links(i.Number)] = `[]`
 	}
 	return w
+}
+
+// ahead records how many commits issue-n's branch has that main lacks.
+func (w *world) ahead(n, by int) {
+	w.answers[fmt.Sprintf("repos/o/r/compare/main...c%d?per_page=1", n)] = fmt.Sprintf(`{"ahead_by":%d}`, by)
 }
 
 // pushed records the last push to issue-n's branch.
@@ -253,6 +259,26 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	f := only(t, w.check(), LeftoverClaim, 19)
 	if f.What != "issue-19 claims #19, which is closed (not planned)" || f.Remedy != "se fleet fix reports it as an se issue" {
 		t.Fatalf("%+v", f)
+	}
+}
+
+func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
+	w := newWorld(t, []string{item(5, 0)}, 19)
+	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned"}`
+	w.ahead(19, 0)
+	f := only(t, w.check(), LeftoverClaim, 19)
+	if f.What != "issue-19 claims #19, which is closed (not planned), and main holds all its commits" || f.Remedy != "se fleet fix deletes issue-19: main holds all its commits" {
+		t.Fatalf("%+v", f)
+	}
+	done, err := Source{Repo: repo, GH: w.gh, Now: clock}.Fix([]Finding{f})
+	if err != nil || done[0].Did != "deleted issue-19 at c19, which main holds whole" || done[0].Made != 0 {
+		t.Fatalf("%+v %v", done, err)
+	}
+	if !wrote(w, "DELETE repos/o/r/git/refs/heads/issue-19") || len(w.writes) != 2 {
+		t.Fatalf("writes %q", w.writes)
+	}
+	if len(w.comments[19]) != 1 || !strings.Contains(w.comments[19][0].Body, "<!-- se:fleet leftover-branch 0 -->") {
+		t.Fatalf("#19 has no record: %+v", w.comments[19])
 	}
 }
 
