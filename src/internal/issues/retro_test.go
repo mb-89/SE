@@ -97,7 +97,7 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 		a["repos/o/r/commits/h49/check-runs?filter=all&per_page=100"] = `{"check_runs":[{"id":9,"name":"check","status":"completed","conclusion":"success"}]}`
 		a["repos/o/r/pulls/49/files?per_page=100"] = `[]`
 		a["repos/o/r/issues?labels=se&state=closed&per_page=100"] = "[" + strings.Join(closed, ",") + "]"
-		a["repos/o/r/commits?sha=main&per_page=100"] = commits[:len(commits)-1] + `,{"sha":"m49","commit":{"message":"m"}},{"sha":"first","commit":{"message":"the first commit"}}]`
+		a["repos/o/r/commits?sha=main&per_page=100&until=2026-10-13T12:00:00Z"] = commits[:len(commits)-1] + `,{"sha":"m49","commit":{"message":"m"}},{"sha":"first","commit":{"message":"the first commit"}}]`
 		return a
 	}
 	// GitHub's since is about updates: #19 closed before the window but was
@@ -109,7 +109,7 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 	a["repos/o/r/issues/21"] = `{"number":21,"state":"closed","state_reason":"completed"}`
 	a["repos/o/r/issues/22"] = `{"number":22,"state":"open"}`
 	a["repos/o/r/issues?labels=se&state=closed&per_page=100"+since] = "[" + strings.Join(closed, ",") + "]"
-	a["repos/o/r/commits?sha=main&per_page=100"+since] = commits
+	a["repos/o/r/commits?sha=main&per_page=100"+since+"&until=2026-10-13T12:00:00Z"] = commits
 	return a
 }
 

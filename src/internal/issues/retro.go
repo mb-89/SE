@@ -292,7 +292,7 @@ func (s Source) Collect(n int) (Collected, error) {
 		Commit struct {
 			Message string `json:"message"`
 		} `json:"commit"`
-	}](s, fmt.Sprintf("repos/%s/commits?sha=main&per_page=100%s", s.Repo, c.Window.since()), true)
+	}](s, fmt.Sprintf("repos/%s/commits?sha=main&per_page=100%s&until=%s", s.Repo, c.Window.since(), c.Window.Until.Format(time.RFC3339)), true)
 	if err != nil {
 		return Collected{}, err
 	}
