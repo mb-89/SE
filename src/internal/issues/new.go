@@ -105,7 +105,8 @@ func (s Source) Create(title, body string, parent int, blockedBy []int, labels .
 	return s.create(title, body, parent, blockedBy, append([]string{Label}, labels...))
 }
 
-// create is Create with the labels given, se among them.
+// create is Create with the labels given, se among them. The body ends in
+// NewMark.
 func (s Source) create(title, body string, parent int, blockedBy []int, labels []string) (made Issue, ready bool, err error) {
 	if strings.TrimSpace(title) == "" {
 		return Issue{}, false, fmt.Errorf("an issue needs a --title")
@@ -120,7 +121,8 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 		}
 	}
 	path := fmt.Sprintf("repos/%s/issues", s.Repo)
-	args := []string{"api", "-X", "POST", "-f", "title=" + title, "-f", "body=" + body}
+	// The mark tells the retro this issue was made here, not by hand.
+	args := []string{"api", "-X", "POST", "-f", "title=" + title, "-f", "body=" + strings.TrimRight(body, "\n") + "\n\n" + NewMark}
 	for _, l := range labels {
 		args = append(args, "-f", "labels[]="+l)
 	}

@@ -20,7 +20,10 @@ those.
    follow the coordination skill,
    [src/plugin/skills/coordination/SKILL.md](../coordination/SKILL.md), which
    checks what is broken and fixes it before the session ends. If it says the issue is a parent, follow **A parent**
-   below instead of steps 3 to 5.
+   below instead of steps 3 to 5. If it says the issue is a retro (labelled
+   `se-retro`), follow the retro skill,
+   [src/plugin/skills/retro/SKILL.md](../retro/SKILL.md), instead of steps 3
+   to 5.
 2. If `set_session_title` is available, rename this session to
    `SE #<n> · <issue title>`.
 3. Do the issue's work on its branch `issue-<n>`, following CLAUDE.md. If it
