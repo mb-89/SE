@@ -1,3 +1,4 @@
+// Internal test package: it uses the fakes of the package's other internal tests.
 package issues
 
 import (
@@ -111,8 +112,10 @@ func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
 	if len(created) != 6 || created[0] != "title=it breaks" || !reflect.DeepEqual(under, []string{"sub_issue_id=1010"}) {
 		t.Fatalf("created %q, under the gate %q", created, under)
 	}
-	for _, want := range []string{"- **it breaks** (blocking, #10)", "- **nit 1** (not blocking, #11)", "- **nit 7** (not blocking, not filed (past the first five))",
-		"2 more non-blocking finding(s) counted, not filed.", "### Checked and clean\n- the tests: none weakened"} {
+	for _, want := range []string{
+		"- **it breaks** (blocking, #10)", "- **nit 1** (not blocking, #11)", "- **nit 7** (not blocking, not filed (past the first five))",
+		"2 more non-blocking finding(s) counted, not filed.", "### Checked and clean\n- the tests: none weakened",
+	} {
 		if !strings.Contains(report, want) {
 			t.Errorf("the report lacks %q:\n%s", want, report)
 		}
