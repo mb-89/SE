@@ -1,5 +1,7 @@
 # How work lands
 
+SE's design principles, which the retro and the overhaul measure against, are in [spec/principles.md](spec/principles.md).
+
 1. Work on your own branch. main takes merged PRs alone.
 2. Run `sh ./tests/check.sh` before every push. The pre-push hook runs it too, and a push that skips the hook is refused.
 3. Once check.sh passes, open one PR against main and turn on auto-merge (squash).
