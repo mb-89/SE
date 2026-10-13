@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const repo = "o/r"
@@ -34,13 +35,32 @@ const (
 	refsPath = "repos/o/r/git/matching-refs/heads/issue-"
 )
 
+// now is the tests' clock; a branch pushed at fresh is inside the lease, one
+// pushed at stale is not.
+var (
+	now   = time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	clock = func() time.Time { return now }
+	fresh = now.Add(-time.Hour).Format(time.RFC3339)
+	stale = now.Add(-4 * time.Hour).Format(time.RFC3339)
+)
+
+// pushedAt answers issue n's branch activity and comments: last pushed at
+// when, no comments.
+func pushedAt(answers map[string]string, n int, when string) map[string]string {
+	answers[fmt.Sprintf("repos/o/r/activity?ref=refs/heads/issue-%d&per_page=1", n)] = `[{"timestamp":"` + when + `"}]`
+	if _, ok := answers[fmt.Sprintf("repos/o/r/issues/%d/comments?per_page=100", n)]; !ok {
+		answers[fmt.Sprintf("repos/o/r/issues/%d/comments?per_page=100", n)] = `[]`
+	}
+	return answers
+}
+
 func open(n int, body string) string {
 	return fmt.Sprintf(`{"number":%d,"title":"t%d","body":%q,"state":"open","html_url":"u%d","issue_dependencies_summary":{"total_blocked_by":0}}`, n, n, body, n)
 }
 
 func survey(t *testing.T, answers map[string]string) map[int]string {
 	t.Helper()
-	all, err := Source{Repo: repo, GH: recorded(t, answers)}.Survey()
+	all, err := Source{Repo: repo, GH: recorded(t, answers), Now: clock}.Survey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,10 +87,12 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 	// Recorded from mb-89/SE: #5 claimed; #6 says "Blocked by: #5" in its
 	// body, which is no blocker, as only native links are.
 	gh := recorded(t, map[string]string{
-		"repos/mb-89/SE/issues?labels=se&state=open&per_page=100": read("issues.json"),
-		"repos/mb-89/SE/git/matching-refs/heads/issue-":           read("refs.json"),
+		"repos/mb-89/SE/issues?labels=se&state=open&per_page=100":   read("issues.json"),
+		"repos/mb-89/SE/git/matching-refs/heads/issue-":             read("refs.json"),
+		"repos/mb-89/SE/activity?ref=refs/heads/issue-5&per_page=1": `[{"timestamp":"` + fresh + `"}]`,
+		"repos/mb-89/SE/issues/5/comments?per_page=100":             `[]`,
 	})
-	s := Source{Repo: "mb-89/SE", GH: gh}
+	s := Source{Repo: "mb-89/SE", GH: gh, Now: clock}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +103,7 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 			t.Errorf("%d: #%d %q, want #%d %q", k, st.Number, st.Why, 5+k, want[k])
 		}
 	}
-	next, ok, err := s.Next()
+	next, ok, _, err := s.Next()
 	if err != nil || !ok || next.Number != 6 || !strings.Contains(next.URL, "/issues/6") {
 		t.Fatalf("next = %+v %v %v", next, ok, err)
 	}
@@ -103,18 +125,18 @@ func TestLowestReadyNumberComesFirst(t *testing.T) {
 		listPath: `[` + open(9, "") + `,` + open(3, "") + `]` + `[` + open(5, "") + `]`, // two pages
 		refsPath: `[]`,
 	})
-	next, ok, err := Source{Repo: repo, GH: gh}.Next()
+	next, ok, _, err := Source{Repo: repo, GH: gh}.Next()
 	if err != nil || !ok || next.Number != 3 || next.Title != "t3" {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
 }
 
 func TestAClaimedBranchHoldsItsIssue(t *testing.T) {
-	got := survey(t, map[string]string{
+	got := survey(t, pushedAt(map[string]string{
 		listPath: `[` + open(1, "") + `,` + open(2, "") + `,` + open(12, "") + `]`,
 		// issue-12 is not issue-1; issue-2-old is not issue-2.
 		refsPath: `[{"ref":"refs/heads/issue-1"},{"ref":"refs/heads/issue-2-old"}]`,
-	})
+	}, 1, fresh))
 	if !reflect.DeepEqual(got, map[int]string{1: "claimed by issue-1", 2: "", 12: ""}) {
 		t.Fatalf("%v", got)
 	}
@@ -148,12 +170,12 @@ func TestNothingReady(t *testing.T) {
 		"no issues": `[]`,
 		"all held":  `[` + open(1, "") + `,{"number":2,"state":"open","issue_dependencies_summary":{"total_blocked_by":1}}]`,
 	} {
-		gh := recorded(t, map[string]string{
+		gh := recorded(t, pushedAt(map[string]string{
 			listPath: list,
 			refsPath: `[{"ref":"refs/heads/issue-1"}]`,
 			"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
-		})
-		if next, ok, err := (Source{Repo: repo, GH: gh}).Next(); err != nil || ok {
+		}, 1, fresh))
+		if next, ok, _, err := (Source{Repo: repo, GH: gh, Now: clock}).Next(); err != nil || ok {
 			t.Errorf("%s: %+v %v %v", name, next, ok, err)
 		}
 	}
@@ -233,16 +255,16 @@ func TestATakeRefusedMovesToTheNextIssue(t *testing.T) {
 		refsPath: `[]`,
 	})
 	s := Source{Repo: repo, GH: gh}
-	if took, ok, err := s.Take(a, 0); err != nil || !ok || took.Number != 5 {
+	if took, ok, _, err := s.Take(a, 0); err != nil || !ok || took.Number != 5 {
 		t.Fatalf("a took %+v %v %v", took, ok, err)
 	}
-	if took, ok, err := s.Take(b, 5); err != nil || !ok || took.Number != 6 {
+	if took, ok, _, err := s.Take(b, 5); err != nil || !ok || took.Number != 6 {
 		t.Fatalf("b took %+v %v %v", took, ok, err)
 	}
 	if got := run(t, b, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-6" {
 		t.Fatalf("b is on %s", got)
 	}
-	if took, ok, err := s.Take(b, 0); err != nil || ok {
+	if took, ok, _, err := s.Take(b, 0); err != nil || ok {
 		t.Fatalf("nothing left, yet b took %+v %v %v", took, ok, err)
 	}
 }
@@ -254,10 +276,10 @@ func TestTakeRefusesAnIssueThatIsNotReady(t *testing.T) {
 		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
 	})
 	s := Source{Repo: repo, GH: gh}
-	if _, _, err := s.Take(t.TempDir(), 2); err == nil || !strings.Contains(err.Error(), "blocked by #1") {
+	if _, _, _, err := s.Take(t.TempDir(), 2); err == nil || !strings.Contains(err.Error(), "blocked by #1") {
 		t.Fatalf("%v", err)
 	}
-	if _, _, err := s.Take(t.TempDir(), 3); err == nil || !strings.Contains(err.Error(), "not an open issue") {
+	if _, _, _, err := s.Take(t.TempDir(), 3); err == nil || !strings.Contains(err.Error(), "not an open issue") {
 		t.Fatalf("%v", err)
 	}
 }

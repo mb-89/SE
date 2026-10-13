@@ -35,13 +35,14 @@ var check = func(dir string) error {
 func init() {
 	register(Command{
 		Name:    "issue next",
-		Usage:   "issue next [--take [N]] [--json] [--repo OWNER/NAME]",
-		Summary: "name the next ready se issue, or say that none is ready; --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out",
+		Usage:   "issue next [--take [N]] [--person] [--json] [--repo OWNER/NAME]",
+		Summary: "name the next se issue, a stuck one before a ready one, or say that none is; --take claims it (or issue N): its branch issue-N, pushed from origin/main, or a stuck one's as it stands, checked out; --person lists the issues waiting on a person",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue next")
 			take := &takeFlag{}
-			fs.Var(take, "take", "claim the issue: the next ready one, or --take N")
+			fs.Var(take, "take", "claim the issue: the next one, or --take N")
+			person := fs.Bool("person", false, "list the issues waiting on a person")
 			// --take N: the number may stand after --take, between or after the other flags.
 			for rest := c.Args; ; {
 				if err := fs.Parse(rest); err != nil {
@@ -60,22 +61,71 @@ func init() {
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
+			if *person && take.set {
+				return Reply{}, fmt.Errorf("issue next takes --person or --take, not both")
+			}
 			s, err := src()
 			if err != nil {
 				return Reply{}, err
 			}
-			if !take.set {
-				next, ok, err := s.Next()
+			if *person {
+				waiting, err := s.Waiting()
 				if err != nil {
 					return Reply{}, err
 				}
-				return issueReply(*asJSON, next, ok, "")
+				return waitingReply(*asJSON, waiting)
 			}
-			took, ok, err := s.Take(c.Workspace, take.n)
+			if !take.set {
+				next, ok, flagged, err := s.Next()
+				if err != nil {
+					return Reply{}, err
+				}
+				return issueReply(*asJSON, next, ok, "", flagged)
+			}
+			took, ok, flagged, err := s.Take(c.Workspace, take.n)
 			if err != nil {
 				return Reply{}, err
 			}
-			return issueReply(*asJSON, took, ok, issues.Branch(took.Number))
+			return issueReply(*asJSON, took, ok, issues.Branch(took.Number), flagged)
+		},
+	})
+	register(Command{
+		Name:    "issue resume",
+		Usage:   "issue resume N [--json] [--repo OWNER/NAME]",
+		Summary: "for a person: take issue N off se-person and put it back in the queue, its takeover count reset",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "issue resume")
+			if err := fs.Parse(c.Args); err != nil {
+				return Reply{}, err
+			}
+			n := 0
+			if fs.NArg() > 0 {
+				n, _ = strconv.Atoi(strings.TrimPrefix(fs.Arg(0), "#"))
+			}
+			if n <= 0 {
+				return Reply{}, fmt.Errorf("issue resume takes an issue number")
+			}
+			c.Args = fs.Args()[1:]
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			i, err := s.Resume(n)
+			if err != nil {
+				return Reply{}, err
+			}
+			if *asJSON {
+				data, err := json.Marshal(struct {
+					Number  int  `json:"number"`
+					Resumed bool `json:"resumed"`
+				}{i.Number, true})
+				return Reply{Text: string(data)}, err
+			}
+			return Reply{Text: fmt.Sprintf("Resumed #%d %s: back in the queue, its takeover count reset.\n%s", i.Number, i.Title, i.URL)}, nil
 		},
 	})
 	register(Command{
@@ -226,26 +276,54 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 }
 
 // issueReply shows the issue, or that there was none; branch names the branch
-// a take checked out.
-func issueReply(asJSON bool, i issues.Issue, ok bool, branch string) (Reply, error) {
+// a take checked out, and flagged the issues the sweep gave to a person.
+func issueReply(asJSON bool, i issues.Issue, ok bool, branch string, flagged []issues.Status) (Reply, error) {
 	if asJSON {
 		answer := struct {
-			Ready  bool          `json:"ready"`
-			Issue  *issues.Issue `json:"issue,omitempty"`
-			Branch string        `json:"branch,omitempty"`
+			Ready   bool          `json:"ready"`
+			Issue   *issues.Issue `json:"issue,omitempty"`
+			Branch  string        `json:"branch,omitempty"`
+			Flagged []int         `json:"flagged,omitempty"`
 		}{Ready: ok}
 		if ok {
 			answer.Issue, answer.Branch = &i, branch
 		}
+		for _, f := range flagged {
+			answer.Flagged = append(answer.Flagged, f.Number)
+		}
 		data, err := json.Marshal(answer)
 		return Reply{Text: string(data)}, err
 	}
-	if !ok {
-		return Reply{Text: "No se issue is ready."}, nil
+	var head string
+	for _, f := range flagged {
+		head += fmt.Sprintf("Gave #%d %s to a person: stuck a second time.\n", f.Number, f.Title)
 	}
-	head := fmt.Sprintf("#%d %s\n%s", i.Number, i.Title, i.URL)
+	if !ok {
+		return Reply{Text: head + "No se issue is ready."}, nil
+	}
 	if branch != "" {
-		head = fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
+		head += fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
+	} else {
+		head += fmt.Sprintf("#%d %s\n%s", i.Number, i.Title, i.URL)
 	}
 	return Reply{Text: strings.TrimRight(head+"\n\n"+i.Body, "\n")}, nil
+}
+
+// waitingReply lists the issues waiting on a person.
+func waitingReply(asJSON bool, waiting []issues.Waiting) (Reply, error) {
+	if asJSON {
+		data, err := json.Marshal(waiting)
+		return Reply{Text: string(data)}, err
+	}
+	if len(waiting) == 0 {
+		return Reply{Text: "No se issue waits on a person."}, nil
+	}
+	var b strings.Builder
+	for k, w := range waiting {
+		if k > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "#%d %s\n%s\nBlocks %d open issue(s).\n%s", w.Number, w.Title, w.URL, w.Blocks, w.Reason)
+	}
+	return Reply{Text: b.String()}, nil
 }

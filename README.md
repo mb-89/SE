@@ -21,7 +21,8 @@ command, `/se`, which takes words the way a command line does:
 | `/se status` | says whether a daemon answers for this workspace |
 | `/se restart` | stops this workspace's daemon and starts it again; in an SE checkout, rebuilt from its source first |
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
-| `/se issue next` | names the next ready `se` issue, or says that none is ready; `--take` claims it |
+| `/se issue next` | names the next `se` issue, a stuck one before a ready one, or says that none is ready; `--take` claims it (taking a stuck one over); `--person` lists the issues waiting on a person |
+| `/se issue resume` | for a person: puts an `se-person` issue back in the queue, its takeover count reset |
 | `/se issue land` | on an `issue-<n>` branch: passes the check, pushes, opens its PR against main (`Fixes #<n>`) and turns on auto-merge (squash) |
 | `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required) |
 | `/se help`, `/se` | lists these |
@@ -65,7 +66,10 @@ one a box may take, and `se issue next --take` claims it by pushing its branch
 `--blocked-by` writes GitHub's native "blocked by" links. The rules for which
 issue is ready, how a claim works, and how issues are made live in
 [docs/issues.md](docs/issues.md). `se issue land` brings the claimed issue's
-branch to main through one PR on auto-merge.
+branch to main through one PR on auto-merge. A claim nothing is pushed to for
+3 hours is stuck: the next box takes it over once, and a second time it goes to
+a person (`se issue next --person` lists those, `se issue resume` puts one
+back).
 
 A box (a cloud session working unattended) follows the work skill,
 [.claude/skills/work/SKILL.md](.claude/skills/work/SKILL.md): take the next

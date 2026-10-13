@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // recordedIssues answers the issue commands' gh calls for o/r: #1 claimed,
@@ -24,6 +25,8 @@ func recordedIssues(t *testing.T) *[][]string {
 			{"number":1,"title":"one","body":"","state":"open","html_url":"u1","issue_dependencies_summary":{"total_blocked_by":0}}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[{"ref":"refs/heads/issue-1"}]`,
 		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
+		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":    `[{"timestamp":"` + time.Now().UTC().Format(time.RFC3339) + `"}]`,
+		"repos/o/r/issues/1/comments?per_page=100":                `[]`,
 		"repos/o/r/issues/1":                                      `{"id":101,"number":1}`,
 		"repos/o/r/issues/3":                                      `{"id":103,"number":3}`,
 		"repos/o/r/issues/4":                                      `{"id":104,"number":4,"pull_request":{}}`,
@@ -75,14 +78,14 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, next." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, next, resume." {
 		t.Fatalf("%+v", r)
 	}
 }
 
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, next." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, next, resume." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -91,7 +94,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue next, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, next.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, next, resume.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -204,5 +207,27 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	code, out, _ = se(t, "issue", "land", "--json", "--workspace", ws, "--repo", "o/r")
 	if code != 0 || out != `{"issue":6,"number":14,"url":"u14","created":true,"merged":false}`+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
+	}
+}
+
+func TestIssueNextPersonListsTheWaitingAndResumePutsThemBack(t *testing.T) {
+	calls := recordedIssues(t)
+	code, out, errs := se(t, "issue", "next", "--person", "--repo", "o/r")
+	if code != 0 || out != "No se issue waits on a person.\n" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if code, _, errs := se(t, "issue", "next", "--person", "--take", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "not both") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	if code, _, errs := se(t, "issue", "resume", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "takes an issue number") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	// #3 waits on no person, so resume writes nothing.
+	*calls = nil
+	if code, _, errs := se(t, "issue", "resume", "3", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "not an open issue waiting on a person") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("calls %q", *calls)
 	}
 }

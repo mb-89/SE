@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Label marks an issue as the fleet's work.
@@ -51,6 +52,15 @@ type Source struct {
 	// Repo is OWNER/NAME.
 	Repo string
 	GH   GH
+	// Now is the clock the lease is read against; nil is the wall clock.
+	Now func() time.Time
+}
+
+func (s Source) now() time.Time {
+	if s.Now == nil {
+		return time.Now()
+	}
+	return s.Now()
 }
 
 // issue is the part of GitHub's issue object the rules read.
@@ -61,6 +71,9 @@ type issue struct {
 	State       string           `json:"state"`
 	URL         string           `json:"html_url"`
 	PullRequest *json.RawMessage `json:"pull_request"`
+	Labels      []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
 	// Dependencies is GitHub's count of native "blocked by" links; absent
 	// where the API does not report it.
 	Dependencies *struct {
@@ -103,15 +116,31 @@ func api[T any](s Source, path string, list bool) ([]T, error) {
 type Status struct {
 	Issue
 	// Why is empty for a ready issue, else what holds it: "claimed by
-	// issue-7", "blocked by #3, #4".
+	// issue-7", "blocked by #3, #4", "waits on a person".
 	Why string `json:"why,omitempty"`
+	// Stuck is set for a claimed issue nothing was pushed to for longer than
+	// the lease; Takeovers counts its takeovers since a person last resumed it.
+	Stuck     bool `json:"stuck,omitempty"`
+	Takeovers int  `json:"takeovers,omitempty"`
+	// Person is set for an issue labelled se-person; Reason says why.
+	Person bool   `json:"person,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// Since is when its branch last saw a push or a takeover.
+	Since time.Time `json:"-"`
+	// blockers are its open blockers, ascending.
+	blockers []int
 }
 
-// Ready says whether the issue may be taken.
+// Ready says whether the issue may be taken as new work.
 func (s Status) Ready() bool { return s.Why == "" }
 
+// Takeable says whether a take may have it: ready, or stuck for the first time.
+func (s Status) Takeable() bool {
+	return s.Ready() || (s.Stuck && s.Takeovers == 0 && !s.Person)
+}
+
 // Survey reads every open fleet issue and says where each stands, lowest
-// number first.
+// number first. It only reads; Sweep acts on what it finds.
 func (s Source) Survey() ([]Status, error) {
 	open, err := api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=100", s.Repo, Label), true)
 	if err != nil {
@@ -134,21 +163,45 @@ func (s Source) Survey() ([]Status, error) {
 		}
 	}
 	sort.Slice(fleet, func(a, b int) bool { return fleet[a].Number < fleet[b].Number })
+	now := s.now()
 	var out []Status
 	for _, i := range fleet {
 		st := Status{Issue: Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL}}
-		if claimed[Branch(i.Number)] {
-			st.Why = "claimed by " + Branch(i.Number)
-			out = append(out, st)
-			continue
-		}
-		blockers, err := s.openBlockers(i)
-		if err != nil {
+		if st.blockers, err = s.openBlockers(i); err != nil {
 			return nil, err
 		}
-		if len(blockers) > 0 {
-			names := make([]string, len(blockers))
-			for k, b := range blockers {
+		for _, l := range i.Labels {
+			st.Person = st.Person || l.Name == PersonLabel
+		}
+		switch {
+		case st.Person:
+			st.Why = "waits on a person"
+			marks, err := s.marks(i.Number)
+			if err != nil {
+				return nil, err
+			}
+			st.Reason = marks.reason
+		case claimed[Branch(i.Number)]:
+			st.Why = "claimed by " + Branch(i.Number)
+			marks, err := s.marks(i.Number)
+			if err != nil {
+				return nil, err
+			}
+			pushed, err := s.lastPush(i.Number)
+			if err != nil {
+				return nil, err
+			}
+			st.Since, st.Takeovers = pushed, marks.takeovers
+			if marks.lastTakeover.After(st.Since) {
+				st.Since = marks.lastTakeover
+			}
+			if now.Sub(st.Since) > Lease {
+				st.Stuck = true
+				st.Why += ", stuck: nothing pushed since " + st.Since.UTC().Format(time.RFC3339)
+			}
+		case len(st.blockers) > 0:
+			names := make([]string, len(st.blockers))
+			for k, b := range st.blockers {
 				names[k] = "#" + strconv.Itoa(b)
 			}
 			st.Why = "blocked by " + strings.Join(names, ", ")
@@ -178,29 +231,49 @@ func (s Source) openBlockers(i issue) ([]int, error) {
 	return blocking, nil
 }
 
-// Next is the lowest-numbered ready issue; ok is false when none is ready.
-func (s Source) Next() (next Issue, ok bool, err error) {
-	all, err := s.Survey()
+// Next is the issue a take would have: the lowest-numbered stuck one, else
+// the lowest-numbered ready one; ok is false when there is none. The sweep runs
+// first, so an issue stuck twice goes to a person on the way.
+func (s Source) Next() (next Issue, ok bool, flagged []Status, err error) {
+	all, flagged, err := s.Sweep()
 	if err != nil {
-		return Issue{}, false, err
+		return Issue{}, false, flagged, err
 	}
+	if order := takeOrder(all, 0); len(order) > 0 {
+		return order[0].Issue, true, flagged, nil
+	}
+	return Issue{}, false, flagged, nil
+}
+
+// takeOrder lists the issues a take may have, in the order it tries them: want
+// first, when it is above zero, then the stuck ones, then the ready ones.
+func takeOrder(all []Status, want int) []Status {
+	var order []Status
 	for _, st := range all {
-		if st.Ready() {
-			return st.Issue, true, nil
+		if st.Number == want {
+			order = append(order, st)
 		}
 	}
-	return Issue{}, false, nil
+	for _, stuck := range []bool{true, false} {
+		for _, st := range all {
+			if st.Takeable() && st.Stuck == stuck && st.Number != want {
+				order = append(order, st)
+			}
+		}
+	}
+	return order
 }
 
 // Take claims an issue in the git checkout dir: want, when it is above zero,
-// else the next ready one. Where another box claimed it first, it moves on to
-// the next ready issue. ok is false when nothing was left to take.
-func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
-	all, err := s.Survey()
+// else the next one, a stuck issue before new work. A stuck issue is taken
+// over: its branch is checked out as it stands. Where another box claimed or
+// took it over first, it moves on to the next one. ok is false when nothing was
+// left to take; flagged names the issues the sweep gave to a person.
+func (s Source) Take(dir string, want int) (took Issue, ok bool, flagged []Status, err error) {
+	all, flagged, err := s.Sweep()
 	if err != nil {
-		return Issue{}, false, err
+		return Issue{}, false, flagged, err
 	}
-	var order []Issue
 	if want > 0 {
 		found := false
 		for _, st := range all {
@@ -208,30 +281,29 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 				continue
 			}
 			found = true
-			if !st.Ready() {
-				return Issue{}, false, fmt.Errorf("#%d is not ready: %s", want, st.Why)
+			if !st.Takeable() {
+				return Issue{}, false, flagged, fmt.Errorf("#%d is not ready: %s", want, st.Why)
 			}
-			order = append(order, st.Issue)
 		}
 		if !found {
-			return Issue{}, false, fmt.Errorf("#%d is not an open issue labelled %s", want, Label)
+			return Issue{}, false, flagged, fmt.Errorf("#%d is not an open issue labelled %s", want, Label)
 		}
 	}
-	for _, st := range all {
-		if st.Ready() && st.Number != want {
-			order = append(order, st.Issue)
+	for _, st := range takeOrder(all, want) {
+		var claimed bool
+		if st.Stuck {
+			claimed, err = s.TakeOver(dir, st)
+		} else {
+			claimed, err = Claim(dir, st.Number)
 		}
-	}
-	for _, i := range order {
-		claimed, err := Claim(dir, i.Number)
 		if err != nil {
-			return Issue{}, false, err
+			return Issue{}, false, flagged, err
 		}
 		if claimed {
-			return i, true, nil
+			return st.Issue, true, flagged, nil
 		}
 	}
-	return Issue{}, false, nil
+	return Issue{}, false, flagged, nil
 }
 
 // Claim pushes the current origin/main as issue n's branch and checks it out.
