@@ -36,12 +36,12 @@ says that none is ready; it exits 0 either way. A session has it as
 `/se issue next`.
 
 `se issue next --take` claims the next ready issue, and `--take N` (or
-`--take=N`) claims issue `N`: it pushes `origin/main` as `issue-<n>` (a push that
-may only create the branch, never move it), then checks the branch out. Where
-the push is refused because another box claimed the issue first, it moves to
-the next ready issue. It prints what it took, or that nothing is ready.
-`--take N` refuses an issue that is not ready and says why. A claim is made from
-a terminal; a session's `/se issue next --take` is refused.
+`--take=N`) issue `N`: it pushes `origin/main` as `issue-<n>` (a push that may
+only create the branch, never move it), then checks the branch out. Where the
+push is refused because another box claimed the issue first, it moves to the
+next ready issue. It prints what it took, or that nothing is ready. `--take N`
+refuses an issue that is not ready and says why. There is no separate `take`
+command.
 
 `se issue new` creates an issue labelled `se` on the repository and links it as
 blocked by each issue `--blocked-by` names, then prints its number and link

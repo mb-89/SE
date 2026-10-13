@@ -21,13 +21,12 @@ command, `/se`, which takes words the way a command line does:
 | `/se status` | says whether a daemon answers for this workspace |
 | `/se restart` | stops this workspace's daemon and starts it again; in an SE checkout, rebuilt from its source first |
 | `/se update` | pulls main into the installed checkout, rebuilds `se`, restarts a running daemon and reloads the plugin |
-| `/se issue next` | names the next ready `se` issue, or says that none is ready |
+| `/se issue next` | names the next ready `se` issue, or says that none is ready; `--take` claims it |
 | `/se issue new` | creates an `se` issue with its native "blocked by" links (`--blocked-by` is required) |
 | `/se help`, `/se` | lists these |
 
 On a terminal, `se help` lists every command, those above and the ones a
-session is not offered: `se serve`, `se start` and `se stop`;
-`se issue next --take`, which claims an issue, is a terminal's alone.
+session is not offered: `se serve`, `se start` and `se stop`.
 
 The plugin is read from the checkout you ran `RUNME.sh` in.
 

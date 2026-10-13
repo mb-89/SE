@@ -19,13 +19,13 @@ func init() {
 	register(Command{
 		Name:    "issue next",
 		Usage:   "issue next [--take [N]] [--json] [--repo OWNER/NAME]",
-		Summary: "name the next ready se issue, or say that none is ready; on a terminal, --take claims it (or issue N) by pushing its branch issue-N",
+		Summary: "name the next ready se issue, or say that none is ready; --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue next")
-			var take takeFlag
-			fs.Var(&take, "take", "claim the next ready issue, or issue N")
-			// --take's number may stand right after it, or anywhere among the flags.
+			take := &takeFlag{}
+			fs.Var(take, "take", "claim the issue: the next ready one, or --take N")
+			// --take N: the number may stand after --take, between or after the other flags.
 			for rest := c.Args; ; {
 				if err := fs.Parse(rest); err != nil {
 					return Reply{}, err
@@ -42,9 +42,6 @@ func init() {
 			c.Args = nil
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
-			}
-			if take.set && c.Session {
-				return Reply{}, fmt.Errorf("--take claims an issue from a terminal, not from a session")
 			}
 			s, err := src()
 			if err != nil {
@@ -130,8 +127,8 @@ func init() {
 	})
 }
 
-// takeFlag is --take: alone it claims the next ready issue, --take=N or
-// --take N claims issue N.
+// takeFlag is --take, alone or as --take=N; a bare --take N is read by the
+// command, since a flag that may stand alone cannot take the next word.
 type takeFlag struct {
 	set bool
 	n   int
@@ -139,27 +136,22 @@ type takeFlag struct {
 
 func (t *takeFlag) IsBoolFlag() bool { return true }
 
-func (t *takeFlag) String() string {
-	if t == nil || t.n == 0 {
-		return ""
-	}
-	return strconv.Itoa(t.n)
-}
+func (t *takeFlag) String() string { return "" }
 
 func (t *takeFlag) Set(v string) error {
+	t.set = true
 	switch v {
 	case "true":
-		t.set = true
 		return nil
 	case "false":
-		t.set, t.n = false, 0
+		t.set = false
 		return nil
 	}
 	n, err := strconv.Atoi(strings.TrimPrefix(v, "#"))
 	if err != nil || n <= 0 {
-		return fmt.Errorf("--take takes one issue number, not %q", v)
+		return fmt.Errorf("--take takes an issue number, not %q", v)
 	}
-	t.set, t.n = true, n
+	t.n = n
 	return nil
 }
 

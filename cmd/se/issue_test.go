@@ -68,45 +68,49 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "issue", "next", "--repo", "o/r"); !strings.HasPrefix(r.Text, "#3 three") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue", "next", "--take", "--repo", "o/r"); !strings.Contains(r.Text, "not from a session") {
-		t.Fatalf("%+v", r)
-	}
 	if r := session(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--repo", "o/r"); r.Text != "Created #10 ten\nu10" {
-		t.Fatalf("%+v", r)
-	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: new, next." {
 		t.Fatalf("%+v", r)
 	}
 	if r := session(t, "help"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: new, next." {
+		t.Fatalf("%+v", r)
+	}
 }
 
-func TestIssueTakeIsNoCommand(t *testing.T) {
+func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	code, _, errs := se(t, "issue")
 	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: new, next." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
-	if _, taken := commands["issue take"]; taken {
-		t.Fatal("issue take is registered; it is issue next --take")
+}
+
+func TestThereIsNoTakeCommand(t *testing.T) {
+	if _, ok := commands["issue take"]; ok {
+		t.Fatal("take is a flag of issue next, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take", "3"); code != 2 || !strings.Contains(errs, "se issue takes a word: new, next.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: new, next.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
 
 func TestIssueNextTakeRefusesABadNumber(t *testing.T) {
 	recordedIssues(t)
-	for _, args := range [][]string{{"3"}, {"--take", "x"}, {"--take", "3", "4"}, {"--take=0"}, {"--take", "0"}, {"--take=x"}} {
+	for _, args := range [][]string{{"3"}, {"--take", "x"}, {"--take", "3", "4"}, {"--take=3", "4"}, {"--take", "0"}} {
 		code, _, errs := se(t, append([]string{"issue", "next", "--repo", "o/r"}, args...)...)
-		if code != 1 || !strings.Contains(errs, "one issue number") {
+		if code != 1 || !strings.Contains(errs, "issue number") {
 			t.Errorf("%v: exit %d, %q", args, code, errs)
 		}
 	}
-	for _, args := range [][]string{{"--take", "2"}, {"--take=2"}, {"--take", "#2", "--json"}} {
+	if code, _, errs := se(t, "issue", "next", "--take=x", "--repo", "o/r"); code != 1 || !strings.Contains(errs, `--take takes an issue number, not "x"`) {
+		t.Errorf("exit %d, %q", code, errs)
+	}
+	// Each spelling of --take N reaches the claim of issue 2, which is blocked.
+	for _, args := range [][]string{{"--take", "2"}, {"--take=2"}, {"--take", "#2"}, {"--take", "--json", "2"}} {
 		code, _, errs := se(t, append([]string{"issue", "next", "--repo", "o/r", "--workspace", t.TempDir()}, args...)...)
 		if code != 1 || !strings.Contains(errs, "#2 is not ready: blocked by #1") {
-			t.Fatalf("%v: exit %d, %q", args, code, errs)
+			t.Errorf("%v: exit %d, %q", args, code, errs)
 		}
 	}
 }
