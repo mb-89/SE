@@ -26,6 +26,10 @@ type World = {
   movesTo: string | null
   // The environment each se session call was given, by its words.
   envs: Record<string, Record<string, string>>
+  // Every pane the plugin opened, by id and title.
+  opened: { id: string; title?: string }[]
+  // Every line the plugin logged to the transcript.
+  logs: string[]
 }
 
 const HELP = '/se <command>\n\n  /se help   list the commands'
@@ -45,11 +49,15 @@ function world(on: On, env: Record<string, string> = {}): World {
     head: 'aaa111',
     movesTo: null,
     envs: {},
+    opened: [],
+    logs: [],
     replies: {
       '': { text: HELP },
       on: { text: 'SE is on.', active: true, endpoint: DAEMON },
       off: { text: 'SE is off.', active: false },
       update: { text: 'SE updated aaa → bbb. Its daemon restarted.', endpoint: DAEMON, reload: true },
+      status: { text: 'No SE daemon answers for /work.' },
+      ui: { text: "SE's control panel is open.", panel: { buttons: ['issue next', 'status'] } },
     },
   }
   mock.env(on, env)
@@ -61,6 +69,14 @@ function world(on: On, env: Record<string, string> = {}): World {
   })
   on('ui.toast', ($, e) => {
     w.toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('ui.open', ($, e) => {
+    w.opened.push({ id: e.id, title: e.title })
+    return { value: { isPlaced: true } }
+  })
+  on('ui.log', ($, e) => {
+    w.logs.push(e.text)
     return { value: undefined }
   })
   on('session.root', () => ({ value: ROOT }))
@@ -398,4 +414,93 @@ test('a missing se is built with the commit it is built from', async ($, on) => 
   await $.session.start(starts)
   const build = w.ran.find(argv => argv[0] === 'go') ?? []
   expect(build.slice(0, 4)).toEqual(['go', 'build', '-ldflags', '-X main.commit=aaa111'])
+})
+
+const SURFACES = ['terminal', 'desktop', 'vscode', 'mobile'] as const
+const PANE = {
+  plugin: 'se',
+  component: 'Pane',
+  requestId: 'se-ui',
+  props: {
+    title: 'SE',
+    isFocused: false,
+    bodyColumns: 40,
+    placement: 'inline',
+    scroll: { offset: 0, bodyRows: 10 },
+    view: {},
+  },
+} as const
+
+test('/se ui opens a pane titled SE that draws on every surface', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  const said = await $.command.run(se('ui'))
+  expect(said?.text).toBe("SE's control panel is open.")
+  expect(w.opened).toEqual([{ id: 'se-ui', title: 'SE' }])
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const drawn = await ui.drawn()
+    expect(drawn).toMatchObject({ type: 'Box', props: { flexWrap: 'wrap', width: 40 } })
+    const buttons = await ui.findAll({ type: 'Button' })
+    // The toggle first, top left; then se's buttons in the order it named them.
+    expect(buttons.map(b => b.props.label)).toEqual(['SE off', 'issue next', 'status'])
+    await ui.unmount()
+  }
+})
+
+test('pressing the toggle runs /se on and /se off, and switches the flag', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
+  expect((await ui.find({ key: 'toggle' }))?.props).toMatchObject({ label: 'SE off', dimColor: true })
+  await ui.press({ key: 'toggle' })
+  expect(verbs(w).at(-1)).toBe('/se on')
+  expect(w.logs).toEqual(['SE is on.'])
+  // The flag is on: what follows is forwarded.
+  await $.attribution.text(probe)
+  expect(posted(w)).toContain('attribution.text')
+  expect((await ui.find({ key: 'toggle' }))?.props).toMatchObject({ label: 'SE on', variant: 'primary' })
+  await ui.press({ key: 'toggle' })
+  expect(verbs(w).at(-1)).toBe('/se off')
+  expect((await ui.find({ key: 'toggle' }))?.props.label).toBe('SE off')
+  // The flag is off: nothing more is forwarded.
+  const before = w.posts.length
+  await $.attribution.text(probe)
+  expect(w.posts.length).toBe(before)
+})
+
+test('/se off typed in the prompt redraws the toggle', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('on'))
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ key: 'toggle' }))?.props.label).toBe('SE on')
+  await $.command.run(se('off'))
+  expect((await ui.find({ key: 'toggle' }))?.props.label).toBe('SE off')
+  expect(w.opened.length).toBe(1)
+})
+
+test('a command se offers as a button appears, and pressing it runs /se <name>', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ key: 'run issue next' })).toBeDefined()
+  w.ran = []
+  await ui.press({ key: 'run status' })
+  expect(verbs(w)).toEqual(['/se status'])
+  // Its answer is a line of the transcript, as the command's answer is.
+  expect(w.logs).toEqual(['No SE daemon answers for /work.'])
+})
+
+test('a command se does not offer as a button does not appear', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await ui.find({ key: 'run issue new' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', text: /issue new/ })).toBeUndefined()
+  expect(w.opened.length).toBe(1)
 })

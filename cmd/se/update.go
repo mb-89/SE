@@ -18,6 +18,7 @@ func init() {
 		Summary:   "pull main into the installed SE checkout, rebuild se, restart a running daemon and reload the plugin",
 		Session:   true,
 		Installed: true,
+		Button:    true,
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("update")
 			repo := fs.String("repo", "", "the installed SE checkout (default: the one this binary was built into)")

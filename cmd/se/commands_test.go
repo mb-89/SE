@@ -34,7 +34,7 @@ func TestEveryCommandSaysWhatItIs(t *testing.T) {
 
 func TestTheSessionIsOfferedItsCommandsAlone(t *testing.T) {
 	want := map[string]bool{
-		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue next": true, "issue new": true, "issue land": true, "issue review": true,
+		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue next": true, "issue new": true, "issue land": true, "issue review": true, "ui": true,
 		"serve": false, "start": false, "stop": false,
 	}
 	for name, offered := range want {
@@ -119,5 +119,42 @@ func TestTheWorkspaceFlagFollowsTheCommandToo(t *testing.T) {
 	dir := t.TempDir()
 	if code, out, errs := se(t, "status", "--workspace", dir); code != 0 || !strings.Contains(out, dir) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+}
+
+func TestUiOffersTheButtonCommandsFromTheRegistry(t *testing.T) {
+	r := session(t, "ui")
+	if r.Panel == nil {
+		t.Fatalf("ui opened no panel: %+v", r)
+	}
+	want := []string{"issue next", "restart", "status", "update"}
+	if strings.Join(r.Panel.Buttons, ",") != strings.Join(want, ",") {
+		t.Errorf("ui offers %q, want %q", r.Panel.Buttons, want)
+	}
+}
+
+func TestOnlySessionCommandsWithoutTypedWordsAreButtons(t *testing.T) {
+	for name, c := range commands {
+		if !c.Button {
+			continue
+		}
+		if !c.Session {
+			t.Errorf("%s is a button but not offered in a session", name)
+		}
+		// Whatever follows the name in its usage is optional: inside [ ].
+		depth, asks := 0, false
+		for _, r := range strings.TrimPrefix(c.Usage, name) {
+			switch {
+			case r == '[':
+				depth++
+			case r == ']':
+				depth--
+			case depth == 0 && r != ' ':
+				asks = true
+			}
+		}
+		if asks {
+			t.Errorf("%s is a button but its usage %q asks for a word", name, c.Usage)
+		}
 	}
 }
