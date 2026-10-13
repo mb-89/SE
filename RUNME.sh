@@ -2,7 +2,7 @@
 # Installs SE for this user: builds se, installs the debugger, and makes this
 # checkout the marketplace "se", so the plugin se loads in every Claude session
 # on this machine. Run it again any time; it changes nothing that already
-# stands. Run it from the checkout that should stay on main: /se-update keeps
+# stands. Run it from the checkout that should stay on main: /se update keeps
 # that one current, and the sessions you work in run it.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -26,4 +26,4 @@ fi
 if ! claude plugin list 2>/dev/null | grep -q "se@se"; then
   claude plugin install se@se --scope user
 fi
-echo "RUNME: SE is installed. Start a session and type /se-on."
+echo "RUNME: SE is installed. Start a session and type /se on; /se help lists the rest."

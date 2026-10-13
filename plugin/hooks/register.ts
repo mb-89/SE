@@ -1,6 +1,9 @@
-// SE's bridgehead. /se-on and /se-off switch the session flag; while it is on,
-// every event the engine raises is posted to the workspace's se daemon before
-// it goes on, unchanged. The daemon owns what happens to it: today it appends
+// SE's bridgehead. It registers one command, /se, and holds no list of what
+// /se does: it hands the words typed after /se to the se binary, which answers
+// the text to show and the effects to apply (switch this session on or off,
+// where the daemon now answers, reload the plugins). While SE is on, every
+// event the engine raises is posted to the workspace's se daemon before it
+// goes on, unchanged. The daemon owns what happens to it: today it appends
 // the event to the session's log. While SE is off, every hook hands the event
 // straight on and contacts nothing.
 
@@ -19,6 +22,9 @@ const RESTART_EVERY = 60_000
 
 type Endpoint = { address: string; token: string }
 
+// What se --session answers: the text to show and the effects to apply.
+export type Reply = { text: string; active?: boolean; endpoint?: Endpoint; reload?: boolean }
+
 // The module's copy of the flag, so an event costs nothing while SE is off.
 // $.state holds the session's value across a reload; session.start reads it back.
 let active: SeActive = false
@@ -34,13 +40,9 @@ const WAITING_CAP = 1000
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'se-on',
-      description: 'Switch SE on: forward every event of this session to the se daemon',
-    })
-    await $.command.register({ name: 'se-off', description: 'Switch SE off for this session' })
-    await $.command.register({
-      name: 'se-update',
-      description: 'Update the installed SE to the newest main and reload it',
+      name: 'se',
+      description: 'SE, the session-event daemon: /se help lists what it does',
+      argumentHint: '<command>',
     })
     root = e.cwd
     const { value } = await $.state.get(ACTIVE)
@@ -53,36 +55,10 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'se-on' }, async $ => {
-    const why = await switchOn($)
-    return {
-      text: why
-        ? `SE is on, but its daemon did not start: ${why}. Events pass unlogged until it does.`
-        : `SE is on. Every event of this session is logged under ${RUNTIME}/logs.`,
-    }
-  })
-
-  on('command.run', { command: 'se-off' }, async $ => {
-    active = false
-    await $.state.set(ACTIVE, false)
-    return { text: 'SE is off.' }
-  })
-
-  on('command.run', { command: 'se-update' }, async $ => {
-    const ran = await $.process.run([binaryOf($.plugin.root), 'update'], { timeoutMs: STARTING })
-    if (ran.exitCode !== 0) return { text: `SE did not update: ${failed(ran)}` }
-    const said = parsed(ran.stdout) as { from?: string; to?: string } | null
-    // The daemon runs the old se until it starts again.
-    await $.process.run([binaryOf($.plugin.root), 'stop', '--workspace', await $.session.root()])
-    endpoint = null
-    if (active) await starts($)
-    const updated = `SE updated ${said?.from ?? '?'} → ${said?.to ?? '?'}`
-    try {
-      await $.command.run({ command: 'reload-plugins', args: '' } as never)
-      return { text: `${updated} and reloaded.` }
-    } catch {
-      return { text: `${updated}. Run /reload-plugins to load it.` }
-    }
+  on('command.run', { command: 'se' }, async ($, e) => {
+    const words = e.args.split(/\s+/).filter(Boolean)
+    const asked = await asks($, words)
+    return { text: typeof asked === 'string' ? asked : await applies($, asked) }
   })
 
   // The bridge never holds an event up for good: a failure here passes it on.
@@ -91,6 +67,47 @@ export const register: Register = on => {
     await forwards($, next.event, e).catch(() => {})
     return next(e)
   }).catch(($, e, next) => next(e))
+}
+
+// Hands the words to se as a session call; answers its reply, or why there is none.
+async function asks($: EngineInterface, words: string[]): Promise<Reply | string> {
+  try {
+    const bin = await builds($)
+    if (bin.failed) return bin.failed
+    root = await $.session.root()
+    const ran = await $.process.run([bin.path, '--session', '--workspace', root, ...words], {
+      timeoutMs: STARTING,
+    })
+    const said = parsed(ran.stdout) as Reply | null
+    if (typeof said?.text !== 'string') return `se did not answer: ${failed(ran)}`
+    return said
+  } catch (error) {
+    return `se did not answer: ${String(error)}`
+  }
+}
+
+// Applies se's effects to this session and answers the text to show.
+async function applies($: EngineInterface, reply: Reply): Promise<string> {
+  if (reply.endpoint?.address) {
+    endpoint = { address: reply.endpoint.address, token: reply.endpoint.token }
+    for (const body of waiting.splice(0)) await posts($, endpoint, body)
+  }
+  if (typeof reply.active === 'boolean') {
+    // An on that found no daemon tries again on the road, not at once.
+    if (reply.active) lastStart = Date.now()
+    active = reply.active
+    await $.state.set(ACTIVE, reply.active)
+  }
+  if (!reply.reload) return reply.text
+  // A command.run hook cannot run another command: the reload waits until this one has answered.
+  $.clock.after(0, async () => {
+    try {
+      await $.command.run({ command: 'reload-plugins', args: '' } as never)
+    } catch {
+      await $.ui.toast('SE updated; run /reload-plugins to load it.')
+    }
+  })
+  return `${reply.text} The plugins reload now.`
 }
 
 // Switches SE on and starts the daemon; answers why the daemon did not start, or ''.
@@ -114,15 +131,9 @@ function starts($: EngineInterface): Promise<string> {
 async function startsOnce($: EngineInterface): Promise<string> {
   lastStart = Date.now()
   root = await $.session.root()
-  const bin = binaryOf($.plugin.root)
   try {
-    if (!(await $.fs.exists(bin))) {
-      const built = await $.process.run(['go', 'build', '-o', bin, './cmd/se'], {
-        cwd: `${$.plugin.root}/..`,
-        timeoutMs: STARTING,
-      })
-      if (built.exitCode !== 0) return `se is not built and go build failed: ${failed(built)}`
-    }
+    const { path: bin, failed: unbuilt } = await builds($)
+    if (unbuilt) return unbuilt
     const ran = await $.process.run([bin, 'start', '--workspace', root], { timeoutMs: STARTING })
     const said = parsed(ran.stdout) as Endpoint | null
     if (ran.exitCode !== 0 || !said?.address) return failed(ran)
@@ -181,6 +192,17 @@ export function bodyOf(session: string, event: string, e: unknown): string {
   } catch {
     return JSON.stringify({ session, event, at, e: { unserializable: String(e) } })
   }
+}
+
+// se under the plugin folder, built from the checkout where it is missing.
+async function builds($: EngineInterface): Promise<{ path: string; failed?: string }> {
+  const path = binaryOf($.plugin.root)
+  if (await $.fs.exists(path)) return { path }
+  const built = await $.process.run(['go', 'build', '-o', path, './cmd/se'], {
+    cwd: `${$.plugin.root}/..`,
+    timeoutMs: STARTING,
+  })
+  return built.exitCode === 0 ? { path } : { path, failed: `se is not built and go build failed: ${failed(built)}` }
 }
 
 // se under the plugin folder, with the suffix a Windows build carries.
