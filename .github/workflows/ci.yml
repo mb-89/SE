@@ -19,3 +19,11 @@ jobs:
       - run: npm i -g @anthropic-ai/claude-code@2.1.296
       - run: sh ./tests/tools.sh install
       - run: sh ./tests/check.sh
+      # The battery's profile, for the retro: every step's and every Go test's duration.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: battery
+          path: .se/.runtime/battery/
+          include-hidden-files: true
+          if-no-files-found: ignore

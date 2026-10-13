@@ -129,7 +129,7 @@ func TestLandingFactsCountCommitsMergesAndTakeovers(t *testing.T) {
 		t.Fatalf("%v %v: %q", ok, err, posted)
 	}
 	want := Facts{Claimed: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC), Landed: landedAt(), Minutes: 90, Commits: 2, Takeovers: 1, MainMerges: 1}
-	if got.Facts != want || got.Issue != 6 || !reflect.DeepEqual(got.Answers, full) {
+	if !reflect.DeepEqual(got.Facts, want) || got.Issue != 6 || !reflect.DeepEqual(got.Answers, full) {
 		t.Fatalf("%+v", got)
 	}
 }

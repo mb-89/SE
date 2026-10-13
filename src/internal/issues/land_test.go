@@ -2,6 +2,7 @@
 package issues
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/battery"
 )
 
 const (
@@ -105,6 +108,84 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	if !strings.Contains(autoMerge, "mergeMethod: SQUASH") {
 		t.Fatal(autoMerge)
 	}
+}
+
+// profiles is a check that passes and leaves a battery profile, as tests/check.sh does.
+func profiles(t *testing.T, p battery.Profile) func(string) error {
+	t.Helper()
+	return func(dir string) error {
+		data, err := json.Marshal(p)
+		if err != nil {
+			return err
+		}
+		at := filepath.Join(dir, battery.Dir)
+		if err := os.MkdirAll(at, 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(at, battery.ProfileFile), data, 0o644)
+	}
+}
+
+var profile = battery.Profile{
+	TotalMs:  1234,
+	Steps:    []battery.Step{{Name: "go test", Ms: 1234}},
+	Slowest:  []battery.Test{{Package: "p", Name: "TestSlow", Ms: 900}},
+	Overruns: []string{"step go test took 1234ms, over its budget of 1000ms"},
+}
+
+func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
+	_, a := claimed(t)
+	gh, calls := landGH(t, map[string]string{
+		pullsPath:         `[]`,
+		"repos/o/r/pulls": pr14,
+		"graphql":         `{"data":{}}`,
+	}, nil)
+	if _, err := (Source{Repo: repo, GH: gh, Now: landedAt}).Land(a, "", qs, full, profiles(t, profile)); err != nil {
+		t.Fatal(err)
+	}
+	var opened, posted string
+	for _, c := range *calls {
+		switch c[len(c)-1] {
+		case "repos/o/r/pulls":
+			opened = c[len(c)-2]
+		case post6:
+			posted = c[len(c)-2]
+		}
+	}
+	if want := "body=Fixes #6\n\n" + profile.Markdown(); opened != want {
+		t.Errorf("the PR body is\n%s\nwant\n%s", opened, want)
+	}
+	for _, want := range []string{"Total: **1234ms**", "| TestSlow | p | 900 |", "**Over budget:** step go test took 1234ms"} {
+		if !strings.Contains(opened, want) {
+			t.Errorf("the PR body lacks %q", want)
+		}
+	}
+	got, ok, err := ParseLanding(strings.TrimPrefix(posted, "body="))
+	if err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	if got.Facts.BatteryMs != 1234 || !reflect.DeepEqual(got.Facts.Slowest, []string{"p TestSlow 900ms"}) ||
+		!reflect.DeepEqual(got.Facts.Overruns, profile.Overruns) {
+		t.Errorf("facts = %+v", got.Facts)
+	}
+	if !strings.Contains(posted, "- **over budget:** step go test took 1234ms") {
+		t.Errorf("the landing comment does not show the overrun:\n%s", posted)
+	}
+}
+
+func TestLandAgainUpdatesTheOpenPRsProfile(t *testing.T) {
+	_, a := claimed(t)
+	gh, calls := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`, "repos/o/r/pulls/14": pr14, "graphql": `{"data":{}}`}, nil)
+	if _, err := (Source{Repo: repo, GH: gh}).Land(a, "", qs, full, profiles(t, profile)); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"api", "-X", "PATCH", "-f", "body=Fixes #6\n\n" + profile.Markdown(), "repos/o/r/pulls/14"}
+	for _, c := range *calls {
+		if reflect.DeepEqual(c, want) {
+			return
+		}
+	}
+	t.Fatalf("the open PR's body was not updated: %q", *calls)
 }
 
 func TestLandAgainPushesAndReportsTheOpenPR(t *testing.T) {

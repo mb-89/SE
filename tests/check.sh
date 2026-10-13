@@ -24,6 +24,12 @@ now() {
     *) echo $((t / 1000000)) ;;
   esac
 }
+# The battery profiles itself: each step's duration goes to the steps file,
+# each Go test's to go test's events, and the report reads both against
+# spec/budgets.yaml (src/cmd/battery).
+battery=.se/.runtime/battery
+rm -rf "$battery"
+mkdir -p "$battery"
 # step runs one check and reports how long it took.
 step() {
   name=$1
@@ -31,13 +37,16 @@ step() {
   echo "check: $name"
   start=$(now)
   "$@"
-  echo "check: $name took $(($(now) - start))ms"
+  took=$(($(now) - start))
+  echo "check: $name took ${took}ms"
+  printf '%s\t%s\n' "$name" "$took" >>"$battery/steps.tsv"
 }
 
 step "se rules" go run ./src/cmd/rules
 step "golangci-lint" golangci-lint run ./...
 step "biome" biome check --error-on-warnings
-step "go test" go test ./...
+step "go test" go run ./src/cmd/battery gotest ./...
 step "plugin validate" claude plugin validate src/plugin
 step "marketplace validate" claude plugin validate .
 step "plugin test" claude plugin test src/plugin
+go run ./src/cmd/battery report
