@@ -18,8 +18,7 @@ func (s Source) Unclosed(n int) (string, error) {
 		return "", nil
 	}
 	branch := Branch(n)
-	owner, _, _ := strings.Cut(s.Repo, "/")
-	open, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?head=%s:%s&base=main&state=open&per_page=100", s.Repo, owner, branch), true)
+	open, err := s.openPulls(branch)
 	if err != nil {
 		return "", err
 	}
@@ -31,4 +30,10 @@ func (s Source) Unclosed(n int) (string, error) {
 		return "", nil
 	}
 	return fmt.Sprintf("#%d is open and its PR #%d (%s) has auto-merge off: turn it on (se issue land), or %s.", n, open[0].Number, open[0].URL, how), nil
+}
+
+// openPulls is the open PRs from branch against main.
+func (s Source) openPulls(branch string) ([]openPull, error) {
+	owner, _, _ := strings.Cut(s.Repo, "/")
+	return api[openPull](s, fmt.Sprintf("repos/%s/pulls?head=%s:%s&base=main&state=open&per_page=100", s.Repo, owner, branch), true)
 }

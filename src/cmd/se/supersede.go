@@ -17,7 +17,7 @@ func init() {
 		Usage:   "issue supersede N (--body B | --body-file PATH | --duplicate-of M) [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "close issue N by a final successor with its open questions",
-		Details: "the second way a box closes the issue it took, beside a PR (and se issue close --fixed-by, where its work is on main already): create N's successor through the same code as se issue new, with N's title and text and the open questions the box could not answer (B), labelled se-final, a sub-issue of N's parent and blocked by N's open blockers; link N's open dependents as blocked by it; then close N, its comment naming the successor. A final issue is refused: its box lands a PR. A ready successor fires the routine once. With --duplicate-of M, for an issue that the open issue M (its PR) already covers, it mints nothing: it links N's open dependents as blocked by M, then closes N as a duplicate (state_reason duplicate), its comment naming M; a final issue closes so too.",
+		Details: "the second way a box closes the issue it took, beside a PR (and se issue close --fixed-by, where its work is on main already): create N's successor through the same code as se issue new, with N's title and text and the open questions the box could not answer (B), labelled se-final, a sub-issue of N's parent and blocked by N's open blockers; link N's open dependents as blocked by it; then close N, its comment naming the successor. A final issue is refused: its box lands a PR. A ready successor fires the routine once. With --duplicate-of M, for an issue that the open issue M (its PR) already covers, it mints nothing: it links N's open dependents as blocked by M, then closes N as a duplicate (state_reason duplicate), its comment naming M; a final issue closes so too. Before N closes, N's open PR closes, its comment naming M, and N's issue-N claim is deleted by a git push from the workspace, so se fleet fix finds no leftover claim.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue supersede")
@@ -119,7 +119,7 @@ func duplicate(c *Call, src func() (issues.Source, error), asJSON bool, n, of in
 	if err := s.CloseParents(); err != nil {
 		return Reply{}, err
 	}
-	dup, err := s.CloseDuplicate(n, of)
+	dup, err := s.CloseDuplicate(c.Workspace, n, of)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -130,6 +130,12 @@ func duplicate(c *Call, src func() (issues.Source, error), asJSON bool, n, of in
 	text := fmt.Sprintf("Closed #%d as a duplicate of #%d, minting nothing.\n%s", n, of, dup.URL)
 	if len(dup.Blocks) > 0 {
 		text += "\n" + numbers(dup.Blocks) + " now wait on #" + strconv.Itoa(of) + "."
+	}
+	for _, p := range dup.Pulls {
+		text += fmt.Sprintf("\nClosed its PR #%d, naming #%d.", p, of)
+	}
+	if dup.Branch != "" {
+		text += "\nDeleted its claim " + dup.Branch + "."
 	}
 	return Reply{Text: text}, nil
 }

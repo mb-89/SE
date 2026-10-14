@@ -376,10 +376,13 @@ successor fires the routine once (with `--json`:
 `se issue supersede N --duplicate-of M` is the supersede of an issue that
 the open issue M already covers, its PR doing the same work (two boxes that
 filed the same bug under different titles): it mints nothing. It links N's
-open dependents as blocked by M, then closes N as a duplicate (state_reason
-`duplicate`), its comment naming M. A final issue closes so too, since its
+open dependents as blocked by M, closes N's open PR with a comment naming M
+and deletes N's `issue-N` claim by a git push from the workspace (so no PR
+stays open with no issue behind it, and `se fleet fix` finds no leftover
+claim), then closes N as a duplicate (state_reason `duplicate`), its comment
+naming M. A final issue closes so too, since its
 work lands under M; a closed M is refused (with `--json`:
-`{"issue","of","url","blocks"}`).
+`{"issue","of","url","blocks","pulls","branch"}`).
 
 `se issue close N --fixed-by SHA --answers FILE` is the third way, for an
 issue whose work reached main before its box took it (another issue's PR did

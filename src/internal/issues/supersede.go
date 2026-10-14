@@ -113,6 +113,12 @@ type Duplicated struct {
 	URL string `json:"url"`
 	// Blocks are the duplicate's open dependents, now blocked by Of.
 	Blocks []int `json:"blocks,omitempty"`
+	// Pulls are the duplicate's open PRs, now closed, each with a comment
+	// naming Of.
+	Pulls []int `json:"pulls,omitempty"`
+	// Branch is the duplicate's issue-<n> claim, now deleted; empty where
+	// origin held none.
+	Branch string `json:"branch,omitempty"`
 }
 
 // CloseDuplicate is the supersede of an issue another open issue already covers,
@@ -120,8 +126,11 @@ type Duplicated struct {
 // it mints nothing. Issue n's open dependents are linked as blocked by of, so
 // nothing that waited on n goes ahead early; then n closes as a duplicate
 // (state_reason duplicate), its comment naming of. A final issue may close so
-// too: the work it would land is landing under of.
-func (s Source) CloseDuplicate(n, of int) (Duplicated, error) {
+// too: the work it would land is landing under of. Before n closes, its open
+// PR closes, a comment naming of, and its issue-<n> claim is deleted by a git
+// push from dir (the boxes' proxy refuses the REST route), so no PR stays
+// open with no issue behind it and se fleet fix finds no leftover claim.
+func (s Source) CloseDuplicate(dir string, n, of int) (Duplicated, error) {
 	if n == of {
 		return Duplicated{}, fmt.Errorf("#%d cannot duplicate itself", n)
 	}
@@ -163,6 +172,9 @@ func (s Source) CloseDuplicate(n, of int) (Duplicated, error) {
 			return dup, err
 		}
 	}
+	if err := s.dropClaim(dir, &dup); err != nil {
+		return dup, err
+	}
 	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
 	comment := fmt.Sprintf("Duplicate of #%d, which already covers this issue's work and carries it on.\n%s", of, got[of].URL)
 	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", comment)); err != nil {
@@ -172,4 +184,37 @@ func (s Source) CloseDuplicate(n, of int) (Duplicated, error) {
 		return dup, fmt.Errorf("closing #%d: %w", n, err)
 	}
 	return dup, nil
+}
+
+// dropClaim closes the duplicate's open PRs, each with a comment naming the
+// issue it duplicates, then deletes its issue-<n> branch where origin holds
+// it, by a git push from dir. Run again, it finds nothing left to do.
+func (s Source) dropClaim(dir string, dup *Duplicated) error {
+	b := Branch(dup.Issue)
+	open, err := s.openPulls(b)
+	if err != nil {
+		return err
+	}
+	for _, p := range open {
+		body := fmt.Sprintf("Closed unmerged: #%d is a duplicate of #%d, which carries this work on.\n%s", dup.Issue, dup.Of, dup.URL)
+		if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, p.Number), github.F("body", body)); err != nil {
+			return fmt.Errorf("commenting on PR #%d: %w", p.Number, err)
+		}
+		if _, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/pulls/%d", s.Repo, p.Number), github.F("state", "closed")); err != nil {
+			return fmt.Errorf("closing PR #%d: %w", p.Number, err)
+		}
+		dup.Pulls = append(dup.Pulls, p.Number)
+	}
+	held, err := s.git(dir, "ls-remote", "origin", "refs/heads/"+b)
+	if err != nil {
+		return fmt.Errorf("reading origin's %s: %w", b, err)
+	}
+	if strings.TrimSpace(held) == "" {
+		return nil
+	}
+	if _, err := s.git(dir, "push", "-q", "origin", "--delete", b); err != nil {
+		return fmt.Errorf("deleting %s: %w", b, err)
+	}
+	dup.Branch = b
+	return nil
 }
