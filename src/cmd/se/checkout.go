@@ -46,7 +46,7 @@ func handsOver(w *World, workspace string, args []string, stdout, stderr io.Writ
 // workspace is an SE checkout. note says which se that is, and why, where it
 // is not simply the installed one.
 func daemonExe(w *World, p daemon.Paths) (exe, note string, err error) {
-	installed, err := w.Executable()
+	installed, err := w.Proc.Self()
 	if err != nil {
 		return "", "", err
 	}
