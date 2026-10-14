@@ -21,21 +21,38 @@ const (
 // fire included. getenv reads the two variables; a missing one turns fan-out
 // off. The token is never part of the answer.
 func Fire(getenv func(string) string, net sehttp.Net) string {
+	return Shoot(getenv, net).Line
+}
+
+// Shot is what one fire did: the line Fire answers, and whether the routine
+// refused it for its fire rate limit (429), with the Retry-After it named.
+type Shot struct {
+	Line       string
+	Limited    bool
+	RetryAfter string
+}
+
+// Shoot is Fire, answering the refusal's retry with the line.
+func Shoot(getenv func(string) string, net sehttp.Net) Shot {
 	url, token := getenv(FireURLVar), getenv(FireTokenVar)
 	if url == "" || token == "" {
-		return fmt.Sprintf("Fan-out is off: %s and %s are not both set.", FireURLVar, FireTokenVar)
+		return Shot{Line: fmt.Sprintf("Fan-out is off: %s and %s are not both set.", FireURLVar, FireTokenVar)}
 	}
 	answer, err := net.Fire(url, token)
 	if err != nil {
-		return fmt.Sprintf("Fan-out failed: %v", hide(err, token))
+		return Shot{Line: fmt.Sprintf("Fan-out failed: %v", hide(err, token))}
 	}
 	if !answer.OK() {
-		return fmt.Sprintf("Fan-out refused: %s %s", sehttp.StatusText(answer.Status), hide(fmt.Errorf("%s", brief(answer.Body)), token))
+		return Shot{
+			Line:       fmt.Sprintf("Fan-out refused: %s %s", sehttp.StatusText(answer.Status), hide(fmt.Errorf("%s", brief(answer.Body)), token)),
+			Limited:    answer.Status == sehttp.StatusTooMany,
+			RetryAfter: answer.RetryAfter,
+		}
 	}
 	if u := sessionURL(answer.Body); u != "" {
-		return "Fan-out fired the routine: " + u
+		return Shot{Line: "Fan-out fired the routine: " + u}
 	}
-	return "Fan-out fired the routine: " + hide(fmt.Errorf("%s", brief(answer.Body)), token).Error()
+	return Shot{Line: "Fan-out fired the routine: " + hide(fmt.Errorf("%s", brief(answer.Body)), token).Error()}
 }
 
 // sessionURL finds the started session's link in the fire's answer: the first
