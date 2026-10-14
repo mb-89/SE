@@ -40,7 +40,7 @@ func init() {
 				// se is built to <checkout>/src/plugin/bin/se.
 				*repo = filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(exe))))
 			}
-			r, err := update.Run(c.Proc, *repo, exe)
+			r, err := update.Run(c.Disk, c.Proc, *repo, exe)
 			var untouched *update.Untouched
 			switch {
 			case err == nil:

@@ -1,9 +1,7 @@
 package daemon
 
 import (
-	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
@@ -13,7 +11,7 @@ import (
 
 // Healthy answers the endpoint of a daemon that runs and answers for this workspace.
 func Healthy(paths Paths, net sehttp.Net) (Endpoint, bool) {
-	ep, err := ReadEndpoint(paths.Endpoint())
+	ep, err := ReadEndpoint(paths)
 	if err != nil {
 		return ep, false
 	}
@@ -33,7 +31,8 @@ func Start(procs proc.Procs, paths Paths, exe string, wait time.Duration, clk cl
 	if err := Prepare(paths); err != nil {
 		return Endpoint{}, err
 	}
-	out, err := os.OpenFile(paths.DaemonLog(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	// The real disk answers the log as a file, which the daemon writes itself.
+	out, err := paths.Disk.Append(paths.DaemonLog())
 	if err != nil {
 		return Endpoint{}, err
 	}
@@ -73,7 +72,7 @@ func Stop(paths Paths, wait time.Duration, clk clock.Clock, net sehttp.Net) erro
 	}
 	deadline := clk.Now().Add(wait)
 	for clk.Now().Before(deadline) {
-		if _, err := os.Stat(paths.Endpoint()); errors.Is(err, os.ErrNotExist) {
+		if there, err := paths.Disk.Exists(paths.Endpoint()); err == nil && !there {
 			return nil
 		}
 		clk.Sleep(50 * time.Millisecond)
