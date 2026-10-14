@@ -129,7 +129,7 @@ func (c Collected) facts() string {
 	}
 
 	b.WriteString("\n## Counts\n| | in the window | per closed issue |\n|---|---|---|\n")
-	for _, name := range []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand"} {
+	for _, name := range counted {
 		fmt.Fprintf(&b, "| %s | %g | %g |\n", name, c.Metrics[name], c.Metrics[name+"_per_issue"])
 	}
 	known := 0
@@ -138,6 +138,7 @@ func (c Collected) facts() string {
 			known++
 		}
 	}
+	fmt.Fprintf(&b, "\nDuplicates: %g closed as duplicate, %d issues for a person minted again for an issue one already held back.\n", c.Metrics["duplicates"]-float64(c.Reholds), c.Reholds)
 	fmt.Fprintf(&b, "\nClaim to merge: median %s over the %d issues whose claim and merge are both on record.\n", span(int(c.Metrics["claim_to_merge_minutes"])), known)
 
 	b.WriteString("\n## Metrics against the previous retros\n")
