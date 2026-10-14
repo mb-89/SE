@@ -372,6 +372,30 @@ func TestUiOffersTheButtonCommandsFromTheRegistry(t *testing.T) {
 	if strings.Join(r.Panel.Buttons, ",") != strings.Join(want, ",") {
 		t.Errorf("ui offers %q, want %q", r.Panel.Buttons, want)
 	}
+	for _, name := range r.Panel.Buttons {
+		if strings.TrimSpace(name) == "" {
+			t.Errorf("ui offers a button with no label: %q", r.Panel.Buttons)
+		}
+	}
+}
+
+func TestUiRowsHoldTheColumnsTheWiringSets(t *testing.T) {
+	t.Parallel()
+	if r := session(t, "ui"); r.Panel == nil || r.Panel.Columns != 3 {
+		t.Fatalf("ui's rows hold %+v, want the wiring's 3 columns", r.Panel)
+	}
+	wired := func(yaml string) func() (index.Wiring, error) {
+		return func() (index.Wiring, error) { return index.ParseWiring([]byte(yaml)) }
+	}
+	if n, err := panelColumns(wired("instances:\n  cli: {module: cli, config: {columns: 2}}\n")); err != nil || n != 2 {
+		t.Errorf("a wiring of 2 columns answers %d, %v", n, err)
+	}
+	if n, err := panelColumns(wired("instances:\n  cli: {module: cli}\n")); err != nil || n != defaultColumns {
+		t.Errorf("a wiring that sets no columns answers %d, %v, want the built-in %d", n, err, defaultColumns)
+	}
+	if _, err := panelColumns(wired("instances:\n  cli: {module: cli, config: {columns: 0}}\n")); err == nil {
+		t.Error("a wiring of 0 columns is answered")
+	}
 }
 
 func TestOnlySessionCommandsWithoutTypedWordsAreButtons(t *testing.T) {
