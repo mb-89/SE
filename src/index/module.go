@@ -135,8 +135,8 @@ func Declare(name, help string, parts ...Part) *Module {
 		derive:   map[string]*derivation{},
 		commands: map[string]*command{},
 	}
-	if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "./ ") {
-		m.fail("a module needs a name without dots, slashes or spaces, not %q", name)
+	if !pathName(name) {
+		m.fail("a module needs a name of letters, digits and dashes, or <cluster>/<module>, not %q", name)
 	}
 	if strings.TrimSpace(help) == "" {
 		m.fail("module %s has no help", name)
@@ -488,6 +488,18 @@ func Key(s string) bool {
 		switch {
 		case r == '-', r == '.', r == '_', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 		default:
+			return false
+		}
+	}
+	return true
+}
+
+// pathName says whether s is a module's or an instance's name: segments of
+// letters, digits and dashes, split by /, such as tally or issues/pull. A
+// nested name is a module in a cluster, and its instance owns the names under it.
+func pathName(s string) bool {
+	for _, seg := range strings.Split(s, "/") {
+		if !portName(seg) {
 			return false
 		}
 	}

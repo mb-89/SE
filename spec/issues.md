@@ -121,7 +121,7 @@ the owner's account for an hour.
   retro and `se issue tree`'s estimate read them.
 - **The pause switch.** One config value on main, `fleet.box/config/paused`
   (`issues/config/paused` on the index, in
-  `src/internal/index/wiring.yaml`). Every take (`--take`, at the top and
+  `src/index/wiring.yaml`). Every take (`--take`, at the top and
   `--in`) reads it from origin/main first and, while it is set, takes nothing
   (with `--json`: `{"ready":false,"paused":true,"why"}`), and the box ends.
   So the owner stops every running box with one change on main.
