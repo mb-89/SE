@@ -203,7 +203,7 @@ func init() {
 				}
 				fanout = c.fanOut(s, took.Number)
 				if *worktree && !took.Parent {
-					wt = issues.Worktree(c.Workspace, took.Number)
+					wt = issues.Worktree(c.Workspace, took.Number, took.Base)
 				}
 				// What waits for it, so the box can tell which of them need
 				// what it may leave over.
@@ -965,14 +965,14 @@ func issueReply(asJSON, full bool, i issues.Issue, ok bool, branch, worktree, fa
 	t := i.Takeover
 	switch {
 	case t != nil && t.PR != 0 && t.Stale == "":
-		head = fmt.Sprintf("Took over #%d %s, on branch %s: its PR #%d conflicts with main (takeover %d).\n%s\n%s\nMerge origin/main into %s (never rebase, never force-push), resolve the conflict, and land it again with se issue land.",
-			i.Number, i.Title, branch, t.PR, t.Count, i.URL, t.URL, branch)
+		head = fmt.Sprintf("Took over #%d %s, on branch %s: its PR #%d conflicts with main (takeover %d).\n%s\n%s\nMerge origin/%s into %s (never rebase, never force-push), resolve the conflict, and land it again with se issue land.",
+			i.Number, i.Title, branch, t.PR, t.Count, i.URL, t.URL, i.Onto(), branch)
 	case t != nil:
 		head = fmt.Sprintf("Took over #%d %s, on branch %s as it stands: it was stuck, %s (takeover %d).\n%s", i.Number, i.Title, branch, t.Stale, t.Count, i.URL)
 		if t.URL != "" {
 			head += "\n" + t.URL
 		}
-		head += fmt.Sprintf("\nMerge origin/main into %s (never rebase, never force-push), continue the branch and its PR, make it green, and land it again with se issue land.", branch)
+		head += fmt.Sprintf("\nMerge origin/%s into %s (never rebase, never force-push), continue the branch and its PR, make it green, and land it again with se issue land.", i.Onto(), branch)
 	case len(cads) > 0:
 		cad := cads[0]
 		head = fmt.Sprintf("Started the unattended %s #%d %s, as %d %s closed since the last one (the cadence is %d), and took it, on branch %s.\n%s",
@@ -1063,7 +1063,7 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 		if err := readTakeover(c, s, &took, true); err != nil {
 			return Reply{}, err
 		}
-		worktree = issues.Worktree(c.Workspace, took.Number)
+		worktree = issues.Worktree(c.Workspace, took.Number, took.Base)
 		h = c.handOver(took)
 	}
 	took.Body = issues.Shown(took.Body)
@@ -1083,7 +1083,7 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 		if tr.Land {
 			// Every leaf is closed: the coordinator lands the manifest from
 			// its branch, checked out in its own worktree.
-			answer.Branch, answer.Worktree = issues.Branch(root), issues.Worktree(c.Workspace, root)
+			answer.Branch, answer.Worktree = issues.Branch(root), issues.Worktree(c.Workspace, root, "")
 		}
 		if ok {
 			answer.Issue, answer.Branch, answer.Worktree, answer.Agent = &took, issues.Branch(took.Number), worktree, issues.KindOf(took).Type()
@@ -1096,13 +1096,13 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 		work.Review = nil
 		text := treeText(work) + reviewText(c, tr)
 		if tr.Land {
-			text += "\n\nLand it from its branch in its own worktree, with se issue land there:\n" + issues.Worktree(c.Workspace, root)
+			text += "\n\nLand it from its branch in its own worktree, with se issue land there:\n" + issues.Worktree(c.Workspace, root, "")
 		}
 		return Reply{Text: text}, nil
 	}
 	did := "Took #%d %s, on branch %s.\n%s\nIts agent: %s.\n\nWork in its own worktree:\n%s"
 	if took.Takeover != nil {
-		did = "Took over #%d %s, on branch %s as it stands: it was stuck.\n%s\nIts agent: %s.\n\nContinue the branch and its PR in its own worktree:\n%s"
+		did = "Took over #%d %s, on branch %s as it stands: it was stuck.\n%s\nIts agent: %s.\n\nContinue the branch and its PR in its own worktree, which merges origin/" + took.Onto() + " in:\n%s"
 	}
 	text := fmt.Sprintf(did, took.Number, took.Title, issues.Branch(took.Number), took.URL, issues.KindOf(took).Type(), worktree) + takeoverLines(took.Takeover, issues.Branch(took.Number)) + reviewText(c, tr)
 	text = strings.TrimRight(text+"\n\n"+took.Body, "\n")

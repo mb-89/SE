@@ -726,6 +726,8 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 		return Issue{}, false, err
 	}
 	k := m.takeovers + 1
+	took = st.Issue
+	took.Base = baseOf(dir, s, t, st.Number)
 	conflict := f.cause() == ConflictedPR
 	if st.Final && !conflict {
 		reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s.", FinalLabel, f.What)
@@ -736,7 +738,7 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 		return Issue{}, false, fmt.Errorf("#%d is final and stuck (%s), so it waits on #%d, an issue for a person", st.Number, f.What, held.Number)
 	}
 	heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, f.head)
-	body := fmt.Sprintf("Taken over: %s at %s. This box merges main into %s, makes it green and lands it again.", f.What, f.head, Branch(st.Number)) + heads + s.boxLine()
+	body := fmt.Sprintf("Taken over: %s at %s. This box merges %s into %s, makes it green and lands it again.", f.What, f.head, took.Onto(), Branch(st.Number)) + heads + s.boxLine()
 	won, err := s.markTakeover(st.Number, k, body)
 	if err != nil {
 		return Issue{}, false, err
@@ -752,7 +754,6 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 	if err := s.pickUp(dir, st.Number); err != nil {
 		return Issue{}, false, err
 	}
-	took = st.Issue
 	took.Takeover = &Takeover{PR: f.PR, URL: f.url, Count: k, Stale: f.What}
 	return took, true, nil
 }

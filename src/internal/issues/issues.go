@@ -52,6 +52,10 @@ type Issue struct {
 	// Blocks names the open issues it blocks, where a take read them: what
 	// is left of it may hold up those that need it (se issue new --blocks).
 	Blocks []int `json:"blocks,omitempty"`
+	// Base is the branch a take based the issue on, which it lands into:
+	// for a leaf inside a manifest's tree, the manifest's branch, which
+	// carries main; empty for main (see Onto).
+	Base string `json:"base,omitempty"`
 	// id is GitHub's id of an issue se just created, which a link takes;
 	// in is the parent it was made a sub-issue of.
 	id int64
@@ -61,6 +65,15 @@ type Issue struct {
 // In is the parent an issue se just created was made a sub-issue of: the
 // --parent it was given, or the misc manifest it was filed into; 0 at the top.
 func (i Issue) In() int { return i.in }
+
+// Onto is the branch the issue's work is merged with and lands into: its
+// Base, or main.
+func (i Issue) Onto() string {
+	if i.Base == "" {
+		return "main"
+	}
+	return i.Base
+}
 
 // Branch is the branch whose presence on origin claims issue n.
 func Branch(n int) string { return fmt.Sprintf("issue-%d", n) }
@@ -793,6 +806,7 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 		switch {
 		case st.Takeover != nil:
 			claimed, err = s.takeOverStuck(dir, st, !s.Worktrees)
+			st.Base = baseOf(dir, s, t, st.Number)
 		case st.Parent:
 			claimed, err = s.claimTree(dir, st.Number)
 		default:
@@ -952,12 +966,14 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 	for _, st := range inside {
 		byNum[st.Number] = st
 	}
+	base := manifestBranch(dir, s, read.t, root)
 	for _, i := range order {
+		i.Base = base
 		var claimed bool
 		if i.Takeover != nil {
 			claimed, err = s.takeOverStuck(dir, byNum[i.Number], false)
 		} else {
-			claimed, err = s.stakeFrom(dir, i.Number, manifestBranch(dir, s, read.t, root))
+			claimed, err = s.stakeFrom(dir, i.Number, i.Onto())
 		}
 		if err != nil {
 			return Issue{}, false, tr, err
@@ -971,17 +987,24 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 
 // Worktree is the command that checks a leaf's claimed branch out in its own
 // worktree, WorktreeDir beside the checkout dir, from the newest of its branch
-// and main: it fetches both, makes the local branch where the box has none
-// (and the worktree where it has none), fast-forwards the branch to origin's,
-// and merges origin/main into it. A merge that conflicts is aborted, leaving the
-// branch as origin has it for its agent to merge main into.
-func Worktree(dir string, n int) string {
+// and its base, the branch it lands into (main where base is empty; a leaf
+// inside a manifest's tree, the manifest's branch, which carries main): it
+// fetches both, makes the local branch where the box has none (and the
+// worktree where it has none), fast-forwards the branch to origin's, and
+// merges origin's base into it. A merge that conflicts is aborted, and the
+// command says so, leaving the branch as origin has it for its agent to merge
+// the base into by hand.
+func Worktree(dir string, n int, base string) string {
+	if base == "" {
+		base = "main"
+	}
 	b, p := Branch(n), WorktreeDir(dir, n)
-	return fmt.Sprintf("git fetch -q origin main %[1]s"+
+	return fmt.Sprintf("git fetch -q origin %[3]s %[1]s"+
 		" && { git show-ref -q --verify refs/heads/%[1]s || git branch -q --track %[1]s origin/%[1]s; }"+
 		" && { test -e %[2]s || git worktree add -q %[2]s %[1]s; }"+
 		" && git -C %[2]s merge -q --ff-only origin/%[1]s"+
-		" && { git -C %[2]s merge -q --no-edit origin/main || git -C %[2]s merge --abort; }", b, p)
+		" && { git -C %[2]s merge -q --no-edit origin/%[3]s || { git -C %[2]s merge --abort;"+
+		" echo \"se: merging origin/%[3]s into %[1]s conflicts, so the merge was aborted: merge origin/%[3]s into %[1]s by hand (never rebase), resolve the conflict and commit\"; }; }", b, p, base)
 }
 
 // WorktreeDir is where Worktree checks issue n out, beside the checkout dir.
@@ -1031,9 +1054,9 @@ func (s Source) stake(dir string, n int) (claimed bool, err error) {
 	return s.stakeFrom(dir, n, "main")
 }
 
-// manifestBranch is the branch a leaf inside root's tree is claimed from:
-// its manifest's, the top of the tree, where that is on origin, so the leaf
-// starts from what its siblings landed; else main.
+// manifestBranch is the branch a leaf inside root's tree is based on: its
+// manifest's, the top of the tree, where that is on origin, so the leaf
+// starts from what its siblings landed; else empty, for main.
 func manifestBranch(dir string, s Source, t tree, root int) string {
 	top := root
 	for t.above[top] != 0 {
@@ -1041,9 +1064,18 @@ func manifestBranch(dir string, s Source, t tree, root int) string {
 	}
 	b := Branch(top)
 	if _, err := s.git(dir, "fetch", "-q", "origin", "+refs/heads/"+b+":refs/remotes/origin/"+b); err != nil {
-		return "main"
+		return ""
 	}
 	return b
+}
+
+// baseOf is the branch leaf n is based on: its manifest's, for a leaf inside
+// a manifest's tree (see manifestBranch); else empty, for main.
+func baseOf(dir string, s Source, t tree, n int) string {
+	if t.above[n] == 0 {
+		return ""
+	}
+	return manifestBranch(dir, s, t, n)
 }
 
 // stakeFrom is stake, the branch pushed from origin's base.

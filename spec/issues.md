@@ -313,8 +313,8 @@ and says why. There is no
 separate `take` command. Taking a parent whose branch exists already checks
 that branch out: the tree is picked up from its claim. Plain `--take` first
 takes over a conflicted claim (see [The rules](#the-rules)): it prints
-`Took over #<n> …` with the PR, and the instruction to merge `origin/main`
-into the branch and land it again (with `--json`: the issue's `takeover`,
+`Took over #<n> …` with the PR, and the instruction to merge its base
+(`origin/main`, or a leaf's manifest's branch) into the branch and land it again (with `--json`: the issue's `takeover`,
 `{"pr","url","count","why","answers"}`). `--take N` takes over claimed leaf `N`, at
 any depth, where `se fleet check` finds it stuck (a conflicted or red PR, or
 no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.md)),
@@ -355,12 +355,17 @@ issue's kind (with `--json`: the field `agent`). Where the box (its session) alr
 its cap of sub-agents, `--worktree` and `--in ROOT --take` take nothing and
 say so (with `--json`: `{"ready":false,"full":true,"why"}`). It also names the open issues the taken one blocks (with
 `--json`: the issue's `blocks`), for `se issue new --blocks`.
-The worktree command starts from the newest of the branch and main, so a
-takeover or a fresh take never works on a stale copy: it fetches `main` and
-the branch, fast-forwards the box's `issue-<n>` to `origin/issue-<n>` (making
-the branch, and the worktree, where the box has none), and merges
-`origin/main` into it; a merge that conflicts is aborted, leaving the branch
-as origin has it for its agent to merge main into.
+The worktree command starts from the newest of the branch and its base, so a
+takeover or a fresh take never works on a stale copy. The base is what the
+leaf lands into: for a leaf inside a manifest's tree, the manifest's branch
+`issue-<manifest>`, which carries main and the conflicts with it already
+resolved (with `--json`: the issue's `base`); else `main`. It fetches the base
+and the branch, fast-forwards the box's `issue-<n>` to `origin/issue-<n>`
+(making the branch, and the worktree, where the box has none), and merges
+`origin/<base>` into it, never `origin/main` for a leaf of a manifest. A merge
+that conflicts is aborted, and the command prints that it was, leaving the
+branch as origin has it for its agent to merge the base into by hand. A
+takeover's instruction names the same base.
 
 `se issue pull --in ROOT` names what is ready inside ROOT's tree: its stuck
 leaves to take over, then its ready leaves, at any depth, lowest number first,
