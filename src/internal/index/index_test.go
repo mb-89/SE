@@ -302,3 +302,107 @@ func TestCollectGathersTheCatalogAndRunsNothing(t *testing.T) {
 		t.Fatalf("the collector answered %v for an unbound input", err)
 	}
 }
+
+// posts is a fixture module that commits a number at a key, as an I/O module commits what comes in.
+var posts = index.Family("posts", 0, "The last number posted at a key.")
+
+var poster = index.Declare("poster", "Holds the numbers a test posts at keys.", index.IO(), posts)
+
+// A family is declared once; its keys come and go without a name added at
+// runtime, each reads its own value, and a derivation that reads the family
+// runs once per key that changed, on that key's value.
+func TestAFamilyHoldsAValuePerKey(t *testing.T) {
+	t.Parallel()
+	ix := start(t, `
+instances:
+  p: {module: poster}
+  s: {module: source}
+  d: {module: doubler}
+wires:
+  p.posts: posts/<id>/last
+  d.x: posts/<id>/last
+`, poster, source, doubler)
+	if got := read(t, ix, "posts/a/last"); got != (index.Value{V: 0}) {
+		t.Fatalf("posts/a/last before any post is %+v, want the built-in 0, not provided", got)
+	}
+	var pushed []any
+	cancel, err := ix.Subscribe("posts/b/last", func(v index.Value) { pushed = append(pushed, v.V) })
+	must(t, err)
+	defer cancel()
+	must(t, ix.Commit("p", posts.At("a", 3)))
+	if got := read(t, ix, "d/twice"); got.V != 6 {
+		t.Fatalf("d/twice after a post at a is %+v, want 6", got)
+	}
+	must(t, ix.Commit("p", posts.At("b", 5)))
+	if got := read(t, ix, "d/twice"); got.V != 10 {
+		t.Fatalf("d/twice after a post at b is %+v, want 10", got)
+	}
+	for name, want := range map[string]int{"posts/a/last": 3, "posts/b/last": 5} {
+		if got := read(t, ix, name); got != (index.Value{V: want, Provided: true}) {
+			t.Fatalf("%s is %+v, want %d, provided", name, got, want)
+		}
+	}
+	must(t, ix.Commit("p", posts.Drop("b")))
+	if got := read(t, ix, "posts/b/last"); got != (index.Value{V: 0}) {
+		t.Fatalf("posts/b/last after its key went is %+v, want the built-in 0, not provided", got)
+	}
+	if got := read(t, ix, "d/twice"); got.V != 0 {
+		t.Fatalf("d/twice after b went is %+v, want 0 from the built-in", got)
+	}
+	must(t, ix.Commit("p", posts.Drop("b")))
+	if !reflect.DeepEqual(pushed, []any{5, 0}) {
+		t.Fatalf("posts/b/last pushed %v, want 5, then 0 once as its key went", pushed)
+	}
+	for _, name := range []string{"posts/<id>/last", "posts/a/b/last", "posts/../last"} {
+		if _, err := ix.Read(name); err == nil {
+			t.Fatalf("%s was read", name)
+		}
+	}
+	for _, w := range []index.Write{posts.At("", 1), posts.At("..", 1), {Port: "posts", Value: 1}} {
+		if err := ix.Commit("p", w); err == nil {
+			t.Fatalf("a commit at key %q was taken", w.Key)
+		}
+	}
+	if err := ix.Commit("s", index.Write{Port: "n", Value: 1, Key: "a"}); err == nil {
+		t.Fatal("a commit at a key to no family was taken")
+	}
+	if err := ix.Commit("s", index.Write{Port: "n", Gone: true}); err == nil {
+		t.Fatal("a drop from no family was taken")
+	}
+}
+
+func TestABrokenFamilyIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ wiring, want string }{
+		{"instances: {p: {module: poster}}\nwires: {p.posts: posts/last}", `p.posts writes at keys, and "posts/last" is no family`},
+		{"instances: {s: {module: source}}\nwires: {s.n: n/<id>}", `s.n writes no keys, and "n/<id>" is a family`},
+		{"instances: {p: {module: poster}}\nwires: {p.posts: posts/<a>/<b>}", "is no name"},
+		{"instances: {p: {module: poster}, q: {module: poster}}\nwires: {p.posts: posts/<a>, q.posts: posts/<b>}", "families posts/<a> and posts/<b> hold the same names"},
+		{"instances: {p: {module: poster}, s: {module: source}}\nwires: {p.posts: posts/<a>, s.n: posts/one}", "name posts/one lies in family posts/<a>"},
+		{"instances: {p: {module: poster}, t: {module: tally}}\nwires: {p.posts: posts/<a>, t.numbers: posts/<a>}", "a command reads it"},
+	} {
+		refused(t, c.wiring, c.want, poster, source, fixture.Module)
+	}
+}
+
+// The fake index keeps what a command writes to a family at its key.
+func TestTheFakeKeepsAFamilyByKey(t *testing.T) {
+	t.Parallel()
+	f, err := indextest.New(index.Declare("post", "Posts 1 at its argument.", posts,
+		index.Command(index.CommandDecl{Name: "post", Usage: "post <key>", Summary: "Post.", Help: "Posts 1 at key.", Group: "Fixtures", Class: index.Batch},
+			func(_ struct{}, args []string) (index.Result, error) {
+				return index.Result{Writes: []index.Write{posts.At(args[0], 1)}}, nil
+			})))
+	must(t, err)
+	_, err = f.Call("post", "a")
+	must(t, err)
+	if got, err := f.OutAt("posts", "a"); err != nil || got != (index.Value{V: 1, Provided: true}) {
+		t.Fatalf("posts at a is %+v, %v", got, err)
+	}
+	if got, err := f.OutAt("posts", "b"); err != nil || got != (index.Value{V: 0}) {
+		t.Fatalf("posts at b is %+v, %v", got, err)
+	}
+	if _, err := f.Out("posts"); err == nil {
+		t.Fatal("a family was read without a key")
+	}
+}

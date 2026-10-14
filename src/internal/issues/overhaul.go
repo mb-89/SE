@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/guidance"
 	"gopkg.in/yaml.v3"
 
 	"github.com/mb-89/SE/src/internal/io/disk"
@@ -59,8 +58,8 @@ func (s Source) NewOverhaul(unattended bool) (OverhaulIssue, error) {
 	if unattended {
 		mode, who = "unattended", "It runs unattended. The box creates the findings' issues, those for a person where controversial, and closes it."
 	}
-	body := fmt.Sprintf("An overhaul of SE as it stands: is the design still right? It checks every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last %d runs. The rules are spec/overhaul.md; a box takes it with the overhaul skill, which its take hands over, and starts with `se overhaul read`.\n\n%s %s\n\n<!-- se:overhaul %s -->\n\n%s",
-		OverhaulCadence, before, who, mode, guidance.Line([]string{"overhaul"}))
+	body := fmt.Sprintf("An overhaul of SE as it stands: is the design still right? It checks every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last %d runs. The rules are spec/overhaul.md; a box takes it and starts its agent, se:overhaul, which starts with `se overhaul read`.\n\n%s %s\n\n<!-- se:overhaul %s -->",
+		s.config().OverhaulCadence, before, who, mode)
 	made, _, err := s.create("SE overhaul "+s.now().UTC().Format("2006-01-02"), body, 0, nil, []string{Label, OverhaulLabel})
 	if err != nil {
 		return OverhaulIssue{}, err
@@ -159,10 +158,12 @@ type Overhauled struct {
 // se overhaul file fills each finding's Issue. The next overhaul reads it
 // first.
 type OverhaulReport struct {
-	Overhaul   int         `yaml:"overhaul"`
-	Attended   bool        `yaml:"attended"`
-	Until      time.Time   `yaml:"until"`
-	Previous   int         `yaml:"previous,omitempty"`
+	Overhaul int       `yaml:"overhaul"`
+	Attended bool      `yaml:"attended"`
+	Until    time.Time `yaml:"until"`
+	Previous int       `yaml:"previous,omitempty"`
+	// Runs is how many of the retro's last runs it reads, issues/config/overhaul-cadence.
+	Runs       int         `yaml:"runs,omitempty"`
 	Principles []Principle `yaml:"principles"`
 	Retros     []RetroRun  `yaml:"retros"`
 	// Recurring are the finding classes more than one of the latest retros
@@ -268,6 +269,7 @@ func (s Source) CollectOverhaul(n int, ps []Principle) (OverhaulReport, error) {
 	}
 	r := OverhaulReport{
 		Overhaul: n, Attended: !strings.Contains(i.Body, overhaulUnattendedMark), Until: s.now().UTC().Truncate(time.Second),
+		Runs:       s.config().OverhaulCadence,
 		Principles: ps, Retros: []RetroRun{}, Recurring: []string{}, Earlier: []Overhauled{},
 		Verdicts: []Judged{}, Findings: []Straying{}, WentWell: []string{},
 	}
@@ -276,7 +278,7 @@ func (s Source) CollectOverhaul(n int, ps []Principle) (OverhaulReport, error) {
 		return OverhaulReport{}, err
 	}
 	var reports []*RetroReport
-	for k := len(retros) - 1; k >= 0 && len(reports) < OverhaulCadence; k-- {
+	for k := len(retros) - 1; k >= 0 && len(reports) < r.Runs; k-- {
 		rep, err := s.postedReport(retros[k].Number)
 		if err != nil {
 			return OverhaulReport{}, err
@@ -407,7 +409,7 @@ func (r OverhaulReport) facts() string {
 		fmt.Fprintf(&b, "| %d | %s | %s | %s |\n", p.Number, p.Name, p.CheckedBy, how)
 	}
 
-	fmt.Fprintf(&b, "\n## The retro's last %d runs\n", OverhaulCadence)
+	fmt.Fprintf(&b, "\n## The retro's last %d runs\n", r.Runs)
 	if len(r.Retros) == 0 {
 		b.WriteString("No retro has a report yet.\n")
 	} else {

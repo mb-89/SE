@@ -123,7 +123,7 @@ func TestAReReviewIsLimitedToTheEarlierBlockers(t *testing.T) {
 	seed(t, gh, map[string]string{
 		subsPath(1):     subs(-2, -3),
 		commentsPath(3): workedBy(Worker{Session: "f", Workspace: "/f"}),
-		commentsPath(1): fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r0", Workspace: "/r0"})),
+		commentsPath(1): fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r0", Workspace: "/r0"}, MaxFiled)),
 	})
 	r := Worker{Session: "r", Workspace: "/r"}
 	if _, err := s.Review(1, r, true, passing); err == nil || !strings.Contains(err.Error(), "checks only the earlier blockers (#3)") {
