@@ -3,7 +3,7 @@ package clock
 import (
 	"time"
 
-	"github.com/mb-89/SE/src/internal/index"
+	"github.com/mb-89/SE/src/index"
 )
 
 // startedIn is what the started derivation reads: nothing, so it runs once, when the index starts.

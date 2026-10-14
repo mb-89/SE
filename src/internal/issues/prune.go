@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // Fresh is how long a claude/* branch is left alone after its last commit,
@@ -103,12 +101,8 @@ func (s Source) Strays() ([]Stray, error) {
 func (s Source) Prune(strays []Stray) ([]Stray, error) {
 	for k := range strays {
 		if pr := strays[k].PR; pr != 0 {
-			body := fmt.Sprintf("Closed unmerged by se fleet prune: %s.", strays[k].Why)
-			if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, pr), github.F("body", body)); err != nil {
-				return strays, fmt.Errorf("commenting on PR #%d: %w", pr, err)
-			}
-			if _, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/pulls/%d", s.Repo, pr), github.F("state", "closed")); err != nil {
-				return strays, fmt.Errorf("closing PR #%d: %w", pr, err)
+			if err := s.closePull(pr, fmt.Sprintf("Closed unmerged by se fleet prune: %s.", strays[k].Why)); err != nil {
+				return strays, err
 			}
 		}
 		if _, err := s.GitHub.Send("DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, strays[k].Branch)); err != nil {

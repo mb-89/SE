@@ -11,17 +11,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
-// recordedFleet answers the fleet commands' gh calls for o/r: #3 is ready,
+// recordedFleet answers the fleet commands' gh calls for o/r: #3 is a manifest,
 // nothing is claimed, and nothing is broken.
 func recordedFleet(t *testing.T) *github.Fake {
 	t.Helper()
 	answers := map[string]string{
-		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3"}]`,
+		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3","labels":[{"name":"se"},{"name":"se-manifest"}]}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[]`,
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
@@ -48,6 +50,42 @@ func TestFleetCheckSaysWhenTheQuotaRunsLow(t *testing.T) {
 	var answer struct{ Quota string }
 	if err := json.Unmarshal([]byte(out), &answer); err != nil || !strings.HasPrefix(answer.Quota, "GitHub's quota runs low: ") {
 		t.Fatalf("%q %v", out, err)
+	}
+}
+
+// A command GitHub refuses for its rate limit waits for the reset, and
+// records the refusal, its command and the wait in its workspace's ledger,
+// which land adds up into the issue's landing facts.
+func TestARateLimitRefusalIsRecordedWithItsWait(t *testing.T) {
+	t.Parallel()
+	// GitHub's clock is the command's, so the wait reaches the reset.
+	c := clock.NewFake(testedAt)
+	gh := github.NewFake(c)
+	if err := gh.Seed(map[string]string{
+		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3"}]`,
+		"repos/o/r/git/matching-refs/heads/issue-":                `[]`,
+		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
+		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worldOf(t).GitHub, worldOf(t).Clock = gh, c
+	gh.Quota(1, 10*time.Minute)
+	if _, err := gh.Get("repos/o/r/issues/3"); err != nil {
+		t.Fatal(err)
+	}
+	ws := t.TempDir()
+	code, out, errs := se(t, "--workspace", ws, "fleet", "check", "--repo", "o/r")
+	if code != 0 || !strings.Contains(errs, "GitHub refused a request for its rate limit (HTTP 403); waiting 10m0s") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	w, err := issues.RateLimitWaits(disk.Real(), ws)
+	if err != nil || w.Refusals == 0 || w.Wait < 10*time.Minute {
+		t.Fatalf("the workspace's ledger records %+v (%v), want the refusals fleet check met and their wait", w, err)
+	}
+	data, err := disk.Real().ReadFile(filepath.Join(ws, issues.RateLimitsFile))
+	if err != nil || !strings.HasPrefix(string(data), "2026-10-14T12:00:00Z\tfleet check\t403\t600\twaited\n") {
+		t.Fatalf("the ledger reads %q (%v)", data, err)
 	}
 }
 
@@ -135,6 +173,29 @@ func TestRulesOnBuildsTheMergesSeAndAnswersItsRuleAndTestFindingsWithoutTimings(
 	})
 	if got, err := rulesOn(m, "/wt"); got != "it does not build:\nundefined: World" || err != nil {
 		t.Fatalf("%q %v", got, err)
+	}
+}
+
+func TestFleetTrustPassesOnlyAHeadCarryingTheBatterysStatusForItsTree(t *testing.T) {
+	t.Parallel()
+	const sha, tree = "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"
+	gh := hubAt(t, map[string]string{})
+	trust := func() (int, string, string) {
+		return se(t, "fleet", "trust", "--repo", "o/r", "--sha", sha, "--tree", tree)
+	}
+	// A push without SE: CI runs the battery.
+	if code, out, errs := trust(); code == 0 || out != "" || !strings.Contains(errs, "not trusted, so CI runs the battery") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	// A box's push: CI passes without it.
+	if _, err := gh.Send("POST", "repos/o/r/statuses/"+sha, github.F("state", "success"), github.F("context", issues.BatteryContext), github.F("description", issues.BatteryDescription(tree))); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errs := trust(); code != 0 || !strings.HasPrefix(out, "trusted: "+sha+" passed the battery on tree "+tree) {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if code, _, errs := se(t, "fleet", "trust", "--repo", "o/r", "--sha", sha); code == 0 || !strings.Contains(errs, "--tree TREE") {
+		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
 

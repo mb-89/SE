@@ -1,3 +1,4 @@
 .se/.runtime/
 src/plugin/.claude-plugin/types/
 src/plugin/bin/
+src/se

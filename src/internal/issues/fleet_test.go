@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -63,12 +64,19 @@ func dep(n int, state, reason string, se bool) string {
 	return fmt.Sprintf(`{"number":%d,"state":%q,"state_reason":%q,"html_url":"u%d","repository_url":"https://api.github.com/repos/o/r","labels":%s}`, n, state, reason, n, ls)
 }
 
+// ready5 is the fleet's ready work, in a manifest as all work is: #5, a
+// manifest, holding its ready leaf #1, which newWorld lists with it.
+var ready5 = item(5, 1, ManifestLabel)
+
 func newWorld(t *testing.T, items []string, claimed ...int) *world {
 	t.Helper()
-	w := &world{t: t, Fake: recorded(t, map[string]string{
-		listPath:               "[" + strings.Join(items, ",") + "]",
-		"repos/o/r/issues/100": `{"number":100,"state":"closed"}`,
-	})}
+	answers := map[string]string{"repos/o/r/issues/100": `{"number":100,"state":"closed"}`}
+	if slices.Contains(items, ready5) {
+		items = append(items, item(1, 0))
+		answers[subsPath(5)] = "[" + item(1, 0) + "]"
+	}
+	answers[listPath] = "[" + strings.Join(items, ",") + "]"
+	w := &world{t: t, Fake: recorded(t, answers)}
 	var refs []string
 	for _, n := range claimed {
 		refs = append(refs, fmt.Sprintf(`{"ref":"refs/heads/issue-%d","object":{"sha":"c%d"}}`, n, n))
@@ -76,6 +84,15 @@ func newWorld(t *testing.T, items []string, claimed ...int) *world {
 	}
 	w.set(refsPath, "["+strings.Join(refs, ",")+"]")
 	return w
+}
+
+// in5 files the leaves ns into the manifest #5, beside its leaf #1.
+func (w *world) in5(ns ...int) {
+	subs := []string{item(1, 0)}
+	for _, n := range ns {
+		subs = append(subs, item(n, 0))
+	}
+	w.set(subsPath(5), "["+strings.Join(subs, ",")+"]")
 }
 
 // ahead records how many commits issue-n's branch has that main lacks.
@@ -148,7 +165,7 @@ func TestAFleetWithNothingBrokenIsHealthy(t *testing.T) {
 	t.Parallel()
 	// #5 is ready, #6 waits on #5, #7 is claimed and its PR is green, mergeable,
 	// with auto-merge on and a push half an hour ago.
-	w := newWorld(t, []string{item(5, 0), item(6, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(6, 0), item(7, 0)}, 7)
 	w.set(links(6), "["+dep(5, "open", "", true)+"]")
 	w.pushed(7, recent)
 	w.pr(7, "true", "clean", true, "check:success")
@@ -160,7 +177,7 @@ func TestAFleetWithNothingBrokenIsHealthy(t *testing.T) {
 	if got := w.check(); len(got) != 0 {
 		t.Fatalf("%+v", got)
 	}
-	w = newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w = newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.pushed(7, recent)
 	if got := w.check(); len(got) != 0 {
 		t.Fatalf("%+v", got)
@@ -169,7 +186,7 @@ func TestAFleetWithNothingBrokenIsHealthy(t *testing.T) {
 
 func TestAConflictedPRIsFoundAndTakenOver(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.pushed(7, recent)
 	w.pr(7, "false", "dirty", true)
 	f := only(t, w.check(), ConflictedPR, 7)
@@ -188,7 +205,7 @@ func TestAConflictedPRIsFoundAndTakenOver(t *testing.T) {
 
 func TestARedPRIsFoundOnceItIsQuiet(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.pr(7, "true", "unstable", true, "check:failure", "lint:success")
 	w.pushed(7, recent)
 	if got := w.check(); len(got) != 0 {
@@ -201,9 +218,47 @@ func TestARedPRIsFoundOnceItIsQuiet(t *testing.T) {
 	}
 }
 
+// The lease and se fleet check read one rule for a quiet claim: a takeover a
+// minute ago keeps it moving for both, however old its last push; no push and
+// no takeover past the lease is quiet to both.
+func TestTheLeaseAndTheFleetCheckAgreeWhenAClaimIsQuiet(t *testing.T) {
+	t.Parallel()
+	stale := noon.Add(-Lease - time.Hour).Format(time.RFC3339)
+	for _, c := range []struct {
+		name   string
+		pushed string
+		taken  bool
+		quiet  bool
+	}{
+		{"taken over a minute ago", `[{"timestamp":"` + stale + `","activity_type":"push"}]`, true, false},
+		{"no push and no takeover", `[]`, false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t, []string{ready5, item(7, 0)}, 7)
+			w.set("repos/o/r/activity?ref=refs/heads/issue-7&per_page=1", c.pushed)
+			w.pr(7, "true", "unstable", true, "check:failure")
+			if c.taken {
+				w.said(7, "<!-- se:takeover 1 -->", noon.Add(-time.Minute))
+			}
+			s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
+			st := Status{Issue: Issue{Number: 7}}
+			if err := s.lease(&st); err != nil {
+				t.Fatal(err)
+			}
+			if st.Stuck != c.quiet {
+				t.Fatalf("the lease says stuck %v, want %v", st.Stuck, c.quiet)
+			}
+			if got := w.check(); (len(got) > 0) != c.quiet {
+				t.Fatalf("se fleet check finds %+v, want quiet %v", got, c.quiet)
+			}
+		})
+	}
+}
+
 func TestAGreenPRWithAutoMergeOffIsFoundAtOnce(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.pr(7, "true", "clean", false, "check:success")
 	w.pushed(7, recent)
 	f := only(t, w.check(), GreenUnmerged, 7)
@@ -216,14 +271,14 @@ func TestAGreenPRWithAutoMergeOffIsFoundAtOnce(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 	w.pushed(7, quiet)
-	if f := only(t, w.check(), GreenUnmerged, 7); f.Remedy != "se fleet fix reports it as an se-person issue" {
+	if f := only(t, w.check(), GreenUnmerged, 7); f.Remedy != "none se applies by itself; se fleet check reports it" {
 		t.Fatalf("%+v", f)
 	}
 }
 
 func TestAClaimWithNoPRIsFoundOnceItIsQuiet(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.closedPRs(7, `[]`)
 	w.pushed(7, quiet)
 	f := only(t, w.check(), NoPR, 7)
@@ -239,11 +294,11 @@ func TestAClaimWithNoPRIsFoundOnceItIsQuiet(t *testing.T) {
 
 func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0)}, 19)
+	w := newWorld(t, []string{ready5}, 19)
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-13T11:00:00Z"}`)
 	f := only(t, w.check(), LeftoverClaim, 19)
 	if f.What != "issue-19 claims #19, which is closed (not planned)" ||
-		f.Remedy != "the prune workflow deletes issue-19; se fleet fix reports it only if it is still there a day after #19 closed" {
+		f.Remedy != "the prune workflow deletes issue-19; se fleet check reports it if it is still there a day after #19 closed" {
 		t.Fatalf("%+v", f)
 	}
 	// Within a day of the close, se fleet fix leaves it to the prune
@@ -253,30 +308,30 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	if done[0].Did != "left to the prune workflow until a day after #19 closed" || len(w.Writes()) != 0 {
 		t.Fatalf("%+v, writes %q", done, w.Writes())
 	}
-	// A day later the workflow failed: it becomes an se issue.
+	// A day later the workflow failed: it is reported, never filed.
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-12T11:00:00Z"}`)
 	done = s.Fix(t.TempDir(), w.check())
-	if done[0].Did != "reported it as #101" || !done[0].Ready ||
+	if done[0].Did != "reported; the prune workflow did not delete it" || len(w.Writes()) != 0 ||
 		done[0].What != "issue-19 claims #19, which is closed (not planned), and is still there a day after it closed: the prune workflow did not delete it" {
 		t.Fatalf("%+v", done)
 	}
-	// With an open PR, the workflow leaves it, so se fleet fix reports it.
+	// With an open PR, the workflow leaves it, so se fleet check reports it.
 	w.set(allPullsPath, `[{"number":90,"head":{"ref":"issue-19","sha":"c19"}}]`)
-	if f := only(t, w.check(), LeftoverClaim, 19); f.Remedy != "se fleet fix reports it as an se issue" {
+	if f := only(t, w.check(), LeftoverClaim, 19); f.Remedy != "none se applies by itself; se fleet check reports it" {
 		t.Fatalf("%+v", f)
 	}
 	// Closed as a duplicate, its open PR is the duplicate's: the workflow
 	// closes it and deletes the branch.
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"duplicate","closed_at":"2026-10-13T11:00:00Z"}`)
 	if f := only(t, w.check(), LeftoverClaim, 19); f.What != "issue-19 claims #19, which is closed (duplicate)" || f.PR != 90 ||
-		f.Remedy != "the prune workflow closes PR #90 unmerged and deletes issue-19; se fleet fix reports it only if it is still there a day after #19 closed" {
+		f.Remedy != "the prune workflow closes PR #90 unmerged and deletes issue-19; se fleet check reports it if it is still there a day after #19 closed" {
 		t.Fatalf("%+v", f)
 	}
 }
 
 func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0)}, 19)
+	w := newWorld(t, []string{ready5}, 19)
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"open"}`)
 	w.ahead(19, 0)
 	f := only(t, w.check(), LeftoverClaim, 19)
@@ -288,23 +343,22 @@ func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 	origin, a, _ := boxes(t)
 	run(t, a, "push", "-q", "origin", "main:issue-19")
 	done := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Fix(a, []Finding{f})
-	if done[0].Did != "deleted issue-19 at c19, which main holds whole" || done[0].Made != 0 || done[0].Failed != "" {
+	if done[0].Did != "deleted issue-19 at c19, which main holds whole" || done[0].Failed != "" {
 		t.Fatalf("%+v", done)
 	}
 	if got := run(t, origin, "branch", "--list", "issue-19"); got != "" {
 		t.Fatalf("origin still has %q", got)
 	}
-	if got := w.Writes(); !reflect.DeepEqual(got, []string{"POST repos/o/r/issues/19/comments"}) {
+	// It writes no comment: the fix is its own record.
+	if got := w.Writes(); len(got) != 0 {
 		t.Fatalf("writes %q", got)
-	}
-	if c := commentsAt(t, w, 19); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:fleet leftover-branch 0 -->") {
-		t.Fatalf("#19 has no record: %+v", c)
 	}
 }
 
 func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(8, 0)}, 19)
+	w := newWorld(t, []string{ready5, item(8, 0)}, 19)
+	w.in5(8)
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"open"}`)
 	w.ahead(19, 0)
 	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
@@ -315,17 +369,18 @@ func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
 		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
 	}
 	if len(done) != 2 || !strings.HasPrefix(done[0].Did, "failed: deleting issue-19: git push -q origin --delete issue-19: ") || done[0].Failed == "" ||
-		dids[1] != "impossible block #8: reported it as #101" || done[1].Failed != "" {
+		dids[1] != "impossible block #8: reported; it has no remedy se applies by itself" || done[1].Failed != "" {
 		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
 	}
-	if c19, c8 := commentsAt(t, w, 19), commentsAt(t, w, 8); len(c19) != 0 || len(c8) != 1 {
+	if c19, c8 := commentsAt(t, w, 19), commentsAt(t, w, 8); len(c19) != 0 || len(c8) != 0 {
 		t.Fatalf("records: #19 %+v, #8 %+v", c19, c8)
 	}
 }
 
 func TestImpossibleBlocksAreFound(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(8, 0), item(9, 0), item(10, 0), item(11, 0), item(12, 0)})
+	w := newWorld(t, []string{ready5, item(8, 0), item(9, 0), item(10, 0), item(11, 0), item(12, 0)})
+	w.in5(8)
 	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
 	w.set(links(9), "["+dep(4, "open", "", false)+"]")
 	w.set(links(10), "["+dep(11, "open", "", true)+"]")
@@ -340,9 +395,9 @@ func TestImpossibleBlocksAreFound(t *testing.T) {
 		whats = append(whats, fmt.Sprintf("#%d %s: %s", f.Issue, f.What, f.Remedy))
 	}
 	want := []string{
-		"#8 #8 is blocked by #3, which was closed as not planned: se fleet fix reports it as an se issue",
-		"#9 #9 is blocked by u4, which is no se issue, so no box moves it: se fleet fix reports it as an se-person issue",
-		"#10 a cycle of blocks: #10 is blocked by #11 is blocked by #12 is blocked by #10: se fleet fix reports it as an se-person issue",
+		"#8 #8 is blocked by #3, which was closed as not planned: none se applies by itself; se fleet check reports it",
+		"#9 #9 is blocked by u4, which is no se issue, so no box moves it: none se applies by itself; se fleet check reports it",
+		"#10 a cycle of blocks: #10 is blocked by #11 is blocked by #12 is blocked by #10: none se applies by itself; se fleet check reports it",
 	}
 	if !reflect.DeepEqual(whats, want) {
 		t.Fatalf("got\n%s", strings.Join(whats, "\n"))
@@ -351,7 +406,7 @@ func TestImpossibleBlocksAreFound(t *testing.T) {
 
 func TestAnIssueWaitingOnAPersonIsReportedWithWhatItHoldsUp(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(12, 0, PersonLabel), item(13, 0)})
+	w := newWorld(t, []string{ready5, item(12, 0, PersonLabel), item(13, 0)})
 	w.set(links(13), "["+dep(12, "open", "", true)+"]")
 	f := only(t, w.check(), WaitingOnPerson, 12)
 	if !reflect.DeepEqual(f.Holds, []int{13}) || f.What != "#12 waits for a person (se-person), holding up #13" || f.Remedy != "none: it waits for a person" {
@@ -379,22 +434,51 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 		f.Remedy != "se issue pull --take 17, merge origin/main into issue-17, make it green, se issue land" {
 		t.Fatalf("%+v", f)
 	}
-	// Its remedy, run: the takeover was made once already, so #17 is
-	// se-final and waits on an issue for a person.
-	_, _, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(t.TempDir(), 17)
-	if err == nil || !strings.Contains(err.Error(), "an issue for a person") {
-		t.Fatalf("%v", err)
+	// Its remedy, run: a conflict is no failure, so #17, final or not, is
+	// taken over again, and nothing waits on a person.
+	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(claimedAt(t, 17), 17)
+	if err != nil || !ok || took.Takeover == nil || took.Takeover.Count != 2 {
+		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	// The issue for the person is #171, after PR #170.
-	if by := linksOf(t, w.Fake, links(17)); !reflect.DeepEqual(by, []int{171}) || labelled(t, w, 17, PersonLabel) || !labelled(t, w, 171, PersonLabel) {
+	if by := linksOf(t, w.Fake, links(17)); len(by) != 0 || !labelled(t, w, 17, FinalLabel) {
 		t.Fatalf("#17 is blocked by %v; writes %q", by, w.Writes())
+	}
+}
+
+// Recorded from mb-89/SE on 14 October: #60, final, was taken over as stuck
+// at 08:01:45, which recorded a comment and no push; at 08:03:42 the
+// coordination remedy found it quiet and stuck, and its box landed PR #127
+// anyway. A takeover a minute old renews the claim as a push does: neither
+// se fleet check nor se issue pull --take N finds it stuck.
+func TestAClaimTakenOverAMinuteAgoIsNotStuck(t *testing.T) {
+	t.Parallel()
+	for name, pr := range map[string]func(w *world){
+		"no PR":  func(w *world) { w.closedPRs(7, `[]`) },
+		"red PR": func(w *world) { w.pr(7, "true", "clean", true, "check:failure") },
+	} {
+		w := newWorld(t, []string{item(5, 0), item(7, 0, FinalLabel)}, 7)
+		pr(w)
+		w.pushed(7, quiet)
+		w.said(7, "<!-- se:takeover 1 -->\nTaken over: nothing was pushed to issue-7.", noon.Add(-time.Minute))
+		for _, f := range w.check() {
+			if f.Issue == 7 {
+				t.Errorf("%s: se fleet check finds %+v", name, f)
+			}
+		}
+		_, _, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(t.TempDir(), 7)
+		if err == nil || !strings.Contains(err.Error(), "nothing about it is stuck") {
+			t.Errorf("%s: %v", name, err)
+		}
+		if c := commentsAt(t, w, 7); len(c) != 1 || len(w.Writes()) != 0 {
+			t.Errorf("%s: #7 was written: %+v, writes %q", name, c, w.Writes())
+		}
 	}
 }
 
 func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	t.Parallel()
 	a := claimed7(t)
-	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.closedPRs(7, `[]`)
 	w.pushed(7, quiet)
 	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(a, 7)
@@ -407,7 +491,7 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	if c := commentsAt(t, w, 7); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:takeover 1 -->") || !strings.Contains(c[0].Body, "<!-- se:takeover-head c7 -->") {
 		t.Fatalf("%+v", c)
 	}
-	// The takeover makes #7 final: stuck again, it goes to a person.
+	// The takeover makes #7 final: stuck again, it is taken over again.
 	if !labelled(t, w, 7, FinalLabel) {
 		t.Fatalf("writes %q", w.Writes())
 	}
@@ -419,9 +503,10 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	}
 }
 
-func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
+func TestFleetFixAppliesEachRemedyAndFilesNothing(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(7, 0), item(8, 0), item(9, 0)}, 7, 19)
+	w := newWorld(t, []string{ready5, item(7, 0), item(8, 0), item(9, 0)}, 7, 19)
+	w.in5(8)
 	// A review is still required on #70, so auto-merge waits for it.
 	w.pr(7, "true", "blocked", false, "check:success")
 	w.pushed(7, recent)
@@ -429,60 +514,30 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
 	w.set(links(9), "["+dep(4, "open", "", false)+"]")
 	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
-	found := w.check()
-	done := s.Fix(t.TempDir(), found)
+	done := s.Fix(t.TempDir(), w.check())
 	var dids []string
 	for _, d := range done {
 		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
 	}
 	want := []string{
 		"green but unmerged #7: turned auto-merge on for PR #70",
-		"leftover claim #19: reported it as #101",
-		"impossible block #8: reported it as #102",
-		"impossible block #9: reported it to a person as #103",
+		"leftover claim #19: reported; the prune workflow did not delete it",
+		"impossible block #8: reported; it has no remedy se applies by itself",
+		"impossible block #9: reported; it has no remedy se applies by itself",
 	}
 	if !reflect.DeepEqual(dids, want) {
 		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
 	}
-	if !done[1].Ready || done[3].Ready || !strings.Contains(get(t, w, "repos/o/r/issues/103"), `"assignees":[{"login":"o"}]`) ||
-		!strings.Contains(get(t, w, "repos/o/r/pulls/70"), `"auto_merge":{"merge_method":"squash"}`) {
-		t.Fatalf("%+v, writes %q", done, w.Writes())
+	if !strings.Contains(get(t, w, "repos/o/r/pulls/70"), `"auto_merge":{"merge_method":"squash"}`) {
+		t.Fatalf("auto-merge is off: writes %q", w.Writes())
 	}
-	for _, n := range []int{7, 19, 8, 9} {
-		if c := commentsAt(t, w, n); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:fleet ") {
-			t.Errorf("#%d has no record: %+v", n, c)
+	// An issue is work, not a report: no issue and no comment is written.
+	for _, x := range w.Writes() {
+		if x == "POST repos/o/r/issues" || strings.HasSuffix(x, "/comments") {
+			t.Fatalf("fleet fix wrote %q", w.Writes())
 		}
 	}
-	// Run again with the same findings: the reported ones are still open and
-	// are left as they are; the green PR is back after its fix, as GitHub
-	// turned its auto-merge off again, so it goes to a person.
-	w.pr(7, "true", "blocked", false, "check:success")
-	fixed := len(w.Writes())
-	done = s.Fix(t.TempDir(), w.check())
-	dids = nil
-	for _, d := range done {
-		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
-	}
-	want = []string{
-		"green but unmerged #7: it is back after a fix, so it went to a person as #104",
-		"leftover claim #19: reported already as #101, still open",
-		"impossible block #8: reported already as #102, still open",
-		"impossible block #9: reported already as #103, still open",
-		// #103 is for a person, and waits on them.
-		"waiting on a person #103: reported; it waits for a person",
-	}
-	if !reflect.DeepEqual(dids, want) {
-		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
-	}
-	for _, x := range w.Writes()[fixed:] {
-		if x == "POST graphql" {
-			t.Fatalf("auto-merge was turned on again: %q", w.Writes()[fixed:])
-		}
-	}
-	if !labelled(t, w, 104, PersonLabel) || !strings.Contains(get(t, w, "repos/o/r/issues/104"), `"assignees":[{"login":"o"}]`) {
-		t.Fatalf("#104 is not for a person: %s", get(t, w, "repos/o/r/issues/104"))
-	}
-	// A takeover is left to the box; a person is only reported.
+	// A takeover is left to the next take; a person is only reported.
 	x := s.Fix(t.TempDir(), []Finding{{Kind: ConflictedPR, Issue: 7}, {Kind: WaitingOnPerson, Issue: 12}})
 	if !x[0].Take || x[1].Take || x[1].Did != "reported; it waits for a person" {
 		t.Fatalf("%+v", x)
@@ -534,5 +589,56 @@ func TestTheTakeoverRemedyOfAStuckSubIssueLeafRuns(t *testing.T) {
 		if got := run(t, a, "log", "-1", "--format=%s"); got != "work on 7" {
 			t.Fatalf("pushed at %s: issue-7 is not checked out as it stands: %s", at, got)
 		}
+	}
+}
+
+// An se built before manifests files bare issues, which no box takes: se
+// fleet check finds each open one at the top that nothing holds or claims,
+// and se fleet fix files it into the open misc manifest, once.
+func TestABareIssueIsFiledIntoTheMiscManifest(t *testing.T) {
+	t.Parallel()
+	// #20 is bare. #7 is bare but claimed, #25 bare but blocked; #21, #22
+	// and #24 stand at the top by themselves (a retro, an overhaul, an empty
+	// manifest), and #23 is a sub-issue of #5.
+	w := newWorld(t, []string{ready5, item(7, 0), item(20, 0), item(21, 0, RetroLabel), item(22, 0, OverhaulLabel), item(23, 0), item(24, 0, ManifestLabel), item(25, 0)}, 7)
+	w.in5(23)
+	w.pushed(7, recent)
+	w.set(links(25), "["+dep(20, "open", "", true)+"]")
+	f := only(t, w.check(), BareIssue, 20)
+	if f.What != "#20 stands in no manifest, and boxes take only manifests" || f.Remedy != "se fleet fix files it into the open misc manifest" {
+		t.Fatalf("%+v", f)
+	}
+	// No misc manifest is open: the fix opens #101 and files #20 into it.
+	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
+	done := s.Fix(t.TempDir(), []Finding{f})
+	if len(done) != 1 || done[0].Did != "filed it into misc manifest #101" || done[0].Failed != "" {
+		t.Fatalf("%+v", done)
+	}
+	if top, err := s.manifestOf(20); err != nil || top != 101 || !labelled(t, w, 101, MiscLabel) {
+		t.Fatalf("#20 is in #%d (%v)", top, err)
+	}
+	// The fix moves #20 by a sub-issue link alone: no comment records it.
+	if c := commentsAt(t, w, 20); len(c) != 0 {
+		t.Fatalf("the fix commented on #20: %+v", c)
+	}
+	for _, x := range w.Writes() {
+		if strings.HasSuffix(x, "/comments") {
+			t.Fatalf("fleet fix wrote %q", w.Writes())
+		}
+	}
+
+	// An open misc manifest takes it, and no other opens.
+	w = newWorld(t, []string{ready5, item(20, 0)})
+	s.GitHub = w
+	misc, err := s.FileInto()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done = s.Fix(t.TempDir(), w.check())
+	if len(done) != 1 || done[0].Did != fmt.Sprintf("filed it into misc manifest #%d", misc) {
+		t.Fatalf("%+v", done)
+	}
+	if top, err := s.manifestOf(20); err != nil || top != misc {
+		t.Fatalf("#20 is in #%d (%v), want #%d", top, err, misc)
 	}
 }
