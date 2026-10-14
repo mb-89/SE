@@ -24,7 +24,8 @@ whole system, not a window.
   starts an unattended overhaul and takes it first, ahead of a due retro and
   all other work. It is the same mechanism as the retro cadence, one constant.
   An open `se-overhaul` issue, attended or not, means no second one is
-  started. `--take N` skips the cadence; the plain `se issue pull` reports the
+  started; one started in a race with a lower one closes itself as its
+  duplicate, as a retro does. `--take N` skips the cadence; the plain `se issue pull` reports the
   count beside the retro's.
 - **The box** takes an overhaul like any issue (`se issue pull --take` says it
   is an overhaul) and follows the overhaul skill,
