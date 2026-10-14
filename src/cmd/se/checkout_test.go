@@ -140,6 +140,24 @@ func runs(t *testing.T, ep *Endpoint, ws string) string {
 	return exe
 }
 
+// stopAndWait stops the workspace's daemon and waits for its process to end:
+// daemon.Stop returns once daemon.json is gone, but the serve command still
+// records its call in .se/.runtime after that, which would race the test's
+// TempDir cleanup. Where the OS does not tell, it waits for daemon.json alone.
+func stopAndWait(paths daemon.Paths) {
+	ep, ok := daemon.Healthy(paths, sehttp.Real())
+	_ = daemon.Stop(paths, 5*time.Second, clock.Real(), sehttp.Real())
+	if !ok || runtime.GOOS != "linux" {
+		return
+	}
+	proc := filepath.Join("/proc", strconv.Itoa(ep.PID))
+	for deadline := clock.Real().Now().Add(5 * time.Second); clock.Real().Now().Before(deadline); clock.Real().Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(proc); err != nil {
+			return
+		}
+	}
+}
+
 func TestTheLifecycleStaysWithTheInstalledSe(t *testing.T) {
 	t.Parallel()
 	for name, c := range commands {
@@ -244,7 +262,7 @@ func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
 	// Real daemons start and stop here, on the real clock they wait by.
 	worldOf(t).Clock = clock.Real()
 	paths := daemon.Paths{Workspace: ws, Disk: disk.Real()}
-	t.Cleanup(func() { _ = daemon.Stop(paths, 5*time.Second, clock.Real(), sehttp.Real()) })
+	t.Cleanup(func() { stopAndWait(paths) })
 
 	// The checkout changes a summary and adds a command.
 	helpGo := filepath.Join(ws, "src", "cmd", "se", "help.go")
