@@ -45,7 +45,6 @@ exit 0`)
 	stub(t, bin, "npm", `echo "npm $*" >>`+log+`
 printf '`+biome+`' >`+filepath.Join(bin, "biome")+`; chmod +x `+filepath.Join(bin, "biome"))
 	stub(t, bin, "claude", `echo "claude $*" >>`+log)
-	t.Setenv("PATH", bin)
 	return dir, bin, log
 }
 
@@ -68,10 +67,17 @@ func stub(t *testing.T, bin, name, body string) {
 	}
 }
 
-func check(t *testing.T, dir string) (string, error) {
+// check runs check.sh in dir on a PATH of bin alone.
+func check(t *testing.T, dir, bin string) (string, error) {
 	t.Helper()
-	cmd := exec.Command("sh", "tests/check.sh")
+	cmd := exec.Command(filepath.Join(bin, "sh"), "tests/check.sh")
 	cmd.Dir = dir
+	cmd.Env = []string{"PATH=" + bin}
+	for _, v := range os.Environ() {
+		if !strings.HasPrefix(v, "PATH=") {
+			cmd.Env = append(cmd.Env, v)
+		}
+	}
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -86,8 +92,9 @@ func calls(t *testing.T, log string) string {
 }
 
 func TestTheBatteryInstallsThePinnedLintersABoxLacks(t *testing.T) {
-	dir, _, log := freshBox(t)
-	if out, err := check(t, dir); err != nil {
+	t.Parallel()
+	dir, bin, log := freshBox(t)
+	if out, err := check(t, dir, bin); err != nil {
 		t.Fatalf("check.sh failed: %v\n%s", err, out)
 	}
 	got := calls(t, log)
@@ -103,10 +110,11 @@ func TestTheBatteryInstallsThePinnedLintersABoxLacks(t *testing.T) {
 }
 
 func TestTheBatteryInstallsNothingWhereTheLintersStand(t *testing.T) {
+	t.Parallel()
 	dir, bin, log := freshBox(t)
 	stub(t, bin, "golangci-lint", `echo "golangci-lint has version `+pin(t, "GOLANGCI_LINT")+` built with go"`)
 	stub(t, bin, "biome", `echo "Version: `+pin(t, "BIOME")+`"`)
-	if out, err := check(t, dir); err != nil {
+	if out, err := check(t, dir, bin); err != nil {
 		t.Fatalf("check.sh failed: %v\n%s", err, out)
 	}
 	if got := calls(t, log); strings.Contains(got, "install") {
@@ -115,9 +123,10 @@ func TestTheBatteryInstallsNothingWhereTheLintersStand(t *testing.T) {
 }
 
 func TestAFailedInstallStopsTheBattery(t *testing.T) {
+	t.Parallel()
 	dir, bin, log := freshBox(t)
 	stub(t, bin, "npm", "exit 1")
-	out, err := check(t, dir)
+	out, err := check(t, dir, bin)
 	if err == nil {
 		t.Fatalf("check.sh passed without biome:\n%s", out)
 	}
