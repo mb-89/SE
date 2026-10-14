@@ -7,13 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"os"
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
+	sehttp "github.com/mb-89/SE/src/internal/io/http"
 )
 
 // ErrRunning says another daemon holds this workspace.
@@ -31,6 +30,8 @@ type Options struct {
 	TakeOver time.Duration
 	// Clock is the time the daemon stamps, idles and waits by.
 	Clock clock.Clock
+	// Net is the network the daemon answers on.
+	Net sehttp.Net
 }
 
 // Serve runs the workspace's daemon until ctx ends, /shutdown is posted, or it idles out.
@@ -38,54 +39,46 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 	if err := Prepare(paths); err != nil {
 		return err
 	}
-	held, err := acquire(paths, opts.TakeOver, opts.Clock)
+	held, err := acquire(paths, opts.TakeOver, opts.Clock, opts.Net)
 	if err != nil {
 		return err
 	}
 	defer held.Close()
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	token, instance := randomHex(32), randomHex(8)
+	srv := NewServer(paths, instance, cancel, opts.Clock)
+	address, served, err := opts.Net.Serve(ctx, token, srv)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	ep := Endpoint{
 		PID:             os.Getpid(),
-		Address:         ln.Addr().String(),
-		Token:           randomHex(32),
-		InstanceID:      randomHex(8),
+		Address:         address,
+		Token:           token,
+		InstanceID:      instance,
 		ProtocolVersion: ProtocolVersion,
 		StartedAt:       opts.Clock.Now().UTC(),
 	}
-	srv := NewServer(paths, ep.Token, ep.InstanceID, cancel, opts.Clock)
-	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := WriteEndpoint(paths, ep); err != nil {
-		ln.Close()
+		cancel()
+		<-served
 		return err
 	}
 	defer withdraw(paths, ep.InstanceID)
 	if opts.Ready != nil {
 		opts.Ready(ep)
 	}
-
-	served := make(chan error, 1)
-	go func() { served <- httpSrv.Serve(ln) }()
 	if opts.Idle > 0 {
 		go idles(ctx, srv, opts.Idle, cancel, opts.Clock)
 	}
-	select {
-	case err := <-served:
-		return err
-	case <-ctx.Done():
-	}
-	quit, stop := context.WithTimeout(context.Background(), 5*time.Second)
-	defer stop()
-	return httpSrv.Shutdown(quit)
+	// Serving ends once ctx does: by the caller, /shutdown or the idle clock.
+	return <-served
 }
 
 // acquire takes the lifetime lock, stepping a running daemon aside for up to takeOver.
-func acquire(paths Paths, takeOver time.Duration, clk clock.Clock) (io.Closer, error) {
+func acquire(paths Paths, takeOver time.Duration, clk clock.Clock, net sehttp.Net) (io.Closer, error) {
 	deadline := clk.Now().Add(takeOver)
 	for {
 		held, err := paths.Disk.Lock(paths.Lock())
@@ -95,7 +88,7 @@ func acquire(paths Paths, takeOver time.Duration, clk clock.Clock) (io.Closer, e
 		if !errors.Is(err, ErrRunning) || takeOver <= 0 || !clk.Now().Before(deadline) {
 			return held, err
 		}
-		_ = Stop(paths, deadline.Sub(clk.Now()), clk)
+		_ = Stop(paths, deadline.Sub(clk.Now()), clk, net)
 		clk.Sleep(50 * time.Millisecond)
 	}
 }

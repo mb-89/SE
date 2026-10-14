@@ -14,6 +14,7 @@ import (
 
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
+	sehttp "github.com/mb-89/SE/src/internal/io/http"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/gitenv"
@@ -116,7 +117,7 @@ func runs(t *testing.T, ep *Endpoint, ws string) string {
 	if runtime.GOOS != "linux" {
 		return ""
 	}
-	got, ok := daemon.Healthy(daemon.Paths{Workspace: ws, Disk: drive})
+	got, ok := daemon.Healthy(daemon.Paths{Workspace: ws, Disk: drive}, sehttp.Real())
 	if !ok || ep == nil || got.Address != ep.Address {
 		t.Fatalf("no daemon answers at %+v (healthy %v at %s)", ep, ok, got.Address)
 	}
@@ -186,7 +187,7 @@ func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
 	se := installed(t)
 	ws := scratch(t)
 	paths := daemon.Paths{Workspace: ws, Disk: drive}
-	t.Cleanup(func() { _ = daemon.Stop(paths, 5*time.Second, clock.Real()) })
+	t.Cleanup(func() { _ = daemon.Stop(paths, 5*time.Second, clock.Real(), sehttp.Real()) })
 
 	// The checkout changes a summary and adds a command.
 	helpGo := filepath.Join(ws, "src", "cmd", "se", "help.go")
@@ -243,7 +244,7 @@ func init() {
 
 	// Once it builds again, /se on starts the rebuilt se.
 	os.Remove(filepath.Join(ws, "src", "cmd", "se", "broken.go"))
-	if err := daemon.Stop(paths, 5*time.Second, clock.Real()); err != nil {
+	if err := daemon.Stop(paths, 5*time.Second, clock.Real(), sehttp.Real()); err != nil {
 		t.Fatal(err)
 	}
 	r = in(t, ws, "on")

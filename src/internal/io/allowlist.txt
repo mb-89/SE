@@ -14,8 +14,3 @@ src/internal/daemon/client.go os/exec
 src/internal/issues/issues.go os/exec
 src/internal/update/update.go os/exec
 
-# The network: http (#64).
-src/internal/daemon/client.go net/http
-src/internal/daemon/serve.go net/http
-src/internal/daemon/server.go net/http
-src/internal/issues/fanout.go net/http

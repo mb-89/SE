@@ -8,6 +8,9 @@ clock, `src/internal/io/clock`, is the first and the model for the rest.
 The disk, `src/internal/io/disk`, is the second: reading, writing, listing,
 locking and atomically replacing files, its fake a filesystem in memory that
 fails as the real one does.
+The network, `src/internal/io/http`, serves and calls the daemon protocol
+(health, event, shutdown) and fires the routine; its fake is a network inside
+the process, and its real one is tested on loopback.
 
 ## The layout
 
