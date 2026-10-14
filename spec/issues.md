@@ -234,12 +234,19 @@ that branch out: the tree is picked up from its claim. Plain `--take` first
 takes over a conflicted claim (see [The rules](#the-rules)): it prints
 `Took over #<n> …` with the PR, and the instruction to merge `origin/main`
 into the branch and land it again (with `--json`: the issue's `takeover`,
-`{"pr","url","count","why"}`). `--take N` takes over claimed leaf `N`, at
+`{"pr","url","count","why","answers"}`). `--take N` takes over claimed leaf `N`, at
 any depth, where `se fleet check` finds it stuck (a conflicted or red PR, or
 no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.md)),
 or where it is stuck past the lease, so every takeover remedy the check names
 runs; labelled `se-final`, it waits on an issue for a person instead. A claim whose work is moving
 is refused.
+Every takeover, at the top or with `--in`, writes the landing answers the
+issue's last land posted on it (see [Landing answers](#landing-answers)) back
+to the answers file beside the branch's checkout, `<path>-landing.yaml` where
+`<path>` is its worktree (or, without `--worktree`, the workspace), so the
+box that takes over brings them up to date rather than writing them anew; a
+file there already is kept. It names the file (with `--json`: the
+takeover's `answers`).
 Every claim records the claiming box's session on the issue, a comment
 carrying `<!-- se:box <session> -->` (a takeover's comment carries it too).
 Once it has claimed an issue, `--take` runs the fan-out (below), which fires
@@ -312,6 +319,10 @@ the only place they are written; `se issue land` and the retro both read it.
   counted against `origin/main`.
 - Landing again (after a CI fix, say) updates that comment rather than
   adding a second.
+- The comment is where the answers outlive the box that wrote them: its
+  answers file stands outside its checkout, where no other box sees it, so a
+  takeover (`se issue pull --take`) writes the answers back from the
+  comment's block.
 
 `se issue new` creates an issue labelled `se` on the repository, makes it a
 sub-issue of `--parent` where that is given, and links it as blocked by each
@@ -375,11 +386,12 @@ dependents become ready as when a PR closes it.
 
 In a box (a cloud session no person attends, as the routine starts it), the
 plugin hands every Stop and SubagentStop to `se hook stop`, which refuses the
-stop while the box's issue is open with neither an open PR from its branch,
-auto-merge on, nor a supersede, and says which is missing (a close by
-`se issue close --fixed-by` closes the issue, so the box ends). The box's issue is
-the one `se issue pull --take` took (a parent's box coordinates and closes
-nothing itself); a leaf's sub-agent is held to the leaf its prompt names. It
+stop while any issue the box took is open with neither an open PR from its
+branch, auto-merge on, nor a supersede, naming each and what it misses (a
+close by `se issue close --fixed-by` closes the issue, so it counts as
+closed). The box's issues are every one `se issue pull --take` took (a
+parent's box coordinates and closes nothing itself); a leaf's sub-agent is
+held to the leaf its prompt names. It
 is enforcement, so it fails closed: only what GitHub shows lets the box end.
 Its escape hatches: a box waiting on background work passes; it refuses at
 most `refusals` times in a row ([spec/stop.yaml](stop.yaml)); a prompt from a
