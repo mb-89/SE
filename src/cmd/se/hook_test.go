@@ -4,6 +4,7 @@ package main
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func stopWorld(t *testing.T, a map[string]string) *disk.Fake {
 	t.Helper()
 	asBox(t)
 	d := onFake(t)
-	put(t, d, "/ws/.se/.runtime/box.json", `{"issue":3}`)
+	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[3]}`)
 	put(t, d, "/ws/"+StopPath, "refusals: 2\n")
 	hubAt(t, a)
 	return d
@@ -93,7 +94,7 @@ func TestALandRecordLetsTheBoxEndBeforeGitHubIsAsked(t *testing.T) {
 	}
 	// The sub-agent landed #3 in its worktree beside the box's checkout.
 	put(t, d, "/issue-3/.se/.runtime/box.json", `{"landed":{"3":{"pr":9,"auto_merge":true}}}`)
-	if v := stops(t); v.Block != "" || !strings.Contains(v.Pass, "recorded #3's PR #9") {
+	if v := stops(t); v.Block != "" || !strings.Contains(v.Pass, "recorded a PR with auto-merge on for #3") {
 		t.Fatalf("%+v", v)
 	}
 	// A leaf's sub-agent is let go by the same record.
@@ -104,12 +105,18 @@ func TestALandRecordLetsTheBoxEndBeforeGitHubIsAsked(t *testing.T) {
 	// A record in the box's own workspace counts too; a record without
 	// auto-merge does not.
 	put(t, d, "/issue-3/.se/.runtime/box.json", `{}`)
-	put(t, d, "/ws/.se/.runtime/box.json", `{"issue":3,"landed":{"3":{"pr":9,"auto_merge":false}}}`)
+	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[3],"landed":{"3":{"pr":9,"auto_merge":false}}}`)
 	if v := stops(t); v.Block == "" {
 		t.Fatalf("%+v", v)
 	}
-	put(t, d, "/ws/.se/.runtime/box.json", `{"issue":3,"landed":{"3":{"pr":9,"auto_merge":true}}}`)
+	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[3],"landed":{"3":{"pr":9,"auto_merge":true}}}`)
 	if v := stops(t); v.Block != "" {
+		t.Fatalf("%+v", v)
+	}
+	// Of several issues, the recorded one passes and the rest are judged.
+	hubAt(t, map[string]string{"repos/o/r/issues/1": `{"number":1,"state":"open"}`, "repos/o/r/pulls?head=o:issue-1&base=main&state=open&per_page=100": `[]`})
+	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[1,3],"landed":{"3":{"pr":9,"auto_merge":true}}}`)
+	if v := stops(t); !strings.Contains(v.Block, "#1 is open") || strings.Contains(v.Block, "#3") {
 		t.Fatalf("%+v", v)
 	}
 }
@@ -172,18 +179,42 @@ func TestATakeRecordsTheIssueForTheStopHook(t *testing.T) {
 	if err := recordTake(c, 3); err != nil {
 		t.Fatal(err)
 	}
-	if b := readBox(c); b.Issue != 3 || len(b.Refused) != 0 {
+	if b := readBox(c); !slices.Equal(b.Issues, []int{3}) || len(b.Refused) != 0 {
+		t.Fatalf("%+v", b)
+	}
+	// A box takes several issues; it keeps every one, each once.
+	for _, n := range []int{4, 3} {
+		if err := recordTake(c, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if b := readBox(c); !slices.Equal(b.Issues, []int{3, 4}) {
 		t.Fatalf("%+v", b)
 	}
 	// A later take keeps the PRs landed here before.
 	if err := recordLand(c, 3, 9); err != nil {
 		t.Fatal(err)
 	}
-	if err := recordTake(c, 4); err != nil {
+	if err := recordTake(c, 5); err != nil {
 		t.Fatal(err)
 	}
-	if b := readBox(c); b.Issue != 4 || b.Landed[3] != (landed{PR: 9, AutoMerge: true}) {
+	if b := readBox(c); !slices.Equal(b.Issues, []int{3, 4, 5}) || b.Landed[3] != (landed{PR: 9, AutoMerge: true}) {
 		t.Fatalf("%+v", b)
+	}
+}
+
+func TestABoxIsHeldToEveryIssueItTook(t *testing.T) {
+	t.Parallel()
+	d := stopWorld(t, map[string]string{
+		"repos/o/r/issues/1": `{"number":1,"state":"open"}`,
+		"repos/o/r/pulls?head=o:issue-1&base=main&state=open&per_page=100": `[]`,
+		"repos/o/r/issues/2": `{"number":2,"state":"open"}`,
+		"repos/o/r/pulls?head=o:issue-2&base=main&state=open&per_page=100": `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`,
+	})
+	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[1,2]}`)
+	v := stops(t)
+	if !strings.Contains(v.Block, "#1 is open with neither a PR from issue-1 nor a supersede") || strings.Contains(v.Block, "#2") {
+		t.Fatalf("%+v", v)
 	}
 }
 

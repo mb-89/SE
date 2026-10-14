@@ -23,7 +23,8 @@ now() {
   esac
 }
 # The battery profiles itself: each step's duration goes to the steps file,
-# each Go test's to go test's events, and the report reads both against
+# each Go test's to go test's events, what the plugin tests printed (each
+# plugin test's duration among it), and the report reads them against
 # spec/budgets.yaml (src/cmd/battery).
 battery=.se/.runtime/battery
 rm -rf "$battery"
@@ -58,6 +59,16 @@ dead() {
   return 1
 }
 
+# plugin_test runs the plugin's tests and keeps what they print for the
+# report, which reads each test's duration from it: claude plugin test has
+# no reporter option. It fails as they failed.
+plugin_test() {
+  status=0
+  claude plugin test src/plugin >"$battery/plugintest.txt" 2>&1 || status=$?
+  cat "$battery/plugintest.txt"
+  return "$status"
+}
+
 step "se rules" go -C src run ./cmd/se rules --workspace "$PWD"
 step "golangci-lint" within src golangci-lint run ./...
 step "biome" within src/plugin biome check --error-on-warnings
@@ -65,5 +76,5 @@ step "deadcode" dead
 step "go test" go -C src run ./cmd/battery gotest "$PWD" ./...
 step "plugin validate" claude plugin validate src/plugin
 step "marketplace validate" claude plugin validate .
-step "plugin test" claude plugin test src/plugin
+step "plugin test" plugin_test
 go -C src run ./cmd/battery report "$PWD"

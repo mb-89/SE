@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/issues"
@@ -14,8 +16,8 @@ import (
 
 // The owner's rule: a box that takes an issue closes it, always, with a PR
 // (auto-merge on) or a supersede. The plugin hands every Stop and SubagentStop
-// to se hook stop, which refuses a box's stop while its issue is open with
-// neither; se issue pull --take records the issue a box took.
+// to se hook stop, which refuses a box's stop while any issue it took is open
+// with neither; se issue pull --take records each issue a box takes.
 
 // isBox says whether this session is a box: a cloud session that no person
 // attends, as a routine starts it. Every other session is interactive.
@@ -30,11 +32,11 @@ const StopPath = "spec/stop.yaml"
 // defaultRefusals is the cap where spec/stop.yaml does not set one.
 const defaultRefusals = 5
 
-// boxState is what the workspace keeps for the Stop hook: the issue the box
+// boxState is what the workspace keeps for the Stop hook: every issue the box
 // took, how often in a row the hook refused, by issue, and the PR se issue
-// land opened here, by issue.
+// land landed here, by issue.
 type boxState struct {
-	Issue   int            `json:"issue,omitempty"`
+	Issues  []int          `json:"issues,omitempty"`
 	Refused map[int]int    `json:"refused,omitempty"`
 	Landed  map[int]landed `json:"landed,omitempty"`
 }
@@ -105,10 +107,15 @@ func writeBox(c *Call, b boxState) error {
 	return c.Disk.Replace(boxPath(c), data)
 }
 
-// recordTake keeps the issue a take claimed, its refusals none yet, and the
-// PRs landed here before.
+// recordTake adds the issue a take claimed to those the box took, its
+// refusals none yet.
 func recordTake(c *Call, n int) error {
-	return writeBox(c, boxState{Issue: n, Landed: readBox(c).Landed})
+	b := readBox(c)
+	delete(b.Refused, n)
+	if !slices.Contains(b.Issues, n) {
+		b.Issues = append(b.Issues, n)
+	}
+	return writeBox(c, b)
 }
 
 // refusals reads the cap from spec/stop.yaml in the workspace.
@@ -160,8 +167,8 @@ func init() {
 		Class:   batch,
 		Usage:   "hook stop [--agent-transcript PATH] [--waiting] [--repo OWNER/NAME]",
 		Group:   "Hooks",
-		Summary: "refuse a box's stop while its issue has no PR nor supersede",
-		Details: "answer the plugin's Stop (or, with --agent-transcript, SubagentStop) as JSON: block, with the reason, while this box's issue is open with neither an open PR from its branch with auto-merge on nor a supersede; else pass, with why. The issue is the one se issue pull --take recorded, or for a sub-agent the leaf its prompt names. A PR se issue land recorded with auto-merge on in .se/.runtime/box.json, of this workspace or of the issue's worktree beside it, passes before GitHub is asked. An interactive session, and a box waiting on background work (--waiting), always pass. It refuses at most refusals times in a row (spec/stop.yaml); a prompt from a person resets the count (se hook prompt). A check that cannot judge lets the turn end and logs why in .se/.runtime/logs/stop.log.",
+		Summary: "hold a box to a PR or supersede for each issue it took",
+		Details: "answer the plugin's Stop (or, with --agent-transcript, SubagentStop) as JSON: block, naming each, while any issue this box took is open with neither an open PR from its branch with auto-merge on nor a supersede; else pass, with why. The issues are every one se issue pull --take recorded, or for a sub-agent the leaf its prompt names. A PR se issue land recorded with auto-merge on in .se/.runtime/box.json, of this workspace or of the issue's worktree beside it, passes its issue before GitHub is asked. An interactive session, and a box waiting on background work (--waiting), always pass. It refuses at most refusals times in a row (spec/stop.yaml); a prompt from a person resets the count (se hook prompt). A check that cannot judge lets the turn end and logs why in .se/.runtime/logs/stop.log.",
 		Run: func(c *Call) (Reply, error) {
 			fs, src, _ := issueFlags(c, "hook stop")
 			transcript := fs.String("agent-transcript", "", "the sub-agent's transcript `PATH`: the stop is a SubagentStop")
@@ -176,53 +183,80 @@ func init() {
 				return verdict{Pass: "the box waits on background work, which wakes it again"}.reply()
 			}
 			b := readBox(c)
-			n := b.Issue
+			taken := b.Issues
 			if *transcript != "" {
-				n = 0
+				taken = nil
 				data, err := c.Disk.ReadFile(*transcript)
 				if err != nil {
 					stopLog(c, fmt.Sprintf("let a sub-agent end unjudged: reading its transcript: %v", err))
 					return verdict{Pass: "the check is broken: " + oneLine(err)}.reply()
 				}
 				if m := leafPrompt.FindSubmatch(data); m != nil {
-					n, _ = strconv.Atoi(string(m[1]))
+					n, _ := strconv.Atoi(string(m[1]))
+					taken = []int{n}
 				}
 			}
-			if n == 0 {
+			if len(taken) == 0 {
 				return verdict{Pass: "no se issue was taken here"}.reply()
 			}
-			if limit := refusals(c); b.Refused[n] >= limit {
-				stopLog(c, fmt.Sprintf("let the box end with #%d unclosed: refused %d times in a row, the cap in %s", n, b.Refused[n], StopPath))
-				return verdict{Pass: fmt.Sprintf("refused %d times in a row, the cap", b.Refused[n])}.reply()
-			}
-			if l, ok := landedRecord(c, n); ok {
-				delete(b.Refused, n)
-				_ = writeBox(c, b)
-				return verdict{Pass: fmt.Sprintf("se issue land recorded #%d's PR #%d with auto-merge on", n, l.PR)}.reply()
-			}
-			why, err := func() (string, error) {
-				s, err := src()
-				if err != nil {
-					return "", err
+			// An issue refused up to the cap is let go; the rest are judged.
+			limit := refusals(c)
+			var judge, recorded []int
+			for _, n := range taken {
+				if b.Refused[n] >= limit {
+					stopLog(c, fmt.Sprintf("let the box end with #%d unclosed: refused %d times in a row, the cap in %s", n, b.Refused[n], StopPath))
+					continue
 				}
-				return s.Unclosed(n)
-			}()
+				// A PR se issue land recorded is trusted before GitHub is asked.
+				if _, ok := landedRecord(c, n); ok {
+					delete(b.Refused, n)
+					recorded = append(recorded, n)
+					continue
+				}
+				judge = append(judge, n)
+			}
+			if len(judge) == 0 {
+				if len(recorded) > 0 {
+					_ = writeBox(c, b)
+					return verdict{Pass: fmt.Sprintf("se issue land recorded a PR with auto-merge on for %s", numbers(recorded))}.reply()
+				}
+				return verdict{Pass: fmt.Sprintf("refused %d times in a row, the cap", limit)}.reply()
+			}
+			s, err := src()
 			if err != nil {
-				stopLog(c, fmt.Sprintf("let the box end unjudged on #%d: %s", n, oneLine(err)))
+				stopLog(c, fmt.Sprintf("let the box end unjudged on %s: %s", numbers(judge), oneLine(err)))
 				return verdict{Pass: "the check is broken: " + oneLine(err)}.reply()
 			}
-			if why == "" {
-				delete(b.Refused, n)
-				_ = writeBox(c, b)
-				return verdict{Pass: fmt.Sprintf("#%d is closed, or its PR has auto-merge on", n)}.reply()
+			var whys []string
+			var open []int
+			for _, n := range judge {
+				why, err := s.Unclosed(n)
+				if err != nil {
+					stopLog(c, fmt.Sprintf("let the box end unjudged on #%d: %s", n, oneLine(err)))
+					return verdict{Pass: "the check is broken: " + oneLine(err)}.reply()
+				}
+				if why == "" {
+					delete(b.Refused, n)
+					continue
+				}
+				b.Refused[n]++
+				whys = append(whys, why)
+				open = append(open, n)
 			}
-			b.Refused[n]++
+			if len(open) == 0 {
+				_ = writeBox(c, b)
+				return verdict{Pass: fmt.Sprintf("%s: each is closed, or its PR has auto-merge on", numbers(judge))}.reply()
+			}
 			if err := writeBox(c, b); err != nil {
 				// A count that cannot be kept would refuse without end.
-				stopLog(c, fmt.Sprintf("let the box end on #%d: keeping the count: %s", n, oneLine(err)))
+				stopLog(c, fmt.Sprintf("let the box end on %s: keeping the count: %s", numbers(open), oneLine(err)))
 				return verdict{Pass: "the check is broken: " + oneLine(err)}.reply()
 			}
-			return verdict{Block: fmt.Sprintf("A box that takes an issue closes it. %s (Refusal %d of %d in a row.)", why, b.Refused[n], refusals(c))}.reply()
+			most := 0
+			for _, n := range open {
+				most = max(most, b.Refused[n])
+			}
+			return verdict{Block: fmt.Sprintf("A box that takes an issue closes it. %s (Refusal %d of %d in a row.)", strings.Join(whys, " "), most, limit)}.reply()
 		},
 	})
 	register(Command{
