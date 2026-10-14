@@ -9,6 +9,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "stop",
+		Class:   batch,
 		Usage:   "stop",
 		Group:   "Daemon",
 		Summary: "end this workspace's daemon",
