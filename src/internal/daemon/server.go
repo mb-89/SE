@@ -1,27 +1,26 @@
 package daemon
 
 import (
-	"crypto/subtle"
-	"encoding/json"
 	"errors"
-	"net/http"
+	"fmt"
 	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
+	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/session"
 )
 
-// bodyCap bounds one post.
-const bodyCap = 16 << 20
+// Event is one post of the bridgehead: a session event as the engine raised it.
+type Event = sehttp.Event
 
-// Server answers the bridgehead's posts for one workspace.
+// Server answers the bridgehead's posts for one workspace: the Daemon the
+// network serves behind the token.
 type Server struct {
 	ix       *index.Index
 	posts    string
-	token    string
 	instance string
 	shutdown func()
 	clock    clock.Clock
@@ -29,11 +28,13 @@ type Server struct {
 	last     atomic.Int64
 }
 
+var _ sehttp.Daemon = (*Server)(nil)
+
 // NewServer makes the handler side of a daemon on the started index ix: each
 // post is committed to the instance of the session posts module the wiring
 // names. shutdown runs when /shutdown is posted, and clk says how long it has idled.
-func NewServer(ix *index.Index, token, instance string, shutdown func(), clk clock.Clock) *Server {
-	s := &Server{ix: ix, token: token, instance: instance, shutdown: shutdown, clock: clk}
+func NewServer(ix *index.Index, instance string, shutdown func(), clk clock.Clock) *Server {
+	s := &Server{ix: ix, instance: instance, shutdown: shutdown, clock: clk}
 	for _, in := range ix.Catalog().Instances {
 		if in.Module == session.Posts.Name() {
 			s.posts = in.Name
@@ -48,55 +49,28 @@ func (s *Server) touch() { s.last.Store(s.clock.Now().UnixNano()) }
 // Idle is how long the server has gone without a post.
 func (s *Server) Idle() time.Duration { return s.clock.Now().Sub(time.Unix(0, s.last.Load())) }
 
-// Handler routes /health, /event, /value/<name> and /shutdown, each behind the token.
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", s.health)
-	mux.HandleFunc("POST /event", s.event)
-	mux.HandleFunc("GET /value/{name...}", s.value)
-	mux.HandleFunc("POST /shutdown", s.stop)
-	return s.authorized(mux)
+// Health is the daemon's answer to /health.
+func (s *Server) Health() sehttp.Health {
+	return sehttp.Health{ProtocolVersion: ProtocolVersion, InstanceID: s.instance, PID: os.Getpid()}
 }
 
-func (s *Server) authorized(next http.Handler) http.Handler {
-	want := []byte("Bearer " + s.token)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), want) != 1 {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	answer(w, map[string]any{"protocolVersion": ProtocolVersion, "instanceId": s.instance, "pid": os.Getpid()})
-}
-
-func (s *Server) stop(w http.ResponseWriter, _ *http.Request) {
-	answer(w, map[string]any{})
+// Shutdown ends the daemon, once /shutdown is answered.
+func (s *Server) Shutdown() {
 	if s.shutdown != nil {
-		go s.shutdown()
+		s.shutdown()
 	}
 }
 
-// event is where every forwarded session event arrives: a breakpoint here holds the session.
-func (s *Server) event(w http.ResponseWriter, r *http.Request) {
+// Event is where every forwarded session event arrives: a breakpoint here holds the session.
+func (s *Server) Event(ev Event) error {
 	s.touch()
-	var ev session.Event
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, bodyCap)).Decode(&ev); err != nil {
-		http.Error(w, "bad event: "+err.Error(), http.StatusBadRequest)
-		return
-	}
 	if !session.Named(ev.Session) || ev.Event == "" {
-		http.Error(w, "bad event: session and event are required", http.StatusBadRequest)
-		return
+		return fmt.Errorf("%w: session and event are required", sehttp.ErrBad)
 	}
-	if err := s.Post(ev); err != nil {
-		http.Error(w, "append: "+err.Error(), http.StatusInternalServerError)
-		return
+	if err := s.Post(session.Event{Session: ev.Session, Event: ev.Event, At: ev.At, E: ev.E}); err != nil {
+		return fmt.Errorf("append: %w", err)
 	}
-	answer(w, map[string]any{})
+	return nil
 }
 
 // Post commits the event as the session posts module's next one; the
@@ -109,17 +83,11 @@ func (s *Server) Post(ev session.Event) error {
 	return s.ix.Commit(s.posts, session.Events.Set(ev))
 }
 
-// value answers a name's value on the index, and whether anything provided it.
-func (s *Server) value(w http.ResponseWriter, r *http.Request) {
-	v, err := s.ix.Read(r.PathValue("name"))
+// Value answers a name's value on the index, and whether anything provided it.
+func (s *Server) Value(name string) (sehttp.Value, error) {
+	v, err := s.ix.Read(name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
+		return sehttp.Value{}, fmt.Errorf("%w: %w", sehttp.ErrUnknown, err)
 	}
-	answer(w, map[string]any{"value": v.V, "provided": v.Provided})
-}
-
-func answer(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	return sehttp.Value{Value: v.V, Provided: v.Provided}, nil
 }

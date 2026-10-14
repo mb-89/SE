@@ -58,6 +58,8 @@ choice is deterministic and no prompt restates it.
   waits on a person: a box, a retro and an overhaul always end.
 - **Done**: the PR's body says `Fixes #n`, so GitHub closes the issue when the
   PR merges, and the issues it blocked become ready.
+  A PR merges only when it is up to date with main, so CI ran on what lands
+  ([coordination.md](coordination.md#up-to-date-with-main)).
 
 ## Nesting: leaves are work, parents coordinate
 

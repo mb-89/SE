@@ -2,9 +2,8 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
-	"net/http"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +14,7 @@ import (
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
+	sehttp "github.com/mb-89/SE/src/internal/io/http"
 )
 
 // The wiring se carries starts the modules se carries, as the daemon starts
@@ -63,6 +63,10 @@ func TestServeLogsEachPostedEventThroughTheIndex(t *testing.T) {
 	old := wall
 	wall = clock.NewFake(at)
 	t.Cleanup(func() { wall = old })
+	oldNet := network
+	n := sehttp.NewFake()
+	network = n
+	t.Cleanup(func() { network = oldNet })
 	ws := t.TempDir()
 	paths := daemon.Paths{Workspace: ws}
 	served := make(chan int, 1)
@@ -78,38 +82,20 @@ func TestServeLogsEachPostedEventThroughTheIndex(t *testing.T) {
 		default:
 		}
 		time.Sleep(5 * time.Millisecond)
-		ep, ok = daemon.Healthy(paths)
-	}
-	call := func(method, path, body string) string {
-		t.Helper()
-		req, err := http.NewRequest(method, "http://"+ep.Address+path, strings.NewReader(body))
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Authorization", "Bearer "+ep.Token)
-		resp, err := (&http.Client{Transport: &http.Transport{Proxy: nil}}).Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		var out strings.Builder
-		sc := bufio.NewScanner(resp.Body)
-		for sc.Scan() {
-			out.WriteString(sc.Text())
-		}
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("%s %s: status %d, %s", method, path, resp.StatusCode, out.String())
-		}
-		return out.String()
+		ep, ok = daemon.Healthy(paths, n)
 	}
 	for _, ev := range []string{"session.start", "tool.call", "tool.call"} {
-		call(http.MethodPost, "/event", `{"session":"s1","event":"`+ev+`","at":"t","e":{"x":1}}`)
+		if err := n.Event(ep.Address, ep.Token, daemon.Event{Session: "s1", Event: ev, At: "t", E: json.RawMessage(`{"x":1}`)}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	var started struct{ Value time.Time }
-	if err := json.Unmarshal([]byte(call(http.MethodGet, "/value/clock/started", "")), &started); err != nil || !started.Value.Equal(at) {
-		t.Errorf("clock/started reads %v, %v; want %v", started.Value, err, at)
+	v, err := n.Value(ep.Address, ep.Token, "clock/started")
+	if started, _ := time.Parse(time.RFC3339, fmt.Sprint(v.Value)); err != nil || !started.Equal(at) {
+		t.Errorf("clock/started reads %v, %v; want %v", v.Value, err, at)
 	}
-	call(http.MethodPost, "/shutdown", "")
+	if err := n.Shutdown(ep.Address, ep.Token); err != nil {
+		t.Fatal(err)
+	}
 	if code := <-served; code != 0 {
 		t.Fatalf("se serve: exit %d", code)
 	}

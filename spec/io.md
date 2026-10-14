@@ -5,6 +5,9 @@ Reader: an agent writing, moving or testing an I/O module, or code that needs on
 Processes, the disk, the clock, the network and GitHub are each reached
 through exactly one I/O module ([principles 6 to 8](principles.md)). The
 clock, `src/internal/io/clock`, is the first and the model for the rest.
+The network, `src/internal/io/http`, serves and calls the daemon protocol
+(health, event, value, shutdown) and fires the routine; its fake is a network inside
+the process, and its real one is tested on loopback.
 
 ## The layout
 

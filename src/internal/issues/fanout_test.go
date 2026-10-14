@@ -1,78 +1,59 @@
 package issues_test
 
 import (
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
-// fake is a routine trigger that answers status and body and records each fire.
-func fake(t *testing.T, status int, body string) (url string, fires *[]*http.Request, bodies *[]string) {
-	t.Helper()
-	fires, bodies = &[]*http.Request{}, &[]string{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		*fires, *bodies = append(*fires, r), append(*bodies, string(b))
-		w.WriteHeader(status)
-		io.WriteString(w, body)
-	}))
-	t.Cleanup(srv.Close)
-	return srv.URL + "/fire", fires, bodies
+const trigger = "https://api.example/v1/routines/r1/fire"
+
+// routine is a fake network with the routine's trigger standing at trigger,
+// taking the token sekrit for limit fires.
+func routine(limit int) *http.Fake {
+	f := http.NewFake()
+	f.Routine(trigger, "sekrit", limit)
+	return f
 }
 
 func env(vars map[string]string) func(string) string {
 	return func(k string) string { return vars[k] }
 }
 
-func TestAFireCarriesTheTriggersHeaders(t *testing.T) {
-	url, fires, bodies := fake(t, 200, `{"type":"routine_fire","claude_code_session_url":"https://claude.ai/code/session_x"}`)
-	note := issues.Fire(env(map[string]string{issues.FireURLVar: url, issues.FireTokenVar: "sekrit"}), http.DefaultClient)
-	if note != "Fan-out fired the routine: https://claude.ai/code/session_x" {
-		t.Fatalf("%q", note)
-	}
-	if len(*fires) != 1 {
-		t.Fatalf("%d fires", len(*fires))
-	}
-	r := (*fires)[0]
-	for h, want := range map[string]string{
-		"Authorization":     "Bearer sekrit",
-		"anthropic-beta":    "experimental-cc-routine-2026-04-01",
-		"anthropic-version": "2023-06-01",
-		"Content-Type":      "application/json",
-	} {
-		if got := r.Header.Get(h); got != want {
-			t.Errorf("%s: %q, want %q", h, got, want)
-		}
-	}
-	if r.Method != http.MethodPost || r.URL.Path != "/fire" || (*bodies)[0] != "{}" {
-		t.Errorf("%s %s %q", r.Method, r.URL.Path, (*bodies)[0])
+func TestAFireNamesTheSessionItStarted(t *testing.T) {
+	f := routine(1)
+	note := issues.Fire(env(map[string]string{issues.FireURLVar: trigger, issues.FireTokenVar: "sekrit"}), f)
+	if note != "Fan-out fired the routine: https://claude.ai/code/session_fake1" || f.Fired(trigger) != 1 {
+		t.Fatalf("%q, %d fired", note, f.Fired(trigger))
 	}
 }
 
 func TestUnsetVariablesTurnFanOutOff(t *testing.T) {
-	url, fires, _ := fake(t, 200, `{}`)
-	for _, vars := range []map[string]string{{}, {issues.FireURLVar: url}, {issues.FireTokenVar: "sekrit"}} {
-		if note := issues.Fire(env(vars), http.DefaultClient); !strings.HasPrefix(note, "Fan-out is off") || strings.Contains(note, "sekrit") {
+	f := routine(5)
+	for _, vars := range []map[string]string{{}, {issues.FireURLVar: trigger}, {issues.FireTokenVar: "sekrit"}} {
+		if note := issues.Fire(env(vars), f); !strings.HasPrefix(note, "Fan-out is off") || strings.Contains(note, "sekrit") {
 			t.Errorf("%v: %q", vars, note)
 		}
 	}
-	if len(*fires) != 0 {
-		t.Fatalf("%d fires", len(*fires))
+	if f.Fired(trigger) != 0 {
+		t.Fatalf("%d fires", f.Fired(trigger))
 	}
 }
 
 func TestARefusedOrFailedFireIsReported(t *testing.T) {
-	url, _, _ := fake(t, 429, `{"error":{"type":"rate_limit_error","message":"sekrit fires an hour"}}`)
-	note := issues.Fire(env(map[string]string{issues.FireURLVar: url, issues.FireTokenVar: "sekrit"}), http.DefaultClient)
-	if !strings.HasPrefix(note, "Fan-out refused: 429") || strings.Contains(note, "sekrit") {
+	f := routine(0)
+	note := issues.Fire(env(map[string]string{issues.FireURLVar: trigger, issues.FireTokenVar: "sekrit"}), f)
+	if !strings.HasPrefix(note, "Fan-out refused: 429 Too Many Requests") || strings.Contains(note, "sekrit") {
 		t.Fatalf("%q", note)
 	}
-	note = issues.Fire(env(map[string]string{issues.FireURLVar: "http://127.0.0.1:1/sekrit", issues.FireTokenVar: "sekrit"}), http.DefaultClient)
-	if !strings.HasPrefix(note, "Fan-out failed:") || strings.Contains(note, "sekrit") {
+	note = issues.Fire(env(map[string]string{issues.FireURLVar: trigger, issues.FireTokenVar: "nope"}), f)
+	if !strings.HasPrefix(note, "Fan-out refused: 401 Unauthorized") {
+		t.Fatalf("%q", note)
+	}
+	note = issues.Fire(env(map[string]string{issues.FireURLVar: "https://nowhere.example/sekrit", issues.FireTokenVar: "sekrit"}), f)
+	if !strings.HasPrefix(note, "Fan-out failed:") || strings.Contains(note, "sekrit") || !strings.Contains(note, "<token>") {
 		t.Fatalf("%q", note)
 	}
 }
