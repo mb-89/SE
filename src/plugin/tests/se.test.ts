@@ -422,7 +422,7 @@ test('a daemon that is down never holds the event up', async ($, on) => {
   expect(out.text).toBe('still here')
 })
 
-test('a daemon that is gone is started again at most once a minute, by the plugin clock', async ($, on) => {
+test('the wait se names before it is asked again runs on the plugin clock', async ($, on) => {
   const w = world(on)
   const clock = w.clock
   await $.session.start(starts)
@@ -430,19 +430,15 @@ test('a daemon that is gone is started again at most once a minute, by the plugi
   w.ran = []
   w.live = null
   w.startFails = 'no room'
-  // The on counts as a start: the first try waits its minute.
+  await $.attribution.text(probe)
+  expect(verbs(w)).toEqual(['ensure'])
+  // se said to wait a minute: the plugin asks again at its end, not before.
   await clock.advance(59_999)
   await $.attribution.text(probe)
-  expect(verbs(w)).toEqual([])
+  expect(verbs(w)).toEqual(['ensure'])
   await clock.advance(1)
   await $.attribution.text(probe)
-  expect(verbs(w)).toEqual(['start'])
-  await clock.advance(59_999)
-  await $.attribution.text(probe)
-  expect(verbs(w)).toEqual(['start'])
-  await clock.advance(1)
-  await $.attribution.text(probe)
-  expect(verbs(w)).toEqual(['start', 'start'])
+  expect(verbs(w)).toEqual(['ensure', 'ensure'])
 })
 
 test('/se update applies the new endpoint and reloads once it has answered', async ($, on) => {
