@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // The marks that cut a retro's report into its parts: the report itself, the
@@ -529,7 +531,7 @@ func (s Source) fileRun(i issue, run filing) (Filed, error) {
 	if err := s.postReport(n, text); err != nil {
 		return out, err
 	}
-	if _, err := s.GH("api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)); err != nil {
+	if _, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
 		return out, fmt.Errorf("closing the %s #%d: %w", run.kind, n, err)
 	}
 	out.Left = s.dropBranch(n, run.kind)
@@ -559,7 +561,7 @@ func (s Source) mint(title, body string, controversial bool, why string, out *Fi
 
 // postReport posts text, a report, on issue n.
 func (s Source) postReport(n int, text string) error {
-	if _, err := s.GH("api", "-X", "POST", "-f", "body="+text, fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, n)); err != nil {
+	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, n), github.F("body", text)); err != nil {
 		return fmt.Errorf("posting the report on #%d: %w", n, err)
 	}
 	return nil
@@ -570,8 +572,8 @@ func (s Source) postReport(n int, text string) error {
 // token may not delete branches), it answers why the branch stays and what
 // removes it.
 func (s Source) dropBranch(n int, kind string) string {
-	_, err := s.GH("api", "-X", "DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, Branch(n)))
-	if err == nil || strings.Contains(err.Error(), "HTTP 422") || strings.Contains(err.Error(), "HTTP 404") {
+	_, err := s.GitHub.Send("DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, Branch(n)))
+	if err == nil || github.Status(err) == 422 || github.Status(err) == 404 {
 		return ""
 	}
 	return fmt.Sprintf("%s stays (%v): se fleet prune removes it once the %s is closed, and a resumed %s's stale claim is taken over", Branch(n), err, kind, kind)
