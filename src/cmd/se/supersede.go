@@ -23,13 +23,14 @@ func init() {
 			"A ready successor fires the routine once.",
 			"With --duplicate-of M, for an issue that the open issue M (its PR) already covers, it mints nothing: it links N's open dependents as blocked by M, then closes N as a duplicate (state_reason duplicate), its comment naming M; a final issue closes so too.",
 			"Before N closes, N's open PR closes, its comment naming M, and N's issue-N claim is deleted by a git push from the workspace, so se fleet fix finds no leftover claim.",
+			"M is an open issue or a merged PR, never an open PR, which may never merge: an open or unmerged PR is refused, and a merged PR's commit on main is named, as se issue close --fixed-by does.",
 		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue supersede")
 			body := fs.String("body", "", "the open questions `B` the box could not answer")
 			bodyFile := fs.String("body-file", "", "a file `PATH` holding the open questions")
-			dupOf := fs.String("duplicate-of", "", "the open issue `M` that already covers N: close N as its duplicate, minting nothing")
+			dupOf := fs.String("duplicate-of", "", "the open issue or merged PR `M` that already covers N: close N as its duplicate, minting nothing")
 			var words []string
 			for rest := c.Args; ; {
 				if err := fs.Parse(rest); err != nil {
@@ -135,6 +136,9 @@ func duplicate(c *Call, src func() (issues.Source, error), asJSON bool, n, of in
 		return Reply{Text: string(data)}, err
 	}
 	text := fmt.Sprintf("Closed #%d as a duplicate of #%d, minting nothing.\n%s", n, of, dup.URL)
+	if dup.Commit != "" {
+		text = fmt.Sprintf("Closed #%d as a duplicate of the merged PR #%d, its work on main in %s.\n%s", n, of, dup.Commit, dup.URL)
+	}
 	if len(dup.Blocks) > 0 {
 		text += "\n" + numbers(dup.Blocks) + " now wait on #" + strconv.Itoa(of) + "."
 	}

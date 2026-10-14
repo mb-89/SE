@@ -1,5 +1,9 @@
 # golangci-lint lints and formats the Go code; tests/check.sh runs it.
 version: "2"
+run:
+  # Parallel checks on one box (several worktrees, one container) share
+  # golangci-lint's lock: a second run waits for it rather than failing.
+  allow-serial-runners: true
 linters:
   default: none
   enable: [govet, staticcheck, errcheck, ineffassign, unused]
