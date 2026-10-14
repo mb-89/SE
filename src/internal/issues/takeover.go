@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,84 @@ type Takeover struct {
 	// Answers is the answers file the take wrote back from the issue's last
 	// landing comment (see RestoreAnswers); empty where it wrote none.
 	Answers string `json:"answers,omitempty"`
+	// Pushed is when the branch last saw a push; zero where GitHub keeps no
+	// record of one.
+	Pushed time.Time `json:"pushed,omitempty"`
+	// Pull is where the branch's open PR stands; nil where it has none.
+	Pull *PullState `json:"pull,omitempty"`
+}
+
+// PullState is where a takeover's open PR stands, read from GitHub's REST
+// API, so the box that takes it over reads it from the take, never from gh.
+type PullState struct {
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+	Head   string `json:"head"`
+	// Mergeable is GitHub's mergeable_state: clean, dirty, blocked, behind,
+	// unstable, or unknown while GitHub has not computed it.
+	Mergeable string `json:"mergeable"`
+	// Checks is the last run of each check on the PR's head.
+	Checks []Check `json:"checks"`
+}
+
+// ReadTakeover fills in where took's takeover stands: when its branch was
+// last pushed, and its open PR's mergeable state and the last run of each
+// of its checks. It reads nothing for an issue not taken over.
+func (s Source) ReadTakeover(took *Issue) error {
+	if took.Takeover == nil {
+		return nil
+	}
+	t := *took.Takeover
+	var err error
+	if t.Pushed, err = s.lastPush(took.Number); err != nil {
+		return err
+	}
+	open, err := s.openPulls(Branch(took.Number))
+	if err != nil {
+		return err
+	}
+	if len(open) > 0 {
+		p, err := s.mergeability(open[0])
+		if err != nil {
+			return err
+		}
+		runs, err := s.checkRuns(p.Head.SHA)
+		if err != nil {
+			return err
+		}
+		state := p.State
+		if state == "" {
+			state = "unknown"
+		}
+		t.Pull = &PullState{Number: p.Number, URL: p.URL, Head: p.Head.SHA, Mergeable: state, Checks: runs}
+	}
+	took.Takeover = &t
+	return nil
+}
+
+// Line says where a takeover's branch and PR stand, in one line.
+func (t Takeover) Line(branch string) string {
+	pushed := "GitHub keeps no record of a push to " + branch
+	if !t.Pushed.IsZero() {
+		pushed = "last pushed to " + branch + " at " + t.Pushed.UTC().Format(time.RFC3339)
+	}
+	if t.Pull == nil {
+		return fmt.Sprintf("Where it stands: no open PR from %s; %s.", branch, pushed)
+	}
+	checks := "no check ran on its head"
+	if len(t.Pull.Checks) > 0 {
+		var each []string
+		for _, c := range t.Pull.Checks {
+			state := c.Conclusion
+			if c.Status != "completed" {
+				state = c.Status
+			}
+			each = append(each, c.Name+" "+state)
+		}
+		sort.Strings(each)
+		checks = "its checks' last runs: " + strings.Join(each, ", ")
+	}
+	return fmt.Sprintf("Where it stands: PR #%d is %s at %s; %s; %s.", t.Pull.Number, t.Pull.Mergeable, t.Pull.Head, checks, pushed)
 }
 
 // pause is the wait before asking GitHub again for a mergeability it has not

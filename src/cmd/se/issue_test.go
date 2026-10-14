@@ -810,12 +810,18 @@ func TestATakeoverWritesBackTheLandingAnswersBesideItsWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	comments, _ := json.Marshal([]map[string]any{{"id": 1, "body": posted}})
-	hubAt(t, map[string]string{"repos/o/r/issues/6/comments?per_page=100": string(comments)})
+	hubAt(t, map[string]string{
+		"repos/o/r/issues/6/comments?per_page=100":                         string(comments),
+		"repos/o/r/activity?ref=refs/heads/issue-6&per_page=1":             `[{"timestamp":"2026-01-02T03:04:05Z"}]`,
+		"repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100": `[{"number":90,"html_url":"p90","head":{"ref":"issue-6","sha":"abc"},"base":{"ref":"main"}}]`,
+		"repos/o/r/pulls/90":                            `{"number":90,"html_url":"p90","mergeable":false,"mergeable_state":"dirty","head":{"ref":"issue-6","sha":"abc"},"base":{"ref":"main"}}`,
+		"repos/o/r/commits/abc/check-runs?per_page=100": `{"check_runs":[{"name":"rules","status":"completed","conclusion":"failure"},{"name":"check","status":"in_progress"}]}`,
+	})
 	ws := filepath.Join(t.TempDir(), "SE")
 	c := &Call{Workspace: ws, World: *worldOf(t)}
 	s := issues.Source{Repo: "o/r", GitHub: c.GitHub, Disk: c.Disk}
 	took := issues.Issue{Number: 6, Title: "six", URL: "u6", Takeover: &issues.Takeover{Count: 1, Stale: "nothing pushed for 3h"}}
-	if err := restoreAnswers(c, s, &took, true); err != nil {
+	if err := readTakeover(c, s, &took, true); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(filepath.Dir(ws), "issue-6-landing.yaml")
@@ -824,16 +830,20 @@ func TestATakeoverWritesBackTheLandingAnswersBesideItsWorktree(t *testing.T) {
 		t.Fatalf("%q %v, takeover %+v", got, err, took.Takeover)
 	}
 	r, err := issueReply(false, false, took, true, "issue-6", "git worktree add …", "", handed{})
+	// The take says where the PR stands, from the REST API, so no box reaches for gh.
+	if err != nil || !strings.Contains(r.Text, "Where it stands: PR #90 is dirty at abc; its checks' last runs: check in_progress, rules failure; last pushed to issue-6 at 2026-01-02T03:04:05Z.") {
+		t.Fatalf("%v\n%s", err, r.Text)
+	}
 	if err != nil || !strings.Contains(r.Text, "Its landing answers, as its last land posted them, are in "+path+": bring them up to date, and land with --answers "+path+".") {
 		t.Fatalf("%v\n%s", err, r.Text)
 	}
 	r, err = issueReply(true, false, took, true, "issue-6", "", "", handed{})
-	if want, _ := json.Marshal(path); err != nil || !strings.Contains(r.Text, `"answers":`+string(want)) {
+	if want, _ := json.Marshal(path); err != nil || !strings.Contains(r.Text, `"answers":`+string(want)) || !strings.Contains(r.Text, `"mergeable":"dirty"`) {
 		t.Fatalf("%v\n%s", err, r.Text)
 	}
 	// New work restores nothing.
 	fresh := issues.Issue{Number: 7}
-	if err := restoreAnswers(c, s, &fresh, true); err != nil || fresh.Takeover != nil {
+	if err := readTakeover(c, s, &fresh, true); err != nil || fresh.Takeover != nil {
 		t.Fatalf("%v %+v", err, fresh)
 	}
 }
