@@ -21,9 +21,6 @@ type Landing struct {
 	Created bool `json:"created"`
 	// Merged is true when the PR needed no wait and was merged at once.
 	Merged bool `json:"merged"`
-	// Warning is the refusal of the battery's status on the push (ship),
-	// which the land went on past.
-	Warning string `json:"warning,omitempty"`
 	// Manifest and Into are, for a leaf, the manifest it landed into and
 	// that manifest's branch: a leaf gets no PR, so Number is 0.
 	Manifest int    `json:"manifest,omitempty"`
@@ -31,6 +28,9 @@ type Landing struct {
 	// Closed is true where the land closed the issue itself: a leaf landed
 	// into its manifest, or a manifest with nothing left to land.
 	Closed bool `json:"closed,omitempty"`
+	// Warning is what went wrong without stopping the land: the battery's
+	// status refused on the pushed commit, which CI then checks itself.
+	Warning string `json:"warning,omitempty"`
 }
 
 // pull is the part of GitHub's pull request object land reads.
@@ -100,18 +100,18 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		return s.landInto(dir, n, root, session, qs, answers, check)
 	}
 	branch := Branch(n)
+	if err := s.takeIn(dir, branch); err != nil {
+		return Landing{}, err
+	}
 	if subs != nil && subs.Total > 0 {
 		// A manifest whose leaves landed nothing has nothing to land.
-		if err := s.takeIn(dir, branch); err != nil {
-			return Landing{}, err
-		}
 		if ahead, err := s.git(dir, "rev-list", "--count", "origin/main..HEAD"); err != nil {
 			return Landing{}, err
 		} else if ahead == "0" {
 			return s.closeEmpty(n)
 		}
 	}
-	warning, err := s.ship(dir, branch, check)
+	warning, err := refused(s.push(dir, branch, check))
 	if err != nil {
 		return Landing{}, err
 	}

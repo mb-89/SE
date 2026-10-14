@@ -32,7 +32,7 @@ import (
 type Fake struct {
 	// Proxy puts the fake behind a Claude Code cloud session's proxy: GraphQL
 	// is refused, auto-merge is the REST route pulls/<n>/ccr/auto_merge, and
-	// deleting a branch and posting a commit status are refused.
+	// deleting a branch is refused.
 	Proxy bool
 	// NoAutoMerge is a repository that does not allow auto-merge.
 	NoAutoMerge bool
@@ -219,11 +219,6 @@ func (f *Fake) Writes() []string {
 func notFound() error { return &Error{Status: 404, Message: "gh: Not Found"} }
 
 func refuse(status int, msg string) error { return &Error{Status: status, Message: "gh: " + msg} }
-
-// proxyRefused is a cloud session's proxy refusing a write it does not let through.
-func proxyRefused() error {
-	return refuse(403, "Write access to this GitHub API path is not permitted through this proxy.")
-}
 
 // route splits a path into its repository, the words after it, and its query.
 func route(path string) (r string, words []string, q url.Values, err error) {
@@ -807,7 +802,7 @@ func (f *Fake) write(method, path string, v map[string]any) (any, error) {
 		return obj{"content": obj{"path": strings.Join(w[1:], "/")}, "commit": obj{"sha": sha}}, nil
 	case method == "DELETE" && len(w) > 3 && w[0] == "git" && w[1] == "refs":
 		if f.Proxy {
-			return nil, proxyRefused()
+			return nil, refuse(403, "Write access to this GitHub API path is not permitted through this proxy.")
 		}
 		ref := "refs/" + strings.Join(w[2:], "/")
 		if _, ok := r.refs[ref]; !ok {
@@ -841,9 +836,6 @@ func (f *Fake) write(method, path string, v map[string]any) (any, error) {
 		p["state"], p["merged"], p["merged_at"], p["closed_at"] = "closed", true, at, at
 		return obj{"merged": true, "message": "Pull Request successfully merged"}, nil
 	case method == "POST" && len(w) == 2 && w[0] == "statuses":
-		if f.Proxy {
-			return nil, proxyRefused()
-		}
 		state, _ := str(v, "state")
 		if !containsString([]string{"error", "failure", "pending", "success"}, state) {
 			return nil, refuse(422, "Validation Failed: state is not included in the list")

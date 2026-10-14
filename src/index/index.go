@@ -392,8 +392,8 @@ func (b *builder) instances() {
 	for _, wi := range b.w.Instances {
 		m := b.mods[wi.Module]
 		switch {
-		case !portName(wi.Name):
-			b.fail(wi.Line, "instance %q needs a name of letters, digits and dashes", wi.Name)
+		case !pathName(wi.Name):
+			b.fail(wi.Line, "instance %q needs a name of letters, digits and dashes, or a nested one such as issues/pull", wi.Name)
 		case b.ix.insts[wi.Name] != nil:
 			b.fail(wi.Line, "instance %s is named twice", wi.Name)
 		case m == nil:
@@ -409,6 +409,24 @@ func (b *builder) instances() {
 			b.ix.insts[wi.Name] = in
 		}
 	}
+}
+
+// owner answers the instance that owns a name: the one with the longest name
+// that is the name itself or a path above it, so issues/pull owns
+// issues/pull/open even beside an instance issues. A name under no instance,
+// such as numbers/count, has no owner, and "" answers it; any writer may take it.
+func (b *builder) owner(name string) string {
+	for p := name; p != ""; {
+		if b.ix.insts[p] != nil {
+			return p
+		}
+		i := strings.LastIndex(p, "/")
+		if i < 0 {
+			break
+		}
+		p = p[:i]
+	}
+	return ""
 }
 
 // ref is an input bound to another instance's output port.
@@ -504,6 +522,10 @@ func (b *builder) outputs() {
 			if line == 0 {
 				line = in.line
 			}
+			if owner := b.owner(name); owner != "" && owner != inst {
+				b.fail(line, "name %s lies under instance %s, which owns the names %s/...: %s may not write it", name, owner, owner, writer)
+				continue
+			}
 			if n, taken := b.ix.names[name]; taken {
 				b.fail(line, "name %s has two writers: %s (line %d) and %s", name, n.writer, n.line, writer)
 				continue
@@ -550,6 +572,10 @@ func (b *builder) config() {
 		for _, c := range in.mod.Config() {
 			declared[c.Port] = true
 			name := wi.Name + "/" + ConfigPrefix + c.Port
+			if owner := b.owner(name); owner != "" && owner != wi.Name {
+				b.fail(wi.Line, "name %s lies under instance %s, which owns the names %s/...: the config of %s may not write it", name, owner, owner, wi.Name)
+				continue
+			}
 			if n, taken := b.ix.names[name]; taken {
 				b.fail(wi.Line, "name %s has two writers: %s (line %d) and the wiring's config", name, n.writer, n.line)
 				continue

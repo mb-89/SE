@@ -47,32 +47,58 @@ func (e behindMain) Error() string {
 // land and se issue keep do: it merges origin's copy of the branch and then
 // origin/main in, runs check, refuses a tree the battery did not pass and a
 // branch main has moved past since, pushes, and posts BatteryContext on the
-// pushed commit, naming its tree. A status GitHub refuses (a Claude Code
-// cloud session's proxy refuses them with 403) fails nothing: CI runs the
-// battery for a commit without one, so ship answers the refusal as warning.
-func (s Source) ship(dir, branch string, check func(dir string) error) (warning string, err error) {
+// pushed commit, naming its tree.
+func (s Source) ship(dir, branch string, check func(dir string) error) error {
 	if err := s.takeIn(dir, branch); err != nil {
-		return "", err
+		return err
 	}
+	return s.push(dir, branch, check)
+}
+
+// push is ship after takeIn: it runs check, refuses a tree the battery did
+// not pass and a branch main has moved past since, pushes, and posts
+// BatteryContext on the pushed commit.
+func (s Source) push(dir, branch string, check func(dir string) error) error {
 	if err := check(dir); err != nil {
-		return "", fmt.Errorf("the check failed, so nothing was pushed: %w", err)
+		return fmt.Errorf("the check failed, so nothing was pushed: %w", err)
 	}
 	tree, err := s.checked(dir, branch)
 	if err != nil {
-		return "", err
+		return err
 	}
 	sha, err := s.git(dir, "rev-parse", "HEAD")
 	if err != nil {
-		return "", err
+		return err
 	}
 	if _, err := s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
-		return "", err
+		return err
 	}
 	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/statuses/%s", s.Repo, sha),
 		github.F("state", "success"), github.F("context", BatteryContext), github.F("description", BatteryDescription(tree))); err != nil {
-		return fmt.Sprintf("pushed %s, but posting its %s status was refused, so CI runs the battery again: %v", branch, BatteryContext, err), nil
+		err = fmt.Errorf("pushed %s, but posting its %s status failed, so CI runs the battery again: %w", branch, BatteryContext, err)
+		if github.Status(err) == 403 {
+			return statusRefused{err}
+		}
+		return err
 	}
-	return "", nil
+	return nil
+}
+
+// statusRefused is push's answer where the push went through and only the
+// battery's status was refused (a cloud box's proxy refuses it): CI runs the
+// battery for the commit itself, so a land or a keep goes on, saying so.
+type statusRefused struct{ error }
+
+func (e statusRefused) Unwrap() error { return e.error }
+
+// refused answers err's message where it is only a refused status, so the
+// caller goes on with it as a warning; any other err is passed back.
+func refused(err error) (warning string, _ error) {
+	var r statusRefused
+	if errors.As(err, &r) {
+		return r.Error(), nil
+	}
+	return "", err
 }
 
 // checked answers the tree checked out in dir where it may be pushed: the
@@ -182,8 +208,6 @@ type Kept struct {
 	TakenOver bool `json:"taken_over"`
 	// Updated counts the times it merged main in, checked and pushed.
 	Updated int `json:"updated"`
-	// Warning is the last refusal of the battery's status on a push (ship).
-	Warning string `json:"warning,omitempty"`
 }
 
 // Keep keeps the PR of the issue branch checked out in dir until it merges,
@@ -237,11 +261,8 @@ func (s Source) Keep(dir string, within time.Duration, check func(dir string) er
 			k.TakenOver = true
 			return k, nil
 		}
-		if warning, err := s.keepUp(dir, branch, check); err == nil {
+		if err := s.keepUp(dir, branch, check); err == nil {
 			k.Updated++
-			if warning != "" {
-				k.Warning = warning
-			}
 		} else if !errors.Is(err, errUpToDate) && !errors.As(err, new(behindMain)) {
 			// Main moving while the battery ran is tried again on the next look.
 			return k, fmt.Errorf("PR #%d (%s) fell behind main: %w", p.Number, p.URL, err)
@@ -257,22 +278,23 @@ func (s Source) Keep(dir string, within time.Duration, check func(dir string) er
 var errUpToDate = errors.New("up to date with main")
 
 // keepUp ships the branch checked out in dir where main has moved past
-// origin's copy of it, and answers errUpToDate where it has not; warning is ship's.
-func (s Source) keepUp(dir, branch string, check func(dir string) error) (warning string, err error) {
+// origin's copy of it, and answers errUpToDate where it has not.
+func (s Source) keepUp(dir, branch string, check func(dir string) error) error {
 	if _, err := s.git(dir, "fetch", "-q", "origin", "main", "refs/heads/"+branch+":refs/remotes/origin/"+branch); err != nil {
-		return "", err
+		return err
 	}
 	behind, err := s.behind(dir, "origin/"+branch)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if !behind {
-		return "", errUpToDate
+		return errUpToDate
 	}
 	if dirty, err := s.git(dir, "status", "--porcelain"); err != nil {
-		return "", err
+		return err
 	} else if dirty != "" {
-		return "", fmt.Errorf("%s has changes not committed, so nothing was merged or pushed:\n%s", dir, dirty)
+		return fmt.Errorf("%s has changes not committed, so nothing was merged or pushed:\n%s", dir, dirty)
 	}
-	return s.ship(dir, branch, check)
+	_, err = refused(s.ship(dir, branch, check))
+	return err
 }

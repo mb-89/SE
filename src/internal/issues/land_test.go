@@ -99,6 +99,11 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	if err := RecordRequests(d, a, "issue pull", 30, landedAt()); err != nil {
 		t.Fatal(err)
 	}
+	// GitHub refused two of them for its rate limit: se waited 10 minutes
+	// for one reset, and gave up on the other.
+	if err := RecordRefusals(d, a, "issue pull", []github.Refusal{{At: landedAt(), Status: 403, Wait: 10 * time.Minute}, {At: landedAt(), Status: 429, GaveUp: true}}); err != nil {
+		t.Fatal(err)
+	}
 	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}.Land(a, "", qs, full, battered(d))
 	if err != nil {
 		t.Fatal(err)
@@ -115,11 +120,14 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 		// Those 30, and the 4 this land had made when it counted them (the
 		// battery status and the manifest lookup among them).
 		Requests: 34,
+		// Those two refusals, and their 600 seconds.
+		RateLimits: 2, RateLimitWaitS: 600,
 	}}.Comment(qs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 34\n") {
+	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 34\n") ||
+		!strings.Contains(body, "- GitHub rate-limit refusals: 2, waited 10m0s for the reset\n") {
 		t.Fatalf("the landing comment is %+v, want\n%s", got, body)
 	}
 	want := []string{"POST repos/o/r/statuses/" + run(t, a, "rev-parse", "HEAD"), "POST repos/o/r/issues/6/comments", "POST repos/o/r/pulls", "POST graphql"}
@@ -261,33 +269,6 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 	}
 	if w := gh.Writes(); w[len(w)-1] != "PUT repos/o/r/pulls/14/ccr/auto_merge" || pullOf(t, gh, 14)["auto_merge"] == nil {
 		t.Fatalf("%q", w)
-	}
-}
-
-// Behind a cloud session's proxy the battery's status is refused (#449): the
-// land goes on past it, posts the answers, opens the PR, turns on auto-merge
-// and names the refusal, since CI runs the battery for a commit without one.
-func TestLandGoesOnPastARefusedStatus(t *testing.T) {
-	t.Parallel()
-	origin, a := claimed(t)
-	gh := landGH(t, map[string]string{pullsPath: `[]`})
-	gh.Proxy = true
-	d := disk.NewFake()
-	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
-	if err != nil || !l.Created || l.Number != 7 {
-		t.Fatalf("%+v %v", l, err)
-	}
-	if !strings.Contains(l.Warning, "se/battery status was refused") || !strings.Contains(l.Warning, "HTTP 403") {
-		t.Fatalf("the warning is %q", l.Warning)
-	}
-	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
-		t.Fatalf("origin's issue-6 is %s, want %s", got, want)
-	}
-	if got := commentsAt(t, gh, 6); len(got) != 1 || !strings.Contains(got[0].Body, "the landing") {
-		t.Fatalf("the answers were not posted: %+v", got)
-	}
-	if pr := pullOf(t, gh, 7); pr["auto_merge"] == nil {
-		t.Fatalf("auto-merge is not on: %+v", pr)
 	}
 }
 

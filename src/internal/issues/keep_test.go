@@ -37,6 +37,32 @@ func TestLandPostsTheBatterysStatusNamingTheTreeItPushed(t *testing.T) {
 	}
 }
 
+// noStatuses is GitHub behind a cloud box's proxy, which refuses commit statuses.
+type noStatuses struct{ github.GitHub }
+
+func (g noStatuses) Send(method, path string, fields ...github.Field) ([]byte, error) {
+	if strings.Contains(path, "/statuses/") {
+		return nil, &github.Error{Status: 403, Message: "Write access to this GitHub API path is not permitted through this proxy"}
+	}
+	return g.GitHub.Send(method, path, fields...)
+}
+
+// A refused status stops nothing: the land posts the answers, opens the PR
+// and turns on auto-merge, and names the refusal, since CI checks the commit.
+func TestARefusedStatusIsAWarningAndTheLandGoesOn(t *testing.T) {
+	t.Parallel()
+	_, a := claimed(t)
+	gh := landGH(t, map[string]string{pullsPath: `[]`})
+	d := disk.NewFake()
+	l, err := Source{Proc: machine, Repo: repo, GitHub: noStatuses{gh}, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	if err != nil || !l.Created || l.Number == 0 || !strings.Contains(l.Warning, "403") && !strings.Contains(l.Warning, "not permitted") {
+		t.Fatalf("%+v %v", l, err)
+	}
+	if len(commentsAt(t, gh, 6)) != 1 || pullOf(t, gh, l.Number)["auto_merge"] == nil {
+		t.Fatalf("the land stopped at the refused status: %+v", l)
+	}
+}
+
 func TestLandRefusesATreeTheBatteryDidNotPass(t *testing.T) {
 	t.Parallel()
 	origin, a := claimed(t)
@@ -202,26 +228,6 @@ func TestTheBoxKeepsAPRThatFallsBehindMainUntilItMerges(t *testing.T) {
 	// Merged in, never rebased: the landed commit is still on the branch.
 	if parents := strings.Fields(run(t, a, "log", "-1", "--format=%P")); len(parents) != 2 {
 		t.Fatalf("the update is no merge: %v", parents)
-	}
-}
-
-func TestKeepGoesOnPastARefusedStatus(t *testing.T) {
-	t.Parallel()
-	_, a, b, gh, c, d := landedPR(t)
-	run(t, b, "checkout", "-q", "main")
-	run(t, b, "pull", "-q", "origin", "main")
-	commitFile(t, b, "other", "b")
-	run(t, b, "push", "-q", "origin", "main")
-	gh.Proxy = true
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c, Disk: d}
-	s.Waits = func(string) {
-		if _, err := gh.Send("PUT", "repos/o/r/pulls/7/merge", github.F("merge_method", "squash")); err != nil {
-			t.Error(err)
-		}
-	}
-	k, err := s.Keep(a, time.Hour, battered(d))
-	if err != nil || !k.Merged || k.Updated != 1 || !strings.Contains(k.Warning, "se/battery status was refused") {
-		t.Fatalf("%+v %v", k, err)
 	}
 }
 

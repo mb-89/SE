@@ -133,9 +133,6 @@ func TestTheFakeRefusesAutoMergeAsGitHubDoes(t *testing.T) {
 	if _, err := f.Send("DELETE", "repos/o/r/git/refs/heads/issue-6"); github.Status(err) != 403 {
 		t.Fatalf("deleting a branch behind the proxy: %v", err)
 	}
-	if _, err := f.Send("POST", "repos/o/r/statuses/abc", github.F("state", "success")); github.Status(err) != 403 {
-		t.Fatalf("posting a status behind the proxy: %v", err)
-	}
 }
 
 func TestTheFakeStampsWhatItWritesByItsClock(t *testing.T) {
