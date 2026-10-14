@@ -4,10 +4,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -115,12 +117,23 @@ func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	// Without --take, pull only shows the issue: it writes nothing to GitHub,
-	// fires nothing and leaves the workspace as it was.
+	// fires nothing and leaves the workspace as it was, but for the ledger
+	// of the GitHub requests it made.
 	if w := gh.Writes(); len(w) != 0 {
 		t.Errorf("pull without --take wrote to GitHub: %q", w)
 	}
-	if entries, _ := os.ReadDir(ws); fires(t) != 0 || len(entries) != 0 {
-		t.Errorf("pull without --take fired %d times, left %v in the workspace", fires(t), entries)
+	var left []string
+	_ = filepath.WalkDir(ws, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			left = append(left, strings.TrimPrefix(path, ws+string(filepath.Separator)))
+		}
+		return nil
+	})
+	if fires(t) != 0 || !slices.Equal(left, []string{filepath.FromSlash(issues.RequestsFile)}) {
+		t.Errorf("pull without --take fired %d times, left %v in the workspace", fires(t), left)
+	}
+	if n, err := issues.Requests(worldOf(t).Disk, ws); err != nil || n == 0 || n != gh.Requests() {
+		t.Errorf("the workspace's ledger records %d GitHub requests (%v), want the %d pull made", n, err, gh.Requests())
 	}
 	code, out, _ = se(t, "issue", "pull", "--json", "--repo", "o/r")
 	var answer struct {
