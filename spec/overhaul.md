@@ -18,7 +18,7 @@ whole system, not a window.
   person started it; the cadence starts overhauls this way. The issue's body
   records which it is, `<!-- se:overhaul attended -->` or
   `<!-- se:overhaul unattended -->`.
-- **The cadence:** every `OverhaulCadence` (5, in
+- **The cadence:** every `OverhaulCadence` (in
   `src/internal/issues/cadence.go`) closed retros since the last closed
   overhaul (with none closed yet, the whole history), `se issue pull --take`
   starts an unattended overhaul and takes it first, ahead of a due retro and
@@ -35,7 +35,7 @@ whole system, not a window.
   the checkout (`../overhaul-N.md`). It holds:
   - every principle of [principles.md](principles.md), with what checks it,
     and whether the retro or the battery checks it mechanically;
-  - the retro's last five runs, from their reports' blocks: each metric, the
+  - the retro's last `OverhaulCadence` runs, from their reports' blocks: each metric, the
     broken rule checks by kind, how many findings became issues and how many
     of those closed, how many the next retro found recurred anyway, and the
     finding classes more than one of them named;
@@ -56,7 +56,7 @@ whole system, not a window.
     fit the parts that rely on it?
   - **The principles themselves** (`looked_at.principles`): is one missing,
     obsolete or in conflict with another?
-  - **The retro's effectiveness over its last five runs**
+  - **The retro's effectiveness over its last `OverhaulCadence` runs**
     (`looked_at.retro`): did the metrics move, and did findings recur anyway?
   - **Speed** (`looked_at.speed`): what could be faster? What runs one after
     another that could run in parallel; where a run asks the outside world
