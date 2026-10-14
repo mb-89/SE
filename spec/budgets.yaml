@@ -29,8 +29,9 @@ commands:
 # on. Every se command records its duration in .se/.runtime/calls.jsonl, with
 # its budget; a terminal call over its budget says so on stderr. Every hook
 # records its duration as an se.hook row of the daemon's log while SE is on.
-# The se rule `budgeted` fails on a command or hook named in no class. A class
-# of 0ms bounds nothing: the call runs until it is stopped.
+# The se rule `budgeted` fails on a command or hook named in no class, and
+# se retro collect names each that ran over its class in the retro's window.
+# A class of 0ms bounds nothing: the call runs until it is stopped.
 classes:
   instant: {ms: 1000, hard: false}
   local: {ms: 10000, hard: false}

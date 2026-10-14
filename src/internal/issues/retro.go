@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/battery"
 )
 
 // NewMark is what se issue new leaves at the end of every body it writes, so
@@ -226,6 +228,10 @@ type Collected struct {
 	Previous *RetroReport
 	Score    *Score
 	History  []Past
+	// Overruns are the se commands and plugin hooks that ran over their
+	// budget classes in the window, as this workspace recorded them
+	// (battery.Overruns): its own runtime, not GitHub's.
+	Overruns []battery.Overrun
 }
 
 // Past is an earlier retro's metrics.

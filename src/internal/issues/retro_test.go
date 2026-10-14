@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
@@ -269,6 +270,33 @@ func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
 	r, facts, err := ParseReport(draft)
 	if err != nil || r.Retro != 30 || len(r.Checks) != len(c.Checks) || !strings.HasPrefix(facts, "## The window") || strings.Contains(facts, "The matrix") {
 		t.Fatalf("%+v %q %v", r, facts, err)
+	}
+}
+
+func TestTheDraftNamesEachBudgetOverrun(t *testing.T) {
+	t.Parallel()
+	c := collect(t, false)
+	draft, err := c.Draft(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(draft, "## Budget overruns\nNo se command or plugin hook this workspace recorded in the window ran over its class in `spec/budgets.yaml`.\n") {
+		t.Errorf("the draft without overruns:\n%s", draft)
+	}
+	c.Overruns = []battery.Overrun{
+		{Kind: "command", Name: "issue pull", Class: "github", Budget: 60000, Calls: 4, Over: 1, Worst: 61000, Excess: 1000},
+		{Kind: "hook", Name: "classic.Stop", Class: "local", Budget: 10000, Hard: true, Calls: 2, Over: 2, Worst: 12000, Excess: 3000},
+	}
+	if draft, err = c.Draft(rqs); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"| `se issue pull` | github | 60000ms | 4 | 1 | 1000ms | 61000ms |\n",
+		"| hook `classic.Stop` | local | 10000ms (hard) | 2 | 2 | 3000ms | 12000ms |\n",
+	} {
+		if !strings.Contains(draft, want) {
+			t.Errorf("the draft lacks %q:\n%s", want, draft)
+		}
 	}
 }
 

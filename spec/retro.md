@@ -67,6 +67,13 @@ What earlier versions taught, and how this design answers it:
     by the word its name starts with, each with the comment line that says why;
   - **the previous retro's findings:** did their issues close, and did their
     classes recur?
+  - **budget overruns:** each `se` command (its lines of
+    `.se/.runtime/calls.jsonl`) and each plugin hook (the `se.hook` rows of
+    the daemon's session logs) that ran over its class in
+    [budgets.yaml](budgets.yaml) in the window, with its class, its budget,
+    how often it ran and ran over, by how much in all, and its longest run.
+    These are the collecting workspace's own records, not GitHub's: they
+    name what grew, and feed no metric or rule check.
 - **The judgment half (the box):** it reads the draft, looks for what the
   window made inconsistent, restated or written for no reader (principles 17
   to 19), groups the findings into classes, picks each class's cheapest

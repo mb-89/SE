@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -65,7 +66,7 @@ func init() {
 		Usage:   "retro collect N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "read a retro's window from GitHub and write its report draft",
-		Details: "read retro N's window from GitHub (everything closed since the last retro closed) and write the report draft to FILE (default: ../retro-N.md beside the workspace): the rule checks, the counts, the metrics against the previous retros, how the previous retro's findings fared, the scripts added under src/scripts/, and the matrix of every closed issue × every landing question. Where a report is already posted on N (a retro from before retros stopped waiting for the owner), it writes that one instead, to be filed as it stands.",
+		Details: "read retro N's window from GitHub (everything closed since the last retro closed) and write the report draft to FILE (default: ../retro-N.md beside the workspace): the rule checks, the counts, the metrics against the previous retros, how the previous retro's findings fared, the scripts added under src/scripts/, the se commands and plugin hooks this workspace recorded (.se/.runtime/calls.jsonl, the se.hook rows of the daemon's session logs) that ran over their budget class in spec/budgets.yaml in the window, and the matrix of every closed issue × every landing question. Where a report is already posted on N (a retro from before retros stopped waiting for the owner), it writes that one instead, to be filed as it stands.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "retro collect")
@@ -93,10 +94,13 @@ func init() {
 				if col, err = s.Collect(n); err != nil {
 					return Reply{}, err
 				}
+				if col.Overruns, err = battery.Overruns(c.Disk, c.Workspace, col.Window.Since, col.Window.Until); err != nil {
+					return Reply{}, err
+				}
 				if text, err = col.Draft(qs); err != nil {
 					return Reply{}, err
 				}
-				what = fmt.Sprintf("its draft: %d closed issues, %d merged PRs, %d broken rule checks", len(col.Rows), col.PRs, len(col.Checks))
+				what = fmt.Sprintf("its draft: %d closed issues, %d merged PRs, %d broken rule checks, %d budget overruns", len(col.Rows), col.PRs, len(col.Checks), len(col.Overruns))
 			}
 			if err := c.Disk.WriteFile(path, []byte(text)); err != nil {
 				return Reply{}, err

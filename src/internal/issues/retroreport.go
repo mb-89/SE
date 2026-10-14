@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
@@ -182,6 +183,25 @@ func (c Collected) facts() string {
 				metric = fmt.Sprintf("%s %g → %g", it.Metric, it.Before, it.Now)
 			}
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %v | %s |\n", it.Title, it.Class, issue, it.State, it.Recurred, metric)
+		}
+	}
+
+	b.WriteString("\n## Budget overruns\n")
+	if len(c.Overruns) == 0 {
+		fmt.Fprintf(&b, "No se command or plugin hook this workspace recorded in the window ran over its class in `%s`.\n", battery.BudgetsFile)
+	} else {
+		fmt.Fprintf(&b, "The se commands (`%s`) and plugin hooks (the `%s` rows of the daemon's session logs) this workspace recorded in the window that ran over their class in `%s`:\n\n", battery.CallsFile, battery.HookEvent, battery.BudgetsFile)
+		b.WriteString("| | class | budget | ran | over | by, in all | longest |\n|---|---|---:|---:|---:|---:|---:|\n")
+		for _, o := range c.Overruns {
+			what := "`se " + o.Name + "`"
+			if o.Kind == "hook" {
+				what = "hook `" + o.Name + "`"
+			}
+			hard := ""
+			if o.Hard {
+				hard = " (hard)"
+			}
+			fmt.Fprintf(&b, "| %s | %s | %dms%s | %d | %d | %dms | %dms |\n", what, o.Class, o.Budget, hard, o.Calls, o.Over, o.Excess, o.Worst)
 		}
 	}
 
