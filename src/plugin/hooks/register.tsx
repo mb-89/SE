@@ -188,7 +188,7 @@ export const register: Register = on => {
   on('*', async ($, e, next) => {
     if (next.is('engine.create', e) || (!active && !settingUp)) return next(e)
     if (!active) {
-      if (waiting.length < WAITING_CAP) waiting.push(bodyOf(await $.session.id(), next.event, e))
+      if (waiting.length < WAITING_CAP) waiting.push(bodyOf(await $.session.id(), next.event, e, await $.clock.now()))
       return next(e)
     }
     await within(
@@ -393,7 +393,7 @@ async function ensuresOnce($: EngineInterface): Promise<string> {
 // Posts the event to the daemon. One that does not answer is asked of se,
 // no sooner than se said; the event waits for se's answer.
 async function forwards($: EngineInterface, event: string, e: unknown): Promise<void> {
-  const body = bodyOf(await $.session.id(), event, e)
+  const body = bodyOf(await $.session.id(), event, e, await $.clock.now())
   if (endpoint && (await posts($, endpoint, body))) return
   // An event that waited on the ensure would hold up the ensure's own events.
   if (ensuring) {
@@ -418,9 +418,10 @@ async function posts($: EngineInterface, to: Endpoint, body: string): Promise<bo
   }
 }
 
-// The post's body: the event whole, which the daemon trims; one that is no JSON goes as text.
-export function bodyOf(session: string, event: string, e: unknown): string {
-  const at = new Date().toISOString()
+// The post's body: the event whole, at ms on the clock, which the daemon
+// trims; one that is no JSON goes as text.
+export function bodyOf(session: string, event: string, e: unknown, ms: number): string {
+  const at = new Date(ms).toISOString()
   try {
     return JSON.stringify({ session, event, at, e: e ?? null })
   } catch {

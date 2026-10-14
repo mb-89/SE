@@ -422,6 +422,29 @@ test('a daemon that is down never holds the event up', async ($, on) => {
   expect(out.text).toBe('still here')
 })
 
+test('a daemon that is gone is started again at most once a minute, by the plugin clock', async ($, on) => {
+  const w = world(on)
+  const clock = w.clock
+  await $.session.start(starts)
+  await $.command.run(se('on'))
+  w.ran = []
+  w.live = null
+  w.startFails = 'no room'
+  // The on counts as a start: the first try waits its minute.
+  await clock.advance(59_999)
+  await $.attribution.text(probe)
+  expect(verbs(w)).toEqual([])
+  await clock.advance(1)
+  await $.attribution.text(probe)
+  expect(verbs(w)).toEqual(['start'])
+  await clock.advance(59_999)
+  await $.attribution.text(probe)
+  expect(verbs(w)).toEqual(['start'])
+  await clock.advance(1)
+  await $.attribution.text(probe)
+  expect(verbs(w)).toEqual(['start', 'start'])
+})
+
 test('/se update applies the new endpoint and reloads once it has answered', async ($, on) => {
   const w = world(on)
   const clock = w.clock
