@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // PrinciplesPath is the file of the product's principles a reviewer judges
@@ -147,7 +149,7 @@ func (s Source) file(path, commit string) (string, error) {
 		Encoding string `json:"encoding"`
 	}](s, fmt.Sprintf("repos/%s/contents/%s?ref=%s", s.Repo, path, commit), false)
 	if err != nil {
-		if strings.Contains(err.Error(), "HTTP 404") {
+		if github.Status(err) == 404 {
 			return "", nil
 		}
 		return "", err

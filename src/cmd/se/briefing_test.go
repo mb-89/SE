@@ -93,36 +93,34 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 	if person {
 		answers["repos/o/r/issues/2/dependencies/blocked_by?per_page=100"] = `[{"number":6,"state":"open"}]`
 	}
-	old, oldClock := gh, wall
-	wall = clock.NewFake(briefedAt)
-	gh = func(args ...string) ([]byte, error) {
-		path := strings.Replace(args[len(args)-1], "repos/o/probe/", "repos/o/r/", 1)
-		if a, ok := answers[path]; ok {
-			return []byte(a), nil
+	// Each comment is held on its issue; GitHub lists them since a time.
+	byIssue := map[int][]comment{}
+	for _, c := range comments {
+		var n int
+		if _, err := fmt.Sscanf(c.URL, "https://api.github.com/repos/o/r/issues/%d", &n); err != nil {
+			t.Fatal(err)
 		}
-		if rest, ok := strings.CutPrefix(path, "repos/o/r/issues/comments?since="); ok {
-			rest, page, _ := strings.Cut(rest, "&per_page=100&page=")
-			since, err := time.Parse(time.RFC3339, rest)
-			if err != nil {
-				return nil, err
-			}
-			got := []comment{}
-			for _, c := range comments {
-				if page == "1" && !c.Created.Before(since) {
-					got = append(got, c)
-				}
-			}
-			return json.Marshal(got)
-		}
-		// What the record leaves out has nothing: no blockers, no comments.
-		for _, empty := range []string{"/dependencies/blocked_by?", "/comments?"} {
-			if strings.Contains(path, empty) {
-				return []byte(`[]`), nil
-			}
-		}
-		return nil, fmt.Errorf("not recorded: %v", args)
+		byIssue[n] = append(byIssue[n], c)
 	}
-	t.Cleanup(func() { gh, wall = old, oldClock })
+	for n, cs := range byIssue {
+		data, err := json.Marshal(cs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		answers[fmt.Sprintf("repos/o/r/issues/%d/comments", n)] = string(data)
+	}
+	// o/probe holds what o/r does.
+	probed := map[string]string{}
+	for path, a := range answers {
+		probed[strings.Replace(path, "repos/o/r/", "repos/o/probe/", 1)] = a
+	}
+	for path, a := range probed {
+		answers[path] = a
+	}
+	oldClock := wall
+	wall = clock.NewFake(briefedAt)
+	t.Cleanup(func() { wall = oldClock })
+	hubAt(t, answers)
 }
 
 // briefed runs se briefing in a workspace with a README and answers its text.
