@@ -103,15 +103,19 @@ func (c Collected) facts() string {
 	for _, k := range checkKinds {
 		var broke []Broken
 		for _, x := range c.Checks {
-			if x.Kind == k.kind {
+			if x.Kind == k.Kind {
 				broke = append(broke, x)
 			}
 		}
+		before := ""
+		if n := c.Before[k.Kind]; n > 0 {
+			before = fmt.Sprintf(" Before the rule came with PR #%d: broken %s, not counted.", k.Since, count(n))
+		}
 		if len(broke) == 0 {
-			fmt.Fprintf(&b, "- **%s** (`%s`): held.\n", k.rule, k.kind)
+			fmt.Fprintf(&b, "- **%s** (`%s`): held.%s\n", k.Rule, k.Kind, before)
 			continue
 		}
-		fmt.Fprintf(&b, "- **%s** (`%s`): broken %s.\n", k.rule, k.kind, count(len(broke)))
+		fmt.Fprintf(&b, "- **%s** (`%s`): broken %s.%s\n", k.Rule, k.Kind, count(len(broke)), before)
 		for j, x := range broke {
 			if j == 20 {
 				fmt.Fprintf(&b, "  - … and %d more, in the block below.\n", len(broke)-20)
