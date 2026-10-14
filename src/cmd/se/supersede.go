@@ -14,15 +14,16 @@ func init() {
 	register(Command{
 		Name:    "issue supersede",
 		Class:   batch,
-		Usage:   "issue supersede N (--body B | --body-file PATH) [--json] [--repo OWNER/NAME]",
+		Usage:   "issue supersede N (--body B | --body-file PATH | --duplicate-of M) [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "close issue N by a final successor with its open questions",
-		Details: "the second way a box closes the issue it took, beside a PR (and se issue close --fixed-by, where its work is on main already): create N's successor through the same code as se issue new, with N's title and text and the open questions the box could not answer (B), labelled se-final, a sub-issue of N's parent and blocked by N's open blockers; link N's open dependents as blocked by it; then close N, its comment naming the successor. A final issue is refused: its box lands a PR. A ready successor fires the routine once. Then it files the issue the box queued with se issue new, if any, as se issue new would create it, its body marked as N's follow-up (<!-- se:followup #N -->), names it and clears the queue; a queued issue se issue new would refuse refuses the whole command first, before anything is written.",
+		Details: "the second way a box closes the issue it took, beside a PR (and se issue close --fixed-by, where its work is on main already): create N's successor through the same code as se issue new, with N's title and text and the open questions the box could not answer (B), labelled se-final, a sub-issue of N's parent and blocked by N's open blockers; link N's open dependents as blocked by it; then close N, its comment naming the successor. A final issue is refused: its box lands a PR. A ready successor fires the routine once. With --duplicate-of M, for an issue that the open issue M (its PR) already covers, it mints nothing: it links N's open dependents as blocked by M, then closes N as a duplicate (state_reason duplicate), its comment naming M; a final issue closes so too. Before N closes, N's open PR closes, its comment naming M, and N's issue-N claim is deleted by a git push from the workspace, so se fleet fix finds no leftover claim. Then it files the issue the box queued with se issue new, if any, as se issue new would create it, its body marked as N's follow-up (<!-- se:followup #N -->), names it and clears the queue; a queued issue se issue new would refuse refuses the whole command first, before anything is written.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue supersede")
 			body := fs.String("body", "", "the open questions `B` the box could not answer")
 			bodyFile := fs.String("body-file", "", "a file `PATH` holding the open questions")
+			dupOf := fs.String("duplicate-of", "", "the open issue `M` that already covers N: close N as its duplicate, minting nothing")
 			var words []string
 			for rest := c.Args; ; {
 				if err := fs.Parse(rest); err != nil {
@@ -44,8 +45,18 @@ func init() {
 			if n <= 0 {
 				return Reply{}, fmt.Errorf("issue supersede takes one issue number, not %q", strings.Join(words, " "))
 			}
+			of := 0
+			if *dupOf != "" {
+				if of, _ = strconv.Atoi(strings.TrimPrefix(*dupOf, "#")); of <= 0 {
+					return Reply{}, fmt.Errorf("--duplicate-of takes one issue number, not %q", *dupOf)
+				}
+				if *body != "" || *bodyFile != "" {
+					return Reply{}, fmt.Errorf("issue supersede --duplicate-of takes no open questions: the issue it duplicates carries the work on")
+				}
+				return duplicate(c, src, *asJSON, n, of)
+			}
 			if (*body == "") == (*bodyFile == "") {
-				return Reply{}, fmt.Errorf("issue supersede takes one of --body and --body-file: the open questions")
+				return Reply{}, fmt.Errorf("issue supersede takes one of --body, --body-file and --duplicate-of")
 			}
 			if *bodyFile != "" {
 				path := *bodyFile
@@ -99,4 +110,35 @@ func init() {
 			})
 		},
 	})
+}
+
+// duplicate closes issue n as a duplicate of the open issue of, minting
+// nothing (se issue supersede n --duplicate-of of).
+func duplicate(c *Call, src func() (issues.Source, error), asJSON bool, n, of int) (Reply, error) {
+	s, err := src()
+	if err != nil {
+		return Reply{}, err
+	}
+	if err := s.CloseParents(); err != nil {
+		return Reply{}, err
+	}
+	dup, err := s.CloseDuplicate(c.Workspace, n, of)
+	if err != nil {
+		return Reply{}, err
+	}
+	if asJSON {
+		data, err := json.Marshal(dup)
+		return Reply{Text: string(data)}, err
+	}
+	text := fmt.Sprintf("Closed #%d as a duplicate of #%d, minting nothing.\n%s", n, of, dup.URL)
+	if len(dup.Blocks) > 0 {
+		text += "\n" + numbers(dup.Blocks) + " now wait on #" + strconv.Itoa(of) + "."
+	}
+	for _, p := range dup.Pulls {
+		text += fmt.Sprintf("\nClosed its PR #%d, naming #%d.", p, of)
+	}
+	if dup.Branch != "" {
+		text += "\nDeleted its claim " + dup.Branch + "."
+	}
+	return Reply{Text: text}, nil
 }
