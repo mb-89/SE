@@ -73,22 +73,11 @@ func (s Source) lookup(numbers []int) (map[int]int64, bool, error) {
 	return out, closed, nil
 }
 
-// Block adds GitHub's native "blocked by" link from issue n to each of
-// blockers. It refuses, before writing anything, a blocker that does not
-// exist. This is the one place se writes dependencies.
-func (s Source) Block(n int, blockers []int) error {
-	ids, err := s.ids(blockers)
-	if err != nil {
-		return err
-	}
-	return s.link(n, blockers, ids)
-}
-
+// link adds GitHub's native "blocked by" link from issue n to each of
+// blockers, by the ids ids holds. This is the one place se writes
+// dependencies: Create and Blocking call it.
 func (s Source) link(n int, blockers []int, ids map[int]int64) error {
 	for _, b := range blockers {
-		if b == n {
-			return fmt.Errorf("#%d cannot block itself", n)
-		}
 		path := fmt.Sprintf("repos/%s/issues/%d/dependencies/blocked_by", s.Repo, n)
 		if _, err := s.GitHub.Send("POST", path, github.Int("issue_id", ids[b])); err != nil {
 			return fmt.Errorf("linking #%d as blocked by #%d: %w", n, b, err)

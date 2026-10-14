@@ -12,8 +12,8 @@ import (
 const RetroCadence = 10
 
 // OverhaulCadence is how many retros close between two overhauls: at this
-// many closed since the last overhaul closed, se issue pull --take starts an
-// unattended one and takes it first (spec/overhaul.md).
+// many closed since the last overhaul closed, se issue pull --take starts one
+// and takes it first (spec/overhaul.md).
 const OverhaulCadence = 5
 
 // cadenceRule is one cadence: a run (a retro, an overhaul) started every so
@@ -141,11 +141,10 @@ func (s Source) TakeRetro(dir string) (took Issue, ok bool, c Cadence, err error
 // TakeOverhaul starts the overhaul the cadence has made due and claims it in
 // the git checkout dir, ahead of all other work, a due retro included: ok is
 // false, with nothing created, where none is due, and with the one it started
-// closed as a duplicate where a race started a lower one too. It runs
-// unattended.
+// closed as a duplicate where a race started a lower one too.
 func (s Source) TakeOverhaul(dir string) (took Issue, ok bool, c Cadence, err error) {
 	return s.takeDue(overhaulRule, dir, func() (Issue, error) {
-		o, err := s.NewOverhaul(true)
+		o, err := s.NewOverhaul()
 		o.Overhaul = true
 		return o.Issue, err
 	})

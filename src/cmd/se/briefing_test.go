@@ -240,23 +240,3 @@ func TestTheWindowIsTheLastDayOrTheLastTenWhicheverAreMore(t *testing.T) {
 		}
 	}
 }
-
-// The probe registers as a source does, at init, before the tests that read
-// the sources run in parallel. It answers for o/probe alone.
-func init() {
-	issues.RegisterPending(issues.PendingSource{Name: "probe", List: func(o issues.Open) ([]issues.Pending, error) {
-		if o.Repo != "o/probe" {
-			return nil, nil
-		}
-		return []issues.Pending{{Number: 99, Title: "a probe", URL: "u99", Reason: "probing"}}, nil
-	}})
-}
-
-func TestAPendingSourceRegistersItself(t *testing.T) {
-	t.Parallel()
-	recordedBriefing(t, false, nil)
-	inOrder(t, briefed(t, "--repo", "o/probe"), "## Waits on you\n- #99 a probe (probe, holds up 0)\n  probing\n  u99\n", "## In flight")
-	if out := briefed(t, "--repo", "o/r"); !strings.Contains(out, "Nothing waits on you.") {
-		t.Fatalf("the probe answered for another repository:\n%s", out)
-	}
-}

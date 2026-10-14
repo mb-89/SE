@@ -411,7 +411,7 @@ func contains(list []string, s string) bool {
 
 // postedReport is the last report posted on issue n, nil where it has none.
 func (s Source) postedReport(n int) (*RetroReport, error) {
-	text, err := s.lastReport(n)
+	text, err := s.lastPosted(n, reportMark)
 	if err != nil || text == "" {
 		return nil, err
 	}
@@ -420,12 +420,6 @@ func (s Source) postedReport(n int) (*RetroReport, error) {
 		return nil, fmt.Errorf("the report on #%d: %w", n, err)
 	}
 	return &r, nil
-}
-
-// lastReport is the text of the last report comment on issue n, and whether
-// a person resumed the issue after it.
-func (s Source) lastReport(n int) (string, error) {
-	return s.lastPosted(n, reportMark)
 }
 
 // lastPosted is the text of the last comment on issue n that opens with mark.
@@ -441,16 +435,6 @@ func (s Source) lastPosted(n int, mark string) (string, error) {
 		}
 	}
 	return text, nil
-}
-
-// Posted is the report already on retro n, posted for the owner before
-// retros stopped waiting, for the box that files it; "" where there is none.
-func (s Source) Posted(n int) (string, error) {
-	if _, err := s.retroIssue(n); err != nil {
-		return "", err
-	}
-	text, err := s.lastReport(n)
-	return text, err
 }
 
 // Filed is what se retro report did.

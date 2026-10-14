@@ -63,7 +63,7 @@ func init() {
 		Usage:   "retro collect N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "read a retro's window from GitHub and write its report draft",
-		Details: "read retro N's window from GitHub (everything closed since the last retro closed) and write the report draft to FILE (default: ../retro-N.md beside the workspace): the rule checks, the counts, the metrics against the previous retros, how the previous retro's findings fared, the scripts added under src/scripts/, and the matrix of every closed issue × every landing question. Where a report is already posted on N (a retro from before retros stopped waiting for the owner), it writes that one instead, to be filed as it stands.",
+		Details: "read retro N's window from GitHub (everything closed since the last retro closed) and write the report draft to FILE (default: ../retro-N.md beside the workspace): the rule checks, the counts, the metrics against the previous retros, how the previous retro's findings fared, the scripts added under src/scripts/, and the matrix of every closed issue × every landing question.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "retro collect")
@@ -77,37 +77,29 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			posted, err := s.Posted(n)
+			qs, err := issues.Questions(c.Disk, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
-			text, what := posted, "the report posted on it: apply what the owner said in its comments, if anything, to its block, then run se retro report"
-			var col issues.Collected
-			if posted == "" {
-				qs, err := issues.Questions(c.Disk, c.Workspace)
-				if err != nil {
-					return Reply{}, err
-				}
-				if col, err = s.Collect(n); err != nil {
-					return Reply{}, err
-				}
-				if text, err = col.Draft(qs); err != nil {
-					return Reply{}, err
-				}
-				what = fmt.Sprintf("its draft: %d closed issues, %d merged PRs, %d broken rule checks", len(col.Rows), col.PRs, len(col.Checks))
+			col, err := s.Collect(n)
+			if err != nil {
+				return Reply{}, err
+			}
+			text, err := col.Draft(qs)
+			if err != nil {
+				return Reply{}, err
 			}
 			if err := c.Disk.WriteFile(path, []byte(text)); err != nil {
 				return Reply{}, err
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
-					Retro  int    `json:"retro"`
-					Draft  string `json:"draft"`
-					Posted bool   `json:"posted"`
-				}{n, path, posted != ""})
+					Retro int    `json:"retro"`
+					Draft string `json:"draft"`
+				}{n, path})
 				return Reply{Text: string(data)}, err
 			}
-			return Reply{Text: fmt.Sprintf("Wrote the retro #%d's report to %s: %s.", n, path, what)}, nil
+			return Reply{Text: fmt.Sprintf("Wrote the retro #%d's report to %s: its draft: %d closed issues, %d merged PRs, %d broken rule checks.", n, path, len(col.Rows), col.PRs, len(col.Checks))}, nil
 		},
 	})
 	register(Command{

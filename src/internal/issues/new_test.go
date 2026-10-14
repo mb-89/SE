@@ -43,38 +43,6 @@ func linksOf(t *testing.T, gh *github.Fake, path string) []int {
 	return ns
 }
 
-func TestBlockWritesNativeLinksByIssueID(t *testing.T) {
-	t.Parallel()
-	gh := recorded(t, map[string]string{
-		"repos/o/r/issues/8": `{"id":808,"number":8,"state":"open"}`,
-		"repos/o/r/issues/6": `{"id":606,"number":6,"state":"open"}`,
-	})
-	if err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Block(6, []int{8}); err != nil {
-		t.Fatal(err)
-	}
-	if w := gh.Writes(); !reflect.DeepEqual(w, []string{"POST repos/o/r/issues/6/dependencies/blocked_by"}) {
-		t.Fatalf("%q", w)
-	}
-	if got := linksOf(t, gh, "repos/o/r/issues/6/dependencies/blocked_by"); !reflect.DeepEqual(got, []int{8}) {
-		t.Fatalf("#6 is blocked by %v", got)
-	}
-}
-
-func TestBlockRefusesAMissingBlockerBeforeWriting(t *testing.T) {
-	t.Parallel()
-	gh := recorded(t, map[string]string{"repos/o/r/issues/8": `{"id":808,"number":8}`, "repos/o/r/issues/6": `{"id":606,"number":6}`})
-	err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Block(6, []int{8, 99})
-	if err == nil || !strings.Contains(err.Error(), "#99 does not exist") {
-		t.Fatalf("%v", err)
-	}
-	if w := gh.Writes(); len(w) != 0 {
-		t.Fatalf("wrote %q", w)
-	}
-	if err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Block(8, []int{8}); err == nil || !strings.Contains(err.Error(), "block itself") {
-		t.Fatalf("%v", err)
-	}
-}
-
 func TestCreateNamesTheIssueWhoseLinkFailed(t *testing.T) {
 	t.Parallel()
 	// #8 is a pull request on GitHub's side by the time the link is written:

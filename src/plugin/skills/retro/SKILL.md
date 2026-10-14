@@ -22,10 +22,7 @@ Tell them the issue it created. A box takes it from there.
 ## The box that took retro N
 
 1. `./src/plugin/bin/se retro collect <n>`. It writes the draft to
-   `../retro-<n>.md`. If it says it wrote the report already posted on the
-   issue (from before retros stopped waiting for the owner): read the
-   owner's comments on the issue, apply what they moved between controversial
-   and not, if anything, to `findings` in the draft's block, and go to 4.
+   `../retro-<n>.md`.
 2. Read the draft: the issue's field feedback, the rule checks, the counts,
    the metrics against the previous retros, the previous retro's score, the
    scripts and the matrix of landing answers. Look too for what the window

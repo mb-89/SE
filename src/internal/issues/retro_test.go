@@ -390,18 +390,6 @@ func TestAnAttendedRetroClosesToo(t *testing.T) {
 	}
 }
 
-// A retro posted for the owner before retros stopped waiting is filed as it
-// stands, with what the owner moved.
-func TestAResumedRetroCreatesTheIssuesAsDecided(t *testing.T) {
-	t.Parallel()
-	answers := retroRepo(t, true, "<!-- se:retro attended -->")
-	answers["repos/o/r/issues/30/comments?per_page=100"] = jsonComments(judged(t, nil), "<!-- se:person -->\nwaits", "move finding 2 to normal", "<!-- se:resume -->\nResumed.")
-	f, _ := fileFindings(t, answers)
-	if len(f.Issues) != 2 {
-		t.Fatalf("%+v", f)
-	}
-}
-
 func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
 	t.Parallel()
 	answers := retroRepo(t, true, "<!-- se:retro attended -->")

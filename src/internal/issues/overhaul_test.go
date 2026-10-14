@@ -47,7 +47,7 @@ func TestFourRetrosStartNoOverhaulAndTheDueRetroIsTaken(t *testing.T) {
 	}
 }
 
-func TestFiveRetrosStartAnUnattendedOverhaulAndTakeItFirst(t *testing.T) {
+func TestFiveRetrosStartAnOverhaulAndTakeItFirst(t *testing.T) {
 	t.Parallel()
 	_, a, _ := boxes(t)
 	gh := recorded(t, overhaulRepo(5, 0))
@@ -58,7 +58,7 @@ func TestFiveRetrosStartAnUnattendedOverhaulAndTakeItFirst(t *testing.T) {
 	// The overhaul is the next issue: retros #200 to #203 closed before it.
 	got, err := gh.Get("repos/o/r/issues/204")
 	made := string(got)
-	if len(gh.Writes()) != 1 || err != nil || took.Number != 204 || !strings.Contains(made, overhaulUnattendedMark) || !labelled(t, gh, 204, OverhaulLabel) ||
+	if len(gh.Writes()) != 1 || err != nil || took.Number != 204 || !labelled(t, gh, 204, OverhaulLabel) ||
 		!strings.Contains(made, `"title":"SE overhaul 2026-10-13"`) || !strings.Contains(made, "The last overhaul was #15") {
 		t.Fatalf("writes %q, made %s %v", gh.Writes(), made, err)
 	}
@@ -120,7 +120,7 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 		t.Fatal(err)
 	}
 	gh := recorded(t, map[string]string{
-		"repos/o/r/issues/31": `{"number":31,"state":"open","body":"<!-- se:overhaul attended -->","labels":[{"name":"se-overhaul"}]}`,
+		"repos/o/r/issues/31": `{"number":31,"state":"open","labels":[{"name":"se-overhaul"}]}`,
 		// Six retros closed, one without a report; the overhaul reads the last five reports.
 		"repos/o/r/issues?labels=se-retro&state=closed&per_page=100": `[` +
 			`{"number":20,"state":"closed","closed_at":"2026-09-02T00:00:00Z"},{"number":21,"state":"closed","closed_at":"2026-09-03T00:00:00Z"},` +
@@ -148,7 +148,7 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 	for _, run := range r.Retros {
 		got = append(got, run.Retro)
 	}
-	if !reflect.DeepEqual(got, []int{21, 22, 23, 24, 25}) || !r.Attended || r.Previous != 15 {
+	if !reflect.DeepEqual(got, []int{21, 22, 23, 24, 25}) || r.Previous != 15 {
 		t.Fatalf("%v %+v", got, r)
 	}
 	// #24's findings: #324 closed, #325 open; #25 scored #24's as recurred once.
@@ -200,16 +200,16 @@ func overhauled(t *testing.T, edit func(*OverhaulReport)) string {
 	return text
 }
 
-func overhaulAnswers(body string) map[string]string {
+func overhaulAnswers() map[string]string {
 	return map[string]string{
-		"repos/o/r/issues/30":                       fmt.Sprintf(`{"number":30,"title":"SE overhaul","state":"open","html_url":"u30","body":%q,"labels":[{"name":"se"},{"name":"se-overhaul"}]}`, body),
+		"repos/o/r/issues/30":                       `{"number":30,"title":"SE overhaul","state":"open","html_url":"u30","labels":[{"name":"se"},{"name":"se-overhaul"}]}`,
 		"repos/o/r/issues/30/comments?per_page=100": `[]`,
 	}
 }
 
 func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	t.Parallel()
-	gh := recorded(t, overhaulAnswers(overhaulUnattendedMark))
+	gh := recorded(t, overhaulAnswers())
 	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
 	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
 		t.Fatalf("%+v %v", f, err)
@@ -250,23 +250,6 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
 		}
-	}
-}
-
-func TestAnAttendedOverhaulClosesToo(t *testing.T) {
-	t.Parallel()
-	// A person started it, and still nobody waits: its controversial
-	// findings are the issues for the person.
-	gh := recorded(t, overhaulAnswers("<!-- se:overhaul attended -->"))
-	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
-	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
-		t.Fatalf("%+v %v", f, err)
-	}
-	if labelled(t, gh, 30, PersonLabel) {
-		t.Fatal("the overhaul was given to a person")
-	}
-	if i := issueAt(t, gh, 30); i.State != "closed" {
-		t.Fatalf("the attended overhaul did not close: %q", gh.Writes())
 	}
 }
 

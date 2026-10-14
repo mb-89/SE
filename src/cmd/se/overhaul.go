@@ -10,14 +10,13 @@ import (
 func init() {
 	register(Command{
 		Name:    "overhaul new",
-		Usage:   "overhaul new [--unattended] [--json] [--repo OWNER/NAME]",
+		Usage:   "overhaul new [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "start an overhaul: is the design still right?",
-		Details: fmt.Sprintf("create an overhaul: an se issue labelled se-overhaul that checks SE as it stands against every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last %d runs (OverhaulCadence), and fire the routine so a box takes it at once. Its box creates the findings' issues, those for a person where controversial, and closes it: an overhaul never waits. --unattended records that no person started it; se issue pull --take starts one so every %d closed retros. spec/overhaul.md has the rules.", issues.OverhaulCadence, issues.OverhaulCadence),
+		Details: fmt.Sprintf("create an overhaul: an se issue labelled se-overhaul that checks SE as it stands against every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last %d runs (OverhaulCadence), and fire the routine so a box takes it at once. Its box creates the findings' issues, those for a person where controversial, and closes it: an overhaul never waits. se issue pull --take starts one so every %d closed retros. spec/overhaul.md has the rules.", issues.OverhaulCadence, issues.OverhaulCadence),
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul new")
-			unattended := fs.Bool("unattended", false, "no person started it: the cadence did")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
@@ -25,7 +24,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			o, err := s.NewOverhaul(*unattended)
+			o, err := s.NewOverhaul()
 			if err != nil {
 				return Reply{}, err
 			}
@@ -45,7 +44,7 @@ func init() {
 		Usage:   "overhaul read N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "read an overhaul's facts and write its report draft",
-		Details: fmt.Sprintf("read overhaul N's facts and write its report draft to FILE (default: ../overhaul-N.md beside the workspace): every design principle from spec/principles.md, mechanical or judged; the last %d retros' metrics (OverhaulCadence), broken rule checks and findings, how many became issues and closed, and which recurred; and the previous overhaul's findings with their issues' state. Where a report is already posted on N (an overhaul from before overhauls stopped waiting for the owner), it writes that one instead, to be filed as it stands.", issues.OverhaulCadence),
+		Details: fmt.Sprintf("read overhaul N's facts and write its report draft to FILE (default: ../overhaul-N.md beside the workspace): every design principle from spec/principles.md, mechanical or judged; the last %d retros' metrics (OverhaulCadence), broken rule checks and findings, how many became issues and closed, and which recurred; and the previous overhaul's findings with their issues' state.", issues.OverhaulCadence),
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul read")
@@ -59,24 +58,17 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			posted, err := s.PostedOverhaul(n)
+			ps, err := issues.Principles(c.Disk, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
-			text, what := posted, "the report posted on it: apply what the owner said in its comments, if anything, to its block, then run se overhaul file"
-			if posted == "" {
-				ps, err := issues.Principles(c.Disk, c.Workspace)
-				if err != nil {
-					return Reply{}, err
-				}
-				r, err := s.CollectOverhaul(n, ps)
-				if err != nil {
-					return Reply{}, err
-				}
-				if text, err = r.OverhaulDraft(); err != nil {
-					return Reply{}, err
-				}
-				what = fmt.Sprintf("its draft: %d principles to judge, %d retros' reports", len(r.Principles), len(r.Retros))
+			r, err := s.CollectOverhaul(n, ps)
+			if err != nil {
+				return Reply{}, err
+			}
+			text, err := r.OverhaulDraft()
+			if err != nil {
+				return Reply{}, err
 			}
 			if err := c.Disk.WriteFile(path, []byte(text)); err != nil {
 				return Reply{}, err
@@ -85,11 +77,10 @@ func init() {
 				data, err := json.Marshal(struct {
 					Overhaul int    `json:"overhaul"`
 					Draft    string `json:"draft"`
-					Posted   bool   `json:"posted"`
-				}{n, path, posted != ""})
+				}{n, path})
 				return Reply{Text: string(data)}, err
 			}
-			return Reply{Text: fmt.Sprintf("Wrote the overhaul #%d's report to %s: %s.", n, path, what)}, nil
+			return Reply{Text: fmt.Sprintf("Wrote the overhaul #%d's report to %s: its draft: %d principles to judge, %d retros' reports.", n, path, len(r.Principles), len(r.Retros))}, nil
 		},
 	})
 	register(Command{

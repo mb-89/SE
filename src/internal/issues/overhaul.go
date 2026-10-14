@@ -20,11 +20,6 @@ import (
 // checkout: the overhaul judges SE against every one of them.
 const PrinciplesFile = "spec/principles.md"
 
-// overhaulUnattendedMark is in the body of an overhaul no person started. One
-// a person started carries <!-- se:overhaul attended --> instead. Either way
-// its box files the issues and closes it.
-const overhaulUnattendedMark = "<!-- se:overhaul unattended -->"
-
 // The marks that cut an overhaul's report into its parts: the report, the
 // facts se overhaul read wrote, and the machine-readable block.
 const (
@@ -37,30 +32,25 @@ const (
 type OverhaulIssue struct {
 	Issue
 	// Previous is the last closed overhaul; 0 where none has closed.
-	Previous   int  `json:"previous"`
-	Unattended bool `json:"unattended"`
+	Previous int `json:"previous"`
 }
 
-// NewOverhaul creates an overhaul issue, labelled se and se-overhaul;
-// unattended says nobody waits for its report. It goes through the same code
-// as se issue new.
-func (s Source) NewOverhaul(unattended bool) (OverhaulIssue, error) {
+// NewOverhaul creates an overhaul issue, labelled se and se-overhaul. It goes
+// through the same code as se issue new. Whoever started it, a person or the
+// cadence, nobody waits for its report.
+func (s Source) NewOverhaul() (OverhaulIssue, error) {
 	last, ok, _, err := s.lastClosed(OverhaulLabel, 0)
 	if err != nil {
 		return OverhaulIssue{}, err
 	}
-	o := OverhaulIssue{Unattended: unattended}
+	o := OverhaulIssue{}
 	before := "It is the first overhaul."
 	if ok {
 		o.Previous = last.Number
 		before = fmt.Sprintf("The last overhaul was #%d; this one compares against its report.", last.Number)
 	}
-	mode, who := "attended", "A person started it. The box creates the findings' issues, those for a person where controversial, and closes it."
-	if unattended {
-		mode, who = "unattended", "It runs unattended. The box creates the findings' issues, those for a person where controversial, and closes it."
-	}
-	body := fmt.Sprintf("An overhaul of SE as it stands: is the design still right? It checks every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last %d runs. The rules are spec/overhaul.md; a box takes it with the overhaul skill, which its take hands over, and starts with `se overhaul read`.\n\n%s %s\n\n<!-- se:overhaul %s -->\n\n%s",
-		OverhaulCadence, before, who, mode, guidance.Line([]string{"overhaul"}))
+	body := fmt.Sprintf("An overhaul of SE as it stands: is the design still right? It checks every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last %d runs. The rules are spec/overhaul.md; a box takes it with the overhaul skill, which its take hands over, and starts with `se overhaul read`.\n\n%s The box creates the findings' issues, those for a person where controversial, and closes it.\n\n%s",
+		OverhaulCadence, before, guidance.Line([]string{"overhaul"}))
 	made, _, err := s.create("SE overhaul "+s.now().UTC().Format("2006-01-02"), body, 0, nil, []string{Label, OverhaulLabel})
 	if err != nil {
 		return OverhaulIssue{}, err
@@ -154,7 +144,6 @@ type Overhauled struct {
 // first.
 type OverhaulReport struct {
 	Overhaul   int         `yaml:"overhaul"`
-	Attended   bool        `yaml:"attended"`
 	Until      time.Time   `yaml:"until"`
 	Previous   int         `yaml:"previous,omitempty"`
 	Principles []Principle `yaml:"principles"`
@@ -239,12 +228,11 @@ func (s Source) overhaulIssue(n int) (issue, error) {
 // retros' reports and how their findings fared, and the previous overhaul's
 // findings.
 func (s Source) CollectOverhaul(n int, ps []Principle) (OverhaulReport, error) {
-	i, err := s.overhaulIssue(n)
-	if err != nil {
+	if _, err := s.overhaulIssue(n); err != nil {
 		return OverhaulReport{}, err
 	}
 	r := OverhaulReport{
-		Overhaul: n, Attended: !strings.Contains(i.Body, overhaulUnattendedMark), Until: s.now().UTC().Truncate(time.Second),
+		Overhaul: n, Until: s.now().UTC().Truncate(time.Second),
 		Principles: ps, Retros: []RetroRun{}, Recurring: []string{}, Earlier: []Overhauled{},
 		Verdicts: []Judged{}, Findings: []Straying{}, WentWell: []string{},
 	}
@@ -562,17 +550,6 @@ func (r *OverhaulReport) judged() error {
 	}
 	sort.Strings(why)
 	return fmt.Errorf("the overhaul's judgment is not complete, so nothing was written: %s", strings.Join(why, "; "))
-}
-
-// PostedOverhaul is the report already on overhaul n, posted for the owner
-// before overhauls stopped waiting, for the box that files it; "" where there
-// is none.
-func (s Source) PostedOverhaul(n int) (string, error) {
-	if _, err := s.overhaulIssue(n); err != nil {
-		return "", err
-	}
-	text, err := s.lastPosted(n, overhaulReportMark)
-	return text, err
 }
 
 // FileOverhaul files overhaul n's report, the text of a draft the box judged,

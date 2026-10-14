@@ -33,7 +33,10 @@ func repoRoot(t *testing.T) string {
 }
 
 func TestMain(m *testing.M) {
-	gitenv.Clear()
+	// git's repository variables point it elsewhere under a pre-push hook.
+	for _, v := range gitenv.Vars {
+		_ = os.Unsetenv(v) // fails only on a name with "=" or NUL, which Vars hold none of
+	}
 	code := m.Run()
 	if installedSE != "" {
 		os.RemoveAll(filepath.Dir(installedSE))

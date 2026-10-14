@@ -94,9 +94,7 @@ What earlier versions taught, and how this design answers it:
   **A retro never waits**, whoever started it: `se retro report` creates the
   issues at once, by the rule above, posts the report as the retro's closing
   comment, and closes it. What needs the person is in the issues for them;
-  they decide there. (A report posted for the owner before retros stopped
-  waiting is handed back by `se retro collect`, and filed as it stands, with
-  whatever the owner said in its comments applied.)
+  they decide there.
 
   It deletes the retro's claim, `issue-N`: a retro lands no branch. Where the box's token may not delete branches, it says so and goes
   on: `se fleet prune` removes the branch once the retro is closed, and a

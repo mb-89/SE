@@ -20,10 +20,7 @@ for them where controversial, and closes the overhaul.
 ## The box that took overhaul N
 
 1. `./src/plugin/bin/se overhaul read <n>`. It writes the draft to
-   `../overhaul-<n>.md`. If it says it wrote the report already posted on the
-   issue (from before overhauls stopped waiting for the owner): read the
-   owner's comments on the issue, apply what they moved between controversial
-   and not, if anything, to `findings` in the draft's block, and go to 4.
+   `../overhaul-<n>.md`.
 2. Read the draft's facts: the principles, the retro's last `OverhaulCadence` runs, the
    previous overhaul's findings. Then read SE itself: `spec/`, the README,
    CLAUDE.md, the skills, `se help`, and the code under `src/`.

@@ -17,7 +17,7 @@ func TestOverhaulNewCreatesTheOverhaulAndFires(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	made := issueOf(t, gh, 10)
-	for _, want := range []string{"It is the first overhaul.", "<!-- se:overhaul attended -->", "Skills: overhaul " + guidance.Mark, "<!-- se:new -->"} {
+	for _, want := range []string{"It is the first overhaul.", "Skills: overhaul " + guidance.Mark, "<!-- se:new -->"} {
 		if !strings.Contains(made, want) {
 			t.Errorf("the body lacks %q: %s", want, made)
 		}
@@ -25,8 +25,8 @@ func TestOverhaulNewCreatesTheOverhaulAndFires(t *testing.T) {
 	if !strings.Contains(made, `"labels":[{"name":"se"},{"name":"se-overhaul"}]`) {
 		t.Fatal(made)
 	}
-	if code, out, _ = se(t, "overhaul", "new", "--unattended", "--repo", "o/r"); code != 0 || !strings.Contains(issueOf(t, gh, 11), "<!-- se:overhaul unattended -->") {
-		t.Fatalf("exit %d, %q", code, out)
+	if strings.Contains(made, "<!-- se:overhaul ") {
+		t.Errorf("the body carries an attended mark: %s", made)
 	}
 }
 

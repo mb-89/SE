@@ -36,7 +36,7 @@ type Briefing struct {
 	At   time.Time `json:"at"`
 	// About is what SE is: the README's first sentences, and the documents to read.
 	About About `json:"about"`
-	// Pending is what waits on the person, from every registered source.
+	// Pending is what waits on the person.
 	Pending []Pending `json:"pending"`
 	// Window says which closed issues Happened holds.
 	Window   string   `json:"window"`
@@ -197,10 +197,7 @@ func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 		sort.Slice(cs, func(a, c int) bool { return cs[a].ID < cs[c].ID })
 	}
 	b.Findings = append([]Finding{}, b.Findings...)
-	var err error
-	if b.Pending, err = pending(Open{Repo: s.Repo, Waiting: waiting(all, t), t: t}); err != nil {
-		return Briefing{}, err
-	}
+	b.Pending = pending(waiting(all, t))
 	if order := takeOrder(all, 0); len(order) > 0 {
 		b.Next = &order[0].Issue
 	}

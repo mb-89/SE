@@ -17,7 +17,7 @@ func init() {
 		Usage:   "briefing [--since TIME | --last N] [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "where SE stands: what waits on you, in flight, happened, next",
-		Details: "read GitHub and the checkout and tell, pending first: every se-person issue with its reason and what it holds up, and every report waiting for the owner, from every registered pending source; the claimed issues and their PRs, and what fleet check reports; the issues closed in the window, each with its PR and landing answer done, and the last retro; what issue pull would take, and how many issues are ready, claimed, blocked or in trees; and what SE is. The window is the last day or the last 10 closed issues, whichever are more; --since takes a time (RFC 3339, a date, or an age such as 36h or 3d), --last a count. The skill se:briefing presents it.",
+		Details: "read GitHub and the checkout and tell, pending first: every se-person issue with its reason and what it holds up; the claimed issues and their PRs, and what fleet check reports; the issues closed in the window, each with its PR and landing answer done, and the last retro; what issue pull would take, and how many issues are ready, claimed, blocked or in trees; and what SE is. The window is the last day or the last 10 closed issues, whichever are more; --since takes a time (RFC 3339, a date, or an age such as 36h or 3d), --last a count. The skill se:briefing presents it.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "briefing")
