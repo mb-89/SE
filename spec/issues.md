@@ -376,13 +376,39 @@ says that none waits on a person. `se issue resume N` is the person's, for an
 issue labelled `se-person` by hand or before issues for a person existed: it
 refuses an issue not labelled `se-person`; see [Stuck work](#stuck-work).
 
-`se issue tree` lists every se issue with sub-issues, open or closed, open
-first, one line each: number, state, how many of its sub-issues are closed,
-its labels and its title. `se issue tree ROOT` lists ROOT and every issue
-below it, open or closed, each indented under its parent (with `--json`: a
-list of `{"number","title","state","url","labels","depth","closed","total"}`).
-It changes nothing but the parents every command closes. A session has it as
-`/se issue tree`.
+`se issue tree` lists every open se issue, each indented under its parent,
+one line each: number, state, where it stands (ready, claimed, blocked and by
+what), how many of its sub-issues are closed, its labels and its title. `se
+issue tree ROOT` lists ROOT and every issue below it, open or closed. Then it
+estimates when the last open issue (of ROOT's tree, with ROOT) closes,
+mechanically, from what the fleet measured over the pace window
+(`PaceWindow`, 7 days, in `src/internal/issues/queue.go`), read by the same
+code the retro reads it with (the se issues closed in the window, the PR that
+fixed each, and the claim time in its landing answers):
+
+- **the work left**: every open leaf, and every open review gate, which is
+  reviewed once its tree is done;
+- **the pace**: the se issues merged an hour, and their claim-to-merge times,
+  p50 and p90;
+- **the parallelism**: how many run at once, the leaves in flight now that
+  are not stuck past the lease, or the merges an hour times the p50,
+  whichever is more, and at least one;
+- **the critical path**: the longest chain of work that must run in a row:
+  an issue waits for its blockers' and its ancestors' blockers' work (a
+  parent's being all of its tree), and a review gate for its tree.
+
+The estimate is the larger of the critical path run end to end and the work
+left spread over the parallelism, once at the p50 time and once at the p90
+time: the spread between them is its uncertainty. It names the critical path,
+and says beside it how long the work left takes at the window's merges an
+hour, idle hours and all. With `--json` it answers
+`{"issues":[...],"queue":{...}}`: each issue as
+`{"number","title","state","url","labels","depth","closed","total","why"}`,
+and the queue's numbers (`open`, `in_flight`, `stuck`, `pace`, `parallel`,
+`critical_path`, `p50_hours`, `p90_hours`, `p50_at`, `p90_at`, `pace_hours`,
+or `why` there is no estimate). The briefing gives its one line under Next. It changes
+nothing but what every `se issue` command and the sweep write. A session has
+it as `/se issue tree`.
 
 They read and write GitHub through `gh api` (the links through
 `/repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by`, the tree through
