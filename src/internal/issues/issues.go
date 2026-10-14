@@ -47,6 +47,8 @@ type Issue struct {
 	// or its PR in conflict with main: taking it continues its branch and PR
 	// as they stand.
 	Takeover *Takeover `json:"takeover,omitempty"`
+	// Picked says, in one line, why se issue pull names it at the top.
+	Picked string `json:"picked,omitempty"`
 	// Blocks names the open issues it blocks, where a take read them: what
 	// is left of it may hold up those that need it (se issue new --blocks).
 	Blocks []int `json:"blocks,omitempty"`
@@ -578,7 +580,7 @@ func (s Source) survey() ([]Status, tree, error) {
 // firstParagraph is the first paragraph of an issue's body, on one line: an
 // issue minted for a person opens with why it waits.
 func firstParagraph(body string) string {
-	first, _, _ := strings.Cut(strings.TrimSpace(body), "\n\n")
+	first, _, _ := strings.Cut(Shown(body), "\n\n")
 	return strings.Join(strings.Fields(first), " ")
 }
 
@@ -615,9 +617,27 @@ func (s Source) Next() (next Issue, ok bool, err error) {
 		return Issue{}, false, err
 	}
 	if order := takeOrder(all, 0); len(order) > 0 {
-		return order[0].Issue, true, nil
+		next = order[0].Issue
+		next.Picked = picked(order[0])
+		return next, true, nil
 	}
 	return Issue{}, false, nil
+}
+
+// picked says why a take would have st first, in one line.
+func picked(st Status) string {
+	switch {
+	case st.Takeover != nil:
+		return fmt.Sprintf("Stuck work comes first: a take takes it over and continues its branch %s.", Branch(st.Number))
+	case st.Parent && st.urgent:
+		return "Stuck work inside its tree comes first: a take coordinates the tree."
+	case st.Parent && st.Review:
+		return "Its sub-issues are all closed: a take starts its review."
+	case st.Parent:
+		return "The lowest ready issue at the top, a parent: a take coordinates its tree."
+	default:
+		return "The lowest ready issue at the top, with no stuck work before it."
+	}
 }
 
 // takeOrder lists the issues at the top a take may have, in the order it

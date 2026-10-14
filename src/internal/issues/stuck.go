@@ -75,7 +75,7 @@ func marksOf(all []comment) marks {
 			case "resume":
 				m = marks{winners: map[int]int64{}}
 			case "person":
-				m.reason = strings.TrimSpace(mark.ReplaceAllString(c.Body, ""))
+				m.reason = Shown(c.Body)
 			case "takeover":
 				round, _ = strconv.Atoi(got[2])
 				if round > m.takeovers {
@@ -181,6 +181,12 @@ func (s Source) toPerson(st *Status) error {
 	return nil
 }
 
+// holdTitle is the title of the issue for a person that hold mints, and
+// holdOf reads the issue it holds back from it.
+const holdTitle = "Decide how #%d goes on: %s"
+
+var holdOf = regexp.MustCompile(`^Decide how #(\d+) goes on: `)
+
 // hold takes issue i out of the queue until a person has looked: it mints an
 // issue for the person that says why, links i as blocked by it (GitHub's
 // native link), and records on i that it waits on that one, with a resume
@@ -189,7 +195,7 @@ func (s Source) toPerson(st *Status) error {
 // with a fresh attempt. This is the one link se writes on an issue that
 // already exists: no box is left to write it.
 func (s Source) hold(i Issue, reason string) (Issue, error) {
-	title := fmt.Sprintf("Decide how #%d goes on: %s", i.Number, i.Title)
+	title := fmt.Sprintf(holdTitle, i.Number, i.Title)
 	body := fmt.Sprintf("%s\n\n#%d (%s) is blocked by this issue. Decide how it goes on, say so here, and close this issue: #%d is then back in the queue with a fresh attempt.\n\n<!-- se:holds %d -->", reason, i.Number, i.URL, i.Number, i.Number)
 	made, err := s.ForPerson(title, body, 0, nil)
 	if err != nil {

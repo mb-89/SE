@@ -6,14 +6,19 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 // recordedFleet answers the fleet commands' gh calls for o/r: #3 is ready,
 // nothing is claimed, and nothing is broken.
-func recordedFleet(t *testing.T) {
+func recordedFleet(t *testing.T) *github.Fake {
 	t.Helper()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3"}]`,
@@ -21,7 +26,29 @@ func recordedFleet(t *testing.T) {
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
 	}
-	hubAt(t, answers)
+	return hubAt(t, answers)
+}
+
+// Where GitHub's answers say the hour's quota has fallen below the floor,
+// fleet check says so on a last line, and in its JSON.
+func TestFleetCheckSaysWhenTheQuotaRunsLow(t *testing.T) {
+	t.Parallel()
+	gh := recordedFleet(t)
+	gh.Quota(1000, time.Hour)
+	for range 850 {
+		if _, err := gh.Get("repos/o/r/issues/3"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, out, errs := se(t, "fleet", "check", "--repo", "o/r")
+	if code != 0 || !strings.HasPrefix(out, "healthy\nGitHub's quota runs low: ") || !strings.Contains(out, " of the hour's 1000 requests left, under the 20% floor (github/config/quota-floor)") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	_, out, _ = se(t, "fleet", "check", "--json", "--repo", "o/r")
+	var answer struct{ Quota string }
+	if err := json.Unmarshal([]byte(out), &answer); err != nil || !strings.HasPrefix(answer.Quota, "GitHub's quota runs low: ") {
+		t.Fatalf("%q %v", out, err)
+	}
 }
 
 func TestAHealthyFleetSaysSo(t *testing.T) {
@@ -67,7 +94,7 @@ func TestFleetPruneDeletesOnlyWithApply(t *testing.T) {
 	}
 }
 
-func TestRulesOnBuildsTheMergesSeAndAnswersItsFindingsWithoutTimings(t *testing.T) {
+func TestRulesOnBuildsTheMergesSeAndAnswersItsRuleAndTestFindingsWithoutTimings(t *testing.T) {
 	t.Parallel()
 	m := proc.NewFake()
 	bin := filepath.Join("/wt", ".se", ".runtime", "se-rules")
@@ -80,11 +107,26 @@ func TestRulesOnBuildsTheMergesSeAndAnswersItsFindingsWithoutTimings(t *testing.
 	if err != nil || got != "se: 1 findings:\nx_test.go:3: fast-test: TestX does not call t.Parallel first" {
 		t.Fatalf("%q %v", got, err)
 	}
-	if want := []string{"go -C " + filepath.Join("/wt", "src") + " build -o " + bin + " ./cmd/se", bin + " rules --workspace /wt"}; !reflect.DeepEqual(m.Lines(), want) {
+	src := filepath.Join("/wt", "src")
+	tests := "go -C " + src + " test " + strings.Join(mergeTests, " ")
+	if want := []string{"go -C " + src + " build -o " + bin + " ./cmd/se", bin + " rules --workspace /wt", tests}; !reflect.DeepEqual(m.Lines(), want) {
 		t.Fatalf("ran %q", m.Lines())
 	}
 	m.Install(bin, func(proc.Cmd) int { return 0 })
 	if got, err := rulesOn(m, "/wt"); got != "" || err != nil {
+		t.Fatalf("%q %v", got, err)
+	}
+	m.Install("go", func(c proc.Cmd) int {
+		if c.Args[2] != "test" {
+			return 0
+		}
+		_, _ = fmt.Fprint(c.Stdout, "--- FAIL: TestEveryInteractiveCommandKeepsItsBudget (0.31s)\n    --- FAIL: TestEveryInteractiveCommandKeepsItsBudget/briefing (1.20s)\n"+
+			"        budget_test.go:91: se briefing took 1300ms\nFAIL\nFAIL\tgithub.com/mb-89/SE/src/cmd/se\t6.012s\nok  \tgithub.com/mb-89/SE/src/internal/battery\t(cached)\nFAIL\n")
+		return 1
+	})
+	want := "go test " + strings.Join(mergeTests, " ") + ":\n--- FAIL: TestEveryInteractiveCommandKeepsItsBudget\n    --- FAIL: TestEveryInteractiveCommandKeepsItsBudget/briefing\n" +
+		"        budget_test.go:91: se briefing took 1300ms\nFAIL\nFAIL\tgithub.com/mb-89/SE/src/cmd/se\nFAIL"
+	if got, err := rulesOn(m, "/wt"); got != want || err != nil {
 		t.Fatalf("%q %v", got, err)
 	}
 	m.Install("go", func(c proc.Cmd) int {
@@ -93,5 +135,29 @@ func TestRulesOnBuildsTheMergesSeAndAnswersItsFindingsWithoutTimings(t *testing.
 	})
 	if got, err := rulesOn(m, "/wt"); got != "it does not build:\nundefined: World" || err != nil {
 		t.Fatalf("%q %v", got, err)
+	}
+}
+
+// TestTheRulesWorkflowRunsOnWhatTheMergeChecks holds that main's change to a
+// rule, a battery step, a budget or the programs list reaches the open PRs it
+// breaks before their CI does.
+func TestTheRulesWorkflowRunsOnWhatTheMergeChecks(t *testing.T) {
+	t.Parallel()
+	// This reads the checkout's own workflow, so it reads the real disk.
+	flow, err := disk.Real().ReadFile("../../../.github/workflows/rules.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range rulesWorkflowPaths {
+		if !strings.Contains(string(flow), "\n      - "+p+"\n") {
+			t.Errorf(".github/workflows/rules.yml does not run on changes to %s", p)
+		}
+	}
+	for _, pkg := range mergeTests {
+		dir := "src/" + strings.TrimSuffix(strings.TrimPrefix(pkg, "./"), "/...")
+		// cmd/se's tests run on spec/budgets.yaml, not on se's every change.
+		if dir != "src/cmd/se" && !slices.Contains(rulesWorkflowPaths, dir+"/**") {
+			t.Errorf("se fleet rules tests %s, but the rules workflow does not run on its changes", pkg)
+		}
 	}
 }

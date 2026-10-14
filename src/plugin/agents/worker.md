@@ -25,7 +25,9 @@ command in `<path>`.
    (`<path>-landing.yaml`), one key per question in `spec/landing.yaml`, each
    answered in a few lines as a block (`key: |`, the text indented below it),
    since a bare ` #39` would be read as a YAML comment ("none" is an answer;
-   an empty field is not). Then
+   an empty field is not). On a takeover the take has written that file
+   already, from the answers the last land posted: bring them up to date
+   rather than writing them anew. Then
    `<se> issue land --workspace <path> --answers <path>-landing.yaml`; it says
    what is missing, and lands the rest (`se help issue land`).
 3. On red CI or a review the box sends you, fix it on the same branch, commit,
@@ -55,7 +57,7 @@ command in `<path>`.
 
    An issue for a person (`--person`) is never a way to end, only a side
    issue, for access or a principle. The Stop hook refuses the box's stop
-   while the last issue it took is open with neither, and says which is
-   missing.
+   while any issue it took is open with neither, naming each and what it
+   misses.
 
 Answer only the PR number and link, or what you filed instead.

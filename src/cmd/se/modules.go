@@ -8,6 +8,7 @@ import (
 	"github.com/mb-89/SE/src/internal/guidance"
 	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/github"
 	sessions "github.com/mb-89/SE/src/internal/io/session"
 	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/reuse"
@@ -15,7 +16,9 @@ import (
 
 // modules are the modules se starts the index with, each I/O module handed
 // its outside thing for the workspace p: the clock, the session's posts and
-// its log, the command line's own commands, the hand-over's switches, the issue work's config, and what each tier runs that others built. The wiring file binds them.
+// its log, the command line's own commands, the hand-over's switches,
+// GitHub's rate limits, the issue work's config, and what each tier runs that
+// others built. The wiring file binds them.
 func modules(p daemon.Paths, clk clock.Clock) []*index.Module {
 	return []*index.Module{
 		clock.Module(clk),
@@ -23,6 +26,7 @@ func modules(p daemon.Paths, clk clock.Clock) []*index.Module {
 		sessions.LogModule(sessions.Folder(p.Disk, p.Logs())),
 		cliModule(),
 		guidance.Module,
+		github.Module,
 		issues.Module,
 		reuse.Module,
 	}

@@ -198,7 +198,7 @@ se issue close N --fixed-by SHA --answers FILE [--json] [--repo OWNER/NAME]
 se issue edit N [--title T] [--body B | --body-file PATH] [--json] [--repo OWNER/NAME]
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
 se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
-se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]
+se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
 se issue supersede N (--body B | --body-file PATH) [--json] [--repo OWNER/NAME]
@@ -210,8 +210,13 @@ se review brief N [--claims] [--json] [--repo OWNER/NAME]
 Every one of them first closes the parents whose sub-issues are all closed.
 
 `se issue pull` prints the next issue at the top a take would have (number,
-title, link and body): stuck work first, then the lowest ready one; or it
-says that none is ready; it exits 0 either way. Without `--take` it takes
+title, link, and one line on why it is at the top): stuck work first, then
+the lowest ready one; or it says that none is ready; then where each cadence
+stands, a line each; it exits 0 either way. `--full` adds the issue's body.
+A press of its button in `/se ui` shows its short form: the same lines, the
+cadences in one. Every issue text `se` prints, a take's body and `--json`'s
+among them, leaves out `se`'s machine marks (`<!-- … -->`) and the
+attribution footer (`issues.Shown`). Without `--take` it takes
 nothing, so a person can pull the next issue to read it: it pushes no branch,
 fires no routine, and writes only what every `se issue` command and the sweep
 write. A stuck leaf is marked as one
@@ -234,13 +239,20 @@ that branch out: the tree is picked up from its claim. Plain `--take` first
 takes over a conflicted claim (see [The rules](#the-rules)): it prints
 `Took over #<n> …` with the PR, and the instruction to merge `origin/main`
 into the branch and land it again (with `--json`: the issue's `takeover`,
-`{"pr","url","count","why"}`). `--take N` takes over claimed leaf `N`, at
+`{"pr","url","count","why","answers"}`). `--take N` takes over claimed leaf `N`, at
 any depth, where `se fleet check` finds it stuck (a conflicted or red PR, or
 no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.md)),
 or where it is stuck past the lease, so every takeover remedy the check names
 runs; labelled `se-final` and stuck (not merely conflicted), it waits on an
 issue for a person instead. A claim whose work is moving, pushed to or taken
 over within the hour, is refused.
+Every takeover, at the top or with `--in`, writes the landing answers the
+issue's last land posted on it (see [Landing answers](#landing-answers)) back
+to the answers file beside the branch's checkout, `<path>-landing.yaml` where
+`<path>` is its worktree (or, without `--worktree`, the workspace), so the
+box that takes over brings them up to date rather than writing them anew; a
+file there already is kept. It names the file (with `--json`: the
+takeover's `answers`).
 Every claim records the claiming box's session on the issue, a comment
 carrying `<!-- se:box <session> -->` (a takeover's comment carries it too).
 Once it has claimed an issue, `--take` runs the fan-out (below), which fires
@@ -310,9 +322,15 @@ the only place they are written; `se issue land` and the retro both read it.
 - The facts: when the branch was created (the claim, from GitHub's activity
   record) and the minutes from it to landing; the branch's commits, merges
   excluded; its takeovers, from their markers; and its merges of main, all
-  counted against `origin/main`.
+  counted against `origin/main`; and the GitHub requests the `se` commands
+  run in the checkout made, from its ledger, this land's so far included
+  ([io.md](io.md#living-within-githubs-rate-limits)).
 - Landing again (after a CI fix, say) updates that comment rather than
   adding a second.
+- The comment is where the answers outlive the box that wrote them: its
+  answers file stands outside its checkout, where no other box sees it, so a
+  takeover (`se issue pull --take`) writes the answers back from the
+  comment's block.
 
 `se issue new` creates an issue labelled `se` on the repository, makes it a
 sub-issue of `--parent` where that is given, and links it as blocked by each
@@ -376,11 +394,12 @@ dependents become ready as when a PR closes it.
 
 In a box (a cloud session no person attends, as the routine starts it), the
 plugin hands every Stop and SubagentStop to `se hook stop`, which refuses the
-stop while the box's issue is open with neither an open PR from its branch,
-auto-merge on, nor a supersede, and says which is missing (a close by
-`se issue close --fixed-by` closes the issue, so the box ends). The box's issue is
-the one `se issue pull --take` took (a parent's box coordinates and closes
-nothing itself); a leaf's sub-agent is held to the leaf its prompt names. It
+stop while any issue the box took is open with neither an open PR from its
+branch, auto-merge on, nor a supersede, naming each and what it misses (a
+close by `se issue close --fixed-by` closes the issue, so it counts as
+closed). The box's issues are every one `se issue pull --take` took (a
+parent's box coordinates and closes nothing itself); a leaf's sub-agent is
+held to the leaf its prompt names. It
 is enforcement, so it fails closed: only what GitHub shows lets the box end.
 Its escape hatches: a box waiting on background work passes; it refuses at
 most `refusals` times in a row ([spec/stop.yaml](stop.yaml)); a prompt from a
