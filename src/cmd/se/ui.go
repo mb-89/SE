@@ -17,13 +17,11 @@ func init() {
 	})
 }
 
-// buttons names the commands /se ui offers as buttons, made from the registry.
+// buttons names the commands /se ui offers as buttons, as the index's catalog holds them.
 func buttons() []string {
 	out := []string{}
-	for _, c := range offered(true) {
-		if c.Button {
-			out = append(out, c.Name)
-		}
+	for _, c := range catalog().Buttons() {
+		out = append(out, c.Name)
 	}
 	return out
 }
