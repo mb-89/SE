@@ -87,6 +87,7 @@ and only then leaves.**
 se fleet check [--json] [--repo OWNER/NAME]
 se fleet fix [--json] [--repo OWNER/NAME]
 se fleet prune [--apply] [--json] [--repo OWNER/NAME]
+se fleet refresh [--json] [--repo OWNER/NAME]
 ```
 <!-- /se:manifest -->
 
@@ -108,3 +109,22 @@ no open PR; `--apply` deletes them. It never touches `main` or any other
 branch. The workflow `.github/workflows/prune.yml` runs
 `se fleet prune --apply` when an issue or a PR closes, and every hour, and
 its output names what it deleted.
+
+## Up to date with main
+
+CI must run on what lands, so main's ruleset merges a PR only when its
+branch is up to date with main (its required check `check` is strict): a PR
+whose CI ran before main moved waits. Two things keep it moving, with no
+box in the loop:
+
+- `se issue land` merges origin's copy of the branch and then `origin/main`
+  into it before it runs the check, so the check runs on what lands and the
+  push is a fast-forward. A merge that conflicts is undone, and the box
+  resolves it by hand (never a rebase, never a force-push).
+- `se fleet refresh` brings every open PR with auto-merge on that main has
+  moved past up to date through GitHub's update-branch, and starts the
+  `ci` workflow on its new head itself, since a push made with the
+  repository's token starts no workflow. A PR that conflicts with main is
+  left to its takeover; an update that fails is reported, and the workflow
+  run goes red. The workflow `.github/workflows/refresh.yml` runs it on every
+  push to main, and every hour.

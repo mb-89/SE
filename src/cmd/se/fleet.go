@@ -143,6 +143,42 @@ func init() {
 			return Reply{Text: strings.Join(lines, "\n")}, nil
 		},
 	})
+	register(Command{
+		Name:    "fleet refresh",
+		Usage:   "fleet refresh [--json] [--repo OWNER/NAME]",
+		Group:   "Fleet",
+		Summary: "merge main into every auto-merge PR behind it, and rerun its CI",
+		Details: "for every open PR against main with auto-merge on whose head main has moved past: merge main into it through GitHub's update-branch and start the ci workflow on its new head, since main's ruleset merges a PR only when it is up to date with main and the repository's token starts no CI by its pushes. A PR that conflicts with main is left to its takeover. A PR whose update fails is reported, and the others are still updated. The refresh workflow runs it with the repository's token on every push to main.",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "fleet refresh")
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			done, refreshErr := s.Refresh()
+			lines := make([]string, len(done))
+			for k, r := range done {
+				lines[k] = fmt.Sprintf("PR #%d (%s): %s", r.PR, r.Branch, r.Did)
+			}
+			if refreshErr != nil {
+				return Reply{}, fmt.Errorf("%w\n%s", refreshErr, strings.Join(lines, "\n"))
+			}
+			if *asJSON {
+				data, err := json.Marshal(struct {
+					Refreshed []issues.Refreshed `json:"refreshed"`
+				}{append([]issues.Refreshed{}, done...)})
+				return Reply{Text: string(data)}, err
+			}
+			if len(done) == 0 {
+				return Reply{Text: "no auto-merge PR is behind main"}, nil
+			}
+			return Reply{Text: strings.Join(lines, "\n")}, nil
+		},
+	})
 }
 
 // findingText is one finding: its kind and issue, what is wrong, and its remedy.
