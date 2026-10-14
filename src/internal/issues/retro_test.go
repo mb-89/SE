@@ -25,7 +25,7 @@ func closedJSON(n int, reason, closed, body string, extra string) string {
 
 func landing(t *testing.T, n int, answers map[string]string, claimed time.Time) string {
 	t.Helper()
-	body, err := Landed{Issue: n, Answers: answers, Facts: Facts{Claimed: claimed, Landed: claimed.Add(time.Hour)}}.Comment(rqs)
+	body, err := Landed{Issue: n, Answers: answers, Facts: Facts{Claimed: claimed, Landed: claimed.Add(time.Hour), Requests: 40}}.Comment(rqs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,12 +246,23 @@ func TestTheCountsAndScripts(t *testing.T) {
 	t.Parallel()
 	c := collect(t, true)
 	want := Metrics{
-		"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1, "duplicates": 2,
-		"conflicts_per_issue": 0.25, "takeovers_per_issue": 0.25, "ci_reruns_per_issue": 0.25, "person_flags_per_issue": 0.25, "by_hand_per_issue": 0.25, "duplicates_per_issue": 0.5,
+		"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1, "duplicates": 2, "requests": 40,
+		"conflicts_per_issue": 0.25, "takeovers_per_issue": 0.25, "ci_reruns_per_issue": 0.25, "person_flags_per_issue": 0.25, "by_hand_per_issue": 0.25, "duplicates_per_issue": 0.5, "requests_per_issue": 10,
 		"claim_to_merge_minutes": 90,
 	}
 	if !reflect.DeepEqual(c.Metrics, want) {
 		t.Fatalf("%v", c.Metrics)
+	}
+	// The draft shows the fleet's GitHub requests per closed issue, from the
+	// landing facts.
+	draft, err := c.Draft(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"| requests | 40 | 10 |", "GitHub requests: 10 per closed issue, counted by the landing facts of 1 of the 4 closed issues."} {
+		if !strings.Contains(draft, line) {
+			t.Errorf("the draft does not say %q:\n%s", line, draft)
+		}
 	}
 	if want := []Script{{"src/scripts/check-claims.sh", 50, "Lists claims with no PR, since fleet check had no such view.", "check"}}; !reflect.DeepEqual(c.Scripts, want) {
 		t.Fatalf("%+v", c.Scripts)

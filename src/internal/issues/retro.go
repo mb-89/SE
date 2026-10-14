@@ -184,6 +184,8 @@ type Row struct {
 	Person    int `json:"person"`
 	// Minutes is the time from its claim to its PR's merge; -1 unknown.
 	Minutes int `json:"minutes"`
+	// Requests is the GitHub requests its landing facts counted; 0 unknown.
+	Requests int `json:"requests,omitempty"`
 }
 
 // Script is a file added under src/scripts/ in the window.
@@ -510,6 +512,9 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 		}
 	}
 	r.Takeovers = len(rounds)
+	if landed != nil {
+		r.Requests = landed.Facts.Requests
+	}
 	if p, ok := fixedBy[x.Number]; ok {
 		r.PR = p.Number
 		if landed != nil && !landed.Facts.Claimed.IsZero() {
@@ -627,8 +632,8 @@ type Metrics map[string]float64
 // are the closed issues closed as duplicate, and the issues for a person made
 // beyond the first for each issue they hold back.
 var metricNames = []string{
-	"closed", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand", "duplicates",
-	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue", "duplicates_per_issue",
+	"closed", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand", "duplicates", "requests",
+	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue", "duplicates_per_issue", "requests_per_issue",
 	"claim_to_merge_minutes",
 }
 
@@ -642,6 +647,7 @@ func (c Collected) measure() Metrics {
 		m["conflicts"] += float64(r.Conflicts)
 		m["takeovers"] += float64(r.Takeovers)
 		m["person_flags"] += float64(r.Person)
+		m["requests"] += float64(r.Requests)
 		if r.Reason == "duplicate" {
 			m["duplicates"]++
 		}
@@ -663,7 +669,7 @@ func (c Collected) measure() Metrics {
 }
 
 // counted are the metrics counted in the window, each also per closed issue.
-var counted = []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand", "duplicates"}
+var counted = []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand", "duplicates", "requests"}
 
 // round2 rounds to two places, so a difference of two metrics reads 0.2, not
 // 0.19999999999999996.
