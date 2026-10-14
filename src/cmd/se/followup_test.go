@@ -3,7 +3,6 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/mb-89/SE/src/internal/battery"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
