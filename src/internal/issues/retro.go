@@ -2,6 +2,7 @@ package issues
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -382,7 +383,7 @@ func (s Source) Collect(n int) (Collected, error) {
 	sort.SliceStable(c.Checks, func(a, b int) bool { return kindOrder(c.Checks[a].Kind) < kindOrder(c.Checks[b].Kind) })
 	c.Metrics = c.measure()
 	if c.Previous != nil {
-		score, err := s.score(*c.Previous, c.Checks, c.Metrics)
+		score, err := s.score(*c.Previous, c.Checks, c.Metrics, c.Window.Until)
 		if err != nil {
 			return Collected{}, err
 		}
@@ -607,7 +608,9 @@ func (c Collected) measure() Metrics {
 	return m
 }
 
-func round2(x float64) float64 { return float64(int(x*100+0.5)) / 100 }
+// round2 rounds to two places, so a difference of two metrics reads 0.2, not
+// 0.19999999999999996.
+func round2(x float64) float64 { return math.Round(x*100) / 100 }
 
 func median(xs []int) int {
 	if len(xs) == 0 {
@@ -648,11 +651,16 @@ func nothing(answer string) bool {
 
 // Score is how the previous retro's findings fared.
 type Score struct {
-	Retro    int         `yaml:"retro"`
-	Findings int         `yaml:"findings"`
-	Issues   int         `yaml:"issues"`
-	Closed   int         `yaml:"closed"`
-	Recurred int         `yaml:"recurred"`
+	Retro    int `yaml:"retro"`
+	Findings int `yaml:"findings"`
+	Issues   int `yaml:"issues"`
+	Closed   int `yaml:"closed"`
+	Recurred int `yaml:"recurred"`
+	// TooEarly counts the findings whose issue is still open and younger than
+	// the window's median claim to merge: no fix could have landed yet, so
+	// they count neither as open nor as recurred, and the next retro scores
+	// them again.
+	TooEarly int         `yaml:"too_early,omitempty"`
 	Items    []ScoreItem `yaml:"items"`
 }
 
@@ -661,8 +669,13 @@ type ScoreItem struct {
 	Title string `yaml:"title"`
 	Class string `yaml:"class"`
 	Issue int    `yaml:"issue,omitempty"`
+	// From is the retro that found it, where that is not the scored one: a
+	// finding too early to read there, scored again here.
+	From int `yaml:"from,omitempty"`
 	// State is its issue's: open, completed, not_planned, or none.
 	State string `yaml:"state"`
+	// Check is the rule check it named, so a later retro can score it again.
+	Check string `yaml:"check,omitempty"`
 	// Recurred is set where the rule check it named broke again.
 	Recurred bool    `yaml:"recurred"`
 	Metric   string  `yaml:"metric,omitempty"`
@@ -670,21 +683,53 @@ type ScoreItem struct {
 	Now      float64 `yaml:"now,omitempty"`
 	// Dropped says whether its metric moved the right way; nil without one.
 	Dropped *bool `yaml:"dropped,omitempty"`
+	// TooEarly marks a finding whose issue is open and younger than the
+	// window's median claim to merge; the next retro scores it again.
+	TooEarly bool `yaml:"too_early,omitempty"`
 }
 
 // score reads how each finding of the previous report fared: did its issue
-// close, did the rule check it named break again, did its metric drop.
-func (s Source) score(prev RetroReport, checks []Broken, now Metrics) (Score, error) {
+// close, did the rule check it named break again, did its metric drop. A
+// finding the previous report marked too early to read is scored again here.
+// until is the window's end, which a finding's issue's age is taken at.
+func (s Source) score(prev RetroReport, checks []Broken, now Metrics, until time.Time) (Score, error) {
 	broke := map[string]bool{}
 	for _, c := range checks {
 		broke[c.Kind] = true
 	}
+	young := time.Duration(now["claim_to_merge_minutes"]) * time.Minute
 	sc := Score{Retro: prev.Retro, Findings: len(prev.Findings)}
+	type finding struct {
+		item   ScoreItem
+		before float64
+		had    bool
+	}
+	var all []finding
 	for _, f := range prev.Findings {
-		it := ScoreItem{Title: f.Title, Class: f.Class, Issue: f.Issue, State: "none", Recurred: f.Check != "" && broke[f.Check]}
-		if f.Issue > 0 {
+		before, had := prev.Metrics[f.Metric]
+		all = append(all, finding{ScoreItem{Title: f.Title, Class: f.Class, Issue: f.Issue, Check: f.Check, Metric: f.Metric}, before, had})
+	}
+	if prev.Previous != nil {
+		for _, it := range prev.Previous.Items {
+			if !it.TooEarly {
+				continue
+			}
+			from := it.From
+			if from == 0 {
+				from = prev.Previous.Retro
+			}
+			sc.Findings++
+			all = append(all, finding{ScoreItem{Title: it.Title, Class: it.Class, Issue: it.Issue, From: from, Check: it.Check, Metric: it.Metric}, it.Before, it.Metric != ""})
+		}
+	}
+	for _, f := range all {
+		it := f.item
+		metric := it.Metric
+		it.Metric, it.State = "", "none"
+		it.Recurred = it.Check != "" && broke[it.Check]
+		if it.Issue > 0 {
 			sc.Issues++
-			got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, f.Issue), false)
+			got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, it.Issue), false)
 			if err != nil {
 				return Score{}, err
 			}
@@ -695,18 +740,29 @@ func (s Source) score(prev RetroReport, checks []Broken, now Metrics) (Score, er
 					sc.Closed++
 				}
 			}
+			created := got[0].Created
+			it.TooEarly = got[0].State == "open" && !created.IsZero() && until.Sub(created) < young
 		}
-		if f.Metric != "" {
-			before, had := prev.Metrics[f.Metric]
-			after, has := now[f.Metric]
-			if had && has {
-				it.Metric, it.Before, it.Now = f.Metric, before, after
-				dropped := after < before
-				if !lowerIsBetter(f.Metric) {
-					dropped = after > before
+		if metric != "" {
+			after, has := now[metric]
+			if f.had && has {
+				it.Metric, it.Before, it.Now = metric, f.before, after
+				if !it.TooEarly {
+					dropped := after < f.before
+					if !lowerIsBetter(metric) {
+						dropped = after > f.before
+					}
+					it.Dropped = &dropped
+					it.Recurred = it.Recurred || !dropped && after > 0
 				}
-				it.Dropped = &dropped
-				it.Recurred = it.Recurred || !dropped && after > 0
+			}
+		}
+		if it.TooEarly {
+			it.Recurred = false
+			sc.TooEarly++
+			if it.Metric == "" && metric != "" && f.had {
+				// Keep what it is measured by, so the next retro can.
+				it.Metric, it.Before = metric, f.before
 			}
 		}
 		if it.Recurred {

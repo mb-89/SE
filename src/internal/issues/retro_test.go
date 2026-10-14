@@ -278,12 +278,98 @@ func TestThePreviousRetroIsScored(t *testing.T) {
 	dropped := true
 	want := &Score{Retro: 20, Findings: 3, Issues: 2, Closed: 1, Recurred: 1, Items: []ScoreItem{
 		// The fixes check broke again, so its class recurred though its issue closed.
-		{Title: "PRs without Fixes", Class: "landing", Issue: 21, State: "completed", Recurred: true},
+		{Title: "PRs without Fixes", Class: "landing", Issue: 21, State: "completed", Check: "fixes", Recurred: true},
 		{Title: "Conflicts", Class: "merging", Issue: 22, State: "open", Metric: "conflicts_per_issue", Before: 0.5, Now: 0.25, Dropped: &dropped},
 		{Title: "Kept as is", Class: "merging", State: "none"},
 	}}
 	if !reflect.DeepEqual(c.Score, want) {
 		t.Fatalf("%+v\nwant %+v", c.Score, want)
+	}
+}
+
+// A finding whose issue is open and younger than the median claim to merge
+// (90 minutes here) is too early to read: it counts as neither open nor
+// recurred, and the next retro scores it again.
+func TestAFindingTooYoungIsTooEarlyToRead(t *testing.T) {
+	t.Parallel()
+	a := retroRepo(t, true, "<!-- se:retro attended -->")
+	a["repos/o/r/issues/21"] = `{"number":21,"state":"open","created_at":"2026-10-13T11:00:00Z"}`
+	a["repos/o/r/issues/22"] = `{"number":22,"state":"open","created_at":"2026-10-13T11:30:00Z"}`
+	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &Score{Retro: 20, Findings: 3, Issues: 2, TooEarly: 2, Items: []ScoreItem{
+		// The fixes check broke again, but its fix could not have landed yet.
+		{Title: "PRs without Fixes", Class: "landing", Issue: 21, State: "open", Check: "fixes", TooEarly: true},
+		{Title: "Conflicts", Class: "merging", Issue: 22, State: "open", Metric: "conflicts_per_issue", Before: 0.5, Now: 0.25, TooEarly: true},
+		{Title: "Kept as is", Class: "merging", State: "none"},
+	}}
+	if !reflect.DeepEqual(c.Score, want) {
+		t.Fatalf("%+v\nwant %+v", c.Score, want)
+	}
+	draft, err := c.Draft(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"#20 found 3, of which 2 became issues and 0 of those closed as completed; 0 recurred. Too early to read: 2,",
+		"| PRs without Fixes | landing | #21 | open | too early | – |",
+	} {
+		if !strings.Contains(draft, want) {
+			t.Errorf("the draft lacks %q:\n%s", want, draft)
+		}
+	}
+}
+
+// The next retro scores again what the previous one found too early to read.
+func TestATooEarlyFindingIsScoredByTheNextRetro(t *testing.T) {
+	t.Parallel()
+	a := retroRepo(t, true, "<!-- se:retro attended -->")
+	text, err := RetroReport{
+		Retro: 20, Attended: true, Window: RetroWindow{Until: prevClosed},
+		Metrics: Metrics{"conflicts_per_issue": 0.5},
+		Previous: &Score{Retro: 10, Findings: 2, Issues: 2, TooEarly: 2, Items: []ScoreItem{
+			{Title: "Refuse PRs without Fixes", Class: "landing", Issue: 17, State: "open", Check: "fixes", TooEarly: true},
+			{Title: "Fewer conflicts", Class: "merging", Issue: 18, From: 5, State: "open", Metric: "conflicts_per_issue", Before: 0.75, Now: 0.5, TooEarly: true},
+		}},
+		Findings: []Lesson{}, Classes: []Class{}, WentWell: []string{},
+	}.assemble("## The window\nold facts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a["repos/o/r/issues/20/comments?per_page=100"] = jsonComments(text)
+	a["repos/o/r/issues/17"] = `{"number":17,"state":"open","created_at":"2026-09-20T00:00:00Z"}`
+	a["repos/o/r/issues/18"] = `{"number":18,"state":"closed","state_reason":"completed"}`
+	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropped := true
+	want := &Score{Retro: 20, Findings: 2, Issues: 2, Closed: 1, Recurred: 1, Items: []ScoreItem{
+		{Title: "Refuse PRs without Fixes", Class: "landing", Issue: 17, From: 10, State: "open", Check: "fixes", Recurred: true},
+		{Title: "Fewer conflicts", Class: "merging", Issue: 18, From: 5, State: "completed", Metric: "conflicts_per_issue", Before: 0.75, Now: 0.25, Dropped: &dropped},
+	}}
+	if !reflect.DeepEqual(c.Score, want) {
+		t.Fatalf("%+v\nwant %+v", c.Score, want)
+	}
+	draft, err := c.Draft(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "| Refuse PRs without Fixes (from #10) | landing | #17 | open | true | – |"; !strings.Contains(draft, want) {
+		t.Errorf("the draft lacks %q", want)
+	}
+}
+
+// A metric's change is rounded to two places, not printed as float noise.
+func TestATrendIsRounded(t *testing.T) {
+	t.Parallel()
+	if got := trend("conflicts_per_issue", Metrics{"conflicts_per_issue": 0.1}, Metrics{"conflicts_per_issue": 0.3}); got != "worse (+0.2)" {
+		t.Fatalf("%q", got)
+	}
+	if got := trend("conflicts_per_issue", Metrics{"conflicts_per_issue": 0.3}, Metrics{"conflicts_per_issue": 0.1}); got != "better (-0.2)" {
+		t.Fatalf("%q", got)
 	}
 }
 

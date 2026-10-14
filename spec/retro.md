@@ -111,7 +111,11 @@ What earlier versions taught, and how this design answers it:
     impression; the draft tabulates them against every earlier retro.
   - **Did the last retro's fixes help?** For each of its findings: did its
     issue close, did the rule check it named break again, did its metric
-    drop.
+    drop A finding whose issue is still open and younger
+    than the window's median claim to merge is **too early** to read: no fix
+    could have landed, so it counts neither as open nor as recurred, and the
+    next retro scores it again. Each metric's change since the last retro is
+    rounded to two places.
   - **Is the retro itself effective?** How many findings became issues, how
     many of those closed, and which findings recurred anyway.
   - **Should the retro change itself?** Proposals for the landing questions

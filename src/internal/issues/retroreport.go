@@ -168,8 +168,13 @@ func (c Collected) facts() string {
 		b.WriteString("None: this is the first retro.\n")
 	} else {
 		sc := c.Score
-		fmt.Fprintf(&b, "#%d found %d, of which %d became issues and %d of those closed as completed; %d recurred.\n",
+		fmt.Fprintf(&b, "#%d found %d, of which %d became issues and %d of those closed as completed; %d recurred.",
 			sc.Retro, sc.Findings, sc.Issues, sc.Closed, sc.Recurred)
+		if sc.TooEarly > 0 {
+			fmt.Fprintf(&b, " Too early to read: %d, whose issue is open and younger than the median claim to merge (%s); the next retro scores them again.",
+				sc.TooEarly, span(int(c.Metrics["claim_to_merge_minutes"])))
+		}
+		b.WriteString("\n")
 		if len(sc.Items) > 0 {
 			b.WriteString("\n| finding | class | issue | state | recurred | metric |\n|---|---|---|---|---|---|\n")
 		}
@@ -181,7 +186,15 @@ func (c Collected) facts() string {
 			if it.Metric != "" {
 				metric = fmt.Sprintf("%s %g → %g", it.Metric, it.Before, it.Now)
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s | %s | %v | %s |\n", it.Title, it.Class, issue, it.State, it.Recurred, metric)
+			recurred := fmt.Sprint(it.Recurred)
+			if it.TooEarly {
+				recurred = "too early"
+			}
+			title := it.Title
+			if it.From > 0 {
+				title = fmt.Sprintf("%s (from #%d)", it.Title, it.From)
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", title, it.Class, issue, it.State, recurred, metric)
 		}
 	}
 
@@ -229,9 +242,9 @@ func trend(name string, last, now Metrics) string {
 	case now[name] == before:
 		return "same"
 	case (now[name] < before) == lowerIsBetter(name):
-		return fmt.Sprintf("better (%+g)", now[name]-before)
+		return fmt.Sprintf("better (%+g)", round2(now[name]-before))
 	}
-	return fmt.Sprintf("worse (%+g)", now[name]-before)
+	return fmt.Sprintf("worse (%+g)", round2(now[name]-before))
 }
 
 // matrix is every closed issue × every landing question, a question at a time.
@@ -304,7 +317,11 @@ func (r RetroReport) judgment() string {
 	}
 	b.WriteString("\n## The retro itself\n")
 	if r.Previous != nil {
-		fmt.Fprintf(&b, "The last retro's findings: %d became issues, %d of those closed, %d recurred anyway.\n", r.Previous.Issues, r.Previous.Closed, r.Previous.Recurred)
+		fmt.Fprintf(&b, "The last retro's findings: %d became issues, %d of those closed, %d recurred anyway", r.Previous.Issues, r.Previous.Closed, r.Previous.Recurred)
+		if r.Previous.TooEarly > 0 {
+			fmt.Fprintf(&b, "; %d too early to read, scored again by the next retro", r.Previous.TooEarly)
+		}
+		b.WriteString(".\n")
 	} else {
 		b.WriteString("No retro before this one to score.\n")
 	}
