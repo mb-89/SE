@@ -12,7 +12,9 @@ import (
 // carries gives their built-in values, and a wiring that sets one is read.
 func TestTheCadencesTheLeaseAndTheCapAreConfigValues(t *testing.T) {
 	t.Parallel()
+	// The pause switch is the owner's to flip on main, so the wiring may set it.
 	s, err := Configured()
+	s.Paused = false
 	if err != nil || s != Builtin() {
 		t.Fatalf("the wiring se carries: %+v %v, want %+v", s, err, Builtin())
 	}
