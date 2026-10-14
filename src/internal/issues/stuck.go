@@ -48,6 +48,10 @@ type marks struct {
 	winners map[int]int64
 	// box is the session of the box whose claim it is, from the last box mark.
 	box string
+	// retry is when a fan-out the routine refused for its rate limit, after
+	// this claim, may fire again: the last retry mark, zero once one after it
+	// says the retry fired.
+	retry time.Time
 }
 
 func (s Source) marks(n int) (marks, error) {
@@ -87,6 +91,13 @@ func marksOf(all []comment) marks {
 				if round == m.takeovers {
 					m.head = got[2]
 				}
+			}
+		}
+		for _, got := range fanoutMark.FindAllStringSubmatch(c.Body, -1) {
+			if got[1] == "fired" {
+				m.retry = time.Time{}
+			} else if at, err := time.Parse(time.RFC3339, got[2]); err == nil {
+				m.retry = at
 			}
 		}
 	}
