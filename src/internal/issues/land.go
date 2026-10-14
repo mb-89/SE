@@ -91,7 +91,7 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	if profiled {
 		body += "\n\n" + profile.Markdown()
 	}
-	if _, err := s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
+	if _, err := s.push(dir, "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
 		return Landing{}, err
 	}
 	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {

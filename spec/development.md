@@ -43,7 +43,10 @@ changes.
 ## Checks
 
 `sh ./tests/check.sh` is the one definition of green; the pre-push hook and CI
-run it, and it names each step it runs. SE's own rules are one file each in
+run it, and it names each step it runs. The two pushes `se` makes itself, a
+claim's and `se issue land`'s, run with no hooks: land has just run the check
+on that tree, and a claim pushes `origin/main`, which CI passed; a person's own
+`git push` still runs the hook. SE's own rules are one file each in
 `src/internal/rules`, run by `se rules`. Every tool SE needs is pinned in
 `tests/tools.sh` (gh, Go, dlv, deadcode and the linters, whose formatters are
 the ones SE uses), and each linter's config gives the reason for anything it switches

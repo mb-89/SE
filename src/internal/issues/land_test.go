@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -290,7 +292,7 @@ func TestLandRefusesBeforePushing(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	for _, line := range m.Lines() {
-		if strings.HasPrefix(line, "git push") {
+		if strings.Contains(line, " push ") {
 			t.Fatalf("a refused land pushed: %s", line)
 		}
 	}
@@ -397,5 +399,61 @@ func TestLandStopsWhereMainConflicts(t *testing.T) {
 	}
 	if got := run(t, origin, "rev-parse", "issue-6"); got != before {
 		t.Fatalf("a refused land moved issue-6 to %s", got)
+	}
+}
+
+// TestThePushesSkipThePrePushHook: the claim's push and land's push run with
+// no hooks, since the pre-push hook only reruns the battery land runs itself
+// (#393); a land whose check fails still pushes nothing.
+func TestThePushesSkipThePrePushHook(t *testing.T) {
+	t.Parallel()
+	origin, a, _ := boxes(t)
+	// a's pre-push hook refuses every push, as a red battery would.
+	hooks := filepath.Join(t.TempDir(), "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-push"), []byte("#!/bin/sh\necho the battery ran >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(t, a, "config", "core.hooksPath", hooks)
+	// m is the real machine, recording each command it runs.
+	m := proc.NewFake()
+	m.Install("git", func(c proc.Cmd) int {
+		code, _ := proc.ExitCode(machine.Run(c))
+		return code
+	})
+	if ok, err := (Source{Proc: m}).Claim(a, 6); err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	run(t, a, "commit", "-q", "--allow-empty", "-m", "work")
+	gh := landGH(t, map[string]string{pullsPath: `[]`})
+	s := Source{Proc: m, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}
+	before := run(t, origin, "rev-parse", "issue-6")
+	if _, err := s.Land(a, "", qs, full, func(string) error { return errors.New("go test: FAIL") }); err == nil || !strings.Contains(err.Error(), "nothing was pushed") {
+		t.Fatalf("a red check landed: %v", err)
+	}
+	if got := run(t, origin, "rev-parse", "issue-6"); got != before {
+		t.Fatalf("a refused land moved issue-6 to %s", got)
+	}
+	if _, err := s.Land(a, "", qs, full, passes); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("origin's issue-6 is %s, want %s", got, want)
+	}
+	var pushes []string
+	for _, c := range m.Ran() {
+		if slices.Contains(c.Args, "push") {
+			pushes = append(pushes, c.String())
+		}
+	}
+	prefix := "git -c core.hooksPath= push "
+	if len(pushes) != 2 || !strings.HasPrefix(pushes[0], prefix+"--porcelain ") || !strings.HasPrefix(pushes[1], prefix+"-q -u ") {
+		t.Fatalf("the pushes are %q, want the claim's and the land's, each with no hooks", pushes)
+	}
+	// A plain git push from a still runs the hook.
+	if out, err := exec.Command("git", "-C", a, "push", "-q", "origin", "HEAD:refs/heads/plain").CombinedOutput(); err == nil || !strings.Contains(string(out), "the battery ran") {
+		t.Fatalf("a plain push skipped the hook: %v %s", err, out)
 	}
 }

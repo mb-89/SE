@@ -883,7 +883,7 @@ func (s Source) stake(dir string, n int) (claimed bool, err error) {
 	// An empty lease: the ref must not exist on origin yet. Where it already
 	// points at this very commit the push is no update at all and succeeds,
 	// so the claim is the push's own word that it created the ref ("*").
-	said, pushErr := s.git(dir, "push", "--porcelain", "--force-with-lease="+ref+":", "origin", "refs/remotes/origin/main:"+ref)
+	said, pushErr := s.push(dir, "--porcelain", "--force-with-lease="+ref+":", "origin", "refs/remotes/origin/main:"+ref)
 	if pushErr != nil {
 		if _, err := s.git(dir, "ls-remote", "--exit-code", "origin", ref); err == nil {
 			return false, nil
@@ -918,4 +918,14 @@ func Repo(p proc.Procs, dir string) (string, error) {
 // git runs git in the checkout dir and answers what it printed, trimmed.
 func (s Source) git(dir string, args ...string) (string, error) {
 	return proc.Output(s.Proc, proc.Cmd{Name: "git", Args: args, Dir: dir})
+}
+
+// noHooks is the git option that runs one command with no hooks.
+var noHooks = []string{"-c", "core.hooksPath="}
+
+// push runs git push with args in dir, with no hooks. The pre-push hook only
+// reruns the battery: land has just run it on this very tree, and a claim
+// pushes origin/main, which CI passed. A person's own git push still runs it.
+func (s Source) push(dir string, args ...string) (string, error) {
+	return s.git(dir, append(append(append([]string(nil), noHooks...), "push"), args...)...)
 }
