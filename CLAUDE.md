@@ -15,4 +15,4 @@ SE's design principles, which the retro and the overhaul measure against, are in
 5. Create SE issues and their dependencies only as [spec/issues.md](spec/issues.md#the-rules) says.
 6. Mechanize first, as [principle 1](spec/principles.md) says: what can be a tested `se` command is one, not a step an agent remembers.
 7. An ad hoc script you write while working goes to `src/scripts/`, in the same PR, as [its README](src/scripts/README.md) says.
-8. A new skill goes to `src/plugin/skills/<name>/SKILL.md`, never into this repository's `.claude` folder. Plugin skills appear as `se:<name>`.
+8. A new skill goes to `src/plugin/skills/<name>/SKILL.md`, and a new agent to `src/plugin/agents/<name>.md`, never into this repository's `.claude` folder. They appear as `se:<name>`; one role is one file, an agent or a skill, never both.
