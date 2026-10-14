@@ -21,7 +21,7 @@
 // Anything a person waits on gives feedback within a second and never blocks:
 // every call into se goes through within, which shows the call is working at
 // the one-second mark and lets the session go on; and while SE is on, each
-// call's duration is a row of the daemon's log, se.call.
+// call's duration is a row of the daemon's log, se.call, and each hook's, se.hook.
 
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
@@ -93,6 +93,7 @@ const GUIDING = 30_000
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    const began = await $.clock.now()
     await $.command.register({
       name: 'se',
       description: 'SE, the session-event daemon: /se help lists what it does',
@@ -105,10 +106,16 @@ export const register: Register = on => {
     const setup = setsUp($).catch(() => {})
     settingUp = setup
     await within($, 'updating itself', setup)
+    took($, 'session.start', began)
     return next(e)
   })
 
-  on('command.run', { command: 'se' }, async ($, e) => ({ text: await runs($, e.args) }))
+  on('command.run', { command: 'se' }, async ($, e) => {
+    const began = await $.clock.now()
+    const text = await runs($, e.args)
+    took($, 'command.run se', began)
+    return { text }
+  })
 
   // Always-on guidance: the documented way a plugin puts text into every
   // session, the SessionStart hook's additionalContext, on each source that
@@ -116,7 +123,9 @@ export const register: Register = on => {
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
     if (!GUIDED.includes(e.source)) return result
+    const began = await $.clock.now()
     const text = await guided($)
+    took($, 'classic.SessionStart', began)
     return text ? { ...result, additionalContext: [...(result.additionalContext ?? []), text] } : result
   })
 
@@ -124,6 +133,7 @@ export const register: Register = on => {
   // The pane is a grid: rows of at most `columns` cells, every cell as wide as
   // every other, so the columns align and a short last row stays to the left.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const began = await $.clock.now()
     const { Box, Button } = $.ui.resolve(e)
     const { value: isOn = false } = await $.state.get(ACTIVE)
     const { value: buttons = [] } = await $.state.get(BUTTONS)
@@ -140,6 +150,7 @@ export const register: Register = on => {
       ...buttons.map(name => <Button key={`run ${name}`} label={name} onPress={() => presses($, name)} />),
     ]
     const grid = gridOf([toggle, ...buttons], columns, e.props.bodyColumns)
+    took($, 'ui.render Pane', began)
     return (
       <Box flexDirection="column" rowGap={GAP} width={e.props.bodyColumns}>
         {grid.rows.map(row => (
@@ -159,6 +170,7 @@ export const register: Register = on => {
   // /se help's output row: the help se answered as data, drawn as a layout. A
   // row whose words carried no help, or an error, is drawn as its text.
   on('ui.render', { component: 'CommandOutput', props: { command: 'se' } }, async ($, e, next) => {
+    const began = await $.clock.now()
     if (e.props.isErrored) return next(e)
     const { value: helps = {} } = await $.state.get(HELPS)
     const help = helps[wordsOf(e.props.args).join(' ')]
@@ -217,6 +229,7 @@ export const register: Register = on => {
         </Box>,
       )
     }
+    took($, 'ui.render CommandOutput', began)
     return (
       <Box flexDirection="column" rowGap={1}>
         {parts}
@@ -229,19 +242,27 @@ export const register: Register = on => {
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
     if (!(await isBox($))) return result
+    const began = await $.clock.now()
     const block = await judges($, waits(e) ? ['--waiting'] : [])
+    took($, 'classic.Stop', began)
     return block ? { ...result, block } : result
   })
   on('classic.SubagentStop', async ($, e, next) => {
     const result = await next(e)
     if (!(await isBox($))) return result
+    const began = await $.clock.now()
     const block = await judges($, [...(waits(e) ? ['--waiting'] : []), '--agent-transcript', e.agent_transcript_path])
+    took($, 'classic.SubagentStop', began)
     return block ? { ...result, block } : result
   })
   // A person who prompts a box gives the Stop hook's refusals a fresh count.
   on('prompt.submit', async ($, e, next) => {
     const kind = e.origin?.kind
-    if ((kind === 'composer' || kind === 'bridge') && (await isBox($))) await asksPlain($, ['hook', 'prompt'])
+    if ((kind === 'composer' || kind === 'bridge') && (await isBox($))) {
+      const began = await $.clock.now()
+      await asksPlain($, ['hook', 'prompt'])
+      took($, 'prompt.submit', began)
+    }
     return next(e)
   })
 
@@ -250,6 +271,7 @@ export const register: Register = on => {
   // switched SE on, dropped if not.
   on('*', async ($, e, next) => {
     if (next.is('engine.create', e) || (!active && !settingUp)) return next(e)
+    const began = await $.clock.now()
     if (!active) {
       if (waiting.length < WAITING_CAP) waiting.push(bodyOf(await $.session.id(), next.event, e, await $.clock.now()))
       return next(e)
@@ -259,6 +281,7 @@ export const register: Register = on => {
       'reaching its daemon',
       forwards($, next.event, e).catch(() => {}),
     )
+    took($, '*', began)
     return next(e)
   }).catch(($, e, next) => next(e))
 }
@@ -318,6 +341,19 @@ async function timed<T>($: EngineInterface, words: string[], call: () => Promise
     const ms = (await $.clock.now()) - began
     if (active) await forwards($, 'se.call', { words, ms }).catch(() => {})
   }
+}
+
+// Records how long a hook took since began on the clock, while SE is on, as
+// an se.hook row of the daemon's log, without waiting on the post. A hook
+// measures its own work up to handing the event on. spec/budgets.yaml gives
+// each hook a class by the name it passes here, and se rules fails on a hook
+// it does not.
+function took($: EngineInterface, hook: string, began: number): void {
+  const to = endpoint
+  if (!active || !to) return
+  void Promise.all([$.clock.now(), $.session.id()])
+    .then(([now, session]) => posts($, to, bodyOf(session, 'se.hook', { hook, ms: now - began }, now)))
+    .catch(() => {})
 }
 
 // Brings the checkout the plugin was loaded from to the newest main, whether or

@@ -154,6 +154,7 @@ var profile = battery.Profile{
 	Slowest:       []battery.Test{{Package: "p", Name: "TestSlow", Ms: 900}},
 	SlowestPlugin: []battery.Test{{Package: "tests/se.test.ts", Name: "a slow hook", Ms: 150}},
 	Overruns:      []string{"step go test took 1234ms, over its budget of 1000ms"},
+	Unbudgeted:    []string{"step new has no budget in spec/budgets.yaml"},
 }
 
 func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
@@ -181,8 +182,11 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 	}
 	if got.Facts.BatteryMs != 1234 || !reflect.DeepEqual(got.Facts.Slowest, []string{"p TestSlow 900ms"}) ||
 		!reflect.DeepEqual(got.Facts.SlowestPlugin, []string{"tests/se.test.ts a slow hook 150ms"}) ||
-		!reflect.DeepEqual(got.Facts.Overruns, profile.Overruns) {
+		!reflect.DeepEqual(got.Facts.Overruns, profile.Overruns) || !reflect.DeepEqual(got.Facts.Unbudgeted, profile.Unbudgeted) {
 		t.Errorf("facts = %+v", got.Facts)
+	}
+	if !strings.Contains(posted, "- **no budget:** step new has no budget") {
+		t.Errorf("the landing comment does not show the step without a budget:\n%s", posted)
 	}
 	if !strings.Contains(posted, "- **over budget:** step go test took 1234ms") {
 		t.Errorf("the landing comment does not show the overrun:\n%s", posted)

@@ -6,11 +6,11 @@ import (
 )
 
 // Unclosed says what keeps the box that took issue n from ending: "" where n
-// is closed (a merged PR, or a supersede) or another box took it over, else
-// what is missing. A box keeps its PR until it merges (the owner's rule,
-// 2026-10-14), so an open PR is unfinished: se issue keep keeps it up to
-// date with main until it merges. It fails closed: only what GitHub shows
-// lets the box end.
+// is closed (a merged PR, a supersede, or se issue close --fixed-by) or
+// another box took it over, else what is missing. A box keeps its PR until it
+// merges (the owner's rule, 2026-10-14), so an open PR is unfinished: se
+// issue keep keeps it up to date with main until it merges. It fails closed:
+// only what GitHub shows lets the box end.
 func (s Source) Unclosed(n int) (string, error) {
 	got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
 	if err != nil {
@@ -32,7 +32,7 @@ func (s Source) Unclosed(n int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	how := fmt.Sprintf("supersede it (se issue supersede %d --body-file F) with the questions you could not answer", n)
+	how := fmt.Sprintf("supersede it (se issue supersede %d --body-file F) with the questions you could not answer, or, where its work is on main already, close it naming the commit (se issue close %d --fixed-by SHA --answers FILE)", n, n)
 	if len(open) == 0 {
 		return fmt.Sprintf("#%d is open with neither a PR from %s nor a supersede: land a PR (se issue land), or %s.", n, branch, how), nil
 	}

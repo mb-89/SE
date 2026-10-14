@@ -111,12 +111,14 @@ type Facts struct {
 	Takeovers  int `yaml:"takeovers"`
 	MainMerges int `yaml:"main_merges"`
 	// BatteryMs is how long the battery this land ran took, Slowest its
-	// slowest Go tests, SlowestPlugin its slowest plugin tests, and Overruns
-	// each budget it went over; empty where the check left no profile.
+	// slowest Go tests, SlowestPlugin its slowest plugin tests, Overruns each
+	// budget it went over, and Unbudgeted each step it ran with no budget;
+	// empty where the check left no profile.
 	BatteryMs     int64    `yaml:"battery_ms,omitempty"`
 	Slowest       []string `yaml:"slowest_tests,omitempty"`
 	SlowestPlugin []string `yaml:"slowest_plugin_tests,omitempty"`
 	Overruns      []string `yaml:"budget_overruns,omitempty"`
+	Unbudgeted    []string `yaml:"budget_missing,omitempty"`
 }
 
 // Landed is the record a landing leaves on its issue.
@@ -166,6 +168,9 @@ func (l Landed) Comment(qs []Question) (string, error) {
 		for _, o := range f.Overruns {
 			fmt.Fprintf(&b, "- **over budget:** %s\n", o)
 		}
+		for _, u := range f.Unbudgeted {
+			fmt.Fprintf(&b, "- **no budget:** %s\n", u)
+		}
 	}
 	data, err := yaml.Marshal(record{Issue: l.Issue, Answers: answers, Facts: f})
 	if err != nil {
@@ -189,18 +194,9 @@ func span(minutes int) string {
 // ParseLanding reads a landing comment's machine-readable block back; ok is
 // false for a comment that is no landing.
 func ParseLanding(body string) (l Landed, ok bool, err error) {
-	if !strings.Contains(body, landingMark) {
-		return Landed{}, false, nil
-	}
-	_, rest, found := strings.Cut(body, landingBlock+"\n```yaml\n")
-	if !found {
-		return Landed{}, true, errors.New("the landing comment carries no machine-readable block")
-	}
-	// The block's lines are YAML at the top level or indented below it, so
-	// the fence that closes it is the first line that is only a fence.
-	block, _, found := strings.Cut("\n"+rest, "\n```")
-	if !found {
-		return Landed{}, true, errors.New("the landing comment's block is not closed")
+	block, ok, err := landingYAML(body)
+	if !ok || err != nil {
+		return Landed{}, ok, err
 	}
 	var r struct {
 		Issue   int               `yaml:"issue"`
@@ -213,6 +209,92 @@ func ParseLanding(body string) (l Landed, ok bool, err error) {
 	return Landed{Issue: r.Issue, Answers: r.Answers, Facts: r.Facts}, true, nil
 }
 
+// landingYAML is a landing comment's machine-readable block; ok is false for
+// a comment that is no landing.
+func landingYAML(body string) (block string, ok bool, err error) {
+	if !strings.Contains(body, landingMark) {
+		return "", false, nil
+	}
+	_, rest, found := strings.Cut(body, landingBlock+"\n```yaml\n")
+	if !found {
+		return "", true, errors.New("the landing comment carries no machine-readable block")
+	}
+	// The block's lines are YAML at the top level or indented below it, so
+	// the fence that closes it is the first line that is only a fence.
+	block, _, found = strings.Cut("\n"+rest, "\n```")
+	if !found {
+		return "", true, errors.New("the landing comment's block is not closed")
+	}
+	return block, true, nil
+}
+
+// AnswersFile is where the landing answers of issue n stand while it is
+// worked, beside the checkout dir and outside it, as the work skill writes
+// them: next to the leaf's own worktree (see Worktree), or, where the take
+// checked the branch out in dir itself, next to dir.
+func AnswersFile(dir string, n int, worktree bool) string {
+	if worktree {
+		dir = filepath.Join(filepath.Dir(dir), Branch(n))
+	}
+	return dir + "-landing.yaml"
+}
+
+// RestoreAnswers writes the answers the last land of issue n posted on it
+// back to the answers file at path, so a takeover brings them up to date
+// rather than writing them anew: the box that wrote them first kept them
+// outside its checkout, where no other box sees them. A file at path is kept
+// as it is. restored is false where it kept one, or no land posted answers.
+func (s Source) RestoreAnswers(n int, path string) (restored bool, err error) {
+	if there, err := s.Disk.Exists(path); err != nil || there {
+		return false, err
+	}
+	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, n), true)
+	if err != nil {
+		return false, err
+	}
+	block := ""
+	for _, c := range comments {
+		got, ok, err := landingYAML(c.Body)
+		if err != nil {
+			return false, fmt.Errorf("#%d's landing answers: %w", n, err)
+		}
+		if ok {
+			block = got
+		}
+	}
+	if block == "" {
+		return false, nil
+	}
+	text, err := answersFile(n, block)
+	if err != nil {
+		return false, fmt.Errorf("#%d's landing answers: %w", n, err)
+	}
+	if err := s.Disk.WriteFile(path, text); err != nil {
+		return false, fmt.Errorf("restoring #%d's landing answers: %w", n, err)
+	}
+	return true, nil
+}
+
+// answersFile turns a landing comment's block back into an answers file for
+// --answers: its answers in their order, each a block of text.
+func answersFile(n int, block string) ([]byte, error) {
+	var r struct {
+		Answers yaml.Node `yaml:"answers"`
+	}
+	if err := yaml.Unmarshal([]byte(block), &r); err != nil {
+		return nil, fmt.Errorf("the landing comment's block: %v", err)
+	}
+	a := r.Answers
+	if a.Kind != yaml.MappingNode {
+		return nil, errors.New("the landing comment's block holds no answers")
+	}
+	for k := 1; k < len(a.Content); k += 2 {
+		a.Content[k].Style = yaml.LiteralStyle
+	}
+	a.HeadComment = fmt.Sprintf("The answers the last land of #%d posted on it: bring them up to date.", n)
+	return yaml.Marshal(&a)
+}
+
 // facts reads what land knows of issue n's work in dir, from its comments,
 // its branch's history and GitHub's record of the branch's creation.
 func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
@@ -222,7 +304,7 @@ func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 		return Facts{}, err
 	}
 	if profiled {
-		f.BatteryMs, f.Overruns = profile.TotalMs, profile.Overruns
+		f.BatteryMs, f.Overruns, f.Unbudgeted = profile.TotalMs, profile.Overruns, profile.Unbudgeted
 		for _, t := range profile.Slowest {
 			f.Slowest = append(f.Slowest, t.String())
 		}

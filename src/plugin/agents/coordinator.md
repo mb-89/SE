@@ -47,12 +47,13 @@ permission prompt, and no others. `<se>` below is the absolute path of
    sub-agent names (`subscribe_pr_activity`). A red CI run or a review on a
    PR goes to that PR's sub-agent (`SendMessage`), with the failure or the
    review. When a sub-agent answers that its PR merged, that another box took
-   its issue over, or that its issue was superseded, remove its worktree
-   (`git worktree remove <path>`) and go back to 2.
+   its issue over, or that its issue was superseded or closed by a commit on
+   main, remove its worktree (`git worktree remove <path>`) and go back to 2.
 4. **You always end, and never stuck.** End when nothing is ready, no
    sub-agent of yours is running (none keeps an open PR), and every tree you
-   coordinate is done or waits. Each issue you took is closed by its sub-agent with a PR or a
-   supersede, as its agent says; never end with only a comment.
+   coordinate is done or waits. Each issue you took is closed by its
+   sub-agent with a merged PR, a supersede or a close naming the commit on
+   main, as its agent says; never end with only a comment.
 
 ## The sub-agent's prompt
 

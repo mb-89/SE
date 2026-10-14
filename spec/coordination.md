@@ -85,6 +85,7 @@ and only then leaves.**
 ```
 se fleet check [--json] [--repo OWNER/NAME]
 se fleet fix [--json] [--repo OWNER/NAME]
+se fleet plugins --into DIR
 se fleet prune [--apply] [--json] [--repo OWNER/NAME]
 se fleet rules [--json] [--repo OWNER/NAME]
 se fleet trust --sha SHA --tree TREE [--json] [--repo OWNER/NAME]
