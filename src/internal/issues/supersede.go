@@ -102,15 +102,19 @@ func (s Source) parentOf(n int) (int, error) {
 	return got[0].Number, nil
 }
 
-// Duplicated is what Duplicate did: the issue it closed and the open issue
-// that already covers it.
+// Duplicated is what CloseDuplicate did: the issue it closed and the open
+// issue, or the merged pull request, that already covers it.
 type Duplicated struct {
 	// Issue is the duplicate, now closed.
 	Issue int `json:"issue"`
-	// Of is the open issue it duplicates, which carries the work on.
+	// Of is the open issue it duplicates, which carries the work on, or the
+	// merged pull request that did its work.
 	Of int `json:"of"`
-	// URL is Of's link.
+	// URL is Of's link, or for a merged pull request its commit's.
 	URL string `json:"url"`
+	// Commit is the full SHA of the merged pull request's commit on main;
+	// empty where Of is an issue.
+	Commit string `json:"commit,omitempty"`
 	// Blocks are the duplicate's open dependents, now blocked by Of.
 	Blocks []int `json:"blocks,omitempty"`
 	// Pulls are the duplicate's open PRs, now closed, each with a comment
@@ -119,6 +123,14 @@ type Duplicated struct {
 	// Branch is the duplicate's issue-<n> claim, now deleted; empty where
 	// origin held none.
 	Branch string `json:"branch,omitempty"`
+}
+
+// mergedPull is the part of a pull request CloseDuplicate reads.
+type mergedPull struct {
+	State  string `json:"state"`
+	Merged bool   `json:"merged"`
+	SHA    string `json:"merge_commit_sha"`
+	Title  string `json:"title"`
 }
 
 // CloseDuplicate is the supersede of an issue another open issue already covers,
@@ -130,6 +142,12 @@ type Duplicated struct {
 // PR closes, a comment naming of, and its issue-<n> claim is deleted by a git
 // push from dir (the boxes' proxy refuses the REST route), so no PR stays
 // open with no issue behind it and se fleet fix finds no leftover claim.
+//
+// An issue duplicates only an open issue or a merged pull request, never an
+// open one: an open PR may never merge, and the issue closed for it would
+// count as handled while its work is not done (#438). Where of is a merged
+// pull request, n's comment names its commit on main, as se issue close
+// --fixed-by does, and nothing is linked: the work is done.
 func (s Source) CloseDuplicate(dir string, n, of int) (Duplicated, error) {
 	if n == of {
 		return Duplicated{}, fmt.Errorf("#%d cannot duplicate itself", n)
@@ -145,12 +163,14 @@ func (s Source) CloseDuplicate(dir string, n, of int) (Duplicated, error) {
 		}
 		got[k] = one[0]
 		switch {
-		case one[0].PullRequest != nil:
+		case one[0].PullRequest != nil && k == n:
 			return Duplicated{}, fmt.Errorf("#%d is a pull request, not an issue", k)
+		case one[0].PullRequest != nil:
+			return s.duplicateOfPull(dir, n, of)
 		case one[0].State != "open" && k == n:
 			return Duplicated{}, fmt.Errorf("#%d is closed already: only an open issue is closed as a duplicate", n)
 		case one[0].State != "open":
-			return Duplicated{}, fmt.Errorf("#%d is closed: #%d duplicates only an open issue, which carries its work on", of, n)
+			return Duplicated{}, fmt.Errorf("#%d is closed: #%d duplicates only an open issue, which carries its work on, or a merged PR", of, n)
 		}
 	}
 	dup := Duplicated{Issue: n, Of: of, URL: got[of].URL}
@@ -175,15 +195,47 @@ func (s Source) CloseDuplicate(dir string, n, of int) (Duplicated, error) {
 	if err := s.dropClaim(dir, &dup); err != nil {
 		return dup, err
 	}
-	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
 	comment := fmt.Sprintf("Duplicate of #%d, which already covers this issue's work and carries it on.\n%s", of, got[of].URL)
+	return dup, s.closeAsDuplicate(n, comment)
+}
+
+// duplicateOfPull closes the open issue n as a duplicate of the pull request
+// of, which must be merged: an open one is refused, since it may never merge,
+// and so is one closed unmerged. n's open PRs and claim go as for an issue,
+// and its comment names the commit on main.
+func (s Source) duplicateOfPull(dir string, n, of int) (Duplicated, error) {
+	got, err := api[mergedPull](s, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, of), false)
+	if err != nil {
+		return Duplicated{}, err
+	}
+	p := got[0]
+	switch {
+	case !p.Merged && p.State == "open":
+		return Duplicated{}, fmt.Errorf("#%d is an open pull request: an issue is a duplicate only of an open issue or a merged PR, never of an open PR, which may never merge; name the issue it fixes", of)
+	case !p.Merged:
+		return Duplicated{}, fmt.Errorf("#%d is a pull request closed unmerged: its work is not on main, so #%d is no duplicate of it", of, n)
+	case p.SHA == "":
+		return Duplicated{}, fmt.Errorf("pull request #%d is merged but names no commit", of)
+	}
+	dup := Duplicated{Issue: n, Of: of, Commit: p.SHA, URL: fmt.Sprintf("https://github.com/%s/commit/%s", s.Repo, p.SHA)}
+	if err := s.dropClaim(dir, &dup); err != nil {
+		return dup, err
+	}
+	comment := fmt.Sprintf(fixedMark+"\nDuplicate of PR #%d, merged: its work is on main already, in %s (%s), so no PR lands it.\n%s",
+		p.SHA, of, p.SHA[:min(len(p.SHA), 12)], p.Title, dup.URL)
+	return dup, s.closeAsDuplicate(n, comment)
+}
+
+// closeAsDuplicate comments on issue n, then closes it as a duplicate.
+func (s Source) closeAsDuplicate(n int, comment string) error {
+	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
 	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", comment)); err != nil {
-		return dup, fmt.Errorf("commenting on #%d: %w", n, err)
+		return fmt.Errorf("commenting on #%d: %w", n, err)
 	}
 	if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "duplicate")); err != nil {
-		return dup, fmt.Errorf("closing #%d: %w", n, err)
+		return fmt.Errorf("closing #%d: %w", n, err)
 	}
-	return dup, nil
+	return nil
 }
 
 // dropClaim closes the duplicate's open PRs, each with a comment naming the
@@ -196,7 +248,7 @@ func (s Source) dropClaim(dir string, dup *Duplicated) error {
 		return err
 	}
 	for _, p := range open {
-		body := fmt.Sprintf("Closed unmerged: #%d is a duplicate of #%d, which carries this work on.\n%s", dup.Issue, dup.Of, dup.URL)
+		body := fmt.Sprintf("Closed unmerged: #%d is a duplicate of #%d, which covers this work.\n%s", dup.Issue, dup.Of, dup.URL)
 		if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, p.Number), github.F("body", body)); err != nil {
 			return fmt.Errorf("commenting on PR #%d: %w", p.Number, err)
 		}
