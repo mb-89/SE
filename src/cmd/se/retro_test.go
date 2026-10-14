@@ -27,7 +27,7 @@ func TestRetroNewAsksForFieldFeedbackOrNone(t *testing.T) {
 func TestRetroNewCreatesTheRetroAndFires(t *testing.T) {
 	calls := recordedIssues(t)
 	code, out, errs := se(t, "retro", "new", "--field", "the boxes were slow", "--repo", "o/r")
-	if code != 0 || !strings.Contains(out, "Created the retro #10") || !strings.Contains(out, "over the whole history") || !strings.HasSuffix(out, "Fired.\n") {
+	if code != 0 || !strings.Contains(out, "Created the retro #10") || !strings.Contains(out, "over the whole history") || !strings.HasSuffix(out, firedOnce+"\n") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	// The closed retros are listed first; the recorded repository has none.

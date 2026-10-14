@@ -17,8 +17,9 @@ import (
 var gh issues.GH = issues.Gh
 
 // fire is the fan-out after a claim, and after the creation of a ready issue:
-// it fires the routine once and answers a line saying what happened. Tests put a fake here.
-var fire = issues.FireFromEnv
+// it fires the routine named in the environment once, on the call's network,
+// and answers a line saying what happened.
+func (c *Call) fire() string { return issues.Fire(os.Getenv, c.Net) }
 
 // sessionID names the session se runs in, which land records as the leaf's
 // worker and review tells apart from them. Tests put a fixed one here.
@@ -135,7 +136,7 @@ func init() {
 			}
 			fanout := ""
 			if ok {
-				fanout = fire()
+				fanout = c.fire()
 				// What waits for it, so the box can tell which of them need
 				// what it may leave over.
 				if took.Blocks, err = s.Dependents(took.Number); err != nil {
@@ -345,7 +346,7 @@ func init() {
 			}
 			fanout := ""
 			if ready {
-				fanout = fire()
+				fanout = c.fire()
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
@@ -509,7 +510,7 @@ func init() {
 			// A filed finding is a ready issue in the queue: it fires once.
 			fanout := ""
 			if len(r.Filed) > 0 {
-				fanout = fire()
+				fanout = c.fire()
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
