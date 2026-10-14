@@ -91,17 +91,22 @@ func (s Source) OverhaulCadence() (Cadence, error) { return s.cadence(overhaulRu
 
 func (s Source) cadence(r cadenceRule) (Cadence, error) {
 	c := Cadence{Kind: r.kind, Every: r.every}
-	last, ok, _, err := s.lastClosed(r.label, 0)
-	if err != nil {
+	// The last closed run and the open ones are read at once.
+	var last past
+	var ok bool
+	var open []issue
+	if err := parallel([]func() error{
+		func() (err error) { last, ok, _, err = s.lastClosed(r.label, 0); return err },
+		func() (err error) {
+			open, err = api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=100", s.Repo, r.label), true)
+			return err
+		},
+	}); err != nil {
 		return Cadence{}, err
 	}
 	var w RetroWindow
 	if ok {
 		c.Previous, w.Since = last.Number, last.ClosedAt.UTC()
-	}
-	open, err := api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=100", s.Repo, r.label), true)
-	if err != nil {
-		return Cadence{}, err
 	}
 	for _, o := range open {
 		if o.PullRequest == nil && (c.Open == 0 || o.Number < c.Open) {

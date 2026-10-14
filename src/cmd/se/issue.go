@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/guidance"
+	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 )
@@ -54,7 +55,7 @@ func init() {
 		Usage:   "issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "show the next se issue, stuck work first; --take claims it",
-		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (OverhaulCadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (RetroCadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (Lease) is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out). --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issues.OverhaulCadence, issues.RetroCadence, issues.Lease, issues.Parallel),
+		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (OverhaulCadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (RetroCadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (Lease) is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out). --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person. At the top it answers from the workspace's daemon's warm snapshot of GitHub where one is kept, and says how old it is where that is older than its refresh (github/config/refresh); --take re-reads from GitHub that its issue is open and unblocked.", issues.OverhaulCadence, issues.RetroCadence, issues.Lease, issues.Parallel),
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -110,21 +111,22 @@ func init() {
 				r, err := inReply(c, s, *asJSON, *in, take)
 				return sweptReply(r, err, *asJSON, flagged)
 			}
+			// At the top, the pull answers from the daemon's warm snapshot
+			// of GitHub where one is kept; a take re-reads what its claim
+			// must be sure of.
+			set, err := github.Configured()
+			if err != nil {
+				return Reply{}, err
+			}
+			age := c.fromSnapshot(&s, set)
 			if !take.set {
-				next, ok, err := s.Next()
+				next, ok, cads, err := s.Pull()
 				if err != nil {
 					return Reply{}, err
 				}
-				var cads []issues.Cadence
-				for _, read := range []func() (issues.Cadence, error){s.Cadence, s.OverhaulCadence} {
-					cad, err := read()
-					if err != nil {
-						return Reply{}, err
-					}
-					cads = append(cads, cad)
-				}
 				r, err := issueReply(*asJSON, next, ok, "", "", "", handed{}, cads...)
-				return sweptReply(r, err, *asJSON, flagged)
+				r, err = sweptReply(r, err, *asJSON, flagged)
+				return agedReply(r, err, *asJSON, age)
 			}
 			// An overhaul, then a retro, the cadence has made due comes
 			// before all other work.
@@ -150,6 +152,12 @@ func init() {
 			}
 			fanout, wt := "", ""
 			if ok {
+				// The claim changed what the snapshot holds: what follows
+				// it, the fan-out above all, reads GitHub itself.
+				c.wrote()
+				if s.Live != nil {
+					s.GitHub, s.Live = s.Live, nil
+				}
 				fanout = c.fanOut(s, true)
 				if *worktree && !took.Parent {
 					wt = issues.Worktree(c.Workspace, took.Number)
@@ -172,7 +180,8 @@ func init() {
 				h = c.handOver(took)
 			}
 			r, err := issueReply(*asJSON, took, ok, issues.Branch(took.Number), wt, fanout, h, started...)
-			return sweptReply(r, err, *asJSON, flagged)
+			r, err = sweptReply(r, err, *asJSON, flagged)
+			return agedReply(r, err, *asJSON, age)
 		},
 	})
 	register(Command{
@@ -688,7 +697,11 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 		}
 		// stdout is the answer; what se waits on goes beside it, as it waits.
 		waits := func(note string) { fmt.Fprintln(os.Stderr, "se:", note) }
-		return issues.Source{Repo: *repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Waits: waits, Box: c.sessionID()}, nil
+		set, err := github.Configured()
+		if err != nil {
+			return issues.Source{}, err
+		}
+		return issues.Source{Repo: *repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Waits: waits, Box: c.sessionID(), Settle: set.Settle}, nil
 	}, asJSON
 }
 

@@ -4,6 +4,7 @@ package issues
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -83,6 +84,31 @@ type Source struct {
 	// Parallel is the cap of sub-agents one box runs, fleet.box/config/parallel;
 	// zero is its built-in value, Parallel.
 	Parallel int
+	// Settle is how long after its last update an issue's dependency summary
+	// is trusted, github/config/settle; zero is its built-in value, Settle.
+	Settle time.Duration
+	// Live, where set, is GitHub itself while GitHub answers from a snapshot
+	// (github.Replay): a take re-reads through it what its claim must be sure
+	// of, the issue's state and its open blockers.
+	Live github.GitHub
+}
+
+// Settle is the built-in value of github/config/settle: an issue unchanged
+// for this long has a dependency summary that no longer lags its links.
+const Settle = 5 * time.Minute
+
+func (s Source) settle() time.Duration {
+	if s.Settle > 0 {
+		return s.Settle
+	}
+	return Settle
+}
+
+// linked says whether issue i may have blocked-by links, so survey reads
+// them: GitHub's summary counts some, or i changed too lately for its summary
+// to be trusted.
+func (s Source) linked(i issue) bool {
+	return i.Dependencies == nil || i.Dependencies.TotalBlockedBy > 0 || s.now().Sub(i.Updated) < s.settle()
 }
 
 func (s Source) now() time.Time { return s.Clock.Now() }
@@ -105,9 +131,16 @@ type issue struct {
 	StateReason string `json:"state_reason"`
 	// ClosedAt is when a closed issue closed; zero while it is open.
 	ClosedAt time.Time `json:"closed_at"`
-	// Created is when it was opened.
+	// Created is when it was opened, Updated when it last changed: writing
+	// a link to it changes it.
 	Created time.Time `json:"created_at"`
-	URL     string    `json:"html_url"`
+	Updated time.Time `json:"updated_at"`
+	// Dependencies is GitHub's count of its blocked-by links, which can lag
+	// a link just written (see openBlockers); absent, it says nothing.
+	Dependencies *struct {
+		TotalBlockedBy int `json:"total_blocked_by"`
+	} `json:"issue_dependencies_summary"`
+	URL string `json:"html_url"`
 	// RepositoryURL names the issue's repository, which a blocker may be outside.
 	RepositoryURL string           `json:"repository_url"`
 	PullRequest   *json.RawMessage `json:"pull_request"`
@@ -371,25 +404,36 @@ func (s Source) survey() ([]Status, tree, error) {
 	claimed := map[string]bool{}
 	var refs []ref
 	var pulls []openPull
+	// The branches and the open PRs need nothing else, so they are read
+	// beside the issue list.
+	branches := make(chan error, 1)
+	go func() {
+		branches <- parallel([]func() error{
+			func() (err error) {
+				refs, err = api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/issue-?per_page=100", s.Repo), true)
+				for _, r := range refs {
+					claimed[strings.TrimPrefix(r.Ref, "refs/heads/")] = true
+				}
+				return err
+			},
+			func() (err error) {
+				pulls, err = api[openPull](s, fmt.Sprintf("repos/%s/pulls?state=open&per_page=100", s.Repo), true)
+				return err
+			},
+		})
+	}()
 	t, err := s.load(func(t tree) []func() error {
 		ns := t.numbers()
 		for _, n := range ns {
 			deps[n], marked[n], leased[n] = &[]issue{}, &marks{}, &Status{}
 		}
 		reads := []func() error{
-			// The branches, and what only issue branches need: the open PRs
-			// and each claimed leaf's lease.
-			func() (err error) {
-				if refs, err = api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/issue-", s.Repo), true); err != nil || len(refs) == 0 {
+			// What only issue branches need: each claimed leaf's lease.
+			func() error {
+				if err := <-branches; err != nil {
 					return err
 				}
-				for _, r := range refs {
-					claimed[strings.TrimPrefix(r.Ref, "refs/heads/")] = true
-				}
-				reads := []func() error{func() (err error) {
-					pulls, err = api[openPull](s, fmt.Sprintf("repos/%s/pulls?state=open&per_page=100", s.Repo), true)
-					return err
-				}}
+				var reads []func() error
 				for _, n := range ns {
 					if !t.parent(n) && claimed[Branch(n)] && !t.byNum[n].labelled(PersonLabel) {
 						reads = append(reads, func() error {
@@ -402,10 +446,12 @@ func (s Source) survey() ([]Status, tree, error) {
 			},
 		}
 		for _, n := range ns {
-			reads = append(reads, func() (err error) {
-				*deps[n], err = api[issue](s, fmt.Sprintf("repos/%s/issues/%d/dependencies/blocked_by?per_page=100", s.Repo, n), true)
-				return err
-			})
+			if s.linked(t.byNum[n]) {
+				reads = append(reads, func() (err error) {
+					*deps[n], err = s.blockedBy(n)
+					return err
+				})
+			}
 			if t.byNum[n].labelled(PersonLabel) {
 				reads = append(reads, func() (err error) {
 					*marked[n], err = s.marks(n)
@@ -545,15 +591,23 @@ func firstParagraph(body string) string {
 	return strings.Join(strings.Fields(first), " ")
 }
 
+// blockedBy reads the blocked-by links of issue n, open and closed blockers.
+func (s Source) blockedBy(n int) ([]issue, error) {
+	return api[issue](s, fmt.Sprintf("repos/%s/issues/%d/dependencies/blocked_by?per_page=100", s.Repo, n), true)
+}
+
 // openBlockers names the blockers of open fleet issue n that are still open,
 // in ascending order. Blockers are GitHub's native "blocked by" links and
 // nothing else.
 //
-// survey asks for the links of every open fleet issue, one request each, and
-// the list's issue_dependencies_summary is not read: right after a link is
-// written that summary can still count 0, and trusting it would make a
-// blocked issue ready. The fleet is small, so one request per issue is cheap,
-// and it is the only answer that cannot lag a link.
+// survey reads the links of an open fleet issue, one request each, only where
+// the list's issue_dependencies_summary may be wrong or counts any (linked):
+// right after a link is written that summary can still count 0, and trusting
+// it then would make a blocked issue ready. Writing a link updates the issue,
+// so the summary of an issue unchanged for longer than the settle time
+// (github/config/settle) no longer lags, and one that counts no link there
+// stands for an empty list. The links are read for the rest, where they are
+// the only answer that cannot lag.
 func (t tree) openBlockers(n int) []int {
 	var blocking []int
 	for _, b := range t.deps[n] {
@@ -581,6 +635,67 @@ func (s Source) Next() (next Issue, ok bool, err error) {
 		return order[0].Issue, true, nil
 	}
 	return Issue{}, false, nil
+}
+
+// Pull is what se issue pull shows without a take: the issue Next names, and
+// where the retro and the overhaul cadences stand, read at once.
+func (s Source) Pull() (next Issue, ok bool, cads []Cadence, err error) {
+	cads = make([]Cadence, 2)
+	err = parallel([]func() error{
+		func() (err error) { next, ok, err = s.Next(); return err },
+		func() (err error) { cads[0], err = s.Cadence(); return err },
+		func() (err error) { cads[1], err = s.OverhaulCadence(); return err },
+	})
+	if err != nil {
+		return Issue{}, false, nil, err
+	}
+	return next, ok, cads, nil
+}
+
+// Warm reads what se issue pull reads, writing nothing, and answers it as
+// the snapshot the daemon keeps: the open fleet issues, their sub-issues and
+// links, the issue branches with their leases, the open PRs, and the
+// cadences. A pull answers from it (github.Replay); a write it would make,
+// such as closing a parent, is left to that pull.
+func Warm(s Source) (github.Snapshot, error) {
+	at := s.now()
+	rec := github.Record(s.GitHub)
+	s.GitHub, s.Flagged, s.Live = rec, nil, nil
+	if _, _, _, err := s.Pull(); err != nil && !errors.Is(err, github.ErrReadOnly) {
+		return github.Snapshot{}, err
+	}
+	return rec.Snapshot(s.Repo, at), nil
+}
+
+// fresh says whether issue n may still be claimed, as GitHub says now, where
+// the survey was answered from a snapshot (Live is set): it is open, and
+// nothing open blocks it. Without Live the survey is GitHub's word already.
+func (s Source) fresh(n int) (bool, error) {
+	if s.Live == nil {
+		return true, nil
+	}
+	live := s
+	live.GitHub = live.Live
+	var got []issue
+	var deps []issue
+	if err := parallel([]func() error{
+		func() (err error) {
+			got, err = api[issue](live, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
+			return err
+		},
+		func() (err error) { deps, err = live.blockedBy(n); return err },
+	}); err != nil {
+		return false, err
+	}
+	if got[0].State != "open" {
+		return false, nil
+	}
+	for _, d := range deps {
+		if d.State == "open" {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // takeOrder lists the issues at the top a take may have, in the order it
@@ -652,6 +767,14 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 		}
 	}
 	for _, st := range takeOrder(all, want) {
+		if ok, err := s.fresh(st.Number); err != nil {
+			return Issue{}, false, err
+		} else if !ok {
+			if st.Number == want {
+				return Issue{}, false, fmt.Errorf("#%d is not ready: it closed or is blocked, as GitHub says now", want)
+			}
+			continue
+		}
 		var claimed bool
 		switch {
 		case st.Takeover != nil:
@@ -808,6 +931,11 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 		byNum[st.Number] = st
 	}
 	for _, i := range order {
+		if ok, err := s.fresh(i.Number); err != nil {
+			return Issue{}, false, tr, err
+		} else if !ok {
+			continue
+		}
 		var claimed bool
 		if i.Takeover != nil {
 			claimed, err = s.takeOverStuck(dir, byNum[i.Number], false)

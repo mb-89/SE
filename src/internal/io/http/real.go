@@ -52,7 +52,7 @@ func (w wire) Serve(ctx context.Context, token string, d Daemon) (string, <-chan
 	return ln.Addr().String(), done, nil
 }
 
-// handler routes /health, /event, /value/<name> and /shutdown, each behind the token.
+// handler routes /health, /event, /value/<name>, /stale/<name> and /shutdown, each behind the token.
 func handler(token string, d Daemon) nethttp.Handler {
 	mux := nethttp.NewServeMux()
 	mux.HandleFunc("GET /health", func(rw nethttp.ResponseWriter, _ *nethttp.Request) { answer(rw, d.Health()) })
@@ -83,6 +83,17 @@ func handler(token string, d Daemon) nethttp.Handler {
 			return
 		}
 		answer(rw, v)
+	})
+	mux.HandleFunc("POST /stale/{name...}", func(rw nethttp.ResponseWriter, r *nethttp.Request) {
+		if err := d.Stale(r.PathValue("name")); err != nil {
+			code := StatusInternal
+			if errors.Is(err, ErrUnknown) {
+				code = StatusNotFound
+			}
+			nethttp.Error(rw, err.Error(), code)
+			return
+		}
+		answer(rw, struct{}{})
 	})
 	mux.HandleFunc("POST /shutdown", func(rw nethttp.ResponseWriter, _ *nethttp.Request) {
 		answer(rw, struct{}{})
@@ -121,6 +132,10 @@ func (w wire) Value(address, token, name string) (Value, error) {
 	var v Value
 	err := w.call(address, token, nethttp.MethodGet, "/value/"+name, nil, &v)
 	return v, err
+}
+
+func (w wire) Stale(address, token, name string) error {
+	return w.call(address, token, nethttp.MethodPost, "/stale/"+name, nil, nil)
 }
 
 func (w wire) Shutdown(address, token string) error {

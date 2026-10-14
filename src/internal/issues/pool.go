@@ -2,8 +2,9 @@ package issues
 
 import "sync"
 
-// Workers is how many reads from GitHub run at once.
-const Workers = 8
+// Workers is how many reads from GitHub run at once: each is a request on
+// one kept-alive client, not a process, so GitHub sets the bound, not the box.
+const Workers = 24
 
 // parallel runs the reads on at most Workers goroutines and answers the
 // error of the first read, in their order, that failed. Each read writes

@@ -1,18 +1,14 @@
 // Package github is the I/O module for GitHub: the one place SE reads or
 // writes issues, their links and sub-issues, branches, pull requests,
 // comments and labels. Code that needs GitHub takes a GitHub as an argument;
-// the se binary hands it Real, which goes through the gh CLI, and a test hands
-// it a Fake, which keeps its own state, so a write is read back.
+// the se binary hands it Real, which calls GitHub's REST API in the process,
+// and a test hands it a Fake, which keeps its own state, so a write is read
+// back.
 package github
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
-	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -54,7 +50,7 @@ func Int(name string, v int64) Field {
 type Error struct {
 	// Status is the HTTP status, such as 404; zero where none was said.
 	Status int
-	// Message is what GitHub, or gh, said.
+	// Message is what GitHub said, after the request it refused.
 	Message string
 }
 
@@ -73,89 +69,4 @@ func Status(err error) int {
 		return e.Status
 	}
 	return 0
-}
-
-// Real is GitHub through the gh CLI on this machine, which owns the
-// authentication.
-func Real() GitHub { return gh{} }
-
-type gh struct{}
-
-func (gh) Get(path string) ([]byte, error) { return run("api", path) }
-
-// List asks for path page by page, adding page=k itself, and joins the
-// pages. gh's --paginate follows GitHub's next links instead, which for some
-// lists name repositories/{id}, and the cloud box proxy refuses those. A page
-// shorter than per_page (30 where path does not say) is the last; so is one
-// that repeats the page before it, where a list takes no page.
-func (gh) List(path string) ([]byte, error) {
-	sep, size := "?", 30
-	if u, err := url.Parse(path); err == nil && u.RawQuery != "" {
-		sep = "&"
-		if n, err := strconv.Atoi(u.Query().Get("per_page")); err == nil && n > 0 {
-			size = n
-		}
-	}
-	all := []json.RawMessage{}
-	var last []byte
-	for k := 1; ; k++ {
-		out, err := run("api", fmt.Sprintf("%s%spage=%d", path, sep, k))
-		if err != nil {
-			return nil, err
-		}
-		if k > 1 && bytes.Equal(bytes.TrimSpace(out), last) {
-			return json.Marshal(all)
-		}
-		last = bytes.TrimSpace(out)
-		var page []json.RawMessage
-		if err := json.Unmarshal(out, &page); err != nil {
-			return nil, fmt.Errorf("gh api %s: %v", path, err)
-		}
-		all = append(all, page...)
-		if len(page) < size {
-			return json.Marshal(all)
-		}
-	}
-}
-
-func (gh) Send(method, path string, fields ...Field) ([]byte, error) {
-	return run(append(append([]string{"api", "-X", method}, flags(fields)...), path)...)
-}
-
-func (gh) GraphQL(query string, vars ...Field) ([]byte, error) {
-	return run(append(append([]string{"api", "-f", "query=" + query}, flags(vars)...), "graphql")...)
-}
-
-func flags(fields []Field) []string {
-	var out []string
-	for _, f := range fields {
-		flag := "-f"
-		if f.Typed {
-			flag = "-F"
-		}
-		out = append(out, flag, f.Name+"="+f.Value)
-	}
-	return out
-}
-
-// httpStatus is how gh names the status of a refused request.
-var httpStatus = regexp.MustCompile(`\(HTTP (\d{3})\)`)
-
-func run(args ...string) ([]byte, error) {
-	cmd := exec.Command("gh", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if errors.Is(err, exec.ErrNotFound) {
-		return nil, errors.New("gh is missing; RUNME.sh names how to install it")
-	}
-	if err != nil {
-		said := strings.TrimSpace(stderr.String())
-		e := &Error{Message: fmt.Sprintf("gh %s: %v: %s", strings.Join(args, " "), err, said)}
-		if m := httpStatus.FindStringSubmatch(said); m != nil {
-			e.Status, _ = strconv.Atoi(m[1])
-		}
-		return nil, e
-	}
-	return out, nil
 }

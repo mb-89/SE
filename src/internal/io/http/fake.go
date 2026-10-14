@@ -142,6 +142,22 @@ func (f *Fake) Value(address, token, name string) (Value, error) {
 	return got, err
 }
 
+func (f *Fake) Stale(address, token, name string) error {
+	path := "/stale/" + name
+	d, err := f.reach(address, token, path)
+	if err != nil {
+		return err
+	}
+	if err := d.Stale(name); err != nil {
+		code := StatusInternal
+		if errors.Is(err, ErrUnknown) {
+			code = StatusNotFound
+		}
+		return &StatusError{Path: path, Status: code, Said: err.Error()}
+	}
+	return nil
+}
+
 func (f *Fake) Shutdown(address, token string) error {
 	d, err := f.reach(address, token, "/shutdown")
 	if err != nil {

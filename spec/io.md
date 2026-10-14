@@ -9,7 +9,7 @@ The disk, `src/internal/io/disk`, covers reading, writing, listing,
 locking and atomically replacing files, its fake a filesystem in memory that
 fails as the real one does.
 The network, `src/internal/io/http`, serves and calls the daemon protocol
-(health, event, value, shutdown) and fires the routine; its fake is a network inside
+(health, event, value, stale, shutdown) and fires the routine; its fake is a network inside
 the process, and its real one is tested on loopback.
 `src/internal/io/proc` runs programs: git, go, check.sh, the se a session
 hands over to and the detached daemon. gh is GitHub's, not proc's. Its fake
@@ -17,8 +17,13 @@ is a machine that holds only the programs a case installs, each a function
 that does what the real one would, and records every run. It also says which
 program is running now (`Self`): the real one asks the system, the fake
 answers what the case made it run as (`RunAs`).
-GitHub, `src/internal/io/github`, is read and written by REST path through
-gh. Its fake, `github.NewFake(clock)`, is seeded from recorded gh answers
+GitHub, `src/internal/io/github`, is read and written by REST path, in the
+process, over one kept-alive HTTP client through the environment's proxy
+(`github.Real()`): no request starts a process. It sends gh's token
+(`GH_TOKEN`, `GITHUB_TOKEN`, else `gh auth token`, read once) where there is
+one; on a cloud box the proxy adds the credentials, as it does for gh. It
+asks again with each answer's ETag, so an answer that has not changed costs
+no rate limit. Its fake, `github.NewFake(clock)`, is seeded from recorded gh answers
 (`Seed`), each read for what it says about the repository, and keeps issues,
 comments, labels, links, sub-issues, branches and pull requests, so a write
 is read back. What GitHub comes to hold later, such as a PR's mergeability,
@@ -26,6 +31,19 @@ is seeded for a time on the fake's clock (`SeedAt`). Its real contract test
 writes issues, branches and pull requests, so it runs only against the
 scratch repository `SE_GITHUB_CONTRACT_REPO` names
 ([below](#the-real-github-contract)).
+
+## The snapshot
+
+The GitHub module is on the index too (`github.Module`): the daemon keeps a
+warm **snapshot** of what `se issue pull` reads, `github/snapshot`, so a pull
+answers without asking GitHub ([issues.md](issues.md#the-commands)). Its
+`Keeper` reads it when the daemon starts, again every `github/config/refresh`
+(2 minutes), and at once when it is told the snapshot is stale: every `se`
+command that wrote to GitHub tells the daemon so (the protocol's `stale`
+verb) as it ends. A snapshot is the answers of a recording
+(`github.Record`), which reads through and refuses every write; a replay
+(`github.Replay`) answers each read the snapshot holds and sends the rest,
+and every write, to GitHub itself.
 
 ## The layout
 

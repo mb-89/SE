@@ -15,8 +15,8 @@ for tool in claude go git; do
     exit 1
   fi
 done
-# se issue reads GitHub through gh, which owns the authentication. On a cloud
-# box gh reaches the API without a login of its own.
+# se calls GitHub's REST API itself, with gh's token, which gh owns. On a
+# cloud box gh reaches the API without a login of its own, and se too.
 if ! command -v gh >/dev/null 2>&1; then
   echo "RUNME: gh is missing; install it from https://cli.github.com (brew install gh, winget install GitHub.cli, or your distribution's gh package)" >&2
   exit 1
