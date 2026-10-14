@@ -9,10 +9,10 @@ import (
 	"github.com/mb-89/SE/src/internal/rules"
 )
 
-// registry is a small command registry: issue next and issue land under
+// registry is a small command registry: issue pull and issue land under
 // issue, and help.
 var registry = map[string][]string{
-	"issue next": {"take", "in", "json"},
+	"issue pull": {"take", "in", "json"},
 	"issue land": {"answers"},
 	"help":       {},
 }
@@ -23,23 +23,24 @@ func sorted(found []string) string {
 }
 
 func TestEverySeCommandProseNamesExists(t *testing.T) {
+	t.Parallel()
 	found := checkIn(t, &rules.Repo{Commands: registry}, "se-command", map[string]string{
-		"README.md": "Run `se issue next --take` or `/se issue land --answers F`.\n" +
-			"Not `se issue take`, nor `./src/plugin/bin/se issue next --tak=5`.\n" +
+		"README.md": "Run `se issue pull --take` or `/se issue land --answers F`.\n" +
+			"Not `se issue take`, nor `./src/plugin/bin/se issue pull --tak=5`.\n" +
 			"`se frob` is gone; `se --session help` and `se <command>` are fine.\n" +
-			"`<se> issue next [--in ROOT] [--json]`, `se issue …`, `cd /opt/se && go build`.\n" +
-			"```sh\nse issue next --take && se issue nest\n```\n" +
-			"`se help issue next` takes words; `se --verbose help` has no such flag.\n",
-		"spec/a.yaml": "# the `se issue next --person` list\n",
+			"`<se> issue pull [--in ROOT] [--json]`, `se issue …`, `cd /opt/se && go build`.\n" +
+			"```sh\nse issue pull --take && se issue nest\n```\n" +
+			"`se help issue pull` takes words; `se --verbose help` has no such flag.\n",
+		"spec/a.yaml": "# the `se issue pull --person` list\n",
 		"notes.txt":   "`se frob` in a file that is not prose\n",
 	})
 	want := sorted([]string{
 		"README.md:2: se-command: se has no command \"issue take\"",
-		"README.md:2: se-command: se issue next takes no flag --tak",
+		"README.md:2: se-command: se issue pull takes no flag --tak",
 		"README.md:3: se-command: se has no command \"frob\"",
 		"README.md:6: se-command: se has no command \"issue nest\"",
 		"README.md:8: se-command: se takes no flag --verbose before a command",
-		"spec/a.yaml:1: se-command: se issue next takes no flag --person",
+		"spec/a.yaml:1: se-command: se issue pull takes no flag --person",
 	})
 	if got := sorted(found); got != want {
 		t.Fatalf("found:\n%s\nwant:\n%s", got, want)
@@ -47,6 +48,7 @@ func TestEverySeCommandProseNamesExists(t *testing.T) {
 }
 
 func TestEveryPathAndLinkProseNamesExists(t *testing.T) {
+	t.Parallel()
 	found := checkIn(t, &rules.Repo{Ignored: func(p string) bool { return p == "src/bin/se" }}, "repo-path", map[string]string{
 		"README.md": "See `src/a/b.go`, `./src/a/`, `src/bin/se` and `src/a/gone.go`.\n" +
 			"Not paths: `origin/main`, `src/<name>/x.md`, `/opt/se`, `git diff a..b`, `issue-<n>`.\n" +
@@ -68,6 +70,7 @@ func TestEveryPathAndLinkProseNamesExists(t *testing.T) {
 }
 
 func TestAManifestIsWhatItsOwnersMake(t *testing.T) {
+	t.Parallel()
 	gen := func(name, at string) (string, error) {
 		if name != "list" {
 			return "", errors.New("no such manifest")
@@ -90,6 +93,7 @@ func TestAManifestIsWhatItsOwnersMake(t *testing.T) {
 }
 
 func TestManifestsRewritesEverySection(t *testing.T) {
+	t.Parallel()
 	text := "# A\n<!-- se:manifest x -->\nstale\n<!-- /se:manifest -->\nkept\n<!-- se:manifest x -->\n<!-- /se:manifest -->\n"
 	out, found := rules.Manifests("a.md", []byte(text), func(string) (string, error) { return "made\n", nil })
 	want := "# A\n<!-- se:manifest x -->\nmade\n<!-- /se:manifest -->\nkept\n<!-- se:manifest x -->\nmade\n<!-- /se:manifest -->\n"
@@ -99,6 +103,7 @@ func TestManifestsRewritesEverySection(t *testing.T) {
 }
 
 func TestEveryMarkdownFileNamesItsReader(t *testing.T) {
+	t.Parallel()
 	found := check(t, "reader", map[string]string{
 		"a.md":       "# A\n\nReader: a person meeting SE.\n\nText.\n",
 		"b.md":       "---\nname: b\n---\n\n# B\n\nReaders: the agent running it.\n",

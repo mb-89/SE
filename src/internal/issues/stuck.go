@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // Lease is how long a claimed leaf may go without a push to its branch before
@@ -28,6 +30,8 @@ type comment struct {
 	ID      int64     `json:"id"`
 	Body    string    `json:"body"`
 	Created time.Time `json:"created_at"`
+	// IssueURL is the API URL of the issue it is on.
+	IssueURL string `json:"issue_url"`
 }
 
 // marks is what an issue's comments say about it since a person last resumed it.
@@ -110,7 +114,7 @@ func (s Source) lease(st *Status) error {
 	if err != nil {
 		return err
 	}
-	st.Since = pushed
+	st.Since, st.pushed = pushed, pushed
 	if s.now().Sub(st.Since) <= Lease {
 		return nil
 	}
@@ -165,11 +169,11 @@ func (s Source) hold(i Issue, reason string) (Issue, error) {
 	}
 	base := fmt.Sprintf("repos/%s/issues/%d", s.Repo, i.Number)
 	note := fmt.Sprintf("<!-- se:person -->\n%s\n\nIt is blocked by #%d, an issue for a person; closing #%d gives it back to the boxes, no longer final.\n<!-- se:resume -->", reason, made.Number, made.Number)
-	if _, err := s.GH("api", "-X", "POST", "-f", "body="+note, base+"/comments"); err != nil {
+	if _, err := s.GitHub.Send("POST", base+"/comments", github.F("body", note)); err != nil {
 		return made, fmt.Errorf("created #%d for a person, but recording it on #%d: %w", made.Number, i.Number, err)
 	}
 	// A 404 is a label already gone.
-	if _, err := s.GH("api", "-X", "DELETE", base+"/labels/"+FinalLabel); err != nil && !strings.Contains(err.Error(), "HTTP 404") {
+	if _, err := s.GitHub.Send("DELETE", base+"/labels/"+FinalLabel); err != nil && github.Status(err) != 404 {
 		return made, fmt.Errorf("created #%d for a person, but taking %s off #%d: %w", made.Number, FinalLabel, i.Number, err)
 	}
 	if s.Flagged != nil {
@@ -189,7 +193,7 @@ func (s Source) ForPerson(title, body string, parent int, blockedBy []int) (Issu
 		return Issue{}, err
 	}
 	owner, _, _ := strings.Cut(s.Repo, "/")
-	if _, err := s.GH("api", "-X", "POST", "-f", "assignees[]="+owner, fmt.Sprintf("repos/%s/issues/%d/assignees", s.Repo, made.Number)); err != nil {
+	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/assignees", s.Repo, made.Number), github.F("assignees[]", owner)); err != nil {
 		return made, fmt.Errorf("created #%d, but assigning it to @%s: %w", made.Number, owner, err)
 	}
 	return made, nil
@@ -197,7 +201,7 @@ func (s Source) ForPerson(title, body string, parent int, blockedBy []int) (Issu
 
 // finalize labels issue n se-final: its next failure goes to a person.
 func (s Source) finalize(n int) error {
-	if _, err := s.GH("api", "-X", "POST", "-f", "labels[]="+FinalLabel, fmt.Sprintf("repos/%s/issues/%d/labels", s.Repo, n)); err != nil {
+	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/labels", s.Repo, n), github.F("labels[]", FinalLabel)); err != nil {
 		return fmt.Errorf("labelling #%d %s: %w", n, FinalLabel, err)
 	}
 	return nil
@@ -218,10 +222,10 @@ func (s Source) takeOverStuck(dir string, st Status, checkout bool) (took bool, 
 	}
 	if !checkout {
 		branch := Branch(st.Number)
-		_, err := git(dir, "fetch", "-q", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch)
+		_, err := s.git(dir, "fetch", "-q", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch)
 		return true, err
 	}
-	if err := pickUp(dir, st.Number); err != nil {
+	if err := s.pickUp(dir, st.Number); err != nil {
 		return true, fmt.Errorf("took over %s, but: %w", Branch(st.Number), err)
 	}
 	return true, nil
@@ -232,7 +236,7 @@ func (s Source) takeOverStuck(dir string, st Status, checkout bool) (took bool, 
 // comment wins and the other box withdraws its own.
 func (s Source) markTakeover(n, round int, body string) (won bool, err error) {
 	path := fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, n)
-	out, err := s.GH("api", "-X", "POST", "-f", "body="+body, path)
+	out, err := s.GitHub.Send("POST", path, github.F("body", body))
 	if err != nil {
 		return false, fmt.Errorf("recording the takeover of #%d: %w", n, err)
 	}
@@ -247,7 +251,7 @@ func (s Source) markTakeover(n, round int, body string) (won bool, err error) {
 	if m.winners[round] == mine.ID {
 		return true, nil
 	}
-	if _, err := s.GH("api", "-X", "DELETE", fmt.Sprintf("repos/%s/issues/comments/%d", s.Repo, mine.ID)); err != nil {
+	if _, err := s.GitHub.Send("DELETE", fmt.Sprintf("repos/%s/issues/comments/%d", s.Repo, mine.ID)); err != nil {
 		return false, fmt.Errorf("withdrawing a second takeover of #%d: %w", n, err)
 	}
 	return false, nil
@@ -271,20 +275,16 @@ func (s Source) Waiting() ([]Waiting, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.waiting(all, t)
+	return waiting(all, t), nil
 }
 
 // waiting is Waiting on a survey already read.
-func (s Source) waiting(all []Status, t tree) ([]Waiting, error) {
+func waiting(all []Status, t tree) []Waiting {
 	// held links each open issue to the open issues it holds: its dependents,
 	// and the rest of its tree, which is never offered while it waits.
 	held := map[int][]int{}
 	for _, n := range t.numbers() {
-		blockers, err := s.openBlockers(t.byNum[n])
-		if err != nil {
-			return nil, err
-		}
-		for _, b := range blockers {
+		for _, b := range t.openBlockers(n) {
 			held[b] = append(held[b], n)
 		}
 		if p, ok := t.above[n]; ok {
@@ -310,7 +310,7 @@ func (s Source) waiting(all []Status, t tree) ([]Waiting, error) {
 		}
 		out = append(out, Waiting{st.Number, st.Title, st.URL, reason, len(seen) - 1})
 	}
-	return out, nil
+	return out
 }
 
 // Resume gives issue n back to the boxes: it removes the se-person label and
@@ -330,14 +330,14 @@ func (s Source) Resume(n int) (Issue, error) {
 	// The resume is recorded before the label goes, so an issue back in the
 	// queue never keeps its old takeover count.
 	body := "<!-- se:resume -->\nResumed by a person: back in the queue, its takeover count reset, no longer final."
-	if _, err := s.GH("api", "-X", "POST", "-f", "body="+body, base+"/comments"); err != nil {
+	if _, err := s.GitHub.Send("POST", base+"/comments", github.F("body", body)); err != nil {
 		return Issue{}, err
 	}
 	for _, l := range []string{FinalLabel, PersonLabel} {
 		if !i.labelled(l) {
 			continue
 		}
-		if _, err := s.GH("api", "-X", "DELETE", base+"/labels/"+l); err != nil {
+		if _, err := s.GitHub.Send("DELETE", base+"/labels/"+l); err != nil {
 			return Issue{}, err
 		}
 	}

@@ -3,6 +3,8 @@ package issues
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // CIWorkflow is the workflow se fleet refresh starts on a PR it updated: the
@@ -29,7 +31,7 @@ type Refreshed struct {
 // and whose head main has moved past, through GitHub's update-branch, and
 // starts CIWorkflow on its new head: the main ruleset merges a PR only when
 // it is up to date with main, so this keeps auto-merge moving. A PR that
-// conflicts with main is left to its takeover (se issue next --take). A PR
+// conflicts with main is left to its takeover (se issue pull --take). A PR
 // whose update fails is reported, and the ones after it are still updated.
 func (s Source) Refresh() ([]Refreshed, error) {
 	pulls, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?base=main&state=open&per_page=100", s.Repo), true)
@@ -77,11 +79,11 @@ func (s Source) Refresh() ([]Refreshed, error) {
 // and starts CIWorkflow on the branch.
 func (s Source) update(r *Refreshed) error {
 	old := r.Head
-	if _, err := s.GH("api", "-X", "PUT", "-f", "expected_head_sha="+old, fmt.Sprintf("repos/%s/pulls/%d/update-branch", s.Repo, r.PR)); err != nil {
+	if _, err := s.GitHub.Send("PUT", fmt.Sprintf("repos/%s/pulls/%d/update-branch", s.Repo, r.PR), github.F("expected_head_sha", old)); err != nil {
 		return err
 	}
 	for k := 0; k < waits && r.Head == old; k++ {
-		s.Clock.Sleep(pause)
+		s.sleep(pause, fmt.Sprintf("GitHub to show PR #%d's new head (ask %d of %d)", r.PR, k+1, waits))
 		got, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, r.PR), false)
 		if err != nil {
 			return err
@@ -91,7 +93,7 @@ func (s Source) update(r *Refreshed) error {
 	if r.Head == old {
 		return fmt.Errorf("GitHub took the update, but PR #%d's head is still %s", r.PR, old)
 	}
-	if _, err := s.GH("api", "-X", "POST", "-f", "ref="+r.Branch, fmt.Sprintf("repos/%s/actions/workflows/%s/dispatches", s.Repo, CIWorkflow)); err != nil {
+	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/actions/workflows/%s/dispatches", s.Repo, CIWorkflow), github.F("ref", r.Branch)); err != nil {
 		return fmt.Errorf("merged main into %s at %s, but could not start %s: %w", r.Branch, r.Head, CIWorkflow, err)
 	}
 	r.Did = fmt.Sprintf("merged main in at %s and started %s", r.Head, CIWorkflow)

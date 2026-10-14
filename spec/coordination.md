@@ -11,7 +11,7 @@ and only then leaves.**
 
 ## The rules
 
-1. **The work skill hands over.** When `se issue next --take` takes nothing,
+1. **The work skill hands over.** When `se issue pull --take` takes nothing,
    the box runs the coordination skill,
    [src/plugin/skills/coordination/SKILL.md](../src/plugin/skills/coordination/SKILL.md),
    before it ends.
@@ -49,7 +49,7 @@ and only then leaves.**
 3. **The coordination skill fixes what has a known remedy,** in the order
    the command lists, each with the mechanism that already exists:
    - a conflicted, red or stalled claim, or a claim with no PR, is taken
-     over: `se issue next --take <n>` checks its branch out as it stands, the
+     over: `se issue pull --take <n>` checks its branch out as it stands, the
      box merges `origin/main` into it, makes it green and lands it again with
      `se issue land`;
    - a green PR with auto-merge off gets auto-merge turned on (`se fleet fix`);
@@ -95,7 +95,7 @@ se fleet refresh [--json] [--repo OWNER/NAME]
 same check and applies every remedy that needs no checkout, in order, and
 names the takeovers it leaves to the box; a remedy that fails is reported and
 the remedies after it are still applied; an issue it made that a box may
-take fires the routine once. `se issue next --take <n>` on a claimed leaf
+take fires the routine once. `se issue pull --take <n>` on a claimed leaf
 takes it over where the check finds it stuck, and refuses a claim whose work
 is moving.
 

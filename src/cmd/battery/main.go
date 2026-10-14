@@ -7,12 +7,17 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/mb-89/SE/src/internal/battery"
+	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
+
+// machine is the disk the battery reads and writes.
+var machine = disk.Real()
 
 func main() {
 	if len(os.Args) < 2 {
@@ -20,7 +25,7 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "gotest":
-		fail(gotest(os.Args[2:]))
+		fail(gotest(proc.Real(), os.Args[2:]))
 	case "report":
 		fail(report())
 	default:
@@ -31,33 +36,40 @@ func main() {
 // gotest runs go test -json on the packages, shows what go test shows a
 // person, keeps the events for report, and fails as go test failed. It runs
 // go test with GIT_DIR on a decoy repository, and fails if a test changed it.
-func gotest(packages []string) error {
-	dir, err := os.MkdirTemp("", "battery-decoy-")
+// It runs git and go on procs.
+func gotest(procs proc.Procs, packages []string) error {
+	dir, err := machine.MkdirTemp("", "battery-decoy-")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
-	decoy, err := battery.NewDecoy(dir)
+	defer func() { _ = machine.RemoveAll(dir) }()
+	decoy, err := battery.NewDecoy(machine, procs, dir)
 	if err != nil {
 		return err
 	}
-	raw, err := os.Create(filepath.Join(battery.Dir, battery.GoTestFile))
+	raw, err := machine.Create(filepath.Join(battery.Dir, battery.GoTestFile))
 	if err != nil {
 		return err
 	}
 	defer raw.Close()
-	cmd := exec.Command("go", append([]string{"test", "-json"}, packages...)...)
-	cmd.Env = decoy.Env(os.Environ())
-	cmd.Stderr = os.Stderr
-	events, err := cmd.StdoutPipe()
+	events, written := io.Pipe()
+	run, err := procs.Start(proc.Cmd{
+		Name: "go", Args: append([]string{"test", "-json"}, packages...),
+		Env: decoy.Env(os.Environ()), Stdout: written, Stderr: os.Stderr,
+	})
 	if err != nil {
 		return err
 	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	relayed := battery.Relay(events, os.Stdout, raw)
-	waited := cmd.Wait()
+	relaying := make(chan error, 1)
+	go func() {
+		err := battery.Relay(events, os.Stdout, raw)
+		// What Relay left unread must not hold go test up.
+		_, _ = io.Copy(io.Discard, events)
+		relaying <- err
+	}()
+	waited := run.Wait()
+	_ = written.Close()
+	relayed := <-relaying
 	if err := decoy.Check(); err != nil {
 		return err
 	}
@@ -70,22 +82,16 @@ func gotest(packages []string) error {
 // report prints the profile of the battery just run, and adds it to the CI
 // job's summary where there is one.
 func report() error {
-	var summary *os.File
+	var summary io.Writer
 	if path := os.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		f, err := machine.Append(path)
 		if err != nil {
 			return err
 		}
 		defer f.Close()
 		summary = f
 	}
-	var p battery.Profile
-	var err error
-	if summary != nil {
-		p, err = battery.Report(".", summary)
-	} else {
-		p, err = battery.Report(".", nil)
-	}
+	p, err := battery.Report(machine, ".", summary)
 	fmt.Print(p.Text())
 	return err
 }

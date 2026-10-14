@@ -3,7 +3,7 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -15,20 +15,13 @@ func recordedFleet(t *testing.T) {
 		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3"}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[]`,
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
-		"repos/o/r/pulls?base=main&state=open&per_page=100":       `[]`,
+		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
 	}
-	old := gh
-	gh = func(args ...string) ([]byte, error) {
-		a, ok := answers[args[len(args)-1]]
-		if !ok {
-			return nil, fmt.Errorf("not recorded: %v", args)
-		}
-		return []byte(a), nil
-	}
-	t.Cleanup(func() { gh = old })
+	hubAt(t, answers)
 }
 
 func TestAHealthyFleetSaysSo(t *testing.T) {
+	t.Parallel()
 	recordedFleet(t)
 	for _, cmd := range []string{"check", "fix"} {
 		if code, out, errs := se(t, "fleet", cmd, "--repo", "o/r"); code != 0 || out != "healthy\n" {
@@ -49,35 +42,22 @@ func TestAHealthyFleetSaysSo(t *testing.T) {
 }
 
 func TestFleetPruneDeletesOnlyWithApply(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/pulls?state=open&per_page=100":   `[]`,
 		"repos/o/r/git/matching-refs/heads/issue-":  `[{"ref":"refs/heads/issue-19","object":{"sha":"c19"}}]`,
 		"repos/o/r/git/matching-refs/heads/claude/": `[]`,
 		"repos/o/r/issues/19":                       `{"number":19,"state":"closed"}`,
-		"repos/o/r/git/refs/heads/issue-19":         `{}`,
 	}
-	var deletes []string
-	old := gh
-	gh = func(args ...string) ([]byte, error) {
-		path := args[len(args)-1]
-		if args[1] == "-X" {
-			deletes = append(deletes, args[2]+" "+path)
-		}
-		a, ok := answers[path]
-		if !ok {
-			return nil, fmt.Errorf("not recorded: %v", args)
-		}
-		return []byte(a), nil
-	}
-	t.Cleanup(func() { gh = old })
-	if code, out, errs := se(t, "fleet", "prune", "--repo", "o/r"); code != 0 || out != "stray issue-19 at c19: #19 is closed and issue-19 has no open PR\n" || len(deletes) != 0 {
-		t.Fatalf("exit %d, %q %q, deletes %q", code, out, errs, deletes)
+	gh := hubAt(t, answers)
+	if code, out, errs := se(t, "fleet", "prune", "--repo", "o/r"); code != 0 || out != "stray issue-19 at c19: #19 is closed and issue-19 has no open PR\n" || len(gh.Writes()) != 0 {
+		t.Fatalf("exit %d, %q %q, writes %q", code, out, errs, gh.Writes())
 	}
 	if code, out, errs := se(t, "fleet", "prune", "--apply", "--repo", "o/r"); code != 0 || out != "deleted issue-19 at c19: #19 is closed and issue-19 has no open PR\n" ||
-		len(deletes) != 1 || deletes[0] != "DELETE repos/o/r/git/refs/heads/issue-19" {
-		t.Fatalf("exit %d, %q %q, deletes %q", code, out, errs, deletes)
+		!reflect.DeepEqual(gh.Writes(), []string{"DELETE repos/o/r/git/refs/heads/issue-19"}) {
+		t.Fatalf("exit %d, %q %q, writes %q", code, out, errs, gh.Writes())
 	}
-	answers["repos/o/r/git/matching-refs/heads/issue-"] = `[]`
+	// The branch is gone, so a second prune finds nothing.
 	if code, out, _ := se(t, "fleet", "prune", "--apply", "--repo", "o/r"); code != 0 || out != "no stray branches\n" {
 		t.Fatalf("exit %d, %q", code, out)
 	}

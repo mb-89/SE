@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // briefAnswers is gate #1 holding #2, a parent of #3, and #5; main is at
@@ -30,19 +33,40 @@ func briefAnswers() map[string]string {
 	}
 }
 
+// reads is a GitHub that keeps the paths it was asked to read, one at a
+// time, as reads run in parallel.
+type reads struct {
+	github.GitHub
+	mu    *sync.Mutex
+	paths *[]string
+}
+
+func (r reads) note(path string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	*r.paths = append(*r.paths, path)
+}
+
+func (r reads) Get(path string) ([]byte, error) {
+	r.note(path)
+	return r.GitHub.Get(path)
+}
+
+func (r reads) List(path string) ([]byte, error) {
+	r.note(path)
+	return r.GitHub.List(path)
+}
+
 // asked records the paths a brief reads.
-func asked(t *testing.T, answers map[string]string) (GH, *[]string) {
+func asked(t *testing.T, answers map[string]string) (github.GitHub, *[]string) {
 	var paths []string
-	gh := recorded(t, answers)
-	return func(args ...string) ([]byte, error) {
-		paths = append(paths, args[len(args)-1])
-		return gh(args...)
-	}, &paths
+	return reads{recorded(t, answers), &sync.Mutex{}, &paths}, &paths
 }
 
 func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
+	t.Parallel()
 	gh, paths := asked(t, briefAnswers())
-	b, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Brief(1, false)
+	b, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Brief(1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +103,7 @@ func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 
 	// Once the findings are verified, --claims shows them, as claims.
 	gh, _ = asked(t, briefAnswers())
-	b, err = Source{Repo: repo, GH: gh, Clock: atNow()}.Brief(1, true)
+	b, err = Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Brief(1, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,19 +116,14 @@ func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 }
 
 func TestTheBriefOfAReReviewNamesTheEarlierBlockersAndTheDiff(t *testing.T) {
+	t.Parallel()
 	answers := briefAnswers()
 	earlier := Verdict{Report: failing("three")}
 	earlier.Report.Findings[0].Issue = 3
 	answers[commentsPath(1)] = fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r", Workspace: "/r"}))
 	// Without a principles file, the brief says so.
-	answers["repos/o/r/contents/spec/principles.md?ref=abc"] = ""
-	gh := recorded(t, answers)
-	s := Source{Repo: repo, GH: func(args ...string) ([]byte, error) {
-		if strings.HasPrefix(args[len(args)-1], "repos/o/r/contents/") {
-			return nil, fmt.Errorf("gh api: Not Found (HTTP 404)")
-		}
-		return gh(args...)
-	}, Clock: atNow()}
+	delete(answers, "repos/o/r/contents/spec/principles.md?ref=abc")
+	s := Source{Proc: machine, Repo: repo, GitHub: recorded(t, answers), Clock: atNow()}
 	b, err := s.Brief(1, false)
 	if err != nil {
 		t.Fatal(err)

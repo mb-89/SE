@@ -3,10 +3,12 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // SessionVar is the environment variable that names the Claude Code session
@@ -66,7 +68,7 @@ func (s Source) record(n int, w Worker) error {
 		return err
 	}
 	body := fmt.Sprintf("Worked by %s.\n\n<!-- se-worker %s -->", w, mark)
-	if _, err := s.GH("api", "-X", "POST", "-f", "body="+body, fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, n)); err != nil {
+	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, n), github.F("body", body)); err != nil {
 		return fmt.Errorf("recording who worked #%d: %w", n, err)
 	}
 	return nil
@@ -160,7 +162,7 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 	}
 	v := Verdict{Passed: pass, Rereview: earlier.failed(), Unfiled: r.Unfiled, Report: rep}
 	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
-	if _, err := s.GH("api", "-X", "POST", "-f", "body="+v.render(reviewer), path+"/comments"); err != nil {
+	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", v.render(reviewer))); err != nil {
 		return r, fmt.Errorf("posting the report on #%d: %w", n, err)
 	}
 	if len(again) > 0 {
@@ -176,7 +178,7 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 		return r, nil
 	}
 	if pass {
-		if _, err := s.GH("api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", path); err != nil {
+		if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
 			return r, fmt.Errorf("closing #%d: %w", n, err)
 		}
 		return r, s.CloseParents()
@@ -233,10 +235,10 @@ func ReviewWorktree(dir string, n, round int) string {
 const ModelsPath = "spec/models.yaml"
 
 // ReviewerModel reads the reviewer's model from spec/models.yaml in the
-// checkout dir, the line "reviewer: <model>"; where it is not set, the
+// checkout dir on d, the line "reviewer: <model>"; where it is not set, the
 // reviewer runs the box's model, the floor, and the answer is empty.
-func ReviewerModel(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, ModelsPath))
+func ReviewerModel(d disk.Disk, dir string) string {
+	data, err := d.ReadFile(filepath.Join(dir, ModelsPath))
 	if err != nil {
 		return ""
 	}

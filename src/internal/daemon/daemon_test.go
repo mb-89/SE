@@ -2,11 +2,11 @@ package daemon_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -15,14 +15,16 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/internal/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 )
 
 func workspace(t *testing.T) daemon.Paths {
 	t.Helper()
-	p := daemon.Paths{Workspace: t.TempDir()}
+	p := daemon.Paths{Workspace: filepath.FromSlash("/ws"), Disk: disk.NewFake()}
 	if err := daemon.Prepare(p); err != nil {
 		t.Fatal(err)
 	}
@@ -57,13 +59,12 @@ func served(t *testing.T, p daemon.Paths) func(token string, ev daemon.Event) in
 
 func rows(t *testing.T, p daemon.Paths, session string) []map[string]any {
 	t.Helper()
-	f, err := os.Open(filepath.Join(p.Logs(), session+".jsonl"))
+	log, err := p.Disk.ReadFile(filepath.Join(p.Logs(), session+".jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
 	var out []map[string]any
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(bytes.NewReader(log))
 	sc.Buffer(nil, 1<<20)
 	for sc.Scan() {
 		var row map[string]any
@@ -76,14 +77,16 @@ func rows(t *testing.T, p daemon.Paths, session string) []map[string]any {
 }
 
 func TestPrepareIgnoresTheRuntimeFolder(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
-	got, err := os.ReadFile(filepath.Join(p.Runtime(), ".gitignore"))
+	got, err := p.Disk.ReadFile(filepath.Join(p.Runtime(), ".gitignore"))
 	if err != nil || string(got) != "*\n" {
 		t.Fatalf(".gitignore = %q, %v", got, err)
 	}
 }
 
 func TestAnEventIsAppended(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	for _, ev := range []string{"session.start", "tool.call"} {
@@ -98,6 +101,7 @@ func TestAnEventIsAppended(t *testing.T) {
 }
 
 func TestAWrongTokenIsRefused(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	if code := post("nope", daemon.Event{Session: "s1", Event: "x"}); code != sehttp.StatusUnauthorized {
@@ -106,6 +110,7 @@ func TestAWrongTokenIsRefused(t *testing.T) {
 }
 
 func TestASessionNameCannotLeaveTheLogFolder(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	for _, s := range []string{"../escape", "a/b", "", ".hidden"} {
@@ -116,6 +121,7 @@ func TestASessionNameCannotLeaveTheLogFolder(t *testing.T) {
 }
 
 func TestALongPayloadLandsCut(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	long := strings.Repeat("a", daemon.PayloadCap*2)
@@ -127,6 +133,7 @@ func TestALongPayloadLandsCut(t *testing.T) {
 }
 
 func TestConcurrentEventsAllLand(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	var wg sync.WaitGroup
@@ -143,41 +150,45 @@ func TestConcurrentEventsAllLand(t *testing.T) {
 	}
 }
 
+// at is the time the fake clocks of these tests stand at.
+var at = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+
 func TestServePublishesAndWithdrawsItsEndpoint(t *testing.T) {
-	p, n := workspace(t), sehttp.NewFake()
+	t.Parallel()
+	p, n, f := workspace(t), sehttp.NewFake(), clock.NewFake(at)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
-		done <- daemon.Serve(ctx, p, daemon.Options{Clock: clock.Real(), Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
+		done <- daemon.Serve(ctx, p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
 	}()
 	ep := <-ready
 	if got, ok := daemon.Healthy(p, n); !ok || got.InstanceID != ep.InstanceID {
 		t.Fatalf("healthy = %v, %v", got, ok)
 	}
-	if runtime.GOOS != "windows" {
-		if err := daemon.Serve(context.Background(), p, daemon.Options{Clock: clock.Real(), Net: n}); !errors.Is(err, daemon.ErrRunning) {
-			t.Fatalf("second serve: %v", err)
-		}
+	if err := daemon.Serve(context.Background(), p, daemon.Options{Clock: f, Net: n}); !errors.Is(err, daemon.ErrRunning) {
+		t.Fatalf("second serve: %v", err)
 	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(p.Endpoint()); !errors.Is(err, os.ErrNotExist) {
+	if there, err := p.Disk.Exists(p.Endpoint()); there || err != nil {
 		t.Fatalf("daemon.json stands after the daemon ended: %v", err)
 	}
 }
 
 func TestStopEndsTheDaemon(t *testing.T) {
-	p, n := workspace(t), sehttp.NewFake()
+	t.Parallel()
+	p, n, f := workspace(t), sehttp.NewFake(), clock.NewFake(at)
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
-		done <- daemon.Serve(context.Background(), p, daemon.Options{Clock: clock.Real(), Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
+		done <- daemon.Serve(context.Background(), p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
 	}()
 	<-ready
-	if err := daemon.Stop(p, 5*time.Second, clock.Real(), n); err != nil {
+	// The fake's sleeps pass at once: a day of them leaves the daemon time to withdraw.
+	if err := daemon.Stop(p, 24*time.Hour, f, n); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {
@@ -189,8 +200,9 @@ func TestStopEndsTheDaemon(t *testing.T) {
 }
 
 func TestAnIdleDaemonEnds(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
-	f := clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
+	f := clock.NewFake(at)
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
@@ -225,21 +237,20 @@ func TestAnIdleDaemonEnds(t *testing.T) {
 }
 
 func TestTakeOverStepsARunningDaemonAside(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the lock is not exclusive here")
-	}
-	p, n := workspace(t), sehttp.NewFake()
+	t.Parallel()
+	p, n, f := workspace(t), sehttp.NewFake(), clock.NewFake(at)
 	first := make(chan daemon.Endpoint, 1)
 	firstDone := make(chan error, 1)
 	go func() {
-		firstDone <- daemon.Serve(context.Background(), p, daemon.Options{Clock: clock.Real(), Net: n, Ready: func(ep daemon.Endpoint) { first <- ep }})
+		firstDone <- daemon.Serve(context.Background(), p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { first <- ep }})
 	}()
 	ep1 := <-first
 	ctx, cancel := context.WithCancel(context.Background())
 	second := make(chan daemon.Endpoint, 1)
 	secondDone := make(chan error, 1)
 	go func() {
-		secondDone <- daemon.Serve(ctx, p, daemon.Options{Clock: clock.Real(), Net: n, TakeOver: 10 * time.Second, Ready: func(ep daemon.Endpoint) { second <- ep }})
+		// A day on the fake, whose sleeps pass at once, as in TestStopEndsTheDaemon.
+		secondDone <- daemon.Serve(ctx, p, daemon.Options{Clock: f, Net: n, TakeOver: 24 * time.Hour, Ready: func(ep daemon.Endpoint) { second <- ep }})
 	}()
 	ep2 := <-second
 	if err := <-firstDone; err != nil {
@@ -251,5 +262,26 @@ func TestTakeOverStepsARunningDaemonAside(t *testing.T) {
 	cancel()
 	if err := <-secondDone; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStartRunsTheDaemonDetachedAndSaysWhenItExits(t *testing.T) {
+	t.Parallel()
+	p := workspace(t)
+	m := proc.NewFake()
+	m.Install("/bin/se", func(c proc.Cmd) int {
+		fmt.Fprintln(c.Stderr, "se serve: no port left")
+		return 1
+	})
+	_, err := daemon.Start(m, p, "/bin/se", time.Minute, clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)), sehttp.NewFake())
+	if err == nil || !strings.Contains(err.Error(), "the daemon exited at start (exit status 1)") {
+		t.Fatalf("%v", err)
+	}
+	ran := m.Ran()
+	if len(ran) != 1 || ran[0].String() != "/bin/se serve --workspace "+p.Workspace || !ran[0].Detached {
+		t.Fatalf("ran %+v", ran)
+	}
+	if log, err := p.Disk.ReadFile(p.DaemonLog()); err != nil || !strings.Contains(string(log), "no port left") {
+		t.Fatalf("the daemon's log holds %q (%v)", log, err)
 	}
 }

@@ -4,10 +4,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -24,8 +22,10 @@ var briefedAt = time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
 // #6 waits on a person and holds up #2, which it blocks; #7 is a retro whose
 // report waits for the owner. Closed are #20 (landed through PR #21 with its
 // answers), #19 (not planned, went to a person on its way), #18 (the last
-// retro, three days ago) and the issues of closed, each closed that long ago.
-// With person false, nothing waits on a person.
+// retro, three days ago) and the issues of closed, each closed that long ago,
+// each created an hour before it closed. Comments on closed issues are read
+// once, since a time, as GitHub answers it. A fork's PR from a branch named
+// issue-20 lands nothing. With person false, nothing waits on a person.
 func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 	t.Helper()
 	ago := func(d time.Duration) string { return briefedAt.Add(-d).Format(time.RFC3339) }
@@ -40,64 +40,92 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 			`{"number":7,"title":"retro","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-retro"},{"name":"se-person"}]}`)
 	}
 	shut := []string{
-		`{"number":20,"title":"twenty","state":"closed","state_reason":"completed","html_url":"u20","closed_at":"` + ago(time.Hour) + `"}`,
-		`{"number":19,"title":"nineteen","state":"closed","state_reason":"not_planned","html_url":"u19","closed_at":"` + ago(2*time.Hour) + `"}`,
-		`{"number":18,"title":"a retro","state":"closed","html_url":"u18","closed_at":"` + ago(72*time.Hour) + `","labels":[{"name":"se"},{"name":"se-retro"}]}`,
+		`{"number":20,"title":"twenty","state":"closed","state_reason":"completed","html_url":"u20","created_at":"` + ago(2*time.Hour) + `","closed_at":"` + ago(time.Hour) + `"}`,
+		`{"number":19,"title":"nineteen","state":"closed","state_reason":"not_planned","html_url":"u19","created_at":"` + ago(3*time.Hour) + `","closed_at":"` + ago(2*time.Hour) + `"}`,
+		`{"number":18,"title":"a retro","state":"closed","html_url":"u18","created_at":"` + ago(73*time.Hour) + `","closed_at":"` + ago(72*time.Hour) + `","labels":[{"name":"se"},{"name":"se-retro"}]}`,
 		`{"number":17,"title":"a PR","state":"closed","html_url":"p17","closed_at":"` + ago(time.Minute) + `","pull_request":{}}`,
 	}
 	for n, d := range closed {
-		shut = append(shut, fmt.Sprintf(`{"number":%d,"title":"closed %d","state":"closed","html_url":"u%d","closed_at":"%s"}`, n, n, n, ago(d)))
+		shut = append(shut, fmt.Sprintf(`{"number":%d,"title":"closed %d","state":"closed","html_url":"u%d","created_at":"%s","closed_at":"%s"}`, n, n, n, ago(d+time.Hour), ago(d)))
 	}
 	landing, err := issues.Landed{Issue: 20, Answers: map[string]string{"done": "twenty is done"}}.Comment([]issues.Question{{Key: "done", Question: "What?"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	quote := func(s string) string { data, _ := json.Marshal(s); return string(data) }
 	answers := map[string]string{
-		"repos/o/r/issues?labels=se&state=open&per_page=100":                  "[" + strings.Join(open, ",") + "]",
-		"repos/o/r/issues?labels=se&state=closed&per_page=100":                "[" + strings.Join(shut, ",") + "]",
-		"repos/o/r/git/matching-refs/heads/issue-":                            `[{"ref":"refs/heads/issue-1","object":{"sha":"s1"}}]`,
-		"repos/o/r/pulls?base=main&state=open&per_page=100":                   `[{"number":11,"html_url":"p11","head":{"ref":"issue-1","sha":"s1"}}]`,
-		"repos/o/r/pulls/11":                                                  `{"number":11,"html_url":"p11","mergeable":true,"mergeable_state":"clean","auto_merge":{},"head":{"ref":"issue-1","sha":"s1"}}`,
-		"repos/o/r/commits/s1/check-runs?per_page=100":                        `{"check_runs":[{"name":"check","status":"completed","conclusion":"success"}]}`,
-		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":                `[{"timestamp":"` + ago(10*time.Minute) + `"}]`,
-		"repos/o/r/issues/6/comments?per_page=100":                            `[{"id":1,"body":"<!-- se:person -->\nneeds the owner's call"}]`,
-		"repos/o/r/issues/7/comments?per_page=100":                            `[{"id":2,"body":"<!-- se:person -->\nthe retro report is posted"}]`,
-		"repos/o/r/issues/20/comments?per_page=100":                           `[{"id":3,"body":` + quote(landing) + `}]`,
-		"repos/o/r/issues/19/comments?per_page=100":                           `[{"id":4,"body":"<!-- se:person -->\nstuck twice"}]`,
-		"repos/o/r/issues/18/comments?per_page=100":                           `[{"id":5,"body":"early"},{"id":6,"body":"## Retro report\n- finding one\n- finding two\n<!-- se:retro -->"}]`,
-		"repos/o/r/pulls?head=o:issue-20&base=main&state=closed&per_page=100": `[{"number":21,"html_url":"p21","merged_at":"` + ago(time.Hour) + `"}]`,
-		"repos/o/r/pulls?head=o:issue-19&base=main&state=closed&per_page=100": `[]`,
+		"repos/o/r/issues?labels=se&state=open&per_page=100":   "[" + strings.Join(open, ",") + "]",
+		"repos/o/r/issues?labels=se&state=closed&per_page=100": "[" + strings.Join(shut, ",") + "]",
+		"repos/o/r/git/matching-refs/heads/issue-":             `[{"ref":"refs/heads/issue-1","object":{"sha":"s1"}}]`,
+		"repos/o/r/pulls?state=open&per_page=100":              `[{"number":11,"html_url":"p11","head":{"ref":"issue-1","sha":"s1"},"base":{"ref":"main"}}]`,
+		"repos/o/r/pulls/11":                                   `{"number":11,"html_url":"p11","mergeable":true,"mergeable_state":"clean","auto_merge":{},"head":{"ref":"issue-1","sha":"s1"}}`,
+		"repos/o/r/commits/s1/check-runs?per_page=100":         `{"check_runs":[{"name":"check","status":"completed","conclusion":"success"}]}`,
+		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1": `[{"timestamp":"` + ago(10*time.Minute) + `"}]`,
+		"repos/o/r/issues/6/comments?per_page=100":             `[{"id":1,"body":"<!-- se:person -->\nneeds the owner's call"}]`,
+		"repos/o/r/issues/7/comments?per_page=100":             `[{"id":2,"body":"<!-- se:person -->\nthe retro report is posted"}]`,
+		"repos/o/r/pulls?base=main&state=closed&per_page=100&page=1": `[{"number":22,"html_url":"p22","merged_at":"` + ago(time.Hour) + `","head":{"ref":"issue-20","repo":{"full_name":"fork/r"}}},` +
+			`{"number":21,"html_url":"p21","merged_at":"` + ago(time.Hour) + `","head":{"ref":"issue-20","repo":{"full_name":"o/r"}}},` +
+			`{"number":16,"html_url":"p16","merged_at":null,"head":{"ref":"issue-16","repo":null}}]`,
+	}
+	type comment struct {
+		ID      int       `json:"id"`
+		Body    string    `json:"body"`
+		Created time.Time `json:"created_at"`
+		URL     string    `json:"issue_url"`
+	}
+	on := func(n int, d time.Duration) (time.Time, string) {
+		return briefedAt.Add(-d), fmt.Sprintf("https://api.github.com/repos/o/r/issues/%d", n)
+	}
+	var comments []comment
+	for _, c := range []struct {
+		n    int
+		d    time.Duration
+		body string
+	}{
+		{18, 73 * time.Hour, "early"},
+		{18, 72 * time.Hour, "## Retro report\n- finding one\n- finding two\n<!-- se:retro -->"},
+		{19, 2 * time.Hour, "<!-- se:person -->\nstuck twice"},
+		{20, time.Hour, landing},
+	} {
+		at, url := on(c.n, c.d)
+		comments = append(comments, comment{len(comments) + 3, c.body, at, url})
 	}
 	if person {
 		answers["repos/o/r/issues/2/dependencies/blocked_by?per_page=100"] = `[{"number":6,"state":"open"}]`
 	}
-	old, oldClock := gh, wall
-	wall = clock.NewFake(briefedAt)
-	gh = func(args ...string) ([]byte, error) {
-		path := strings.Replace(args[len(args)-1], "repos/o/probe/", "repos/o/r/", 1)
-		if a, ok := answers[path]; ok {
-			return []byte(a), nil
+	// Each comment is held on its issue; GitHub lists them since a time.
+	byIssue := map[int][]comment{}
+	for _, c := range comments {
+		var n int
+		if _, err := fmt.Sscanf(c.URL, "https://api.github.com/repos/o/r/issues/%d", &n); err != nil {
+			t.Fatal(err)
 		}
-		// What the record leaves out has nothing: no blockers, no comments, no PR.
-		for _, empty := range []string{"/dependencies/blocked_by?", "/comments?", "pulls?head="} {
-			if strings.Contains(path, empty) {
-				return []byte(`[]`), nil
-			}
-		}
-		return nil, fmt.Errorf("not recorded: %v", args)
+		byIssue[n] = append(byIssue[n], c)
 	}
-	t.Cleanup(func() { gh, wall = old, oldClock })
+	for n, cs := range byIssue {
+		data, err := json.Marshal(cs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		answers[fmt.Sprintf("repos/o/r/issues/%d/comments", n)] = string(data)
+	}
+	// o/probe holds what o/r does.
+	probed := map[string]string{}
+	for path, a := range answers {
+		probed[strings.Replace(path, "repos/o/r/", "repos/o/probe/", 1)] = a
+	}
+	for path, a := range probed {
+		answers[path] = a
+	}
+	worldOf(t).Clock = clock.NewFake(briefedAt)
+	hubAt(t, answers)
 }
 
 // briefed runs se briefing in a workspace with a README and answers its text.
 func briefed(t *testing.T, args ...string) string {
 	t.Helper()
-	dir := t.TempDir()
+	d, dir := onFake(t), filepath.FromSlash("/ws")
 	readme := "# SE\n\nReader: a person meeting SE.\n\nSE is a test. It has parts. They talk.\nIt is small. This is cut.\n\n## Install\n"
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(readme), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	put(t, d, filepath.Join(dir, "README.md"), readme)
 	code, out, errs := se(t, append([]string{"briefing", "--workspace", dir}, args...)...)
 	if code != 0 {
 		t.Fatalf("briefing %v: exit %d, %q %q", args, code, out, errs)
@@ -119,6 +147,7 @@ func inOrder(t *testing.T, out string, parts ...string) {
 }
 
 func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
+	t.Parallel()
 	recordedBriefing(t, true, nil)
 	out := briefed(t, "--repo", "o/r")
 	inOrder(t, out,
@@ -134,7 +163,7 @@ func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
 		"- #19 nineteen [not planned, went to a person]",
 		"- #18 a retro [retro]",
 		"## Last retro", "#18 a retro, closed 2026-10-10T12:00:00Z", "u18", "- finding one", "- finding two",
-		"## Next", "se issue next would take #3 three", "u3",
+		"## Next", "se issue pull would take #3 three", "u3",
 		"1 ready, 1 claimed, 3 blocked, 0 in trees",
 		"## What SE is", "SE is a test.\nIt has parts.\nThey talk.\nIt is small.\n",
 		"- spec/principles.md: https://github.com/o/r/blob/main/spec/principles.md",
@@ -157,12 +186,14 @@ func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
 }
 
 func TestNothingPendingIsSaidPlainly(t *testing.T) {
+	t.Parallel()
 	recordedBriefing(t, false, nil)
 	out := briefed(t, "--repo", "o/r")
 	inOrder(t, out, "## Waits on you\nNothing waits on you.\n", "## In flight", "fleet check: healthy", "2 ready, 1 claimed, 0 blocked")
 }
 
 func TestTheWindowIsTheLastDayOrTheLastTenWhicheverAreMore(t *testing.T) {
+	t.Parallel()
 	// Twelve closed within the day: the day holds more than ten.
 	many := map[int]time.Duration{}
 	for n := 101; n <= 112; n++ {
@@ -210,19 +241,20 @@ func TestTheWindowIsTheLastDayOrTheLastTenWhicheverAreMore(t *testing.T) {
 	}
 }
 
-// probe registers the test's pending source once, however often it runs.
-var probe sync.Once
+// The probe registers as a source does, at init, before the tests that read
+// the sources run in parallel. It answers for o/probe alone.
+func init() {
+	issues.RegisterPending(issues.PendingSource{Name: "probe", List: func(o issues.Open) ([]issues.Pending, error) {
+		if o.Repo != "o/probe" {
+			return nil, nil
+		}
+		return []issues.Pending{{Number: 99, Title: "a probe", URL: "u99", Reason: "probing"}}, nil
+	}})
+}
 
 func TestAPendingSourceRegistersItself(t *testing.T) {
+	t.Parallel()
 	recordedBriefing(t, false, nil)
-	probe.Do(func() {
-		issues.RegisterPending(issues.PendingSource{Name: "probe", List: func(o issues.Open) ([]issues.Pending, error) {
-			if o.Repo != "o/probe" {
-				return nil, nil
-			}
-			return []issues.Pending{{Number: 99, Title: "a probe", URL: "u99", Reason: "probing"}}, nil
-		}})
-	})
 	inOrder(t, briefed(t, "--repo", "o/probe"), "## Waits on you\n- #99 a probe (probe, holds up 0)\n  probing\n  u99\n", "## In flight")
 	if out := briefed(t, "--repo", "o/r"); !strings.Contains(out, "Nothing waits on you.") {
 		t.Fatalf("the probe answered for another repository:\n%s", out)

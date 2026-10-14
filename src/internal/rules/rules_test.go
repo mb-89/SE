@@ -1,11 +1,11 @@
 package rules_test
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/rules"
 )
 
@@ -18,19 +18,19 @@ func check(t *testing.T, rule string, files map[string]string) []string {
 // checkIn is check with what the repo knows beyond its files.
 func checkIn(t *testing.T, repo *rules.Repo, rule string, files map[string]string) []string {
 	t.Helper()
-	root := t.TempDir()
+	d, root := disk.NewFake(), filepath.FromSlash("/checkout")
 	var paths []string
 	for p, text := range files {
 		full := filepath.Join(root, filepath.FromSlash(p))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		if err := d.MkdirAll(filepath.Dir(full)); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(full, []byte(text), 0o644); err != nil {
+		if err := d.WriteFile(full, []byte(text)); err != nil {
 			t.Fatal(err)
 		}
 		paths = append(paths, p)
 	}
-	repo.Root, repo.Paths = root, append(paths, "gone_test.go")
+	repo.Root, repo.Disk, repo.Paths = root, d, append(paths, "gone_test.go")
 	results, err := rules.Run(repo)
 	if err != nil {
 		t.Fatal(err)
@@ -53,6 +53,7 @@ func checkIn(t *testing.T, repo *rules.Repo, rule string, files map[string]strin
 }
 
 func TestEveryRuleIsRegisteredWithItsParts(t *testing.T) {
+	t.Parallel()
 	var names []string
 	for _, r := range rules.Rules() {
 		if r.Doc == "" || r.Applies == nil || r.Check == nil {
@@ -60,7 +61,7 @@ func TestEveryRuleIsRegisteredWithItsParts(t *testing.T) {
 		}
 		names = append(names, r.Name)
 	}
-	if got := strings.Join(names, " "); got != "io-module manifest reader repo-path se-command test-package todo-issue" {
+	if got := strings.Join(names, " "); got != "fast-test io-module manifest reader repo-path se-command test-package todo-issue" {
 		t.Fatalf("rules = %s", got)
 	}
 }

@@ -3,7 +3,6 @@ package issues
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -11,7 +10,10 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/battery"
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"gopkg.in/yaml.v3"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // QuestionsFile is where the landing questions are written, relative to the
@@ -25,10 +27,10 @@ type Question struct {
 	Hint     string `yaml:"hint"`
 }
 
-// Questions reads the landing questions from the checkout dir.
-func Questions(dir string) ([]Question, error) {
+// Questions reads the landing questions from the checkout dir on d.
+func Questions(d disk.Disk, dir string) ([]Question, error) {
 	path := filepath.Join(dir, QuestionsFile)
-	data, err := os.ReadFile(path)
+	data, err := d.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("the landing questions: %w", err)
 	}
@@ -49,9 +51,9 @@ func Questions(dir string) ([]Question, error) {
 	return qs, nil
 }
 
-// ReadAnswers reads an answers file: YAML, one answer per question key.
-func ReadAnswers(path string) (map[string]string, error) {
-	data, err := os.ReadFile(path)
+// ReadAnswers reads an answers file on d: YAML, one answer per question key.
+func ReadAnswers(d disk.Disk, path string) (map[string]string, error) {
+	data, err := d.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("the landing answers: %w", err)
 	}
@@ -214,7 +216,7 @@ func ParseLanding(body string) (l Landed, ok bool, err error) {
 // its branch's history and GitHub's record of the branch's creation.
 func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 	f := Facts{Landed: s.now().UTC().Truncate(time.Second), Takeovers: marksOf(comments).takeovers}
-	profile, profiled, err := battery.Load(dir)
+	profile, profiled, err := battery.Load(s.Disk, dir)
 	if err != nil {
 		return Facts{}, err
 	}
@@ -225,14 +227,14 @@ func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 		}
 	}
 	count := func(args ...string) (int, error) {
-		out, err := git(dir, append([]string{"rev-list", "--count"}, args...)...)
+		out, err := s.git(dir, append([]string{"rev-list", "--count"}, args...)...)
 		if err != nil {
 			return 0, err
 		}
 		return strconv.Atoi(out)
 	}
 	// The branch's own work is what main does not hold yet.
-	if _, err := git(dir, "fetch", "-q", "origin", "main"); err != nil {
+	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
 		return Facts{}, err
 	}
 	if f.Commits, err = count("--no-merges", "origin/main..HEAD"); err != nil {
@@ -275,14 +277,14 @@ func (s Source) postLanding(dir string, n int, qs []Question, answers map[string
 	}
 	for _, c := range comments {
 		if strings.Contains(c.Body, landingMark) {
-			_, err := s.GH("api", "-X", "PATCH", "-f", "body="+body, fmt.Sprintf("repos/%s/issues/comments/%d", s.Repo, c.ID))
+			_, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/issues/comments/%d", s.Repo, c.ID), github.F("body", body))
 			if err != nil {
 				return fmt.Errorf("updating #%d's landing answers: %w", n, err)
 			}
 			return nil
 		}
 	}
-	if _, err := s.GH("api", "-X", "POST", "-f", "body="+body, fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, n)); err != nil {
+	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, n), github.F("body", body)); err != nil {
 		return fmt.Errorf("posting #%d's landing answers: %w", n, err)
 	}
 	return nil

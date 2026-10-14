@@ -3,12 +3,12 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/rules"
 )
@@ -26,6 +26,7 @@ var manifests = map[string]func(m manifestCall) (string, error){
 // manifestCall is what a manifest is made for: the checkout, its files, the
 // words after the manifest's name, and the file the section stands in.
 type manifestCall struct {
+	disk  disk.Disk
 	root  string
 	paths []string
 	args  []string
@@ -63,7 +64,7 @@ func init() {
 				return Reply{}, err
 			}
 			c.Workspace = root
-			repo, err := repoOf(c.Workspace)
+			repo, err := repoOf(c.Disk, c.Proc, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -71,10 +72,10 @@ func init() {
 				if name == "" {
 					return Reply{}, fmt.Errorf("manifest takes a name (%s), or --write", strings.Join(manifestNames(), ", "))
 				}
-				text, err := manifest(c.Workspace, repo.Paths, name, "README.md")
+				text, err := manifest(c.Disk, c.Workspace, repo.Paths, name, "README.md")
 				return Reply{Text: text}, err
 			}
-			if unmerged, err := unmergedPaths(c.Workspace); err != nil {
+			if unmerged, err := unmergedPaths(c.Proc, c.Workspace); err != nil {
 				return Reply{}, err
 			} else if len(unmerged) > 0 {
 				return Reply{}, fmt.Errorf("manifest --write refuses while git's index holds unmerged paths (%s): resolve the merge first", strings.Join(unmerged, ", "))
@@ -85,18 +86,18 @@ func init() {
 					continue
 				}
 				full := filepath.Join(c.Workspace, filepath.FromSlash(p))
-				text, err := os.ReadFile(full)
+				text, err := c.Disk.ReadFile(full)
 				if err != nil {
 					continue
 				}
-				out, found := rules.Manifests(p, text, func(n string) (string, error) { return manifest(c.Workspace, repo.Paths, n, p) })
+				out, found := rules.Manifests(p, text, func(n string) (string, error) { return manifest(c.Disk, c.Workspace, repo.Paths, n, p) })
 				for _, f := range found {
 					if !strings.Contains(f.Message, "differs") {
 						return Reply{}, fmt.Errorf("%s", f)
 					}
 				}
 				if !bytes.Equal(out, text) {
-					if err := os.WriteFile(full, out, 0o644); err != nil {
+					if err := c.Disk.WriteFile(full, out); err != nil {
 						return Reply{}, err
 					}
 					changed = append(changed, p)
@@ -121,7 +122,7 @@ func manifestNames() []string {
 
 // manifest makes the manifest named, its first word the manifest and the rest
 // its words, for a section in the file at.
-func manifest(root string, paths []string, name, at string) (string, error) {
+func manifest(d disk.Disk, root string, paths []string, name, at string) (string, error) {
 	words := strings.Fields(name)
 	if len(words) == 0 {
 		return "", fmt.Errorf("a manifest needs a name")
@@ -130,7 +131,7 @@ func manifest(root string, paths []string, name, at string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("se makes no manifest %q; it makes %s", words[0], strings.Join(manifestNames(), ", "))
 	}
-	return made(manifestCall{root: root, paths: paths, args: words[1:], at: at})
+	return made(manifestCall{disk: d, root: root, paths: paths, args: words[1:], at: at})
 }
 
 // skillsManifest lists the plugin's skills, each by its name in a session,
@@ -142,7 +143,7 @@ func skillsManifest(m manifestCall) (string, error) {
 		if file != "SKILL.md" || path.Dir(path.Clean(dir)) != "src/plugin/skills" {
 			continue
 		}
-		text, err := os.ReadFile(filepath.Join(m.root, filepath.FromSlash(p)))
+		text, err := m.disk.ReadFile(filepath.Join(m.root, filepath.FromSlash(p)))
 		if err != nil {
 			return "", err
 		}
@@ -165,7 +166,7 @@ func specManifest(m manifestCall) (string, error) {
 		}
 		line := fmt.Sprintf("- [%s](%s)", p, m.link(p))
 		if path.Ext(p) == ".md" {
-			text, err := os.ReadFile(filepath.Join(m.root, filepath.FromSlash(p)))
+			text, err := m.disk.ReadFile(filepath.Join(m.root, filepath.FromSlash(p)))
 			if err != nil {
 				return "", err
 			}

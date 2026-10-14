@@ -3,14 +3,14 @@ package battery
 import (
 	"crypto/sha256"
 	"fmt"
-	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/gitenv"
+	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 // Decoy is a throwaway repository go test runs under: GIT_DIR points at it,
@@ -18,17 +18,19 @@ import (
 // inherit that variable acts on the decoy, and Check sees it changed.
 type Decoy struct {
 	GitDir string
+	disk   disk.Disk
 	before map[string][32]byte
 }
 
-// NewDecoy makes the decoy in dir, a repository with one commit, and records
-// what it holds.
-func NewDecoy(dir string) (*Decoy, error) {
+// NewDecoy makes the decoy in dir on d, a repository with one commit, and
+// records what it holds. It runs git on procs.
+func NewDecoy(d disk.Disk, procs proc.Procs, dir string) (*Decoy, error) {
 	git := func(args ...string) error {
-		cmd := exec.Command("git", append([]string{"-c", "user.name=battery", "-c", "user.email=battery@se", "-c", "commit.gpgsign=false"}, args...)...)
-		cmd.Dir = dir
-		cmd.Env = Isolated(os.Environ())
-		if out, err := cmd.CombinedOutput(); err != nil {
+		cmd := proc.Cmd{
+			Name: "git", Args: append([]string{"-c", "user.name=battery", "-c", "user.email=battery@se", "-c", "commit.gpgsign=false"}, args...),
+			Dir: dir, Env: Isolated(os.Environ()),
+		}
+		if out, err := proc.Combined(procs, cmd); err != nil {
 			return fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, out)
 		}
 		return nil
@@ -46,10 +48,10 @@ func NewDecoy(dir string) (*Decoy, error) {
 	if err := git("commit", "-q", "--allow-empty", "-m", "decoy"); err != nil {
 		return nil, err
 	}
-	d := &Decoy{GitDir: filepath.Join(dir, ".git")}
+	decoy := &Decoy{GitDir: filepath.Join(dir, ".git"), disk: d}
 	var err error
-	d.before, err = d.snapshot()
-	return d, err
+	decoy.before, err = decoy.snapshot()
+	return decoy, err
 }
 
 // Env is env with git's repository variables replaced by GIT_DIR, the decoy.
@@ -87,19 +89,22 @@ func (d *Decoy) Check() error {
 // snapshot is every file in the decoy's git folder, by path, with its hash.
 func (d *Decoy) snapshot() (map[string][32]byte, error) {
 	files := map[string][32]byte{}
-	err := filepath.WalkDir(d.GitDir, func(path string, e fs.DirEntry, err error) error {
-		if err != nil || e.IsDir() {
-			return err
-		}
-		text, err := os.ReadFile(path)
+	paths, err := d.disk.Walk(d.GitDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range paths {
+		text, err := d.disk.ReadFile(path)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		rel, err := filepath.Rel(d.GitDir, path)
+		if err != nil {
+			return nil, err
+		}
 		files[filepath.ToSlash(rel)] = sha256.Sum256(text)
-		return err
-	})
-	return files, err
+	}
+	return files, nil
 }
 
 // Isolated is env without git's repository variables.

@@ -45,7 +45,7 @@ const OVERVIEW = {
   groups: [
     {
       name: 'Issues',
-      commands: [{ name: 'issue next', summary: 'name the next se issue', usage: '/se issue next [--take [N]]' }],
+      commands: [{ name: 'issue pull', summary: 'name the next se issue', usage: '/se issue pull [--take [N]]' }],
     },
     {
       name: 'Session',
@@ -57,8 +57,8 @@ const OVERVIEW = {
   ],
   note: '/se help <command> shows its usage and flags.',
 }
-const ISSUE_NEXT = {
-  usage: '/se issue next [--take [N]]',
+const ISSUE_PULL = {
+  usage: '/se issue pull [--take [N]]',
   about: 'Name the next ready se issue.',
   flags: [
     { name: '--take', usage: 'claim the next ready issue' },
@@ -92,9 +92,9 @@ function world(on: On, env: Record<string, string> = {}): World {
       off: { text: 'SE is off.', active: false },
       update: { text: 'SE updated aaa → bbb. Its daemon restarted.', endpoint: DAEMON, reload: true },
       status: { text: 'No SE daemon answers for /work.' },
-      ui: { text: "SE's control panel is open.", panel: { buttons: ['issue next', 'status'] } },
+      ui: { text: "SE's control panel is open.", panel: { buttons: ['issue pull', 'status'] } },
       help: { text: HELP, help: OVERVIEW },
-      'help issue next': { text: '/se issue next [--take [N]]\n```\n…\n```', help: ISSUE_NEXT },
+      'help issue pull': { text: '/se issue pull [--take [N]]\n```\n…\n```', help: ISSUE_PULL },
     },
   }
   mock.env(on, env)
@@ -398,6 +398,29 @@ test('a daemon that is down never holds the event up', async ($, on) => {
   expect(out.text).toBe('still here')
 })
 
+test('a daemon that is gone is started again at most once a minute, by the plugin clock', async ($, on) => {
+  const w = world(on)
+  const clock = w.clock
+  await $.session.start(starts)
+  await $.command.run(se('on'))
+  w.ran = []
+  w.live = null
+  w.startFails = 'no room'
+  // The on counts as a start: the first try waits its minute.
+  await clock.advance(59_999)
+  await $.attribution.text(probe)
+  expect(verbs(w)).toEqual([])
+  await clock.advance(1)
+  await $.attribution.text(probe)
+  expect(verbs(w)).toEqual(['start'])
+  await clock.advance(59_999)
+  await $.attribution.text(probe)
+  expect(verbs(w)).toEqual(['start'])
+  await clock.advance(1)
+  await $.attribution.text(probe)
+  expect(verbs(w)).toEqual(['start', 'start'])
+})
+
 test('/se update applies the new endpoint and reloads once it has answered', async ($, on) => {
   const w = world(on)
   const clock = w.clock
@@ -576,7 +599,7 @@ test('/se ui opens a pane titled SE that draws on every surface', async ($, on) 
     expect(drawn).toMatchObject({ type: 'Box', props: { flexWrap: 'wrap', width: 40 } })
     const buttons = await ui.findAll({ type: 'Button' })
     // The toggle first, top left; then se's buttons in the order it named them.
-    expect(buttons.map(b => b.props.label)).toEqual(['SE off', 'issue next', 'status'])
+    expect(buttons.map(b => b.props.label)).toEqual(['SE off', 'issue pull', 'status'])
     await ui.unmount()
   }
 })
@@ -620,7 +643,7 @@ test('a command se offers as a button appears, and pressing it runs /se <name>',
   await $.session.start(starts)
   await $.command.run(se('ui'))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await ui.find({ key: 'run issue next' })).toBeDefined()
+  expect(await ui.find({ key: 'run issue pull' })).toBeDefined()
   w.ran = []
   await ui.press({ key: 'run status' })
   expect(verbs(w)).toEqual(['/se status'])
@@ -658,11 +681,11 @@ test('/se help draws its groups and two columns on every surface', async ($, on)
     expect((await ui.find({ key: 'usage' }))?.text).toBe('/se <command> [flags]')
     expect((await ui.find({ key: 'group Issues' }))?.text).toContain('Issues')
     expect((await ui.find({ key: 'group Session' }))?.text).toContain('Session')
-    const row = await ui.find({ key: 'command issue next' })
+    const row = await ui.find({ key: 'command issue pull' })
     expect(row?.props.flexDirection).toBe('row')
     // Two columns: the name in a box as wide as every row's, the summary beside it.
     const [name, summary] = (row?.children ?? []) as { props: { width?: number } }[]
-    expect(name?.props.width).toBe('issue next'.length + 2)
+    expect(name?.props.width).toBe('issue pull'.length + 2)
     expect((await ui.find({ key: 'command on' }))?.children[0]).toMatchObject({ props: { width: 12 } })
     expect(JSON.stringify(summary)).toContain('name the next se issue')
     expect((await ui.find({ key: 'note' }))?.text).toBe('/se help <command> shows its usage and flags.')
@@ -673,10 +696,10 @@ test('/se help draws its groups and two columns on every surface', async ($, on)
 test('/se help <command> draws its usage and one row per flag on every surface', async ($, on) => {
   world(on)
   await $.session.start(starts)
-  const said = await $.command.run(se('help issue next'))
+  const said = await $.command.run(se('help issue pull'))
   for (const surface of SURFACES) {
-    const ui = await $.ui.mount(output('help issue next', said?.text ?? '', surface))
-    expect((await ui.find({ key: 'usage' }))?.text).toBe('/se issue next [--take [N]]')
+    const ui = await $.ui.mount(output('help issue pull', said?.text ?? '', surface))
+    expect((await ui.find({ key: 'usage' }))?.text).toBe('/se issue pull [--take [N]]')
     expect((await ui.find({ key: 'about' }))?.text).toBe('Name the next ready se issue.')
     expect((await ui.find({ key: 'flag --take' }))?.text).toContain('claim the next ready issue')
     expect((await ui.find({ key: 'flag --workspace DIR' }))?.children[0]).toMatchObject({

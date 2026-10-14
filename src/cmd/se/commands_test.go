@@ -5,16 +5,95 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/github"
+	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 func se(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	var out, errs bytes.Buffer
-	code := run(args, &out, &errs)
+	code := run(worldOf(t), args, &out, &errs)
 	return code, out.String(), errs.String()
+}
+
+// worlds holds each test's World, so tests share nothing and run in parallel.
+var worlds sync.Map // *testing.T to *testWorld
+
+type testWorld struct {
+	World
+	env map[string]string
+}
+
+// testedAt is where every test's clock stands until the test moves it.
+var testedAt = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+
+// worldOf is the World every se call of the test runs in, made on the first
+// call: a fake clock at testedAt, an environment holding only what setenv put
+// there, an empty fake GitHub, and the real disk, programs and
+// network, which a test replaces through the fields.
+func worldOf(t *testing.T) *World {
+	t.Helper()
+	if w, ok := worlds.Load(t); ok {
+		return &w.(*testWorld).World
+	}
+	w := &testWorld{env: map[string]string{}}
+	w.World = World{
+		Clock: clock.NewFake(testedAt), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(),
+		GitHub:     github.NewFake(clock.NewFake(testedAt)),
+		Getenv:     func(k string) string { return w.env[k] },
+		Environ:    func() []string { return w.environ() },
+		Executable: os.Executable, Check: check,
+	}
+	worlds.Store(t, w)
+	t.Cleanup(func() { worlds.Delete(t) })
+	return &w.World
+}
+
+// environ is the process's environment with what setenv put there over it,
+// for the programs a call starts.
+func (w *testWorld) environ() []string {
+	out := os.Environ()
+	for k, v := range w.env {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
+// setenv sets a variable of the environment the test's calls run in.
+func setenv(t *testing.T, key, value string) {
+	t.Helper()
+	worldOf(t)
+	w, _ := worlds.Load(t)
+	w.(*testWorld).env[key] = value
+}
+
+// onFake hands every call of the test a fake disk in place of the real one.
+func onFake(t *testing.T) *disk.Fake {
+	t.Helper()
+	d := disk.NewFake()
+	worldOf(t).Disk = d
+	return d
+}
+
+// put writes a file on the fake, making its folder.
+func put(t *testing.T, d disk.Disk, path, text string) {
+	t.Helper()
+	if err := d.MkdirAll(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.WriteFile(path, []byte(text)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func session(t *testing.T, args ...string) Reply {
@@ -28,6 +107,7 @@ func session(t *testing.T, args ...string) Reply {
 }
 
 func TestEveryCommandSaysWhatItIs(t *testing.T) {
+	t.Parallel()
 	for name, c := range commands {
 		if c.Name != name || c.Summary == "" || c.Run == nil || !strings.HasPrefix(c.Usage, name) {
 			t.Errorf("command %q is incomplete: %+v", name, c)
@@ -36,8 +116,9 @@ func TestEveryCommandSaysWhatItIs(t *testing.T) {
 }
 
 func TestTheSessionIsOfferedItsCommandsAlone(t *testing.T) {
+	t.Parallel()
 	want := map[string]bool{
-		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue next": true, "issue new": true, "issue land": true, "issue review": true, "ui": true, "fleet check": true, "fleet fix": true, "briefing": true,
+		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue pull": true, "issue new": true, "issue land": true, "issue review": true, "ui": true, "fleet check": true, "fleet fix": true, "briefing": true,
 		"serve": false, "start": false, "stop": false,
 	}
 	for name, offered := range want {
@@ -49,6 +130,7 @@ func TestTheSessionIsOfferedItsCommandsAlone(t *testing.T) {
 }
 
 func TestTheHelpIsMadeFromTheRegistry(t *testing.T) {
+	t.Parallel()
 	terminal, inSession := help(false, false), help(true, false)
 	for name, c := range commands {
 		line := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(name) + ` +` + regexp.QuoteMeta(c.Summary) + `$`)
@@ -62,9 +144,10 @@ func TestTheHelpIsMadeFromTheRegistry(t *testing.T) {
 }
 
 func TestTheHelpGroupsTheCommands(t *testing.T) {
+	t.Parallel()
 	want := map[string][]string{
 		"Session":  {"help", "off", "on", "restart", "status", "ui", "update"},
-		"Issues":   {"issue land", "issue new", "issue next", "issue resume", "issue review", "issue tree"},
+		"Issues":   {"issue land", "issue new", "issue pull", "issue resume", "issue review", "issue tree"},
 		"Daemon":   {"serve", "start", "stop"},
 		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune", "fleet refresh"},
 		"Retro":    {"retro collect", "retro new", "retro report"},
@@ -87,19 +170,21 @@ func TestTheHelpGroupsTheCommands(t *testing.T) {
 }
 
 func TestACommandStandsUnderTheGroupItRegisters(t *testing.T) {
-	register(Command{
-		Name: "zz probe", Usage: "zz probe", Group: "Probes", Summary: "probe the help", Session: true,
-		Run: func(c *Call) (Reply, error) { return Reply{}, nil },
-	})
-	t.Cleanup(func() { delete(commands, "zz probe") })
+	t.Parallel()
+	// The probe joins the registered commands without touching the registry,
+	// which the other tests read in parallel.
+	probe := Command{Name: "zz probe", Usage: "zz probe", Group: "Probes", Summary: "probe the help", Session: true}
 	for _, session := range []bool{false, true} {
-		if h := help(session, false); !regexp.MustCompile(`Probes:\n  zz probe +probe the help\n`).MatchString(h) {
+		o := overview(session)
+		o.Groups = groupsOf(append(offered(session), probe), session)
+		if h := helpText(o, session, false); !regexp.MustCompile(`Probes:\n  zz probe +probe the help\n`).MatchString(h) {
 			t.Errorf("session %v:\n%s", session, h)
 		}
 	}
 }
 
 func TestNoOverviewLineIsLongerThan80(t *testing.T) {
+	t.Parallel()
 	for _, session := range []bool{false, true} {
 		for _, line := range strings.Split(help(session, false), "\n") {
 			if len(line) > 80 {
@@ -110,6 +195,7 @@ func TestNoOverviewLineIsLongerThan80(t *testing.T) {
 }
 
 func TestTheSessionHelpIsAFencedBlockAfterItsFirstLine(t *testing.T) {
+	t.Parallel()
 	h := help(true, false)
 	if !strings.HasPrefix(h, "/se <command> [flags]\n```\nFleet:") || !strings.HasSuffix(h, "\n```") {
 		t.Fatalf("%q", h)
@@ -120,6 +206,7 @@ func TestTheSessionHelpIsAFencedBlockAfterItsFirstLine(t *testing.T) {
 }
 
 func TestAColouredHelpColoursHeadingsAndNamesAlone(t *testing.T) {
+	t.Parallel()
 	plain, colored := help(false, false), help(false, true)
 	if strings.Contains(plain, "\x1b[") || !strings.Contains(colored, "\x1b[1mSession:\x1b[0m") || !strings.Contains(colored, "\x1b[36mstatus\x1b[0m") {
 		t.Fatalf("%q", colored)
@@ -130,6 +217,7 @@ func TestAColouredHelpColoursHeadingsAndNamesAlone(t *testing.T) {
 }
 
 func TestAPipeAndASessionGetNoColour(t *testing.T) {
+	t.Parallel()
 	if _, out, _ := se(t, "help"); strings.Contains(out, "\x1b[") {
 		t.Fatalf("%q", out)
 	}
@@ -142,13 +230,14 @@ func TestAPipeAndASessionGetNoColour(t *testing.T) {
 }
 
 func TestTheHelpOfACommand(t *testing.T) {
-	code, out, _ := se(t, "help", "issue", "next")
+	t.Parallel()
+	code, out, _ := se(t, "help", "issue", "pull")
 	if code != 0 {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 	for _, want := range []string{
-		"se issue next [--in ROOT]",
-		"Name the next ready se issue",
+		"se issue pull [--in ROOT]",
+		"Pull the next ready se issue",
 		"Flags:\n",
 		"\n  --in ROOT          look inside the tree of issue ROOT for its ready leaves\n",
 		"\n  --take             claim the next ready issue",
@@ -165,16 +254,17 @@ func TestTheHelpOfACommand(t *testing.T) {
 			t.Errorf("%d characters: %q", len(line), line)
 		}
 	}
-	if _, flagged, _ := se(t, "issue", "next", "--help"); flagged != out {
-		t.Errorf("se issue next --help:\n%s\nwant:\n%s", flagged, out)
+	if _, flagged, _ := se(t, "issue", "pull", "--help"); flagged != out {
+		t.Errorf("se issue pull --help:\n%s\nwant:\n%s", flagged, out)
 	}
 	usage, rest, _ := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(out, "se"), "\n"), "\n\n")
-	if r := session(t, "help", "issue", "next"); r.Text != "/se"+usage+"\n```\n"+rest+"\n```" {
-		t.Errorf("/se help issue next:\n%s", r.Text)
+	if r := session(t, "help", "issue", "pull"); r.Text != "/se"+usage+"\n```\n"+rest+"\n```" {
+		t.Errorf("/se help issue pull:\n%s", r.Text)
 	}
 }
 
 func TestEveryCommandHasItsHelp(t *testing.T) {
+	t.Parallel()
 	for name, c := range commands {
 		code, out, _ := se(t, "help", name)
 		if code != 0 || !strings.HasPrefix(out, "se "+strings.Fields(c.Usage)[0]) {
@@ -184,15 +274,17 @@ func TestEveryCommandHasItsHelp(t *testing.T) {
 }
 
 func TestHelpOfAnUnknownCommand(t *testing.T) {
+	t.Parallel()
 	if code, _, errs := se(t, "help", "frob"); code != 1 || !strings.Contains(errs, `"frob"`) {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
-	if _, out, _ := se(t, "help", "issue"); !strings.Contains(out, "  issue next") || strings.Contains(out, "  status") {
+	if _, out, _ := se(t, "help", "issue"); !strings.Contains(out, "  issue pull") || strings.Contains(out, "  status") {
 		t.Fatalf("se help issue: %q", out)
 	}
 }
 
 func TestHelpOnATerminal(t *testing.T) {
+	t.Parallel()
 	code, out, _ := se(t, "help")
 	if code != 0 || out != help(false, false)+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
@@ -200,6 +292,7 @@ func TestHelpOnATerminal(t *testing.T) {
 }
 
 func TestABareSeShowsTheHelp(t *testing.T) {
+	t.Parallel()
 	if code, _, errs := se(t); code != 2 || !strings.Contains(errs, help(false, false)) {
 		t.Fatalf("terminal: exit %d, %q", code, errs)
 	}
@@ -212,6 +305,7 @@ func TestABareSeShowsTheHelp(t *testing.T) {
 }
 
 func TestAnUnknownWordShowsTheHelpAndNamesIt(t *testing.T) {
+	t.Parallel()
 	r := session(t, "frob")
 	if !strings.HasPrefix(r.Text, help(true, false)) || !strings.Contains(r.Text, `"frob"`) {
 		t.Fatalf("%q", r.Text)
@@ -223,6 +317,7 @@ func TestAnUnknownWordShowsTheHelpAndNamesIt(t *testing.T) {
 }
 
 func TestATerminalCommandIsUnknownInASession(t *testing.T) {
+	t.Parallel()
 	r := session(t, "stop")
 	if !strings.Contains(r.Text, `no command "stop"`) {
 		t.Fatalf("%q", r.Text)
@@ -230,6 +325,7 @@ func TestATerminalCommandIsUnknownInASession(t *testing.T) {
 }
 
 func TestOffSwitchesTheSessionOff(t *testing.T) {
+	t.Parallel()
 	r := session(t, "off")
 	if r.Active == nil || *r.Active || r.Text != "SE is off." {
 		t.Fatalf("%+v", r)
@@ -237,6 +333,7 @@ func TestOffSwitchesTheSessionOff(t *testing.T) {
 }
 
 func TestStatusWithoutADaemon(t *testing.T) {
+	t.Parallel()
 	r := session(t, "status")
 	if !strings.HasPrefix(r.Text, "No SE daemon answers") {
 		t.Fatalf("%q", r.Text)
@@ -244,6 +341,7 @@ func TestStatusWithoutADaemon(t *testing.T) {
 }
 
 func TestACommandRefusesAStrayWord(t *testing.T) {
+	t.Parallel()
 	code, out, _ := se(t, "--session", "off", "now")
 	if code != 1 || !strings.Contains(out, `takes no word \"now\"`) {
 		t.Fatalf("exit %d, %q", code, out)
@@ -251,6 +349,7 @@ func TestACommandRefusesAStrayWord(t *testing.T) {
 }
 
 func TestTheWorkspaceFlagFollowsTheCommandToo(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if code, out, errs := se(t, "status", "--workspace", dir); code != 0 || !strings.Contains(out, dir) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
@@ -258,17 +357,19 @@ func TestTheWorkspaceFlagFollowsTheCommandToo(t *testing.T) {
 }
 
 func TestUiOffersTheButtonCommandsFromTheRegistry(t *testing.T) {
+	t.Parallel()
 	r := session(t, "ui")
 	if r.Panel == nil {
 		t.Fatalf("ui opened no panel: %+v", r)
 	}
-	want := []string{"issue next", "restart", "status", "update"}
+	want := []string{"issue pull", "restart", "status", "update"}
 	if strings.Join(r.Panel.Buttons, ",") != strings.Join(want, ",") {
 		t.Errorf("ui offers %q, want %q", r.Panel.Buttons, want)
 	}
 }
 
 func TestOnlySessionCommandsWithoutTypedWordsAreButtons(t *testing.T) {
+	t.Parallel()
 	for name, c := range commands {
 		if !c.Button {
 			continue
@@ -295,7 +396,8 @@ func TestOnlySessionCommandsWithoutTypedWordsAreButtons(t *testing.T) {
 }
 
 func TestNoSessionHelpOpensAFenceOnItsFirstLine(t *testing.T) {
-	for _, words := range [][]string{{"help"}, {"help", "issue"}, {"help", "issue", "next"}, {"issue", "next", "--help"}, {"frob"}} {
+	t.Parallel()
+	for _, words := range [][]string{{"help"}, {"help", "issue"}, {"help", "issue", "pull"}, {"issue", "pull", "--help"}, {"frob"}} {
 		r := session(t, words...)
 		if first, _, _ := strings.Cut(r.Text, "\n"); strings.Contains(first, "```") {
 			t.Errorf("/se %s opens a fence on its first line: %q", strings.Join(words, " "), first)
@@ -304,6 +406,7 @@ func TestNoSessionHelpOpensAFenceOnItsFirstLine(t *testing.T) {
 }
 
 func TestTheSessionHelpCarriesItsData(t *testing.T) {
+	t.Parallel()
 	r := session(t, "help")
 	if r.Help == nil || r.Help.Usage != "/se <command> [flags]" || len(r.Help.Flags) != 0 {
 		t.Fatalf("%+v", r.Help)
@@ -322,7 +425,7 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 			t.Errorf("%s stands under %q, want %q", name, listed[name], want)
 		}
 	}
-	one := session(t, "help", "issue", "next")
+	one := session(t, "help", "issue", "pull")
 	if one.Help == nil || one.Help.Usage == "" || one.Help.About == "" || len(one.Help.Groups) != 0 {
 		t.Fatalf("%+v", one.Help)
 	}

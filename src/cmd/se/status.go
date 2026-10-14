@@ -25,7 +25,7 @@ func init() {
 				said = fmt.Sprintf("SE's daemon answers for %s at %s (pid %d, up since %s).",
 					c.Workspace, ep.Address, ep.PID, ep.StartedAt.Local().Format(time.DateTime))
 			}
-			return Reply{Text: said + "\n" + sessionCommits()}, nil
+			return Reply{Text: said + "\n" + sessionCommits(&c.World)}, nil
 		},
 	})
 }

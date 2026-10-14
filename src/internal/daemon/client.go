@@ -1,19 +1,17 @@
 package daemon
 
 import (
-	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 // Healthy answers the endpoint of a daemon that runs and answers for this workspace.
 func Healthy(paths Paths, net sehttp.Net) (Endpoint, bool) {
-	ep, err := ReadEndpoint(paths.Endpoint())
+	ep, err := ReadEndpoint(paths)
 	if err != nil {
 		return ep, false
 	}
@@ -24,27 +22,27 @@ func Healthy(paths Paths, net sehttp.Net) (Endpoint, bool) {
 	return ep, said.ProtocolVersion == ProtocolVersion && said.InstanceID == ep.InstanceID
 }
 
-// Start answers the running daemon, or starts exe as the workspace's daemon and waits for it by clk.
-func Start(paths Paths, exe string, wait time.Duration, clk clock.Clock, net sehttp.Net) (Endpoint, error) {
+// Start answers the running daemon, or starts exe on procs, detached, as the
+// workspace's daemon and waits for it by clk.
+func Start(procs proc.Procs, paths Paths, exe string, wait time.Duration, clk clock.Clock, net sehttp.Net) (Endpoint, error) {
 	if ep, ok := Healthy(paths, net); ok {
 		return ep, nil
 	}
 	if err := Prepare(paths); err != nil {
 		return Endpoint{}, err
 	}
-	out, err := os.OpenFile(paths.DaemonLog(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	// The real disk answers the log as a file, which the daemon writes itself.
+	out, err := paths.Disk.Append(paths.DaemonLog())
 	if err != nil {
 		return Endpoint{}, err
 	}
 	defer out.Close()
-	cmd := exec.Command(exe, "serve", "--workspace", paths.Workspace)
-	cmd.Stdout, cmd.Stderr = out, out
-	cmd.SysProcAttr = detached()
-	if err := cmd.Start(); err != nil {
+	run, err := procs.Start(proc.Cmd{Name: exe, Args: []string{"serve", "--workspace", paths.Workspace}, Stdout: out, Stderr: out, Detached: true})
+	if err != nil {
 		return Endpoint{}, err
 	}
 	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	go func() { exited <- run.Wait() }()
 	deadline := clk.Now().Add(wait)
 	for clk.Now().Before(deadline) {
 		if ep, ok := Healthy(paths, net); ok {
@@ -74,7 +72,7 @@ func Stop(paths Paths, wait time.Duration, clk clock.Clock, net sehttp.Net) erro
 	}
 	deadline := clk.Now().Add(wait)
 	for clk.Now().Before(deadline) {
-		if _, err := os.Stat(paths.Endpoint()); errors.Is(err, os.ErrNotExist) {
+		if there, err := paths.Disk.Exists(paths.Endpoint()); err == nil && !there {
 			return nil
 		}
 		clk.Sleep(50 * time.Millisecond)

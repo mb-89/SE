@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/battery"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // Landing is where an issue's PR stands once se issue land is done.
@@ -31,9 +33,9 @@ type pull struct {
 // autoMerge turns on GitHub's auto-merge, squashing, for the PR with this node id.
 const autoMerge = `mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId } }`
 
-// Issued reads n from the issue branch checked out in dir.
-func Issued(dir string) (int, error) {
-	branch, err := git(dir, "rev-parse", "--abbrev-ref", "HEAD")
+// issued reads n from the issue branch checked out in dir.
+func (s Source) issued(dir string) (int, error) {
+	branch, err := s.git(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return 0, err
 	}
@@ -55,14 +57,14 @@ func Issued(dir string) (int, error) {
 // is set, the leaf records who worked it, so a review of its tree can refuse
 // that worker.
 func (s Source) Land(dir, session string, qs []Question, answers map[string]string, check func(dir string) error) (Landing, error) {
-	n, err := Issued(dir)
+	n, err := s.issued(dir)
 	if err != nil {
 		return Landing{}, err
 	}
 	if err := answered(qs, answers); err != nil {
 		return Landing{}, err
 	}
-	if dirty, err := git(dir, "status", "--porcelain"); err != nil {
+	if dirty, err := s.git(dir, "status", "--porcelain"); err != nil {
 		return Landing{}, err
 	} else if dirty != "" {
 		return Landing{}, fmt.Errorf("land pushes commits, and %s has changes not committed:\n%s", dir, dirty)
@@ -75,21 +77,21 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		return Landing{}, fmt.Errorf("#%d has open sub-issues, and a parent holds no work: its sub-issues land, and it closes by itself", n)
 	}
 	branch := Branch(n)
-	if err := takeIn(dir, branch); err != nil {
+	if err := s.takeIn(dir, branch); err != nil {
 		return Landing{}, err
 	}
 	if err := check(dir); err != nil {
 		return Landing{}, fmt.Errorf("the check failed, so nothing was pushed: %w", err)
 	}
 	body := fmt.Sprintf("Fixes #%d", n)
-	profile, profiled, err := battery.Load(dir)
+	profile, profiled, err := battery.Load(s.Disk, dir)
 	if err != nil {
 		return Landing{}, err
 	}
 	if profiled {
 		body += "\n\n" + profile.Markdown()
 	}
-	if _, err := git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
+	if _, err := s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
 		return Landing{}, err
 	}
 	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
@@ -109,14 +111,13 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		pr = open[0]
 		// The body shows the profile of the battery this land ran.
 		if profiled {
-			if _, err := s.GH("api", "-X", "PATCH", "-f", "body="+body, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, pr.Number)); err != nil {
+			if _, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/pulls/%d", s.Repo, pr.Number), github.F("body", body)); err != nil {
 				return Landing{}, err
 			}
 		}
 	} else {
 		path := fmt.Sprintf("repos/%s/pulls", s.Repo)
-		out, err := s.GH("api", "-X", "POST", "-f", "title="+got[0].Title, "-f", "head="+branch, "-f", "base=main",
-			"-f", "body="+body, path)
+		out, err := s.GitHub.Send("POST", path, github.F("title", got[0].Title), github.F("head", branch), github.F("base", "main"), github.F("body", body))
 		if err != nil {
 			return Landing{}, err
 		}
@@ -134,18 +135,18 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 // has (se fleet refresh merges main into it there) and then origin's main, so
 // the check runs on what lands and the push is a fast-forward. A merge that
 // conflicts is undone, and the box resolves it by hand.
-func takeIn(dir, branch string) error {
-	if _, err := git(dir, "fetch", "-q", "origin", "main"); err != nil {
+func (s Source) takeIn(dir, branch string) error {
+	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
 		return err
 	}
 	refs := []string{"origin/main"}
 	// A branch not on origin yet has nothing to take in.
-	if _, err := git(dir, "fetch", "-q", "origin", "refs/heads/"+branch+":refs/remotes/origin/"+branch); err == nil {
+	if _, err := s.git(dir, "fetch", "-q", "origin", "refs/heads/"+branch+":refs/remotes/origin/"+branch); err == nil {
 		refs = []string{"origin/" + branch, "origin/main"}
 	}
 	for _, ref := range refs {
-		if _, err := git(dir, "merge", "-q", "--no-edit", ref); err != nil {
-			_, _ = git(dir, "merge", "--abort")
+		if _, err := s.git(dir, "merge", "-q", "--no-edit", ref); err != nil {
+			_, _ = s.git(dir, "merge", "--abort")
 			return fmt.Errorf("merging %s into %s conflicts, so nothing was pushed: merge it by hand (never rebase), resolve the conflict, commit and land again: %w", ref, branch, err)
 		}
 	}
@@ -155,11 +156,11 @@ func takeIn(dir, branch string) error {
 // autoMerge turns on auto-merge, squashing, for the PR; merged is true where
 // nothing was left to wait for and it was merged at once instead.
 func (s Source) autoMerge(pr pull) (merged bool, err error) {
-	_, err = s.GH("api", "-f", "query="+autoMerge, "-f", "id="+pr.NodeID, "graphql")
+	_, err = s.GitHub.GraphQL(autoMerge, github.F("id", pr.NodeID))
 	if err != nil && strings.Contains(err.Error(), "GraphQL is not available") {
 		// A Claude Code cloud session reaches GitHub through a proxy that
 		// refuses GraphQL and offers auto-merge as a REST route instead.
-		_, err = s.GH("api", "-X", "PUT", "-f", "merge_method=squash", fmt.Sprintf("repos/%s/pulls/%d/ccr/auto_merge", s.Repo, pr.Number))
+		_, err = s.GitHub.Send("PUT", fmt.Sprintf("repos/%s/pulls/%d/ccr/auto_merge", s.Repo, pr.Number), github.F("merge_method", "squash"))
 	}
 	if err != nil {
 		// A PR with nothing left to wait for takes no auto-merge; it is
@@ -168,7 +169,7 @@ func (s Source) autoMerge(pr pull) (merged bool, err error) {
 			return false, fmt.Errorf("PR #%d (%s) is open, but auto-merge is not on: %w", pr.Number, pr.URL, err)
 		}
 		path := fmt.Sprintf("repos/%s/pulls/%d/merge", s.Repo, pr.Number)
-		if _, err := s.GH("api", "-X", "PUT", "-f", "merge_method=squash", path); err != nil {
+		if _, err := s.GitHub.Send("PUT", path, github.F("merge_method", "squash")); err != nil {
 			return false, fmt.Errorf("PR #%d (%s) is open, but merging it failed: %w", pr.Number, pr.URL, err)
 		}
 		return true, nil

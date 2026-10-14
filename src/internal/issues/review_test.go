@@ -4,33 +4,21 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
-// reviewGH answers from answers, which a test changes as the tree moves; an
-// issue's links and comments it holds no answer for are none. It keeps every
-// write it was asked.
-func reviewGH(t *testing.T, answers map[string]string) (GH, *[][]string) {
+// closeIssue closes issue n on the fake GitHub, as a merged PR would.
+func closeIssue(t *testing.T, gh github.GitHub, n int) {
 	t.Helper()
-	var wrote [][]string
-	return func(args ...string) ([]byte, error) {
-		path := args[len(args)-1]
-		if args[1] == "-X" {
-			wrote = append(wrote, args)
-		}
-		if a, ok := answers[path]; ok {
-			return []byte(a), nil
-		}
-		if strings.HasSuffix(path, "/dependencies/blocked_by?per_page=100") || strings.HasSuffix(path, "/comments?per_page=100") {
-			return []byte(`[]`), nil
-		}
-		t.Fatalf("gh %v was not recorded", args)
-		return nil, nil
-	}, &wrote
+	if _, err := gh.Send("PATCH", fmt.Sprintf("repos/o/r/issues/%d", n), github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // passing is a report a pass may post: every requirement has its evidence.
@@ -56,30 +44,30 @@ func workedBy(w Worker) string {
 }
 
 func TestRecordWritesTheWorkerOnce(t *testing.T) {
+	t.Parallel()
 	w := Worker{Session: "s1", Workspace: "/b/issue-2"}
-	answers := map[string]string{"repos/o/r/issues/2/comments": `{}`}
-	gh, wrote := reviewGH(t, answers)
-	s := Source{Repo: repo, GH: gh, Clock: atNow()}
+	gh := recorded(t, map[string]string{"repos/o/r/issues/2": `{"number":2}`, "repos/o/r/issues/3": `{"number":3}`})
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if err := s.record(2, w); err != nil {
 		t.Fatal(err)
 	}
-	if len(*wrote) != 1 || !strings.Contains((*wrote)[0][4], `<!-- se-worker {"session":"s1","workspace":"/b/issue-2"} -->`) {
-		t.Fatalf("%q", *wrote)
+	if c := commentsAt(t, gh, 2); len(c) != 1 || !strings.Contains(c[0].Body, `<!-- se-worker {"session":"s1","workspace":"/b/issue-2"} -->`) {
+		t.Fatalf("%+v", c)
 	}
-	answers[commentsPath(2)] = workedBy(w)
 	if got, err := s.workers(2); err != nil || !reflect.DeepEqual(got, []Worker{w}) {
 		t.Fatalf("%v %v", got, err)
 	}
-	if err := s.record(2, w); err != nil || len(*wrote) != 1 {
-		t.Fatalf("%v %q", err, *wrote)
+	if err := s.record(2, w); err != nil || len(gh.Writes()) != 1 {
+		t.Fatalf("%v %q", err, gh.Writes())
 	}
 	// Without a session there is no one to record.
-	if err := s.record(3, Worker{Workspace: "/b"}); err != nil || len(*wrote) != 1 {
-		t.Fatalf("%v %q", err, *wrote)
+	if err := s.record(3, Worker{Workspace: "/b"}); err != nil || len(gh.Writes()) != 1 {
+		t.Fatalf("%v %q", err, gh.Writes())
 	}
 }
 
 func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
+	t.Parallel()
 	worker := Worker{Session: "box", Workspace: "/b/issue-2"}
 	fixer := Worker{Session: "box2", Workspace: "/c/issue-3"}
 	reviewer := Worker{Session: "box", Workspace: "/b/review-1-1"}
@@ -89,8 +77,8 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 		refsPath:    `[]`,
 		subsPath(1): subs(2),
 	}
-	gh, wrote := reviewGH(t, answers)
-	s := Source{Repo: repo, GH: gh, Clock: atNow()}
+	gh := recorded(t, answers)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 
 	// Before the leaf lands, #1 is not ready for review.
 	if tr, err := s.In(1); err != nil || !reflect.DeepEqual(numbers(tr.Ready), []int{2}) || len(tr.Review) != 0 {
@@ -101,9 +89,8 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 	}
 
 	// The leaf lands: its worker is recorded, and it closes.
-	answers[listPath] = list(node(1, 1, ReviewLabel))
-	answers[subsPath(1)] = subs(-2)
-	answers[commentsPath(2)] = workedBy(worker)
+	seed(t, gh, map[string]string{commentsPath(2): workedBy(worker)})
+	closeIssue(t, gh, 2)
 	tr, err := s.In(1)
 	if err != nil || !reflect.DeepEqual(numbers(tr.Review), []int{1}) || len(tr.Ready) != 0 {
 		t.Fatalf("%+v %v", tr, err)
@@ -113,99 +100,92 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 	}
 
 	// The leaf's worker may not review it.
+	landed := len(gh.Writes())
 	if _, err := s.Review(1, worker, true, passing); err == nil || !strings.Contains(err.Error(), "session box in /b/issue-2 worked #2 in #1's tree") {
 		t.Fatalf("%v", err)
 	}
-	if len(*wrote) != 0 {
-		t.Fatalf("a refused review wrote %q", *wrote)
+	if w := gh.Writes()[landed:]; len(w) != 0 {
+		t.Fatalf("a refused review wrote %q", w)
 	}
 
-	// Another agent fails it: the findings go on #1, a fix leaf under it.
-	answers["repos/o/r/issues/1"] = `{"id":1001,"number":1}`
-	answers["repos/o/r/issues"] = `{"id":1003,"number":3,"title":"fix it","html_url":"u3"}`
-	answers["repos/o/r/issues/1/sub_issues"] = `{}`
-	answers["repos/o/r/issues/1/comments"] = `{}`
+	// Another agent fails it: the findings go on #1, a fix leaf under it,
+	// the repository's next issue, #3.
 	r, err := s.Review(1, reviewer, false, failing("fix it"))
 	if err != nil || r.Passed || !reflect.DeepEqual(numbers(r.Fixes), []int{3}) {
 		t.Fatalf("%+v %v", r, err)
 	}
 	// The blocking finding is an se-final sub-issue of #1; the report goes on #1.
-	if w := *wrote; len(w) != 3 ||
-		!reflect.DeepEqual(w[0][:4], []string{"api", "-X", "POST", "-f"}) || w[0][4] != "title=fix it" ||
-		!strings.HasPrefix(w[0][6], "body=Blocking: the review of #1 waits for it") ||
-		!reflect.DeepEqual(w[0][7:], []string{"-f", "labels[]=se", "-f", "labels[]=se-final", "repos/o/r/issues"}) ||
-		!reflect.DeepEqual(w[1], []string{"api", "-X", "POST", "-F", "sub_issue_id=1003", "repos/o/r/issues/1/sub_issues"}) ||
-		w[2][5] != "repos/o/r/issues/1/comments" ||
-		!strings.HasPrefix(w[2][4], "body=## Review: FAIL\n\nBy session box in /b/review-1-1, at c0ffee.") ||
-		!strings.Contains(w[2][4], "- **fix it** (blocking, #3)") ||
-		!strings.Contains(w[2][4], `<!-- se:review {"passed":false,"rereview":false,`) {
+	want := []string{"POST repos/o/r/issues", "POST repos/o/r/issues/1/sub_issues", "POST repos/o/r/issues/1/comments"}
+	if w := gh.Writes()[landed:]; !reflect.DeepEqual(w, want) {
 		t.Fatalf("%q", w)
 	}
-	*wrote = nil
+	fix := issueAt(t, gh, 3)
+	if fix.Title != "fix it" || !strings.HasPrefix(fix.Body, "Blocking: the review of #1 waits for it") || !fix.labelled(Label) || !fix.labelled(FinalLabel) {
+		t.Fatalf("%+v", fix)
+	}
+	if c := commentsAt(t, gh, 1); len(c) != 1 || !strings.HasPrefix(c[0].Body, "## Review: FAIL\n\nBy session box in /b/review-1-1, at c0ffee.") ||
+		!strings.Contains(c[0].Body, "- **fix it** (blocking, #3)") || !strings.Contains(c[0].Body, `<!-- se:review {"passed":false,"rereview":false,`) {
+		t.Fatalf("%+v", c)
+	}
 
 	// The fix is work inside #1, which waits for it.
-	answers[listPath] = list(node(1, 2, ReviewLabel), node(3, 0))
-	answers[subsPath(1)] = subs(-2, 3)
 	if tr, err := s.In(1); err != nil || !reflect.DeepEqual(numbers(tr.Ready), []int{3}) || len(tr.Review) != 0 {
 		t.Fatalf("%+v %v", tr, err)
 	}
 
 	// Once the fix has landed, #1 is ready for review again, in a new worktree.
-	answers[listPath] = list(node(1, 2, ReviewLabel))
-	answers[subsPath(1)] = subs(-2, -3)
-	answers[commentsPath(3)] = workedBy(fixer)
+	seed(t, gh, map[string]string{commentsPath(3): workedBy(fixer)})
+	closeIssue(t, gh, 3)
 	if tr, err := s.In(1); err != nil || !reflect.DeepEqual(numbers(tr.Review), []int{1}) || !strings.HasSuffix(tr.ReviewWorktree("/b/SE", 1), "/b/review-1-2 origin/main") {
 		t.Fatalf("%+v %v", tr, err)
 	}
-	if _, err := s.Review(1, fixer, true, passing); err == nil || !strings.Contains(err.Error(), "worked #3") {
+	// Its review is a re-review: it checks the earlier blocker, #3.
+	again := passing
+	again.Requirements = []Requirement{{Item: "fix it is fixed", Evidence: "go test ./... ok", Blocker: 3}}
+	if _, err := s.Review(1, reviewer, true, passing); err == nil || !strings.Contains(err.Error(), "checks only the earlier blockers (#3)") {
+		t.Fatalf("%v", err)
+	}
+	if _, err := s.Review(1, fixer, true, again); err == nil || !strings.Contains(err.Error(), "worked #3") {
 		t.Fatalf("%v", err)
 	}
 
 	// A pass by a different agent closes it.
-	r, err = s.Review(1, reviewer, true, passing)
+	fixed := len(gh.Writes())
+	r, err = s.Review(1, reviewer, true, again)
 	if err != nil || !r.Passed || len(r.Fixes) != 0 {
 		t.Fatalf("%+v %v", r, err)
 	}
-	if w := *wrote; len(w) != 2 || w[0][5] != "repos/o/r/issues/1/comments" || !strings.HasPrefix(w[0][4], "body=## Review: PASS\n") ||
-		!reflect.DeepEqual(w[1], []string{"api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", "repos/o/r/issues/1"}) {
+	if w := gh.Writes()[fixed:]; !reflect.DeepEqual(w, []string{"POST repos/o/r/issues/1/comments", "PATCH repos/o/r/issues/1"}) {
 		t.Fatalf("%q", w)
+	}
+	if c := commentsAt(t, gh, 1); !strings.HasPrefix(c[len(c)-1].Body, "## Re-review: PASS\n") || issueAt(t, gh, 1).State != "closed" || issueAt(t, gh, 1).StateReason != "completed" {
+		t.Fatalf("%+v", c)
 	}
 }
 
 func TestAPassClosesTheParentItCompletes(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		// #1 holds only #2, a review parent ready for review.
-		listPath:                      list(node(1, 1), node(2, 1, ReviewLabel)),
-		refsPath:                      `[]`,
-		subsPath(1):                   subs(2),
-		subsPath(2):                   subs(-3),
-		commentsPath(3):               workedBy(Worker{Session: "a", Workspace: "/w"}),
-		"repos/o/r/issues/2/comments": `{}`,
-		"repos/o/r/issues/2":          `{}`,
-		"repos/o/r/issues/1/comments": `{}`,
-		"repos/o/r/issues/1":          `{}`,
+		listPath:        list(node(1, 1), node(2, 1, ReviewLabel)),
+		refsPath:        `[]`,
+		subsPath(1):     subs(2),
+		subsPath(2):     subs(-3),
+		commentsPath(3): workedBy(Worker{Session: "a", Workspace: "/w"}),
 	}
-	gh, wrote := reviewGH(t, answers)
-	s := Source{Repo: repo, GH: gh, Clock: atNow()}
-	// The closing is read back before the parent-closing rule runs.
-	closing := gh
-	s.GH = func(args ...string) ([]byte, error) {
-		if args[len(args)-1] == "repos/o/r/issues/2" && args[1] == "-X" {
-			answers[listPath] = list(node(1, 1))
-			answers[subsPath(1)] = subs(-2)
-		}
-		return closing(args...)
-	}
+	gh := recorded(t, answers)
+	s := Source{Repo: repo, GitHub: gh, Clock: atNow()}
+	// Closing #2 closes #1, its last open sub-issue, too.
 	if _, err := s.Review(2, Worker{Session: "b", Workspace: "/w"}, true, passing); err != nil {
 		t.Fatal(err)
 	}
-	last := (*wrote)[len(*wrote)-1]
-	if want := []string{"api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", "repos/o/r/issues/1"}; !reflect.DeepEqual(last, want) {
-		t.Fatalf("%q", *wrote)
+	if w := gh.Writes(); w[len(w)-1] != "PATCH repos/o/r/issues/1" || issueAt(t, gh, 1).State != "closed" {
+		t.Fatalf("%q", w)
 	}
 }
 
 func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		// #1 is ready for review: #2 is a closed parent holding #4 (worked
 		// by w) and #5 (closed as not planned); #3 records no worker. #7 is
@@ -216,8 +196,8 @@ func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
 		subsPath(2):     `[{"number":4,"state":"closed"},{"number":5,"state":"closed","state_reason":"not_planned"}]`,
 		commentsPath(4): workedBy(Worker{Session: "w", Workspace: "/w"}),
 	}
-	gh, wrote := reviewGH(t, answers)
-	s := Source{Repo: repo, GH: gh, Clock: atNow()}
+	gh := recorded(t, answers)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	r := Worker{Session: "r", Workspace: "/r"}
 	for _, c := range []struct {
 		n    int
@@ -236,34 +216,33 @@ func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
 			t.Errorf("%+v: %v", c, err)
 		}
 	}
-	if len(*wrote) != 0 {
-		t.Fatalf("a refused review wrote %q", *wrote)
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("a refused review wrote %q", w)
 	}
 	// With #3's worker recorded, w's workspace in another session may review.
-	answers[commentsPath(3)] = workedBy(Worker{Session: "w", Workspace: "/w3"})
-	answers["repos/o/r/issues/1/comments"] = `{}`
-	answers["repos/o/r/issues/1"] = `{}`
+	seed(t, gh, map[string]string{commentsPath(3): workedBy(Worker{Session: "w", Workspace: "/w3"})})
 	if _, err := s.Review(1, Worker{Session: "other", Workspace: "/w"}, true, passing); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestTheReviewerModelIsOneLineOfSpecModels(t *testing.T) {
-	dir := t.TempDir()
-	if got := ReviewerModel(dir); got != "" {
+	t.Parallel()
+	d, dir := disk.NewFake(), filepath.FromSlash("/checkout")
+	if got := ReviewerModel(d, dir); got != "" {
 		t.Fatalf("without the file: %q", got)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "spec"), 0o755); err != nil {
+	if err := d.MkdirAll(filepath.Join(dir, "spec")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ModelsPath), []byte("# models\nbox: opus\nreviewer: \"fable\" # stronger\n"), 0o644); err != nil {
+	if err := d.WriteFile(filepath.Join(dir, ModelsPath), []byte("# models\nbox: opus\nreviewer: \"fable\" # stronger\n")); err != nil {
 		t.Fatal(err)
 	}
-	if got := ReviewerModel(dir); got != "fable" {
+	if got := ReviewerModel(d, dir); got != "fable" {
 		t.Fatalf("%q", got)
 	}
-	// The repository's own setting is never empty.
-	if got := ReviewerModel("../../.."); got == "" {
+	// The repository's own setting is never empty: it is the checkout's file, on the real disk.
+	if got := ReviewerModel(disk.Real(), "../../.."); got == "" {
 		t.Fatal("spec/models.yaml sets no reviewer")
 	}
 }

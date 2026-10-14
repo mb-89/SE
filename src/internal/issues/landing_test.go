@@ -2,7 +2,6 @@
 package issues
 
 import (
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -10,10 +9,13 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 func TestTheLandingQuestionsAreTheSpecsList(t *testing.T) {
-	got, err := Questions(filepath.Join("..", "..", ".."))
+	t.Parallel()
+	// The spec is the checkout's own file, so it is read from the real disk.
+	got, err := Questions(disk.Real(), filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,11 +33,8 @@ func TestTheLandingQuestionsAreTheSpecsList(t *testing.T) {
 }
 
 func TestLandRefusesAnswersMissingEmptyOrUnknown(t *testing.T) {
+	t.Parallel()
 	origin, a := claimed(t)
-	never := func(args ...string) ([]byte, error) {
-		t.Fatalf("gh %v after a refusal", args)
-		return nil, nil
-	}
 	for _, c := range []struct {
 		answers map[string]string
 		want    string
@@ -46,7 +45,7 @@ func TestLandRefusesAnswersMissingEmptyOrUnknown(t *testing.T) {
 		{map[string]string{"done": "x", "left": "none", "extra": "y", "also": "z"}, "not in spec/landing.yaml: also, extra"},
 	} {
 		checked := false
-		_, err := Source{Repo: repo, GH: never, Clock: atNow()}.Land(a, "", qs, c.answers, func(string) error { checked = true; return nil })
+		_, err := Source{Proc: machine, Repo: repo, GitHub: never{t}, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, c.answers, func(string) error { checked = true; return nil })
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "nothing was pushed") || checked {
 			t.Errorf("%v: %v, checked %v", c.answers, err, checked)
 		}
@@ -57,23 +56,25 @@ func TestLandRefusesAnswersMissingEmptyOrUnknown(t *testing.T) {
 }
 
 func TestReadAnswersTakesTextAndRefusesAList(t *testing.T) {
-	dir := t.TempDir()
-	good, bad := filepath.Join(dir, "good.yaml"), filepath.Join(dir, "bad.yaml")
+	t.Parallel()
+	d := disk.NewFake()
+	good, bad := filepath.FromSlash("/good.yaml"), filepath.FromSlash("/bad.yaml")
 	for path, text := range map[string]string{good: "done: one line\ntimeline: |\n  first\n  then\nleft:\n", bad: "done:\n  - a\n  - b\n"} {
-		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		if err := d.WriteFile(path, []byte(text)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got, err := ReadAnswers(good)
+	got, err := ReadAnswers(d, good)
 	if want := map[string]string{"done": "one line", "timeline": "first\nthen\n", "left": ""}; err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("%q %v", got, err)
 	}
-	if _, err := ReadAnswers(bad); err == nil || !strings.Contains(err.Error(), "as text") {
+	if _, err := ReadAnswers(d, bad); err == nil || !strings.Contains(err.Error(), "as text") {
 		t.Fatalf("%v", err)
 	}
 }
 
 func TestTheLandingBlockRoundTrips(t *testing.T) {
+	t.Parallel()
 	l := Landed{Issue: 39, Answers: map[string]string{
 		"done": "answers: on the issue, # not a comment",
 		"left": "```\nfenced\n```\n- a list in text\n\"quoted\"",
@@ -103,6 +104,7 @@ func TestTheLandingBlockRoundTrips(t *testing.T) {
 }
 
 func TestLandingFactsCountCommitsMergesAndTakeovers(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	// main moves on, and the branch merges it in.
 	run(t, a, "checkout", "-q", "main")
@@ -111,21 +113,15 @@ func TestLandingFactsCountCommitsMergesAndTakeovers(t *testing.T) {
 	run(t, a, "checkout", "-q", "issue-6")
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "more work")
 	run(t, a, "merge", "-q", "--no-ff", "-m", "merge main", "main")
-	var posted string
-	gh, _ := landGH(t, map[string]string{
+	gh := landGH(t, map[string]string{
 		pullsPath: `[` + pr14 + `]`,
-		"graphql": `{"data":{}}`,
 		comments6: `[{"id":5,"body":"<!-- se:takeover 1 -->\nTaken over."}]`,
-	}, nil)
-	spy := func(args ...string) ([]byte, error) {
-		if args[len(args)-1] == post6 {
-			posted = strings.TrimPrefix(args[len(args)-2], "body=")
-		}
-		return gh(args...)
-	}
-	if _, err := (Source{Repo: repo, GH: spy, Clock: clock.NewFake(landedAt())}).Land(a, "", qs, full, passes); err != nil {
+	})
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}).Land(a, "", qs, full, passes); err != nil {
 		t.Fatal(err)
 	}
+	c := commentsAt(t, gh, 6)
+	posted := c[len(c)-1].Body
 	got, ok, err := ParseLanding(posted)
 	if err != nil || !ok {
 		t.Fatalf("%v %v: %q", ok, err, posted)
@@ -137,29 +133,25 @@ func TestLandingFactsCountCommitsMergesAndTakeovers(t *testing.T) {
 }
 
 func TestLandAgainUpdatesTheLandingComment(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
-	gh, calls := landGH(t, map[string]string{
-		pullsPath:                      `[` + pr14 + `]`,
-		"graphql":                      `{"data":{}}`,
-		comments6:                      `[{"id":5,"body":"Worked by someone."},{"id":77,"body":"<!-- se:landing -->\nolder answers"}]`,
-		"repos/o/r/issues/comments/77": `{}`,
-	}, nil)
-	if _, err := (Source{Repo: repo, GH: gh, Clock: atNow()}).Land(a, "", qs, full, passes); err != nil {
+	gh := landGH(t, map[string]string{
+		pullsPath: `[` + pr14 + `]`,
+		comments6: `[{"id":5,"body":"Worked by someone."},{"id":77,"body":"<!-- se:landing -->\nolder answers"}]`,
+	})
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}).Land(a, "", qs, full, passes); err != nil {
 		t.Fatal(err)
 	}
 	patched := 0
-	for _, c := range *calls {
-		switch c[len(c)-1] {
-		case post6:
-			t.Fatalf("posted a second landing comment: %q", c)
-		case "repos/o/r/issues/comments/77":
-			if c[1] != "-X" || c[2] != "PATCH" || !strings.Contains(c[4], "the landing") {
-				t.Fatalf("%q", c)
-			}
+	for _, w := range gh.Writes() {
+		switch w {
+		case "POST repos/o/r/issues/6/comments":
+			t.Fatalf("posted a second landing comment: %q", gh.Writes())
+		case "PATCH repos/o/r/issues/comments/77":
 			patched++
 		}
 	}
-	if patched != 1 {
-		t.Fatalf("patched %d times: %q", patched, *calls)
+	if c := commentsAt(t, gh, 6); patched != 1 || len(c) != 2 || c[1].ID != 77 || !strings.Contains(c[1].Body, "the landing") {
+		t.Fatalf("patched %d times: %q, %+v", patched, gh.Writes(), c)
 	}
 }

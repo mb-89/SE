@@ -5,32 +5,27 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 )
-
-// gh is how the issue commands reach GitHub; tests put recorded answers here.
-var gh issues.GH = issues.Gh
 
 // fire is the fan-out after a claim, and after the creation of a ready issue:
 // it fires the routine named in the environment once, on the call's network,
 // and answers a line saying what happened.
-func (c *Call) fire() string { return issues.Fire(os.Getenv, c.Net) }
+func (c *Call) fire() string { return issues.Fire(c.Getenv, c.Net) }
 
 // sessionID names the session se runs in, which land records as the leaf's
-// worker and review tells apart from them. Tests put a fixed one here.
-var sessionID = func() string { return os.Getenv(issues.SessionVar) }
+// worker and review tells apart from them.
+func (c *Call) sessionID() string { return c.Getenv(issues.SessionVar) }
 
-// check is what issue land runs before it pushes: the repo's one definition of
-// green. It answers the check's output when it fails.
-var check = func(dir string) error {
-	cmd := exec.Command("sh", "./tests/check.sh")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+// check is the real World's Check: sh ./tests/check.sh, with the last 40
+// lines of its output when it fails.
+func check(procs proc.Procs, dir string) error {
+	out, err := proc.Combined(procs, proc.Cmd{Name: "sh", Args: []string{"./tests/check.sh"}, Dir: dir})
 	if err != nil {
 		lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
 		if len(lines) > 40 {
@@ -43,15 +38,15 @@ var check = func(dir string) error {
 
 func init() {
 	register(Command{
-		Name:    "issue next",
-		Usage:   "issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]",
+		Name:    "issue pull",
+		Usage:   "issue pull [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "name the next se issue, stuck work first; --take claims it",
-		Details: "name the next ready se issue at the top, stuck work before new work, or say that none is ready. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where 5 retros have closed since the last overhaul closed and none is open, else an unattended retro where 10 se issues have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the 3-hour lease is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.",
+		Summary: "show the next se issue, stuck work first; --take claims it",
+		Details: "pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where 5 retros have closed since the last overhaul closed and none is open, else an unattended retro where 10 se issues have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the 3-hour lease is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.",
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue next")
+			fs, src, asJSON := issueFlags(c, "issue pull")
 			take := &takeFlag{}
 			fs.Var(take, "take", "claim the next ready issue, or issue N as --take N")
 			in := fs.Int("in", 0, "look inside the tree of issue `ROOT` for its ready leaves")
@@ -66,7 +61,7 @@ func init() {
 				}
 				n, err := strconv.Atoi(strings.TrimPrefix(fs.Arg(0), "#"))
 				if !take.set || err != nil || n <= 0 || take.n != 0 {
-					return Reply{}, fmt.Errorf("issue next takes one issue number, after --take, not %q", fs.Arg(0))
+					return Reply{}, fmt.Errorf("issue pull takes one issue number, after --take, not %q", fs.Arg(0))
 				}
 				take.n, rest = n, fs.Args()[1:]
 			}
@@ -75,7 +70,7 @@ func init() {
 				return Reply{}, err
 			}
 			if *person && (take.set || *in != 0) {
-				return Reply{}, fmt.Errorf("issue next takes --person alone, without --take or --in")
+				return Reply{}, fmt.Errorf("issue pull takes --person alone, without --take or --in")
 			}
 			s, err := src()
 			if err != nil {
@@ -305,7 +300,7 @@ func init() {
 				if !filepath.IsAbs(path) {
 					path = filepath.Join(c.Workspace, path)
 				}
-				data, err := os.ReadFile(path)
+				data, err := c.Disk.ReadFile(path)
 				if err != nil {
 					return Reply{}, err
 				}
@@ -410,11 +405,11 @@ func init() {
 			if !filepath.IsAbs(*file) {
 				*file = filepath.Join(c.Workspace, *file)
 			}
-			qs, err := issues.Questions(c.Workspace)
+			qs, err := issues.Questions(c.Disk, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
-			answers, err := issues.ReadAnswers(*file)
+			answers, err := issues.ReadAnswers(c.Disk, *file)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -425,7 +420,7 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			l, err := s.Land(c.Workspace, sessionID(), qs, answers, check)
+			l, err := s.Land(c.Workspace, c.sessionID(), qs, answers, func(dir string) error { return c.Check(c.Proc, dir) })
 			if err != nil {
 				return Reply{}, err
 			}
@@ -488,7 +483,7 @@ func init() {
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(c.Workspace, path)
 			}
-			data, err := os.ReadFile(path)
+			data, err := c.Disk.ReadFile(path)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -502,7 +497,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			reviewer := issues.Worker{Session: sessionID(), Workspace: c.Workspace}
+			reviewer := issues.Worker{Session: c.sessionID(), Workspace: c.Workspace}
 			r, err := s.Review(n, reviewer, words[0] == "pass", rep)
 			if err != nil {
 				return Reply{}, err
@@ -630,13 +625,15 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 	repo := fs.String("repo", "", "the repository as `OWNER/NAME` (default: the workspace's origin)")
 	return fs, func() (issues.Source, error) {
 		if *repo == "" {
-			r, err := issues.Repo(c.Workspace)
+			r, err := issues.Repo(c.Proc, c.Workspace)
 			if err != nil {
 				return issues.Source{}, err
 			}
 			*repo = r
 		}
-		return issues.Source{Repo: *repo, GH: gh, Clock: c.Clock}, nil
+		// stdout is the answer; what se waits on goes beside it, as it waits.
+		waits := func(note string) { fmt.Fprintln(os.Stderr, "se:", note) }
+		return issues.Source{Repo: *repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Waits: waits}, nil
 	}, asJSON
 }
 
@@ -709,12 +706,12 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string, cad
 		head += fmt.Sprintf("\n\n#%d is an overhaul (%s): follow the overhaul skill, src/plugin/skills/overhaul/SKILL.md, from se overhaul read %d", i.Number, issues.OverhaulLabel, i.Number)
 	}
 	if i.Parent {
-		head += fmt.Sprintf("\n\n#%d is a parent: it holds no work. Coordinate its tree: se issue next --in %d --take", i.Number, i.Number)
+		head += fmt.Sprintf("\n\n#%d is a parent: it holds no work. Coordinate its tree: se issue pull --in %d --take", i.Number, i.Number)
 	}
 	return Reply{Text: strings.TrimRight(head+"\n\n"+i.Body, "\n") + tail}, nil
 }
 
-// inReply answers issue next --in: what is ready inside root's tree, or, with
+// inReply answers issue pull --in: what is ready inside root's tree, or, with
 // --take, the leaf claimed and the worktree command that checks it out.
 func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (Reply, error) {
 	if !take.set {
@@ -801,7 +798,7 @@ type reviewAt struct {
 func reviews(c *Call, tr issues.Tree) []reviewAt {
 	out := []reviewAt{}
 	for _, i := range tr.Review {
-		out = append(out, reviewAt{i, tr.ReviewWorktree(c.Workspace, i.Number), issues.ReviewerModel(c.Workspace)})
+		out = append(out, reviewAt{i, tr.ReviewWorktree(c.Workspace, i.Number), issues.ReviewerModel(c.Disk, c.Workspace)})
 	}
 	return out
 }
@@ -819,7 +816,7 @@ func reviewText(c *Call, tr issues.Tree) string {
 	return text
 }
 
-// sweptReply adds to a reply of issue next the issues its sweep gave to a
+// sweptReply adds to a reply of issue pull the issues its sweep gave to a
 // person: lines before the text, or with --json the field "flagged".
 func sweptReply(r Reply, err error, asJSON bool, flagged []string) (Reply, error) {
 	if err != nil || len(flagged) == 0 {

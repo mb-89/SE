@@ -15,6 +15,7 @@ const (
 
 // What /se status says about the commits, recorded for each case.
 func TestCommitsAgainstRecordedAnswers(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ name, hooks, checkout, built, want string }{
 		{"all agree", aaa, aaa, aaa, `Hooks loaded from:   aaaaaaa
 Plugin checkout at:  aaaaaaa
@@ -48,16 +49,15 @@ Whether they agree is unknown: the hooks' commit is not known.`},
 }
 
 func TestStatusSaysTheCommitsThePluginNames(t *testing.T) {
+	t.Parallel()
 	repo := checkout(t, "main")
-	head, err := update.Head(repo)
+	head, err := update.Head(worldOf(t).Proc, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(hooksCommitEnv, aaa)
-	t.Setenv(pluginRepoEnv, repo)
-	saved := commit
-	commit = head
-	defer func() { commit = saved }()
+	setenv(t, hooksCommitEnv, aaa)
+	setenv(t, pluginRepoEnv, repo)
+	worldOf(t).Commit = head
 	r := session(t, "status")
 	lines := strings.Split(r.Text, "\n")
 	if len(lines) != 5 || !strings.HasPrefix(lines[0], "No SE daemon answers") {
