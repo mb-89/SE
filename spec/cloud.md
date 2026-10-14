@@ -40,7 +40,7 @@ pull or build never holds the session up; either is said in one line.
 ## The outside plugins
 
 SE runs plugins and skills others built, each pinned to a commit in the
-reuse config of [src/internal/index/wiring.yaml](../src/internal/index/wiring.yaml);
+reuse config of [src/index/wiring.yaml](../src/index/wiring.yaml);
 `se fleet plugins` fetches them into `/opt/se-plugins`. A cloud box gets
 plugins only through `CLAUDE_CODE_PLUGIN_DIRS`, which takes several folders
 (`:` between them), and a folder there that is no plugin itself loads each

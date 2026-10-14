@@ -116,7 +116,7 @@ follows them; `se review brief` and `se issue review` (in
 
 10. **What others built runs on the delta:** the brief ends with the
    reviewer's list from the reuse config of
-   [src/internal/index/wiring.yaml](../src/internal/index/wiring.yaml)
+   [src/index/wiring.yaml](../src/index/wiring.yaml)
    (the simplifier, `/security-review` and the pr-review-toolkit agents),
    each resolved against the plugins the box loaded. What they report are
    candidates, verified like any other. The report's `ran` names each entry
