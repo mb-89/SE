@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
+	"time"
 
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
@@ -21,6 +22,14 @@ import (
 
 // handedOver marks an se run by another se; it hands nothing over again.
 const handedOver = "SE_HANDED_OVER"
+
+// A checkout's se that was just written can be busy for a moment, while a
+// process forked meanwhile still holds it open; handsOver tries it busyTries
+// times, busyWait apart on the world's clock, before it answers itself.
+const (
+	busyTries = 20
+	busyWait  = 50 * time.Millisecond
+)
 
 // handsOver runs the se built from the workspace's checkout in w with these args,
 // when there is one, and answers its exit code. handed is false where this se
@@ -38,8 +47,14 @@ func handsOver(w *World, workspace string, args []string, stdout, stderr io.Writ
 	if there, err := d.Exists(bin); err != nil || !there {
 		return 0, false
 	}
-	err = w.Proc.Run(proc.Cmd{Name: bin, Args: args, Stdout: stdout, Stderr: stderr, Env: append(w.Environ(), handedOver+"=1")})
-	return proc.ExitCode(err)
+	c := proc.Cmd{Name: bin, Args: args, Stdout: stdout, Stderr: stderr, Env: append(w.Environ(), handedOver+"=1")}
+	for try := 1; ; try++ {
+		err = w.Proc.Run(c)
+		if !errors.Is(err, proc.ErrBusy) || try == busyTries {
+			return proc.ExitCode(err)
+		}
+		w.Clock.Sleep(busyWait)
+	}
 }
 
 // daemonExe is the se the workspace's daemon runs, built first where the
