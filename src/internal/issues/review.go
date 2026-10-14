@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
@@ -229,24 +228,4 @@ func (s Source) separate(root, n int, reviewer Worker) error {
 func ReviewWorktree(dir string, n, round int) string {
 	return fmt.Sprintf("git fetch -q origin main && git worktree add --detach %s origin/main",
 		filepath.Join(filepath.Dir(dir), fmt.Sprintf("review-%d-%d", n, round)))
-}
-
-// ModelsPath is the one place the models SE runs are set.
-const ModelsPath = "spec/models.yaml"
-
-// ReviewerModel reads the reviewer's model from spec/models.yaml in the
-// checkout dir on d, the line "reviewer: <model>"; where it is not set, the
-// reviewer runs the box's model, the floor, and the answer is empty.
-func ReviewerModel(d disk.Disk, dir string) string {
-	data, err := d.ReadFile(filepath.Join(dir, ModelsPath))
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if k, v, ok := strings.Cut(line, ":"); ok && strings.TrimSpace(k) == "reviewer" {
-			v, _, _ = strings.Cut(v, "#")
-			return strings.Trim(strings.TrimSpace(v), `"'`)
-		}
-	}
-	return ""
 }
