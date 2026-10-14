@@ -85,7 +85,8 @@ var (
 	checkedLine   = regexp.MustCompile(`^\s*Checked by:\s*(.+)$`)
 )
 
-// Principles reads the design principles from the checkout dir on d.
+// Principles reads the design principles from the checkout dir on d: the
+// numbered list before the file's first "## " heading.
 func Principles(d disk.Disk, dir string) ([]Principle, error) {
 	path := filepath.Join(dir, PrinciplesFile)
 	data, err := d.ReadFile(path)
@@ -97,6 +98,11 @@ func Principles(d disk.Disk, dir string) ([]Principle, error) {
 	// runs on over indented lines until a blank line or the next principle.
 	checked := false
 	for _, line := range strings.Split(string(data), "\n") {
+		// The list ends where the file's second part, how code is written,
+		// begins.
+		if strings.HasPrefix(line, "## ") {
+			break
+		}
 		if m := principleLine.FindStringSubmatch(line); m != nil {
 			ps = append(ps, Principle{Number: atoi(m[1]), Name: strings.TrimSuffix(m[2], ".")})
 			checked = false
@@ -170,6 +176,19 @@ type OverhaulReport struct {
 	LookedAt LookedAt   `yaml:"looked_at"`
 	Findings []Straying `yaml:"findings"`
 	WentWell []string   `yaml:"went_well"`
+	// Window is what the code facts read from GitHub, and Code those facts
+	// as text (src/internal/shape); the draft shows them, the block keeps
+	// neither.
+	Window OverhaulWindow `yaml:"-"`
+	Code   string         `yaml:"-"`
+}
+
+// OverhaulWindow is what se overhaul read hands the code facts: since when
+// (the previous overhaul's close; zero, ever), the landing answers given
+// since, and when the last retro's window ended.
+type OverhaulWindow struct {
+	Since, ReadBy time.Time
+	Answers       []string
 }
 
 // Judged is the box's judgment of one principle: how far SE strays from it.
@@ -217,6 +236,10 @@ type Straying struct {
 	Why           string   `yaml:"why,omitempty"`
 	Issue         int      `yaml:"issue,omitempty"`
 }
+
+// cascade is what every removal's issue says: removing one piece exposes
+// what existed only to support it.
+const cascade = "Repeat the removal until nothing more falls out: each piece removed can leave code that existed only to support it (run `deadcode ./...` in src again)."
 
 var (
 	areas      = []string{"principle", "outside", "consistency", "principles", "retro", "speed", "mechanize", "removal"}
@@ -299,29 +322,64 @@ func (s Source) CollectOverhaul(n int, ps []Principle) (OverhaulReport, error) {
 		}
 	}
 	sort.Strings(r.Recurring)
+	if len(reports) > 0 {
+		r.Window.ReadBy = reports[len(reports)-1].Window.Until
+	}
+	if err := s.earlier(&r, n); err != nil {
+		return OverhaulReport{}, err
+	}
+	r.Window.Answers, err = s.answersSince(r.Window.Since)
+	return r, err
+}
+
+// earlier reads the previous overhaul into r: when it closed, and its
+// findings with the state of their issues.
+func (s Source) earlier(r *OverhaulReport, n int) error {
 	last, ok, _, err := s.lastClosed(OverhaulLabel, n)
 	if err != nil || !ok {
-		return r, err
+		return err
 	}
-	r.Previous = last.Number
+	r.Previous, r.Window.Since = last.Number, last.ClosedAt.UTC()
 	text, err := s.lastPosted(last.Number, overhaulReportMark)
 	if err != nil || text == "" {
-		return r, err
+		return err
 	}
 	prev, _, err := ParseOverhaul(text)
 	if err != nil {
-		return OverhaulReport{}, fmt.Errorf("the report on #%d: %w", last.Number, err)
+		return fmt.Errorf("the report on #%d: %w", last.Number, err)
 	}
 	for _, f := range prev.Findings {
 		o := Overhauled{Title: f.Title, Principle: f.Principle, Issue: f.Issue, State: "none"}
 		if f.Issue > 0 {
 			if o.State, err = s.state(f.Issue); err != nil {
-				return OverhaulReport{}, err
+				return err
 			}
 		}
 		r.Earlier = append(r.Earlier, o)
 	}
-	return r, nil
+	return nil
+}
+
+// answersSince reads every landing answer given since t (zero: ever), in one
+// listing of the repository's comments.
+func (s Source) answersSince(t time.Time) ([]string, error) {
+	path := fmt.Sprintf("repos/%s/issues/comments?per_page=%d", s.Repo, PerPage)
+	if !t.IsZero() {
+		path += "&since=" + t.Format(time.RFC3339)
+	}
+	comments, err := pages[comment](s, path)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, c := range comments {
+		if l, ok, err := ParseLanding(c.Body); ok && err == nil {
+			for _, a := range l.Answers {
+				out = append(out, a)
+			}
+		}
+	}
+	return out, nil
 }
 
 // state is issue n's state: open, or the reason it closed.
@@ -405,6 +463,9 @@ func (r OverhaulReport) facts() string {
 			}
 			fmt.Fprintf(&b, "| %s | %d | %s | %s |\n", o.Title, o.Principle, issue, o.State)
 		}
+	}
+	if r.Code != "" {
+		b.WriteString("\n" + r.Code)
 	}
 	return b.String()
 }
@@ -606,6 +667,9 @@ func (s Source) FileOverhaul(n int, draft string) (Filed, error) {
 			body := fmt.Sprintf("%s\n\nFound by the overhaul #%d (%s): it strays %s from principle %d, at %s.", strings.TrimSpace(f.Body), n, f.Area, f.Strays, f.Principle, f.Place)
 			if len(f.Sources) > 0 {
 				body += "\n\nSources: " + strings.Join(f.Sources, ", ")
+			}
+			if f.Area == "removal" {
+				body += "\n\n" + cascade
 			}
 			var err error
 			if f.Issue, err = s.mint(f.Title, body, f.Controversial, f.Why, out); err != nil {

@@ -34,6 +34,22 @@ func TestOnlyIOModulesReachTheOutside(t *testing.T) {
 	same(t, found, want)
 }
 
+func TestAWalkOrGlobOutsideTheDiskModuleIsRefused(t *testing.T) {
+	t.Parallel()
+	found := check(t, "io-module", map[string]string{
+		"src/a/walk.go":             "package a\n\nimport \"path/filepath\"\n\nfunc f() { _ = filepath.WalkDir(\".\", nil) }\n",
+		"src/a/both.go":             "package a\n\nimport fp \"path/filepath\"\n\nfunc f() { _ = fp.Walk(\".\", nil); _, _ = fp.Glob(\"*\") }\n",
+		"src/a/pure.go":             "package a\n\nimport \"path/filepath\"\n\nvar p = filepath.Join(\"a\", \"b\")\n",
+		"src/internal/io/disk/d.go": "package disk\n\nimport \"path/filepath\"\n\nfunc f() { _ = filepath.WalkDir(\".\", nil) }\n",
+	})
+	want := []string{
+		"src/a/both.go:5: io-module: path/filepath.Glob reaches the outside",
+		"src/a/both.go:5: io-module: path/filepath.Walk reaches the outside",
+		"src/a/walk.go:5: io-module: path/filepath.WalkDir reaches the outside",
+	}
+	same(t, found, want)
+}
+
 func TestTheIOAllowlistOnlyShrinks(t *testing.T) {
 	t.Parallel()
 	found := check(t, "io-module", map[string]string{
