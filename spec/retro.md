@@ -60,6 +60,10 @@ What earlier versions taught, and how this design answers it:
     answers' machine-readable blocks; it stays in the draft and is not posted;
   - the [rule checks](#the-rule-checks), each broken one with what broke
     it;
+  - **sizes:** the closed issues, the landed ones (those the `answers` check
+    counts: a leaf closed as completed, not a retro, an overhaul or a
+    person's decision), the closed issues for a person and the duplicates,
+    each its own count, so a sweep closing issues for a person reads as one;
   - **counts:** conflicts (conflict takeovers), takeovers, `se-person` flags,
     CI reruns, `by-hand` answers that are not "none", the GitHub requests the
     landing facts counted, and the median time from claim to merge;
@@ -107,13 +111,16 @@ What earlier versions taught, and how this design answers it:
     `se-person` flags, `by-hand` mentions, duplicates (issues closed as
     duplicate, and issues for a person made in the window beyond the first
     for each issue they hold back), GitHub requests and time from claim to
-    merge, each per closed issue, and the follow-ups: the share of the issues
-    a box closed whose box filed one ([issues.md](issues.md#a-boxs-follow-up)). `se retro collect` computes them and stores them in the
+    merge, each per landed issue (never per closed issue: closing issues
+    for a person or duplicates must not make a metric read better), beside
+    the sizes, and the follow-ups: the share of the issues a box closed whose
+    box filed one ([issues.md](issues.md#a-boxs-follow-up)). `se retro collect` computes them and stores them in the
     report's machine-readable block, so the trend is a number, not an
     impression; the draft tabulates them against every earlier retro.
   - **Did the last retro's fixes help?** For each of its findings: did its
     issue close, did the rule check it named break again, did its metric
-    drop.
+    drop. A metric's move counts for a finding only once its issue closed
+    as completed: before its fix is on main, a drop is not the fix's.
   - **Is the retro itself effective?** How many findings became issues, how
     many of those closed, and which findings recurred anyway.
   - **Should the retro change itself?** Proposals for the landing questions
