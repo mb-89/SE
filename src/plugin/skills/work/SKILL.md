@@ -48,8 +48,8 @@ checkout.
    (`git worktree remove <path>`) and go back to 2.
 4. **You always end, and never stuck.** End when nothing is ready, no
    sub-agent of yours is running, and every tree you coordinate is done or
-   waits. Where a sub-agent can land nothing at all, it files the issue for a
-   person as **An issue** says; never end with only a comment.
+   waits. Each issue you took is closed by its sub-agent with a PR or a
+   supersede, as **An issue** says; never end with only a comment.
 
 ## The sub-agent's prompt
 
@@ -86,14 +86,23 @@ Reader: the sub-agent that does one issue's work.
 4. Anything that belongs in a separate change becomes an issue through
    `<se> issue new` (its `--blocked-by` is required: a list, or `none`;
    `--parent` makes it a sub-issue).
-5. Land what you could. Where something is left over, file it with
-   `<se> issue new`: with `--person` where it needs the owner's input (its
-   body opens with what they decide), without it where any box can do it. You
-   may land an issue with open points once they are in an issue. Of the
-   issues the take said yours blocks, name in `--blocks` only those that need
-   what you left over, so nothing waits that need not. Where you can land
-   nothing at all (a refused push, say), file the issue for a person with
-   `--blocks <n>`, your own issue, say what you have and where, and end.
+5. **You close the issue you took, always**, in one of two ways and no
+   other:
+   - **a PR** for what you solved, landed with `<se> issue land` (auto-merge
+     on), and an issue through `<se> issue new` for everything you could not
+     solve. Of the issues your take said yours blocks, name in `--blocks`
+     only those that need what you left over, so nothing waits that need not;
+     or
+   - **a supersede**, where you can land no PR at all:
+     `<se> issue supersede <n> --body-file F`, F holding the open questions
+     you could not answer. It makes a final successor in your issue's place
+     and closes yours. A final issue (`se-final`) cannot be superseded: its
+     box lands a PR.
+
+   An issue for a person (`--person`) is never a way to end, only a side
+   issue, for access or a principle. The Stop hook refuses the box's stop
+   while the last issue it took is open with neither, and says which is
+   missing.
 
 ## A parent
 
