@@ -22,7 +22,7 @@ func init() {
 		Name:    "guidance",
 		Usage:   "guidance [--session-id ID]",
 		Group:   "Session",
-		Summary: "answer the principles and the skills a session holds in context",
+		Summary: "answer the principles and the skills a session holds",
 		Details: "answer the guidance a session's context carries: spec/principles.md where the guidance instance's principles switch is on, and each skill a take handed to session ID, as its log records them, in full where the inline switch is on, else by name. The plugin puts it into the context at the session's first request and again after each compaction; the hand-again is a row of the session's log.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
