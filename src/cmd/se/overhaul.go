@@ -136,6 +136,9 @@ func init() {
 				return Reply{Text: string(data)}, err
 			}
 			text := fmt.Sprintf("Created %d issue(s) from the overhaul #%d's findings, %d of them for a person: %s. The report is its closing comment, and it is closed.", len(filed.Issues), n, len(filed.Person), numbers(filed.Issues))
+			if filed.Manifest > 0 {
+				text += fmt.Sprintf(" Those not for a person are sub-issues of the manifest #%d, all %s.", filed.Manifest, issues.FinalLabel)
+			}
 			if filed.Left != "" {
 				text += "\n" + filed.Left + "."
 			}

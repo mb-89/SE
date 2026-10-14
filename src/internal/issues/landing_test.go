@@ -27,7 +27,7 @@ func TestTheLandingQuestionsAreTheSpecsList(t *testing.T) {
 			t.Errorf("%s has no hint", q.Key)
 		}
 	}
-	want := []string{"done", "timeline", "decided", "well", "cost", "by-hand", "rules", "guidance", "lacked", "proof", "left", "doubt", "improve", "else"}
+	want := []string{"done", "timeline", "decided", "well", "cost", "by-hand", "rules", "guidance", "lacked", "proof", "left", "open", "doubt", "improve", "else"}
 	if !reflect.DeepEqual(keys, want) {
 		t.Fatalf("keys %q", keys)
 	}

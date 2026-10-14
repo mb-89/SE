@@ -24,8 +24,9 @@ work is local (commit, `git fetch`, merge `origin/main`) and silent on
 GitHub. You and your sub-agents reach GitHub only through `se`: never the CLI,
 the GitHub MCP tools or the API, never a comment, a label or a push by hand.
 Subscribing to a PR's activity (`subscribe_pr_activity`) writes nothing and
-is fine. A new issue is a last resort (one per sub-agent at most, filed by
-its land), never a way to report.
+is fine. Neither you nor a sub-agent opens an issue (`se issue new`
+refuses in a box): any issue a box opens is a defect. Open points go into
+the landing answers' `open`, and the retro turns them into work.
 
 **All work moves in manifests** ([spec/issues.md](../../../spec/issues.md#manifests-all-work-moves-in-them)).
 A manifest is an issue at the top on one topic whose sub-issues are its work,
@@ -33,9 +34,8 @@ its leaves together about `issues.manifest/config/target` (an hour); it lands
 once, as one PR from its branch `issue-<manifest>`. A take at the top offers
 only manifests, retros and overhauls. Each leaf lands into the manifest's
 branch and closes, with no PR of its own; you land the manifest. Several
-manifests run in parallel. What you file goes into a manifest too: `se issue
-new --parent <manifest>` for work of its topic, `--manifest` for a new topic
-sized to the target, or, with neither, the open misc manifest.
+manifests run in parallel. You file nothing: what is left goes into the
+landing answers' `open`.
 
 Every step that can be an `se` command is one. `se` is `./src/plugin/bin/se`;
 build it first with `sh ./src/build.sh`.
@@ -68,7 +68,10 @@ permission prompt, and no others. `<se>` below is the absolute path of
      prompt**, filled in. Then pull again, so the box fills up to its cap.
 3. **Wait.** Each sub-agent keeps the PR it opened until it merges
    (`se issue keep`: whenever main moves past it, it merges main in, checks
-   and pushes), so a box stays with its PRs. Subscribe to each PR a
+   and pushes), so a box stays with its PRs. A PR merges once its own CI is
+   green, so main can turn red: a red main is the fleet's first job, and the
+   sub-agent whose check fails on what main brought fixes main first
+   ([spec/coordination.md](../../../spec/coordination.md#merging-into-main)). Subscribe to each PR a
    sub-agent names, and to each manifest's PR you open
    (`subscribe_pr_activity`). A red CI run or a review on a PR goes to that
    PR's sub-agent (`SendMessage`), with the failure or the review. When a
@@ -103,8 +106,8 @@ instead.
 A manifest holds no work of its own; you coordinate its tree, whose root is
 the issue you took, with the same loop as step 2, limited to the tree, and
 then land it. Its leaves count against the same cap as the box's other
-sub-agents. A leaf filed into it while it runs (`se issue new --parent
-<root>`) is pulled in the next round; once its PR is open, a new leaf goes in
+sub-agents. A leaf filed into it while it runs (by a person, or a retro's
+manifest of findings) is pulled in the next round; once its PR is open, a new leaf goes in
 with the next push, or waits for the next manifest.
 
 1. Run `<se> issue pull --in <root> --take --json`.

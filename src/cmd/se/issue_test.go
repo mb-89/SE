@@ -168,6 +168,39 @@ func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 	}
 }
 
+// Finals do not count: a closed se-final issue (what a retro, a review or an
+// overhaul filed) leaves the retro cadence where it was, so retros do not
+// feed themselves; any other closed se issue moves it.
+func TestAClosedFinalIssueDoesNotMoveTheRetroCadence(t *testing.T) {
+	t.Parallel()
+	gh := recordedIssues(t)
+	setenv(t, "CLAUDE_CODE_SESSION_ATTENDED", "1")
+	closeNew := func(args ...string) {
+		t.Helper()
+		code, out, errs := se(t, append([]string{"issue", "new", "--json", "--repo", "o/r", "--body", "b", "--blocked-by", "none", "--parent", "3"}, args...)...)
+		var made struct{ Number int }
+		if err := json.Unmarshal([]byte(out), &made); code != 0 || err != nil {
+			t.Fatalf("exit %d, %q %q %v", code, out, errs, err)
+		}
+		if _, err := gh.Send("PATCH", fmt.Sprintf("repos/o/r/issues/%d", made.Number), github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cadence := func() string {
+		t.Helper()
+		_, out, _ := se(t, "issue", "pull", "--repo", "o/r")
+		return out
+	}
+	closeNew("--title", "a finding", "--final")
+	if out := cadence(); !strings.Contains(out, "\n1 se issue closed and no retro has closed yet") {
+		t.Fatalf("a closed final issue moved the cadence: %q", out)
+	}
+	closeNew("--title", "work")
+	if out := cadence(); !strings.Contains(out, "\n2 se issues closed and no retro has closed yet") {
+		t.Fatalf("a closed issue did not move the cadence: %q", out)
+	}
+}
+
 // A press of issue pull in /se ui shows its short form: the issue, its link,
 // why it is at the top, and the cadences in one line; typing shows each cadence.
 func TestIssuePullAnswersAPressShort(t *testing.T) {

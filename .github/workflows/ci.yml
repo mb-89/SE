@@ -1,9 +1,15 @@
 name: ci
+# main merges a PR once its own CI is green, without bringing it up to date
+# first, so main is checked again after every merge (spec/coordination.md).
 on:
   pull_request:
+  push:
+    branches: [main]
+# A PR's newer push cancels its older run. main's running check always
+# finishes; of main's waiting ones only the newest runs, which holds the rest.
 concurrency:
-  group: ci-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:

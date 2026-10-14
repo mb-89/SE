@@ -79,10 +79,12 @@ type Reviewed struct {
 	// Fixes are the issues the blocking findings became: se-final sub-issues
 	// of the gate, so it is reviewed again once they have landed.
 	Fixes []Issue `json:"fixes"`
-	// Filed are the issues the non-blocking findings became, se-final, in
-	// the normal queue; Unfiled counts those past the first issues/config/max-filed.
-	Filed   []Issue `json:"filed"`
-	Unfiled int     `json:"unfiled"`
+	// Filed are the issues the non-blocking findings became, se-final, the
+	// sub-issues of Manifest, the review's one manifest of findings (0 where
+	// none was filed); Unfiled counts those past the first issues/config/max-filed.
+	Filed    []Issue `json:"filed"`
+	Manifest int     `json:"manifest,omitempty"`
+	Unfiled  int     `json:"unfiled"`
 	// Accepted are the earlier blockers a re-review found the problem of
 	// again: each was a final attempt, so the repeat is accepted, files
 	// nothing and blocks no more.
@@ -97,7 +99,7 @@ type Reviewed struct {
 // reviewer who worked any leaf of n's tree, a tree with a leaf whose worker is
 // not recorded, and a report that breaks the rules of spec/review.md (see
 // Report.check). Every verified finding becomes an se-final issue: a blocking
-// one a sub-issue of n, a non-blocking one in the open misc manifest, at most
+// one a sub-issue of n, a non-blocking one in the review's one manifest of findings, at most
 // issues/config/max-filed of them. The report goes on n with its machine-readable block; a
 // pass closes n, which can complete its parent, except a manifest at the
 // top: its se-review label comes off, and the one PR it lands as closes it.
@@ -149,9 +151,16 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 			r.Unfiled++
 			continue
 		}
-		parent := 0
-		if f.Blocking {
-			parent = n
+		// A blocking finding is a sub-issue of the gate; the rest go into
+		// the review's one manifest of findings.
+		parent := n
+		if !f.Blocking {
+			if r.Manifest == 0 {
+				if r.Manifest, err = s.findingsManifest(fmt.Sprintf("the review of #%d", n)); err != nil {
+					return r, err
+				}
+			}
+			parent = r.Manifest
 		}
 		made, _, err := s.Create(f.Title, f.body(n), parent, nil, FinalLabel)
 		if err != nil {

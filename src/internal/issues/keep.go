@@ -11,7 +11,7 @@ import (
 )
 
 // The owner's rule, 2026-10-14: a box stays with its PR until it merges, it
-// pushes only what is up to date with main and checked, and CI trusts the
+// pushes only what is checked, and CI trusts the
 // battery the box already ran. se issue land and se issue keep push through
 // ship, which commits the battery's record of the tree it passed
 // (battery.Passed) with the work; CI's check job asks battery.Trusted about
