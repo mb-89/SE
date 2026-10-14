@@ -16,6 +16,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "rules",
+		Class:   batch,
 		Usage:   "rules",
 		Group:   "Checks",
 		Summary: "check this checkout against every SE rule",
