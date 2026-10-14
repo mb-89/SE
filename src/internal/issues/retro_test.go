@@ -309,9 +309,9 @@ func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
 	_, matrix, _ := strings.Cut(draft, matrixMark)
 	for _, want := range []string{
 		"No landing answers: #24, #25, #26.",
-		"### `done`: What does it deliver?\n- #19 t19: old\n- #23 t23: it works\n",
+		"### `done`: What does it deliver?\n- #19 t19 (closed by merged PR #49): old\n- #23 t23 (closed by merged PR #50): it works\n",
 		// #19's by-hand answer is none, so it is left out.
-		"### `by-hand`: What did you do by hand?\n- #23 t23: wrote src/scripts/check-claims.sh\n",
+		"### `by-hand`: What did you do by hand?\n- #23 t23 (closed by merged PR #50): wrote src/scripts/check-claims.sh\n",
 	} {
 		if !strings.Contains(matrix, want) {
 			t.Errorf("the matrix lacks %q:\n%s", want, matrix)
@@ -320,6 +320,41 @@ func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
 	r, facts, err := ParseReport(draft)
 	if err != nil || r.Retro != 30 || len(r.Checks) != len(c.Checks) || !strings.HasPrefix(facts, "## The window") || strings.Contains(facts, "The matrix") {
 		t.Fatalf("%+v %q %v", r, facts, err)
+	}
+}
+
+// Each row says how its issue closed, so the matrix can head its answers
+// with it: an issue closed with no merged PR answered for a branch, not main.
+func TestARowSaysHowItsIssueClosed(t *testing.T) {
+	t.Parallel()
+	answered := landing(t, 0, map[string]string{"done": "on a branch", "by-hand": "none"}, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))
+	gh := recorded(t, map[string]string{
+		"repos/o/r/issues/1/comments?per_page=100": jsonComments(answered),
+		"repos/o/r/issues/2/comments?per_page=100": jsonComments(answered, fmt.Sprintf(fixedMark+"\nClosed.", "4957ced7aaaabbbbccccdddd")),
+		"repos/o/r/issues/3/comments?per_page=100": jsonComments(answered),
+		"repos/o/r/issues/4/comments?per_page=100": `[]`,
+	})
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	at := time.Date(2026, 10, 2, 11, 0, 0, 0, time.UTC)
+	fixedBy := map[int]merged{1: {Number: 9, MergedAt: &at}}
+	for n, want := range map[int]string{
+		1: "by merged PR #9",
+		2: "as fixed by 4957ced, no merged PR of its own",
+		3: "as a duplicate, no merged PR of its own",
+		4: "as a person's decision, no merged PR of its own",
+	} {
+		reason := map[int]string{3: "duplicate", 4: "not_planned"}[n]
+		if reason == "" {
+			reason = "completed"
+		}
+		r, _, err := s.row(past{issue: issue{Number: n, Title: "t", StateReason: reason}}, fixedBy)
+		if err != nil || r.Closed != want {
+			t.Errorf("#%d closed %q, want %q (%v)", n, r.Closed, want, err)
+		}
+	}
+	c := Collected{Rows: []Row{{Number: 2, Title: "t2", Closed: "as fixed by 4957ced, no merged PR of its own", Answers: map[string]string{"done": "on a branch"}}}}
+	if m := c.matrix(rqs); !strings.Contains(m, "- #2 t2 (closed as fixed by 4957ced, no merged PR of its own): on a branch\n") {
+		t.Errorf("the matrix does not head #2's answer with how it closed:\n%s", m)
 	}
 }
 
@@ -356,6 +391,70 @@ func TestAMetricIsCreditedOnceItsIssueClosedAsCompleted(t *testing.T) {
 	if it.State != "completed" || it.Dropped == nil || *it.Dropped || !it.Recurred || c.Score.Closed != 2 || c.Score.Recurred != 2 {
 		t.Fatalf("%+v", c.Score)
 	}
+	// Beside it, what moved its metric, so the judge sees whether its class came back.
+	if !reflect.DeepEqual(it.MovedBy, []string{"#23: 1 conflicts"}) {
+		t.Fatalf("moved by %q", it.MovedBy)
+	}
+	draft, err := c.Draft(rqs)
+	if err != nil || !strings.Contains(draft, "**Conflicts** recurred by conflicts_per_issue, which these moved in the window:\n- #23: 1 conflicts\n") {
+		t.Fatalf("%v\n%s", err, draft)
+	}
+}
+
+// A finding whose issue landed into a manifest's branch is closed only once
+// that manifest's PR merged to main: until then no fix of its is on main, so
+// it is not counted closed and its recurrence is not read.
+func TestAFindingLandedIntoAnUnmergedManifestIsNotClosed(t *testing.T) {
+	t.Parallel()
+	into, err := Landed{Issue: 21, Answers: map[string]string{"done": "d", "by-hand": "none"}, Facts: Facts{Landed: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC), Into: "issue-90"}}.Comment(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := retroRepo(t, true, "<!-- se:retro attended -->")
+	a["repos/o/r/issues/21/comments?per_page=100"] = jsonComments(into)
+	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fixes check broke again, yet #21's fix is not on main to blame.
+	it := c.Score.Items[0]
+	if it.State != "landed into manifest #90, not on main" || it.Recurred || c.Score.Closed != 0 || c.Score.Unmerged != 1 || c.Score.Recurred != 0 {
+		t.Fatalf("%+v", c.Score)
+	}
+	draft, err := c.Draft(rqs)
+	if err != nil || !strings.Contains(draft, "and 0 of those closed as completed (1 more landed into a manifest's branch not yet on main, their recurrence not read); 0 recurred.") ||
+		!strings.Contains(draft, "| #21 | landed into manifest #90, not on main | false |") {
+		t.Fatalf("%v\n%s", err, draft)
+	}
+	// Once the manifest's PR merged, #21 is closed and its recurrence read.
+	pulls := a["repos/o/r/pulls?state=closed&base=main&per_page=100"]
+	a["repos/o/r/pulls?state=closed&base=main&per_page=100"] = pulls[:len(pulls)-1] + `,{"number":95,"title":"manifest","body":"Fixes #90","merged_at":"2026-10-20T00:00:00Z","merge_commit_sha":"m95","head":{"sha":"h95","ref":"issue-90"}}]`
+	c, err = Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := c.Score.Items[0]; it.State != "completed" || !it.Recurred || c.Score.Closed != 1 || c.Score.Unmerged != 0 {
+		t.Fatalf("%+v", c.Score)
+	}
+}
+
+func TestMoversListWhatMovedAMetric(t *testing.T) {
+	t.Parallel()
+	c := Collected{Rows: []Row{
+		{Number: 126, Answers: map[string]string{"by-hand": "Retried\ngolangci-lint."}, Requests: 13},
+		{Number: 371, Answers: map[string]string{"by-hand": "none"}, Requests: 927},
+		{Number: 400, Requests: 13},
+	}, RerunsBy: map[int]int{7: 2}}
+	for metric, want := range map[string][]string{
+		"by_hand_per_issue":  {"#126: Retried golangci-lint."},
+		"requests_per_issue": {"#371: 927 requests", "#126: 13 requests", "#400: 13 requests"},
+		"ci_reruns":          {"PR #7: 2 CI reruns"},
+		"takeovers":          nil,
+	} {
+		if got := c.movers(metric); !reflect.DeepEqual(got, want) && len(got)+len(want) > 0 {
+			t.Errorf("%s: %q, want %q", metric, got, want)
+		}
+	}
 }
 
 func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
@@ -378,7 +477,7 @@ func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
 		"| takeovers | – | 1 | new |",
 		"| duplicates_per_issue | – | 1 | new |",
 		"| duplicates | 2 | 1 |",
-		"Duplicates: 1 closed as duplicate, 1 issues for a person minted again for an issue one already held back.",
+		"Duplicates: 1 closed as duplicate, 1 issue for a person minted again for an issue one already held back.",
 	} {
 		if !strings.Contains(draft, want) {
 			t.Errorf("the draft lacks %q", want)
@@ -398,7 +497,7 @@ func judged(t *testing.T, edit func(*RetroReport)) string {
 		Retro: 30, Attended: true, Metrics: Metrics{"closed": 4}, Checks: []Broken{},
 		Findings: []Lesson{
 			{Title: "Refuse a PR without Fixes", Class: "landing", Body: "PR #51 said no Fixes.", Home: "refusal", Check: "fixes"},
-			{Title: "Drop the lease", Class: "claims", Body: "It trades speed for safety.", Home: "removal", Controversial: true, Why: "it trades one metric against another"},
+			{Title: "Drop the lease on claimed issues", Class: "claims", Body: "It trades speed for safety.", Home: "removal", Controversial: true, Why: "it trades one metric against another"},
 		},
 		Classes:  []Class{{"landing", "se issue land refuses"}, {"claims", "a person decides"}},
 		WentWell: []string{"the landing answers"},
@@ -416,15 +515,26 @@ func judged(t *testing.T, edit func(*RetroReport)) string {
 func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 	t.Parallel()
 	for name, edit := range map[string]func(*RetroReport){
-		"nothing went well":        func(r *RetroReport) { r.WentWell = nil },
-		"an unknown class":         func(r *RetroReport) { r.Findings[0].Class = "nope" },
-		"controversial, no why":    func(r *RetroReport) { r.Findings[1].Why = "" },
-		"a home that is no fix":    func(r *RetroReport) { r.Findings[0].Home = "hope" },
-		"a check that is no check": func(r *RetroReport) { r.Findings[0].Check = "vibes" },
+		"nothing went well":         func(r *RetroReport) { r.WentWell = nil },
+		"an unknown class":          func(r *RetroReport) { r.Findings[0].Class = "nope" },
+		"controversial, no why":     func(r *RetroReport) { r.Findings[1].Why = "" },
+		"a home that is no fix":     func(r *RetroReport) { r.Findings[0].Home = "hope" },
+		"a check that is no check":  func(r *RetroReport) { r.Findings[0].Check = "vibes" },
+		"a one-word title":          func(r *RetroReport) { r.Findings[0].Title = "Take" },
+		"a title cut off":           func(r *RetroReport) { r.Findings[0].Title = "Count however many takes find it stuck, and" },
+		"a title ending in a comma": func(r *RetroReport) { r.Findings[0].Title = "Refuse a PR without Fixes," },
 	} {
 		if _, err := (Source{Proc: machine, Repo: repo, GitHub: never{t}, Clock: atNow()}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+func TestATitleThatSaysNothingIsNamed(t *testing.T) {
+	t.Parallel()
+	_, err := (Source{Proc: machine, Repo: repo, GitHub: never{t}, Clock: atNow()}).FileReport(30, judged(t, func(r *RetroReport) { r.Findings[1].Title = "Take" }))
+	if err == nil || !strings.Contains(err.Error(), `finding 2 ("Take") has a title under five words`) {
+		t.Fatal(err)
 	}
 }
 
@@ -494,7 +604,7 @@ func TestAnAttendedRetroClosesToo(t *testing.T) {
 	}
 	c := commentsAt(t, gh, 30)
 	report := "body=" + c[len(c)-1].Body
-	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease** (removal; for a person: it trades one metric against another)", "- the landing answers", reportBlock} {
+	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease on claimed issues** (removal; for a person: it trades one metric against another)", "- the landing answers", reportBlock} {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
 		}
@@ -555,6 +665,41 @@ func TestByHandCountsAnAnswerThatProposesACommand(t *testing.T) {
 	} {
 		if got := byHand(answer); got != want {
 			t.Errorf("byHand(%q) = %v, want %v", answer, got, want)
+		}
+	}
+}
+
+func TestTheMetricsTableRoundsEachChangeAsItsValues(t *testing.T) {
+	t.Parallel()
+	c := Collected{
+		Window:  RetroWindow{Until: prevClosed},
+		Metrics: Metrics{"landed": 3, "for_person": 1, "conflicts_per_issue": 0.29, "ci_reruns_per_issue": 0.25, "requests_per_issue": 20.07},
+		History: []Past{{Retro: 20, Metrics: Metrics{"landed": 3, "for_person": 2, "conflicts_per_issue": 0.33, "ci_reruns_per_issue": 0.3, "requests_per_issue": 20}}},
+		Reholds: 1,
+	}
+	text := c.facts()
+	// 0.29-0.33 is -0.040000000000000036 and 0.25-0.3 is -0.04999999999999999
+	// in floats; the table says what the judge reads in the values.
+	for _, line := range []string{
+		"| conflicts_per_issue | 0.33 | 0.29 | better (-0.04) |",
+		"| ci_reruns_per_issue | 0.3 | 0.25 | better (-0.05) |",
+		"| requests_per_issue | 20 | 20.07 | worse (+0.07) |",
+		"| for_person | 2 | 1 | -1 |",
+		"| landed | 3 | 3 | same |",
+		"and 1 was for a person.",
+		"1 issue for a person minted again",
+	} {
+		if !strings.Contains(text, line) {
+			t.Errorf("the draft does not say %q:\n%s", line, text)
+		}
+	}
+}
+
+func TestRound2RoundsHalfAwayFromZero(t *testing.T) {
+	t.Parallel()
+	for x, want := range map[float64]float64{-0.04999999999999999: -0.05, -0.040000000000000036: -0.04, 0.125: 0.13, -0.125: -0.13, 2.0 / 3: 0.67} {
+		if got := round2(x); got != want {
+			t.Errorf("round2(%v) = %v, want %v", x, got, want)
 		}
 	}
 }

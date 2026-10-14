@@ -285,10 +285,11 @@ func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
 	}
 	run(t, a, "rev-parse", "origin/issue-2")
 	// b read the same issues before a's claim showed: it moves to #3.
-	if took, ok, _, err := s.TakeIn(b, 1, 2); err != nil || !ok || took.Number != 3 {
+	took, ok, _, err = s.TakeIn(b, 1, 2)
+	if err != nil || !ok || took.Number != 3 || took.Base != "issue-1" {
 		t.Fatalf("%+v %v %v", took, ok, err)
 	}
-	shell(t, a, Worktree(a, 3))
+	shell(t, a, Worktree(a, 3, took.Base))
 	if got := run(t, WorktreeDir(a, 3), "rev-parse", "--abbrev-ref", "HEAD", "@{upstream}"); got != "issue-3\norigin/issue-3" {
 		t.Fatalf("the worktree is on %s", got)
 	}
@@ -321,14 +322,16 @@ func TestInSaysWhenTheRootHasClosed(t *testing.T) {
 }
 
 // shell runs a command line as a box does, in dir.
-func shell(t *testing.T, dir, line string) {
+func shell(t *testing.T, dir, line string) string {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", line)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("%s: %v %s", line, err, out)
 	}
+	return string(out)
 }
 
 func TestTheWorktreeCommandStartsFromTheNewestBranchAndMain(t *testing.T) {
@@ -338,7 +341,7 @@ func TestTheWorktreeCommandStartsFromTheNewestBranchAndMain(t *testing.T) {
 		t.Fatalf("%v %v", ok, err)
 	}
 	wt := WorktreeDir(a, 4)
-	shell(t, a, Worktree(a, 4))
+	shell(t, a, Worktree(a, 4, ""))
 	// Another box pushes to issue-4 and to main while a's branch stands.
 	run(t, b, "fetch", "-q", "origin")
 	run(t, b, "checkout", "-q", "-b", "issue-4", "origin/issue-4")
@@ -348,7 +351,7 @@ func TestTheWorktreeCommandStartsFromTheNewestBranchAndMain(t *testing.T) {
 	commitFile(t, b, "newer", "main")
 	run(t, b, "push", "-q", "origin", "main")
 	// a takes it over: its local branch and worktree are behind both.
-	shell(t, a, Worktree(a, 4))
+	shell(t, a, Worktree(a, 4, ""))
 	for _, ref := range []string{run(t, origin, "rev-parse", "issue-4"), run(t, origin, "rev-parse", "main")} {
 		run(t, wt, "merge-base", "--is-ancestor", ref, "HEAD")
 	}
@@ -364,11 +367,38 @@ func TestTheWorktreeCommandStartsFromTheNewestBranchAndMain(t *testing.T) {
 	run(t, b, "checkout", "-q", "-B", "main", "origin/main")
 	commitFile(t, b, "both", "main")
 	run(t, b, "push", "-q", "origin", "main")
-	shell(t, a, Worktree(a, 4))
+	// The command says the merge was aborted, so the agent merges by hand.
+	if out := shell(t, a, Worktree(a, 4, "")); !strings.Contains(out, "merging origin/main into issue-4 conflicts, so the merge was aborted") {
+		t.Fatalf("the command did not say the merge was aborted: %q", out)
+	}
 	if got, want := run(t, wt, "rev-parse", "HEAD"), run(t, origin, "rev-parse", "issue-4"); got != want {
 		t.Fatalf("the worktree is at %s, not %s", got, want)
 	}
 	if got := run(t, wt, "status", "--porcelain"); got != "" {
 		t.Fatalf("the worktree is not clean: %s", got)
+	}
+}
+
+func TestTheWorktreeCommandOfALeafMergesItsManifestsBranchNotMain(t *testing.T) {
+	t.Parallel()
+	origin, a, b := boxes(t)
+	// Manifest #1's branch took main in and resolved what conflicts with it;
+	// main has moved on with a change that conflicts with the manifest's.
+	run(t, b, "checkout", "-q", "-b", "issue-1")
+	commitFile(t, b, "both", "manifest")
+	run(t, b, "push", "-q", "origin", "issue-1")
+	run(t, b, "checkout", "-q", "main")
+	commitFile(t, b, "both", "main")
+	run(t, b, "push", "-q", "origin", "main")
+	// Leaf #2 was claimed from main before the manifest's commit.
+	run(t, a, "push", "-q", "origin", "main:refs/heads/issue-2")
+	run(t, a, "fetch", "-q", "origin")
+	wt := WorktreeDir(a, 2)
+	if out := shell(t, a, Worktree(a, 2, "issue-1")); strings.Contains(out, "aborted") {
+		t.Fatalf("merging the manifest's branch was aborted: %s", out)
+	}
+	run(t, wt, "merge-base", "--is-ancestor", run(t, origin, "rev-parse", "issue-1"), "HEAD")
+	if err := exec.Command("git", "-C", wt, "merge-base", "--is-ancestor", run(t, origin, "rev-parse", "main"), "HEAD").Run(); err == nil {
+		t.Fatal("the leaf's worktree merged main in, not only its manifest's branch")
 	}
 }

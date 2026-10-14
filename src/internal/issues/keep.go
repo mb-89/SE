@@ -36,13 +36,15 @@ func (s Source) ship(dir, branch string, check func(dir string) error) error {
 	if err := s.takeIn(dir, branch); err != nil {
 		return err
 	}
-	return s.push(dir, branch, check)
+	return s.push(dir, branch, check, nil)
 }
 
 // push is ship after takeIn: it runs check, refuses a tree the battery did
 // not pass and a branch main has moved past since, commits the battery's
-// record of the pass, so the pushed commit holds it, and pushes.
-func (s Source) push(dir, branch string, check func(dir string) error) error {
+// record of the pass, so the pushed commit holds it, runs before (where
+// set), and pushes. before writes what must survive a stop after it: se
+// issue land's landing answers.
+func (s Source) push(dir, branch string, check func(dir string) error, before func() error) error {
 	if err := check(dir); err != nil {
 		return fmt.Errorf("the check failed, so nothing was pushed: %w", err)
 	}
@@ -52,6 +54,11 @@ func (s Source) push(dir, branch string, check func(dir string) error) error {
 	}
 	if err := battery.Commit(s.Proc, dir, tree); err != nil {
 		return err
+	}
+	if before != nil {
+		if err := before(); err != nil {
+			return err
+		}
 	}
 	_, err = s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch)
 	return err
@@ -105,13 +112,21 @@ func (s Source) merge(dir, ref string) error {
 	if err == nil {
 		return nil
 	}
-	if settled, rerr := battery.Resolve(s.Proc, dir); rerr == nil && settled {
-		if _, err = s.git(dir, "commit", "-q", "--no-edit"); err == nil {
-			return nil
-		}
+	if s.settle(dir) {
+		return nil
 	}
 	_, _ = s.git(dir, "merge", "--abort")
 	return err
+}
+
+// settle commits the merge in dir where it conflicts in the battery's record
+// alone (battery.Resolve), and answers false where any other path conflicts.
+func (s Source) settle(dir string) bool {
+	if settled, err := battery.Resolve(s.Proc, dir); err != nil || !settled {
+		return false
+	}
+	_, err := s.git(dir, "commit", "-q", "--no-edit")
+	return err == nil
 }
 
 // keptPull is the part of GitHub's pull request object Keep reads.

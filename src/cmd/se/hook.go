@@ -168,7 +168,15 @@ func init() {
 		Usage:   "hook stop [--agent-transcript PATH] [--waiting] [--repo OWNER/NAME]",
 		Group:   "Hooks",
 		Summary: "hold a box to a merged PR or supersede for each issue it took",
-		Details: "answer the plugin's Stop (or, with --agent-transcript, SubagentStop) as JSON: block, naming each, while any issue this box took is open: with no PR from its branch, with one whose auto-merge is off, or with one not merged yet (a box keeps its PR until it merges: se issue keep), unless another box took the issue over; else pass, with why. A merged PR or a supersede closes the issue. A PR se issue land recorded with auto-merge on in .se/.runtime/box.json, of this workspace or of the issue's worktree beside it, counts as auto-merge on whatever GitHub's auto_merge field shows. The issues are every one se issue pull --take recorded, or for a sub-agent the leaf its prompt names. An interactive session, and a box waiting on background work (--waiting), always pass. It refuses at most refusals times in a row (spec/stop.yaml); a prompt from a person resets the count (se hook prompt). A check that cannot judge lets the turn end and logs why in .se/.runtime/logs/stop.log.",
+		Details: []string{
+			"answer the plugin's Stop (or, with --agent-transcript, SubagentStop) as JSON: block, naming each, while any issue this box took is open: with no PR from its branch, with one whose auto-merge is off, or with one not merged yet (a box keeps its PR until it merges: se issue keep), unless another box took the issue over; else pass, with why.",
+			"A merged PR or a supersede closes the issue.",
+			"A PR se issue land recorded with auto-merge on in .se/.runtime/box.json, of this workspace or of the issue's worktree beside it, counts as auto-merge on whatever GitHub's auto_merge field shows.",
+			"The issues are every one se issue pull --take recorded, or for a sub-agent the leaf its prompt names.",
+			"An interactive session, and a box waiting on background work (--waiting), always pass.",
+			"It refuses at most refusals times in a row (spec/stop.yaml); a prompt from a person resets the count (se hook prompt).",
+			"A check that cannot judge lets the turn end and logs why in .se/.runtime/logs/stop.log.",
+		},
 		Run: func(c *Call) (Reply, error) {
 			fs, src, _ := issueFlags(c, "hook stop")
 			transcript := fs.String("agent-transcript", "", "the sub-agent's transcript `PATH`: the stop is a SubagentStop")
@@ -255,7 +263,9 @@ func init() {
 		Usage:   "hook prompt",
 		Group:   "Hooks",
 		Summary: "a person prompted: reset the Stop hook's refusals",
-		Details: "a prompt from a person: reset how often in a row se hook stop has refused, so the cap counts afresh.",
+		Details: []string{
+			"a prompt from a person: reset how often in a row se hook stop has refused, so the cap counts afresh.",
+		},
 		Run: func(c *Call) (Reply, error) {
 			if err := c.Parse(c.Flags("hook prompt")); err != nil {
 				return Reply{}, err

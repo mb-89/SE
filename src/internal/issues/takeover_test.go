@@ -3,6 +3,7 @@ package issues
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -101,7 +102,7 @@ func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 	// Nothing was pushed to issue-7 within the lease: no box works it.
 	g := newPulls(t, atNow(), stale, pr70("false", "dirty"))
 	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
-	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || *took.Takeover != (Takeover{PR: 70, URL: "p70", Count: 1}) {
+	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || !reflect.DeepEqual(*took.Takeover, Takeover{PR: 70, URL: "p70", Count: 1}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 	if got := run(t, a, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-7" {
@@ -204,7 +205,7 @@ func TestASecondConflictAtANewHeadIsTakenOverAgain(t *testing.T) {
 	lately(t, g, "Taken over.\n<!-- se:takeover 1 -->\n<!-- se:takeover-head 0ld -->")
 	s := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}
 	took, ok, err := s.Take(a, 0)
-	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || *took.Takeover != (Takeover{PR: 70, URL: "p70", Count: 2}) {
+	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || !reflect.DeepEqual(*took.Takeover, Takeover{PR: 70, URL: "p70", Count: 2}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 	for _, w := range g.Writes() {
@@ -263,6 +264,17 @@ func TestAConflictAfterAStuckTakeoverIsTakenOver(t *testing.T) {
 	}
 }
 
+func TestATakeoverWithNoPRSaysSoAndItsLastPush(t *testing.T) {
+	t.Parallel()
+	if got := (Takeover{}).Line("issue-6"); got != "Where it stands: no open PR from issue-6; GitHub keeps no record of a push to issue-6." {
+		t.Fatal(got)
+	}
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if got := (Takeover{Pushed: at, Pull: &PullState{Number: 9, Head: "abc", Mergeable: "clean"}}).Line("issue-6"); got != "Where it stands: PR #9 is clean at abc; no check ran on its head; last pushed to issue-6 at 2026-01-02T03:04:05Z." {
+		t.Fatal(got)
+	}
+}
+
 func TestAConflictPushedToWithinTheLeaseIsRefused(t *testing.T) {
 	t.Parallel()
 	_, a, _ := boxes(t)
@@ -274,5 +286,37 @@ func TestAConflictPushedToWithinTheLeaseIsRefused(t *testing.T) {
 	}
 	if c := commentsAt(t, g, 7); len(c) != 0 || labelled(t, g, 7, FinalLabel) {
 		t.Fatalf("#7 was taken over: %+v", c)
+	}
+}
+
+func TestATakeoverNamesItsBranchsCommitsOfAnotherClosedIssue(t *testing.T) {
+	t.Parallel()
+	gh := recordedAt(t, clock.NewFake(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)), map[string]string{
+		"repos/o/r/issues/3":                         `{"number":3,"state":"open","sub_issues_summary":{"total":1}}`,
+		"repos/o/r/issues/3/sub_issues?per_page=100": `[{"number":6,"state":"open"}]`,
+		"repos/o/r/compare/issue-3...issue-6?per_page=100": `{"commits":[` +
+			`{"sha":"aaaaaaaaaa","commit":{"message":"Stale form of the fix (#4)\n\nBody naming #9."}},` +
+			`{"sha":"bbbbbbbbbb","commit":{"message":"Merge origin/issue-5 into issue-6"}},` +
+			`{"sha":"cccccccccc","commit":{"message":"Merge origin/issue-3 into issue-6"}},` +
+			`{"sha":"dddddddddd","commit":{"message":"Own work for issue-6, see #8"}},` +
+			`{"sha":"eeeeeeeeee","commit":{"message":"No issue named"}}]}`,
+		"repos/o/r/issues/4":           `{"number":4,"state":"closed"}`,
+		"repos/o/r/issues/5":           `{"number":5,"state":"closed"}`,
+		"repos/o/r/issues/8":           `{"number":8,"state":"open"}`,
+		"repos/o/r/commits/aaaaaaaaaa": `{"files":[{"filename":"a.go"},{"filename":"b.md"}]}`,
+		"repos/o/r/commits/bbbbbbbbbb": `{"files":[{"filename":"c.go"}]}`,
+	})
+	s := Source{Repo: repo, GitHub: gh}
+	base, got, err := s.foreign(6)
+	want := []Foreign{
+		{SHA: "aaaaaaaaaa", Subject: "Stale form of the fix (#4)", Issue: 4, Files: []string{"a.go", "b.md"}},
+		{SHA: "bbbbbbbbbb", Subject: "Merge origin/issue-5 into issue-6", Issue: 5, Files: []string{"c.go"}},
+	}
+	if err != nil || base != "issue-3" || !reflect.DeepEqual(got, want) {
+		t.Fatalf("%q %+v %v", base, got, err)
+	}
+	// A branch GitHub does not hold, at the top: main is its base, and nothing is named.
+	if base, got, err := s.foreign(7); err != nil || base != "main" || got != nil {
+		t.Fatalf("%q %+v %v", base, got, err)
 	}
 }

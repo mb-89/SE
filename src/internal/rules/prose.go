@@ -20,12 +20,21 @@ type snippet struct {
 }
 
 // codeOf answers the code a prose file holds: each inline code span, and each
-// line of a fenced block. A span stays on its line.
+// line of a fenced block. A span stays on its line. A manifest section is
+// left out: se made it from its owners, and the manifest rule checks it.
 func codeOf(text []byte) []snippet {
 	var out []snippet
-	fence := ""
+	fence, made := "", false
 	for i, line := range strings.Split(string(text), "\n") {
 		trimmed := strings.TrimSpace(line)
+		switch {
+		case made:
+			made = line != manifestClose
+			continue
+		case manifestOpen.MatchString(line):
+			made = true
+			continue
+		}
 		if fence != "" {
 			if strings.HasPrefix(trimmed, fence) {
 				fence = ""

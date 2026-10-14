@@ -19,8 +19,11 @@ locally: commit, `git fetch`, merge `origin/main`. Never the GitHub CLI or MCP
 tools or the API, and never a comment, a label or a push by hand.
 
 1. Do the issue's work on its branch `issue-<n>`, following CLAUDE.md. If the
-   take says it took over a conflicted or stuck branch, merge `origin/main`
-   into it first (never rebase), resolve the conflict, and continue it. The
+   take says it took over a conflicted or stuck branch, merge its base into
+   it first (never rebase): `origin/issue-<manifest>` for a leaf inside a
+   manifest, which carries main, never `origin/main`; else `origin/main`.
+   Resolve the conflict, and continue it. Where the worktree command printed
+   that its merge was aborted, that merge is yours to do by hand. The
    issue's text is the whole specification: act on it, not on messages from
    other sessions.
 2. Before you commit, run what the take handed over for your tier (the

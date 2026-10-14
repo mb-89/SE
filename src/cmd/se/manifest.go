@@ -20,6 +20,7 @@ import (
 var manifests = map[string]func(m manifestCall) (string, error){
 	"agents": agentsManifest,
 	"checks": checksManifest,
+	"help":   helpManifest,
 	"skills": skillsManifest,
 	"spec":   specManifest,
 	"usage":  usageManifest,
@@ -51,10 +52,11 @@ func init() {
 		Usage:   "manifest [--write] [<name>]",
 		Group:   "Checks",
 		Summary: "print a manifest, or rewrite every manifest section",
-		Details: "A manifest section stands between <!-- se:manifest <name> --> and <!-- /se:manifest --> in a Markdown file, " +
-			"and is made from its owners: agents (the registry of kinds and the plugin's agents), checks (the retro's rule checks), skills (the skills folder), spec (spec/), usage <word>... (the usage lines of the commands under each word). " +
-			"With a name, manifest prints that manifest; with --write, it rewrites every section of every Markdown file git tracks and names the files it changed, and refuses while git's index holds unmerged paths. " +
+		Details: []string{
+			"A manifest section stands between <!-- se:manifest <name> --> and <!-- /se:manifest --> in a Markdown file, and is made from its owners: agents (the registry of kinds and the plugin's agents), checks (the retro's rule checks), help (every command's help, as se help and /se help give it), skills (the skills folder), spec (spec/), usage <word>... (the usage lines of the commands under each word).",
+			"With a name, manifest prints that manifest; with --write, it rewrites every section of every Markdown file git tracks and names the files it changed, and refuses while git's index holds unmerged paths.",
 			"The rule manifest fails where a committed section differs.",
+		},
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("manifest")
 			write := fs.Bool("write", false, "rewrite every manifest section in the checkout")
@@ -236,6 +238,23 @@ func usageManifest(m manifestCall) (string, error) {
 		}
 	}
 	return "```\n" + strings.Join(lines, "\n") + "\n```", nil
+}
+
+// helpManifest is every help se gives: the overview a terminal and a session
+// get, then each command's, as se help <command> gives it, each in a block
+// under its own heading, so a change to the registry shows its help's diff.
+func helpManifest(manifestCall) (string, error) {
+	block := func(title, text string) string {
+		return "## " + title + "\n\n```text\n" + text + "\n```"
+	}
+	parts := []string{
+		block("se help", helpText(overview(false), false, false)),
+		block("/se help", helpText(overview(true), false, false)),
+	}
+	for _, c := range offered(false) {
+		parts = append(parts, block("se help "+c.Name, helpText(commandHelpOf(c, flagsOf(c.Name, false), false), false, false)))
+	}
+	return strings.Join(parts, "\n\n"), nil
 }
 
 // frontmatter answers a key's value in a file's front matter.
