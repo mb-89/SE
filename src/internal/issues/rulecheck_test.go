@@ -4,7 +4,6 @@ package issues
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -20,7 +19,7 @@ func rulesPull(n int, branch string) string {
 func branchWith(t *testing.T, a, branch, file, text string) {
 	t.Helper()
 	run(t, a, "checkout", "-q", "-b", branch, "main")
-	if err := os.WriteFile(filepath.Join(a, file), []byte(text), 0o644); err != nil {
+	if err := diskOf(t).WriteFile(filepath.Join(a, file), []byte(text)); err != nil {
 		t.Fatal(err)
 	}
 	run(t, a, "add", file)
@@ -30,15 +29,17 @@ func branchWith(t *testing.T, a, branch, file, text string) {
 }
 
 // banned is the check of a rule main takes after the PRs opened: no file
-// named bad, where the merge holds the rule.
-func banned(dir string) (string, error) {
-	if _, err := os.Stat(filepath.Join(dir, "rule")); err != nil {
+// named bad, where the merge holds the rule, on the test's disk.
+func banned(t *testing.T) func(dir string) (string, error) {
+	return func(dir string) (string, error) {
+		if ok, err := diskOf(t).Exists(filepath.Join(dir, "rule")); err != nil || !ok {
+			return "", err
+		}
+		if ok, err := diskOf(t).Exists(filepath.Join(dir, "bad")); err != nil || ok {
+			return "bad:1: no-bad: no file is named bad", err
+		}
 		return "", nil
 	}
-	if _, err := os.Stat(filepath.Join(dir, "bad")); err == nil {
-		return "bad:1: no-bad: no file is named bad", nil
-	}
-	return "", nil
 }
 
 func TestRulesNamesOnEachOpenPRTheRuleMainTookThatItBreaks(t *testing.T) {
@@ -54,8 +55,8 @@ func TestRulesNamesOnEachOpenPRTheRuleMainTookThatItBreaks(t *testing.T) {
 	gh := recorded(t, map[string]string{
 		openPullsPath: "[" + strings.Join([]string{rulesPull(10, "issue-1"), rulesPull(20, "issue-2"), rulesPull(30, "issue-3"), rulesPull(40, "claude/x")}, ",") + "]",
 	})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
-	got, err := s.Rules(a, banned)
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}
+	got, err := s.Rules(a, banned(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,14 +80,14 @@ func TestRulesNamesOnEachOpenPRTheRuleMainTookThatItBreaks(t *testing.T) {
 		t.Fatalf("%s %v", notes, err)
 	}
 	// Each merge's worktree is gone, and the clone is as it was.
-	if _, err := os.Stat(filepath.Join(a, filepath.FromSlash(RulesDir), "issue-2")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("worktree left: %v", err)
+	if left, err := diskOf(t).Exists(filepath.Join(a, filepath.FromSlash(RulesDir), "issue-2")); err != nil || left {
+		t.Fatalf("worktree left: %v %v", left, err)
 	}
 	if st := run(t, a, "status", "--porcelain"); st != "" {
 		t.Fatalf("the clone changed: %s", st)
 	}
 	// The same findings again are not told twice.
-	if _, err := s.Rules(a, banned); err != nil {
+	if _, err := s.Rules(a, banned(t)); err != nil {
 		t.Fatal(err)
 	}
 	if w := gh.Writes(); len(w) != 1 {
@@ -108,7 +109,7 @@ func TestRulesReportsAFailedCheckAndChecksTheRest(t *testing.T) {
 		}
 		return "", nil
 	}
-	got, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Rules(a, check)
+	got, err := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}.Rules(a, check)
 	if err == nil || !strings.Contains(err.Error(), "PR #10") || len(got) != 2 || got[0].Failed != "no go" || got[1].Did != "passes se rules merged with main" {
 		t.Fatalf("%+v %v", got, err)
 	}

@@ -273,6 +273,57 @@ func gitContract(t *testing.T, fresh func(t *testing.T) gitOn) {
 			t.Errorf("a commit of nothing: exit %d", code)
 		}
 	})
+	t.Run("a detached worktree takes a merge it does not commit, and is removed", func(t *testing.T) {
+		t.Parallel()
+		m := fresh(t)
+		_, a, b := m.boxes(t)
+		m.commit(t, b, "y", "b\n")
+		m.must(t, b, "push", "-q", "origin", "main:issue-1")
+		m.commit(t, a, "x", "a\n")
+		m.must(t, a, "fetch", "-q", "origin", "issue-1")
+		theirs := m.must(t, a, "rev-parse", "FETCH_HEAD")
+		tree := filepath.Join(a, "rules", "issue-1")
+		m.must(t, a, "worktree", "add", "-q", "--detach", tree, "main")
+		head := m.must(t, tree, "rev-parse", "HEAD")
+		m.must(t, tree, "merge", "-q", "--no-commit", "--no-ff", theirs)
+		for _, f := range []string{"x", "y"} {
+			if there, _ := m.disk.Exists(filepath.Join(tree, f)); !there {
+				t.Errorf("the merge lacks %s", f)
+			}
+		}
+		if got := m.must(t, tree, "rev-parse", "HEAD"); got != head {
+			t.Fatalf("the merge was committed: %s", got)
+		}
+		if got := m.must(t, tree, "ls-files", "--unmerged"); got != "" {
+			t.Fatalf("a clean merge lists %q unmerged", got)
+		}
+		if _, code := m.git(t, a, "worktree", "remove", tree); code != 128 {
+			t.Fatalf("a worktree mid-merge removed without --force: exit %d", code)
+		}
+		m.must(t, a, "worktree", "remove", "--force", tree)
+		if there, _ := m.disk.Exists(tree); there {
+			t.Fatal("the worktree stands after its removal")
+		}
+		if _, code := m.git(t, a, "worktree", "remove", "--force", tree); code != 128 {
+			t.Fatalf("a worktree removed twice: exit %d", code)
+		}
+		if _, code := m.git(t, a, "worktree", "remove", "--force", a); code != 128 {
+			t.Fatalf("the main work tree removed: exit %d", code)
+		}
+		// Both sides change one file apart: the merge stops, and lists it.
+		m.commit(t, a, "y", "a\n")
+		m.must(t, a, "worktree", "add", "-q", "--detach", tree, "HEAD")
+		if _, code := m.git(t, tree, "merge", "-q", "--no-commit", "--no-ff", theirs); code == 0 {
+			t.Fatal("a conflict merged")
+		}
+		if got := m.must(t, tree, "ls-files", "--unmerged"); !strings.HasSuffix(got, "\ty") {
+			t.Fatalf("the conflict lists %q unmerged", got)
+		}
+		m.must(t, a, "worktree", "remove", "--force", tree)
+		if dirty := m.must(t, a, "status", "--porcelain"); dirty != "" {
+			t.Fatalf("the clone changed: %q", dirty)
+		}
+	})
 	t.Run("a pull fast-forwards, and branches and worktrees check out what they hold", func(t *testing.T) {
 		t.Parallel()
 		m := fresh(t)

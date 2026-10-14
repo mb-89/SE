@@ -56,6 +56,7 @@ type gitPlace struct {
 	index     map[string]string // nil in a bare repository
 	merging   string            // MERGE_HEAD while a merge waits
 	conflicts map[string]bool
+	linked    bool // a work tree git worktree add made, which git worktree remove takes
 }
 
 // NewGit answers a fake git holding no repository, its work trees on d.
@@ -775,7 +776,7 @@ func (r *gitRun) untracked(name string) string {
 }
 
 func (r *gitRun) lsFiles(args []string) int {
-	f, _, err := flags(args, "-z", "--cached", "-c", "--others", "-o", "--exclude-standard")
+	f, _, err := flags(args, "-z", "--cached", "-c", "--others", "-o", "--exclude-standard", "--unmerged", "-u")
 	if err != nil {
 		return r.fail(129, "%v", err)
 	}
@@ -785,6 +786,21 @@ func (r *gitRun) lsFiles(args []string) int {
 	end := "\n"
 	if has(f, "-z") {
 		end = "\x00"
+	}
+	if has(f, "--unmerged", "-u") {
+		// Each conflicted path, at our stage and theirs; the fake keeps no
+		// object ids for the stages, so those it names are zeros.
+		var names []string
+		for name := range r.p.conflicts {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			for _, stage := range []string{"2", "3"} {
+				_, _ = io.WriteString(r.c.Stdout, "100644 "+strings.Repeat("0", 40)+" "+stage+"\t"+name+end)
+			}
+		}
+		return 0
 	}
 	// The untracked come first, then the tracked, each sorted, as git lists them.
 	var others, cached []string
@@ -1264,7 +1280,7 @@ func (r *gitRun) pull(args []string) int {
 }
 
 func (r *gitRun) merge(args []string) int {
-	f, rest, err := flags(args, "-q", "--quiet", "--no-edit", "--no-ff", "--ff-only", "-m=", "--abort")
+	f, rest, err := flags(args, "-q", "--quiet", "--no-edit", "--no-ff", "--ff-only", "--no-commit", "-m=", "--abort")
 	if err != nil {
 		return r.fail(129, "%v", err)
 	}
@@ -1335,6 +1351,15 @@ func (r *gitRun) merge(args []string) int {
 		}
 		r.say("Automatic merge failed; fix conflicts and then commit the result.")
 		return 1
+	}
+	if has(f, "--no-commit") {
+		// The merge stands in the work tree and the index, with MERGE_HEAD
+		// set, for a commit that concludes it or an abort that undoes it.
+		r.p.merging, r.p.conflicts = theirs, map[string]bool{}
+		if !has(f, "-q", "--quiet") {
+			r.say("Automatic merge went well; stopped before committing as requested")
+		}
+		return 0
 	}
 	message := or(f["-m"], "Merge branch '"+r.abbrev(rest[0])+"'")
 	r.p.setHead(r.g.commit([]string{ours, theirs}, copyFiles(merged), message))
@@ -1529,6 +1554,9 @@ func (r *gitRun) push(args []string) int {
 }
 
 func (r *gitRun) worktree(args []string) int {
+	if len(args) > 0 && args[0] == "remove" {
+		return r.worktreeRemove(args[1:])
+	}
 	if len(args) == 0 || args[0] != "add" {
 		return r.fail(129, "usage: git worktree add [--track] [-b <branch>] [--detach] <path> [<commit-ish>]")
 	}
@@ -1570,11 +1598,36 @@ func (r *gitRun) worktree(args []string) int {
 	if err := r.g.disk.MkdirAll(dir); err != nil {
 		return r.fail(128, "fatal: could not create directory of '%s'", rest[0])
 	}
-	p := &gitPlace{repo: r.p.repo, dir: dir, head: head, index: map[string]string{}}
+	p := &gitPlace{repo: r.p.repo, dir: dir, head: head, index: map[string]string{}, linked: true}
 	r.g.places[dir] = p
 	for name, content := range r.g.tree(id) {
 		r.write(p, name, content)
 		p.index[name] = content
 	}
+	return 0
+}
+
+// worktreeRemove deletes a work tree worktree add made, with its files;
+// without --force only one that holds no change and no merge.
+func (r *gitRun) worktreeRemove(args []string) int {
+	f, rest, err := flags(args, "-f", "--force")
+	if err != nil || len(rest) != 1 {
+		return r.fail(129, "usage: git worktree remove [--force] <worktree>")
+	}
+	dir := abs(r.dir, rest[0])
+	p, ok := r.g.places[dir]
+	if there, _ := r.g.disk.Exists(dir); !ok || !there || p.repo != r.p.repo {
+		return r.fail(128, "fatal: '%s' is not a working tree", rest[0])
+	}
+	if !p.linked {
+		return r.fail(128, "fatal: '%s' is a main working tree", rest[0])
+	}
+	if !has(f, "-f", "--force") && (p.merging != "" || len(r.overwrites(p, r.g.tree(p.headID()))) > 0) {
+		return r.fail(128, "fatal: '%s' contains modified or untracked files, use --force to delete it", rest[0])
+	}
+	if err := r.g.disk.RemoveAll(dir); err != nil {
+		return r.fail(128, "fatal: could not remove '%s'", rest[0])
+	}
+	delete(r.g.places, dir)
 	return 0
 }
