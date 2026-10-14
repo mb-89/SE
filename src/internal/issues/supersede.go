@@ -231,7 +231,7 @@ func (s Source) duplicateOfPull(dir string, n, of int) (Duplicated, error) {
 		return Duplicated{}, fmt.Errorf("pull request #%d is merged but names no commit", of)
 	}
 	dup := Duplicated{Issue: n, Of: of, Commit: p.SHA, URL: fmt.Sprintf("https://github.com/%s/commit/%s", s.Repo, p.SHA)}
-	why := fmt.Sprintf("#%d is a duplicate of #%d, merged, which covers this work.\n%s", n, of, dup.URL)
+	why := fmt.Sprintf("#%d is a duplicate of PR #%d, merged, whose work is on main already.\n%s", n, of, dup.URL)
 	if dup.Pulls, dup.Branch, err = s.dropClaim(dir, n, why); err != nil {
 		return dup, err
 	}

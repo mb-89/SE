@@ -391,8 +391,8 @@ overhaul) lands to main: it merges origin's copy of the branch and
 refuses a tree the battery did not record as passed and a branch main moved
 past meanwhile, records on the issue who worked it (see
 [Reviews](#reviews)) and posts the landing answers on it before anything is
-pushed, so a land stopped later (a refused status post, say) still leaves its
-record, then pushes the branch, posts the commit status `se/battery`
+pushed, so a land stopped later (a PR it could not open, say) still leaves
+its record, then pushes the branch, posts the commit status `se/battery`
 naming its tree on the pushed commit, which CI trusts (see
 [spec/coordination.md](coordination.md#up-to-date-with-main)); where
 GitHub refuses that status with 403 (a cloud box's proxy does), it goes on
@@ -438,7 +438,9 @@ the only place they are written; `se issue land` and the retro both read it.
   excluded; its takeovers, from their markers; and its merges of main, all
   counted against `origin/main` (a leaf's against its manifest's branch);
   and the GitHub requests the `se` commands run in the checkout made, from
-  its ledger, this land's so far included
+  its ledger, this land's so far included,
+  and the requests GitHub refused them for a rate limit, with the seconds
+  waited for the reset, from theirs
   ([io.md](io.md#living-within-githubs-rate-limits)).
 - Landing again (after a CI fix, say) updates that comment rather than
   adding a second.

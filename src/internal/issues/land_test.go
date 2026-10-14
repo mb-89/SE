@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +99,11 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	if err := RecordRequests(d, a, "issue pull", 30, landedAt()); err != nil {
 		t.Fatal(err)
 	}
+	// GitHub refused two of them for its rate limit: se waited 10 minutes
+	// for one reset, and gave up on the other.
+	if err := RecordRefusals(d, a, "issue pull", []github.Refusal{{At: landedAt(), Status: 403, Wait: 10 * time.Minute}, {At: landedAt(), Status: 429, GaveUp: true}}); err != nil {
+		t.Fatal(err)
+	}
 	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}.Land(a, "", qs, full, battered(d))
 	if err != nil {
 		t.Fatal(err)
@@ -116,11 +120,14 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 		// Those 30, and the 3 this land had made when it counted them (the
 		// manifest lookup among them; the battery status comes after).
 		Requests: 33,
+		// Those two refusals, and their 600 seconds.
+		RateLimits: 2, RateLimitWaitS: 600,
 	}}.Comment(qs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 33\n") {
+	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 33\n") ||
+		!strings.Contains(body, "- GitHub rate-limit refusals: 2, waited 10m0s for the reset\n") {
 		t.Fatalf("the landing comment is %+v, want\n%s", got, body)
 	}
 	want := []string{"POST repos/o/r/issues/6/comments", "POST repos/o/r/statuses/" + run(t, a, "rev-parse", "HEAD"), "POST repos/o/r/pulls", "POST graphql"}
@@ -265,24 +272,24 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 	}
 }
 
-// A land writes its answers on the issue before it pushes (#491), so one
-// stopped after the push still leaves its record: here the status post after
-// the push is refused (#449), a warning the land goes on past.
+// A land whose push is refused, here by origin's pre-receive hook, has
+// already written its answers on the issue (#491).
 func TestLandPostsTheAnswersBeforeItPushes(t *testing.T) {
 	t.Parallel()
 	origin, a := claimed(t)
+	before := run(t, origin, "rev-parse", "issue-6")
+	hook := filepath.Join(origin, "hooks", "pre-receive")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho refused >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
-	gh.NoStatuses = true
 	d := disk.NewFake()
-	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
-	if err != nil || !strings.Contains(l.Warning, "status failed") {
-		t.Fatalf("%+v %v", l, err)
+	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	if err == nil {
+		t.Fatal("a refused push landed")
 	}
-	if w := gh.Writes(); slices.Index(w, "POST repos/o/r/issues/6/comments") > slices.IndexFunc(w, func(s string) bool { return strings.Contains(s, "/statuses/") }) {
-		t.Fatalf("the answers were posted after the status: %q", w)
-	}
-	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
-		t.Fatalf("origin's issue-6 is %s, want %s", got, want)
+	if got := run(t, origin, "rev-parse", "issue-6"); got != before {
+		t.Fatalf("origin's issue-6 moved to %s", got)
 	}
 	c := commentsAt(t, gh, 6)
 	if len(c) != 1 {

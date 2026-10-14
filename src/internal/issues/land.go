@@ -113,7 +113,7 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		}
 	}
 	// The answers go on the issue before the push, so a land stopped after
-	// it (a refused status post, a PR it could not open) leaves its record.
+	// it (a PR it could not open, say) leaves its record.
 	warning, err := refused(s.push(dir, branch, check, func() error {
 		if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
 			return err
