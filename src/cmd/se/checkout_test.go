@@ -47,8 +47,9 @@ var (
 	installedErr  error
 )
 
-// installed stands an se built from this checkout in for the installed se,
-// since the test binary cannot serve as a daemon.
+// installed builds an se from this checkout to stand in for the installed
+// se, since the test binary cannot serve as a daemon. A machine runs as it
+// through runningAs.
 func installed(t *testing.T) string {
 	t.Helper()
 	installedOnce.Do(func() {
@@ -63,9 +64,18 @@ func installed(t *testing.T) string {
 	if installedErr != nil {
 		t.Fatal(installedErr)
 	}
-	worldOf(t).Executable = func() (string, error) { return installedSE, nil }
+	w := worldOf(t)
+	w.Proc = runningAs{w.Proc, installedSE}
 	return installedSE
 }
+
+// runningAs is a machine whose running program, its Self, is self.
+type runningAs struct {
+	proc.Procs
+	self string
+}
+
+func (m runningAs) Self() (string, error) { return m.self, nil }
 
 // scratch copies this checkout's source into a fresh workspace.
 func scratch(t *testing.T) string {
@@ -143,6 +153,7 @@ func TestAnyOtherWorkspaceRunsTheInstalledSe(t *testing.T) {
 	ws := t.TempDir()
 	write(t, filepath.Join(ws, "go.mod"), "module example.com/other\n")
 	m, w := proc.NewFake(), worldOf(t)
+	m.RunAs(se)
 	w.Proc = m
 	exe, note, err := daemonExe(w, daemon.Paths{Workspace: ws, Disk: disk.Real()})
 	if err != nil || exe != se || note != "" || len(m.Ran()) != 0 {
