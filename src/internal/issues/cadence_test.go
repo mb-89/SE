@@ -92,6 +92,7 @@ func TestAnOpenRetroBlocksASecond(t *testing.T) {
 }
 
 func TestARetroStartedInARaceClosesAsADuplicateOfTheLowerOne(t *testing.T) {
+	t.Parallel()
 	_, a, _ := boxes(t)
 	gh := recorded(t, cadenceRepo(10, 0))
 	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
