@@ -283,11 +283,11 @@ func filedAnswers(fs []filed) []newAnswer {
 	return out
 }
 
-// landed ends a land, a supersede or a close of issue of: it files what the
+// closeOut ends a land, a supersede or a close of issue of: it files what the
 // box queued (q, which queued checked), and adds what it filed to r, the
 // command's own answer, text or --json. fire fires the routine where a filed
 // issue is ready, or the command's own work made one ready (own), once.
-func landed(c *Call, s issues.Source, of int, q []newIssue, asJSON bool, own bool, fire func() string, r func(filed []newAnswer, fanout string) (Reply, error)) (Reply, error) {
+func closeOut(c *Call, s issues.Source, of int, q []newIssue, asJSON bool, own bool, fire func() string, r func(filed []newAnswer, fanout string) (Reply, error)) (Reply, error) {
 	fs, ready, ferr := fileQueued(c, s, of, q)
 	fanout := ""
 	if ready || own {

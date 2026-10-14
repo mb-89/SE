@@ -1,6 +1,6 @@
 ---
 name: worker
-description: Work one leaf se issue in its own worktree, on its branch issue-<n>, and close it with a PR landed by se issue land (auto-merge on), a supersede, or se issue close --fixed-by where its work is on main already. The box starts one for each leaf a take names se:worker.
+description: Work one leaf se issue in its own worktree, on its branch issue-<n>, and close it with a PR landed by se issue land (auto-merge on) and kept by se issue keep until it merges, a supersede, or se issue close --fixed-by where its work is on main already. The box starts one for each leaf a take names se:worker.
 model: opus
 skills: [simplify]
 ---
@@ -35,19 +35,29 @@ tools or the API, and never a comment, a label or a push by hand.
    rather than writing them anew. Then
    `<se> issue land --workspace <path> --answers <path>-landing.yaml`; it says
    what is missing, and lands the rest (`se help issue land`).
-3. On red CI or a review the box sends you, fix it on the same branch, commit,
-   bring the answers up to date, and run the same `issue land` again.
-4. A new issue is a last resort, not a report: most work lands whole. If
+3. **Keep your PR until it merges.** Run `<se> issue keep --workspace <path>`
+   (in the foreground: it answers within its `--for`, 8 minutes), and run it
+   again while it says the PR is still open. Whenever main moves past your
+   branch, it merges `origin/main` in, runs the battery, pushes and posts the
+   battery's status, so CI passes in seconds and auto-merge merges it. You
+   are done with it once it says the PR merged, or that another box took the
+   issue over.
+4. On red CI, a review the box sends you, or an error from `issue keep` (a
+   merge with main that conflicts, a failing check), fix it on the same
+   branch (merge `origin/main` in, never rebase), commit, bring the answers up
+   to date, run the same `issue land` again, and keep the PR again.
+5. A new issue is a last resort, not a report: most work lands whole. If
    something truly belongs in a separate change, `<se> issue new` (its
    `--blocked-by` is required: a list, or `none`; `--parent` makes it a
    sub-issue) queues it, and your land files it. You file at most one: fold
    what is left into it (`--replace`), and if it is too big for one issue,
    make that one `--person`. Never file a decision you can make yourself:
    decide, and name the decision in the landing answers.
-5. **You close the issue you took, always**, in one of three ways and no
+6. **You close the issue you took, always**, in one of three ways and no
    other:
    - **a PR** for what you solved, landed with `<se> issue land` (auto-merge
-     on), with at most one queued issue (step 4) for what you could not
+     on) and kept until it merges, with at most one queued issue (step 5)
+     for what you could not
      solve. Of the issues your take said yours blocks, name in `--blocks`
      only those that need what you left over, so nothing waits that need not;
      or
@@ -66,7 +76,7 @@ tools or the API, and never a comment, a label or a push by hand.
 
    An issue for a person (`--person`) is never a way to end, only a side
    issue, for access or a principle. The Stop hook refuses the box's stop
-   while any issue it took is open with neither, naming each and what it
-   misses.
+   while any issue it took is open with neither a merged PR nor another way
+   of closing it, naming each and what it misses.
 
 Answer only the PR number and link, or what you filed instead.

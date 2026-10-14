@@ -73,7 +73,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			return landed(c, s, n, q, *asJSON, sup.Ready, c.fire, func(filed []newAnswer, fanout string) (Reply, error) {
+			return closeOut(c, s, n, q, *asJSON, sup.Ready, c.fire, func(filed []newAnswer, fanout string) (Reply, error) {
 				if *asJSON {
 					data, err := json.Marshal(struct {
 						issues.Superseded

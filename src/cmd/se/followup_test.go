@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/mb-89/SE/src/internal/battery"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -162,7 +163,14 @@ func boxCheckout(t *testing.T) (ws, answers, fix string, d *disk.Fake, gh *githu
 	}
 	answers = filepath.Join(root, "answers.yaml")
 	put(t, d, answers, all)
-	worldOf(t).Check = func(proc.Procs, string) error { return nil }
+	// The check records the tree it passed, as tests/check.sh does.
+	worldOf(t).Check = func(procs proc.Procs, dir string) error {
+		tree, err := battery.Tree(procs, dir)
+		if err == nil {
+			_, err = battery.Pass(d, procs, dir, tree)
+		}
+		return err
+	}
 	gh = hubAt(t, map[string]string{
 		"repos/o/r/issues/6": `{"number":6,"title":"six","state":"open"}`,
 		"repos/o/r/activity?ref=refs/heads/issue-6&activity_type=branch_creation&per_page=100": `[]`,
