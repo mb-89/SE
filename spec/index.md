@@ -9,8 +9,9 @@ inputs, outputs, config and commands by local name, reads one snapshot, and
 commits its outputs. It never spells another module's name: one **wiring file**
 binds the names. A module is tested alone, against a fake index.
 
-This is the design; the code lands in later issues, in the order of
-[the migration](#the-migration). It adapts v5's model
+This is the design; the code lands in the order of
+[the migration](#the-migration). The core is `src/internal/index`, its fake
+`src/internal/index/indextest`; their doc comments are the contract's detail. It adapts v5's model
 ([quackitect's `model.md` on `v5`](https://github.com/mb-89/quackitect/blob/v5/spec/design_output/model.md)): it keeps one writer per name, local ports with
 outside wiring, one snapshot per run, built-in values, declarations that every
 surface renders, and the fake index; it drops what SE does not need yet.
@@ -62,16 +63,19 @@ the store and never reaches the outside. An I/O module's run reaches its one
 outside thing and nothing else, in
 [I/O modules and compute modules](#io-modules-and-compute-modules).
 
-The shape, with names that settle in the first code issue:
+The shape:
 
 ```go
 type openIn struct {
     Issues []Issue `index:"issues"` // a local port; the wiring binds it
 }
 
-var Open = index.Derived("open", 0, // output port "open", built-in value 0
-    index.Help("The issues a box can take now."),
-    func(in openIn) (int, error) { return countOpen(in.Issues), nil })
+var Module = index.Declare("issues", "The issue rules.",
+    index.Derived("open", 0, // output port "open", built-in value 0
+        "The issues a box can take now.",
+        func(in openIn) (int, error) { return countOpen(in.Issues), nil }))
+
+func init() { index.Register(Module) }
 ```
 
 | v5's contract | SE |
