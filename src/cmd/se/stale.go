@@ -7,12 +7,13 @@ import (
 	"github.com/mb-89/SE/src/internal/update"
 )
 
-// staleSE refuses a take by an se built from a commit main has moved past,
-// naming the command that updates it: the agents and guidance a take hands
-// over come from the SE that takes, so a box that ran on while main moved
-// would hand its sub-agents the procedures of its start. Where it cannot tell
-// (the build or its checkout unknown, main not fetched), it lets the take go.
-func staleSE(w *World) error {
+// staleSE refuses a command run by an se built from a commit main has moved
+// past, naming the command that updates it; why says what the stale se would
+// get wrong. A take would hand its sub-agents the agents and guidance of the
+// box's start; a retro's collect and report would read and store the window
+// by the rules of a build main has moved past. Where it cannot tell (the build
+// or its checkout unknown, main not fetched), it lets the command go.
+func staleSE(w *World, why string) error {
 	built, repo := builtFrom(w), pluginCheckout(w)
 	if built == "" || repo == "" || !update.IsCheckout(w.Disk, repo) {
 		return nil
@@ -33,5 +34,5 @@ func staleSE(w *World) error {
 	if code, _ := proc.ExitCode(err); code != 1 {
 		return nil
 	}
-	return fmt.Errorf("se was built from %s, but main has moved on to %s: a take would hand over stale agents and guidance. Run se update (it pulls main into %s and rebuilds se), then take again", short(built), short(main), repo)
+	return fmt.Errorf("se was built from %s, but main has moved on to %s: %s. Run se update (it pulls main into %s and rebuilds se), then run it again", short(built), short(main), why, repo)
 }

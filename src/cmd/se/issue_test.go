@@ -314,6 +314,32 @@ func TestIssueNewRefusesAnOpenIssuesTitleUnderTheSameParent(t *testing.T) {
 	}
 }
 
+func TestIssueNewRefusesABodyNamingOpenWorkItDoesNotWaitFor(t *testing.T) {
+	t.Parallel()
+	gh := recordedIssues(t)
+	// #1 and #3 are open se issues, #5 is closed and #9 is no issue: only the
+	// open ones refuse it, each named with both ways out.
+	body := "builds on #3 and #1, after #5 and #9; o/r#2 is another's"
+	code, _, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "t", "--body", body, "--blocked-by", "none")
+	if code != 1 || !strings.Contains(errs, "the body names #1, #3, open se work not on main yet: --blocked-by 1,3 makes the take hold this issue until it merges, or --not-blocked 1,3 says the mention is only a reference") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("a refused issue new wrote %q", w)
+	}
+	// Waiting for one and naming the other a reference creates it.
+	if code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "t", "--body", body, "--blocked-by", "3", "--not-blocked", "#1"); code != 0 || !strings.HasPrefix(out, "Created #11 t\n") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	// Its parent, and what it blocks, it names freely.
+	if code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "u", "--body", "under #1, before #3", "--blocked-by", "none", "--parent", "1", "--blocks", "3"); code != 0 || !strings.HasPrefix(out, "Created #12 u\n") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if code, _, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "v", "--body", "b", "--blocked-by", "none", "--not-blocked", "none"); code != 1 || !strings.Contains(errs, "--not-blocked takes issue numbers") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+}
+
 func TestIssueLandNamesThePR(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
