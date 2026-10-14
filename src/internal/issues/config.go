@@ -14,7 +14,7 @@ const Instance = "issues"
 // constant as the built-in value: the retro's and the overhaul's cadence, the
 // lease and the cap on a review's filed findings.
 var Module = index.Declare("issues", "The se issue work: the queue, its takes and leases, its reviews, and the cadences of retros and overhauls.",
-	index.Config("retro-cadence", RetroCadence, "How many se issues close between two retros: at this many closed since the last retro closed, se issue pull --take starts an unattended one."),
+	index.Config("retro-cadence", RetroCadence, "How many se issues close between two retros: at this many closed since the last retro closed, final ones (se-final) not counted, se issue pull --take starts an unattended one."),
 	index.Config("overhaul-cadence", OverhaulCadence, "How many retros close between two overhauls: at this many closed since the last overhaul closed, se issue pull --take starts an unattended one; an overhaul reads the retro's last this many runs."),
 	index.Config("lease", Lease, "How long a claimed leaf may go without a push to its branch before it is stuck; it is under the routine's 4-hour schedule."),
 	index.Config("max-filed", MaxFiled, "How many non-blocking findings one review files as issues; the rest are counted, not filed."),

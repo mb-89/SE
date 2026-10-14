@@ -360,7 +360,8 @@ func (s Source) facts(dir string, n int, comments []comment, base string) (Facts
 	} else {
 		f.Into = base
 	}
-	if f.Commits, err = count("--no-merges", "origin/"+base+"..HEAD"); err != nil {
+	// The commits of the battery's record are no work.
+	if f.Commits, err = count("--no-merges", "--invert-grep", "--grep=^"+battery.CommitSubject, "origin/"+base+"..HEAD"); err != nil {
 		return Facts{}, err
 	}
 	if f.MainMerges, err = count("--merges", "origin/"+base+"..HEAD"); err != nil {

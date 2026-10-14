@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
@@ -161,25 +162,18 @@ func init() {
 	register(Command{
 		Name:    "fleet trust",
 		Class:   batch,
-		Usage:   "fleet trust --sha SHA --tree TREE [--json] [--repo OWNER/NAME]",
+		Usage:   "fleet trust [--rev REV] [--json]",
 		Group:   "Fleet",
 		Summary: "say whether CI may trust the battery a box ran on a commit",
-		Details: fmt.Sprintf("CI's check job asks it first: exit 0 and say why where commit SHA's latest %s status is a success naming TREE, the tree CI checked out, posted by an account with write access to the repository, as se issue land and se issue keep post it on the commit they pushed; else exit 1 and say why, and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}). A status not posted yet is asked for again a few times. It is trust in one's own boxes, not a proof.", issues.BatteryContext),
+		Details: "CI's check job asks it first, in its checkout: exit 0 and say why where commit REV (default HEAD) holds the battery's record (battery/config/passed) naming REV's git tree with the record left out, as tests/check.sh writes it and se issue land and se issue keep commit it with the work; else (no record, or one naming another tree, as where main moved since) exit 1 and say why, and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}). It asks GitHub nothing. It is trust in one's own boxes: faking the record is sabotage, not an accident.",
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "fleet trust")
-			sha := fs.String("sha", "", "the `SHA` of the PR's head commit")
-			tree := fs.String("tree", "", "the `TREE` CI checked out, HEAD^{tree}")
+			fs := c.Flags("fleet trust")
+			asJSON := fs.Bool("json", false, "answer JSON")
+			rev := fs.String("rev", "HEAD", "the commit `REV` CI checked out")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
-			if *sha == "" || *tree == "" {
-				return Reply{}, fmt.Errorf("fleet trust takes --sha SHA and --tree TREE")
-			}
-			s, err := src()
-			if err != nil {
-				return Reply{}, err
-			}
-			why, err := s.Trusted(*sha, *tree)
+			why, err := battery.Trusted(c.Proc, c.Workspace, *rev)
 			if err != nil {
 				return Reply{}, fmt.Errorf("not trusted, so CI runs the battery: %w", err)
 			}

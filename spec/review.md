@@ -51,8 +51,10 @@ follows them; `se review brief` and `se issue review` (in
 4. **Findings become issues, flagged final.** Every verified finding,
    blocking or not, becomes an issue labelled `se` and `se-final`, made as
    `se issue new --final --blocked-by none` makes it:
-   - a non-blocking one goes to the normal queue (no parent), and fires the
-     routine once, as a new ready issue does;
+   - a non-blocking one goes into the review's one manifest of findings,
+     `Findings of the review of #N`, labelled `se-manifest` and `se-final`,
+     which the first of them creates, and fires the routine once, as a new
+     ready issue does;
    - a blocking one becomes a sub-issue of the gate, so the gate is reviewed
      again after it lands.
 

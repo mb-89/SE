@@ -74,8 +74,9 @@ choice is deterministic and no prompt restates it.
 - **Done**: a leaf inside a manifest is closed by its landing into the
   manifest's branch; a manifest's PR body says `Fixes #n`, so GitHub closes
   it when the PR merges, and the issues it blocked become ready.
-  A PR merges only when it is up to date with main, so CI ran on what lands
-  ([coordination.md](coordination.md#up-to-date-with-main)).
+  A PR merges once its own CI is green; it need not be up to date with
+  main, and CI checks main again after every merge
+  ([coordination.md](coordination.md#merging-into-main)).
 
 ## Manifests: all work moves in them
 
@@ -105,10 +106,11 @@ the owner's account for an hour.
   Without either it goes into the open **misc manifest**, labelled
   `se-misc`: it takes new issues for the target time from its creation and
   while its PR is not open; after that the next one opens, and the old one
-  lands once its leaves are done. What se files itself (the retro's, the
-  overhaul's, a review's non-blocking findings, a supersede of a bare issue)
-  goes the same way, and `se fleet fix` moves a bare issue there by a
-  sub-issue link, filing nothing of its own. An issue for a person, a retro
+  lands once its leaves are done. A supersede of a bare issue goes the same
+  way, and `se fleet fix` moves a bare issue there by a sub-issue link,
+  filing nothing of its own. What a retro, an overhaul or a review finds
+  goes into its own one manifest of findings, the manifest and every finding
+  in it labelled `se-final` ([spec/retro.md](retro.md)). An issue for a person, a retro
   and an overhaul stand at the top by themselves.
 - **Boxes take only manifests.** At the top, `se issue pull --take` offers a
   manifest (a parent), a retro or an overhaul, never a bare leaf (with
@@ -242,10 +244,13 @@ nothing mints an issue for a person on a box's behalf.
   issue whose PR already covers its work; or, where the issue's work reached
   main before the take, a close naming that commit
   (`se issue close <n> --fixed-by SHA`), so a moot issue ends without an
-  empty PR. A box opens no issue (the owner's rule, 2026-10-14):
-  `se issue new` refuses in one, before it asks GitHub anything, and only
-  retros, reviews and overhauls file issues, through their own commands. The
-  plugin's Stop hook holds a box to the rule (see
+  empty PR. A box, a worker or a manifest's coordinator, opens no issue
+  (the owner's rule, 2026-10-14): `se issue new` refuses in one, before it
+  asks GitHub anything. Its open points go into its landing answers (`open`,
+  [Landing answers](#landing-answers)), and the retro, which lists them,
+  turns them into work; only retros, reviews and overhauls file issues,
+  through their own commands, each as one manifest of finals. Any issue a
+  box opens is a defect. The plugin's Stop hook holds a box to the rule (see
   [The Stop hook](#the-stop-hook)).
 - **The person's side:**
   - `se issue pull --person` lists every issue waiting on a person, with its
@@ -376,12 +381,9 @@ An issue at the top (a manifest whose leaves are all closed, a retro, an
 overhaul) lands to main: it merges origin's copy of the branch and
 `origin/main` in, runs `tests/check.sh` and goes on only if it passes,
 refuses a tree the battery did not record as passed and a branch main moved
-past meanwhile, pushes the branch, posts the commit status `se/battery`
-naming its tree on the pushed commit, which CI trusts (see
-[spec/coordination.md](coordination.md#up-to-date-with-main)); where
-GitHub refuses that status with 403 (a cloud box's proxy does), it goes on
-and names the refusal (with `--json`: `warning`), as `se issue keep` goes
-on, since CI then runs the battery for the commit itself. It records on
+past meanwhile, commits the battery's record of the tree it passed with the
+work and pushes the branch, so CI trusts the pushed commit (see
+[spec/coordination.md](coordination.md#merging-into-main)). It records on
 the leaf who worked it (see
 [Reviews](#reviews)), posts the landing answers on the issue, opens one PR against main titled after the issue with the
 body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left
@@ -392,11 +394,14 @@ fix for red CI is safe, and updates the answers it posted before. A session
 has it as `/se issue land`.
 
 `se issue keep` keeps the checked-out branch's PR until it merges: whenever
-main moves past the branch, it merges `origin/main` in, checks, pushes and
-posts the status as `se issue land` does; it answers within `--for`, saying
+main moves past the branch, it merges `origin/main` in, checks, commits the
+battery's record and pushes as `se issue land` does; it answers within `--for`, saying
 the PR merged, another box took the issue over, or that it is still open
-(with `--json`: `{"issue","pr","url","merged","taken_over","updated"}`). See
-[spec/coordination.md](coordination.md#up-to-date-with-main).
+(with `--json`: `{"issue","pr","url","merged","taken_over","updated"}`). The
+PR merges once its own CI is green, up to date with main or not; only a
+conflict holds it back, and keeping it up to date re-checks it against the
+main it will merge into. See
+[spec/coordination.md](coordination.md#merging-into-main).
 
 ### Landing answers
 
@@ -405,6 +410,9 @@ so the answers are the record, and the retro reads the same questions across
 every issue closed in its window. The questions are one list,
 [spec/landing.yaml](landing.yaml) (key, question and a one-line hint each),
 the only place they are written; `se issue land` and the retro both read it.
+One of them, `open`, asks for the open points the work leaves: a box opens
+no issue, so they go there, and `se retro collect` lists the window's in
+its draft (`## Open points`) for the retro to turn into work.
 
 - `--answers FILE` is YAML keyed by the same keys, each answer text (a
   relative FILE is read from the workspace). `land` refuses, before it checks
@@ -615,7 +623,7 @@ through `se`, with every verdict on the reviewed issue's thread.
   the report names it, and a fail whose blocking findings are all repeats
   closes N as a pass does.
 - **Either way**, the non-blocking findings (at most `issues/config/max-filed`) become `se-final`
-  issues in the normal queue.
+  sub-issues of the review's one manifest of findings, itself `se-final`.
 - **Who worked a leaf** is recorded by `se issue land`: a comment on the leaf,
   `Worked by session S in W.`, with the marker
   `<!-- se-worker {"session":S,"workspace":W} -->`, once per worker. S is the

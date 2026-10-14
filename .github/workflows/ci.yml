@@ -1,12 +1,17 @@
 name: ci
+# main merges a PR once its own CI is green, without bringing it up to date
+# first, so main is checked again after every merge (spec/coordination.md).
 on:
   pull_request:
+  push:
+    branches: [main]
+# A PR's newer push cancels its older run. main's running check always
+# finishes; of main's waiting ones only the newest runs, which holds the rest.
 concurrency:
-  group: ci-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
-  statuses: read
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -19,20 +24,19 @@ jobs:
         with:
           go-version: ${{ steps.pins.outputs.go }}
           cache-dependency-path: src/go.sum
-      # A box pushes only a tree its battery passed, and posts the se/battery
-      # status naming it on the commit (se issue land, se issue keep). Where
-      # the head carries it for the tree checked out here, posted by an
-      # account that writes to the repository, CI trusts it and runs nothing
-      # more; any other push runs the battery (spec/coordination.md).
+      # The battery writes the tree it passed (HEAD's git tree without that
+      # file) into one file of the checkout, battery/config/passed, and se
+      # issue land and se issue keep commit it with the work. Where the
+      # commit checked out here (github.sha: a PR's merge commit, or the push)
+      # holds that file naming its own tree, CI trusts it and runs nothing
+      # more; a missing or stale file (main moved, say) runs the battery
+      # (spec/coordination.md). It asks GitHub nothing.
       - id: trust
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         # se is built outside the checkout, which the battery wants clean; a
         # tree whose se does not build is not trusted either.
         run: |
           se="$RUNNER_TEMP/se"
-          if sh src/build.sh "$se" && "$se" fleet trust --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" --tree "$(git rev-parse 'HEAD^{tree}')"; then
+          if sh src/build.sh "$se" && "$se" fleet trust --rev "$GITHUB_SHA"; then
             echo "trusted=true" >>"$GITHUB_OUTPUT"
           fi
       - if: steps.trust.outputs.trusted != 'true'

@@ -17,6 +17,7 @@ import (
 	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
@@ -164,6 +165,39 @@ func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(out), &answer); code != 0 || err != nil || !answer.Ready || answer.Issue.Number != 3 {
 		t.Fatalf("exit %d, %q %v", code, out, err)
+	}
+}
+
+// Finals do not count: a closed se-final issue (what a retro, a review or an
+// overhaul filed) leaves the retro cadence where it was, so retros do not
+// feed themselves; any other closed se issue moves it.
+func TestAClosedFinalIssueDoesNotMoveTheRetroCadence(t *testing.T) {
+	t.Parallel()
+	gh := recordedIssues(t)
+	setenv(t, "CLAUDE_CODE_SESSION_ATTENDED", "1")
+	closeNew := func(args ...string) {
+		t.Helper()
+		code, out, errs := se(t, append([]string{"issue", "new", "--json", "--repo", "o/r", "--body", "b", "--blocked-by", "none", "--parent", "3"}, args...)...)
+		var made struct{ Number int }
+		if err := json.Unmarshal([]byte(out), &made); code != 0 || err != nil {
+			t.Fatalf("exit %d, %q %q %v", code, out, errs, err)
+		}
+		if _, err := gh.Send("PATCH", fmt.Sprintf("repos/o/r/issues/%d", made.Number), github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cadence := func() string {
+		t.Helper()
+		_, out, _ := se(t, "issue", "pull", "--repo", "o/r")
+		return out
+	}
+	closeNew("--title", "a finding", "--final")
+	if out := cadence(); !strings.Contains(out, "\n1 se issue closed and no retro has closed yet") {
+		t.Fatalf("a closed final issue moved the cadence: %q", out)
+	}
+	closeNew("--title", "work")
+	if out := cadence(); !strings.Contains(out, "\n2 se issues closed and no retro has closed yet") {
+		t.Fatalf("a closed issue did not move the cadence: %q", out)
 	}
 }
 
@@ -332,7 +366,8 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	git(ws, "push", "-q", "origin", "main")
 	git(ws, "checkout", "-q", "-b", "issue-6")
 	git(ws, "commit", "-q", "--allow-empty", "-m", "work")
-	// git keeps the checkout on the real disk; se reads its files from a fake.
+	// git keeps the checkout on the real disk, the battery's record in it among
+	// them; se reads its other files from a fake.
 	spec, err := os.ReadFile(filepath.Join("..", "..", "..", issues.QuestionsFile))
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +382,7 @@ func TestIssueLandNamesThePR(t *testing.T) {
 		checked = dir
 		tree, err := battery.Tree(procs, dir)
 		if err == nil {
-			_, err = battery.Pass(d, procs, dir, tree)
+			_, err = battery.Pass(disk.Real(), procs, dir, tree)
 		}
 		return err
 	}

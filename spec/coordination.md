@@ -94,7 +94,7 @@ se fleet fix [--json] [--repo OWNER/NAME]
 se fleet plugins --into DIR
 se fleet prune [--apply] [--json] [--repo OWNER/NAME]
 se fleet rules [--json] [--repo OWNER/NAME]
-se fleet trust --sha SHA --tree TREE [--json] [--repo OWNER/NAME]
+se fleet trust [--rev REV] [--json]
 ```
 <!-- /se:manifest -->
 
@@ -122,47 +122,53 @@ branch. The workflow `.github/workflows/prune.yml` runs
 `se fleet prune --apply` when an issue or a PR closes, and every hour, and
 its output names what it deleted.
 
-## Up to date with main
+## Merging into main
 
-CI must run on what lands, so main's ruleset merges a PR only when its
-branch is up to date with main (its required check `check` is strict): a PR
-whose CI ran before main moved waits. The merge queue is not offered for a
-repository a personal account owns, and a push made with a workflow's own
-token starts no CI, so no workflow can bring a PR up to date either. The
-owner's rule (2026-10-14): **a box stays with its PR until it merges, it
-pushes only what is up to date with main and checked, and CI trusts the
-battery the box already ran.**
+main's ruleset requires the check `check`, and no longer requires a PR to be
+up to date with main before it merges (the owner switched the strict setting
+off, 2026-10-14): **a PR merges once its own CI is green, and only a conflict
+holds it back.** Waiting for up to date sent every open PR back for another
+merge of main, battery and CI run each time one merged. The price is that two
+PRs green apart can break main together, so **CI runs on every push to main
+too, and a red main is the fleet's first job.** Every land and every keep
+merges `origin/main` in and runs the battery, so a red main fails every box's
+next check: the box whose check fails on what main brought fixes main first,
+on its own branch, and lands that fix before its own work goes on. The rest
+of the owner's rule (2026-10-14) stands: **a box stays with its PR until it
+merges, it pushes only what is checked, and CI trusts the battery the box
+already ran.** The merge queue is not offered for a repository a personal
+account owns, and a push made with a workflow's own token starts no CI.
 
-- **The battery records what it passed.** `tests/check.sh` records the git
-  tree it ran over, `HEAD^{tree}` of a clean worktree, read before its first
-  step and again once it passed, in `.se/.runtime/battery/tree`
-  (`src/internal/battery`, `TreeFile`): a battery run is bound to the exact
-  code.
+- **The battery records what it passed, in the checkout.** `tests/check.sh`
+  writes the git tree it ran over into one file, `tests/passed`
+  (`battery/config/passed`, the one place its path is set): HEAD's tree with
+  that file left out, so recording a pass changes nothing it names, read
+  from a clean worktree (the file aside) before the first step and again
+  once it passed. A battery run is bound to the exact code.
 - **`se issue land` pushes only what is current and checked.** It merges
   origin's copy of the branch and then `origin/main` into it before it runs
-  the check, so the check runs on what lands. It refuses to push a tree the
-  battery did not record as passed, and a branch `origin/main` (fetched
-  again after the check) has moved past: only a fast-forward onto main is
-  pushed, and main's ruleset enforces the merge side. A merge that conflicts
+  the check, so the check runs on the main of the moment. It refuses to push
+  a tree the battery did not record as passed, and a branch `origin/main`
+  (fetched again after the check) has moved past. A merge that conflicts
   is undone, and the box resolves it by hand (never a rebase, never a
-  force-push). After the push it posts the commit status `se/battery`,
-  success, on the pushed commit, its description naming the tree, through
-  the GitHub I/O module.
-- **CI trusts that status.** The `check` job, the one main's ruleset
-  requires, first runs `se fleet trust` (built from the PR's tree, outside
-  the checkout): where the head commit's latest `se/battery` status is a
-  success naming the tree CI checked out, posted by an account with write
-  access to the repository, it passes in seconds. Otherwise (a person's push
-  without SE, say) it runs the battery as before. A status not posted yet is
-  asked for again a few times, since CI can start on a push before the box
-  posts it. It is trust in one's own boxes, not a cryptographic proof, and
-  the owner changes no setting.
+  force-push); one that conflicts in the record alone is settled, since the
+  battery writes it anew. It commits the record with the work, so the pushed
+  commit holds it.
+- **CI trusts that record.** The `check` job, the one main's ruleset
+  requires, first runs `se fleet trust --rev` on the commit it checked out
+  (a PR's merge commit, or a push to main), with an `se` built outside the
+  checkout: where that commit's record names its own tree, it passes in
+  seconds. A missing record (a person's push without SE) or a stale one
+  (main moved since) runs the battery. It asks GitHub nothing. It is trust in
+  one's own boxes: faking the record is sabotage, not an accident.
 - **The box keeps each PR it opened until it merges.** The worker that
   landed it runs `se issue keep` in its worktree: every minute it looks at
   the PR, and whenever main has moved past the branch on origin it merges
-  `origin/main` in (never a rebase), runs the battery, pushes and posts the
-  status as `se issue land` does. The push starts CI like any person's push,
-  CI passes in seconds on the status, and auto-merge merges it. It answers
+  `origin/main` in (never a rebase), runs the battery, commits its record
+  and pushes as `se issue land` does; CI passes in seconds on the record.
+  The PR does not wait for it to merge: auto-merge merges it once its CI is
+  green. Keeping it up to date re-checks it against the main it merges into,
+  and finds a conflict before GitHub does. It answers
   within `--for` (8 minutes), saying the PR merged, another box took the
   issue over (a takeover marker, or another box's claim, since it started),
   or that it is still open, and the worker runs it again. A merge that

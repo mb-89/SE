@@ -27,7 +27,7 @@ func TestTheLandingQuestionsAreTheSpecsList(t *testing.T) {
 			t.Errorf("%s has no hint", q.Key)
 		}
 	}
-	want := []string{"done", "timeline", "decided", "well", "cost", "by-hand", "rules", "guidance", "lacked", "proof", "left", "doubt", "improve", "else"}
+	want := []string{"done", "timeline", "decided", "well", "cost", "by-hand", "rules", "guidance", "lacked", "proof", "left", "open", "doubt", "improve", "else"}
 	if !reflect.DeepEqual(keys, want) {
 		t.Fatalf("keys %q", keys)
 	}
@@ -119,7 +119,7 @@ func TestLandingFactsCountCommitsMergesAndTakeovers(t *testing.T) {
 		comments6: `[{"id":5,"body":"<!-- se:takeover 1 -->\nTaken over."}]`,
 	})
 	d := disk.NewFake()
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}).Land(a, "", qs, full, battered(d)); err != nil {
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}).Land(a, "", qs, full, battered()); err != nil {
 		t.Fatal(err)
 	}
 	c := commentsAt(t, gh, 6)
@@ -128,7 +128,7 @@ func TestLandingFactsCountCommitsMergesAndTakeovers(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("%v %v: %q", ok, err, posted)
 	}
-	want := Facts{Claimed: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC), Landed: landedAt(), Minutes: 90, Commits: 2, Takeovers: 1, MainMerges: 1, Requests: 4}
+	want := Facts{Claimed: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC), Landed: landedAt(), Minutes: 90, Commits: 2, Takeovers: 1, MainMerges: 1, Requests: 3}
 	if !reflect.DeepEqual(got.Facts, want) || got.Issue != 6 || !reflect.DeepEqual(got.Answers, full) {
 		t.Fatalf("%+v", got)
 	}
@@ -142,7 +142,7 @@ func TestLandAgainUpdatesTheLandingComment(t *testing.T) {
 		comments6: `[{"id":5,"body":"Worked by someone."},{"id":77,"body":"<!-- se:landing -->\nolder answers"}]`,
 	})
 	d := disk.NewFake()
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered(d)); err != nil {
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered()); err != nil {
 		t.Fatal(err)
 	}
 	patched := 0

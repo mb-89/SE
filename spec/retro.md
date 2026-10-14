@@ -37,8 +37,10 @@ What earlier versions taught, and how this design answers it:
     `<!-- se:retro unattended -->`.
 - **The cadence:** retros happen without anyone remembering them. When
   `se issue pull --take` runs, before offering anything else, it counts the
-  `se` issues closed since the last closed `se-retro` issue closed, retros and
-  overhauls not counted (with none closed yet, the whole history). At `issues/config/retro-cadence` (the
+  `se` issues closed since the last closed `se-retro` issue closed, retros,
+  overhauls and final issues (`se-final`) not counted, so what retros,
+  reviews and overhauls file does not start the next retro (with none closed
+  yet, the whole history). At `issues/config/retro-cadence` (the
   issues instance's config value, built-in in `src/internal/issues/cadence.go`) or more, with no `se-retro` issue open,
   it starts an unattended retro, as `se retro new --unattended` does, and
   takes it ahead of all other work but a due overhaul
@@ -78,15 +80,19 @@ What earlier versions taught, and how this design answers it:
   durable fix and records what went well. How, and the fields it writes into
   the draft's block, are the agent's (its steps 2 and 3).
 - **Who decides (the owner's rule for retros and overhauls alike):** every
-  finding becomes an issue through the same code as `se issue new`.
-  - A **non-controversial** finding goes into the normal queue: into the
-    open misc manifest, as every issue filed into no manifest does
-    ([issues.md](issues.md#manifests-all-work-moves-in-them)), whose leaves
-    together should take about `issues.manifest/config/target` (an hour). A
-    class too big for that is filed as a manifest of its own
-    (`se issue new --manifest`, its leaves with `--parent`).
-  - A **controversial** one is an issue for a person: labelled `se-person`
-    and assigned to the owner, it waits for them. The retro does not.
+  finding becomes an issue through the same code as `se issue new`,
+  labelled `se-final`: what a run files is its output, never superseded and
+  never counted toward the cadence.
+  - The **non-controversial** findings go into the run's one manifest,
+    `Findings of the retro #N`, labelled `se-manifest` and `se-final`, which
+    the first of them creates; its leaves land as one PR
+    ([issues.md](issues.md#manifests-all-work-moves-in-them)).
+  - A **controversial** one, or one too big for the manifest, is an issue
+    for a person: labelled `se-person` and assigned to the owner, it waits
+    for them. The retro does not.
+  - The **open points** the window's landing answers name (`open`) are
+    listed in the draft (`## Open points`): a box opens no issue, so the
+    retro is the one that turns them into findings.
 
   Controversial means any of:
   - it changes a design principle ([principles.md](principles.md));

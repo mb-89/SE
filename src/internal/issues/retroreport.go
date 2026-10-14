@@ -149,6 +149,7 @@ func (c Collected) facts() string {
 	fmt.Fprintf(&b, "\nGitHub rate limits: %g refusals and %g minutes waited for the reset per landed issue; %d of the %d closed issues met one.\n", c.Metrics["rate_limits_per_issue"], c.Metrics["rate_limit_minutes_per_issue"], withWaits, len(c.Rows))
 	fmt.Fprintf(&b, "\nDuplicates: %g closed as duplicate, %d issues for a person minted again for an issue one already held back.\n", c.Metrics["duplicates"]-float64(c.Reholds), c.Reholds)
 	fmt.Fprintf(&b, "\nClaim to merge: median %s over the %d issues whose claim and merge are both on record.\n", span(int(c.Metrics["claim_to_merge_minutes"])), known)
+	b.WriteString(c.openPoints())
 
 	b.WriteString("\n## Metrics against the previous retros\n")
 	if len(c.History) == 0 {
@@ -277,6 +278,31 @@ func (c Collected) matrix(qs []Question) string {
 		if said == 0 {
 			b.WriteString("Nothing but none.\n")
 		}
+	}
+	return b.String()
+}
+
+// OpenKey is the landing question that asks for the open points a work
+// leaves. A box opens no issue: its open points go into its landing answers,
+// and the retro, which reads them here, turns them into work.
+const OpenKey = "open"
+
+// openPoints lists the open points the window's landing answers name, by
+// issue; those that say "none" are left out.
+func (c Collected) openPoints() string {
+	var b strings.Builder
+	b.WriteString("\n## Open points\nWhat the closed issues' landing answers left open (`" + OpenKey + "`): the retro turns them into work, as findings.\n")
+	said := 0
+	for _, r := range c.Rows {
+		a, ok := r.Answers[OpenKey]
+		if !ok || nothing(a) {
+			continue
+		}
+		said++
+		fmt.Fprintf(&b, "- #%d %s: %s\n", r.Number, r.Title, strings.ReplaceAll(strings.TrimSpace(a), "\n", "\n  "))
+	}
+	if said == 0 {
+		b.WriteString("None in the window.\n")
 	}
 	return b.String()
 }
@@ -475,6 +501,11 @@ type Filed struct {
 	// Issues are the issues created, Person those of them for a person.
 	Issues []int `json:"issues"`
 	Person []int `json:"person"`
+	// Manifest is the one manifest that holds the findings not for a person,
+	// as its sub-issues; 0 where every finding is for a person.
+	Manifest int `json:"manifest,omitempty"`
+	// kind names the run: retro or overhaul.
+	kind string
 	// Left says why the claim issue-N is still there, where its deletion was
 	// refused.
 	Left string `json:"left,omitempty"`
@@ -535,7 +566,7 @@ type filing struct {
 // Its claim issue-N goes.
 func (s Source) fileRun(i issue, run filing) (Filed, error) {
 	n := i.Number
-	out := Filed{Retro: n, Issues: []int{}, Person: []int{}}
+	out := Filed{Retro: n, Issues: []int{}, Person: []int{}, kind: run.kind}
 	if err := run.mint(&out); err != nil {
 		return out, err
 	}
@@ -554,24 +585,55 @@ func (s Source) fileRun(i issue, run filing) (Filed, error) {
 }
 
 // mint creates one finding's issue through the same code as se issue new: a
-// controversial one for a person (ForPerson), the rest in the normal queue.
-// It records the issue in out.
+// controversial one for a person (ForPerson), at the top; the rest as
+// sub-issues of the run's one manifest, which the first of them creates. Each
+// is labelled se-final, the manifest too: what a run files is its output, so
+// the retro's cadence does not count it. It records the issue in out.
 func (s Source) mint(title, body string, controversial bool, why string, out *Filed) (int, error) {
 	if controversial {
-		made, err := s.ForPerson(title, "Controversial, so it waits for a person: "+why+"\n\n"+body, 0, nil)
+		made, err := s.ForPerson(title, "Controversial, so it waits for a person: "+why+"\n\n"+body, 0, nil, FinalLabel)
 		if made.Number > 0 {
 			out.Issues = append(out.Issues, made.Number)
 			out.Person = append(out.Person, made.Number)
 		}
 		return made.Number, err
 	}
-	made, ready, err := s.create(title, body, 0, nil, []string{Label})
+	if err := s.findings(out); err != nil {
+		return 0, err
+	}
+	made, ready, err := s.create(title, body, out.Manifest, nil, []string{Label, FinalLabel})
 	if err != nil {
 		return 0, err
 	}
 	out.Issues = append(out.Issues, made.Number)
 	out.Ready = out.Ready || ready
 	return made.Number, nil
+}
+
+// findings makes the manifest that holds run out's findings, where out has
+// none yet.
+func (s Source) findings(out *Filed) error {
+	if out.Manifest > 0 {
+		return nil
+	}
+	var err error
+	out.Manifest, err = s.findingsManifest(fmt.Sprintf("the %s #%d", out.kind, out.Retro))
+	return err
+}
+
+// findingsManifest makes the one manifest that holds what run (a retro, an
+// overhaul, a review) found: an issue at the top labelled se-manifest and
+// se-final, its findings its sub-issues, landing as one PR. An open one of its
+// title, from a filing cut short, is taken again.
+func (s Source) findingsManifest(run string) (int, error) {
+	title := "Findings of " + run
+	open, err := s.Duplicate(title, 0)
+	if err != nil || open > 0 {
+		return open, err
+	}
+	body := fmt.Sprintf("What %s found, as one manifest: its sub-issues, each final (%s), land as one PR. A run files its findings; a box opens no issue.", run, FinalLabel)
+	made, _, err := s.create(title, body, 0, nil, []string{Label, ManifestLabel, FinalLabel})
+	return made.Number, err
 }
 
 // postReport posts text, a report, on issue n.

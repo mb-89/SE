@@ -175,10 +175,10 @@ func (s Status) since() string {
 // ForPerson creates an issue for a person, through the same code as se issue
 // new: labelled se and se-person and assigned to the repository's owner, so
 // GitHub notifies them and no box is offered it, a sub-issue of parent where
-// that is above zero, and blocked by each of blockedBy. These are the only
-// issues that wait on a person.
-func (s Source) ForPerson(title, body string, parent int, blockedBy []int) (Issue, error) {
-	made, _, err := s.create(title, body, parent, blockedBy, []string{Label, PersonLabel})
+// that is above zero, blocked by each of blockedBy, and labelled each of
+// labels (se-final) too. These are the only issues that wait on a person.
+func (s Source) ForPerson(title, body string, parent int, blockedBy []int, labels ...string) (Issue, error) {
+	made, _, err := s.create(title, body, parent, blockedBy, append([]string{Label, PersonLabel}, labels...))
 	if err != nil {
 		return Issue{}, err
 	}
