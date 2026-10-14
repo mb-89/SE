@@ -95,7 +95,8 @@ the owner's account for an hour.
   `issue-<leaf>`, claimed from the manifest's branch; its `se issue land`
   runs the battery, merges the leaf into `issue-<manifest>` (never a
   rebase), posts the leaf's landing answers on the leaf and closes it. A leaf
-  gets no PR of its own. When every leaf is closed, the coordinator lands the
+  gets no PR of its own: an earlier box's open PR of the leaf to main is
+  closed, its auto-merge with it, with a comment naming the manifest. When every leaf is closed, the coordinator lands the
   manifest: one PR from `issue-<manifest>` to main, `Fixes #<manifest>`,
   auto-merge on, and it stays with that PR until it merges. A manifest whose
   branch holds nothing main does not closes with no PR.

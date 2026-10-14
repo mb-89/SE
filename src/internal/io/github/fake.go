@@ -826,6 +826,10 @@ func (f *Fake) write(method, path string, v map[string]any) (any, error) {
 			}
 		}
 		p["updated_at"] = f.now()
+		if p["state"] == "closed" && p["closed_at"] == nil {
+			// Closing a PR turns its auto-merge off, as GitHub does.
+			p["closed_at"], p["auto_merge"] = p["updated_at"], nil
+		}
 		return p, nil
 	case method == "PUT" && match(w, "pulls", "#", "merge"):
 		p, ok := r.pulls[num(w[1])]

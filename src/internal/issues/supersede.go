@@ -262,18 +262,8 @@ func (s Source) closeAsDuplicate(n int, comment string) error {
 // it finds nothing left to do.
 func (s Source) dropClaim(dir string, n int, why string) (pulls []int, branch string, err error) {
 	b := Branch(n)
-	open, err := s.openPulls(b)
-	if err != nil {
-		return nil, "", err
-	}
-	for _, p := range open {
-		if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, p.Number), github.F("body", "Closed unmerged: "+why)); err != nil {
-			return pulls, "", fmt.Errorf("commenting on PR #%d: %w", p.Number, err)
-		}
-		if _, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/pulls/%d", s.Repo, p.Number), github.F("state", "closed")); err != nil {
-			return pulls, "", fmt.Errorf("closing PR #%d: %w", p.Number, err)
-		}
-		pulls = append(pulls, p.Number)
+	if pulls, err = s.closePulls(b, why); err != nil {
+		return pulls, "", err
 	}
 	held, err := s.git(dir, "ls-remote", "origin", "refs/heads/"+b)
 	if err != nil {
@@ -286,4 +276,24 @@ func (s Source) dropClaim(dir string, n int, why string) (pulls []int, branch st
 		return pulls, "", fmt.Errorf("deleting %s: %w", b, err)
 	}
 	return pulls, b, nil
+}
+
+// closePulls closes the open PRs from branch against main, each with a
+// comment saying where its work went (why); closing one turns its auto-merge
+// off. It returns the PRs it closed.
+func (s Source) closePulls(branch, why string) (pulls []int, err error) {
+	open, err := s.openPulls(branch)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range open {
+		if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, p.Number), github.F("body", "Closed unmerged: "+why)); err != nil {
+			return pulls, fmt.Errorf("commenting on PR #%d: %w", p.Number, err)
+		}
+		if _, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/pulls/%d", s.Repo, p.Number), github.F("state", "closed")); err != nil {
+			return pulls, fmt.Errorf("closing PR #%d: %w", p.Number, err)
+		}
+		pulls = append(pulls, p.Number)
+	}
+	return pulls, nil
 }
