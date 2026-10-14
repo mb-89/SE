@@ -9,7 +9,7 @@ yourself ([principle 20](spec/principles.md)).
 SE's design principles, which the retro and the overhaul measure against, are in [spec/principles.md](spec/principles.md).
 
 1. Work on your own branch. main takes merged PRs alone.
-2. Run `sh ./tests/check.sh` before every push. The pre-push hook runs it too, and a push that skips the hook is refused.
+2. Run `sh ./tests/check.sh` before every push. The pre-push hook runs it too; what refuses a change whose check failed is CI's required check, as [spec/development.md](spec/development.md#the-gate) says.
 3. Once check.sh passes, open one PR against main and turn on auto-merge (squash).
 4. A red CI run on your PR is yours: fix it on the same branch and push.
 5. Create no other branches: no backups, no heartbeats, no rescue branches.

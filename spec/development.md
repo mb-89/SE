@@ -50,6 +50,19 @@ switches off. Only the battery needs them, so check.sh runs
 `sh tests/tools.sh install` first for any that is missing or at another
 version; a fresh box's first push installs them itself.
 
+## The gate
+
+What keeps an unchecked change off main is CI, not the box. main's ruleset
+requires the `ci` workflow's `check` job, which runs `sh ./tests/check.sh`,
+and makes it strict: a PR merges only once that check passed on a head that is
+up to date with main ([spec/coordination.md](coordination.md#up-to-date-with-main)).
+
+The pre-push hook and `.claude/hooks/no-skip.sh` only save a round trip. The
+hook runs check.sh before a push leaves the box; `no-skip.sh` refuses a Bash
+call whose text names `--no-verify` or sets `core.hooksPath` inline. Neither
+is a refusal: a push from elsewhere, or one that turns the hooks off another
+way, passes both, and the required check still stops what it pushed.
+
 ## Debugging the daemon
 
 Open this folder in VS Code and run **se: debug this workspace's daemon**. It
