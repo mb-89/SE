@@ -130,18 +130,40 @@ type RuleCheck struct {
 	Kind string
 	Rule string
 	// Since is the merged PR that brought the rule, 0 where it held from the
-	// first commit. A retro checks the rule only on what closed after it.
+	// first commit. A retro checks the rule only on what came after it, by Bound.
 	Since int
+	// Bound is the time Since is held against: when what the rule checks
+	// closed, or, for a rule on what is written at creation, when it was made.
+	Bound Bound
+}
+
+// Bound says which time of an issue or PR a rule check's start is held against.
+type Bound string
+
+const (
+	// Closing bounds a check by when what it checks closed (a PR's merge).
+	Closing Bound = "closed"
+	// Creation bounds a check by when what it checks was created.
+	Creation Bound = "created"
+)
+
+// at is the time of x the check's start is held against.
+func (k RuleCheck) at(closed, created time.Time) time.Time {
+	if k.Bound == Creation {
+		return created
+	}
+	return closed
 }
 
 // checkKinds are the rule checks, in the order the report lists them. spec/retro.md
 // lists them from here.
 var checkKinds = []RuleCheck{
-	{"fixes", "every merged PR said `Fixes #n`", 14},
-	{"ci", "every merged PR had green CI (the last run of each check on its head)", 0},
-	{"outside-pr", "no commit reached main outside a PR (every commit on main is some merged PR's merge commit)", 0},
-	{"mark", "every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body", 91},
-	{"answers", "every landed issue (a leaf closed as completed, not a retro, an overhaul or a person's decision) has landing answers", 74},
+	{"fixes", "every merged PR said `Fixes #n`", 14, Closing},
+	{"ci", "every merged PR had green CI (the last run of each check on its head)", 0, Closing},
+	{"outside-pr", "no commit reached main outside a PR (every commit on main is some merged PR's merge commit)", 0, Closing},
+	// The mark is written at creation, so an issue made before #91 is not held to it.
+	{"mark", "every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body", 91, Creation},
+	{"answers", "every landed issue (a leaf closed as completed, not a retro, an overhaul or a person's decision) has landing answers", 74, Closing},
 }
 
 // RuleChecks are the rule checks, in the order the report lists them.
@@ -194,8 +216,9 @@ type Collected struct {
 	Commits  int
 	Reruns   int
 	Checks   []Broken
-	// Before counts, by kind, what broke a rule in the window before the PR
-	// that brought it merged; Checks leaves it out.
+	// Before counts, by kind, what broke a rule in the window but closed (or,
+	// for a rule bounded by creation, was created) before the PR that brought
+	// it merged; Checks leaves it out.
 	Before  map[string]int
 	Scripts []Script
 	Metrics Metrics
@@ -352,7 +375,7 @@ func (s Source) Collect(n int) (Collected, error) {
 		}
 		c.Rows = append(c.Rows, row)
 		for _, b := range checks {
-			broke(b, x.ClosedAt)
+			broke(b, checkKinds[kindOrder(b.Kind)].at(x.ClosedAt, x.Created))
 		}
 	}
 	sort.SliceStable(c.Checks, func(a, b int) bool { return kindOrder(c.Checks[a].Kind) < kindOrder(c.Checks[b].Kind) })
