@@ -9,15 +9,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/mb-89/SE/src/index"
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/guidance"
-	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
 // Command is one word se answers. A command is one file that calls register
@@ -44,6 +47,9 @@ type Command struct {
 	// Button offers it as a button in /se ui, pressed as /se <name> is typed.
 	// Only a session command that takes no typed words is one.
 	Button bool
+	// Class says whether a person waits on it, index.Interactive, which the
+	// battery holds to its budgets (spec/budgets.yaml), or not, index.Batch.
+	Class index.Class
 	// Run does it and answers what to show, and in a session what the plugin applies.
 	Run func(c *Call) (Reply, error)
 }
@@ -51,8 +57,11 @@ type Command struct {
 // Reply is what a command answers. On a terminal se prints Text; in a session
 // (--session) it prints the whole Reply as JSON for the plugin to apply.
 type Reply struct {
-	// Text is what to show.
+	// Text is what to show where the command was typed.
 	Text string `json:"text"`
+	// Short, when set, is what a press of the command's button in /se ui
+	// shows instead of Text: a few short lines, the rest left to typing.
+	Short string `json:"short,omitempty"`
 	// Active, when set, switches forwarding on or off for the calling session.
 	Active *bool `json:"active,omitempty"`
 	// Endpoint, when set, is where the workspace's daemon now answers.
@@ -65,10 +74,14 @@ type Reply struct {
 	Help *Help `json:"help,omitempty"`
 }
 
-// Panel is what /se ui draws beside its on/off toggle.
+// Panel is what /se ui draws: a grid of buttons, the on/off toggle top left,
+// then one button per command offered as one, each labelled with its name.
 type Panel struct {
 	// Buttons are the names of the commands offered as buttons, in order.
 	Buttons []string `json:"buttons"`
+	// Columns is the most buttons a row holds, the toggle counted: the next
+	// starts the next row, and every cell is as wide as every other.
+	Columns int `json:"columns"`
 }
 
 // Endpoint is the part of daemon.json the plugin posts with.
@@ -128,11 +141,17 @@ type World struct {
 // realWorld is what se reaches when it runs for real.
 func realWorld() *World {
 	return &World{
-		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(), GitHub: github.Real(),
+		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Listed(proc.Real()), Net: sehttp.Real(), GitHub: github.Real(),
 		Getenv: os.Getenv, Environ: os.Environ, Commit: commit, Check: check,
 		Guided: guidance.Configured,
 	}
 }
+
+// The two classes a command declares, by their short names.
+const (
+	interactive = index.Interactive
+	batch       = index.Batch
+)
 
 var commands = map[string]Command{}
 
@@ -237,7 +256,25 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch {
 	case ok:
+		// Every command reaches GitHub within its rate limits, and records
+		// in its workspace the requests it made and each rate-limit refusal
+		// it met, with its wait.
+		limited := github.Limit(call.GitHub, call.Clock, githubSettings().Limits, stderr)
+		call.GitHub = limited
+		before := limited.Requests()
+		began := call.Clock.Now()
 		reply, err = runCommand(name, call)
+		timed(call, name, began, stderr)
+		if n := limited.Requests() - before; n > 0 {
+			if rerr := issues.RecordRequests(call.Disk, call.Workspace, name, n, call.Clock.Now()); rerr != nil {
+				fmt.Fprintf(stderr, "se: recording %s's %d GitHub requests: %v\n", name, n, rerr)
+			}
+		}
+		if refused := limited.Refusals(); len(refused) > 0 {
+			if rerr := issues.RecordRefusals(call.Disk, call.Workspace, name, refused); rerr != nil {
+				fmt.Fprintf(stderr, "se: recording %s's %d GitHub rate-limit refusals: %v\n", name, len(refused), rerr)
+			}
+		}
 		if errors.Is(err, flag.ErrHelp) {
 			reply, err = helpReply(commandHelpOf(cmd, call.flags, *session), *session, color), nil
 		}
@@ -278,6 +315,28 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, reply.Text)
 	}
 	return 0
+}
+
+// githubSettings is the github instance's config, as the wiring file se
+// carries gives it; a wiring that does not give it is a broken se, which the
+// battery's tests catch before a merge.
+func githubSettings() github.Settings {
+	s, err := github.Configured()
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
+// timed records how long the command named took in the workspace's
+// battery.CallsFile, against its budget; a terminal call over it says so on
+// stderr. Timing never fails the command.
+func timed(call *Call, name string, began time.Time, stderr io.Writer) {
+	took := call.Clock.Now().Sub(began)
+	c, err := battery.Record(call.Disk, call.Workspace, battery.Call{At: began.UTC(), Name: name, Ms: took.Milliseconds()})
+	if err == nil && !call.Session && c.Over {
+		fmt.Fprintln(stderr, "se:", c.Overrun())
+	}
 }
 
 // runCommand runs the command the catalog names with the run the command line registered for it.

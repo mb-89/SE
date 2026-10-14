@@ -18,13 +18,13 @@ principles of code once.
    Every fact lives in one place, and everything else is derived from it: the
    command registry, the landing questions, this list. A fact written twice
    drifts.
-   Checked by: overhaul, by judgment (a fact written twice is a finding).
+   Checked by: retro, mechanically (a fact written twice is a finding); overhaul, by judgment.
 
 3. **Locality.**
    One change happens in one place, and the system picks it up everywhere by
    registration, never by hand-kept lists; understanding a change means
    reading one place.
-   Checked by: overhaul, by judgment.
+   Checked by: retro, mechanically (files touched per issue, as a metric); overhaul, by judgment.
 
 4. **Modularity.**
    Behaviour lives in modules that register with a small core, the index
@@ -46,9 +46,18 @@ principles of code once.
    parallel where reads are independent, into one snapshot. The computing in
    between is pure and works on that snapshot alone. A run never asks the
    outside world again for what it already has: that is slow, and inputs
-   read at different times disagree.
-   Checked by: the battery (the `io-module` rule of `se rules`); overhaul, by
-   judgment (`looked_at.speed`).
+   read at different times disagree. No process does what a library call
+   can do: the proc I/O module starts only programs that are themselves the
+   work (`go`, the battery's linters, `git` where Go has no library for it),
+   one listed value, `proc.Programs`; GitHub is reached through its own
+   module's HTTP client, never `gh`. An I/O module is a door: it declares
+   the resource it guards and what going around it looks like, and nothing
+   goes around it, neither code nor an agent; an agent reaches GitHub only
+   through `se`. A box's run has the same three phases: its take reads and
+   claims, its land (or supersede, or close) writes once, and in between it
+   works locally (commits, fetches and merges main) and is silent on GitHub.
+   Checked by: the battery (the `io-module` and `programs` rules of
+   `se rules`); overhaul, by judgment (`looked_at.speed`).
 
 7. **Fakes that behave, held to contracts.**
    Every I/O module has a fake, and one contract suite runs against both the
@@ -68,8 +77,15 @@ principles of code once.
    their duration, and soft budgets in one file
    ([spec/budgets.yaml](budgets.yaml)) report what grows (#50). One hard
    rule: anything a person waits on gives feedback within 1 second and never
-   blocks. What can run in parallel does.
-   Checked by: the battery and the bridgehead; retro, mechanically (trend);
+   blocks. What can run in parallel does. A person never waits on the outside
+   world: what a person triggers, typed or pressed, is answered from the
+   snapshot the daemon holds, which the I/O modules refresh in the
+   background; only a command that must write (a claim, a land) goes out at
+   once. Every command declares its class, interactive or batch, and each
+   interactive one keeps a hard time and request budget, run against fakes
+   that delay each request and process start as the outside world does.
+   Checked by: the battery (each interactive command against its budgets,
+   reported in its profile) and the bridgehead; retro, mechanically (trend);
    overhaul, by judgment (`looked_at.speed`).
 
 10. **Lint and style checks are part of the battery.**
@@ -85,13 +101,16 @@ principles of code once.
 
 12. **One work system.**
     Issues with native links, created only through `se issue new`; a box acts
-    on its issue's text, not on messages.
+    on its issue's text, not on messages. An issue is work: code or prose
+    that must change. It is never a way to report, ask or tell: what a run
+    finds that changes nothing is said in its own output (a PR, a landing
+    answer, a report), not in a new issue.
     Checked by: retro, mechanically (rule checks).
 
 13. **Every session starts at main.**
     Both the code being worked on and the SE that runs the session start at
     main.
-    Checked by: overhaul, by judgment.
+    Checked by: retro, mechanically (commit drift reported by `/se status`).
 
 14. **Fail open for advice, closed for enforcement.**
     Logging and help never block; a rule that guards something refuses when
@@ -101,10 +120,19 @@ principles of code once.
 15. **Persons decide, agents execute.**
     Anything controversial goes to a person; everything else flows without
     one. It goes as an issue minted for the person, and only such an issue
-    waits on one: every run ends, a box landing what it could and filing
-    the rest, a retro or an overhaul closing once its issues exist. What
-    needs the person's answer is blocked by their issue, and nothing else is.
-    Checked by: retro, mechanically (`se-person` counts); overhaul, by judgment.
+    waits on one: every run ends, a box landing what it could, a retro or an
+    overhaul closing once its issues exist. What needs the person's answer is
+    blocked by their issue, and nothing else is. Nothing mints an issue for
+    a person on a box's behalf. A worker's output is a PR or a supersede;
+    its open points go into its landing answers (`open`), which the retro
+    reads, and any issue a box opens is a defect (`se issue new` refuses in
+    one). A review, a retro or an overhaul exists to file issues: they are
+    its output, filed through its own command in one go at its end, as one
+    manifest of finals (`se-final`, the findings its sub-issues), or for a
+    person where too big or controversial. Finals do not count toward the
+    retro's cadence, so retros do not feed themselves.
+    Checked by: retro, mechanically (`se-person` counts); overhaul, by
+    judgment.
 
 16. **Blameless.**
     Fix what produced a bad outcome (a rule, a tool, a prompt), never just the

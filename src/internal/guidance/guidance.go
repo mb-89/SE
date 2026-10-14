@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mb-89/SE/src/internal/index"
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
@@ -104,6 +104,17 @@ func Read(d disk.Disk, workspace string, names []string) ([]Skill, error) {
 		skills = append(skills, Skill{Name: n, Path: path, Hash: hex.EncodeToString(sum[:]), Text: string(data)})
 	}
 	return skills, nil
+}
+
+// Body is a skill's or an agent's file without its front matter.
+func Body(text []byte) string {
+	t := string(text)
+	if rest, ok := strings.CutPrefix(t, "---\n"); ok {
+		if _, body, ok := strings.Cut(rest, "\n---\n"); ok {
+			return body
+		}
+	}
+	return t
 }
 
 // Text is the skills as an answer carries them: in full where inline holds,

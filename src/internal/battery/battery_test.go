@@ -9,23 +9,36 @@ import (
 
 	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/disk"
+	"gopkg.in/yaml.v3"
 )
 
 const budgets = `total: {ms: 1000, hard: false}
 steps:
   go test: {ms: 500, hard: false}
   biome: {ms: 100, hard: false}
+commands:
+  interactive: {ms: 1000, requests: 3}
 `
 
 const events = `{"Action":"run","Package":"p","Test":"TestA"}
 {"Action":"output","Package":"p","Test":"TestA","Output":"=== RUN   TestA\n"}
 {"Action":"pass","Package":"p","Test":"TestA","Elapsed":0.25}
 {"Action":"pass","Package":"p","Test":"TestB","Elapsed":1.5}
+{"Action":"output","Package":"p","Test":"TestB/issue_pull","Output":"    b_test.go:9: battery-command: issue pull\t12\t3600\n"}
+{"Action":"output","Package":"p","Test":"TestB/help","Output":"    b_test.go:9: battery-command: help\t0\t0\n"}
 {"Action":"output","Package":"p","Test":"TestC","Output":"c.go:3: wrong\n"}
 {"Action":"fail","Package":"p","Test":"TestC","Elapsed":0.01}
 {"Action":"output","Package":"p","Output":"FAIL\tp\t1.8s\n"}
 {"Action":"fail","Package":"p","Elapsed":1.8}
 `
+
+// plugin is what `claude plugin test` prints: bun's lines for a person.
+const plugin = "\ntests/se.test.ts:\n" +
+	"(pass) a hook answers [153.32ms]\n" +
+	"\x1b[0m\x1b[32m(pass)\x1b[0m a coloured hook [2.5ms]\x1b[0m\n" +
+	"(fail) a hook that broke | badly [1.20s]\n" +
+	"error: expect(received).toBe(expected)\n" +
+	"\n 2 pass\n 1 fail\nRan 3 tests across 1 file. [4.33s]\n"
 
 // workspace writes a battery run into a fresh workspace on a fake disk: the
 // steps, go test's events and the budgets.
@@ -34,9 +47,10 @@ func workspace(t *testing.T, steps, budgetsYAML string) (disk.Disk, string) {
 	d, dir := disk.NewFake(), filepath.FromSlash("/ws")
 	at := filepath.Join(dir, battery.Dir)
 	for path, text := range map[string]string{
-		filepath.Join(at, battery.StepsFile):    steps,
-		filepath.Join(at, battery.GoTestFile):   events,
-		filepath.Join(dir, battery.BudgetsFile): budgetsYAML,
+		filepath.Join(at, battery.StepsFile):      steps,
+		filepath.Join(at, battery.GoTestFile):     events,
+		filepath.Join(at, battery.PluginTestFile): plugin,
+		filepath.Join(dir, battery.BudgetsFile):   budgetsYAML,
 	} {
 		if err := d.MkdirAll(filepath.Dir(path)); err != nil {
 			t.Fatal(err)
@@ -67,10 +81,16 @@ func TestTheReportListsEveryDurationAndTheSlowestTests(t *testing.T) {
 		"battery:   1500ms p TestB",
 		"battery:   250ms p TestA",
 		"battery:   10ms p TestC",
+		"battery: the 2 interactive commands (budget 1000ms and 3 requests each)",
+		"battery:   0ms 0 requests se help",
+		"battery:   3600ms 12 requests se issue pull",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the report lacks %q:\n%s", want, text)
 		}
+	}
+	if !strings.Contains(text, "battery: the 3 slowest plugin tests\nbattery:   1200ms tests/se.test.ts a hook that broke | badly\nbattery:   153ms tests/se.test.ts a hook answers\nbattery:   3ms tests/se.test.ts a coloured hook\n") {
+		t.Errorf("the report lacks the slowest plugin tests:\n%s", text)
 	}
 	if strings.Index(text, "TestB") > strings.Index(text, "TestA") {
 		t.Errorf("the slowest test is not first:\n%s", text)
@@ -78,12 +98,18 @@ func TestTheReportListsEveryDurationAndTheSlowestTests(t *testing.T) {
 	if strings.Contains(text, "OVER BUDGET") {
 		t.Errorf("a run within its budgets reports an overrun:\n%s", text)
 	}
+	if !strings.Contains(summary.String(), "| a hook that broke \\| badly | tests/se.test.ts | 1200 |") {
+		t.Errorf("the summary lacks the slowest plugin test:\n%s", summary.String())
+	}
 	if !strings.Contains(summary.String(), "| go test | 420 | 500 |") {
 		t.Errorf("the summary lacks the go test step:\n%s", summary.String())
 	}
+	if !strings.Contains(summary.String(), "| se issue pull | 12 | 3600 |") {
+		t.Errorf("the summary lacks issue pull's run:\n%s", summary.String())
+	}
 	// What land reads back is what was reported.
 	loaded, ok, err := battery.Load(d, dir)
-	if err != nil || !ok || loaded.TotalMs != 460 || len(loaded.Slowest) != 3 {
+	if err != nil || !ok || loaded.TotalMs != 460 || len(loaded.Slowest) != 3 || len(loaded.SlowestPlugin) != 3 {
 		t.Errorf("Load = %+v, %v, %v", loaded, ok, err)
 	}
 }
@@ -117,6 +143,18 @@ func TestAHardBudgetOverrunFails(t *testing.T) {
 	}
 	if len(p.Hard) != 1 {
 		t.Errorf("hard overruns = %q", p.Hard)
+	}
+}
+
+func TestABatteryWithoutPluginTestsListsNone(t *testing.T) {
+	t.Parallel()
+	d, dir := workspace(t, "biome\t40\n", budgets)
+	if err := d.Remove(filepath.Join(dir, battery.Dir, battery.PluginTestFile)); err != nil {
+		t.Fatal(err)
+	}
+	p, err := battery.Report(d, dir, nil)
+	if err != nil || len(p.SlowestPlugin) != 0 || len(p.Slowest) != 3 {
+		t.Errorf("Report = %+v, %v", p, err)
 	}
 }
 
@@ -169,5 +207,47 @@ func TestTheBudgetsFileBudgetsEveryStepOfTheBattery(t *testing.T) {
 				t.Errorf("step %q has no budget in %s", name, battery.BudgetsFile)
 			}
 		}
+	}
+}
+
+func TestAStepWithoutABudgetIsReported(t *testing.T) {
+	t.Parallel()
+	d, dir := workspace(t, "biome\t40\nnew step\t5\n", budgets)
+	var summary bytes.Buffer
+	p, err := battery.Report(d, dir, &summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "step new step has no budget in spec/budgets.yaml"
+	if len(p.Unbudgeted) != 1 || p.Unbudgeted[0] != want {
+		t.Errorf("unbudgeted = %q, want %q", p.Unbudgeted, want)
+	}
+	if !strings.Contains(p.Text(), "battery: NO BUDGET: "+want) || !strings.Contains(summary.String(), "> **No budget:** "+want) {
+		t.Errorf("the report does not name the step without a budget:\n%s\n%s", p.Text(), summary.String())
+	}
+	if len(p.Overruns) != 0 || len(p.Hard) != 0 {
+		t.Errorf("a step without a budget counts as an overrun: %q", p.Overruns)
+	}
+}
+
+// TestALintRunWaitsForAnotherWorktreesLint keeps golangci-lint's lock a wait:
+// several worktrees in one container check at once (#361).
+func TestALintRunWaitsForAnotherWorktreesLint(t *testing.T) {
+	t.Parallel()
+	// This reads the checkout's own config, so it reads the real disk.
+	raw, err := os.ReadFile("../../../.golangci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Run struct {
+			Serial bool `yaml:"allow-serial-runners"`
+		}
+	}
+	if err := yaml.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	if !config.Run.Serial {
+		t.Error(".golangci.yml does not set run.allow-serial-runners: a second check fails on the lock instead of waiting for it")
 	}
 }

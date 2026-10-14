@@ -16,3 +16,6 @@ surfaces: [".", spec, src]
 # no way to pass the check.
 allowlist:
   spec: {files: 14}
+  # index, modules and lib came beside cmd and internal (#190); the entry goes
+  # when #142 has moved cmd and internal into them.
+  src: {folders: 7}

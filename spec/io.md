@@ -11,8 +11,10 @@ fails as the real one does.
 The network, `src/internal/io/http`, serves and calls the daemon protocol
 (health, event, value, shutdown) and fires the routine; its fake is a network inside
 the process, and its real one is tested on loopback.
-`src/internal/io/proc` runs programs: git, go, check.sh, the se a session
-hands over to and the detached daemon. gh is GitHub's, not proc's. Its fake
+`src/internal/io/proc` runs programs: git, go, the linters (golangci-lint, biome, deadcode), check.sh, the se a session
+hands over to and the detached daemon. It starts only the programs
+`proc.Programs` lists, the one place that list lives: `proc.Listed`, which se
+and the battery run on, refuses any other. gh is GitHub's, not proc's. Its fake
 is a machine that holds only the programs a case installs, each a function
 that does what the real one would, and records every run. It also says which
 program is running now (`Self`): the real one asks the system, the fake
@@ -26,6 +28,46 @@ is seeded for a time on the fake's clock (`SeedAt`). Its real contract test
 writes issues, branches and pull requests, so it runs only against the
 scratch repository `SE_GITHUB_CONTRACT_REPO` names
 ([below](#the-real-github-contract)).
+
+## Living within GitHub's rate limits
+
+Every box and every person's session reach GitHub with the owner's one
+token, so the fleet shares one quota of requests an hour (15,000), and
+GitHub's secondary limits on creating content quickly. `se` hands every
+command its GitHub wrapped in `github.Limit` (`src/internal/io/github/limit.go`),
+with the github instance's config ([index.md](index.md#the-wiring-file)):
+
+- **It backs off when GitHub says so.** Real reads `x-ratelimit-limit`,
+  `x-ratelimit-remaining`, `x-ratelimit-reset` and `retry-after` from every
+  answer (`gh api -i`), and the fake keeps a quota of its own (`Quota`,
+  15,000 an hour unless a case sets one, and `ContentLimit`). On a 403 or 429
+  that names a rate limit, the module says so on stderr at once, with how
+  long and until when (principle 9), waits for the reset (or the
+  retry-after; a minute where GitHub says neither) and asks again. Each wait
+  is at least a second and twice the one before, so it never asks in a tight
+  loop. A wait that would take the command past `github/config/wait-ceiling`
+  all told fails the request at once, saying when the reset comes. A 403 for
+  anything else, a permission, is no reason to wait.
+- **It paces writes.** Every write (`Send`, `GraphQL`) goes out one at a
+  time, at least `github/config/write-spacing` after the last ended, so a
+  sweep that comments on or closes many issues stays under GitHub's limit on
+  creating content. The spacing holds within one `se` command.
+- **It counts the fleet's requests.** Real and the fake each count their
+  requests and keep the quota GitHub's last answer gave (`github.Meter`).
+  Each command appends the requests it made to its workspace's ledger,
+  `.se/.runtime/requests.log`; `se issue land` adds up its checkout's into
+  the landing facts ([issues.md](issues.md#landing-answers)), the retro
+  reports them per landed issue ([retro.md](retro.md)), and `se fleet check`
+  says when the quota left falls below `github/config/quota-floor` percent
+  of the hour's ([coordination.md](coordination.md)).
+- **It records each rate-limit refusal.** The module keeps each request
+  GitHub refused for a rate limit, with its status and the wait it made for
+  the reset, or that it gave up past the ceiling (`github.Refuser`). Each
+  command appends them, with its own name, to its workspace's ledger
+  `.se/.runtime/ratelimits.log`; `se issue land` adds up its checkout's
+  refusals and minutes waited into the landing facts, and the retro counts
+  both per landed issue, so a quota that starves the fleet is a metric, not
+  something read from free-text answers or hidden in claim to merge.
 
 ## The layout
 
@@ -44,12 +86,47 @@ and `github.Real()`).
 Nothing reaches for the real thing itself, so a test hands in the fake and a
 case replays.
 
+## A door declares what it guards
+
+An I/O module is a door. Its folder holds `owns.yaml`, which says three
+things, and the `io-module` rule reads every folder under `src/internal/io`
+that holds a file as a door, so a new module is picked up by being there:
+
+| key | what it holds |
+|---|---|
+| `guards` | the resource, in one line: what it is, a colon, what of it. GitHub's is `"GitHub: issues, pull requests, branches, comments, labels"` |
+| `go` | the Go imports (`os/exec`, covering its subpackages) and package members (`time.Now`) that reach it |
+| `commands` | the words that reach it from a shell line or from text a box is told to run: GitHub's are `gh`, `api.github.com` and `mcp__github__*`, the last any word it starts |
+
+A name belongs to one door. A folder without `owns.yaml` is refused, and so is
+a declaration with no resource or a key it does not take.
+
+The rule refuses going around a door: a Go file outside `src/internal/io`
+that uses a `go` name, or starts a program, through `os/exec`, that a
+`commands` word names; and a line naming a `commands` word in the plugin
+(`src/plugin`: agents, skills, hooks), in `src/scripts`, in `tests/*.sh` or in
+`CLAUDE.md`. So an agent file telling a box to run `gh pr view` is refused:
+it reaches GitHub around its door; it goes through se. A word is matched
+whole: `ghost` and `gh-calls` are not `gh`.
+
+There are two ways past. A line that may go around a door for good, such as
+one that forbids the bypass ("never run gh"), carries the marker
+`se: around-the-door - <why>`, in a comment where the file has them; a marker
+without a reason passes nothing, and one on a line that goes around no door is
+refused. What cannot change yet is named in `src/internal/io/allowlist.txt`,
+a file and what it names per line, which only shrinks.
+
 ## Fakes behave
 
 A fake keeps its own state and answers from it as the real thing would. It
 never scripts answers: a test does not tell it what the next call returns. The
 fake clock stands still until it is told to move: `Advance` moves it and fires
 every `After` whose time has come, and `Sleep` passes its time at once.
+
+Fakes keep time too: `github.Fake.Delay` and `proc.Fake.Delay` make each
+request and each process start pass the latency
+[spec/budgets.yaml](budgets.yaml) names on a fake clock, and the battery runs
+every interactive command on them against its budgets.
 
 ## One contract suite per fake
 
@@ -102,13 +179,15 @@ assigns a package-level func variable, its own package's or an imported one's.
 A test does not swap how code reaches the outside; it hands the code a fake,
 as an argument or a field, such as the `World` `cmd/se` hands every call.
 
-The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line: outside
+The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line, off
+each door's `owns.yaml` ([above](#a-door-declares-what-it-guards)): outside
 `src/internal/io/`, no Go file imports `os/exec` or `net/http`, runs `gh`, calls the
 clock through `time` (`Now`, `Sleep`, `After` and their kin), or opens, reads
-or writes files through `os`. Test files are held by the `fast-test` rule
+or writes files through `os`, and no text a box is told to run names `gh`.
+Test files are held by the `fast-test` rule
 (`src/internal/rules/fasttest.go`) instead: every test calls `t.Parallel`
 first, and outside `src/internal/io/` no test reads the clock through `time`
-or takes `clock.Real`. What still breaks it is named in
+(the members the clock's `owns.yaml` names) or takes `clock.Real`. What still breaks it is named in
 `src/internal/rules/serial.txt`, which only shrinks as the allowlist below does.
 
 The plugin has its clock too, `$.clock`. The `plugin-clock` rule
@@ -120,4 +199,13 @@ are aside.
 What broke it while the modules landed was named in one allowlist,
 `src/internal/io/allowlist.txt`, one file and what it reaches per line. Each
 I/O module removed its own entries as it landed, and GitHub's, the last,
-emptied it. It only shrinks: the rule refuses an entry that matches nothing.
+emptied it. When the rule came to read scripts and shell files, it took two:
+`tests/tools.sh` installs gh and `src/scripts/profile-gh-calls.sh` wraps it,
+both until the GitHub module runs no gh (#186). It only shrinks: the rule
+refuses an entry that matches nothing.
+
+The `programs` rule (`src/internal/rules/programs.go`) holds principle 6's
+"no process does what a library call can do": no Go file names a program
+`proc.Programs` does not list, and none but proc calls `os/exec`. What still
+breaks it is named in `src/internal/rules/programs.txt`, which only shrinks:
+today gh, until the GitHub module speaks HTTP itself (#186).

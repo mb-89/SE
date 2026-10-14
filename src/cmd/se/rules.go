@@ -10,20 +10,26 @@ import (
 
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/rules"
 )
 
 func init() {
 	register(Command{
 		Name:    "rules",
-		Usage:   "rules",
+		Class:   batch,
+		Usage:   "rules [--fix]",
 		Group:   "Checks",
 		Summary: "check this checkout against every SE rule",
 		Details: "check every file git tracks or would track against each rule in src/internal/rules, " +
 			"naming each finding by file, line and rule, and how long each rule took. " +
-			"The rules that read prose know se's commands and its manifests. It fails on a finding; tests/check.sh runs it.",
+			"The rules that read prose know se's commands and its manifests. It fails on a finding; tests/check.sh runs it. " +
+			"--fix first applies the mechanical part of each finding where the rule can, such as the fast-test rule's t.Parallel() " +
+			"as a test's first statement, names each file it changed, and then checks.",
 		Run: func(c *Call) (Reply, error) {
-			if err := c.Parse(c.Flags("rules")); err != nil {
+			fs := c.Flags("rules")
+			fix := fs.Bool("fix", false, "apply the mechanical part of each finding where the rule can, then check")
+			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
 			repo, err := repoOf(c.Disk, c.Proc, c.Workspace)
@@ -31,11 +37,20 @@ func init() {
 				return Reply{}, err
 			}
 			repo.Clock = c.Clock
+			var lines, findings []string
+			if *fix {
+				fixed, err := rules.Fix(repo)
+				if err != nil {
+					return Reply{}, err
+				}
+				for _, f := range fixed {
+					lines = append(lines, "fixed: "+f)
+				}
+			}
 			results, err := rules.Run(repo)
 			if err != nil {
 				return Reply{}, err
 			}
-			var lines, findings []string
 			for _, r := range results {
 				for _, f := range r.Findings {
 					findings = append(findings, f.String())
@@ -74,8 +89,26 @@ func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
 			return false
 		},
 		Commands: commandFlags(),
+		Agents:   issues.Agents(),
 		Manifest: func(name, at string) (string, error) { return manifest(d, root, paths, name, at) },
 	}, nil
+}
+
+// unmergedPaths is every path git's index at root holds unmerged, each once:
+// a conflicted file stands there once per stage, which would list it as often.
+// It runs git on procs.
+func unmergedPaths(procs proc.Procs, root string) ([]string, error) {
+	var out bytes.Buffer
+	if err := procs.Run(proc.Cmd{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U", "-z"}, Dir: root, Stdout: &out}); err != nil {
+		return nil, fmt.Errorf("git diff --diff-filter=U: %w", err)
+	}
+	var paths []string
+	for _, p := range strings.Split(out.String(), "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
 }
 
 // commandFlags is every command by name, with the flags it takes.

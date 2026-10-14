@@ -106,16 +106,30 @@ type Facts struct {
 	Claimed time.Time `yaml:"claimed,omitempty"`
 	Landed  time.Time `yaml:"landed"`
 	Minutes int       `yaml:"minutes,omitempty"`
+	// Into is the branch a leaf landed into, its manifest's issue-<m>;
+	// empty where it landed as a PR into main.
+	Into string `yaml:"into,omitempty"`
 	// Commits counts the branch's own commits, MainMerges its merges of main.
 	Commits    int `yaml:"commits"`
 	Takeovers  int `yaml:"takeovers"`
 	MainMerges int `yaml:"main_merges"`
+	// Requests counts the GitHub requests the se commands run in the
+	// checkout made (RequestsFile), this land's so far included.
+	Requests int `yaml:"requests,omitempty"`
+	// RateLimits counts the requests GitHub refused those commands for a
+	// rate limit (RateLimitsFile), this land's so far included, and
+	// RateLimitWaitS the seconds se waited for the resets all told.
+	RateLimits     int `yaml:"rate_limits,omitempty"`
+	RateLimitWaitS int `yaml:"rate_limit_wait_s,omitempty"`
 	// BatteryMs is how long the battery this land ran took, Slowest its
-	// slowest tests, and Overruns each budget it went over; empty where the
-	// check left no profile.
-	BatteryMs int64    `yaml:"battery_ms,omitempty"`
-	Slowest   []string `yaml:"slowest_tests,omitempty"`
-	Overruns  []string `yaml:"budget_overruns,omitempty"`
+	// slowest Go tests, SlowestPlugin its slowest plugin tests, Overruns each
+	// budget it went over, and Unbudgeted each step it ran with no budget;
+	// empty where the check left no profile.
+	BatteryMs     int64    `yaml:"battery_ms,omitempty"`
+	Slowest       []string `yaml:"slowest_tests,omitempty"`
+	SlowestPlugin []string `yaml:"slowest_plugin_tests,omitempty"`
+	Overruns      []string `yaml:"budget_overruns,omitempty"`
+	Unbudgeted    []string `yaml:"budget_missing,omitempty"`
 }
 
 // Landed is the record a landing leaves on its issue.
@@ -158,12 +172,24 @@ func (l Landed) Comment(qs []Question) (string, error) {
 	if !f.Claimed.IsZero() {
 		took = fmt.Sprintf("%s (claimed %s)", span(f.Minutes), f.Claimed.UTC().Format(time.RFC3339))
 	}
-	fmt.Fprintf(&b, "\n### Facts\n- claim to landing: %s\n- landed: %s\n- commits: %d\n- takeovers: %d\n- main merges: %d\n",
-		took, f.Landed.UTC().Format(time.RFC3339), f.Commits, f.Takeovers, f.MainMerges)
+	fmt.Fprintf(&b, "\n### Facts\n- claim to landing: %s\n- landed: %s\n", took, f.Landed.UTC().Format(time.RFC3339))
+	if f.Into != "" {
+		fmt.Fprintf(&b, "- landed into: %s\n", f.Into)
+	}
+	fmt.Fprintf(&b, "- commits: %d\n- takeovers: %d\n- main merges: %d\n", f.Commits, f.Takeovers, f.MainMerges)
+	if f.Requests > 0 {
+		fmt.Fprintf(&b, "- GitHub requests: %d\n", f.Requests)
+	}
+	if f.RateLimits > 0 {
+		fmt.Fprintf(&b, "- GitHub rate-limit refusals: %d, waited %s for the reset\n", f.RateLimits, time.Duration(f.RateLimitWaitS)*time.Second)
+	}
 	if f.BatteryMs > 0 {
 		fmt.Fprintf(&b, "- battery: %dms\n", f.BatteryMs)
 		for _, o := range f.Overruns {
 			fmt.Fprintf(&b, "- **over budget:** %s\n", o)
+		}
+		for _, u := range f.Unbudgeted {
+			fmt.Fprintf(&b, "- **no budget:** %s\n", u)
 		}
 	}
 	data, err := yaml.Marshal(record{Issue: l.Issue, Answers: answers, Facts: f})
@@ -188,18 +214,9 @@ func span(minutes int) string {
 // ParseLanding reads a landing comment's machine-readable block back; ok is
 // false for a comment that is no landing.
 func ParseLanding(body string) (l Landed, ok bool, err error) {
-	if !strings.Contains(body, landingMark) {
-		return Landed{}, false, nil
-	}
-	_, rest, found := strings.Cut(body, landingBlock+"\n```yaml\n")
-	if !found {
-		return Landed{}, true, errors.New("the landing comment carries no machine-readable block")
-	}
-	// The block's lines are YAML at the top level or indented below it, so
-	// the fence that closes it is the first line that is only a fence.
-	block, _, found := strings.Cut("\n"+rest, "\n```")
-	if !found {
-		return Landed{}, true, errors.New("the landing comment's block is not closed")
+	block, ok, err := landingYAML(body)
+	if !ok || err != nil {
+		return Landed{}, ok, err
 	}
 	var r struct {
 		Issue   int               `yaml:"issue"`
@@ -212,18 +229,120 @@ func ParseLanding(body string) (l Landed, ok bool, err error) {
 	return Landed{Issue: r.Issue, Answers: r.Answers, Facts: r.Facts}, true, nil
 }
 
+// landingYAML is a landing comment's machine-readable block; ok is false for
+// a comment that is no landing.
+func landingYAML(body string) (block string, ok bool, err error) {
+	if !strings.Contains(body, landingMark) {
+		return "", false, nil
+	}
+	_, rest, found := strings.Cut(body, landingBlock+"\n```yaml\n")
+	if !found {
+		return "", true, errors.New("the landing comment carries no machine-readable block")
+	}
+	// The block's lines are YAML at the top level or indented below it, so
+	// the fence that closes it is the first line that is only a fence.
+	block, _, found = strings.Cut("\n"+rest, "\n```")
+	if !found {
+		return "", true, errors.New("the landing comment's block is not closed")
+	}
+	return block, true, nil
+}
+
+// AnswersFile is where the landing answers of issue n stand while it is
+// worked, beside the checkout dir and outside it, as the work skill writes
+// them: next to the leaf's own worktree (see Worktree), or, where the take
+// checked the branch out in dir itself, next to dir.
+func AnswersFile(dir string, n int, worktree bool) string {
+	if worktree {
+		dir = filepath.Join(filepath.Dir(dir), Branch(n))
+	}
+	return dir + "-landing.yaml"
+}
+
+// RestoreAnswers writes the answers the last land of issue n posted on it
+// back to the answers file at path, so a takeover brings them up to date
+// rather than writing them anew: the box that wrote them first kept them
+// outside its checkout, where no other box sees them. A file at path is kept
+// as it is. restored is false where it kept one, or no land posted answers.
+func (s Source) RestoreAnswers(n int, path string) (restored bool, err error) {
+	if there, err := s.Disk.Exists(path); err != nil || there {
+		return false, err
+	}
+	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, n), true)
+	if err != nil {
+		return false, err
+	}
+	block := ""
+	for _, c := range comments {
+		got, ok, err := landingYAML(c.Body)
+		if err != nil {
+			return false, fmt.Errorf("#%d's landing answers: %w", n, err)
+		}
+		if ok {
+			block = got
+		}
+	}
+	if block == "" {
+		return false, nil
+	}
+	text, err := answersFile(n, block)
+	if err != nil {
+		return false, fmt.Errorf("#%d's landing answers: %w", n, err)
+	}
+	if err := s.Disk.WriteFile(path, text); err != nil {
+		return false, fmt.Errorf("restoring #%d's landing answers: %w", n, err)
+	}
+	return true, nil
+}
+
+// answersFile turns a landing comment's block back into an answers file for
+// --answers: its answers in their order, each a block of text.
+func answersFile(n int, block string) ([]byte, error) {
+	var r struct {
+		Answers yaml.Node `yaml:"answers"`
+	}
+	if err := yaml.Unmarshal([]byte(block), &r); err != nil {
+		return nil, fmt.Errorf("the landing comment's block: %v", err)
+	}
+	a := r.Answers
+	if a.Kind != yaml.MappingNode {
+		return nil, errors.New("the landing comment's block holds no answers")
+	}
+	for k := 1; k < len(a.Content); k += 2 {
+		a.Content[k].Style = yaml.LiteralStyle
+	}
+	a.HeadComment = fmt.Sprintf("The answers the last land of #%d posted on it: bring them up to date.", n)
+	return yaml.Marshal(&a)
+}
+
 // facts reads what land knows of issue n's work in dir, from its comments,
-// its branch's history and GitHub's record of the branch's creation.
-func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
+// its branch's history against origin's base (main, or the manifest's branch
+// a leaf lands into) and GitHub's record of the branch's creation.
+func (s Source) facts(dir string, n int, comments []comment, base string) (Facts, error) {
 	f := Facts{Landed: s.now().UTC().Truncate(time.Second), Takeovers: marksOf(comments).takeovers}
+	recorded, err := Requests(s.Disk, dir)
+	if err != nil {
+		return Facts{}, err
+	}
+	running, _ := github.Metered(s.GitHub)
+	f.Requests = recorded + running
+	waits, err := RateLimitWaits(s.Disk, dir)
+	if err != nil {
+		return Facts{}, err
+	}
+	waits = waits.add(github.RefusedBy(s.GitHub))
+	f.RateLimits, f.RateLimitWaitS = waits.Refusals, int(waits.Wait/time.Second)
 	profile, profiled, err := battery.Load(s.Disk, dir)
 	if err != nil {
 		return Facts{}, err
 	}
 	if profiled {
-		f.BatteryMs, f.Overruns = profile.TotalMs, profile.Overruns
+		f.BatteryMs, f.Overruns, f.Unbudgeted = profile.TotalMs, profile.Overruns, profile.Unbudgeted
 		for _, t := range profile.Slowest {
 			f.Slowest = append(f.Slowest, t.String())
+		}
+		for _, t := range profile.SlowestPlugin {
+			f.SlowestPlugin = append(f.SlowestPlugin, t.String())
 		}
 	}
 	count := func(args ...string) (int, error) {
@@ -233,14 +352,19 @@ func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 		}
 		return strconv.Atoi(out)
 	}
-	// The branch's own work is what main does not hold yet.
-	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
+	// The branch's own work is what its base does not hold yet.
+	if base == "main" {
+		if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
+			return Facts{}, err
+		}
+	} else {
+		f.Into = base
+	}
+	// The commits of the battery's record are no work.
+	if f.Commits, err = count("--no-merges", "--invert-grep", "--grep=^"+battery.CommitSubject, "origin/"+base+"..HEAD"); err != nil {
 		return Facts{}, err
 	}
-	if f.Commits, err = count("--no-merges", "origin/main..HEAD"); err != nil {
-		return Facts{}, err
-	}
-	if f.MainMerges, err = count("--merges", "origin/main..HEAD"); err != nil {
+	if f.MainMerges, err = count("--merges", "origin/"+base+"..HEAD"); err != nil {
 		return Facts{}, err
 	}
 	created, err := api[[]struct {
@@ -263,15 +387,28 @@ func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 // postLanding writes issue n's landing comment, or updates the one an
 // earlier land wrote.
 func (s Source) postLanding(dir string, n int, qs []Question, answers map[string]string) error {
+	comments, f, err := s.factsOf(dir, n, "main")
+	if err != nil {
+		return err
+	}
+	return s.post(n, comments, qs, Landed{Issue: n, Answers: answers, Facts: f})
+}
+
+// factsOf reads issue n's comments and the facts of its work in dir against
+// origin's base.
+func (s Source) factsOf(dir string, n int, base string) ([]comment, Facts, error) {
 	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, n), true)
 	if err != nil {
-		return err
+		return nil, Facts{}, err
 	}
-	f, err := s.facts(dir, n, comments)
-	if err != nil {
-		return err
-	}
-	body, err := Landed{Issue: n, Answers: answers, Facts: f}.Comment(qs)
+	f, err := s.facts(dir, n, comments, base)
+	return comments, f, err
+}
+
+// post writes the landing l on issue n, whose comments are comments, or
+// updates the one an earlier land wrote.
+func (s Source) post(n int, comments []comment, qs []Question, l Landed) error {
+	body, err := l.Comment(qs)
 	if err != nil {
 		return err
 	}

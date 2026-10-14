@@ -81,7 +81,7 @@ func (m runningAs) Self() (string, error) { return m.self, nil }
 func scratch(t *testing.T) string {
 	t.Helper()
 	root, dst := repoRoot(t), t.TempDir()
-	for _, part := range []string{"src/cmd", "src/internal", "src/go.mod", "src/go.sum"} {
+	for _, part := range []string{"src/cmd", "src/index", "src/internal", "src/lib", "src/modules", "src/go.mod", "src/go.sum"} {
 		err := filepath.WalkDir(filepath.Join(root, part), func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -172,6 +172,10 @@ func TestOnlySessionWordsGoToTheCheckoutsSe(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in se is a shell script")
 	}
+	// The stand-in se runs on the real machine, where a test running beside
+	// this one can hold it busy a moment; handsOver waits that out on the
+	// real clock.
+	worldOf(t).Clock = clock.Real()
 	ws := t.TempDir()
 	write(t, filepath.Join(ws, "src", "go.mod"), "module "+update.Module+"\n")
 	bin := daemon.Paths{Workspace: ws, Disk: disk.Real()}.Bin()
@@ -198,6 +202,38 @@ func TestOnlySessionWordsGoToTheCheckoutsSe(t *testing.T) {
 	}
 }
 
+func TestABusyCheckoutSeIsTriedAgainOnTheWorldsClock(t *testing.T) {
+	t.Parallel()
+	d := onFake(t)
+	ws, _ := filepath.Abs("/ws")
+	put(t, d, filepath.Join(ws, "src", "go.mod"), "module "+update.Module+"\n")
+	bin := daemon.Paths{Workspace: ws, Disk: d}.Bin()
+	put(t, d, bin, "built")
+	m, w := proc.NewFake(), worldOf(t)
+	m.Install(bin, func(c proc.Cmd) int { return 7 })
+	w.Proc = m
+	clk := clock.NewFake(testedAt)
+	w.Clock = clk
+
+	// Busy a few times, as a fork beside it holds it open: the run comes through.
+	m.Busy(bin, 3)
+	if code, handed := handsOver(w, ws, []string{"status"}, nil, nil); !handed || code != 7 {
+		t.Fatalf("busy 3 times: exit %d, handed %v", code, handed)
+	}
+	if len(m.Ran()) != 4 || clk.Now().Sub(testedAt) != 3*busyWait {
+		t.Fatalf("ran %q, waited %v", m.Lines(), clk.Now().Sub(testedAt))
+	}
+
+	// Busy past every try: this se answers itself.
+	m.Busy(bin, busyTries)
+	if _, handed := handsOver(w, ws, []string{"status"}, nil, nil); handed {
+		t.Fatal("handed over to an se that never ran")
+	}
+	if len(m.Ran()) != 4+busyTries {
+		t.Fatalf("tried %d times, want %d", len(m.Ran())-4, busyTries)
+	}
+}
+
 func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
@@ -220,7 +256,7 @@ func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
 	write(t, filepath.Join(ws, "src", "cmd", "se", "hello.go"), `package main
 
 func init() {
-	register(Command{Name: "hello", Usage: "hello", Summary: "say hello", Session: true,
+	register(Command{Name: "hello", Usage: "hello", Summary: "say hello", Session: true, Class: batch,
 		Run: func(c *Call) (Reply, error) { return Reply{Text: "hello from the checkout"}, nil }})
 }
 `)

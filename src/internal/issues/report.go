@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// MaxFiled is how many non-blocking findings one review files as issues; the
+// MaxFiled is the built-in value of issues/config/max-filed: how many non-blocking findings one review files as issues; the
 // rest are counted, not filed, since more findings means more noise.
 const MaxFiled = 5
 
@@ -24,6 +24,42 @@ type Report struct {
 	Findings []ReviewFinding `json:"findings"`
 	// Clean is what was examined and found sound, so a rubber-stamp shows.
 	Clean []string `json:"clean"`
+	// Ran is what the reviewer ran on the delta, one per entry of the
+	// reviewer's list in the reuse config (CheckRan).
+	Ran []Ran `json:"ran,omitempty"`
+}
+
+// Ran is one skill or agent a reviewer ran on the delta.
+type Ran struct {
+	// Skill is its name in the reviewer's list: security-review, or plugin:name.
+	Skill string `json:"skill"`
+	// Found is what it found, or why it did not run.
+	Found string `json:"found"`
+}
+
+// CheckRan refuses a report that does not name each of want in Ran, with
+// what it found or why it did not run, or that names one twice.
+func (r Report) CheckRan(want []string) error {
+	got := map[string]bool{}
+	for _, x := range r.Ran {
+		switch {
+		case got[x.Skill]:
+			return fmt.Errorf("the report's ran names %s twice", x.Skill)
+		case strings.TrimSpace(x.Found) == "":
+			return fmt.Errorf("the report's ran names %s without what it found, or why it did not run", x.Skill)
+		}
+		got[x.Skill] = true
+	}
+	var missing []string
+	for _, w := range want {
+		if !got[w] {
+			missing = append(missing, w)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("the report's ran does not name %s: the brief's list of what a reviewer runs on the delta names each, and the report says what each found or why it did not run", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // Requirement is one thing the ask requires.
@@ -45,8 +81,9 @@ type ReviewFinding struct {
 	Blocking bool   `json:"blocking"`
 	Why      string `json:"why"`
 	// Repeats is, in a re-review, the earlier blocker whose problem this
-	// finding shows again: that final issue failed, and the gate goes to a
-	// person.
+	// finding shows again: that issue was a final attempt, so the repeat is
+	// accepted, the reviewer's decision named in the report, and blocks no
+	// more.
 	Repeats int `json:"repeats,omitempty"`
 	// Issue is the issue se filed for it; 0 where it was not filed.
 	Issue int `json:"issue,omitempty"`
@@ -138,13 +175,25 @@ func hashes(ns []int) string {
 	return strings.Join(out, ", ")
 }
 
+// blocks says whether a blocking finding is not a repeat: one that holds the
+// gate. A fail whose blocking findings all repeat earlier blockers holds
+// nothing, and the gate closes.
+func (r Report) blocks() bool {
+	for _, f := range r.Findings {
+		if f.Blocking && f.Repeats == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // body is the text of the issue a finding becomes.
 func (f ReviewFinding) body(gate int) string {
 	judged := "Not blocking: the review of #%d passes over it, and it is an open point."
 	if f.Blocking {
 		judged = "Blocking: the review of #%d waits for it, as a sub-issue of it."
 	}
-	return fmt.Sprintf(judged+"\n\n**Evidence:** %s\n\n**Judgment:** %s\n\nLabelled %s: filed by a review, this is its final attempt; if it fails again, it goes to a person.",
+	return fmt.Sprintf(judged+"\n\n**Evidence:** %s\n\n**Judgment:** %s\n\nLabelled %s: filed by a review, this is its final attempt: it is never superseded again, and a re-review that finds its problem again accepts the repeat.",
 		gate, f.Evidence, f.Why, FinalLabel)
 }
 
@@ -154,15 +203,15 @@ type Verdict struct {
 	Passed bool `json:"passed"`
 	// Rereview is set where the review before had failed.
 	Rereview bool `json:"rereview"`
-	// Unfiled counts the non-blocking findings past MaxFiled.
+	// Unfiled counts the non-blocking findings past the cap, issues/config/max-filed.
 	Unfiled int    `json:"unfiled"`
 	Report  Report `json:"report"`
 }
 
 var verdictMark = regexp.MustCompile(`<!-- se:review (\{.*\}) -->`)
 
-// blockers is the issues the verdict's blocking findings became, or showed
-// again; none where it passed, or is missing.
+// blockers is the issues the verdict's blocking findings became; none where
+// it passed, or is missing. An accepted repeat blocks no more.
 func (v *Verdict) blockers() []int {
 	if !v.failed() {
 		return nil
@@ -171,9 +220,6 @@ func (v *Verdict) blockers() []int {
 	for _, f := range v.Report.Findings {
 		if f.Blocking && f.Issue != 0 {
 			out = append(out, f.Issue)
-		}
-		if f.Repeats != 0 {
-			out = append(out, f.Repeats)
 		}
 	}
 	sort.Ints(out)
@@ -202,7 +248,7 @@ func (s Source) lastVerdict(n int) (*Verdict, error) {
 
 // render is the report as it is posted on the gate: what a person reads,
 // then the machine-readable block.
-func (v Verdict) render(by Worker) string {
+func (v Verdict) render(by Worker, maxFiled int) string {
 	var b strings.Builder
 	word := "FAIL"
 	if v.Passed {
@@ -233,10 +279,10 @@ func (v Verdict) render(by Worker) string {
 		if f.Blocking {
 			judged = "blocking"
 		}
-		became := fmt.Sprintf("not filed (past the first %d)", MaxFiled)
+		became := fmt.Sprintf("not filed (past the first %d)", maxFiled)
 		switch {
 		case f.Repeats != 0:
-			became = fmt.Sprintf("repeats #%d, so this goes to a person", f.Repeats)
+			became = fmt.Sprintf("repeats #%d: an accepted repeat, it blocks no more", f.Repeats)
 		case f.Issue != 0:
 			became = fmt.Sprintf("#%d", f.Issue)
 		}
@@ -245,9 +291,18 @@ func (v Verdict) render(by Worker) string {
 	if v.Unfiled > 0 {
 		fmt.Fprintf(&b, "\n%d more non-blocking finding(s) counted, not filed.\n", v.Unfiled)
 	}
+	if !v.Passed && !v.Report.blocks() {
+		b.WriteString("\nEvery blocking finding repeats an earlier blocker, a final attempt: the reviewer accepts the repeats, and the gate closes.\n")
+	}
 	b.WriteString("\n### Checked and clean\n")
 	for _, c := range v.Report.Clean {
 		fmt.Fprintf(&b, "- %s\n", c)
+	}
+	if len(v.Report.Ran) > 0 {
+		b.WriteString("\n### Ran on the delta\n")
+		for _, x := range v.Report.Ran {
+			fmt.Fprintf(&b, "- **%s**: %s\n", x.Skill, x.Found)
+		}
 	}
 	// json.Marshal escapes < and >, so the block cannot end early.
 	data, _ := json.Marshal(v)

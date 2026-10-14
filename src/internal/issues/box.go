@@ -99,10 +99,14 @@ func (p kept) due(now time.Time) bool { return p.at.IsZero() || !now.Before(p.at
 
 // fleet is boxes, with the refused fan-out the alive claims record.
 func (s Source) fleet(all []Status, pulls []openPull) (map[string]int, kept, error) {
+	// A claimed tree runs no sub-agent of its own, but its claim keeps a
+	// refused fan-out as a leaf's does: boxes take only manifests.
 	var alive []int
+	trees := map[int]bool{}
 	for _, st := range all {
-		if st.claimed && !st.Stuck && !st.Parent {
+		if st.claimed && !st.Stuck && !st.Parent || st.staked {
 			alive = append(alive, st.Number)
+			trees[st.Number] = st.staked
 		}
 	}
 	ms, err := each(len(alive), func(k int) (marks, error) { return s.marks(alive[k]) })
@@ -114,6 +118,7 @@ func (s Source) fleet(all []Status, pulls []openPull) (map[string]int, kept, err
 	var p kept
 	for k, m := range ms {
 		switch {
+		case trees[alive[k]]:
 		case m.box == "":
 			out[fmt.Sprintf("#%d", alive[k])] = s.parallel()
 		case up[Branch(alive[k])].AutoMerge != nil:

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/daemon"
-	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 )
@@ -33,7 +33,7 @@ func TestTheWiringSeCarriesStartsItsModules(t *testing.T) {
 	for _, in := range ix.Catalog().Instances {
 		instances = append(instances, in.Name)
 	}
-	if want := []string{"cli", "clock", "guidance", "session", "sessionlog"}; !slices.Equal(instances, want) {
+	if want := []string{"battery", "cli", "clock", "github", "guidance", "issues", "reuse", "session", "sessionlog"}; !slices.Equal(instances, want) {
 		t.Fatalf("the index runs %v, want %v", instances, want)
 	}
 }

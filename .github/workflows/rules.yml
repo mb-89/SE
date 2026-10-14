@@ -1,0 +1,37 @@
+# When main takes a change to se's rules, or to what the battery checks
+# against (tests/check.sh's steps, the battery, the budgets, proc.Programs),
+# names on each open se PR the checks it breaks merged with main, so its box
+# fixes them before its CI goes red (spec/coordination.md).
+name: rules
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/internal/rules/**
+      - tests/check.sh
+      - src/internal/battery/**
+      - spec/budgets.yaml
+      - src/internal/io/proc/**
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+concurrency:
+  group: rules
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
+      - run: sh src/build.sh se
+      # Its output names every open se PR, and what se rules found on its merge with main.
+      - run: ./se fleet rules --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}

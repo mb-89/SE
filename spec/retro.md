@@ -27,8 +27,8 @@ What earlier versions taught, and how this design answers it:
 - **Starting one:** `se retro new` creates the issue (through the same code as
   `se issue new`) and fires the routine, as fan-out does, so a box takes it at
   once.
-  - Started by a person (the default): the retro skill first asks the person
-    for **field feedback**, which `--field TEXT` puts into the issue.
+  - Started by a person (the default): the agent `se:retro` first takes the
+    person's **field feedback**, which `--field TEXT` puts into the issue.
     `--no-field` skips the question. `se retro new` refuses to guess: it takes
     exactly one of `--field`, `--no-field` and `--unattended`.
   - `--unattended` never asks. The automatic cadence (below) starts retros this
@@ -37,9 +37,11 @@ What earlier versions taught, and how this design answers it:
     `<!-- se:retro unattended -->`.
 - **The cadence:** retros happen without anyone remembering them. When
   `se issue pull --take` runs, before offering anything else, it counts the
-  `se` issues closed since the last closed `se-retro` issue closed, retros and
-  overhauls not counted (with none closed yet, the whole history). At `RetroCadence` (in
-  `src/internal/issues/cadence.go`) or more, with no `se-retro` issue open,
+  `se` issues closed since the last closed `se-retro` issue closed, retros,
+  overhauls and final issues (`se-final`) not counted, so what retros,
+  reviews and overhauls file does not start the next retro (with none closed
+  yet, the whole history). At `issues/config/retro-cadence` (the
+  issues instance's config value, built-in in `src/internal/issues/cadence.go`) or more, with no `se-retro` issue open,
   it starts an unattended retro, as `se retro new --unattended` does, and
   takes it ahead of all other work but a due overhaul
   ([overhaul.md](overhaul.md)). An open `se-retro` issue, attended or not,
@@ -52,18 +54,22 @@ What earlier versions taught, and how this design answers it:
   cadence. The plain `se issue pull` only reports the count, and that a retro
   is due.
 - **The box** takes a retro like any issue (`se issue pull --take` says it is
-  a retro) and follows the retro skill,
-  [src/plugin/skills/retro/SKILL.md](../src/plugin/skills/retro/SKILL.md),
-  instead of landing a branch.
+  a retro and names its agent, `se:retro`) and starts that agent, which files
+  the report instead of landing a branch.
 - **The mechanical half,** `se retro collect N`, reads the window from GitHub
   and writes a report draft beside the checkout (`../retro-N.md`). It holds:
   - the matrix: every closed issue × every landing question, from the
     answers' machine-readable blocks; it stays in the draft and is not posted;
   - the [rule checks](#the-rule-checks), each broken one with what broke
     it;
+  - **sizes:** the closed issues, the landed ones (those the `answers` check
+    counts: a leaf closed as completed, not a retro, an overhaul or a
+    person's decision), the closed issues for a person and the duplicates,
+    each its own count, so a sweep closing issues for a person reads as one;
   - **counts:** conflicts (conflict takeovers), takeovers, `se-person` flags,
-    CI reruns, `by-hand` answers that are not "none", and the median time from
-    claim to merge;
+    CI reruns, `by-hand` answers that are not "none", the GitHub requests the
+    landing facts counted, their rate-limit refusals and the minutes waited
+    for the reset, and the median time from claim to merge;
   - **scripts:** every file added under `src/scripts/` in the window, grouped
     by the word its name starts with, each with the comment line that says why;
   - **the previous retro's findings:** did their issues close, and did their
@@ -72,12 +78,21 @@ What earlier versions taught, and how this design answers it:
   window made inconsistent, restated or written for no reader (principles 17
   to 19), groups the findings into classes, picks each class's cheapest
   durable fix and records what went well. How, and the fields it writes into
-  the draft's block, are the retro skill's (its steps 2 and 3).
+  the draft's block, are the agent's (its steps 2 and 3).
 - **Who decides (the owner's rule for retros and overhauls alike):** every
-  finding becomes an issue through the same code as `se issue new`.
-  - A **non-controversial** finding goes into the normal queue.
-  - A **controversial** one is an issue for a person: labelled `se-person`
-    and assigned to the owner, it waits for them. The retro does not.
+  finding becomes an issue through the same code as `se issue new`,
+  labelled `se-final`: what a run files is its output, never superseded and
+  never counted toward the cadence.
+  - The **non-controversial** findings go into the run's one manifest,
+    `Findings of the retro #N`, labelled `se-manifest` and `se-final`, which
+    the first of them creates; its leaves land as one PR
+    ([issues.md](issues.md#manifests-all-work-moves-in-them)).
+  - A **controversial** one, or one too big for the manifest, is an issue
+    for a person: labelled `se-person` and assigned to the owner, it waits
+    for them. The retro does not.
+  - The **open points** the window's landing answers name (`open`) are
+    listed in the draft (`## Open points`): a box opens no issue, so the
+    retro is the one that turns them into findings.
 
   Controversial means any of:
   - it changes a design principle ([principles.md](principles.md));
@@ -105,18 +120,23 @@ What earlier versions taught, and how this design answers it:
   resumed retro's stale claim is taken over like any stuck claim.
 - **The retro reviews itself**, every time, as a fixed part of the report:
   - **Metrics against the previous retros:** conflicts, takeovers, CI reruns,
-    `se-person` flags, `by-hand` mentions and time from claim to merge, each
-    per closed issue. `se retro collect` computes them and stores them in the
+    `se-person` flags, `by-hand` mentions, duplicates (issues closed as
+    duplicate, and issues for a person made in the window beyond the first
+    for each issue they hold back), GitHub requests, rate-limit refusals and minutes waited for
+    the reset, and time from claim to merge, each per landed issue (never per closed issue: closing issues
+    for a person or duplicates must not make a metric read better), beside
+    the sizes. `se retro collect` computes them and stores them in the
     report's machine-readable block, so the trend is a number, not an
     impression; the draft tabulates them against every earlier retro.
   - **Did the last retro's fixes help?** For each of its findings: did its
     issue close, did the rule check it named break again, did its metric
-    drop.
+    drop. A metric's move counts for a finding only once its issue closed
+    as completed: before its fix is on main, a drop is not the fix's.
   - **Is the retro itself effective?** How many findings became issues, how
     many of those closed, and which findings recurred anyway.
   - **Should the retro change itself?** Proposals for the landing questions
     ([landing.yaml](landing.yaml)), the rule checks, the metrics or the retro
-    skill are findings like any other, with the same homes (`retro: true`).
+    agent are findings like any other, with the same homes (`retro: true`).
 - **The report stays on the retro issue** as its closing comment, opening
   with `<!-- se:retro-report -->`, with a machine-readable block under
   `<!-- se:retro-yaml -->`: the window, metrics, rule checks, the previous

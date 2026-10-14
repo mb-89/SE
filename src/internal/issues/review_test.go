@@ -4,12 +4,10 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
@@ -163,6 +161,35 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 	}
 }
 
+// A review files what it finds and does not block on as one manifest of
+// finals: the manifest and each finding se-final, the findings its
+// sub-issues, so the retro's cadence counts none of them.
+func TestAReviewFilesItsOpenPointsAsOneManifestOfFinals(t *testing.T) {
+	t.Parallel()
+	gh := recorded(t, map[string]string{
+		listPath:    list(node(1, 1, ReviewLabel), node(2, 0)),
+		refsPath:    `[]`,
+		subsPath(1): subs(2),
+	})
+	seed(t, gh, map[string]string{commentsPath(2): workedBy(Worker{Session: "box", Workspace: "/b/issue-2"})})
+	closeIssue(t, gh, 2)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	rep := passing
+	rep.Findings = []ReviewFinding{{Title: "name it", Evidence: "a.go:1", Why: "unclear"}, {Title: "test it", Evidence: "b.go:2", Why: "untested"}}
+	r, err := s.Review(1, Worker{Session: "other", Workspace: "/b/review-1-1"}, true, rep)
+	if err != nil || r.Manifest != 3 || !reflect.DeepEqual(numbers(r.Filed), []int{4, 5}) {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if m := issueAt(t, gh, 3); m.Title != "Findings of the review of #1" || !m.labelled(ManifestLabel) || !m.labelled(FinalLabel) || m.SubIssues.Total != 2 {
+		t.Fatalf("%+v", m)
+	}
+	for _, n := range []int{4, 5} {
+		if f := issueAt(t, gh, n); !f.labelled(FinalLabel) || f.labelled(MiscLabel) {
+			t.Fatalf("%+v", f)
+		}
+	}
+}
+
 func TestAPassClosesTheParentItCompletes(t *testing.T) {
 	t.Parallel()
 	answers := map[string]string{
@@ -223,26 +250,5 @@ func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
 	seed(t, gh, map[string]string{commentsPath(3): workedBy(Worker{Session: "w", Workspace: "/w3"})})
 	if _, err := s.Review(1, Worker{Session: "other", Workspace: "/w"}, true, passing); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestTheReviewerModelIsOneLineOfSpecModels(t *testing.T) {
-	t.Parallel()
-	d, dir := disk.NewFake(), filepath.FromSlash("/checkout")
-	if got := ReviewerModel(d, dir); got != "" {
-		t.Fatalf("without the file: %q", got)
-	}
-	if err := d.MkdirAll(filepath.Join(dir, "spec")); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.WriteFile(filepath.Join(dir, ModelsPath), []byte("# models\nbox: opus\nreviewer: \"fable\" # stronger\n")); err != nil {
-		t.Fatal(err)
-	}
-	if got := ReviewerModel(d, dir); got != "fable" {
-		t.Fatalf("%q", got)
-	}
-	// The repository's own setting is never empty: it is the checkout's file, on the real disk.
-	if got := ReviewerModel(disk.Real(), "../../.."); got == "" {
-		t.Fatal("spec/models.yaml sets no reviewer")
 	}
 }

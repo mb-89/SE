@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -48,19 +49,46 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 	if want := "- [`se:work`](src/plugin/skills/work/SKILL.md): Take the next issue.\n"; out != want {
 		t.Fatalf("skills: %q", out)
 	}
+	// The agents come from the registry of kinds, and each must have its file.
+	if code, _, errs := se(t, "--workspace", ws, "manifest", "agents"); code != 1 || !strings.Contains(errs, "the leaf kind's agent has no file src/plugin/agents/worker.md") {
+		t.Fatalf("agents without their files (exit %d): %s", code, errs)
+	}
+	_, out, _ = se(t, "--workspace", "../../..", "manifest", "agents")
+	if !strings.HasPrefix(out, "- [`se:worker`](src/plugin/agents/worker.md), for the kind leaf: ") || strings.Count(out, "\n") != 5 {
+		t.Fatalf("agents: %q", out)
+	}
 	_, out, _ = se(t, "--workspace", ws, "manifest", "checks")
 	if !strings.Contains(out, "- `ci`: every merged PR had green CI (the last run of each check on its head); checked from the first commit.\n") ||
 		!strings.Contains(out, "; checked on what was created after PR #91 brought it.\n") ||
 		!strings.Contains(out, "; checked on what closed after PR #74 brought it.\n") {
 		t.Fatalf("checks: %q", out)
 	}
+	// The usage lines' want comes from the registered commands, so a new
+	// command edits no list here.
 	_, out, _ = se(t, "--workspace", ws, "manifest", "usage", "fleet", "rules")
-	if want := "```\nse fleet check [--json] [--repo OWNER/NAME]\nse fleet fix [--json] [--repo OWNER/NAME]\nse fleet prune [--apply] [--json] [--repo OWNER/NAME]\nse fleet refresh [--json] [--repo OWNER/NAME]\nse rules\n```\n"; out != want {
-		t.Fatalf("usage: %q", out)
+	if want := "```\n" + usagesUnder("fleet") + usagesUnder("rules") + "```\n"; !strings.HasPrefix(want, "```\nse fleet check ") || !strings.HasSuffix(want, "\nse rules [--fix]\n```\n") || out != want {
+		t.Fatalf("usage: %q, want %q", out, want)
 	}
 	if code, _, errs := se(t, "--workspace", ws, "manifest", "frob"); code != 1 || !strings.Contains(errs, `no manifest "frob"`) {
 		t.Fatalf("an unknown manifest (exit %d): %s", code, errs)
 	}
+}
+
+// usagesUnder answers the usage lines of the registered commands under word,
+// by name, each on its own line.
+func usagesUnder(word string) string {
+	var names []string
+	for name := range commands {
+		if name == word || strings.HasPrefix(name, word+" ") {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	for _, name := range names {
+		b.WriteString("se " + commands[name].Usage + "\n")
+	}
+	return b.String()
 }
 
 func TestWriteFillsEveryManifestAndTheRulesHoldItThere(t *testing.T) {
@@ -112,6 +140,44 @@ func TestAFolderGitIgnoresCountsThoughNoCheckoutHoldsIt(t *testing.T) {
 	code, _, errs := se(t, "--workspace", ws, "rules")
 	if code != 1 || !strings.Contains(errs, "README.md:5: repo-path: no such path: a/gone") || strings.Count(errs, "repo-path: ") != 1 {
 		t.Fatalf("rules (exit %d): %s", code, errs)
+	}
+}
+
+func TestWriteRefusesWhileTheIndexHoldsAConflict(t *testing.T) {
+	t.Parallel()
+	readme := "# SE\n\nReader: a person meeting SE.\n\n<!-- se:manifest spec -->\n<!-- /se:manifest -->\n"
+	ws := prose(t, map[string]string{
+		"README.md":      readme,
+		"spec/issues.md": "# Issues\n\nReader: whoever.\n",
+	})
+	// Each call names its committer: a runner without a global identity
+	// would refuse the merge before it reached the conflict.
+	gitOut := func(args ...string) ([]byte, error) {
+		return exec.Command("git", append([]string{"-C", ws, "-c", "user.name=se", "-c", "user.email=se@example.com"}, args...)...).CombinedOutput()
+	}
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := gitOut(args...); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git("add", ".")
+	git("commit", "-q", "-m", "base")
+	git("checkout", "-q", "-b", "other")
+	write(t, filepath.Join(ws, "spec", "issues.md"), "# Issues: theirs\n\nReader: whoever.\n")
+	git("commit", "-q", "-am", "theirs")
+	git("checkout", "-q", "-")
+	write(t, filepath.Join(ws, "spec", "issues.md"), "# Issues: ours\n\nReader: whoever.\n")
+	git("commit", "-q", "-am", "ours")
+	if out, err := gitOut("merge", "-q", "other"); err == nil || !strings.Contains(string(out), "CONFLICT") {
+		t.Fatalf("the merge did not conflict: %v %s", err, out)
+	}
+	code, out, errs := se(t, "--workspace", ws, "manifest", "--write")
+	if code != 1 || !strings.Contains(errs, "unmerged paths (spec/issues.md)") {
+		t.Fatalf("write during a conflict (exit %d): %q %s", code, out, errs)
+	}
+	if data, _ := os.ReadFile(filepath.Join(ws, "README.md")); string(data) != readme {
+		t.Fatalf("README.md changed:\n%s", data)
 	}
 }
 

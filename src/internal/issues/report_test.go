@@ -83,20 +83,24 @@ func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(numbers(r.Fixes), []int{10}) || !reflect.DeepEqual(numbers(r.Filed), []int{11, 12, 13, 14, 15}) || r.Unfiled != 2 || r.Passed || r.Person {
+	// The non-blocking ones go into a new misc manifest, #11.
+	if !reflect.DeepEqual(numbers(r.Fixes), []int{10}) || !reflect.DeepEqual(numbers(r.Filed), []int{12, 13, 14, 15, 16}) || r.Unfiled != 2 || r.Passed || r.Closed || len(r.Accepted) != 0 {
 		t.Fatalf("%+v", r)
 	}
-	for n := 10; n <= 15; n++ {
+	for _, n := range []int{10, 12, 13, 14, 15, 16} {
 		if i := issueAt(t, gh, n); !i.labelled(Label) || !i.labelled(FinalLabel) {
 			t.Errorf("#%d is not se-final: %+v", n, i)
 		}
 	}
-	if created := gh.Writes(); len(created) != 8 || issueAt(t, gh, 10).Title != "it breaks" || !reflect.DeepEqual(linksOf(t, gh, subsPath(1)), []int{2, 10}) {
+	if !reflect.DeepEqual(linksOf(t, gh, subsPath(11)), []int{12, 13, 14, 15, 16}) {
+		t.Fatalf("the misc manifest holds %v", linksOf(t, gh, subsPath(11)))
+	}
+	if created := gh.Writes(); len(created) != 14 || issueAt(t, gh, 10).Title != "it breaks" || !reflect.DeepEqual(linksOf(t, gh, subsPath(1)), []int{2, 10}) {
 		t.Fatalf("created %q, under the gate %v", created, linksOf(t, gh, subsPath(1)))
 	}
 	report := commentsAt(t, gh, 1)[0].Body
 	for _, want := range []string{
-		"- **it breaks** (blocking, #10)", "- **nit 1** (not blocking, #11)", "- **nit 7** (not blocking, not filed (past the first 5))",
+		"- **it breaks** (blocking, #10)", "- **nit 1** (not blocking, #12)", "- **nit 7** (not blocking, not filed (past the first 5))",
 		"2 more non-blocking finding(s) counted, not filed.", "### Checked and clean\n- the tests: none weakened",
 	} {
 		if !strings.Contains(report, want) {
@@ -123,7 +127,7 @@ func TestAReReviewIsLimitedToTheEarlierBlockers(t *testing.T) {
 	seed(t, gh, map[string]string{
 		subsPath(1):     subs(-2, -3),
 		commentsPath(3): workedBy(Worker{Session: "f", Workspace: "/f"}),
-		commentsPath(1): fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r0", Workspace: "/r0"})),
+		commentsPath(1): fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r0", Workspace: "/r0"}, MaxFiled)),
 	})
 	r := Worker{Session: "r", Workspace: "/r"}
 	if _, err := s.Review(1, r, true, passing); err == nil || !strings.Contains(err.Error(), "checks only the earlier blockers (#3)") {
@@ -132,29 +136,30 @@ func TestAReReviewIsLimitedToTheEarlierBlockers(t *testing.T) {
 	if w := gh.Writes(); len(w) != 0 {
 		t.Fatalf("a refused review wrote %q", w)
 	}
-	// The re-review finds #3's problem again: #3 was final, so #1 waits on
-	// an issue for a person, #10.
+	// The re-review finds #3's problem again: #3 was final, so the repeat
+	// is accepted, files nothing, and with nothing else blocking #1 closes.
 	again := failing("three, again")
 	again.Requirements = []Requirement{{Item: "three is fixed", Evidence: "x.go:3 still breaks", Blocker: 3}}
 	again.Findings[0].Repeats = 3
 	got, err := s.Review(1, r, false, again)
-	if err != nil || !got.Person || len(got.Fixes)+len(got.Filed) != 0 {
+	if err != nil || !got.Closed || got.Passed || !reflect.DeepEqual(got.Accepted, []int{3}) || len(got.Fixes)+len(got.Filed) != 0 {
 		t.Fatalf("%+v %v", got, err)
 	}
-	want := []string{
-		"POST repos/o/r/issues/1/comments", "POST repos/o/r/issues", "POST repos/o/r/issues/10/assignees",
-		"POST repos/o/r/issues/1/dependencies/blocked_by", "POST repos/o/r/issues/1/comments", "DELETE repos/o/r/issues/1/labels/se-final",
-	}
-	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
+	if w := gh.Writes(); len(w) < 2 || w[0] != "POST repos/o/r/issues/1/comments" || w[1] != "PATCH repos/o/r/issues/1" {
 		t.Fatalf("%q", w)
 	}
+	for _, w := range gh.Writes() {
+		if w == "POST repos/o/r/issues" || strings.Contains(w, "blocked_by") || strings.Contains(w, "labels") {
+			t.Fatalf("the re-review minted or held something: %q", gh.Writes())
+		}
+	}
 	c := commentsAt(t, gh, 1)
-	if len(c) != 3 || !strings.HasPrefix(c[1].Body, "## Re-review: FAIL") || !strings.Contains(c[1].Body, "repeats #3, so this goes to a person") ||
-		!strings.Contains(c[2].Body, "Its re-review finds the problem of #3 (three, again) again") {
+	if len(c) != 2 || !strings.HasPrefix(c[1].Body, "## Re-review: FAIL") || !strings.Contains(c[1].Body, "repeats #3: an accepted repeat, it blocks no more") ||
+		!strings.Contains(c[1].Body, "the reviewer accepts the repeats, and the gate closes") {
 		t.Fatalf("%+v", c)
 	}
-	if !labelled(t, gh, 10, PersonLabel) || !strings.Contains(get(t, gh, "repos/o/r/issues/10"), `"assignees":[{"login":"o"}]`) ||
-		!reflect.DeepEqual(linksOf(t, gh, links(1)), []int{10}) {
-		t.Fatalf("#10 is no issue for a person blocking #1: %s", get(t, gh, "repos/o/r/issues/10"))
+	// An accepted repeat blocks no more: it is no blocker of a next review.
+	if v, err := s.lastVerdict(1); err != nil || len(v.blockers()) != 0 {
+		t.Fatalf("%+v %v", v, err)
 	}
 }

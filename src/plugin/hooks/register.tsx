@@ -5,28 +5,35 @@
 // event the engine raises is posted to the workspace's se daemon before it
 // goes on, unchanged. The daemon owns what happens to it: today it appends
 // the event to the session's log. While SE is off, every hook hands the event
-// straight on and contacts nothing, but one: the context carries the guidance
-// se answers (the principles, the skills a take handed over), on or off, made
-// again after each compaction. /se ui opens a pane of buttons: the on/off
-// toggle and the commands se offers as buttons, each pressed as /se <words>.
+// straight on and contacts nothing, but one: the plugin's SessionStart hook
+// puts the guidance se answers into the context (the principles; in a box, the
+// box's agent; the skills a take handed over), on or off, at startup, resume,
+// clear and compact, since a plugin can ship no rules and no CLAUDE.md. /se ui
+// opens a grid of buttons: the on/off toggle and the commands se offers as
+// buttons, each labelled with its name and pressed as /se <words>, at most as
+// many to a row as se says (gridOf);
+// a press shows the short form se answers, where it has one, a transcript row
+// per line.
 // In a box, SE on or off, every Stop and SubagentStop goes to se hook stop,
-// which refuses the stop while the issue the box took is open with neither a
-// PR (auto-merge on) nor a supersede; a prompt from a person resets its count.
+// which refuses the stop while the issue the box took is open, its PR not
+// merged nor the issue superseded; a prompt from a person resets its count.
 // An interactive session runs none of it.
 // /se help draws as a layout: se answers the help as data beside its text, and
 // the command's output row draws that data, headings and two aligned columns.
 // Anything a person waits on gives feedback within a second and never blocks:
 // every call into se goes through within, which shows the call is working at
 // the one-second mark and lets the session go on; and while SE is on, each
-// call's duration is a row of the daemon's log, se.call.
+// call's duration is a row of the daemon's log, se.call, and each hook's, se.hook.
 
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { SeActive, SeButtons, SeHelp } from '../types'
+import type { SeActive, SeButtons, SeColumns, SeHelp } from '../types'
 
 const ACTIVE = { plugin: 'se', key: 'active' } as const
 // The commands se offered as buttons when /se ui last opened the pane.
 const BUTTONS = { plugin: 'se', key: 'buttons' } as const
+// The most buttons a row of the pane holds, as se answered it with the buttons.
+const COLUMNS = { plugin: 'se', key: 'columns' } as const
 const PANE = 'se-ui'
 // The help se answered for each /se line that asked for it, by its words.
 const HELPS = { plugin: 'se', key: 'helps' } as const
@@ -53,10 +60,12 @@ const PLUGIN_CHECKOUT = 'SE_PLUGIN_CHECKOUT'
 // What se --session answers: the text to show and the effects to apply.
 export type Reply = {
   text: string
+  // What a press of the command's button shows instead of text, where se has a short form.
+  short?: string
   active?: boolean
   endpoint?: Endpoint
   reload?: boolean
-  panel?: { buttons: SeButtons }
+  panel?: { buttons: SeButtons; columns: SeColumns }
   help?: SeHelp
 }
 
@@ -79,14 +88,16 @@ const WAITING_CAP = 1000
 let settingUp: Promise<void> | null = null
 // What the status line says is working, one line per call still running past FEEDBACK.
 const working: string[] = []
-// The context block se's guidance goes under.
-const GUIDANCE = 'se-guidance'
-// The guidance se answered for this session's context; null until it answers,
-// and again after a compaction, so the next context asks anew.
-let guidance: string | null = null
+// The sources of a session start whose context the guidance goes into: each
+// starts a context that holds none of it yet.
+const GUIDED = ['startup', 'resume', 'clear', 'compact']
+// How long a session start waits for the guidance: it shows it is working
+// after FEEDBACK, and the first prompt goes on without it after this long.
+const GUIDING = 30_000
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    const began = await $.clock.now()
     await $.command.register({
       name: 'se',
       description: 'SE, the session-event daemon: /se help lists what it does',
@@ -99,41 +110,62 @@ export const register: Register = on => {
     const setup = setsUp($).catch(() => {})
     settingUp = setup
     await within($, 'updating itself', setup)
+    took($, 'session.start', began)
     return next(e)
   })
 
-  on('command.run', { command: 'se' }, async ($, e) => ({ text: await runs($, e.args) }))
-
-  // The guidance goes into the context, which the engine sends once while the
-  // conversation holds none: at its first request, and after each compaction.
-  on('prompt.context', async ($, e, next) => {
-    const said = await next(e)
-    const text = await guided($)
-    return text ? { ...said, blocks: [...said.blocks, { name: GUIDANCE, text }] } : said
+  on('command.run', { command: 'se' }, async ($, e) => {
+    const began = await $.clock.now()
+    const text = await runs($, e.args)
+    took($, 'command.run se', began)
+    return { text }
   })
 
-  on('session.compact', async ($, e, next) => {
-    const compacted = await next(e)
-    if (e.trigger !== 'precompute' && !compacted.skip) guidance = null
-    return compacted
+  // Always-on guidance: the documented way a plugin puts text into every
+  // session, the SessionStart hook's additionalContext, on each source that
+  // starts a context without it (a compaction keeps only a summary of it).
+  on('classic.SessionStart', async ($, e, next) => {
+    const result = await next(e)
+    if (!GUIDED.includes(e.source)) return result
+    const began = await $.clock.now()
+    const text = await guided($)
+    took($, 'classic.SessionStart', began)
+    return text ? { ...result, additionalContext: [...(result.additionalContext ?? []), text] } : result
   })
 
   // Every surface draws Box, Text and Button, the phone too, so the pane uses no other.
+  // The pane is a grid: rows of at most `columns` cells, every cell as wide as
+  // every other, so the columns align and a short last row stays to the left.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const began = await $.clock.now()
     const { Box, Button } = $.ui.resolve(e)
     const { value: isOn = false } = await $.state.get(ACTIVE)
     const { value: buttons = [] } = await $.state.get(BUTTONS)
+    const { value: columns = 0 } = await $.state.get(COLUMNS)
+    const toggle = isOn ? 'SE on' : 'SE off'
+    const cells = [
+      <Button
+        key="toggle"
+        label={toggle}
+        variant={isOn ? 'primary' : undefined}
+        dimColor={!isOn}
+        onPress={() => presses($, isOn ? 'off' : 'on')}
+      />,
+      ...buttons.map(name => <Button key={`run ${name}`} label={name} onPress={() => presses($, name)} />),
+    ]
+    const grid = gridOf([toggle, ...buttons], columns, e.props.bodyColumns)
+    took($, 'ui.render Pane', began)
     return (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={1} width={e.props.bodyColumns}>
-        <Button
-          key="toggle"
-          label={isOn ? 'SE on' : 'SE off'}
-          variant={isOn ? 'primary' : undefined}
-          dimColor={!isOn}
-          onPress={() => presses($, isOn ? 'off' : 'on')}
-        />
-        {buttons.map(name => (
-          <Button key={`run ${name}`} label={name} onPress={() => presses($, name)} />
+      <Box flexDirection="column" rowGap={GAP} width={e.props.bodyColumns}>
+        {grid.rows.map(row => (
+          // A row is named by its first cell, the same cell each time it is drawn.
+          <Box key={`row ${row[0]}`} flexDirection="row" columnGap={GAP}>
+            {row.map(i => (
+              <Box key={`cell ${i}`} width={grid.width} flexShrink={0}>
+                {cells[i]}
+              </Box>
+            ))}
+          </Box>
         ))}
       </Box>
     )
@@ -142,6 +174,7 @@ export const register: Register = on => {
   // /se help's output row: the help se answered as data, drawn as a layout. A
   // row whose words carried no help, or an error, is drawn as its text.
   on('ui.render', { component: 'CommandOutput', props: { command: 'se' } }, async ($, e, next) => {
+    const began = await $.clock.now()
     if (e.props.isErrored) return next(e)
     const { value: helps = {} } = await $.state.get(HELPS)
     const help = helps[wordsOf(e.props.args).join(' ')]
@@ -200,6 +233,7 @@ export const register: Register = on => {
         </Box>,
       )
     }
+    took($, 'ui.render CommandOutput', began)
     return (
       <Box flexDirection="column" rowGap={1}>
         {parts}
@@ -212,19 +246,27 @@ export const register: Register = on => {
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
     if (!(await isBox($))) return result
+    const began = await $.clock.now()
     const block = await judges($, waits(e) ? ['--waiting'] : [])
+    took($, 'classic.Stop', began)
     return block ? { ...result, block } : result
   })
   on('classic.SubagentStop', async ($, e, next) => {
     const result = await next(e)
     if (!(await isBox($))) return result
+    const began = await $.clock.now()
     const block = await judges($, [...(waits(e) ? ['--waiting'] : []), '--agent-transcript', e.agent_transcript_path])
+    took($, 'classic.SubagentStop', began)
     return block ? { ...result, block } : result
   })
   // A person who prompts a box gives the Stop hook's refusals a fresh count.
   on('prompt.submit', async ($, e, next) => {
     const kind = e.origin?.kind
-    if ((kind === 'composer' || kind === 'bridge') && (await isBox($))) await asksPlain($, ['hook', 'prompt'])
+    if ((kind === 'composer' || kind === 'bridge') && (await isBox($))) {
+      const began = await $.clock.now()
+      await asksPlain($, ['hook', 'prompt'])
+      took($, 'prompt.submit', began)
+    }
     return next(e)
   })
 
@@ -233,6 +275,7 @@ export const register: Register = on => {
   // switched SE on, dropped if not.
   on('*', async ($, e, next) => {
     if (next.is('engine.create', e) || (!active && !settingUp)) return next(e)
+    const began = await $.clock.now()
     if (!active) {
       if (waiting.length < WAITING_CAP) waiting.push(bodyOf(await $.session.id(), next.event, e, await $.clock.now()))
       return next(e)
@@ -242,6 +285,7 @@ export const register: Register = on => {
       'reaching its daemon',
       forwards($, next.event, e).catch(() => {}),
     )
+    took($, '*', began)
     return next(e)
   }).catch(($, e, next) => next(e))
 }
@@ -303,6 +347,19 @@ async function timed<T>($: EngineInterface, words: string[], call: () => Promise
   }
 }
 
+// Records how long a hook took since began on the clock, while SE is on, as
+// an se.hook row of the daemon's log, without waiting on the post. A hook
+// measures its own work up to handing the event on. spec/budgets.yaml gives
+// each hook a class by the name it passes here, and se rules fails on a hook
+// it does not.
+function took($: EngineInterface, hook: string, began: number): void {
+  const to = endpoint
+  if (!active || !to) return
+  void Promise.all([$.clock.now(), $.session.id()])
+    .then(([now, session]) => posts($, to, bodyOf(session, 'se.hook', { hook, ms: now - began }, now)))
+    .catch(() => {})
+}
+
 // Brings the checkout the plugin was loaded from to the newest main, whether or
 // not SE is on. se leaves a checkout that is no clean main alone; nothing here
 // holds the session up: what happened, if anything, is one line in a toast,
@@ -313,16 +370,21 @@ async function updatesItself($: EngineInterface): Promise<void> {
   if (said) $.ui.toast(said.split('\n')[0])
 }
 
-// The guidance se answers for this session, asked once and again after a
-// compaction; '' while se has not answered within FEEDBACK, or failed.
+// The guidance se answers for this session; '' where se failed, or did not
+// answer within GUIDING. Past FEEDBACK the status line says it is working.
 async function guided($: EngineInterface): Promise<string> {
-  if (guidance !== null) return guidance
-  const asking = asks($, ['guidance', '--session-id', await $.session.id()]).then(said => {
-    if (typeof said !== 'string') guidance = said.text
-    return guidance ?? ''
-  })
+  const asking = asks($, ['guidance', '--session-id', await $.session.id()]).then(said =>
+    typeof said === 'string' ? '' : said.text,
+  )
   const ran = await within($, 'reading its guidance', asking)
-  return ran.done ? ran.value : ''
+  if (ran.done) return ran.value
+  let timer: Timer | undefined
+  const late = new Promise<string>(resolve => {
+    timer = $.clock.after(GUIDING, () => resolve(''))
+  })
+  const text = await Promise.race([ran.later, late])
+  timer?.cancel()
+  return text
 }
 
 // Hands the words to se as a session call; answers its reply, or why there is none.
@@ -395,6 +457,7 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
   }
   if (reply.panel) {
     await $.state.set(BUTTONS, reply.panel.buttons)
+    await $.state.set(COLUMNS, reply.panel.columns)
     await $.ui.open({ id: PANE, title: 'SE' })
   }
   if (!reply.reload) return reply.text
@@ -412,19 +475,19 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
 // /se <words>: hands the words to se and applies its reply; answers the text
 // to show. One se does not answer within FEEDBACK answers that it is working,
 // and its answer follows as a line of the transcript.
-async function runs($: EngineInterface, args: string): Promise<string> {
+async function runs($: EngineInterface, args: string, pressed = false): Promise<string> {
   const words = wordsOf(args)
   const typed = ['/se', ...words].join(' ')
-  const ran = await within($, typed, answers($, words))
+  const ran = await within($, typed, answers($, words, pressed))
   if (ran.done) return ran.value
-  void ran.later.then(text => $.ui.log(text))
+  void ran.later.then(text => logs($, text))
   return `${typed} is still working; its answer follows here.`
 }
 
-// Hands the words to se and applies its reply; answers the text to show.
-// Help se answered is kept for the output row to draw; a line that no longer
-// answers help draws as its text.
-async function answers($: EngineInterface, words: string[]): Promise<string> {
+// Hands the words to se and applies its reply; answers the text to show, the
+// short form se answered where a button was pressed. Help se answered is kept
+// for the output row to draw; a line that no longer answers help draws as its text.
+async function answers($: EngineInterface, words: string[], pressed: boolean): Promise<string> {
   const asked = await asks($, words)
   if (typeof asked === 'string') return asked
   const key = words.join(' ')
@@ -434,18 +497,47 @@ async function answers($: EngineInterface, words: string[]): Promise<string> {
     const { [key]: _, ...rest } = helps
     await $.state.set(HELPS, rest)
   }
-  return applies($, asked)
+  return applies($, pressed && asked.short ? { ...asked, text: asked.short } : asked)
+}
+
+// The cells between two cells of the pane's grid, across and down.
+const GAP = 1
+
+// What the terminal draws around a Button's label: `[ label ]`.
+const CHROME = 4
+
+// The pane's grid, the one place its shape is drawn: the cells, by their
+// labels, in rows of at most `columns` (se's config value; one row where se
+// named none), every cell the same width: the row's share of the pane less
+// its gaps, or the longest label's button where that is wider.
+export function gridOf(labels: string[], columns: number, paneWidth: number): { rows: number[][]; width: number } {
+  const count = labels.length
+  const across = Math.max(1, Math.min(columns > 0 ? columns : count, count))
+  const rows: number[][] = []
+  for (let i = 0; i < count; i += across)
+    rows.push(Array.from({ length: Math.min(across, count - i) }, (_, j) => i + j))
+  const share = Math.floor((paneWidth - GAP * (across - 1)) / across)
+  return { rows, width: Math.max(share, CHROME + Math.max(0, ...labels.map(l => l.length))) }
 }
 
 function wordsOf(args: string): string[] {
   return args.split(/\s+/).filter(Boolean)
 }
 
-// A press runs what typing /se <words> runs; its answer is a line of the
-// transcript, where a command's answer shows. (A plugin's $.command.run skips
-// the plugin's own hooks, so it cannot reach /se.)
+// A press runs what typing /se <words> runs, and shows se's short form where
+// it has one; its answer goes to the transcript, where a command's answer
+// shows. (A plugin's $.command.run skips the plugin's own hooks, so it cannot
+// reach /se.)
 async function presses($: EngineInterface, words: string): Promise<void> {
-  $.ui.log(await runs($, words))
+  logs($, await runs($, words, true))
+}
+
+// Writes an answer to the transcript, a row per line. $.ui.log is the one call
+// every surface draws as a transcript row, the terminal, the desktop app and
+// the phone alike, and it draws one line: the terminal flattens a newline in
+// it (to ◆ on Windows). So each line is its own call, and a blank line none.
+function logs($: EngineInterface, text: string): void {
+  for (const line of text.split(/\r?\n/)) if (line.trim()) $.ui.log(line)
 }
 
 // Switches SE on and starts the daemon; answers why the daemon did not start, or ''.

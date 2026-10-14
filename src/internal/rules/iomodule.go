@@ -2,50 +2,55 @@ package rules
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"path"
 	"sort"
-	"strconv"
 	"strings"
 )
 
-// Allowlist names the places outside src/internal/io that still reach the
-// outside directly, one per line: a Go file and what it reaches. It only
-// shrinks: each I/O module removes its own entries, and an entry that matches
-// nothing is refused.
-const Allowlist = "src/internal/io/allowlist.txt"
-
-// outside is what reaches the outside past an I/O module: the imports, and
-// the calls of time and os, by package path.
-var (
-	outsideImports = []string{"os/exec", "net/http"}
-	outsideCalls   = map[string][]string{
-		"time": {"Now", "Sleep", "After", "Since", "Until", "Tick", "NewTicker", "NewTimer", "AfterFunc"},
-		"os": {
-			"Open", "OpenFile", "Create", "CreateTemp", "ReadFile", "WriteFile", "ReadDir",
-			"Mkdir", "MkdirAll", "MkdirTemp", "Remove", "RemoveAll", "Rename", "Stat", "Lstat",
-			"Truncate", "Chmod", "Chown", "Chtimes", "Link", "Symlink", "Readlink", "DirFS", "CopyFS",
-		},
-	}
-)
+// Allowlist names the places that still go around a door, one per line: a
+// file and what it names, a Go name or a command word a door declares. It
+// only shrinks: an entry that matches nothing is refused.
+const Allowlist = IODir + "/allowlist.txt"
 
 func init() {
 	register(Rule{
 		Name: "io-module",
-		Doc: "outside src/internal/io, no Go file imports os/exec or net/http, runs gh, reads the clock, sleeps or waits through time, " +
-			"or opens, reads or writes files through os, except as " + Allowlist + " names; an entry there that matches nothing is refused",
+		Doc: "every I/O module under " + IODir + " declares in its " + DoorFile + " the resource it guards, the Go names that reach it (go) " +
+			"and the words that reach it from a shell or an agent's text (commands); no Go file outside " + IODir + " uses a go name, or starts a program a commands word names, " +
+			"and no plugin agent, skill or hook, script under src/scripts, tests/*.sh or CLAUDE.md names a commands word, except on a line marked " +
+			Marker + " - <why> or as " + Allowlist + " names; an entry there that matches nothing, a marker without a reason and one that passes nothing are refused",
 		Applies: func(p string) bool {
-			return p == Allowlist || (path.Ext(p) == ".go" && !strings.HasSuffix(p, "_test.go") && !strings.HasPrefix(p, "src/internal/io/"))
+			return p == Allowlist || doorOf(p) != "" || outsideGo(p) || toldToRun(p)
 		},
 		Check: ioModule,
 	})
 }
 
+// outsideGo says whether p is Go code outside the doors.
+func outsideGo(p string) bool {
+	return path.Ext(p) == ".go" && !strings.HasSuffix(p, "_test.go") && !strings.HasPrefix(p, IODir+"/")
+}
+
+// toldToRun says whether p is text a box runs or is told to run: the
+// plugin's agents, skills and hooks, the ad hoc scripts, the battery's shell
+// files and CLAUDE.md.
+func toldToRun(p string) bool {
+	return strings.HasPrefix(p, "src/plugin/") || strings.HasPrefix(p, "src/scripts/") ||
+		(path.Dir(p) == "tests" && path.Ext(p) == ".sh") || p == "CLAUDE.md"
+}
+
 func ioModule(repo *Repo, p string, text []byte) []Finding {
-	if p == Allowlist {
-		return staleEntries(repo, text)
+	ds := doorsOf(repo)
+	switch {
+	case p == Allowlist:
+		return staleEntries(repo, text, Allowlist, "io-module", ds.reaches)
+	case doorOf(p) != "":
+		found := ds.faults[p]
+		if at, bare := ds.bare[p]; bare {
+			found = append(found, Finding{Path: p, Line: 1, Rule: "io-module", Message: fmt.Sprintf(
+				"the I/O module %s declares nothing: write %s/%s, saying the resource it guards and what goes around it (spec/io.md)", at, at, DoorFile)})
+		}
+		return found
 	}
 	list, _, _ := repo.Read(Allowlist)
 	allowed := map[string]bool{}
@@ -53,27 +58,98 @@ func ioModule(repo *Repo, p string, text []byte) []Finding {
 		allowed[e.file+" "+e.reach] = true
 	}
 	var found []Finding
-	for _, r := range Reaches(p, text) {
-		if !allowed[p+" "+r.What] {
-			found = append(found, Finding{Path: p, Line: r.Line, Rule: "io-module", Message: r.What + " reaches the outside past an I/O module; go through one under src/internal/io (spec/io.md)"})
+	walks := ds.walksOf(p, text, func(f Finding) { found = append(found, f) })
+	for _, w := range walks {
+		if allowed[p+" "+w.what] {
+			continue
 		}
+		through := "go through it"
+		if !strings.HasSuffix(p, ".go") {
+			through = "go through se"
+		}
+		found = append(found, Finding{Path: p, Line: w.line, Rule: "io-module", Message: fmt.Sprintf(
+			"%s reaches %s around its door (%s); %s (spec/io.md)", w.said, w.door.Resource(), w.door.At, through)})
 	}
 	return found
 }
 
-// staleEntries refuses an allowlist entry that is malformed, named twice, or
-// matches nothing in the file it names.
-func staleEntries(repo *Repo, text []byte) []Finding {
+// walksOf answers every way the file goes around a door that no marker
+// passes, and hands refuse each marker that is wrong: one without a reason,
+// which passes nothing, and one on a line that goes around no door.
+func (ds *doors) walksOf(p string, text []byte, refuse func(Finding)) []walk {
+	var walks []walk
+	var m marks
+	if path.Ext(p) == ".go" {
+		walks, m = ds.goWalks(p, text)
+	} else {
+		walks, m = ds.textWalks(text)
+	}
+	at := map[int]bool{}
+	seen := map[string]bool{}
+	var out []walk
+	for _, w := range walks {
+		at[w.line] = true
+		key := fmt.Sprint(w.line, " ", w.what)
+		if m[w.line] == "" && !seen[key] {
+			seen[key] = true
+			out = append(out, w)
+		}
+	}
+	lines := make([]int, 0, len(m))
+	for l := range m {
+		lines = append(lines, l)
+	}
+	sort.Ints(lines)
+	for _, l := range lines {
+		msg := ""
+		switch {
+		case m[l] == "":
+			msg = "the marker gives no reason, so it passes nothing: write " + Marker + " - <why>"
+		case !at[l]:
+			msg = "the marker passes nothing: the line goes around no door; remove it"
+		}
+		if msg != "" && refuse != nil {
+			refuse(Finding{Path: p, Line: l, Rule: "io-module", Message: msg})
+		}
+	}
+	return out
+}
+
+// reaches answers the file's walks as reaches, each what once, at its first
+// line, in order: what an allowlist entry matches.
+func (ds *doors) reaches(p string, text []byte) []Reach {
+	first := map[string]int{}
+	for _, w := range ds.walksOf(p, text, nil) {
+		if l, ok := first[w.what]; !ok || w.line < l {
+			first[w.what] = w.line
+		}
+	}
+	out := make([]Reach, 0, len(first))
+	for what, line := range first {
+		out = append(out, Reach{What: what, Line: line})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Line != out[j].Line {
+			return out[i].Line < out[j].Line
+		}
+		return out[i].What < out[j].What
+	})
+	return out
+}
+
+// staleEntries refuses an entry of the allowlist at list, rule's, that is
+// malformed, named twice, or matches nothing reaches finds in the file it names.
+func staleEntries(repo *Repo, text []byte, list, rule string, reaches func(p string, text []byte) []Reach) []Finding {
 	var found []Finding
 	seen := map[string]bool{}
 	for _, e := range entriesOf(text) {
 		refuse := func(msg string) {
-			found = append(found, Finding{Path: Allowlist, Line: e.line, Rule: "io-module", Message: msg})
+			found = append(found, Finding{Path: list, Line: e.line, Rule: rule, Message: msg})
 		}
 		key := e.file + " " + e.reach
 		switch {
 		case e.file == "" || e.reach == "":
-			refuse("an entry is a Go file and what it reaches, such as: src/cmd/se/x.go os/exec")
+			refuse("an entry is a file and what it reaches, such as: src/cmd/se/x.go os/exec")
 			continue
 		case seen[key]:
 			refuse("the entry is named twice: " + key)
@@ -86,7 +162,7 @@ func staleEntries(repo *Repo, text []byte) []Finding {
 			continue
 		}
 		hit := false
-		for _, r := range Reaches(e.file, src) {
+		for _, r := range reaches(e.file, src) {
 			hit = hit || r.What == e.reach
 		}
 		if !hit {
@@ -120,104 +196,10 @@ func entriesOf(text []byte) []entry {
 	return out
 }
 
-// runsGh says whether call is exec.Command("gh", …), or its CommandContext:
-// GitHub, which only its I/O module reaches.
-func runsGh(call *ast.CallExpr, execName string) bool {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	if id, ok := sel.X.(*ast.Ident); !ok || id.Name != execName {
-		return false
-	}
-	at, ok := map[string]int{"Command": 0, "CommandContext": 1}[sel.Sel.Name]
-	if !ok || len(call.Args) <= at {
-		return false
-	}
-	lit, ok := call.Args[at].(*ast.BasicLit)
-	if !ok {
-		return false
-	}
-	name, err := strconv.Unquote(lit.Value)
-	return err == nil && name == "gh"
-}
-
-// Reach is one way a Go file reaches the outside: an import path, such as
-// os/exec, or a call, such as time.Now, and the first line it is on.
+// Reach is one way a file reaches the outside: an import path, such as
+// os/exec, a call, such as time.Now, or a program or command word, such as
+// gh, and the first line it is on.
 type Reach struct {
 	What string
 	Line int
-}
-
-// Reaches answers every way the Go file reaches the outside directly, each
-// once, in order; a file that does not parse reaches nothing the rule can tell.
-func Reaches(p string, text []byte) []Reach {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, p, text, parser.SkipObjectResolution)
-	if err != nil {
-		return nil
-	}
-	first := map[string]int{}
-	note := func(what string, pos token.Pos) {
-		if _, ok := first[what]; !ok {
-			first[what] = fset.Position(pos).Line
-		}
-	}
-	local := map[string]string{} // the name a package goes by in the file, to its path
-	execName := ""               // the name os/exec goes by in the file
-	for _, im := range f.Imports {
-		ip, _ := strconv.Unquote(im.Path.Value)
-		for _, o := range outsideImports {
-			if ip == o {
-				note(ip, im.Pos())
-			}
-		}
-		if ip == "os/exec" {
-			execName = "exec"
-			if im.Name != nil {
-				execName = im.Name.Name
-			}
-		}
-		if _, ok := outsideCalls[ip]; ok {
-			name := path.Base(ip)
-			if im.Name != nil {
-				name = im.Name.Name
-			}
-			local[name] = ip
-		}
-	}
-	ast.Inspect(f, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok && execName != "" && runsGh(call, execName) {
-			note("gh", call.Pos())
-		}
-		sel, ok := n.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		id, ok := sel.X.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		ip, ok := local[id.Name]
-		if !ok {
-			return true
-		}
-		for _, name := range outsideCalls[ip] {
-			if sel.Sel.Name == name {
-				note(ip+"."+name, sel.Pos())
-			}
-		}
-		return true
-	})
-	out := make([]Reach, 0, len(first))
-	for what, line := range first {
-		out = append(out, Reach{What: what, Line: line})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Line != out[j].Line {
-			return out[i].Line < out[j].Line
-		}
-		return out[i].What < out[j].What
-	})
-	return out
 }

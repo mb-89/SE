@@ -13,7 +13,7 @@ const Top = 10
 // judgment weighs, none a verdict.
 func (f Facts) Markdown() string {
 	var b strings.Builder
-	b.WriteString("## Pruning and code shape\nCandidates, not verdicts: the overhaul skill's pruning rules and spec/principles.md's \"How code is written\" judge them. Each removal or reshaping is a finding with area `removal` or `principle`.\n")
+	b.WriteString("## Pruning and code shape\nCandidates, not verdicts: the overhaul agent's pruning rules (src/plugin/agents/overhaul.md) and spec/principles.md's \"How code is written\" judge them. They are also where to start on principles 2 and 3, which the overhaul judges over all the code, old and untouched included: the widest changes, what nothing reaches, what was not touched in a while. Each removal or reshaping is a finding with area `removal` or `principle`.\n")
 
 	section(&b, "Production-unreachable", "What `deadcode ./...` finds nothing in production reaches, the fakes and test helpers left out: code only tests reach.")
 	if f.Unrun != "" {

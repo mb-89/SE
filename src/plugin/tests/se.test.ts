@@ -36,6 +36,8 @@ type World = {
   takes: Record<string, number>
   // The clock beneath the plugin, which moves only when the test moves it.
   clock: MockClock
+  // Every hook the daemon was told the duration of, by its name.
+  hooks: string[]
   // What se hook stop prints; a number is the exit code it fails with.
   verdict: unknown
 }
@@ -88,6 +90,7 @@ function world(on: On, env: Record<string, string> = {}): World {
     statuses: [],
     takes: {},
     clock: mock.clock(on),
+    hooks: [],
     verdict: { pass: 'no se issue was taken here' },
     replies: {
       '': { text: HELP },
@@ -95,7 +98,7 @@ function world(on: On, env: Record<string, string> = {}): World {
       off: { text: 'SE is off.', active: false },
       update: { text: 'SE updated aaa → bbb. Its daemon restarted.', endpoint: DAEMON, reload: true },
       status: { text: 'No SE daemon answers for /work.' },
-      ui: { text: "SE's control panel is open.", panel: { buttons: ['issue pull', 'status'] } },
+      ui: { text: "SE's control panel is open.", panel: { buttons: ['issue pull', 'status'], columns: 3 } },
       help: { text: HELP, help: OVERVIEW },
       'help issue pull': { text: '/se issue pull [--take [N]]\n```\n…\n```', help: ISSUE_PULL },
     },
@@ -171,6 +174,7 @@ function world(on: On, env: Record<string, string> = {}): World {
   on('http.fetch', ($, e) => {
     if (w.live === null || e.url !== `http://${w.live}/event`) return { deny: 'connection refused' }
     const body = JSON.parse(String(e.init?.body ?? '{}'))
+    if (body.event === 'se.hook' && typeof body.e?.ms === 'number') w.hooks.push(body.e.hook)
     w.posts.push({
       url: e.url,
       auth: String(e.init?.headers?.authorization ?? ''),
@@ -180,8 +184,7 @@ function world(on: On, env: Record<string, string> = {}): World {
     return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
   })
   on('attribution.text', ($, e) => ({ text: e.text }))
-  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
-  on('session.compact', () => ({ messages: [{ role: 'user', text: 'the summary', toolUses: [] }] }) as never)
+  on('classic.SessionStart', () => ({ additionalContext: ['the project hook'] }))
   on('classic.Stop', () => ({}))
   on('classic.SubagentStop', () => ({}))
   on('prompt.submit', ($, e) => ({ text: e.text }) as never)
@@ -289,6 +292,26 @@ test('while SE is on, each se call is a row of the daemon log with its duration'
   await $.command.run(se('on'))
   await $.command.run(se('status'))
   expect(posted(w)).toContain('se.call')
+})
+
+test('while SE is on, each hook is a row of the daemon log with its duration', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('on'))
+  await $.command.run(se('status'))
+  await $.attribution.text(probe)
+  await w.clock.advance(0)
+  expect(w.hooks).toContain('command.run se')
+  expect(w.hooks).toContain('*')
+})
+
+test('while SE is off, no hook posts its duration', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('status'))
+  await $.attribution.text(probe)
+  await w.clock.advance(0)
+  expect(w.hooks).toEqual([])
 })
 
 test('off by default: events pass, nothing starts, nothing is posted', async ($, on) => {
@@ -608,12 +631,55 @@ test('/se ui opens a pane titled SE that draws on every surface', async ($, on) 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const drawn = await ui.drawn()
-    expect(drawn).toMatchObject({ type: 'Box', props: { flexWrap: 'wrap', width: 40 } })
+    expect(drawn).toMatchObject({ type: 'Box', props: { flexDirection: 'column', width: 40 } })
     const buttons = await ui.findAll({ type: 'Button' })
     // The toggle first, top left; then se's buttons in the order it named them.
     expect(buttons.map(b => b.props.label)).toEqual(['SE off', 'issue pull', 'status'])
     await ui.unmount()
   }
+})
+
+// The grid as drawn: each row's cells, by the label of the Button each holds and the cell's width.
+type Drawn = { type: string; props?: Record<string, unknown>; children?: unknown[] }
+const rowsOf = (drawn: Drawn) =>
+  (drawn.children as Drawn[]).map(row =>
+    (row.children as Drawn[]).map(cell => ({
+      label: (cell.children as Drawn[])[0]?.props?.label,
+      width: cell.props?.width,
+    })),
+  )
+
+test('/se ui draws a panel of 7 buttons as aligned rows of 3, 3 and 1', async ($, on) => {
+  const w = world(on)
+  const six = ['issue pull', 'restart', 'status', 'update', 'briefing', 'fleet check']
+  w.replies.ui = { text: "SE's control panel is open.", panel: { buttons: six, columns: 3 } }
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const rows = rowsOf((await ui.drawn()) as Drawn)
+    // At most three to a row: the fourth button starts the next row.
+    expect(rows.map(r => r.length)).toEqual([3, 3, 1])
+    // Every button is labelled with its command's name, the toggle first, top left.
+    expect(rows.flat().map(c => c.label)).toEqual(['SE off', ...six])
+    // Every cell is as wide as every other, so the columns align and the last row stays left.
+    const widths = new Set(rows.flat().map(c => c.width))
+    expect(widths.size).toBe(1)
+    expect([...widths][0]).toBeGreaterThanOrEqual('fleet check'.length + 4)
+    await ui.unmount()
+  }
+})
+
+test("the columns of the grid are the ones se answers, not the plugin's", async ($, on) => {
+  const w = world(on)
+  w.replies.ui = { text: "SE's control panel is open.", panel: { buttons: ['a', 'b', 'c', 'd'], columns: 2 } }
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const rows = rowsOf((await ui.drawn()) as Drawn)
+  expect(rows.map(r => r.map(c => c.label))).toEqual([['SE off', 'a'], ['b', 'c'], ['d']])
+  // Two cells and their gap fill the pane.
+  expect(rows[0]?.[0]?.width).toBe(19)
 })
 
 test('pressing the toggle runs /se on and /se off, and switches the flag', async ($, on) => {
@@ -661,6 +727,52 @@ test('a command se offers as a button appears, and pressing it runs /se <name>',
   expect(verbs(w)).toEqual(['/se status'])
   // Its answer is a line of the transcript, as the command's answer is.
   expect(w.logs).toEqual(['No SE daemon answers for /work.'])
+})
+
+test('a three-line answer to a press arrives as three lines, never one flattened line', async ($, on) => {
+  const w = world(on)
+  w.replies.status = {
+    text: 'No SE daemon answers for /work.\nHooks loaded from aaa111.\nThey disagree: start a new session.',
+  }
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'run status' })
+  expect(w.logs).toEqual([
+    'No SE daemon answers for /work.',
+    'Hooks loaded from aaa111.',
+    'They disagree: start a new session.',
+  ])
+})
+
+test('a press shows the short form se answers; typing shows the full one', async ($, on) => {
+  const w = world(on)
+  w.replies['issue pull'] = {
+    text: '#7 seven\nu7\nThe lowest ready issue at the top.\n1 se issue closed.\n0 retros closed.',
+    short: '#7 seven\nu7\nThe lowest ready issue at the top.\nCadence: retro at 1 of 10; overhaul at 0 of 5.',
+  }
+  await $.session.start(starts)
+  expect((await $.command.run(se('issue pull')))?.text).toBe(
+    '#7 seven\nu7\nThe lowest ready issue at the top.\n1 se issue closed.\n0 retros closed.',
+  )
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
+  await ui.press({ key: 'run issue pull' })
+  expect(w.logs).toEqual([
+    '#7 seven',
+    'u7',
+    'The lowest ready issue at the top.',
+    'Cadence: retro at 1 of 10; overhaul at 0 of 5.',
+  ])
+})
+
+test('a slow answer that follows in the transcript keeps its lines', async ($, on) => {
+  const w = world(on)
+  w.takes.slow = 5000
+  w.replies.slow = { text: 'one\n\ntwo' }
+  await $.session.start(starts)
+  await Promise.all([$.command.run(se('slow')), w.clock.advance(5000)])
+  expect(w.logs).toEqual(['one', 'two'])
 })
 
 test('a command se does not offer as a button does not appear', async ($, on) => {
@@ -752,33 +864,49 @@ test('a line that no longer answers help draws as its text', async ($, on) => {
   expect(await ui.find({ key: 'usage' })).toBeUndefined()
 })
 
-test('the context carries the guidance se answers, asked once, and again after a compaction', async ($, on) => {
+test('the session start hands the guidance se answers to the context, on each source that starts one', async ($, on) => {
   const w = world(on)
   w.replies['guidance --session-id s1'] = { text: 'the principles, and the skills handed over' }
   await $.session.start(starts)
-  const blocks = async () => (await $.prompt.context({ blocks: [{ name: 'currentDate', text: 'today' }] })).blocks
-  expect(await blocks()).toEqual([
-    { name: 'currentDate', text: 'today' },
-    { name: 'se-guidance', text: 'the principles, and the skills handed over' },
-  ])
-  await blocks()
-  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toEqual(['/se guidance --session-id s1'])
+  for (const source of ['startup', 'resume', 'clear', 'compact'] as const) {
+    expect((await $.classic.SessionStart({ source })).additionalContext).toEqual([
+      'the project hook',
+      'the principles, and the skills handed over',
+    ])
+  }
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(4)
   // SE is off: the guidance goes into the context all the same, and nothing is posted.
   expect(posted(w)).toEqual([])
-  await $.session.compact({
-    trigger: 'manual',
-    messages: [{ role: 'user', text: 'all so far', toolUses: [] }],
-  } as never)
-  w.replies['guidance --session-id s1'] = { text: 'the skills handed over, again' }
-  expect((await blocks()).at(-1)).toEqual({ name: 'se-guidance', text: 'the skills handed over, again' })
-  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(2)
+  // A fork carries its parent's context, guidance and all.
+  expect((await $.classic.SessionStart({ source: 'fork' })).additionalContext).toEqual(['the project hook'])
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(4)
 })
 
-test('guidance se answers empty adds no block', async ($, on) => {
+test('guidance se answers empty, or not at all, adds nothing', async ($, on) => {
   const w = world(on)
   w.replies['guidance --session-id s1'] = { text: '' }
   await $.session.start(starts)
-  expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
+  expect((await $.classic.SessionStart({ source: 'startup' })).additionalContext).toEqual(['the project hook'])
+  w.replies['guidance --session-id s1'] = 'not json' as never
+  expect((await $.classic.SessionStart({ source: 'clear' })).additionalContext).toEqual(['the project hook'])
+})
+
+test('a slow guidance says it is working, and the session start waits for it', async ($, on) => {
+  const w = world(on)
+  const clock = w.clock
+  w.replies['guidance --session-id s1'] = { text: 'the principles' }
+  w.takes['guidance --session-id s1'] = 5000
+  await $.session.start(starts)
+  let said: string[] | undefined
+  const starting = $.classic.SessionStart({ source: 'startup' }).then(r => {
+    said = r.additionalContext
+  })
+  await clock.advance(1000)
+  expect(w.statuses).toContain('se: reading its guidance…')
+  expect(said).toBeUndefined()
+  await clock.advance(4000)
+  await starting
+  expect(said).toEqual(['the project hook', 'the principles'])
 })
 
 // A cloud session no person attends, as a routine starts it.

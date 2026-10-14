@@ -5,6 +5,9 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 // Program is a program installed on a Fake: it does what the real one would
@@ -19,6 +22,9 @@ type Fake struct {
 	programs map[string]Program
 	ran      []Cmd
 	self     string
+	busy     map[string]int
+	delay    time.Duration
+	delayOn  clock.Clock
 }
 
 // NewFake answers a fake machine with no programs on it.
@@ -29,6 +35,26 @@ func (f *Fake) Install(name string, p Program) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.programs[name] = p
+}
+
+// Busy makes the next times starts of name fail with ErrBusy, as a program
+// just written does on the real machine while a fork still holds it open.
+func (f *Fake) Busy(name string, times int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.busy == nil {
+		f.busy = map[string]int{}
+	}
+	f.busy[name] = times
+}
+
+// Delay makes each start pass d on c, as starting a process takes time: the
+// battery runs the interactive commands so, against their budgets
+// (spec/budgets.yaml).
+func (f *Fake) Delay(c clock.Clock, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delayOn, f.delay = c, d
 }
 
 // RunAs makes name the program running now, which Self answers: an installed
@@ -79,9 +105,20 @@ func (f *Fake) Start(c Cmd) (Running, error) {
 	f.mu.Lock()
 	f.ran = append(f.ran, c)
 	p, ok := f.programs[c.Name]
+	busy := ok && f.busy[c.Name] > 0
+	if busy {
+		f.busy[c.Name]--
+	}
+	on, d := f.delayOn, f.delay
 	f.mu.Unlock()
+	if on != nil && d > 0 {
+		on.Sleep(d)
+	}
 	if !ok {
 		return nil, fmt.Errorf("%s: %w", c.Name, ErrNotFound)
+	}
+	if busy {
+		return nil, fmt.Errorf("%s: %w", c.Name, ErrBusy)
 	}
 	if c.Stdin == nil {
 		c.Stdin = strings.NewReader("")

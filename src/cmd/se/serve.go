@@ -15,6 +15,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "serve",
+		Class:   batch,
 		Usage:   "serve [--idle D] [--takeover]",
 		Group:   "Daemon",
 		Summary: "run this workspace's daemon in the foreground",

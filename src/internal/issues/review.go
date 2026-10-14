@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
-	"strings"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
@@ -81,13 +79,19 @@ type Reviewed struct {
 	// Fixes are the issues the blocking findings became: se-final sub-issues
 	// of the gate, so it is reviewed again once they have landed.
 	Fixes []Issue `json:"fixes"`
-	// Filed are the issues the non-blocking findings became, se-final, in
-	// the normal queue; Unfiled counts those past the first MaxFiled.
-	Filed   []Issue `json:"filed"`
-	Unfiled int     `json:"unfiled"`
-	// Person is set where a re-review found a final issue's problem again:
-	// the gate then waits on an issue for a person.
-	Person bool `json:"person,omitempty"`
+	// Filed are the issues the non-blocking findings became, se-final, the
+	// sub-issues of Manifest, the review's one manifest of findings (0 where
+	// none was filed); Unfiled counts those past the first issues/config/max-filed.
+	Filed    []Issue `json:"filed"`
+	Manifest int     `json:"manifest,omitempty"`
+	Unfiled  int     `json:"unfiled"`
+	// Accepted are the earlier blockers a re-review found the problem of
+	// again: each was a final attempt, so the repeat is accepted, files
+	// nothing and blocks no more.
+	Accepted []int `json:"accepted,omitempty"`
+	// Closed is set where the review closed n: it passed, or every blocking
+	// finding was an accepted repeat.
+	Closed bool `json:"closed"`
 }
 
 // Review passes or fails issue n, a parent labelled se-review whose
@@ -95,10 +99,13 @@ type Reviewed struct {
 // reviewer who worked any leaf of n's tree, a tree with a leaf whose worker is
 // not recorded, and a report that breaks the rules of spec/review.md (see
 // Report.check). Every verified finding becomes an se-final issue: a blocking
-// one a sub-issue of n, a non-blocking one in the normal queue, at most
-// MaxFiled of them. The report goes on n with its machine-readable block; a
-// pass closes n, which can complete its parent. A blocking finding that
-// repeats an earlier blocker sends n to a person.
+// one a sub-issue of n, a non-blocking one in the review's one manifest of findings, at most
+// issues/config/max-filed of them. The report goes on n with its machine-readable block; a
+// pass closes n, which can complete its parent, except a manifest at the
+// top: its se-review label comes off, and the one PR it lands as closes it.
+// A blocking finding that repeats an earlier blocker is an accepted repeat:
+// it files nothing, and a fail whose blocking findings are all repeats ends
+// n's review as a pass does.
 func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed, error) {
 	if reviewer.Session == "" {
 		return Reviewed{}, fmt.Errorf("%s is not set, so this reviewer cannot be told apart from the workers of #%d's tree; nothing was reviewed", SessionVar, n)
@@ -134,20 +141,26 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 		return Reviewed{}, err
 	}
 	r := Reviewed{Issue: n, Passed: pass, Fixes: []Issue{}, Filed: []Issue{}}
-	var again []ReviewFinding
 	for k := range rep.Findings {
 		f := &rep.Findings[k]
 		switch {
 		case f.Repeats > 0:
-			again = append(again, *f)
+			r.Accepted = append(r.Accepted, f.Repeats)
 			continue
-		case !f.Blocking && len(r.Filed) == MaxFiled:
+		case !f.Blocking && len(r.Filed) == s.config().MaxFiled:
 			r.Unfiled++
 			continue
 		}
-		parent := 0
-		if f.Blocking {
-			parent = n
+		// A blocking finding is a sub-issue of the gate; the rest go into
+		// the review's one manifest of findings.
+		parent := n
+		if !f.Blocking {
+			if r.Manifest == 0 {
+				if r.Manifest, err = s.findingsManifest(fmt.Sprintf("the review of #%d", n)); err != nil {
+					return r, err
+				}
+			}
+			parent = r.Manifest
 		}
 		made, _, err := s.Create(f.Title, f.body(n), parent, nil, FinalLabel)
 		if err != nil {
@@ -162,25 +175,28 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 	}
 	v := Verdict{Passed: pass, Rereview: earlier.failed(), Unfiled: r.Unfiled, Report: rep}
 	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
-	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", v.render(reviewer))); err != nil {
+	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", v.render(reviewer, s.config().MaxFiled))); err != nil {
 		return r, fmt.Errorf("posting the report on #%d: %w", n, err)
 	}
-	if len(again) > 0 {
-		names := make([]string, len(again))
-		for k, f := range again {
-			names[k] = fmt.Sprintf("#%d (%s)", f.Repeats, f.Title)
-		}
-		reason := fmt.Sprintf("Its re-review finds the problem of %s again. Each was a final attempt (labelled %s), so it gets no other round.", strings.Join(names, ", "), FinalLabel)
-		if _, err := s.hold(st.Issue, reason); err != nil {
+	if pass || !rep.blocks() {
+		// A manifest passed is not closed: its leaves' work is on its
+		// branch, and it lands as one PR, which closes it.
+		if got, err := api[issue](s, path, false); err != nil {
 			return r, err
+		} else if got[0].labelled(ManifestLabel) {
+			if top, err := s.manifestOf(n); err != nil {
+				return r, err
+			} else if top == 0 {
+				if _, err := s.GitHub.Send("DELETE", path+"/labels/"+ReviewLabel); err != nil {
+					return r, fmt.Errorf("taking %s off #%d: %w", ReviewLabel, n, err)
+				}
+				return r, nil
+			}
 		}
-		r.Person = true
-		return r, nil
-	}
-	if pass {
 		if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
 			return r, fmt.Errorf("closing #%d: %w", n, err)
 		}
+		r.Closed = true
 		return r, s.CloseParents()
 	}
 	return r, nil
@@ -229,24 +245,4 @@ func (s Source) separate(root, n int, reviewer Worker) error {
 func ReviewWorktree(dir string, n, round int) string {
 	return fmt.Sprintf("git fetch -q origin main && git worktree add --detach %s origin/main",
 		filepath.Join(filepath.Dir(dir), fmt.Sprintf("review-%d-%d", n, round)))
-}
-
-// ModelsPath is the one place the models SE runs are set.
-const ModelsPath = "spec/models.yaml"
-
-// ReviewerModel reads the reviewer's model from spec/models.yaml in the
-// checkout dir on d, the line "reviewer: <model>"; where it is not set, the
-// reviewer runs the box's model, the floor, and the answer is empty.
-func ReviewerModel(d disk.Disk, dir string) string {
-	data, err := d.ReadFile(filepath.Join(dir, ModelsPath))
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if k, v, ok := strings.Cut(line, ":"); ok && strings.TrimSpace(k) == "reviewer" {
-			v, _, _ = strings.Cut(v, "#")
-			return strings.Trim(strings.TrimSpace(v), `"'`)
-		}
-	}
-	return ""
 }

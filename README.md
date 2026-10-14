@@ -27,15 +27,21 @@ finishes without it if you skip it.
 - **Running SE on cloud boxes:** [spec/cloud.md](spec/cloud.md).
 - **Why SE is built the way it is:** [spec/principles.md](spec/principles.md).
 
+The agents, one per role, each reached as `@agent-se:<name>` in a session
+(or by asking Claude for its role):
+
+<!-- se:manifest agents -->
+- [`se:worker`](src/plugin/agents/worker.md), for the kind leaf: an issue with no sub-issues: work, landed into its manifest's branch.
+- [`se:coordinator`](src/plugin/agents/coordinator.md), for the kind parent: an issue with sub-issues, a manifest at the top: the box coordinates its tree and lands it as one PR, as it runs the queue and checks the fleet when nothing is ready.
+- [`se:reviewer`](src/plugin/agents/reviewer.md), for the kind gate: an se-review parent ready for review: reviewed cold.
+- [`se:retro`](src/plugin/agents/retro.md), for the kind retro: an issue labelled se-retro.
+- [`se:overhaul`](src/plugin/agents/overhaul.md), for the kind overhaul: an issue labelled se-overhaul.
+<!-- /se:manifest -->
+
 The skills, `se:<name>` in a session:
 
 <!-- se:manifest skills -->
 - [`se:briefing`](src/plugin/skills/briefing/SKILL.md): Brief the person on where SE stands, what waits on them first, then what is in flight, what happened and what is next, and ask what they want to work on. It presents; it does not act.
-- [`se:coordination`](src/plugin/skills/coordination/SKILL.md): When se issue pull --take takes nothing, check what is broken in the fleet and fix it before ending. The work skill hands over to it.
-- [`se:overhaul`](src/plugin/skills/overhaul/SKILL.md): Start an SE overhaul, or, as the box that took one, judge SE against every principle and the outside world and file its report. A take hands it over where the issue names it, as every overhaul does.
-- [`se:retro`](src/plugin/skills/retro/SKILL.md): Start an SE retro, or, as the box that took one, collect its window, judge it, and file its report. A take hands it over where the issue names it, as every retro does.
-- [`se:review`](src/plugin/skills/review/SKILL.md): Review an se-review gate whose sub-issues have closed, cold, as an agent that worked none of its tree. Find, then verify, then judge; block only on damage; end with se issue review pass|fail and its report. The work skill starts it as a fresh sub-agent on the reviewer model.
-- [`se:work`](src/plugin/skills/work/SKILL.md): Run an SE box - pull each ready se issue and hand it to a fresh sub-agent in its own worktree, up to the box's cap, until nothing is ready and none is running. Every SE box runs this; the routine SE work starts it.
 <!-- /se:manifest -->
 
 The rules, each file owning one part:
@@ -43,7 +49,7 @@ The rules, each file owning one part:
 <!-- se:manifest spec -->
 - [spec/budgets.yaml](spec/budgets.yaml)
 - [spec/cloud.md](spec/cloud.md): Cloud boxes: SE in a cloud environment
-- [spec/coordination.md](spec/coordination.md): Coordination: a box that finds nothing to take
+- [spec/coordination.md](spec/coordination.md): Coordination: finding and repairing what is broken
 - [spec/development.md](spec/development.md): Development: working on SE
 - [spec/index.md](spec/index.md): Index: the core and the module contract
 - [spec/io.md](spec/io.md): I/O modules: the shape every one follows

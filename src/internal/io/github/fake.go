@@ -22,9 +22,9 @@ import (
 // It knows the routes SE uses: issues with their comments, labels,
 // assignees, sub-issues and blocked-by links, branches (git refs: each
 // repository starts with main, and a file written to a branch through
-// contents is a new commit on it), pull requests with their merge, auto-merge
-// and update-branch, and workflow dispatches. Any other path it answers from
-// what was seeded at that path, read-only.
+// contents is a new commit on it), pull requests with their merge and
+// auto-merge. Any other path it answers from what was seeded at that path,
+// read-only.
 //
 // Seed fills it from recorded gh answers, each read for what it says about
 // the repository rather than kept as an answer.
@@ -44,6 +44,30 @@ type Fake struct {
 	writes []string
 	// later is what the repository comes to hold at a time, earliest first.
 	later []timed
+	// requests counts what gh would have asked GitHub; each passes delay on delayOn.
+	requests int
+	delay    time.Duration
+	delayOn  clock.Clock
+	// quota is GitHub's hourly limit on requests, content its limit on
+	// creating content; rate is what the last answer said of the quota.
+	quota   quota
+	content content
+	rate    Rate
+}
+
+// quota is a limit of requests a window, counted from the window's start.
+type quota struct {
+	limit  int
+	window time.Duration
+	start  time.Time
+	used   int
+}
+
+// content is a limit of writes in any span of per, and when each was made.
+type content struct {
+	n     int
+	per   time.Duration
+	stamp []time.Time
 }
 
 // timed is recorded answers the repository holds from at on.
@@ -76,7 +100,109 @@ type repo struct {
 
 // NewFake answers an empty fake GitHub whose stamps are read from c.
 func NewFake(c clock.Clock) *Fake {
-	return &Fake{Login: "se-fake", clock: c, repos: map[string]*repo{}}
+	return &Fake{Login: "se-fake", clock: c, repos: map[string]*repo{}, quota: quota{limit: Quota, window: time.Hour}}
+}
+
+// Quota is the fake's built-in limit of requests an hour: the owner's
+// token's, which the whole fleet shares.
+const Quota = 15000
+
+// Quota limits the fake to limit requests a window, as GitHub limits a token
+// to its requests an hour: the window opens at the first request, and a
+// request past the limit is refused with 403 and the quota's headers until
+// the window resets on the fake's clock.
+func (f *Fake) Quota(limit int, window time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.quota = quota{limit: limit, window: window}
+}
+
+// ContentLimit limits the fake to n writes in any span of per, as GitHub's
+// secondary limit does content creation: a write past it is refused with
+// 403, a secondary rate limit, and a retry-after until the oldest leaves the
+// span.
+func (f *Fake) ContentLimit(n int, per time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.content = content{n: n, per: per}
+}
+
+// Rate answers the quota as the fake's last answer gave it.
+func (f *Fake) Rate() Rate {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.rate
+}
+
+// admit counts a request against the quota, and a write against the
+// content limit, with f.mu held; it refuses one past either as GitHub does.
+func (f *Fake) admit(write bool) error {
+	now := f.clock.Now()
+	q := &f.quota
+	if q.limit > 0 {
+		if q.start.IsZero() || !now.Before(q.start.Add(q.window)) {
+			q.start, q.used = now, 0
+		}
+		f.rate = Rate{Known: true, Limit: q.limit, Remaining: max(q.limit-q.used-1, 0), Reset: q.start.Add(q.window)}
+		if q.used >= q.limit {
+			f.rate.Remaining = 0
+			return &Error{Status: 403, Message: "gh: API rate limit exceeded for user ID 1.", Rate: f.rate}
+		}
+		q.used++
+	}
+	if c := &f.content; write && c.n > 0 {
+		kept := c.stamp[:0]
+		for _, at := range c.stamp {
+			if now.Sub(at) < c.per {
+				kept = append(kept, at)
+			}
+		}
+		c.stamp = kept
+		if len(c.stamp) >= c.n {
+			r := f.rate
+			r.RetryAfter = max(c.stamp[0].Add(c.per).Sub(now).Round(time.Second), time.Second)
+			return &Error{Status: 403, Message: "gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.", Rate: r}
+		}
+		c.stamp = append(c.stamp, now)
+	}
+	return nil
+}
+
+// used counts n more requests against the quota, with f.mu held: the pages
+// of a List past its first.
+func (f *Fake) used(n int) {
+	if f.quota.limit > 0 && n > 0 {
+		f.quota.used += n
+		f.rate.Remaining = max(f.rate.Remaining-n, 0)
+	}
+}
+
+// Delay makes each request the fake takes pass d on c, as a request to
+// GitHub takes time: the battery runs the interactive commands so, against
+// their budgets (spec/budgets.yaml).
+func (f *Fake) Delay(c clock.Clock, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delayOn, f.delay = c, d
+}
+
+// Requests answers how many requests the fake took, as gh would make them:
+// one for each Get, Send and GraphQL, and one for each page of a List.
+func (f *Fake) Requests() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.requests
+}
+
+// spend counts n requests and passes their delay, with the fake unlocked.
+func (f *Fake) spend(n int) {
+	f.mu.Lock()
+	f.requests += n
+	c, d := f.delayOn, f.delay
+	f.mu.Unlock()
+	if c != nil && d > 0 {
+		c.Sleep(time.Duration(n) * d)
+	}
 }
 
 // Writes lists every write the fake took, oldest first, as "METHOD path"
@@ -136,8 +262,12 @@ func (f *Fake) now() string { return f.clock.Now().UTC().Format(time.RFC3339) }
 
 // Get answers the value at path.
 func (f *Fake) Get(path string) ([]byte, error) {
+	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.admit(false); err != nil {
+		return nil, err
+	}
 	f.catchUp()
 	v, err := f.read(path)
 	if err != nil {
@@ -146,10 +276,16 @@ func (f *Fake) Get(path string) ([]byte, error) {
 	return encode(v)
 }
 
-// List answers the list at path, whole.
+// List answers the list at path, whole, as the pages gh would ask for.
 func (f *Fake) List(path string) ([]byte, error) {
+	pages := 1
+	defer func() { f.spend(pages) }()
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.admit(false); err != nil {
+		return nil, err
+	}
+	defer func() { f.used(pages - 1) }()
 	f.catchUp()
 	v, err := f.read(path)
 	if err != nil {
@@ -160,11 +296,14 @@ func (f *Fake) List(path string) ([]byte, error) {
 		if json.Unmarshal(raw, &list) != nil {
 			return nil, fmt.Errorf("gh api --paginate %s: not a list", path)
 		}
+		pages = len(list)/pageSize(path) + 1
 		return raw, nil
 	}
-	if _, ok := v.([]any); !ok {
+	list, ok := v.([]any)
+	if !ok {
 		return nil, fmt.Errorf("gh api --paginate %s: not a list", path)
 	}
+	pages = len(list)/pageSize(path) + 1
 	return encode(v)
 }
 
@@ -497,10 +636,14 @@ func (r *repo) listPulls(q url.Values) []any {
 
 // Send takes a write and changes the repository as GitHub would.
 func (f *Fake) Send(method, path string, fields ...Field) ([]byte, error) {
+	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.catchUp()
 	f.writes = append(f.writes, method+" "+path)
+	if err := f.admit(true); err != nil {
+		return nil, err
+	}
+	f.catchUp()
 	v, err := f.write(method, path, values(fields))
 	if err != nil {
 		return nil, err
@@ -677,24 +820,6 @@ func (f *Fake) write(method, path string, v map[string]any) (any, error) {
 		at := f.now()
 		p["state"], p["merged"], p["merged_at"], p["closed_at"] = "closed", true, at, at
 		return obj{"merged": true, "message": "Pull Request successfully merged"}, nil
-	case method == "PUT" && match(w, "pulls", "#", "update-branch"):
-		// GitHub takes the update and merges the base in on its own time;
-		// the new head is what the repository comes to hold (SeedAt).
-		p, ok := r.pulls[num(w[1])]
-		if !ok || p["state"] != "open" {
-			return nil, notFound()
-		}
-		if want, ok := str(v, "expected_head_sha"); ok {
-			if head, _ := p["head"].(obj); head["sha"] != want {
-				return nil, refuse(422, "expected head sha didn't match current head ref")
-			}
-		}
-		return obj{"message": "Updating pull request branch."}, nil
-	case method == "POST" && len(w) == 4 && w[0] == "actions" && w[1] == "workflows" && w[3] == "dispatches":
-		if ref, _ := str(v, "ref"); ref == "" {
-			return nil, refuse(422, "Validation Failed: a dispatch takes a ref")
-		}
-		return nil, nil
 	case method == "PUT" && f.Proxy && match(w, "pulls", "#", "ccr", "auto_merge"):
 		p, ok := r.pulls[num(w[1])]
 		if !ok {
@@ -933,10 +1058,14 @@ func (f *Fake) enableAutoMerge(p obj) error {
 
 // GraphQL answers the one mutation SE sends, turning on auto-merge.
 func (f *Fake) GraphQL(query string, vars ...Field) ([]byte, error) {
+	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.catchUp()
 	f.writes = append(f.writes, "POST graphql")
+	if err := f.admit(true); err != nil {
+		return nil, err
+	}
+	f.catchUp()
 	if f.Proxy {
 		return nil, refuse(403, "GitHub GraphQL is not available from Claude Code sessions; use the REST API")
 	}

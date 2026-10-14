@@ -19,6 +19,9 @@ type Takeover struct {
 	Count int `json:"count"`
 	// Stale says what made the claim stuck: nothing pushed for how long.
 	Stale string `json:"stale,omitempty"`
+	// Answers is the answers file the take wrote back from the issue's last
+	// landing comment (see RestoreAnswers); empty where it wrote none.
+	Answers string `json:"answers,omitempty"`
 }
 
 // pause is the wait before asking GitHub again for a mergeability it has not
@@ -66,11 +69,13 @@ type conflict struct {
 
 // conflicts names the claimed leaves whose open PR is not mergeable
 // (mergeable_state dirty), lowest number first. A null mergeable is asked
-// again shortly, and is no conflict while it stays null.
+// again shortly, and is no conflict while it stays null. A leaf whose branch
+// saw a push within the lease is refused, and its PR not asked: a live box
+// works it, and taking it over too would do its work twice.
 func (s Source) conflicts(all []Status, pulls []openPull) ([]conflict, error) {
 	claimed := map[string]Status{}
 	for _, st := range all {
-		if st.claimed {
+		if st.claimed && !s.live(st) {
 			claimed[Branch(st.Number)] = st
 		}
 	}
@@ -115,15 +120,22 @@ func (s Source) mergeability(p openPull) (openPull, error) {
 	return p, nil
 }
 
+// live says whether a claimed leaf's branch saw a push within the lease;
+// a branch GitHub keeps no record of a push to is not live.
+func (s Source) live(st Status) bool {
+	return !st.pushed.IsZero() && s.now().Sub(st.pushed) <= Lease
+}
+
 // dirty says whether the PR conflicts with its base.
 func (p openPull) dirty() bool { return p.Mergeable != nil && !*p.Mergeable && p.State == "dirty" }
 
 // takeOverConflict takes over the first conflict it can, lowest number
-// first, and checks its branch out in dir. A conflict whose last takeover
-// found the same PR head is still in flight and is left to its box; a
-// conflict on a final issue (one taken over before, or filed by a review)
-// waits on an issue for a person. A takeover labels the issue se-final. ok is false when none was
-// taken over.
+// first, and checks its branch out in dir. A conflict on a branch pushed to
+// within the lease is refused (see conflicts), and the take moves on. A
+// conflict whose last takeover found the same PR head is still in flight
+// and is left to its box. A conflict is no failure of its box, as main moves
+// on under it: a conflict at a new head is taken over again, final or not,
+// and the takeover leaves the issue as final as it was. ok is false when none was taken over.
 func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (took Issue, ok bool, err error) {
 	cs, err := s.conflicts(all, pulls)
 	if err != nil {
@@ -139,13 +151,6 @@ func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (to
 		}
 		k := m.takeovers + 1
 		heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, c.pr.Head.SHA)
-		if c.Final {
-			reason := fmt.Sprintf("PR #%d conflicts with main on its final attempt (labelled %s).", c.pr.Number, FinalLabel)
-			if _, err := s.hold(c.Issue, reason); err != nil {
-				return Issue{}, false, err
-			}
-			continue
-		}
 		body := fmt.Sprintf("Taken over: PR #%d conflicts with main at %s. This box merges main into %s and lands it again.",
 			c.pr.Number, c.pr.Head.SHA, Branch(c.Number)) + heads + s.boxLine()
 		won, err := s.markTakeover(c.Number, k, body)
@@ -154,9 +159,6 @@ func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (to
 		}
 		if !won {
 			continue
-		}
-		if err := s.finalize(c.Number); err != nil {
-			return Issue{}, false, err
 		}
 		if err := s.pickUp(dir, c.Number); err != nil {
 			return Issue{}, false, err
