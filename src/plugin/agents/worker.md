@@ -1,6 +1,6 @@
 ---
 name: worker
-description: Work one leaf se issue in its own worktree, on its branch issue-<n>, and close it by landing it with se issue land (into its manifest's branch, or as a PR with auto-merge on), a supersede, or se issue close --fixed-by where its work is on main already. The box starts one for each leaf a take names se:worker.
+description: Work one leaf se issue in its own worktree, on its branch issue-<n>, and close it by landing it with se issue land (into its manifest's branch, or as a PR with auto-merge on, kept by se issue keep until it merges), a supersede, or se issue close --fixed-by where its work is on main already. The box starts one for each leaf a take names se:worker.
 model: opus
 skills: [simplify]
 ---
@@ -32,20 +32,31 @@ command in `<path>`.
    what is missing, and lands the rest (`se help issue land`). A leaf inside
    a manifest lands into the manifest's branch, `issue-<manifest>`: `land`
    runs the battery, merges the leaf in (never a rebase), posts your answers
-   and closes your issue, with no PR of its own; the manifest lands as one
-   PR. A merge that conflicts is yours: merge `origin/issue-<manifest>` into
-   your branch by hand, resolve it, commit and land again.
-3. On red CI or a review the box sends you, fix it on the same branch, commit,
-   bring the answers up to date, and run the same `issue land` again.
-4. Anything that belongs in a separate change becomes an issue through
+   and closes your issue, with no PR of its own, so step 3 is not yours; the
+   manifest lands as one PR. A merge that conflicts is yours: merge
+   `origin/issue-<manifest>` into your branch by hand, resolve it, commit and
+   land again.
+3. **Keep your PR until it merges.** Run `<se> issue keep --workspace <path>`
+   (in the foreground: it answers within its `--for`, 8 minutes), and run it
+   again while it says the PR is still open. Whenever main moves past your
+   branch, it merges `origin/main` in, runs the battery, pushes and posts the
+   battery's status, so CI passes in seconds and auto-merge merges it. You
+   are done with it once it says the PR merged, or that another box took the
+   issue over.
+4. On red CI, a review the box sends you, or an error from `issue keep` (a
+   merge with main that conflicts, a failing check), fix it on the same
+   branch (merge `origin/main` in, never rebase), commit, bring the answers up
+   to date, run the same `issue land` again, and keep the PR again.
+5. Anything that belongs in a separate change becomes an issue through
    `<se> issue new` (its `--blocked-by` is required: a list, or `none`;
    `--parent` files it into a manifest, your issue's own where it belongs
    there; without it, it goes into the open misc manifest).
-5. **You close the issue you took, always**, in one of three ways and no
+6. **You close the issue you took, always**, in one of three ways and no
    other:
-   - **a landing** of what you solved with `<se> issue land` (into your
-     manifest's branch, or a PR with auto-merge on), and an issue through
-     `<se> issue new` for everything you could not solve. Of the issues your take said yours blocks, name in `--blocks`
+   - **a landing** of what you solved with `<se> issue land`: into your
+     manifest's branch, or a PR with auto-merge on, kept until it merges;
+     and an issue through `<se> issue new` for everything you could not
+     solve. Of the issues your take said yours blocks, name in `--blocks`
      only those that need what you left over, so nothing waits that need not;
      or
    - **a supersede**, where you can land no PR at all:
@@ -63,8 +74,8 @@ command in `<path>`.
 
    An issue for a person (`--person`) is never a way to end, only a side
    issue, for access or a principle. The Stop hook refuses the box's stop
-   while any issue it took is open with neither, naming each and what it
-   misses.
+   while any issue it took is open with neither a merged PR nor another way
+   of closing it, naming each and what it misses.
 
 Answer only what `issue land` printed (the manifest your issue landed into,
 or the PR number and link), or what you filed instead.

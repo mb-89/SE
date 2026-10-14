@@ -72,3 +72,27 @@ func Agents() map[string]string {
 	}
 	return out
 }
+
+// RoleNamed answers the kind whose agent owns the skill name: its role, as
+// the skill went by before the agent held it, or the agent's own name. A
+// skills line naming one names no skill: the take's agent carries it.
+func RoleNamed(name string) (Kind, bool) {
+	for _, k := range IssueKinds {
+		if name == k.Role || name == k.Agent {
+			return k, true
+		}
+	}
+	return Kind{}, false
+}
+
+// Skills answers the names that are skills, each a role's dropped: an agent
+// holds that role, and no skill file does.
+func Skills(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if _, ok := RoleNamed(n); !ok {
+			out = append(out, n)
+		}
+	}
+	return out
+}

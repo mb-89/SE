@@ -106,7 +106,7 @@ func TestAManifestOfThreeLeavesLandsAsOnePR(t *testing.T) {
 	// The coordinator lands it: one PR, Fixes #1, auto-merge on.
 	run(t, b, "fetch", "-q", "origin")
 	run(t, b, "checkout", "-q", "-b", "issue-1", "--track", "origin/issue-1")
-	l, err := s.Land(b, "", qs, full, passes)
+	l, err := s.Land(b, "", qs, full, battered(s.Disk))
 	if err != nil || !l.Created || l.Manifest != 0 {
 		t.Fatalf("%+v %v", l, err)
 	}
