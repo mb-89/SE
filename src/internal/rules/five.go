@@ -46,6 +46,8 @@ func ruleOfFive(repo *Repo, p string, text []byte) []Finding {
 		return found
 	}
 	held := map[string]map[string]int{}
+	// seen holds each file and folder counted: a path the index holds
+	// unmerged, once per stage (1, 2 and 3), counts once.
 	seen := map[string]bool{}
 	for _, s := range c.Surfaces {
 		s = path.Clean(s)
@@ -59,7 +61,10 @@ func ruleOfFive(repo *Repo, p string, text []byte) []Finding {
 			switch {
 			case !ok || strings.HasPrefix(top, "."):
 			case !nested:
-				held[s]["files"]++
+				if !seen[f] {
+					seen[f] = true
+					held[s]["files"]++
+				}
 			case !seen[s+"/"+top]:
 				seen[s+"/"+top] = true
 				held[s]["folders"]++

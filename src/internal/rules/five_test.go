@@ -57,3 +57,20 @@ func TestAnEntryAboveTheCountIsLowered(t *testing.T) {
 		rules.FiveConfig + ":5: rule-of-five: the root holds 2 visible files, within the limit: remove its allowlist entry",
 	})
 }
+
+// During a merge, git lists a conflicted file once per unmerged stage (1, 2
+// and 3): the rule of five counts it once.
+func TestAnUnmergedFileCountsOnce(t *testing.T) {
+	t.Parallel()
+	five := "limit: 2\nsurfaces: [spec]\n"
+	repo := &rules.Repo{Paths: []string{"spec/a.md", "spec/b.md", "spec/b.md", "spec/b.md", rules.FiveConfig}}
+	for _, r := range rules.Rules() {
+		if r.Name == "rule-of-five" {
+			if found := r.Check(repo, rules.FiveConfig, []byte(five)); len(found) != 0 {
+				t.Fatalf("spec/ holds 2 files, but the rule of five found %v", found)
+			}
+			return
+		}
+	}
+	t.Fatal("no rule-of-five")
+}
