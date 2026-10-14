@@ -54,17 +54,17 @@ choice is deterministic and no prompt restates it.
   conflict. The box taking it checks out `issue-<n>` as it stands, merges
   `origin/main` into it (never a rebase, never a force-push), resolves the
   conflict and lands it again with `se issue land`.
-- **A takeover makes the issue final**: it labels it `se-final`, the single
-  record that it was taken over (see [spec/review.md](review.md), rule 5),
-  and records it as a comment carrying the marker `<!-- se:takeover N -->`
-  (stuck work writes the same marker), the human-readable record; a conflict
+- **A conflict is no failure.** While main merges fast, a PR conflicts again
+  after its takeover through no fault of its box, so a conflict takeover
+  never makes an issue final, and a conflict on an issue that is already
+  `se-final` is taken over as any other: only a stuck takeover and a review's
+  fix make an issue final (see [spec/review.md](review.md), rule 5). A
+  takeover is recorded as a comment carrying the marker
+  `<!-- se:takeover N -->` (stuck work writes the same marker); a conflict
   takeover also records the PR head it found, `<!-- se:takeover-head SHA -->`.
   A PR still conflicted at that same head is a takeover in flight and is left
   to its box. Of two boxes writing the same `N` at once, the earlier comment
-  wins and the other box deletes its own. A conflict on an issue that is
-  already `se-final` (taken over before, for a conflict or stuck, or filed by
-  a review) instead waits on an issue for a person, as a final stuck claim
-  does (below).
+  wins and the other box deletes its own.
 - **Waits on a person**: an issue labelled `se-person` is never ready. Only
   issues minted for a person carry it (`se issue new --person`, and the issues
   se mints below and in [retro.md](retro.md)); every other issue that needs a
@@ -215,10 +215,12 @@ person**, and leaves the agents' queue until the person has closed it.
   continues the existing branch and PR: at the top it checks `issue-<n>` out
   as it stands, inside a tree its worktree command checks it out. `se`
   records the takeover on the issue as a comment carrying the marker
-  `<!-- se:takeover <round> -->`, and labels it `se-final`, as a conflict
-  takeover does. Of two boxes taking over one issue, the first comment of the
-  round wins; the other deletes its own and moves on. A takeover renews the
-  lease.
+  `<!-- se:takeover <round> -->`, and labels it `se-final`, the single record
+  that it was taken over stuck. Of two boxes taking over one issue, the first
+  comment of the round wins; the other deletes its own and moves on. A
+  takeover renews the lease, and se fleet check's hour of quiet with it: both
+  read a claim's activity as its last push or its last takeover, whichever is
+  later, so a box that has just taken an issue over is not found stuck.
 - **Final and stuck: an issue for a person.** A leaf labelled `se-final`
   (taken over once already, or filed by a review) that is stuck is never
   labelled `se-person` itself. `se` mints an issue for a person, "Decide how
@@ -227,7 +229,10 @@ person**, and leaves the agents' queue until the person has closed it.
   writes on an issue that already exists, since no box is left to write it.
   #n gets a comment saying why, with the markers `<!-- se:person -->` and
   `<!-- se:resume -->`, and loses `se-final`: once the person closes their
-  issue, #n is back in the queue for a fresh attempt. This sweep runs inside
+  issue, #n is back in the queue for a fresh attempt. The issue for a person
+  carries `<!-- se:holds n -->` in its body; once #n closes anyway, it is
+  moot, and every `se issue` command (where it closes finished parents)
+  closes it with a comment. This sweep runs inside
   every `se issue pull`. A claim waiting on its blockers is not stuck; once
   they close, its old push makes it stuck at once, and the next box takes it
   over. `se issue pull` never offers an `se-person` issue, or a tree
@@ -313,8 +318,9 @@ into the branch and land it again (with `--json`: the issue's `takeover`,
 any depth, where `se fleet check` finds it stuck (a conflicted or red PR, or
 no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.md)),
 or where it is stuck past the lease, so every takeover remedy the check names
-runs; labelled `se-final`, it waits on an issue for a person instead. A claim whose work is moving
-is refused.
+runs; labelled `se-final` and stuck (not merely conflicted), it waits on an
+issue for a person instead. A claim whose work is moving, pushed to or taken
+over within the hour, is refused.
 Every takeover, at the top or with `--in`, writes the landing answers the
 issue's last land posted on it (see [Landing answers](#landing-answers)) back
 to the answers file beside the branch's checkout, `<path>-landing.yaml` where
