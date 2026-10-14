@@ -136,8 +136,8 @@ func (s Source) Create(title, body string, parent int, blockedBy []int, labels .
 // create is Create with the labels given, se among them. The body ends in
 // NewMark.
 func (s Source) create(title, body string, parent int, blockedBy []int, labels []string) (made Issue, ready bool, err error) {
-	if strings.TrimSpace(title) == "" {
-		return Issue{}, false, fmt.Errorf("an issue needs a --title")
+	if err := titled(title); err != nil {
+		return Issue{}, false, err
 	}
 	ids, ready, err := s.lookup(blockedBy)
 	if err != nil {
@@ -149,8 +149,7 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 		}
 	}
 	path := fmt.Sprintf("repos/%s/issues", s.Repo)
-	// The mark tells the retro this issue was made here, not by hand.
-	fields := []github.Field{github.F("title", title), github.F("body", strings.TrimRight(body, "\n")+"\n\n"+NewMark)}
+	fields := []github.Field{github.F("title", title), github.F("body", marked(body))}
 	for _, l := range labels {
 		fields = append(fields, github.F("labels[]", l))
 	}
@@ -175,18 +174,39 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 	return created, ready, nil
 }
 
+// titled refuses a title that is empty or only spaces.
+func titled(title string) error {
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("an issue needs a --title")
+	}
+	return nil
+}
+
+// marked is body as se writes every issue's body: its text, then NewMark
+// alone at its end. The mark tells the retro the issue was written here, not
+// by hand; a mark the text carries already is moved to the end, not doubled.
+func marked(body string) string {
+	return strings.TrimRight(strings.ReplaceAll(body, NewMark, ""), " \n") + "\n\n" + NewMark
+}
+
 // Duplicate names the lowest open fleet issue titled title, its spaces
 // trimmed, that is a sub-issue of parent, or at the top where parent is 0;
 // 0 where there is none. It reads the fleet as CloseParents does, closing the
 // parents it closes, so se issue new reads it once.
 func (s Source) Duplicate(title string, parent int) (int, error) {
+	return s.duplicate(title, parent, 0)
+}
+
+// duplicate is Duplicate, issue except left out: an issue retitled is no
+// duplicate of itself.
+func (s Source) duplicate(title string, parent, except int) (int, error) {
 	t, err := s.load(nil)
 	if err != nil {
 		return 0, err
 	}
 	title = strings.TrimSpace(title)
 	for _, n := range t.numbers() {
-		if strings.TrimSpace(t.byNum[n].Title) == title && t.above[n] == parent {
+		if n != except && strings.TrimSpace(t.byNum[n].Title) == title && t.above[n] == parent {
 			return n, nil
 		}
 	}
