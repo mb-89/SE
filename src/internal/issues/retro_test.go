@@ -146,6 +146,7 @@ func rows(c Collected) []int {
 }
 
 func TestTheFirstRetroCoversTheWholeHistory(t *testing.T) {
+	t.Parallel()
 	c := collect(t, false)
 	if c.Window.Previous != 0 || !c.Window.Since.IsZero() || !c.Window.Until.Equal(now) || !c.Attended {
 		t.Fatalf("%+v", c.Window)
@@ -159,6 +160,7 @@ func TestTheFirstRetroCoversTheWholeHistory(t *testing.T) {
 }
 
 func TestALaterRetroCoversWhatClosedSinceTheLastOne(t *testing.T) {
+	t.Parallel()
 	c := collect(t, true)
 	if c.Window.Previous != 20 || !c.Window.Since.Equal(prevClosed) {
 		t.Fatalf("%+v", c.Window)
@@ -169,6 +171,7 @@ func TestALaterRetroCoversWhatClosedSinceTheLastOne(t *testing.T) {
 }
 
 func TestEachRuleCheck(t *testing.T) {
+	t.Parallel()
 	c := collect(t, true)
 	var got []string
 	for _, x := range c.Checks {
@@ -200,6 +203,7 @@ func TestEachRuleCheck(t *testing.T) {
 }
 
 func TestTheCountsAndScripts(t *testing.T) {
+	t.Parallel()
 	c := collect(t, true)
 	want := Metrics{
 		"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1,
@@ -215,6 +219,7 @@ func TestTheCountsAndScripts(t *testing.T) {
 }
 
 func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
+	t.Parallel()
 	c := collect(t, false)
 	draft, err := c.Draft(rqs)
 	if err != nil {
@@ -238,6 +243,7 @@ func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
 }
 
 func TestThePreviousRetroIsScored(t *testing.T) {
+	t.Parallel()
 	c := collect(t, true)
 	dropped := true
 	want := &Score{Retro: 20, Findings: 3, Issues: 2, Closed: 1, Recurred: 1, Items: []ScoreItem{
@@ -252,6 +258,7 @@ func TestThePreviousRetroIsScored(t *testing.T) {
 }
 
 func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
+	t.Parallel()
 	c := collect(t, true)
 	if len(c.History) != 1 || c.History[0].Retro != 20 {
 		t.Fatalf("history %+v: #10 posted no report, #20 did", c.History)
@@ -301,6 +308,7 @@ func judged(t *testing.T, edit func(*RetroReport)) string {
 }
 
 func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
+	t.Parallel()
 	for name, edit := range map[string]func(*RetroReport){
 		"nothing went well":        func(r *RetroReport) { r.WentWell = nil },
 		"an unknown class":         func(r *RetroReport) { r.Findings[0].Class = "nope" },
@@ -327,6 +335,7 @@ func fileFindings(t *testing.T, answers map[string]string) (Filed, *github.Fake)
 }
 
 func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
+	t.Parallel()
 	f, gh := fileFindings(t, retroRepo(t, true, "<!-- se:retro unattended -->"))
 	if !reflect.DeepEqual(f.Issues, []int{92, 93}) || !reflect.DeepEqual(f.Person, []int{93}) || !f.Ready {
 		t.Fatalf("%+v", f)
@@ -356,6 +365,7 @@ func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
 }
 
 func TestAnAttendedRetroClosesToo(t *testing.T) {
+	t.Parallel()
 	// A person started it, and still nobody waits: the report is its closing
 	// comment, and the controversial finding is the issue for the person.
 	f, gh := fileFindings(t, retroRepo(t, true, "<!-- se:retro attended -->"))
@@ -383,6 +393,7 @@ func TestAnAttendedRetroClosesToo(t *testing.T) {
 // A retro posted for the owner before retros stopped waiting is filed as it
 // stands, with what the owner moved.
 func TestAResumedRetroCreatesTheIssuesAsDecided(t *testing.T) {
+	t.Parallel()
 	answers := retroRepo(t, true, "<!-- se:retro attended -->")
 	answers["repos/o/r/issues/30/comments?per_page=100"] = jsonComments(judged(t, nil), "<!-- se:person -->\nwaits", "move finding 2 to normal", "<!-- se:resume -->\nResumed.")
 	f, _ := fileFindings(t, answers)
@@ -392,6 +403,7 @@ func TestAResumedRetroCreatesTheIssuesAsDecided(t *testing.T) {
 }
 
 func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
+	t.Parallel()
 	answers := retroRepo(t, true, "<!-- se:retro attended -->")
 	// Behind a cloud session's proxy, deleting a branch is refused.
 	gh := recorded(t, answers)
@@ -403,6 +415,7 @@ func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
 }
 
 func TestARuleCheckWhosePRDidNotMergeIsRefused(t *testing.T) {
+	t.Parallel()
 	a := retroRepo(t, true, "")
 	key := "repos/o/r/pulls?state=closed&base=main&per_page=100"
 	a[key] = strings.Replace(a[key], `"number":91`, `"number":92`, 1)
@@ -410,5 +423,24 @@ func TestARuleCheckWhosePRDidNotMergeIsRefused(t *testing.T) {
 	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Collect(30)
 	if err == nil || !strings.Contains(err.Error(), "the rule check mark started with PR #91, which is not a merged PR") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestByHandCountsAnAnswerThatProposesACommand(t *testing.T) {
+	t.Parallel()
+	for answer, want := range map[string]bool{
+		// #88's answer: nothing scripted, yet it names the command it wants.
+		`Nothing scripted. No se command reports "main fails its own check"; se fleet check could run check.sh on origin/main and name that as a finding.`: true,
+		"wrote src/scripts/check-claims.sh":    true,
+		"merged main by hand twice":            true,
+		"none":                                 false,
+		"Nothing.":                             false,
+		"nothing: se issue land did all of it": false,
+		"None. Everything went through the se commands as written": false,
+		"": false,
+	} {
+		if got := byHand(answer); got != want {
+			t.Errorf("byHand(%q) = %v, want %v", answer, got, want)
+		}
 	}
 }

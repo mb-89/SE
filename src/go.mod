@@ -1,4 +1,4 @@
-module github.com/mb-89/SE
+module github.com/mb-89/SE/src
 
 go 1.24
 

@@ -1,6 +1,10 @@
 package issues
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/mb-89/SE/src/internal/io/github"
+)
 
 // RetroCadence is how many se issues close between two retros: at this many
 // closed since the last retro closed, se issue pull --take starts an
@@ -123,7 +127,9 @@ func (s Source) cadence(r cadenceRule) (Cadence, error) {
 
 // TakeRetro starts the retro the cadence has made due and claims it in the
 // git checkout dir, ahead of all other work: ok is false, with nothing
-// created, where none is due. The retro runs unattended, as nobody started it.
+// created, where none is due, and with the one it started closed as a
+// duplicate where a race started a lower one too. The retro runs unattended,
+// as nobody started it.
 func (s Source) TakeRetro(dir string) (took Issue, ok bool, c Cadence, err error) {
 	return s.takeDue(retroRule, dir, func() (Issue, error) {
 		r, err := s.NewRetro("", true)
@@ -134,7 +140,9 @@ func (s Source) TakeRetro(dir string) (took Issue, ok bool, c Cadence, err error
 
 // TakeOverhaul starts the overhaul the cadence has made due and claims it in
 // the git checkout dir, ahead of all other work, a due retro included: ok is
-// false, with nothing created, where none is due. It runs unattended.
+// false, with nothing created, where none is due, and with the one it started
+// closed as a duplicate where a race started a lower one too. It runs
+// unattended.
 func (s Source) TakeOverhaul(dir string) (took Issue, ok bool, c Cadence, err error) {
 	return s.takeDue(overhaulRule, dir, func() (Issue, error) {
 		o, err := s.NewOverhaul(true)
@@ -162,6 +170,23 @@ func (s Source) takeDue(r cadenceRule, dir string, start func() (Issue, error)) 
 	made, err := start()
 	if err != nil {
 		return Issue{}, false, c, err
+	}
+	// Two boxes can both read the cadence as due and both start a run: look
+	// again, and where a lower one is open, this one is the duplicate.
+	again, err := s.cadence(r)
+	if err != nil {
+		return Issue{}, false, c, err
+	}
+	if again.Open != 0 && again.Open < made.Number {
+		path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, made.Number)
+		note := fmt.Sprintf("Started in a race with #%d over the same cadence: this %s is its duplicate and closes by itself.", again.Open, r.kind)
+		if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", note)); err != nil {
+			return Issue{}, false, again, fmt.Errorf("commenting on #%d: %w", made.Number, err)
+		}
+		if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "duplicate")); err != nil {
+			return Issue{}, false, again, fmt.Errorf("closing #%d: %w", made.Number, err)
+		}
+		return Issue{}, false, again, nil
 	}
 	c.Open = made.Number
 	s.tell("claiming #%d", made.Number)

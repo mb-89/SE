@@ -36,6 +36,8 @@ type World = {
   takes: Record<string, number>
   // The clock beneath the plugin, which moves only when the test moves it.
   clock: MockClock
+  // What se hook stop prints; a number is the exit code it fails with.
+  verdict: unknown
 }
 
 const HELP = '/se <command>\n\n  /se help   list the commands'
@@ -86,6 +88,7 @@ function world(on: On, env: Record<string, string> = {}): World {
     statuses: [],
     takes: {},
     clock: mock.clock(on),
+    verdict: { pass: 'no se issue was taken here' },
     replies: {
       '': { text: HELP },
       on: { text: 'SE is on.', active: true, endpoint: DAEMON },
@@ -152,6 +155,10 @@ function world(on: On, env: Record<string, string> = {}): World {
       const reply = w.replies[words] ?? { text: `${HELP}\n\nse has no command "${words}".` }
       return { value: { exitCode: 0, stdout: JSON.stringify(reply), stderr: '' } }
     }
+    if (verb === 'hook' && argv[2] === 'stop') {
+      if (typeof w.verdict === 'number') return { value: { exitCode: w.verdict, stdout: '', stderr: 'se: boom' } }
+      return { value: { exitCode: 0, stdout: JSON.stringify(w.verdict), stderr: '' } }
+    }
     if (verb === 'start' && w.startFails !== null) {
       return { value: { exitCode: 1, stdout: '', stderr: w.startFails } }
     }
@@ -173,6 +180,11 @@ function world(on: On, env: Record<string, string> = {}): World {
     return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
   })
   on('attribution.text', ($, e) => ({ text: e.text }))
+  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
+  on('session.compact', () => ({ messages: [{ role: 'user', text: 'the summary', toolUses: [] }] }) as never)
+  on('classic.Stop', () => ({}))
+  on('classic.SubagentStop', () => ({}))
+  on('prompt.submit', ($, e) => ({ text: e.text }) as never)
   // The engine's own output row: the text as it came.
   on('ui.render', { component: 'CommandOutput' }, ($, e) => ({ type: 'Text', children: [e.props.text] }) as never)
   return w
@@ -738,4 +750,105 @@ test('a line that no longer answers help draws as its text', async ($, on) => {
   await $.command.run(se('help'))
   const ui = await $.ui.mount(output('help', 'se has moved on.', 'desktop'))
   expect(await ui.find({ key: 'usage' })).toBeUndefined()
+})
+
+test('the context carries the guidance se answers, asked once, and again after a compaction', async ($, on) => {
+  const w = world(on)
+  w.replies['guidance --session-id s1'] = { text: 'the principles, and the skills handed over' }
+  await $.session.start(starts)
+  const blocks = async () => (await $.prompt.context({ blocks: [{ name: 'currentDate', text: 'today' }] })).blocks
+  expect(await blocks()).toEqual([
+    { name: 'currentDate', text: 'today' },
+    { name: 'se-guidance', text: 'the principles, and the skills handed over' },
+  ])
+  await blocks()
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toEqual(['/se guidance --session-id s1'])
+  // SE is off: the guidance goes into the context all the same, and nothing is posted.
+  expect(posted(w)).toEqual([])
+  await $.session.compact({
+    trigger: 'manual',
+    messages: [{ role: 'user', text: 'all so far', toolUses: [] }],
+  } as never)
+  w.replies['guidance --session-id s1'] = { text: 'the skills handed over, again' }
+  expect((await blocks()).at(-1)).toEqual({ name: 'se-guidance', text: 'the skills handed over, again' })
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(2)
+})
+
+test('guidance se answers empty adds no block', async ($, on) => {
+  const w = world(on)
+  w.replies['guidance --session-id s1'] = { text: '' }
+  await $.session.start(starts)
+  expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
+})
+
+// A cloud session no person attends, as a routine starts it.
+const BOX = { CLAUDE_CODE_REMOTE: 'true', CLAUDE_CODE_SESSION_ATTENDED: '0' }
+const hooked = (w: World) => w.ran.filter(argv => argv[1] === 'hook').map(argv => argv.slice(1).join(' '))
+
+test('a box whose issue is not closed is refused its stop, with the reason se gives', async ($, on) => {
+  const w = world(on, BOX)
+  await $.session.start(starts)
+  w.verdict = { block: '#3 is open with neither a PR from issue-3 nor a supersede.' }
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(
+    '#3 is open with neither a PR from issue-3 nor a supersede.',
+  )
+  w.verdict = { pass: '#3 is closed' }
+  expect((await $.classic.Stop({ stop_hook_active: true })).block).toBeUndefined()
+  expect(hooked(w)).toEqual([`hook stop --workspace ${ROOT}`, `hook stop --workspace ${ROOT}`])
+})
+
+test('an interactive session is never refused, and runs no check', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  w.verdict = { block: 'refused' }
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBeUndefined()
+  expect(
+    (
+      await $.classic.SubagentStop({
+        stop_hook_active: false,
+        agent_id: 'a',
+        agent_type: 'x',
+        agent_transcript_path: '/t',
+      })
+    ).block,
+  ).toBeUndefined()
+  await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' } } as never)
+  expect(hooked(w)).toEqual([])
+})
+
+test('a box waiting on background work says so, and a sub-agent names its transcript', async ($, on) => {
+  const w = world(on, BOX)
+  await $.session.start(starts)
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{}] as never })
+  w.verdict = { block: '#6 is open' }
+  const sub = await $.classic.SubagentStop({
+    stop_hook_active: false,
+    agent_id: 'a',
+    agent_type: 'x',
+    agent_transcript_path: '/t/a.jsonl',
+  })
+  expect(sub.block).toBe('#6 is open')
+  expect(hooked(w)).toEqual([
+    `hook stop --waiting --workspace ${ROOT}`,
+    `hook stop --agent-transcript /t/a.jsonl --workspace ${ROOT}`,
+  ])
+})
+
+test('a broken check lets the stop through and says why', async ($, on) => {
+  const w = world(on, BOX)
+  await $.session.start(starts)
+  w.verdict = 1
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBeUndefined()
+  expect(w.toasts).toContain('SE could not judge this stop: se: boom')
+  w.verdict = 'no verdict'
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBeUndefined()
+})
+
+test('a prompt from a person resets the refusals of a box; its own prompts do not', async ($, on) => {
+  const w = world(on, BOX)
+  await $.session.start(starts)
+  await $.prompt.submit({ text: 'go on', origin: { kind: 'scheduled-trigger' } } as never)
+  expect(hooked(w)).toEqual([])
+  await $.prompt.submit({ text: 'stop here', origin: { kind: 'bridge' } } as never)
+  expect(hooked(w)).toEqual([`hook prompt --workspace ${ROOT}`])
 })
