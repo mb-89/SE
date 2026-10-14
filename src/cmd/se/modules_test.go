@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/index"
+	"github.com/mb-89/SE/src/index/fixture"
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/modules/io/clock"
 	sehttp "github.com/mb-89/SE/src/modules/io/http"
@@ -108,5 +110,60 @@ func TestServeLogsEachPostedEventThroughTheIndex(t *testing.T) {
 	}
 	if string(log) != strings.Join(lines, "") {
 		t.Fatalf("the log reads %q", log)
+	}
+}
+
+// A command a module declared runs on the workspace's daemon, never in se's
+// own process: se finds the daemon, posts the command with its words, its
+// --workspace taken out, and answers the reply, the command's requests
+// delivered to the verb the daemon's wiring binds.
+func TestAModulesCommandRunsOnTheWorkspacesDaemon(t *testing.T) {
+	t.Parallel()
+	net := sehttp.NewFake()
+	worldOf(t).Net = net
+	d, ws := onFake(t), "/ws"
+	w, err := index.ParseWiring([]byte(fixture.ShopWiring))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mods := []*index.Module{fixture.Shelf(map[string]int{"pear": 3}), fixture.Shopper}
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	ready := make(chan daemon.Endpoint, 1)
+	go func() {
+		done <- daemon.Serve(ctx, daemon.Paths{Workspace: ws, Disk: d}, daemon.Options{
+			Clock: worldOf(t).Clock, Net: net, Modules: mods, Wiring: &w,
+			Ready: func(ep daemon.Endpoint) { ready <- ep },
+		})
+	}()
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("the daemon did not start: %v", err)
+	}
+	t.Cleanup(func() {
+		stop()
+		<-done
+	})
+	cat, err := index.Collect(w, mods...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, _ := cat.Command("shop take")
+	var errs strings.Builder
+	run := func(words ...string) (Reply, error) {
+		return runCommand(cmd, &Call{Workspace: "/elsewhere", World: *worldOf(t)}, words, &errs)
+	}
+	if r, err := run("pear", "--workspace", ws); err != nil || r.Text != "took a pear, 2 left" {
+		t.Fatalf("shop take pear = %+v, %v", r, err)
+	}
+	if r, err := run("--workspace="+ws, "pear", "--json"); err != nil || r.Text != `{"thing":"pear","left":1}` {
+		t.Fatalf("shop take pear --json = %+v, %v", r, err)
+	}
+	if _, err := run("kiwi", "--workspace", ws); err == nil || !strings.Contains(err.Error(), "no kiwi left") {
+		t.Fatalf("a take off an empty shelf: %v", err)
+	}
+	if errs.Len() != 0 {
+		t.Fatalf("a daemon that answered was said to be starting: %q", errs.String())
 	}
 }

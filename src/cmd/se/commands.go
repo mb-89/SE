@@ -253,7 +253,7 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 		call.GitHub = limited
 		before := limited.Requests()
 		began := call.Clock.Now()
-		reply, err = runCommand(cmd, call, words)
+		reply, err = runCommand(cmd, call, words, stderr)
 		timed(call, name, began, stderr)
 		if n := limited.Requests() - before; n > 0 {
 			if rerr := issues.RecordRequests(call.Disk, call.Workspace, name, n, call.Clock.Now()); rerr != nil {
@@ -329,14 +329,15 @@ func timed(call *Call, name string, began time.Time, stderr io.Writer) {
 	}
 }
 
-// runCommand runs the command the catalog declares with the run the command
-// line registered for it: the collector parses words into the call's Args as
-// the command declares them, and renders its reply, its Data as JSON where
-// the call said --json.
-func runCommand(cmd index.CommandInfo, call *Call, words []string) (Reply, error) {
+// runCommand runs the command the catalog declares: one the command line
+// registered with the run it registered, any other, which a module declared,
+// on the workspace's daemon (onDaemon). For the command line's own, the
+// collector parses words into the call's Args as the command declares them,
+// and renders its reply, its Data as JSON where the call said --json.
+func runCommand(cmd index.CommandInfo, call *Call, words []string, stderr io.Writer) (Reply, error) {
 	c, ok := commands[cmd.Name]
 	if !ok {
-		return Reply{}, fmt.Errorf("%s is declared on the index, but the command line has no run for it", cmd.Name)
+		return onDaemon(cmd, call, words, stderr)
 	}
 	args, err := cmd.Parse(words)
 	if err != nil {
@@ -355,4 +356,74 @@ func runCommand(cmd index.CommandInfo, call *Call, words []string) (Reply, error
 	}
 	text, err := args.Render(r.Text, r.Data)
 	return Reply{Text: text}, err
+}
+
+// startingAfter is how long a command waits on the daemon before it says,
+// on stderr, that the daemon is starting.
+const startingAfter = time.Second
+
+// onDaemon runs a command a module declared on the workspace's daemon, the
+// index's one host: it finds or starts the daemon, posts the command with
+// its words (--workspace taken out, which names the daemon), and answers its
+// reply. Where the daemon has not answered within startingAfter, it says on
+// stderr that the daemon is starting; a daemon that does not start fails
+// the command, which never runs in this process.
+func onDaemon(cmd index.CommandInfo, call *Call, words []string, stderr io.Writer) (Reply, error) {
+	ws, words, err := workspaceIn(words)
+	if err != nil {
+		return Reply{}, err
+	}
+	if ws != "" {
+		call.Workspace = ws
+	}
+	if call.Workspace, err = filepath.Abs(call.Workspace); err != nil {
+		return Reply{}, err
+	}
+	started := make(chan struct{})
+	go func() {
+		select {
+		case <-started:
+		case <-call.Clock.After(startingAfter):
+			fmt.Fprintf(stderr, "se: the daemon is starting for %s\n", call.Workspace)
+		}
+	}()
+	ep, _, err := startDaemon(&call.World, call.Paths())
+	close(started)
+	if err != nil {
+		return Reply{}, fmt.Errorf("se %s runs on the workspace's daemon, which did not start: %w", cmd.Name, err)
+	}
+	r, err := call.Net.Command(ep.Address, ep.Token, sehttp.CommandCall{Name: cmd.Name, Words: words})
+	var refused *sehttp.StatusError
+	if errors.As(err, &refused) {
+		if refused.Status == sehttp.StatusNotFound {
+			return Reply{}, fmt.Errorf("the daemon for %s does not know se %s (se restart starts the se built now): %s", call.Workspace, cmd.Name, refused.Said)
+		}
+		return Reply{}, errors.New(refused.Said)
+	}
+	return Reply{Text: r.Text}, err
+}
+
+// workspaceIn takes --workspace DIR (or --workspace=DIR) out of a command's
+// words, and answers DIR, "" where the words name none.
+func workspaceIn(words []string) (ws string, rest []string, err error) {
+	for i := 0; i < len(words); i++ {
+		w := words[i]
+		if w == "--" {
+			return ws, append(rest, words[i:]...), nil
+		}
+		name, value, inline := strings.Cut(strings.TrimLeft(w, "-"), "=")
+		if !strings.HasPrefix(w, "-") || name != workspaceFlag.Name {
+			rest = append(rest, w)
+			continue
+		}
+		if !inline {
+			if i+1 == len(words) {
+				return "", nil, fmt.Errorf("--%s takes a folder", workspaceFlag.Name)
+			}
+			i++
+			value = words[i]
+		}
+		ws = value
+	}
+	return ws, rest, nil
 }

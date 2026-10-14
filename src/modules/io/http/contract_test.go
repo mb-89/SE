@@ -21,7 +21,8 @@ type world struct {
 
 // daemon is a Daemon that keeps what it is told: it refuses the session "bad"
 // as malformed and fails to keep the session "broken". Its one value,
-// events/kept, is how many events it kept.
+// events/kept, is how many events it kept. Its command echo answers its
+// words, and its command fail fails.
 type daemon struct {
 	mu     sync.Mutex
 	events []sehttp.Event
@@ -53,6 +54,16 @@ func (d *daemon) Value(name string) (sehttp.Value, error) {
 		return sehttp.Value{}, fmt.Errorf("%w: %s", sehttp.ErrUnknown, name)
 	}
 	return sehttp.Value{Value: len(d.kept()), Provided: true}, nil
+}
+
+func (d *daemon) Command(c sehttp.CommandCall) (sehttp.Reply, error) {
+	switch c.Name {
+	case "echo":
+		return sehttp.Reply{Text: strings.Join(c.Words, " ")}, nil
+	case "fail":
+		return sehttp.Reply{}, errors.New("the command failed")
+	}
+	return sehttp.Reply{}, fmt.Errorf("%w: %s", sehttp.ErrUnknown, c.Name)
 }
 
 func (d *daemon) Shutdown() { d.once.Do(func() { close(d.ended) }) }
@@ -106,6 +117,9 @@ func contract(t *testing.T, fresh func(t *testing.T) world) {
 		}
 		if _, err := w.net.Value(addr, "nope", "events/kept"); status(err) != sehttp.StatusUnauthorized {
 			t.Fatalf("value: %v", err)
+		}
+		if _, err := w.net.Command(addr, "nope", sehttp.CommandCall{Name: "echo"}); status(err) != sehttp.StatusUnauthorized {
+			t.Fatalf("command: %v", err)
 		}
 		if err := w.net.Shutdown(addr, ""); status(err) != sehttp.StatusUnauthorized {
 			t.Fatalf("shutdown: %v", err)
@@ -183,6 +197,20 @@ func contract(t *testing.T, fresh func(t *testing.T) world) {
 		}
 		if _, err := w.net.Value(addr, "tok", "no/such"); status(err) != sehttp.StatusNotFound || !strings.Contains(err.Error(), "no/such") {
 			t.Fatalf("no/such: %v", err)
+		}
+	})
+	t.Run("a command answers its reply; an unknown one is not found, a failed one says why", func(t *testing.T) {
+		w := fresh(t)
+		_, addr := serve(t, w.net)
+		r, err := w.net.Command(addr, "tok", sehttp.CommandCall{Name: "echo", Words: []string{"a", "--b", "c d"}})
+		if err != nil || r.Text != "a --b c d" {
+			t.Fatalf("echo = %+v, %v", r, err)
+		}
+		if _, err := w.net.Command(addr, "tok", sehttp.CommandCall{Name: "no such"}); status(err) != sehttp.StatusNotFound || !strings.Contains(err.Error(), "no such") {
+			t.Fatalf("no such: %v", err)
+		}
+		if _, err := w.net.Command(addr, "tok", sehttp.CommandCall{Name: "fail"}); status(err) != sehttp.StatusInternal || !strings.Contains(err.Error(), "the command failed") {
+			t.Fatalf("fail: %v", err)
 		}
 	})
 	t.Run("shutdown reaches the daemon", func(t *testing.T) {

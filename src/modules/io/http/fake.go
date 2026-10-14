@@ -146,6 +146,25 @@ func (f *Fake) Value(address, token, name string) (Value, error) {
 	return got, err
 }
 
+func (f *Fake) Command(address, token string, c CommandCall) (Reply, error) {
+	d, err := f.reach(address, token, "/command")
+	if err != nil {
+		return Reply{}, err
+	}
+	// The call crosses the wire as JSON, as the real one does.
+	var got CommandCall
+	if err := roundTrip(c, &got); err != nil {
+		return Reply{}, &StatusError{Path: "/command", Status: StatusBadRequest, Said: "bad command: " + err.Error()}
+	}
+	r, err := d.Command(got)
+	if err != nil {
+		return Reply{}, &StatusError{Path: "/command", Status: commandStatus(err), Said: err.Error()}
+	}
+	var out Reply
+	err = roundTrip(r, &out)
+	return out, err
+}
+
 func (f *Fake) Shutdown(address, token string) error {
 	d, err := f.reach(address, token, "/shutdown")
 	if err != nil {

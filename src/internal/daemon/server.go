@@ -16,8 +16,8 @@ import (
 // Event is one post of the bridgehead: a session event as the engine raised it.
 type Event = sehttp.Event
 
-// Server answers the bridgehead's posts for one workspace: the Daemon the
-// network serves behind the token.
+// Server answers the bridgehead's posts and the se command line's for one
+// workspace: the Daemon the network serves behind the token.
 type Server struct {
 	ix       *index.Index
 	posts    string
@@ -91,4 +91,19 @@ func (s *Server) Value(name string) (sehttp.Value, error) {
 		return sehttp.Value{}, fmt.Errorf("%w: %w", sehttp.ErrUnknown, err)
 	}
 	return sehttp.Value{Value: v.V, Provided: v.Provided}, nil
+}
+
+// Command runs a command a module declared on the index, as the se command
+// line posts it, and answers its reply: the index delivers the requests the
+// command answers to the I/O modules' verbs and commits what it writes.
+func (s *Server) Command(c sehttp.CommandCall) (sehttp.Reply, error) {
+	s.touch()
+	if _, ok := s.ix.Catalog().Command(c.Name); !ok {
+		return sehttp.Reply{}, fmt.Errorf("%w: no command %q", sehttp.ErrUnknown, c.Name)
+	}
+	r, err := s.ix.Call(c.Name, c.Words...)
+	if err != nil {
+		return sehttp.Reply{}, err
+	}
+	return sehttp.Reply{Text: r.Text}, nil
 }

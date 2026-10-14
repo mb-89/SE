@@ -170,7 +170,7 @@ token:
 | the reader | how it reads |
 |---|---|
 | the plugin's bridgehead | posts each session event, which the session I/O module commits; runs `/se` words through the `se` binary, as today |
-| an `se` command | the binary is an adapter: it finds or starts the daemon, posts the command with its arguments, and prints the reply |
+| an `se` command | the binary is an adapter: it finds or starts the daemon, posts the command with its arguments to the daemon's `/command` (`--workspace` taken out, which names the daemon), and prints the reply, which `Index.Call` answers on the daemon. Until a command's module moves, the command line's own registry runs it, as the `cli` instance |
 | `/se ui`, `se help`, the manifests | read the collector's catalog from the daemon and render it |
 | any later adapter (a REST API, an MCP tool list) | reads values by name, calls commands by name, and subscribes to changes, the same three verbs |
 

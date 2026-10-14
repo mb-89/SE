@@ -21,11 +21,13 @@ func Real() Net {
 	return wire{
 		// The daemon answers on loopback alone, so its calls never go through a proxy.
 		direct: &nethttp.Client{Transport: &nethttp.Transport{Proxy: nil}, Timeout: 2 * time.Second},
-		out:    &nethttp.Client{Transport: &nethttp.Transport{Proxy: nethttp.ProxyFromEnvironment}, Timeout: 30 * time.Second},
+		// A command runs as long as it runs: se issue land runs the battery.
+		long: &nethttp.Client{Transport: &nethttp.Transport{Proxy: nil}},
+		out:  &nethttp.Client{Transport: &nethttp.Transport{Proxy: nethttp.ProxyFromEnvironment}, Timeout: 30 * time.Second},
 	}
 }
 
-type wire struct{ direct, out *nethttp.Client }
+type wire struct{ direct, long, out *nethttp.Client }
 
 func (w wire) Serve(ctx context.Context, token string, d Daemon) (string, <-chan error, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -53,7 +55,7 @@ func (w wire) Serve(ctx context.Context, token string, d Daemon) (string, <-chan
 	return ln.Addr().String(), done, nil
 }
 
-// handler routes /health, /event, /value/<name> and /shutdown, each behind the token.
+// handler routes /health, /event, /value/<name>, /command and /shutdown, each behind the token.
 func handler(token string, d Daemon) nethttp.Handler {
 	mux := nethttp.NewServeMux()
 	mux.HandleFunc("GET /health", func(rw nethttp.ResponseWriter, _ *nethttp.Request) { answer(rw, d.Health()) })
@@ -84,6 +86,19 @@ func handler(token string, d Daemon) nethttp.Handler {
 			return
 		}
 		answer(rw, v)
+	})
+	mux.HandleFunc("POST /command", func(rw nethttp.ResponseWriter, r *nethttp.Request) {
+		var c CommandCall
+		if err := json.NewDecoder(nethttp.MaxBytesReader(rw, r.Body, EventCap)).Decode(&c); err != nil {
+			nethttp.Error(rw, "bad command: "+err.Error(), StatusBadRequest)
+			return
+		}
+		reply, err := d.Command(c)
+		if err != nil {
+			nethttp.Error(rw, err.Error(), commandStatus(err))
+			return
+		}
+		answer(rw, reply)
 	})
 	mux.HandleFunc("POST /shutdown", func(rw nethttp.ResponseWriter, _ *nethttp.Request) {
 		answer(rw, struct{}{})
@@ -124,11 +139,26 @@ func (w wire) Value(address, token, name string) (Value, error) {
 	return v, err
 }
 
+func (w wire) Command(address, token string, c CommandCall) (Reply, error) {
+	body, err := json.Marshal(c)
+	if err != nil {
+		return Reply{}, err
+	}
+	var r Reply
+	err = w.over(w.long, address, token, nethttp.MethodPost, "/command", body, &r)
+	return r, err
+}
+
 func (w wire) Shutdown(address, token string) error {
 	return w.call(address, token, nethttp.MethodPost, "/shutdown", nil, nil)
 }
 
 func (w wire) call(address, token, method, path string, body []byte, into any) error {
+	return w.over(w.direct, address, token, method, path, body, into)
+}
+
+// over makes one call of the daemon protocol with client.
+func (w wire) over(client *nethttp.Client, address, token, method, path string, body []byte, into any) error {
 	req, err := nethttp.NewRequest(method, "http://"+address+path, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -137,7 +167,7 @@ func (w wire) call(address, token, method, path string, body []byte, into any) e
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := w.direct.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

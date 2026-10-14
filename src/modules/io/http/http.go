@@ -1,9 +1,9 @@
 // Package http is the I/O module for the network: the one place SE serves or
 // calls over HTTP. It speaks two things and nothing more: the daemon protocol
-// the plugin's bridgehead posts to (health, event, value, shutdown), served and
-// called from Go, and the routine's API trigger, the fire. Code that needs the
-// network takes a Net as an argument; the se binary hands it Real, a test
-// hands it a Fake, so a case replays.
+// the plugin's bridgehead and the se command line post to (health, event,
+// value, command, shutdown), served and called from Go, and the routine's API
+// trigger, the fire. Code that needs the network takes a Net as an argument;
+// the se binary hands it Real, a test hands it a Fake, so a case replays.
 package http
 
 import (
@@ -25,6 +25,9 @@ type Net interface {
 	Event(address, token string, ev Event) error
 	// Value asks the daemon at address for name's value on its index.
 	Value(address, token, name string) (Value, error)
+	// Command asks the daemon at address to run a command of its index and
+	// answers its reply. It waits as long as the command runs.
+	Command(address, token string, c CommandCall) (Reply, error)
 	// Shutdown asks the daemon at address to end.
 	Shutdown(address, token string) error
 	// Fire posts once to the routine's API trigger at url and answers what it said.
@@ -42,6 +45,10 @@ type Daemon interface {
 	// Value answers name's value. An error that wraps ErrUnknown says
 	// nothing declares the name.
 	Value(name string) (Value, error)
+	// Command runs a command of the daemon's index and answers its reply. An
+	// error that wraps ErrUnknown says nothing declares the command; any
+	// other is why the command failed.
+	Command(CommandCall) (Reply, error)
 	// Shutdown asks the daemon to end; it is called once /shutdown is answered.
 	Shutdown()
 }
@@ -67,6 +74,19 @@ type Value struct {
 	Provided bool `json:"provided"`
 }
 
+// CommandCall is one call of a command on a daemon's index: the command's
+// name, such as "issue land", and the words after it, flags and all.
+type CommandCall struct {
+	Name  string   `json:"name"`
+	Words []string `json:"words"`
+}
+
+// Reply is what a command run on a daemon answers: its text, or its data as
+// JSON where the call said --json.
+type Reply struct {
+	Text string `json:"text"`
+}
+
 // Answer is what the routine's trigger said to a fire.
 type Answer struct {
 	// Status is the HTTP status code.
@@ -84,8 +104,17 @@ func (a Answer) OK() bool { return a.Status/100 == 2 }
 // ErrBad marks a post the daemon refuses as malformed.
 var ErrBad = errors.New("bad request")
 
-// ErrUnknown marks a name the daemon's index does not declare.
+// ErrUnknown marks a name or a command the daemon's index does not declare.
 var ErrUnknown = errors.New("unknown name")
+
+// commandStatus is the status a failed command answers with: not found for
+// a command the index does not declare, an internal error for any other.
+func commandStatus(err error) int {
+	if errors.Is(err, ErrUnknown) {
+		return StatusNotFound
+	}
+	return StatusInternal
+}
 
 // StatusError is a daemon's refusal: a post it answered with a status other than 200.
 type StatusError struct {
