@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mb-89/SE/src/internal/guidance"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -16,7 +17,7 @@ func TestOverhaulNewCreatesTheOverhaulAndFires(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	made := issueOf(t, gh, 10)
-	for _, want := range []string{"It is the first overhaul.", "<!-- se:overhaul attended -->", "<!-- se:new -->"} {
+	for _, want := range []string{"It is the first overhaul.", "<!-- se:overhaul attended -->", "Skills: overhaul " + guidance.Mark, "<!-- se:new -->"} {
 		if !strings.Contains(made, want) {
 			t.Errorf("the body lacks %q: %s", want, made)
 		}
@@ -29,12 +30,13 @@ func TestOverhaulNewCreatesTheOverhaulAndFires(t *testing.T) {
 	}
 }
 
-func TestTakingAnOverhaulHandsItToTheOverhaulSkill(t *testing.T) {
+func TestTakingAnOverhaulHandsOverTheSkillItsBodyNames(t *testing.T) {
 	t.Parallel()
 	cad := issues.Cadence{Kind: "overhaul", Every: 5, Closed: 5}
-	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE overhaul", Overhaul: true}, true, "issue-30", "", "", cad)
+	h := handed{Text: "the overhaul skill, in full"}
+	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE overhaul", Overhaul: true}, true, "issue-30", "", "", h, cad)
 	if err != nil || !strings.HasPrefix(r.Text, "Started the unattended overhaul #30 SE overhaul, as 5 retros closed since the last one (the cadence is 5)") ||
-		!strings.Contains(r.Text, "#30 is an overhaul (se-overhaul): follow the overhaul skill, src/plugin/skills/overhaul/SKILL.md, from se overhaul read 30") {
+		!strings.HasSuffix(r.Text, "\n\nthe overhaul skill, in full") || strings.Contains(r.Text, "se-overhaul") {
 		t.Fatalf("%q %v", r.Text, err)
 	}
 }

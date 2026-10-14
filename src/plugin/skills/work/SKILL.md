@@ -14,8 +14,7 @@ worktree and PR numbers in your own context. `se` takes no claim past the cap,
 and fires the routine only when every box is full.
 
 Every step that can be an `se` command is one. `se` is `./src/plugin/bin/se`;
-build it first with
-`go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se`.
+build it first with `sh ./src/build.sh`.
 Call it exactly as `./src/plugin/bin/se issue …` (or `./src/plugin/bin/se fleet …`),
 one command per call, never through a variable: `.claude/settings.json` allows
 those forms to write GitHub issues without a permission prompt, and only
@@ -37,9 +36,7 @@ checkout.
      then pull again.
    - Otherwise run its `worktree` command, and start one fresh sub-agent in
      the background with the prompt in **The sub-agent's prompt**, filled
-     in. For a retro (`"retro": true`) or an overhaul (`"overhaul": true`)
-     its skill is the retro skill or the overhaul skill instead of **An
-     issue**. Then pull again, so the box fills up to its cap.
+     in. Then pull again, so the box fills up to its cap.
 3. **Wait.** Subscribe to each PR a sub-agent answers
    (`subscribe_pr_activity`). When a sub-agent answers that its PR is up with
    auto-merge on, or that its issue was superseded, go back to 2. A red CI
@@ -53,17 +50,20 @@ checkout.
 
 ## The sub-agent's prompt
 
-Fill in `<n>`, `<path>`, `<se>`, `<skill>` (**An issue**, or the retro or
-overhaul skill's section for the box that took it) and the issue's body, and
-send nothing else of the queue or of other issues:
+Fill in `<n>`, `<path>`, `<se>`, the issue's body and the take's `guidance`
+(every skill the issue names, in full), and send nothing else of the queue or
+of other issues:
 
 `Work on se issue #<n> in the worktree <path>, on its branch issue-<n>. Run
 every command there, and call se as <se> with --workspace <path>, or build
 <path>/src/plugin/bin/se where a skill calls ./src/plugin/bin/se. The issue's
 text, below, is the whole specification; follow <path>/CLAUDE.md. Read
-<path>/src/plugin/skills/work/SKILL.md and follow <skill>. Answer only the PR
-number and link, or what you filed instead.
-<the issue's body>`
+<path>/src/plugin/skills/work/SKILL.md and follow **An issue**, and follow
+every skill below; where one of them (a retro's, an overhaul's) takes the
+issue to its end, it stands instead of **An issue**. Answer only the PR number
+and link, or what you filed instead.
+<the issue's body>
+<the take's guidance>`
 
 ## An issue
 

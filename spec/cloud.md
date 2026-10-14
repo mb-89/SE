@@ -9,7 +9,7 @@ A cloud environment that runs SE gets it from its setup script:
 set -u
 rm -rf /opt/se
 git clone --depth 1 https://github.com/mb-89/SE /opt/se \
-  && (cd /opt/se && go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se) \
+  && sh /opt/se/src/build.sh \
   || echo "SE setup failed; sessions start without SE"
 exit 0
 ```

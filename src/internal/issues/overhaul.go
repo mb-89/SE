@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/guidance"
 	"gopkg.in/yaml.v3"
 
 	"github.com/mb-89/SE/src/internal/io/disk"
@@ -58,8 +59,8 @@ func (s Source) NewOverhaul(unattended bool) (OverhaulIssue, error) {
 	if unattended {
 		mode, who = "unattended", "It runs unattended. The box creates the findings' issues, those for a person where controversial, and closes it."
 	}
-	body := fmt.Sprintf("An overhaul of SE as it stands: is the design still right? It checks every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last %d runs. The rules are spec/overhaul.md; a box takes it with the overhaul skill and starts with `se overhaul read`.\n\n%s %s\n\n<!-- se:overhaul %s -->",
-		OverhaulCadence, before, who, mode)
+	body := fmt.Sprintf("An overhaul of SE as it stands: is the design still right? It checks every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last %d runs. The rules are spec/overhaul.md; a box takes it with the overhaul skill, which its take hands over, and starts with `se overhaul read`.\n\n%s %s\n\n<!-- se:overhaul %s -->\n\n%s",
+		OverhaulCadence, before, who, mode, guidance.Line([]string{"overhaul"}))
 	made, _, err := s.create("SE overhaul "+s.now().UTC().Format("2006-01-02"), body, 0, nil, []string{Label, OverhaulLabel})
 	if err != nil {
 		return OverhaulIssue{}, err

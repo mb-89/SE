@@ -18,6 +18,11 @@ choice is deterministic and no prompt restates it.
   its dependencies when it is made, even if that is `none`. Every body it
   writes ends in the mark `<!-- se:new -->`, which the retro checks
   ([retro.md](retro.md)).
+- **Skills**: an issue names the skills its work needs in one place, the
+  marked line `se issue new --skills` writes into its body (a retro and an
+  overhaul name theirs). The take hands each over in full in its answer, and
+  the session's log records it; no label picks a skill
+  ([principle 22](principles.md)).
 - **Blockers**: an issue waits while any of its blockers is open. Blockers are
   GitHub's native "blocked by" links, and nothing else; a "Blocked by: #12"
   line in an issue's body does not block it. `se issue new --blocked-by` is
@@ -118,8 +123,8 @@ person**, and leaves the agents' queue until the person has closed it.
 
 - **Stuck** is decided by a timer, not judgment. A claimed leaf (claimed at
   the top or with `--in`) is stuck when nothing has been pushed to its branch
-  `issue-<n>` (or its PR), nor a takeover recorded, for longer than the lease:
-  3 hours, `Lease` in `src/internal/issues/stuck.go`. That is under the routine's
+  `issue-<n>` (or its PR), nor a takeover recorded, for longer than the lease,
+  `Lease` in `src/internal/issues/stuck.go`. It is under the routine's
   4-hour schedule, so a scheduled box always catches it. The last push is
   GitHub's activity on the branch (`/repos/{owner}/{repo}/activity`), its
   creation included; a branch GitHub keeps no push record of is stuck. A
@@ -175,7 +180,7 @@ person**, and leaves the agents' queue until the person has closed it.
 <!-- se:manifest usage issue review -->
 ```
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
-se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
@@ -388,7 +393,7 @@ through `se`, with every verdict on the reviewed issue's thread.
   `se issue new --parent N --blocked-by none --final` would, its body the
   finding. N stays open: the fixes are work inside it, and once they have
   landed it is ready for review again, as a re-review.
-- **Either way**, the non-blocking findings (five at most) become `se-final`
+- **Either way**, the non-blocking findings (at most `MaxFiled`) become `se-final`
   issues in the normal queue.
 - **Who worked a leaf** is recorded by `se issue land`: a comment on the leaf,
   `Worked by session S in W.`, with the marker
