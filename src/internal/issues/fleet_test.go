@@ -265,6 +265,13 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	if f := only(t, w.check(), LeftoverClaim, 19); f.Remedy != "se fleet fix reports it as an se issue" {
 		t.Fatalf("%+v", f)
 	}
+	// Closed as a duplicate, its open PR is the duplicate's: the workflow
+	// closes it and deletes the branch.
+	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"duplicate","closed_at":"2026-10-13T11:00:00Z"}`)
+	if f := only(t, w.check(), LeftoverClaim, 19); f.What != "issue-19 claims #19, which is closed (duplicate)" || f.PR != 90 ||
+		f.Remedy != "the prune workflow closes PR #90 unmerged and deletes issue-19; se fleet fix reports it only if it is still there a day after #19 closed" {
+		t.Fatalf("%+v", f)
+	}
 }
 
 func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {

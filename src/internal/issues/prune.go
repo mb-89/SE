@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // Fresh is how long a claude/* branch is left alone after its last commit,
@@ -17,21 +19,27 @@ type Stray struct {
 	Branch string `json:"branch"`
 	SHA    string `json:"sha"`
 	Why    string `json:"why"`
+	// PR is the open PR on the branch, closed before the branch is deleted:
+	// it is set only where the branch's issue closed as a duplicate.
+	PR int `json:"pr,omitempty"`
 	// Deleted is true once --apply has deleted it.
 	Deleted bool `json:"deleted"`
 }
 
 // Strays lists the branches no work needs any more: every issue-<n> branch
 // whose issue is closed, and every claude/* branch whose last commit is older
-// than Fresh, each with no open PR. It never names main or any other branch.
+// than Fresh, each with no open PR. An issue-<n> branch whose issue closed as
+// a duplicate is a stray even with an open PR, which is named with it: the
+// issue it duplicates carries that work. It never names main or any other
+// branch.
 func (s Source) Strays() ([]Stray, error) {
 	pulls, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?state=open&per_page=100", s.Repo), true)
 	if err != nil {
 		return nil, err
 	}
-	open := map[string]bool{}
+	open := map[string]int{}
 	for _, p := range pulls {
-		open[p.Head.Ref] = true
+		open[p.Head.Ref] = p.Number
 	}
 	var out []Stray
 	refs, err := api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/issue-", s.Repo), true)
@@ -41,15 +49,22 @@ func (s Source) Strays() ([]Stray, error) {
 	for _, r := range refs {
 		b := strings.TrimPrefix(r.Ref, "refs/heads/")
 		n, err := strconv.Atoi(strings.TrimPrefix(b, "issue-"))
-		if err != nil || Branch(n) != b || open[b] {
+		if err != nil || Branch(n) != b {
 			continue
 		}
 		got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
 		if err != nil {
 			return nil, err
 		}
-		if i := got[0]; i.State == "closed" && i.PullRequest == nil {
+		i := got[0]
+		if i.State != "closed" || i.PullRequest != nil {
+			continue
+		}
+		switch pr, ok := open[b]; {
+		case !ok:
 			out = append(out, Stray{Branch: b, SHA: r.Object.SHA, Why: fmt.Sprintf("#%d is closed and %s has no open PR", n, b)})
+		case i.StateReason == duplicate:
+			out = append(out, Stray{Branch: b, SHA: r.Object.SHA, PR: pr, Why: fmt.Sprintf("#%d is closed as a duplicate, so its PR #%d is closed unmerged", n, pr)})
 		}
 	}
 	refs, err = api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/claude/", s.Repo), true)
@@ -58,7 +73,7 @@ func (s Source) Strays() ([]Stray, error) {
 	}
 	for _, r := range refs {
 		b := strings.TrimPrefix(r.Ref, "refs/heads/")
-		if !strings.HasPrefix(b, "claude/") || open[b] {
+		if _, ok := open[b]; !strings.HasPrefix(b, "claude/") || ok {
 			continue
 		}
 		got, err := api[struct {
@@ -83,9 +98,19 @@ func (s Source) Strays() ([]Stray, error) {
 	return out, nil
 }
 
-// Prune deletes the strays, stopping at the first delete GitHub refuses.
+// Prune deletes the strays, stopping at the first write GitHub refuses. A
+// stray's open PR is closed first, with a comment that says why.
 func (s Source) Prune(strays []Stray) ([]Stray, error) {
 	for k := range strays {
+		if pr := strays[k].PR; pr != 0 {
+			body := fmt.Sprintf("Closed unmerged by se fleet prune: %s.", strays[k].Why)
+			if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, pr), github.F("body", body)); err != nil {
+				return strays, fmt.Errorf("commenting on PR #%d: %w", pr, err)
+			}
+			if _, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/pulls/%d", s.Repo, pr), github.F("state", "closed")); err != nil {
+				return strays, fmt.Errorf("closing PR #%d: %w", pr, err)
+			}
+		}
 		if _, err := s.GitHub.Send("DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, strays[k].Branch)); err != nil {
 			return strays, fmt.Errorf("deleting %s: %w", strays[k].Branch, err)
 		}

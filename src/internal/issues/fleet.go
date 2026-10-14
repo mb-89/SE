@@ -57,7 +57,8 @@ type Finding struct {
 	// deleting it loses nothing.
 	spent bool
 	// prunable is true for a leftover claim of a closed issue with no open
-	// PR: the prune workflow deletes its branch. closed is when it closed.
+	// PR, or of one closed as a duplicate: the prune workflow closes its PR
+	// and deletes its branch. closed is when it closed.
 	prunable bool
 	closed   time.Time
 	// key names the finding in the record its fix leaves.
@@ -90,6 +91,8 @@ func (f *Finding) setRemedy() {
 		f.Remedy = fmt.Sprintf("se issue pull --take %d, merge origin/main into %s, make it green, se issue land", f.Issue, Branch(f.Issue))
 	case f.cause() == GreenUnmerged && !f.autoMerge:
 		f.Remedy = "se fleet fix turns auto-merge on"
+	case f.prunable && f.PR != 0:
+		f.Remedy = fmt.Sprintf("the prune workflow closes PR #%d unmerged and deletes %s; se fleet fix reports it only if it is still there a day after #%d closed", f.PR, Branch(f.Issue), f.Issue)
 	case f.prunable:
 		f.Remedy = fmt.Sprintf("the prune workflow deletes %s; se fleet fix reports it only if it is still there a day after #%d closed", Branch(f.Issue), f.Issue)
 	case f.spent:
@@ -408,13 +411,13 @@ func (s Source) checks(sha string) (red []string, pending bool, err error) {
 }
 
 // leftovers is the issue-<n> branches whose issue is no open se issue. One
-// whose issue is closed and that has no open PR is prunable: the prune
-// workflow deletes it. Any other that main holds whole is spent: its fix
-// deletes it.
+// whose issue is closed and that has no open PR, or whose issue closed as a
+// duplicate, is prunable: the prune workflow closes its PR and deletes it.
+// Any other that main holds whole is spent: its fix deletes it.
 func (s Source) leftovers(t tree) ([]Finding, error) {
-	open := map[string]bool{}
+	open := map[string]int{}
 	for _, p := range t.pulls {
-		open[p.Head.Ref] = true
+		open[p.Head.Ref] = p.Number
 	}
 	var stray []ref
 	for _, r := range t.refs {
@@ -456,8 +459,9 @@ func (s Source) leftovers(t tree) ([]Finding, error) {
 			Kind: LeftoverClaim, Issue: n, head: r.Object.SHA, key: "leftover-claim",
 			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why),
 		}
-		if i.State == "closed" && i.PullRequest == nil && !open[b] {
-			f.prunable, f.closed = true, i.ClosedAt
+		pr, hasPR := open[b]
+		if i.State == "closed" && i.PullRequest == nil && (!hasPR || i.StateReason == duplicate) {
+			f.prunable, f.closed, f.PR = true, i.ClosedAt, pr
 			return f, nil
 		}
 		if cmp[0].AheadBy == 0 {

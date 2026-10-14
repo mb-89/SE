@@ -52,9 +52,10 @@ and only then leaves.**
      over: `se issue pull --take <n> --worktree` fetches its branch as it
      stands, and the box hands it to the agent the take names, which lands it;
    - a green PR with auto-merge off gets auto-merge turned on (`se fleet fix`);
-   - a leftover claim whose issue is closed and whose branch has no open PR
-     is left to the prune workflow, which deletes the branch (see **Pruning**
-     below); `se fleet fix` reports it as an issue only if the branch is
+   - a leftover claim whose issue is closed and whose branch has no open PR,
+     or whose issue closed as a duplicate, is left to the prune workflow,
+     which closes the duplicate's PR unmerged and deletes the branch (see
+     **Pruning** below); `se fleet fix` reports it as an issue only if the branch is
      still there a day after the issue closed (the workflow failed);
    - any other leftover claim whose issue is no open `se` issue and whose
      branch main holds whole (no commit main lacks) has its branch deleted
@@ -106,7 +107,10 @@ Cloud sessions cannot delete branches, so GitHub does it, with the
 repository's own token. `se fleet prune` lists every `issue-<n>` branch whose
 issue is closed and every `claude/*` branch whose last commit is more than an
 hour old (so a session that has just pushed can still open its PR), each with
-no open PR; `--apply` deletes them. It never touches `main` or any other
+no open PR, and every `issue-<n>` branch whose issue closed as a duplicate,
+open PR and all: the issue it duplicates carries that work, and only a person
+or the repository's token may close a PR. `--apply` deletes them, closing
+such a PR unmerged first with a comment that says why. It never touches `main` or any other
 branch. The workflow `.github/workflows/prune.yml` runs
 `se fleet prune --apply` when an issue or a PR closes, and every hour, and
 its output names what it deleted.

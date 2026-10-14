@@ -117,7 +117,7 @@ func init() {
 		Usage:   "fleet prune [--apply] [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list the stray branches; --apply deletes them",
-		Details: "list every issue-<n> branch whose issue is closed and every claude/* branch whose last commit is more than an hour old, each with no open PR. --apply deletes them; without it nothing is deleted. It never touches main or any other branch. The prune workflow runs it with the repository's token.",
+		Details: "list every issue-<n> branch whose issue is closed and every claude/* branch whose last commit is more than an hour old, each with no open PR, and every issue-<n> branch whose issue closed as a duplicate, with its open PR. --apply deletes them, closing such a PR unmerged first with a comment that says why; without it nothing is written. It never touches main or any other branch. The prune workflow runs it with the repository's token.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet prune")

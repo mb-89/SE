@@ -1,5 +1,6 @@
 # Deletes stray issue-<n> and claude/* branches with the repository's own
-# token, since cloud sessions cannot delete branches (spec/coordination.md).
+# token, since cloud sessions cannot delete branches, and closes the open PR
+# of an issue closed as a duplicate (spec/coordination.md).
 name: prune
 on:
   issues:
@@ -11,7 +12,7 @@ on:
 permissions:
   contents: write
   issues: read
-  pull-requests: read
+  pull-requests: write
 concurrency:
   group: prune
 jobs:
@@ -26,7 +27,7 @@ jobs:
           go-version-file: src/go.mod
           cache-dependency-path: src/go.sum
       - run: sh src/build.sh se
-      # Its output names every branch it deleted, and why.
+      # Its output names every branch it deleted and PR it closed, and why.
       - run: ./se fleet prune --apply --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}
