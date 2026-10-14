@@ -1,8 +1,10 @@
-# Soft budgets for tests/check.sh, in milliseconds: one per step, by the name
-# check.sh gives it, and one for the battery's total. Each started as a
-# measurement (a warm local run) with headroom for a cold CI runner. An overrun
-# is reported (the check's output, the CI summary, the PR body, the landing
-# facts) and passes; `hard: true` on a budget makes its overrun fail the check.
+# Soft budgets, in milliseconds. An overrun is reported and passes; `hard:
+# true` on a budget makes its overrun fail the check.
+#
+# For tests/check.sh: one per step, by the name check.sh gives it, and one for
+# the battery's total. Each started as a measurement (a warm local run) with
+# headroom for a cold CI runner. An overrun shows in the check's output, the
+# CI summary, the PR body and the landing facts; so does a step with no budget.
 total: {ms: 300000, hard: false}
 steps:
   se rules: {ms: 5000, hard: false}
@@ -22,3 +24,67 @@ commands:
   interactive: {ms: 1000, requests: 3}
   latency: {request_ms: 300, process_ms: 50}
   over: [briefing, fleet check, issue pull, issue tree]
+
+# For each se command and each plugin hook: a class, by what the call waits
+# on. Every se command records its duration in .se/.runtime/calls.jsonl, with
+# its budget; a terminal call over its budget says so on stderr. Every hook
+# records its duration as an se.hook row of the daemon's log while SE is on.
+# The se rule `budgeted` fails on a command or hook named in no class. A class
+# of 0ms bounds nothing: the call runs until it is stopped.
+classes:
+  instant: {ms: 1000, hard: false}
+  local: {ms: 10000, hard: false}
+  github: {ms: 60000, hard: false}
+  build: {ms: 300000, hard: false}
+  battery: {ms: 900000, hard: false}
+  daemon: {ms: 0, hard: false}
+command_classes:
+  briefing: github
+  fleet check: github
+  fleet fix: github
+  fleet plugins: github
+  fleet prune: github
+  fleet rules: battery
+  fleet trust: github
+  guidance: local
+  help: instant
+  hook prompt: local
+  hook stop: local
+  issue close: github
+  issue edit: github
+  issue keep: battery
+  issue land: battery
+  issue new: github
+  issue pull: github
+  issue resume: github
+  issue review: github
+  issue supersede: github
+  issue tree: github
+  manifest: local
+  off: instant
+  on: build
+  overhaul file: github
+  overhaul new: github
+  overhaul read: github
+  restart: build
+  retro collect: github
+  retro new: github
+  retro report: github
+  review brief: github
+  rules: local
+  serve: daemon
+  start: build
+  status: instant
+  stop: local
+  ui: instant
+  update: build
+hook_classes:
+  session.start: instant
+  classic.SessionStart: local
+  prompt.submit: local
+  command.run se: instant
+  ui.render Pane: instant
+  ui.render CommandOutput: instant
+  classic.Stop: local
+  classic.SubagentStop: local
+  '*': instant

@@ -11,17 +11,19 @@
 // clear and compact, since a plugin can ship no rules and no CLAUDE.md. /se ui
 // opens a grid of buttons: the on/off toggle and the commands se offers as
 // buttons, each labelled with its name and pressed as /se <words>, at most as
-// many to a row as se says (gridOf).
+// many to a row as se says (gridOf);
+// a press shows the short form se answers, where it has one, a transcript row
+// per line.
 // In a box, SE on or off, every Stop and SubagentStop goes to se hook stop,
-// which refuses the stop while the issue the box took is open with neither a
-// PR (auto-merge on) nor a supersede; a prompt from a person resets its count.
+// which refuses the stop while the issue the box took is open, its PR not
+// merged nor the issue superseded; a prompt from a person resets its count.
 // An interactive session runs none of it.
 // /se help draws as a layout: se answers the help as data beside its text, and
 // the command's output row draws that data, headings and two aligned columns.
 // Anything a person waits on gives feedback within a second and never blocks:
 // every call into se goes through within, which shows the call is working at
 // the one-second mark and lets the session go on; and while SE is on, each
-// call's duration is a row of the daemon's log, se.call.
+// call's duration is a row of the daemon's log, se.call, and each hook's, se.hook.
 
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
@@ -58,6 +60,8 @@ const PLUGIN_CHECKOUT = 'SE_PLUGIN_CHECKOUT'
 // What se --session answers: the text to show and the effects to apply.
 export type Reply = {
   text: string
+  // What a press of the command's button shows instead of text, where se has a short form.
+  short?: string
   active?: boolean
   endpoint?: Endpoint
   reload?: boolean
@@ -93,6 +97,7 @@ const GUIDING = 30_000
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    const began = await $.clock.now()
     await $.command.register({
       name: 'se',
       description: 'SE, the session-event daemon: /se help lists what it does',
@@ -105,10 +110,16 @@ export const register: Register = on => {
     const setup = setsUp($).catch(() => {})
     settingUp = setup
     await within($, 'updating itself', setup)
+    took($, 'session.start', began)
     return next(e)
   })
 
-  on('command.run', { command: 'se' }, async ($, e) => ({ text: await runs($, e.args) }))
+  on('command.run', { command: 'se' }, async ($, e) => {
+    const began = await $.clock.now()
+    const text = await runs($, e.args)
+    took($, 'command.run se', began)
+    return { text }
+  })
 
   // Always-on guidance: the documented way a plugin puts text into every
   // session, the SessionStart hook's additionalContext, on each source that
@@ -116,7 +127,9 @@ export const register: Register = on => {
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
     if (!GUIDED.includes(e.source)) return result
+    const began = await $.clock.now()
     const text = await guided($)
+    took($, 'classic.SessionStart', began)
     return text ? { ...result, additionalContext: [...(result.additionalContext ?? []), text] } : result
   })
 
@@ -124,6 +137,7 @@ export const register: Register = on => {
   // The pane is a grid: rows of at most `columns` cells, every cell as wide as
   // every other, so the columns align and a short last row stays to the left.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const began = await $.clock.now()
     const { Box, Button } = $.ui.resolve(e)
     const { value: isOn = false } = await $.state.get(ACTIVE)
     const { value: buttons = [] } = await $.state.get(BUTTONS)
@@ -140,6 +154,7 @@ export const register: Register = on => {
       ...buttons.map(name => <Button key={`run ${name}`} label={name} onPress={() => presses($, name)} />),
     ]
     const grid = gridOf([toggle, ...buttons], columns, e.props.bodyColumns)
+    took($, 'ui.render Pane', began)
     return (
       <Box flexDirection="column" rowGap={GAP} width={e.props.bodyColumns}>
         {grid.rows.map(row => (
@@ -159,6 +174,7 @@ export const register: Register = on => {
   // /se help's output row: the help se answered as data, drawn as a layout. A
   // row whose words carried no help, or an error, is drawn as its text.
   on('ui.render', { component: 'CommandOutput', props: { command: 'se' } }, async ($, e, next) => {
+    const began = await $.clock.now()
     if (e.props.isErrored) return next(e)
     const { value: helps = {} } = await $.state.get(HELPS)
     const help = helps[wordsOf(e.props.args).join(' ')]
@@ -217,6 +233,7 @@ export const register: Register = on => {
         </Box>,
       )
     }
+    took($, 'ui.render CommandOutput', began)
     return (
       <Box flexDirection="column" rowGap={1}>
         {parts}
@@ -229,19 +246,27 @@ export const register: Register = on => {
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
     if (!(await isBox($))) return result
+    const began = await $.clock.now()
     const block = await judges($, waits(e) ? ['--waiting'] : [])
+    took($, 'classic.Stop', began)
     return block ? { ...result, block } : result
   })
   on('classic.SubagentStop', async ($, e, next) => {
     const result = await next(e)
     if (!(await isBox($))) return result
+    const began = await $.clock.now()
     const block = await judges($, [...(waits(e) ? ['--waiting'] : []), '--agent-transcript', e.agent_transcript_path])
+    took($, 'classic.SubagentStop', began)
     return block ? { ...result, block } : result
   })
   // A person who prompts a box gives the Stop hook's refusals a fresh count.
   on('prompt.submit', async ($, e, next) => {
     const kind = e.origin?.kind
-    if ((kind === 'composer' || kind === 'bridge') && (await isBox($))) await asksPlain($, ['hook', 'prompt'])
+    if ((kind === 'composer' || kind === 'bridge') && (await isBox($))) {
+      const began = await $.clock.now()
+      await asksPlain($, ['hook', 'prompt'])
+      took($, 'prompt.submit', began)
+    }
     return next(e)
   })
 
@@ -250,6 +275,7 @@ export const register: Register = on => {
   // switched SE on, dropped if not.
   on('*', async ($, e, next) => {
     if (next.is('engine.create', e) || (!active && !settingUp)) return next(e)
+    const began = await $.clock.now()
     if (!active) {
       if (waiting.length < WAITING_CAP) waiting.push(bodyOf(await $.session.id(), next.event, e, await $.clock.now()))
       return next(e)
@@ -259,6 +285,7 @@ export const register: Register = on => {
       'reaching its daemon',
       forwards($, next.event, e).catch(() => {}),
     )
+    took($, '*', began)
     return next(e)
   }).catch(($, e, next) => next(e))
 }
@@ -318,6 +345,19 @@ async function timed<T>($: EngineInterface, words: string[], call: () => Promise
     const ms = (await $.clock.now()) - began
     if (active) await forwards($, 'se.call', { words, ms }).catch(() => {})
   }
+}
+
+// Records how long a hook took since began on the clock, while SE is on, as
+// an se.hook row of the daemon's log, without waiting on the post. A hook
+// measures its own work up to handing the event on. spec/budgets.yaml gives
+// each hook a class by the name it passes here, and se rules fails on a hook
+// it does not.
+function took($: EngineInterface, hook: string, began: number): void {
+  const to = endpoint
+  if (!active || !to) return
+  void Promise.all([$.clock.now(), $.session.id()])
+    .then(([now, session]) => posts($, to, bodyOf(session, 'se.hook', { hook, ms: now - began }, now)))
+    .catch(() => {})
 }
 
 // Brings the checkout the plugin was loaded from to the newest main, whether or
@@ -435,19 +475,19 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
 // /se <words>: hands the words to se and applies its reply; answers the text
 // to show. One se does not answer within FEEDBACK answers that it is working,
 // and its answer follows as a line of the transcript.
-async function runs($: EngineInterface, args: string): Promise<string> {
+async function runs($: EngineInterface, args: string, pressed = false): Promise<string> {
   const words = wordsOf(args)
   const typed = ['/se', ...words].join(' ')
-  const ran = await within($, typed, answers($, words))
+  const ran = await within($, typed, answers($, words, pressed))
   if (ran.done) return ran.value
-  void ran.later.then(text => $.ui.log(text))
+  void ran.later.then(text => logs($, text))
   return `${typed} is still working; its answer follows here.`
 }
 
-// Hands the words to se and applies its reply; answers the text to show.
-// Help se answered is kept for the output row to draw; a line that no longer
-// answers help draws as its text.
-async function answers($: EngineInterface, words: string[]): Promise<string> {
+// Hands the words to se and applies its reply; answers the text to show, the
+// short form se answered where a button was pressed. Help se answered is kept
+// for the output row to draw; a line that no longer answers help draws as its text.
+async function answers($: EngineInterface, words: string[], pressed: boolean): Promise<string> {
   const asked = await asks($, words)
   if (typeof asked === 'string') return asked
   const key = words.join(' ')
@@ -457,7 +497,7 @@ async function answers($: EngineInterface, words: string[]): Promise<string> {
     const { [key]: _, ...rest } = helps
     await $.state.set(HELPS, rest)
   }
-  return applies($, asked)
+  return applies($, pressed && asked.short ? { ...asked, text: asked.short } : asked)
 }
 
 // The cells between two cells of the pane's grid, across and down.
@@ -484,11 +524,20 @@ function wordsOf(args: string): string[] {
   return args.split(/\s+/).filter(Boolean)
 }
 
-// A press runs what typing /se <words> runs; its answer is a line of the
-// transcript, where a command's answer shows. (A plugin's $.command.run skips
-// the plugin's own hooks, so it cannot reach /se.)
+// A press runs what typing /se <words> runs, and shows se's short form where
+// it has one; its answer goes to the transcript, where a command's answer
+// shows. (A plugin's $.command.run skips the plugin's own hooks, so it cannot
+// reach /se.)
 async function presses($: EngineInterface, words: string): Promise<void> {
-  $.ui.log(await runs($, words))
+  logs($, await runs($, words, true))
+}
+
+// Writes an answer to the transcript, a row per line. $.ui.log is the one call
+// every surface draws as a transcript row, the terminal, the desktop app and
+// the phone alike, and it draws one line: the terminal flattens a newline in
+// it (to ◆ on Windows). So each line is its own call, and a blank line none.
+function logs($: EngineInterface, text: string): void {
+  for (const line of text.split(/\r?\n/)) if (line.trim()) $.ui.log(line)
 }
 
 // Switches SE on and starts the daemon; answers why the daemon did not start, or ''.
