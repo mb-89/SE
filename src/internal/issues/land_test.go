@@ -132,10 +132,11 @@ func profiles(t *testing.T, d disk.Disk, p battery.Profile) func(string) error {
 }
 
 var profile = battery.Profile{
-	TotalMs:  1234,
-	Steps:    []battery.Step{{Name: "go test", Ms: 1234}},
-	Slowest:  []battery.Test{{Package: "p", Name: "TestSlow", Ms: 900}},
-	Overruns: []string{"step go test took 1234ms, over its budget of 1000ms"},
+	TotalMs:       1234,
+	Steps:         []battery.Step{{Name: "go test", Ms: 1234}},
+	Slowest:       []battery.Test{{Package: "p", Name: "TestSlow", Ms: 900}},
+	SlowestPlugin: []battery.Test{{Package: "tests/se.test.ts", Name: "a slow hook", Ms: 150}},
+	Overruns:      []string{"step go test took 1234ms, over its budget of 1000ms"},
 }
 
 func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
@@ -152,7 +153,7 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 	if want := "body=Fixes #6\n\n" + profile.Markdown(); opened != want {
 		t.Errorf("the PR body is\n%s\nwant\n%s", opened, want)
 	}
-	for _, want := range []string{"Total: **1234ms**", "| TestSlow | p | 900 |", "**Over budget:** step go test took 1234ms"} {
+	for _, want := range []string{"Total: **1234ms**", "| TestSlow | p | 900 |", "| a slow hook | tests/se.test.ts | 150 |", "**Over budget:** step go test took 1234ms"} {
 		if !strings.Contains(opened, want) {
 			t.Errorf("the PR body lacks %q", want)
 		}
@@ -162,6 +163,7 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 		t.Fatalf("%v %v", ok, err)
 	}
 	if got.Facts.BatteryMs != 1234 || !reflect.DeepEqual(got.Facts.Slowest, []string{"p TestSlow 900ms"}) ||
+		!reflect.DeepEqual(got.Facts.SlowestPlugin, []string{"tests/se.test.ts a slow hook 150ms"}) ||
 		!reflect.DeepEqual(got.Facts.Overruns, profile.Overruns) {
 		t.Errorf("facts = %+v", got.Facts)
 	}
