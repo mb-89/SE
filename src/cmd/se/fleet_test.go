@@ -14,12 +14,12 @@ import (
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
-// recordedFleet answers the fleet commands' gh calls for o/r: #3 is ready,
+// recordedFleet answers the fleet commands' gh calls for o/r: #3 is a manifest,
 // nothing is claimed, and nothing is broken.
 func recordedFleet(t *testing.T) *github.Fake {
 	t.Helper()
 	answers := map[string]string{
-		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3"}]`,
+		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3","labels":[{"name":"se"},{"name":"se-manifest"}]}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[]`,
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
