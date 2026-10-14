@@ -333,10 +333,11 @@ successor fires the routine once (with `--json`:
 
 In a box (a cloud session no person attends, as the routine starts it), the
 plugin hands every Stop and SubagentStop to `se hook stop`, which refuses the
-stop while the box's issue is open with neither an open PR from its branch,
-auto-merge on, nor a supersede, and says which is missing. The box's issue is
-the one `se issue pull --take` took (a parent's box coordinates and closes
-nothing itself); a leaf's sub-agent is held to the leaf its prompt names. It
+stop while any issue the box took is open with neither an open PR from its
+branch, auto-merge on, nor a supersede, naming each and what it misses. The
+box's issues are every one `se issue pull --take` took (a parent's box
+coordinates and closes nothing itself); a leaf's sub-agent is held to the leaf
+its prompt names. It
 is enforcement, so it fails closed: only what GitHub shows lets the box end.
 Its escape hatches: a box waiting on background work passes; it refuses at
 most `refusals` times in a row ([spec/stop.yaml](stop.yaml)); a prompt from a

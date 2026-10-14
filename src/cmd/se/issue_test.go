@@ -425,7 +425,7 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// The take is recorded for the Stop hook, which holds the box to closing #3.
-	if data, err := os.ReadFile(filepath.Join(ws, ".se", ".runtime", "box.json")); err != nil || string(data) != `{"issue":3}` {
+	if data, err := os.ReadFile(filepath.Join(ws, ".se", ".runtime", "box.json")); err != nil || string(data) != `{"issues":[3]}` {
 		t.Fatalf("%q %v", data, err)
 	}
 	// #3 is now claimed on origin, but the recorded refs do not say so: the
