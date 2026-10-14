@@ -177,8 +177,10 @@ func TestIssueSupersedeReadsItsWords(t *testing.T) {
 	for args, want := range map[string]string{
 		"":                                 "takes one issue number",
 		"3 4 --body q":                     "takes one issue number",
-		"3":                                "one of --body and --body-file",
-		"3 --body q --body-file f":         "one of --body and --body-file",
+		"3":                                "one of --body, --body-file and --duplicate-of",
+		"3 --body q --body-file f":         "one of --body, --body-file and --duplicate-of",
+		"3 --duplicate-of x":               "--duplicate-of takes one issue number",
+		"3 --duplicate-of 4 --body q":      "takes no open questions",
 		"x --body q":                       "takes one issue number",
 		"5 --body q --repo o/r --json=bad": "",
 	} {
