@@ -71,6 +71,7 @@ func shallow(t *testing.T) (origin, clone string) {
 }
 
 func TestAShallowCloneIsPulledAndRebuilt(t *testing.T) {
+	t.Parallel()
 	origin, clone := shallow(t)
 	out := filepath.Join(clone, "src", "plugin", "bin", "se")
 	r, err := update.Run(drive, machine, clone, out)
@@ -86,6 +87,7 @@ func TestAShallowCloneIsPulledAndRebuilt(t *testing.T) {
 }
 
 func TestACurrentCheckoutIsNotRebuilt(t *testing.T) {
+	t.Parallel()
 	origin, clone := shallow(t)
 	run(t, clone, "pull", "-q", "--ff-only", "origin", "main")
 	out := filepath.Join(clone, "se")
@@ -99,6 +101,7 @@ func TestACurrentCheckoutIsNotRebuilt(t *testing.T) {
 }
 
 func TestAFailedPullIsAnErrorThatTouchedNothing(t *testing.T) {
+	t.Parallel()
 	origin, clone := shallow(t)
 	if err := os.RemoveAll(origin); err != nil {
 		t.Fatal(err)
@@ -232,6 +235,7 @@ func TestAnUpdateRefusesUncommittedWork(t *testing.T) {
 }
 
 func TestACheckoutIsKnownByItsModule(t *testing.T) {
+	t.Parallel()
 	for mod, want := range map[string]bool{
 		"module github.com/mb-89/SE\n\ngo 1.24\n": true,
 		"// SE\nmodule \"github.com/mb-89/SE\"\n": true,

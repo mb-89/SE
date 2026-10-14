@@ -49,6 +49,7 @@ func workspace(t *testing.T, steps, budgetsYAML string) (disk.Disk, string) {
 }
 
 func TestTheReportListsEveryDurationAndTheSlowestTests(t *testing.T) {
+	t.Parallel()
 	d, dir := workspace(t, "biome\t40\ngo test\t420\n", budgets)
 	var summary bytes.Buffer
 	p, err := battery.Report(d, dir, &summary)
@@ -88,6 +89,7 @@ func TestTheReportListsEveryDurationAndTheSlowestTests(t *testing.T) {
 }
 
 func TestASoftBudgetOverrunIsReportedButPasses(t *testing.T) {
+	t.Parallel()
 	d, dir := workspace(t, "biome\t40\ngo test\t1200\n", budgets)
 	var summary bytes.Buffer
 	p, err := battery.Report(d, dir, &summary)
@@ -107,6 +109,7 @@ func TestASoftBudgetOverrunIsReportedButPasses(t *testing.T) {
 }
 
 func TestAHardBudgetOverrunFails(t *testing.T) {
+	t.Parallel()
 	d, dir := workspace(t, "go test\t1200\n", strings.Replace(budgets, "go test: {ms: 500, hard: false}", "go test: {ms: 500, hard: true}", 1))
 	p, err := battery.Report(d, dir, nil)
 	if err == nil || !strings.Contains(err.Error(), "step go test took 1200ms") {
@@ -118,18 +121,21 @@ func TestAHardBudgetOverrunFails(t *testing.T) {
 }
 
 func TestNoProfileIsNoError(t *testing.T) {
+	t.Parallel()
 	if _, ok, err := battery.Load(disk.NewFake(), filepath.FromSlash("/ws")); ok || err != nil {
 		t.Errorf("Load of an empty workspace = %v, %v", ok, err)
 	}
 }
 
 func TestAStepLineThatIsNoStepIsRefused(t *testing.T) {
+	t.Parallel()
 	if _, err := battery.ParseSteps(strings.NewReader("biome 40\n")); err == nil {
 		t.Error("a step without a tab was read")
 	}
 }
 
 func TestRelayShowsPackagesAndFailuresAndKeepsEveryEvent(t *testing.T) {
+	t.Parallel()
 	var out, raw bytes.Buffer
 	if err := battery.Relay(strings.NewReader(events+"not json\n"), &out, &raw); err != nil {
 		t.Fatal(err)
@@ -143,6 +149,7 @@ func TestRelayShowsPackagesAndFailuresAndKeepsEveryEvent(t *testing.T) {
 }
 
 func TestTheBudgetsFileBudgetsEveryStepOfTheBattery(t *testing.T) {
+	t.Parallel()
 	// This reads the checkout's own files, so it reads the real disk.
 	b, err := battery.ReadBudgets(disk.Real(), "../../..")
 	if err != nil {

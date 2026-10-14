@@ -16,6 +16,7 @@ import (
 // them again. Without one it is skipped, since no repository SE works in is
 // written to by a test.
 func TestTheRealGitHubKeepsTheContract(t *testing.T) {
+	t.Parallel()
 	repo := os.Getenv("SE_GITHUB_CONTRACT_REPO")
 	if repo == "" {
 		t.Skip("SE_GITHUB_CONTRACT_REPO names no repository to write to")
