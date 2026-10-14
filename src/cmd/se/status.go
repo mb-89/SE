@@ -15,7 +15,9 @@ func init() {
 		Usage:   "status",
 		Group:   "Session",
 		Summary: "say whether a daemon answers, and which commits SE came from",
-		Details: "say whether a daemon answers for this workspace, and which commits the session's SE came from: one line where the hooks, the plugin's checkout and se agree; where they disagree, a short line per commit and the remedy, a new session, once.",
+		Details: []string{
+			"say whether a daemon answers for this workspace, and which commits the session's SE came from: one line where the hooks, the plugin's checkout and se agree; where they disagree, a short line per commit and the remedy, a new session, once.",
+		},
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {

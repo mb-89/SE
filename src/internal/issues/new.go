@@ -3,6 +3,8 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +33,44 @@ func ParseBlockedBy(s string) ([]int, error) {
 		if !seen[n] {
 			seen[n] = true
 			out = append(out, n)
+		}
+	}
+	sort.Ints(out)
+	return out, nil
+}
+
+// mention is an issue a text names, "#12": not "o/r#12", another
+// repository's, nor "&#39;", an HTML entity.
+var mention = regexp.MustCompile(`(?:^|[^\w&/])#(\d+)\b`)
+
+// Mentions names, lowest first and once each, the issues text names as #N.
+func Mentions(text string) []int {
+	var out []int
+	for _, m := range mention.FindAllStringSubmatch(text, -1) {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 && !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// Unmerged names, lowest first, the open se issues among numbers: work that
+// is not on main yet, so an issue that names them is built on it unless it
+// waits for them. It reads the open fleet once, and nothing where numbers is
+// empty.
+func (s Source) Unmerged(numbers []int) ([]int, error) {
+	if len(numbers) == 0 {
+		return nil, nil
+	}
+	open, err := api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=100", s.Repo, Label), true)
+	if err != nil {
+		return nil, err
+	}
+	var out []int
+	for _, i := range open {
+		if i.PullRequest == nil && slices.Contains(numbers, i.Number) {
+			out = append(out, i.Number)
 		}
 	}
 	sort.Ints(out)

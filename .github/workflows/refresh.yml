@@ -1,0 +1,35 @@
+# Merges main into each open manifest's branch whenever main moves, so its
+# leaves meet main's moves once, through the manifest, not each as its own
+# conflict (spec/coordination.md).
+name: refresh
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: read
+  pull-requests: read
+concurrency:
+  group: refresh
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          # The merge needs the history main and each branch share.
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
+      - run: sh src/build.sh se
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      # Its output names every manifest it merged main into, and each that conflicts.
+      - run: ./se fleet refresh --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
