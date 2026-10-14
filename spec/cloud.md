@@ -63,4 +63,6 @@ but not the hooks module that is already running; whether watching the plugin
 folder (`CLAUDE_CODE_PLUGIN_DIR_WATCH=1`) reloads them has not been seen on a
 box (#28). New behaviour therefore belongs in `se`, not in the hooks.
 `/se status` names the commits the loaded hooks, the plugin's checkout and the
-running `se` came from, and whether they agree.
+running `se` came from, and whether they agree: one line where they agree;
+where they disagree, a short line per commit and the remedy, a new session,
+once.
