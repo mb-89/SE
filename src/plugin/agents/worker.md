@@ -13,6 +13,11 @@ Your prompt names the issue `#<n>`, its worktree `<path>`, the `se` to call
 (`<se>`) and the issue's text, which is the whole specification. Run every
 command in `<path>`.
 
+You reach GitHub only through `<se>`, and only twice: the take that started
+you, and your land (or supersede, or close) at the end. In between you work
+locally: commit, `git fetch`, merge `origin/main`. Never the GitHub CLI or MCP
+tools or the API, and never a comment, a label or a push by hand.
+
 1. Do the issue's work on its branch `issue-<n>`, following CLAUDE.md. If the
    take says it took over a conflicted or stuck branch, merge `origin/main`
    into it first (never rebase), resolve the conflict, and continue it. The
@@ -46,17 +51,14 @@ command in `<path>`.
    merge with main that conflicts, a failing check), fix it on the same
    branch (merge `origin/main` in, never rebase), commit, bring the answers up
    to date, run the same `issue land` again, and keep the PR again.
-5. Anything that belongs in a separate change becomes an issue through
-   `<se> issue new` (its `--blocked-by` is required: a list, or `none`;
-   `--parent` files it into a manifest, your issue's own where it belongs
-   there; without it, it goes into the open misc manifest).
+5. **Never open an issue**: a box opens none, and `<se> issue new` refuses
+   in one. What you cannot finish goes into a supersede (step 6), which
+   carries it. Decide what you can yourself, and name the decision in the
+   landing answers.
 6. **You close the issue you took, always**, in one of three ways and no
    other:
    - **a landing** of what you solved with `<se> issue land` (into your
      manifest's branch, or a PR with auto-merge on, kept until it merges),
-     and an issue through `<se> issue new` for everything you could not
-     solve. Of the issues your take said yours blocks, name in `--blocks`
-     only those that need what you left over, so nothing waits that need not;
      or
    - **a supersede**, where you can land no PR at all:
      `<se> issue supersede <n> --body-file F`, F holding the open questions

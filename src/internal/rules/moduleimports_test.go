@@ -18,6 +18,7 @@ func TestAComputeModuleImportsTheContractTheLibrariesAndThePureStandardLibrary(t
 		"src/modules/io/disk/read.go":          "package disk\n\nimport \"os\"\n\nvar _ = os.ReadFile\n",
 		"src/lib/text/text.go":                 "package text\n\nimport \"os/exec\"\n",
 		"src/internal/a/a.go":                  "package a\n\nimport \"os\"\n",
+		"src/internal/io/clock/owns.yaml":      clockDoor,
 	})
 	same(t, found, []string{
 		"src/lib/text/text.go:3: module-imports: a library imports os/exec",

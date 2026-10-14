@@ -79,7 +79,7 @@ func moduleImports(repo *Repo, p string, text []byte) []Finding {
 			return true
 		}
 		if id, ok := sel.X.(*ast.Ident); ok && id.Name == timeName {
-			for _, name := range outsideCalls["time"] {
+			for _, name := range doorsOf(repo).membersOf("time") {
 				if sel.Sel.Name == name {
 					refuse(sel.Pos(), fmt.Sprintf("%s reads the clock or waits through time.%s: only the clock's I/O module does (spec/index.md)", what, name))
 				}

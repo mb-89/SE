@@ -5,7 +5,7 @@ Reader: whoever changes how the fleet picks, claims, nests, lands or reviews its
 SE's work items are GitHub issues. These rules say which issue a box may work
 on next, how it claims it, and how issues and their dependencies are created.
 They live here and nowhere else; `se issue pull`, `se issue new`,
-`se issue land`, `se issue review`, `se issue resume` and `se issue tree` (in
+`se issue land`, `se issue review` and `se issue tree` (in
 `src/internal/issues`) are their one implementation, so the
 choice is deterministic and no prompt restates it.
 
@@ -44,30 +44,31 @@ choice is deterministic and no prompt restates it.
 - **Order**: any conflicted claim first (below), then stuck work (see
   [Stuck work](#stuck-work)), then the lowest issue number among the ready
   ones.
-- **Conflicted claims are taken over at once.** GitHub runs no CI on a PR
-  that conflicts with main and sends nothing that wakes its box, so a
-  conflicted claim would sit forever. Before offering anything else,
-  `se issue pull --take` looks at every claimed leaf's open PR; one GitHub
-  reports as not mergeable (`mergeable` false, `mergeable_state` `dirty`) is
-  taken next, whatever its age. A `null` `mergeable` means GitHub has not
+- **Conflicted claims are taken over once their lease runs out.** GitHub
+  runs no CI on a PR that conflicts with main and sends nothing that wakes its
+  box, so a conflicted claim would sit forever. Before offering anything
+  else, `se issue pull --take` looks at the open PR of every claimed leaf
+  whose branch saw no push within the lease (see [Stuck work](#stuck-work));
+  one GitHub reports as not mergeable (`mergeable` false, `mergeable_state`
+  `dirty`) is taken next. A branch pushed to within the lease is refused,
+  its PR not asked, and the take offers the next issue: a live box works it,
+  and two boxes resolving one conflict do the work twice and race their
+  pushes. A `null` `mergeable` means GitHub has not
   computed it yet: `se` asks again shortly, and while it stays `null` it is no
   conflict. The box taking it checks out `issue-<n>` as it stands, merges
   `origin/main` into it (never a rebase, never a force-push), resolves the
   conflict and lands it again with `se issue land`.
-- **A conflict is no failure.** While main merges fast, a PR conflicts again
-  after its takeover through no fault of its box, so a conflict takeover
-  never makes an issue final, and a conflict on an issue that is already
-  `se-final` is taken over as any other: only a stuck takeover and a review's
-  fix make an issue final (see [spec/review.md](review.md), rule 5). A
-  takeover is recorded as a comment carrying the marker
-  `<!-- se:takeover N -->` (stuck work writes the same marker); a conflict
-  takeover also records the PR head it found, `<!-- se:takeover-head SHA -->`.
-  A PR still conflicted at that same head is a takeover in flight and is left
-  to its box. Of two boxes writing the same `N` at once, the earlier comment
+- **A conflict is no failure.** Main moves while a PR waits, so a conflict
+  takeover never makes an issue final, and a final issue in conflict is taken
+  over like any other. A conflict takeover records itself as a comment
+  carrying the marker `<!-- se:takeover N -->` (stuck work writes the same
+  marker) and the PR head it found, `<!-- se:takeover-head SHA -->`. A PR
+  still conflicted at that same head is a takeover in flight and is left to
+  its box. Of two boxes writing the same `N` at once, the earlier comment
   wins and the other box deletes its own.
 - **Waits on a person**: an issue labelled `se-person` is never ready. Only
   issues minted for a person carry it (`se issue new --person`, and the issues
-  se mints below and in [retro.md](retro.md)); every other issue that needs a
+  in [retro.md](retro.md)); every other issue that needs a
   person waits on one of those through a native "blocked by" link. No run
   waits on a person: a box, a retro and an overhaul always end.
 - **Done**: a leaf inside a manifest is closed by its landing into the
@@ -106,9 +107,10 @@ the owner's account for an hour.
   `se-misc`: it takes new issues for the target time from its creation and
   while its PR is not open; after that the next one opens, and the old one
   lands once its leaves are done. What se files itself (the retro's, the
-  overhaul's, a review's non-blocking findings, `se fleet fix`'s reports, a
-  supersede of a bare issue) goes the same way. An issue for a person, a
-  retro and an overhaul stand at the top by themselves.
+  overhaul's, a review's non-blocking findings, a supersede of a bare issue)
+  goes the same way, and `se fleet fix` moves a bare issue there by a
+  sub-issue link, filing nothing of its own. An issue for a person, a retro
+  and an overhaul stand at the top by themselves.
 - **Boxes take only manifests.** At the top, `se issue pull --take` offers a
   manifest (a parent), a retro or an overhaul, never a bare leaf (with
   `--json`: its `bare`); a claimed bare leaf from before is still taken over
@@ -195,10 +197,9 @@ follows from its structure alone:
 ## Stuck work
 
 A box can stall: its session dies, or it waits forever. Its issue then stays
-claimed, and the queue behind it stops. Releasing and escalating stuck work is
-mechanical, done inside `se issue pull` by every box, never left to an
-agent's memory. Work that needs a decision waits on an **issue for a
-person**, and leaves the agents' queue until the person has closed it.
+claimed, and the queue behind it stops. Releasing stuck work is mechanical,
+done by every box's take, never left to an agent's memory. Agents decide:
+nothing mints an issue for a person on a box's behalf.
 
 - **Stuck** is decided by a timer, not judgment. A claimed leaf (claimed at
   the top or with `--in`) is stuck when nothing has been pushed to its branch
@@ -217,53 +218,42 @@ person**, and leaves the agents' queue until the person has closed it.
   as it stands, inside a tree its worktree command checks it out. `se`
   records the takeover on the issue as a comment carrying the marker
   `<!-- se:takeover <round> -->`, and labels it `se-final`, the single record
-  that it was taken over stuck. Of two boxes taking over one issue, the first
-  comment of the round wins; the other deletes its own and moves on. A
-  takeover renews the lease, and se fleet check's hour of quiet with it: both
-  read a claim's activity as its last push or its last takeover, whichever is
-  later, so a box that has just taken an issue over is not found stuck.
-- **Final and stuck: an issue for a person.** A leaf labelled `se-final`
-  (taken over once already, or filed by a review) that is stuck is never
-  labelled `se-person` itself. `se` mints an issue for a person, "Decide how
-  #n goes on", labelled `se-person` and assigned to the repository owner (so
-  GitHub notifies them), and links #n as blocked by it: the one link `se`
-  writes on an issue that already exists, since no box is left to write it.
-  #n gets a comment saying why, with the markers `<!-- se:person -->` and
-  `<!-- se:resume -->`, and loses `se-final`: once the person closes their
-  issue, #n is back in the queue for a fresh attempt. The issue for a person
-  carries `<!-- se:holds n -->` in its body; once #n closes anyway, it is
-  moot, and every `se issue` command (where it closes finished parents)
-  closes it with a comment. This sweep runs inside
-  every `se issue pull`. A claim waiting on its blockers is not stuck; once
+  that it was taken over stuck (see [spec/review.md](review.md), rule 5). Of two boxes taking over one issue, the first comment of the
+  round wins; the other deletes its own and moves on. A takeover renews the
+  lease, and se fleet check's hour of quiet with it: both read a claim's
+  activity as its last push or its last takeover, whichever is later, so a
+  box that has just taken an issue over is not found stuck.
+- **Final and stuck: taken over again.** A leaf labelled `se-final` (taken
+  over once already, or filed by a review) that is stuck is taken over like
+  any other stuck leaf, and its box ends it as every box does (below).
+  Nothing mints an issue for a person on its behalf. The survey that finds
+  stuck work only reads ([principle 6](principles.md)): `se issue pull`, the
+  briefing and `se fleet check` write nothing while they look; only the take
+  writes its takeover. A claim waiting on its blockers is not stuck; once
   they close, its old push makes it stuck at once, and the next box takes it
   over. `se issue pull` never offers an `se-person` issue, or a tree
-  containing one (at the top, nor with `--in`). #n's dependents stay blocked
-  through their native links.
+  containing one (at the top, nor with `--in`). The `<!-- se:person -->` and
+  `<!-- se:resume -->` marks an older `se` wrote are still read, as history:
+  a resume mark resets the takeover count.
 - **A box that takes an issue closes it, always** (the owner's rule,
   2026-10-14). It ends in one of three ways and no other: a PR for what it
   solved, auto-merge on (`se issue land`) and kept until it merges
-  (`se issue keep`), with an issue (`se issue new`) for
-  everything it could not solve; a supersede (`se issue supersede <n>`),
-  where it cannot land a PR at all, `--duplicate-of` another open issue
-  whose PR already covers its work; or, where the issue's work reached main
-  before the take, a close naming that commit
+  (`se issue keep`); a supersede (`se issue supersede <n>`), where it cannot
+  land a PR at all, carrying what is left, `--duplicate-of` another open
+  issue whose PR already covers its work; or, where the issue's work reached
+  main before the take, a close naming that commit
   (`se issue close <n> --fixed-by SHA`), so a moot issue ends without an
-  empty PR. `se issue pull --take` names the open
-  issues the taken one blocks; the box names in `--blocks` those of them that
-  need what it left over, and only those, so nothing waits that need not. An
-  issue for a person (`se issue new --person`) is never a way for a box to
-  end: it is only a side issue, for access or a principle. The plugin's Stop
-  hook holds a box to the rule (see [The Stop hook](#the-stop-hook)).
+  empty PR. A box opens no issue (the owner's rule, 2026-10-14):
+  `se issue new` refuses in one, before it asks GitHub anything, and only
+  retros, reviews and overhauls file issues, through their own commands. The
+  plugin's Stop hook holds a box to the rule (see
+  [The Stop hook](#the-stop-hook)).
 - **The person's side:**
   - `se issue pull --person` lists every issue waiting on a person, with its
     reason and how many open issues it holds up, directly or through a tree.
   - The person decides, says so on the issue, and closes it; what it blocked
-    goes on.
-  - `se issue resume <n>` is for an issue labelled `se-person` by hand, or
-    before issues for a person existed: it removes the label, and `se-final`
-    with it, and puts the issue back in the queue, its takeover count reset
-    (a comment with the marker `<!-- se:resume -->`). A claim still stale is
-    then taken over by the next box, as a first takeover.
+    goes on. An issue labelled `se-person` by hand is back in the queue once
+    the person takes the label off.
 
 ## The commands
 
@@ -275,7 +265,6 @@ se issue keep [--for D] [--json] [--repo OWNER/NAME]
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
 se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--not-blocked N,M] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]
-se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
 se issue supersede N (--body B | --body-file PATH | --duplicate-of M) [--json] [--repo OWNER/NAME]
 se issue tree [ROOT] [--json] [--repo OWNER/NAME]
@@ -294,10 +283,9 @@ cadences in one. Every issue text `se` prints, a take's body and `--json`'s
 among them, leaves out `se`'s machine marks (`<!-- … -->`) and the
 attribution footer (`issues.Shown`). Without `--take` it takes
 nothing, so a person can pull the next issue to read it: it pushes no branch,
-fires no routine, and writes only what every `se issue` command and the sweep
-write. A stuck leaf is marked as one
-(with `--json`: `"takeover": true`). Each issue its sweep gave to a person is
-named in a line before the answer (with `--json`: the field `flagged`). A parent is
+fires no routine, and writes only what every `se issue` command writes. A
+stuck leaf is marked as one
+(with `--json`: `"takeover": true`). A parent is
 marked as one (with `--json`: `"parent": true`), with the command that
 coordinates it. A session has it as
 `/se issue pull`.
@@ -312,16 +300,15 @@ refuses an issue that is not ready, or a sub-issue that is no stuck leaf,
 and says why. There is no
 separate `take` command. Taking a parent whose branch exists already checks
 that branch out: the tree is picked up from its claim. Plain `--take` first
-takes over a conflicted claim (see [The rules](#the-rules)): it prints
+takes over a conflicted claim whose lease ran out (see [The rules](#the-rules)): it prints
 `Took over #<n> …` with the PR, and the instruction to merge `origin/main`
 into the branch and land it again (with `--json`: the issue's `takeover`,
 `{"pr","url","count","why","answers"}`). `--take N` takes over claimed leaf `N`, at
 any depth, where `se fleet check` finds it stuck (a conflicted or red PR, or
 no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.md)),
 or where it is stuck past the lease, so every takeover remedy the check names
-runs; labelled `se-final` and stuck (not merely conflicted), it waits on an
-issue for a person instead. A claim whose work is moving, pushed to or taken
-over within the hour, is refused.
+runs, labelled `se-final` or not. A claim whose work is moving, pushed to
+or taken over within the hour, is refused.
 Every takeover, at the top or with `--in`, writes the landing answers the
 issue's last land posted on it (see [Landing answers](#landing-answers)) back
 to the answers file beside the branch's checkout, `<path>-landing.yaml` where
@@ -355,6 +342,12 @@ issue's kind (with `--json`: the field `agent`). Where the box (its session) alr
 its cap of sub-agents, `--worktree` and `--in ROOT --take` take nothing and
 say so (with `--json`: `{"ready":false,"full":true,"why"}`). It also names the open issues the taken one blocks (with
 `--json`: the issue's `blocks`), for `se issue new --blocks`.
+The worktree command starts from the newest of the branch and main, so a
+takeover or a fresh take never works on a stale copy: it fetches `main` and
+the branch, fast-forwards the box's `issue-<n>` to `origin/issue-<n>` (making
+the branch, and the worktree, where the box has none), and merges
+`origin/main` into it; a merge that conflicts is aborted, leaving the branch
+as origin has it for its agent to merge main into.
 
 `se issue pull --in ROOT` names what is ready inside ROOT's tree: its stuck
 leaves to take over, then its ready leaves, at any depth, lowest number first,
@@ -471,7 +464,7 @@ its `--parent` and
 the issues `--blocks` names need neither. The
 body comes from `--body` or from `--body-file`, one of them. `--review` labels
 it `se-review` as well (see [Reviews](#reviews)), and `--final` labels it
-`se-final`, its last attempt before a person (see
+`se-final`, its last attempt (see
 [spec/review.md](review.md), rule 5). `--person` makes it an issue for a
 person: labelled `se-person` and assigned to the owner (it takes neither
 `--review` nor `--final`); its body opens with what they decide. `--blocks
@@ -481,6 +474,8 @@ issue it created (every issue in `--blocked-by` is closed, or it is `none`),
 it runs the fan-out (below) and adds a line saying what it did (with
 `--json`: the field `fanout`); otherwise a new ready issue could wait for the
 next merge or the schedule. A blocked issue fires nothing.
+In a box it refuses, writing nothing and asking GitHub nothing: a box opens
+no issue (see [Stuck work](#stuck-work)).
 A session has it as `/se issue new`.
 
 `se issue edit N` is how an `se` issue changes after it is made, never by
@@ -567,9 +562,7 @@ and [spec/review.md](review.md). A session has them as `/se issue review` and
 `se issue pull --person` lists every open issue labelled `se-person`, each
 with its reason and how many open issues it blocks, directly or through a tree
 (with `--json`: a list of `{"number","title","url","reason","blocks"}`), or
-says that none waits on a person. `se issue resume N` is the person's, for an
-issue labelled `se-person` by hand or before issues for a person existed: it
-refuses an issue not labelled `se-person`; see [Stuck work](#stuck-work).
+says that none waits on a person; see [Stuck work](#stuck-work).
 
 `se issue tree` lists every open se issue, each indented under its parent,
 one line each: number, state, where it stands (ready, claimed, blocked and by
@@ -603,7 +596,7 @@ hour, idle hours and all. With `--json` it answers
 and the queue's numbers (`open`, `in_flight`, `stuck`, `pace`, `parallel`,
 `critical_path`, `p50_hours`, `p90_hours`, `p50_at`, `p90_at`, `pace_hours`,
 or `why` there is no estimate). The briefing gives its one line under Next. It changes
-nothing but what every `se issue` command and the sweep write. A session has
+nothing but what every `se issue` command writes. A session has
 it as `/se issue tree`.
 
 They read and write GitHub through `gh api` (the links through
@@ -634,7 +627,10 @@ through `se`, with every verdict on the reviewed issue's thread.
   blocking finding becomes an `se-final` sub-issue of N, made as
   `se issue new --parent N --blocked-by none --final` would, its body the
   finding. N stays open: the fixes are work inside it, and once they have
-  landed it is ready for review again, as a re-review.
+  landed it is ready for review again, as a re-review. A re-review finding
+  that repeats an earlier blocker is an accepted repeat: it files nothing,
+  the report names it, and a fail whose blocking findings are all repeats
+  closes N as a pass does.
 - **Either way**, the non-blocking findings (at most `issues/config/max-filed`) become `se-final`
   issues in the normal queue.
 - **Who worked a leaf** is recorded by `se issue land`: a comment on the leaf,
@@ -714,7 +710,7 @@ cost a fire of the routine (whose limit the fan-out ran into on 2026-10-14).
   branch saw a push within the lease, the box named by its last
   `<!-- se:box -->` comment. Its sub-agent counts against the cap until the
   claim's PR has auto-merge on. A claim with no box comment counts as a box of
-  its own at its cap. A box that dies is left to the stuck sweep: its claims
+  its own at its cap. A box that dies is left to the stuck rule: its claims
   are taken over once their lease runs out.
 
 ### Fan-out

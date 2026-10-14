@@ -197,7 +197,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: close, edit, keep, land, new, pull, resume, review, supersede, tree." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: close, edit, keep, land, new, pull, review, supersede, tree." {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -205,7 +205,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	t.Parallel()
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: close, edit, keep, land, new, pull, resume, review, supersede, tree." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: close, edit, keep, land, new, pull, review, supersede, tree." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -215,7 +215,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue pull, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: close, edit, keep, land, new, pull, resume, review, supersede, tree.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: close, edit, keep, land, new, pull, review, supersede, tree.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -557,7 +557,7 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires", code, fires(t))
 	}
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || fires(t) != 1 || !strings.HasPrefix(out, "Took #3 three, on branch issue-3.\nu3\nIts agent: se:coordinator.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\n#3 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 3 --take\n\ndo it\n") {
+	if code != 0 || fires(t) != 1 || !strings.HasPrefix(out, "Took #3 three, on branch issue-3.\nu3\nIts agent: se:coordinator.\nIt blocks #7. What you cannot finish goes into a supersede (se issue supersede), which they then wait on.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\n#3 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 3 --take\n\ndo it\n") {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// A manifest's box coordinates its tree: the Stop hook holds its leaves'
@@ -609,7 +609,7 @@ func TestATakeNamesWhatTheIssueBlocks(t *testing.T) {
 	}
 	// #3 blocks #7, open, and #8, closed: only #7 still waits for it.
 	code, out, _ := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || !strings.Contains(out, "It blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.") {
+	if code != 0 || !strings.Contains(out, "It blocks #7. What you cannot finish goes into a supersede (se issue supersede), which they then wait on.") {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 }
@@ -740,7 +740,7 @@ func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
 	t.Parallel()
 	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--final")
-	if code != 0 || out != "Created #11 ten\n"+u11+"\nFiled into the misc manifest #10: it named no --parent.\nLabelled se-final: if it fails, it goes to a person.\n"+firedOnce+"\n" {
+	if code != 0 || out != "Created #11 ten\n"+u11+"\nFiled into the misc manifest #10: it named no --parent.\nLabelled se-final: its last attempt, never superseded again.\n"+firedOnce+"\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	if made := issueOf(t, gh, 11); !strings.Contains(made, `"body":"b\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"},{"name":"se-final"}]`) {
@@ -748,7 +748,35 @@ func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
 	}
 }
 
-func TestIssuePullPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
+// A box opens no issue: se issue new refuses before it asks GitHub
+// anything or writes a file, and an interactive session creates as before.
+func TestIssueNewInABoxRefusesAndWritesNothing(t *testing.T) {
+	t.Parallel()
+	gh := recordedIssues(t)
+	asBox(t)
+	d, ws := onFake(t), filepath.FromSlash("/ws")
+	put(t, d, filepath.Join(ws, "left.md"), "what is left\n")
+	before := gh.Requests()
+	newIn := func() (int, string, string) {
+		return se(t, "issue", "new", "--workspace", ws, "--repo", "o/r", "--title", "ten", "--body-file", "left.md", "--blocked-by", "none")
+	}
+	code, out, errs := newIn()
+	if code != 1 || out != "" || !strings.Contains(errs, "a box opens no issue: its work ends in a PR (se issue land), or, where it cannot land one, a supersede (se issue supersede)") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if n := gh.Requests(); n != before || len(gh.Writes()) != 0 || fires(t) != 0 {
+		t.Fatalf("a box's se issue new asked GitHub %d times, wrote %q, fired %d", n-before, gh.Writes(), fires(t))
+	}
+	if files, err := d.Walk(ws); err != nil || !reflect.DeepEqual(files, []string{filepath.Join(ws, "left.md")}) {
+		t.Fatalf("files %q %v", files, err)
+	}
+	setenv(t, "CLAUDE_CODE_SESSION_ATTENDED", "1")
+	if code, out, errs := newIn(); code != 0 || !strings.HasPrefix(out, "Created #11 ten\n") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+}
+
+func TestIssuePullPersonListsWhatWaits(t *testing.T) {
 	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
@@ -768,18 +796,11 @@ func TestIssuePullPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
 	if code, _, errs := se(t, "issue", "pull", "--person", "--take", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "--person alone") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
-	if code, _, errs := se(t, "issue", "resume", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "one issue number") {
-		t.Fatalf("exit %d, %q", code, errs)
+	if _, ok := commands["issue resume"]; ok {
+		t.Fatal("se issue resume is gone: nothing holds an issue for a person to resume")
 	}
-	code, out, errs = se(t, "issue", "resume", "#7", "--repo", "o/r")
-	if code != 0 || out != "Resumed #7 seven: back in the queue, its takeover count reset.\nu7\n" {
-		t.Fatalf("exit %d, %q %q", code, out, errs)
-	}
-	if want := []string{"POST repos/o/r/issues/7/comments", "DELETE repos/o/r/issues/7/labels/se-person"}; !reflect.DeepEqual(gh.Writes(), want) {
-		t.Fatalf("writes %q", gh.Writes())
-	}
-	if strings.Contains(issueOf(t, gh, 7), "se-person") {
-		t.Fatal(issueOf(t, gh, 7))
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("listing wrote %q", w)
 	}
 }
 
