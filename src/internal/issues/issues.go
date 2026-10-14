@@ -25,8 +25,9 @@ const Label = "se"
 const ReviewLabel = "se-review"
 
 // FinalLabel marks an issue on its last attempt: one a review filed for a
-// finding, or one taken over stuck once already. A final issue that fails again goes
-// to a person instead of another round.
+// finding, or one taken over once already. A final issue is never superseded
+// again; stuck again, it is taken over again, and a re-review that finds its
+// problem again accepts the repeat.
 const FinalLabel = "se-final"
 
 // Issue is one fleet issue.
@@ -76,8 +77,6 @@ type Source struct {
 	Disk disk.Disk
 	// Proc runs git in the checkouts the source claims, picks up and lands from.
 	Proc proc.Procs
-	// Flagged hears of each issue the sweep gave to a person, and why.
-	Flagged func(i Issue, reason string)
 	// Waits hears what the source waits on, and for how long, before each
 	// wait, so the person running it is not left waiting blind.
 	Waits func(note string)
@@ -210,9 +209,9 @@ type Status struct {
 	// starts the reviewer.
 	Review bool `json:"review,omitempty"`
 	// Stuck is set for a claimed leaf nothing was pushed to for longer than
-	// the lease; Takeovers is its last takeover round since a person last
-	// resumed it, which only settles two boxes racing for one round (the
-	// label se-final is the record of a takeover), and Since is when its
+	// the lease; Takeovers is its last takeover round, which only settles
+	// two boxes racing for one round (the label se-final is the record of a
+	// takeover), and Since is when its
 	// branch last saw a push or a takeover.
 	Stuck     bool      `json:"stuck,omitempty"`
 	Takeovers int       `json:"takeovers,omitempty"`
@@ -310,7 +309,6 @@ func (t tree) depth(n int) int {
 }
 
 // load reads the open fleet issues with their sub-issues, then closes every
-// issue for a person that hold minted whose held issue is closed, and every
 // parent whose sub-issues are all closed, deepest first, so a parent its
 // closing completes closes too. A parent labelled se-review never closes here.
 // The reads more makes from the list run beside the sub-issues' reads.
@@ -339,43 +337,11 @@ func (s Source) load(more func(t tree) []func() error) (tree, error) {
 			return err
 		})
 	}
-	// An issue for a person whose held issue is not open in the list is
-	// moot where that issue is closed; it is read to be sure.
-	moot := map[int]*bool{}
-	for _, h := range t.numbers() {
-		n := t.byNum[h].holds()
-		if _, open := t.byNum[n]; n == 0 || open {
-			continue
-		}
-		shut := false
-		moot[h] = &shut
-		reads = append(reads, func() error {
-			got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
-			// A 404 is an issue gone, which holds nothing either.
-			if github.Status(err) == 404 {
-				shut = true
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			shut = got[0].State == "closed"
-			return nil
-		})
-	}
 	if more != nil {
 		reads = append(reads, more(t)...)
 	}
 	if err := parallel(reads); err != nil {
 		return tree{}, err
-	}
-	for _, h := range t.numbers() {
-		if shut, ok := moot[h]; ok && *shut {
-			if err := s.closeMoot(h, t.byNum[h].holds()); err != nil {
-				return tree{}, err
-			}
-			delete(t.byNum, h)
-		}
 	}
 	for k, n := range parents {
 		t.subs[n] = subs[k]
@@ -436,9 +402,8 @@ func (s Source) closeParent(n int) error {
 }
 
 // CloseParents closes every open parent whose sub-issues are all closed,
-// deepest first, except those labelled se-review, and every moot issue for a
-// person: one hold minted whose held issue is closed. Every se issue command
-// does this first.
+// deepest first, except those labelled se-review. Every se issue command does
+// this first.
 func (s Source) CloseParents() error {
 	_, err := s.load(nil)
 	return err
@@ -546,9 +511,9 @@ func (s Source) survey() ([]Status, tree, error) {
 				st.Reason = firstParagraph(i.Body)
 			}
 		case !parent && claimed[Branch(n)]:
-			// A claim waiting on its blockers (an issue for a person that
-			// holds it) is not stuck; once they close, its old push makes it
-			// stuck at once, and the next box takes it over afresh.
+			// A claim waiting on its blockers is not stuck; once they close,
+			// its old push makes it stuck at once, and the next box takes it
+			// over afresh.
 			if why := held(n); why != "" {
 				st.Why = Branch(n) + " waits: " + why
 				break
@@ -556,12 +521,9 @@ func (s Source) survey() ([]Status, tree, error) {
 			st.Why, st.claimed = "claimed by "+Branch(n), true
 			l := leased[n]
 			st.Since, st.pushed, st.Takeovers, st.Stuck = l.Since, l.pushed, l.Takeovers, l.Stuck
-			// The sweep: a final issue stuck goes to a person.
-			if st.Stuck && st.Final {
-				if err := s.toPerson(st); err != nil {
-					return nil, tree{}, err
-				}
-			} else if st.Stuck {
+			// A stuck claim, final or not, is a takeover candidate: the
+			// survey reads and writes nothing.
+			if st.Stuck {
 				st.Takeover = &Takeover{Count: st.Takeovers + 1, Stale: st.since()}
 				st.urgent = true
 				st.Why += ", stuck: " + st.since()
@@ -742,7 +704,8 @@ func takeOrder(all []Status, want int) []Status {
 
 // Take claims an issue at the top in the git checkout dir: want, when it is
 // above zero, else the one Next names. Without want, a claimed leaf whose PR
-// conflicts with main comes first, whatever its age (see takeOverConflict).
+// conflicts with main comes first, once nothing was pushed to its branch
+// within the lease (see takeOverConflict).
 // Where another box claimed a leaf first, it moves on to the next one. A leaf
 // stuck for the first time is taken over: its branch is checked out as it
 // stands. A parent's branch claims its whole
@@ -970,10 +933,18 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 }
 
 // Worktree is the command that checks a leaf's claimed branch out in its own
-// worktree, WorktreeDir beside the checkout dir.
+// worktree, WorktreeDir beside the checkout dir, from the newest of its branch
+// and main: it fetches both, makes the local branch where the box has none
+// (and the worktree where it has none), fast-forwards the branch to origin's,
+// and merges origin/main into it. A merge that conflicts is aborted, leaving the
+// branch as origin has it for its agent to merge main into.
 func Worktree(dir string, n int) string {
-	b := Branch(n)
-	return fmt.Sprintf("git worktree add --track -b %s %s origin/%s", b, WorktreeDir(dir, n), b)
+	b, p := Branch(n), WorktreeDir(dir, n)
+	return fmt.Sprintf("git fetch -q origin main %[1]s"+
+		" && { git show-ref -q --verify refs/heads/%[1]s || git branch -q --track %[1]s origin/%[1]s; }"+
+		" && { test -e %[2]s || git worktree add -q %[2]s %[1]s; }"+
+		" && git -C %[2]s merge -q --ff-only origin/%[1]s"+
+		" && { git -C %[2]s merge -q --no-edit origin/main || git -C %[2]s merge --abort; }", b, p)
 }
 
 // WorktreeDir is where Worktree checks issue n out, beside the checkout dir.

@@ -490,8 +490,7 @@ func (s Source) postedReport(n int) (*RetroReport, error) {
 	return &r, nil
 }
 
-// lastReport is the text of the last report comment on issue n, and whether
-// a person resumed the issue after it.
+// lastReport is the text of the last report comment on issue n.
 func (s Source) lastReport(n int) (string, error) {
 	return s.lastPosted(n, reportMark)
 }
