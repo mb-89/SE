@@ -60,10 +60,16 @@ func TestEnsureAnswersTheDaemonWhereverItMoved(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
+	fake := clock.NewFake(testedAt)
 	go func() {
-		done <- daemon.Serve(ctx, p, daemon.Options{Clock: clock.Real(), Net: w.Net, Ready: func(ep daemon.Endpoint) { ready <- ep }})
+		done <- daemon.Serve(ctx, p, daemon.Options{Clock: fake, Net: w.Net, Modules: modules(p, fake), Ready: func(ep daemon.Endpoint) { ready <- ep }})
 	}()
-	ep := <-ready
+	var ep daemon.Endpoint
+	select {
+	case ep = <-ready:
+	case err := <-done:
+		t.Fatalf("the daemon did not serve: %v", err)
+	}
 	t.Cleanup(func() {
 		cancel()
 		<-done
