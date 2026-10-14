@@ -9,7 +9,7 @@ Reader: the agent briefing a person.
 
 Every fact comes from one command; you present them, and you act on none.
 `se` is `./src/plugin/bin/se` in the SE checkout; if it is missing, build it
-with `go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se`.
+with `sh ./src/build.sh`.
 
 1. Run `./src/plugin/bin/se briefing` from the checkout's root. Pass the
    person's window if they gave one: `--since <time>` (a date, an RFC 3339

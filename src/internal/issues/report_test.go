@@ -96,7 +96,7 @@ func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
 	}
 	report := commentsAt(t, gh, 1)[0].Body
 	for _, want := range []string{
-		"- **it breaks** (blocking, #10)", "- **nit 1** (not blocking, #11)", "- **nit 7** (not blocking, not filed (past the first five))",
+		"- **it breaks** (blocking, #10)", "- **nit 1** (not blocking, #11)", "- **nit 7** (not blocking, not filed (past the first 5))",
 		"2 more non-blocking finding(s) counted, not filed.", "### Checked and clean\n- the tests: none weakened",
 	} {
 		if !strings.Contains(report, want) {

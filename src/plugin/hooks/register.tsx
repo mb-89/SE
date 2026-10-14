@@ -557,8 +557,9 @@ async function builds($: EngineInterface): Promise<{ path: string; failed?: stri
   if (await $.fs.exists(path)) return { path }
   const head = await headOf($)
   const ldflags = head ? ['-ldflags', `-X main.commit=${head}`] : []
-  const built = await $.process.run(['go', 'build', ...ldflags, '-o', path, './src/cmd/se'], {
-    cwd: checkoutOf($),
+  // Go runs in src/, which holds go.mod (ModuleDir in src/internal/update/update.go).
+  const built = await $.process.run(['go', 'build', ...ldflags, '-o', path, './cmd/se'], {
+    cwd: `${checkoutOf($)}/src`,
     timeoutMs: STARTING,
   })
   return built.exitCode === 0 ? { path } : { path, failed: `se is not built and go build failed: ${failed(built)}` }
