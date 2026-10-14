@@ -9,7 +9,7 @@ The disk, `src/internal/io/disk`, covers reading, writing, listing,
 locking and atomically replacing files, its fake a filesystem in memory that
 fails as the real one does.
 The network, `src/internal/io/http`, serves and calls the daemon protocol
-(health, event, shutdown) and fires the routine; its fake is a network inside
+(health, event, value, shutdown) and fires the routine; its fake is a network inside
 the process, and its real one is tested on loopback.
 `src/internal/io/proc` runs programs: git, go, check.sh, the se a session
 hands over to and the detached daemon. gh is GitHub's, not proc's. Its fake
