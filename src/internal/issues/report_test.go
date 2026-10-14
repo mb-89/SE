@@ -83,20 +83,24 @@ func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(numbers(r.Fixes), []int{10}) || !reflect.DeepEqual(numbers(r.Filed), []int{11, 12, 13, 14, 15}) || r.Unfiled != 2 || r.Passed || r.Closed || len(r.Accepted) != 0 {
+	// The non-blocking ones go into a new misc manifest, #11.
+	if !reflect.DeepEqual(numbers(r.Fixes), []int{10}) || !reflect.DeepEqual(numbers(r.Filed), []int{12, 13, 14, 15, 16}) || r.Unfiled != 2 || r.Passed || r.Closed || len(r.Accepted) != 0 {
 		t.Fatalf("%+v", r)
 	}
-	for n := 10; n <= 15; n++ {
+	for _, n := range []int{10, 12, 13, 14, 15, 16} {
 		if i := issueAt(t, gh, n); !i.labelled(Label) || !i.labelled(FinalLabel) {
 			t.Errorf("#%d is not se-final: %+v", n, i)
 		}
 	}
-	if created := gh.Writes(); len(created) != 8 || issueAt(t, gh, 10).Title != "it breaks" || !reflect.DeepEqual(linksOf(t, gh, subsPath(1)), []int{2, 10}) {
+	if !reflect.DeepEqual(linksOf(t, gh, subsPath(11)), []int{12, 13, 14, 15, 16}) {
+		t.Fatalf("the misc manifest holds %v", linksOf(t, gh, subsPath(11)))
+	}
+	if created := gh.Writes(); len(created) != 14 || issueAt(t, gh, 10).Title != "it breaks" || !reflect.DeepEqual(linksOf(t, gh, subsPath(1)), []int{2, 10}) {
 		t.Fatalf("created %q, under the gate %v", created, linksOf(t, gh, subsPath(1)))
 	}
 	report := commentsAt(t, gh, 1)[0].Body
 	for _, want := range []string{
-		"- **it breaks** (blocking, #10)", "- **nit 1** (not blocking, #11)", "- **nit 7** (not blocking, not filed (past the first 5))",
+		"- **it breaks** (blocking, #10)", "- **nit 1** (not blocking, #12)", "- **nit 7** (not blocking, not filed (past the first 5))",
 		"2 more non-blocking finding(s) counted, not filed.", "### Checked and clean\n- the tests: none weakened",
 	} {
 		if !strings.Contains(report, want) {

@@ -42,6 +42,10 @@ sweeping at once wrote the same issues and comments many times over
    - **impossible block**: an issue blocked by an issue closed as not planned,
      by an open issue no box works (not labelled `se`, or in another
      repository), or by itself through a cycle.
+   - **bare issue**: an open `se` issue at the top in no manifest, which no
+     box takes: no parent, no sub-issues, not a manifest, retro, overhaul or
+     issue for a person, nothing holds it and nothing claims it. An `se`
+     built before manifests still files such issues.
    - **waiting on a person**: an `se-person` issue, with what it holds up.
      Reported, never fixed.
 
@@ -64,6 +68,10 @@ sweeping at once wrote the same issues and comments many times over
      (`se fleet fix`, by `git push origin --delete` from the workspace, the
      transport `se issue land` pushes through): nothing is lost, and nothing
      else could clear it;
+   - a bare issue is filed into the open misc manifest (`se fleet fix`, the
+     manifest `se issue new` files into, opening the next one where none is
+     open, then GitHub's sub-issues link): it moves work there is already,
+     and files no issue of its own;
    - an impossible block, any other leftover claim, or anything else with no
      remedy is reported by `se fleet check` (and the briefing), never filed:
      an issue is work, not a report ([principle 12](principles.md)).
@@ -71,9 +79,10 @@ sweeping at once wrote the same issues and comments many times over
    `<!-- se:takeover N -->` on its issue, part of the take's own write. It
    labels the issue `se-final`, and a stuck or conflicted `se-final` issue
    is taken over again, never handed to a person.
-5. **`se fleet fix` writes no record.** Turning auto-merge on and deleting a
-   spent branch are their own record on GitHub; it writes no comment and no
-   issue.
+5. **`se fleet fix` writes no record.** Turning auto-merge on, deleting a
+   spent branch and filing a bare issue into the misc manifest are their own
+   record on GitHub; it writes no comment, and no issue but the next misc
+   manifest, where a bare issue finds none open.
 
 ## The commands
 

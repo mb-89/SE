@@ -53,9 +53,15 @@ type Issue struct {
 	// Blocks names the open issues it blocks, where a take read them: what
 	// is left of it may hold up those that need it (se issue new --blocks).
 	Blocks []int `json:"blocks,omitempty"`
-	// id is GitHub's id of an issue se just created, which a link takes.
+	// id is GitHub's id of an issue se just created, which a link takes;
+	// in is the parent it was made a sub-issue of.
 	id int64
+	in int
 }
+
+// In is the parent an issue se just created was made a sub-issue of: the
+// --parent it was given, or the misc manifest it was filed into; 0 at the top.
+func (i Issue) In() int { return i.in }
 
 // Branch is the branch whose presence on origin claims issue n.
 func Branch(n int) string { return fmt.Sprintf("issue-%d", n) }
@@ -134,6 +140,15 @@ func (i issue) labelled(name string) bool {
 	return false
 }
 
+// labels names its labels.
+func (i issue) labels() []string {
+	out := make([]string, len(i.Labels))
+	for k, l := range i.Labels {
+		out[k] = l.Name
+	}
+	return out
+}
+
 // api reads a GitHub path, every page of it where list is set, into out.
 func api[T any](s Source, path string, list bool) ([]T, error) {
 	if !list {
@@ -201,6 +216,13 @@ type Status struct {
 	Stuck     bool      `json:"stuck,omitempty"`
 	Takeovers int       `json:"takeovers,omitempty"`
 	Since     time.Time `json:"-"`
+	// Bare says why an issue nothing holds is not taken all the same: a
+	// leaf at the top in no manifest (BareWhy), or a manifest with nothing
+	// inside yet (EmptyWhy). Boxes take only manifests.
+	Bare string `json:"bare,omitempty"`
+	// Land is true for a manifest at the top whose leaves are all closed:
+	// its coordinator lands it, as one PR from its branch.
+	Land bool `json:"land,omitempty"`
 	// Final is set for an issue labelled se-final: on its last attempt.
 	Final bool `json:"final,omitempty"`
 	// Person is set for an issue labelled se-person; Reason says why.
@@ -214,12 +236,29 @@ type Status struct {
 	// when its branch last saw a push, zero where GitHub keeps no record.
 	claimed bool
 	pushed  time.Time
+	// staked is true for a parent whose branch exists on origin: its tree
+	// is claimed, and its claim keeps a refused fan-out as a leaf's does.
+	staked bool
 }
 
 // Ready says whether the issue may be taken as new work: a ready leaf is
 // work, a ready parent has work or a review inside it, or is ready for review
 // itself.
-func (s Status) Ready() bool { return s.Why == "" }
+func (s Status) Ready() bool { return s.Why == "" && s.Bare == "" }
+
+// why says what holds the issue, or why it is not taken all the same.
+func (s Status) why() string {
+	if s.Why == "" {
+		return s.Bare
+	}
+	return s.Why
+}
+
+// What a take says of an issue it skips although nothing holds it.
+const (
+	BareWhy  = "in no manifest: boxes take only manifests"
+	EmptyWhy = "an empty manifest: nothing inside yet"
+)
 
 // Takeable says whether a take may have it: ready, or a leaf stuck for the
 // first time, which is taken over.
@@ -310,7 +349,7 @@ func (s Source) load(more func(t tree) []func() error) (tree, error) {
 	}
 	sort.SliceStable(parents, func(a, b int) bool { return t.depth(parents[a]) > t.depth(parents[b]) })
 	for _, n := range parents {
-		if t.byNum[n].labelled(ReviewLabel) || !t.done(n) {
+		if t.byNum[n].labelled(ReviewLabel) || !t.done(n) || t.lands(n) {
 			continue
 		}
 		if err := s.closeParent(n); err != nil {
@@ -326,6 +365,14 @@ func (s Source) load(more func(t tree) []func() error) (tree, error) {
 func (t tree) parent(n int) bool {
 	i := t.byNum[n]
 	return i.SubIssues != nil && i.SubIssues.Total > 0
+}
+
+// lands says whether open fleet issue n is a manifest at the top: it lands
+// as one PR from its branch once its leaves are done, so it never closes by
+// itself.
+func (t tree) lands(n int) bool {
+	_, below := t.above[n]
+	return !below && t.byNum[n].labelled(ManifestLabel)
 }
 
 // done says whether every sub-issue of n is closed.
@@ -452,7 +499,7 @@ func (s Source) survey() ([]Status, tree, error) {
 	for _, n := range ns {
 		i := t.byNum[n]
 		_, parent := t.subs[n]
-		st := &Status{Issue: Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, Parent: parent, Retro: i.labelled(RetroLabel), Overhaul: i.labelled(OverhaulLabel)}, Above: t.above[n], Final: i.labelled(FinalLabel)}
+		st := &Status{Issue: Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, Parent: parent, Retro: i.labelled(RetroLabel), Overhaul: i.labelled(OverhaulLabel)}, Above: t.above[n], Final: i.labelled(FinalLabel), staked: parent && claimed[Branch(n)]}
 		switch {
 		case i.labelled(PersonLabel):
 			st.Person, st.Why = true, "waits on a person"
@@ -479,8 +526,23 @@ func (s Source) survey() ([]Status, tree, error) {
 			}
 		default:
 			st.Why = held(n)
+			// Boxes take only manifests: a leaf at the top, in no manifest,
+			// is never offered.
+			if st.Why == "" && !parent && t.above[n] == 0 && !st.Retro && !st.Overhaul {
+				st.Bare = BareWhy
+				if i.labelled(ManifestLabel) {
+					st.Bare = EmptyWhy
+				}
+			}
 		}
-		if parent && st.Why == "" && t.done(n) {
+		switch {
+		case !parent || st.Why != "" || !t.done(n):
+		case t.lands(n) && !i.labelled(ReviewLabel):
+			st.Land = true
+			if pr, ok := openTo(t.pulls, Branch(n)); ok {
+				st.Why = fmt.Sprintf("its PR #%d is open", pr)
+			}
+		default:
 			st.Review = true
 		}
 		byNum[n] = st
@@ -528,7 +590,7 @@ func (s Source) survey() ([]Status, tree, error) {
 	}
 	all := make([]Status, len(out))
 	for k, st := range out {
-		if st.Parent && st.Why == "" && !st.Review {
+		if st.Parent && st.Why == "" && !st.Review && !st.Land {
 			if !inside(st.Number, false) {
 				st.Why = "nothing inside is ready"
 			}
@@ -663,7 +725,7 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 				return Issue{}, false, fmt.Errorf("#%d is a sub-issue of #%d; it is taken with --in", want, st.Above)
 			}
 			if !st.Takeable() {
-				return Issue{}, false, fmt.Errorf("#%d is not ready: %s", want, st.Why)
+				return Issue{}, false, fmt.Errorf("#%d is not ready: %s", want, st.why())
 			}
 		}
 		if !found {
@@ -700,6 +762,9 @@ type Tree struct {
 	Ready []Issue `json:"ready"`
 	// Review is the se-review parents whose sub-issues are all closed.
 	Review []Issue `json:"review"`
+	// Land is true for a manifest whose leaves are all closed: its
+	// coordinator lands it, one PR from its branch (se issue land).
+	Land bool `json:"land,omitempty"`
 	// Why says what holds the whole tree: an issue in it waits on a person.
 	Why string `json:"why,omitempty"`
 	// rounds counts each review parent's sub-issues, which names its reviewer's worktree.
@@ -766,6 +831,8 @@ func (s Source) in(root int) (Tree, []Status, surveyed, error) {
 	var fresh []Issue
 	for _, st := range inside {
 		switch {
+		case st.Land:
+			tr.Land = true
 		case st.Review:
 			tr.Review = append(tr.Review, st.Issue)
 			tr.rounds[st.Number] = len(t.subs[st.Number])
@@ -831,7 +898,7 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 		if i.Takeover != nil {
 			claimed, err = s.takeOverStuck(dir, byNum[i.Number], false)
 		} else {
-			claimed, err = s.stake(dir, i.Number)
+			claimed, err = s.stakeFrom(dir, i.Number, manifestBranch(dir, s, read.t, root))
 		}
 		if err != nil {
 			return Issue{}, false, tr, err
@@ -894,15 +961,35 @@ func (s Source) Claim(dir string, n int) (claimed bool, err error) {
 // stake is Claim without the checkout: it pushes the branch and fetches it as
 // origin/issue-<n>, and records the claim's box on the issue.
 func (s Source) stake(dir string, n int) (claimed bool, err error) {
+	return s.stakeFrom(dir, n, "main")
+}
+
+// manifestBranch is the branch a leaf inside root's tree is claimed from:
+// its manifest's, the top of the tree, where that is on origin, so the leaf
+// starts from what its siblings landed; else main.
+func manifestBranch(dir string, s Source, t tree, root int) string {
+	top := root
+	for t.above[top] != 0 {
+		top = t.above[top]
+	}
+	b := Branch(top)
+	if _, err := s.git(dir, "fetch", "-q", "origin", "+refs/heads/"+b+":refs/remotes/origin/"+b); err != nil {
+		return "main"
+	}
+	return b
+}
+
+// stakeFrom is stake, the branch pushed from origin's base.
+func (s Source) stakeFrom(dir string, n int, base string) (claimed bool, err error) {
 	branch := Branch(n)
 	ref := "refs/heads/" + branch
-	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
+	if _, err := s.git(dir, "fetch", "-q", "origin", "+refs/heads/"+base+":refs/remotes/origin/"+base); err != nil {
 		return false, err
 	}
 	// An empty lease: the ref must not exist on origin yet. Where it already
 	// points at this very commit the push is no update at all and succeeds,
 	// so the claim is the push's own word that it created the ref ("*").
-	said, pushErr := s.git(dir, "push", "--porcelain", "--force-with-lease="+ref+":", "origin", "refs/remotes/origin/main:"+ref)
+	said, pushErr := s.git(dir, "push", "--porcelain", "--force-with-lease="+ref+":", "origin", "refs/remotes/origin/"+base+":"+ref)
 	if pushErr != nil {
 		if _, err := s.git(dir, "ls-remote", "--exit-code", "origin", ref); err == nil {
 			return false, nil

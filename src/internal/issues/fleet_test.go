@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -63,12 +64,19 @@ func dep(n int, state, reason string, se bool) string {
 	return fmt.Sprintf(`{"number":%d,"state":%q,"state_reason":%q,"html_url":"u%d","repository_url":"https://api.github.com/repos/o/r","labels":%s}`, n, state, reason, n, ls)
 }
 
+// ready5 is the fleet's ready work, in a manifest as all work is: #5, a
+// manifest, holding its ready leaf #1, which newWorld lists with it.
+var ready5 = item(5, 1, ManifestLabel)
+
 func newWorld(t *testing.T, items []string, claimed ...int) *world {
 	t.Helper()
-	w := &world{t: t, Fake: recorded(t, map[string]string{
-		listPath:               "[" + strings.Join(items, ",") + "]",
-		"repos/o/r/issues/100": `{"number":100,"state":"closed"}`,
-	})}
+	answers := map[string]string{"repos/o/r/issues/100": `{"number":100,"state":"closed"}`}
+	if slices.Contains(items, ready5) {
+		items = append(items, item(1, 0))
+		answers[subsPath(5)] = "[" + item(1, 0) + "]"
+	}
+	answers[listPath] = "[" + strings.Join(items, ",") + "]"
+	w := &world{t: t, Fake: recorded(t, answers)}
 	var refs []string
 	for _, n := range claimed {
 		refs = append(refs, fmt.Sprintf(`{"ref":"refs/heads/issue-%d","object":{"sha":"c%d"}}`, n, n))
@@ -76,6 +84,15 @@ func newWorld(t *testing.T, items []string, claimed ...int) *world {
 	}
 	w.set(refsPath, "["+strings.Join(refs, ",")+"]")
 	return w
+}
+
+// in5 files the leaves ns into the manifest #5, beside its leaf #1.
+func (w *world) in5(ns ...int) {
+	subs := []string{item(1, 0)}
+	for _, n := range ns {
+		subs = append(subs, item(n, 0))
+	}
+	w.set(subsPath(5), "["+strings.Join(subs, ",")+"]")
 }
 
 // ahead records how many commits issue-n's branch has that main lacks.
@@ -148,7 +165,7 @@ func TestAFleetWithNothingBrokenIsHealthy(t *testing.T) {
 	t.Parallel()
 	// #5 is ready, #6 waits on #5, #7 is claimed and its PR is green, mergeable,
 	// with auto-merge on and a push half an hour ago.
-	w := newWorld(t, []string{item(5, 0), item(6, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(6, 0), item(7, 0)}, 7)
 	w.set(links(6), "["+dep(5, "open", "", true)+"]")
 	w.pushed(7, recent)
 	w.pr(7, "true", "clean", true, "check:success")
@@ -160,7 +177,7 @@ func TestAFleetWithNothingBrokenIsHealthy(t *testing.T) {
 	if got := w.check(); len(got) != 0 {
 		t.Fatalf("%+v", got)
 	}
-	w = newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w = newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.pushed(7, recent)
 	if got := w.check(); len(got) != 0 {
 		t.Fatalf("%+v", got)
@@ -169,7 +186,7 @@ func TestAFleetWithNothingBrokenIsHealthy(t *testing.T) {
 
 func TestAConflictedPRIsFoundAndTakenOver(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.pushed(7, recent)
 	w.pr(7, "false", "dirty", true)
 	f := only(t, w.check(), ConflictedPR, 7)
@@ -188,7 +205,7 @@ func TestAConflictedPRIsFoundAndTakenOver(t *testing.T) {
 
 func TestARedPRIsFoundOnceItIsQuiet(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.pr(7, "true", "unstable", true, "check:failure", "lint:success")
 	w.pushed(7, recent)
 	if got := w.check(); len(got) != 0 {
@@ -203,7 +220,7 @@ func TestARedPRIsFoundOnceItIsQuiet(t *testing.T) {
 
 func TestAGreenPRWithAutoMergeOffIsFoundAtOnce(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.pr(7, "true", "clean", false, "check:success")
 	w.pushed(7, recent)
 	f := only(t, w.check(), GreenUnmerged, 7)
@@ -223,7 +240,7 @@ func TestAGreenPRWithAutoMergeOffIsFoundAtOnce(t *testing.T) {
 
 func TestAClaimWithNoPRIsFoundOnceItIsQuiet(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.closedPRs(7, `[]`)
 	w.pushed(7, quiet)
 	f := only(t, w.check(), NoPR, 7)
@@ -239,7 +256,7 @@ func TestAClaimWithNoPRIsFoundOnceItIsQuiet(t *testing.T) {
 
 func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0)}, 19)
+	w := newWorld(t, []string{ready5}, 19)
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-13T11:00:00Z"}`)
 	f := only(t, w.check(), LeftoverClaim, 19)
 	if f.What != "issue-19 claims #19, which is closed (not planned)" ||
@@ -269,7 +286,7 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 
 func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0)}, 19)
+	w := newWorld(t, []string{ready5}, 19)
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"open"}`)
 	w.ahead(19, 0)
 	f := only(t, w.check(), LeftoverClaim, 19)
@@ -295,7 +312,8 @@ func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 
 func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(8, 0)}, 19)
+	w := newWorld(t, []string{ready5, item(8, 0)}, 19)
+	w.in5(8)
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"open"}`)
 	w.ahead(19, 0)
 	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
@@ -316,7 +334,8 @@ func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
 
 func TestImpossibleBlocksAreFound(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(8, 0), item(9, 0), item(10, 0), item(11, 0), item(12, 0)})
+	w := newWorld(t, []string{ready5, item(8, 0), item(9, 0), item(10, 0), item(11, 0), item(12, 0)})
+	w.in5(8)
 	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
 	w.set(links(9), "["+dep(4, "open", "", false)+"]")
 	w.set(links(10), "["+dep(11, "open", "", true)+"]")
@@ -342,7 +361,7 @@ func TestImpossibleBlocksAreFound(t *testing.T) {
 
 func TestAnIssueWaitingOnAPersonIsReportedWithWhatItHoldsUp(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(12, 0, PersonLabel), item(13, 0)})
+	w := newWorld(t, []string{ready5, item(12, 0, PersonLabel), item(13, 0)})
 	w.set(links(13), "["+dep(12, "open", "", true)+"]")
 	f := only(t, w.check(), WaitingOnPerson, 12)
 	if !reflect.DeepEqual(f.Holds, []int{13}) || f.What != "#12 waits for a person (se-person), holding up #13" || f.Remedy != "none: it waits for a person" {
@@ -384,7 +403,7 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	t.Parallel()
 	a := claimed7(t)
-	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.closedPRs(7, `[]`)
 	w.pushed(7, quiet)
 	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(a, 7)
@@ -411,7 +430,8 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 
 func TestFleetFixAppliesEachRemedyAndFilesNothing(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t, []string{item(5, 0), item(7, 0), item(8, 0), item(9, 0)}, 7, 19)
+	w := newWorld(t, []string{ready5, item(7, 0), item(8, 0), item(9, 0)}, 7, 19)
+	w.in5(8)
 	// A review is still required on #70, so auto-merge waits for it.
 	w.pr(7, "true", "blocked", false, "check:success")
 	w.pushed(7, recent)
@@ -494,5 +514,56 @@ func TestTheTakeoverRemedyOfAStuckSubIssueLeafRuns(t *testing.T) {
 		if got := run(t, a, "log", "-1", "--format=%s"); got != "work on 7" {
 			t.Fatalf("pushed at %s: issue-7 is not checked out as it stands: %s", at, got)
 		}
+	}
+}
+
+// An se built before manifests files bare issues, which no box takes: se
+// fleet check finds each open one at the top that nothing holds or claims,
+// and se fleet fix files it into the open misc manifest, once.
+func TestABareIssueIsFiledIntoTheMiscManifest(t *testing.T) {
+	t.Parallel()
+	// #20 is bare. #7 is bare but claimed, #25 bare but blocked; #21, #22
+	// and #24 stand at the top by themselves (a retro, an overhaul, an empty
+	// manifest), and #23 is a sub-issue of #5.
+	w := newWorld(t, []string{ready5, item(7, 0), item(20, 0), item(21, 0, RetroLabel), item(22, 0, OverhaulLabel), item(23, 0), item(24, 0, ManifestLabel), item(25, 0)}, 7)
+	w.in5(23)
+	w.pushed(7, recent)
+	w.set(links(25), "["+dep(20, "open", "", true)+"]")
+	f := only(t, w.check(), BareIssue, 20)
+	if f.What != "#20 stands in no manifest, and boxes take only manifests" || f.Remedy != "se fleet fix files it into the open misc manifest" {
+		t.Fatalf("%+v", f)
+	}
+	// No misc manifest is open: the fix opens #101 and files #20 into it.
+	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
+	done := s.Fix(t.TempDir(), []Finding{f})
+	if len(done) != 1 || done[0].Did != "filed it into misc manifest #101" || done[0].Failed != "" {
+		t.Fatalf("%+v", done)
+	}
+	if top, err := s.manifestOf(20); err != nil || top != 101 || !labelled(t, w, 101, MiscLabel) {
+		t.Fatalf("#20 is in #%d (%v)", top, err)
+	}
+	// The fix moves #20 by a sub-issue link alone: no comment records it.
+	if c := commentsAt(t, w, 20); len(c) != 0 {
+		t.Fatalf("the fix commented on #20: %+v", c)
+	}
+	for _, x := range w.Writes() {
+		if strings.HasSuffix(x, "/comments") {
+			t.Fatalf("fleet fix wrote %q", w.Writes())
+		}
+	}
+
+	// An open misc manifest takes it, and no other opens.
+	w = newWorld(t, []string{ready5, item(20, 0)})
+	s.GitHub = w
+	misc, err := s.FileInto()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done = s.Fix(t.TempDir(), w.check())
+	if len(done) != 1 || done[0].Did != fmt.Sprintf("filed it into misc manifest #%d", misc) {
+		t.Fatalf("%+v", done)
+	}
+	if top, err := s.manifestOf(20); err != nil || top != misc {
+		t.Fatalf("#20 is in #%d (%v), want #%d", top, err, misc)
 	}
 }

@@ -29,7 +29,9 @@ func pr70(mergeable, state string) string {
 func newPulls(t *testing.T, c *clock.Fake, pr ...string) *github.Fake {
 	t.Helper()
 	gh := recordedAt(t, c, unblocked(map[string]string{
-		listPath:      `[` + open(5, "new work") + `,` + open(7, "old work") + `]`,
+		// #5 is a retro, a leaf a take at the top may have: boxes take
+		// only manifests, retros and overhauls there.
+		listPath:      `[` + openRetro(5, "new work") + `,` + open(7, "old work") + `]`,
 		refsPath:      `[{"ref":"refs/heads/issue-7"}]`,
 		openPullsPath: `[{"number":70,"head":{"ref":"issue-7"},"base":{"ref":"main"}},{"number":71,"head":{"ref":"someone-else"},"base":{"ref":"main"}}]`,
 		// #7's branch saw a push inside the lease: it is not stuck.
@@ -153,7 +155,7 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 // finalSeven is the recorded list with #7 labelled se-final.
 func finalSeven(t *testing.T, g *github.Fake) {
 	t.Helper()
-	seed(t, g, map[string]string{listPath: `[` + open(5, "new work") + `,{"number":7,"title":"old work","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-final"}]}]`})
+	seed(t, g, map[string]string{listPath: `[` + openRetro(5, "new work") + `,{"number":7,"title":"old work","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-final"}]}]`})
 }
 
 func TestAFinalIssueInConflictIsTakenOverAgain(t *testing.T) {

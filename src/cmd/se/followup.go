@@ -31,6 +31,7 @@ type newIssue struct {
 	Review         bool     `json:"review,omitempty"`
 	Final          bool     `json:"final,omitempty"`
 	Person         bool     `json:"person,omitempty"`
+	Manifest       bool     `json:"manifest,omitempty"`
 	AllowDuplicate bool     `json:"allow_duplicate,omitempty"`
 	Skills         []string `json:"skills,omitempty"`
 }
@@ -45,32 +46,48 @@ type newAnswer struct {
 	Review    bool   `json:"review,omitempty"`
 	Final     bool   `json:"final,omitempty"`
 	Person    bool   `json:"person,omitempty"`
+	Manifest  bool   `json:"manifest,omitempty"`
+	Misc      bool   `json:"misc,omitempty"`
 	Fanout    string `json:"fanout,omitempty"`
 }
 
+// atTop is true for an issue that stands at the top by itself: a manifest
+// or an issue for a person. Any other filed into no manifest goes into the
+// open misc manifest: there are no bare issues.
+func (n newIssue) atTop() bool { return n.Manifest || n.Person }
+
 // refused is what se issue new refuses on GitHub before it creates
-// anything: a title an open se issue under the same parent has already,
-// unless a duplicate is allowed, and a --blocks number that is no issue.
+// anything: a title an open se issue under the same parent (the open misc
+// manifest, for one filed into no manifest) has already, unless a duplicate
+// is allowed, and a --blocks number that is no issue.
 func (n newIssue) refused(s issues.Source) error {
+	parent := n.Parent
+	if parent == 0 && !n.atTop() {
+		var err error
+		if parent, err = s.Misc(); err != nil {
+			return err
+		}
+	}
 	if n.AllowDuplicate {
 		if err := s.CloseParents(); err != nil {
 			return err
 		}
-	} else if dup, err := s.Duplicate(n.Title, n.Parent); err != nil {
+	} else if dup, err := s.Duplicate(n.Title, parent); err != nil {
 		return err
 	} else if dup > 0 {
 		where := "at the top"
-		if n.Parent > 0 {
-			where = fmt.Sprintf("a sub-issue of #%d", n.Parent)
+		if parent > 0 {
+			where = fmt.Sprintf("a sub-issue of #%d", parent)
 		}
 		return fmt.Errorf("#%d is an open se issue titled %q, %s, already; --allow-duplicate creates another", dup, strings.TrimSpace(n.Title), where)
 	}
 	return s.Exist(n.Blocks)
 }
 
-// create creates the issue, its links and its labels, as se issue new does;
-// where of is above zero, as the follow-up of the box's issue #of, its body
-// marked so. Call refused first.
+// create creates the issue, its links and its labels, as se issue new does:
+// one filed into no manifest goes into the open misc manifest, or the next
+// one, which it opens. Where of is above zero, it is the follow-up of the
+// box's issue #of, its body marked so. Call refused first.
 func (n newIssue) create(s issues.Source, of int) (made issues.Issue, ready bool, err error) {
 	body := guidance.With(n.Body, n.Skills)
 	if of > 0 {
@@ -80,6 +97,9 @@ func (n newIssue) create(s issues.Source, of int) (made issues.Issue, ready bool
 		made, err = s.ForPerson(n.Title, body, n.Parent, n.BlockedBy)
 	} else {
 		var labels []string
+		if n.Manifest {
+			labels = append(labels, issues.ManifestLabel)
+		}
 		if n.Review {
 			labels = append(labels, issues.ReviewLabel)
 		}
@@ -94,15 +114,33 @@ func (n newIssue) create(s issues.Source, of int) (made issues.Issue, ready bool
 	return made, ready, s.Blocking(made, n.Blocks)
 }
 
+// misc answers the misc manifest made went into, filed into no manifest; 0
+// where it named its --parent or stands at the top.
+func (n newIssue) misc(made issues.Issue) int {
+	if n.Parent == 0 && !n.atTop() {
+		return made.In()
+	}
+	return 0
+}
+
 func (n newIssue) answer(made issues.Issue, fanout string) newAnswer {
-	return newAnswer{made.Number, made.URL, append([]int{}, n.BlockedBy...), n.Parent, n.Blocks, n.Review, n.Final, n.Person, fanout}
+	parent, misc := n.Parent, n.misc(made)
+	if misc > 0 {
+		parent = misc
+	}
+	return newAnswer{made.Number, made.URL, append([]int{}, n.BlockedBy...), parent, n.Blocks, n.Review, n.Final, n.Person, n.Manifest, misc > 0, fanout}
 }
 
 // text says what was created: head, then its URL and its links.
 func (n newIssue) text(head string, made issues.Issue) string {
 	text := head + "\n" + made.URL
-	if n.Parent > 0 {
+	switch misc := n.misc(made); {
+	case misc > 0:
+		text += fmt.Sprintf("\nFiled into the misc manifest #%d: it named no --parent.", misc)
+	case n.Parent > 0:
 		text += fmt.Sprintf("\nA sub-issue of #%d.", n.Parent)
+	case n.Manifest:
+		text += fmt.Sprintf("\nA new manifest, labelled %s: file its leaves with --parent %d.", issues.ManifestLabel, made.Number)
 	}
 	if n.Review {
 		text += "\nLabelled " + issues.ReviewLabel + ": it is reviewed once its sub-issues have closed."

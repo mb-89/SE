@@ -121,7 +121,9 @@ func TestATakeoverComesBeforeNewWorkAndContinuesTheBranch(t *testing.T) {
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "half done")
 	run(t, a, "push", "-q", "origin", "issue-5")
 	g := newHub(t, map[string]string{
-		listPath:    list(node(3, 0), node(5, 0)),
+		// #3 is a retro: a take at the top has only manifests, retros and
+		// overhauls, besides stuck work.
+		listPath:    list(node(3, 0, RetroLabel), node(5, 0)),
 		refsPath:    refs(5),
 		activity(5): pushed(stale),
 		// #5 has no PR yet, so none conflicts.
@@ -195,7 +197,7 @@ func TestAStaleFinalClaimIsTakenOverAgain(t *testing.T) {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
 	g := newHub(t, map[string]string{
-		listPath:      list(node(5, 0, FinalLabel), node(6, 0)),
+		listPath:      list(node(5, 0, FinalLabel), node(6, 0, RetroLabel)),
 		refsPath:      refs(5),
 		activity(5):   pushed(stale),
 		openPullsPath: `[]`,
@@ -226,7 +228,7 @@ func TestIssuesWaitingOnAPersonAndTheirTreesAreNeverOffered(t *testing.T) {
 	g := newHub(t, map[string]string{
 		// #10's tree holds #11, which waits on a person, and #12, ready;
 		// #20 is blocked by #11, #21 by #20; #30 is free.
-		listPath:        list(node(10, 2), node(11, 0, PersonLabel), node(12, 0), node(20, 0), node(21, 0), node(30, 0)),
+		listPath:        list(node(10, 2), node(11, 0, PersonLabel), node(12, 0), node(20, 0), node(21, 0), node(30, 0, RetroLabel)),
 		refsPath:        refs(10, 11),
 		subsPath(10):    subs(11, 12),
 		blockedPath(20): subs(11),

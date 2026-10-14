@@ -97,11 +97,13 @@ type Reviewed struct {
 // reviewer who worked any leaf of n's tree, a tree with a leaf whose worker is
 // not recorded, and a report that breaks the rules of spec/review.md (see
 // Report.check). Every verified finding becomes an se-final issue: a blocking
-// one a sub-issue of n, a non-blocking one in the normal queue, at most
+// one a sub-issue of n, a non-blocking one in the open misc manifest, at most
 // issues/config/max-filed of them. The report goes on n with its machine-readable block; a
-// pass closes n, which can complete its parent. A blocking finding that
-// repeats an earlier blocker is an accepted repeat: it files nothing, and a
-// fail whose blocking findings are all repeats closes n as a pass does.
+// pass closes n, which can complete its parent, except a manifest at the
+// top: its se-review label comes off, and the one PR it lands as closes it.
+// A blocking finding that repeats an earlier blocker is an accepted repeat:
+// it files nothing, and a fail whose blocking findings are all repeats ends
+// n's review as a pass does.
 func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed, error) {
 	if reviewer.Session == "" {
 		return Reviewed{}, fmt.Errorf("%s is not set, so this reviewer cannot be told apart from the workers of #%d's tree; nothing was reviewed", SessionVar, n)
@@ -168,6 +170,20 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 		return r, fmt.Errorf("posting the report on #%d: %w", n, err)
 	}
 	if pass || !rep.blocks() {
+		// A manifest passed is not closed: its leaves' work is on its
+		// branch, and it lands as one PR, which closes it.
+		if got, err := api[issue](s, path, false); err != nil {
+			return r, err
+		} else if got[0].labelled(ManifestLabel) {
+			if top, err := s.manifestOf(n); err != nil {
+				return r, err
+			} else if top == 0 {
+				if _, err := s.GitHub.Send("DELETE", path+"/labels/"+ReviewLabel); err != nil {
+					return r, fmt.Errorf("taking %s off #%d: %w", ReviewLabel, n, err)
+				}
+				return r, nil
+			}
+		}
 		if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
 			return r, fmt.Errorf("closing #%d: %w", n, err)
 		}

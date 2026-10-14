@@ -72,7 +72,7 @@ func TestABoxsIssueNewQueuesOneIssueAndWritesNothing(t *testing.T) {
 	if code, _, errs := newIn("--title", "x", "--body", "b", "--blocked-by", "none", "--replace"); code != 1 || !strings.Contains(errs, "this session is no box") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
-	if code, out, errs := newIn("--title", "x", "--body", "b", "--blocked-by", "none"); code != 0 || !strings.HasPrefix(out, "Created #10 x\n") {
+	if code, out, errs := newIn("--title", "x", "--body", "b", "--blocked-by", "none"); code != 0 || !strings.HasPrefix(out, "Created #11 x\n") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 }
@@ -87,15 +87,15 @@ func TestASupersedeFilesTheQueuedIssueAsItsFollowup(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, errs := se(t, "issue", "supersede", "3", "--body", "which way?", "--workspace", ws, "--repo", "o/r")
-	// #10 is the successor, #11 the follow-up.
-	if code != 0 || !strings.HasPrefix(out, "Superseded #3 by #10 three") || !strings.Contains(out, "\n\nFiled the queued follow-up of #3: #11 the rest\n"+u11+"\nIt blocks #3.\nBlocked by #1.") {
+	// #10 is the misc manifest the successor, #11, opened; #12 the follow-up.
+	if code != 0 || !strings.HasPrefix(out, "Superseded #3 by #11 three") || !strings.Contains(out, "\n\nFiled the queued follow-up of #3: #12 the rest\nhttps://github.com/o/r/issues/12\nFiled into the misc manifest #10: it named no --parent.\nIt blocks #3.\nBlocked by #1.") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	if made := issueOf(t, gh, 11); !strings.Contains(made, `"body":"the rest\n\n<!-- se:followup #3 -->\n\n<!-- se:new -->"`) {
+	if made := issueOf(t, gh, 12); !strings.Contains(made, `"body":"the rest\n\n<!-- se:followup #3 -->\n\n<!-- se:new -->"`) {
 		t.Fatal(made)
 	}
-	if by := linked(t, gh, "repos/o/r/issues/11/dependencies/blocked_by"); !reflect.DeepEqual(by, []int{1}) {
-		t.Fatalf("#11 is blocked by %v", by)
+	if by := linked(t, gh, "repos/o/r/issues/12/dependencies/blocked_by"); !reflect.DeepEqual(by, []int{1}) {
+		t.Fatalf("#12 is blocked by %v", by)
 	}
 	if q := queuedAt(t, d, ws); q != nil {
 		t.Fatalf("the queue is left: %+v", q)
@@ -186,11 +186,12 @@ func TestALandFilesTheQueuedIssueAfterItsPR(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, errs := se(t, "issue", "land", "--json", "--answers", answers, "--workspace", ws, "--repo", "o/r")
-	// The PR is #7, the follow-up #8, blocked by #6 until it merges.
-	if code != 0 || !strings.HasPrefix(out, `{"issue":6,"number":7,`) || !strings.Contains(out, `"filed":[{"number":8,"url":"https://github.com/o/r/issues/8","blocked_by":[6]}]`) {
+	// The PR is #7, the follow-up #9, blocked by #6 until it merges, in the
+	// misc manifest #8 it opened.
+	if code != 0 || !strings.HasPrefix(out, `{"issue":6,"number":7,`) || !strings.Contains(out, `"filed":[{"number":9,"url":"https://github.com/o/r/issues/9","blocked_by":[6],"parent":8,"misc":true}]`) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	if made := issueOf(t, gh, 8); !strings.Contains(made, `<!-- se:followup #6 -->`) {
+	if made := issueOf(t, gh, 9); !strings.Contains(made, `<!-- se:followup #6 -->`) {
 		t.Fatal(made)
 	}
 	// The queue is filed once: the next land files nothing.
