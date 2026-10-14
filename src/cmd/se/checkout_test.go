@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/daemon"
+	"github.com/mb-89/SE/src/internal/gitenv"
 	"github.com/mb-89/SE/src/internal/update"
 )
 
@@ -27,6 +28,7 @@ func repoRoot(t *testing.T) string {
 }
 
 func TestMain(m *testing.M) {
+	gitenv.Clear()
 	code := m.Run()
 	if installedSE != "" {
 		os.RemoveAll(filepath.Dir(installedSE))
