@@ -43,10 +43,37 @@ type Cmd struct {
 // String is the command line, as an error names it.
 func (c Cmd) String() string { return strings.Join(append([]string{"git"}, c.Args...), " ") }
 
-// Module is git on the index: an I/O module.
-var Module = index.Declare("io/git", "The git repositories SE reads and changes, each named by its folder.", index.IO())
+// Module is git on the index, run through g: an I/O module. Its verb origin
+// answers the GitHub repository a checkout's origin names, the workspace's
+// for an empty folder.
+func Module(g Git, workspace string) *index.Module {
+	return index.Declare("io/git", "The git repositories SE reads and changes, each named by its folder.",
+		index.IO(),
+		index.Verb("origin", "Answers OWNER/NAME, the GitHub repository a checkout's origin names: the checkout in the folder asked, the workspace's where it is empty.",
+			func(dir string) (string, error) {
+				if dir == "" {
+					dir = workspace
+				}
+				return Origin(g, dir)
+			}),
+	)
+}
 
-func init() { index.Register(Module) }
+// Origin reads OWNER/NAME from the origin URL of the checkout in dir,
+// whatever its form: https://github.com/o/n.git, git@github.com:o/n, or a
+// proxy's …/o/n.
+func Origin(g Git, dir string) (string, error) {
+	url, err := Output(g, dir, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	url = strings.TrimSuffix(strings.TrimSuffix(url, "/"), ".git")
+	parts := strings.FieldsFunc(url, func(r rune) bool { return r == '/' || r == ':' })
+	if len(parts) < 2 {
+		return "", fmt.Errorf("origin %q names no OWNER/NAME; pass --repo", url)
+	}
+	return parts[len(parts)-2] + "/" + parts[len(parts)-1], nil
+}
 
 // Vars are git's repository variables: each points git at a repository other
 // than the one its working folder is in.

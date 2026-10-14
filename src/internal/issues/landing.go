@@ -319,7 +319,7 @@ func answersFile(n int, block string) ([]byte, error) {
 // its branch's history against origin's base (main, or the manifest's branch
 // a leaf lands into) and GitHub's record of the branch's creation.
 func (s Source) facts(dir string, n int, comments []comment, base string) (Facts, error) {
-	f := Facts{Landed: s.now().UTC().Truncate(time.Second), Takeovers: marksOf(comments).takeovers}
+	f := Facts{Landed: s.now().UTC().Truncate(time.Second), Takeovers: marksOf(comments).Takeovers}
 	recorded, err := Requests(s.Disk, dir)
 	if err != nil {
 		return Facts{}, err

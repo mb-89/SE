@@ -371,7 +371,7 @@ func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tre
 			}
 			m = &got
 		}
-		if m.takeovers > 0 && m.head == f.head && s.now().Sub(m.lastTakeover) < Quiet {
+		if m.Takeovers > 0 && m.Head == f.head && s.now().Sub(m.LastTakeover) < Quiet {
 			return nil, nil
 		}
 	}
@@ -724,7 +724,7 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 	if err != nil {
 		return Issue{}, false, err
 	}
-	k := m.takeovers + 1
+	k := m.Takeovers + 1
 	conflict := f.cause() == ConflictedPR
 	if st.Final && !conflict {
 		reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s.", FinalLabel, f.What)

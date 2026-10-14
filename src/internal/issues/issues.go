@@ -15,6 +15,7 @@ import (
 	"github.com/mb-89/SE/src/modules/io/disk"
 	"github.com/mb-89/SE/src/modules/io/git"
 	"github.com/mb-89/SE/src/modules/io/github"
+	"github.com/mb-89/SE/src/modules/issues/stuck"
 )
 
 // Label marks an issue as the fleet's work.
@@ -27,7 +28,7 @@ const ReviewLabel = "se-review"
 // FinalLabel marks an issue on its last attempt: one a review filed for a
 // finding, or one taken over stuck once already. A final issue that fails again goes
 // to a person instead of another round.
-const FinalLabel = "se-final"
+const FinalLabel = stuck.FinalLabel
 
 // Issue is one fleet issue.
 type Issue struct {
@@ -542,7 +543,7 @@ func (s Source) survey() ([]Status, tree, error) {
 		switch {
 		case i.labelled(PersonLabel):
 			st.Person, st.Why = true, "waits on a person"
-			if st.Reason = marked[n].reason; st.Reason == "" {
+			if st.Reason = Shown(marked[n].Person); st.Reason == "" {
 				st.Reason = firstParagraph(i.Body)
 			}
 		case !parent && claimed[Branch(n)]:
@@ -1073,21 +1074,8 @@ func (s Source) stakeFrom(dir string, n int, base string) (claimed bool, err err
 	return true, s.markBox(n)
 }
 
-// Repo reads OWNER/NAME from the checkout's origin URL, whatever its form:
-// https://github.com/o/n.git, git@github.com:o/n, or a proxy's …/o/n. It
-// runs git on g.
-func Repo(g git.Git, dir string) (string, error) {
-	url, err := git.Output(g, dir, "remote", "get-url", "origin")
-	if err != nil {
-		return "", err
-	}
-	url = strings.TrimSuffix(strings.TrimSuffix(url, "/"), ".git")
-	parts := strings.FieldsFunc(url, func(r rune) bool { return r == '/' || r == ':' })
-	if len(parts) < 2 {
-		return "", fmt.Errorf("origin %q names no OWNER/NAME; pass --repo", url)
-	}
-	return parts[len(parts)-2] + "/" + parts[len(parts)-1], nil
-}
+// Repo reads OWNER/NAME from the checkout's origin URL, running git on g.
+func Repo(g git.Git, dir string) (string, error) { return git.Origin(g, dir) }
 
 // git runs git in the checkout dir and answers what it printed, trimmed.
 func (s Source) git(dir string, args ...string) (string, error) {

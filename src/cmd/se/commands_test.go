@@ -157,17 +157,14 @@ func TestTheHelpIsMadeFromTheRegistry(t *testing.T) {
 	}
 }
 
-// TestTheHelpGroupsTheCommands reads its want from the registered commands,
+// TestTheHelpGroupsTheCommands reads its want from the catalog's commands,
 // so a new command edits no list here: each group stands under its heading,
 // the headings in order, and lists its commands by name.
 func TestTheHelpGroupsTheCommands(t *testing.T) {
 	t.Parallel()
 	want := map[string][]string{}
-	for name, c := range commands {
-		if c.Group == "" {
-			t.Errorf("command %q stands under no group", name)
-		}
-		want[c.Group] = append(want[c.Group], name)
+	for _, c := range catalog().Commands {
+		want[c.Group] = append(want[c.Group], c.Name)
 	}
 	var groups []string
 	for group, names := range want {
@@ -466,17 +463,18 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 		t.Fatalf("%+v", r.Help)
 	}
 	listed := map[string]string{}
+	cat := catalog()
 	for _, g := range r.Help.Groups {
 		for _, c := range g.Commands {
 			listed[c.Name] = g.Name
-			if c.Summary != commands[c.Name].Summary || c.Usage != "/se "+commands[c.Name].Usage {
+			if d, _ := cat.Command(c.Name); c.Summary != d.Summary || c.Usage != "/se "+d.Usage {
 				t.Errorf("%s: %+v", c.Name, c)
 			}
 		}
 	}
-	for name, c := range commands {
-		if want := map[bool]string{true: c.Group}[c.Session]; listed[name] != want {
-			t.Errorf("%s stands under %q, want %q", name, listed[name], want)
+	for _, c := range cat.Commands {
+		if want := map[bool]string{true: c.Group}[c.Session]; listed[c.Name] != want {
+			t.Errorf("%s stands under %q, want %q", c.Name, listed[c.Name], want)
 		}
 	}
 	one := session(t, "help", "issue", "pull")
@@ -536,7 +534,7 @@ func TestTheHelpRendersTheConfigValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, want := range map[string][]string{
-		"issue pull":    {fmt.Sprintf("%d retros (issues/config/overhaul-cadence)", cfg.OverhaulCadence), fmt.Sprintf("%d se issues (issues/config/retro-cadence)", cfg.RetroCadence), fmt.Sprintf("%s lease (issues/config/lease)", cfg.Lease)},
+		"issue pull":    {fmt.Sprintf("%d retros (issues/config/overhaul-cadence)", cfg.OverhaulCadence), fmt.Sprintf("%d se issues (issues/config/retro-cadence)", cfg.RetroCadence), fmt.Sprintf("%s lease (issues/stuck/config/lease)", cfg.Lease)},
 		"issue review":  {fmt.Sprintf("at most %d, issues/config/max-filed", cfg.MaxFiled)},
 		"overhaul new":  {fmt.Sprintf("last %d runs (issues/config/overhaul-cadence)", cfg.OverhaulCadence)},
 		"overhaul read": {fmt.Sprintf("last %d retros' metrics (issues/config/overhaul-cadence)", cfg.OverhaulCadence)},

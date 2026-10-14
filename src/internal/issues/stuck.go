@@ -9,21 +9,15 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/modules/io/github"
+	"github.com/mb-89/SE/src/modules/issues/stuck"
 )
 
-// Lease is the built-in value of issues/config/lease: how long a claimed leaf may go without a push to its branch before
-// it is stuck. It is under the routine's 4-hour schedule, so a scheduled box
-// always finds a stuck issue.
-const Lease = 3 * time.Hour
+// Lease is the built-in value of issues/stuck/config/lease, which the module
+// issues/stuck declares.
+const Lease = stuck.Lease
 
-// PersonLabel marks an issue that waits on a person, the repository's owner,
-// who is assigned to it; no box is offered it, or a tree containing it.
-const PersonLabel = "se-person"
-
-// The marks se leaves in the comments it writes, so what it did survives the
-// box that did it: <!-- se:takeover 1 -->, <!-- se:person -->, <!-- se:resume -->,
-// and <!-- se:takeover-head abc -->, the PR head a conflict takeover found.
-var mark = regexp.MustCompile(`<!-- se:(takeover|person|resume|takeover-head)(?: ([0-9a-f]+))? -->`)
+// PersonLabel marks an issue that waits on a person, as issues/stuck says.
+const PersonLabel = stuck.PersonLabel
 
 // comment is the part of GitHub's issue comment object the rules read.
 type comment struct {
@@ -34,18 +28,10 @@ type comment struct {
 	IssueURL string `json:"issue_url"`
 }
 
-// marks is what an issue's comments say about it since a person last resumed it.
+// marks is what an issue's comments say about it since a person last resumed
+// it: issues/stuck's marks, and the box's.
 type marks struct {
-	// takeovers is the highest takeover round; two boxes racing for one round
-	// count once. head is the PR head that round's conflict takeover found,
-	// so a box tells a takeover still in flight from a second conflict.
-	takeovers    int
-	head         string
-	lastTakeover time.Time
-	// reason is the text of the last person mark.
-	reason string
-	// winners maps each takeover round to its first comment's id.
-	winners map[int]int64
+	stuck.Marks
 	// box is the session of the box whose claim it is, from the last box mark.
 	box string
 	// retry is when a fan-out the routine refused for its rate limit, after
@@ -62,36 +48,16 @@ func (s Source) marks(n int) (marks, error) {
 	return marksOf(all), nil
 }
 
-// marksOf reads the marks out of an issue's comments, oldest first.
+// marksOf reads the marks out of an issue's comments, oldest first; a resume
+// clears the box's marks with stuck's.
 func marksOf(all []comment) marks {
-	m := marks{winners: map[int]int64{}}
+	var m marks
 	for _, c := range all {
 		for _, got := range boxMark.FindAllStringSubmatch(c.Body, -1) {
 			m.box = got[1]
 		}
-		round := 0
-		for _, got := range mark.FindAllStringSubmatch(c.Body, -1) {
-			switch got[1] {
-			case "resume":
-				m = marks{winners: map[int]int64{}}
-			case "person":
-				m.reason = Shown(c.Body)
-			case "takeover":
-				round, _ = strconv.Atoi(got[2])
-				if round > m.takeovers {
-					m.takeovers, m.head = round, ""
-				}
-				if c.Created.After(m.lastTakeover) {
-					m.lastTakeover = c.Created
-				}
-				if id, ok := m.winners[round]; !ok || c.ID < id {
-					m.winners[round] = c.ID
-				}
-			case "takeover-head":
-				if round == m.takeovers {
-					m.head = got[2]
-				}
-			}
+		if m.Read(stuck.Comment{ID: c.ID, Body: c.Body, Created: c.Created}) {
+			m.box, m.retry = "", time.Time{}
 		}
 		for _, got := range fanoutMark.FindAllStringSubmatch(c.Body, -1) {
 			if got[1] == "fired" {
@@ -136,11 +102,8 @@ func (s Source) quiet(n int, pushed time.Time, window time.Duration) (quiet bool
 	if err != nil {
 		return false, pushed, nil, err
 	}
-	moved = pushed
-	if got.lastTakeover.After(moved) {
-		moved = got.lastTakeover
-	}
-	return s.now().Sub(moved) > window, moved, &got, nil
+	quiet, moved = stuck.Quiet(s.now(), pushed, got.LastTakeover, window)
+	return quiet, moved, &got, nil
 }
 
 // lease reads whether a claimed leaf is stuck: quiet for longer than the
@@ -157,7 +120,7 @@ func (s Source) lease(st *Status) error {
 	}
 	st.Since, st.Stuck = moved, stuck
 	if m != nil {
-		st.Takeovers = m.takeovers
+		st.Takeovers = m.Takeovers
 	}
 	return nil
 }
@@ -316,7 +279,7 @@ func (s Source) markTakeover(n, round int, body string) (won bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	if m.winners[round] == mine.ID {
+	if m.Winners[round] == mine.ID {
 		return true, nil
 	}
 	if _, err := s.GitHub.Send("DELETE", fmt.Sprintf("repos/%s/issues/comments/%d", s.Repo, mine.ID)); err != nil {
@@ -379,35 +342,4 @@ func waiting(all []Status, t tree) []Waiting {
 		out = append(out, Waiting{st.Number, st.Title, st.URL, reason, len(seen) - 1})
 	}
 	return out
-}
-
-// Resume gives issue n back to the boxes: it removes the se-person label and
-// the se-final one, and records a resume, which resets its takeover count, so
-// it gets one more attempt. A claim that is still stale is taken over by the
-// next box.
-func (s Source) Resume(n int) (Issue, error) {
-	base := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
-	got, err := api[issue](s, base, false)
-	if err != nil {
-		return Issue{}, err
-	}
-	i := got[0]
-	if i.PullRequest != nil || i.State != "open" || !i.labelled(PersonLabel) {
-		return Issue{}, fmt.Errorf("#%d is not an open issue waiting on a person (labelled %s)", n, PersonLabel)
-	}
-	// The resume is recorded before the label goes, so an issue back in the
-	// queue never keeps its old takeover count.
-	body := "<!-- se:resume -->\nResumed by a person: back in the queue, its takeover count reset, no longer final."
-	if _, err := s.GitHub.Send("POST", base+"/comments", github.F("body", body)); err != nil {
-		return Issue{}, err
-	}
-	for _, l := range []string{FinalLabel, PersonLabel} {
-		if !i.labelled(l) {
-			continue
-		}
-		if _, err := s.GitHub.Send("DELETE", base+"/labels/"+l); err != nil {
-			return Issue{}, err
-		}
-	}
-	return Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL}, nil
 }

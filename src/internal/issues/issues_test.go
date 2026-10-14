@@ -318,45 +318,6 @@ func TestNothingReady(t *testing.T) {
 	}
 }
 
-func TestRepoReadsOrigin(t *testing.T) {
-	t.Parallel()
-	for url, want := range map[string]string{
-		"https://github.com/mb-89/SE":              "mb-89/SE",
-		"https://github.com/mb-89/SE.git":          "mb-89/SE",
-		"git@github.com:mb-89/SE.git":              "mb-89/SE",
-		"http://proxy@127.0.0.1:1234/git/mb-89/SE": "mb-89/SE",
-	} {
-		m := git.NewFake(withOrigin("/w", url))
-		if got, err := Repo(m, "/w"); err != nil || got != want {
-			t.Errorf("%s: %q %v", url, got, err)
-		}
-	}
-	m := git.NewFake(withOrigin("/w", ""))
-	if _, err := Repo(m, "/w"); err == nil || !strings.Contains(err.Error(), "remote get-url origin") {
-		t.Fatalf("a checkout without origin answered %v", err)
-	}
-}
-
-// withOrigin is a git whose one checkout, dir, has origin at url; an empty url
-// is no origin at all.
-func withOrigin(dir, url string) proc.Program {
-	return func(c proc.Cmd) int {
-		switch {
-		case c.Dir != dir:
-			fmt.Fprintf(c.Stderr, "fatal: not a git repository: %s\n", c.Dir)
-			return 128
-		case strings.Join(c.Args, " ") != "remote get-url origin":
-			fmt.Fprintf(c.Stderr, "git: %s is not what this git does\n", c.Args)
-			return 1
-		case url == "":
-			fmt.Fprintln(c.Stderr, "error: No such remote 'origin'")
-			return 2
-		}
-		fmt.Fprintln(c.Stdout, url)
-		return 0
-	}
-}
-
 // machine is the real git the tests that build git repositories still run;
 // #137 moves them onto the fake.
 var machine = git.Real(proc.Real(), env.Real())

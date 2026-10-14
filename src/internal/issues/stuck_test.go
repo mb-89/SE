@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/modules/io/github"
+	"github.com/mb-89/SE/src/modules/issues/stuck"
 )
 
 // hub is a fake GitHub seeded from recorded answers, which keeps what it is
@@ -184,7 +185,7 @@ func TestOfTwoTakeoversTheFirstCommentWins(t *testing.T) {
 		t.Fatalf("b moved to %s", got)
 	}
 	// Two comments for one round count as one takeover.
-	if m, err := s.marks(5); err != nil || m.takeovers != 1 {
+	if m, err := s.marks(5); err != nil || m.Takeovers != 1 {
 		t.Fatalf("%+v %v", m, err)
 	}
 }
@@ -338,35 +339,25 @@ func TestAParentsClaimIsNeverStuck(t *testing.T) {
 	}
 }
 
-func TestResumeResetsTheTakeoverCount(t *testing.T) {
+// A resume, which issues/stuck's se issue resume records, resets the
+// takeover count: back in the queue and still stale, the next take takes it
+// over, round one.
+func TestAResumeResetsTheTakeoverCount(t *testing.T) {
 	t.Parallel()
 	g := newHub(t, map[string]string{
-		"repos/o/r/issues/5": node(5, 0, FinalLabel, PersonLabel),
-		"repos/o/r/issues/6": node(6, 0),
-		listPath:             list(node(5, 0, FinalLabel, PersonLabel)),
+		"repos/o/r/issues/5": node(5, 0),
+		listPath:             list(node(5, 0)),
 		refsPath:             refs(5),
 		activity(5):          pushed(stale),
 	})
 	g.say(5, "<!-- se:takeover 1 -->")
 	g.say(5, "<!-- se:person -->\nStuck a second time.")
-	s := g.source()
-	if _, err := s.Resume(6); err == nil || !strings.Contains(err.Error(), "not an open issue waiting on a person") {
-		t.Fatalf("resumed #6: %v", err)
-	}
-	if i, err := s.Resume(5); err != nil || i.Number != 5 {
-		t.Fatalf("%+v %v", i, err)
-	}
-	// It is no longer final either: it gets one more attempt.
-	want := []string{"POST repos/o/r/issues/5/comments", "DELETE repos/o/r/issues/5/labels/se-final", "DELETE repos/o/r/issues/5/labels/se-person"}
-	if w := g.Writes(); !reflect.DeepEqual(w, want) || g.labelled(5, FinalLabel) || g.labelled(5, PersonLabel) {
-		t.Fatalf("writes %q", w)
-	}
-	// Back in the queue, still stale: the next take takes it over, round one.
-	all, err := s.Survey()
+	g.say(5, stuck.ResumeNote)
+	all, err := g.source().Survey()
 	if err != nil || !all[0].Stuck || all[0].Takeovers != 0 || !all[0].Takeable() {
 		t.Fatalf("%+v %v", all, err)
 	}
-	if w := g.Writes(); len(w) != 3 {
+	if w := g.Writes(); len(w) != 0 {
 		t.Fatalf("the survey flagged it again: %q", w)
 	}
 }

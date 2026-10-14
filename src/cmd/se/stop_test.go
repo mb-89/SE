@@ -26,7 +26,7 @@ func TestStatusAndStopReachTheDaemonOverTheNetwork(t *testing.T) {
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
 		done <- daemon.Serve(context.Background(), daemon.Paths{Workspace: ws, Disk: d}, daemon.Options{
-			Clock: fake, Net: w.Net, Modules: modules(daemon.Paths{Workspace: ws, Disk: d}, fake, nil), Ready: func(ep daemon.Endpoint) { ready <- ep },
+			Clock: fake, Net: w.Net, Modules: modules(daemon.Paths{Workspace: ws, Disk: d}, fake, nil, nil), Ready: func(ep daemon.Endpoint) { ready <- ep },
 		})
 	}()
 	ep := <-ready

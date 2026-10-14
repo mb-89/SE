@@ -206,8 +206,8 @@ person**, and leaves the agents' queue until the person has closed it.
 - **Stuck** is decided by a timer, not judgment. A claimed leaf (claimed at
   the top or with `--in`) is stuck when nothing has been pushed to its branch
   `issue-<n>` (or its PR), nor a takeover recorded, for longer than the lease,
-  `issues/config/lease` (the issues instance's config value, built-in in
-  `src/internal/issues/stuck.go`). It is under the routine's
+  `issues/stuck/config/lease` (the issues/stuck instance's config value,
+  built-in in `src/modules/issues/stuck`). It is under the routine's
   4-hour schedule, so a scheduled box always catches it. The last push is
   GitHub's activity on the branch (`/repos/{owner}/{repo}/activity`), its
   creation included; a branch GitHub keeps no push record of is stuck. A
@@ -286,7 +286,9 @@ se review brief N [--claims] [--json] [--repo OWNER/NAME]
 ```
 <!-- /se:manifest -->
 
-Every one of them first closes the parents whose sub-issues are all closed.
+Every one of them but `se issue resume`, which the module `issues/stuck`
+answers on the workspace's daemon, first closes the parents whose sub-issues
+are all closed.
 
 `se issue pull` prints the next issue at the top a take would have (number,
 title, link, and one line on why it is at the top): stuck work first, then

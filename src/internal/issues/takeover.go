@@ -146,10 +146,10 @@ func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (to
 		if err != nil {
 			return Issue{}, false, err
 		}
-		if m.head == c.pr.Head.SHA {
+		if m.Head == c.pr.Head.SHA {
 			continue
 		}
-		k := m.takeovers + 1
+		k := m.Takeovers + 1
 		heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, c.pr.Head.SHA)
 		body := fmt.Sprintf("Taken over: PR #%d conflicts with main at %s. This box merges main into %s and lands it again.",
 			c.pr.Number, c.pr.Head.SHA, Branch(c.Number)) + heads + s.boxLine()

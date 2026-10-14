@@ -14,6 +14,7 @@ instances:
   cli: {module: cli, config: {columns: 3}}
   guidance: {module: guidance, config: {inline: true, principles: true}}
   issues: {module: issues}
+  issues/stuck: {module: issues/stuck}
   # What SE runs that others built (src/internal/reuse): each source pinned
   # to a commit, with its licence, and each tier's list, staggered by cost.
   # Moving a skill between tiers is a change of one list here.
@@ -49,3 +50,6 @@ instances:
 wires:
   io/session.events: session/<id>/events
   io/session-log.events: session/<id>/events
+  issues/stuck.get: io/github.get
+  issues/stuck.send: io/github.send
+  issues/stuck.origin: io/git.origin

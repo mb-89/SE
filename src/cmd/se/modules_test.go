@@ -28,7 +28,7 @@ func TestTheWiringSeCarriesStartsItsModules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ix, err := index.Start(w, modules(daemon.Paths{Workspace: t.TempDir()}, clock.NewFake(time.Time{}), nil)...)
+	ix, err := index.Start(w, modules(daemon.Paths{Workspace: t.TempDir()}, clock.NewFake(time.Time{}), nil, nil)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,16 +36,23 @@ func TestTheWiringSeCarriesStartsItsModules(t *testing.T) {
 	for _, in := range ix.Catalog().Instances {
 		instances = append(instances, in.Name)
 	}
-	if want := []string{"cli", "guidance", "io/clock", "io/disk", "io/env", "io/git", "io/github", "io/http", "io/proc", "io/session", "io/session-log", "issues", "reuse"}; !slices.Equal(instances, want) {
+	if want := []string{"cli", "guidance", "io/clock", "io/disk", "io/env", "io/git", "io/github", "io/http", "io/proc", "io/session", "io/session-log", "issues", "issues/stuck", "reuse"}; !slices.Equal(instances, want) {
 		t.Fatalf("the index runs %v, want %v", instances, want)
 	}
 }
 
-// Every command se registers is declared on the index, and the index declares no other.
+// Every command se registers is declared on the index as the cli instance's,
+// and the cli instance declares no other; the rest a module declares.
 func TestTheIndexDeclaresEveryRegisteredCommand(t *testing.T) {
 	t.Parallel()
 	var declared, registered []string
 	for _, c := range catalog().Commands {
+		if c.Instance != "cli" {
+			if _, ok := commands[c.Name]; ok {
+				t.Errorf("%s is registered by se and declared by %s", c.Name, c.Instance)
+			}
+			continue
+		}
 		declared = append(declared, c.Name)
 		if want := declOf(commands[c.Name]); !reflect.DeepEqual(c.CommandDecl, want) {
 			t.Errorf("%s is declared as %+v, registered as %+v", c.Name, c.CommandDecl, want)

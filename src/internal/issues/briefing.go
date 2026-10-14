@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/issues/stuck"
 )
 
 // RetroLabel and OverhaulLabel mark the issues that run a retro and an overhaul.
@@ -297,9 +298,7 @@ func closedOf(c closedIssue, comments []comment, pulls []closedPull) Closed {
 		if l, ok, err := ParseLanding(m.Body); ok && err == nil {
 			out.Done = strings.TrimSpace(l.Answers["done"])
 		}
-		for _, got := range mark.FindAllStringSubmatch(m.Body, -1) {
-			out.Person = out.Person || got[1] == "person"
-		}
+		out.Person = out.Person || stuck.PersonMarked(m.Body)
 	}
 	for _, p := range pulls {
 		if out.PR == 0 || p.Merged != nil {

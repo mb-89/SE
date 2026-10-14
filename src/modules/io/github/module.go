@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/index"
+	"github.com/mb-89/SE/src/lib/rest"
 )
 
 // The built-in values of Module's config.
@@ -23,20 +24,13 @@ const (
 // name is the module's name, which the wiring file's instances name.
 const name = "io/github"
 
-// Get is a request of the get verb: the JSON value at Path, such as
-// repos/OWNER/NAME/issues/5.
-type Get struct{ Path string }
-
-// List is a request of the list verb: every item of the paginated list at
-// Path, every page of it, as one JSON array.
-type List struct{ Path string }
-
-// Send is a request of the send verb: Method (POST, PATCH, PUT or DELETE)
-// to Path with Fields.
-type Send struct {
-	Method, Path string
-	Fields       []Field
-}
+// Get, List and Send are the requests of the verbs get, list and send, which
+// the library rest declares, since a compute module asks them too.
+type (
+	Get  = rest.Get
+	List = rest.List
+	Send = rest.Send
+)
 
 // Module is GitHub on the index, read and written through gh: its verbs get,
 // list and send answer GitHub's JSON reply to a compute module's requests,

@@ -165,7 +165,7 @@ func TestTheSessionLogRecordsTheHandOverAndACompactionHandsItAgain(t *testing.T)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
 		done <- daemon.Serve(ctx, daemon.Paths{Workspace: ws, Disk: d}, daemon.Options{
-			Clock: worldOf(t).Clock, Net: net, Modules: modules(daemon.Paths{Workspace: ws, Disk: d}, worldOf(t).Clock, nil),
+			Clock: worldOf(t).Clock, Net: net, Modules: modules(daemon.Paths{Workspace: ws, Disk: d}, worldOf(t).Clock, nil, nil),
 			Ready: func(ep daemon.Endpoint) { ready <- ep },
 		})
 	}()

@@ -17,20 +17,21 @@ import (
 	sehttp "github.com/mb-89/SE/src/modules/io/http"
 	"github.com/mb-89/SE/src/modules/io/proc"
 	sessions "github.com/mb-89/SE/src/modules/io/session"
+	"github.com/mb-89/SE/src/modules/issues/stuck"
 )
 
 // modules are the modules se starts the index with, each I/O module handed
 // its outside thing for the workspace p: the clock, the disk, the
 // environment, git, GitHub through gh, the network, the programs, the
 // session's posts and its log, the command line's own commands, the
-// hand-over's switches, the issue work's config, and what each tier runs that
+// hand-over's switches, the issue work's config, stuck work, and what each tier runs that
 // others built. The wiring file binds them.
-func modules(p daemon.Paths, clk clock.Clock, gh github.GitHub) []*index.Module {
+func modules(p daemon.Paths, clk clock.Clock, gh github.GitHub, g git.Git) []*index.Module {
 	return []*index.Module{
 		clock.Module(clk),
 		disk.Module,
 		env.Module,
-		git.Module,
+		git.Module(g, p.Workspace),
 		github.Module(gh),
 		sehttp.Module,
 		proc.Module,
@@ -39,6 +40,7 @@ func modules(p daemon.Paths, clk clock.Clock, gh github.GitHub) []*index.Module 
 		cliModule(),
 		guidance.Module,
 		issues.Module,
+		stuck.Module,
 		reuse.Module,
 	}
 }
@@ -101,7 +103,7 @@ func catalog() index.Catalog {
 	if err != nil {
 		panic(err)
 	}
-	c, err := index.Collect(w, modules(daemon.Paths{}, clock.Real(), nil)...)
+	c, err := index.Collect(w, modules(daemon.Paths{}, clock.Real(), nil, nil)...)
 	if err != nil {
 		panic(err)
 	}

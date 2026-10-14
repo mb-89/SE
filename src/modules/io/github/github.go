@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/mb-89/SE/src/lib/rest"
 )
 
 // GitHub is what SE asks of GitHub: its REST API, read and written by path
@@ -34,22 +36,14 @@ type GitHub interface {
 	GraphQL(query string, vars ...Field) ([]byte, error)
 }
 
-// Field is one field of a request. Name may end in [] to add to an array,
-// as labels[] does.
-type Field struct {
-	Name, Value string
-	// Typed is set for a number, true, false or null, which GitHub reads as
-	// that rather than as a string.
-	Typed bool
-}
+// Field is one field of a request, as the library rest declares it.
+type Field = rest.Field
 
 // F is a string field.
-func F(name, value string) Field { return Field{Name: name, Value: value} }
+func F(name, value string) Field { return rest.F(name, value) }
 
 // Int is a number field, such as the issue_id a link takes.
-func Int(name string, v int64) Field {
-	return Field{Name: name, Value: strconv.FormatInt(v, 10), Typed: true}
-}
+func Int(name string, v int64) Field { return rest.Int(name, v) }
 
 // Error is GitHub refusing a request, with the HTTP status it answered.
 type Error struct {

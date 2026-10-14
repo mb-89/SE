@@ -257,7 +257,7 @@ func (s Source) Keep(dir string, within time.Duration, check func(dir string) er
 		if err != nil {
 			return k, err
 		}
-		if m.takeovers > start.takeovers || m.box != start.box {
+		if m.Takeovers > start.Takeovers || m.box != start.box {
 			k.TakenOver = true
 			return k, nil
 		}

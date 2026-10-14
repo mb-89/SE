@@ -720,7 +720,7 @@ func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
 	}
 }
 
-func TestIssuePullPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
+func TestIssuePullPersonListsWhatWaits(t *testing.T) {
 	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
@@ -730,28 +730,14 @@ func TestIssuePullPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
 		"repos/o/r/issues/7/comments?per_page=100":                `[{"id":1,"body":"<!-- se:person -->\nStuck a second time."}]`,
 		"repos/o/r/issues/7/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/issues/8/dependencies/blocked_by?per_page=100": `[{"number":7,"state":"open"}]`,
-		"repos/o/r/issues/7":                                      `{"number":7,"title":"seven","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-person"}]}`,
 	}
-	gh := hubAt(t, answers)
+	hubAt(t, answers)
 	code, out, errs := se(t, "issue", "pull", "--person", "--repo", "o/r")
 	if code != 0 || out != "#7 seven\nu7\nBlocks 1 open issue(s).\nStuck a second time.\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	if code, _, errs := se(t, "issue", "pull", "--person", "--take", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "--person alone") {
 		t.Fatalf("exit %d, %q", code, errs)
-	}
-	if code, _, errs := se(t, "issue", "resume", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "one issue number") {
-		t.Fatalf("exit %d, %q", code, errs)
-	}
-	code, out, errs = se(t, "issue", "resume", "#7", "--repo", "o/r")
-	if code != 0 || out != "Resumed #7 seven: back in the queue, its takeover count reset.\nu7\n" {
-		t.Fatalf("exit %d, %q %q", code, out, errs)
-	}
-	if want := []string{"POST repos/o/r/issues/7/comments", "DELETE repos/o/r/issues/7/labels/se-person"}; !reflect.DeepEqual(gh.Writes(), want) {
-		t.Fatalf("writes %q", gh.Writes())
-	}
-	if strings.Contains(issueOf(t, gh, 7), "se-person") {
-		t.Fatal(issueOf(t, gh, 7))
 	}
 }
 
