@@ -2,14 +2,11 @@ package issues
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // The kinds of finding se fleet check lists, in the order it lists them and
@@ -91,13 +88,11 @@ func (f *Finding) setRemedy() {
 	case f.cause() == GreenUnmerged && !f.autoMerge:
 		f.Remedy = "se fleet fix turns auto-merge on"
 	case f.prunable:
-		f.Remedy = fmt.Sprintf("the prune workflow deletes %s; se fleet fix reports it only if it is still there a day after #%d closed", Branch(f.Issue), f.Issue)
+		f.Remedy = fmt.Sprintf("the prune workflow deletes %s; se fleet check reports it if it is still there a day after #%d closed", Branch(f.Issue), f.Issue)
 	case f.spent:
 		f.Remedy = "se fleet fix deletes " + Branch(f.Issue) + ": main holds all its commits"
-	case f.judgment || f.cause() == GreenUnmerged:
-		f.Remedy = "se fleet fix reports it as an " + PersonLabel + " issue"
 	default:
-		f.Remedy = "se fleet fix reports it as an se issue"
+		f.Remedy = "none se applies by itself; se fleet check reports it"
 	}
 }
 
@@ -538,30 +533,19 @@ type Fixed struct {
 	Finding
 	// Did says what was done, in a few words.
 	Did string `json:"did"`
-	// Made is the issue the fix created, where it created one.
-	Made int `json:"made,omitempty"`
-	// Ready is true for a made issue a box may take: no se-person.
-	Ready bool `json:"ready,omitempty"`
-	// Take is true where the fix is this box's takeover, by its Remedy.
+	// Take is true where the fix is a takeover, by its Remedy.
 	Take bool `json:"take,omitempty"`
 	// Failed is why the remedy failed, where it did; Did says so too.
 	Failed string `json:"failed,omitempty"`
 }
 
-// fleetMark records a fix on the finding's issue: the finding's key and the
-// issue it made, or 0.
-var fleetMark = regexp.MustCompile(`<!-- se:fleet (\S+) (\d+) -->`)
-
 // Fix applies, in order, the remedy of every finding that needs no checkout:
-// auto-merge goes on where it is off, a spent leftover branch is deleted, and
-// a finding with no other remedy
-// becomes an issue, labelled se-person where it is a judgment. A takeover is
-// left to the box, which runs its remedy. Each fix is recorded on the
-// finding's issue; a finding that is back after its fix goes to a person, and
-// one that is reported already, its issue still open, is left as it is. A
-// leftover branch is deleted by a push from the checkout dir, the transport
-// se issue land pushes through. A remedy that fails is reported in its Fixed,
-// and the remedies after it are still applied.
+// auto-merge goes on where it is off, and a spent leftover branch is deleted,
+// by a push from the checkout dir, the transport se issue land pushes
+// through. Every other finding is reported, never filed: an issue is work,
+// not a report (principle 12), and Fix writes no issue and no comment. A
+// takeover is named for the next take. A remedy that fails is reported in its
+// Fixed, and the remedies after it are still applied.
 func (s Source) Fix(dir string, findings []Finding) []Fixed {
 	var out []Fixed
 	for _, f := range findings {
@@ -570,58 +554,26 @@ func (s Source) Fix(dir string, findings []Finding) []Fixed {
 		case f.Kind == WaitingOnPerson:
 			x.Did = "reported; it waits for a person"
 		case f.takeover():
-			x.Did, x.Take = "left to this box: "+f.Remedy, true
+			x.Did, x.Take = "left to the next take: "+f.Remedy, true
 		case f.prunable && s.now().Sub(f.closed) < Grace:
 			x.Did = fmt.Sprintf("left to the prune workflow until a day after #%d closed", f.Issue)
 		case f.prunable:
 			x.What += ", and is still there a day after it closed: the prune workflow did not delete it"
-			s.apply(dir, &x)
+			x.Did = "reported; the prune workflow did not delete it"
 		default:
-			s.apply(dir, &x)
+			if err := s.fix(dir, &x); err != nil {
+				x.Failed = err.Error()
+				x.Did = "failed: " + x.Failed
+			}
 		}
 		out = append(out, x)
 	}
 	return out
 }
 
-// apply runs x's remedy and, where it fails, records why in x.
-func (s Source) apply(dir string, x *Fixed) {
-	if err := s.fix(dir, x); err != nil {
-		x.Failed = err.Error()
-		x.Did = "failed: " + x.Failed
-	}
-}
-
 func (s Source) fix(dir string, x *Fixed) error {
 	f := x.Finding
-	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, f.Issue), true)
-	if err != nil {
-		return err
-	}
-	fixed, made := false, 0
-	for _, c := range comments {
-		for _, m := range fleetMark.FindAllStringSubmatch(c.Body, -1) {
-			if m[1] == f.key {
-				fixed, made = true, atoi(m[2])
-			}
-		}
-	}
-	if fixed && made > 0 {
-		got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, made), false)
-		if err != nil {
-			return err
-		}
-		if got[0].State == "open" {
-			x.Did, x.Made = fmt.Sprintf("reported already as #%d, still open", made), made
-			return nil
-		}
-	}
 	switch {
-	case fixed:
-		if x.Made, err = s.report(f, true); err != nil {
-			return err
-		}
-		x.Did = fmt.Sprintf("it is back after a fix, so it went to a person as #%d", x.Made)
 	case f.cause() == GreenUnmerged && !f.autoMerge:
 		merged, err := s.autoMerge(pull{Number: f.PR, NodeID: f.nodeID, URL: f.url})
 		if err != nil {
@@ -637,37 +589,9 @@ func (s Source) fix(dir string, x *Fixed) error {
 		}
 		x.Did = fmt.Sprintf("deleted %s at %s, which main holds whole", Branch(f.Issue), f.head)
 	default:
-		person := f.judgment || f.cause() == GreenUnmerged
-		if x.Made, err = s.report(f, person); err != nil {
-			return err
-		}
-		x.Ready = !person
-		x.Did = fmt.Sprintf("reported it as #%d", x.Made)
-		if person {
-			x.Did = fmt.Sprintf("reported it to a person as #%d", x.Made)
-		}
-	}
-	body := fmt.Sprintf("se fleet check found: %s.\n\nse fleet fix %s.\n\n<!-- se:fleet %s %d -->", f.What, x.Did, f.key, x.Made)
-	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, f.Issue), github.F("body", body)); err != nil {
-		return fmt.Errorf("recording the fix on #%d: %w", f.Issue, err)
+		x.Did = "reported; it has no remedy se applies by itself"
 	}
 	return nil
-}
-
-// report creates the issue a finding becomes; for a person, through ForPerson.
-func (s Source) report(f Finding, person bool) (int, error) {
-	title := strings.ToUpper(f.cause()[:1]) + f.cause()[1:] + ": " + f.What
-	if person {
-		body := fmt.Sprintf("Only a person can decide this one: it was fixed once and is back, or the fix is a judgment.\n\nse fleet check found, on #%d: %s.", f.Issue, f.What)
-		made, err := s.ForPerson(title, body, 0, nil)
-		return made.Number, err
-	}
-	body := fmt.Sprintf("se fleet check found, on #%d: %s.\n\nIt has no remedy a box applies by itself, so it is this issue.", f.Issue, f.What)
-	made, _, err := s.create(title, body, 0, nil, []string{Label})
-	if err != nil {
-		return 0, err
-	}
-	return made.Number, nil
 }
 
 func atoi(s string) int {

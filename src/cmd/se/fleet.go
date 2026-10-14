@@ -67,7 +67,7 @@ func init() {
 		Usage:   "fleet fix [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "fix what fleet check finds that needs no checkout",
-		Details: "run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, and a finding with no other remedy becomes an se issue, or an se-person one where it is a judgment. Each fix is recorded on the finding's issue, and a finding back after its fix goes to a person. A remedy that fails is reported, and the ones after it are still applied. A takeover is named for the box to run. A ready issue it made fires the routine once.",
+		Details: "run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, and any other leftover claim's branch main holds whole is deleted by a git push from the workspace. Every other finding is reported, never filed: it writes no issue and no comment (an issue is work, not a report). A takeover is named for the next take. A remedy that fails is reported, and the ones after it are still applied.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet fix")
@@ -83,19 +83,11 @@ func init() {
 				return Reply{}, err
 			}
 			done := s.Fix(c.Workspace, found)
-			fanout := ""
-			for _, d := range done {
-				if d.Ready {
-					fanout = c.fire()
-					break
-				}
-			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
 					Healthy bool           `json:"healthy"`
 					Fixed   []issues.Fixed `json:"fixed"`
-					Fanout  string         `json:"fanout,omitempty"`
-				}{len(found) == 0, append([]issues.Fixed{}, done...), fanout})
+				}{len(found) == 0, append([]issues.Fixed{}, done...)})
 				return Reply{Text: string(data)}, err
 			}
 			if len(done) == 0 {
@@ -104,9 +96,6 @@ func init() {
 			lines := make([]string, 0, len(done)+1)
 			for _, d := range done {
 				lines = append(lines, fmt.Sprintf("%s #%d: %s\n  did: %s", d.Kind, d.Issue, d.What, d.Did))
-			}
-			if fanout != "" {
-				lines = append(lines, fanout)
 			}
 			return Reply{Text: strings.Join(lines, "\n")}, nil
 		},

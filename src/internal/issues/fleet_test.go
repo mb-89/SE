@@ -216,7 +216,7 @@ func TestAGreenPRWithAutoMergeOffIsFoundAtOnce(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 	w.pushed(7, quiet)
-	if f := only(t, w.check(), GreenUnmerged, 7); f.Remedy != "se fleet fix reports it as an se-person issue" {
+	if f := only(t, w.check(), GreenUnmerged, 7); f.Remedy != "none se applies by itself; se fleet check reports it" {
 		t.Fatalf("%+v", f)
 	}
 }
@@ -243,7 +243,7 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-13T11:00:00Z"}`)
 	f := only(t, w.check(), LeftoverClaim, 19)
 	if f.What != "issue-19 claims #19, which is closed (not planned)" ||
-		f.Remedy != "the prune workflow deletes issue-19; se fleet fix reports it only if it is still there a day after #19 closed" {
+		f.Remedy != "the prune workflow deletes issue-19; se fleet check reports it if it is still there a day after #19 closed" {
 		t.Fatalf("%+v", f)
 	}
 	// Within a day of the close, se fleet fix leaves it to the prune
@@ -253,16 +253,16 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	if done[0].Did != "left to the prune workflow until a day after #19 closed" || len(w.Writes()) != 0 {
 		t.Fatalf("%+v, writes %q", done, w.Writes())
 	}
-	// A day later the workflow failed: it becomes an se issue.
+	// A day later the workflow failed: it is reported, never filed.
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-12T11:00:00Z"}`)
 	done = s.Fix(t.TempDir(), w.check())
-	if done[0].Did != "reported it as #101" || !done[0].Ready ||
+	if done[0].Did != "reported; the prune workflow did not delete it" || len(w.Writes()) != 0 ||
 		done[0].What != "issue-19 claims #19, which is closed (not planned), and is still there a day after it closed: the prune workflow did not delete it" {
 		t.Fatalf("%+v", done)
 	}
-	// With an open PR, the workflow leaves it, so se fleet fix reports it.
+	// With an open PR, the workflow leaves it, so se fleet check reports it.
 	w.set(allPullsPath, `[{"number":90,"head":{"ref":"issue-19","sha":"c19"}}]`)
-	if f := only(t, w.check(), LeftoverClaim, 19); f.Remedy != "se fleet fix reports it as an se issue" {
+	if f := only(t, w.check(), LeftoverClaim, 19); f.Remedy != "none se applies by itself; se fleet check reports it" {
 		t.Fatalf("%+v", f)
 	}
 }
@@ -281,17 +281,15 @@ func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 	origin, a, _ := boxes(t)
 	run(t, a, "push", "-q", "origin", "main:issue-19")
 	done := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Fix(a, []Finding{f})
-	if done[0].Did != "deleted issue-19 at c19, which main holds whole" || done[0].Made != 0 || done[0].Failed != "" {
+	if done[0].Did != "deleted issue-19 at c19, which main holds whole" || done[0].Failed != "" {
 		t.Fatalf("%+v", done)
 	}
 	if got := run(t, origin, "branch", "--list", "issue-19"); got != "" {
 		t.Fatalf("origin still has %q", got)
 	}
-	if got := w.Writes(); !reflect.DeepEqual(got, []string{"POST repos/o/r/issues/19/comments"}) {
+	// It writes no comment: the fix is its own record.
+	if got := w.Writes(); len(got) != 0 {
 		t.Fatalf("writes %q", got)
-	}
-	if c := commentsAt(t, w, 19); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:fleet leftover-branch 0 -->") {
-		t.Fatalf("#19 has no record: %+v", c)
 	}
 }
 
@@ -308,10 +306,10 @@ func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
 		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
 	}
 	if len(done) != 2 || !strings.HasPrefix(done[0].Did, "failed: deleting issue-19: git push -q origin --delete issue-19: ") || done[0].Failed == "" ||
-		dids[1] != "impossible block #8: reported it as #101" || done[1].Failed != "" {
+		dids[1] != "impossible block #8: reported; it has no remedy se applies by itself" || done[1].Failed != "" {
 		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
 	}
-	if c19, c8 := commentsAt(t, w, 19), commentsAt(t, w, 8); len(c19) != 0 || len(c8) != 1 {
+	if c19, c8 := commentsAt(t, w, 19), commentsAt(t, w, 8); len(c19) != 0 || len(c8) != 0 {
 		t.Fatalf("records: #19 %+v, #8 %+v", c19, c8)
 	}
 }
@@ -333,9 +331,9 @@ func TestImpossibleBlocksAreFound(t *testing.T) {
 		whats = append(whats, fmt.Sprintf("#%d %s: %s", f.Issue, f.What, f.Remedy))
 	}
 	want := []string{
-		"#8 #8 is blocked by #3, which was closed as not planned: se fleet fix reports it as an se issue",
-		"#9 #9 is blocked by u4, which is no se issue, so no box moves it: se fleet fix reports it as an se-person issue",
-		"#10 a cycle of blocks: #10 is blocked by #11 is blocked by #12 is blocked by #10: se fleet fix reports it as an se-person issue",
+		"#8 #8 is blocked by #3, which was closed as not planned: none se applies by itself; se fleet check reports it",
+		"#9 #9 is blocked by u4, which is no se issue, so no box moves it: none se applies by itself; se fleet check reports it",
+		"#10 a cycle of blocks: #10 is blocked by #11 is blocked by #12 is blocked by #10: none se applies by itself; se fleet check reports it",
 	}
 	if !reflect.DeepEqual(whats, want) {
 		t.Fatalf("got\n%s", strings.Join(whats, "\n"))
@@ -411,7 +409,7 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	}
 }
 
-func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
+func TestFleetFixAppliesEachRemedyAndFilesNothing(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t, []string{item(5, 0), item(7, 0), item(8, 0), item(9, 0)}, 7, 19)
 	// A review is still required on #70, so auto-merge waits for it.
@@ -421,60 +419,30 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
 	w.set(links(9), "["+dep(4, "open", "", false)+"]")
 	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
-	found := w.check()
-	done := s.Fix(t.TempDir(), found)
+	done := s.Fix(t.TempDir(), w.check())
 	var dids []string
 	for _, d := range done {
 		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
 	}
 	want := []string{
 		"green but unmerged #7: turned auto-merge on for PR #70",
-		"leftover claim #19: reported it as #101",
-		"impossible block #8: reported it as #102",
-		"impossible block #9: reported it to a person as #103",
+		"leftover claim #19: reported; the prune workflow did not delete it",
+		"impossible block #8: reported; it has no remedy se applies by itself",
+		"impossible block #9: reported; it has no remedy se applies by itself",
 	}
 	if !reflect.DeepEqual(dids, want) {
 		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
 	}
-	if !done[1].Ready || done[3].Ready || !strings.Contains(get(t, w, "repos/o/r/issues/103"), `"assignees":[{"login":"o"}]`) ||
-		!strings.Contains(get(t, w, "repos/o/r/pulls/70"), `"auto_merge":{"merge_method":"squash"}`) {
-		t.Fatalf("%+v, writes %q", done, w.Writes())
+	if !strings.Contains(get(t, w, "repos/o/r/pulls/70"), `"auto_merge":{"merge_method":"squash"}`) {
+		t.Fatalf("auto-merge is off: writes %q", w.Writes())
 	}
-	for _, n := range []int{7, 19, 8, 9} {
-		if c := commentsAt(t, w, n); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:fleet ") {
-			t.Errorf("#%d has no record: %+v", n, c)
+	// An issue is work, not a report: no issue and no comment is written.
+	for _, x := range w.Writes() {
+		if x == "POST repos/o/r/issues" || strings.HasSuffix(x, "/comments") {
+			t.Fatalf("fleet fix wrote %q", w.Writes())
 		}
 	}
-	// Run again with the same findings: the reported ones are still open and
-	// are left as they are; the green PR is back after its fix, as GitHub
-	// turned its auto-merge off again, so it goes to a person.
-	w.pr(7, "true", "blocked", false, "check:success")
-	fixed := len(w.Writes())
-	done = s.Fix(t.TempDir(), w.check())
-	dids = nil
-	for _, d := range done {
-		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
-	}
-	want = []string{
-		"green but unmerged #7: it is back after a fix, so it went to a person as #104",
-		"leftover claim #19: reported already as #101, still open",
-		"impossible block #8: reported already as #102, still open",
-		"impossible block #9: reported already as #103, still open",
-		// #103 is for a person, and waits on them.
-		"waiting on a person #103: reported; it waits for a person",
-	}
-	if !reflect.DeepEqual(dids, want) {
-		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
-	}
-	for _, x := range w.Writes()[fixed:] {
-		if x == "POST graphql" {
-			t.Fatalf("auto-merge was turned on again: %q", w.Writes()[fixed:])
-		}
-	}
-	if !labelled(t, w, 104, PersonLabel) || !strings.Contains(get(t, w, "repos/o/r/issues/104"), `"assignees":[{"login":"o"}]`) {
-		t.Fatalf("#104 is not for a person: %s", get(t, w, "repos/o/r/issues/104"))
-	}
-	// A takeover is left to the box; a person is only reported.
+	// A takeover is left to the next take; a person is only reported.
 	x := s.Fix(t.TempDir(), []Finding{{Kind: ConflictedPR, Issue: 7}, {Kind: WaitingOnPerson, Issue: 12}})
 	if !x[0].Take || x[1].Take || x[1].Did != "reported; it waits for a person" {
 		t.Fatalf("%+v", x)
