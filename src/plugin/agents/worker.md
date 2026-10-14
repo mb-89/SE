@@ -42,8 +42,8 @@ command in `<path>`.
 5. **You close the issue you took, always**, in one of two ways and no
    other:
    - **a landing** of what you solved with `<se> issue land` (into your
-     manifest's branch, or a PR with auto-merge on), and an issue through `<se> issue new` for everything you could not
-     solve. Of the issues your take said yours blocks, name in `--blocks`
+     manifest's branch, or a PR with auto-merge on), and an issue through
+     `<se> issue new` for everything you could not solve. Of the issues your take said yours blocks, name in `--blocks`
      only those that need what you left over, so nothing waits that need not;
      or
    - **a supersede**, where you can land no PR at all:
