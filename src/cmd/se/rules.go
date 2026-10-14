@@ -28,6 +28,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
+			repo.Clock = c.Clock
 			results, err := rules.Run(repo)
 			if err != nil {
 				return Reply{}, err

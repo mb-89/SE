@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 // Rule is one of SE's rules, checked file by file.
@@ -43,8 +45,32 @@ type Repo struct {
 	Commands map[string][]string
 	// Manifest answers the manifest named, as it stands in the file at path.
 	Manifest func(name, path string) (string, error)
+	// Clock times each rule; nil times none.
+	Clock clock.Clock
 
 	files, dirs map[string]bool
+	texts       map[string][]byte
+}
+
+// Read answers the text of a slash-separated path relative to Root, read once
+// per run, and whether it exists.
+func (r *Repo) Read(p string) ([]byte, bool, error) {
+	if t, ok := r.texts[p]; ok {
+		return t, t != nil, nil
+	}
+	if r.texts == nil {
+		r.texts = map[string][]byte{}
+	}
+	t, err := os.ReadFile(filepath.Join(r.Root, filepath.FromSlash(p)))
+	if errors.Is(err, fs.ErrNotExist) {
+		r.texts[p] = nil
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	r.texts[p] = t
+	return t, true, nil
 }
 
 // Exists says whether a slash-separated path, relative to Root, is a file or
@@ -109,32 +135,18 @@ func Rules() []Rule {
 // Run checks the repo's files against every registered rule. A path that is
 // gone is skipped.
 func Run(repo *Repo) ([]Result, error) {
-	root, paths := repo.Root, repo.Paths
-	texts := map[string][]byte{}
-	read := func(p string) ([]byte, bool, error) {
-		if t, ok := texts[p]; ok {
-			return t, t != nil, nil
-		}
-		t, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p)))
-		if errors.Is(err, fs.ErrNotExist) {
-			texts[p] = nil
-			return nil, false, nil
-		}
-		if err != nil {
-			return nil, false, err
-		}
-		texts[p] = t
-		return t, true, nil
-	}
 	var results []Result
 	for _, r := range Rules() {
-		start := time.Now()
+		var start time.Time
+		if repo.Clock != nil {
+			start = repo.Clock.Now()
+		}
 		res := Result{Rule: r}
-		for _, p := range paths {
+		for _, p := range repo.Paths {
 			if !r.Applies(p) {
 				continue
 			}
-			t, ok, err := read(p)
+			t, ok, err := repo.Read(p)
 			if err != nil {
 				return nil, err
 			}
@@ -142,7 +154,9 @@ func Run(repo *Repo) ([]Result, error) {
 				res.Findings = append(res.Findings, r.Check(repo, p, t)...)
 			}
 		}
-		res.Took = time.Since(start)
+		if repo.Clock != nil {
+			res.Took = repo.Clock.Now().Sub(start)
+		}
 		results = append(results, res)
 	}
 	return results, nil

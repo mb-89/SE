@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/mb-89/SE/src/internal/io/clock"
+
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/update"
 )
@@ -69,7 +71,7 @@ func daemonExe(p daemon.Paths) (exe, note string, err error) {
 }
 
 // startDaemon answers the running daemon, or starts one with daemonExe.
-func startDaemon(p daemon.Paths) (daemon.Endpoint, string, error) {
+func startDaemon(p daemon.Paths, clk clock.Clock) (daemon.Endpoint, string, error) {
 	if ep, ok := daemon.Healthy(p); ok {
 		return ep, "", nil
 	}
@@ -77,7 +79,7 @@ func startDaemon(p daemon.Paths) (daemon.Endpoint, string, error) {
 	if err != nil {
 		return daemon.Endpoint{}, "", err
 	}
-	ep, err := daemon.Start(p, exe, startWait)
+	ep, err := daemon.Start(p, exe, startWait, clk)
 	return ep, note, err
 }
 
