@@ -378,8 +378,11 @@ the open issue M already covers, its PR doing the same work (two boxes that
 filed the same bug under different titles): it mints nothing. It links N's
 open dependents as blocked by M, then closes N as a duplicate (state_reason
 `duplicate`), its comment naming M. A final issue closes so too, since its
-work lands under M; a closed M is refused (with `--json`:
-`{"issue","of","url","blocks"}`).
+work lands under M; a closed M is refused. M may be a merged pull request
+instead, whose commit on main N's comment names, as `se issue close
+--fixed-by` does, linking nothing; an open pull request is refused, and one
+closed unmerged: it may never merge, and N would count as handled while its
+work is not done (with `--json`: `{"issue","of","url","commit","blocks"}`).
 
 `se issue close N --fixed-by SHA --answers FILE` is the third way, for an
 issue whose work reached main before its box took it (another issue's PR did

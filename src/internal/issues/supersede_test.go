@@ -177,3 +177,53 @@ func TestDuplicateRefusesAClosedOrMissingIssue(t *testing.T) {
 		t.Fatalf("wrote %q", w)
 	}
 }
+
+func TestDuplicateRefusesAnOpenPullRequest(t *testing.T) {
+	t.Parallel()
+	// #356 closed as a duplicate of the open PR #364, which had not merged:
+	// an issue duplicates an open issue or a merged PR, never an open PR.
+	gh := superseding(t, `{"name":"se"}`)
+	seed(t, gh, map[string]string{
+		"repos/o/r/issues/9":  `{"id":909,"number":9,"state":"open","pull_request":{}}`,
+		"repos/o/r/pulls/9":   `{"number":9,"state":"open","merged":false}`,
+		"repos/o/r/issues/10": `{"id":1010,"number":10,"state":"closed","pull_request":{}}`,
+		"repos/o/r/pulls/10":  `{"number":10,"state":"closed","merged":false}`,
+	})
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	for of, want := range map[int]string{9: "#9 is an open pull request", 10: "closed unmerged"} {
+		if _, err := s.CloseDuplicate(5, of); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("of %d: %v", of, err)
+		}
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("wrote %q", w)
+	}
+	if old := issueAt(t, gh, 5); old.State != "open" {
+		t.Fatalf("%+v", old)
+	}
+}
+
+func TestDuplicateOfAMergedPullRequestNamesItsCommit(t *testing.T) {
+	t.Parallel()
+	gh := superseding(t, `{"name":"se"}`)
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	seed(t, gh, map[string]string{
+		"repos/o/r/issues/9": `{"id":909,"number":9,"state":"closed","pull_request":{}}`,
+		"repos/o/r/pulls/9":  `{"number":9,"state":"closed","merged":true,"merge_commit_sha":"` + sha + `","title":"The fix"}`,
+	})
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	dup, err := s.CloseDuplicate(5, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dup.Of != 9 || dup.Commit != sha || dup.URL != "https://github.com/o/r/commit/"+sha || len(dup.Blocks) != 0 {
+		t.Fatalf("%+v", dup)
+	}
+	if old := issueAt(t, gh, 5); old.State != "closed" || old.StateReason != "duplicate" {
+		t.Fatalf("%+v", old)
+	}
+	cs := commentsAt(t, gh, 5)
+	if len(cs) != 1 || !strings.Contains(cs[0].Body, "<!-- se:fixed-by "+sha+" -->") || !strings.Contains(cs[0].Body, "Duplicate of PR #9, merged") {
+		t.Fatalf("%+v", cs)
+	}
+}
