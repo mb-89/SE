@@ -13,6 +13,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "issue close",
+		Class:   batch,
 		Usage:   "issue close N --fixed-by SHA --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "close issue N, its work on main already, naming the commit",

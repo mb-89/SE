@@ -5,6 +5,9 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 // Program is a program installed on a Fake: it does what the real one would
@@ -19,6 +22,8 @@ type Fake struct {
 	programs map[string]Program
 	ran      []Cmd
 	self     string
+	delay    time.Duration
+	delayOn  clock.Clock
 }
 
 // NewFake answers a fake machine with no programs on it.
@@ -29,6 +34,15 @@ func (f *Fake) Install(name string, p Program) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.programs[name] = p
+}
+
+// Delay makes each start pass d on c, as starting a process takes time: the
+// battery runs the interactive commands so, against their budgets
+// (spec/budgets.yaml).
+func (f *Fake) Delay(c clock.Clock, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delayOn, f.delay = c, d
 }
 
 // RunAs makes name the program running now, which Self answers: an installed
@@ -79,7 +93,11 @@ func (f *Fake) Start(c Cmd) (Running, error) {
 	f.mu.Lock()
 	f.ran = append(f.ran, c)
 	p, ok := f.programs[c.Name]
+	on, d := f.delayOn, f.delay
 	f.mu.Unlock()
+	if on != nil && d > 0 {
+		on.Sleep(d)
+	}
 	if !ok {
 		return nil, fmt.Errorf("%s: %w", c.Name, ErrNotFound)
 	}
