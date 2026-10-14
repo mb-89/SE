@@ -40,6 +40,7 @@ var Module = index.Declare("tally", "Sums numbers and takes notes.",
 		Group:   "Fixtures",
 		Session: true,
 		Button:  false,
+		Class:   index.Batch,
 	}, func(in noteIn, args []string) (index.Result, error) {
 		if len(args) == 0 {
 			return index.Result{}, fmt.Errorf("tally note takes the words to keep")
