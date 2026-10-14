@@ -12,6 +12,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "overhaul new",
+		Class:   batch,
 		Usage:   "overhaul new [--unattended] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "start an overhaul: is the design still right?",
@@ -44,6 +45,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "overhaul read",
+		Class:   batch,
 		Usage:   "overhaul read N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "read an overhaul's facts and write its report draft",
@@ -97,6 +99,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "overhaul file",
+		Class:   batch,
 		Usage:   "overhaul file N [--draft FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "file a judged report: create its issues and close it",

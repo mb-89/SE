@@ -44,6 +44,9 @@ type Command struct {
 	// Button offers it as a button in /se ui, pressed as /se <name> is typed.
 	// Only a session command that takes no typed words is one.
 	Button bool
+	// Class says whether a person waits on it, index.Interactive, which the
+	// battery holds to its budgets (spec/budgets.yaml), or not, index.Batch.
+	Class index.Class
 	// Run does it and answers what to show, and in a session what the plugin applies.
 	Run func(c *Call) (Reply, error)
 }
@@ -65,10 +68,14 @@ type Reply struct {
 	Help *Help `json:"help,omitempty"`
 }
 
-// Panel is what /se ui draws beside its on/off toggle.
+// Panel is what /se ui draws: a grid of buttons, the on/off toggle top left,
+// then one button per command offered as one, each labelled with its name.
 type Panel struct {
 	// Buttons are the names of the commands offered as buttons, in order.
 	Buttons []string `json:"buttons"`
+	// Columns is the most buttons a row holds, the toggle counted: the next
+	// starts the next row, and every cell is as wide as every other.
+	Columns int `json:"columns"`
 }
 
 // Endpoint is the part of daemon.json the plugin posts with.
@@ -130,11 +137,17 @@ type World struct {
 // realWorld is what se reaches when it runs for real.
 func realWorld() *World {
 	return &World{
-		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(), GitHub: github.Real(),
+		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Listed(proc.Real()), Net: sehttp.Real(), GitHub: github.Real(),
 		Getenv: os.Getenv, Environ: os.Environ, Commit: commit, Check: check,
 		Guided: guidance.Configured,
 	}
 }
+
+// The two classes a command declares, by their short names.
+const (
+	interactive = index.Interactive
+	batch       = index.Batch
+)
 
 var commands = map[string]Command{}
 

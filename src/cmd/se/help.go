@@ -59,6 +59,7 @@ type HelpFlag struct {
 func init() {
 	register(Command{
 		Name:    "help",
+		Class:   interactive,
 		Usage:   "help [<command>]",
 		Group:   "Session",
 		Summary: "list the commands, or show one: help <command>",
