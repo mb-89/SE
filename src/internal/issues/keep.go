@@ -75,9 +75,30 @@ func (s Source) push(dir, branch string, check func(dir string) error) error {
 	}
 	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/statuses/%s", s.Repo, sha),
 		github.F("state", "success"), github.F("context", BatteryContext), github.F("description", BatteryDescription(tree))); err != nil {
-		return fmt.Errorf("pushed %s, but posting its %s status failed, so CI runs the battery again: %w", branch, BatteryContext, err)
+		err = fmt.Errorf("pushed %s, but posting its %s status failed, so CI runs the battery again: %w", branch, BatteryContext, err)
+		if github.Status(err) == 403 {
+			return statusRefused{err}
+		}
+		return err
 	}
 	return nil
+}
+
+// statusRefused is push's answer where the push went through and only the
+// battery's status was refused (a cloud box's proxy refuses it): CI runs the
+// battery for the commit itself, so a land or a keep goes on, saying so.
+type statusRefused struct{ error }
+
+func (e statusRefused) Unwrap() error { return e.error }
+
+// refused answers err's message where it is only a refused status, so the
+// caller goes on with it as a warning; any other err is passed back.
+func refused(err error) (warning string, _ error) {
+	var r statusRefused
+	if errors.As(err, &r) {
+		return r.Error(), nil
+	}
+	return "", err
 }
 
 // checked answers the tree checked out in dir where it may be pushed: the
@@ -274,5 +295,6 @@ func (s Source) keepUp(dir, branch string, check func(dir string) error) error {
 	} else if dirty != "" {
 		return fmt.Errorf("%s has changes not committed, so nothing was merged or pushed:\n%s", dir, dirty)
 	}
-	return s.ship(dir, branch, check)
+	_, err = refused(s.ship(dir, branch, check))
+	return err
 }

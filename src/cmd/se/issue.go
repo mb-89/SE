@@ -574,6 +574,9 @@ func init() {
 			} else {
 				text += ", auto-merge (squash) on."
 			}
+			if l.Warning != "" {
+				text += "\nWarning: " + l.Warning
+			}
 			return Reply{Text: text + "\n" + l.URL}, nil
 		},
 	})

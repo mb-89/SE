@@ -372,7 +372,10 @@ overhaul) lands to main: it merges origin's copy of the branch and
 refuses a tree the battery did not record as passed and a branch main moved
 past meanwhile, pushes the branch, posts the commit status `se/battery`
 naming its tree on the pushed commit, which CI trusts (see
-[spec/coordination.md](coordination.md#up-to-date-with-main)), records on the leaf who worked it (see
+[spec/coordination.md](coordination.md#up-to-date-with-main)); where
+GitHub refuses that status with 403 (a cloud box's proxy does), it goes on
+and names the refusal (with `--json`: `warning`), as `se issue keep` goes
+on, since CI then runs the battery for the commit itself. It records on the leaf who worked it (see
 [Reviews](#reviews)), posts the landing answers on the issue, opens one PR against main titled after the issue with the
 body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left
 to wait for is squash-merged at once. It prints the PR's number and link (with

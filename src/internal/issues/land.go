@@ -28,6 +28,9 @@ type Landing struct {
 	// Closed is true where the land closed the issue itself: a leaf landed
 	// into its manifest, or a manifest with nothing left to land.
 	Closed bool `json:"closed,omitempty"`
+	// Warning is what went wrong without stopping the land: the battery's
+	// status refused on the pushed commit, which CI then checks itself.
+	Warning string `json:"warning,omitempty"`
 }
 
 // pull is the part of GitHub's pull request object land reads.
@@ -108,7 +111,8 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 			return s.closeEmpty(n)
 		}
 	}
-	if err := s.push(dir, branch, check); err != nil {
+	warning, err := refused(s.push(dir, branch, check))
+	if err != nil {
 		return Landing{}, err
 	}
 	body := fmt.Sprintf("Fixes #%d", n)
@@ -125,7 +129,7 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	if err := s.postLanding(dir, n, qs, answers); err != nil {
 		return Landing{}, err
 	}
-	l := Landing{Issue: n}
+	l := Landing{Issue: n, Warning: warning}
 	pr, open, err := s.openPR(n)
 	if err != nil {
 		return Landing{}, err
