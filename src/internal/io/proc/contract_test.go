@@ -46,7 +46,8 @@ func tool(args []string, dir string, getenv func(string) string, stdin io.Reader
 	return 0
 }
 
-// toolOn is a machine with tool on it, and how to run tool there.
+// toolOn is a machine with tool on it, running as tool itself, and how to run
+// tool there.
 type toolOn struct {
 	procs proc.Procs
 	// run is the Cmd that runs tool with these words.
@@ -120,6 +121,18 @@ func contract(t *testing.T, fresh func(t *testing.T) toolOn) {
 		said, err := proc.Combined(m.procs, m.run("out", "one", "err", "two", "exit", "2"))
 		if code, _ := proc.ExitCode(err); code != 2 || !strings.Contains(string(said), "one") || !strings.Contains(string(said), "two") {
 			t.Fatalf("combined %q, %v", said, err)
+		}
+	})
+	t.Run("self is the program running now, which runs as any other", func(t *testing.T) {
+		m := fresh(t)
+		self, err := m.procs.Self()
+		if err != nil || self == "" {
+			t.Fatalf("self %q, %v", self, err)
+		}
+		c := m.run("out", "it is me")
+		c.Name = self
+		if out, err := proc.Output(m.procs, c); err != nil || out != "it is me" {
+			t.Fatalf("ran %s: %q, %v", self, out, err)
 		}
 	})
 	t.Run("start returns before the program ends, and wait answers its end", func(t *testing.T) {

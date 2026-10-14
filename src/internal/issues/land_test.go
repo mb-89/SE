@@ -78,6 +78,7 @@ func passes(string) error { return nil }
 func landedAt() time.Time { return time.Date(2026, 1, 2, 11, 30, 0, 0, time.UTC) }
 
 func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
+	t.Parallel()
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
 	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}.Land(a, "", qs, full, passes)
@@ -131,13 +132,15 @@ func profiles(t *testing.T, d disk.Disk, p battery.Profile) func(string) error {
 }
 
 var profile = battery.Profile{
-	TotalMs:  1234,
-	Steps:    []battery.Step{{Name: "go test", Ms: 1234}},
-	Slowest:  []battery.Test{{Package: "p", Name: "TestSlow", Ms: 900}},
-	Overruns: []string{"step go test took 1234ms, over its budget of 1000ms"},
+	TotalMs:       1234,
+	Steps:         []battery.Step{{Name: "go test", Ms: 1234}},
+	Slowest:       []battery.Test{{Package: "p", Name: "TestSlow", Ms: 900}},
+	SlowestPlugin: []battery.Test{{Package: "tests/se.test.ts", Name: "a slow hook", Ms: 150}},
+	Overruns:      []string{"step go test took 1234ms, over its budget of 1000ms"},
 }
 
 func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	d := disk.NewFake()
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
@@ -150,7 +153,7 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 	if want := "body=Fixes #6\n\n" + profile.Markdown(); opened != want {
 		t.Errorf("the PR body is\n%s\nwant\n%s", opened, want)
 	}
-	for _, want := range []string{"Total: **1234ms**", "| TestSlow | p | 900 |", "**Over budget:** step go test took 1234ms"} {
+	for _, want := range []string{"Total: **1234ms**", "| TestSlow | p | 900 |", "| a slow hook | tests/se.test.ts | 150 |", "**Over budget:** step go test took 1234ms"} {
 		if !strings.Contains(opened, want) {
 			t.Errorf("the PR body lacks %q", want)
 		}
@@ -160,6 +163,7 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 		t.Fatalf("%v %v", ok, err)
 	}
 	if got.Facts.BatteryMs != 1234 || !reflect.DeepEqual(got.Facts.Slowest, []string{"p TestSlow 900ms"}) ||
+		!reflect.DeepEqual(got.Facts.SlowestPlugin, []string{"tests/se.test.ts a slow hook 150ms"}) ||
 		!reflect.DeepEqual(got.Facts.Overruns, profile.Overruns) {
 		t.Errorf("facts = %+v", got.Facts)
 	}
@@ -169,6 +173,7 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 }
 
 func TestLandAgainUpdatesTheOpenPRsProfile(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	d := disk.NewFake()
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
@@ -181,6 +186,7 @@ func TestLandAgainUpdatesTheOpenPRsProfile(t *testing.T) {
 }
 
 func TestLandAgainPushesAndReportsTheOpenPR(t *testing.T) {
+	t.Parallel()
 	origin, a := claimed(t)
 	run(t, a, "push", "-q", "origin", "HEAD:issue-6")
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "fix ci")
@@ -200,6 +206,7 @@ func TestLandAgainPushesAndReportsTheOpenPR(t *testing.T) {
 }
 
 func TestLandMergesAPRWithNothingToWaitFor(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	// No check is pending on #14: GitHub calls it clean.
 	gh := landGH(t, map[string]string{pullsPath: `[` + clean14 + `]`})
@@ -213,6 +220,7 @@ func TestLandMergesAPRWithNothingToWaitFor(t *testing.T) {
 }
 
 func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
 	gh.Proxy = true
@@ -226,6 +234,7 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 }
 
 func TestLandSaysWhenAutoMergeFails(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
 	gh.NoAutoMerge = true
@@ -291,6 +300,7 @@ func TestLandRefusesBeforePushing(t *testing.T) {
 }
 
 func TestLandRefusesAParent(t *testing.T) {
+	t.Parallel()
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{issue6: `{"number":6,"title":"the tree","sub_issues_summary":{"total":2,"completed":1}}`})
 	checked := false
@@ -333,6 +343,7 @@ func commitFile(t *testing.T, dir, name, text string) {
 }
 
 func TestLandMergesTheBranchAndMainInBeforeTheCheck(t *testing.T) {
+	t.Parallel()
 	origin, a, b := claimedBy(t)
 	run(t, a, "push", "-q", "origin", "HEAD:issue-6")
 	commitFile(t, a, "fix", "a")
@@ -366,6 +377,7 @@ func TestLandMergesTheBranchAndMainInBeforeTheCheck(t *testing.T) {
 }
 
 func TestLandStopsWhereMainConflicts(t *testing.T) {
+	t.Parallel()
 	origin, a, b := claimedBy(t)
 	before := run(t, origin, "rev-parse", "issue-6")
 	commitFile(t, b, "work", "b")

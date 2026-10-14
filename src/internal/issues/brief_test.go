@@ -64,6 +64,7 @@ func asked(t *testing.T, answers map[string]string) (github.GitHub, *[]string) {
 }
 
 func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
+	t.Parallel()
 	gh, paths := asked(t, briefAnswers())
 	b, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Brief(1, false)
 	if err != nil {
@@ -115,10 +116,11 @@ func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 }
 
 func TestTheBriefOfAReReviewNamesTheEarlierBlockersAndTheDiff(t *testing.T) {
+	t.Parallel()
 	answers := briefAnswers()
 	earlier := Verdict{Report: failing("three")}
 	earlier.Report.Findings[0].Issue = 3
-	answers[commentsPath(1)] = fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r", Workspace: "/r"}))
+	answers[commentsPath(1)] = fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r", Workspace: "/r"}, MaxFiled))
 	// Without a principles file, the brief says so.
 	delete(answers, "repos/o/r/contents/spec/principles.md?ref=abc")
 	s := Source{Proc: machine, Repo: repo, GitHub: recorded(t, answers), Clock: atNow()}

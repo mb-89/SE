@@ -9,6 +9,7 @@ import (
 )
 
 func TestRetroNewAsksForFieldFeedbackOrNone(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	for _, args := range [][]string{
 		{"retro", "new", "--repo", "o/r"},
@@ -25,6 +26,7 @@ func TestRetroNewAsksForFieldFeedbackOrNone(t *testing.T) {
 }
 
 func TestRetroNewCreatesTheRetroAndFires(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	code, out, errs := se(t, "retro", "new", "--field", "the boxes were slow", "--repo", "o/r")
 	if code != 0 || !strings.Contains(out, "Created the retro #10") || !strings.Contains(out, "over the whole history") || !strings.HasSuffix(out, firedOnce+"\n") {
@@ -32,7 +34,7 @@ func TestRetroNewCreatesTheRetroAndFires(t *testing.T) {
 	}
 	// The closed retros are listed first; the recorded repository has none.
 	made := issueOf(t, gh, 10)
-	for _, want := range []string{"## Field feedback\\nthe boxes were slow", "<!-- se:retro attended -->", "<!-- se:new -->"} {
+	for _, want := range []string{"## Field feedback\\nthe boxes were slow", "<!-- se:retro attended -->", "starts its agent, se:retro", "<!-- se:new -->"} {
 		if !strings.Contains(made, want) {
 			t.Errorf("the body lacks %q: %s", want, made)
 		}
@@ -42,9 +44,10 @@ func TestRetroNewCreatesTheRetroAndFires(t *testing.T) {
 	}
 }
 
-func TestTakingARetroHandsItToTheRetroSkill(t *testing.T) {
-	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE retro", Retro: true}, true, "issue-30", "")
-	if err != nil || !strings.Contains(r.Text, "#30 is a retro (se-retro): follow the retro skill, src/plugin/skills/retro/SKILL.md, from se retro collect 30") {
+func TestARetroIsNoLongerDispatchedByItsLabel(t *testing.T) {
+	t.Parallel()
+	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE retro", Retro: true}, true, "issue-30", "", "", handed{})
+	if err != nil || strings.Contains(r.Text, "se-retro") || strings.Contains(r.Text, "SKILL.md") {
 		t.Fatalf("%q %v", r.Text, err)
 	}
 }

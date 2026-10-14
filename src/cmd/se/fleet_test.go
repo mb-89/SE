@@ -3,8 +3,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 // recordedFleet answers the fleet commands' gh calls for o/r: #3 is ready,
@@ -21,6 +25,7 @@ func recordedFleet(t *testing.T) {
 }
 
 func TestAHealthyFleetSaysSo(t *testing.T) {
+	t.Parallel()
 	recordedFleet(t)
 	for _, cmd := range []string{"check", "fix"} {
 		if code, out, errs := se(t, "fleet", cmd, "--repo", "o/r"); code != 0 || out != "healthy\n" {
@@ -41,6 +46,7 @@ func TestAHealthyFleetSaysSo(t *testing.T) {
 }
 
 func TestFleetPruneDeletesOnlyWithApply(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/pulls?state=open&per_page=100":   `[]`,
 		"repos/o/r/git/matching-refs/heads/issue-":  `[{"ref":"refs/heads/issue-19","object":{"sha":"c19"}}]`,
@@ -58,5 +64,34 @@ func TestFleetPruneDeletesOnlyWithApply(t *testing.T) {
 	// The branch is gone, so a second prune finds nothing.
 	if code, out, _ := se(t, "fleet", "prune", "--apply", "--repo", "o/r"); code != 0 || out != "no stray branches\n" {
 		t.Fatalf("exit %d, %q", code, out)
+	}
+}
+
+func TestRulesOnBuildsTheMergesSeAndAnswersItsFindingsWithoutTimings(t *testing.T) {
+	t.Parallel()
+	m := proc.NewFake()
+	bin := filepath.Join("/wt", ".se", ".runtime", "se-rules")
+	m.Install("go", func(proc.Cmd) int { return 0 })
+	m.Install(bin, func(c proc.Cmd) int {
+		fmt.Fprintln(c.Stderr, "se: 1 findings:\nx_test.go:3: fast-test: TestX does not call t.Parallel first\ncheck: rule fast-test took 12ms")
+		return 1
+	})
+	got, err := rulesOn(m, "/wt")
+	if err != nil || got != "se: 1 findings:\nx_test.go:3: fast-test: TestX does not call t.Parallel first" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if want := []string{"go -C " + filepath.Join("/wt", "src") + " build -o " + bin + " ./cmd/se", bin + " rules --workspace /wt"}; !reflect.DeepEqual(m.Lines(), want) {
+		t.Fatalf("ran %q", m.Lines())
+	}
+	m.Install(bin, func(proc.Cmd) int { return 0 })
+	if got, err := rulesOn(m, "/wt"); got != "" || err != nil {
+		t.Fatalf("%q %v", got, err)
+	}
+	m.Install("go", func(c proc.Cmd) int {
+		fmt.Fprintln(c.Stderr, "undefined: World")
+		return 1
+	})
+	if got, err := rulesOn(m, "/wt"); got != "it does not build:\nundefined: World" || err != nil {
+		t.Fatalf("%q %v", got, err)
 	}
 }

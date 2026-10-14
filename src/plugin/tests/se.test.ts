@@ -36,6 +36,8 @@ type World = {
   takes: Record<string, number>
   // The clock beneath the plugin, which moves only when the test moves it.
   clock: MockClock
+  // What se hook stop prints; a number is the exit code it fails with.
+  verdict: unknown
 }
 
 const HELP = '/se <command>\n\n  /se help   list the commands'
@@ -86,13 +88,14 @@ function world(on: On, env: Record<string, string> = {}): World {
     statuses: [],
     takes: {},
     clock: mock.clock(on),
+    verdict: { pass: 'no se issue was taken here' },
     replies: {
       '': { text: HELP },
       on: { text: 'SE is on.', active: true, endpoint: DAEMON },
       off: { text: 'SE is off.', active: false },
       update: { text: 'SE updated aaa → bbb. Its daemon restarted.', endpoint: DAEMON, reload: true },
       status: { text: 'No SE daemon answers for /work.' },
-      ui: { text: "SE's control panel is open.", panel: { buttons: ['issue pull', 'status'] } },
+      ui: { text: "SE's control panel is open.", panel: { buttons: ['issue pull', 'status'], columns: 3 } },
       help: { text: HELP, help: OVERVIEW },
       'help issue pull': { text: '/se issue pull [--take [N]]\n```\n…\n```', help: ISSUE_PULL },
     },
@@ -152,6 +155,10 @@ function world(on: On, env: Record<string, string> = {}): World {
       const reply = w.replies[words] ?? { text: `${HELP}\n\nse has no command "${words}".` }
       return { value: { exitCode: 0, stdout: JSON.stringify(reply), stderr: '' } }
     }
+    if (verb === 'hook' && argv[2] === 'stop') {
+      if (typeof w.verdict === 'number') return { value: { exitCode: w.verdict, stdout: '', stderr: 'se: boom' } }
+      return { value: { exitCode: 0, stdout: JSON.stringify(w.verdict), stderr: '' } }
+    }
     if (verb === 'start' && w.startFails !== null) {
       return { value: { exitCode: 1, stdout: '', stderr: w.startFails } }
     }
@@ -173,6 +180,10 @@ function world(on: On, env: Record<string, string> = {}): World {
     return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
   })
   on('attribution.text', ($, e) => ({ text: e.text }))
+  on('classic.SessionStart', () => ({ additionalContext: ['the project hook'] }))
+  on('classic.Stop', () => ({}))
+  on('classic.SubagentStop', () => ({}))
+  on('prompt.submit', ($, e) => ({ text: e.text }) as never)
   // The engine's own output row: the text as it came.
   on('ui.render', { component: 'CommandOutput' }, ($, e) => ({ type: 'Text', children: [e.props.text] }) as never)
   return w
@@ -596,12 +607,55 @@ test('/se ui opens a pane titled SE that draws on every surface', async ($, on) 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const drawn = await ui.drawn()
-    expect(drawn).toMatchObject({ type: 'Box', props: { flexWrap: 'wrap', width: 40 } })
+    expect(drawn).toMatchObject({ type: 'Box', props: { flexDirection: 'column', width: 40 } })
     const buttons = await ui.findAll({ type: 'Button' })
     // The toggle first, top left; then se's buttons in the order it named them.
     expect(buttons.map(b => b.props.label)).toEqual(['SE off', 'issue pull', 'status'])
     await ui.unmount()
   }
+})
+
+// The grid as drawn: each row's cells, by the label of the Button each holds and the cell's width.
+type Drawn = { type: string; props?: Record<string, unknown>; children?: unknown[] }
+const rowsOf = (drawn: Drawn) =>
+  (drawn.children as Drawn[]).map(row =>
+    (row.children as Drawn[]).map(cell => ({
+      label: (cell.children as Drawn[])[0]?.props?.label,
+      width: cell.props?.width,
+    })),
+  )
+
+test('/se ui draws a panel of 7 buttons as aligned rows of 3, 3 and 1', async ($, on) => {
+  const w = world(on)
+  const six = ['issue pull', 'restart', 'status', 'update', 'briefing', 'fleet check']
+  w.replies.ui = { text: "SE's control panel is open.", panel: { buttons: six, columns: 3 } }
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const rows = rowsOf((await ui.drawn()) as Drawn)
+    // At most three to a row: the fourth button starts the next row.
+    expect(rows.map(r => r.length)).toEqual([3, 3, 1])
+    // Every button is labelled with its command's name, the toggle first, top left.
+    expect(rows.flat().map(c => c.label)).toEqual(['SE off', ...six])
+    // Every cell is as wide as every other, so the columns align and the last row stays left.
+    const widths = new Set(rows.flat().map(c => c.width))
+    expect(widths.size).toBe(1)
+    expect([...widths][0]).toBeGreaterThanOrEqual('fleet check'.length + 4)
+    await ui.unmount()
+  }
+})
+
+test("the columns of the grid are the ones se answers, not the plugin's", async ($, on) => {
+  const w = world(on)
+  w.replies.ui = { text: "SE's control panel is open.", panel: { buttons: ['a', 'b', 'c', 'd'], columns: 2 } }
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const rows = rowsOf((await ui.drawn()) as Drawn)
+  expect(rows.map(r => r.map(c => c.label))).toEqual([['SE off', 'a'], ['b', 'c'], ['d']])
+  // Two cells and their gap fill the pane.
+  expect(rows[0]?.[0]?.width).toBe(19)
 })
 
 test('pressing the toggle runs /se on and /se off, and switches the flag', async ($, on) => {
@@ -738,4 +792,121 @@ test('a line that no longer answers help draws as its text', async ($, on) => {
   await $.command.run(se('help'))
   const ui = await $.ui.mount(output('help', 'se has moved on.', 'desktop'))
   expect(await ui.find({ key: 'usage' })).toBeUndefined()
+})
+
+test('the session start hands the guidance se answers to the context, on each source that starts one', async ($, on) => {
+  const w = world(on)
+  w.replies['guidance --session-id s1'] = { text: 'the principles, and the skills handed over' }
+  await $.session.start(starts)
+  for (const source of ['startup', 'resume', 'clear', 'compact'] as const) {
+    expect((await $.classic.SessionStart({ source })).additionalContext).toEqual([
+      'the project hook',
+      'the principles, and the skills handed over',
+    ])
+  }
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(4)
+  // SE is off: the guidance goes into the context all the same, and nothing is posted.
+  expect(posted(w)).toEqual([])
+  // A fork carries its parent's context, guidance and all.
+  expect((await $.classic.SessionStart({ source: 'fork' })).additionalContext).toEqual(['the project hook'])
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(4)
+})
+
+test('guidance se answers empty, or not at all, adds nothing', async ($, on) => {
+  const w = world(on)
+  w.replies['guidance --session-id s1'] = { text: '' }
+  await $.session.start(starts)
+  expect((await $.classic.SessionStart({ source: 'startup' })).additionalContext).toEqual(['the project hook'])
+  w.replies['guidance --session-id s1'] = 'not json' as never
+  expect((await $.classic.SessionStart({ source: 'clear' })).additionalContext).toEqual(['the project hook'])
+})
+
+test('a slow guidance says it is working, and the session start waits for it', async ($, on) => {
+  const w = world(on)
+  const clock = w.clock
+  w.replies['guidance --session-id s1'] = { text: 'the principles' }
+  w.takes['guidance --session-id s1'] = 5000
+  await $.session.start(starts)
+  let said: string[] | undefined
+  const starting = $.classic.SessionStart({ source: 'startup' }).then(r => {
+    said = r.additionalContext
+  })
+  await clock.advance(1000)
+  expect(w.statuses).toContain('se: reading its guidance…')
+  expect(said).toBeUndefined()
+  await clock.advance(4000)
+  await starting
+  expect(said).toEqual(['the project hook', 'the principles'])
+})
+
+// A cloud session no person attends, as a routine starts it.
+const BOX = { CLAUDE_CODE_REMOTE: 'true', CLAUDE_CODE_SESSION_ATTENDED: '0' }
+const hooked = (w: World) => w.ran.filter(argv => argv[1] === 'hook').map(argv => argv.slice(1).join(' '))
+
+test('a box whose issue is not closed is refused its stop, with the reason se gives', async ($, on) => {
+  const w = world(on, BOX)
+  await $.session.start(starts)
+  w.verdict = { block: '#3 is open with neither a PR from issue-3 nor a supersede.' }
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(
+    '#3 is open with neither a PR from issue-3 nor a supersede.',
+  )
+  w.verdict = { pass: '#3 is closed' }
+  expect((await $.classic.Stop({ stop_hook_active: true })).block).toBeUndefined()
+  expect(hooked(w)).toEqual([`hook stop --workspace ${ROOT}`, `hook stop --workspace ${ROOT}`])
+})
+
+test('an interactive session is never refused, and runs no check', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  w.verdict = { block: 'refused' }
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBeUndefined()
+  expect(
+    (
+      await $.classic.SubagentStop({
+        stop_hook_active: false,
+        agent_id: 'a',
+        agent_type: 'x',
+        agent_transcript_path: '/t',
+      })
+    ).block,
+  ).toBeUndefined()
+  await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' } } as never)
+  expect(hooked(w)).toEqual([])
+})
+
+test('a box waiting on background work says so, and a sub-agent names its transcript', async ($, on) => {
+  const w = world(on, BOX)
+  await $.session.start(starts)
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{}] as never })
+  w.verdict = { block: '#6 is open' }
+  const sub = await $.classic.SubagentStop({
+    stop_hook_active: false,
+    agent_id: 'a',
+    agent_type: 'x',
+    agent_transcript_path: '/t/a.jsonl',
+  })
+  expect(sub.block).toBe('#6 is open')
+  expect(hooked(w)).toEqual([
+    `hook stop --waiting --workspace ${ROOT}`,
+    `hook stop --agent-transcript /t/a.jsonl --workspace ${ROOT}`,
+  ])
+})
+
+test('a broken check lets the stop through and says why', async ($, on) => {
+  const w = world(on, BOX)
+  await $.session.start(starts)
+  w.verdict = 1
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBeUndefined()
+  expect(w.toasts).toContain('SE could not judge this stop: se: boom')
+  w.verdict = 'no verdict'
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBeUndefined()
+})
+
+test('a prompt from a person resets the refusals of a box; its own prompts do not', async ($, on) => {
+  const w = world(on, BOX)
+  await $.session.start(starts)
+  await $.prompt.submit({ text: 'go on', origin: { kind: 'scheduled-trigger' } } as never)
+  expect(hooked(w)).toEqual([])
+  await $.prompt.submit({ text: 'stop here', origin: { kind: 'bridge' } } as never)
+  expect(hooked(w)).toEqual([`hook prompt --workspace ${ROOT}`])
 })

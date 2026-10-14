@@ -9,7 +9,7 @@ Reader: the agent briefing a person.
 
 Every fact comes from one command; you present them, and you act on none.
 `se` is `./src/plugin/bin/se` in the SE checkout; if it is missing, build it
-with `go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se`.
+with `sh ./src/build.sh`.
 
 1. Run `./src/plugin/bin/se briefing` from the checkout's root. Pass the
    person's window if they gave one: `--since <time>` (a date, an RFC 3339
@@ -25,7 +25,8 @@ with `go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin
       what fleet check reports.
    3. **What happened:** the closed issues, each with its `done` line, then
       the last retro and its headline findings.
-   4. **Next:** what `se issue pull` would take, and the counts.
+   4. **Next:** what `se issue pull` would take, the counts, and the
+      queue's estimate line as it stands (`se issue tree` has the detail).
    Keep each item to its facts; add no judgment of your own.
 4. Ask the person what they want to discuss. This session is for design;
    what comes out of it that is clear becomes an `se` issue for the fleet

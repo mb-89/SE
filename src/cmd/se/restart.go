@@ -11,6 +11,7 @@ import (
 func init() {
 	register(Command{
 		Name:      "restart",
+		Class:     batch,
 		Usage:     "restart",
 		Group:     "Session",
 		Summary:   "restart the daemon; in an SE checkout, rebuild se first",
@@ -23,7 +24,7 @@ func init() {
 				return Reply{}, err
 			}
 			// The build runs while the old daemon still serves.
-			exe, note, err := daemonExe(c.Proc, c.Paths())
+			exe, note, err := daemonExe(&c.World, c.Paths())
 			if err != nil {
 				return Reply{}, err
 			}

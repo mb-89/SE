@@ -18,61 +18,50 @@ whole system, not a window.
   person started it; the cadence starts overhauls this way. The issue's body
   records which it is, `<!-- se:overhaul attended -->` or
   `<!-- se:overhaul unattended -->`.
-- **The cadence:** every `OverhaulCadence` (5, in
-  `src/internal/issues/cadence.go`) closed retros since the last closed
+- **The cadence:** every `issues/config/overhaul-cadence` (the
+  issues instance's config value, built-in in `src/internal/issues/cadence.go`) closed retros since the last closed
   overhaul (with none closed yet, the whole history), `se issue pull --take`
   starts an unattended overhaul and takes it first, ahead of a due retro and
   all other work. It is the same mechanism as the retro cadence, one constant.
   An open `se-overhaul` issue, attended or not, means no second one is
-  started. `--take N` skips the cadence; the plain `se issue pull` reports the
+  started; one started in a race with a lower one closes itself as its
+  duplicate, as a retro does. `--take N` skips the cadence; the plain `se issue pull` reports the
   count beside the retro's.
 - **The box** takes an overhaul like any issue (`se issue pull --take` says it
-  is an overhaul) and follows the overhaul skill,
-  [src/plugin/skills/overhaul/SKILL.md](../src/plugin/skills/overhaul/SKILL.md),
-  instead of landing a branch.
+  is an overhaul and names its agent, `se:overhaul`) and starts that agent,
+  which files the report instead of landing a branch.
 - **The mechanical half,** `se overhaul read N`, writes a report draft beside
   the checkout (`../overhaul-N.md`). It holds:
   - every principle of [principles.md](principles.md), with what checks it,
     and whether the retro or the battery checks it mechanically;
-  - the retro's last five runs, from their reports' blocks: each metric, the
+  - the retro's last `issues/config/overhaul-cadence` runs, from their reports' blocks: each metric, the
     broken rule checks by kind, how many findings became issues and how many
     of those closed, how many the next retro found recurred anyway, and the
     finding classes more than one of them named;
-  - the previous overhaul's findings and the state of their issues.
-- **What the box checks, and writes into the draft's block:**
-  - **Every principle, one by one** (`verdicts`: each a `principle`, how far
-    SE `strays`, `none`, `slightly` or `far`, and `how`): the mechanically
-    checkable ones through the latest retros' rule checks and metrics; the
-    rest by reading the code and spec against the principle's text.
-  - **The outside world** (`looked_at.outside`): current practice and tools
-    relevant to SE's parts (agent orchestration, issue-driven work, testing
-    with fakes and contracts, plugin and hook design), and what comparable
-    systems do. Sources are cited, and an outside idea becomes a finding only
-    with a concrete place in SE it would change.
-  - **Consistency across the whole system** (`looked_at.consistency`;
-    #83): do the README, the spec, the help, the skills and
-    CLAUDE.md still describe what the code does, and does every part still
-    fit the parts that rely on it?
-  - **The principles themselves** (`looked_at.principles`): is one missing,
-    obsolete or in conflict with another?
-  - **The retro's effectiveness over its last five runs**
-    (`looked_at.retro`): did the metrics move, and did findings recur anyway?
-  - **Speed** (`looked_at.speed`): what could be faster? What runs one after
-    another that could run in parallel; where a run asks the outside world
-    for the same thing twice, or item by item where one batched query, or a
-    query that does more on the server, would do (principles 6 and 9).
-  - **Mechanize** (`looked_at.mechanize`): what an agent still does, or a
-    person still remembers, that could be a tested `se` command (principle 1).
-  - **Removal** (`looked_at.removal`): what could go: a command, a rule, a
-    file, a step or a check that no longer earns its place.
-  - **Findings** (`findings`): each names the principle (`principle`; 0 only
-    for a missing one), the place (`place`) and how far it strays (`strays`,
-    `slightly` or `far`), with a `title`, a `body`, the `area` that found it
-    (`principle`, `outside`, `consistency`, `principles` for a change to a
-    principle, `retro`, `speed`, `mechanize` or `removal`), the `sources` an
-    outside one cites, and
-    `controversial` with its `why`.
-  - **What went well** (`went_well`).
+  - the previous overhaul's findings and the state of their issues;
+  - the pruning and code-shape facts of the code (`src/internal/shape`):
+    what `deadcode` finds nothing but tests reach (the fakes and test helpers
+    left out), duplicates and near-duplicates, lines of code and of tests per
+    package and module, one-user abstractions (a library one other module
+    imports, a registry with one entry, an interface with one implementation
+    and no fake), the `se` commands and flags no landing answer named since
+    the last overhaul, comments that say code serves an old state, the
+    scripts and whether the last retro read them, the files untouched
+    longest, the longest functions, files and parameter lists, the switches
+    on a kind, and the files touched per change.
+- **Pruning is part of every overhaul.** The less code, the less to maintain.
+  The battery runs `deadcode -test`, so code unreachable even from the tests
+  never lands; what the facts above find, the box judges by the overhaul
+  agent's pruning rules and the principles' second part,
+  [How code is written](principles.md#how-code-is-written). A removal is
+  normal work, never for a person ([retro.md](retro.md)), and its issue says to
+repeat the removal until nothing more falls out: removing one piece exposes
+what existed only to support it.
+- **The judgment half (the box):** every principle one by one, the outside
+  world, the consistency of the whole system, the principles themselves, the
+  retro's effectiveness, speed, what to mechanize and what to remove, the
+  findings and what went well. What each part asks and the fields it writes
+  into the draft's block are the agent's (its step 3).
 - **Minting:** the same rule as the retro's (the owner's rule in
   [retro.md](retro.md)). Every finding becomes an issue through the same code
   as `se issue new`. A controversial one is an issue for a person, labelled
@@ -97,9 +86,13 @@ whole system, not a window.
 
 ## The commands
 
-    se overhaul new [--unattended] [--json] [--repo OWNER/NAME]
-    se overhaul read N [--out FILE] [--json] [--repo OWNER/NAME]
-    se overhaul file N [--draft FILE] [--json] [--repo OWNER/NAME]
+<!-- se:manifest usage overhaul -->
+```
+se overhaul file N [--draft FILE] [--json] [--repo OWNER/NAME]
+se overhaul new [--unattended] [--json] [--repo OWNER/NAME]
+se overhaul read N [--out FILE] [--json] [--repo OWNER/NAME]
+```
+<!-- /se:manifest -->
 
 All three are offered in a session, as `/se overhaul <word>`. They read and
 write GitHub through `gh api`, as the issue commands do

@@ -1,0 +1,25 @@
+// Biome lints and formats the plugin's TypeScript; tests/check.sh runs it here.
+{
+  "$schema": "https://biomejs.dev/schemas/2.2.4/schema.json",
+  // What git ignores here: se's build and the types Claude Code generates.
+  "files": { "includes": ["**", "!bin", "!.claude-plugin/types"] },
+  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded",
+      "arrowParentheses": "asNeeded",
+      "trailingCommas": "all"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        // A handler's parameters are positional: an unused $ before a used e cannot go.
+        "noUnusedFunctionParameters": "off"
+      }
+    }
+  }
+}

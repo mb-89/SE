@@ -18,7 +18,7 @@ import (
 const Allowlist = "src/internal/io/allowlist.txt"
 
 // outside is what reaches the outside past an I/O module: the imports, and
-// the calls of time and os, by package path.
+// the calls of time, os and path/filepath, by package path.
 var (
 	outsideImports = []string{"os/exec", "net", "net/http", "io/ioutil"}
 	outsideCalls   = map[string][]string{
@@ -28,14 +28,15 @@ var (
 			"Mkdir", "MkdirAll", "MkdirTemp", "Remove", "RemoveAll", "Rename", "Stat", "Lstat",
 			"Truncate", "Chmod", "Chown", "Chtimes", "Link", "Symlink", "Readlink", "DirFS", "CopyFS",
 		},
+		"path/filepath": {"Walk", "WalkDir", "Glob"},
 	}
 )
 
 func init() {
 	register(Rule{
 		Name: "io-module",
-		Doc: "outside src/internal/io, no Go file imports os/exec, net, net/http or io/ioutil, runs gh, reads the clock, sleeps or waits through time, " +
-			"or opens, reads or writes files through os, except as " + Allowlist + " names; an entry there that matches nothing is refused",
+		Doc: "outside src/internal/io, no Go file imports os/exec, net, net/http or io/ioutil, runs gh, reads the clock, sleeps or waits through time (dot-imported or not), " +
+			"opens, reads or writes files through os, or walks or globs the disk through path/filepath, except as " + Allowlist + " names; an entry there that matches nothing is refused",
 		Applies: func(p string) bool {
 			return p == Allowlist || (path.Ext(p) == ".go" && !strings.HasSuffix(p, "_test.go") && !strings.HasPrefix(p, "src/internal/io/"))
 		},
@@ -45,7 +46,7 @@ func init() {
 
 func ioModule(repo *Repo, p string, text []byte) []Finding {
 	if p == Allowlist {
-		return staleEntries(repo, text)
+		return staleEntries(repo, text, Allowlist, "io-module", Reaches)
 	}
 	list, _, _ := repo.Read(Allowlist)
 	allowed := map[string]bool{}
@@ -61,14 +62,14 @@ func ioModule(repo *Repo, p string, text []byte) []Finding {
 	return found
 }
 
-// staleEntries refuses an allowlist entry that is malformed, named twice, or
-// matches nothing in the file it names.
-func staleEntries(repo *Repo, text []byte) []Finding {
+// staleEntries refuses an entry of the allowlist at list, rule's, that is
+// malformed, named twice, or matches nothing reaches finds in the file it names.
+func staleEntries(repo *Repo, text []byte, list, rule string, reaches func(p string, text []byte) []Reach) []Finding {
 	var found []Finding
 	seen := map[string]bool{}
 	for _, e := range entriesOf(text) {
 		refuse := func(msg string) {
-			found = append(found, Finding{Path: Allowlist, Line: e.line, Rule: "io-module", Message: msg})
+			found = append(found, Finding{Path: list, Line: e.line, Rule: rule, Message: msg})
 		}
 		key := e.file + " " + e.reach
 		switch {
@@ -86,7 +87,7 @@ func staleEntries(repo *Repo, text []byte) []Finding {
 			continue
 		}
 		hit := false
-		for _, r := range Reaches(e.file, src) {
+		for _, r := range reaches(e.file, src) {
 			hit = hit || r.What == e.reach
 		}
 		if !hit {

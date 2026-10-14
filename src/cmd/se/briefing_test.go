@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -117,9 +116,7 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 	for path, a := range probed {
 		answers[path] = a
 	}
-	oldClock := wall
-	wall = clock.NewFake(briefedAt)
-	t.Cleanup(func() { wall = oldClock })
+	worldOf(t).Clock = clock.NewFake(briefedAt)
 	hubAt(t, answers)
 }
 
@@ -150,6 +147,7 @@ func inOrder(t *testing.T, out string, parts ...string) {
 }
 
 func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
+	t.Parallel()
 	recordedBriefing(t, true, nil)
 	out := briefed(t, "--repo", "o/r")
 	inOrder(t, out,
@@ -167,6 +165,8 @@ func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
 		"## Last retro", "#18 a retro, closed 2026-10-10T12:00:00Z", "u18", "- finding one", "- finding two",
 		"## Next", "se issue pull would take #3 three", "u3",
 		"1 ready, 1 claimed, 3 blocked, 0 in trees",
+		"Queue: 5 open, 1 in flight; no estimate: no se issue merged with a claim time since",
+		"se issue tree tells the detail.",
 		"## What SE is", "SE is a test.\nIt has parts.\nThey talk.\nIt is small.\n",
 		"- spec/principles.md: https://github.com/o/r/blob/main/spec/principles.md",
 		"- spec/issues.md:", "- CLAUDE.md:")
@@ -188,12 +188,14 @@ func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
 }
 
 func TestNothingPendingIsSaidPlainly(t *testing.T) {
+	t.Parallel()
 	recordedBriefing(t, false, nil)
 	out := briefed(t, "--repo", "o/r")
 	inOrder(t, out, "## Waits on you\nNothing waits on you.\n", "## In flight", "fleet check: healthy", "2 ready, 1 claimed, 0 blocked")
 }
 
 func TestTheWindowIsTheLastDayOrTheLastTenWhicheverAreMore(t *testing.T) {
+	t.Parallel()
 	// Twelve closed within the day: the day holds more than ten.
 	many := map[int]time.Duration{}
 	for n := 101; n <= 112; n++ {
@@ -241,19 +243,20 @@ func TestTheWindowIsTheLastDayOrTheLastTenWhicheverAreMore(t *testing.T) {
 	}
 }
 
-// probe registers the test's pending source once, however often it runs.
-var probe sync.Once
+// The probe registers as a source does, at init, before the tests that read
+// the sources run in parallel. It answers for o/probe alone.
+func init() {
+	issues.RegisterPending(issues.PendingSource{Name: "probe", List: func(o issues.Open) ([]issues.Pending, error) {
+		if o.Repo != "o/probe" {
+			return nil, nil
+		}
+		return []issues.Pending{{Number: 99, Title: "a probe", URL: "u99", Reason: "probing"}}, nil
+	}})
+}
 
 func TestAPendingSourceRegistersItself(t *testing.T) {
+	t.Parallel()
 	recordedBriefing(t, false, nil)
-	probe.Do(func() {
-		issues.RegisterPending(issues.PendingSource{Name: "probe", List: func(o issues.Open) ([]issues.Pending, error) {
-			if o.Repo != "o/probe" {
-				return nil, nil
-			}
-			return []issues.Pending{{Number: 99, Title: "a probe", URL: "u99", Reason: "probing"}}, nil
-		}})
-	})
 	inOrder(t, briefed(t, "--repo", "o/probe"), "## Waits on you\n- #99 a probe (probe, holds up 0)\n  probing\n  u99\n", "## In flight")
 	if out := briefed(t, "--repo", "o/r"); !strings.Contains(out, "Nothing waits on you.") {
 		t.Fatalf("the probe answered for another repository:\n%s", out)

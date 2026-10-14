@@ -13,6 +13,7 @@ import (
 )
 
 func TestTheLandingQuestionsAreTheSpecsList(t *testing.T) {
+	t.Parallel()
 	// The spec is the checkout's own file, so it is read from the real disk.
 	got, err := Questions(disk.Real(), filepath.Join("..", "..", ".."))
 	if err != nil {
@@ -32,6 +33,7 @@ func TestTheLandingQuestionsAreTheSpecsList(t *testing.T) {
 }
 
 func TestLandRefusesAnswersMissingEmptyOrUnknown(t *testing.T) {
+	t.Parallel()
 	origin, a := claimed(t)
 	for _, c := range []struct {
 		answers map[string]string
@@ -54,6 +56,7 @@ func TestLandRefusesAnswersMissingEmptyOrUnknown(t *testing.T) {
 }
 
 func TestReadAnswersTakesTextAndRefusesAList(t *testing.T) {
+	t.Parallel()
 	d := disk.NewFake()
 	good, bad := filepath.FromSlash("/good.yaml"), filepath.FromSlash("/bad.yaml")
 	for path, text := range map[string]string{good: "done: one line\ntimeline: |\n  first\n  then\nleft:\n", bad: "done:\n  - a\n  - b\n"} {
@@ -71,6 +74,7 @@ func TestReadAnswersTakesTextAndRefusesAList(t *testing.T) {
 }
 
 func TestTheLandingBlockRoundTrips(t *testing.T) {
+	t.Parallel()
 	l := Landed{Issue: 39, Answers: map[string]string{
 		"done": "answers: on the issue, # not a comment",
 		"left": "```\nfenced\n```\n- a list in text\n\"quoted\"",
@@ -100,6 +104,7 @@ func TestTheLandingBlockRoundTrips(t *testing.T) {
 }
 
 func TestLandingFactsCountCommitsMergesAndTakeovers(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	// main moves on, and the branch merges it in.
 	run(t, a, "checkout", "-q", "main")
@@ -128,6 +133,7 @@ func TestLandingFactsCountCommitsMergesAndTakeovers(t *testing.T) {
 }
 
 func TestLandAgainUpdatesTheLandingComment(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	gh := landGH(t, map[string]string{
 		pullsPath: `[` + pr14 + `]`,
