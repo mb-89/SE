@@ -40,6 +40,7 @@ classes:
   daemon: {ms: 0, hard: false}
 command_classes:
   briefing: github
+  ensure: build
   fleet check: github
   fleet fix: github
   fleet plugins: github
