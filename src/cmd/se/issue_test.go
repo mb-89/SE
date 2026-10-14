@@ -566,7 +566,7 @@ func TestATakeSaysTheOwnerReleasedAnIssueFiledForAPerson(t *testing.T) {
 	}
 	want := "Released to the boxes: @owner took se-person off at 2026-10-13 09:13 UTC. Its body still says it waits for a person; that no longer holds, so do it."
 	took := issues.Issue{Number: 3, Title: "three", URL: "u3", Body: "b", Released: answer.Issue.Released}
-	if r, err := issueReply(false, took, true, "issue-3", "", "", handed{}); err != nil || r.Text != "Took #3 three, on branch issue-3.\nu3\nIts agent: se:worker.\n"+want+"\n\nb" {
+	if r, err := issueReply(false, false, took, true, "issue-3", "", "", handed{}); err != nil || r.Text != "Took #3 three, on branch issue-3.\nu3\nIts agent: se:worker.\n"+want+"\n\nb" {
 		t.Fatalf("%q %v", r.Text, err)
 	}
 	// Where GitHub's events cannot say who or when, the release stands without them.
