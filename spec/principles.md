@@ -101,7 +101,10 @@ principles of code once.
 
 12. **One work system.**
     Issues with native links, created only through `se issue new`; a box acts
-    on its issue's text, not on messages.
+    on its issue's text, not on messages. An issue is work: code or prose
+    that must change. It is never a way to report, ask or tell: what a run
+    finds that changes nothing is said in its own output (a PR, a landing
+    answer, a report), not in a new issue.
     Checked by: retro, mechanically (rule checks).
 
 13. **Every session starts at main.**
