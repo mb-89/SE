@@ -29,6 +29,10 @@ now() {
 battery=.se/.runtime/battery
 rm -rf "$battery"
 mkdir -p "$battery"
+# The battery records the tree it passed, so se issue land pushes only that
+# tree: HEAD^{tree} of a clean worktree, read now and again once it passed
+# (src/internal/battery, TreeFile).
+started=$(go -C src run ./cmd/battery tree "$PWD")
 # step runs one check and reports how long it took.
 step() {
   name=$1
@@ -78,3 +82,4 @@ step "plugin validate" claude plugin validate src/plugin
 step "marketplace validate" claude plugin validate .
 step "plugin test" plugin_test
 go -C src run ./cmd/battery report "$PWD"
+go -C src run ./cmd/battery passed "$PWD" "$started"

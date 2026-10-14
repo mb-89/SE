@@ -14,14 +14,15 @@ import (
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
-// recordedFleet answers the fleet commands' gh calls for o/r: #3 is ready,
+// recordedFleet answers the fleet commands' gh calls for o/r: #3 is a manifest,
 // nothing is claimed, and nothing is broken.
 func recordedFleet(t *testing.T) *github.Fake {
 	t.Helper()
 	answers := map[string]string{
-		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3"}]`,
+		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3","labels":[{"name":"se"},{"name":"se-manifest"}]}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[]`,
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
@@ -135,6 +136,29 @@ func TestRulesOnBuildsTheMergesSeAndAnswersItsRuleAndTestFindingsWithoutTimings(
 	})
 	if got, err := rulesOn(m, "/wt"); got != "it does not build:\nundefined: World" || err != nil {
 		t.Fatalf("%q %v", got, err)
+	}
+}
+
+func TestFleetTrustPassesOnlyAHeadCarryingTheBatterysStatusForItsTree(t *testing.T) {
+	t.Parallel()
+	const sha, tree = "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"
+	gh := hubAt(t, map[string]string{})
+	trust := func() (int, string, string) {
+		return se(t, "fleet", "trust", "--repo", "o/r", "--sha", sha, "--tree", tree)
+	}
+	// A push without SE: CI runs the battery.
+	if code, out, errs := trust(); code == 0 || out != "" || !strings.Contains(errs, "not trusted, so CI runs the battery") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	// A box's push: CI passes without it.
+	if _, err := gh.Send("POST", "repos/o/r/statuses/"+sha, github.F("state", "success"), github.F("context", issues.BatteryContext), github.F("description", issues.BatteryDescription(tree))); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errs := trust(); code != 0 || !strings.HasPrefix(out, "trusted: "+sha+" passed the battery on tree "+tree) {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if code, _, errs := se(t, "fleet", "trust", "--repo", "o/r", "--sha", sha); code == 0 || !strings.Contains(errs, "--tree TREE") {
+		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
 
