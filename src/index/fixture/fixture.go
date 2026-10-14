@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mb-89/SE/src/internal/index"
+	"github.com/mb-89/SE/src/index"
 )
 
 type totalIn struct {

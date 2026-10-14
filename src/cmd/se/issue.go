@@ -70,6 +70,7 @@ func init() {
 		Summary: "show the next se issue, stuck work first; --take claims it",
 		Details: []string{
 			"pull the next ready se issue at the top, stuck work before new work; boxes take only manifests, so at the top it offers a manifest (a parent), a retro or an overhaul, never a leaf in no manifest, and a manifest whose leaves are all closed is offered to be landed as one PR.",
+			"After stuck and conflicted work, it offers the priority manifests first, lowest number first: those labelled se-priority or holding an open leaf so labelled, and an open retro or overhaul; inside a manifest, its se-priority leaves come before the rest.",
 			"Every --take first reads fleet.box/config/paused (issues/config/paused) in the wiring file on origin/main, and while it is set takes nothing and says the fleet is paused, so the box ends.",
 			"Without --take it only shows it (number, title, link, why it is at the top, and where the cadences stand; --full adds the body), or says that none is ready, and takes nothing; a press of its /se ui button shows the short form, the cadences in one line.",
 			"--take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out.",
@@ -590,7 +591,7 @@ func init() {
 		Details: []string{
 			"on an issue-N branch: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), and refuse an issue with open sub-issues.",
 			"A leaf inside a manifest (an issue with a parent) lands into the manifest's branch: merge origin's issue-N and the manifest's issue-M into it (never a rebase), pass tests/check.sh, push it to both, post the answers on the leaf with its facts (its time from claim to land among them) and close it; a leaf gets no PR of its own.",
-			"An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a manifest whose branch holds nothing main does not closes with no PR.",
+			"An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit (where GitHub refuses it with 403, as a cloud box's proxy does, it goes on and warns, since CI then runs the battery itself), post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a manifest whose branch holds nothing main does not closes with no PR.",
 		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
@@ -647,6 +648,9 @@ func init() {
 				text += "; nothing was left to wait for, so it is merged (squash)."
 			} else {
 				text += ", auto-merge (squash) on."
+			}
+			if l.Warning != "" {
+				text += "\nWarning: " + l.Warning
 			}
 			return Reply{Text: text + "\n" + l.URL}, nil
 		},
