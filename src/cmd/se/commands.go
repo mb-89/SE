@@ -8,20 +8,20 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/daemon"
+	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
-
-	"github.com/mb-89/SE/src/internal/daemon"
 )
 
 // Command is one word se answers. A command is one file that calls register
-// in its init; the help and the session's /se are made from what registered.
+// in its init. What registered is declared on the index (modules.go), and the
+// help, /se ui and the session's /se are made from the index's catalog.
 type Command struct {
 	// Name is the word that runs it: se <name>, or /se <name> in a session.
 	// A name of two words, "issue pull", is a sub-word of its first: the first
@@ -92,6 +92,15 @@ type Call struct {
 	Session bool
 	// Color is set when the help may colour what it prints.
 	Color bool
+	// World is everything outside se the command reaches.
+	World
+	// flags is the flag set Flags made, which the command's help lists.
+	flags *flag.FlagSet
+}
+
+// World is everything outside se that a run reaches. main hands run the real
+// one; a test hands in its own, so tests share nothing and run in parallel.
+type World struct {
 	// Clock is the time the command reads, sleeps and waits by.
 	Clock clock.Clock
 	// Disk is what the command reads and writes files on.
@@ -102,26 +111,26 @@ type Call struct {
 	Net sehttp.Net
 	// GitHub is where the command reads and writes issues and pull requests.
 	GitHub github.GitHub
-	// flags is the flag set Flags made, which the command's help lists.
-	flags *flag.FlagSet
+	// Getenv reads one variable of the environment se runs in; Environ
+	// answers all of it, for the programs se starts.
+	Getenv  func(key string) string
+	Environ func() []string
+	// Commit is the SE commit this se was built from, "" where the build did not say.
+	Commit string
+	// Check is what issue land runs before it pushes, on procs: the repo's one
+	// definition of green. It answers the check's output when it fails.
+	Check func(procs proc.Procs, dir string) error
+}
+
+// realWorld is what se reaches when it runs for real.
+func realWorld() *World {
+	return &World{
+		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(), GitHub: github.Real(),
+		Getenv: os.Getenv, Environ: os.Environ, Commit: commit, Check: check,
+	}
 }
 
 var commands = map[string]Command{}
-
-// wall is the clock every call is handed: the real one, which a test replaces.
-var wall = clock.Real()
-
-// drive is the disk every call is handed: the real one, which a test replaces.
-var drive = disk.Real()
-
-// machine runs every call's programs: the real one, which a test replaces.
-var machine = proc.Real()
-
-// network is the network every call is handed: the real one, which a test replaces.
-var network = sehttp.Real()
-
-// hub is the GitHub every call is handed: the real one, which a test replaces.
-var hub = github.Real()
 
 // register adds a command; a command file calls it from init.
 func register(c Command) {
@@ -159,16 +168,13 @@ func (c *Call) Parse(fs *flag.FlagSet) error {
 // Paths names the workspace's runtime files.
 func (c *Call) Paths() daemon.Paths { return daemon.Paths{Workspace: c.Workspace, Disk: c.Disk} }
 
-// offered lists the commands a terminal (session false) or a session can run, by name.
-func offered(session bool) []Command {
-	var out []Command
-	for _, c := range commands {
-		if c.Session || !session {
-			out = append(out, c)
-		}
+// offered lists the commands a terminal (session false) or a session can run,
+// by name, as the index's catalog holds them.
+func offered(session bool) []index.CommandInfo {
+	if session {
+		return catalog().Session()
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	return catalog().Commands
 }
 
 // subWords lists the second words of the commands under first that a terminal
@@ -190,9 +196,9 @@ func prog(session bool) string {
 	return "se"
 }
 
-// run is se: it reads --session and --workspace, then the command's name, and
+// run is se in world w: it reads --session and --workspace, then the command's name, and
 // runs that command. It answers the exit code.
-func run(args []string, stdout, stderr io.Writer) int {
+func run(w *World, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("se", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	session := fs.Bool("session", false, "called by the plugin from a session: answer JSON")
@@ -203,19 +209,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	// The help is coloured on a terminal alone, never in a session's answer.
 	color, errColor := !*session && colors(stdout), !*session && colors(stderr)
-	call := &Call{Workspace: *workspace, Session: *session, Color: color, Clock: wall, Disk: drive, Proc: machine, Net: network, GitHub: hub}
+	call := &Call{Workspace: *workspace, Session: *session, Color: color, World: *w}
 	name := ""
 	if fs.NArg() > 0 {
 		name, call.Args = fs.Arg(0), fs.Args()[1:]
 	}
+	cat := catalog()
 	if len(call.Args) > 0 {
-		if _, sub := commands[name+" "+call.Args[0]]; sub {
+		if _, sub := cat.Command(name + " " + call.Args[0]); sub {
 			name, call.Args = name+" "+call.Args[0], call.Args[1:]
 		}
 	}
-	cmd, ok := commands[name]
+	cmd, ok := cat.Command(name)
 	if *session && (!ok || !cmd.Installed) {
-		if code, handed := handsOver(drive, machine, *workspace, args, stdout, stderr); handed {
+		if code, handed := handsOver(w, *workspace, args, stdout, stderr); handed {
 			return code
 		}
 	}
@@ -226,7 +233,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch {
 	case ok:
-		reply, err = cmd.Run(call)
+		reply, err = runCommand(name, call)
 		if errors.Is(err, flag.ErrHelp) {
 			reply, err = helpReply(commandHelpOf(cmd, call.flags, *session), *session, color), nil
 		}
@@ -269,5 +276,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// executable is this se, the installed one when it runs from the plugin.
-var executable = os.Executable
+// runCommand runs the command the catalog names with the run the command line registered for it.
+func runCommand(name string, call *Call) (Reply, error) {
+	c, ok := commands[name]
+	if !ok {
+		return Reply{}, fmt.Errorf("%s is declared on the index, but the command line has no run for it", name)
+	}
+	return c.Run(call)
+}

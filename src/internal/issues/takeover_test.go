@@ -86,6 +86,7 @@ func claimedAt(t *testing.T, n int) (a string) {
 }
 
 func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
+	t.Parallel()
 	a := claimed7(t)
 	g := newPulls(t, atNow(), pr70("false", "dirty"))
 	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
@@ -114,6 +115,7 @@ func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 }
 
 func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
+	t.Parallel()
 	for name, answers := range map[string][]string{
 		"clean":            {pr70("true", "clean")},
 		"blocked":          {pr70("false", "blocked")},
@@ -166,6 +168,7 @@ func finalSeven(t *testing.T, g *github.Fake) {
 // merged fast, and each went to a person. A conflict at a new head is taken
 // over again, and nothing is held.
 func TestASecondConflictAtANewHeadIsTakenOverAgain(t *testing.T) {
+	t.Parallel()
 	a := claimed7(t)
 	g := newPulls(t, atNow(), pr70("false", "dirty"))
 	// The first takeover found head 0ld; the PR conflicts again at abc.
@@ -186,6 +189,7 @@ func TestASecondConflictAtANewHeadIsTakenOverAgain(t *testing.T) {
 }
 
 func TestATakeoverInFlightIsLeftToItsBox(t *testing.T) {
+	t.Parallel()
 	_, a, _ := boxes(t)
 	g := newPulls(t, atNow(), pr70("false", "dirty"))
 	// A box took #7 over at this very head and has not landed the merge yet.
@@ -197,6 +201,7 @@ func TestATakeoverInFlightIsLeftToItsBox(t *testing.T) {
 }
 
 func TestOfTwoBoxesTakingOverAtOnceTheFirstMarkerWins(t *testing.T) {
+	t.Parallel()
 	_, a, _ := boxes(t)
 	g := newPulls(t, atNow(), pr70("false", "dirty"))
 	other := "<!-- se:takeover 1 -->\n<!-- se:takeover-head abc -->"
@@ -211,6 +216,7 @@ func TestOfTwoBoxesTakingOverAtOnceTheFirstMarkerWins(t *testing.T) {
 }
 
 func TestAConflictAfterAStuckTakeoverIsTakenOverAndStaysFinal(t *testing.T) {
+	t.Parallel()
 	a := claimed7(t)
 	g := newPulls(t, atNow(), pr70("false", "dirty"))
 	// #7 was taken over once already, stuck, so it is final; its PR now conflicts.

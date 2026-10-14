@@ -145,6 +145,7 @@ func only(t *testing.T, got []Finding, kind string, n int) Finding {
 }
 
 func TestAFleetWithNothingBrokenIsHealthy(t *testing.T) {
+	t.Parallel()
 	// #5 is ready, #6 waits on #5, #7 is claimed and its PR is green, mergeable,
 	// with auto-merge on and a push half an hour ago.
 	w := newWorld(t, []string{item(5, 0), item(6, 0), item(7, 0)}, 7)
@@ -167,6 +168,7 @@ func TestAFleetWithNothingBrokenIsHealthy(t *testing.T) {
 }
 
 func TestAConflictedPRIsFoundAndTakenOver(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
 	w.pushed(7, recent)
 	w.pr(7, "false", "dirty", true)
@@ -185,6 +187,7 @@ func TestAConflictedPRIsFoundAndTakenOver(t *testing.T) {
 }
 
 func TestARedPRIsFoundOnceItIsQuiet(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
 	w.pr(7, "true", "unstable", true, "check:failure", "lint:success")
 	w.pushed(7, recent)
@@ -199,6 +202,7 @@ func TestARedPRIsFoundOnceItIsQuiet(t *testing.T) {
 }
 
 func TestAGreenPRWithAutoMergeOffIsFoundAtOnce(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
 	w.pr(7, "true", "clean", false, "check:success")
 	w.pushed(7, recent)
@@ -218,6 +222,7 @@ func TestAGreenPRWithAutoMergeOffIsFoundAtOnce(t *testing.T) {
 }
 
 func TestAClaimWithNoPRIsFoundOnceItIsQuiet(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
 	w.closedPRs(7, `[]`)
 	w.pushed(7, quiet)
@@ -233,6 +238,7 @@ func TestAClaimWithNoPRIsFoundOnceItIsQuiet(t *testing.T) {
 }
 
 func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0)}, 19)
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-13T11:00:00Z"}`)
 	f := only(t, w.check(), LeftoverClaim, 19)
@@ -262,6 +268,7 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 }
 
 func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0)}, 19)
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"open"}`)
 	w.ahead(19, 0)
@@ -289,6 +296,7 @@ func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 }
 
 func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0), item(8, 0)}, 19)
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"open"}`)
 	w.ahead(19, 0)
@@ -309,6 +317,7 @@ func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
 }
 
 func TestImpossibleBlocksAreFound(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0), item(8, 0), item(9, 0), item(10, 0), item(11, 0), item(12, 0)})
 	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
 	w.set(links(9), "["+dep(4, "open", "", false)+"]")
@@ -334,6 +343,7 @@ func TestImpossibleBlocksAreFound(t *testing.T) {
 }
 
 func TestAnIssueWaitingOnAPersonIsReportedWithWhatItHoldsUp(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0), item(12, 0, PersonLabel), item(13, 0)})
 	w.set(links(13), "["+dep(12, "open", "", true)+"]")
 	f := only(t, w.check(), WaitingOnPerson, 12)
@@ -347,6 +357,7 @@ func TestAnIssueWaitingOnAPersonIsReportedWithWhatItHoldsUp(t *testing.T) {
 // head, is hours old. #38 waits on #17, #39 on #38, the parent #51 on #38,
 // and so does its sub-issue #52. Nothing is ready, and every box left.
 func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(17, 0, FinalLabel), item(38, 0), item(39, 0), item(51, 1), item(52, 0)}, 17)
 	w.set(subsPath(51), `[`+item(52, 0)+`]`)
 	w.set(links(38), "["+dep(17, "open", "", true)+"]")
@@ -402,6 +413,7 @@ func TestAFinalClaimTakenOverAMinuteAgoIsNotHeld(t *testing.T) {
 }
 
 func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
+	t.Parallel()
 	a := claimed7(t)
 	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
 	w.closedPRs(7, `[]`)
@@ -429,6 +441,7 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 }
 
 func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0), item(7, 0), item(8, 0), item(9, 0)}, 7, 19)
 	// A review is still required on #70, so auto-merge waits for it.
 	w.pr(7, "true", "blocked", false, "check:success")
@@ -502,6 +515,7 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 // waits on #60. Nothing about #60 is a box's to fix: the one finding is #117,
 // and it holds #60's dependants.
 func TestFourteenOctoberAClaimAPersonBlocksIsNoStalledRoot(t *testing.T) {
+	t.Parallel()
 	for _, blocked := range []int{60, 59} {
 		w := newWorld(t, []string{item(44, 0), item(59, 1), item(60, 0), item(117, 0, PersonLabel)}, 60)
 		w.set(subsPath(59), `[`+item(60, 0)+`]`)
@@ -518,6 +532,7 @@ func TestFourteenOctoberAClaimAPersonBlocksIsNoStalledRoot(t *testing.T) {
 // Every takeover remedy se fleet check names for a stuck sub-issue leaf runs:
 // within the lease, and past it.
 func TestTheTakeoverRemedyOfAStuckSubIssueLeafRuns(t *testing.T) {
+	t.Parallel()
 	for _, at := range []string{quiet, "2026-10-13T07:00:00Z"} {
 		a := claimed7(t)
 		w := newWorld(t, []string{item(5, 1), item(7, 0)}, 7)
