@@ -23,7 +23,7 @@ func moot(t *testing.T, answers map[string]string) (s Source, gh *github.Fake, a
 	run(t, a, "push", "-q", "origin", "main")
 	run(t, a, "checkout", "-q", "issue-6")
 	gh = landGH(t, answers)
-	return Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}, gh, a, fix
+	return Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}, gh, a, fix
 }
 
 func TestFixedByClosesTheIssueNamingTheCommitOnMain(t *testing.T) {

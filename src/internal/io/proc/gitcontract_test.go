@@ -111,6 +111,20 @@ func gitContract(t *testing.T, fresh func(t *testing.T) gitOn) {
 		if short, full := m.must(t, a, "rev-parse", "--short", "HEAD"), m.must(t, a, "rev-parse", "HEAD"); len(short) < 7 || !strings.HasPrefix(full, short) {
 			t.Fatalf("short %s of %s", short, full)
 		}
+		full := m.must(t, a, "rev-parse", "HEAD")
+		if got := m.must(t, a, "rev-parse", "--verify", "--quiet", full[:8]+"^{commit}"); got != full {
+			t.Fatalf("%s^{commit} verifies as %q", full[:8], got)
+		}
+		if out, code := m.git(t, a, "rev-parse", "--verify", "--quiet", strings.Repeat("e", 40)+"^{commit}"); code != 1 || out != "" {
+			t.Fatalf("an unknown commit verifies: exit %d, %q", code, out)
+		}
+		m.commit(t, a, "later", "later\n")
+		if _, code := m.git(t, a, "merge-base", "--is-ancestor", full, "HEAD"); code != 0 {
+			t.Fatalf("HEAD~1 is no ancestor of HEAD: exit %d", code)
+		}
+		if _, code := m.git(t, a, "merge-base", "--is-ancestor", "HEAD", "origin/main"); code != 1 {
+			t.Fatalf("a commit not pushed is an ancestor of origin/main: exit %d", code)
+		}
 		outside := filepath.Join(m.root, "plain")
 		if err := m.disk.MkdirAll(outside); err != nil {
 			t.Fatal(err)

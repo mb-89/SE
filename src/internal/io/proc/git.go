@@ -115,7 +115,7 @@ func (g *Git) Run(c Cmd) int {
 	verbs := map[string]func([]string) int{
 		"add": r.add, "branch": r.branch, "check-ignore": r.checkIgnore, "checkout": r.checkout,
 		"commit": r.commit, "config": r.config, "fetch": r.fetch, "log": r.log, "ls-files": r.lsFiles,
-		"ls-remote": r.lsRemote, "merge": r.merge, "pull": r.pull, "push": r.push, "remote": r.remote,
+		"ls-remote": r.lsRemote, "merge": r.merge, "merge-base": r.mergeBaseVerb, "pull": r.pull, "push": r.push, "remote": r.remote,
 		"rev-list": r.revList, "rev-parse": r.revParse, "status": r.status, "worktree": r.worktree,
 	}
 	if do, ok := verbs[verb]; ok {
@@ -320,6 +320,8 @@ func fullRef(repo *gitRepo, name string) (string, bool) {
 // resolve answers the commit rev names in p: HEAD, @{upstream}, FETCH_HEAD, a
 // ref, a commit or its prefix, each followed by ~N or ^.
 func (r *gitRun) resolve(rev string) (string, bool) {
+	// Every object the fake holds is a commit: peeling to one changes nothing.
+	rev = strings.TrimSuffix(strings.TrimSuffix(rev, "^{commit}"), "^{}")
 	cut := strings.IndexAny(rev, "~^")
 	base, ops := rev, ""
 	if cut >= 0 {
@@ -675,6 +677,10 @@ func (r *gitRun) revParse(args []string) int {
 	for _, rev := range rest {
 		id, ok := r.resolve(rev)
 		switch {
+		case !ok && has(f, "--verify") && has(f, "-q", "--quiet"):
+			return 1
+		case !ok && has(f, "--verify"):
+			return r.fail(128, "fatal: Needed a single revision")
 		case !ok && (rev == "@{upstream}" || rev == "@{u}"):
 			return r.fail(128, "fatal: no upstream configured for branch '%s'", r.p.branch())
 		case !ok:
@@ -1634,4 +1640,25 @@ func (r *gitRun) worktreeRemove(args []string) int {
 		return r.fail(128, "fatal: failed to delete '%s': %v", rest[0], err)
 	}
 	return 0
+}
+
+// mergeBaseVerb answers git merge-base --is-ancestor: exit 0 where the first
+// commit is the second or an ancestor of it, 1 where not.
+func (r *gitRun) mergeBaseVerb(args []string) int {
+	f, rest, err := flags(args, "--is-ancestor")
+	if err != nil || !has(f, "--is-ancestor") || len(rest) != 2 {
+		return r.fail(129, "usage: git merge-base --is-ancestor <commit> <commit>")
+	}
+	a, ok := r.resolve(rest[0])
+	if !ok {
+		return r.fail(128, "fatal: Not a valid commit name %s", rest[0])
+	}
+	b, ok := r.resolve(rest[1])
+	if !ok {
+		return r.fail(128, "fatal: Not a valid commit name %s", rest[1])
+	}
+	if r.g.isAncestor(a, b) {
+		return 0
+	}
+	return 1
 }
