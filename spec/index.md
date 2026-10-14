@@ -54,10 +54,13 @@ A module is one Go package that declares, by **local name** only:
 | **config** | its keys, each with a type, a built-in value and one help line. A key is an input like any other, under `<instance>/config/<key>`; the module never learns where the value came from |
 | **commands** | the functions a person or agent calls, in [Commands and help](#commands-and-help) |
 | **requests** | for an I/O module only: the verbs it accepts from others, in [I/O modules and compute modules](#io-modules-and-compute-modules) |
+| **the I/O flag** | for an I/O module only: it marks the module as one that touches the outside (v5's `q.IO()`). A module without it is a compute module, and the battery's import rule reads the flag, in [Testing](#testing) |
 
-A run is pure: the module reads its input struct, computes, and answers one
-commit of its outputs. It calls nothing else; it never reads the store and
-never reaches the outside.
+A compute module's run is pure: the module reads its input struct, computes,
+and answers one commit of its outputs. It calls nothing else; it never reads
+the store and never reaches the outside. An I/O module's run reaches its one
+outside thing and nothing else, in
+[I/O modules and compute modules](#io-modules-and-compute-modules).
 
 The shape, with names that settle in the first code issue:
 
@@ -178,9 +181,13 @@ Every part tests itself alone ([principles 7 and 8](principles.md)):
 | the index core | fixture modules that declare, read and write as a test scripts them |
 | every command declaration | generic cases over the catalog: each has a summary, help and group, and every adapter shows the same text |
 
-No module test starts the daemon, and no module talks to anything but the
-index. A module imports the index contract and the standard library only; a
-rule in the battery holds that once the first module lands.
+No module test starts the daemon, and no compute module talks to anything but
+the index. A compute module imports the index contract and the pure standard
+library only: no package that reaches the outside, such as `os`, `os/exec`,
+`net` or `net/http`, and no read of the clock (`time.Now`). An I/O module, one
+that carries the I/O flag, imports the index contract, the standard library
+and what its outside thing needs. A rule in the battery reads the flag and
+holds both once the first module lands.
 
 ## The migration
 
