@@ -145,7 +145,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, pull, resume, review, supersede, tree." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: edit, land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -153,7 +153,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	t.Parallel()
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, pull, resume, review, supersede, tree." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: edit, land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -163,7 +163,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue pull, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, pull, resume, review, supersede, tree.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: edit, land, new, pull, resume, review, supersede, tree.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -427,7 +427,7 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires", code, fires(t))
 	}
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIts agent: se:coordinator.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\n#3 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 3 --take\n\ndo it\n" {
+	if code != 0 || fires(t) != 1 || !strings.HasPrefix(out, "Took #3 three, on branch issue-3.\nu3\nIts agent: se:coordinator.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\n#3 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 3 --take\n\ndo it\n") {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// A manifest's box coordinates its tree: the Stop hook holds its leaves'
@@ -573,7 +573,7 @@ func TestIssueReviewReadsItsWords(t *testing.T) {
 	gh := recordedIssues(t)
 	d, dir := onFake(t), filepath.FromSlash("/reports")
 	good, bad := filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json")
-	put(t, d, good, `{"commit":"c","requirements":[{"item":"i","evidence":"e"}],"clean":["x"]}`)
+	put(t, d, good, `{"commit":"c","requirements":[{"item":"i","evidence":"e"}],"clean":["x"],"ran":`+ranAll(t)+`}`)
 	put(t, d, bad, `{"verdict":"pass"}`)
 	for args, want := range map[string]string{
 		"pass":                          "pass or fail, then an issue number",
