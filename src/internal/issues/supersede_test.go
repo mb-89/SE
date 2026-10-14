@@ -121,3 +121,59 @@ func TestUnclosedNamesWhatIsMissing(t *testing.T) {
 		t.Fatal("answered without GitHub")
 	}
 }
+
+func TestDuplicateClosesTheIssueAndMintsNothing(t *testing.T) {
+	t.Parallel()
+	// Issue 5 is final: a duplicate closes it all the same.
+	gh := superseding(t, `{"name":"se"},{"name":"se-final"}`)
+	seed(t, gh, map[string]string{
+		"repos/o/r/issues/6": `{"id":606,"number":6,"state":"open","title":"The same","html_url":"u6"}`,
+		"repos/o/r/issues/6/dependencies/blocking?per_page=100": `[]`,
+	})
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	dup, err := s.CloseDuplicate(5, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dup.Issue != 5 || dup.Of != 6 || dup.URL != "u6" || !reflect.DeepEqual(dup.Blocks, []int{7}) {
+		t.Fatalf("%+v", dup)
+	}
+	old := issueAt(t, gh, 5)
+	if old.State != "closed" || old.StateReason != "duplicate" {
+		t.Fatalf("%+v", old)
+	}
+	if cs := commentsAt(t, gh, 5); len(cs) != 1 || !strings.HasPrefix(cs[0].Body, "Duplicate of #6,") {
+		t.Fatalf("%+v", cs)
+	}
+	// What waited on the duplicate waits on the issue that covers it.
+	if got := linksOf(t, gh, "repos/o/r/issues/7/dependencies/blocked_by"); !slices.Contains(got, 6) {
+		t.Fatalf("#7 is blocked by %v", got)
+	}
+	for _, w := range gh.Writes() {
+		if strings.HasPrefix(w, "POST repos/o/r/issues ") || w == "POST repos/o/r/issues" {
+			t.Fatalf("minted an issue: %q", gh.Writes())
+		}
+	}
+}
+
+func TestDuplicateRefusesAClosedOrMissingIssue(t *testing.T) {
+	t.Parallel()
+	gh := superseding(t, `{"name":"se"}`)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	for _, c := range []struct {
+		n, of int
+		want  string
+	}{
+		{5, 5, "cannot duplicate itself"},
+		{5, 4, "#4 is closed"},
+		{4, 3, "#4 is closed already"},
+		{5, 99, "#99 does not exist"},
+	} {
+		if _, err := s.CloseDuplicate(c.n, c.of); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("%d of %d: %v", c.n, c.of, err)
+		}
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("wrote %q", w)
+	}
+}
