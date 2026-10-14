@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/guidance"
@@ -66,7 +67,7 @@ func cliModule() *index.Module {
 // a group stands under Other, and one without details is helped by its summary.
 func declOf(c Command) index.CommandDecl {
 	d := index.CommandDecl{
-		Name: c.Name, Usage: c.Usage, Summary: c.Summary, Help: c.Details, Group: c.Group,
+		Name: c.Name, Usage: c.Usage, Summary: c.Summary, Help: strings.Join(c.Details, " "), Group: c.Group,
 		Session: c.Session, Button: c.Button, Installed: c.Installed, Class: c.Class,
 	}
 	if d.Group == "" {

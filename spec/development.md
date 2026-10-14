@@ -36,7 +36,11 @@ and hands nothing to the checkout's build.
 ## Adding a command
 
 A command is one file in `src/cmd/se` whose `init` calls `register`; the
-fields of `Command` in `src/cmd/se/commands.go` say what it declares. The help,
+fields of `Command` in `src/cmd/se/commands.go` say what it declares. Its
+`Details` are a list of sentences, one string literal each, joined at print:
+two changes to one command's help then merge per sentence, where one long
+line conflicted (#495). The `help-sentences` rule refuses a help string
+literal of more than one sentence, and `se rules --fix` splits one. The help,
 `/se ui` and the manifests are made from what registered, so nothing else
 changes.
 

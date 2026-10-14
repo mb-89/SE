@@ -541,7 +541,7 @@ func TestTheHelpRendersTheConfigValues(t *testing.T) {
 		"overhaul read": {fmt.Sprintf("last %d retros' metrics (issues/config/overhaul-cadence)", cfg.OverhaulCadence)},
 	} {
 		for _, w := range want {
-			if !strings.Contains(commands[name].Details, w) {
+			if !strings.Contains(strings.Join(commands[name].Details, " "), w) {
 				t.Errorf("se help %s does not render %q from the config", name, w)
 			}
 		}

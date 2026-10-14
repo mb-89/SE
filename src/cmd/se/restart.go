@@ -10,12 +10,15 @@ import (
 
 func init() {
 	register(Command{
-		Name:      "restart",
-		Class:     batch,
-		Usage:     "restart",
-		Group:     "Session",
-		Summary:   "restart the daemon; in an SE checkout, rebuild se first",
-		Details:   "stop this workspace's daemon and start it again. In an SE checkout, se is rebuilt from its source first.",
+		Name:    "restart",
+		Class:   batch,
+		Usage:   "restart",
+		Group:   "Session",
+		Summary: "restart the daemon; in an SE checkout, rebuild se first",
+		Details: []string{
+			"stop this workspace's daemon and start it again.",
+			"In an SE checkout, se is rebuilt from its source first.",
+		},
 		Session:   true,
 		Installed: true,
 		Button:    true,

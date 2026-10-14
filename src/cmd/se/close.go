@@ -17,7 +17,9 @@ func init() {
 		Usage:   "issue close N --fixed-by SHA --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "close issue N, its work on main already, naming the commit",
-		Details: "the third way a box closes the issue it took, beside a PR and a supersede, where its work is on main already and landing would take an empty commit: refuse unless SHA names a commit that origin/main holds and FILE answers every question in spec/landing.yaml (as se issue land reads it), and refuse a closed issue and a parent; then post the answers on N, comment naming the commit, and close N as completed.",
+		Details: []string{
+			"the third way a box closes the issue it took, beside a PR and a supersede, where its work is on main already and landing would take an empty commit: refuse unless SHA names a commit that origin/main holds and FILE answers every question in spec/landing.yaml (as se issue land reads it), and refuse a closed issue and a parent; then post the answers on N, comment naming the commit, and close N as completed.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue close")

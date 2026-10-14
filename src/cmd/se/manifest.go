@@ -51,10 +51,11 @@ func init() {
 		Usage:   "manifest [--write] [<name>]",
 		Group:   "Checks",
 		Summary: "print a manifest, or rewrite every manifest section",
-		Details: "A manifest section stands between <!-- se:manifest <name> --> and <!-- /se:manifest --> in a Markdown file, " +
-			"and is made from its owners: agents (the registry of kinds and the plugin's agents), checks (the retro's rule checks), skills (the skills folder), spec (spec/), usage <word>... (the usage lines of the commands under each word). " +
-			"With a name, manifest prints that manifest; with --write, it rewrites every section of every Markdown file git tracks and names the files it changed. " +
+		Details: []string{
+			"A manifest section stands between <!-- se:manifest <name> --> and <!-- /se:manifest --> in a Markdown file, and is made from its owners: agents (the registry of kinds and the plugin's agents), checks (the retro's rule checks), skills (the skills folder), spec (spec/), usage <word>... (the usage lines of the commands under each word).",
+			"With a name, manifest prints that manifest; with --write, it rewrites every section of every Markdown file git tracks and names the files it changed.",
 			"The rule manifest fails where a committed section differs.",
+		},
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("manifest")
 			write := fs.Bool("write", false, "rewrite every manifest section in the checkout")

@@ -10,12 +10,14 @@ const startWait = 10 * time.Second
 
 func init() {
 	register(Command{
-		Name:      "on",
-		Class:     batch,
-		Usage:     "on",
-		Group:     "Session",
-		Summary:   "switch SE on: start the daemon, forward this session's events",
-		Details:   "switch SE on: start this workspace's daemon and forward every event of the session to it.",
+		Name:    "on",
+		Class:   batch,
+		Usage:   "on",
+		Group:   "Session",
+		Summary: "switch SE on: start the daemon, forward this session's events",
+		Details: []string{
+			"switch SE on: start this workspace's daemon and forward every event of the session to it.",
+		},
 		Session:   true,
 		Installed: true,
 		Run: func(c *Call) (Reply, error) {

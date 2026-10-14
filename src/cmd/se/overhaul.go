@@ -16,7 +16,12 @@ func init() {
 		Usage:   "overhaul new [--unattended] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "start an overhaul: is the design still right?",
-		Details: fmt.Sprintf("create an overhaul: an se issue labelled se-overhaul that checks SE as it stands against every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last %d runs (issues/config/overhaul-cadence), and fire the routine so a box takes it at once. Its box creates the findings' issues, those for a person where controversial, and closes it: an overhaul never waits. --unattended records that no person started it; se issue pull --take starts one so every %d closed retros. spec/overhaul.md has the rules.", issueConfig().OverhaulCadence, issueConfig().OverhaulCadence),
+		Details: []string{
+			fmt.Sprintf("create an overhaul: an se issue labelled se-overhaul that checks SE as it stands against every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last %d runs (issues/config/overhaul-cadence), and fire the routine so a box takes it at once.", issueConfig().OverhaulCadence),
+			"Its box creates the findings' issues, those for a person where controversial, and closes it: an overhaul never waits.",
+			fmt.Sprintf("--unattended records that no person started it; se issue pull --take starts one so every %d closed retros.", issueConfig().OverhaulCadence),
+			"spec/overhaul.md has the rules.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul new")
@@ -49,7 +54,10 @@ func init() {
 		Usage:   "overhaul read N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "read an overhaul's facts and write its report draft",
-		Details: fmt.Sprintf("read overhaul N's facts and write its report draft to FILE (default: ../overhaul-N.md beside the workspace): every design principle from spec/principles.md, mechanical or judged; the last %d retros' metrics (issues/config/overhaul-cadence), broken rule checks and findings, how many became issues and closed, and which recurred; the previous overhaul's findings with their issues' state; and the pruning and code-shape facts of the workspace's code (production-unreachable, duplicates and near-duplicates, sizes, one-user abstractions, unused se surfaces, legacy states, scripts, the files untouched longest, the longest functions, files and parameter lists, switches on a kind, and files touched per change). Where a report is already posted on N (an overhaul from before overhauls stopped waiting for the owner), it writes that one instead, to be filed as it stands.", issueConfig().OverhaulCadence),
+		Details: []string{
+			fmt.Sprintf("read overhaul N's facts and write its report draft to FILE (default: ../overhaul-N.md beside the workspace): every design principle from spec/principles.md, mechanical or judged; the last %d retros' metrics (issues/config/overhaul-cadence), broken rule checks and findings, how many became issues and closed, and which recurred; the previous overhaul's findings with their issues' state; and the pruning and code-shape facts of the workspace's code (production-unreachable, duplicates and near-duplicates, sizes, one-user abstractions, unused se surfaces, legacy states, scripts, the files untouched longest, the longest functions, files and parameter lists, switches on a kind, and files touched per change).", issueConfig().OverhaulCadence),
+			"Where a report is already posted on N (an overhaul from before overhauls stopped waiting for the owner), it writes that one instead, to be filed as it stands.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul read")
@@ -103,7 +111,13 @@ func init() {
 		Usage:   "overhaul file N [--draft FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "file a judged report: create its issues and close it",
-		Details: "file overhaul N's report from its judged draft FILE (default: ../overhaul-N.md beside the workspace). It refuses a judgment that is not complete: a principle without a verdict, nothing said on the outside world, the system's consistency, the principles themselves, the retro, speed, mechanizing or removal, a finding without its principle, place or how far it strays, an outside finding without a source. A change to a principle is always controversial. It gets one se issue per finding, one for a person (se-person) where it is controversial, then the report as its closing comment, and closes: it never waits for the owner. Its claim issue-N goes.",
+		Details: []string{
+			"file overhaul N's report from its judged draft FILE (default: ../overhaul-N.md beside the workspace).",
+			"It refuses a judgment that is not complete: a principle without a verdict, nothing said on the outside world, the system's consistency, the principles themselves, the retro, speed, mechanizing or removal, a finding without its principle, place or how far it strays, an outside finding without a source.",
+			"A change to a principle is always controversial.",
+			"It gets one se issue per finding, one for a person (se-person) where it is controversial, then the report as its closing comment, and closes: it never waits for the owner.",
+			"Its claim issue-N goes.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul file")

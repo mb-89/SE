@@ -37,8 +37,10 @@ type Command struct {
 	Group string
 	// Summary is the help's one short line about it, no flags.
 	Summary string
-	// Details is what se help <name> says beyond the usage and the flags.
-	Details string
+	// Details is what se help <name> says beyond the usage and the flags, one
+	// sentence each, joined at print: two changes to a command's help merge per
+	// sentence (the rule help-sentences).
+	Details []string
 	// Session offers it inside a Claude session as /se <name>.
 	Session bool
 	// Installed keeps it in the installed se when the session works in an SE

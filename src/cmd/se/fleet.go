@@ -19,7 +19,14 @@ func init() {
 		Usage:   "fleet check [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list what is broken in the fleet, each with its remedy",
-		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, a bare issue (in no manifest), an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says healthy. Where GitHub's answers say the hour's quota of requests has fallen below the github instance's quota-floor share (github/config/quota-floor), a last line says how many are left and when it resets. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
+		Details: []string{
+			"read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, a bare issue (in no manifest), an issue waiting on a person.",
+			"Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them.",
+			"Nothing found, it says healthy.",
+			"Where GitHub's answers say the hour's quota of requests has fallen below the github instance's quota-floor share (github/config/quota-floor), a last line says how many are left and when it resets.",
+			"With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so.",
+			"spec/coordination.md has the rules.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet check")
@@ -76,7 +83,13 @@ func init() {
 		Usage:   "fleet fix [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "fix what fleet check finds that needs no checkout",
-		Details: "run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, a bare issue is filed into the open misc manifest (opening the next where none is open), and a finding with no other remedy becomes an se issue, or an se-person one where it is a judgment; an se issue it files goes into the open misc manifest, as se issue new files one without --parent, whose leaves together should take about issues.manifest/config/target (an hour). Each fix is recorded on the finding's issue, and a finding back after its fix goes to a person. A remedy that fails is reported, and the ones after it are still applied. A takeover is named for the box to run. A ready issue it made fires the routine once.",
+		Details: []string{
+			"run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, a bare issue is filed into the open misc manifest (opening the next where none is open), and a finding with no other remedy becomes an se issue, or an se-person one where it is a judgment; an se issue it files goes into the open misc manifest, as se issue new files one without --parent, whose leaves together should take about issues.manifest/config/target (an hour).",
+			"Each fix is recorded on the finding's issue, and a finding back after its fix goes to a person.",
+			"A remedy that fails is reported, and the ones after it are still applied.",
+			"A takeover is named for the box to run.",
+			"A ready issue it made fires the routine once.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet fix")
@@ -126,7 +139,12 @@ func init() {
 		Usage:   "fleet prune [--apply] [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list the stray branches; --apply deletes them",
-		Details: "list every issue-<n> branch whose issue is closed and every claude/* branch whose last commit is more than an hour old, each with no open PR. --apply deletes them; without it nothing is deleted. It never touches main or any other branch. The prune workflow runs it with the repository's token.",
+		Details: []string{
+			"list every issue-<n> branch whose issue is closed and every claude/* branch whose last commit is more than an hour old, each with no open PR.",
+			"--apply deletes them; without it nothing is deleted.",
+			"It never touches main or any other branch.",
+			"The prune workflow runs it with the repository's token.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet prune")
@@ -175,7 +193,11 @@ func init() {
 		Usage:   "fleet trust --sha SHA --tree TREE [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "say whether CI may trust the battery a box ran on a commit",
-		Details: fmt.Sprintf("CI's check job asks it first: exit 0 and say why where commit SHA's latest %s status is a success naming TREE, the tree CI checked out, posted by an account with write access to the repository, as se issue land and se issue keep post it on the commit they pushed; else exit 1 and say why, and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}). A status not posted yet is asked for again a few times. It is trust in one's own boxes, not a proof.", issues.BatteryContext),
+		Details: []string{
+			fmt.Sprintf("CI's check job asks it first: exit 0 and say why where commit SHA's latest %s status is a success naming TREE, the tree CI checked out, posted by an account with write access to the repository, as se issue land and se issue keep post it on the commit they pushed; else exit 1 and say why, and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}).", issues.BatteryContext),
+			"A status not posted yet is asked for again a few times.",
+			"It is trust in one's own boxes, not a proof.",
+		},
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet trust")
 			sha := fs.String("sha", "", "the `SHA` of the PR's head commit")
@@ -210,7 +232,11 @@ func init() {
 		Group:   "Fleet",
 		Class:   batch,
 		Summary: "tell each open se PR the se checks it breaks merged with main",
-		Details: "for every open se PR against main: merge its head with origin's main in a worktree under .se/.runtime/rules, build se there and run se rules and the tests of the battery, the budgets and the programs list on the merge, and comment on each PR it breaks the findings and what to do, once for the same findings, so the box that owns it acts before its CI goes red. A PR that conflicts with main is left to its takeover; one whose check fails is reported, and the others are still checked. The rules workflow runs it when main takes a change to se's rules, tests/check.sh, the battery, spec/budgets.yaml or proc.",
+		Details: []string{
+			"for every open se PR against main: merge its head with origin's main in a worktree under .se/.runtime/rules, build se there and run se rules and the tests of the battery, the budgets and the programs list on the merge, and comment on each PR it breaks the findings and what to do, once for the same findings, so the box that owns it acts before its CI goes red.",
+			"A PR that conflicts with main is left to its takeover; one whose check fails is reported, and the others are still checked.",
+			"The rules workflow runs it when main takes a change to se's rules, tests/check.sh, the battery, spec/budgets.yaml or proc.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet rules")
