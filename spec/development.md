@@ -43,7 +43,12 @@ changes.
 ## Checks
 
 `sh ./tests/check.sh` is the one definition of green; the pre-push hook and CI
-run it, and it names each step it runs. SE's own rules are one file each in
+run it, and it names each step it runs. Three gates stand at the push, and
+nothing steers the agent before it ([principle 22](principles.md)): the
+pre-push hook in `.githooks` (the SessionStart hook sets `core.hooksPath` to
+it), `se issue land`, which runs `tests/check.sh` itself before it pushes,
+and main's ruleset, which merges a PR only on a green, strict required check.
+A push that skips the hook still meets the last two. SE's own rules are one file each in
 `src/internal/rules`, run by `se rules`; where a rule can apply the mechanical
 part of its finding (the `fast-test` rule's `t.Parallel()` as a test's first
 statement), `se rules --fix` applies it, so no agent does it by hand. Every
