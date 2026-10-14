@@ -67,7 +67,8 @@ tools or the API, and never a comment, a label or a push by hand.
      box lands a PR. Where another open issue's PR already covers your
      issue's work, final or not, close it as that issue's duplicate instead:
      `<se> issue supersede <n> --duplicate-of <m>` mints nothing, and
-     closes your open PR and deletes your branch with it.
+     closes your open PR and deletes your branch with it. <m> is that
+     issue, or a merged PR, never an open PR.
    - **a close naming the commit**, where the issue's work is on main
      already (another issue's PR did it before your take), so a PR would be
      an empty commit: write the landing answers as in step 2, then
