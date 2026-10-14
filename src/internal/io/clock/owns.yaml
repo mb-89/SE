@@ -1,0 +1,4 @@
+# What the clock door guards, and what going around it looks like (spec/io.md).
+guards: "the clock: the time now, sleeping, timers and tickers"
+go: [time.Now, time.Sleep, time.After, time.Since, time.Until, time.Tick, time.NewTicker, time.NewTimer, time.AfterFunc]
+commands: []

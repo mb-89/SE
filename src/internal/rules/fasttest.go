@@ -34,7 +34,7 @@ func fastTest(repo *Repo, p string, text []byte) []Finding {
 	}
 	allowed := serialOf(repo)
 	var found []Finding
-	for _, s := range Slows(p, text) {
+	for _, s := range Slows(p, text, wallsOf(repo)) {
 		if !allowed[p+" "+s.What] {
 			found = append(found, Finding{Path: p, Line: s.Line, Rule: "fast-test", Message: s.Message()})
 		}
@@ -160,7 +160,7 @@ func staleSlow(repo *Repo, text []byte) []Finding {
 			continue
 		}
 		hit := false
-		for _, s := range Slows(e.file, src) {
+		for _, s := range Slows(e.file, src, wallsOf(repo)) {
 			hit = hit || s.What == e.reach
 		}
 		if !hit {
@@ -187,9 +187,18 @@ func (s Slow) Message() string {
 	return s.What + " reaches the wall clock in a test; hand in clock.NewFake (principle 8, spec/io.md)"
 }
 
+// wallsOf answers what reads the wall clock in a test, by package path: the
+// members of time a door owns (the clock's owns.yaml), and clock.Real.
+func wallsOf(repo *Repo) map[string][]string {
+	return map[string][]string{"time": doorsOf(repo).membersOf("time"), clockPath: {"Real"}}
+}
+
+const clockPath = "github.com/mb-89/SE/src/internal/io/clock"
+
 // Slows answers every way the test file breaks principle 8, each once, in
-// order; a file that does not parse breaks nothing the rule can tell.
-func Slows(p string, text []byte) []Slow {
+// order, walls being what reads the wall clock, by package path; a file that
+// does not parse breaks nothing the rule can tell.
+func Slows(p string, text []byte, walls map[string][]string) []Slow {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, p, text, parser.SkipObjectResolution)
 	if err != nil {
@@ -205,8 +214,6 @@ func Slows(p string, text []byte) []Slow {
 	if strings.HasPrefix(p, "src/internal/io/") {
 		return out
 	}
-	clockPath := "github.com/mb-89/SE/src/internal/io/clock"
-	walls := map[string][]string{"time": outsideCalls["time"], clockPath: {"Real"}}
 	local := map[string]string{}
 	for _, im := range f.Imports {
 		ip := strings.Trim(im.Path.Value, `"`)

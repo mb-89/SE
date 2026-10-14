@@ -14,8 +14,8 @@ while IFS='|' read -r title numbers; do
   made=$("$se" issue new --manifest --title "$title" --body "$body" --blocked-by none --json | jq -r .number)
   echo "#$made $title"
   for n in $(echo "$numbers" | tr ',' ' '); do
-    id=$(gh api "repos/$repo/issues/$n" --jq .id)
-    gh api -X POST "repos/$repo/issues/$made/sub_issues" -F "sub_issue_id=$id" --silent
+    id=$(gh api "repos/$repo/issues/$n" --jq .id) # se: around-the-door - the one migration of #371, run once; se has no command that files an existing issue into a manifest
+    gh api -X POST "repos/$repo/issues/$made/sub_issues" -F "sub_issue_id=$id" --silent # se: around-the-door - the one migration of #371, run once; se has no command that files an existing issue into a manifest
     echo "  #$n"
   done
 done <"$plan"

@@ -41,7 +41,6 @@ Issues:
   issue land       check and land issue-N: a leaf into its manifest, else one PR
   issue new        create an se issue in a manifest, with its blockers
   issue pull       show the next se issue, stuck work first; --take claims it
-  issue resume     for a person: put issue N back in the queue
   issue review     pass or fail a gate whose sub-issues closed, by its report
   issue supersede  close issue N by a final successor with its open questions
   issue tree       list the open queue and estimate when its last issue closes
@@ -94,7 +93,6 @@ Issues:
   issue land       check and land issue-N: a leaf into its manifest, else one PR
   issue new        create an se issue in a manifest, with its blockers
   issue pull       show the next se issue, stuck work first; --take claims it
-  issue resume     for a person: put issue N back in the queue
   issue review     pass or fail a gate whose sub-issues closed, by its report
   issue supersede  close issue N by a final successor with its open questions
   issue tree       list the open queue and estimate when its last issue closes
@@ -185,15 +183,11 @@ se fleet fix [--json] [--repo OWNER/NAME]
 Run fleet check and apply, in its order, every remedy that needs no checkout:
 auto-merge goes on, a leftover claim of a closed issue is left to the prune
 workflow for a day after the close, any other leftover claim's branch main holds
-whole is deleted by a git push from the workspace, a bare issue is filed into
-the open misc manifest (opening the next where none is open), and a finding with
-no other remedy becomes an se issue, or an se-person one where it is a judgment;
-an se issue it files goes into the open misc manifest, as se issue new files one
-without --parent, whose leaves together should take about
-issues.manifest/config/target (an hour). Each fix is recorded on the finding's
-issue, and a finding back after its fix goes to a person. A remedy that fails is
-reported, and the ones after it are still applied. A takeover is named for the
-box to run. A ready issue it made fires the routine once.
+whole is deleted by a git push from the workspace, and a bare issue is filed
+into the open misc manifest (opening the next where none is open) by a sub-issue
+link. Every other finding is reported, never filed: it writes no issue and no
+comment (an issue is work, not a report). A takeover is named for the next take.
+A remedy that fails is reported, and the ones after it are still applied.
 
 Flags:
   --json             answer JSON
@@ -469,7 +463,7 @@ makes it a new manifest itself, labelled se-manifest, whose leaves follow with
 which takes new issues for that time from its creation, after which the next one
 opens. --blocks links each issue it names as blocked by the new one: those
 dependents of a box's issue that need what is left of it. --review labels it
-se-review; --final labels it se-final, its last attempt before a person.
+se-review; --final labels it se-final, its last attempt: never superseded again.
 --person makes it an issue for a person: labelled se-person and assigned to the
 owner, it waits for them, and its body opens with what they decide. --skills
 names the skills its work needs, each a folder of src/plugin/skills in the
@@ -483,7 +477,9 @@ not on main yet, unless --blocked-by names it, so the take holds the new issue
 until it merges, or --not-blocked does, saying the mention is only a reference;
 --parent and --blocks name issues it may mention freely. An issue for a person
 stands at the top, in no manifest. A ready issue, one nothing open blocks, fires
-the routine once.
+the routine once. In a box it refuses, writing nothing: a box opens no issue,
+its work ends in a PR (se issue land) or a supersede (se issue supersede);
+retros, reviews and overhauls file theirs through their own commands.
 
 Flags:
   --allow-duplicate   create it although an open se issue under the same parent
@@ -492,7 +488,8 @@ Flags:
   --blocks N,M        the issues it blocks, as N,M: those that need it
   --body B            the issue's body B
   --body-file PATH    a file PATH holding the issue's body
-  --final             label it se-final: if it fails, it goes to a person
+  --final             label it se-final: its last attempt, never superseded
+                      again
   --json              answer JSON
   --manifest          make it a new manifest, labelled se-manifest: its leaves
                       follow with --parent
@@ -544,26 +541,27 @@ checkout (its worktree with --worktree or --in), keeping a file there already,
 and names it. A takeover also says, from the REST API, when its branch was last
 pushed and its open PR's mergeable state and the last run of each of its checks,
 so no box reaches for gh. A claim stuck a second time, or conflicting after a
-takeover, goes to a person on the way. A claim records the box's session on the
-issue, and fires the routine once only where the fleet needs another box: every
-alive box runs its cap of sub-agents (fleet.box/config/parallel, 4, Parallel)
-and another issue is ready (fan-out); a fire the routine refuses with 429 is
-kept on the claim with the retry time it names, nothing fires before that time,
-and the next take or se fleet check after it fires it. --worktree is the box's
-take: it checks nothing out, names the command that makes the issue's worktree
-for its sub-agent, and is refused while the box runs its cap. A take hands over
-every skill the issue's marked skills line names (se issue new --skills): their
-full text follows the issue, or, where the guidance instance's inline switch is
-off, their names and files; the session's log records each by name and hash. A
-name there that is an agent's role, as retro or overhaul, is no skill: the
-take's agent holds it, so it is neither handed over nor reported missing. A take
-names the agent that works the issue, by its kind (the registry in
-src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a
-parent, which is the box itself, se:retro and se:overhaul; each review names
-se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take
-claims one for a worktree. Every --take also refuses where main has moved past
-the commit se was built from, naming se update: the agents and guidance it hands
-over come from main. --person lists the issues waiting on a person.
+takeover, is taken over again; nothing mints an issue for a person on a box's
+behalf. A claim records the box's session on the issue, and fires the routine
+once only where the fleet needs another box: every alive box runs its cap of
+sub-agents (fleet.box/config/parallel, 4, Parallel) and another issue is ready
+(fan-out); a fire the routine refuses with 429 is kept on the claim with the
+retry time it names, nothing fires before that time, and the next take or se
+fleet check after it fires it. --worktree is the box's take: it checks nothing
+out, names the command that makes the issue's worktree for its sub-agent, and is
+refused while the box runs its cap. A take hands over every skill the issue's
+marked skills line names (se issue new --skills): their full text follows the
+issue, or, where the guidance instance's inline switch is off, their names and
+files; the session's log records each by name and hash. A name there that is an
+agent's role, as retro or overhaul, is no skill: the take's agent holds it, so
+it is neither handed over nor reported missing. A take names the agent that
+works the issue, by its kind (the registry in src/internal/issues/kinds.go):
+se:worker for a leaf, se:coordinator for a parent, which is the box itself,
+se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the
+ready leaves inside ROOT's tree, and --take claims one for a worktree. Every
+--take also refuses where main has moved past the commit se was built from,
+naming se update: the agents and guidance it hands over come from main. --person
+lists the issues waiting on a person.
 
 Flags:
   --full             without --take: show the issue's body too
@@ -578,21 +576,6 @@ Flags:
                      nothing out
 ```
 
-## se help issue resume
-
-```text
-se issue resume N [--json] [--repo OWNER/NAME]
-
-For a person: take issue N off se-person and put it back in the queue, its
-takeover count reset.
-
-Flags:
-  --json             answer JSON
-  --repo OWNER/NAME  the repository as OWNER/NAME (default: the workspace's
-                     origin)
-  --workspace DIR    the workspace DIR the daemon serves (default: here)
-```
-
 ## se help issue review
 
 ```text
@@ -604,8 +587,9 @@ It refuses a pass where a requirement lacks evidence, and a report without its
 checked-and-clean list. Every finding becomes an se-final issue: a blocking one
 a sub-issue of N, a non-blocking one in the queue (at most 5,
 issues/config/max-filed). pass posts the report and closes N; fail posts it, and
-N waits for its fixes. A re-review that finds an earlier blocker's problem again
-sends N to a person.
+N waits for its fixes. A re-review finding that repeats an earlier blocker is an
+accepted repeat: it files nothing, the report names it, and a fail whose
+blocking findings are all repeats closes N.
 
 Flags:
   --json             answer JSON

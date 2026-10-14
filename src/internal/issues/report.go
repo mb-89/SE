@@ -81,8 +81,9 @@ type ReviewFinding struct {
 	Blocking bool   `json:"blocking"`
 	Why      string `json:"why"`
 	// Repeats is, in a re-review, the earlier blocker whose problem this
-	// finding shows again: that final issue failed, and the gate goes to a
-	// person.
+	// finding shows again: that issue was a final attempt, so the repeat is
+	// accepted, the reviewer's decision named in the report, and blocks no
+	// more.
 	Repeats int `json:"repeats,omitempty"`
 	// Issue is the issue se filed for it; 0 where it was not filed.
 	Issue int `json:"issue,omitempty"`
@@ -174,13 +175,25 @@ func hashes(ns []int) string {
 	return strings.Join(out, ", ")
 }
 
+// blocks says whether a blocking finding is not a repeat: one that holds the
+// gate. A fail whose blocking findings all repeat earlier blockers holds
+// nothing, and the gate closes.
+func (r Report) blocks() bool {
+	for _, f := range r.Findings {
+		if f.Blocking && f.Repeats == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // body is the text of the issue a finding becomes.
 func (f ReviewFinding) body(gate int) string {
 	judged := "Not blocking: the review of #%d passes over it, and it is an open point."
 	if f.Blocking {
 		judged = "Blocking: the review of #%d waits for it, as a sub-issue of it."
 	}
-	return fmt.Sprintf(judged+"\n\n**Evidence:** %s\n\n**Judgment:** %s\n\nLabelled %s: filed by a review, this is its final attempt; if it fails again, it goes to a person.",
+	return fmt.Sprintf(judged+"\n\n**Evidence:** %s\n\n**Judgment:** %s\n\nLabelled %s: filed by a review, this is its final attempt: it is never superseded again, and a re-review that finds its problem again accepts the repeat.",
 		gate, f.Evidence, f.Why, FinalLabel)
 }
 
@@ -197,8 +210,8 @@ type Verdict struct {
 
 var verdictMark = regexp.MustCompile(`<!-- se:review (\{.*\}) -->`)
 
-// blockers is the issues the verdict's blocking findings became, or showed
-// again; none where it passed, or is missing.
+// blockers is the issues the verdict's blocking findings became; none where
+// it passed, or is missing. An accepted repeat blocks no more.
 func (v *Verdict) blockers() []int {
 	if !v.failed() {
 		return nil
@@ -207,9 +220,6 @@ func (v *Verdict) blockers() []int {
 	for _, f := range v.Report.Findings {
 		if f.Blocking && f.Issue != 0 {
 			out = append(out, f.Issue)
-		}
-		if f.Repeats != 0 {
-			out = append(out, f.Repeats)
 		}
 	}
 	sort.Ints(out)
@@ -272,7 +282,7 @@ func (v Verdict) render(by Worker, maxFiled int) string {
 		became := fmt.Sprintf("not filed (past the first %d)", maxFiled)
 		switch {
 		case f.Repeats != 0:
-			became = fmt.Sprintf("repeats #%d, so this goes to a person", f.Repeats)
+			became = fmt.Sprintf("repeats #%d: an accepted repeat, it blocks no more", f.Repeats)
 		case f.Issue != 0:
 			became = fmt.Sprintf("#%d", f.Issue)
 		}
@@ -280,6 +290,9 @@ func (v Verdict) render(by Worker, maxFiled int) string {
 	}
 	if v.Unfiled > 0 {
 		fmt.Fprintf(&b, "\n%d more non-blocking finding(s) counted, not filed.\n", v.Unfiled)
+	}
+	if !v.Passed && !v.Report.blocks() {
+		b.WriteString("\nEvery blocking finding repeats an earlier blocker, a final attempt: the reviewer accepts the repeats, and the gate closes.\n")
 	}
 	b.WriteString("\n### Checked and clean\n")
 	for _, c := range v.Report.Clean {
