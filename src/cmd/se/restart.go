@@ -23,7 +23,7 @@ func init() {
 				return Reply{}, err
 			}
 			// The build runs while the old daemon still serves.
-			exe, note, err := daemonExe(c.Proc, c.Paths())
+			exe, note, err := daemonExe(&c.World, c.Paths())
 			if err != nil {
 				return Reply{}, err
 			}
