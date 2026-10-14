@@ -31,9 +31,9 @@ type pull struct {
 // autoMerge turns on GitHub's auto-merge, squashing, for the PR with this node id.
 const autoMerge = `mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId } }`
 
-// Issued reads n from the issue branch checked out in dir.
-func Issued(dir string) (int, error) {
-	branch, err := git(dir, "rev-parse", "--abbrev-ref", "HEAD")
+// issued reads n from the issue branch checked out in dir.
+func (s Source) issued(dir string) (int, error) {
+	branch, err := s.git(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return 0, err
 	}
@@ -54,14 +54,14 @@ func Issued(dir string) (int, error) {
 // is set, the leaf records who worked it, so a review of its tree can refuse
 // that worker.
 func (s Source) Land(dir, session string, qs []Question, answers map[string]string, check func(dir string) error) (Landing, error) {
-	n, err := Issued(dir)
+	n, err := s.issued(dir)
 	if err != nil {
 		return Landing{}, err
 	}
 	if err := answered(qs, answers); err != nil {
 		return Landing{}, err
 	}
-	if dirty, err := git(dir, "status", "--porcelain"); err != nil {
+	if dirty, err := s.git(dir, "status", "--porcelain"); err != nil {
 		return Landing{}, err
 	} else if dirty != "" {
 		return Landing{}, fmt.Errorf("land pushes commits, and %s has changes not committed:\n%s", dir, dirty)
@@ -85,7 +85,7 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		body += "\n\n" + profile.Markdown()
 	}
 	branch := Branch(n)
-	if _, err := git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
+	if _, err := s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
 		return Landing{}, err
 	}
 	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {

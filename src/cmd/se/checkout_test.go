@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/gitenv"
@@ -55,7 +56,7 @@ func installed(t *testing.T) string {
 			return
 		}
 		installedSE = filepath.Join(dir, filepath.Base(daemon.Paths{}.Bin()))
-		installedErr = update.Build(repoRoot(t), installedSE)
+		installedErr = update.Build(proc.Real(), repoRoot(t), installedSE)
 	})
 	if installedErr != nil {
 		t.Fatal(installedErr)
@@ -139,9 +140,10 @@ func TestAnyOtherWorkspaceRunsTheInstalledSe(t *testing.T) {
 	se := installed(t)
 	ws := t.TempDir()
 	write(t, filepath.Join(ws, "go.mod"), "module example.com/other\n")
-	exe, note, err := daemonExe(daemon.Paths{Workspace: ws})
-	if err != nil || exe != se || note != "" {
-		t.Fatalf("exe %q, note %q, err %v", exe, note, err)
+	m := proc.NewFake()
+	exe, note, err := daemonExe(m, daemon.Paths{Workspace: ws})
+	if err != nil || exe != se || note != "" || len(m.Ran()) != 0 {
+		t.Fatalf("exe %q, note %q, err %v, ran %q", exe, note, err, m.Lines())
 	}
 	if _, err := os.Stat(daemon.Paths{Workspace: ws}.Bin()); err == nil {
 		t.Fatal("se was built in a workspace that is no SE checkout")
