@@ -40,8 +40,8 @@ What earlier versions taught, and how this design answers it:
 - **The cadence:** retros happen without anyone remembering them. When
   `se issue pull --take` runs, before offering anything else, it counts the
   `se` issues closed since the last closed `se-retro` issue closed, retros and
-  overhauls not counted (with none closed yet, the whole history). At `RetroCadence` (in
-  `src/internal/issues/cadence.go`) or more, with no `se-retro` issue open,
+  overhauls not counted (with none closed yet, the whole history). At `issues/config/retro-cadence` (the
+  issues instance's config value, built-in in `src/internal/issues/cadence.go`) or more, with no `se-retro` issue open,
   it starts an unattended retro, as `se retro new --unattended` does, and
   takes it ahead of all other work but a due overhaul
   ([overhaul.md](overhaul.md)). An open `se-retro` issue, attended or not,
