@@ -35,11 +35,14 @@ commands:
   fleet prune: github
   fleet refresh: github
   help: instant
+  hook prompt: local
+  hook stop: local
   issue land: battery
   issue new: github
   issue pull: github
   issue resume: github
   issue review: github
+  issue supersede: github
   issue tree: github
   manifest: local
   off: instant
@@ -64,4 +67,6 @@ hooks:
   command.run se: instant
   ui.render Pane: instant
   ui.render CommandOutput: instant
+  classic.Stop: local
+  classic.SubagentStop: local
   '*': instant

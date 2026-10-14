@@ -236,6 +236,14 @@ func (f *Fake) whole(path string) (any, error) {
 		return i.(obj)["labels"], nil
 	case match(w, "issues", "#", "sub_issues"):
 		return r.issuesOf(num(w[1]), r.subs)
+	case match(w, "issues", "#", "parent"):
+		n := num(w[1])
+		for _, p := range r.order {
+			if contains(r.subs[p], n) {
+				return r.issue(p)
+			}
+		}
+		return nil, notFound()
 	case match(w, "issues", "#", "dependencies", "blocked_by"):
 		return r.issuesOf(num(w[1]), r.blockedBy)
 	case match(w, "issues", "#", "dependencies", "blocking"):
