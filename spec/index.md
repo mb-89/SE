@@ -178,6 +178,15 @@ Every part tests itself alone ([principles 7 and 8](principles.md)):
 | the index core | fixture modules that declare, read and write as a test scripts them |
 | every command declaration | generic cases over the catalog: each has a summary, help and group, and every adapter shows the same text |
 
+This is principle 8 applied to modules, not an exception to it. A behaviour
+lives in one module, and that module's outermost interface is what it
+declares: its commands and its derivations. Its test drives that interface on
+the fake index, which is the fake principle 8 asks for. The CLI, `/se` and the
+other adapters add no behaviour of their own: they render and dispatch what
+the collector gathered, so the generic cases over the catalog test them once
+for every command. No test drives one command's behaviour through an adapter
+again; that would test it twice.
+
 No module test starts the daemon, and no module talks to anything but the
 index. A module imports the index contract and the standard library only; a
 rule in the battery holds that once the first module lands.
