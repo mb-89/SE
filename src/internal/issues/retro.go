@@ -42,14 +42,15 @@ func (s Source) lastRetro(n int) (last past, ok bool, all []past, err error) {
 }
 
 // lastClosed is the closed issue labelled label that closed last, apart from
-// n, and all of them, oldest first; ok is false where none has closed.
+// n and those closed as duplicates, which never ran, and all of them, oldest
+// first; ok is false where none has closed.
 func (s Source) lastClosed(label string, n int) (last past, ok bool, all []past, err error) {
 	list, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100", s.Repo, label), true)
 	if err != nil {
 		return past{}, false, nil, err
 	}
 	for _, r := range list {
-		if r.PullRequest != nil || r.Number == n {
+		if r.PullRequest != nil || r.Number == n || !ran(r) {
 			continue
 		}
 		all = append(all, r)
