@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 
+	"github.com/mb-89/SE/src/internal/daemon"
+	"github.com/mb-89/SE/src/internal/issues"
 	"gopkg.in/yaml.v3"
 )
 
@@ -29,24 +31,67 @@ const StopPath = "spec/stop.yaml"
 const defaultRefusals = 5
 
 // boxState is what the workspace keeps for the Stop hook: the issue the box
-// took, and how often in a row the hook refused, by issue.
+// took, how often in a row the hook refused, by issue, and the PR se issue
+// land opened here, by issue.
 type boxState struct {
-	Issue   int         `json:"issue,omitempty"`
-	Refused map[int]int `json:"refused,omitempty"`
+	Issue   int            `json:"issue,omitempty"`
+	Refused map[int]int    `json:"refused,omitempty"`
+	Landed  map[int]landed `json:"landed,omitempty"`
 }
 
-func boxPath(c *Call) string { return filepath.Join(c.Paths().Runtime(), "box.json") }
+// landed is what se issue land records of the PR it landed: its number, and
+// that auto-merge went on (or it was merged at once). The Stop hook trusts it
+// before it asks GitHub, whose auto_merge field a proxy's auto-merge route
+// may leave unset.
+type landed struct {
+	PR        int  `json:"pr"`
+	AutoMerge bool `json:"auto_merge"`
+}
+
+func boxPath(c *Call) string { return boxPathIn(c.Workspace) }
+
+// boxPathIn is box.json in workspace ws.
+func boxPathIn(ws string) string {
+	return filepath.Join(daemon.Paths{Workspace: ws}.Runtime(), "box.json")
+}
 
 // readBox answers the workspace's state; one missing or unreadable is empty.
-func readBox(c *Call) boxState {
+func readBox(c *Call) boxState { return readBoxIn(c, c.Workspace) }
+
+// readBoxIn answers the state of workspace ws; one missing or unreadable is
+// empty.
+func readBoxIn(c *Call, ws string) boxState {
 	var b boxState
-	if data, err := c.Disk.ReadFile(boxPath(c)); err == nil {
+	if data, err := c.Disk.ReadFile(boxPathIn(ws)); err == nil {
 		_ = json.Unmarshal(data, &b)
 	}
 	if b.Refused == nil {
 		b.Refused = map[int]int{}
 	}
+	if b.Landed == nil {
+		b.Landed = map[int]landed{}
+	}
 	return b
+}
+
+// recordLand keeps the PR se issue land landed for issue n in this
+// workspace's box.json, so the Stop hook need not ask GitHub.
+func recordLand(c *Call, n, pr int) error {
+	b := readBox(c)
+	b.Landed[n] = landed{PR: pr, AutoMerge: true}
+	return writeBox(c, b)
+}
+
+// landedRecord answers the PR se issue land recorded for issue n with
+// auto-merge on: in this workspace, or in n's worktree beside it, where the
+// sub-agent that worked n landed it.
+func landedRecord(c *Call, n int) (landed, bool) {
+	for _, ws := range []string{c.Workspace, issues.WorktreeDir(c.Workspace, n)} {
+		if l, ok := readBoxIn(c, ws).Landed[n]; ok && l.AutoMerge && l.PR > 0 {
+			return l, true
+		}
+	}
+	return landed{}, false
 }
 
 func writeBox(c *Call, b boxState) error {
@@ -60,8 +105,11 @@ func writeBox(c *Call, b boxState) error {
 	return c.Disk.Replace(boxPath(c), data)
 }
 
-// recordTake keeps the issue a take claimed, its refusals none yet.
-func recordTake(c *Call, n int) error { return writeBox(c, boxState{Issue: n}) }
+// recordTake keeps the issue a take claimed, its refusals none yet, and the
+// PRs landed here before.
+func recordTake(c *Call, n int) error {
+	return writeBox(c, boxState{Issue: n, Landed: readBox(c).Landed})
+}
 
 // refusals reads the cap from spec/stop.yaml in the workspace.
 func refusals(c *Call) int {
@@ -112,7 +160,7 @@ func init() {
 		Usage:   "hook stop [--agent-transcript PATH] [--waiting] [--repo OWNER/NAME]",
 		Group:   "Hooks",
 		Summary: "refuse a box's stop while its issue has no PR nor supersede",
-		Details: "answer the plugin's Stop (or, with --agent-transcript, SubagentStop) as JSON: block, with the reason, while this box's issue is open with neither an open PR from its branch with auto-merge on nor a supersede; else pass, with why. The issue is the one se issue pull --take recorded, or for a sub-agent the leaf its prompt names. An interactive session, and a box waiting on background work (--waiting), always pass. It refuses at most refusals times in a row (spec/stop.yaml); a prompt from a person resets the count (se hook prompt). A check that cannot judge lets the turn end and logs why in .se/.runtime/logs/stop.log.",
+		Details: "answer the plugin's Stop (or, with --agent-transcript, SubagentStop) as JSON: block, with the reason, while this box's issue is open with neither an open PR from its branch with auto-merge on nor a supersede; else pass, with why. The issue is the one se issue pull --take recorded, or for a sub-agent the leaf its prompt names. A PR se issue land recorded with auto-merge on in .se/.runtime/box.json, of this workspace or of the issue's worktree beside it, passes before GitHub is asked. An interactive session, and a box waiting on background work (--waiting), always pass. It refuses at most refusals times in a row (spec/stop.yaml); a prompt from a person resets the count (se hook prompt). A check that cannot judge lets the turn end and logs why in .se/.runtime/logs/stop.log.",
 		Run: func(c *Call) (Reply, error) {
 			fs, src, _ := issueFlags(c, "hook stop")
 			transcript := fs.String("agent-transcript", "", "the sub-agent's transcript `PATH`: the stop is a SubagentStop")
@@ -145,6 +193,11 @@ func init() {
 			if limit := refusals(c); b.Refused[n] >= limit {
 				stopLog(c, fmt.Sprintf("let the box end with #%d unclosed: refused %d times in a row, the cap in %s", n, b.Refused[n], StopPath))
 				return verdict{Pass: fmt.Sprintf("refused %d times in a row, the cap", b.Refused[n])}.reply()
+			}
+			if l, ok := landedRecord(c, n); ok {
+				delete(b.Refused, n)
+				_ = writeBox(c, b)
+				return verdict{Pass: fmt.Sprintf("se issue land recorded #%d's PR #%d with auto-merge on", n, l.PR)}.reply()
 			}
 			why, err := func() (string, error) {
 				s, err := src()

@@ -337,7 +337,13 @@ stop while the box's issue is open with neither an open PR from its branch,
 auto-merge on, nor a supersede, and says which is missing. The box's issue is
 the one `se issue pull --take` took (a parent's box coordinates and closes
 nothing itself); a leaf's sub-agent is held to the leaf its prompt names. It
-is enforcement, so it fails closed: only what GitHub shows lets the box end.
+is enforcement, so it fails closed: only what GitHub shows, or what
+`se issue land` recorded, lets the box end. `se issue land` records the PR it
+landed, auto-merge on, in `.se/.runtime/box.json` of its workspace
+(`{"landed":{"N":{"pr":P,"auto_merge":true}}}`), and the hook trusts that
+record, in its own workspace or in the issue's worktree beside it, before it
+asks GitHub, whose `auto_merge` field a proxy's auto-merge route may leave
+unset.
 Its escape hatches: a box waiting on background work passes; it refuses at
 most `refusals` times in a row ([spec/stop.yaml](stop.yaml)); a prompt from a
 person resets the count (`se hook prompt`); and a check that cannot judge
