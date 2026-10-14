@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"net/url"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -83,22 +83,38 @@ type gh struct{}
 
 func (gh) Get(path string) ([]byte, error) { return run("api", path) }
 
-// List joins the pages gh --paginate prints, one JSON array each.
+// List asks for path page by page, adding page=k itself, and joins the
+// pages. gh's --paginate follows GitHub's next links instead, which for some
+// lists name repositories/{id}, and the cloud box proxy refuses those. A page
+// shorter than per_page (30 where path does not say) is the last; so is one
+// that repeats the page before it, where a list takes no page.
 func (gh) List(path string) ([]byte, error) {
-	out, err := run("api", "--paginate", path)
-	if err != nil {
-		return nil, err
+	sep, size := "?", 30
+	if u, err := url.Parse(path); err == nil && u.RawQuery != "" {
+		sep = "&"
+		if n, err := strconv.Atoi(u.Query().Get("per_page")); err == nil && n > 0 {
+			size = n
+		}
 	}
 	all := []json.RawMessage{}
-	dec := json.NewDecoder(bytes.NewReader(out))
-	for {
-		var page []json.RawMessage
-		if err := dec.Decode(&page); errors.Is(err, io.EOF) {
+	var last []byte
+	for k := 1; ; k++ {
+		out, err := run("api", fmt.Sprintf("%s%spage=%d", path, sep, k))
+		if err != nil {
+			return nil, err
+		}
+		if k > 1 && bytes.Equal(bytes.TrimSpace(out), last) {
 			return json.Marshal(all)
-		} else if err != nil {
+		}
+		last = bytes.TrimSpace(out)
+		var page []json.RawMessage
+		if err := json.Unmarshal(out, &page); err != nil {
 			return nil, fmt.Errorf("gh api %s: %v", path, err)
 		}
 		all = append(all, page...)
+		if len(page) < size {
+			return json.Marshal(all)
+		}
 	}
 }
 
