@@ -36,6 +36,8 @@ type World = {
   takes: Record<string, number>
   // The clock beneath the plugin, which moves only when the test moves it.
   clock: MockClock
+  // Every hook the daemon was told the duration of, by its name.
+  hooks: string[]
 }
 
 const HELP = '/se <command>\n\n  /se help   list the commands'
@@ -86,6 +88,7 @@ function world(on: On, env: Record<string, string> = {}): World {
     statuses: [],
     takes: {},
     clock: mock.clock(on),
+    hooks: [],
     replies: {
       '': { text: HELP },
       on: { text: 'SE is on.', active: true, endpoint: DAEMON },
@@ -164,6 +167,7 @@ function world(on: On, env: Record<string, string> = {}): World {
   on('http.fetch', ($, e) => {
     if (w.live === null || e.url !== `http://${w.live}/event`) return { deny: 'connection refused' }
     const body = JSON.parse(String(e.init?.body ?? '{}'))
+    if (body.event === 'se.hook' && typeof body.e?.ms === 'number') w.hooks.push(body.e.hook)
     w.posts.push({
       url: e.url,
       auth: String(e.init?.headers?.authorization ?? ''),
@@ -277,6 +281,26 @@ test('while SE is on, each se call is a row of the daemon log with its duration'
   await $.command.run(se('on'))
   await $.command.run(se('status'))
   expect(posted(w)).toContain('se.call')
+})
+
+test('while SE is on, each hook is a row of the daemon log with its duration', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('on'))
+  await $.command.run(se('status'))
+  await $.attribution.text(probe)
+  await w.clock.advance(0)
+  expect(w.hooks).toContain('command.run se')
+  expect(w.hooks).toContain('*')
+})
+
+test('while SE is off, no hook posts its duration', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('status'))
+  await $.attribution.text(probe)
+  await w.clock.advance(0)
+  expect(w.hooks).toEqual([])
 })
 
 test('off by default: events pass, nothing starts, nothing is posted', async ($, on) => {

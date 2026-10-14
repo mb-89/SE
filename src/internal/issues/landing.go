@@ -109,11 +109,12 @@ type Facts struct {
 	Takeovers  int `yaml:"takeovers"`
 	MainMerges int `yaml:"main_merges"`
 	// BatteryMs is how long the battery this land ran took, Slowest its
-	// slowest tests, and Overruns each budget it went over; empty where the
-	// check left no profile.
-	BatteryMs int64    `yaml:"battery_ms,omitempty"`
-	Slowest   []string `yaml:"slowest_tests,omitempty"`
-	Overruns  []string `yaml:"budget_overruns,omitempty"`
+	// slowest tests, Overruns each budget it went over, and Unbudgeted each
+	// step it ran with no budget; empty where the check left no profile.
+	BatteryMs  int64    `yaml:"battery_ms,omitempty"`
+	Slowest    []string `yaml:"slowest_tests,omitempty"`
+	Overruns   []string `yaml:"budget_overruns,omitempty"`
+	Unbudgeted []string `yaml:"budget_missing,omitempty"`
 }
 
 // Landed is the record a landing leaves on its issue.
@@ -162,6 +163,9 @@ func (l Landed) Comment(qs []Question) (string, error) {
 		fmt.Fprintf(&b, "- battery: %dms\n", f.BatteryMs)
 		for _, o := range f.Overruns {
 			fmt.Fprintf(&b, "- **over budget:** %s\n", o)
+		}
+		for _, u := range f.Unbudgeted {
+			fmt.Fprintf(&b, "- **no budget:** %s\n", u)
 		}
 	}
 	data, err := yaml.Marshal(record{Issue: l.Issue, Answers: answers, Facts: f})
@@ -219,7 +223,7 @@ func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 		return Facts{}, err
 	}
 	if profiled {
-		f.BatteryMs, f.Overruns = profile.TotalMs, profile.Overruns
+		f.BatteryMs, f.Overruns, f.Unbudgeted = profile.TotalMs, profile.Overruns, profile.Unbudgeted
 		for _, t := range profile.Slowest {
 			f.Slowest = append(f.Slowest, t.String())
 		}

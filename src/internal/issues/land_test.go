@@ -136,10 +136,11 @@ func profiles(t *testing.T, d disk.Disk, p battery.Profile) func(string) error {
 }
 
 var profile = battery.Profile{
-	TotalMs:  1234,
-	Steps:    []battery.Step{{Name: "go test", Ms: 1234}},
-	Slowest:  []battery.Test{{Package: "p", Name: "TestSlow", Ms: 900}},
-	Overruns: []string{"step go test took 1234ms, over its budget of 1000ms"},
+	TotalMs:    1234,
+	Steps:      []battery.Step{{Name: "go test", Ms: 1234}},
+	Slowest:    []battery.Test{{Package: "p", Name: "TestSlow", Ms: 900}},
+	Overruns:   []string{"step go test took 1234ms, over its budget of 1000ms"},
+	Unbudgeted: []string{"step new has no budget in spec/budgets.yaml"},
 }
 
 func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
@@ -175,8 +176,11 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 		t.Fatalf("%v %v", ok, err)
 	}
 	if got.Facts.BatteryMs != 1234 || !reflect.DeepEqual(got.Facts.Slowest, []string{"p TestSlow 900ms"}) ||
-		!reflect.DeepEqual(got.Facts.Overruns, profile.Overruns) {
+		!reflect.DeepEqual(got.Facts.Overruns, profile.Overruns) || !reflect.DeepEqual(got.Facts.Unbudgeted, profile.Unbudgeted) {
 		t.Errorf("facts = %+v", got.Facts)
+	}
+	if !strings.Contains(posted, "- **no budget:** step new has no budget") {
+		t.Errorf("the landing comment does not show the step without a budget:\n%s", posted)
 	}
 	if !strings.Contains(posted, "- **over budget:** step go test took 1234ms") {
 		t.Errorf("the landing comment does not show the overrun:\n%s", posted)

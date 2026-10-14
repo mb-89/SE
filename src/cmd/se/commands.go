@@ -10,12 +10,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/daemon"
 )
 
@@ -220,7 +222,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch {
 	case ok:
+		began := call.Clock.Now()
 		reply, err = cmd.Run(call)
+		timed(call, name, began, stderr)
 		if errors.Is(err, flag.ErrHelp) {
 			reply, err = helpReply(commandHelpOf(cmd, call.flags, *session), *session, color), nil
 		}
@@ -261,6 +265,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, reply.Text)
 	}
 	return 0
+}
+
+// timed records how long the command named took in the workspace's
+// battery.CallsFile, against its budget; a terminal call over it says so on
+// stderr. Timing never fails the command.
+func timed(call *Call, name string, began time.Time, stderr io.Writer) {
+	took := call.Clock.Now().Sub(began)
+	c, err := battery.Record(call.Disk, call.Workspace, battery.Call{At: began.UTC(), Name: name, Ms: took.Milliseconds()})
+	if err == nil && !call.Session && c.Over {
+		fmt.Fprintln(stderr, "se:", c.Overrun())
+	}
 }
 
 // executable is this se, the installed one when it runs from the plugin.

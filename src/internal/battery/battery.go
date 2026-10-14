@@ -45,10 +45,23 @@ type Budget struct {
 	Hard bool  `yaml:"hard" json:"hard"`
 }
 
-// Budgets are spec/budgets.yaml: one for the battery's total, one per step by its name.
+// Budgets are spec/budgets.yaml: one for the battery's total, one per step by
+// its name, and a class for each se command and each plugin hook.
 type Budgets struct {
 	Total Budget            `yaml:"total"`
 	Steps map[string]Budget `yaml:"steps"`
+	// Classes are budgets by what a call waits on; Commands and Hooks name
+	// the class of each se command and each plugin hook.
+	Classes  map[string]Budget `yaml:"classes"`
+	Commands map[string]string `yaml:"commands"`
+	Hooks    map[string]string `yaml:"hooks"`
+}
+
+// Command answers the budget of the se command named, through its class; ok
+// is false where it has none.
+func (b Budgets) Command(name string) (budget Budget, ok bool) {
+	budget, ok = b.Classes[b.Commands[name]]
+	return budget, ok
 }
 
 // Step is one step of the battery and how long it took.
@@ -77,6 +90,8 @@ type Profile struct {
 	// Overruns names each budget the run went over; Hard those of them that fail it.
 	Overruns []string `json:"overruns"`
 	Hard     []string `json:"hard_overruns"`
+	// Unbudgeted names each step spec/budgets.yaml gives no budget.
+	Unbudgeted []string `json:"unbudgeted"`
 }
 
 // ReadBudgets reads the budgets file in dir on d.
@@ -140,7 +155,7 @@ func ParseGoTest(r io.Reader) ([]Test, error) {
 // Build profiles a run: its steps against their budgets, its total against
 // the total's, and its slowest tests, slowest first.
 func Build(steps []Step, tests []Test, b Budgets) Profile {
-	p := Profile{Steps: steps, Overruns: []string{}, Hard: []string{}}
+	p := Profile{Steps: steps, Overruns: []string{}, Hard: []string{}, Unbudgeted: []string{}}
 	over := func(what string, ms int64, budget Budget) {
 		if budget.Ms <= 0 || ms <= budget.Ms {
 			return
@@ -156,6 +171,8 @@ func Build(steps []Step, tests []Test, b Budgets) Profile {
 		if budget, ok := b.Steps[s.Name]; ok {
 			p.Steps[i].Budget = &budget
 			over("step "+s.Name, s.Ms, budget)
+		} else {
+			p.Unbudgeted = append(p.Unbudgeted, fmt.Sprintf("step %s has no budget in %s", s.Name, BudgetsFile))
 		}
 	}
 	if b.Total.Ms > 0 {
@@ -184,6 +201,9 @@ func (p Profile) Text() string {
 	for _, o := range p.Overruns {
 		fmt.Fprintf(&b, "battery: OVER BUDGET: %s\n", o)
 	}
+	for _, u := range p.Unbudgeted {
+		fmt.Fprintf(&b, "battery: NO BUDGET: %s\n", u)
+	}
 	return b.String()
 }
 
@@ -194,7 +214,10 @@ func (p Profile) Markdown() string {
 	for _, o := range p.Overruns {
 		fmt.Fprintf(&b, "\n> **Over budget:** %s", o)
 	}
-	if len(p.Overruns) > 0 {
+	for _, u := range p.Unbudgeted {
+		fmt.Fprintf(&b, "\n> **No budget:** %s", u)
+	}
+	if len(p.Overruns)+len(p.Unbudgeted) > 0 {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n| step | ms | budget |\n|---|---:|---:|\n")

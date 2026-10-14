@@ -1,8 +1,10 @@
-# Soft budgets for tests/check.sh, in milliseconds: one per step, by the name
-# check.sh gives it, and one for the battery's total. Each started as a
-# measurement (a warm local run) with headroom for a cold CI runner. An overrun
-# is reported (the check's output, the CI summary, the PR body, the landing
-# facts) and passes; `hard: true` on a budget makes its overrun fail the check.
+# Soft budgets, in milliseconds. An overrun is reported and passes; `hard:
+# true` on a budget makes its overrun fail the check.
+#
+# For tests/check.sh: one per step, by the name check.sh gives it, and one for
+# the battery's total. Each started as a measurement (a warm local run) with
+# headroom for a cold CI runner. An overrun shows in the check's output, the
+# CI summary, the PR body and the landing facts; so does a step with no budget.
 total: {ms: 300000, hard: false}
 steps:
   se rules: {ms: 5000, hard: false}
@@ -12,3 +14,54 @@ steps:
   plugin validate: {ms: 15000, hard: false}
   marketplace validate: {ms: 15000, hard: false}
   plugin test: {ms: 30000, hard: false}
+
+# For each se command and each plugin hook: a class, by what the call waits
+# on. Every se command records its duration in .se/.runtime/calls.jsonl, with
+# its budget; a terminal call over its budget says so on stderr. Every hook
+# records its duration as an se.hook row of the daemon's log while SE is on.
+# The se rule `budgeted` fails on a command or hook named in no class. A class
+# of 0ms bounds nothing: the call runs until it is stopped.
+classes:
+  instant: {ms: 1000, hard: false}
+  local: {ms: 10000, hard: false}
+  github: {ms: 60000, hard: false}
+  build: {ms: 300000, hard: false}
+  battery: {ms: 900000, hard: false}
+  daemon: {ms: 0, hard: false}
+commands:
+  briefing: github
+  fleet check: github
+  fleet fix: github
+  fleet prune: github
+  fleet refresh: github
+  help: instant
+  issue land: battery
+  issue new: github
+  issue pull: github
+  issue resume: github
+  issue review: github
+  issue tree: github
+  manifest: local
+  off: instant
+  on: build
+  overhaul file: github
+  overhaul new: github
+  overhaul read: github
+  restart: build
+  retro collect: github
+  retro new: github
+  retro report: github
+  review brief: github
+  rules: local
+  serve: daemon
+  start: build
+  status: instant
+  stop: local
+  ui: instant
+  update: build
+hooks:
+  session.start: instant
+  command.run se: instant
+  ui.render Pane: instant
+  ui.render CommandOutput: instant
+  '*': instant

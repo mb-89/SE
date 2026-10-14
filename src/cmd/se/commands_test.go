@@ -9,7 +9,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
@@ -358,5 +360,36 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 	}
 	if r := session(t, "status"); r.Help != nil {
 		t.Fatalf("/se status carries help: %+v", r.Help)
+	}
+}
+
+func TestEveryCommandRecordsItsDurationAndATerminalOneSaysItsOverrun(t *testing.T) {
+	d, old := onFake(t), wall
+	fake := clock.NewFake(time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC))
+	wall = fake
+	t.Cleanup(func() { wall = old })
+	register(Command{
+		Name: "zz slow", Usage: "zz slow", Summary: "take two seconds", Session: true,
+		Run: func(c *Call) (Reply, error) { c.Clock.Sleep(2 * time.Second); return Reply{Text: "slept"}, nil },
+	})
+	t.Cleanup(func() { delete(commands, "zz slow") })
+	ws := filepath.FromSlash("/ws")
+	put(t, d, filepath.Join(ws, "spec", "budgets.yaml"), "classes:\n  instant: {ms: 1000, hard: false}\ncommands:\n  zz slow: instant\n")
+	if err := d.MkdirAll(filepath.Join(ws, ".se", ".runtime")); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := se(t, "--workspace", ws, "zz", "slow"); code != 0 ||
+		!strings.Contains(errs, "se: zz slow took 2000ms, over its budget of 1000ms (spec/budgets.yaml)") {
+		t.Fatalf("code %d, stderr %q", code, errs)
+	}
+	if code, _, errs := se(t, "--session", "--workspace", ws, "zz", "slow"); code != 0 || errs != "" {
+		t.Fatalf("a session call: code %d, stderr %q", code, errs)
+	}
+	data, err := d.ReadFile(filepath.Join(ws, ".se", ".runtime", "calls.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(strings.TrimSpace(string(data)), "\n"); len(lines) != 2 || !strings.Contains(lines[1], `"name":"zz slow","ms":2000`) {
+		t.Fatalf("calls.jsonl:\n%s", data)
 	}
 }
