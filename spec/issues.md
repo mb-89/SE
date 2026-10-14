@@ -179,6 +179,7 @@ person**, and leaves the agents' queue until the person has closed it.
 
 <!-- se:manifest usage issue review -->
 ```
+se issue edit N [--title T] [--body B | --body-file PATH] [--json] [--repo OWNER/NAME]
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
 se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]
@@ -318,6 +319,17 @@ it runs the fan-out (below) and adds a line saying what it did (with
 `--json`: the field `fanout`); otherwise a new ready issue could wait for the
 next merge or the schedule. A blocked issue fires nothing.
 A session has it as `/se issue new`.
+
+`se issue edit N` is how an `se` issue changes after it is made, never by
+hand (`gh issue edit` drops the mark the retro checks). It writes through the
+same code as `se issue new`: `--title` replaces the title, refused empty or
+where an open `se` issue under N's parent has it already; `--body` or
+`--body-file` replaces the body, which still ends in the mark
+`<!-- se:new -->` and keeps each se block of the old body (a line holding
+`<!-- se:KIND -->`, such as the skills line or a retro's mark) whose kind the
+new body does not carry itself. With neither, it writes the body again as it
+stands, its mark put back. A pull request, or an issue not labelled `se`, is
+refused (with `--json`: `{"issue","kept"}`).
 
 `se issue supersede N` is the second way a box closes the issue it took,
 where it cannot land a PR. It creates N's successor through the same code as
