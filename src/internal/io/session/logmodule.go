@@ -7,7 +7,8 @@ type logIn struct {
 }
 
 // LogModule is the session log on the index: an I/O module that reads each
-// session event and writes it as one line of its session's log in l, its one
+// session event, at the session it came from where events is wired to a
+// family, and writes it as one line of its session's log in l, its one
 // outside thing. Its output is the number of the last event it wrote.
 func LogModule(l Log) *index.Module {
 	return index.Declare("sessionlog", "The session log: one line per session event, one log per session.",
