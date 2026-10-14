@@ -25,14 +25,19 @@ for them where controversial, and closes the overhaul.
    owner's comments on the issue, apply what they moved between controversial
    and not, if anything, to `findings` in the draft's block, and go to 4.
 2. Read the draft's facts: the principles, the retro's last five runs, the
-   previous overhaul's findings. Then read SE itself: `spec/`, the README,
+   previous overhaul's findings, and where to look for principles 2 and 3
+   (the widest PRs since the last overhaul, code no caller reaches, the files
+   the longest untouched). Then read SE itself: `spec/`, the README,
    CLAUDE.md, the skills, `se help`, and the code under `src/`.
 3. Judge, and write it into the draft's block (the YAML under
    `<!-- se:overhaul-yaml -->`); leave the facts as they are.
    - `verdicts`: one per principle, `principle`, `strays` (`none`,
      `slightly`, `far`) and `how`. For a mechanical one, read the retros'
      rule checks and metrics; for the rest, read the code and spec against
-     the principle's text.
+     the principle's text. Judge principles 2 (single point of truth) and 3
+     (locality) over everything, old and untouched code included: what is
+     written twice, what no longer earns its place, what was not used in a
+     while. The draft's facts on them are where to start, not the answer.
    - `looked_at`: `outside` (search the web for current practice and tools in
      agent orchestration, issue-driven work, testing with fakes and
      contracts, plugin and hook design, and for comparable systems; cite

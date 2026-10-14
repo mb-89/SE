@@ -162,6 +162,9 @@ type OverhaulReport struct {
 	// named: findings that recurred anyway.
 	Recurring []string     `yaml:"recurring"`
 	Earlier   []Overhauled `yaml:"earlier"`
+	// Code is what the checkout says on principles 2 and 3; se overhaul read
+	// reads it with ReadCode, from Code.Since, which CollectOverhaul sets.
+	Code CodeFacts `yaml:"code"`
 	// Verdicts, LookedAt, Findings and WentWell are the box's judgment.
 	Verdicts []Judged   `yaml:"verdicts"`
 	LookedAt LookedAt   `yaml:"looked_at"`
@@ -234,9 +237,9 @@ func (s Source) overhaulIssue(n int) (issue, error) {
 	return i, nil
 }
 
-// CollectOverhaul reads overhaul n's facts: the principles ps, the latest
-// retros' reports and how their findings fared, and the previous overhaul's
-// findings.
+// CollectOverhaul reads overhaul n's facts from GitHub: the principles ps,
+// the latest retros' reports and how their findings fared, and the previous
+// overhaul's findings and when it closed. The code facts ReadCode reads.
 func (s Source) CollectOverhaul(n int, ps []Principle) (OverhaulReport, error) {
 	i, err := s.overhaulIssue(n)
 	if err != nil {
@@ -299,7 +302,7 @@ func (s Source) CollectOverhaul(n int, ps []Principle) (OverhaulReport, error) {
 	if err != nil || !ok {
 		return r, err
 	}
-	r.Previous = last.Number
+	r.Previous, r.Code.Since = last.Number, last.ClosedAt.UTC()
 	text, err := s.lastPosted(last.Number, overhaulReportMark)
 	if err != nil || text == "" {
 		return r, err
@@ -402,6 +405,7 @@ func (r OverhaulReport) facts() string {
 			fmt.Fprintf(&b, "| %s | %d | %s | %s |\n", o.Title, o.Principle, issue, o.State)
 		}
 	}
+	b.WriteString(r.Code.text())
 	return b.String()
 }
 

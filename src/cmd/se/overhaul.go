@@ -45,7 +45,7 @@ func init() {
 		Usage:   "overhaul read N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "read an overhaul's facts and write its report draft",
-		Details: "read overhaul N's facts and write its report draft to FILE (default: ../overhaul-N.md beside the workspace): every design principle from spec/principles.md, mechanical or judged; the last 5 retros' metrics, broken rule checks and findings, how many became issues and closed, and which recurred; and the previous overhaul's findings with their issues' state. Where a report is already posted on N (an overhaul from before overhauls stopped waiting for the owner), it writes that one instead, to be filed as it stands.",
+		Details: "read overhaul N's facts and write its report draft to FILE (default: ../overhaul-N.md beside the workspace): every design principle from spec/principles.md, mechanical or judged; the last 5 retros' metrics, broken rule checks and findings, how many became issues and closed, and which recurred; the previous overhaul's findings with their issues' state; and, for principles 2 and 3, the PRs merged since the previous overhaul that touched the most files, the functions under src/ no caller reaches, and the files the longest untouched. Where a report is already posted on N (an overhaul from before overhauls stopped waiting for the owner), it writes that one instead, to be filed as it stands.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul read")
@@ -71,6 +71,9 @@ func init() {
 				}
 				r, err := s.CollectOverhaul(n, ps)
 				if err != nil {
+					return Reply{}, err
+				}
+				if r.Code, err = issues.ReadCode(c.Proc, c.Disk, c.Workspace, r.Code.Since); err != nil {
 					return Reply{}, err
 				}
 				if text, err = r.OverhaulDraft(); err != nil {

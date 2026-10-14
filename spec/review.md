@@ -44,7 +44,10 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
       say so and stop early.
    3. Run the tests and reproduce each requirement directly. Check that no
       test was weakened, deleted or special-cased.
-   4. **Find** in two independent passes with different focus.
+   4. **Find** in two independent passes with different focus. The one
+      against the principles asks whether the change edits one fact in more
+      than one place (principles 2 and 3, on its delta; the overhaul judges
+      them over the whole system).
    5. **Verify** each candidate with evidence: a file and line, or a command
       and its output. Drop anything unproven.
    6. **Judge** each verified finding as blocking or not, by rule 3. A

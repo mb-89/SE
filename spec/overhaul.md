@@ -38,12 +38,21 @@ whole system, not a window.
     broken rule checks by kind, how many findings became issues and how many
     of those closed, how many the next retro found recurred anyway, and the
     finding classes more than one of them named;
-  - the previous overhaul's findings and the state of their issues.
+  - the previous overhaul's findings and the state of their issues;
+  - where to look for principles 2 and 3, read from the checkout: the PRs
+    merged on main since the previous overhaul closed that touched the most
+    files, the functions and methods under `src/` whose name nothing else
+    names (code no caller reaches), and the tracked files the longest
+    untouched.
 - **What the box checks, and writes into the draft's block:**
   - **Every principle, one by one** (`verdicts`: each a `principle`, how far
     SE `strays`, `none`, `slightly` or `far`, and `how`): the mechanically
     checkable ones through the latest retros' rule checks and metrics; the
     rest by reading the code and spec against the principle's text.
+    Principles 2 and 3 are judged directly, over everything, old and
+    untouched code included: what is written twice, what no longer earns its
+    place, what was not used in a while. A review judges the same two
+    principles on its delta alone ([review.md](review.md)).
   - **The outside world** (`looked_at.outside`): current practice and tools
     relevant to SE's parts (agent orchestration, issue-driven work, testing
     with fakes and contracts, plugin and hook design), and what comparable
