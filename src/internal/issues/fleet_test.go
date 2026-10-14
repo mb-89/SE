@@ -218,6 +218,44 @@ func TestARedPRIsFoundOnceItIsQuiet(t *testing.T) {
 	}
 }
 
+// The lease and se fleet check read one rule for a quiet claim: a takeover a
+// minute ago keeps it moving for both, however old its last push; no push and
+// no takeover past the lease is quiet to both.
+func TestTheLeaseAndTheFleetCheckAgreeWhenAClaimIsQuiet(t *testing.T) {
+	t.Parallel()
+	stale := noon.Add(-Lease - time.Hour).Format(time.RFC3339)
+	for _, c := range []struct {
+		name   string
+		pushed string
+		taken  bool
+		quiet  bool
+	}{
+		{"taken over a minute ago", `[{"timestamp":"` + stale + `","activity_type":"push"}]`, true, false},
+		{"no push and no takeover", `[]`, false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t, []string{ready5, item(7, 0)}, 7)
+			w.set("repos/o/r/activity?ref=refs/heads/issue-7&per_page=1", c.pushed)
+			w.pr(7, "true", "unstable", true, "check:failure")
+			if c.taken {
+				w.said(7, "<!-- se:takeover 1 -->", noon.Add(-time.Minute))
+			}
+			s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
+			st := Status{Issue: Issue{Number: 7}}
+			if err := s.lease(&st); err != nil {
+				t.Fatal(err)
+			}
+			if st.Stuck != c.quiet {
+				t.Fatalf("the lease says stuck %v, want %v", st.Stuck, c.quiet)
+			}
+			if got := w.check(); (len(got) > 0) != c.quiet {
+				t.Fatalf("se fleet check finds %+v, want quiet %v", got, c.quiet)
+			}
+		})
+	}
+}
+
 func TestAGreenPRWithAutoMergeOffIsFoundAtOnce(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
