@@ -2,7 +2,6 @@ package issues
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -17,6 +16,9 @@ type Node struct {
 	Depth  int      `json:"depth"`
 	Closed int      `json:"closed"`
 	Total  int      `json:"total"`
+	// Why says where an open issue stands: ready, claimed, blocked and by
+	// what; empty where it was not judged.
+	Why string `json:"why,omitempty"`
 }
 
 func nodeOf(i issue, depth int) Node {
@@ -30,10 +32,13 @@ func nodeOf(i issue, depth int) Node {
 	return n
 }
 
-// Line is the node as one line: number, state, the closed count of a parent,
-// its labels and its title.
+// Line is the node as one line: number, state, where an open one stands, the
+// closed count of a parent, its labels and its title.
 func (n Node) Line() string {
 	parts := []string{fmt.Sprintf("#%d", n.Number), n.State}
+	if n.Why != "" {
+		parts = append(parts, n.Why)
+	}
 	if n.Total > 0 {
 		parts = append(parts, fmt.Sprintf("%d/%d closed", n.Closed, n.Total))
 	}
@@ -41,28 +46,6 @@ func (n Node) Line() string {
 		parts = append(parts, strings.Join(n.Labels, ","))
 	}
 	return strings.Repeat("  ", n.Depth) + strings.Join(append(parts, n.Title), "  ")
-}
-
-// Trees lists every se issue with sub-issues, open or closed, open first,
-// each by number.
-func (s Source) Trees() ([]Node, error) {
-	list, err := api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=all&per_page=100", s.Repo, Label), true)
-	if err != nil {
-		return nil, err
-	}
-	out := []Node{}
-	for _, i := range list {
-		if i.PullRequest == nil && i.SubIssues != nil && i.SubIssues.Total > 0 {
-			out = append(out, nodeOf(i, 0))
-		}
-	}
-	sort.SliceStable(out, func(a, b int) bool {
-		if (out[a].State == "open") != (out[b].State == "open") {
-			return out[a].State == "open"
-		}
-		return out[a].Number < out[b].Number
-	})
-	return out, nil
 }
 
 // TreeOf lists root and every issue below it, open or closed, at any depth,
