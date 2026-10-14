@@ -2,6 +2,7 @@
 package issues
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -153,5 +154,78 @@ func TestLandAgainUpdatesTheLandingComment(t *testing.T) {
 	}
 	if c := commentsAt(t, gh, 6); patched != 1 || len(c) != 2 || c[1].ID != 77 || !strings.Contains(c[1].Body, "the landing") {
 		t.Fatalf("patched %d times: %q, %+v", patched, gh.Writes(), c)
+	}
+}
+
+func TestATakeoverRestoresTheAnswersTheLastLandPosted(t *testing.T) {
+	t.Parallel()
+	answers := map[string]string{
+		"done": "answers: on the issue, # not a comment\n #39 too",
+		"left": "```\nfenced\n```\n- a list in text\n\"quoted\"",
+	}
+	older, err := Landed{Issue: 6, Answers: map[string]string{"done": "older", "left": "older"}, Facts: Facts{Landed: landedAt()}}.Comment(qs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, err := Landed{Issue: 6, Answers: answers, Facts: Facts{Landed: landedAt()}}.Comment(qs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted, _ := json.Marshal([]map[string]any{{"id": 1, "body": "Worked by s."}, {"id": 2, "body": older}, {"id": 3, "body": latest}})
+	s := Source{Repo: repo, GitHub: recorded(t, map[string]string{comments6: string(posted)}), Disk: disk.NewFake()}
+	path := filepath.FromSlash("/w/issue-6-landing.yaml")
+	if err := s.Disk.MkdirAll(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	if restored, err := s.RestoreAnswers(6, path); err != nil || !restored {
+		t.Fatalf("%v %v", restored, err)
+	}
+	got, err := ReadAnswers(s.Disk, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range answers {
+		if strings.TrimSpace(got[k]) != want {
+			t.Errorf("%s: %q, want %q", k, got[k], want)
+		}
+	}
+	if len(got) != len(answers) {
+		t.Errorf("%q", got)
+	}
+	text, _ := s.Disk.ReadFile(path)
+	if !strings.HasPrefix(string(text), "# The answers the last land of #6") || strings.Index(string(text), "done:") > strings.Index(string(text), "left:") {
+		t.Errorf("the file:\n%s", text)
+	}
+	// A file the box has already is its own, and is kept.
+	if err := s.Disk.WriteFile(path, []byte("done: mine\n")); err != nil {
+		t.Fatal(err)
+	}
+	if restored, err := s.RestoreAnswers(6, path); err != nil || restored {
+		t.Fatalf("%v %v", restored, err)
+	}
+	if text, _ := s.Disk.ReadFile(path); string(text) != "done: mine\n" {
+		t.Fatalf("overwrote the box's own answers: %q", text)
+	}
+	// An issue no land posted answers on writes nothing.
+	none := Source{Repo: repo, GitHub: recorded(t, map[string]string{comments6: `[{"id":1,"body":"Worked by s."}]`}), Disk: disk.NewFake()}
+	if err := none.Disk.MkdirAll(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	if restored, err := none.RestoreAnswers(6, path); err != nil || restored {
+		t.Fatalf("%v %v", restored, err)
+	}
+	if there, _ := none.Disk.Exists(path); there {
+		t.Fatal("wrote answers no land posted")
+	}
+}
+
+func TestTheAnswersFileStandsBesideTheLeafsCheckout(t *testing.T) {
+	t.Parallel()
+	ws := filepath.FromSlash("/home/u/SE")
+	if got, want := AnswersFile(ws, 6, true), filepath.FromSlash("/home/u/issue-6-landing.yaml"); got != want {
+		t.Errorf("worktree: %s, want %s", got, want)
+	}
+	if got, want := AnswersFile(ws, 6, false), filepath.FromSlash("/home/u/SE-landing.yaml"); got != want {
+		t.Errorf("checkout: %s, want %s", got, want)
 	}
 }
