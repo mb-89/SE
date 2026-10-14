@@ -11,9 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # tests/tools.sh pins every tool, Go among them.
+      - id: pins
+        run: . ./tests/tools.sh && echo "go=$GO" >>"$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.pins.outputs.go }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22

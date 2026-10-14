@@ -11,9 +11,12 @@ labelled `se`, do them, and land each through one pull request.
 
     ./RUNME.sh
 
-It names anything it needs that is missing, and installs the plugin for your
-user, so every Claude session on this machine has one command, `/se`. Type
-`/se on` to switch SE on in a session.
+On Linux, macOS, or Windows under Git Bash, it installs every tool SE needs
+that is missing into `~/.se`, without admin rights, and installs the plugin
+for your user, so every Claude session on this machine has one command,
+`/se`. Type `/se on` to switch SE on in a session. The fleet's commands need
+a GitHub login; where gh has none, RUNME runs `gh auth login` for you, and
+finishes without it if you skip it.
 
 ## Where to go next
 
