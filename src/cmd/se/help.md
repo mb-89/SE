@@ -27,6 +27,7 @@ Fleet:
   fleet fix        fix what fleet check finds that needs no checkout
   fleet plugins    fetch the outside plugins and skills SE runs, pinned
   fleet prune      list the stray branches; --apply deletes them
+  fleet refresh    merge main into each open manifest's branch
   fleet rules      tell each open se PR the se checks it breaks merged with main
   fleet trust      say whether CI may skip the battery on the commit checked out
 
@@ -84,6 +85,7 @@ Fleet:
   fleet check      list what is broken in the fleet, each with its remedy
   fleet fix        fix what fleet check finds that needs no checkout
   fleet prune      list the stray branches; --apply deletes them
+  fleet refresh    merge main into each open manifest's branch
   fleet rules      tell each open se PR the se checks it breaks merged with main
 
 Issues:
@@ -157,16 +159,16 @@ Flags:
 se fleet check [--json] [--repo OWNER/NAME]
 
 Read GitHub and list every finding: a stalled root, a conflicted, red or green
-but unmerged PR, a claim with no PR, a leftover claim, an impossible block, a
-bare issue (in no manifest), an issue waiting on a person. Each names its issue,
-its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing
-found, it says healthy. Where GitHub's answers say the hour's quota of requests
-has fallen below the github instance's quota-floor share
-(github/config/quota-floor), a last line says how many are left and when it
-resets. With fan-out on, a fan-out the routine refused with 429, which se issue
-pull --take keeps on the alive claims with its retry time, fires once that time
-has passed and the fleet still needs the box, and a last line says so.
-spec/coordination.md has the rules.
+but unmerged PR, a claim with no PR, a manifest whose branch lacks main's
+commits (stale), a leftover claim, an impossible block, a bare issue (in no
+manifest), an issue waiting on a person. Each names its issue, its PR and its
+remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says
+healthy. Where GitHub's answers say the hour's quota of requests has fallen
+below the github instance's quota-floor share (github/config/quota-floor), a
+last line says how many are left and when it resets. With fan-out on, a fan-out
+the routine refused with 429, which se issue pull --take keeps on the alive
+claims with its retry time, fires once that time has passed and the fleet still
+needs the box, and a last line says so. spec/coordination.md has the rules.
 
 Flags:
   --json             answer JSON
@@ -181,13 +183,14 @@ Flags:
 se fleet fix [--json] [--repo OWNER/NAME]
 
 Run fleet check and apply, in its order, every remedy that needs no checkout:
-auto-merge goes on, a leftover claim of a closed issue is left to the prune
-workflow for a day after the close, any other leftover claim's branch main holds
-whole is deleted by a git push from the workspace, and a bare issue is filed
-into the open misc manifest (opening the next where none is open) by a sub-issue
-link. Every other finding is reported, never filed: it writes no issue and no
-comment (an issue is work, not a report). A takeover is named for the next take.
-A remedy that fails is reported, and the ones after it are still applied.
+auto-merge goes on, a stale manifest's branch takes main in as se fleet refresh
+does, a leftover claim of a closed issue is left to the prune workflow for a day
+after the close, any other leftover claim's branch main holds whole is deleted
+by a git push from the workspace, and a bare issue is filed into the open misc
+manifest (opening the next where none is open) by a sub-issue link. Every other
+finding is reported, never filed: it writes no issue and no comment (an issue is
+work, not a report). A takeover is named for the next take. A remedy that fails
+is reported, and the ones after it are still applied.
 
 Flags:
   --json             answer JSON
@@ -224,6 +227,28 @@ branch. The prune workflow runs it with the repository's token.
 
 Flags:
   --apply            delete the branches it lists
+  --json             answer JSON
+  --repo OWNER/NAME  the repository as OWNER/NAME (default: the workspace's
+                     origin)
+  --workspace DIR    the workspace DIR the daemon serves (default: here)
+```
+
+## se help fleet refresh
+
+```text
+se fleet refresh [--json] [--repo OWNER/NAME]
+
+For every open manifest whose branch issue-<m> is on origin with no open PR into
+main (se issue keep keeps that one): where main has moved past it, merge
+origin/main in (never a rebase) in a worktree under .se/.runtime/refresh and
+push, so main's moves reach its leaves once, through the manifest, not as each
+leaf's conflict. A merge that conflicts pushes nothing and is named: se fleet
+check lists it as a stale manifest, to merge by hand. A refresh that fails is
+reported, and the others are still refreshed. The refresh workflow runs it on
+every push to main (with --json:
+{"refreshed":[{"issue","branch","merged","conflict","did"}]}).
+
+Flags:
   --json             answer JSON
   --repo OWNER/NAME  the repository as OWNER/NAME (default: the workspace's
                      origin)
