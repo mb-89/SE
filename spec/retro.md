@@ -43,8 +43,12 @@ What earlier versions taught, and how this design answers it:
   it starts an unattended retro, as `se retro new --unattended` does, and
   takes it ahead of all other work but a due overhaul
   ([overhaul.md](overhaul.md)). An open `se-retro` issue, attended or not,
-  means no second one is started. `--take N` names its issue and skips the
-  cadence. The plain `se issue pull` only reports the count, and that a retro
+  means no second one is started. Reading the count and creating the retro
+  are not one step, so after creating its retro a box reads the open ones
+  again: where one with a lower number is open, it closes its own as a
+  duplicate of that one, claims nothing and goes on to other work. A retro
+  closed as a duplicate never ran: it opens no window and the overhaul does
+  not count it. `--take N` names its issue and skips the cadence. The plain `se issue pull` only reports the count, and that a retro
   is due.
 - **The box** takes a retro like any issue (`se issue pull --take` says it is
   a retro) and follows the retro skill,

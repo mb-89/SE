@@ -110,3 +110,58 @@ func TestTheFirstCadenceCountsTheWholeHistory(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+func TestASecondRetroStartedByARacingBoxClosesAsADuplicate(t *testing.T) {
+	origin, a, b := boxes(t)
+	gh := recorded(t, cadenceRepo(10, 0))
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	// Both boxes read the cadence before either starts its retro.
+	ca, err := s.Cadence()
+	if err != nil || !ca.Due() {
+		t.Fatalf("a: %+v %v", ca, err)
+	}
+	cb, err := s.Cadence()
+	if err != nil || !cb.Due() {
+		t.Fatalf("b: %+v %v", cb, err)
+	}
+	took, ok, ca, err := s.startDue(retroRule, a, ca, s.startRetro)
+	if err != nil || !ok || took.Number != 110 || ca.Open != 110 {
+		t.Fatalf("a took %+v %v, %+v %v", took, ok, ca, err)
+	}
+	took, ok, cb, err = s.startDue(retroRule, b, cb, s.startRetro)
+	if err != nil || ok || cb.Open != 110 {
+		t.Fatalf("b took %+v %v, %+v %v", took, ok, cb, err)
+	}
+	if d := issueAt(t, gh, 111); d.State != "closed" || d.StateReason != duplicate {
+		t.Fatalf("#111 is %s (%s)", d.State, d.StateReason)
+	}
+	if said, err := gh.List("repos/o/r/issues/111/comments?per_page=100"); err != nil || !strings.Contains(string(said), "Duplicate of #110") {
+		t.Fatalf("%s %v", said, err)
+	}
+	if out := run(t, origin, "branch", "--list", "issue-111"); out != "" {
+		t.Fatalf("#111 was claimed: %q", out)
+	}
+	// The duplicate never ran: it is not the last retro, and #110 stays open.
+	if c, err := s.Cadence(); err != nil || c.Previous != 20 || c.Open != 110 {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if last, ok, _, err := s.lastRetro(0); err != nil || !ok || last.Number != 20 {
+		t.Fatalf("last retro %+v %v %v", last, ok, err)
+	}
+	// Box b goes on to other work.
+	if took, ok, err := s.Take(b, 0); err != nil || !ok || took.Number != 5 {
+		t.Fatalf("b took %+v %v %v", took, ok, err)
+	}
+}
+
+func TestADuplicateRetroIsNoRetroToTheOverhaul(t *testing.T) {
+	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, map[string]string{
+		"repos/o/r/issues?labels=se-overhaul&state=closed&per_page=100": `[]`,
+		"repos/o/r/issues?labels=se-overhaul&state=open&per_page=100":   `[]`,
+		"repos/o/r/issues?labels=se-retro&state=closed&per_page=100": `[{"number":1,"state":"closed","state_reason":"completed","closed_at":"2026-01-01T00:00:00Z","labels":[{"name":"se-retro"}]},` +
+			`{"number":2,"state":"closed","state_reason":"duplicate","closed_at":"2026-01-01T00:00:00Z","labels":[{"name":"se-retro"}]}]`,
+	}), Clock: atNow()}.OverhaulCadence()
+	if err != nil || c.Closed != 1 {
+		t.Fatalf("%+v %v", c, err)
+	}
+}
