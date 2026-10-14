@@ -42,7 +42,8 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 	}
 	_, out, _ = se(t, "--workspace", ws, "manifest", "checks")
 	if !strings.Contains(out, "- `ci`: every merged PR had green CI (the last run of each check on its head); checked from the first commit.\n") ||
-		!strings.Contains(out, "; checked on what closed after PR #91 brought it.\n") {
+		!strings.Contains(out, "; checked on what was created after PR #91 brought it.\n") ||
+		!strings.Contains(out, "; checked on what closed after PR #74 brought it.\n") {
 		t.Fatalf("checks: %q", out)
 	}
 	_, out, _ = se(t, "--workspace", ws, "manifest", "usage", "fleet", "rules")
