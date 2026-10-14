@@ -5,6 +5,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
@@ -70,5 +73,46 @@ func TestAFakeProgramMadeBusyFailsSoManyStartsThenRuns(t *testing.T) {
 	}
 	if len(f.Ran()) != 3 {
 		t.Fatalf("ran %q", f.Lines())
+	}
+}
+
+func TestAListedMachineStartsOnlyTheListedPrograms(t *testing.T) {
+	t.Parallel()
+	f := proc.NewFake()
+	for _, name := range []string{"git", "gh", "/w/.se/.runtime/bin/se"} {
+		f.Install(name, func(proc.Cmd) int { return 0 })
+	}
+	m := proc.Listed(f)
+	if err := m.Run(proc.Cmd{Name: "git", Args: []string{"status"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Run(proc.Cmd{Name: "/w/.se/.runtime/bin/se", Args: []string{"serve"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Run(proc.Cmd{Name: "gh", Args: []string{"api", "user"}}); !errors.Is(err, proc.ErrNotListed) {
+		t.Fatalf("gh ran: %v", err)
+	}
+	if _, err := m.Start(proc.Cmd{Name: "gh"}); !errors.Is(err, proc.ErrNotListed) {
+		t.Fatalf("gh started: %v", err)
+	}
+	if got, want := f.Lines(), []string{"git status", "/w/.se/.runtime/bin/se serve"}; !slices.Equal(got, want) {
+		t.Fatalf("ran %q, want %q: a refused program never reaches the machine", got, want)
+	}
+}
+
+func TestEachStartOnAFakeMachinePassesItsDelay(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	c := clock.NewFake(at)
+	f := proc.NewFake()
+	f.Install("git", func(proc.Cmd) int { return 0 })
+	f.Delay(c, 50*time.Millisecond)
+	for range 3 {
+		if err := f.Run(proc.Cmd{Name: "git"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if took := c.Now().Sub(at); took != 150*time.Millisecond {
+		t.Fatalf("three starts took %v, want 150ms", took)
 	}
 }

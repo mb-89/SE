@@ -38,15 +38,17 @@ What earlier versions taught, and how this design answers it:
 - **The cadence:** retros happen without anyone remembering them. When
   `se issue pull --take` runs, before offering anything else, it counts the
   `se` issues closed since the last closed `se-retro` issue closed, retros and
-  overhauls not counted (with none closed yet, the whole history). At `RetroCadence` (in
-  `src/internal/issues/cadence.go`) or more, with no `se-retro` issue open,
+  overhauls not counted (with none closed yet, the whole history). At `issues/config/retro-cadence` (the
+  issues instance's config value, built-in in `src/internal/issues/cadence.go`) or more, with no `se-retro` issue open,
   it starts an unattended retro, as `se retro new --unattended` does, and
   takes it ahead of all other work but a due overhaul
   ([overhaul.md](overhaul.md)). An open `se-retro` issue, attended or not,
   means no second one is started, under a race too: after starting one,
   `--take` reads the open `se-retro` issues again, and where a lower one is
   open, closes its own as a duplicate of it, with a comment naming it, takes
-  nothing from the cadence and goes on to the normal take. `--take N` names its issue and skips the
+  nothing from the cadence and goes on to the normal take. A retro closed as
+  a duplicate never ran: it opens no window and the overhaul does not count
+  it. `--take N` names its issue and skips the
   cadence. The plain `se issue pull` only reports the count, and that a retro
   is due.
 - **The box** takes a retro like any issue (`se issue pull --take` says it is
