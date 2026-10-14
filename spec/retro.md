@@ -102,8 +102,10 @@ What earlier versions taught, and how this design answers it:
   resumed retro's stale claim is taken over like any stuck claim.
 - **The retro reviews itself**, every time, as a fixed part of the report:
   - **Metrics against the previous retros:** conflicts, takeovers, CI reruns,
-    `se-person` flags, `by-hand` mentions and time from claim to merge, each
-    per closed issue. `se retro collect` computes them and stores them in the
+    `se-person` flags, `by-hand` mentions, duplicates (issues closed as
+    duplicate, and issues for a person made in the window beyond the first
+    for each issue they hold back) and time from claim to merge, each per
+    closed issue. `se retro collect` computes them and stores them in the
     report's machine-readable block, so the trend is a number, not an
     impression; the draft tabulates them against every earlier retro.
   - **Did the last retro's fixes help?** For each of its findings: did its
