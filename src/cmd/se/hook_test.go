@@ -68,13 +68,19 @@ func TestAClaimWithoutAPRIsRefusedUpToTheCap(t *testing.T) {
 	}
 }
 
-func TestAPRWithAutoMergeOrASupersedeLetsTheBoxEnd(t *testing.T) {
+func TestOnlyAMergedPROrASupersedeLetsTheBoxEnd(t *testing.T) {
 	t.Parallel()
 	stopWorld(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[{"number":9,"html_url":"p9","auto_merge":null}]`})
 	if v := stops(t); !strings.Contains(v.Block, "PR #9 (p9) has auto-merge off") {
 		t.Fatalf("%+v", v)
 	}
+	// A box keeps its PR until it merges: auto-merge on is not the end.
 	hubAt(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`})
+	if v := stops(t); !strings.Contains(v.Block, "PR #9 (p9) has not merged") || !strings.Contains(v.Block, "se issue keep") {
+		t.Fatalf("%+v", v)
+	}
+	// Merged, its PR closed the issue.
+	hubAt(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"closed"}`})
 	if v := stops(t); v.Block != "" || v.Pass == "" {
 		t.Fatalf("%+v", v)
 	}
@@ -167,7 +173,8 @@ func TestABoxIsHeldToEveryIssueItTook(t *testing.T) {
 	})
 	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[1,2]}`)
 	v := stops(t)
-	if !strings.Contains(v.Block, "#1 is open with neither a PR from issue-1 nor a supersede") || strings.Contains(v.Block, "#2") {
+	// #2's PR is up, auto-merge on, but a box keeps it until it merges.
+	if !strings.Contains(v.Block, "#1 is open with neither a PR from issue-1 nor a supersede") || !strings.Contains(v.Block, "#2 is open and its PR #9 (p9) has not merged") {
 		t.Fatalf("%+v", v)
 	}
 }
