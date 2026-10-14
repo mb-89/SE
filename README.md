@@ -31,8 +31,8 @@ The agents, one per role, each reached as `@agent-se:<name>` in a session
 (or by asking Claude for its role):
 
 <!-- se:manifest agents -->
-- [`se:worker`](src/plugin/agents/worker.md), for the kind leaf: an issue with no sub-issues: work, landed as one PR.
-- [`se:coordinator`](src/plugin/agents/coordinator.md), for the kind parent: an issue with sub-issues: the box coordinates its tree, as it runs the queue and checks the fleet when nothing is ready.
+- [`se:worker`](src/plugin/agents/worker.md), for the kind leaf: an issue with no sub-issues: work, landed into its manifest's branch.
+- [`se:coordinator`](src/plugin/agents/coordinator.md), for the kind parent: an issue with sub-issues, a manifest at the top: the box coordinates its tree and lands it as one PR, as it runs the queue and checks the fleet when nothing is ready.
 - [`se:reviewer`](src/plugin/agents/reviewer.md), for the kind gate: an se-review parent ready for review: reviewed cold.
 - [`se:retro`](src/plugin/agents/retro.md), for the kind retro: an issue labelled se-retro.
 - [`se:overhaul`](src/plugin/agents/overhaul.md), for the kind overhaul: an issue labelled se-overhaul.
@@ -49,7 +49,7 @@ The rules, each file owning one part:
 <!-- se:manifest spec -->
 - [spec/budgets.yaml](spec/budgets.yaml)
 - [spec/cloud.md](spec/cloud.md): Cloud boxes: SE in a cloud environment
-- [spec/coordination.md](spec/coordination.md): Coordination: a box that finds nothing to take
+- [spec/coordination.md](spec/coordination.md): Coordination: finding and repairing what is broken
 - [spec/development.md](spec/development.md): Development: working on SE
 - [spec/index.md](spec/index.md): Index: the core and the module contract
 - [spec/io.md](spec/io.md): I/O modules: the shape every one follows

@@ -4,6 +4,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -11,17 +13,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/battery"
+	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
-// recordedFleet answers the fleet commands' gh calls for o/r: #3 is ready,
+// recordedFleet answers the fleet commands' gh calls for o/r: #3 is a manifest,
 // nothing is claimed, and nothing is broken.
 func recordedFleet(t *testing.T) *github.Fake {
 	t.Helper()
 	answers := map[string]string{
-		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3"}]`,
+		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3","labels":[{"name":"se"},{"name":"se-manifest"}]}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[]`,
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
@@ -48,6 +53,42 @@ func TestFleetCheckSaysWhenTheQuotaRunsLow(t *testing.T) {
 	var answer struct{ Quota string }
 	if err := json.Unmarshal([]byte(out), &answer); err != nil || !strings.HasPrefix(answer.Quota, "GitHub's quota runs low: ") {
 		t.Fatalf("%q %v", out, err)
+	}
+}
+
+// A command GitHub refuses for its rate limit waits for the reset, and
+// records the refusal, its command and the wait in its workspace's ledger,
+// which land adds up into the issue's landing facts.
+func TestARateLimitRefusalIsRecordedWithItsWait(t *testing.T) {
+	t.Parallel()
+	// GitHub's clock is the command's, so the wait reaches the reset.
+	c := clock.NewFake(testedAt)
+	gh := github.NewFake(c)
+	if err := gh.Seed(map[string]string{
+		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3"}]`,
+		"repos/o/r/git/matching-refs/heads/issue-":                `[]`,
+		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
+		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worldOf(t).GitHub, worldOf(t).Clock = gh, c
+	gh.Quota(1, 10*time.Minute)
+	if _, err := gh.Get("repos/o/r/issues/3"); err != nil {
+		t.Fatal(err)
+	}
+	ws := t.TempDir()
+	code, out, errs := se(t, "--workspace", ws, "fleet", "check", "--repo", "o/r")
+	if code != 0 || !strings.Contains(errs, "GitHub refused a request for its rate limit (HTTP 403); waiting 10m0s") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	w, err := issues.RateLimitWaits(disk.Real(), ws)
+	if err != nil || w.Refusals == 0 || w.Wait < 10*time.Minute {
+		t.Fatalf("the workspace's ledger records %+v (%v), want the refusals fleet check met and their wait", w, err)
+	}
+	data, err := disk.Real().ReadFile(filepath.Join(ws, issues.RateLimitsFile))
+	if err != nil || !strings.HasPrefix(string(data), "2026-10-14T12:00:00Z\tfleet check\t403\t600\twaited\n") {
+		t.Fatalf("the ledger reads %q (%v)", data, err)
 	}
 }
 
@@ -135,6 +176,66 @@ func TestRulesOnBuildsTheMergesSeAndAnswersItsRuleAndTestFindingsWithoutTimings(
 	})
 	if got, err := rulesOn(m, "/wt"); got != "it does not build:\nundefined: World" || err != nil {
 		t.Fatalf("%q %v", got, err)
+	}
+}
+
+// CI's checkout is a git repository, and se fleet trust reads it with git
+// alone: it asks GitHub nothing, and se's disk is a fake.
+func TestFleetTrustSkipsTheBatteryOnlyWhereTheRecordNamesTheTreeCheckedOut(t *testing.T) {
+	t.Parallel()
+	gh := hubAt(t, map[string]string{})
+	onFake(t)
+	ws := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", ws, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	commit := func(name, text string) {
+		t.Helper()
+		at := filepath.Join(ws, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(at), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(at, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("add", "-A")
+		git("commit", "-q", "-m", name)
+	}
+	git("init", "-q", "-b", "main")
+	commit("src/a.go", "package a\n")
+	file, err := battery.Passed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	trust := func(args ...string) (int, string, string) {
+		return se(t, append([]string{"fleet", "trust", "--workspace", ws}, args...)...)
+	}
+	// A missing record: a push without SE, and CI runs the battery.
+	if code, out, errs := trust(); code == 0 || out != "" || !strings.Contains(errs, "not trusted, so CI runs the battery: HEAD holds no "+file) {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	// A box's push: its record names the tree without it, and CI skips the battery.
+	tree := git("rev-parse", "HEAD^{tree}")
+	commit(file, tree+"\n")
+	sha := git("rev-parse", "HEAD")
+	if code, out, errs := trust("--rev", sha); code != 0 || out != "trusted: "+sha+"'s "+file+" names its tree "+tree+": the battery passed it\n" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if code, out, _ := trust("--json"); code != 0 || !strings.Contains(out, `{"trusted":true,"why":"HEAD's `+file+` names its tree `+tree) {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+	// A mismatch: the tree moved past the record (main merged in, say), and CI runs the battery.
+	commit("src/b.go", "package a\n")
+	if code, _, errs := trust(); code == 0 || !strings.Contains(errs, "HEAD's "+file+" names tree "+tree+", and its tree without it is") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("trust wrote %q", w)
 	}
 }
 

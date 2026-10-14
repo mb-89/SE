@@ -1,0 +1,31 @@
+# What the disk door guards, and what going around it looks like (spec/io.md).
+guards: "the disk: opening, reading, writing, listing, walking and locking files"
+go:
+  - os.Open
+  - os.OpenFile
+  - os.Create
+  - os.CreateTemp
+  - os.ReadFile
+  - os.WriteFile
+  - os.ReadDir
+  - os.Mkdir
+  - os.MkdirAll
+  - os.MkdirTemp
+  - os.Remove
+  - os.RemoveAll
+  - os.Rename
+  - os.Stat
+  - os.Lstat
+  - os.Truncate
+  - os.Chmod
+  - os.Chown
+  - os.Chtimes
+  - os.Link
+  - os.Symlink
+  - os.Readlink
+  - os.DirFS
+  - os.CopyFS
+  - path/filepath.Walk
+  - path/filepath.WalkDir
+  - path/filepath.Glob
+commands: []

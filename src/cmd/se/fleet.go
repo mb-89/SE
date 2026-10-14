@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
@@ -19,7 +20,7 @@ func init() {
 		Usage:   "fleet check [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list what is broken in the fleet, each with its remedy",
-		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says healthy. Where GitHub's answers say the hour's quota of requests has fallen below the github instance's quota-floor share (github/config/quota-floor), a last line says how many are left and when it resets. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
+		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, a bare issue (in no manifest), an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says healthy. Where GitHub's answers say the hour's quota of requests has fallen below the github instance's quota-floor share (github/config/quota-floor), a last line says how many are left and when it resets. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet check")
@@ -76,7 +77,7 @@ func init() {
 		Usage:   "fleet fix [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "fix what fleet check finds that needs no checkout",
-		Details: "run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, and a finding with no other remedy becomes an se issue, or an se-person one where it is a judgment. Each fix is recorded on the finding's issue, and a finding back after its fix goes to a person. A remedy that fails is reported, and the ones after it are still applied. A takeover is named for the box to run. A ready issue it made fires the routine once.",
+		Details: "run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, and a bare issue is filed into the open misc manifest (opening the next where none is open) by a sub-issue link. Every other finding is reported, never filed: it writes no issue and no comment (an issue is work, not a report). A takeover is named for the next take. A remedy that fails is reported, and the ones after it are still applied.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet fix")
@@ -92,19 +93,11 @@ func init() {
 				return Reply{}, err
 			}
 			done := s.Fix(c.Workspace, found)
-			fanout := ""
-			for _, d := range done {
-				if d.Ready {
-					fanout = c.fire()
-					break
-				}
-			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
 					Healthy bool           `json:"healthy"`
 					Fixed   []issues.Fixed `json:"fixed"`
-					Fanout  string         `json:"fanout,omitempty"`
-				}{len(found) == 0, append([]issues.Fixed{}, done...), fanout})
+				}{len(found) == 0, append([]issues.Fixed{}, done...)})
 				return Reply{Text: string(data)}, err
 			}
 			if len(done) == 0 {
@@ -113,9 +106,6 @@ func init() {
 			lines := make([]string, 0, len(done)+1)
 			for _, d := range done {
 				lines = append(lines, fmt.Sprintf("%s #%d: %s\n  did: %s", d.Kind, d.Issue, d.What, d.Did))
-			}
-			if fanout != "" {
-				lines = append(lines, fanout)
 			}
 			return Reply{Text: strings.Join(lines, "\n")}, nil
 		},
@@ -170,40 +160,31 @@ func init() {
 		},
 	})
 	register(Command{
-		Name:    "fleet refresh",
+		Name:    "fleet trust",
 		Class:   batch,
-		Usage:   "fleet refresh [--json] [--repo OWNER/NAME]",
+		Usage:   "fleet trust [--rev REV] [--json]",
 		Group:   "Fleet",
-		Summary: "merge main into each auto-merge PR behind it and rerun its CI",
-		Details: "for every open PR against main with auto-merge on whose head main has moved past: merge main into it through GitHub's update-branch and start the ci workflow on its new head, since main's ruleset merges a PR only when it is up to date with main and the repository's token starts no CI by its pushes. A PR that conflicts with main is left to its takeover. A PR whose update fails is reported, and the others are still updated. The refresh workflow runs it with the repository's token on every push to main.",
-		Session: true,
+		Summary: "say whether CI may trust the battery a box ran on a commit",
+		Details: "CI's check job asks it first, in its checkout: exit 0 and say why where commit REV (default HEAD) holds the battery's record (battery/config/passed) naming REV's git tree with the record left out, as tests/check.sh writes it and se issue land and se issue keep commit it with the work; else (no record, or one naming another tree, as where main moved since) exit 1 and say why, and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}). It asks GitHub nothing. It is trust in one's own boxes: faking the record is sabotage, not an accident.",
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "fleet refresh")
+			fs := c.Flags("fleet trust")
+			asJSON := fs.Bool("json", false, "answer JSON")
+			rev := fs.String("rev", "HEAD", "the commit `REV` CI checked out")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
-			s, err := src()
+			why, err := battery.Trusted(c.Proc, c.Workspace, *rev)
 			if err != nil {
-				return Reply{}, err
-			}
-			done, refreshErr := s.Refresh()
-			lines := make([]string, len(done))
-			for k, r := range done {
-				lines[k] = fmt.Sprintf("PR #%d (%s): %s", r.PR, r.Branch, r.Did)
-			}
-			if refreshErr != nil {
-				return Reply{}, fmt.Errorf("%w\n%s", refreshErr, strings.Join(lines, "\n"))
+				return Reply{}, fmt.Errorf("not trusted, so CI runs the battery: %w", err)
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
-					Refreshed []issues.Refreshed `json:"refreshed"`
-				}{append([]issues.Refreshed{}, done...)})
+					Trusted bool   `json:"trusted"`
+					Why     string `json:"why"`
+				}{true, why})
 				return Reply{Text: string(data)}, err
 			}
-			if len(done) == 0 {
-				return Reply{Text: "no auto-merge PR is behind main"}, nil
-			}
-			return Reply{Text: strings.Join(lines, "\n")}, nil
+			return Reply{Text: "trusted: " + why}, nil
 		},
 	})
 	register(Command{

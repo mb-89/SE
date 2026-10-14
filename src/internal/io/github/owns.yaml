@@ -1,0 +1,5 @@
+# What the github door guards, and what going around it looks like (spec/io.md).
+guards: "GitHub: issues, pull requests, branches, comments, labels"
+go: [github.com/cli/go-gh, github.com/google/go-github]
+# Running gh, calling the REST API by its URL (curl, wget), or a GitHub MCP tool.
+commands: [gh, api.github.com, mcp__github__*]

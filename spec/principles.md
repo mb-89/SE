@@ -50,14 +50,19 @@ principles of code once.
    can do: the proc I/O module starts only programs that are themselves the
    work (`go`, the battery's linters, `git` where Go has no library for it),
    one listed value, `proc.Programs`; GitHub is reached through its own
-   module's HTTP client, never `gh`.
+   module's HTTP client, never `gh`. An I/O module is a door: it declares
+   the resource it guards and what going around it looks like, and nothing
+   goes around it, neither code nor an agent; an agent reaches GitHub only
+   through `se`. A box's run has the same three phases: its take reads and
+   claims, its land (or supersede, or close) writes once, and in between it
+   works locally (commits, fetches and merges main) and is silent on GitHub.
    Checked by: the battery (the `io-module` and `programs` rules of
    `se rules`); overhaul, by judgment (`looked_at.speed`).
 
 7. **Fakes that behave, held to contracts.**
    Every I/O module has a fake, and one contract suite runs against both the
    fake and the real thing; a fake without its suite is refused.
-   Checked by: the battery (a lint rule).
+   Checked by: the battery (the `fake-contract` rule of `se rules`).
 
 8. **Fast tests.**
    Test a behaviour once, at the outermost interface (the `se` command), on
@@ -96,7 +101,10 @@ principles of code once.
 
 12. **One work system.**
     Issues with native links, created only through `se issue new`; a box acts
-    on its issue's text, not on messages.
+    on its issue's text, not on messages. An issue is work: code or prose
+    that must change. It is never a way to report, ask or tell: what a run
+    finds that changes nothing is said in its own output (a PR, a landing
+    answer, a report), not in a new issue.
     Checked by: retro, mechanically (rule checks).
 
 13. **Every session starts at main.**
@@ -112,10 +120,19 @@ principles of code once.
 15. **Persons decide, agents execute.**
     Anything controversial goes to a person; everything else flows without
     one. It goes as an issue minted for the person, and only such an issue
-    waits on one: every run ends, a box landing what it could and filing
-    the rest, a retro or an overhaul closing once its issues exist. What
-    needs the person's answer is blocked by their issue, and nothing else is.
-    Checked by: retro, mechanically (`se-person` counts); overhaul, by judgment.
+    waits on one: every run ends, a box landing what it could, a retro or an
+    overhaul closing once its issues exist. What needs the person's answer is
+    blocked by their issue, and nothing else is. Nothing mints an issue for
+    a person on a box's behalf. A worker's output is a PR or a supersede;
+    its open points go into its landing answers (`open`), which the retro
+    reads, and any issue a box opens is a defect (`se issue new` refuses in
+    one). A review, a retro or an overhaul exists to file issues: they are
+    its output, filed through its own command in one go at its end, as one
+    manifest of finals (`se-final`, the findings its sub-issues), or for a
+    person where too big or controversial. Finals do not count toward the
+    retro's cadence, so retros do not feed themselves.
+    Checked by: retro, mechanically (`se-person` counts); overhaul, by
+    judgment.
 
 16. **Blameless.**
     Fix what produced a bad outcome (a rule, a tool, a prompt), never just the

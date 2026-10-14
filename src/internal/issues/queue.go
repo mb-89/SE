@@ -18,7 +18,8 @@ const PaceWindow = 7 * 24 * time.Hour
 type Pace struct {
 	Since time.Time `json:"since"`
 	Until time.Time `json:"until"`
-	// Merged counts the se issues closed in the window by a merged PR;
+	// Merged counts the se issues closed in the window by a merged PR, or
+	// landed into their manifest's branch;
 	// PerHour is Merged over the window's hours.
 	Merged  int     `json:"merged"`
 	PerHour float64 `json:"per_hour"`
@@ -47,7 +48,9 @@ func (s Source) Pace(window time.Duration) (Pace, error) {
 	rows := make([]Row, len(closed))
 	var reads []func() error
 	for k, x := range closed {
-		if _, ok := fixedBy[x.Number]; !ok {
+		// A leaf landed into its manifest has no PR: its landing says so.
+		leaf := x.StateReason == "completed" && (x.SubIssues == nil || x.SubIssues.Total == 0) && !atTop(x.labels())
+		if _, ok := fixedBy[x.Number]; !ok && !leaf {
 			continue
 		}
 		reads = append(reads, func() (err error) { rows[k], _, err = s.row(x, fixedBy); return err })
@@ -57,7 +60,7 @@ func (s Source) Pace(window time.Duration) (Pace, error) {
 	}
 	var minutes []int
 	for _, r := range rows {
-		if r.PR == 0 {
+		if r.PR == 0 && r.Into == "" {
 			continue
 		}
 		p.Merged++
@@ -135,8 +138,11 @@ func openNodes(all []Status, t tree, root int) []Node {
 	why := map[int]string{}
 	for _, st := range all {
 		why[st.Number] = st.Why
-		if st.Ready() {
+		switch {
+		case st.Ready():
 			why[st.Number] = "ready"
+		case st.Why == "":
+			why[st.Number] = st.Bare
 		}
 	}
 	out := []Node{}

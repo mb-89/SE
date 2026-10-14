@@ -67,8 +67,10 @@ what existed only to support it.
   into the draft's block are the agent's (its step 3).
 - **Minting:** the same rule as the retro's (the owner's rule in
   [retro.md](retro.md)). Every finding becomes an issue through the same code
-  as `se issue new`. A controversial one is an issue for a person, labelled
-  `se-person` and assigned to the owner; the rest go to the normal queue. A
+  as `se issue new`, labelled `se-final`. A controversial one, or one too
+  big, is an issue for a person, labelled `se-person` and assigned to the
+  owner; the rest go into the overhaul's one manifest, `Findings of the
+  overhaul #N`, labelled `se-manifest` and `se-final`. A
   change to a principle is always controversial: `se overhaul file` makes it
   so. `se overhaul file` creates the issues at once, posts the report as the
   closing comment and closes the overhaul: it never waits. (A report posted

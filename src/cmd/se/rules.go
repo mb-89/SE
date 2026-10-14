@@ -94,6 +94,23 @@ func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
 	}, nil
 }
 
+// unmergedPaths is every path git's index at root holds unmerged, each once:
+// a conflicted file stands there once per stage, which would list it as often.
+// It runs git on procs.
+func unmergedPaths(procs proc.Procs, root string) ([]string, error) {
+	var out bytes.Buffer
+	if err := procs.Run(proc.Cmd{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U", "-z"}, Dir: root, Stdout: &out}); err != nil {
+		return nil, fmt.Errorf("git diff --diff-filter=U: %w", err)
+	}
+	var paths []string
+	for _, p := range strings.Split(out.String(), "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
 // commandFlags is every command by name, with the flags it takes.
 func commandFlags() map[string][]string {
 	out := map[string][]string{}

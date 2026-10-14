@@ -16,7 +16,7 @@ func init() {
 		Group:   "Fleet",
 		Class:   batch,
 		Summary: "fetch the outside plugins and skills SE runs, pinned",
-		Details: "fetch every source of the reuse config (src/internal/index/wiring.yaml) at its pinned commit into DIR, as a folder of plugins that one entry of " + reuse.DirsVar + " loads: each plugin as DIR/<name>, each lone skill inside DIR/" + reuse.Adopted + ". A folder there that no source names any more is removed. A cloud environment's setup script runs it (spec/cloud.md).",
+		Details: "fetch every source of the reuse config (src/index/wiring.yaml) at its pinned commit into DIR, as a folder of plugins that one entry of " + reuse.DirsVar + " loads: each plugin as DIR/<name>, each lone skill inside DIR/" + reuse.Adopted + ". A folder there that no source names any more is removed. A cloud environment's setup script runs it (spec/cloud.md).",
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("fleet plugins")
 			into := fs.String("into", "", "the `DIR` to fetch them into")
@@ -46,10 +46,10 @@ func init() {
 
 // The intros the tiers are handed with: when each runs, and over what.
 const (
-	workerIntro   = "Before you commit, run each of these on your own diff, once and briefly; it adds nothing to the landing, whose battery is the guarantee (reuse config, src/internal/index/wiring.yaml):"
+	workerIntro   = "Before you commit, run each of these on your own diff, once and briefly; it adds nothing to the landing, whose battery is the guarantee (reuse config, src/index/wiring.yaml):"
 	authorIntro   = "Where your change writes or changes an SE agent or skill, also run each of these on it:"
-	reviewerIntro = "## What you run on the delta\n\nRun each of these on the delta, the merged code of the tree against its base, as a finder: what one reports is a candidate finding for your step 5, to verify like any other; change no code. The report's `ran` names each, with what it found or why it did not run (reuse config, src/internal/index/wiring.yaml):"
-	overhaulIntro = "Run each of these over the whole of SE's code, taking as long as they need; what they find goes into `looked_at.removal` and the findings, like any other (reuse config, src/internal/index/wiring.yaml):"
+	reviewerIntro = "## What you run on the delta\n\nRun each of these on the delta, the merged code of the tree against its base, as a finder: what one reports is a candidate finding for your step 5, to verify like any other; change no code. The report's `ran` names each, with what it found or why it did not run (reuse config, src/index/wiring.yaml):"
+	overhaulIntro = "Run each of these over the whole of SE's code, taking as long as they need; what they find goes into `looked_at.removal` and the findings, like any other (reuse config, src/index/wiring.yaml):"
 )
 
 // reused answers what tier is handed, with intro, resolved against the
