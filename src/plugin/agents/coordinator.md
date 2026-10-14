@@ -111,8 +111,8 @@ can, and only then end. The rules are
    checkout; its lines `did: left to this box: …` are the takeovers.
 3. For the first takeover it names, run its remedy as the box's take:
    `./src/plugin/bin/se issue pull --take <n> --worktree --json`.
-   - If it says the issue went to a person, or another box took it over, or
-     nothing about it is stuck, go to the next takeover.
+   - If it says another box took it over, or nothing about it is stuck, go
+     to the next takeover.
    - If it took the issue over, run its `worktree` command and hand it to the
      sub-agent its `agent` names as step 2 does (the worker merges
      `origin/main` in, never rebases, makes it green and lands it), and wait

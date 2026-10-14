@@ -156,44 +156,29 @@ func finalSeven(t *testing.T, g *github.Fake) {
 	seed(t, g, map[string]string{listPath: `[` + open(5, "new work") + `,{"number":7,"title":"old work","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-final"}]}]`})
 }
 
-func TestASecondConflictTakeoverWaitsOnAnIssueForAPerson(t *testing.T) {
+func TestASecondConflictTakeoverIsTakenOverAgain(t *testing.T) {
 	t.Parallel()
-	_, a, _ := boxes(t)
+	a := claimed7(t)
 	g := newPulls(t, atNow(), pr70("false", "dirty"))
 	finalSeven(t, g)
 	// The first takeover found head 0ld; the PR conflicts again at abc.
 	said(t, g, "Taken over.\n<!-- se:takeover 1 -->\n<!-- se:takeover-head 0ld -->")
-	s := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}
-	took, ok, err := s.Take(a, 0)
-	if err != nil || !ok || took.Number != 5 {
+	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
+	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || *took.Takeover != (Takeover{PR: 70, URL: "p70", Count: 2}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	// #7 itself is not given to a person: an issue for one, #72 after PR #71, blocks it.
+	// Final, it is taken over again: nothing is minted for a person.
 	writes := g.Writes()
-	for _, want := range []string{
-		"POST repos/o/r/issues/72/assignees",
-		"POST repos/o/r/issues/7/dependencies/blocked_by",
-		"DELETE repos/o/r/issues/7/labels/se-final",
-	} {
-		if !contains(writes, want) {
-			t.Errorf("not written: %s (writes %q)", want, writes)
+	for _, w := range writes {
+		if w == "POST repos/o/r/issues" || strings.Contains(w, "blocked_by") || strings.Contains(w, "DELETE") {
+			t.Fatalf("a final conflict minted or held something: %q", writes)
 		}
 	}
-	if labelled(t, g, 7, PersonLabel) || labelled(t, g, 7, FinalLabel) || !labelled(t, g, 72, PersonLabel) {
-		t.Fatalf("#7 was labelled for a person, or is still final: %q", writes)
+	if labelled(t, g, 7, PersonLabel) || !labelled(t, g, 7, FinalLabel) {
+		t.Fatalf("#7 was labelled for a person, or is no longer final: %q", writes)
 	}
-	if c := commentsAt(t, g, 7); len(c) != 2 || !strings.Contains(c[1].Body, "blocked by #72") || !strings.HasSuffix(c[1].Body, "<!-- se:resume -->") {
+	if c := commentsAt(t, g, 7); len(c) != 2 || !strings.Contains(c[1].Body, "<!-- se:takeover 2 -->") || !strings.Contains(c[1].Body, "<!-- se:takeover-head abc -->") {
 		t.Fatalf("comments %+v", c)
-	}
-	// Blocked by #72, #7's claim waits, and is not stuck.
-	all, err := s.Survey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, st := range all {
-		if st.Number == 7 && st.Why != "issue-7 waits: blocked by #72" {
-			t.Fatalf("%+v", st)
-		}
 	}
 }
 
@@ -224,18 +209,18 @@ func TestOfTwoBoxesTakingOverAtOnceTheFirstMarkerWins(t *testing.T) {
 	}
 }
 
-func TestAConflictAfterAStuckTakeoverGoesToAPerson(t *testing.T) {
+func TestAConflictAfterAStuckTakeoverIsTakenOverAgain(t *testing.T) {
 	t.Parallel()
-	_, a, _ := boxes(t)
+	a := claimed7(t)
 	g := newPulls(t, atNow(), pr70("false", "dirty"))
 	// #7 was taken over once already, stuck, so it is final; its PR now conflicts.
 	finalSeven(t, g)
 	said(t, g, "<!-- se:takeover 1 -->\nTaken over: nothing was pushed.")
 	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
-	if err != nil || !ok || took.Number != 5 {
+	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || took.Takeover.Count != 2 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	if c := commentsAt(t, g, 7); len(c) != 2 || !strings.HasPrefix(c[1].Body, "<!-- se:person -->\nPR #70 conflicts with main on its final attempt") {
+	if c := commentsAt(t, g, 7); len(c) != 2 || !strings.Contains(c[1].Body, "<!-- se:takeover 2 -->") {
 		t.Fatalf("comments %+v", c)
 	}
 }

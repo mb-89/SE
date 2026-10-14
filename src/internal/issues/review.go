@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
-	"strings"
 
 	"github.com/mb-89/SE/src/internal/io/github"
 )
@@ -84,9 +83,13 @@ type Reviewed struct {
 	// the normal queue; Unfiled counts those past the first issues/config/max-filed.
 	Filed   []Issue `json:"filed"`
 	Unfiled int     `json:"unfiled"`
-	// Person is set where a re-review found a final issue's problem again:
-	// the gate then waits on an issue for a person.
-	Person bool `json:"person,omitempty"`
+	// Accepted are the earlier blockers a re-review found the problem of
+	// again: each was a final attempt, so the repeat is accepted, files
+	// nothing and blocks no more.
+	Accepted []int `json:"accepted,omitempty"`
+	// Closed is set where the review closed n: it passed, or every blocking
+	// finding was an accepted repeat.
+	Closed bool `json:"closed"`
 }
 
 // Review passes or fails issue n, a parent labelled se-review whose
@@ -97,7 +100,8 @@ type Reviewed struct {
 // one a sub-issue of n, a non-blocking one in the normal queue, at most
 // issues/config/max-filed of them. The report goes on n with its machine-readable block; a
 // pass closes n, which can complete its parent. A blocking finding that
-// repeats an earlier blocker sends n to a person.
+// repeats an earlier blocker is an accepted repeat: it files nothing, and a
+// fail whose blocking findings are all repeats closes n as a pass does.
 func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed, error) {
 	if reviewer.Session == "" {
 		return Reviewed{}, fmt.Errorf("%s is not set, so this reviewer cannot be told apart from the workers of #%d's tree; nothing was reviewed", SessionVar, n)
@@ -133,12 +137,11 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 		return Reviewed{}, err
 	}
 	r := Reviewed{Issue: n, Passed: pass, Fixes: []Issue{}, Filed: []Issue{}}
-	var again []ReviewFinding
 	for k := range rep.Findings {
 		f := &rep.Findings[k]
 		switch {
 		case f.Repeats > 0:
-			again = append(again, *f)
+			r.Accepted = append(r.Accepted, f.Repeats)
 			continue
 		case !f.Blocking && len(r.Filed) == s.config().MaxFiled:
 			r.Unfiled++
@@ -164,22 +167,11 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", v.render(reviewer, s.config().MaxFiled))); err != nil {
 		return r, fmt.Errorf("posting the report on #%d: %w", n, err)
 	}
-	if len(again) > 0 {
-		names := make([]string, len(again))
-		for k, f := range again {
-			names[k] = fmt.Sprintf("#%d (%s)", f.Repeats, f.Title)
-		}
-		reason := fmt.Sprintf("Its re-review finds the problem of %s again. Each was a final attempt (labelled %s), so it gets no other round.", strings.Join(names, ", "), FinalLabel)
-		if _, err := s.hold(st.Issue, reason); err != nil {
-			return r, err
-		}
-		r.Person = true
-		return r, nil
-	}
-	if pass {
+	if pass || !rep.blocks() {
 		if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
 			return r, fmt.Errorf("closing #%d: %w", n, err)
 		}
+		r.Closed = true
 		return r, s.CloseParents()
 	}
 	return r, nil

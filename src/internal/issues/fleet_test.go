@@ -373,14 +373,19 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 		t.Fatalf("%+v", f)
 	}
 	// Its remedy, run: the takeover was made once already, so #17 is
-	// se-final and waits on an issue for a person.
-	_, _, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(t.TempDir(), 17)
-	if err == nil || !strings.Contains(err.Error(), "an issue for a person") {
-		t.Fatalf("%v", err)
+	// se-final, and it is taken over again; nothing is minted for a person.
+	_, a, _ := boxes(t)
+	run(t, a, "checkout", "-q", "-b", "issue-17")
+	run(t, a, "commit", "-q", "--allow-empty", "-m", "work on 17")
+	run(t, a, "push", "-q", "origin", "issue-17")
+	run(t, a, "checkout", "-q", "main")
+	run(t, a, "branch", "-q", "-D", "issue-17")
+	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(a, 17)
+	if err != nil || !ok || took.Number != 17 || took.Takeover == nil || took.Takeover.Count != 2 {
+		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	// The issue for the person is #171, after PR #170.
-	if by := linksOf(t, w.Fake, links(17)); !reflect.DeepEqual(by, []int{171}) || labelled(t, w, 17, PersonLabel) || !labelled(t, w, 171, PersonLabel) {
-		t.Fatalf("#17 is blocked by %v; writes %q", by, w.Writes())
+	if labelled(t, w, 17, PersonLabel) || !labelled(t, w, 17, FinalLabel) || contains(w.Writes(), "POST repos/o/r/issues") {
+		t.Fatalf("#17 went to a person; writes %q", w.Writes())
 	}
 }
 
@@ -400,7 +405,7 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	if c := commentsAt(t, w, 7); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:takeover 1 -->") || !strings.Contains(c[0].Body, "<!-- se:takeover-head c7 -->") {
 		t.Fatalf("%+v", c)
 	}
-	// The takeover makes #7 final: stuck again, it goes to a person.
+	// The takeover makes #7 final: stuck again, it is taken over again.
 	if !labelled(t, w, 7, FinalLabel) {
 		t.Fatalf("writes %q", w.Writes())
 	}
