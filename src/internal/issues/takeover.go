@@ -22,8 +22,8 @@ type Takeover struct {
 }
 
 // pause is the wait before asking GitHub again for a mergeability it has not
-// computed yet; tests make it nothing.
-var pause = func() { time.Sleep(3 * time.Second) }
+// computed yet.
+const pause = 3 * time.Second
 
 // asks is how often a PR's mergeability is asked for before a null answer is
 // taken as no conflict.
@@ -102,7 +102,7 @@ func (s Source) conflicts(all []Status, pulls []openPull) ([]conflict, error) {
 func (s Source) mergeability(p openPull) (openPull, error) {
 	for k := 0; k < asks; k++ {
 		if k > 0 {
-			pause()
+			s.Clock.Sleep(pause)
 		}
 		got, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, p.Number), false)
 		if err != nil {
@@ -121,8 +121,8 @@ func (p openPull) dirty() bool { return p.Mergeable != nil && !*p.Mergeable && p
 // takeOverConflict takes over the first conflict it can, lowest number
 // first, and checks its branch out in dir. A conflict whose last takeover
 // found the same PR head is still in flight and is left to its box; a
-// conflict on a final issue (one taken over before, or filed by a review) goes
-// to a person. A takeover labels the issue se-final. ok is false when none was
+// conflict on a final issue (one taken over before, or filed by a review)
+// waits on an issue for a person. A takeover labels the issue se-final. ok is false when none was
 // taken over.
 func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (took Issue, ok bool, err error) {
 	cs, err := s.conflicts(all, pulls)
@@ -140,9 +140,8 @@ func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (to
 		k := m.takeovers + 1
 		heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, c.pr.Head.SHA)
 		if c.Final {
-			reason := fmt.Sprintf("PR #%d conflicts with main on its final attempt (labelled %s), so it waits for a person. "+
-				"`se issue resume %d` puts it back in the queue.", c.pr.Number, FinalLabel, c.Number)
-			if err := s.flag(c.Issue, reason, heads); err != nil {
+			reason := fmt.Sprintf("PR #%d conflicts with main on its final attempt (labelled %s).", c.pr.Number, FinalLabel)
+			if _, err := s.hold(c.Issue, reason); err != nil {
 				return Issue{}, false, err
 			}
 			continue

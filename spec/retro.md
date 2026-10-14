@@ -54,16 +54,8 @@ What earlier versions taught, and how this design answers it:
   and writes a report draft beside the checkout (`../retro-N.md`). It holds:
   - the matrix: every closed issue × every landing question, from the
     answers' machine-readable blocks; it stays in the draft and is not posted;
-  - **rule checks:**
-    - `fixes`: every merged PR said `Fixes #n`;
-    - `ci`: every merged PR had green CI (the last run of each check on its
-      head);
-    - `outside-pr`: no commit reached main outside a PR (every commit on main
-      is some merged PR's merge commit);
-    - `mark`: every `se` issue carries `se issue new`'s mark,
-      `<!-- se:new -->`, which it writes at the end of every body;
-    - `answers`: every landed issue (a leaf closed as completed, not a retro)
-      has landing answers;
+  - the [rule checks](#the-rule-checks), each broken one with what broke
+    it;
   - **counts:** conflicts (conflict takeovers), takeovers, `se-person` flags,
     CI reruns, `by-hand` answers that are not "none", and the median time from
     claim to merge;
@@ -91,8 +83,8 @@ What earlier versions taught, and how this design answers it:
 - **Who decides (the owner's rule for retros and overhauls alike):** every
   finding becomes an issue through the same code as `se issue new`.
   - A **non-controversial** finding goes into the normal queue.
-  - A **controversial** one is created with the label `se-person` and
-    assigned to the owner, so it waits for a person.
+  - A **controversial** one is an issue for a person: labelled `se-person`
+    and assigned to the owner, it waits for them. The retro does not.
 
   Controversial means any of:
   - it changes a design principle ([principles.md](principles.md));
@@ -108,19 +100,14 @@ What earlier versions taught, and how this design answers it:
   judgment that is not complete: a finding without a title, a body, a class
   the classes name, a known home, or a `why` where it is controversial; a
   class without a fix; an unknown check or metric; nothing that went well.
-  When the issues are created depends on who is there:
-  - **A person is present (the default):** `se retro report` posts the report
-    on the retro issue and stops: the issue is labelled `se-person` and
-    assigned to the owner. The person may move findings between the two kinds
-    in a comment, then runs `se issue resume`. The next box takes the retro
-    again, `se retro collect` hands it the posted report, it applies what the
-    person decided to the block, and `se retro report` creates the issues as
-    decided and closes the retro.
-  - **Unattended:** `se retro report` creates the issues at once, by the rule
-    above, and closes the retro.
+  **A retro never waits**, whoever started it: `se retro report` creates the
+  issues at once, by the rule above, posts the report as the retro's closing
+  comment, and closes it. What needs the person is in the issues for them;
+  they decide there. (A report posted for the owner before retros stopped
+  waiting is handed back by `se retro collect`, and filed as it stands, with
+  whatever the owner said in its comments applied.)
 
-  Either way it deletes the retro's claim, `issue-N`: a retro lands no
-  branch. Where the box's token may not delete branches, it says so and goes
+  It deletes the retro's claim, `issue-N`: a retro lands no branch. Where the box's token may not delete branches, it says so and goes
   on: `se fleet prune` removes the branch once the retro is closed, and a
   resumed retro's stale claim is taken over like any stuck claim.
 - **The retro reviews itself**, every time, as a fixed part of the report:
@@ -142,6 +129,22 @@ What earlier versions taught, and how this design answers it:
   `<!-- se:retro-yaml -->`: the window, metrics, rule checks, the previous
   retro's score, findings with the issues they became, classes and what went
   well. The next retro reads it first.
+
+## The rule checks
+
+Each rule is checked only on what closed after the PR that brought it merged,
+so a rule does not count the history it predates. What broke it before, in the
+window, the draft gives once as a count beside it, outside the broken checks
+the next retro scores. `RuleChecks` in `src/internal/issues/retro.go` owns the
+list:
+
+<!-- se:manifest checks -->
+- `fixes`: every merged PR said `Fixes #n`; checked on what closed after PR #14 brought it.
+- `ci`: every merged PR had green CI (the last run of each check on its head); checked from the first commit.
+- `outside-pr`: no commit reached main outside a PR (every commit on main is some merged PR's merge commit); checked from the first commit.
+- `mark`: every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body; checked on what closed after PR #91 brought it.
+- `answers`: every landed issue (a leaf closed as completed, not a retro) has landing answers; checked on what closed after PR #74 brought it.
+<!-- /se:manifest -->
 
 ## The commands
 

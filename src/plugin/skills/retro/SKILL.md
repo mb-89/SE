@@ -23,9 +23,9 @@ Tell them the issue it created. A box takes it from there.
 
 1. `./src/plugin/bin/se retro collect <n>`. It writes the draft to
    `../retro-<n>.md`. If it says it wrote the report already posted on the
-   issue, the owner has decided: read their comments on the issue, apply what
-   they moved between controversial and not to `findings` in the draft's
-   block, and go to 4.
+   issue (from before retros stopped waiting for the owner): read the
+   owner's comments on the issue, apply what they moved between controversial
+   and not, if anything, to `findings` in the draft's block, and go to 4.
 2. Read the draft: the issue's field feedback, the rule checks, the counts,
    the metrics against the previous retros, the previous retro's score, the
    scripts and the matrix of landing answers. Look too for what the window
@@ -46,6 +46,6 @@ Tell them the issue it created. A box takes it from there.
      machinery. Each a `name` and its cheapest durable `fix`.
    - `went_well`: what worked and should stay.
 4. `./src/plugin/bin/se retro report <n>`. If it refuses, fix what it names
-   and run it again. It either posts the report and gives the retro to the
-   owner, or creates the issues and closes the retro. Either way, end: there
-   is no PR to land.
+   and run it again. It creates the issues, those for a person where
+   controversial, and closes the retro. End: there is no PR to land, and
+   nothing waits for the owner but the issues for them.

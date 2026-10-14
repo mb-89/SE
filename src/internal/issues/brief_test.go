@@ -47,7 +47,7 @@ func asked(t *testing.T, answers map[string]string) (GH, *[]string) {
 
 func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 	gh, paths := asked(t, briefAnswers())
-	b, err := Source{Repo: repo, GH: gh}.Brief(1, false)
+	b, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Brief(1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 
 	// Once the findings are verified, --claims shows them, as claims.
 	gh, _ = asked(t, briefAnswers())
-	b, err = Source{Repo: repo, GH: gh}.Brief(1, true)
+	b, err = Source{Repo: repo, GH: gh, Clock: atNow()}.Brief(1, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestTheBriefOfAReReviewNamesTheEarlierBlockersAndTheDiff(t *testing.T) {
 			return nil, fmt.Errorf("gh api: Not Found (HTTP 404)")
 		}
 		return gh(args...)
-	}}
+	}, Clock: atNow()}
 	b, err := s.Brief(1, false)
 	if err != nil {
 		t.Fatal(err)

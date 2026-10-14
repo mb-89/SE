@@ -71,8 +71,9 @@ and only then leaves.**
    `<!-- se:takeover N -->`, every other fix with `<!-- se:fleet KEY M -->` on
    the finding's issue (`M` is the issue it made, or 0). A finding that comes
    back after its fix goes to a person: a takeover labels the issue
-   `se-final`, and a takeover of an `se-final` issue labels it `se-person`
-   instead, and any other finding becomes an `se-person` issue. A finding
+   `se-final`, and a takeover of an `se-final` issue makes it wait on an
+   issue for a person instead, and any other finding becomes an `se-person`
+   issue. A finding
    already reported as an issue that is still open is left as it is.
 5. **The record.** The box lands nothing of its own, so each fix is a comment
    on the issue it acted on, saying what was found and what was done (the
@@ -86,6 +87,7 @@ and only then leaves.**
 se fleet check [--json] [--repo OWNER/NAME]
 se fleet fix [--json] [--repo OWNER/NAME]
 se fleet prune [--apply] [--json] [--repo OWNER/NAME]
+se fleet refresh [--json] [--repo OWNER/NAME]
 ```
 <!-- /se:manifest -->
 
@@ -107,3 +109,22 @@ no open PR; `--apply` deletes them. It never touches `main` or any other
 branch. The workflow `.github/workflows/prune.yml` runs
 `se fleet prune --apply` when an issue or a PR closes, and every hour, and
 its output names what it deleted.
+
+## Up to date with main
+
+CI must run on what lands, so main's ruleset merges a PR only when its
+branch is up to date with main (its required check `check` is strict): a PR
+whose CI ran before main moved waits. Two things keep it moving, with no
+box in the loop:
+
+- `se issue land` merges origin's copy of the branch and then `origin/main`
+  into it before it runs the check, so the check runs on what lands and the
+  push is a fast-forward. A merge that conflicts is undone, and the box
+  resolves it by hand (never a rebase, never a force-push).
+- `se fleet refresh` brings every open PR with auto-merge on that main has
+  moved past up to date through GitHub's update-branch, and starts the
+  `ci` workflow on its new head itself, since a push made with the
+  repository's token starts no workflow. A PR that conflicts with main is
+  left to its takeover; an update that fails is reported, and the workflow
+  run goes red. The workflow `.github/workflows/refresh.yml` runs it on every
+  push to main, and every hour.

@@ -43,3 +43,14 @@ func TestOutsideSessionStartAFailedPullFails(t *testing.T) {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 }
+
+func TestAnUpdateOverARemoteConnectionDoesNotReload(t *testing.T) {
+	t.Setenv(remoteEnv, "true")
+	if reloads(true) {
+		t.Fatal("a remote session was asked to reload")
+	}
+	t.Setenv(remoteEnv, "")
+	if !reloads(true) || reloads(false) {
+		t.Fatal("only a local session reloads")
+	}
+}

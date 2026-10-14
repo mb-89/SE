@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/io/clock"
+
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -92,8 +94,8 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 	if person {
 		answers["repos/o/r/issues/2/dependencies/blocked_by?per_page=100"] = `[{"number":6,"state":"open"}]`
 	}
-	old, oldClock := gh, clock
-	clock = func() time.Time { return briefedAt }
+	old, oldClock := gh, wall
+	wall = clock.NewFake(briefedAt)
 	gh = func(args ...string) ([]byte, error) {
 		path := strings.Replace(args[len(args)-1], "repos/o/probe/", "repos/o/r/", 1)
 		if a, ok := answers[path]; ok {
@@ -121,7 +123,7 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 		}
 		return nil, fmt.Errorf("not recorded: %v", args)
 	}
-	t.Cleanup(func() { gh, clock = old, oldClock })
+	t.Cleanup(func() { gh, wall = old, oldClock })
 }
 
 // briefed runs se briefing in a workspace with a README and answers its text.
@@ -158,8 +160,8 @@ func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
 	inOrder(t, out,
 		"SE briefing for o/r, 2026-10-13T12:00:00Z",
 		"## Waits on you",
-		"- #7 retro (report waiting, holds up 0)", "its report waits for the owner: the retro report is posted", "u7",
 		"- #6 six (waiting on a person, holds up 1)", "needs the owner's call", "u6",
+		"- #7 retro (waiting on a person, holds up 0)", "the retro report is posted", "u7",
 		"## In flight",
 		"- #1 one: PR #11 p11; CI green, auto-merge on",
 		"fleet check:", "waiting on a person #6", "waiting on a person #7",
@@ -181,7 +183,7 @@ func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
 	if err := json.Unmarshal([]byte(js), &b); code != 0 || err != nil {
 		t.Fatalf("exit %d, %q: %v", code, js, err)
 	}
-	if len(b.Pending) != 2 || b.Pending[1].Holds != 1 || len(b.InFlight) != 1 || b.InFlight[0].PR != 11 ||
+	if len(b.Pending) != 2 || b.Pending[0].Holds != 1 || len(b.InFlight) != 1 || b.InFlight[0].PR != 11 ||
 		b.Happened[0].Done != "twenty is done" || b.Retro == nil || b.Retro.Number != 18 || b.Next == nil || b.Next.Number != 3 {
 		t.Fatalf("%+v", b)
 	}

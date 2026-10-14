@@ -17,8 +17,9 @@ import (
 var gh issues.GH = issues.Gh
 
 // fire is the fan-out after a claim, and after the creation of a ready issue:
-// it fires the routine once and answers a line saying what happened. Tests put a fake here.
-var fire = issues.FireFromEnv
+// it fires the routine named in the environment once, on the call's network,
+// and answers a line saying what happened.
+func (c *Call) fire() string { return issues.Fire(os.Getenv, c.Net) }
 
 // sessionID names the session se runs in, which land records as the leaf's
 // worker and review tells apart from them. Tests put a fixed one here.
@@ -135,7 +136,12 @@ func init() {
 			}
 			fanout := ""
 			if ok {
-				fanout = fire()
+				fanout = c.fire()
+				// What waits for it, so the box can tell which of them need
+				// what it may leave over.
+				if took.Blocks, err = s.Dependents(took.Number); err != nil {
+					return Reply{}, err
+				}
 			}
 			r, err := issueReply(*asJSON, took, ok, issues.Branch(took.Number), fanout, started...)
 			return sweptReply(r, err, *asJSON, flagged)
@@ -193,11 +199,71 @@ func init() {
 		},
 	})
 	register(Command{
+		Name:    "issue tree",
+		Usage:   "issue tree [ROOT] [--json] [--repo OWNER/NAME]",
+		Group:   "Issues",
+		Summary: "list the se trees and how many of their sub-issues are closed",
+		Details: "list every se issue with sub-issues, open or closed, open first: its number, state, how many of its sub-issues are closed, its labels and its title. With ROOT, list ROOT and every issue below it, open or closed, each indented under its parent.",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "issue tree")
+			var words []string
+			for rest := c.Args; ; {
+				if err := fs.Parse(rest); err != nil {
+					return Reply{}, err
+				}
+				if fs.NArg() == 0 {
+					break
+				}
+				words, rest = append(words, fs.Arg(0)), fs.Args()[1:]
+			}
+			c.Args = nil
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			root := 0
+			if len(words) > 0 {
+				root, _ = strconv.Atoi(strings.TrimPrefix(words[0], "#"))
+				if len(words) > 1 || root <= 0 {
+					return Reply{}, fmt.Errorf("issue tree takes at most one issue number, not %q", strings.Join(words, " "))
+				}
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			if err := s.CloseParents(); err != nil {
+				return Reply{}, err
+			}
+			var nodes []issues.Node
+			if root > 0 {
+				nodes, err = s.TreeOf(root)
+			} else {
+				nodes, err = s.Trees()
+			}
+			if err != nil {
+				return Reply{}, err
+			}
+			if *asJSON {
+				data, err := json.Marshal(nodes)
+				return Reply{Text: string(data)}, err
+			}
+			if len(nodes) == 0 {
+				return Reply{Text: "No se issue has sub-issues."}, nil
+			}
+			lines := make([]string, len(nodes))
+			for k, n := range nodes {
+				lines[k] = n.Line()
+			}
+			return Reply{Text: strings.Join(lines, "\n")}, nil
+		},
+	})
+	register(Command{
 		Name:    "issue new",
-		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--final] [--json] [--repo OWNER/NAME]",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "create an se issue, with its blockers and its parent",
-		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --review labels it se-review; --final labels it se-final, its last attempt before a person. A ready issue, one nothing open blocks, fires the routine once.",
+		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. A ready issue, one nothing open blocks, fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -206,8 +272,10 @@ func init() {
 			bodyFile := fs.String("body-file", "", "a file `PATH` holding the issue's body")
 			blockedBy := fs.String("blocked-by", "", "the issues that block it, as `N,M`, or none")
 			parent := fs.Int("parent", 0, "the issue `N` it is a sub-issue of")
+			blocks := fs.String("blocks", "", "the issues it blocks, as `N,M`: those that need it")
 			review := fs.Bool("review", false, "label it se-review: it is reviewed once its sub-issues have closed")
 			final := fs.Bool("final", false, "label it se-final: if it fails, it goes to a person")
+			person := fs.Bool("person", false, "make it an issue for a person: label it se-person and assign it to the owner")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
@@ -219,6 +287,12 @@ func init() {
 			blockers, err := issues.ParseBlockedBy(*blockedBy)
 			if err != nil {
 				return Reply{}, err
+			}
+			var dependents []int
+			if given["blocks"] {
+				if dependents, err = issues.ParseBlockedBy(*blocks); err != nil || len(dependents) == 0 {
+					return Reply{}, fmt.Errorf("--blocks takes issue numbers, like 5,8, not %q", *blocks)
+				}
 			}
 			if *parent < 0 {
 				return Reply{}, fmt.Errorf("--parent takes an issue number, not %d", *parent)
@@ -251,13 +325,28 @@ func init() {
 			if *final {
 				labels = append(labels, issues.FinalLabel)
 			}
-			made, ready, err := s.Create(*title, *body, *parent, blockers, labels...)
+			if err := s.Exist(dependents); err != nil {
+				return Reply{}, err
+			}
+			var made issues.Issue
+			ready := false
+			if *person {
+				if len(labels) > 0 {
+					return Reply{}, fmt.Errorf("--person takes neither --review nor --final: an issue for a person is no box's work")
+				}
+				made, err = s.ForPerson(*title, *body, *parent, blockers)
+			} else {
+				made, ready, err = s.Create(*title, *body, *parent, blockers, labels...)
+			}
 			if err != nil {
+				return Reply{}, err
+			}
+			if err := s.Blocking(made, dependents); err != nil {
 				return Reply{}, err
 			}
 			fanout := ""
 			if ready {
-				fanout = fire()
+				fanout = c.fire()
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
@@ -265,10 +354,12 @@ func init() {
 					URL       string `json:"url"`
 					BlockedBy []int  `json:"blocked_by"`
 					Parent    int    `json:"parent,omitempty"`
+					Blocks    []int  `json:"blocks,omitempty"`
 					Review    bool   `json:"review,omitempty"`
 					Final     bool   `json:"final,omitempty"`
+					Person    bool   `json:"person,omitempty"`
 					Fanout    string `json:"fanout,omitempty"`
-				}{made.Number, made.URL, append([]int{}, blockers...), *parent, *review, *final, fanout})
+				}{made.Number, made.URL, append([]int{}, blockers...), *parent, dependents, *review, *final, *person, fanout})
 				return Reply{Text: string(data)}, err
 			}
 			text := fmt.Sprintf("Created #%d %s\n%s", made.Number, made.Title, made.URL)
@@ -277,6 +368,12 @@ func init() {
 			}
 			if *review {
 				text += "\nLabelled " + issues.ReviewLabel + ": it is reviewed once its sub-issues have closed."
+			}
+			if len(dependents) > 0 {
+				text += "\nIt blocks " + numbers(dependents) + "."
+			}
+			if *person {
+				text += "\nFor a person: labelled " + issues.PersonLabel + " and assigned to the owner."
 			}
 			if *final {
 				text += "\nLabelled " + issues.FinalLabel + ": if it fails, it goes to a person."
@@ -413,7 +510,7 @@ func init() {
 			// A filed finding is a ready issue in the queue: it fires once.
 			fanout := ""
 			if len(r.Filed) > 0 {
-				fanout = fire()
+				fanout = c.fire()
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
@@ -539,7 +636,7 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 			}
 			*repo = r
 		}
-		return issues.Source{Repo: *repo, GH: gh}, nil
+		return issues.Source{Repo: *repo, GH: gh, Clock: c.Clock}, nil
 	}, asJSON
 }
 
@@ -598,6 +695,9 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string, cad
 		head = fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
 	case t != nil:
 		head += fmt.Sprintf("\nIt is stuck: a take takes it over and continues its branch %s.", issues.Branch(i.Number))
+	}
+	if branch != "" && len(i.Blocks) > 0 {
+		head += fmt.Sprintf("\nIt blocks %s. What you leave over, filed with se issue new, names in --blocks those of them that need it.", numbers(i.Blocks))
 	}
 	if fanout != "" {
 		head += "\n" + fanout

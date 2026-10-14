@@ -55,6 +55,10 @@ func (g *github) gh(args ...string) ([]byte, error) {
 	}
 	if args[1] == "-X" {
 		g.writes = append(g.writes, args)
+		// The issue for a person the sweep mints.
+		if args[2] == "POST" && path == "repos/o/r/issues" {
+			return []byte(`{"number":101,"id":1010,"html_url":"u101"}`), nil
+		}
 		return []byte(`{}`), nil
 	}
 	a, ok := g.answers[path]
@@ -70,7 +74,7 @@ func (g *github) gh(args ...string) ([]byte, error) {
 	return []byte(a), nil
 }
 
-func (g *github) source() Source { return Source{Repo: repo, GH: g.gh, Now: clock} }
+func (g *github) source() Source { return Source{Repo: repo, GH: g.gh, Clock: atNow()} }
 
 func refs(ns ...int) string {
 	var out []string
@@ -188,7 +192,7 @@ func TestOfTwoTakeoversTheFirstCommentWins(t *testing.T) {
 	}
 }
 
-func TestAStaleFinalClaimGoesToAPerson(t *testing.T) {
+func TestAStaleFinalClaimWaitsOnAnIssueForAPerson(t *testing.T) {
 	// #5 is se-final: taken over once already, or filed by a review.
 	g := newGithub(t, map[string]string{
 		listPath:    list(node(5, 0, FinalLabel), node(6, 0)),
@@ -208,17 +212,31 @@ func TestAStaleFinalClaimGoesToAPerson(t *testing.T) {
 	if err != nil || !ok || next.Number != 6 || !reflect.DeepEqual(flagged, []int{5}) {
 		t.Fatalf("next %+v %v, flagged %v, %v", next, ok, flagged, err)
 	}
-	want := [][]string{
-		{"api", "-X", "POST", "-f", "labels[]=se-person", "repos/o/r/issues/5/labels"},
-		{"api", "-X", "POST", "-f", "assignees[]=o", "repos/o/r/issues/5/assignees"},
+	// An issue for a person, #101, is minted and blocks #5; #5 is told so,
+	// resumed, and no longer final. #5 itself is never labelled se-person.
+	var paths []string
+	for _, w := range g.writes {
+		paths = append(paths, w[2]+" "+w[len(w)-1])
 	}
-	if len(g.writes) != 3 || !reflect.DeepEqual(g.writes[:2], want) {
-		t.Fatalf("writes %q", g.writes)
+	want := []string{
+		"POST repos/o/r/issues",
+		"POST repos/o/r/issues/101/assignees",
+		"POST repos/o/r/issues/5/dependencies/blocked_by",
+		"POST repos/o/r/issues/5/comments",
+		"DELETE repos/o/r/issues/5/labels/se-final",
 	}
-	if c := g.writes[2]; c[len(c)-1] != "repos/o/r/issues/5/comments" || !strings.HasPrefix(c[len(c)-2], "body=<!-- se:person -->\nStuck on its final attempt") {
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("writes %q", paths)
+	}
+	if made := strings.Join(g.writes[0], " "); !strings.Contains(made, "title=Decide how #5 goes on: t5") || !strings.Contains(made, "labels[]=se-person") {
+		t.Fatalf("minted %q", made)
+	}
+	if c := g.comments[5][len(g.comments[5])-1].Body; !strings.HasPrefix(c, "<!-- se:person -->\nStuck on its final attempt") || !strings.HasSuffix(c, "<!-- se:resume -->") {
 		t.Fatalf("comment %q", c)
 	}
-	if _, _, err := s.Take(t.TempDir(), 5); err == nil || !strings.Contains(err.Error(), "waits on a person") {
+	// Blocked by #101, #5's claim waits: it is neither stuck nor taken over.
+	g.answers[links(5)] = `[{"number":101,"state":"open"}]`
+	if _, _, err := s.Take(t.TempDir(), 5); err == nil || !strings.Contains(err.Error(), "blocked by #101") {
 		t.Fatalf("%v", err)
 	}
 }

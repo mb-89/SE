@@ -28,8 +28,10 @@ every session switched on. The fan-out's own variables are in
 The setup script's result is cached, so `/opt/se` can be many commits behind
 when a session starts. The plugin therefore updates its own checkout at every
 session start, whether or not SE is on: a clean `main` is pulled from
-`origin/main` (a shallow clone too), `se` is rebuilt if anything changed, and
-the plugin reloads once `session.start` has answered. A checkout that is not a
+`origin/main` (a shallow clone too), `se` is rebuilt if anything changed, and,
+in a local session, the plugin reloads once `session.start` has answered. A
+remote session (`CLAUDE_CODE_REMOTE=true`, a cloud box) is not asked to
+reload: it refuses `/reload-plugins`, and the new `se` runs at once anyway. A checkout that is not a
 clean `main`, such as a person's working clone, is left as it is, and a failed
 pull or build never holds the session up; either is said in one line.
 

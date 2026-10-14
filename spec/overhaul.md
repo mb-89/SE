@@ -13,10 +13,10 @@ whole system, not a window.
 
 - **An overhaul is an issue** labelled `se` and `se-overhaul`, created by
   `se overhaul new` (through the same code as `se issue new`), which fires the
-  routine, as fan-out does, so a box takes it at once. Like a retro, it is
-  attended by default: its box stops for the owner with the report.
-  `--unattended` never stops; the cadence starts overhauls this way. The
-  issue's body records which it is, `<!-- se:overhaul attended -->` or
+  routine, as fan-out does, so a box takes it at once. Like a retro, it never
+  waits for the owner, whoever started it. `--unattended` records that no
+  person started it; the cadence starts overhauls this way. The issue's body
+  records which it is, `<!-- se:overhaul attended -->` or
   `<!-- se:overhaul unattended -->`.
 - **The cadence:** every `OverhaulCadence` (5, in
   `src/internal/issues/cadence.go`) closed retros since the last closed
@@ -57,25 +57,32 @@ whole system, not a window.
     obsolete or in conflict with another?
   - **The retro's effectiveness over its last five runs**
     (`looked_at.retro`): did the metrics move, and did findings recur anyway?
+  - **Speed** (`looked_at.speed`): what could be faster? What runs one after
+    another that could run in parallel; where a run asks the outside world
+    for the same thing twice, or item by item where one batched query, or a
+    query that does more on the server, would do (principles 6 and 9).
+  - **Mechanize** (`looked_at.mechanize`): what an agent still does, or a
+    person still remembers, that could be a tested `se` command (principle 1).
+  - **Removal** (`looked_at.removal`): what could go: a command, a rule, a
+    file, a step or a check that no longer earns its place.
   - **Findings** (`findings`): each names the principle (`principle`; 0 only
     for a missing one), the place (`place`) and how far it strays (`strays`,
     `slightly` or `far`), with a `title`, a `body`, the `area` that found it
     (`principle`, `outside`, `consistency`, `principles` for a change to a
-    principle, or `retro`), the `sources` an outside one cites, and
+    principle, `retro`, `speed`, `mechanize` or `removal`), the `sources` an
+    outside one cites, and
     `controversial` with its `why`.
   - **What went well** (`went_well`).
 - **Minting:** the same rule as the retro's (the owner's rule in
   [retro.md](retro.md)). Every finding becomes an issue through the same code
-  as `se issue new`. A controversial one is created with `se-person`,
-  assigned to the owner; the rest go to the normal queue. A change to a
-  principle is always controversial: `se overhaul file` makes it so. Attended,
-  the report is posted first and the issue goes to the owner (`se-person`),
-  who may move findings between the two kinds in a comment, then runs
-  `se issue resume`; the next box takes it again, `se overhaul read` hands it
-  the posted report, it applies what the owner decided, and `se overhaul file`
-  creates the issues and closes the overhaul. Unattended, `se overhaul file`
-  creates them at once and closes it. Either way it deletes the claim
-  `issue-N`, as a retro does.
+  as `se issue new`. A controversial one is an issue for a person, labelled
+  `se-person` and assigned to the owner; the rest go to the normal queue. A
+  change to a principle is always controversial: `se overhaul file` makes it
+  so. `se overhaul file` creates the issues at once, posts the report as the
+  closing comment and closes the overhaul: it never waits. (A report posted
+  for the owner before overhauls stopped waiting is handed back by
+  `se overhaul read` and filed as it stands.) It deletes the claim `issue-N`,
+  as a retro does.
 - **`se overhaul file` refuses**, writing nothing, a judgment that is not
   complete: a principle without a verdict, or a verdict without `strays` and
   `how`; an empty `looked_at` part ("nothing to change" is an answer); a

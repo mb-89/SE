@@ -16,7 +16,7 @@ func init() {
 			if err := c.Parse(c.Flags("stop")); err != nil {
 				return Reply{}, err
 			}
-			return Reply{}, daemon.Stop(c.Paths(), 5*time.Second)
+			return Reply{}, daemon.Stop(c.Paths(), 5*time.Second, c.Clock, c.Net)
 		},
 	})
 }

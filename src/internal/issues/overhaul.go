@@ -18,9 +18,9 @@ import (
 // checkout: the overhaul judges SE against every one of them.
 const PrinciplesFile = "spec/principles.md"
 
-// overhaulUnattendedMark is in the body of an overhaul nobody waits for: its
-// box creates the findings' issues at once. One a person started carries
-// <!-- se:overhaul attended --> instead, and its box stops for the owner.
+// overhaulUnattendedMark is in the body of an overhaul no person started. One
+// a person started carries <!-- se:overhaul attended --> instead. Either way
+// its box files the issues and closes it.
 const overhaulUnattendedMark = "<!-- se:overhaul unattended -->"
 
 // The marks that cut an overhaul's report into its parts: the report, the
@@ -53,9 +53,9 @@ func (s Source) NewOverhaul(unattended bool) (OverhaulIssue, error) {
 		o.Previous = last.Number
 		before = fmt.Sprintf("The last overhaul was #%d; this one compares against its report.", last.Number)
 	}
-	mode, who := "attended", "A person started it: the box posts its report here and stops for the owner, who decides, then runs `se issue resume`."
+	mode, who := "attended", "A person started it. The box creates the findings' issues, those for a person where controversial, and closes it."
 	if unattended {
-		mode, who = "unattended", "It runs unattended: the box creates the findings' issues at once and closes it."
+		mode, who = "unattended", "It runs unattended. The box creates the findings' issues, those for a person where controversial, and closes it."
 	}
 	body := fmt.Sprintf("An overhaul of SE as it stands: is the design still right? It checks every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last %d runs. The rules are spec/overhaul.md; a box takes it with the overhaul skill and starts with `se overhaul read`.\n\n%s %s\n\n<!-- se:overhaul %s -->",
 		OverhaulCadence, before, who, mode)
@@ -91,16 +91,29 @@ func Principles(dir string) ([]Principle, error) {
 		return nil, fmt.Errorf("the design principles: %w", err)
 	}
 	var ps []Principle
+	// checked says the line before belongs to a "Checked by:" text, which
+	// runs on over indented lines until a blank line or the next principle.
+	checked := false
 	for _, line := range strings.Split(string(data), "\n") {
 		if m := principleLine.FindStringSubmatch(line); m != nil {
 			ps = append(ps, Principle{Number: atoi(m[1]), Name: strings.TrimSuffix(m[2], ".")})
+			checked = false
 			continue
 		}
 		if m := checkedLine.FindStringSubmatch(line); m != nil && len(ps) > 0 {
-			p := &ps[len(ps)-1]
-			p.CheckedBy = strings.TrimSpace(m[1])
-			p.Mechanical = strings.Contains(p.CheckedBy, "mechanically") || strings.Contains(p.CheckedBy, "battery")
+			ps[len(ps)-1].CheckedBy = strings.TrimSpace(m[1])
+			checked = true
+			continue
 		}
+		if checked && strings.TrimSpace(line) != "" && strings.TrimLeft(line, " \t") != line {
+			ps[len(ps)-1].CheckedBy += " " + strings.TrimSpace(line)
+			continue
+		}
+		checked = false
+	}
+	for i := range ps {
+		p := &ps[i]
+		p.Mechanical = strings.Contains(p.CheckedBy, "mechanically") || strings.Contains(p.CheckedBy, "battery")
 	}
 	if len(ps) == 0 {
 		return nil, fmt.Errorf("%s states no principle", path)
@@ -165,13 +178,18 @@ type Judged struct {
 
 // LookedAt says what the box found beyond the principles one by one: the
 // outside world, the consistency of the whole system, the principles
-// themselves, and the retro's effectiveness. Each is required, "nothing to
+// themselves, the retro's effectiveness, what could be faster (run in
+// parallel, ask the server for more per query), what an agent still does that
+// could be a command, and what could go. Each is required, "nothing to
 // change" included.
 type LookedAt struct {
 	Outside     string `yaml:"outside"`
 	Consistency string `yaml:"consistency"`
 	Principles  string `yaml:"principles"`
 	Retro       string `yaml:"retro"`
+	Speed       string `yaml:"speed"`
+	Mechanize   string `yaml:"mechanize"`
+	Removal     string `yaml:"removal"`
 }
 
 // Straying is one finding of an overhaul: where SE strays, from which
@@ -180,7 +198,7 @@ type Straying struct {
 	Title string `yaml:"title"`
 	Body  string `yaml:"body"`
 	// Area is what found it: principle, outside, consistency, principles
-	// (a change to a principle) or retro.
+	// (a change to a principle), retro, speed, mechanize or removal.
 	Area string `yaml:"area"`
 	// Principle is the principle it names; 0 only for a principle missing
 	// from the list.
@@ -197,7 +215,7 @@ type Straying struct {
 }
 
 var (
-	areas      = []string{"principle", "outside", "consistency", "principles", "retro"}
+	areas      = []string{"principle", "outside", "consistency", "principles", "retro", "speed", "mechanize", "removal"}
 	verdicts   = []string{"none", "slightly", "far"}
 	principled = "it changes a design principle"
 )
@@ -281,7 +299,7 @@ func (s Source) CollectOverhaul(n int, ps []Principle) (OverhaulReport, error) {
 		return r, err
 	}
 	r.Previous = last.Number
-	text, _, err := s.lastPosted(last.Number, overhaulReportMark)
+	text, err := s.lastPosted(last.Number, overhaulReportMark)
 	if err != nil || text == "" {
 		return r, err
 	}
@@ -350,9 +368,9 @@ func (r OverhaulReport) facts() string {
 			b.WriteString("\n")
 		}
 		for _, k := range checkKinds {
-			fmt.Fprintf(&b, "| broken `%s` |", k.kind)
+			fmt.Fprintf(&b, "| broken `%s` |", k.Kind)
 			for _, run := range r.Retros {
-				fmt.Fprintf(&b, " %d |", run.Broken[k.kind])
+				fmt.Fprintf(&b, " %d |", run.Broken[k.Kind])
 			}
 			b.WriteString("\n")
 		}
@@ -422,8 +440,9 @@ func (r OverhaulReport) judgment() string {
 			}
 		}
 	}
-	fmt.Fprintf(&b, "\n## Beyond the principles\n- **The outside world:** %s\n- **Consistency across the whole system:** %s\n- **The principles themselves:** %s\n- **The retro's effectiveness:** %s\n",
-		oneLine(r.LookedAt.Outside), oneLine(r.LookedAt.Consistency), oneLine(r.LookedAt.Principles), oneLine(r.LookedAt.Retro))
+	fmt.Fprintf(&b, "\n## Beyond the principles\n- **The outside world:** %s\n- **Consistency across the whole system:** %s\n- **The principles themselves:** %s\n- **The retro's effectiveness:** %s\n- **Speed (what could run in parallel, or ask the server for more at once):** %s\n- **Mechanize (what an agent still does that could be an se command):** %s\n- **Removal (what could go):** %s\n",
+		oneLine(r.LookedAt.Outside), oneLine(r.LookedAt.Consistency), oneLine(r.LookedAt.Principles), oneLine(r.LookedAt.Retro),
+		oneLine(r.LookedAt.Speed), oneLine(r.LookedAt.Mechanize), oneLine(r.LookedAt.Removal))
 	b.WriteString("\n## What went well\n")
 	for _, w := range r.WentWell {
 		fmt.Fprintf(&b, "- %s\n", w)
@@ -499,7 +518,10 @@ func (r *OverhaulReport) judged() error {
 			why = append(why, fmt.Sprintf("principle %d (%s) has no verdict", p.Number, p.Name))
 		}
 	}
-	for name, said := range map[string]string{"outside": r.LookedAt.Outside, "consistency": r.LookedAt.Consistency, "principles": r.LookedAt.Principles, "retro": r.LookedAt.Retro} {
+	for name, said := range map[string]string{
+		"outside": r.LookedAt.Outside, "consistency": r.LookedAt.Consistency, "principles": r.LookedAt.Principles, "retro": r.LookedAt.Retro,
+		"speed": r.LookedAt.Speed, "mechanize": r.LookedAt.Mechanize, "removal": r.LookedAt.Removal,
+	} {
 		if strings.TrimSpace(said) == "" {
 			why = append(why, "looked_at."+name+" is empty: say what was found, nothing included")
 		}
@@ -540,20 +562,20 @@ func (r *OverhaulReport) judged() error {
 	return fmt.Errorf("the overhaul's judgment is not complete, so nothing was written: %s", strings.Join(why, "; "))
 }
 
-// PostedOverhaul is the report already on overhaul n, for a box that picks it
-// up after the owner decided; "" where there is none.
+// PostedOverhaul is the report already on overhaul n, posted for the owner
+// before overhauls stopped waiting, for the box that files it; "" where there
+// is none.
 func (s Source) PostedOverhaul(n int) (string, error) {
 	if _, err := s.overhaulIssue(n); err != nil {
 		return "", err
 	}
-	text, _, err := s.lastPosted(n, overhaulReportMark)
+	text, err := s.lastPosted(n, overhaulReportMark)
 	return text, err
 }
 
 // FileOverhaul files overhaul n's report, the text of a draft the box judged,
-// by the owner's rule, as a retro's is filed (spec/retro.md): attended and not
-// yet decided, it is posted and goes to the owner; unattended or resumed, its
-// findings become issues, a person's where controversial, and it closes.
+// as a retro's is filed (spec/retro.md): its findings become issues, one for
+// a person where controversial, and it closes.
 func (s Source) FileOverhaul(n int, draft string) (Filed, error) {
 	r, facts, err := ParseOverhaul(draft)
 	if err != nil {
@@ -569,7 +591,7 @@ func (s Source) FileOverhaul(n int, draft string) (Filed, error) {
 	if err != nil {
 		return Filed{}, err
 	}
-	run := filing{kind: "overhaul", mark: overhaulReportMark, unattended: strings.Contains(i.Body, overhaulUnattendedMark), assemble: func() (string, error) { return r.assemble(facts) }}
+	run := filing{kind: "overhaul", mark: overhaulReportMark, assemble: func() (string, error) { return r.assemble(facts) }}
 	run.mint = func(out *Filed) error {
 		for k := range r.Findings {
 			f := &r.Findings[k]

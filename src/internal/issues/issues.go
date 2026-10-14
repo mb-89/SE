@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 // Label marks an issue as the fleet's work.
@@ -46,6 +48,11 @@ type Issue struct {
 	// or its PR in conflict with main: taking it continues its branch and PR
 	// as they stand.
 	Takeover *Takeover `json:"takeover,omitempty"`
+	// Blocks names the open issues it blocks, where a take read them: what
+	// is left of it may hold up those that need it (se issue new --blocks).
+	Blocks []int `json:"blocks,omitempty"`
+	// id is GitHub's id of an issue se just created, which a link takes.
+	id int64
 }
 
 // Branch is the branch whose presence on origin claims issue n.
@@ -74,18 +81,13 @@ type Source struct {
 	// Repo is OWNER/NAME.
 	Repo string
 	GH   GH
-	// Now is the clock the lease is read against; nil is the wall clock.
-	Now func() time.Time
+	// Clock is the time leases, windows and stamps are read against.
+	Clock clock.Clock
 	// Flagged hears of each issue the sweep gave to a person, and why.
 	Flagged func(i Issue, reason string)
 }
 
-func (s Source) now() time.Time {
-	if s.Now == nil {
-		return time.Now()
-	}
-	return s.Now()
-}
+func (s Source) now() time.Time { return s.Clock.Now() }
 
 // issue is the part of GitHub's issue object the rules read.
 type issue struct {
@@ -450,8 +452,18 @@ func (s Source) survey() ([]Status, tree, error) {
 		st := &Status{Issue: Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, Parent: parent, Retro: i.labelled(RetroLabel), Overhaul: i.labelled(OverhaulLabel)}, Above: t.above[n], Final: i.labelled(FinalLabel)}
 		switch {
 		case i.labelled(PersonLabel):
-			st.Person, st.Why, st.Reason = true, "waits on a person", marked[n].reason
+			st.Person, st.Why = true, "waits on a person"
+			if st.Reason = marked[n].reason; st.Reason == "" {
+				st.Reason = firstParagraph(i.Body)
+			}
 		case !parent && claimed[Branch(n)]:
+			// A claim waiting on its blockers (an issue for a person that
+			// holds it) is not stuck; once they close, its old push makes it
+			// stuck at once, and the next box takes it over afresh.
+			if why := held(n); why != "" {
+				st.Why = Branch(n) + " waits: " + why
+				break
+			}
 			st.Why, st.claimed = "claimed by "+Branch(n), true
 			l := leased[n]
 			st.Since, st.pushed, st.Takeovers, st.Stuck = l.Since, l.pushed, l.Takeovers, l.Stuck
@@ -527,6 +539,13 @@ func (s Source) survey() ([]Status, tree, error) {
 	return all, t, nil
 }
 
+// firstParagraph is the first paragraph of an issue's body, on one line: an
+// issue minted for a person opens with why it waits.
+func firstParagraph(body string) string {
+	first, _, _ := strings.Cut(strings.TrimSpace(body), "\n\n")
+	return strings.Join(strings.Fields(first), " ")
+}
+
 // openBlockers names the blockers of open fleet issue n that are still open,
 // in ascending order. Blockers are GitHub's native "blocked by" links and
 // nothing else.
@@ -593,8 +612,8 @@ func takeOrder(all []Status, want int) []Status {
 // stands. A parent's branch claims its whole
 // tree; where it exists already, Take picks the tree up from that claim. A
 // claimed leaf named as want, at any depth, is taken over where se fleet
-// check finds it stuck (see takeOverClaim). ok is false when nothing was left
-// to take.
+// check finds it stuck (see takeOverClaim), or where it is stuck past the
+// lease. ok is false when nothing was left to take.
 func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 	all, t, err := s.survey()
 	if err != nil {
@@ -615,7 +634,9 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 			if st.claimed && st.Takeover == nil {
 				return s.takeOverClaim(dir, st, t)
 			}
-			if st.Above != 0 {
+			// A stuck leaf is taken over at any depth, as se fleet check's
+			// remedy names it; other work inside a tree is taken with --in.
+			if st.Above != 0 && st.Takeover == nil {
 				return Issue{}, false, fmt.Errorf("#%d is a sub-issue of #%d; it is taken with --in", want, st.Above)
 			}
 			if !st.Takeable() {
@@ -837,15 +858,11 @@ func Claim(dir string, n int) (claimed bool, err error) {
 	return true, nil
 }
 
-// stake is Claim without the checkout: it readies the pinned linters the push
-// hook needs, pushes the branch and fetches it as
+// stake is Claim without the checkout: it pushes the branch and fetches it as
 // origin/issue-<n>.
 func stake(dir string, n int) (claimed bool, err error) {
 	branch := Branch(n)
 	ref := "refs/heads/" + branch
-	if err := ReadyTools(dir); err != nil {
-		return false, err
-	}
 	if _, err := git(dir, "fetch", "-q", "origin", "main"); err != nil {
 		return false, err
 	}

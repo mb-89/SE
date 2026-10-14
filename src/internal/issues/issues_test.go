@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 const repo = "o/r"
@@ -53,11 +55,10 @@ func links(n int) string {
 	return fmt.Sprintf("repos/o/r/issues/%d/dependencies/blocked_by?per_page=100", n)
 }
 
-// now is the tests' clock; a branch pushed at fresh is inside the lease, one
+// now is when the tests run; a branch pushed at fresh is inside the lease, one
 // pushed at stale is not.
 var (
 	now   = time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
-	clock = func() time.Time { return now }
 	fresh = now.Add(-time.Hour).Format(time.RFC3339)
 	stale = now.Add(-4 * time.Hour).Format(time.RFC3339)
 )
@@ -68,10 +69,15 @@ func activity(n int) string {
 
 func pushed(when string) string { return `[{"timestamp":"` + when + `"}]` }
 
-// pushedAt records that each claimed branch issue-<n> was last pushed at when.
+// pushedAt records that each claimed branch issue-<n> was last pushed at when,
+// and, where no test said otherwise, that nothing blocks its issue: a claim's
+// links are read too, as one that waits on its blockers is not stuck.
 func pushedAt(answers map[string]string, when string, ns ...int) map[string]string {
 	for _, n := range ns {
 		answers[activity(n)] = pushed(when)
+		if _, ok := answers[links(n)]; !ok {
+			answers[links(n)] = `[]`
+		}
 	}
 	return answers
 }
@@ -82,7 +88,7 @@ func open(n int, body string) string {
 
 func survey(t *testing.T, answers map[string]string) map[int]string {
 	t.Helper()
-	all, err := Source{Repo: repo, GH: recorded(t, answers), Now: clock}.Survey()
+	all, err := Source{Repo: repo, GH: recorded(t, answers), Clock: atNow()}.Survey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +123,7 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 		"repos/mb-89/SE/issues/7/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/mb-89/SE/activity?ref=refs/heads/issue-5&per_page=1":    pushed(fresh),
 	})
-	s := Source{Repo: "mb-89/SE", GH: gh, Now: clock}
+	s := Source{Repo: "mb-89/SE", GH: gh, Clock: atNow()}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +156,7 @@ func TestLowestReadyNumberComesFirst(t *testing.T) {
 		listPath: `[` + open(9, "") + `,` + open(3, "") + `]` + `[` + open(5, "") + `]`, // two pages
 		refsPath: `[]`,
 	}, 3, 5, 9))
-	next, ok, err := Source{Repo: repo, GH: gh}.Next()
+	next, ok, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Next()
 	if err != nil || !ok || next.Number != 3 || next.Title != "t3" {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
@@ -203,7 +209,7 @@ func TestAStaleSummaryDoesNotMakeABlockedIssueReady(t *testing.T) {
 		links(8):      `[]`,
 		activity(8):   pushed(fresh),
 	})
-	s := Source{Repo: repo, GH: gh, Now: clock}
+	s := Source{Repo: repo, GH: gh, Clock: atNow()}
 	if next, ok, err := s.Next(); err != nil || ok {
 		t.Fatalf("next = %+v %v %v", next, ok, err)
 	}
@@ -223,9 +229,10 @@ func TestNothingReady(t *testing.T) {
 			openPullsPath: `[]`,
 			links(1):      `[]`,
 			"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
+			links(1):    `[]`,
 			activity(1): pushed(fresh),
 		})
-		if next, ok, err := (Source{Repo: repo, GH: gh, Now: clock}).Next(); err != nil || ok {
+		if next, ok, err := (Source{Repo: repo, GH: gh, Clock: atNow()}).Next(); err != nil || ok {
 			t.Errorf("%s: %+v %v %v", name, next, ok, err)
 		}
 	}
@@ -304,7 +311,7 @@ func TestATakeRefusedMovesToTheNextIssue(t *testing.T) {
 		listPath: `[` + open(5, "") + `,` + open(6, "") + `]`,
 		refsPath: `[]`,
 	}, 5, 6))
-	s := Source{Repo: repo, GH: gh}
+	s := Source{Repo: repo, GH: gh, Clock: atNow()}
 	if took, ok, err := s.Take(a, 0); err != nil || !ok || took.Number != 5 {
 		t.Fatalf("a took %+v %v %v", took, ok, err)
 	}
@@ -326,7 +333,7 @@ func TestTakeRefusesAnIssueThatIsNotReady(t *testing.T) {
 		links(1): `[]`,
 		links(2): `[{"number":1,"state":"open"}]`,
 	})
-	s := Source{Repo: repo, GH: gh}
+	s := Source{Repo: repo, GH: gh, Clock: atNow()}
 	if _, _, err := s.Take(t.TempDir(), 2); err == nil || !strings.Contains(err.Error(), "blocked by #1") {
 		t.Fatalf("%v", err)
 	}
@@ -349,3 +356,6 @@ func TestPagesAsksPageByPageUntilOneIsShort(t *testing.T) {
 		t.Fatalf("%d items, %v", len(got), err)
 	}
 }
+
+// atNow is a fresh fake clock standing at now.
+func atNow() *clock.Fake { return clock.NewFake(now) }

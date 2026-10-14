@@ -13,9 +13,9 @@ import (
 // the retro can tell an issue it made from one made by hand.
 const NewMark = "<!-- se:new -->"
 
-// unattendedMark is in the body of a retro nobody waits for: its box creates
-// the findings' issues at once. A retro a person started carries
-// <!-- se:retro attended --> instead, and its box stops for the owner.
+// unattendedMark is in the body of a retro no person started, which asked for
+// no field feedback. One a person started carries <!-- se:retro attended -->
+// instead. Either way its box files the issues and closes it.
 const unattendedMark = "<!-- se:retro unattended -->"
 
 // RetroIssue is the retro se retro new created.
@@ -73,9 +73,9 @@ func (s Source) NewRetro(field string, unattended bool) (RetroIssue, error) {
 		r.Previous = last.Number
 		window = fmt.Sprintf("everything closed since the retro #%d closed, %s", last.Number, last.ClosedAt.UTC().Format(time.RFC3339))
 	}
-	mode, who := "attended", "A person started it: the box posts its report here and stops for the owner, who decides, then runs `se issue resume`."
+	mode, who := "attended", "A person started it. The box creates the findings' issues, those for a person where controversial, and closes it."
 	if unattended {
-		mode, who = "unattended", "It runs unattended: the box creates the findings' issues at once and closes it."
+		mode, who = "unattended", "It runs unattended. The box creates the findings' issues, those for a person where controversial, and closes it."
 	}
 	feedback := strings.TrimSpace(field)
 	switch {
@@ -123,15 +123,27 @@ type Broken struct {
 	What    string `yaml:"what" json:"what"`
 }
 
-// checkKinds are the rule checks, in the order the report lists them, each
-// with the rule it holds the window to.
-var checkKinds = []struct{ kind, rule string }{
-	{"fixes", "every merged PR said `Fixes #n`"},
-	{"ci", "every merged PR had green CI"},
-	{"outside-pr", "no commit reached main outside a PR"},
-	{"mark", "every `se` issue carries `se issue new`'s mark"},
-	{"answers", "every landed issue has landing answers"},
+// RuleCheck is one rule a retro holds its window to.
+type RuleCheck struct {
+	Kind string
+	Rule string
+	// Since is the merged PR that brought the rule, 0 where it held from the
+	// first commit. A retro checks the rule only on what closed after it.
+	Since int
 }
+
+// checkKinds are the rule checks, in the order the report lists them. spec/retro.md
+// lists them from here.
+var checkKinds = []RuleCheck{
+	{"fixes", "every merged PR said `Fixes #n`", 14},
+	{"ci", "every merged PR had green CI (the last run of each check on its head)", 0},
+	{"outside-pr", "no commit reached main outside a PR (every commit on main is some merged PR's merge commit)", 0},
+	{"mark", "every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body", 91},
+	{"answers", "every landed issue (a leaf closed as completed, not a retro) has landing answers", 74},
+}
+
+// RuleChecks are the rule checks, in the order the report lists them.
+func RuleChecks() []RuleCheck { return append([]RuleCheck(nil), checkKinds...) }
 
 // Row is one closed issue of the window: a row of the matrix, with its counts.
 type Row struct {
@@ -180,8 +192,11 @@ type Collected struct {
 	Commits  int
 	Reruns   int
 	Checks   []Broken
-	Scripts  []Script
-	Metrics  Metrics
+	// Before counts, by kind, what broke a rule in the window before the PR
+	// that brought it merged; Checks leaves it out.
+	Before  map[string]int
+	Scripts []Script
+	Metrics Metrics
 	// Previous is the last closed retro's report, Score how it fared; History
 	// is every closed retro's metrics, oldest first.
 	Previous *RetroReport
@@ -272,10 +287,24 @@ func (s Source) Collect(n int) (Collected, error) {
 	}
 	sort.Slice(inWindow, func(a, b int) bool { return inWindow[a].Number < inWindow[b].Number })
 	c.PRs = len(inWindow)
+	started, err := ruleStarts(pulls)
+	if err != nil {
+		return Collected{}, err
+	}
+	broke := func(b Broken, at time.Time) {
+		if start := started[b.Kind]; !start.IsZero() && !at.After(start) {
+			if c.Before == nil {
+				c.Before = map[string]int{}
+			}
+			c.Before[b.Kind]++
+			return
+		}
+		c.Checks = append(c.Checks, b)
+	}
 
 	for _, p := range inWindow {
 		if fixesLine.FindString(p.Body) == "" {
-			c.Checks = append(c.Checks, Broken{"fixes", fmt.Sprintf("PR #%d", p.Number), fmt.Sprintf("%s: its body names no `Fixes #n`", p.Title)})
+			broke(Broken{"fixes", fmt.Sprintf("PR #%d", p.Number), fmt.Sprintf("%s: its body names no `Fixes #n`", p.Title)}, *p.MergedAt)
 		}
 		red, reruns, err := s.mergedCI(p.Head.SHA)
 		if err != nil {
@@ -283,7 +312,7 @@ func (s Source) Collect(n int) (Collected, error) {
 		}
 		c.Reruns += reruns
 		if red != "" {
-			c.Checks = append(c.Checks, Broken{"ci", fmt.Sprintf("PR #%d", p.Number), fmt.Sprintf("%s: %s", p.Title, red)})
+			broke(Broken{"ci", fmt.Sprintf("PR #%d", p.Number), fmt.Sprintf("%s: %s", p.Title, red)}, *p.MergedAt)
 		}
 		scripts, err := s.scriptsOf(p.Number)
 		if err != nil {
@@ -320,7 +349,9 @@ func (s Source) Collect(n int) (Collected, error) {
 			return Collected{}, err
 		}
 		c.Rows = append(c.Rows, row)
-		c.Checks = append(c.Checks, checks...)
+		for _, b := range checks {
+			broke(b, x.ClosedAt)
+		}
 	}
 	sort.SliceStable(c.Checks, func(a, b int) bool { return kindOrder(c.Checks[a].Kind) < kindOrder(c.Checks[b].Kind) })
 	c.Metrics = c.measure()
@@ -334,9 +365,32 @@ func (s Source) Collect(n int) (Collected, error) {
 	return c, nil
 }
 
+// ruleStarts are the times the rule checks started: when the PR that brought
+// each merged. A rule from the first commit has none.
+func ruleStarts(pulls []merged) (map[string]time.Time, error) {
+	at := map[int]time.Time{}
+	for _, p := range pulls {
+		if p.MergedAt != nil {
+			at[p.Number] = *p.MergedAt
+		}
+	}
+	starts := map[string]time.Time{}
+	for _, k := range checkKinds {
+		if k.Since == 0 {
+			continue
+		}
+		t, ok := at[k.Since]
+		if !ok {
+			return nil, fmt.Errorf("the rule check %s started with PR #%d, which is not a merged PR", k.Kind, k.Since)
+		}
+		starts[k.Kind] = t
+	}
+	return starts, nil
+}
+
 func kindOrder(kind string) int {
 	for k, c := range checkKinds {
-		if c.kind == kind {
+		if c.Kind == kind {
 			return k
 		}
 	}

@@ -61,6 +61,10 @@ func (g *pulls) gh(args ...string) ([]byte, error) {
 			g.comments = append(g.comments, c)
 			return json.Marshal(c)
 		}
+		// The issue for a person a final conflict mints.
+		if args[2] == "POST" && path == "repos/o/r/issues" {
+			return []byte(`{"number":101,"id":1010,"html_url":"u101"}`), nil
+		}
 		return []byte(`{}`), nil
 	}
 	switch path {
@@ -93,19 +97,10 @@ func claimed7(t *testing.T) (a string) {
 	return a
 }
 
-func noPause(t *testing.T) *int {
-	paused := 0
-	old := pause
-	pause = func() { paused++ }
-	t.Cleanup(func() { pause = old })
-	return &paused
-}
-
 func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
-	noPause(t)
 	a := claimed7(t)
 	g := newPulls(t, pr70("false", "dirty"))
-	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
+	took, ok, err := Source{Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || *took.Takeover != (Takeover{PR: 70, URL: "p70", Count: 1}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -125,7 +120,7 @@ func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 	// Named with --take N, the issue named is taken, and no PR is asked.
 	g = newPulls(t)
 	_, b, _ := boxes(t)
-	if took, ok, err := (Source{Repo: repo, GH: g.gh, Now: clock}).Take(b, 5); err != nil || !ok || took.Number != 5 || took.Takeover != nil {
+	if took, ok, err := (Source{Repo: repo, GH: g.gh, Clock: atNow()}).Take(b, 5); err != nil || !ok || took.Number != 5 || took.Takeover != nil {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 }
@@ -137,25 +132,25 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 		"null, then clean": {pr70("null", "unknown"), pr70("true", "clean")},
 		"null, every time": {pr70("null", "unknown")},
 	} {
-		paused := noPause(t)
 		_, a, _ := boxes(t)
 		g := newPulls(t, answers...)
-		took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
+		c := atNow()
+		took, ok, err := Source{Repo: repo, GH: g.gh, Clock: c}.Take(a, 0)
+		paused := int(c.Now().Sub(now) / pause)
 		if err != nil || !ok || took.Number != 5 || took.Takeover != nil || len(g.comments) != 0 {
 			t.Errorf("%s: took %+v %v %v", name, took, ok, err)
 		}
-		if strings.HasPrefix(name, "null") && *paused == 0 {
+		if strings.HasPrefix(name, "null") && paused == 0 {
 			t.Errorf("%s: a null answer was not asked again", name)
 		}
-		if *paused > asks-1 {
-			t.Errorf("%s: asked %d times", name, *paused+1)
+		if paused > asks-1 {
+			t.Errorf("%s: asked %d times", name, paused+1)
 		}
 	}
 	// A null answer that turns dirty is a conflict.
-	noPause(t)
 	a := claimed7(t)
 	g := newPulls(t, pr70("null", "unknown"), pr70("false", "dirty"))
-	if took, ok, err := (Source{Repo: repo, GH: g.gh, Now: clock}).Take(a, 0); err != nil || !ok || took.Number != 7 {
+	if took, ok, err := (Source{Repo: repo, GH: g.gh, Clock: atNow()}).Take(a, 0); err != nil || !ok || took.Number != 7 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 }
@@ -165,63 +160,67 @@ func finalSeven(g *pulls) {
 	g.answers[listPath] = `[` + open(5, "new work") + `,{"number":7,"title":"old work","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-final"}]}]`
 }
 
-func TestASecondConflictTakeoverGoesToAPerson(t *testing.T) {
-	noPause(t)
+func TestASecondConflictTakeoverWaitsOnAnIssueForAPerson(t *testing.T) {
 	_, a, _ := boxes(t)
 	g := newPulls(t, pr70("false", "dirty"))
 	finalSeven(g)
 	// The first takeover found head 0ld; the PR conflicts again at abc.
 	g.comments = []comment{{ID: 1, Body: "Taken over.\n<!-- se:takeover 1 -->\n<!-- se:takeover-head 0ld -->"}}
-	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
+	took, ok, err := Source{Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	if len(g.comments) != 2 || !strings.Contains(g.comments[1].Body, "<!-- se:takeover 2 -->") {
+	// #7 itself is not given to a person: an issue for one, #101, blocks it.
+	var writes []string
+	for _, w := range g.writes {
+		writes = append(writes, strings.Join(w[2:], " "))
+	}
+	for _, want := range []string{
+		"POST -f assignees[]=o repos/o/r/issues/101/assignees",
+		"POST -F issue_id=1010 repos/o/r/issues/7/dependencies/blocked_by",
+		"DELETE repos/o/r/issues/7/labels/se-final",
+	} {
+		if !contains(writes, want) {
+			t.Errorf("not written: %s (writes %q)", want, writes)
+		}
+	}
+	for _, w := range writes {
+		if strings.Contains(w, "se-person repos/o/r/issues/7/") {
+			t.Fatalf("#7 was labelled for a person: %q", writes)
+		}
+	}
+	if len(g.comments) != 2 || !strings.Contains(g.comments[1].Body, "blocked by #101") || !strings.HasSuffix(g.comments[1].Body, "<!-- se:resume -->") {
 		t.Fatalf("comments %+v", g.comments)
 	}
-	want := map[string]bool{"labels[]=se-person repos/o/r/issues/7/labels": false, "assignees[]=o repos/o/r/issues/7/assignees": false}
-	for _, w := range g.writes {
-		if k := strings.Join(w[len(w)-2:], " "); len(w) > 4 {
-			if _, ok := want[k]; ok {
-				want[k] = true
-			}
-		}
-	}
-	for k, done := range want {
-		if !done {
-			t.Errorf("not written: %s (writes %q)", k, g.writes)
-		}
-	}
-	// Labelled se-person, #7 has left the queue.
+	// Blocked by #101, #7's claim waits, and is not stuck.
 	got := survey(t, unblocked(map[string]string{
-		listPath:      `[{"number":7,"state":"open","labels":[{"name":"se"},{"name":"se-person"}]}]`,
+		listPath:      `[{"number":7,"state":"open","labels":[{"name":"se"}]}]`,
 		refsPath:      `[{"ref":"refs/heads/issue-7"}]`,
 		openPullsPath: `[]`,
-		comments7:     `[]`,
-	}, 7))
-	if got[7] != "waits on a person" {
+		activity(7):   pushed(fresh),
+		links(7):      `[{"number":101,"state":"open"}]`,
+	}))
+	if got[7] != "issue-7 waits: blocked by #101" {
 		t.Fatalf("%v", got)
 	}
 }
 
 func TestATakeoverInFlightIsLeftToItsBox(t *testing.T) {
-	noPause(t)
 	_, a, _ := boxes(t)
 	g := newPulls(t, pr70("false", "dirty"))
 	// A box took #7 over at this very head and has not landed the merge yet.
 	g.comments = []comment{{ID: 1, Body: "<!-- se:takeover 1 -->\n<!-- se:takeover-head abc -->"}}
-	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
+	took, ok, err := Source{Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 || len(g.writes) != 0 {
 		t.Fatalf("took %+v %v %v, writes %q", took, ok, err, g.writes)
 	}
 }
 
 func TestOfTwoBoxesTakingOverAtOnceTheFirstMarkerWins(t *testing.T) {
-	noPause(t)
 	_, a, _ := boxes(t)
 	g := newPulls(t, pr70("false", "dirty"))
 	g.before = &comment{ID: 50, Body: "<!-- se:takeover 1 -->\n<!-- se:takeover-head abc -->"}
-	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
+	took, ok, err := Source{Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -232,13 +231,12 @@ func TestOfTwoBoxesTakingOverAtOnceTheFirstMarkerWins(t *testing.T) {
 }
 
 func TestAConflictAfterAStuckTakeoverGoesToAPerson(t *testing.T) {
-	noPause(t)
 	_, a, _ := boxes(t)
 	g := newPulls(t, pr70("false", "dirty"))
 	// #7 was taken over once already, stuck, so it is final; its PR now conflicts.
 	finalSeven(g)
 	g.comments = []comment{{ID: 1, Body: "<!-- se:takeover 1 -->\nTaken over: nothing was pushed."}}
-	took, ok, err := Source{Repo: repo, GH: g.gh, Now: clock}.Take(a, 0)
+	took, ok, err := Source{Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
