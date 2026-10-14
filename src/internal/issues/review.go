@@ -82,7 +82,7 @@ type Reviewed struct {
 	// of the gate, so it is reviewed again once they have landed.
 	Fixes []Issue `json:"fixes"`
 	// Filed are the issues the non-blocking findings became, se-final, in
-	// the normal queue; Unfiled counts those past the first MaxFiled.
+	// the normal queue; Unfiled counts those past the first issues/config/max-filed.
 	Filed   []Issue `json:"filed"`
 	Unfiled int     `json:"unfiled"`
 	// Person is set where a re-review found a final issue's problem again:
@@ -96,7 +96,7 @@ type Reviewed struct {
 // not recorded, and a report that breaks the rules of spec/review.md (see
 // Report.check). Every verified finding becomes an se-final issue: a blocking
 // one a sub-issue of n, a non-blocking one in the normal queue, at most
-// MaxFiled of them. The report goes on n with its machine-readable block; a
+// issues/config/max-filed of them. The report goes on n with its machine-readable block; a
 // pass closes n, which can complete its parent. A blocking finding that
 // repeats an earlier blocker sends n to a person.
 func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed, error) {
@@ -141,7 +141,7 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 		case f.Repeats > 0:
 			again = append(again, *f)
 			continue
-		case !f.Blocking && len(r.Filed) == MaxFiled:
+		case !f.Blocking && len(r.Filed) == s.config().MaxFiled:
 			r.Unfiled++
 			continue
 		}
@@ -162,7 +162,7 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 	}
 	v := Verdict{Passed: pass, Rereview: earlier.failed(), Unfiled: r.Unfiled, Report: rep}
 	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
-	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", v.render(reviewer))); err != nil {
+	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", v.render(reviewer, s.config().MaxFiled))); err != nil {
 		return r, fmt.Errorf("posting the report on #%d: %w", n, err)
 	}
 	if len(again) > 0 {

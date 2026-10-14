@@ -7,12 +7,14 @@ import (
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
-// RetroCadence is how many se issues close between two retros: at this many
+// RetroCadence is the built-in value of issues/config/retro-cadence: how
+// many se issues close between two retros: at this many
 // closed since the last retro closed, se issue pull --take starts an
 // unattended one and takes it before all other work (spec/retro.md).
 const RetroCadence = 10
 
-// OverhaulCadence is how many retros close between two overhauls: at this
+// OverhaulCadence is the built-in value of issues/config/overhaul-cadence:
+// how many retros close between two overhauls: at this
 // many closed since the last overhaul closed, se issue pull --take starts an
 // unattended one and takes it first (spec/overhaul.md).
 const OverhaulCadence = 5
@@ -26,12 +28,13 @@ type cadenceRule struct {
 	// noun names one of them, and skip the labels left out of the count.
 	label, counts, noun string
 	skip                []string
-	every               int
+	// every reads the cadence from the settings.
+	every func(Settings) int
 }
 
 var (
-	retroRule    = cadenceRule{"retro", "a", RetroLabel, Label, "se issue", []string{RetroLabel, OverhaulLabel}, RetroCadence}
-	overhaulRule = cadenceRule{"overhaul", "an", OverhaulLabel, RetroLabel, "retro", nil, OverhaulCadence}
+	retroRule    = cadenceRule{"retro", "a", RetroLabel, Label, "se issue", []string{RetroLabel, OverhaulLabel}, func(c Settings) int { return c.RetroCadence }}
+	overhaulRule = cadenceRule{"overhaul", "an", OverhaulLabel, RetroLabel, "retro", nil, func(c Settings) int { return c.OverhaulCadence }}
 )
 
 // Cadence is where one cadence stands.
@@ -118,7 +121,7 @@ func (s Source) Cadence() (Cadence, error) { return s.cadence(retroRule) }
 func (s Source) OverhaulCadence() (Cadence, error) { return s.cadence(overhaulRule) }
 
 func (s Source) cadence(r cadenceRule) (Cadence, error) {
-	c := Cadence{Kind: r.kind, Every: r.every}
+	c := Cadence{Kind: r.kind, Every: r.every(s.config())}
 	last, ok, _, err := s.lastClosed(r.label, 0)
 	if err != nil {
 		return Cadence{}, err

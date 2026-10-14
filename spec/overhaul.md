@@ -18,8 +18,8 @@ whole system, not a window.
   person started it; the cadence starts overhauls this way. The issue's body
   records which it is, `<!-- se:overhaul attended -->` or
   `<!-- se:overhaul unattended -->`.
-- **The cadence:** every `OverhaulCadence` (in
-  `src/internal/issues/cadence.go`) closed retros since the last closed
+- **The cadence:** every `issues/config/overhaul-cadence` (the
+  issues instance's config value, built-in in `src/internal/issues/cadence.go`) closed retros since the last closed
   overhaul (with none closed yet, the whole history), `se issue pull --take`
   starts an unattended overhaul and takes it first, ahead of a due retro and
   all other work. It is the same mechanism as the retro cadence, one constant.
@@ -35,11 +35,29 @@ whole system, not a window.
   the checkout (`../overhaul-N.md`). It holds:
   - every principle of [principles.md](principles.md), with what checks it,
     and whether the retro or the battery checks it mechanically;
-  - the retro's last `OverhaulCadence` runs, from their reports' blocks: each metric, the
+  - the retro's last `issues/config/overhaul-cadence` runs, from their reports' blocks: each metric, the
     broken rule checks by kind, how many findings became issues and how many
     of those closed, how many the next retro found recurred anyway, and the
     finding classes more than one of them named;
-  - the previous overhaul's findings and the state of their issues.
+  - the previous overhaul's findings and the state of their issues;
+  - the pruning and code-shape facts of the code (`src/internal/shape`):
+    what `deadcode` finds nothing but tests reach (the fakes and test helpers
+    left out), duplicates and near-duplicates, lines of code and of tests per
+    package and module, one-user abstractions (a library one other module
+    imports, a registry with one entry, an interface with one implementation
+    and no fake), the `se` commands and flags no landing answer named since
+    the last overhaul, comments that say code serves an old state, the
+    scripts and whether the last retro read them, the files untouched
+    longest, the longest functions, files and parameter lists, the switches
+    on a kind, and the files touched per change.
+- **Pruning is part of every overhaul.** The less code, the less to maintain.
+  The battery runs `deadcode -test`, so code unreachable even from the tests
+  never lands; what the facts above find, the box judges by the overhaul
+  skill's pruning rules and the principles' second part,
+  [How code is written](principles.md#how-code-is-written). A removal is
+  normal work, never for a person ([retro.md](retro.md)), and its issue says to
+repeat the removal until nothing more falls out: removing one piece exposes
+what existed only to support it.
 - **The judgment half (the box):** every principle one by one, the outside
   world, the consistency of the whole system, the principles themselves, the
   retro's effectiveness, speed, what to mechanize and what to remove, the

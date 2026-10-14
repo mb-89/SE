@@ -85,6 +85,9 @@ type Source struct {
 	// Parallel is the cap of sub-agents one box runs, fleet.box/config/parallel;
 	// zero is its built-in value, Parallel.
 	Parallel int
+	// Config is the issue work's config, issues/config/<key>, as Configured
+	// reads it; nil runs on the built-in values.
+	Config *Settings
 }
 
 func (s Source) now() time.Time { return s.Clock.Now() }
