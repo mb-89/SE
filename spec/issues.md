@@ -175,7 +175,7 @@ person**, and leaves the agents' queue until the person has closed it.
 <!-- se:manifest usage issue review -->
 ```
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
-se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
@@ -287,7 +287,10 @@ issue `--blocked-by` names, then prints its number and link
 comma-separated list of issue numbers (`--blocked-by 5,8`) or the word `none`.
 Every issue in the list is looked up before anything is written, so a list
 naming an issue that does not exist, or a pull request, creates nothing; so
-does a `--parent` that does not exist. The
+does a `--parent` that does not exist. So does a title that an open `se`
+issue under the same `--parent` (or at the top, without one) has already,
+spaces trimmed: the error names that issue, so a tree is not created twice;
+`--allow-duplicate` creates it anyway. The
 body comes from `--body` or from `--body-file`, one of them. `--review` labels
 it `se-review` as well (see [Reviews](#reviews)), and `--final` labels it
 `se-final`, its last attempt before a person (see
