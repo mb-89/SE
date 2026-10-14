@@ -18,7 +18,7 @@ import (
 // in its init; the help and the session's /se are made from what registered.
 type Command struct {
 	// Name is the word that runs it: se <name>, or /se <name> in a session.
-	// A name of two words, "issue next", is a sub-word of its first: the first
+	// A name of two words, "issue pull", is a sub-word of its first: the first
 	// word alone then lists its sub-words.
 	Name string
 	// Usage is the command line after se, the name first: "serve [--idle D]".

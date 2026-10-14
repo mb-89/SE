@@ -14,7 +14,7 @@ func init() {
 		Usage:   "overhaul new [--unattended] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "start an overhaul: is the design still right?",
-		Details: "create an overhaul: an se issue labelled se-overhaul that checks SE as it stands against every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last 5 runs, and fire the routine so a box takes it at once. Started by a person (the default), its box posts the report and stops for the owner; --unattended, its box creates the findings' issues at once and closes it. se issue next --take starts one unattended every 5 closed retros. spec/overhaul.md has the rules.",
+		Details: "create an overhaul: an se issue labelled se-overhaul that checks SE as it stands against every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last 5 runs, and fire the routine so a box takes it at once. Started by a person (the default), its box posts the report and stops for the owner; --unattended, its box creates the findings' issues at once and closes it. se issue pull --take starts one unattended every 5 closed retros. spec/overhaul.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul new")

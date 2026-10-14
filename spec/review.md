@@ -71,7 +71,7 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
    fleet work, and `se-final` is a separate label beside it. An issue becomes
    `se-final` when:
    - a review creates it to fix a finding;
-   - `se issue next --take` takes it over, stuck or with a conflicted PR
+   - `se issue pull --take` takes it over, stuck or with a conflicted PR
      ([Stuck work](issues.md#stuck-work), [The rules](issues.md#the-rules)).
 
    If an `se-final` issue fails again, it is not given another round: it gets
@@ -110,7 +110,7 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
    review writes nothing.
 8. **The reviewer's model:** a stronger model than the boxes run, where one
    is available. The choice is one line, `reviewer:` in
-   [spec/models.yaml](models.yaml). `se issue next --in ROOT --take --json`
+   [spec/models.yaml](models.yaml). `se issue pull --in ROOT --take --json`
    names it as each review's `model`, and the work skill starts the reviewer
    sub-agent on it. Today's box model is the floor; the reviewer is never
    weaker.

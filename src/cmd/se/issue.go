@@ -42,15 +42,15 @@ var check = func(dir string) error {
 
 func init() {
 	register(Command{
-		Name:    "issue next",
-		Usage:   "issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]",
+		Name:    "issue pull",
+		Usage:   "issue pull [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "name the next se issue, stuck work first; --take claims it",
-		Details: "name the next ready se issue at the top, stuck work before new work, or say that none is ready. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where 5 retros have closed since the last overhaul closed and none is open, else an unattended retro where 10 se issues have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the 3-hour lease is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.",
+		Summary: "show the next se issue, stuck work first; --take claims it",
+		Details: "pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where 5 retros have closed since the last overhaul closed and none is open, else an unattended retro where 10 se issues have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the 3-hour lease is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.",
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue next")
+			fs, src, asJSON := issueFlags(c, "issue pull")
 			take := &takeFlag{}
 			fs.Var(take, "take", "claim the next ready issue, or issue N as --take N")
 			in := fs.Int("in", 0, "look inside the tree of issue `ROOT` for its ready leaves")
@@ -65,7 +65,7 @@ func init() {
 				}
 				n, err := strconv.Atoi(strings.TrimPrefix(fs.Arg(0), "#"))
 				if !take.set || err != nil || n <= 0 || take.n != 0 {
-					return Reply{}, fmt.Errorf("issue next takes one issue number, after --take, not %q", fs.Arg(0))
+					return Reply{}, fmt.Errorf("issue pull takes one issue number, after --take, not %q", fs.Arg(0))
 				}
 				take.n, rest = n, fs.Args()[1:]
 			}
@@ -74,7 +74,7 @@ func init() {
 				return Reply{}, err
 			}
 			if *person && (take.set || *in != 0) {
-				return Reply{}, fmt.Errorf("issue next takes --person alone, without --take or --in")
+				return Reply{}, fmt.Errorf("issue pull takes --person alone, without --take or --in")
 			}
 			s, err := src()
 			if err != nil {
@@ -609,12 +609,12 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, fanout string, cad
 		head += fmt.Sprintf("\n\n#%d is an overhaul (%s): follow the overhaul skill, src/plugin/skills/overhaul/SKILL.md, from se overhaul read %d", i.Number, issues.OverhaulLabel, i.Number)
 	}
 	if i.Parent {
-		head += fmt.Sprintf("\n\n#%d is a parent: it holds no work. Coordinate its tree: se issue next --in %d --take", i.Number, i.Number)
+		head += fmt.Sprintf("\n\n#%d is a parent: it holds no work. Coordinate its tree: se issue pull --in %d --take", i.Number, i.Number)
 	}
 	return Reply{Text: strings.TrimRight(head+"\n\n"+i.Body, "\n") + tail}, nil
 }
 
-// inReply answers issue next --in: what is ready inside root's tree, or, with
+// inReply answers issue pull --in: what is ready inside root's tree, or, with
 // --take, the leaf claimed and the worktree command that checks it out.
 func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (Reply, error) {
 	if !take.set {
@@ -719,7 +719,7 @@ func reviewText(c *Call, tr issues.Tree) string {
 	return text
 }
 
-// sweptReply adds to a reply of issue next the issues its sweep gave to a
+// sweptReply adds to a reply of issue pull the issues its sweep gave to a
 // person: lines before the text, or with --json the field "flagged".
 func sweptReply(r Reply, err error, asJSON bool, flagged []string) (Reply, error) {
 	if err != nil || len(flagged) == 0 {

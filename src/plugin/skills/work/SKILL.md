@@ -18,7 +18,7 @@ those.
 
 1. `git fetch origin main && git checkout origin/main` (a box started by a PR
    event starts on that PR's head commit), rebuild `se`, then
-   `./src/plugin/bin/se issue next --take`. If it says no se issue is ready,
+   `./src/plugin/bin/se issue pull --take`. If it says no se issue is ready,
    follow the coordination skill,
    [src/plugin/skills/coordination/SKILL.md](../coordination/SKILL.md), which
    checks what is broken and fixes it before the session ends. If it says the issue is a parent, follow **A parent**
@@ -56,7 +56,7 @@ those.
 A parent holds no work; you coordinate its tree, whose root is the issue you
 took. `se` is the absolute path of `./src/plugin/bin/se` in this checkout.
 
-1. Run `se issue next --in <root> --take --json`.
+1. Run `se issue pull --in <root> --take --json`.
    - `"closed": true`: the tree is done. End.
    - For each issue in `"review"` that no sub-agent of yours is reviewing
      already: run its `worktree` command, and start one fresh sub-agent in
@@ -86,5 +86,5 @@ took. `se` is the absolute path of `./src/plugin/bin/se` in this checkout.
    worktree, bring its answers up to date and run
    `se issue land --workspace <path> --answers <path>-landing.yaml` again.
 
-You never start another box yourself: `se issue next --take` fires the routine
+You never start another box yourself: `se issue pull --take` fires the routine
 once after its claim (the fan-out in [spec/issues.md](../../../../spec/issues.md)).

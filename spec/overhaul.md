@@ -20,13 +20,13 @@ whole system, not a window.
   `<!-- se:overhaul unattended -->`.
 - **The cadence:** every `OverhaulCadence` (5, in
   `src/internal/issues/cadence.go`) closed retros since the last closed
-  overhaul (with none closed yet, the whole history), `se issue next --take`
+  overhaul (with none closed yet, the whole history), `se issue pull --take`
   starts an unattended overhaul and takes it first, ahead of a due retro and
   all other work. It is the same mechanism as the retro cadence, one constant.
   An open `se-overhaul` issue, attended or not, means no second one is
-  started. `--take N` skips the cadence; the plain `se issue next` reports the
+  started. `--take N` skips the cadence; the plain `se issue pull` reports the
   count beside the retro's.
-- **The box** takes an overhaul like any issue (`se issue next --take` says it
+- **The box** takes an overhaul like any issue (`se issue pull --take` says it
   is an overhaul) and follows the overhaul skill,
   [src/plugin/skills/overhaul/SKILL.md](../src/plugin/skills/overhaul/SKILL.md),
   instead of landing a branch.
