@@ -105,7 +105,8 @@ func overview(session bool) Help {
 	prog := prog(session)
 	note := prog + " help <command> shows its usage and flags."
 	if !session {
-		note += "\nEvery command takes --workspace DIR (default: here)."
+		note += "\nEvery command takes --workspace DIR (default: here)." +
+			"\nse --trace <command> prints each GitHub request it made, on stderr."
 	}
 	return Help{Usage: prog + " <command> [flags]", Groups: groupsOf(offered(session), session), Note: note}
 }

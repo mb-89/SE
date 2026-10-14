@@ -20,7 +20,7 @@ func init() {
 var word = regexp.MustCompile(`^[a-z][a-z-]*$`)
 
 // global are the flags se takes before a command's name, and whether each takes a value.
-var global = map[string]bool{"session": false, "workspace": true, "help": false, "h": false}
+var global = map[string]bool{"session": false, "trace": false, "workspace": true, "help": false, "h": false}
 
 // isSe says whether a token calls se: se, /se, <se>, or a path ending in /se.
 func isSe(tok string) bool {

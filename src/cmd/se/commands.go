@@ -207,6 +207,7 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(io.Discard)
 	session := fs.Bool("session", false, "called by the plugin from a session: answer JSON")
 	workspace := fs.String("workspace", ".", "the workspace the daemon serves")
+	trace := fs.Bool("trace", false, "print each GitHub request the command makes to stderr")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(stderr, "se: %v\n%s\n", err, help(false, colors(stderr)))
 		return 2
@@ -214,6 +215,11 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	// The help is coloured on a terminal alone, never in a session's answer.
 	color, errColor := !*session && colors(stdout), !*session && colors(stderr)
 	call := &Call{Workspace: *workspace, Session: *session, Color: color, World: *w}
+	if *trace {
+		t := &tracer{clock: w.Clock, start: w.Clock.Now()}
+		call.GitHub = github.Traced(w.GitHub, w.Clock, t.seen)
+		defer t.print(stderr)
+	}
 	name := ""
 	if fs.NArg() > 0 {
 		name, call.Args = fs.Arg(0), fs.Args()[1:]

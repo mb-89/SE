@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 // API is the root of GitHub's REST API that Real calls.
@@ -85,6 +87,79 @@ type rest struct {
 	seen   map[string]cached
 	// slots holds a token per request open, InFlight at most.
 	slots chan struct{}
+	// clock and trace, where trace is set, time each request and tell it
+	// to trace once it is answered.
+	clock clock.Clock
+	trace func(Request)
+}
+
+// Request is one request se sent GitHub, as a trace tells it.
+type Request struct {
+	// Method is the HTTP method, such as GET.
+	Method string
+	// Path is the path asked, below the API's root, with its query.
+	Path string
+	// Status is the HTTP status GitHub answered, such as 200 or 304; zero
+	// where no answer came.
+	Status int
+	// Start is when the request was sent, and Took how long its answer took.
+	Start time.Time
+	Took  time.Duration
+}
+
+// Traced is g telling seen each request it sends GitHub once it is answered,
+// timed on clk; seen may be told from several goroutines at once. Real is
+// traced by the HTTP request, each page of a list one; any other GitHub, such
+// as a Fake, by the call, a list's method LIST.
+func Traced(g GitHub, clk clock.Clock, seen func(Request)) GitHub {
+	if r, ok := g.(*rest); ok {
+		t := newRest(r.base, r.token)
+		t.clock, t.trace = clk, seen
+		return t
+	}
+	return traced{g: g, clock: clk, seen: seen}
+}
+
+type traced struct {
+	g     GitHub
+	clock clock.Clock
+	seen  func(Request)
+}
+
+func (t traced) tell(method, path string, start time.Time, err error) {
+	status := Status(err)
+	if err == nil {
+		status = http.StatusOK
+	}
+	t.seen(Request{Method: method, Path: path, Status: status, Start: start, Took: t.clock.Now().Sub(start)})
+}
+
+func (t traced) Get(path string) ([]byte, error) {
+	start := t.clock.Now()
+	out, err := t.g.Get(path)
+	t.tell("GET", path, start, err)
+	return out, err
+}
+
+func (t traced) List(path string) ([]byte, error) {
+	start := t.clock.Now()
+	out, err := t.g.List(path)
+	t.tell("LIST", path, start, err)
+	return out, err
+}
+
+func (t traced) Send(method, path string, fields ...Field) ([]byte, error) {
+	start := t.clock.Now()
+	out, err := t.g.Send(method, path, fields...)
+	t.tell(method, path, start, err)
+	return out, err
+}
+
+func (t traced) GraphQL(query string, vars ...Field) ([]byte, error) {
+	start := t.clock.Now()
+	out, err := t.g.GraphQL(query, vars...)
+	t.tell("POST", "graphql", start, err)
+	return out, err
 }
 
 type cached struct {
@@ -185,6 +260,7 @@ func object(fields []Field) map[string]any {
 }
 
 func (r *rest) do(method, path string, body []byte) ([]byte, error) {
+	status := 0
 	u := r.base + "/" + strings.TrimPrefix(path, "/")
 	var in io.Reader
 	if body != nil {
@@ -214,7 +290,22 @@ func (r *rest) do(method, path string, body []byte) ([]byte, error) {
 	}
 	r.slots <- struct{}{}
 	defer func() { <-r.slots }()
+	if r.trace != nil {
+		start := r.clock.Now()
+		defer func() {
+			r.trace(Request{Method: method, Path: strings.TrimPrefix(path, "/"), Status: status, Start: start, Took: r.clock.Now().Sub(start)})
+		}()
+	}
 	resp, err := r.client.Do(req)
+	if resp != nil {
+		status = resp.StatusCode
+	}
+	return r.answer(method, path, u, had, resp, err)
+}
+
+// answer reads resp, the answer to method path at u, where had is what a
+// GET of u answered before.
+func (r *rest) answer(method, path, u string, had cached, resp *http.Response, err error) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}

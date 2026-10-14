@@ -23,7 +23,10 @@ process, over one kept-alive HTTP client through the environment's proxy
 (`GH_TOKEN`, `GITHUB_TOKEN`, else `gh auth token`, read once) where there is
 one; on a cloud box the proxy adds the credentials, as it does for gh. It
 asks again with each answer's ETag, so an answer that has not changed costs
-no rate limit. Its fake, `github.NewFake(clock)`, is seeded from recorded gh answers
+no rate limit. `github.Traced` times each request it sends on a clock and
+tells it once answered (Real's by the HTTP request, each page of a list one;
+any other GitHub's by the call); `se --trace <command>` prints them to stderr,
+by start, which is how a command's cold path is measured. Its fake, `github.NewFake(clock)`, is seeded from recorded gh answers
 (`Seed`), each read for what it says about the repository, and keeps issues,
 comments, labels, links, sub-issues, branches and pull requests, so a write
 is read back. What GitHub comes to hold later, such as a PR's mergeability,

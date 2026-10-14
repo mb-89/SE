@@ -9,7 +9,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
@@ -120,5 +122,77 @@ func TestTheRealGitHubSpeaksRest(t *testing.T) {
 	}
 	if got := strings.Join(said, "\n"); got != strings.Join(want, "\n") {
 		t.Fatalf("the API was sent\n%s\nwant\n%s", got, strings.Join(want, "\n"))
+	}
+}
+
+// Real traced tells each HTTP request it sends once it is answered, each page
+// of a list one: its method, path, status (a 304 where an ETag answered), its
+// start and how long its answer took, on the trace's clock.
+func TestTheRealGitHubTracesEachRequest(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	clk := clock.NewFake(at)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clk.Advance(time.Second)
+		switch q := r.URL.RequestURI(); {
+		case strings.Contains(q, "missing"):
+			w.WriteHeader(404)
+			_, _ = fmt.Fprint(w, `{"message":"Not Found"}`)
+		case strings.Contains(q, "page=1"):
+			_, _ = fmt.Fprint(w, `[1,2]`)
+		case strings.Contains(q, "page=2"):
+			_, _ = fmt.Fprint(w, `[3]`)
+		case r.Header.Get("If-None-Match") == `"v1"`:
+			w.WriteHeader(304)
+		default:
+			w.Header().Set("ETag", `"v1"`)
+			_, _ = fmt.Fprint(w, `{"number":5}`)
+		}
+	}))
+	defer srv.Close()
+	var mu sync.Mutex
+	var seen []string
+	gh := github.Traced(github.RealAt(srv.URL, "tok"), clk, func(r github.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, fmt.Sprintf("%s %s %d %s %s", r.Start.Sub(at), r.Took, r.Status, r.Method, r.Path))
+	})
+	if out, err := gh.List("repos/o/r/issues?per_page=2"); err != nil || string(out) != "[1,2,3]" {
+		t.Fatalf("%s %v", out, err)
+	}
+	for range 2 {
+		if out, err := gh.Get("repos/o/r/issues/5"); err != nil || string(out) != `{"number":5}` {
+			t.Fatalf("%s %v", out, err)
+		}
+	}
+	if _, err := gh.Get("repos/o/r/issues/missing"); github.Status(err) != 404 {
+		t.Fatalf("%v", err)
+	}
+	want := []string{
+		"0s 1s 200 GET repos/o/r/issues?per_page=2&page=1",
+		"1s 1s 200 GET repos/o/r/issues?per_page=2&page=2",
+		"2s 1s 200 GET repos/o/r/issues/5",
+		"3s 1s 304 GET repos/o/r/issues/5",
+		"4s 1s 404 GET repos/o/r/issues/missing",
+	}
+	if got := strings.Join(seen, "\n"); got != strings.Join(want, "\n") {
+		t.Fatalf("the trace told\n%s\nwant\n%s", got, strings.Join(want, "\n"))
+	}
+}
+
+// Any other GitHub, such as a Fake, is traced by the call: a list is one
+// request, its method LIST, and a refusal carries its status.
+func TestAFakeIsTracedByTheCall(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
+	var seen []string
+	gh := github.Traced(github.NewFake(clk), clk, func(r github.Request) {
+		seen = append(seen, fmt.Sprintf("%d %s %s", r.Status, r.Method, r.Path))
+	})
+	_, _ = gh.List("repos/o/r/issues?state=open")
+	_, _ = gh.Get("repos/o/r/issues/99")
+	want := "200 LIST repos/o/r/issues?state=open\n404 GET repos/o/r/issues/99"
+	if got := strings.Join(seen, "\n"); got != want {
+		t.Fatalf("the trace told\n%s\nwant\n%s", got, want)
 	}
 }
