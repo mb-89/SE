@@ -137,6 +137,13 @@ func init() {
 				if took.Blocks, err = s.Dependents(took.Number); err != nil {
 					return Reply{}, err
 				}
+				// The Stop hook holds the box to closing what it took; a
+				// parent's box coordinates its tree and closes nothing itself.
+				if !took.Parent {
+					if err := recordTake(c, took.Number); err != nil {
+						return Reply{}, fmt.Errorf("took #%d, but recording it for the Stop hook: %w", took.Number, err)
+					}
+				}
 			}
 			r, err := issueReply(*asJSON, took, ok, issues.Branch(took.Number), fanout, started...)
 			return sweptReply(r, err, *asJSON, flagged)
@@ -401,7 +408,7 @@ func init() {
 		Name:    "issue land",
 		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "check, push and open the PR of an issue-N branch, auto-merge on",
+		Summary: "check, push and open an issue-N branch's PR, auto-merge on",
 		Details: "on an issue-N branch of a leaf: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), pass tests/check.sh, push, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash).",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
@@ -459,7 +466,7 @@ func init() {
 		Name:    "issue review",
 		Usage:   "issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "pass or fail a gate whose sub-issues have closed, by its report",
+		Summary: "pass or fail a gate whose sub-issues closed, by its report",
 		Details: "review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree, with the report in the JSON file PATH (spec/review.md). It refuses a pass where a requirement lacks evidence, and a report without its checked-and-clean list. Every finding becomes an se-final issue: a blocking one a sub-issue of N, a non-blocking one in the queue (five at most). pass posts the report and closes N; fail posts it, and N waits for its fixes. A re-review that finds an earlier blocker's problem again sends N to a person.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
