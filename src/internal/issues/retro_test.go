@@ -96,9 +96,11 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 	}
 	closed := []string{
 		closedJSON(23, "completed", at(2, 12), "work\n\n"+NewMark, ""),
-		closedJSON(24, "completed", at(3, 10), "by hand", ""),
-		closedJSON(25, "not_planned", at(3, 11), NewMark, ""),
-		closedJSON(26, "completed", at(3, 12), NewMark, `,"sub_issues_summary":{"total":2,"completed":2}`),
+		// The mark is bounded by creation, #91 brought it at 10:30 on the 3rd:
+		// #24 and #26 lack it but were made before, #25 lacks it and was made after.
+		closedJSON(24, "completed", at(3, 10), "by hand", `,"created_at":"`+at(2, 0)+`"`),
+		closedJSON(25, "not_planned", at(3, 11), "by hand", `,"created_at":"2026-10-03T10:45:00Z"`),
+		closedJSON(26, "completed", at(3, 12), "by hand", `,"created_at":"`+at(2, 0)+`","sub_issues_summary":{"total":2,"completed":2}`),
 	}
 	commits := `[{"sha":"x99","commit":{"message":"pushed straight\n\nto main"}},{"sha":"m51","commit":{"message":"m"}},{"sha":"m50","commit":{"message":"m"}}]`
 	if !later {
@@ -181,20 +183,22 @@ func TestEachRuleCheck(t *testing.T) {
 		"fixes PR #51",          // its body names no Fixes #n
 		"ci PR #51",             // its last run failed; #50's rerun passed
 		"outside-pr commit x99", // no merged PR made it
+		"mark #25",              // made after #91 brought the mark, and lacks it
 		"answers #24",           // completed leaf, no answers; #25 not planned, #26 a parent
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%q", got)
 	}
-	// #24 lacks the mark, but closed before #91 brought it: a count, not a check.
-	if want := map[string]int{"mark": 1}; !reflect.DeepEqual(c.Before, want) {
+	// #24 and #26 lack the mark, but were made before #91 brought it: a count,
+	// not a check, though #26 closed after it.
+	if want := map[string]int{"mark": 2}; !reflect.DeepEqual(c.Before, want) {
 		t.Fatalf("before %v", c.Before)
 	}
 	draft, err := c.Draft(rqs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(draft, "(`mark`): held. Before the rule came with PR #91: broken once, not counted.\n") {
+	if !strings.Contains(draft, "(`mark`): broken once. Before the rule came with PR #91: broken 2 times, not counted.\n") {
 		t.Fatalf("the draft lacks the count before the mark:\n%s", draft)
 	}
 	if !strings.Contains(c.Checks[1].What, "check failure") || !strings.Contains(c.Checks[2].What, "pushed straight:") {
