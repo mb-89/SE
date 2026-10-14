@@ -102,9 +102,19 @@ func (c *Call) boxAgent() (string, error) {
 }
 
 // handOver reads the skills issue i names, records the hand-over in the
-// session's log, and answers them with the text a take adds to its answer.
+// session's log, and answers them with the text a take adds to its answer,
+// followed by what its tier runs that others built (tierText).
 // The claim stands either way: a skill that cannot be handed over is said.
 func (c *Call) handOver(i issues.Issue) handed {
+	h := c.handOverSkills(i)
+	if tier := c.tierText(i); tier != "" {
+		h.Text = strings.TrimLeft(h.Text+"\n\n"+tier, "\n")
+	}
+	return h
+}
+
+// handOverSkills hands over the skills issue i names, as handOver says.
+func (c *Call) handOverSkills(i issues.Issue) handed {
 	names := guidance.Named(i.Body)
 	if len(names) == 0 {
 		return handed{}

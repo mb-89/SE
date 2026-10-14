@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -62,13 +63,32 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 		!strings.Contains(out, "; checked on what closed after PR #74 brought it.\n") {
 		t.Fatalf("checks: %q", out)
 	}
+	// The usage lines' want comes from the registered commands, so a new
+	// command edits no list here.
 	_, out, _ = se(t, "--workspace", ws, "manifest", "usage", "fleet", "rules")
-	if want := "```\nse fleet check [--json] [--repo OWNER/NAME]\nse fleet fix [--json] [--repo OWNER/NAME]\nse fleet prune [--apply] [--json] [--repo OWNER/NAME]\nse fleet refresh [--json] [--repo OWNER/NAME]\nse fleet rules [--json] [--repo OWNER/NAME]\nse rules\n```\n"; out != want {
-		t.Fatalf("usage: %q", out)
+	if want := "```\n" + usagesUnder("fleet") + usagesUnder("rules") + "```\n"; !strings.HasPrefix(want, "```\nse fleet check ") || !strings.HasSuffix(want, "\nse rules [--fix]\n```\n") || out != want {
+		t.Fatalf("usage: %q, want %q", out, want)
 	}
 	if code, _, errs := se(t, "--workspace", ws, "manifest", "frob"); code != 1 || !strings.Contains(errs, `no manifest "frob"`) {
 		t.Fatalf("an unknown manifest (exit %d): %s", code, errs)
 	}
+}
+
+// usagesUnder answers the usage lines of the registered commands under word,
+// by name, each on its own line.
+func usagesUnder(word string) string {
+	var names []string
+	for name := range commands {
+		if name == word || strings.HasPrefix(name, word+" ") {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	for _, name := range names {
+		b.WriteString("se " + commands[name].Usage + "\n")
+	}
+	return b.String()
 }
 
 func TestWriteFillsEveryManifestAndTheRulesHoldItThere(t *testing.T) {

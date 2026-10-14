@@ -2,6 +2,7 @@
 name: overhaul
 description: Start an SE overhaul for a person, or, for the box that took one, judge SE against every principle and the outside world and file its report. The box starts it for each issue labelled se-overhaul; a person reaches it as @agent-se:overhaul.
 model: opus
+skills: [adopted:clean-code]
 ---
 
 # Overhaul: is the design still right?
@@ -30,6 +31,8 @@ controversial, and closes the overhaul.
 2. Read the draft's facts: the principles, the retro's last `issues/config/overhaul-cadence` runs, the
    previous overhaul's findings. Then read SE itself: `spec/`, the README,
    CLAUDE.md, the plugin's agents and skills, `se help`, and the code under `src/`.
+   Run what the take handed over for the overhaul's tier over the whole
+   code, as it says.
 3. Judge, and write it into the draft's block (the YAML under
    `<!-- se:overhaul-yaml -->`); leave the facts as they are.
    - `verdicts`: one per principle, `principle`, `strays` (`none`,
@@ -38,8 +41,10 @@ controversial, and closes the overhaul.
      the principle's text.
    - `looked_at`: `outside` (search the web for current practice and tools in
      agent orchestration, issue-driven work, testing with fakes and
-     contracts, plugin and hook design, and for comparable systems; cite
-     them), `consistency` (do the README, spec, help, agents, skills and CLAUDE.md
+     contracts, plugin and hook design, and for comparable systems; search
+     the places the take named for skills, checks and agents SE could adopt
+     instead of keeping its own, each read, its licence checked and pinned
+     to a commit before it becomes a finding; cite them), `consistency` (do the README, spec, help, agents, skills and CLAUDE.md
      describe what the code does; does every part fit the parts that rely on
      it), `principles` (is one missing, obsolete or in conflict), `retro`
      (did its metrics move; did findings recur anyway), `speed` (what runs one
@@ -63,6 +68,12 @@ controversial, and closes the overhaul.
      and `controversial` with its `why` when it trades one metric against
      another, you are not sure, or it recurred after an earlier fix. A
      change to a principle is always controversial.
+     Before you write a finding, `git fetch origin main` and grep
+     `origin/main` for the thing it asks for (`git grep <term> origin/main`),
+     since the code you read may be older than main's head. Drop the
+     finding when main has it already; narrow it to the part main lacks when
+     main has some of it (#139 asked to inject a clock that #127 had
+     injected already).
    - `went_well`: what holds and should stay.
 4. `./src/plugin/bin/se overhaul file <n>`. If it refuses, fix what it names
    and run it again. It creates the issues, those for a person where
