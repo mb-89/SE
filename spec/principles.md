@@ -150,10 +150,19 @@ principle is one sentence and one paragraph, and names what checks it.
     cloud fleet does it; the session does not do it itself.
     Checked by: retro and overhaul, by judgment.
 
-21. **The fleet's configuration lives in the repository.**
+21. **The rule of five.**
+    A surface a person sees, the root, `spec/` and `src/`, holds at most five
+    visible files and at most five visible folders; dot files and dot folders
+    do not count. A person looking at SE sees what is there for them, not the
+    tools SE is built with. The limit, the surfaces and the allowlist of
+    today's violations, which only shrinks, live in one configuration.
+    Checked by: the battery (the `rule-of-five` rule of `se rules`, configured
+    in `src/internal/rules/five.yaml`).
+
+22. **The fleet's configuration lives in the repository.**
     Every setting the fleet runs by, the main ruleset, the routine that starts
     boxes and the models they run, is written in the repository
-    ([spec/fleet.yaml](fleet.yaml), [spec/models.yaml](models.yaml)), and
+    ([src/internal/issues/fleet.yaml](../src/internal/issues/fleet.yaml), [spec/models.yaml](models.yaml)), and
     `se fleet check` compares it with the live one; a drift goes to a person.
     A setting no API the fleet has can read is written down all the same, and
     says so. Principle 11 keeps the fleet's state on GitHub; this keeps its

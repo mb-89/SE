@@ -40,10 +40,10 @@ and only then leaves.**
      by an open issue no box works (not labelled `se`, or in another
      repository), or by itself through a cycle.
    - **configuration drift**: main's live ruleset differs from
-     [spec/fleet.yaml](fleet.yaml) at main (its required checks, or their
+     [src/internal/issues/fleet.yaml](../src/internal/issues/fleet.yaml) at main (its required checks, or their
      strictness); on no issue. The routine is written there too, but no API
      the fleet has reads it, so it is not compared
-     ([principle 21](principles.md)).
+     ([principle 22](principles.md)).
    - **waiting on a person**: an `se-person` issue, with what it holds up.
      Reported, never fixed.
 
@@ -73,7 +73,7 @@ and only then leaves.**
      owner where it is a judgment: a cycle, a blocker outside the fleet, a
      green PR auto-merge does not merge;
    - a configuration drift goes to a person (`se fleet fix`), who sets the
-     live setting or changes `spec/fleet.yaml`; it is on no issue, so its
+     live setting or changes `src/internal/issues/fleet.yaml`; it is on no issue, so its
      record is the mark `<!-- se:fleet configuration-drift -->` in the issue
      it made, and while that issue is open it is not reported again.
 4. **It never fixes the same thing twice.** A takeover is recorded with
@@ -123,7 +123,7 @@ its output names what it deleted.
 
 CI must run on what lands, so main's ruleset merges a PR only when its
 branch is up to date with main (its required check is strict, as
-[spec/fleet.yaml](fleet.yaml) sets): a PR
+[src/internal/issues/fleet.yaml](../src/internal/issues/fleet.yaml) sets): a PR
 whose CI ran before main moved waits. Two things keep it moving, with no
 box in the loop:
 

@@ -42,7 +42,6 @@ The rules, each file owning one part:
 - [spec/cloud.md](spec/cloud.md): Cloud boxes: SE in a cloud environment
 - [spec/coordination.md](spec/coordination.md): Coordination: a box that finds nothing to take
 - [spec/development.md](spec/development.md): Development: working on SE
-- [spec/fleet.yaml](spec/fleet.yaml)
 - [spec/index.md](spec/index.md): Index: the core and the module contract
 - [spec/io.md](spec/io.md): I/O modules: the shape every one follows
 - [spec/issues.md](spec/issues.md): Issues: how the fleet picks its work

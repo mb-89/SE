@@ -1,4 +1,4 @@
-# The fleet's configuration, set here and nowhere else (principle 21). se fleet
+# The fleet's configuration, set here and nowhere else (spec/principles.md, principle 22). se fleet
 # check reads this file at main and compares what an API the fleet has can read
 # with the live setting; a difference is a configuration drift, for a person
 # (spec/coordination.md). A setting no such API reads is written down here all

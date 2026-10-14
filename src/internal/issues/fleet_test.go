@@ -531,12 +531,12 @@ func TestTheTakeoverRemedyOfAStuckSubIssueLeafRuns(t *testing.T) {
 	}
 }
 
-// configured records spec/fleet.yaml at main, requiring checks of main, and
+// configured records src/internal/issues/fleet.yaml at main, requiring checks of main, and
 // main's live rules: its required checks, and whether they are strict.
 func (w *world) configured(want string, live []string, strict bool) {
 	w.t.Helper()
 	text := fmt.Sprintf("ruleset:\n  branch: main\n  required_checks: [%s]\n  strict: true\nroutine:\n  name: SE work\n", want)
-	w.set("repos/o/r/contents/spec/fleet.yaml?ref=main", fmt.Sprintf(`{"content":%q,"encoding":"base64"}`, base64.StdEncoding.EncodeToString([]byte(text))))
+	w.set("repos/o/r/contents/src/internal/issues/fleet.yaml?ref=main", fmt.Sprintf(`{"content":%q,"encoding":"base64"}`, base64.StdEncoding.EncodeToString([]byte(text))))
 	var cs []string
 	for _, c := range live {
 		cs = append(cs, fmt.Sprintf(`{"context":%q}`, c))
@@ -558,8 +558,8 @@ func TestARulesetThatDriftedFromSpecFleetYamlGoesToAPersonOnce(t *testing.T) {
 	w := newWorld(t, []string{item(5, 0)})
 	w.configured("check", []string{"lint"}, false)
 	f := only(t, w.check(), ConfigDrift, 0)
-	want := "spec/fleet.yaml requires check, which main's live ruleset does not; main's live ruleset requires lint, which spec/fleet.yaml does not; spec/fleet.yaml sets strict: true, main's live ruleset false"
-	if f.What != want || f.Remedy != "se fleet fix reports it as an se-person issue: the person sets the live setting or changes spec/fleet.yaml" {
+	want := "src/internal/issues/fleet.yaml requires check, which main's live ruleset does not; main's live ruleset requires lint, which src/internal/issues/fleet.yaml does not; src/internal/issues/fleet.yaml sets strict: true, main's live ruleset false"
+	if f.What != want || f.Remedy != "se fleet fix reports it as an se-person issue: the person sets the live setting or changes src/internal/issues/fleet.yaml" {
 		t.Fatalf("%+v", f)
 	}
 	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
@@ -582,7 +582,7 @@ func TestAMainWithoutRulesDriftsFromSpecFleetYaml(t *testing.T) {
 	w := newWorld(t, []string{item(5, 0)})
 	w.configured("check", nil, false)
 	w.set("repos/o/r/rules/branches/main", `[]`)
-	if f := only(t, w.check(), ConfigDrift, 0); f.What != "spec/fleet.yaml requires check, which main's live ruleset does not; spec/fleet.yaml sets strict: true, main's live ruleset false" {
+	if f := only(t, w.check(), ConfigDrift, 0); f.What != "src/internal/issues/fleet.yaml requires check, which main's live ruleset does not; src/internal/issues/fleet.yaml sets strict: true, main's live ruleset false" {
 		t.Fatalf("%+v", f)
 	}
 }

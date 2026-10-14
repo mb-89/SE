@@ -408,7 +408,7 @@ routine `SE work`, whose whole prompt is
     run the work skill
 
 and the work skill is [src/plugin/skills/work/SKILL.md](../src/plugin/skills/work/SKILL.md), `se:work` in a session.
-Its triggers are set in [spec/fleet.yaml](fleet.yaml): a GitHub trigger on
+Its triggers are set in [src/internal/issues/fleet.yaml](../src/internal/issues/fleet.yaml): a GitHub trigger on
 every merge into main, so a box may find the issues that merge unblocked; a
 schedule; and an API trigger, which `se` fires for the fan-out.
 

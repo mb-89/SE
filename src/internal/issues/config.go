@@ -10,14 +10,14 @@ import (
 )
 
 // FleetConfigPath is the fleet's configuration, which se fleet check compares
-// with the live one (principle 21).
-const FleetConfigPath = "spec/fleet.yaml"
+// with the live one (principle 22).
+const FleetConfigPath = "src/internal/issues/fleet.yaml"
 
 // driftMark marks the issue a configuration drift went to, so it is reported
 // once while that issue is open.
 const driftMark = "<!-- se:fleet configuration-drift -->"
 
-// fleetConfig is what se fleet check reads of spec/fleet.yaml. The routine
+// fleetConfig is what se fleet check reads of src/internal/issues/fleet.yaml. The routine
 // is written there too, but no API the fleet has reads it.
 type fleetConfig struct {
 	Ruleset struct {
@@ -38,7 +38,7 @@ type rule struct {
 	} `json:"parameters"`
 }
 
-// drift compares spec/fleet.yaml at main with main's live ruleset: each
+// drift compares src/internal/issues/fleet.yaml at main with main's live ruleset: each
 // difference is one configuration drift, which goes to a person, since only
 // a person decides which side is right. Without the file there is nothing to
 // compare. reported is the open issue a drift went to already, or 0.
