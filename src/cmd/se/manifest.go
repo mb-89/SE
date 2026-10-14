@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -107,22 +106,6 @@ func init() {
 			return Reply{Text: "rewrote " + strings.Join(changed, ", ")}, nil
 		},
 	})
-}
-
-// unmergedPaths is every path git's index at root holds unmerged, each once:
-// a conflicted file stands there once per stage, which would list it as often.
-func unmergedPaths(root string) ([]string, error) {
-	out, err := exec.Command("git", "-C", root, "diff", "--name-only", "--diff-filter=U", "-z").Output()
-	if err != nil {
-		return nil, fmt.Errorf("git diff --diff-filter=U: %w", err)
-	}
-	var paths []string
-	for _, p := range strings.Split(string(out), "\x00") {
-		if p != "" {
-			paths = append(paths, p)
-		}
-	}
-	return paths, nil
 }
 
 func manifestNames() []string {
