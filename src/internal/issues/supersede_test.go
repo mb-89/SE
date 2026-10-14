@@ -107,8 +107,22 @@ func TestUnclosedNamesWhatIsMissing(t *testing.T) {
 	if why, err := s.Unclosed(5); err != nil || !strings.Contains(why, "PR #9 (p9) has auto-merge off") {
 		t.Fatalf("%q %v", why, err)
 	}
+	// A box keeps its PR until it merges: auto-merge on is not yet done.
 	s = at(map[string]string{pulls: `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`})
+	if why, err := s.Unclosed(5); err != nil || !strings.Contains(why, "PR #9 (p9) has not merged") || !strings.Contains(why, "se issue keep") {
+		t.Fatalf("%q %v", why, err)
+	}
+	// Taken over by another box, it is that box's to keep.
+	s = at(map[string]string{
+		pulls:                         `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`,
+		"repos/o/r/issues/5/comments": `[{"id":1,"body":"Claimed.\n<!-- se:box s1 -->"},{"id":2,"body":"Took over.\n<!-- se:box s2 -->"}]`,
+	})
+	s.Box = "s1"
 	if why, err := s.Unclosed(5); err != nil || why != "" {
+		t.Fatalf("%q %v", why, err)
+	}
+	s.Box = "s2"
+	if why, err := s.Unclosed(5); err != nil || !strings.Contains(why, "has not merged") {
 		t.Fatalf("%q %v", why, err)
 	}
 	// Superseded, or merged: closed.
