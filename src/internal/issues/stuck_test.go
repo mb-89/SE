@@ -68,7 +68,7 @@ func (g *github) gh(args ...string) ([]byte, error) {
 	return []byte(a), nil
 }
 
-func (g *github) source() Source { return Source{Repo: repo, GH: g.gh, Now: clock} }
+func (g *github) source() Source { return Source{Repo: repo, GH: g.gh, Clock: atNow()} }
 
 func refs(ns ...int) string {
 	var out []string

@@ -202,7 +202,7 @@ Every part tests itself alone ([principles 7 and 8](principles.md)):
 | what is tested | against |
 |---|---|
 | a compute module | the **fake index** (v5's `q/qtest`): the test seeds the inputs and config the module reads, by local name, runs it (a derivation or a command with arguments), and asserts the outputs it commits and the requests it answers, handing each request its answer |
-| an I/O module | the fake index and the fake of its outside, with one contract suite run against the fake and the real thing (#44) |
+| an I/O module | the fake index and the fake of its outside, with one contract suite run against the fake and the real thing, in the shape [io.md](io.md) sets (#44) |
 | the fake index | one contract suite, run against the fake and the real core in process: the fake speaks the module contract and nothing more |
 | the index core | fixture modules that declare, read and write as a test scripts them |
 | every command declaration | generic cases over the catalog: each has a summary, help and group, and every adapter shows the same text |
