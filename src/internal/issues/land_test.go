@@ -78,6 +78,7 @@ func passes(string) error { return nil }
 func landedAt() time.Time { return time.Date(2026, 1, 2, 11, 30, 0, 0, time.UTC) }
 
 func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
+	t.Parallel()
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
 	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}.Land(a, "", qs, full, passes)
@@ -138,6 +139,7 @@ var profile = battery.Profile{
 }
 
 func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	d := disk.NewFake()
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
@@ -169,6 +171,7 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 }
 
 func TestLandAgainUpdatesTheOpenPRsProfile(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	d := disk.NewFake()
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
@@ -181,6 +184,7 @@ func TestLandAgainUpdatesTheOpenPRsProfile(t *testing.T) {
 }
 
 func TestLandAgainPushesAndReportsTheOpenPR(t *testing.T) {
+	t.Parallel()
 	origin, a := claimed(t)
 	run(t, a, "push", "-q", "origin", "HEAD:issue-6")
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "fix ci")
@@ -200,6 +204,7 @@ func TestLandAgainPushesAndReportsTheOpenPR(t *testing.T) {
 }
 
 func TestLandMergesAPRWithNothingToWaitFor(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	// No check is pending on #14: GitHub calls it clean.
 	gh := landGH(t, map[string]string{pullsPath: `[` + clean14 + `]`})
@@ -213,6 +218,7 @@ func TestLandMergesAPRWithNothingToWaitFor(t *testing.T) {
 }
 
 func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
 	gh.Proxy = true
@@ -226,6 +232,7 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 }
 
 func TestLandSaysWhenAutoMergeFails(t *testing.T) {
+	t.Parallel()
 	_, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
 	gh.NoAutoMerge = true
@@ -291,6 +298,7 @@ func TestLandRefusesBeforePushing(t *testing.T) {
 }
 
 func TestLandRefusesAParent(t *testing.T) {
+	t.Parallel()
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{issue6: `{"number":6,"title":"the tree","sub_issues_summary":{"total":2,"completed":1}}`})
 	checked := false
@@ -333,6 +341,7 @@ func commitFile(t *testing.T, dir, name, text string) {
 }
 
 func TestLandMergesTheBranchAndMainInBeforeTheCheck(t *testing.T) {
+	t.Parallel()
 	origin, a, b := claimedBy(t)
 	run(t, a, "push", "-q", "origin", "HEAD:issue-6")
 	commitFile(t, a, "fix", "a")
@@ -366,6 +375,7 @@ func TestLandMergesTheBranchAndMainInBeforeTheCheck(t *testing.T) {
 }
 
 func TestLandStopsWhereMainConflicts(t *testing.T) {
+	t.Parallel()
 	origin, a, b := claimedBy(t)
 	before := run(t, origin, "rev-parse", "issue-6")
 	commitFile(t, b, "work", "b")
