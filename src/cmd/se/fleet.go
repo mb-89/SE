@@ -14,7 +14,7 @@ func init() {
 		Usage:   "fleet check [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list what is broken in the fleet, each with its remedy",
-		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the coordination skill fixes them. Nothing found, it says healthy. spec/coordination.md has the rules.",
+		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says healthy. spec/coordination.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet check")

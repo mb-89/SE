@@ -27,8 +27,8 @@ What earlier versions taught, and how this design answers it:
 - **Starting one:** `se retro new` creates the issue (through the same code as
   `se issue new`) and fires the routine, as fan-out does, so a box takes it at
   once.
-  - Started by a person (the default): the retro skill first asks the person
-    for **field feedback**, which `--field TEXT` puts into the issue.
+  - Started by a person (the default): the agent `se:retro` first takes the
+    person's **field feedback**, which `--field TEXT` puts into the issue.
     `--no-field` skips the question. `se retro new` refuses to guess: it takes
     exactly one of `--field`, `--no-field` and `--unattended`.
   - `--unattended` never asks. The automatic cadence (below) starts retros this
@@ -50,9 +50,8 @@ What earlier versions taught, and how this design answers it:
   cadence. The plain `se issue pull` only reports the count, and that a retro
   is due.
 - **The box** takes a retro like any issue (`se issue pull --take` says it is
-  a retro) and follows the retro skill,
-  [src/plugin/skills/retro/SKILL.md](../src/plugin/skills/retro/SKILL.md),
-  instead of landing a branch.
+  a retro and names its agent, `se:retro`) and starts that agent, which files
+  the report instead of landing a branch.
 - **The mechanical half,** `se retro collect N`, reads the window from GitHub
   and writes a report draft beside the checkout (`../retro-N.md`). It holds:
   - the matrix: every closed issue × every landing question, from the
@@ -70,7 +69,7 @@ What earlier versions taught, and how this design answers it:
   window made inconsistent, restated or written for no reader (principles 17
   to 19), groups the findings into classes, picks each class's cheapest
   durable fix and records what went well. How, and the fields it writes into
-  the draft's block, are the retro skill's (its steps 2 and 3).
+  the draft's block, are the agent's (its steps 2 and 3).
 - **Who decides (the owner's rule for retros and overhauls alike):** every
   finding becomes an issue through the same code as `se issue new`.
   - A **non-controversial** finding goes into the normal queue.
@@ -114,7 +113,7 @@ What earlier versions taught, and how this design answers it:
     many of those closed, and which findings recurred anyway.
   - **Should the retro change itself?** Proposals for the landing questions
     ([landing.yaml](landing.yaml)), the rule checks, the metrics or the retro
-    skill are findings like any other, with the same homes (`retro: true`).
+    agent are findings like any other, with the same homes (`retro: true`).
 - **The report stays on the retro issue** as its closing comment, opening
   with `<!-- se:retro-report -->`, with a machine-readable block under
   `<!-- se:retro-yaml -->`: the window, metrics, rule checks, the previous

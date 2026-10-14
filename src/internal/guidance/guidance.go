@@ -106,6 +106,17 @@ func Read(d disk.Disk, workspace string, names []string) ([]Skill, error) {
 	return skills, nil
 }
 
+// Body is a skill's or an agent's file without its front matter.
+func Body(text []byte) string {
+	t := string(text)
+	if rest, ok := strings.CutPrefix(t, "---\n"); ok {
+		if _, body, ok := strings.Cut(rest, "\n---\n"); ok {
+			return body
+		}
+	}
+	return t
+}
+
 // Text is the skills as an answer carries them: in full where inline holds,
 // else each by name and file only.
 func Text(skills []Skill, inline bool) string {

@@ -5,9 +5,10 @@
 // event the engine raises is posted to the workspace's se daemon before it
 // goes on, unchanged. The daemon owns what happens to it: today it appends
 // the event to the session's log. While SE is off, every hook hands the event
-// straight on and contacts nothing, but one: the context carries the guidance
-// se answers (the principles, the skills a take handed over), on or off, made
-// again after each compaction. /se ui opens a pane of buttons: the on/off
+// straight on and contacts nothing, but one: the plugin's SessionStart hook
+// puts the guidance se answers into the context (the principles; in a box, the
+// box's agent; the skills a take handed over), on or off, at startup, resume,
+// clear and compact, since a plugin can ship no rules and no CLAUDE.md. /se ui opens a pane of buttons: the on/off
 // toggle and the commands se offers as buttons, each pressed as /se <words>.
 // In a box, SE on or off, every Stop and SubagentStop goes to se hook stop,
 // which refuses the stop while the issue the box took is open with neither a
@@ -79,11 +80,12 @@ const WAITING_CAP = 1000
 let settingUp: Promise<void> | null = null
 // What the status line says is working, one line per call still running past FEEDBACK.
 const working: string[] = []
-// The context block se's guidance goes under.
-const GUIDANCE = 'se-guidance'
-// The guidance se answered for this session's context; null until it answers,
-// and again after a compaction, so the next context asks anew.
-let guidance: string | null = null
+// The sources of a session start whose context the guidance goes into: each
+// starts a context that holds none of it yet.
+const GUIDED = ['startup', 'resume', 'clear', 'compact']
+// How long a session start waits for the guidance: it shows it is working
+// after FEEDBACK, and the first prompt goes on without it after this long.
+const GUIDING = 30_000
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -104,18 +106,14 @@ export const register: Register = on => {
 
   on('command.run', { command: 'se' }, async ($, e) => ({ text: await runs($, e.args) }))
 
-  // The guidance goes into the context, which the engine sends once while the
-  // conversation holds none: at its first request, and after each compaction.
-  on('prompt.context', async ($, e, next) => {
-    const said = await next(e)
+  // Always-on guidance: the documented way a plugin puts text into every
+  // session, the SessionStart hook's additionalContext, on each source that
+  // starts a context without it (a compaction keeps only a summary of it).
+  on('classic.SessionStart', async ($, e, next) => {
+    const result = await next(e)
+    if (!GUIDED.includes(e.source)) return result
     const text = await guided($)
-    return text ? { ...said, blocks: [...said.blocks, { name: GUIDANCE, text }] } : said
-  })
-
-  on('session.compact', async ($, e, next) => {
-    const compacted = await next(e)
-    if (e.trigger !== 'precompute' && !compacted.skip) guidance = null
-    return compacted
+    return text ? { ...result, additionalContext: [...(result.additionalContext ?? []), text] } : result
   })
 
   // Every surface draws Box, Text and Button, the phone too, so the pane uses no other.
@@ -313,16 +311,21 @@ async function updatesItself($: EngineInterface): Promise<void> {
   if (said) $.ui.toast(said.split('\n')[0])
 }
 
-// The guidance se answers for this session, asked once and again after a
-// compaction; '' while se has not answered within FEEDBACK, or failed.
+// The guidance se answers for this session; '' where se failed, or did not
+// answer within GUIDING. Past FEEDBACK the status line says it is working.
 async function guided($: EngineInterface): Promise<string> {
-  if (guidance !== null) return guidance
-  const asking = asks($, ['guidance', '--session-id', await $.session.id()]).then(said => {
-    if (typeof said !== 'string') guidance = said.text
-    return guidance ?? ''
-  })
+  const asking = asks($, ['guidance', '--session-id', await $.session.id()]).then(said =>
+    typeof said === 'string' ? '' : said.text,
+  )
   const ran = await within($, 'reading its guidance', asking)
-  return ran.done ? ran.value : ''
+  if (ran.done) return ran.value
+  let timer: Timer | undefined
+  const late = new Promise<string>(resolve => {
+    timer = $.clock.after(GUIDING, () => resolve(''))
+  })
+  const text = await Promise.race([ran.later, late])
+  timer?.cancel()
+  return text
 }
 
 // Hands the words to se as a session call; answers its reply, or why there is none.

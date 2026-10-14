@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/mb-89/SE/src/internal/guidance"
 )
 
 // NewMark is what se issue new leaves at the end of every body it writes, so
@@ -86,8 +84,8 @@ func (s Source) NewRetro(field string, unattended bool) (RetroIssue, error) {
 	case feedback == "":
 		feedback = "None given."
 	}
-	body := fmt.Sprintf("A retro over %s. The rules are spec/retro.md; a box takes it with the retro skill, which its take hands over, and starts with `se retro collect`.\n\n%s\n\n## Field feedback\n%s\n\n<!-- se:retro %s -->\n\n%s",
-		window, who, feedback, mode, guidance.Line([]string{"retro"}))
+	body := fmt.Sprintf("A retro over %s. The rules are spec/retro.md; a box takes it and starts its agent, se:retro, which starts with `se retro collect`.\n\n%s\n\n## Field feedback\n%s\n\n<!-- se:retro %s -->",
+		window, who, feedback, mode)
 	title := "SE retro " + s.now().UTC().Format("2006-01-02")
 	made, _, err := s.create(title, body, 0, nil, []string{Label, RetroLabel})
 	if err != nil {

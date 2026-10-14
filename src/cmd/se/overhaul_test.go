@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/guidance"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -17,7 +16,7 @@ func TestOverhaulNewCreatesTheOverhaulAndFires(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	made := issueOf(t, gh, 10)
-	for _, want := range []string{"It is the first overhaul.", "<!-- se:overhaul attended -->", "Skills: overhaul " + guidance.Mark, "<!-- se:new -->"} {
+	for _, want := range []string{"It is the first overhaul.", "<!-- se:overhaul attended -->", "starts its agent, se:overhaul", "<!-- se:new -->"} {
 		if !strings.Contains(made, want) {
 			t.Errorf("the body lacks %q: %s", want, made)
 		}

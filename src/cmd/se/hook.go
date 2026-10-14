@@ -91,7 +91,7 @@ func stopLog(c *Call, line string) {
 	fmt.Fprintf(f, "%s %s\n", c.Clock.Now().UTC().Format("2006-01-02T15:04:05Z"), line)
 }
 
-// leafPrompt is how the work skill starts a leaf's sub-agent.
+// leafPrompt is how the box (se:coordinator) starts the sub-agent of an issue it took.
 var leafPrompt = regexp.MustCompile(`Work on se issue #(\d+) in the worktree`)
 
 // verdict is what se hook stop answers the plugin: block, with the reason the

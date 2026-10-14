@@ -28,9 +28,8 @@ whole system, not a window.
   duplicate, as a retro does. `--take N` skips the cadence; the plain `se issue pull` reports the
   count beside the retro's.
 - **The box** takes an overhaul like any issue (`se issue pull --take` says it
-  is an overhaul) and follows the overhaul skill,
-  [src/plugin/skills/overhaul/SKILL.md](../src/plugin/skills/overhaul/SKILL.md),
-  instead of landing a branch.
+  is an overhaul and names its agent, `se:overhaul`) and starts that agent,
+  which files the report instead of landing a branch.
 - **The mechanical half,** `se overhaul read N`, writes a report draft beside
   the checkout (`../overhaul-N.md`). It holds:
   - every principle of [principles.md](principles.md), with what checks it,
@@ -44,7 +43,7 @@ whole system, not a window.
   world, the consistency of the whole system, the principles themselves, the
   retro's effectiveness, speed, what to mechanize and what to remove, the
   findings and what went well. What each part asks and the fields it writes
-  into the draft's block are the overhaul skill's (its step 3).
+  into the draft's block are the agent's (its step 3).
 - **Minting:** the same rule as the retro's (the owner's rule in
   [retro.md](retro.md)). Every finding becomes an issue through the same code
   as `se issue new`. A controversial one is an issue for a person, labelled
