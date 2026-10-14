@@ -7,6 +7,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/mb-89/SE/src/internal/index"
 )
 
 // The help reads at a glance: the overview gives each command one short line
@@ -72,8 +74,8 @@ func init() {
 			case "-h", "-help", "--help":
 				return Reply{}, flag.ErrHelp
 			}
-			if cmd, ok := commands[name]; ok && (cmd.Session || !c.Session) {
-				return helpReply(commandHelpOf(cmd, flagsOf(cmd, c.Session), c.Session), c.Session, c.Color), nil
+			if cmd, ok := catalog().Command(name); ok && (cmd.Session || !c.Session) {
+				return helpReply(commandHelpOf(cmd, flagsOf(cmd.Name, c.Session), c.Session), c.Session, c.Color), nil
 			}
 			if under := under(name, c.Session); len(under) > 0 {
 				return helpReply(Help{Groups: groupsOf(under, c.Session)}, c.Session, c.Color), nil
@@ -110,14 +112,11 @@ func overview(session bool) Help {
 
 // groupsOf puts the commands under their groups' headings, the groups in
 // alphabetical order, the commands in the order given.
-func groupsOf(cmds []Command, session bool) []HelpGroup {
+func groupsOf(cmds []index.CommandInfo, session bool) []HelpGroup {
 	byName := map[string]*HelpGroup{}
 	var names []string
 	for _, c := range cmds {
 		heading := c.Group
-		if heading == "" {
-			heading = "Other"
-		}
 		g, ok := byName[heading]
 		if !ok {
 			g = &HelpGroup{Name: heading}
@@ -135,12 +134,8 @@ func groupsOf(cmds []Command, session bool) []HelpGroup {
 }
 
 // commandHelpOf is one command's help as data.
-func commandHelpOf(c Command, fs *flag.FlagSet, session bool) Help {
-	about := c.Summary
-	if c.Details != "" {
-		about = c.Details
-	}
-	h := Help{Usage: prog(session) + " " + c.Usage, About: capital(about)}
+func commandHelpOf(c index.CommandInfo, fs *flag.FlagSet, session bool) Help {
+	h := Help{Usage: prog(session) + " " + c.Usage, About: capital(c.Help)}
 	if fs != nil {
 		fs.VisitAll(func(f *flag.Flag) {
 			kind, usage := flag.UnquoteUsage(f)
@@ -212,19 +207,19 @@ func listing(groups []HelpGroup, color bool) string {
 	return strings.Join(lines, "\n")
 }
 
-// flagsOf is the flag set a command takes, read by running it with --help:
-// every command parses its flags before it does anything.
-func flagsOf(c Command, session bool) *flag.FlagSet {
+// flagsOf is the flag set the command name takes, read by running it with
+// --help: every command parses its flags before it does anything.
+func flagsOf(name string, session bool) *flag.FlagSet {
 	call := &Call{Args: []string{"--help"}, Workspace: ".", Session: session}
-	if _, err := c.Run(call); err != nil && call.flags != nil {
+	if _, err := runCommand(name, call); err != nil && call.flags != nil {
 		return call.flags
 	}
 	return nil
 }
 
 // under lists the commands whose name starts with the words of first.
-func under(first string, session bool) []Command {
-	var out []Command
+func under(first string, session bool) []index.CommandInfo {
+	var out []index.CommandInfo
 	for _, c := range offered(session) {
 		if first != "" && strings.HasPrefix(c.Name, first+" ") {
 			out = append(out, c)
