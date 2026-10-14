@@ -41,6 +41,9 @@ follows them; `se review brief` and `se issue review` (in
 2. **The steps are the reviewer agent's:** finding, verifying and judging are
    separate steps, and the riskiest part comes first, so a reviewer that
    finds damage can stop early. A verified blocker is judged by rule 3.
+   On principles 2 and 3 a review looks at its delta (does the change edit
+   one fact in more than one place?); the overhaul looks at everything
+   ([overhaul.md](overhaul.md)).
 3. **What blocks (the owner's rule): only damage.** A finding blocks only if
    letting the work through would make the product worse, or goes against
    what the product is about. Breakage is CI's job. Bad but fixable work does
