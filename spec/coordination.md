@@ -87,6 +87,7 @@ se fleet check [--json] [--repo OWNER/NAME]
 se fleet fix [--json] [--repo OWNER/NAME]
 se fleet prune [--apply] [--json] [--repo OWNER/NAME]
 se fleet refresh [--json] [--repo OWNER/NAME]
+se fleet rules [--json] [--repo OWNER/NAME]
 ```
 <!-- /se:manifest -->
 
@@ -127,3 +128,18 @@ box in the loop:
   left to its takeover; an update that fails is reported, and the workflow
   run goes red. The workflow `.github/workflows/refresh.yml` runs it on every
   push to main, and every hour.
+
+## A rule main takes
+
+A PR that adds or tightens an se rule breaks the PRs opened before it, and
+each of their boxes used to find out only from its own red CI or its next
+merge. So `se fleet rules` merges the head of every open se PR (an
+`issue-<n>` branch) with `origin/main` in a worktree under
+`.se/.runtime/rules`, builds `se` there, runs `se rules` on the merge, and
+comments on each PR it breaks the findings (a merge that does not build is
+one) and what to do: merge main in, fix them, land again. The comment carries
+`<!-- se:rules KEY -->`, the findings' hash, so the same findings are told
+once. A PR that conflicts with main is left to its takeover; one whose check
+fails is reported, and the others are still checked. The workflow
+`.github/workflows/rules.yml` runs it on every push to main that changes
+`src/internal/rules`, and on demand.

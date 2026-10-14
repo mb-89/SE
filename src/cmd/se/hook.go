@@ -109,6 +109,7 @@ func (v verdict) reply() (Reply, error) {
 func init() {
 	register(Command{
 		Name:    "hook stop",
+		Class:   batch,
 		Usage:   "hook stop [--agent-transcript PATH] [--waiting] [--repo OWNER/NAME]",
 		Group:   "Hooks",
 		Summary: "refuse a box's stop while its issue has no PR nor supersede",
@@ -173,6 +174,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "hook prompt",
+		Class:   interactive,
 		Usage:   "hook prompt",
 		Group:   "Hooks",
 		Summary: "a person prompted: reset the Stop hook's refusals",

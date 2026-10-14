@@ -56,7 +56,7 @@ follows them; `se review brief` and `se issue review` (in
    - a blocking one becomes a sub-issue of the gate, so the gate is reviewed
      again after it lands.
 
-   At most `MaxFiled` non-blocking findings are filed; the rest are
+   At most `issues/config/max-filed` non-blocking findings are filed; the rest are
    counted in the report, not filed.
 5. **Final is general: any second attempt is final, and a failing final
    issue waits on an issue for a person (the owner's rule).** Labels combine: `se` marks

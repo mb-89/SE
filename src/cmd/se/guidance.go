@@ -20,6 +20,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "guidance",
+		Class:   interactive,
 		Usage:   "guidance [--session-id ID]",
 		Group:   "Session",
 		Summary: "answer the principles and the skills a session holds",

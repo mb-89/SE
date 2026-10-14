@@ -47,6 +47,7 @@ func (m manifestCall) link(p string) string {
 func init() {
 	register(Command{
 		Name:    "manifest",
+		Class:   batch,
 		Usage:   "manifest [--write] [<name>]",
 		Group:   "Checks",
 		Summary: "print a manifest, or rewrite every manifest section",
