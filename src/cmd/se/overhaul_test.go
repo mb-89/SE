@@ -42,6 +42,7 @@ func TestTakingAnOverhaulHandsItToTheOverhaulSkill(t *testing.T) {
 }
 
 func TestOverhaulReadHandsTheCodeFactsOnPrinciples2And3(t *testing.T) {
+	t.Parallel()
 	hubAt(t, map[string]string{
 		"repos/o/r/issues/31":                                           `{"number":31,"state":"open","body":"<!-- se:overhaul unattended -->","labels":[{"name":"se-overhaul"}]}`,
 		"repos/o/r/issues/31/comments?per_page=100":                     `[]`,
@@ -69,9 +70,7 @@ func TestOverhaulReadHandsTheCodeFactsOnPrinciples2And3(t *testing.T) {
 		}
 		return 0
 	})
-	old := machine
-	machine = m
-	t.Cleanup(func() { machine = old })
+	worldOf(t).Proc = m
 	if code, out, errs := se(t, "overhaul", "read", "31", "--repo", "o/r", "--workspace", "/ws"); code != 0 {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
