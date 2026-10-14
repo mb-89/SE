@@ -13,7 +13,7 @@ import (
 )
 
 // The kinds of finding se fleet check lists, in the order it lists them and
-// the coordination skill works them. spec/coordination.md says what each is.
+// the box, se:coordinator, works them. spec/coordination.md says what each is.
 const (
 	StalledRoot     = "stalled root"
 	ConflictedPR    = "conflicted PR"
