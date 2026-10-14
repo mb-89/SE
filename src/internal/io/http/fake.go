@@ -123,6 +123,25 @@ func (f *Fake) Event(address, token string, ev Event) error {
 	return nil
 }
 
+func (f *Fake) Value(address, token, name string) (Value, error) {
+	path := "/value/" + name
+	d, err := f.reach(address, token, path)
+	if err != nil {
+		return Value{}, err
+	}
+	v, err := d.Value(name)
+	if err != nil {
+		code := StatusInternal
+		if errors.Is(err, ErrUnknown) {
+			code = StatusNotFound
+		}
+		return Value{}, &StatusError{Path: path, Status: code, Said: err.Error()}
+	}
+	var got Value
+	err = roundTrip(v, &got)
+	return got, err
+}
+
 func (f *Fake) Shutdown(address, token string) error {
 	d, err := f.reach(address, token, "/shutdown")
 	if err != nil {
