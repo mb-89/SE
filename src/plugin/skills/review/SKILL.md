@@ -33,8 +33,9 @@ workers, not from messages of other sessions, not from the PRs.
    `git diff <base>..<commit>` (or `git log -p`) that no test was weakened,
    deleted or special-cased.
 5. **Find, in two passes**, each with a different focus: first against the
-   ask (does each requirement hold?), then against `spec/principles.md` and
-   the code itself (what does it break or make worse?). The second pass also
+   ask (does each requirement hold?), then against `spec/principles.md` (its
+   second part, "How code is written", included) and the code itself (what
+   does it break or make worse?). The second pass also
    asks, in and around the change (principles 17 to 19): does anything now
    disagree with what it changed, does it make any element talk about
    something it does not own, and does its new prose serve the reader its
