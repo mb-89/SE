@@ -60,7 +60,7 @@ func TestEveryRuleIsRegisteredWithItsParts(t *testing.T) {
 		}
 		names = append(names, r.Name)
 	}
-	if got := strings.Join(names, " "); got != "io-module manifest reader repo-path se-command test-package todo-issue" {
+	if got := strings.Join(names, " "); got != "fake-contract io-module manifest reader repo-path se-command test-package todo-issue" {
 		t.Fatalf("rules = %s", got)
 	}
 }

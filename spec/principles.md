@@ -16,13 +16,13 @@ principle is one sentence and one paragraph, and names what checks it.
    Every fact lives in one place, and everything else is derived from it: the
    command registry, the landing questions, this list. A fact written twice
    drifts.
-   Checked by: retro, mechanically (a fact written twice is a finding); overhaul, by judgment.
+   Checked by: overhaul, by judgment (a fact written twice is a finding).
 
 3. **Locality.**
    One change happens in one place, and the system picks it up everywhere by
    registration, never by hand-kept lists; understanding a change means
    reading one place.
-   Checked by: retro, mechanically (files touched per issue, as a metric); overhaul, by judgment.
+   Checked by: overhaul, by judgment.
 
 4. **Modularity.**
    Behaviour lives in modules that register with a small core, the index
@@ -45,13 +45,13 @@ principle is one sentence and one paragraph, and names what checks it.
    between is pure and works on that snapshot alone. A run never asks the
    outside world again for what it already has: that is slow, and inputs
    read at different times disagree.
-   Checked by: the battery (a lint rule, #44's tree); overhaul, by judgment
-   (`looked_at.speed`).
+   Checked by: the battery (the `io-module` rule of `se rules`); overhaul, by
+   judgment (`looked_at.speed`).
 
 7. **Fakes that behave, held to contracts.**
    Every I/O module has a fake, and one contract suite runs against both the
    fake and the real thing; a fake without its suite is refused.
-   Checked by: the battery (a lint rule).
+   Checked by: the battery (the `fake-contract` rule of `se rules`).
 
 8. **Fast tests.**
    Test a behaviour once, at the outermost interface (the `se` command), on
@@ -88,7 +88,7 @@ principle is one sentence and one paragraph, and names what checks it.
 13. **Every session starts at main.**
     Both the code being worked on and the SE that runs the session start at
     main.
-    Checked by: retro, mechanically (commit drift reported by `/se status`).
+    Checked by: overhaul, by judgment.
 
 14. **Fail open for advice, closed for enforcement.**
     Logging and help never block; a rule that guards something refuses when
