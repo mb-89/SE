@@ -95,6 +95,30 @@ func Registered() []*Module {
 // input bound to nothing, two types on one wire, a cycle, or a broken
 // declaration. Then every derivation runs once.
 func Start(w Wiring, modules ...*Module) (*Index, error) {
+	ix, err := check(w, modules)
+	if err != nil {
+		return nil, err
+	}
+	changed := map[string]bool{}
+	if err := ix.settle(changed, true); err != nil {
+		return nil, err
+	}
+	return ix, nil
+}
+
+// Collect checks the catalog the wiring makes of the modules, as Start does,
+// and answers it without starting anything: no derivation runs. An adapter
+// that renders what the modules declared, such as the help, reads it here.
+func Collect(w Wiring, modules ...*Module) (Catalog, error) {
+	ix, err := check(w, modules)
+	if err != nil {
+		return Catalog{}, err
+	}
+	return ix.catalog, nil
+}
+
+// check builds an unstarted index from the wiring and the modules, or refuses a broken catalog.
+func check(w Wiring, modules []*Module) (*Index, error) {
 	b := &builder{w: w, mods: map[string]*Module{}, ix: &Index{
 		names: map[string]*nameInfo{}, insts: map[string]*instance{}, subs: map[string]map[int]func(Value){},
 	}}
@@ -102,12 +126,7 @@ func Start(w Wiring, modules ...*Module) (*Index, error) {
 	if len(b.errs) > 0 {
 		return nil, errors.New("index: the catalog is broken:\n  " + strings.Join(b.errs, "\n  "))
 	}
-	ix := b.ix
-	changed := map[string]bool{}
-	if err := ix.settle(changed, true); err != nil {
-		return nil, err
-	}
-	return ix, nil
+	return b.ix, nil
 }
 
 // Snapshot is the store as it stands.

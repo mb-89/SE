@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
@@ -32,6 +33,10 @@ type Options struct {
 	Clock clock.Clock
 	// Net is the network the daemon answers on.
 	Net sehttp.Net
+	// Modules are the modules the daemon starts the index with, as the wiring binds them.
+	Modules []*index.Module
+	// Wiring, when set, binds them in place of the wiring file se carries.
+	Wiring *index.Wiring
 }
 
 // Serve runs the workspace's daemon until ctx ends, /shutdown is posted, or it idles out.
@@ -44,11 +49,15 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 		return err
 	}
 	defer held.Close()
+	ix, err := startIndex(opts)
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	token, instance := randomHex(32), randomHex(8)
-	srv := NewServer(paths, instance, cancel, opts.Clock)
+	srv := NewServer(ix, instance, cancel, opts.Clock)
 	address, served, err := opts.Net.Serve(ctx, token, srv)
 	if err != nil {
 		return err
@@ -75,6 +84,20 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 	}
 	// Serving ends once ctx does: by the caller, /shutdown or the idle clock.
 	return <-served
+}
+
+// startIndex starts the index the daemon hosts: the wiring se carries, or the
+// one the options give, over the options' modules.
+func startIndex(opts Options) (*index.Index, error) {
+	w := opts.Wiring
+	if w == nil {
+		wired, err := index.Wired()
+		if err != nil {
+			return nil, err
+		}
+		w = &wired
+	}
+	return index.Start(*w, opts.Modules...)
 }
 
 // acquire takes the lifetime lock, stepping a running daemon aside for up to takeOver.

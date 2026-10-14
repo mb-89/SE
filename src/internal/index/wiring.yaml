@@ -1,5 +1,11 @@
 # The wiring file: the module instances and the wires that bind their ports.
 # It is the only place that knows the global layout; spec/index.md says what
-# an entry may say. The se binary embeds it. No module runs on the index yet.
-instances: {}
-wires: {}
+# an entry may say. The se binary embeds it.
+instances:
+  clock: {module: clock}
+  session: {module: session}
+  sessionlog: {module: sessionlog}
+  cli: {module: cli}
+wires:
+  session.events: session/events
+  sessionlog.events: session/events
