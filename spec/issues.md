@@ -290,11 +290,12 @@ runs `tests/check.sh` and goes on only if it passes, refuses a tree the
 battery did not record as passed and a branch main moved past meanwhile,
 pushes the branch, posts the commit status `se/battery` naming its tree on
 the pushed commit, which CI trusts (see
-[spec/coordination.md](coordination.md#up-to-date-with-main)), records on the leaf who worked it (see
+[spec/coordination.md](coordination.md#up-to-date-with-main); a refused
+status is a warning it goes on past), records on the leaf who worked it (see
 [Reviews](#reviews)), posts the landing answers on the issue, opens one PR against main titled after the issue with the
 body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left
 to wait for is squash-merged at once. It prints the PR's number and link (with
-`--json`: `{"issue","number","url","created","merged"}`). Where the branch's PR
+`--json`: `{"issue","number","url","created","merged","warning"}`). Where the branch's PR
 is open already, it pushes and reports that PR, so running it again after a
 fix for red CI is safe, and updates the answers it posted before. A session
 has it as `/se issue land`.

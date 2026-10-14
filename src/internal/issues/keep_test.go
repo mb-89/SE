@@ -205,6 +205,26 @@ func TestTheBoxKeepsAPRThatFallsBehindMainUntilItMerges(t *testing.T) {
 	}
 }
 
+func TestKeepGoesOnPastARefusedStatus(t *testing.T) {
+	t.Parallel()
+	_, a, b, gh, c, d := landedPR(t)
+	run(t, b, "checkout", "-q", "main")
+	run(t, b, "pull", "-q", "origin", "main")
+	commitFile(t, b, "other", "b")
+	run(t, b, "push", "-q", "origin", "main")
+	gh.Proxy = true
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c, Disk: d}
+	s.Waits = func(string) {
+		if _, err := gh.Send("PUT", "repos/o/r/pulls/7/merge", github.F("merge_method", "squash")); err != nil {
+			t.Error(err)
+		}
+	}
+	k, err := s.Keep(a, time.Hour, battered(d))
+	if err != nil || !k.Merged || k.Updated != 1 || !strings.Contains(k.Warning, "se/battery status was refused") {
+		t.Fatalf("%+v %v", k, err)
+	}
+}
+
 func TestTheBoxKeepsAPRUpToDateUntilItsTimeRunsOutOrAnotherBoxTakesItOver(t *testing.T) {
 	t.Parallel()
 	_, a, _, gh, c, d := landedPR(t)

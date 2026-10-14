@@ -21,6 +21,9 @@ type Landing struct {
 	Created bool `json:"created"`
 	// Merged is true when the PR needed no wait and was merged at once.
 	Merged bool `json:"merged"`
+	// Warning is the refusal of the battery's status on the push (ship),
+	// which the land went on past.
+	Warning string `json:"warning,omitempty"`
 }
 
 // pull is the part of GitHub's pull request object land reads.
@@ -79,7 +82,8 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		return Landing{}, fmt.Errorf("#%d has open sub-issues, and a parent holds no work: its sub-issues land, and it closes by itself", n)
 	}
 	branch := Branch(n)
-	if err := s.ship(dir, branch, check); err != nil {
+	warning, err := s.ship(dir, branch, check)
+	if err != nil {
 		return Landing{}, err
 	}
 	body := fmt.Sprintf("Fixes #%d", n)
@@ -96,7 +100,7 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	if err := s.postLanding(dir, n, qs, answers); err != nil {
 		return Landing{}, err
 	}
-	l := Landing{Issue: n}
+	l := Landing{Issue: n, Warning: warning}
 	owner, _, _ := strings.Cut(s.Repo, "/")
 	open, err := api[pull](s, fmt.Sprintf("repos/%s/pulls?head=%s:%s&base=main&state=open&per_page=100", s.Repo, owner, branch), true)
 	if err != nil {

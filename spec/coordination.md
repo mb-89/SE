@@ -141,7 +141,9 @@ battery the box already ran.**
   is undone, and the box resolves it by hand (never a rebase, never a
   force-push). After the push it posts the commit status `se/battery`,
   success, on the pushed commit, its description naming the tree, through
-  the GitHub I/O module.
+  the GitHub I/O module. A refused status (a Claude Code cloud session's
+  proxy answers 403) fails nothing: the land or keep goes on and names the
+  refusal as a warning, and CI runs the battery for a commit without one.
 - **CI trusts that status.** The `check` job, the one main's ruleset
   requires, first runs `se fleet trust` (built from the PR's tree, outside
   the checkout): where the head commit's latest `se/battery` status is a

@@ -263,6 +263,33 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 	}
 }
 
+// Behind a cloud session's proxy the battery's status is refused (#449): the
+// land goes on past it, posts the answers, opens the PR, turns on auto-merge
+// and names the refusal, since CI runs the battery for a commit without one.
+func TestLandGoesOnPastARefusedStatus(t *testing.T) {
+	t.Parallel()
+	origin, a := claimed(t)
+	gh := landGH(t, map[string]string{pullsPath: `[]`})
+	gh.Proxy = true
+	d := disk.NewFake()
+	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	if err != nil || !l.Created || l.Number != 7 {
+		t.Fatalf("%+v %v", l, err)
+	}
+	if !strings.Contains(l.Warning, "se/battery status was refused") || !strings.Contains(l.Warning, "HTTP 403") {
+		t.Fatalf("the warning is %q", l.Warning)
+	}
+	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("origin's issue-6 is %s, want %s", got, want)
+	}
+	if got := commentsAt(t, gh, 6); len(got) != 1 || !strings.Contains(got[0].Body, "the landing") {
+		t.Fatalf("the answers were not posted: %+v", got)
+	}
+	if pr := pullOf(t, gh, 7); pr["auto_merge"] == nil {
+		t.Fatalf("auto-merge is not on: %+v", pr)
+	}
+}
+
 func TestLandSaysWhenAutoMergeFails(t *testing.T) {
 	t.Parallel()
 	_, a := claimed(t)
