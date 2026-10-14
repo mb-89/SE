@@ -9,8 +9,7 @@ Reader: the agent of a box, running this skill.
 
 Every step that can be an `se` command is one. Yours are doing the issue's
 work and fixing a red CI run; follow the rest as written. `se` is
-`./src/plugin/bin/se`; build it first with
-`go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se`.
+`./src/plugin/bin/se`; build it first with `sh ./src/build.sh`.
 Call it exactly as `./src/plugin/bin/se issue …` (or `./src/plugin/bin/se fleet …`),
 one command per call, never through a variable: `.claude/settings.json` allows
 those forms to write GitHub issues without a permission prompt, and only
@@ -22,13 +21,9 @@ those.
    follow the coordination skill,
    [src/plugin/skills/coordination/SKILL.md](../coordination/SKILL.md), which
    checks what is broken and fixes it before the session ends. If it says the issue is a parent, follow **A parent**
-   below instead of steps 3 to 5. If it says the issue is a retro (labelled
-   `se-retro`), follow the retro skill,
-   [src/plugin/skills/retro/SKILL.md](../retro/SKILL.md), instead of steps 3
-   to 5. If it says the issue is an overhaul (labelled `se-overhaul`), follow
-   the overhaul skill,
-   [src/plugin/skills/overhaul/SKILL.md](../overhaul/SKILL.md), instead of
-   steps 3 to 5.
+   below instead of steps 3 to 5. The take's answer ends with every skill the
+   issue names, in full: follow them. Where one of them (a retro's, an
+   overhaul's) takes the issue to its end, it stands instead of steps 3 to 5.
 2. If `set_session_title` is available, rename this session to
    `SE #<n> · <issue title>`.
 3. Do the issue's work on its branch `issue-<n>`, following CLAUDE.md. If it
@@ -49,15 +44,22 @@ those.
 6. Anything that belongs in a separate change becomes an issue through
    `./src/plugin/bin/se issue new` (its `--blocked-by` is required: a list, or
    `none`; `--parent` makes it a sub-issue).
-7. **You always end, and never stuck.** Land what you could. Where something
-   is left over, file it with `./src/plugin/bin/se issue new`: with `--person`
-   where it needs the owner's input (its body opens with what they decide),
-   without it where any box can do it. You may land an issue with open points
-   once they are in an issue. Of the issues your take said yours blocks, name
-   in `--blocks` only those that need what you left over, so nothing waits
-   that need not. Where you can land nothing at all (a refused push, say),
-   file the issue for a person with `--blocks <n>`, your own issue, say what
-   you have and where, and end. Never end with only a comment.
+7. **You close the issue you took, always**, in one of two ways and no
+   other:
+   - **a PR** for what you solved, landed with `se issue land` (auto-merge
+     on), and an issue through `./src/plugin/bin/se issue new` for everything
+     you could not solve. Of the issues your take said yours blocks, name in
+     `--blocks` only those that need what you left over, so nothing waits that
+     need not; or
+   - **a supersede**, where you can land no PR at all:
+     `./src/plugin/bin/se issue supersede <n> --body-file F`, F holding the
+     open questions you could not answer. It makes a final successor in your
+     issue's place and closes yours. A final issue (`se-final`) cannot be
+     superseded: its box lands a PR.
+
+   An issue for a person (`--person`) is never a way to end, only a side
+   issue, for access or a principle. The Stop hook refuses your stop until
+   one of the two is done, and says which is missing.
 
 ## A parent
 
@@ -86,7 +88,8 @@ took. `se` is the absolute path of `./src/plugin/bin/se` in this checkout.
      is an answer; an empty field is not), then run
      <se> issue land --workspace <path> --answers <path>-landing.yaml.
      Answer only the PR number and link.
-     <the issue's body>`
+     <the issue's body>
+     <the answer's guidance, the skills the issue names>`
      Then go back to 1, so every ready leaf gets its sub-agent.
 2. Subscribe to each PR a sub-agent answers. When a PR merges, or a
    reviewer answers, go back to 1.

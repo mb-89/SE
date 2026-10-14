@@ -91,6 +91,41 @@ func TestAnOpenRetroBlocksASecond(t *testing.T) {
 	}
 }
 
+func TestARetroStartedInARaceClosesAsADuplicateOfTheLowerOne(t *testing.T) {
+	t.Parallel()
+	_, a, _ := boxes(t)
+	gh := recorded(t, cadenceRepo(10, 0))
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	// Another box read the cadence as due too and started #110 first.
+	took, ok, c, err := s.takeDue(retroRule, a, func() (Issue, error) {
+		if _, err := s.NewRetro("", true); err != nil {
+			return Issue{}, err
+		}
+		r, err := s.NewRetro("", true)
+		return r.Issue, err
+	})
+	if err != nil || ok || took.Number != 0 || c.Open != 110 {
+		t.Fatalf("took %+v %v, %+v %v", took, ok, c, err)
+	}
+	if dup := issueAt(t, gh, 111); dup.State != "closed" || dup.StateReason != "duplicate" {
+		t.Fatalf("#111 is %s (%s)", dup.State, dup.StateReason)
+	}
+	if first := issueAt(t, gh, 110); first.State != "open" {
+		t.Fatalf("#110 is %s", first.State)
+	}
+	notes, err := gh.Get("repos/o/r/issues/111/comments")
+	if err != nil || !strings.Contains(string(notes), "#110") {
+		t.Fatalf("comments %s %v", notes, err)
+	}
+	if got := run(t, a, "rev-parse", "--abbrev-ref", "HEAD"); got == "issue-111" || got == "issue-110" {
+		t.Fatalf("a is on %s", got)
+	}
+	// The normal take goes on; the lower retro is open, so none is due.
+	if took, ok, c, err := s.TakeRetro(a); err != nil || ok || c.Open != 110 || len(gh.Writes()) != 4 {
+		t.Fatalf("took %+v %v, %+v %v, writes %q", took, ok, c, err, gh.Writes())
+	}
+}
+
 func TestRetroIssuesAreNotCounted(t *testing.T) {
 	t.Parallel()
 	// cadenceRepo(9, …) holds a closed retro and a pull request inside the

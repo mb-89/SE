@@ -9,7 +9,7 @@ import (
 )
 
 // commit is the SE commit this se was built from. Every build sets it:
-// go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se
+// src/build.sh, update.Build and the plugin's build.
 var commit string
 
 // What the plugin tells se on every session call: the commit its hooks were
@@ -41,7 +41,7 @@ func pluginCheckout(w *World) string {
 	if repo := w.Getenv(pluginRepoEnv); repo != "" {
 		return repo
 	}
-	exe, err := w.Executable()
+	exe, err := w.Proc.Self()
 	if err != nil {
 		return ""
 	}

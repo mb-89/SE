@@ -1,6 +1,6 @@
 ---
 name: overhaul
-description: Start an SE overhaul, or, as the box that took one, judge SE against every principle and the outside world and file its report. The work skill hands an issue labelled se-overhaul to it.
+description: Start an SE overhaul, or, as the box that took one, judge SE against every principle and the outside world and file its report. A take hands it over where the issue names it, as every overhaul does.
 ---
 
 # Overhaul: is the design still right?
@@ -24,7 +24,7 @@ for them where controversial, and closes the overhaul.
    issue (from before overhauls stopped waiting for the owner): read the
    owner's comments on the issue, apply what they moved between controversial
    and not, if anything, to `findings` in the draft's block, and go to 4.
-2. Read the draft's facts: the principles, the retro's last five runs, the
+2. Read the draft's facts: the principles, the retro's last `OverhaulCadence` runs, the
    previous overhaul's findings. Then read SE itself: `spec/`, the README,
    CLAUDE.md, the skills, `se help`, and the code under `src/`.
 3. Judge, and write it into the draft's block (the YAML under

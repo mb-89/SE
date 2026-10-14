@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	_ "github.com/mb-89/SE/src/internal/guidance" // the wiring se carries instances it
 	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/index/fixture"
 	"github.com/mb-89/SE/src/internal/index/indextest"
@@ -284,11 +285,20 @@ func TestTheFakeAndTheCoreAgree(t *testing.T) {
 	}
 }
 
-func TestTheWiringSeCarriesStarts(t *testing.T) {
+// The collector gathers what the modules declared without running them, and refuses what Start refuses.
+func TestCollectGathersTheCatalogAndRunsNothing(t *testing.T) {
 	t.Parallel()
-	w, err := index.Wired()
+	var seen []pairIn
+	w, err := index.ParseWiring([]byte("instances: {c: {module: checker}}\nwires: {c.a: built-in, c.b: built-in}"))
 	must(t, err)
-	if _, err := index.Start(w, index.Registered()...); err != nil {
-		t.Fatal(err)
+	c, err := index.Collect(w, checker(&seen))
+	must(t, err)
+	if len(c.Instances) != 1 || c.Instances[0].Outputs[0].Name != "c/sum" || len(seen) != 0 {
+		t.Fatalf("the catalog is %+v, and the derivation ran on %v", c, seen)
+	}
+	w, err = index.ParseWiring([]byte("instances: {c: {module: checker}}"))
+	must(t, err)
+	if _, err := index.Collect(w, checker(&seen)); err == nil || !strings.Contains(err.Error(), "input c.a is bound to nothing") {
+		t.Fatalf("the collector answered %v for an unbound input", err)
 	}
 }

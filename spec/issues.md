@@ -18,6 +18,11 @@ choice is deterministic and no prompt restates it.
   its dependencies when it is made, even if that is `none`. Every body it
   writes ends in the mark `<!-- se:new -->`, which the retro checks
   ([retro.md](retro.md)).
+- **Skills**: an issue names the skills its work needs in one place, the
+  marked line `se issue new --skills` writes into its body (a retro and an
+  overhaul name theirs). The take hands each over in full in its answer, and
+  the session's log records it; no label picks a skill
+  ([principle 22](principles.md)).
 - **Blockers**: an issue waits while any of its blockers is open. Blockers are
   GitHub's native "blocked by" links, and nothing else; a "Blocked by: #12"
   line in an issue's body does not block it. `se issue new --blocked-by` is
@@ -118,8 +123,8 @@ person**, and leaves the agents' queue until the person has closed it.
 
 - **Stuck** is decided by a timer, not judgment. A claimed leaf (claimed at
   the top or with `--in`) is stuck when nothing has been pushed to its branch
-  `issue-<n>` (or its PR), nor a takeover recorded, for longer than the lease:
-  3 hours, `Lease` in `src/internal/issues/stuck.go`. That is under the routine's
+  `issue-<n>` (or its PR), nor a takeover recorded, for longer than the lease,
+  `Lease` in `src/internal/issues/stuck.go`. It is under the routine's
   4-hour schedule, so a scheduled box always catches it. The last push is
   GitHub's activity on the branch (`/repos/{owner}/{repo}/activity`), its
   creation included; a branch GitHub keeps no push record of is stuck. A
@@ -149,14 +154,16 @@ person**, and leaves the agents' queue until the person has closed it.
   over. `se issue pull` never offers an `se-person` issue, or a tree
   containing one (at the top, nor with `--in`). #n's dependents stay blocked
   through their native links.
-- **A box never ends stuck.** It lands what it could, and files what is left
-  as an issue: one for a person (`se issue new --person`) where it needs
-  their input, a normal one where it does not. `se issue pull --take` names
-  the open issues the taken one blocks; the box names in `--blocks` those of
-  them that need what it left over, and only those, so nothing waits that
-  need not. Where it can land nothing at all (its push is refused, say), it
-  files the issue for a person with `--blocks <n>`, its own issue, and ends;
-  its claim then waits on that issue instead of going stale.
+- **A box that takes an issue closes it, always** (the owner's rule,
+  2026-10-14). It ends in one of two ways and no other: a PR for what it
+  solved, auto-merge on (`se issue land`), with an issue (`se issue new`) for
+  everything it could not solve; or a supersede (`se issue supersede <n>`),
+  where it cannot land a PR at all. `se issue pull --take` names the open
+  issues the taken one blocks; the box names in `--blocks` those of them that
+  need what it left over, and only those, so nothing waits that need not. An
+  issue for a person (`se issue new --person`) is never a way for a box to
+  end: it is only a side issue, for access or a principle. The plugin's Stop
+  hook holds a box to the rule (see [The Stop hook](#the-stop-hook)).
 - **The person's side:**
   - `se issue pull --person` lists every issue waiting on a person, with its
     reason and how many open issues it holds up, directly or through a tree.
@@ -173,10 +180,11 @@ person**, and leaves the agents' queue until the person has closed it.
 <!-- se:manifest usage issue review -->
 ```
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
-se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
+se issue supersede N (--body B | --body-file PATH) [--json] [--repo OWNER/NAME]
 se issue tree [ROOT] [--json] [--repo OWNER/NAME]
 se review brief N [--claims] [--json] [--repo OWNER/NAME]
 ```
@@ -302,6 +310,31 @@ the fire did (with `--json`: the field `fanout`); otherwise a new ready issue
 would wait for the next merge or the schedule. A blocked issue fires nothing.
 A session has it as `/se issue new`.
 
+`se issue supersede N` is the second way a box closes the issue it took,
+where it cannot land a PR. It creates N's successor through the same code as
+`se issue new`: N's title and text, then the open questions the box could not
+answer (`--body` or `--body-file`), labelled `se-final`, a sub-issue of N's
+parent and blocked by N's open blockers; it links N's open dependents as
+blocked by the successor (GitHub's native links), then closes N, its comment
+naming the successor. A final issue is refused: its box lands a PR. A ready
+successor fires the routine once (with `--json`:
+`{"issue","successor","parent","blocked_by","blocks","ready","fanout"}`).
+
+### The Stop hook
+
+In a box (a cloud session no person attends, as the routine starts it), the
+plugin hands every Stop and SubagentStop to `se hook stop`, which refuses the
+stop while the box's issue is open with neither an open PR from its branch,
+auto-merge on, nor a supersede, and says which is missing. The box's issue is
+the one `se issue pull --take` took (a parent's box coordinates and closes
+nothing itself); a leaf's sub-agent is held to the leaf its prompt names. It
+is enforcement, so it fails closed: only what GitHub shows lets the box end.
+Its escape hatches: a box waiting on background work passes; it refuses at
+most `refusals` times in a row ([spec/stop.yaml](stop.yaml)); a prompt from a
+person resets the count (`se hook prompt`); and a check that cannot judge
+lets the turn end and logs why in `.se/.runtime/logs/stop.log`. An
+interactive session is never refused.
+
 `se issue review` passes or fails a parent ready for review, and
 `se review brief` is what its reviewer starts from; see [Reviews](#reviews)
 and [spec/review.md](review.md). A session has them as `/se issue review` and
@@ -351,7 +384,7 @@ through `se`, with every verdict on the reviewed issue's thread.
   `se issue new --parent N --blocked-by none --final` would, its body the
   finding. N stays open: the fixes are work inside it, and once they have
   landed it is ready for review again, as a re-review.
-- **Either way**, the non-blocking findings (five at most) become `se-final`
+- **Either way**, the non-blocking findings (at most `MaxFiled`) become `se-final`
   issues in the normal queue.
 - **Who worked a leaf** is recorded by `se issue land`: a comment on the leaf,
   `Worked by session S in W.`, with the marker

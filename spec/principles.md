@@ -149,3 +149,21 @@ principle is one sentence and one paragraph, and names what checks it.
     should be and how. Work that is clear becomes an `se` issue, and the
     cloud fleet does it; the session does not do it itself.
     Checked by: retro and overhaul, by judgment.
+
+21. **The rule of five.**
+    A surface a person sees, the root, `spec/` and `src/`, holds at most five
+    visible files and at most five visible folders; dot files and dot folders
+    do not count. A person looking at SE sees what is there for them, not the
+    tools SE is built with. The limit, the surfaces and the allowlist of
+    today's violations, which only shrinks, live in one configuration.
+    Checked by: the battery (the `rule-of-five` rule of `se rules`, configured
+    in `src/internal/rules/five.yaml`).
+
+22. **Steer before, check at the push.**
+    What an agent gets is settled before it starts: the take hands over the
+    skills its issue names, in full, and the session starts with these
+    principles. What must hold is checked when the work is pushed, by the
+    battery and the landing. Nothing steers the agent in between: no canary,
+    no tool refusals during the work.
+    Checked by: the take (`se issue pull --take` hands the skills over, the
+    session's log records them); the battery and `se issue land` (the push).

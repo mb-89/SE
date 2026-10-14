@@ -8,20 +8,21 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/daemon"
+	"github.com/mb-89/SE/src/internal/guidance"
+	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
-
-	"github.com/mb-89/SE/src/internal/daemon"
 )
 
 // Command is one word se answers. A command is one file that calls register
-// in its init; the help and the session's /se are made from what registered.
+// in its init. What registered is declared on the index (modules.go), and the
+// help, /se ui and the session's /se are made from the index's catalog.
 type Command struct {
 	// Name is the word that runs it: se <name>, or /se <name> in a session.
 	// A name of two words, "issue pull", is a sub-word of its first: the first
@@ -115,20 +116,21 @@ type World struct {
 	// answers all of it, for the programs se starts.
 	Getenv  func(key string) string
 	Environ func() []string
-	// Executable is this se, the installed one when it runs from the plugin.
-	Executable func() (string, error)
 	// Commit is the SE commit this se was built from, "" where the build did not say.
 	Commit string
 	// Check is what issue land runs before it pushes, on procs: the repo's one
 	// definition of green. It answers the check's output when it fails.
 	Check func(procs proc.Procs, dir string) error
+	// Guided reads the hand-over's switches, session.guidance's config.
+	Guided func() (guidance.Settings, error)
 }
 
 // realWorld is what se reaches when it runs for real.
 func realWorld() *World {
 	return &World{
 		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(), GitHub: github.Real(),
-		Getenv: os.Getenv, Environ: os.Environ, Executable: os.Executable, Commit: commit, Check: check,
+		Getenv: os.Getenv, Environ: os.Environ, Commit: commit, Check: check,
+		Guided: guidance.Configured,
 	}
 }
 
@@ -170,16 +172,13 @@ func (c *Call) Parse(fs *flag.FlagSet) error {
 // Paths names the workspace's runtime files.
 func (c *Call) Paths() daemon.Paths { return daemon.Paths{Workspace: c.Workspace, Disk: c.Disk} }
 
-// offered lists the commands a terminal (session false) or a session can run, by name.
-func offered(session bool) []Command {
-	var out []Command
-	for _, c := range commands {
-		if c.Session || !session {
-			out = append(out, c)
-		}
+// offered lists the commands a terminal (session false) or a session can run,
+// by name, as the index's catalog holds them.
+func offered(session bool) []index.CommandInfo {
+	if session {
+		return catalog().Session()
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	return catalog().Commands
 }
 
 // subWords lists the second words of the commands under first that a terminal
@@ -219,12 +218,13 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() > 0 {
 		name, call.Args = fs.Arg(0), fs.Args()[1:]
 	}
+	cat := catalog()
 	if len(call.Args) > 0 {
-		if _, sub := commands[name+" "+call.Args[0]]; sub {
+		if _, sub := cat.Command(name + " " + call.Args[0]); sub {
 			name, call.Args = name+" "+call.Args[0], call.Args[1:]
 		}
 	}
-	cmd, ok := commands[name]
+	cmd, ok := cat.Command(name)
 	if *session && (!ok || !cmd.Installed) {
 		if code, handed := handsOver(w, *workspace, args, stdout, stderr); handed {
 			return code
@@ -237,7 +237,7 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch {
 	case ok:
-		reply, err = cmd.Run(call)
+		reply, err = runCommand(name, call)
 		if errors.Is(err, flag.ErrHelp) {
 			reply, err = helpReply(commandHelpOf(cmd, call.flags, *session), *session, color), nil
 		}
@@ -278,4 +278,13 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, reply.Text)
 	}
 	return 0
+}
+
+// runCommand runs the command the catalog names with the run the command line registered for it.
+func runCommand(name string, call *Call) (Reply, error) {
+	c, ok := commands[name]
+	if !ok {
+		return Reply{}, fmt.Errorf("%s is declared on the index, but the command line has no run for it", name)
+	}
+	return c.Run(call)
 }

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/guidance"
 )
 
 // NewMark is what se issue new leaves at the end of every body it writes, so
@@ -85,8 +87,8 @@ func (s Source) NewRetro(field string, unattended bool) (RetroIssue, error) {
 	case feedback == "":
 		feedback = "None given."
 	}
-	body := fmt.Sprintf("A retro over %s. The rules are spec/retro.md; a box takes it with the retro skill and starts with `se retro collect`.\n\n%s\n\n## Field feedback\n%s\n\n<!-- se:retro %s -->",
-		window, who, feedback, mode)
+	body := fmt.Sprintf("A retro over %s. The rules are spec/retro.md; a box takes it with the retro skill, which its take hands over, and starts with `se retro collect`.\n\n%s\n\n## Field feedback\n%s\n\n<!-- se:retro %s -->\n\n%s",
+		window, who, feedback, mode, guidance.Line([]string{"retro"}))
 	title := "SE retro " + s.now().UTC().Format("2006-01-02")
 	made, _, err := s.create(title, body, 0, nil, []string{Label, RetroLabel})
 	if err != nil {
@@ -563,7 +565,7 @@ func (c Collected) measure() Metrics {
 		m["conflicts"] += float64(r.Conflicts)
 		m["takeovers"] += float64(r.Takeovers)
 		m["person_flags"] += float64(r.Person)
-		if r.Answers != nil && !nothing(r.Answers["by-hand"]) {
+		if r.Answers != nil && byHand(r.Answers["by-hand"]) {
 			m["by_hand"]++
 		}
 		if r.Minutes >= 0 {
@@ -588,6 +590,24 @@ func median(xs []int) int {
 	}
 	sort.Ints(xs)
 	return xs[len(xs)/2]
+}
+
+// commandNamed is an answer naming a command: an se command or a script.
+var commandNamed = regexp.MustCompile("(^|[\\s`\"'(])se [a-z]|src/scripts/")
+
+// proposal is an answer saying what a command should, could or would do.
+var proposal = regexp.MustCompile(`\b(should|could|would|ought|belongs?)\b`)
+
+// byHand says whether a by-hand answer names a step done by hand, or a
+// command that should do it: one that opens with "nothing" counts still
+// where it goes on to propose a command, as "Nothing scripted. ... se fleet
+// check could run check.sh" does.
+func byHand(answer string) bool {
+	if !nothing(answer) {
+		return true
+	}
+	a := strings.ToLower(answer)
+	return commandNamed.MatchString(a) && proposal.MatchString(a)
 }
 
 // nothing says whether an answer says there was nothing: "none", "nothing", "n/a".

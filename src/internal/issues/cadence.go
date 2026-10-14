@@ -146,7 +146,9 @@ const duplicate = "duplicate"
 
 // TakeRetro starts the retro the cadence has made due and claims it in the
 // git checkout dir, ahead of all other work: ok is false, with nothing
-// created, where none is due. The retro runs unattended, as nobody started it.
+// created, where none is due, and with the one it started closed as a
+// duplicate where a race started a lower one too. The retro runs unattended,
+// as nobody started it.
 func (s Source) TakeRetro(dir string) (took Issue, ok bool, c Cadence, err error) {
 	return s.takeDue(retroRule, dir, s.startRetro)
 }
@@ -159,7 +161,9 @@ func (s Source) startRetro() (Issue, error) {
 
 // TakeOverhaul starts the overhaul the cadence has made due and claims it in
 // the git checkout dir, ahead of all other work, a due retro included: ok is
-// false, with nothing created, where none is due. It runs unattended.
+// false, with nothing created, where none is due, and with the one it started
+// closed as a duplicate where a race started a lower one too. It runs
+// unattended.
 func (s Source) TakeOverhaul(dir string) (took Issue, ok bool, c Cadence, err error) {
 	return s.takeDue(overhaulRule, dir, s.startOverhaul)
 }
@@ -198,15 +202,16 @@ func (s Source) startDue(r cadenceRule, dir string, c Cadence, start func() (Iss
 	if err != nil {
 		return Issue{}, false, c, err
 	}
-	c.Open = made.Number
-	first, err := s.firstOpen(r.label)
+	// Two boxes can both read the cadence as due and both start a run: look
+	// again, and where a lower one is open, this one is the duplicate.
+	again, err := s.cadence(r)
 	if err != nil {
 		return Issue{}, false, c, err
 	}
-	if first != 0 && first < made.Number {
-		c.Open = first
-		return Issue{}, false, c, s.closeDuplicate(r, made.Number, first)
+	if again.Open != 0 && again.Open < made.Number {
+		return Issue{}, false, again, s.closeDuplicate(r, made.Number, again.Open)
 	}
+	c.Open = made.Number
 	claimed, err := s.Claim(dir, made.Number)
 	if err != nil || !claimed {
 		return Issue{}, false, c, err
