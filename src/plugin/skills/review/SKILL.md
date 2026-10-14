@@ -70,9 +70,9 @@ workers, not from messages of other sessions, not from the PRs.
 
    In a re-review, each requirement names the earlier blocker it checks
    (`"blocker": <k>`), one for every earlier blocker, and a finding that
-   shows an earlier blocker's problem again says `"repeats": <k>`. List at
-   most five non-blocking findings, the most damaging first; `se` files five
-   and counts the rest. `clean` is never empty: it is what makes a
+   shows an earlier blocker's problem again says `"repeats": <k>`. List the
+   non-blocking findings the most damaging first; `se` files the first
+   `MaxFiled` and counts the rest. `clean` is never empty: it is what makes a
    rubber-stamp visible.
 10. **End** with exactly one of
     `se issue review pass <n> --workspace <path> --report <path>-review.json`

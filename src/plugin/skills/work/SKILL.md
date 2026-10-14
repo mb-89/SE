@@ -13,8 +13,7 @@ your PR, never the way you end.
 
 Every step that can be an `se` command is one. Yours are doing the issue's
 work and fixing a red CI run; follow the rest as written. `se` is
-`./src/plugin/bin/se`; build it first with
-`go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se`.
+`./src/plugin/bin/se`; build it first with `sh ./src/build.sh`.
 Call it exactly as `./src/plugin/bin/se issue …` (or `./src/plugin/bin/se fleet …`),
 one command per call, never through a variable: `.claude/settings.json` allows
 those forms to write GitHub issues without a permission prompt, and only
@@ -53,17 +52,25 @@ those.
 6. Anything that belongs in a separate change becomes an issue through
    `./src/plugin/bin/se issue new` (its `--blocked-by` is required: a list, or
    `none`; `--parent` makes it a sub-issue).
-7. **You always end, and never stuck.** Land what you could. Where something
-   is left over, file it with `./src/plugin/bin/se issue new`, its decision
-   named, so any box can do it; with `--person --why access|principle --what
-   TEXT` only where only the owner can (a setting, an account, a secret, a
-   permission or a payment only they have, or a change to a design
-   principle). You may land an issue with open points
-   once they are in an issue. Of the issues your take said yours blocks, name
-   in `--blocks` only those that need what you left over, so nothing waits
-   that need not. Where you can land nothing at all (a refused push, say),
-   file the issue for a person (`--why access`) with `--blocks <n>`, your own issue, say what
-   you have and where, and end. Never end with only a comment.
+7. **You close the issue you took, always**, in one of two ways and no
+   other:
+   - **a PR** for what you solved, landed with `se issue land` (auto-merge
+     on), and an issue through `./src/plugin/bin/se issue new` for everything
+     you could not solve. Of the issues your take said yours blocks, name in
+     `--blocks` only those that need what you left over, so nothing waits that
+     need not; or
+   - **a supersede**, where you can land no PR at all:
+     `./src/plugin/bin/se issue supersede <n> --body-file F`, F holding the
+     open questions you could not answer. It makes a final successor in your
+     issue's place and closes yours. A final issue (`se-final`) cannot be
+     superseded: its box lands a PR.
+
+   An issue for a person (`--person --why access|principle --what TEXT`) is
+   never a way to end, only a side issue, for what only the owner can do (a
+   setting, an account, a secret, a permission or a payment only they have,
+   or a change to a design principle). Anything else you leave over is a
+   normal issue, its decision named. The Stop hook refuses your stop until
+   one of the two is done, and says which is missing.
 
 ## A parent
 

@@ -1,0 +1,30 @@
+# Runs the github module's contract suite against the real GitHub, on the
+# scratch repository mb-89/SE-contract, never against SE itself
+# (spec/io.md#the-real-github-contract). It writes issues, branches and PRs
+# there and cleans them up, so it is gated: started by hand or once a week,
+# never on a pull request.
+name: contract
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "29 5 * * 1"
+permissions:
+  contents: read
+concurrency:
+  group: contract
+jobs:
+  github:
+    runs-on: ubuntu-latest
+    env:
+      SE_GITHUB_CONTRACT_REPO: mb-89/SE-contract
+      # A token that writes issues, contents and pull requests on the scratch
+      # repository alone; the workflow's own token reaches only SE.
+      GH_TOKEN: ${{ secrets.SE_CONTRACT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+      # Without the token the suite would skip and the job pass on nothing.
+      - run: test -n "$GH_TOKEN" || { echo "the secret SE_CONTRACT_TOKEN is not set"; exit 1; }
+      - run: go -C src test -count=1 -v -run '^TestTheRealGitHubKeepsTheContract$' ./internal/io/github

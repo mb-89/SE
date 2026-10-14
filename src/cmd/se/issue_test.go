@@ -144,7 +144,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, pull, resume, review, tree." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -152,7 +152,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	t.Parallel()
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, pull, resume, review, tree." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -162,7 +162,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue pull, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, pull, resume, review, tree.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, pull, resume, review, supersede, tree.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -231,9 +231,30 @@ func TestIssueNewCreatesTheIssueAndItsLinks(t *testing.T) {
 	if made := issueOf(t, gh, 10); !strings.Contains(made, `"body":"the body\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"}]`) {
 		t.Fatal(made)
 	}
-	code, out, _ = se(t, "issue", "new", "--json", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none")
+	code, out, _ = se(t, "issue", "new", "--json", "--repo", "o/r", "--title", "eleven", "--body", "b", "--blocked-by", "none")
 	if code != 0 || out != `{"number":11,"url":"`+u11+`","blocked_by":[],"fanout":"`+firedOnce+`"}`+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
+	}
+}
+
+func TestIssueNewRefusesAnOpenIssuesTitleUnderTheSameParent(t *testing.T) {
+	t.Parallel()
+	gh := recordedIssues(t)
+	// #3 three is open at the top: the same title, spaces aside, creates nothing.
+	code, _, errs := se(t, "issue", "new", "--repo", "o/r", "--title", " three ", "--body", "b", "--blocked-by", "none")
+	if code != 1 || !strings.Contains(errs, `#3 is an open se issue titled "three", at the top, already; --allow-duplicate creates another`) {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("a refused duplicate wrote %q", w)
+	}
+	// Under another parent the title is no duplicate.
+	if code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "three", "--body", "b", "--blocked-by", "none", "--parent", "1"); code != 0 || !strings.HasPrefix(out, "Created #10 three\n") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	// --allow-duplicate creates it anyway.
+	if code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "three", "--body", "b", "--blocked-by", "none", "--allow-duplicate"); code != 0 || !strings.HasPrefix(out, "Created #11 three\n") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 }
 
@@ -403,6 +424,10 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
+	// The take is recorded for the Stop hook, which holds the box to closing #3.
+	if data, err := os.ReadFile(filepath.Join(ws, ".se", ".runtime", "box.json")); err != nil || string(data) != `{"issue":3}` {
+		t.Fatalf("%q %v", data, err)
+	}
 	// #3 is now claimed on origin, but the recorded refs do not say so: the
 	// take is refused, moves on, finds nothing else and fires nothing.
 	git(ws, "checkout", "-q", "main")
@@ -419,13 +444,13 @@ func TestANewIssueFiresTheRoutineOnlyWhenNothingBlocksIt(t *testing.T) {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// #5 is closed: nothing blocks it, so it fires once.
-	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "5")
-	if code != 0 || fires(t) != 1 || out != "Created #11 ten\n"+u11+"\nBlocked by #5.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n" {
+	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "eleven", "--body", "b", "--blocked-by", "5")
+	if code != 0 || fires(t) != 1 || out != "Created #11 eleven\n"+u11+"\nBlocked by #5.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n" {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// A fire that is off is reported and never fails the creation.
 	setenv(t, issues.FireURLVar, "")
-	if code, out, _ := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none"); code != 0 || !strings.HasSuffix(out, "Fan-out is off: SE_ROUTINE_FIRE_URL and SE_ROUTINE_FIRE_TOKEN are not both set.\n") {
+	if code, out, _ := se(t, "issue", "new", "--repo", "o/r", "--title", "twelve", "--body", "b", "--blocked-by", "none"); code != 0 || !strings.HasSuffix(out, "Fan-out is off: SE_ROUTINE_FIRE_URL and SE_ROUTINE_FIRE_TOKEN are not both set.\n") {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 }
@@ -474,7 +499,7 @@ func TestWhatABoxLeavesOverIsAnIssueForAPersonThatBlocksOnlyWhatNeedsIt(t *testi
 	}
 	// A number that is no issue creates nothing.
 	before := len(gh.Writes())
-	if code, _, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--blocks", "9"); code == 0 || !strings.Contains(errs, "#9 does not exist") {
+	if code, _, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "eleven", "--body", "b", "--blocked-by", "none", "--blocks", "9"); code == 0 || !strings.Contains(errs, "#9 does not exist") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 	if w := gh.Writes()[before:]; len(w) != 0 {

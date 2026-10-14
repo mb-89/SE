@@ -42,7 +42,7 @@ func init() {
 		Usage:   "issue pull [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "show the next se issue, stuck work first; --take claims it",
-		Details: "pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where 5 retros have closed since the last overhaul closed and none is open, else an unattended retro where 10 se issues have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the 3-hour lease is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.",
+		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (OverhaulCadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (RetroCadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (Lease) is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim fires the routine once (fan-out). --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issues.OverhaulCadence, issues.RetroCadence, issues.Lease),
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -136,6 +136,13 @@ func init() {
 				// what it may leave over.
 				if took.Blocks, err = s.Dependents(took.Number); err != nil {
 					return Reply{}, err
+				}
+				// The Stop hook holds the box to closing what it took; a
+				// parent's box coordinates its tree and closes nothing itself.
+				if !took.Parent {
+					if err := recordTake(c, took.Number); err != nil {
+						return Reply{}, fmt.Errorf("took #%d, but recording it for the Stop hook: %w", took.Number, err)
+					}
 				}
 			}
 			r, err := issueReply(*asJSON, took, ok, issues.Branch(took.Number), fanout, started...)
@@ -255,10 +262,10 @@ func init() {
 	})
 	register(Command{
 		Name:    "issue new",
-		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person --why access|principle --what TEXT] [--json] [--repo OWNER/NAME]",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person --why access|principle --what TEXT] [--allow-duplicate] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "create an se issue, with its blockers and its parent",
-		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them. It is the last resort, only for what only a person can do: --why access (a setting, an account, a secret, a permission or a payment only the owner has) or --why principle (a change to a design principle), and --what says in a sentence what only the person can do; it refuses anything else, since a decision a box can make is the box's (spec/principles.md, principle 15). A ready issue, one nothing open blocks, fires the routine once.",
+		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them. It is the last resort, only for what only a person can do: --why access (a setting, an account, a secret, a permission or a payment only the owner has) or --why principle (a change to a design principle), and --what says in a sentence what only the person can do; it refuses anything else, since a decision a box can make is the box's (spec/principles.md, principle 15). It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. A ready issue, one nothing open blocks, fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -273,6 +280,7 @@ func init() {
 			person := fs.Bool("person", false, "make it an issue for a person: label it se-person and assign it to the owner")
 			why := fs.String("why", "", "with --person, what only a person can do here: `access` or principle")
 			what := fs.String("what", "", "with --person, the sentence `TEXT` saying what only the person can do")
+			allowDuplicate := fs.Bool("allow-duplicate", false, "create it although an open se issue under the same parent has its title")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
@@ -315,8 +323,18 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			if err := s.CloseParents(); err != nil {
+			if *allowDuplicate {
+				if err := s.CloseParents(); err != nil {
+					return Reply{}, err
+				}
+			} else if dup, err := s.Duplicate(*title, *parent); err != nil {
 				return Reply{}, err
+			} else if dup > 0 {
+				where := "at the top"
+				if *parent > 0 {
+					where = fmt.Sprintf("a sub-issue of #%d", *parent)
+				}
+				return Reply{}, fmt.Errorf("#%d is an open se issue titled %q, %s, already; --allow-duplicate creates another", dup, strings.TrimSpace(*title), where)
 			}
 			var labels []string
 			if *review {
@@ -395,7 +413,7 @@ func init() {
 		Name:    "issue land",
 		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "check, push and open the PR of an issue-N branch, auto-merge on",
+		Summary: "check, push and open an issue-N branch's PR, auto-merge on",
 		Details: "on an issue-N branch of a leaf: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), pass tests/check.sh, push, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash).",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
@@ -453,8 +471,8 @@ func init() {
 		Name:    "issue review",
 		Usage:   "issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "pass or fail a gate whose sub-issues have closed, by its report",
-		Details: "review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree, with the report in the JSON file PATH (spec/review.md). It refuses a pass where a requirement lacks evidence, and a report without its checked-and-clean list. Every finding becomes an se-final issue: a blocking one a sub-issue of N, a non-blocking one in the queue (five at most). pass posts the report and closes N; fail posts it, and N waits for its fixes. A re-review that finds an earlier blocker's problem again sends N to a person.",
+		Summary: "pass or fail a gate whose sub-issues closed, by its report",
+		Details: fmt.Sprintf("review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree, with the report in the JSON file PATH (spec/review.md). It refuses a pass where a requirement lacks evidence, and a report without its checked-and-clean list. Every finding becomes an se-final issue: a blocking one a sub-issue of N, a non-blocking one in the queue (at most %d, MaxFiled). pass posts the report and closes N; fail posts it, and N waits for its fixes. A re-review that finds an earlier blocker's problem again sends N to a person.", issues.MaxFiled),
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue review")

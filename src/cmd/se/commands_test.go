@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,11 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
 func se(t *testing.T, args ...string) (int, string, string) {
@@ -49,10 +52,10 @@ func worldOf(t *testing.T) *World {
 	w := &testWorld{env: map[string]string{}}
 	w.World = World{
 		Clock: clock.NewFake(testedAt), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(),
-		GitHub:     github.NewFake(clock.NewFake(testedAt)),
-		Getenv:     func(k string) string { return w.env[k] },
-		Environ:    func() []string { return w.environ() },
-		Executable: os.Executable, Check: check,
+		GitHub:  github.NewFake(clock.NewFake(testedAt)),
+		Getenv:  func(k string) string { return w.env[k] },
+		Environ: func() []string { return w.environ() },
+		Check:   check,
 	}
 	worlds.Store(t, w)
 	t.Cleanup(func() { worlds.Delete(t) })
@@ -147,7 +150,8 @@ func TestTheHelpGroupsTheCommands(t *testing.T) {
 	t.Parallel()
 	want := map[string][]string{
 		"Session":  {"help", "off", "on", "restart", "status", "ui", "update"},
-		"Issues":   {"issue land", "issue new", "issue pull", "issue resume", "issue review", "issue tree"},
+		"Issues":   {"issue land", "issue new", "issue pull", "issue resume", "issue review", "issue supersede", "issue tree"},
+		"Hooks":    {"hook prompt", "hook stop"},
 		"Daemon":   {"serve", "start", "stop"},
 		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune", "fleet refresh"},
 		"Retro":    {"retro collect", "retro new", "retro report"},
@@ -176,7 +180,7 @@ func TestACommandStandsUnderTheGroupItRegisters(t *testing.T) {
 	probe := Command{Name: "zz probe", Usage: "zz probe", Group: "Probes", Summary: "probe the help", Session: true}
 	for _, session := range []bool{false, true} {
 		o := overview(session)
-		o.Groups = groupsOf(append(offered(session), probe), session)
+		o.Groups = groupsOf(append(offered(session), index.CommandInfo{CommandDecl: declOf(probe)}), session)
 		if h := helpText(o, session, false); !regexp.MustCompile(`Probes:\n  zz probe +probe the help\n`).MatchString(h) {
 			t.Errorf("session %v:\n%s", session, h)
 		}
@@ -438,5 +442,21 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 	}
 	if r := session(t, "status"); r.Help != nil {
 		t.Fatalf("/se status carries help: %+v", r.Help)
+	}
+}
+
+func TestTheHelpRendersTheConfigValues(t *testing.T) {
+	t.Parallel()
+	for name, want := range map[string][]string{
+		"issue pull":    {fmt.Sprintf("%d retros (OverhaulCadence)", issues.OverhaulCadence), fmt.Sprintf("%d se issues (RetroCadence)", issues.RetroCadence), fmt.Sprintf("%s lease (Lease)", issues.Lease)},
+		"issue review":  {fmt.Sprintf("at most %d, MaxFiled", issues.MaxFiled)},
+		"overhaul new":  {fmt.Sprintf("last %d runs (OverhaulCadence)", issues.OverhaulCadence)},
+		"overhaul read": {fmt.Sprintf("last %d retros' metrics (OverhaulCadence)", issues.OverhaulCadence)},
+	} {
+		for _, w := range want {
+			if !strings.Contains(commands[name].Details, w) {
+				t.Errorf("se help %s does not render %q from the config", name, w)
+			}
+		}
 	}
 }

@@ -47,8 +47,9 @@ var (
 	installedErr  error
 )
 
-// installed stands an se built from this checkout in for the installed se,
-// since the test binary cannot serve as a daemon.
+// installed builds an se from this checkout to stand in for the installed
+// se, since the test binary cannot serve as a daemon. A machine runs as it
+// through runningAs.
 func installed(t *testing.T) string {
 	t.Helper()
 	installedOnce.Do(func() {
@@ -63,15 +64,24 @@ func installed(t *testing.T) string {
 	if installedErr != nil {
 		t.Fatal(installedErr)
 	}
-	worldOf(t).Executable = func() (string, error) { return installedSE, nil }
+	w := worldOf(t)
+	w.Proc = runningAs{w.Proc, installedSE}
 	return installedSE
 }
+
+// runningAs is a machine whose running program, its Self, is self.
+type runningAs struct {
+	proc.Procs
+	self string
+}
+
+func (m runningAs) Self() (string, error) { return m.self, nil }
 
 // scratch copies this checkout's source into a fresh workspace.
 func scratch(t *testing.T) string {
 	t.Helper()
 	root, dst := repoRoot(t), t.TempDir()
-	for _, part := range []string{"go.mod", "go.sum", "src/cmd", "src/internal"} {
+	for _, part := range []string{"src/cmd", "src/internal", "src/go.mod", "src/go.sum"} {
 		err := filepath.WalkDir(filepath.Join(root, part), func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -95,6 +105,9 @@ func scratch(t *testing.T) string {
 
 func write(t *testing.T, path, text string) {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -141,8 +154,9 @@ func TestAnyOtherWorkspaceRunsTheInstalledSe(t *testing.T) {
 	t.Parallel()
 	se := installed(t)
 	ws := t.TempDir()
-	write(t, filepath.Join(ws, "go.mod"), "module example.com/other\n")
+	write(t, filepath.Join(ws, "src", "go.mod"), "module example.com/other\n")
 	m, w := proc.NewFake(), worldOf(t)
+	m.RunAs(se)
 	w.Proc = m
 	exe, note, err := daemonExe(w, daemon.Paths{Workspace: ws, Disk: disk.Real()})
 	if err != nil || exe != se || note != "" || len(m.Ran()) != 0 {
@@ -159,7 +173,7 @@ func TestOnlySessionWordsGoToTheCheckoutsSe(t *testing.T) {
 		t.Skip("the stand-in se is a shell script")
 	}
 	ws := t.TempDir()
-	write(t, filepath.Join(ws, "go.mod"), "module github.com/mb-89/SE\n")
+	write(t, filepath.Join(ws, "src", "go.mod"), "module "+update.Module+"\n")
 	bin := daemon.Paths{Workspace: ws, Disk: disk.Real()}.Bin()
 	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
 		t.Fatal(err)
@@ -316,7 +330,7 @@ func TestOnlyACheckoutWithABuildHandsOver(t *testing.T) {
 	if _, handed := handsOver(worldOf(t), ws, []string{"status"}, nil, nil); handed {
 		t.Fatal("a folder that is no checkout handed over")
 	}
-	put(t, d, filepath.Join(ws, "go.mod"), "module "+update.Module+"\n")
+	put(t, d, filepath.Join(ws, "src", "go.mod"), "module "+update.Module+"\n")
 	if _, handed := handsOver(worldOf(t), ws, []string{"status"}, nil, nil); handed {
 		t.Fatal("a checkout with nothing built handed over")
 	}

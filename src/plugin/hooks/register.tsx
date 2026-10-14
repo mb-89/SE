@@ -7,6 +7,10 @@
 // the event to the session's log. While SE is off, every hook hands the event
 // straight on and contacts nothing. /se ui opens a pane of buttons: the on/off
 // toggle and the commands se offers as buttons, each pressed as /se <words>.
+// In a box, SE on or off, every Stop and SubagentStop goes to se hook stop,
+// which refuses the stop while the issue the box took is open with neither a
+// PR (auto-merge on) nor a supersede; a prompt from a person resets its count.
+// An interactive session runs none of it.
 // /se help draws as a layout: se answers the help as data beside its text, and
 // the command's output row draws that data, headings and two aligned columns.
 // Anything a person waits on gives feedback within a second and never blocks:
@@ -35,6 +39,8 @@ const UPDATING = 120_000
 const RESTART_EVERY = 60_000
 // What a person waits on shows it is working after this long, and holds nothing up.
 export const FEEDBACK = 1_000
+// How long se hook stop may take to judge a box's stop: a few reads of GitHub.
+const JUDGING = 60_000
 
 type Endpoint = { address: string; token: string }
 
@@ -180,6 +186,27 @@ export const register: Register = on => {
     )
   })
 
+  // A box that takes an issue closes it: se judges each stop of a box (see
+  // src/cmd/se/hook.go). A stop that waits on background work comes back.
+  on('classic.Stop', async ($, e, next) => {
+    const result = await next(e)
+    if (!(await isBox($))) return result
+    const block = await judges($, waits(e) ? ['--waiting'] : [])
+    return block ? { ...result, block } : result
+  })
+  on('classic.SubagentStop', async ($, e, next) => {
+    const result = await next(e)
+    if (!(await isBox($))) return result
+    const block = await judges($, [...(waits(e) ? ['--waiting'] : []), '--agent-transcript', e.agent_transcript_path])
+    return block ? { ...result, block } : result
+  })
+  // A person who prompts a box gives the Stop hook's refusals a fresh count.
+  on('prompt.submit', async ($, e, next) => {
+    const kind = e.origin?.kind
+    if ((kind === 'composer' || kind === 'bridge') && (await isBox($))) await asksPlain($, ['hook', 'prompt'])
+    return next(e)
+  })
+
   // The bridge never holds an event up for good: a failure here passes it on.
   // Events raised while the session start's setup runs wait for it: sent if it
   // switched SE on, dropped if not.
@@ -283,6 +310,42 @@ async function asks($: EngineInterface, words: string[], timeoutMs = STARTING): 
   } catch (error) {
     return `se did not answer: ${String(error)}`
   }
+}
+
+// A box is a cloud session no person attends, as a routine starts it; se
+// hook stop reads the same two variables.
+async function isBox($: EngineInterface): Promise<boolean> {
+  return (await $.env.get('CLAUDE_CODE_REMOTE')) === 'true' && (await $.env.get('CLAUDE_CODE_SESSION_ATTENDED')) === '0'
+}
+
+// Whether the session has work in flight, or a wake-up, that brings it back.
+function waits(e: { background_tasks?: unknown[]; session_crons?: unknown[] }): boolean {
+  return (e.background_tasks?.length ?? 0) + (e.session_crons?.length ?? 0) > 0
+}
+
+// Runs se with these words outside a session call; answers what it printed,
+// or why it did not answer.
+async function asksPlain($: EngineInterface, words: string[]): Promise<{ stdout: string } | { failed: string }> {
+  try {
+    const bin = await builds($)
+    if (bin.failed) return { failed: bin.failed }
+    root = await $.session.root()
+    const ran = await $.process.run([bin.path, ...words, '--workspace', root], { timeoutMs: JUDGING })
+    if (ran.exitCode !== 0) return { failed: failed(ran) }
+    return { stdout: String(ran.stdout ?? '') }
+  } catch (error) {
+    return { failed: String(error) }
+  }
+}
+
+// se hook stop's verdict: the reason the stop is refused, or '' to let it be.
+// A check that cannot run lets the turn end and says why in a toast.
+async function judges($: EngineInterface, words: string[]): Promise<string> {
+  const ran = await asksPlain($, ['hook', 'stop', ...words])
+  const said = 'stdout' in ran ? (parsed(ran.stdout) as { block?: string; pass?: string } | null) : null
+  if (said && (typeof said.block === 'string' || typeof said.pass === 'string')) return said.block ?? ''
+  $.ui.toast(`SE could not judge this stop: ${'failed' in ran ? ran.failed : 'se answered no verdict'}`.split('\n')[0])
+  return ''
 }
 
 // Applies se's effects to this session and answers the text to show.
@@ -461,8 +524,9 @@ async function builds($: EngineInterface): Promise<{ path: string; failed?: stri
   if (await $.fs.exists(path)) return { path }
   const head = await headOf($)
   const ldflags = head ? ['-ldflags', `-X main.commit=${head}`] : []
-  const built = await $.process.run(['go', 'build', ...ldflags, '-o', path, './src/cmd/se'], {
-    cwd: checkoutOf($),
+  // Go runs in src/, which holds go.mod (ModuleDir in src/internal/update/update.go).
+  const built = await $.process.run(['go', 'build', ...ldflags, '-o', path, './cmd/se'], {
+    cwd: `${checkoutOf($)}/src`,
     timeoutMs: STARTING,
   })
   return built.exitCode === 0 ? { path } : { path, failed: `se is not built and go build failed: ${failed(built)}` }
