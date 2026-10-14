@@ -66,11 +66,13 @@ type conflict struct {
 
 // conflicts names the claimed leaves whose open PR is not mergeable
 // (mergeable_state dirty), lowest number first. A null mergeable is asked
-// again shortly, and is no conflict while it stays null.
+// again shortly, and is no conflict while it stays null. A leaf whose branch
+// saw a push within the lease is refused, and its PR not asked: a live box
+// works it, and taking it over too would do its work twice.
 func (s Source) conflicts(all []Status, pulls []openPull) ([]conflict, error) {
 	claimed := map[string]Status{}
 	for _, st := range all {
-		if st.claimed {
+		if st.claimed && !s.live(st) {
 			claimed[Branch(st.Number)] = st
 		}
 	}
@@ -115,11 +117,18 @@ func (s Source) mergeability(p openPull) (openPull, error) {
 	return p, nil
 }
 
+// live says whether a claimed leaf's branch saw a push within the lease;
+// a branch GitHub keeps no record of a push to is not live.
+func (s Source) live(st Status) bool {
+	return !st.pushed.IsZero() && s.now().Sub(st.pushed) <= Lease
+}
+
 // dirty says whether the PR conflicts with its base.
 func (p openPull) dirty() bool { return p.Mergeable != nil && !*p.Mergeable && p.State == "dirty" }
 
 // takeOverConflict takes over the first conflict it can, lowest number
-// first, and checks its branch out in dir. A conflict whose last takeover
+// first, and checks its branch out in dir. A conflict on a branch pushed to
+// within the lease is refused (see conflicts), and the take moves on. A conflict whose last takeover
 // found the same PR head is still in flight and is left to its box; a
 // conflict on a final issue (one taken over before, or filed by a review)
 // waits on an issue for a person. A takeover labels the issue se-final. ok is false when none was

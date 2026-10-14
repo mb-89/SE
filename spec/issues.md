@@ -35,12 +35,16 @@ choice is deterministic and no prompt restates it.
 - **Order**: any conflicted claim first (below), then stuck work (see
   [Stuck work](#stuck-work)), then the lowest issue number among the ready
   ones.
-- **Conflicted claims are taken over at once.** GitHub runs no CI on a PR
-  that conflicts with main and sends nothing that wakes its box, so a
-  conflicted claim would sit forever. Before offering anything else,
-  `se issue pull --take` looks at every claimed leaf's open PR; one GitHub
-  reports as not mergeable (`mergeable` false, `mergeable_state` `dirty`) is
-  taken next, whatever its age. A `null` `mergeable` means GitHub has not
+- **Conflicted claims are taken over once their lease runs out.** GitHub
+  runs no CI on a PR that conflicts with main and sends nothing that wakes its
+  box, so a conflicted claim would sit forever. Before offering anything
+  else, `se issue pull --take` looks at the open PR of every claimed leaf
+  whose branch saw no push within the lease (see [Stuck work](#stuck-work));
+  one GitHub reports as not mergeable (`mergeable` false, `mergeable_state`
+  `dirty`) is taken next. A branch pushed to within the lease is refused,
+  its PR not asked, and the take offers the next issue: a live box works it,
+  and two boxes resolving one conflict do the work twice and race their
+  pushes. A `null` `mergeable` means GitHub has not
   computed it yet: `se` asks again shortly, and while it stays `null` it is no
   conflict. The box taking it checks out `issue-<n>` as it stands, merges
   `origin/main` into it (never a rebase, never a force-push), resolves the
@@ -214,7 +218,7 @@ refuses an issue that is not ready, or a sub-issue that is no stuck leaf,
 and says why. There is no
 separate `take` command. Taking a parent whose branch exists already checks
 that branch out: the tree is picked up from its claim. Plain `--take` first
-takes over a conflicted claim (see [The rules](#the-rules)): it prints
+takes over a conflicted claim whose lease ran out (see [The rules](#the-rules)): it prints
 `Took over #<n> …` with the PR, and the instruction to merge `origin/main`
 into the branch and land it again (with `--json`: the issue's `takeover`,
 `{"pr","url","count","why"}`). `--take N` takes over claimed leaf `N`, at

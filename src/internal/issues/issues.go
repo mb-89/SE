@@ -605,7 +605,8 @@ func takeOrder(all []Status, want int) []Status {
 
 // Take claims an issue at the top in the git checkout dir: want, when it is
 // above zero, else the one Next names. Without want, a claimed leaf whose PR
-// conflicts with main comes first, whatever its age (see takeOverConflict).
+// conflicts with main comes first, once nothing was pushed to its branch
+// within the lease (see takeOverConflict).
 // Where another box claimed a leaf first, it moves on to the next one. A leaf
 // stuck for the first time is taken over: its branch is checked out as it
 // stands. A parent's branch claims its whole
