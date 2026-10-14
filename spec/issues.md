@@ -226,7 +226,8 @@ person**, and leaves the agents' queue until the person has closed it.
   solved, auto-merge on (`se issue land`) and kept until it merges
   (`se issue keep`), with an issue (`se issue new`) for
   everything it could not solve; a supersede (`se issue supersede <n>`),
-  where it cannot land a PR at all; or, where the issue's work reached main
+  where it cannot land a PR at all, `--duplicate-of` another open issue
+  whose PR already covers its work; or, where the issue's work reached main
   before the take, a close naming that commit
   (`se issue close <n> --fixed-by SHA`), so a moot issue ends without an
   empty PR. `se issue pull --take` names the open
@@ -258,7 +259,7 @@ se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--pa
 se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
-se issue supersede N (--body B | --body-file PATH) [--json] [--repo OWNER/NAME]
+se issue supersede N (--body B | --body-file PATH | --duplicate-of M) [--json] [--repo OWNER/NAME]
 se issue tree [ROOT] [--json] [--repo OWNER/NAME]
 se review brief N [--claims] [--json] [--repo OWNER/NAME]
 ```
@@ -461,6 +462,17 @@ blocked by the successor (GitHub's native links), then closes N, its comment
 naming the successor. A final issue is refused: its box lands a PR. A ready
 successor fires the routine once (with `--json`:
 `{"issue","successor","parent","blocked_by","blocks","ready","fanout"}`).
+
+`se issue supersede N --duplicate-of M` is the supersede of an issue that
+the open issue M already covers, its PR doing the same work (two boxes that
+filed the same bug under different titles): it mints nothing. It links N's
+open dependents as blocked by M, closes N's open PR with a comment naming M
+and deletes N's `issue-N` claim by a git push from the workspace (so no PR
+stays open with no issue behind it, and `se fleet fix` finds no leftover
+claim), then closes N as a duplicate (state_reason `duplicate`), its comment
+naming M. A final issue closes so too, since its
+work lands under M; a closed M is refused (with `--json`:
+`{"issue","of","url","blocks","pulls","branch"}`).
 
 `se issue close N --fixed-by SHA --answers FILE` is the third way, for an
 issue whose work reached main before its box took it (another issue's PR did
