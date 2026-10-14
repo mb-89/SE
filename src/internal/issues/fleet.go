@@ -22,11 +22,12 @@ const (
 	NoPR            = "no PR"
 	LeftoverClaim   = "leftover claim"
 	ImpossibleBlock = "impossible block"
+	ConfigDrift     = "configuration drift"
 	WaitingOnPerson = "waiting on a person"
 )
 
 // Kinds is every kind of finding, in the order se fleet check lists them.
-var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, LeftoverClaim, ImpossibleBlock, WaitingOnPerson}
+var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, LeftoverClaim, ImpossibleBlock, ConfigDrift, WaitingOnPerson}
 
 // Grace is how long the prune workflow has to delete a leftover claim of a
 // closed issue before se fleet fix reports it.
@@ -62,6 +63,9 @@ type Finding struct {
 	closed   time.Time
 	// key names the finding in the record its fix leaves.
 	key string
+	// reported is, for a configuration drift, the open issue it went to
+	// already, or 0.
+	reported int
 }
 
 // cause is the kind of the finding on the issue itself.
@@ -86,6 +90,8 @@ func (f *Finding) setRemedy() {
 	switch {
 	case f.Kind == WaitingOnPerson:
 		f.Remedy = "none: it waits for a person"
+	case f.Kind == ConfigDrift:
+		f.Remedy = "se fleet fix reports it as an " + PersonLabel + " issue: the person sets the live setting or changes " + FleetConfigPath
 	case f.takeover():
 		f.Remedy = fmt.Sprintf("se issue pull --take %d, merge origin/main into %s, make it green, se issue land", f.Issue, Branch(f.Issue))
 	case f.cause() == GreenUnmerged && !f.autoMerge:
@@ -122,15 +128,17 @@ func (s Source) Check() ([]Finding, error) {
 
 // check is Check on a survey already read.
 func (s Source) check(all []Status, t tree) ([]Finding, error) {
-	var claims, out []Finding
+	var claims, out, drifts []Finding
 	if err := parallel([]func() error{
 		func() (err error) { claims, err = s.claimFindings(all, t); return err },
 		func() (err error) { out, err = s.leftovers(t); return err },
+		func() (err error) { drifts, err = s.drift(t); return err },
 	}); err != nil {
 		return nil, err
 	}
 	deps := t.deps
 	out = append(out, s.impossible(t)...)
+	out = append(out, drifts...)
 
 	// What each open issue waits on, at the end of its links: the claimed
 	// leaves and the se-person issues it cannot move without.
@@ -555,6 +563,12 @@ func (s Source) Fix(dir string, findings []Finding) []Fixed {
 			x.Did = "reported; it waits for a person"
 		case f.takeover():
 			x.Did, x.Take = "left to this box: "+f.Remedy, true
+		case f.Kind == ConfigDrift:
+			// A drift is on no issue, so it is recorded on the one it made.
+			if err := s.reportDrift(&x); err != nil {
+				x.Failed = err.Error()
+				x.Did = "failed: " + x.Failed
+			}
 		case f.prunable && s.now().Sub(f.closed) < Grace:
 			x.Did = fmt.Sprintf("left to the prune workflow until a day after #%d closed", f.Issue)
 		case f.prunable:

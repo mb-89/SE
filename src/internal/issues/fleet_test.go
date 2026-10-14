@@ -2,6 +2,7 @@
 package issues
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -512,5 +513,58 @@ func TestTheTakeoverRemedyOfAStuckSubIssueLeafRuns(t *testing.T) {
 		if got := run(t, a, "log", "-1", "--format=%s"); got != "work on 7" {
 			t.Fatalf("pushed at %s: issue-7 is not checked out as it stands: %s", at, got)
 		}
+	}
+}
+
+// configured records spec/fleet.yaml at main, requiring checks of main, and
+// main's live rules: its required checks, and whether they are strict.
+func (w *world) configured(want string, live []string, strict bool) {
+	w.t.Helper()
+	text := fmt.Sprintf("ruleset:\n  branch: main\n  required_checks: [%s]\n  strict: true\nroutine:\n  name: SE work\n", want)
+	w.set("repos/o/r/contents/spec/fleet.yaml?ref=main", fmt.Sprintf(`{"content":%q,"encoding":"base64"}`, base64.StdEncoding.EncodeToString([]byte(text))))
+	var cs []string
+	for _, c := range live {
+		cs = append(cs, fmt.Sprintf(`{"context":%q}`, c))
+	}
+	w.set("repos/o/r/rules/branches/main", fmt.Sprintf(`[{"type":"deletion"},{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":%t,"required_status_checks":[%s]}}]`, strict, strings.Join(cs, ",")))
+}
+
+func TestALiveRulesetAsSpecFleetYamlSaysIsHealthy(t *testing.T) {
+	w := newWorld(t, []string{item(5, 0)})
+	w.configured("check", []string{"check"}, true)
+	if got := w.check(); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestARulesetThatDriftedFromSpecFleetYamlGoesToAPersonOnce(t *testing.T) {
+	w := newWorld(t, []string{item(5, 0)})
+	w.configured("check", []string{"lint"}, false)
+	f := only(t, w.check(), ConfigDrift, 0)
+	want := "spec/fleet.yaml requires check, which main's live ruleset does not; main's live ruleset requires lint, which spec/fleet.yaml does not; spec/fleet.yaml sets strict: true, main's live ruleset false"
+	if f.What != want || f.Remedy != "se fleet fix reports it as an se-person issue: the person sets the live setting or changes spec/fleet.yaml" {
+		t.Fatalf("%+v", f)
+	}
+	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
+	done := s.Fix(t.TempDir(), w.check())
+	if len(done) != 1 || done[0].Made != 101 || done[0].Did != "reported it to a person as #101" || done[0].Ready {
+		t.Fatalf("%+v", done)
+	}
+	if !labelled(t, w, 101, PersonLabel) || !strings.Contains(issueAt(t, w, 101).Body, driftMark) {
+		t.Fatalf("%+v", issueAt(t, w, 101))
+	}
+	// While #101 is open, the drift is reported already, and #101 waits.
+	done = s.Fix(t.TempDir(), w.check())
+	if len(done) != 2 || done[0].Kind != ConfigDrift || done[0].Did != "reported already as #101, still open" || done[1].Kind != WaitingOnPerson || done[1].Issue != 101 {
+		t.Fatalf("%+v", done)
+	}
+}
+
+func TestAMainWithoutRulesDriftsFromSpecFleetYaml(t *testing.T) {
+	w := newWorld(t, []string{item(5, 0)})
+	w.configured("check", nil, false)
+	w.set("repos/o/r/rules/branches/main", `[]`)
+	if f := only(t, w.check(), ConfigDrift, 0); f.What != "spec/fleet.yaml requires check, which main's live ruleset does not; spec/fleet.yaml sets strict: true, main's live ruleset false" {
+		t.Fatalf("%+v", f)
 	}
 }

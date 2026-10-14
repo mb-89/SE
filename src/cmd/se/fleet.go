@@ -14,7 +14,7 @@ func init() {
 		Usage:   "fleet check [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list what is broken in the fleet, each with its remedy",
-		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the coordination skill fixes them. Nothing found, it says healthy. spec/coordination.md has the rules.",
+		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, a configuration drift (main's live ruleset differs from spec/fleet.yaml at main), an issue waiting on a person. Each names its issue where it has one, its PR and its remedy, in the order the coordination skill fixes them. Nothing found, it says healthy. spec/coordination.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet check")
@@ -51,7 +51,7 @@ func init() {
 		Usage:   "fleet fix [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "fix what fleet check finds that needs no checkout",
-		Details: "run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, and a finding with no other remedy becomes an se issue, or an se-person one where it is a judgment. Each fix is recorded on the finding's issue, and a finding back after its fix goes to a person. A remedy that fails is reported, and the ones after it are still applied. A takeover is named for the box to run. A ready issue it made fires the routine once.",
+		Details: "run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, and a finding with no other remedy becomes an se issue, or an se-person one where it is a judgment, a configuration drift among them. Each fix is recorded on the finding's issue (a drift's on the issue it made), and a finding back after its fix goes to a person. A remedy that fails is reported, and the ones after it are still applied. A takeover is named for the box to run. A ready issue it made fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet fix")
@@ -87,7 +87,7 @@ func init() {
 			}
 			lines := make([]string, 0, len(done)+1)
 			for _, d := range done {
-				lines = append(lines, fmt.Sprintf("%s #%d: %s\n  did: %s", d.Kind, d.Issue, d.What, d.Did))
+				lines = append(lines, fmt.Sprintf("%s: %s\n  did: %s", findingHead(d.Finding), d.What, d.Did))
 			}
 			if fanout != "" {
 				lines = append(lines, fanout)
@@ -181,11 +181,19 @@ func init() {
 	})
 }
 
-// findingText is one finding: its kind and issue, what is wrong, and its remedy.
+// findingText is one finding: its head, what is wrong, and its remedy.
 func findingText(f issues.Finding) string {
-	head := fmt.Sprintf("%s #%d", f.Kind, f.Issue)
+	head := findingHead(f)
 	if f.PR > 0 {
 		head += fmt.Sprintf(" (PR #%d)", f.PR)
 	}
 	return fmt.Sprintf("%s: %s\n  remedy: %s", head, f.What, f.Remedy)
+}
+
+// findingHead is a finding's kind, and its issue where it has one.
+func findingHead(f issues.Finding) string {
+	if f.Issue == 0 {
+		return f.Kind
+	}
+	return fmt.Sprintf("%s #%d", f.Kind, f.Issue)
 }

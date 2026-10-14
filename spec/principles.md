@@ -148,3 +148,13 @@ principle is one sentence and one paragraph, and names what checks it.
     should be and how. Work that is clear becomes an `se` issue, and the
     cloud fleet does it; the session does not do it itself.
     Checked by: retro and overhaul, by judgment.
+
+21. **The fleet's configuration lives in the repository.**
+    Every setting the fleet runs by, the main ruleset, the routine that starts
+    boxes and the models they run, is written in the repository
+    ([spec/fleet.yaml](fleet.yaml), [spec/models.yaml](models.yaml)), and
+    `se fleet check` compares it with the live one; a drift goes to a person.
+    A setting no API the fleet has can read is written down all the same, and
+    says so. Principle 11 keeps the fleet's state on GitHub; this keeps its
+    configuration versioned.
+    Checked by: `se fleet check`, mechanically (configuration drift); overhaul, by judgment.

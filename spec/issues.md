@@ -377,14 +377,9 @@ routine `SE work`, whose whole prompt is
     run the work skill
 
 and the work skill is [src/plugin/skills/work/SKILL.md](../src/plugin/skills/work/SKILL.md), `se:work` in a session.
-The routine has two triggers:
-
-- a GitHub trigger on `pull_request.closed` with is-merged = true and base
-  branch = main, so every merge into main starts a box, which may find the
-  issues that merge unblocked;
-- a schedule, every 4 hours.
-
-It also has an API trigger, which `se` fires for the fan-out.
+Its triggers are set in [spec/fleet.yaml](fleet.yaml): a GitHub trigger on
+every merge into main, so a box may find the issues that merge unblocked; a
+schedule; and an API trigger, which `se` fires for the fan-out.
 
 ### Fan-out
 

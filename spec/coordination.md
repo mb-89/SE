@@ -39,6 +39,11 @@ and only then leaves.**
    - **impossible block**: an issue blocked by an issue closed as not planned,
      by an open issue no box works (not labelled `se`, or in another
      repository), or by itself through a cycle.
+   - **configuration drift**: main's live ruleset differs from
+     [spec/fleet.yaml](fleet.yaml) at main (its required checks, or their
+     strictness); on no issue. The routine is written there too, but no API
+     the fleet has reads it, so it is not compared
+     ([principle 21](principles.md)).
    - **waiting on a person**: an `se-person` issue, with what it holds up.
      Reported, never fixed.
 
@@ -66,7 +71,11 @@ and only then leaves.**
      reported as an issue (`se fleet fix`, through the same code as
      `se issue new`), labelled `se-person` and assigned to the repository's
      owner where it is a judgment: a cycle, a blocker outside the fleet, a
-     green PR auto-merge does not merge.
+     green PR auto-merge does not merge;
+   - a configuration drift goes to a person (`se fleet fix`), who sets the
+     live setting or changes `spec/fleet.yaml`; it is on no issue, so its
+     record is the mark `<!-- se:fleet configuration-drift -->` in the issue
+     it made, and while that issue is open it is not reported again.
 4. **It never fixes the same thing twice.** A takeover is recorded with
    `<!-- se:takeover N -->`, every other fix with `<!-- se:fleet KEY M -->` on
    the finding's issue (`M` is the issue it made, or 0). A finding that comes
@@ -113,7 +122,8 @@ its output names what it deleted.
 ## Up to date with main
 
 CI must run on what lands, so main's ruleset merges a PR only when its
-branch is up to date with main (its required check `check` is strict): a PR
+branch is up to date with main (its required check is strict, as
+[spec/fleet.yaml](fleet.yaml) sets): a PR
 whose CI ran before main moved waits. Two things keep it moving, with no
 box in the loop:
 

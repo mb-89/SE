@@ -1,5 +1,7 @@
 # The models SE runs, set here and nowhere else (spec/review.md).
-# box: what the routine's boxes run; the floor for every agent.
+# box: what the routine's boxes run; the floor for every agent. No API the
+# fleet has reads the routine, so the owner sets it there by hand, as here
+# (spec/fleet.yaml, principle 21).
 box: opus
 # reviewer: what a gate's reviewer sub-agent runs, never weaker than box:
 # a stronger model where one is available. The work skill reads this line
