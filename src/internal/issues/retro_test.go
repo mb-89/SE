@@ -451,3 +451,22 @@ func TestARuleCheckWhosePRDidNotMergeIsRefused(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestByHandCountsAnAnswerThatProposesACommand(t *testing.T) {
+	t.Parallel()
+	for answer, want := range map[string]bool{
+		// #88's answer: nothing scripted, yet it names the command it wants.
+		`Nothing scripted. No se command reports "main fails its own check"; se fleet check could run check.sh on origin/main and name that as a finding.`: true,
+		"wrote src/scripts/check-claims.sh":    true,
+		"merged main by hand twice":            true,
+		"none":                                 false,
+		"Nothing.":                             false,
+		"nothing: se issue land did all of it": false,
+		"None. Everything went through the se commands as written": false,
+		"": false,
+	} {
+		if got := byHand(answer); got != want {
+			t.Errorf("byHand(%q) = %v, want %v", answer, got, want)
+		}
+	}
+}
