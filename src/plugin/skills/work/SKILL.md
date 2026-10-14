@@ -12,9 +12,9 @@ work and fixing a red CI run; follow the rest as written. `se` is
 `./src/plugin/bin/se`; build it first with
 `go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se`.
 Call it exactly as `./src/plugin/bin/se issue …` (or `./src/plugin/bin/se fleet …`),
-one command per call, never through a variable: `.claude/settings.json` allows
-those forms to write GitHub issues without a permission prompt, and only
-those.
+one command per call, never through a variable: the forms
+[.claude/settings.json](../../../../.claude/settings.json) allows run without a
+permission prompt, and no others.
 
 1. `git fetch origin main && git checkout origin/main` (a box started by a PR
    event starts on that PR's head commit), rebuild `se`, then
