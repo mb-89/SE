@@ -10,6 +10,7 @@ import (
 
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/rules"
 )
 
@@ -83,6 +84,7 @@ func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
 			return false
 		},
 		Commands: commandFlags(),
+		Agents:   issues.Agents(),
 		Manifest: func(name, at string) (string, error) { return manifest(d, root, paths, name, at) },
 	}, nil
 }
