@@ -119,7 +119,7 @@ the owner's account for an hour.
   retro and `se issue tree`'s estimate read them.
 - **The pause switch.** One config value on main, `fleet.box/config/paused`
   (`issues/config/paused` on the index, in
-  `src/internal/index/wiring.yaml`). Every take (`--take`, at the top and
+  `src/index/wiring.yaml`). Every take (`--take`, at the top and
   `--in`) reads it from origin/main first and, while it is set, takes nothing
   (with `--json`: `{"ready":false,"paused":true,"why"}`), and the box ends.
   So the owner stops every running box with one change on main.
@@ -215,7 +215,9 @@ nothing mints an issue for a person on a box's behalf.
   `<!-- se:takeover <round> -->`, and labels it `se-final`, the single record
   that it was taken over stuck (see [spec/review.md](review.md), rule 5). Of two boxes taking over one issue, the first comment of the
   round wins; the other deletes its own and moves on. A takeover renews the
-  lease.
+  lease, and se fleet check's hour of quiet with it: both read a claim's
+  activity as its last push or its last takeover, whichever is later, so a
+  box that has just taken an issue over is not found stuck.
 - **Final and stuck: taken over again.** A leaf labelled `se-final` (taken
   over once already, or filed by a review) that is stuck is taken over like
   any other stuck leaf, and its box ends it as every box does (below).
@@ -300,8 +302,8 @@ into the branch and land it again (with `--json`: the issue's `takeover`,
 any depth, where `se fleet check` finds it stuck (a conflicted or red PR, or
 no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.md)),
 or where it is stuck past the lease, so every takeover remedy the check names
-runs, labelled `se-final` or not. A claim whose work is moving
-is refused.
+runs, labelled `se-final` or not. A claim whose work is moving, pushed to
+or taken over within the hour, is refused.
 Every takeover, at the top or with `--in`, writes the landing answers the
 issue's last land posted on it (see [Landing answers](#landing-answers)) back
 to the answers file beside the branch's checkout, `<path>-landing.yaml` where
@@ -412,7 +414,9 @@ the only place they are written; `se issue land` and the retro both read it.
   excluded; its takeovers, from their markers; and its merges of main, all
   counted against `origin/main` (a leaf's against its manifest's branch);
   and the GitHub requests the `se` commands run in the checkout made, from
-  its ledger, this land's so far included
+  its ledger, this land's so far included,
+  and the requests GitHub refused them for a rate limit, with the seconds
+  waited for the reset, from theirs
   ([io.md](io.md#living-within-githubs-rate-limits)).
 - Landing again (after a CI fix, say) updates that comment rather than
   adding a second.
@@ -480,9 +484,12 @@ open dependents as blocked by M, closes N's open PR with a comment naming M
 and deletes N's `issue-N` claim by a git push from the workspace (so no PR
 stays open with no issue behind it, and `se fleet fix` finds no leftover
 claim), then closes N as a duplicate (state_reason `duplicate`), its comment
-naming M. A final issue closes so too, since its
-work lands under M; a closed M is refused (with `--json`:
-`{"issue","of","url","blocks","pulls","branch"}`).
+naming M. A final issue closes so too, since its work lands under M; a closed
+M is refused. M may be a merged pull request instead, whose commit on main
+N's comment names, as `se issue close --fixed-by` does, linking nothing; an
+open pull request is refused, and one closed unmerged: it may never merge,
+and N would count as handled while its work is not done (with `--json`:
+`{"issue","of","url","commit","blocks","pulls","branch"}`).
 
 `se issue close N --fixed-by SHA --answers FILE` is the third way, for an
 issue whose work reached main before its box took it (another issue's PR did

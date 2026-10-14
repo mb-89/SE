@@ -292,11 +292,15 @@ var failed = map[string]bool{"failure": true, "timed_out": true, "cancelled": tr
 // where open is true, and whose branch is at sha; nil where its work is
 // moving, or a takeover of it is. What t holds already is not read again.
 func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tree) (*Finding, error) {
-	n, b, last := st.Number, Branch(st.Number), st.pushed
-	var err error
+	n, b, pushed := st.Number, Branch(st.Number), st.pushed
+	// A takeover renews the claim as a push does: a box has just taken it.
+	last, m, err := s.active(n, pushed, Quiet)
+	if err != nil {
+		return nil, err
+	}
 	quiet := s.now().Sub(last) > Quiet
-	since := "no push since " + last.UTC().Format(time.RFC3339)
-	if last.IsZero() {
+	since := "no push since " + pushed.UTC().Format(time.RFC3339)
+	if pushed.IsZero() {
 		since = "no push on record"
 	}
 	var f *Finding
@@ -356,9 +360,12 @@ func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tre
 	}
 	f.Issue = n
 	if f.takeover() {
-		m, err := s.marks(n)
-		if err != nil {
-			return nil, err
+		if m == nil {
+			got, err := s.marks(n)
+			if err != nil {
+				return nil, err
+			}
+			m = &got
 		}
 		if m.takeovers > 0 && m.head == f.head && s.now().Sub(m.lastTakeover) < Quiet {
 			return nil, nil

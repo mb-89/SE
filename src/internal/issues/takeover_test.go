@@ -71,12 +71,19 @@ func (r *racer) Send(method, path string, fields ...github.Field) ([]byte, error
 // claimed7 makes origin's issue-7, with one commit of work on it.
 func claimed7(t *testing.T) (a string) {
 	t.Helper()
+	return claimedAt(t, 7)
+}
+
+// claimedAt makes origin's issue-n, with one commit of work on it.
+func claimedAt(t *testing.T, n int) (a string) {
+	t.Helper()
 	_, a, _ = boxes(t)
-	run(t, a, "checkout", "-q", "-b", "issue-7")
-	run(t, a, "commit", "-q", "--allow-empty", "-m", "work on 7")
-	run(t, a, "push", "-q", "origin", "issue-7")
+	b := fmt.Sprintf("issue-%d", n)
+	run(t, a, "checkout", "-q", "-b", b)
+	run(t, a, "commit", "-q", "--allow-empty", "-m", fmt.Sprintf("work on %d", n))
+	run(t, a, "push", "-q", "origin", b)
 	run(t, a, "checkout", "-q", "main")
-	run(t, a, "branch", "-q", "-D", "issue-7")
+	run(t, a, "branch", "-q", "-D", b)
 	return a
 }
 
@@ -175,6 +182,31 @@ func TestAFinalIssueInConflictIsTakenOverAgain(t *testing.T) {
 	}
 }
 
+// Recorded from mb-89/SE on 14 October: #116's PR #118 and #122's PR #140
+// each conflicted again within 10 minutes of a conflict takeover, as main
+// merged fast, and each went to a person. A conflict at a new head is taken
+// over again, and nothing is held.
+func TestASecondConflictAtANewHeadIsTakenOverAgain(t *testing.T) {
+	t.Parallel()
+	a := claimed7(t)
+	g := newPulls(t, atNow(), pr70("false", "dirty"))
+	// The first takeover found head 0ld; the PR conflicts again at abc.
+	said(t, g, "Taken over.\n<!-- se:takeover 1 -->\n<!-- se:takeover-head 0ld -->")
+	s := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}
+	took, ok, err := s.Take(a, 0)
+	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || *took.Takeover != (Takeover{PR: 70, URL: "p70", Count: 2}) {
+		t.Fatalf("took %+v %v %v", took, ok, err)
+	}
+	for _, w := range g.Writes() {
+		if strings.Contains(w, "assignees") || strings.Contains(w, "blocked_by") || strings.Contains(w, "labels") {
+			t.Fatalf("#7 was held or labelled: %q", g.Writes())
+		}
+	}
+	if c := commentsAt(t, g, 7); len(c) != 2 || !strings.Contains(c[1].Body, "<!-- se:takeover 2 -->\n<!-- se:takeover-head abc -->") {
+		t.Fatalf("comments %+v", c)
+	}
+}
+
 func TestATakeoverInFlightIsLeftToItsBox(t *testing.T) {
 	t.Parallel()
 	_, a, _ := boxes(t)
@@ -211,10 +243,11 @@ func TestAConflictAfterAStuckTakeoverIsTakenOver(t *testing.T) {
 	finalSeven(t, g)
 	said(t, g, "<!-- se:takeover 1 -->\nTaken over: nothing was pushed.")
 	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
-	if err != nil || !ok || took.Number != 7 {
+	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || took.Takeover.Count != 2 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	if c := commentsAt(t, g, 7); len(c) != 2 || strings.Contains(c[1].Body, "<!-- se:person -->") {
-		t.Fatalf("comments %+v", c)
+	// The conflict changed nothing: #7 stays final, and nothing is held.
+	if c := commentsAt(t, g, 7); len(c) != 2 || strings.Contains(c[1].Body, "se:person") || !labelled(t, g, 7, FinalLabel) {
+		t.Fatalf("comments %+v, writes %q", c, g.Writes())
 	}
 }

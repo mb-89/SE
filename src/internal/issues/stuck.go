@@ -125,27 +125,42 @@ func (s Source) lastPush(n int) (time.Time, error) {
 	return last, nil
 }
 
+// active is when claimed leaf n last moved, its branch last pushed at pushed:
+// that push, or its last takeover where that is later, as a takeover records
+// a comment, not a push. Its comments are read only where the push is older
+// than within, and m is then what they say; nil otherwise. The lease and se
+// fleet check both read activity here, so they never disagree.
+func (s Source) active(n int, pushed time.Time, within time.Duration) (last time.Time, m *marks, err error) {
+	if s.now().Sub(pushed) <= within {
+		return pushed, nil, nil
+	}
+	got, err := s.marks(n)
+	if err != nil {
+		return time.Time{}, nil, err
+	}
+	if got.lastTakeover.After(pushed) {
+		return got.lastTakeover, &got, nil
+	}
+	return pushed, &got, nil
+}
+
 // lease reads whether a claimed leaf is stuck: nothing pushed to its branch,
-// nor a takeover recorded, for longer than the lease. Its comments are read
-// only where the last push is that old.
+// nor a takeover recorded, for longer than the lease.
 func (s Source) lease(st *Status) error {
 	pushed, err := s.lastPush(st.Number)
 	if err != nil {
 		return err
 	}
-	st.Since, st.pushed = pushed, pushed
-	if s.now().Sub(st.Since) <= s.config().Lease {
-		return nil
-	}
-	m, err := s.marks(st.Number)
+	st.pushed = pushed
+	since, m, err := s.active(st.Number, pushed, s.config().Lease)
 	if err != nil {
 		return err
 	}
-	st.Takeovers = m.takeovers
-	if m.lastTakeover.After(st.Since) {
-		st.Since = m.lastTakeover
+	st.Since = since
+	if m != nil {
+		st.Takeovers = m.takeovers
+		st.Stuck = s.now().Sub(since) > s.config().Lease
 	}
-	st.Stuck = s.now().Sub(st.Since) > s.config().Lease
 	return nil
 }
 

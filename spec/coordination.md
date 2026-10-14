@@ -49,10 +49,11 @@ sweeping at once wrote the same issues and comments many times over
    - **waiting on a person**: an `se-person` issue, with what it holds up.
      Reported, never fixed.
 
-   Claimed work is moving while its branch was pushed within the hour (the
-   activity GitHub records for the branch, its creation included), while its
-   CI runs, or while a takeover of it is in flight: the last takeover marker
-   names the same head and is less than an hour old.
+   Claimed work is moving while its branch was pushed, or the issue taken
+   over, within the hour (the activity GitHub records for the branch, its
+   creation included, or the last takeover marker: the lease reads it the
+   same way), while its CI runs, or while a takeover of it is in flight: the
+   last takeover marker names the same head and is less than an hour old.
 3. **What has a known remedy is fixed,** in the order
    the command lists, each with the mechanism that already exists:
    - a conflicted, red or stalled claim, or a claim with no PR, is taken

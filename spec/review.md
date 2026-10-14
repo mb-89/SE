@@ -63,8 +63,13 @@ follows them; `se review brief` and `se issue review` (in
    `se-final` is a separate label beside it. An issue becomes `se-final`
    when:
    - a review creates it to fix a finding;
-   - `se issue pull --take` takes it over, stuck or with a conflicted PR
-     ([Stuck work](issues.md#stuck-work), [The rules](issues.md#the-rules)).
+   - `se issue pull --take` takes it over stuck, with no push for too long
+     or a red PR ([Stuck work](issues.md#stuck-work)).
+
+   A conflict is no failure: main moves on under a PR through no fault of
+   its box, so a conflict takeover never makes an issue final, and a final
+   issue in conflict is taken over like any other
+   ([The rules](issues.md#the-rules)).
 
    A final issue is never superseded again: its box lands a PR. Nothing
    mints an issue for a person on a box's behalf. If an `se-final` issue
@@ -77,9 +82,9 @@ follows them; `se review brief` and `se issue review` (in
      else blocks, the gate closes.
 
    This bounds the review loop at one retry. The label is the single record
-   of a takeover: a takeover sets it. The `<!-- se:takeover N -->` comment
-   stays as the human-readable record, and its round only settles two boxes
-   racing for one takeover.
+   of a takeover of stuck work: such a takeover sets it. The
+   `<!-- se:takeover N -->` comment stays as the human-readable record, and
+   its round only settles two boxes racing for one takeover.
 6. **A re-review** is the review of a gate whose last review failed. It
    checks only the earlier blockers and the code that changed since (the
    brief names both: the blockers, and `git diff <then>..<now>`), and raises
@@ -114,7 +119,7 @@ follows them; `se review brief` and `se issue review` (in
 
 10. **What others built runs on the delta:** the brief ends with the
    reviewer's list from the reuse config of
-   [src/internal/index/wiring.yaml](../src/internal/index/wiring.yaml)
+   [src/index/wiring.yaml](../src/index/wiring.yaml)
    (the simplifier, `/security-review` and the pr-review-toolkit agents),
    each resolved against the plugins the box loaded. What they report are
    candidates, verified like any other. The report's `ran` names each entry
