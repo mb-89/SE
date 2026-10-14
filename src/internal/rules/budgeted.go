@@ -43,7 +43,7 @@ func budgeted(repo *Repo, p string, text []byte) []Finding {
 	for _, section := range []struct {
 		name  string
 		names map[string]string
-	}{{"commands", b.Commands}, {"hooks", b.Hooks}} {
+	}{{"command_classes", b.CommandClasses}, {"hook_classes", b.HookClasses}} {
 		for _, name := range sortedKeys(section.names) {
 			if class := section.names[name]; !hasKey(b.Classes, class) {
 				found = append(found, Finding{
@@ -57,17 +57,17 @@ func budgeted(repo *Repo, p string, text []byte) []Finding {
 		return found
 	}
 	for _, name := range sortedKeys(repo.Commands) {
-		if _, ok := b.Commands[name]; !ok {
+		if _, ok := b.CommandClasses[name]; !ok {
 			found = append(found, Finding{
-				Path: p, Line: at("commands", ""), Rule: "budgeted",
-				Message: fmt.Sprintf("the se command %q has no class under commands", name),
+				Path: p, Line: at("command_classes", ""), Rule: "budgeted",
+				Message: fmt.Sprintf("the se command %q has no class under command_classes", name),
 			})
 		}
 	}
-	for _, name := range sortedKeys(b.Commands) {
+	for _, name := range sortedKeys(b.CommandClasses) {
 		if _, ok := repo.Commands[name]; !ok {
 			found = append(found, Finding{
-				Path: p, Line: at("commands", name), Rule: "budgeted",
+				Path: p, Line: at("command_classes", name), Rule: "budgeted",
 				Message: fmt.Sprintf("%q is no se command", name),
 			})
 		}
@@ -75,7 +75,7 @@ func budgeted(repo *Repo, p string, text []byte) []Finding {
 	return found
 }
 
-// hooksBudgeted checks each hook the plugin times against the hooks budgets.yaml classes.
+// hooksBudgeted checks each hook the plugin times against the hook_classes of budgets.yaml.
 func hooksBudgeted(repo *Repo, text []byte) []Finding {
 	data, ok, err := repo.Read(battery.BudgetsFile)
 	if err != nil || !ok {
@@ -88,10 +88,10 @@ func hooksBudgeted(repo *Repo, text []byte) []Finding {
 	var found []Finding
 	for i, line := range bytes.Split(text, []byte("\n")) {
 		for _, m := range hookName.FindAllSubmatch(line, -1) {
-			if _, ok := b.Hooks[string(m[1])]; !ok {
+			if _, ok := b.HookClasses[string(m[1])]; !ok {
 				found = append(found, Finding{
 					Path: HooksFile, Line: i + 1, Rule: "budgeted",
-					Message: fmt.Sprintf("the hook %q has no class under hooks in %s", m[1], battery.BudgetsFile),
+					Message: fmt.Sprintf("the hook %q has no class under hook_classes in %s", m[1], battery.BudgetsFile),
 				})
 			}
 		}

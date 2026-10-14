@@ -11,10 +11,10 @@ and only then leaves.**
 
 ## The rules
 
-1. **The work skill hands over.** When `se issue pull --take` takes nothing,
-   the box runs the coordination skill,
-   [src/plugin/skills/coordination/SKILL.md](../src/plugin/skills/coordination/SKILL.md),
-   before it ends.
+1. **The box checks before it ends.** When `se issue pull --take` takes
+   nothing, the box, the agent `se:coordinator`, checks the fleet and fixes
+   it before it ends; its agent file says how (see the agents in
+   [spec/issues.md](issues.md#the-box)).
 2. **The diagnosis is a command, not judgment.** `se fleet check` reads
    GitHub and lists every finding, each with its kind, its issue, its PR where
    there is one, and the remedy it names. It exits 0 and says `healthy` when it
@@ -46,12 +46,11 @@ and only then leaves.**
    activity GitHub records for the branch, its creation included), while its
    CI runs, or while a takeover of it is in flight: the last takeover marker
    names the same head and is less than an hour old.
-3. **The coordination skill fixes what has a known remedy,** in the order
+3. **The box fixes what has a known remedy,** in the order
    the command lists, each with the mechanism that already exists:
    - a conflicted, red or stalled claim, or a claim with no PR, is taken
-     over: `se issue pull --take <n>` checks its branch out as it stands, the
-     box merges `origin/main` into it, makes it green and lands it again with
-     `se issue land`;
+     over: `se issue pull --take <n> --worktree` fetches its branch as it
+     stands, and the box hands it to the agent the take names, which lands it;
    - a green PR with auto-merge off gets auto-merge turned on (`se fleet fix`);
    - a leftover claim whose issue is closed and whose branch has no open PR
      is left to the prune workflow, which deletes the branch (see **Pruning**
@@ -88,6 +87,7 @@ se fleet check [--json] [--repo OWNER/NAME]
 se fleet fix [--json] [--repo OWNER/NAME]
 se fleet prune [--apply] [--json] [--repo OWNER/NAME]
 se fleet refresh [--json] [--repo OWNER/NAME]
+se fleet rules [--json] [--repo OWNER/NAME]
 ```
 <!-- /se:manifest -->
 
@@ -128,3 +128,18 @@ box in the loop:
   left to its takeover; an update that fails is reported, and the workflow
   run goes red. The workflow `.github/workflows/refresh.yml` runs it on every
   push to main, and every hour.
+
+## A rule main takes
+
+A PR that adds or tightens an se rule breaks the PRs opened before it, and
+each of their boxes used to find out only from its own red CI or its next
+merge. So `se fleet rules` merges the head of every open se PR (an
+`issue-<n>` branch) with `origin/main` in a worktree under
+`.se/.runtime/rules`, builds `se` there, runs `se rules` on the merge, and
+comments on each PR it breaks the findings (a merge that does not build is
+one) and what to do: merge main in, fix them, land again. The comment carries
+`<!-- se:rules KEY -->`, the findings' hash, so the same findings are told
+once. A PR that conflicts with main is left to its takeover; one whose check
+fails is reported, and the others are still checked. The workflow
+`.github/workflows/rules.yml` runs it on every push to main that changes
+`src/internal/rules`, and on demand.

@@ -198,3 +198,24 @@ func TestTheFakeListsTheRepositorysCommentsSinceATimeByPage(t *testing.T) {
 		t.Fatalf("past the last page: %s", out)
 	}
 }
+
+func TestTheFakeCountsEachRequestAndPassesItsDelay(t *testing.T) {
+	t.Parallel()
+	answers := map[string]string{"repos/o/r/issues?labels=se&state=open&per_page=2": `[{"number":1},{"number":2},{"number":3}]`}
+	f := seeded(t, answers)
+	waited := clock.NewFake(start)
+	f.Delay(waited, 300*time.Millisecond)
+	if _, err := f.Get("repos/o/r/issues/1"); err != nil {
+		t.Fatal(err)
+	}
+	// Three issues at two a page are two pages, as gh asks for them.
+	if _, err := f.List("repos/o/r/issues?labels=se&state=open&per_page=2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Send("POST", "repos/o/r/issues/1/comments", github.F("body", "hi")); err != nil {
+		t.Fatal(err)
+	}
+	if n, took := f.Requests(), waited.Now().Sub(start); n != 4 || took != 1200*time.Millisecond {
+		t.Fatalf("%d requests in %v, want 4 in 1.2s", n, took)
+	}
+}

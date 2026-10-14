@@ -1,8 +1,9 @@
 // Command battery profiles tests/check.sh (src/internal/battery). check.sh
-// runs `battery gotest <packages>` for its Go tests, which runs go test -json
-// and keeps every test's duration, and `battery report` once every step has
-// passed, which prints the profile against spec/budgets.yaml, writes it for
-// the CI summary and se issue land, and fails only on a hard budget's overrun.
+// runs `battery gotest <top> <packages>` for its Go tests, which runs go test
+// -json and keeps every test's duration, and `battery report <top>` once every
+// step has passed, which prints the profile against spec/budgets.yaml, writes
+// it for the CI summary and se issue land, and fails only on a hard budget's
+// overrun. top is the checkout, where the battery's files live.
 package main
 
 import (
@@ -20,14 +21,17 @@ import (
 var machine = disk.Real()
 
 func main() {
-	if len(os.Args) < 2 {
-		fail(fmt.Errorf("usage: battery gotest <packages> | battery report"))
+	// check.sh runs the battery in src/, where go.mod is, and names the
+	// checkout's top, where its files live.
+	if len(os.Args) < 3 {
+		fail(fmt.Errorf("usage: battery gotest <top> <packages> | battery report <top>"))
 	}
+	top := os.Args[2]
 	switch os.Args[1] {
 	case "gotest":
-		fail(gotest(proc.Real(), os.Args[2:]))
+		fail(gotest(proc.Listed(proc.Real()), top, os.Args[3:]))
 	case "report":
-		fail(report())
+		fail(report(top))
 	default:
 		fail(fmt.Errorf("battery has no command %q", os.Args[1]))
 	}
@@ -36,8 +40,8 @@ func main() {
 // gotest runs go test -json on the packages, shows what go test shows a
 // person, keeps the events for report, and fails as go test failed. It runs
 // go test with GIT_DIR on a decoy repository, and fails if a test changed it.
-// It runs git and go on procs.
-func gotest(procs proc.Procs, packages []string) error {
+// It keeps the events under the checkout top, and runs git and go on procs.
+func gotest(procs proc.Procs, top string, packages []string) error {
 	dir, err := machine.MkdirTemp("", "battery-decoy-")
 	if err != nil {
 		return err
@@ -47,7 +51,7 @@ func gotest(procs proc.Procs, packages []string) error {
 	if err != nil {
 		return err
 	}
-	raw, err := machine.Create(filepath.Join(battery.Dir, battery.GoTestFile))
+	raw, err := machine.Create(filepath.Join(top, battery.Dir, battery.GoTestFile))
 	if err != nil {
 		return err
 	}
@@ -79,9 +83,9 @@ func gotest(procs proc.Procs, packages []string) error {
 	return relayed
 }
 
-// report prints the profile of the battery just run, and adds it to the CI
-// job's summary where there is one.
-func report() error {
+// report prints the profile of the battery just run in the checkout at top,
+// and adds it to the CI job's summary where there is one.
+func report(top string) error {
 	var summary io.Writer
 	if path := os.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
 		f, err := machine.Append(path)
@@ -91,7 +95,7 @@ func report() error {
 		defer f.Close()
 		summary = f
 	}
-	p, err := battery.Report(machine, ".", summary)
+	p, err := battery.Report(machine, top, summary)
 	fmt.Print(p.Text())
 	return err
 }

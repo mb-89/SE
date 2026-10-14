@@ -98,7 +98,7 @@ function world(on: On, env: Record<string, string> = {}): World {
       off: { text: 'SE is off.', active: false },
       update: { text: 'SE updated aaa → bbb. Its daemon restarted.', endpoint: DAEMON, reload: true },
       status: { text: 'No SE daemon answers for /work.' },
-      ui: { text: "SE's control panel is open.", panel: { buttons: ['issue pull', 'status'] } },
+      ui: { text: "SE's control panel is open.", panel: { buttons: ['issue pull', 'status'], columns: 3 } },
       help: { text: HELP, help: OVERVIEW },
       'help issue pull': { text: '/se issue pull [--take [N]]\n```\n…\n```', help: ISSUE_PULL },
     },
@@ -184,6 +184,7 @@ function world(on: On, env: Record<string, string> = {}): World {
     return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
   })
   on('attribution.text', ($, e) => ({ text: e.text }))
+  on('classic.SessionStart', () => ({ additionalContext: ['the project hook'] }))
   on('classic.Stop', () => ({}))
   on('classic.SubagentStop', () => ({}))
   on('prompt.submit', ($, e) => ({ text: e.text }) as never)
@@ -630,12 +631,55 @@ test('/se ui opens a pane titled SE that draws on every surface', async ($, on) 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const drawn = await ui.drawn()
-    expect(drawn).toMatchObject({ type: 'Box', props: { flexWrap: 'wrap', width: 40 } })
+    expect(drawn).toMatchObject({ type: 'Box', props: { flexDirection: 'column', width: 40 } })
     const buttons = await ui.findAll({ type: 'Button' })
     // The toggle first, top left; then se's buttons in the order it named them.
     expect(buttons.map(b => b.props.label)).toEqual(['SE off', 'issue pull', 'status'])
     await ui.unmount()
   }
+})
+
+// The grid as drawn: each row's cells, by the label of the Button each holds and the cell's width.
+type Drawn = { type: string; props?: Record<string, unknown>; children?: unknown[] }
+const rowsOf = (drawn: Drawn) =>
+  (drawn.children as Drawn[]).map(row =>
+    (row.children as Drawn[]).map(cell => ({
+      label: (cell.children as Drawn[])[0]?.props?.label,
+      width: cell.props?.width,
+    })),
+  )
+
+test('/se ui draws a panel of 7 buttons as aligned rows of 3, 3 and 1', async ($, on) => {
+  const w = world(on)
+  const six = ['issue pull', 'restart', 'status', 'update', 'briefing', 'fleet check']
+  w.replies.ui = { text: "SE's control panel is open.", panel: { buttons: six, columns: 3 } }
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const rows = rowsOf((await ui.drawn()) as Drawn)
+    // At most three to a row: the fourth button starts the next row.
+    expect(rows.map(r => r.length)).toEqual([3, 3, 1])
+    // Every button is labelled with its command's name, the toggle first, top left.
+    expect(rows.flat().map(c => c.label)).toEqual(['SE off', ...six])
+    // Every cell is as wide as every other, so the columns align and the last row stays left.
+    const widths = new Set(rows.flat().map(c => c.width))
+    expect(widths.size).toBe(1)
+    expect([...widths][0]).toBeGreaterThanOrEqual('fleet check'.length + 4)
+    await ui.unmount()
+  }
+})
+
+test("the columns of the grid are the ones se answers, not the plugin's", async ($, on) => {
+  const w = world(on)
+  w.replies.ui = { text: "SE's control panel is open.", panel: { buttons: ['a', 'b', 'c', 'd'], columns: 2 } }
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const rows = rowsOf((await ui.drawn()) as Drawn)
+  expect(rows.map(r => r.map(c => c.label))).toEqual([['SE off', 'a'], ['b', 'c'], ['d']])
+  // Two cells and their gap fill the pane.
+  expect(rows[0]?.[0]?.width).toBe(19)
 })
 
 test('pressing the toggle runs /se on and /se off, and switches the flag', async ($, on) => {
@@ -772,6 +816,51 @@ test('a line that no longer answers help draws as its text', async ($, on) => {
   await $.command.run(se('help'))
   const ui = await $.ui.mount(output('help', 'se has moved on.', 'desktop'))
   expect(await ui.find({ key: 'usage' })).toBeUndefined()
+})
+
+test('the session start hands the guidance se answers to the context, on each source that starts one', async ($, on) => {
+  const w = world(on)
+  w.replies['guidance --session-id s1'] = { text: 'the principles, and the skills handed over' }
+  await $.session.start(starts)
+  for (const source of ['startup', 'resume', 'clear', 'compact'] as const) {
+    expect((await $.classic.SessionStart({ source })).additionalContext).toEqual([
+      'the project hook',
+      'the principles, and the skills handed over',
+    ])
+  }
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(4)
+  // SE is off: the guidance goes into the context all the same, and nothing is posted.
+  expect(posted(w)).toEqual([])
+  // A fork carries its parent's context, guidance and all.
+  expect((await $.classic.SessionStart({ source: 'fork' })).additionalContext).toEqual(['the project hook'])
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(4)
+})
+
+test('guidance se answers empty, or not at all, adds nothing', async ($, on) => {
+  const w = world(on)
+  w.replies['guidance --session-id s1'] = { text: '' }
+  await $.session.start(starts)
+  expect((await $.classic.SessionStart({ source: 'startup' })).additionalContext).toEqual(['the project hook'])
+  w.replies['guidance --session-id s1'] = 'not json' as never
+  expect((await $.classic.SessionStart({ source: 'clear' })).additionalContext).toEqual(['the project hook'])
+})
+
+test('a slow guidance says it is working, and the session start waits for it', async ($, on) => {
+  const w = world(on)
+  const clock = w.clock
+  w.replies['guidance --session-id s1'] = { text: 'the principles' }
+  w.takes['guidance --session-id s1'] = 5000
+  await $.session.start(starts)
+  let said: string[] | undefined
+  const starting = $.classic.SessionStart({ source: 'startup' }).then(r => {
+    said = r.additionalContext
+  })
+  await clock.advance(1000)
+  expect(w.statuses).toContain('se: reading its guidance…')
+  expect(said).toBeUndefined()
+  await clock.advance(4000)
+  await starting
+  expect(said).toEqual(['the project hook', 'the principles'])
 })
 
 // A cloud session no person attends, as a routine starts it.

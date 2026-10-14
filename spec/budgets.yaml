@@ -10,10 +10,20 @@ steps:
   se rules: {ms: 5000, hard: false}
   golangci-lint: {ms: 120000, hard: false}
   biome: {ms: 5000, hard: false}
+  deadcode: {ms: 30000, hard: false}
   go test: {ms: 120000, hard: false}
   plugin validate: {ms: 15000, hard: false}
   marketplace validate: {ms: 15000, hard: false}
   plugin test: {ms: 30000, hard: false}
+# The interactive commands' hard budgets (principle 9): the battery runs each
+# command whose class is interactive (spec/index.md) against the fakes, which
+# add latency to each GitHub request and each process start, and fails one
+# that takes longer than ms or makes more outside requests than requests. over
+# names the commands that still break them; it only shrinks.
+commands:
+  interactive: {ms: 1000, requests: 3}
+  latency: {request_ms: 300, process_ms: 50}
+  over: [briefing, fleet check, issue pull, issue tree]
 
 # For each se command and each plugin hook: a class, by what the call waits
 # on. Every se command records its duration in .se/.runtime/calls.jsonl, with
@@ -28,15 +38,18 @@ classes:
   build: {ms: 300000, hard: false}
   battery: {ms: 900000, hard: false}
   daemon: {ms: 0, hard: false}
-commands:
+command_classes:
   briefing: github
   fleet check: github
   fleet fix: github
   fleet prune: github
   fleet refresh: github
+  fleet rules: github
+  guidance: local
   help: instant
   hook prompt: local
   hook stop: local
+  issue edit: github
   issue land: battery
   issue new: github
   issue pull: github
@@ -62,8 +75,10 @@ commands:
   stop: local
   ui: instant
   update: build
-hooks:
+hook_classes:
   session.start: instant
+  classic.SessionStart: local
+  prompt.submit: local
   command.run se: instant
   ui.render Pane: instant
   ui.render CommandOutput: instant

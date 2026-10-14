@@ -40,14 +40,15 @@ func (s Source) lastRetro(n int) (last past, ok bool, all []past, err error) {
 }
 
 // lastClosed is the closed issue labelled label that closed last, apart from
-// n, and all of them, oldest first; ok is false where none has closed.
+// n and those closed as duplicates, which never ran, and all of them, oldest
+// first; ok is false where none has closed.
 func (s Source) lastClosed(label string, n int) (last past, ok bool, all []past, err error) {
 	list, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100", s.Repo, label), true)
 	if err != nil {
 		return past{}, false, nil, err
 	}
 	for _, r := range list {
-		if r.PullRequest != nil || r.Number == n {
+		if r.PullRequest != nil || r.Number == n || !ran(r) {
 			continue
 		}
 		all = append(all, r)
@@ -84,7 +85,7 @@ func (s Source) NewRetro(field string, unattended bool) (RetroIssue, error) {
 	case feedback == "":
 		feedback = "None given."
 	}
-	body := fmt.Sprintf("A retro over %s. The rules are spec/retro.md; a box takes it with the retro skill and starts with `se retro collect`.\n\n%s\n\n## Field feedback\n%s\n\n<!-- se:retro %s -->",
+	body := fmt.Sprintf("A retro over %s. The rules are spec/retro.md; a box takes it and starts its agent, se:retro, which starts with `se retro collect`.\n\n%s\n\n## Field feedback\n%s\n\n<!-- se:retro %s -->",
 		window, who, feedback, mode)
 	title := "SE retro " + s.now().UTC().Format("2006-01-02")
 	made, _, err := s.create(title, body, 0, nil, []string{Label, RetroLabel})
@@ -128,18 +129,40 @@ type RuleCheck struct {
 	Kind string
 	Rule string
 	// Since is the merged PR that brought the rule, 0 where it held from the
-	// first commit. A retro checks the rule only on what closed after it.
+	// first commit. A retro checks the rule only on what came after it, by Bound.
 	Since int
+	// Bound is the time Since is held against: when what the rule checks
+	// closed, or, for a rule on what is written at creation, when it was made.
+	Bound Bound
+}
+
+// Bound says which time of an issue or PR a rule check's start is held against.
+type Bound string
+
+const (
+	// Closing bounds a check by when what it checks closed (a PR's merge).
+	Closing Bound = "closed"
+	// Creation bounds a check by when what it checks was created.
+	Creation Bound = "created"
+)
+
+// at is the time of x the check's start is held against.
+func (k RuleCheck) at(closed, created time.Time) time.Time {
+	if k.Bound == Creation {
+		return created
+	}
+	return closed
 }
 
 // checkKinds are the rule checks, in the order the report lists them. spec/retro.md
 // lists them from here.
 var checkKinds = []RuleCheck{
-	{"fixes", "every merged PR said `Fixes #n`", 14},
-	{"ci", "every merged PR had green CI (the last run of each check on its head)", 0},
-	{"outside-pr", "no commit reached main outside a PR (every commit on main is some merged PR's merge commit)", 0},
-	{"mark", "every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body", 91},
-	{"answers", "every landed issue (a leaf closed as completed, not a retro) has landing answers", 74},
+	{"fixes", "every merged PR said `Fixes #n`", 14, Closing},
+	{"ci", "every merged PR had green CI (the last run of each check on its head)", 0, Closing},
+	{"outside-pr", "no commit reached main outside a PR (every commit on main is some merged PR's merge commit)", 0, Closing},
+	// The mark is written at creation, so an issue made before #91 is not held to it.
+	{"mark", "every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body", 91, Creation},
+	{"answers", "every landed issue (a leaf closed as completed, not a retro, an overhaul or a person's decision) has landing answers", 74, Closing},
 }
 
 // RuleChecks are the rule checks, in the order the report lists them.
@@ -192,8 +215,9 @@ type Collected struct {
 	Commits  int
 	Reruns   int
 	Checks   []Broken
-	// Before counts, by kind, what broke a rule in the window before the PR
-	// that brought it merged; Checks leaves it out.
+	// Before counts, by kind, what broke a rule in the window but closed (or,
+	// for a rule bounded by creation, was created) before the PR that brought
+	// it merged; Checks leaves it out.
 	Before  map[string]int
 	Scripts []Script
 	Metrics Metrics
@@ -261,31 +285,20 @@ func (s Source) Collect(n int) (Collected, error) {
 		}
 	}
 
-	closed, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100%s", s.Repo, Label, c.Window.since()), true)
+	closed, err := s.closedIn(c.Window, n)
 	if err != nil {
 		return Collected{}, err
 	}
-	pulls, err := api[merged](s, fmt.Sprintf("repos/%s/pulls?state=closed&base=main&per_page=100", s.Repo), true)
+	pulls, inWindow, fixedBy, err := s.merges(c.Window)
 	if err != nil {
 		return Collected{}, err
 	}
 	viaPR := map[string]bool{}
-	fixedBy := map[int]merged{}
-	var inWindow []merged
 	for _, p := range pulls {
-		if p.MergedAt == nil {
-			continue
-		}
-		viaPR[p.SHA] = true
-		if !c.Window.holds(*p.MergedAt) {
-			continue
-		}
-		inWindow = append(inWindow, p)
-		for _, m := range fixesLine.FindAllStringSubmatch(p.Body, -1) {
-			fixedBy[atoi(m[1])] = p
+		if p.MergedAt != nil {
+			viaPR[p.SHA] = true
 		}
 	}
-	sort.Slice(inWindow, func(a, b int) bool { return inWindow[a].Number < inWindow[b].Number })
 	c.PRs = len(inWindow)
 	started, err := ruleStarts(pulls)
 	if err != nil {
@@ -339,18 +352,14 @@ func (s Source) Collect(n int) (Collected, error) {
 		}
 	}
 
-	sort.Slice(closed, func(a, b int) bool { return closed[a].Number < closed[b].Number })
 	for _, x := range closed {
-		if x.PullRequest != nil || x.Number == n || !c.Window.holds(x.ClosedAt) {
-			continue
-		}
 		row, checks, err := s.row(x, fixedBy)
 		if err != nil {
 			return Collected{}, err
 		}
 		c.Rows = append(c.Rows, row)
 		for _, b := range checks {
-			broke(b, x.ClosedAt)
+			broke(b, checkKinds[kindOrder(b.Kind)].at(x.ClosedAt, x.Created))
 		}
 	}
 	sort.SliceStable(c.Checks, func(a, b int) bool { return kindOrder(c.Checks[a].Kind) < kindOrder(c.Checks[b].Kind) })
@@ -363,6 +372,45 @@ func (s Source) Collect(n int) (Collected, error) {
 		c.Score = &score
 	}
 	return c, nil
+}
+
+// merges reads the PRs into main: every one, merged or not, those merged in
+// w, lowest number first, and the PR of w that fixed each issue, by its
+// Fixes line. The retro and the queue's pace both read them here.
+func (s Source) merges(w RetroWindow) (pulls, in []merged, fixedBy map[int]merged, err error) {
+	pulls, err = api[merged](s, fmt.Sprintf("repos/%s/pulls?state=closed&base=main&per_page=100", s.Repo), true)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	fixedBy = map[int]merged{}
+	for _, p := range pulls {
+		if p.MergedAt == nil || !w.holds(*p.MergedAt) {
+			continue
+		}
+		in = append(in, p)
+		for _, m := range fixesLine.FindAllStringSubmatch(p.Body, -1) {
+			fixedBy[atoi(m[1])] = p
+		}
+	}
+	sort.Slice(in, func(a, b int) bool { return in[a].Number < in[b].Number })
+	return pulls, in, fixedBy, nil
+}
+
+// closedIn reads the se issues closed in w, lowest number first, skip left
+// out. The retro and the queue's pace both read them here.
+func (s Source) closedIn(w RetroWindow, skip int) ([]past, error) {
+	list, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100%s", s.Repo, Label, w.since()), true)
+	if err != nil {
+		return nil, err
+	}
+	var out []past
+	for _, x := range list {
+		if x.PullRequest == nil && x.Number != skip && w.holds(x.ClosedAt) {
+			out = append(out, x)
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].Number < out[b].Number })
+	return out, nil
 }
 
 // ruleStarts are the times the rule checks started: when the PR that brought
@@ -441,7 +489,9 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 		}
 	}
 	parent := x.SubIssues != nil && x.SubIssues.Total > 0
-	work := x.StateReason == "completed" && !parent && !x.labelled(RetroLabel)
+	// A retro, an overhaul or a person's decision lands no branch, so it has
+	// no landing answers by design.
+	work := x.StateReason == "completed" && !parent && !x.labelled(RetroLabel) && !x.labelled(OverhaulLabel) && !x.labelled(PersonLabel)
 	if landed != nil {
 		r.Answers = landed.Answers
 	} else if work {
@@ -562,7 +612,7 @@ func (c Collected) measure() Metrics {
 		m["conflicts"] += float64(r.Conflicts)
 		m["takeovers"] += float64(r.Takeovers)
 		m["person_flags"] += float64(r.Person)
-		if r.Answers != nil && !nothing(r.Answers["by-hand"]) {
+		if r.Answers != nil && byHand(r.Answers["by-hand"]) {
 			m["by_hand"]++
 		}
 		if r.Minutes >= 0 {
@@ -581,12 +631,34 @@ func (c Collected) measure() Metrics {
 
 func round2(x float64) float64 { return float64(int(x*100+0.5)) / 100 }
 
-func median(xs []int) int {
+func median(xs []int) int { return percentile(xs, 0.5) }
+
+// percentile is the value q of the way up xs, sorted (0.5 the median, 0.9
+// the p90); 0 for none.
+func percentile(xs []int, q float64) int {
 	if len(xs) == 0 {
 		return 0
 	}
 	sort.Ints(xs)
-	return xs[len(xs)/2]
+	return xs[min(int(q*float64(len(xs))), len(xs)-1)]
+}
+
+// commandNamed is an answer naming a command: an se command or a script.
+var commandNamed = regexp.MustCompile("(^|[\\s`\"'(])se [a-z]|src/scripts/")
+
+// proposal is an answer saying what a command should, could or would do.
+var proposal = regexp.MustCompile(`\b(should|could|would|ought|belongs?)\b`)
+
+// byHand says whether a by-hand answer names a step done by hand, or a
+// command that should do it: one that opens with "nothing" counts still
+// where it goes on to propose a command, as "Nothing scripted. ... se fleet
+// check could run check.sh" does.
+func byHand(answer string) bool {
+	if !nothing(answer) {
+		return true
+	}
+	a := strings.ToLower(answer)
+	return commandNamed.MatchString(a) && proposal.MatchString(a)
 }
 
 // nothing says whether an answer says there was nothing: "none", "nothing", "n/a".

@@ -10,11 +10,11 @@ import (
 const budgetsYAML = `total: {ms: 1000, hard: false}
 classes:
   instant: {ms: 1000, hard: false}
-commands:
+command_classes:
   help: instant
   gone: instant
   status: slow
-hooks:
+hook_classes:
   session.start: instant
 `
 
@@ -35,9 +35,9 @@ func TestEveryCommandAndHookHasABudgetClass(t *testing.T) {
 	})
 	want := []string{
 		`spec/budgets.yaml:7: budgeted: status names the class "slow", which classes does not hold`,
-		`spec/budgets.yaml:4: budgeted: the se command "issue land" has no class under commands`,
+		`spec/budgets.yaml:4: budgeted: the se command "issue land" has no class under command_classes`,
 		`spec/budgets.yaml:6: budgeted: "gone" is no se command`,
-		`src/plugin/hooks/register.tsx:5: budgeted: the hook "*" has no class under hooks in spec/budgets.yaml`,
+		`src/plugin/hooks/register.tsx:5: budgeted: the hook "*" has no class under hook_classes in spec/budgets.yaml`,
 	}
 	got := strings.Join(found, "\n")
 	for _, w := range want {

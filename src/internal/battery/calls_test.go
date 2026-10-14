@@ -14,7 +14,7 @@ import (
 const classes = `classes:
   instant: {ms: 1000, hard: false}
   daemon: {ms: 0, hard: false}
-commands:
+command_classes:
   help: instant
   serve: daemon
 `
