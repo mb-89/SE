@@ -33,7 +33,11 @@ created. A box takes it from there.
    and not, if anything, to `findings` in the draft's block, and go to 4.
 2. Read the draft: the issue's field feedback, the rule checks, the counts,
    the metrics against the previous retros, the previous retro's score, the
-   scripts and the matrix of landing answers. Look too for what the window
+   scripts and the matrix of landing answers. Each answer is headed by how
+   its issue closed: one closed with no merged PR (as fixed by a commit, a
+   duplicate or a person's decision) answered for its own branch, so read
+   what it says it changed as on that branch, not on main; check main before
+   a finding rests on it. Look too for what the window
    made inconsistent, restated or written for no reader (principles 17 to
    19).
 3. Judge, and write it into the draft's block (the YAML under

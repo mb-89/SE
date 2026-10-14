@@ -192,9 +192,19 @@ type Row struct {
 	Minutes int `json:"minutes"`
 	// Requests is the GitHub requests its landing facts counted; 0 unknown.
 	Requests int `json:"requests,omitempty"`
+	// RateLimits is the requests GitHub refused its se commands for a rate
+	// limit, and RateLimitMinutes the minutes se waited for the resets, as
+	// its landing facts counted them; 0 none or unknown.
+	RateLimits       int     `json:"rate_limits,omitempty"`
+	RateLimitMinutes float64 `json:"rate_limit_minutes,omitempty"`
 	// Into is the manifest's branch a leaf landed into, from its landing
 	// facts; empty for an issue that landed as a PR.
 	Into string `json:"into,omitempty"`
+	// Closed is how it closed, which heads its answers in the matrix: by a
+	// merged PR, into its manifest's branch, as a duplicate, as fixed by a
+	// commit, or as a person's decision. Answers from an issue with no merged
+	// PR describe a branch, not main.
+	Closed string `json:"closed"`
 }
 
 // Script is a file added under src/scripts/ in the window.
@@ -255,6 +265,7 @@ var (
 	fixesLine    = regexp.MustCompile(`(?i)\bfixes #(\d+)\b`)
 	takeoverMark = regexp.MustCompile(`<!-- se:takeover (\d+) -->`)
 	conflictMark = regexp.MustCompile(`<!-- se:takeover-head [0-9a-f]+ -->`)
+	fixedByMark  = regexp.MustCompile(`<!-- se:fixed-by ([0-9a-f]+) -->`)
 	personMark   = regexp.MustCompile(`<!-- se:person -->`)
 )
 
@@ -519,7 +530,11 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 	}
 	rounds := map[string]bool{}
 	var landed *Landed
+	fixed := ""
 	for _, c := range comments {
+		if m := fixedByMark.FindStringSubmatch(c.Body); m != nil {
+			fixed = m[1]
+		}
 		for _, m := range takeoverMark.FindAllStringSubmatch(c.Body, -1) {
 			rounds[m[1]] = true
 		}
@@ -536,6 +551,7 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 	r.Takeovers = len(rounds)
 	if landed != nil {
 		r.Requests = landed.Facts.Requests
+		r.RateLimits, r.RateLimitMinutes = landed.Facts.RateLimits, round2(float64(landed.Facts.RateLimitWaitS)/60)
 	}
 	if p, ok := fixedBy[x.Number]; ok {
 		r.PR = p.Number
@@ -554,12 +570,29 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 	// A retro, an overhaul or a person's decision lands no branch, so it has
 	// no landing answers by design.
 	r.Landed = x.StateReason == "completed" && !parent && !x.labelled(RetroLabel) && !x.labelled(OverhaulLabel) && !r.ForPerson
+	r.Closed = closedHow(r, fixed)
 	if landed != nil {
 		r.Answers = landed.Answers
 	} else if r.Landed {
 		checks = append(checks, Broken{"answers", subject, x.Title + ": closed as completed without landing answers"})
 	}
 	return r, checks, nil
+}
+
+// closedHow says how the issue of row r closed, fixed naming the commit an
+// se issue close --fixed-by comment names ("" for none).
+func closedHow(r Row, fixed string) string {
+	switch {
+	case r.PR != 0:
+		return fmt.Sprintf("by merged PR #%d", r.PR)
+	case r.Into != "":
+		return "into its manifest's branch " + r.Into
+	case r.Reason == "duplicate":
+		return "as a duplicate, no merged PR of its own"
+	case fixed != "":
+		return "as fixed by " + short(fixed) + ", no merged PR of its own"
+	}
+	return "as a person's decision, no merged PR of its own"
 }
 
 // mergedCI reads the check runs on a merged PR's head: red names what was not
@@ -665,8 +698,8 @@ type Metrics map[string]float64
 // issues closed as duplicate, and the issues for a person made beyond the
 // first for each issue they hold back.
 var metricNames = []string{
-	"closed", "landed", "for_person", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand", "duplicates", "requests",
-	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue", "duplicates_per_issue", "requests_per_issue",
+	"closed", "landed", "for_person", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand", "duplicates", "requests", "rate_limits", "rate_limit_minutes",
+	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue", "duplicates_per_issue", "requests_per_issue", "rate_limits_per_issue", "rate_limit_minutes_per_issue",
 	"claim_to_merge_minutes",
 }
 
@@ -688,6 +721,8 @@ func (c Collected) measure() Metrics {
 		m["takeovers"] += float64(r.Takeovers)
 		m["person_flags"] += float64(r.Person)
 		m["requests"] += float64(r.Requests)
+		m["rate_limits"] += float64(r.RateLimits)
+		m["rate_limit_minutes"] += r.RateLimitMinutes
 		if r.Reason == "duplicate" {
 			m["duplicates"]++
 		}
@@ -773,7 +808,7 @@ func (c Collected) movers(metric string) []string {
 }
 
 // counted are the metrics counted in the window, each also per landed issue.
-var counted = []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand", "duplicates", "requests"}
+var counted = []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand", "duplicates", "requests", "rate_limits", "rate_limit_minutes"}
 
 func round2(x float64) float64 { return float64(int(x*100+0.5)) / 100 }
 
