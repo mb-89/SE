@@ -1,0 +1,18 @@
+# The rule of five's configuration (src/internal/rules/five.go,
+# spec/principles.md, principle 21): the one place its limit, its surfaces and
+# its allowlist live.
+
+# limit is the most visible files, and the most visible folders, a surface holds.
+limit: 5
+
+# surfaces are the folders a person sees, by path from the checkout's root.
+# Only their top level counts, and dot files and dot folders do not.
+surfaces: [".", spec, src]
+
+# allowlist names each surface over the limit today, with what it holds: files,
+# folders, or both. It only shrinks: the rule refuses a surface that holds more
+# than its entry says, an entry above what the surface holds (lower it), and an
+# entry for a surface back within the limit (remove it). Raising an entry is
+# no way to pass the check.
+allowlist:
+  spec: {files: 14}
