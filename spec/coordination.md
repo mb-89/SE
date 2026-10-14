@@ -121,9 +121,11 @@ box in the loop:
   push is a fast-forward. A merge that conflicts is undone, and the box
   resolves it by hand (never a rebase, never a force-push).
 - `se fleet refresh` brings every open PR with auto-merge on that main has
-  moved past up to date through GitHub's update-branch, and starts the
-  `ci` workflow on its new head itself, since a push made with the
-  repository's token starts no workflow. A PR that conflicts with main is
+  moved past up to date through GitHub's update-branch, and approves the
+  `pull_request` run of `ci` that the update starts on its new head: a
+  `git push` made with the repository's token starts no workflow, but
+  update-branch starts that run, which waits in `action_required`, and the
+  required check `check` waits on it. A PR that conflicts with main is
   left to its takeover; an update that fails is reported, and the workflow
   run goes red. The workflow `.github/workflows/refresh.yml` runs it on every
   push to main, and every hour.

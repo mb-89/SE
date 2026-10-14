@@ -1,4 +1,4 @@
-# Merges main into every auto-merge PR behind it and reruns its CI, with the
+# Merges main into every auto-merge PR behind it and approves its CI run, with the
 # repository's own token, since main merges only PRs up to date with it
 # (spec/coordination.md).
 name: refresh
@@ -25,7 +25,7 @@ jobs:
           go-version-file: src/go.mod
           cache-dependency-path: src/go.sum
       - run: sh src/build.sh se
-      # Its output names every PR it updated, and the head it started CI on.
+      # Its output names every PR it updated, and the head whose CI run it approved.
       - run: ./se fleet refresh --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}

@@ -147,8 +147,8 @@ func init() {
 		Name:    "fleet refresh",
 		Usage:   "fleet refresh [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
-		Summary: "merge main into each auto-merge PR behind it and rerun its CI",
-		Details: "for every open PR against main with auto-merge on whose head main has moved past: merge main into it through GitHub's update-branch and start the ci workflow on its new head, since main's ruleset merges a PR only when it is up to date with main and the repository's token starts no CI by its pushes. A PR that conflicts with main is left to its takeover. A PR whose update fails is reported, and the others are still updated. The refresh workflow runs it with the repository's token on every push to main.",
+		Summary: "merge main into each auto-merge PR behind it, approve its CI",
+		Details: "for every open PR against main with auto-merge on whose head main has moved past: merge main into it through GitHub's update-branch and approve the pull_request run of the ci workflow that the update starts on its new head, since main's ruleset merges a PR only when it is up to date with main, its required check waits on that run, and a run the repository's token starts through update-branch waits in action_required for approval. A PR that conflicts with main is left to its takeover. A PR whose update fails is reported, and the others are still updated. The refresh workflow runs it with the repository's token on every push to main.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet refresh")

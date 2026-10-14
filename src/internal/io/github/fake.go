@@ -23,8 +23,8 @@ import (
 // assignees, sub-issues and blocked-by links, branches (git refs: each
 // repository starts with main, and a file written to a branch through
 // contents is a new commit on it), pull requests with their merge, auto-merge
-// and update-branch, and workflow dispatches. Any other path it answers from
-// what was seeded at that path, read-only.
+// and update-branch, workflow dispatches, and the approval of a workflow run.
+// Any other path it answers from what was seeded at that path, read-only.
 //
 // Seed fills it from recorded gh answers, each read for what it says about
 // the repository rather than kept as an answer.
@@ -694,6 +694,9 @@ func (f *Fake) write(method, path string, v map[string]any) (any, error) {
 		if ref, _ := str(v, "ref"); ref == "" {
 			return nil, refuse(422, "Validation Failed: a dispatch takes a ref")
 		}
+		return nil, nil
+	case method == "POST" && match(w, "actions", "runs", "#", "approve"):
+		// GitHub starts the run; the runs the fake lists are what was seeded.
 		return nil, nil
 	case method == "PUT" && f.Proxy && match(w, "pulls", "#", "ccr", "auto_merge"):
 		p, ok := r.pulls[num(w[1])]
