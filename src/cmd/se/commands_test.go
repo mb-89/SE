@@ -444,6 +444,7 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 }
 
 func TestTheHelpRendersTheConfigValues(t *testing.T) {
+	t.Parallel()
 	for name, want := range map[string][]string{
 		"issue pull":    {fmt.Sprintf("%d retros (OverhaulCadence)", issues.OverhaulCadence), fmt.Sprintf("%d se issues (RetroCadence)", issues.RetroCadence), fmt.Sprintf("%s lease (Lease)", issues.Lease)},
 		"issue review":  {fmt.Sprintf("at most %d, MaxFiled", issues.MaxFiled)},
