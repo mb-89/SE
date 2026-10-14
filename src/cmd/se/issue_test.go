@@ -478,6 +478,60 @@ func TestATakeNamesWhatTheIssueBlocks(t *testing.T) {
 	}
 }
 
+func TestATakeSaysTheOwnerReleasedAnIssueFiledForAPerson(t *testing.T) {
+	t.Parallel()
+	gh := recordedIssues(t)
+	// #3 was filed for a person; the owner took se-person off at 09:13,
+	// which released it, and its body still says it waits for a person.
+	if err := gh.Seed(map[string]string{
+		"repos/o/r/issues?labels=se&state=open&per_page=100": `[{"number":3,"title":"three","body":"` + issues.PersonLine + `: it is a judgment.\n\ndo it","state":"open","html_url":"u3"}]`,
+		"repos/o/r/issues/3/events?per_page=100&page=1": `[
+			{"event":"labeled","actor":{"login":"bot"},"label":{"name":"se-person"},"created_at":"2026-10-12T08:00:00Z"},
+			{"event":"unlabeled","actor":{"login":"owner"},"label":{"name":"se-person"},"created_at":"2026-10-13T09:13:00Z"},
+			{"event":"unassigned","actor":{"login":"owner"},"created_at":"2026-10-13T09:13:05Z"}]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
+	for _, args := range [][]string{
+		{root, "init", "-q", "--bare", "-b", "main", origin},
+		{root, "clone", "-q", origin, ws},
+		{ws, "checkout", "-q", "-b", "main"},
+		{ws, "commit", "-q", "--allow-empty", "-m", "start"},
+		{ws, "push", "-q", "origin", "main"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", args[0], "-c", "user.name=t", "-c", "user.email=t@t"}, args[1:]...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws)
+	var answer struct {
+		Issue struct {
+			Number   int
+			Released *issues.Released
+		}
+	}
+	if err := json.Unmarshal([]byte(out), &answer); code != 0 || err != nil || answer.Issue.Number != 3 || answer.Issue.Released == nil ||
+		answer.Issue.Released.By != "owner" || !answer.Issue.Released.At.Equal(time.Date(2026, 10, 13, 9, 13, 0, 0, time.UTC)) {
+		t.Fatalf("exit %d, %q %v", code, out, err)
+	}
+	want := "Released to the boxes: @owner took se-person off at 2026-10-13 09:13 UTC. Its body still says it waits for a person; that no longer holds, so do it."
+	took := issues.Issue{Number: 3, Title: "three", URL: "u3", Body: "b", Released: answer.Issue.Released}
+	if r, err := issueReply(false, took, true, "issue-3", "", "", handed{}); err != nil || r.Text != "Took #3 three, on branch issue-3.\nu3\n"+want+"\n\nb" {
+		t.Fatalf("%q %v", r.Text, err)
+	}
+	// Where GitHub's events cannot say who or when, the release stands without them.
+	if line := (issues.Released{}).Line(); line != "Released to the boxes: the owner took se-person off. Its body still says it waits for a person; that no longer holds, so do it." {
+		t.Fatalf("%q", line)
+	}
+	// An issue whose body does not open with the line was never filed for
+	// a person: the take says nothing of a release.
+	if r := (issues.Source{}).Release(issues.Issue{Number: 3, Body: "do it"}); r != nil {
+		t.Fatalf("%+v", r)
+	}
+}
+
 func TestWhatABoxLeavesOverIsAnIssueForAPersonThatBlocksOnlyWhatNeedsIt(t *testing.T) {
 	t.Parallel()
 	gh := recordedIssues(t)

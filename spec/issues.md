@@ -235,7 +235,13 @@ its sub-agent (with `--json`: the field `worktree`; a parent gets none, as the
 box coordinates its tree itself). Where the box (its session) already runs
 its cap of sub-agents, `--worktree` and `--in ROOT --take` take nothing and
 say so (with `--json`: `{"ready":false,"full":true,"why"}`). It also names the open issues the taken one blocks (with
-`--json`: the issue's `blocks`), for `se issue new --blocks`.
+`--json`: the issue's `blocks`), for `se issue new --blocks`. Where the
+issue it hands over was filed for a person (its body opens with
+"Controversial, so it waits for a person", the line a retro's or an
+overhaul's controversial finding opens with) and no longer carries
+`se-person`, the owner released it to the boxes: the take says so, with who
+took the label off and when, from the issue's events (with `--json`: the
+issue's `released`, `{"by","at"}`), so the box need not guess from the body.
 
 `se issue pull --in ROOT` names what is ready inside ROOT's tree: its stuck
 leaves to take over, then its ready leaves, at any depth, lowest number first,

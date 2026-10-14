@@ -50,6 +50,9 @@ type Issue struct {
 	// Blocks names the open issues it blocks, where a take read them: what
 	// is left of it may hold up those that need it (se issue new --blocks).
 	Blocks []int `json:"blocks,omitempty"`
+	// Released is set where a take hands over an issue filed for a person
+	// that the owner released to the boxes (se-person taken off).
+	Released *Released `json:"released,omitempty"`
 	// id is GitHub's id of an issue se just created, which a link takes.
 	id int64
 }

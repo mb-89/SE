@@ -64,7 +64,7 @@ func init() {
 		Usage:   "issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "show the next se issue, stuck work first; --take claims it",
-		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (OverhaulCadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (RetroCadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (Lease) is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issues.OverhaulCadence, issues.RetroCadence, issues.Lease, issues.Parallel),
+		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (OverhaulCadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (RetroCadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (Lease) is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. A take of an issue filed for a person (its body opens with the line a run's controversial finding opens with) that no longer carries se-person says the owner released it to the boxes, who and when. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issues.OverhaulCadence, issues.RetroCadence, issues.Lease, issues.Parallel),
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -169,6 +169,9 @@ func init() {
 				if took.Blocks, err = s.Dependents(took.Number); err != nil {
 					return Reply{}, err
 				}
+				// An issue filed for a person that the owner released: say
+				// so, so the box need not guess from its body.
+				took.Released = s.Release(took)
 				// The Stop hook holds the box to closing what it took; a
 				// parent's box coordinates its tree and closes nothing itself.
 				if !took.Parent {
@@ -775,6 +778,9 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, worktree, fanout s
 	if branch != "" && len(i.Blocks) > 0 {
 		head += fmt.Sprintf("\nIt blocks %s. What you leave over, filed with se issue new, names in --blocks those of them that need it.", numbers(i.Blocks))
 	}
+	if branch != "" && i.Released != nil {
+		head += "\n" + i.Released.Line()
+	}
 	if fanout != "" {
 		head += "\n" + fanout
 	}
@@ -813,6 +819,7 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 	var h handed
 	if ok {
 		worktree = issues.Worktree(c.Workspace, took.Number)
+		took.Released = s.Release(took)
 		h = c.handOver(took)
 	}
 	if asJSON {
@@ -841,7 +848,11 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 	if took.Takeover != nil {
 		did = "Took over #%d %s, on branch %s as it stands: it was stuck.\n%s\n\nContinue the branch and its PR in its own worktree:\n%s"
 	}
-	text := fmt.Sprintf(did, took.Number, took.Title, issues.Branch(took.Number), took.URL, worktree) + reviewText(c, tr)
+	text := fmt.Sprintf(did, took.Number, took.Title, issues.Branch(took.Number), took.URL, worktree)
+	if took.Released != nil {
+		text += "\n" + took.Released.Line()
+	}
+	text += reviewText(c, tr)
 	text = strings.TrimRight(text+"\n\n"+took.Body, "\n")
 	if h.Text != "" {
 		text += "\n\n" + h.Text

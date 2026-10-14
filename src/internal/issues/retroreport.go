@@ -543,7 +543,7 @@ func (s Source) fileRun(i issue, run filing) (Filed, error) {
 // It records the issue in out.
 func (s Source) mint(title, body string, controversial bool, why string, out *Filed) (int, error) {
 	if controversial {
-		made, err := s.ForPerson(title, "Controversial, so it waits for a person: "+why+"\n\n"+body, 0, nil)
+		made, err := s.ForPerson(title, PersonLine+": "+why+"\n\n"+body, 0, nil)
 		if made.Number > 0 {
 			out.Issues = append(out.Issues, made.Number)
 			out.Person = append(out.Person, made.Number)
