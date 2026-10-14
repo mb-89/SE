@@ -32,6 +32,10 @@ type routine struct {
 	fired int
 }
 
+// FakeRetryAfter is the Retry-After a fake routine's 429 carries: its fires
+// come back in half an hour.
+const FakeRetryAfter = "1800"
+
 // NewFake answers an empty fake network: nothing is served, no routine stands.
 func NewFake() *Fake {
 	return &Fake{port: 40000, served: map[string]served{}, routines: map[string]*routine{}}
@@ -178,7 +182,7 @@ func (f *Fake) Fire(to, token string) (Answer, error) {
 	case r.token != token:
 		return Answer{Status: StatusUnauthorized, Body: []byte(`{"type":"error","error":{"type":"authentication_error","message":"invalid bearer token"}}`)}, nil
 	case r.left <= 0:
-		return Answer{Status: StatusTooMany, Body: []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"the routine's fires are spent"}}`)}, nil
+		return Answer{Status: StatusTooMany, Body: []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"the routine's fires are spent"}}`), RetryAfter: FakeRetryAfter}, nil
 	}
 	r.left--
 	r.fired++

@@ -285,7 +285,7 @@ func contract(t *testing.T, fresh func(t *testing.T) world) {
 			t.Fatalf("first fire = %d, %v", a.Status, err)
 		}
 		a, err := w.net.Fire(url, "sekrit")
-		if err != nil || a.Status != sehttp.StatusTooMany || fired() != 1 {
+		if err != nil || a.Status != sehttp.StatusTooMany || a.RetryAfter != "1800" || fired() != 1 {
 			t.Fatalf("second fire = %d %s, %v; %d fired", a.Status, a.Body, err, fired())
 		}
 	})

@@ -80,6 +80,9 @@ type Answer struct {
 	Status int
 	// Body is the answer's body, cut at BodyCap.
 	Body []byte
+	// RetryAfter is the answer's Retry-After header, as it came: seconds, or
+	// an HTTP date. A routine's 429 names in it when its limit resets.
+	RetryAfter string
 }
 
 // OK says the fire was taken: a 2xx status.
