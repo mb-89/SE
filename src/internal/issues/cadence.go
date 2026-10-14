@@ -2,6 +2,7 @@ package issues
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/mb-89/SE/src/internal/io/github"
 )
@@ -84,6 +85,33 @@ func (c Cadence) Line() string {
 	default:
 		return fmt.Sprintf("%s; %s %s is due at %d.", head, r.article, r.kind, c.Every)
 	}
+}
+
+// Brief says where the cadence stands in a few words, for a line that holds
+// both cadences: "retro at 3 of 10", "retro due (10 of 10)", "retro #7 open".
+func (c Cadence) Brief() string {
+	kind := c.rule().kind
+	switch {
+	case c.Open != 0:
+		return fmt.Sprintf("%s #%d open", kind, c.Open)
+	case c.Due():
+		return fmt.Sprintf("%s due (%d of %d)", kind, c.Closed, c.Every)
+	default:
+		return fmt.Sprintf("%s at %d of %d", kind, c.Closed, c.Every)
+	}
+}
+
+// Briefly is where the cadences stand, in one line: "Cadence: retro at 3 of
+// 10; overhaul at 1 of 5."; "" for none.
+func Briefly(cads []Cadence) string {
+	if len(cads) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, c := range cads {
+		parts = append(parts, c.Brief())
+	}
+	return "Cadence: " + strings.Join(parts, "; ") + "."
 }
 
 // Cadence reads where the retro cadence stands from GitHub.
