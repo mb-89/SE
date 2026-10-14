@@ -112,17 +112,17 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	}
 	body, err := Landed{Issue: 6, Answers: full, Facts: Facts{
 		Claimed: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC), Landed: landedAt(), Minutes: 90, Commits: 1,
-		// Those 30, and the 4 this land had made when it counted them (the
-		// battery status and the manifest lookup among them).
-		Requests: 34,
+		// Those 30, and the 3 this land had made when it counted them (the
+		// manifest lookup among them; the battery status comes after).
+		Requests: 33,
 	}}.Comment(qs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 34\n") {
+	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 33\n") {
 		t.Fatalf("the landing comment is %+v, want\n%s", got, body)
 	}
-	want := []string{"POST repos/o/r/statuses/" + run(t, a, "rev-parse", "HEAD"), "POST repos/o/r/issues/6/comments", "POST repos/o/r/pulls", "POST graphql"}
+	want := []string{"POST repos/o/r/issues/6/comments", "POST repos/o/r/statuses/" + run(t, a, "rev-parse", "HEAD"), "POST repos/o/r/pulls", "POST graphql"}
 	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
 		t.Fatalf("writes\n%q\nwant\n%q", w, want)
 	}
@@ -261,6 +261,30 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 	}
 	if w := gh.Writes(); w[len(w)-1] != "PUT repos/o/r/pulls/14/ccr/auto_merge" || pullOf(t, gh, 14)["auto_merge"] == nil {
 		t.Fatalf("%q", w)
+	}
+}
+
+// A land stopped after the push, here by a refused status post (#449), has
+// already written its answers on the issue (#491).
+func TestLandPostsTheAnswersBeforeItPushes(t *testing.T) {
+	t.Parallel()
+	origin, a := claimed(t)
+	gh := landGH(t, map[string]string{pullsPath: `[]`})
+	gh.NoStatuses = true
+	d := disk.NewFake()
+	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	if err == nil || !strings.Contains(err.Error(), "status failed") {
+		t.Fatalf("%v", err)
+	}
+	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("origin's issue-6 is %s, want %s", got, want)
+	}
+	c := commentsAt(t, gh, 6)
+	if len(c) != 1 {
+		t.Fatalf("the issue's comments are %+v", c)
+	}
+	if got, ok, err := ParseLanding(c[0].Body); err != nil || !ok || !reflect.DeepEqual(got.Answers, full) {
+		t.Fatalf("%v %v: %+v", ok, err, got)
 	}
 }
 
