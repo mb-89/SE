@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 
 	"github.com/mb-89/SE/src/internal/issues"
+	"github.com/mb-89/SE/src/internal/shape"
 )
 
 func init() {
@@ -45,7 +47,7 @@ func init() {
 		Usage:   "overhaul read N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "read an overhaul's facts and write its report draft",
-		Details: fmt.Sprintf("read overhaul N's facts and write its report draft to FILE (default: ../overhaul-N.md beside the workspace): every design principle from spec/principles.md, mechanical or judged; the last %d retros' metrics (OverhaulCadence), broken rule checks and findings, how many became issues and closed, and which recurred; and the previous overhaul's findings with their issues' state. Where a report is already posted on N (an overhaul from before overhauls stopped waiting for the owner), it writes that one instead, to be filed as it stands.", issues.OverhaulCadence),
+		Details: fmt.Sprintf("read overhaul N's facts and write its report draft to FILE (default: ../overhaul-N.md beside the workspace): every design principle from spec/principles.md, mechanical or judged; the last %d retros' metrics (OverhaulCadence), broken rule checks and findings, how many became issues and closed, and which recurred; the previous overhaul's findings with their issues' state; and the pruning and code-shape facts of the workspace's code (production-unreachable, duplicates and near-duplicates, sizes, one-user abstractions, unused se surfaces, legacy states, scripts, the files untouched longest, the longest functions, files and parameter lists, switches on a kind, and files touched per change). Where a report is already posted on N (an overhaul from before overhauls stopped waiting for the owner), it writes that one instead, to be filed as it stands.", issues.OverhaulCadence),
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul read")
@@ -73,6 +75,7 @@ func init() {
 				if err != nil {
 					return Reply{}, err
 				}
+				r.Code = codeFacts(c, r.Window)
 				if text, err = r.OverhaulDraft(); err != nil {
 					return Reply{}, err
 				}
@@ -139,4 +142,26 @@ func init() {
 			return Reply{Text: text}, nil
 		},
 	})
+}
+
+// flagNamed is a flag in a command's usage.
+var flagNamed = regexp.MustCompile(`--([a-z][a-z-]*)`)
+
+// codeFacts are the pruning and code-shape facts of the workspace's code,
+// with the commands and flags registered and what GitHub said in w. They are
+// advice: what cannot be read is said in their place.
+func codeFacts(c *Call, w issues.OverhaulWindow) string {
+	in, err := shape.Read(c.Disk, c.Proc, c.Workspace)
+	if err != nil {
+		return "## Pruning and code shape\nNot read: " + err.Error() + ".\n"
+	}
+	for _, name := range sortedNames() {
+		sur := shape.Surface{Name: name}
+		for _, m := range flagNamed.FindAllStringSubmatch(commands[name].Usage, -1) {
+			sur.Flags = append(sur.Flags, m[1])
+		}
+		in.Commands = append(in.Commands, sur)
+	}
+	in.Answers, in.Since, in.ReadBy = w.Answers, w.Since, w.ReadBy
+	return shape.Find(in).Markdown()
 }

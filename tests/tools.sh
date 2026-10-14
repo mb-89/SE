@@ -9,6 +9,9 @@
 GH=2.89.0
 GO=1.24.7
 DLV=1.25.2
+# deadcode is golang.org/x/tools' (the battery's dead-code check, se overhaul read's
+# production-unreachable fact); the newest x/tools that builds with Go $GO.
+DEADCODE=0.42.0
 GOLANGCI_LINT=2.5.0
 BIOME=2.2.4
 # Biome's releases publish no checksums, so its binaries' are pinned here.
@@ -99,6 +102,7 @@ tools_differ() {
   golangci-lint --version 2>/dev/null | grep -q "version $GOLANGCI_LINT " || echo "golangci-lint $GOLANGCI_LINT"
   [ "$(biome --version 2>/dev/null)" = "Version: $BIOME" ] || echo "biome $BIOME"
   command -v dlv >/dev/null 2>&1 || echo "dlv $DLV"
+  command -v deadcode >/dev/null 2>&1 || echo "deadcode $DEADCODE"
   command -v claude >/dev/null 2>&1 || echo "claude latest"
 }
 
@@ -159,10 +163,12 @@ tools_install() {
       file=$(tools_fetch biome "$tmp")
       cp "$file" "$SE_HOME/bin/$exe"
       ;;
-    dlv)
+    dlv | deadcode)
       gobin=$SE_HOME/bin
       command -v cygpath >/dev/null 2>&1 && gobin=$(cygpath -w "$gobin")
-      GOBIN=$gobin go install "github.com/go-delve/delve/cmd/dlv@v$DLV"
+      pkg="github.com/go-delve/delve/cmd/dlv@v$DLV"
+      [ "$1" = deadcode ] && pkg="golang.org/x/tools/cmd/deadcode@v$DEADCODE"
+      GOBIN=$gobin go install "$pkg"
       ;;
     claude)
       case $(uname -s) in
