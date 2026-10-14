@@ -20,6 +20,7 @@ import (
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
 // Command is one word se answers. A command is one file that calls register
@@ -255,9 +256,19 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch {
 	case ok:
+		// Every command reaches GitHub within its rate limits, and records
+		// the requests it made in its workspace.
+		limited := github.Limit(call.GitHub, call.Clock, githubSettings().Limits, stderr)
+		call.GitHub = limited
+		before := limited.Requests()
 		began := call.Clock.Now()
 		reply, err = runCommand(name, call)
 		timed(call, name, began, stderr)
+		if n := limited.Requests() - before; n > 0 {
+			if rerr := issues.RecordRequests(call.Disk, call.Workspace, name, n, call.Clock.Now()); rerr != nil {
+				fmt.Fprintf(stderr, "se: recording %s's %d GitHub requests: %v\n", name, n, rerr)
+			}
+		}
 		if errors.Is(err, flag.ErrHelp) {
 			reply, err = helpReply(commandHelpOf(cmd, call.flags, *session), *session, color), nil
 		}
@@ -298,6 +309,17 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, reply.Text)
 	}
 	return 0
+}
+
+// githubSettings is the github instance's config, as the wiring file se
+// carries gives it; a wiring that does not give it is a broken se, which the
+// battery's tests catch before a merge.
+func githubSettings() github.Settings {
+	s, err := github.Configured()
+	if err != nil {
+		panic(err)
+	}
+	return s
 }
 
 // timed records how long the command named took in the workspace's

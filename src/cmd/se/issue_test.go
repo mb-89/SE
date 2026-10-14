@@ -4,14 +4,17 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
@@ -120,7 +123,7 @@ func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 	if _, err := gh.Send("PATCH", "repos/o/r/issues/3", github.Field{Name: "body", Value: marked}); err != nil {
 		t.Fatal(err)
 	}
-	patched := len(gh.Writes())
+	patched, asked := len(gh.Writes()), gh.Requests()
 	ws := t.TempDir()
 	code, out, errs := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || out != "#3 three\nu3\n"+picked+"\n"+cadences+"\n" {
@@ -132,12 +135,23 @@ func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	// Without --take, pull only shows the issue: it writes nothing to GitHub,
-	// fires nothing and leaves the workspace as it was.
+	// fires nothing and leaves the workspace as it was, but for the ledger
+	// of the GitHub requests it made.
 	if w := gh.Writes()[patched:]; len(w) != 0 {
 		t.Errorf("pull without --take wrote to GitHub: %q", w)
 	}
-	if entries, _ := os.ReadDir(ws); fires(t) != 0 || len(entries) != 0 {
-		t.Errorf("pull without --take fired %d times, left %v in the workspace", fires(t), entries)
+	var left []string
+	_ = filepath.WalkDir(ws, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			left = append(left, strings.TrimPrefix(path, ws+string(filepath.Separator)))
+		}
+		return nil
+	})
+	if fires(t) != 0 || !slices.Equal(left, []string{filepath.FromSlash(battery.CallsFile), filepath.FromSlash(issues.RequestsFile)}) {
+		t.Errorf("pull without --take fired %d times, left %v in the workspace", fires(t), left)
+	}
+	if n, err := issues.Requests(worldOf(t).Disk, ws); err != nil || n == 0 || n != gh.Requests()-asked {
+		t.Errorf("the workspace's ledger records %d GitHub requests (%v), want the %d the pulls made", n, err, gh.Requests()-asked)
 	}
 	code, out, _ = se(t, "issue", "pull", "--json", "--repo", "o/r")
 	var answer struct {
