@@ -593,7 +593,11 @@ parent, which is the box itself, se:retro and se:overhaul; each review names
 se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take
 claims one for a worktree. Every --take also refuses where main has moved past
 the commit se was built from, naming se update: the agents and guidance it hands
-over come from main. --person lists the issues waiting on a person.
+over come from main. --person lists the issues waiting on a person. At the top
+it answers from the workspace's daemon's warm snapshot of GitHub where one is
+kept, and says how old it is where that is older than its refresh
+(github/config/refresh); --take re-reads from GitHub that its issue is open and
+unblocked.
 
 Flags:
   --full             without --take: show the issue's body too

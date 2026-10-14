@@ -125,16 +125,18 @@ func (s Source) OverhaulCadence() (Cadence, error) { return s.cadence(overhaulRu
 
 func (s Source) cadence(r cadenceRule) (Cadence, error) {
 	c := Cadence{Kind: r.kind, Every: r.every(s.config())}
-	last, ok, _, err := s.lastClosed(r.label, 0)
-	if err != nil {
+	// The last closed run and the open ones are read at once.
+	var last past
+	var ok bool
+	if err := parallel([]func() error{
+		func() (err error) { last, ok, _, err = s.lastClosed(r.label, 0); return err },
+		func() (err error) { c.Open, err = s.firstOpen(r.label); return err },
+	}); err != nil {
 		return Cadence{}, err
 	}
 	var w RetroWindow
 	if ok {
 		c.Previous, w.Since = last.Number, last.ClosedAt.UTC()
-	}
-	if c.Open, err = s.firstOpen(r.label); err != nil {
-		return Cadence{}, err
 	}
 	closed, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100%s", s.Repo, r.counts, w.since()), true)
 	if err != nil {

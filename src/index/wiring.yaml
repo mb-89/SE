@@ -7,7 +7,7 @@ instances:
   sessionlog: {module: sessionlog}
   cli: {module: cli, config: {columns: 3}}
   guidance: {module: guidance, config: {inline: true, principles: true}}
-  github: {module: github}
+  github: {module: github, config: {refresh: 2m, settle: 5m}}
   issues: {module: issues, config: {paused: true}}
   battery: {module: battery}
   # What SE runs that others built (src/internal/reuse): each source pinned

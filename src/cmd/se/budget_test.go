@@ -30,13 +30,19 @@ func commandBudgets(t *testing.T) battery.CommandBudgets {
 }
 
 // measured runs se name on a fake o/r whose every GitHub request and process
-// start takes the budgets' latency on the call's clock, and answers its
-// outside requests and how long it took by that clock.
+// start takes the budgets' latency on the call's clock, with the workspace's
+// daemon warm, and answers its outside requests and how long it took by that
+// clock.
 func measured(t *testing.T, name string, b battery.CommandBudgets) battery.Command {
 	t.Helper()
 	gh := recordedIssues(t)
 	w := worldOf(t)
 	clk := w.Clock.(*clock.Fake)
+	// The workspace's daemon runs warm, as it does while a person works:
+	// its snapshot is read before the measure starts.
+	ws := t.TempDir()
+	<-warmDaemon(t, ws, gh)
+	before := gh.Requests()
 	gh.Delay(clk, time.Duration(b.Latency.RequestMs)*time.Millisecond)
 	machine := proc.NewFake()
 	for _, p := range proc.Programs {
@@ -44,7 +50,7 @@ func measured(t *testing.T, name string, b battery.CommandBudgets) battery.Comma
 	}
 	machine.Delay(clk, time.Duration(b.Latency.ProcessMs)*time.Millisecond)
 	w.Proc = machine
-	args := append([]string{"--workspace", t.TempDir()}, strings.Fields(name)...)
+	args := append([]string{"--workspace", ws}, strings.Fields(name)...)
 	if slices.Contains(commandFlags()[name], "repo") {
 		args = append(args, "--repo", "o/r")
 	}
@@ -53,7 +59,7 @@ func measured(t *testing.T, name string, b battery.CommandBudgets) battery.Comma
 	if code != 0 {
 		t.Fatalf("se %s: exit %d, %q %q", name, code, out, errs)
 	}
-	return battery.Command{Name: name, Requests: gh.Requests() + len(machine.Ran()), Ms: clk.Now().Sub(start).Milliseconds()}
+	return battery.Command{Name: name, Requests: gh.Requests() - before + len(machine.Ran()), Ms: clk.Now().Sub(start).Milliseconds()}
 }
 
 // TestEveryInteractiveCommandKeepsItsBudget holds principle 9: a person never

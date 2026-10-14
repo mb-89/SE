@@ -9,7 +9,7 @@ The disk, `src/internal/io/disk`, covers reading, writing, listing,
 locking and atomically replacing files, its fake a filesystem in memory that
 fails as the real one does.
 The network, `src/internal/io/http`, serves and calls the daemon protocol
-(health, event, value, shutdown) and fires the routine; its fake is a network inside
+(health, event, value, stale, shutdown) and fires the routine; its fake is a network inside
 the process, and its real one is tested on loopback.
 `src/internal/io/proc` runs programs: git, go, the linters (golangci-lint, biome, deadcode), check.sh, the se a session
 hands over to and the detached daemon. It starts only the programs
@@ -19,8 +19,13 @@ is a machine that holds only the programs a case installs, each a function
 that does what the real one would, and records every run. It also says which
 program is running now (`Self`): the real one asks the system, the fake
 answers what the case made it run as (`RunAs`).
-GitHub, `src/internal/io/github`, is read and written by REST path through
-gh. Its fake, `github.NewFake(clock)`, is seeded from recorded gh answers
+GitHub, `src/internal/io/github`, is read and written by REST path, in the
+process, over one kept-alive HTTP client through the environment's proxy
+(`github.Real()`): no request starts a process. It sends gh's token
+(`GH_TOKEN`, `GITHUB_TOKEN`, else `gh auth token`, read once) where there is
+one; on a cloud box the proxy adds the credentials, as it does for gh. It
+asks again with each answer's ETag, so an answer that has not changed costs
+no rate limit. Its fake, `github.NewFake(clock)`, is seeded from recorded gh answers
 (`Seed`), each read for what it says about the repository, and keeps issues,
 comments, labels, links, sub-issues, branches and pull requests, so a write
 is read back. What GitHub comes to hold later, such as a PR's mergeability,
@@ -28,6 +33,19 @@ is seeded for a time on the fake's clock (`SeedAt`). Its real contract test
 writes issues, branches and pull requests, so it runs only against the
 scratch repository `SE_GITHUB_CONTRACT_REPO` names
 ([below](#the-real-github-contract)).
+
+## The snapshot
+
+The GitHub module is on the index too (`github.Module`): the daemon keeps a
+warm **snapshot** of what `se issue pull` reads, `github/snapshot`, so a pull
+answers without asking GitHub ([issues.md](issues.md#the-commands)). Its
+`Keeper` reads it when the daemon starts, again every `github/config/refresh`
+(2 minutes), and at once when it is told the snapshot is stale: every `se`
+command that wrote to GitHub tells the daemon so (the protocol's `stale`
+verb) as it ends. A snapshot is the answers of a recording
+(`github.Record`), which reads through and refuses every write; a replay
+(`github.Replay`) answers each read the snapshot holds and sends the rest,
+and every write, to GitHub itself.
 
 ## Living within GitHub's rate limits
 
@@ -39,7 +57,7 @@ with the github instance's config ([index.md](index.md#the-wiring-file)):
 
 - **It backs off when GitHub says so.** Real reads `x-ratelimit-limit`,
   `x-ratelimit-remaining`, `x-ratelimit-reset` and `retry-after` from every
-  answer (`gh api -i`), and the fake keeps a quota of its own (`Quota`,
+  answer, and the fake keeps a quota of its own (`Quota`,
   15,000 an hour unless a case sets one, and `ContentLimit`). On a 403 or 429
   that names a rate limit, the module says so on stderr at once, with how
   long and until when (principle 9), waits for the reset (or the
@@ -208,4 +226,5 @@ The `programs` rule (`src/internal/rules/programs.go`) holds principle 6's
 "no process does what a library call can do": no Go file names a program
 `proc.Programs` does not list, and none but proc calls `os/exec`. What still
 breaks it is named in `src/internal/rules/programs.txt`, which only shrinks:
-today gh, until the GitHub module speaks HTTP itself (#186).
+today gh, which the GitHub module asks once for its token (`gh auth token`)
+where the environment holds none; every request goes over HTTP itself.

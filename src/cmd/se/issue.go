@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/guidance"
+	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/reuse"
@@ -89,6 +90,7 @@ func init() {
 			"--in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree.",
 			"Every --take also refuses where main has moved past the commit se was built from, naming se update: the agents and guidance it hands over come from main.",
 			"--person lists the issues waiting on a person.",
+			"At the top it answers from the workspace's daemon's warm snapshot of GitHub where one is kept, and says how old it is where that is older than its refresh (github/config/refresh); --take re-reads from GitHub that its issue is open and unblocked.",
 		},
 		Session: true,
 		Button:  true,
@@ -155,20 +157,21 @@ func init() {
 			if *in > 0 {
 				return inReply(c, s, *asJSON, *in, take)
 			}
+			// At the top, the pull answers from the daemon's warm snapshot
+			// of GitHub where one is kept; a take re-reads what its claim
+			// must be sure of.
+			set, err := github.Configured()
+			if err != nil {
+				return Reply{}, err
+			}
+			age := c.fromSnapshot(&s, set)
 			if !take.set {
-				next, ok, err := s.Next()
+				next, ok, cads, err := s.Pull()
 				if err != nil {
 					return Reply{}, err
 				}
-				var cads []issues.Cadence
-				for _, read := range []func() (issues.Cadence, error){s.Cadence, s.OverhaulCadence} {
-					cad, err := read()
-					if err != nil {
-						return Reply{}, err
-					}
-					cads = append(cads, cad)
-				}
-				return issueReply(*asJSON, *full, next, ok, "", "", "", handed{}, cads...)
+				r, err := issueReply(*asJSON, *full, next, ok, "", "", "", handed{}, cads...)
+				return agedReply(r, err, *asJSON, age)
 			}
 			// An overhaul, then a retro, the cadence has made due comes
 			// before all other work.
@@ -194,6 +197,12 @@ func init() {
 			}
 			fanout, wt := "", ""
 			if ok {
+				// The claim changed what the snapshot holds: what follows
+				// it, the fan-out above all, reads GitHub itself.
+				c.wrote()
+				if s.Live != nil {
+					s.GitHub, s.Live = s.Live, nil
+				}
 				if err := readTakeover(c, s, &took, *worktree); err != nil {
 					return Reply{}, err
 				}
@@ -218,7 +227,8 @@ func init() {
 			if ok {
 				h = c.handOver(took)
 			}
-			return issueReply(*asJSON, false, took, ok, issues.Branch(took.Number), wt, fanout, h, started...)
+			r, err := issueReply(*asJSON, false, took, ok, issues.Branch(took.Number), wt, fanout, h, started...)
+			return agedReply(r, err, *asJSON, age)
 		},
 	})
 	register(Command{
@@ -868,7 +878,11 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 		if err != nil {
 			return issues.Source{}, err
 		}
-		return issues.Source{Repo: *repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Waits: waits, Box: c.sessionID(), Config: &cfg}, nil
+		set, err := github.Configured()
+		if err != nil {
+			return issues.Source{}, err
+		}
+		return issues.Source{Repo: *repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Waits: waits, Box: c.sessionID(), Config: &cfg, Settle: set.Settle}, nil
 	}, asJSON
 }
 

@@ -37,6 +37,19 @@ type Options struct {
 	Modules []*index.Module
 	// Wiring, when set, binds them in place of the wiring file se carries.
 	Wiring *index.Wiring
+	// Keepers keep names on the index in step with the outside while the
+	// daemon runs, such as the GitHub snapshot.
+	Keepers []Keeper
+}
+
+// Keeper keeps names on the index in step with the outside: an I/O module's
+// reading side, which the daemon runs beside its serving.
+type Keeper interface {
+	// Keep keeps its names on ix until ctx ends.
+	Keep(ctx context.Context, ix *index.Index)
+	// Stale says name no longer matches the outside, so the keeper reads it
+	// again at once. It answers whether name is one it keeps.
+	Stale(name string) bool
 }
 
 // Serve runs the workspace's daemon until ctx ends, /shutdown is posted, or it idles out.
@@ -58,6 +71,7 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 	defer cancel()
 	token, instance := randomHex(32), randomHex(8)
 	srv := NewServer(ix, instance, cancel, opts.Clock)
+	srv.keepers = opts.Keepers
 	address, served, err := opts.Net.Serve(ctx, token, srv)
 	if err != nil {
 		return err
@@ -81,6 +95,9 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 	}
 	if opts.Idle > 0 {
 		go idles(ctx, srv, opts.Idle, cancel, opts.Clock)
+	}
+	for _, k := range opts.Keepers {
+		go k.Keep(ctx, ix)
 	}
 	// Serving ends once ctx does: by the caller, /shutdown or the idle clock.
 	return <-served

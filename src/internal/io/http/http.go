@@ -1,6 +1,6 @@
 // Package http is the I/O module for the network: the one place SE serves or
 // calls over HTTP. It speaks two things and nothing more: the daemon protocol
-// the plugin's bridgehead posts to (health, event, value, shutdown), served and
+// the plugin's bridgehead posts to (health, event, value, stale, shutdown), served and
 // called from Go, and the routine's API trigger, the fire. Code that needs the
 // network takes a Net as an argument; the se binary hands it Real, a test
 // hands it a Fake, so a case replays.
@@ -25,6 +25,9 @@ type Net interface {
 	Event(address, token string, ev Event) error
 	// Value asks the daemon at address for name's value on its index.
 	Value(address, token, name string) (Value, error)
+	// Stale tells the daemon at address that name's value no longer matches
+	// the outside, so whatever keeps it reads it again.
+	Stale(address, token, name string) error
 	// Shutdown asks the daemon at address to end.
 	Shutdown(address, token string) error
 	// Fire posts once to the routine's API trigger at url and answers what it said.
@@ -42,6 +45,10 @@ type Daemon interface {
 	// Value answers name's value. An error that wraps ErrUnknown says
 	// nothing declares the name.
 	Value(name string) (Value, error)
+	// Stale says name's value no longer matches the outside, so whatever
+	// keeps it reads it again. An error that wraps ErrUnknown says nothing
+	// keeps the name.
+	Stale(name string) error
 	// Shutdown asks the daemon to end; it is called once /shutdown is answered.
 	Shutdown()
 }

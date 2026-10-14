@@ -2,10 +2,12 @@ package github_test
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,8 +15,8 @@ import (
 )
 
 // The real GitHub keeps the contract against a repository of its own, which
-// SE_GITHUB_CONTRACT_REPO names (OWNER/NAME), with gh logged in to write
-// there: the contract opens issues in it, labelled se-contract, and closes
+// SE_GITHUB_CONTRACT_REPO names (OWNER/NAME), with a token (gh's) that
+// writes there: the contract opens issues in it, labelled se-contract, and closes
 // them again. Without one it is skipped, since no repository SE works in is
 // written to by a test.
 func TestTheRealGitHubKeepsTheContract(t *testing.T) {
@@ -26,53 +28,83 @@ func TestTheRealGitHubKeepsTheContract(t *testing.T) {
 	contract(t, func(*testing.T) (github.GitHub, string) { return github.Real(), repo })
 }
 
-// A stand-in gh on the PATH shows how Real speaks to gh: the arguments it
-// passes, the pages it asks for by repos/ path and joins, the quota it reads
-// from the headers gh api -i prints, and the status it reads out of a refusal.
-func TestTheRealGitHubSpeaksGh(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the stand-in gh is a shell script")
-	}
-	dir := t.TempDir()
-	said := filepath.Join(dir, "said")
-	head := func(status string, remaining int) string {
-		return fmt.Sprintf("printf 'HTTP/1.1 %s\\r\\nX-Ratelimit-Limit: 15000\\r\\nX-Ratelimit-Remaining: %d\\r\\nX-Ratelimit-Reset: 1791988287\\r\\n\\r\\n'; ", status, remaining)
-	}
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >>" + said + "\n" +
-		"case \"$*\" in\n" +
-		"*missing*) " + head("404 Not Found", 14990) + "echo '{\"message\":\"Not Found\"}'; echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;\n" +
-		"*spent*) " + head("403 Forbidden", 0) + "echo '{\"message\":\"API rate limit exceeded\"}'; echo 'gh: API rate limit exceeded for user ID 1. (HTTP 403)' >&2; exit 1 ;;\n" +
-		"*login*) echo 'To get started with GitHub CLI, please run:  gh auth login' >&2; exit 4 ;;\n" +
-		"*per_page=2\\&page=1*) " + head("200 OK", 14999) + "echo '[1,2]' ;;\n" +
-		"*per_page=2\\&page=2*) " + head("200 OK", 14998) + "echo '[3]' ;;\n" +
-		"*refs*) " + head("200 OK", 14997) + "echo '[9]' ;;\n" +
-		"*) " + head("200 OK", 14995) + "echo '{\"number\":5}' ;;\n" +
-		"esac\n"
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	gh := github.Real()
+// A stand-in API on loopback shows how Real speaks to GitHub: the token it
+// sends, the pages it asks for by repos/ path and joins, the JSON a write and
+// a GraphQL query carry, the answer it keeps and asks again with its ETag,
+// and the status and message it reads out of a refusal.
+func TestTheRealGitHubSpeaksRest(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var said []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		said = append(said, strings.TrimSpace(fmt.Sprintf("%s %s %s %s", r.Header.Get("Authorization"), r.Method, r.URL.RequestURI(), body)))
+		mu.Unlock()
+		w.Header().Set("X-Ratelimit-Limit", "15000")
+		w.Header().Set("X-Ratelimit-Remaining", "14995")
+		w.Header().Set("X-Ratelimit-Reset", "1791988287")
+		switch q := r.URL.RequestURI(); {
+		case strings.Contains(q, "spent"):
+			w.Header().Set("X-Ratelimit-Remaining", "0")
+			w.WriteHeader(403)
+			_, _ = fmt.Fprint(w, `{"message":"API rate limit exceeded for user ID 1."}`)
+		case strings.Contains(q, "missing"):
+			w.WriteHeader(404)
+			_, _ = fmt.Fprint(w, `{"message":"Not Found"}`)
+		case strings.Contains(q, "login"):
+			w.WriteHeader(401)
+			_, _ = fmt.Fprint(w, `{"message":"Bad credentials"}`)
+		case strings.Contains(q, "invalid"):
+			w.WriteHeader(422)
+			_, _ = fmt.Fprint(w, `{"message":"Validation Failed","errors":[{"code":"custom","message":"already linked"}]}`)
+		case r.Method == "DELETE":
+			w.WriteHeader(204)
+		case strings.Contains(q, "per_page=2&page=1"):
+			_, _ = fmt.Fprint(w, `[1,2]`)
+		case strings.Contains(q, "per_page=2&page=2"):
+			_, _ = fmt.Fprint(w, `[3]`)
+		case strings.Contains(q, "refs"):
+			_, _ = fmt.Fprint(w, `[9]`)
+		case q == "/graphql" && strings.Contains(string(body), "clean"):
+			_, _ = fmt.Fprint(w, `{"data":null,"errors":[{"message":"Pull request is in clean status"}]}`)
+		case r.Header.Get("If-None-Match") == `"v1"`:
+			w.WriteHeader(304)
+		default:
+			w.Header().Set("ETag", `"v1"`)
+			_, _ = fmt.Fprint(w, `{"number":5}`)
+		}
+	}))
+	defer srv.Close()
+	gh := github.RealAt(srv.URL, "tok")
 	if out, err := gh.List("repos/o/r/issues?per_page=2"); err != nil || string(out) != "[1,2,3]" {
 		t.Fatalf("%s %v", out, err)
 	}
 	if out, err := gh.List("repos/o/r/refs?per_page=1"); err != nil || string(out) != "[9]" {
 		t.Fatalf("a list that takes no page: %s %v", out, err)
 	}
-	if out, err := gh.Get("repos/o/r/issues/5"); err != nil || !strings.Contains(string(out), `"number":5`) {
-		t.Fatalf("%s %v", out, err)
+	for range 2 {
+		if out, err := gh.Get("repos/o/r/issues/5"); err != nil || string(out) != `{"number":5}` {
+			t.Fatalf("an answer asked again: %s %v", out, err)
+		}
 	}
-	if n, r := github.Metered(gh); n != 5 || r != (github.Rate{Known: true, Limit: 15000, Remaining: 14995, Reset: time.Unix(1791988287, 0).UTC()}) {
-		t.Fatalf("after 5 requests Real counts %d and reads the quota %+v", n, r)
-	}
-	if _, err := gh.Send("POST", "repos/o/r/issues/5/sub_issues", github.Int("sub_issue_id", 7), github.F("labels[]", "se")); err != nil {
+	if _, err := gh.Send("POST", "repos/o/r/issues/5/sub_issues", github.Int("sub_issue_id", 7), github.F("labels[]", "se"), github.F("labels[]", "x")); err != nil {
 		t.Fatal(err)
+	}
+	if out, err := gh.Send("DELETE", "repos/o/r/git/refs/heads/b"); err != nil || len(out) != 0 {
+		t.Fatalf("%q %v", out, err)
 	}
 	if _, err := gh.GraphQL("mutation", github.F("id", "PR_1")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := gh.GraphQL("clean", github.F("id", "PR_1")); err == nil || !strings.Contains(err.Error(), "clean status") {
+		t.Fatalf("a GraphQL error: %v", err)
+	}
+	if n, r := github.Metered(gh); n != 10 || r != (github.Rate{Known: true, Limit: 15000, Remaining: 14995, Reset: time.Unix(1791988287, 0).UTC()}) {
+		t.Fatalf("after 10 requests Real counts %d and reads the quota %+v", n, r)
+	}
 	_, err := gh.Get("repos/o/r/issues/missing")
-	if github.Status(err) != 404 || !strings.Contains(err.Error(), "HTTP 404") {
+	if github.Status(err) != 404 || !strings.Contains(err.Error(), "Not Found (HTTP 404)") {
 		t.Fatalf("%v", err)
 	}
 	if _, limited := github.RateLimited(err); limited {
@@ -82,26 +114,30 @@ func TestTheRealGitHubSpeaksGh(t *testing.T) {
 	if r, limited := github.RateLimited(err); !limited || github.Status(err) != 403 || r.Remaining != 0 || !r.Reset.Equal(time.Unix(1791988287, 0)) {
 		t.Fatalf("a spent quota: %+v %v", r, err)
 	}
-	if _, err := gh.Get("repos/o/r/login"); err == nil || err.Error() != "gh cannot reach GitHub without a login; run gh auth login, then this command again" {
+	_, err = gh.Send("POST", "repos/o/r/issues/invalid", github.F("body", "b"))
+	if github.Status(err) != 422 || !strings.Contains(err.Error(), "Validation Failed: already linked") {
+		t.Fatalf("%v", err)
+	}
+	if _, err := gh.Get("repos/o/r/login"); github.Status(err) != 401 || !strings.Contains(err.Error(), "run gh auth login, then this command again") {
 		t.Fatalf("without a login: %v", err)
 	}
-	got, err := os.ReadFile(said)
-	if err != nil {
-		t.Fatal(err)
+	want := []string{
+		"token tok GET /repos/o/r/issues?per_page=2&page=1",
+		"token tok GET /repos/o/r/issues?per_page=2&page=2",
+		"token tok GET /repos/o/r/refs?per_page=1&page=1",
+		"token tok GET /repos/o/r/refs?per_page=1&page=2",
+		"token tok GET /repos/o/r/issues/5",
+		"token tok GET /repos/o/r/issues/5",
+		`token tok POST /repos/o/r/issues/5/sub_issues {"labels":["se","x"],"sub_issue_id":7}`,
+		"token tok DELETE /repos/o/r/git/refs/heads/b",
+		`token tok POST /graphql {"query":"mutation","variables":{"id":"PR_1"}}`,
+		`token tok POST /graphql {"query":"clean","variables":{"id":"PR_1"}}`,
+		"token tok GET /repos/o/r/issues/missing",
+		"token tok GET /repos/o/r/spent",
+		`token tok POST /repos/o/r/issues/invalid {"body":"b"}`,
+		"token tok GET /repos/o/r/login",
 	}
-	want := strings.Join([]string{
-		"api", "-i", "repos/o/r/issues?per_page=2&page=1",
-		"api", "-i", "repos/o/r/issues?per_page=2&page=2",
-		"api", "-i", "repos/o/r/refs?per_page=1&page=1",
-		"api", "-i", "repos/o/r/refs?per_page=1&page=2",
-		"api", "-i", "repos/o/r/issues/5",
-		"api", "-i", "-X", "POST", "-F", "sub_issue_id=7", "-f", "labels[]=se", "repos/o/r/issues/5/sub_issues",
-		"api", "-i", "-f", "query=mutation", "-f", "id=PR_1", "graphql",
-		"api", "-i", "repos/o/r/issues/missing",
-		"api", "-i", "repos/o/r/spent",
-		"api", "-i", "repos/o/r/login",
-	}, "\n") + "\n"
-	if string(got) != want {
-		t.Fatalf("gh was passed\n%s\nwant\n%s", got, want)
+	if got := strings.Join(said, "\n"); got != strings.Join(want, "\n") {
+		t.Fatalf("the API was sent\n%s\nwant\n%s", got, strings.Join(want, "\n"))
 	}
 }

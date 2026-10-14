@@ -100,5 +100,5 @@ se overhaul read N [--out FILE] [--json] [--repo OWNER/NAME]
 <!-- /se:manifest -->
 
 All three are offered in a session, as `/se overhaul <word>`. They read and
-write GitHub through `gh api`, as the issue commands do
+write GitHub through its REST API, as the issue commands do
 ([issues.md](issues.md)), in `src/internal/issues`.
