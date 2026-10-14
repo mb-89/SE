@@ -1,7 +1,9 @@
 #!/bin/sh
 # The battery's linters, pinned: one place for their versions. RUNME.sh and CI
 # run `sh tests/tools.sh install`; tests/check.sh sources this file and refuses
-# any other version, so every machine lints alike.
+# any other version, so every machine lints alike. `sh tests/tools.sh fmt`
+# (what `se fmt` runs) installs them the same way, then runs every formatter
+# the battery checks.
 GOLANGCI_LINT=2.5.0
 BIOME=2.2.4
 
@@ -11,7 +13,8 @@ tools_differ() {
   [ "$(biome --version 2>/dev/null)" = "Version: $BIOME" ] || echo "biome $BIOME"
 }
 
-if [ "${1:-}" = install ]; then
+case ${1:-} in
+install | fmt)
   set -eu
   PATH="$(go env GOPATH)/bin:$PATH"
   for tool in $(tools_differ | cut -d' ' -f1); do
@@ -23,4 +26,10 @@ if [ "${1:-}" = install ]; then
         ;;
     esac
   done
+  ;;
+esac
+
+if [ "${1:-}" = fmt ]; then
+  golangci-lint fmt ./...
+  biome check --write
 fi

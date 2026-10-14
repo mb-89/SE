@@ -48,6 +48,9 @@ run it, and it names each step it runs. SE's own rules are one file each in
 `tests/tools.sh`, and each linter's config gives the reason for anything it
 switches off. A claim (`se issue next --take`) runs `sh tests/tools.sh install`
 before its push, so a fresh box's pre-push check finds them.
+`se fmt` installs them the same way, then runs every formatter the battery
+checks (`golangci-lint fmt`, `biome check --write`): run it, not each
+formatter by hand, when a lint step fails on formatting.
 
 ## Debugging the daemon
 
