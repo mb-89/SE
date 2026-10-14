@@ -57,6 +57,7 @@ func workedBy(w Worker) string {
 }
 
 func TestRecordWritesTheWorkerOnce(t *testing.T) {
+	t.Parallel()
 	w := Worker{Session: "s1", Workspace: "/b/issue-2"}
 	answers := map[string]string{"repos/o/r/issues/2/comments": `{}`}
 	gh, wrote := reviewGH(t, answers)
@@ -81,6 +82,7 @@ func TestRecordWritesTheWorkerOnce(t *testing.T) {
 }
 
 func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
+	t.Parallel()
 	worker := Worker{Session: "box", Workspace: "/b/issue-2"}
 	fixer := Worker{Session: "box2", Workspace: "/c/issue-3"}
 	reviewer := Worker{Session: "box", Workspace: "/b/review-1-1"}
@@ -174,6 +176,7 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 }
 
 func TestAPassClosesTheParentItCompletes(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		// #1 holds only #2, a review parent ready for review.
 		listPath:                      list(node(1, 1), node(2, 1, ReviewLabel)),
@@ -207,6 +210,7 @@ func TestAPassClosesTheParentItCompletes(t *testing.T) {
 }
 
 func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		// #1 is ready for review: #2 is a closed parent holding #4 (worked
 		// by w) and #5 (closed as not planned); #3 records no worker. #7 is
@@ -250,6 +254,7 @@ func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
 }
 
 func TestTheReviewerModelIsOneLineOfSpecModels(t *testing.T) {
+	t.Parallel()
 	d, dir := disk.NewFake(), filepath.FromSlash("/checkout")
 	if got := ReviewerModel(d, dir); got != "" {
 		t.Fatalf("without the file: %q", got)

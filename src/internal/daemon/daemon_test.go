@@ -77,6 +77,7 @@ func rows(t *testing.T, p daemon.Paths, session string) []map[string]any {
 }
 
 func TestPrepareIgnoresTheRuntimeFolder(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	got, err := p.Disk.ReadFile(filepath.Join(p.Runtime(), ".gitignore"))
 	if err != nil || string(got) != "*\n" {
@@ -85,6 +86,7 @@ func TestPrepareIgnoresTheRuntimeFolder(t *testing.T) {
 }
 
 func TestAnEventIsAppended(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	for _, ev := range []string{"session.start", "tool.call"} {
@@ -99,6 +101,7 @@ func TestAnEventIsAppended(t *testing.T) {
 }
 
 func TestAWrongTokenIsRefused(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	if code := post("nope", daemon.Event{Session: "s1", Event: "x"}); code != sehttp.StatusUnauthorized {
@@ -107,6 +110,7 @@ func TestAWrongTokenIsRefused(t *testing.T) {
 }
 
 func TestASessionNameCannotLeaveTheLogFolder(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	for _, s := range []string{"../escape", "a/b", "", ".hidden"} {
@@ -117,6 +121,7 @@ func TestASessionNameCannotLeaveTheLogFolder(t *testing.T) {
 }
 
 func TestALongPayloadLandsCut(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	long := strings.Repeat("a", daemon.PayloadCap*2)
@@ -128,6 +133,7 @@ func TestALongPayloadLandsCut(t *testing.T) {
 }
 
 func TestConcurrentEventsAllLand(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	var wg sync.WaitGroup
@@ -145,6 +151,7 @@ func TestConcurrentEventsAllLand(t *testing.T) {
 }
 
 func TestServePublishesAndWithdrawsItsEndpoint(t *testing.T) {
+	t.Parallel()
 	p, n := workspace(t), sehttp.NewFake()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -169,6 +176,7 @@ func TestServePublishesAndWithdrawsItsEndpoint(t *testing.T) {
 }
 
 func TestStopEndsTheDaemon(t *testing.T) {
+	t.Parallel()
 	p, n := workspace(t), sehttp.NewFake()
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
@@ -188,6 +196,7 @@ func TestStopEndsTheDaemon(t *testing.T) {
 }
 
 func TestAnIdleDaemonEnds(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	f := clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
 	done := make(chan error, 1)
@@ -224,6 +233,7 @@ func TestAnIdleDaemonEnds(t *testing.T) {
 }
 
 func TestTakeOverStepsARunningDaemonAside(t *testing.T) {
+	t.Parallel()
 	p, n := workspace(t), sehttp.NewFake()
 	first := make(chan daemon.Endpoint, 1)
 	firstDone := make(chan error, 1)

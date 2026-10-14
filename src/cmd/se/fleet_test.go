@@ -17,18 +17,17 @@ func recordedFleet(t *testing.T) {
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
 	}
-	old := gh
-	gh = func(args ...string) ([]byte, error) {
+	worldOf(t).GH = func(args ...string) ([]byte, error) {
 		a, ok := answers[args[len(args)-1]]
 		if !ok {
 			return nil, fmt.Errorf("not recorded: %v", args)
 		}
 		return []byte(a), nil
 	}
-	t.Cleanup(func() { gh = old })
 }
 
 func TestAHealthyFleetSaysSo(t *testing.T) {
+	t.Parallel()
 	recordedFleet(t)
 	for _, cmd := range []string{"check", "fix"} {
 		if code, out, errs := se(t, "fleet", cmd, "--repo", "o/r"); code != 0 || out != "healthy\n" {
@@ -49,6 +48,7 @@ func TestAHealthyFleetSaysSo(t *testing.T) {
 }
 
 func TestFleetPruneDeletesOnlyWithApply(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/pulls?state=open&per_page=100":   `[]`,
 		"repos/o/r/git/matching-refs/heads/issue-":  `[{"ref":"refs/heads/issue-19","object":{"sha":"c19"}}]`,
@@ -57,8 +57,7 @@ func TestFleetPruneDeletesOnlyWithApply(t *testing.T) {
 		"repos/o/r/git/refs/heads/issue-19":         `{}`,
 	}
 	var deletes []string
-	old := gh
-	gh = func(args ...string) ([]byte, error) {
+	worldOf(t).GH = func(args ...string) ([]byte, error) {
 		path := args[len(args)-1]
 		if args[1] == "-X" {
 			deletes = append(deletes, args[2]+" "+path)
@@ -69,7 +68,6 @@ func TestFleetPruneDeletesOnlyWithApply(t *testing.T) {
 		}
 		return []byte(a), nil
 	}
-	t.Cleanup(func() { gh = old })
 	if code, out, errs := se(t, "fleet", "prune", "--repo", "o/r"); code != 0 || out != "stray issue-19 at c19: #19 is closed and issue-19 has no open PR\n" || len(deletes) != 0 {
 		t.Fatalf("exit %d, %q %q, deletes %q", code, out, errs, deletes)
 	}

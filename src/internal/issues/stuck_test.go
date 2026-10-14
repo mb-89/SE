@@ -85,6 +85,7 @@ func refs(ns ...int) string {
 }
 
 func TestAFreshClaimIsNotStuckAndAStaleOneIs(t *testing.T) {
+	t.Parallel()
 	g := newGithub(t, map[string]string{
 		listPath:    list(node(1, 0), node(2, 0), node(3, 0), node(4, 0)),
 		refsPath:    refs(1, 2, 3, 4),
@@ -119,6 +120,7 @@ func TestAFreshClaimIsNotStuckAndAStaleOneIs(t *testing.T) {
 }
 
 func TestATakeoverComesBeforeNewWorkAndContinuesTheBranch(t *testing.T) {
+	t.Parallel()
 	origin, a, b := boxes(t)
 	// a claimed #5, pushed some work, and stalled.
 	if ok, err := (Source{Proc: machine}).Claim(a, 5); err != nil || !ok {
@@ -167,6 +169,7 @@ func TestATakeoverComesBeforeNewWorkAndContinuesTheBranch(t *testing.T) {
 }
 
 func TestOfTwoTakeoversTheFirstCommentWins(t *testing.T) {
+	t.Parallel()
 	_, _, b := boxes(t)
 	g := newGithub(t, map[string]string{
 		listPath:    list(node(5, 0), node(6, 0)),
@@ -193,6 +196,7 @@ func TestOfTwoTakeoversTheFirstCommentWins(t *testing.T) {
 }
 
 func TestAStaleFinalClaimWaitsOnAnIssueForAPerson(t *testing.T) {
+	t.Parallel()
 	// #5 is se-final: taken over once already, or filed by a review.
 	g := newGithub(t, map[string]string{
 		listPath:    list(node(5, 0, FinalLabel), node(6, 0)),
@@ -242,6 +246,7 @@ func TestAStaleFinalClaimWaitsOnAnIssueForAPerson(t *testing.T) {
 }
 
 func TestIssuesWaitingOnAPersonAndTheirTreesAreNeverOffered(t *testing.T) {
+	t.Parallel()
 	g := newGithub(t, map[string]string{
 		// #10's tree holds #11, which waits on a person, and #12, ready;
 		// #20 is blocked by #11, #21 by #20; #30 is free.
@@ -279,6 +284,7 @@ func TestIssuesWaitingOnAPersonAndTheirTreesAreNeverOffered(t *testing.T) {
 }
 
 func TestAStuckLeafInATreeIsTakenOverFirst(t *testing.T) {
+	t.Parallel()
 	origin, a, b := boxes(t)
 	// A sub-agent claimed leaf #11 of #10, pushed some work, and stalled.
 	if ok, err := (Source{Proc: machine}).stake(a, 11); err != nil || !ok {
@@ -326,6 +332,7 @@ func TestAStuckLeafInATreeIsTakenOverFirst(t *testing.T) {
 }
 
 func TestAParentsClaimIsNeverStuck(t *testing.T) {
+	t.Parallel()
 	// No activity is recorded for issue-10: none is asked for.
 	g := newGithub(t, map[string]string{
 		listPath:     list(node(10, 1), node(11, 0)),
@@ -338,6 +345,7 @@ func TestAParentsClaimIsNeverStuck(t *testing.T) {
 }
 
 func TestResumeResetsTheTakeoverCount(t *testing.T) {
+	t.Parallel()
 	g := newGithub(t, map[string]string{
 		"repos/o/r/issues/5": node(5, 0, FinalLabel, PersonLabel),
 		"repos/o/r/issues/6": node(6, 0),

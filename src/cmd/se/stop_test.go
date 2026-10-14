@@ -14,15 +14,16 @@ import (
 // TestStatusAndStopReachTheDaemonOverTheNetwork serves a daemon on a fake
 // network and a fake disk and has se status find it and se stop end it there.
 func TestStatusAndStopReachTheDaemonOverTheNetwork(t *testing.T) {
-	old := network
-	network = sehttp.NewFake()
-	t.Cleanup(func() { network = old })
+	t.Parallel()
+	// se stop polls for the daemon's endpoint to go, which only the real clock waits out.
+	w := worldOf(t)
+	w.Net, w.Clock = sehttp.NewFake(), clock.Real()
 	d, ws := onFake(t), "/ws"
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
 		done <- daemon.Serve(context.Background(), daemon.Paths{Workspace: ws, Disk: d}, daemon.Options{
-			Clock: clock.Real(), Net: network, Ready: func(ep daemon.Endpoint) { ready <- ep },
+			Clock: w.Clock, Net: w.Net, Ready: func(ep daemon.Endpoint) { ready <- ep },
 		})
 	}()
 	ep := <-ready

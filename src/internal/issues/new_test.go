@@ -10,6 +10,7 @@ import (
 )
 
 func TestBlockedByIsANumberListOrNone(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string][]int{"none": nil, "5": {5}, "5,8": {5, 8}, " #8, 5 ,8": {5, 8}} {
 		if got, err := ParseBlockedBy(in); err != nil || !reflect.DeepEqual(got, want) {
 			t.Errorf("%q: %v %v, want %v", in, got, err, want)
@@ -42,6 +43,7 @@ func writes(t *testing.T, answers map[string]string) (GH, *[][]string) {
 }
 
 func TestBlockWritesNativeLinksByIssueID(t *testing.T) {
+	t.Parallel()
 	gh, calls := writes(t, map[string]string{
 		"repos/o/r/issues/8":                         `{"id":808,"number":8}`,
 		"repos/o/r/issues/6/dependencies/blocked_by": `{"id":606}`,
@@ -59,6 +61,7 @@ func TestBlockWritesNativeLinksByIssueID(t *testing.T) {
 }
 
 func TestBlockRefusesAMissingBlockerBeforeWriting(t *testing.T) {
+	t.Parallel()
 	gh, calls := writes(t, map[string]string{"repos/o/r/issues/8": `{"id":808,"number":8}`})
 	err := (Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}).Block(6, []int{8, 99})
 	if err == nil || !strings.Contains(err.Error(), "#99 does not exist") {
@@ -75,6 +78,7 @@ func TestBlockRefusesAMissingBlockerBeforeWriting(t *testing.T) {
 }
 
 func TestCreateNamesTheIssueWhoseLinkFailed(t *testing.T) {
+	t.Parallel()
 	gh, _ := writes(t, map[string]string{
 		"repos/o/r/issues/8": `{"id":808,"number":8}`,
 		"repos/o/r/issues":   `{"number":11,"title":"t","html_url":"u11"}`,
@@ -86,6 +90,7 @@ func TestCreateNamesTheIssueWhoseLinkFailed(t *testing.T) {
 }
 
 func TestCreateMakesASubIssueOfItsParent(t *testing.T) {
+	t.Parallel()
 	gh, calls := writes(t, map[string]string{
 		"repos/o/r/issues/1":            `{"id":101,"number":1}`,
 		"repos/o/r/issues":              `{"id":1100,"number":11,"title":"t","html_url":"u11"}`,

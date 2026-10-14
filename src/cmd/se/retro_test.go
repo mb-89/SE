@@ -9,6 +9,7 @@ import (
 )
 
 func TestRetroNewAsksForFieldFeedbackOrNone(t *testing.T) {
+	t.Parallel()
 	calls := recordedIssues(t)
 	for _, args := range [][]string{
 		{"retro", "new", "--repo", "o/r"},
@@ -25,6 +26,7 @@ func TestRetroNewAsksForFieldFeedbackOrNone(t *testing.T) {
 }
 
 func TestRetroNewCreatesTheRetroAndFires(t *testing.T) {
+	t.Parallel()
 	calls := recordedIssues(t)
 	code, out, errs := se(t, "retro", "new", "--field", "the boxes were slow", "--repo", "o/r")
 	if code != 0 || !strings.Contains(out, "Created the retro #10") || !strings.Contains(out, "over the whole history") || !strings.HasSuffix(out, firedOnce+"\n") {
@@ -44,6 +46,7 @@ func TestRetroNewCreatesTheRetroAndFires(t *testing.T) {
 }
 
 func TestTakingARetroHandsItToTheRetroSkill(t *testing.T) {
+	t.Parallel()
 	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE retro", Retro: true}, true, "issue-30", "")
 	if err != nil || !strings.Contains(r.Text, "#30 is a retro (se-retro): follow the retro skill, src/plugin/skills/retro/SKILL.md, from se retro collect 30") {
 		t.Fatalf("%q %v", r.Text, err)

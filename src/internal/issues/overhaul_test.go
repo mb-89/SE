@@ -32,6 +32,7 @@ func overhaulRepo(n, openOverhaul int) map[string]string {
 }
 
 func TestFourRetrosStartNoOverhaulAndTheDueRetroIsTaken(t *testing.T) {
+	t.Parallel()
 	_, a, _ := boxes(t)
 	gh, w := writing(t, overhaulRepo(4, 0))
 	took, ok, c, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.TakeDue(a)
@@ -45,6 +46,7 @@ func TestFourRetrosStartNoOverhaulAndTheDueRetroIsTaken(t *testing.T) {
 }
 
 func TestFiveRetrosStartAnUnattendedOverhaulAndTakeItFirst(t *testing.T) {
+	t.Parallel()
 	_, a, _ := boxes(t)
 	gh, w := writing(t, overhaulRepo(5, 0))
 	took, ok, c, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.TakeDue(a)
@@ -61,6 +63,7 @@ func TestFiveRetrosStartAnUnattendedOverhaulAndTakeItFirst(t *testing.T) {
 }
 
 func TestAnOpenOverhaulBlocksASecond(t *testing.T) {
+	t.Parallel()
 	c, err := Source{Proc: machine, Repo: repo, GH: recorded(t, overhaulRepo(7, 31)), Clock: atNow()}.OverhaulCadence()
 	if err != nil || c.Open != 31 || c.Due() || !strings.HasSuffix(c.Line(), "; the overhaul #31 is open.") {
 		t.Fatalf("%+v %v %q", c, err, c.Line())
@@ -68,6 +71,7 @@ func TestAnOpenOverhaulBlocksASecond(t *testing.T) {
 }
 
 func TestThePrinciplesAreReadFromTheSpec(t *testing.T) {
+	t.Parallel()
 	// The principles are the checkout's own file, so they are read from the real disk.
 	ps, err := Principles(disk.Real(), "../../..")
 	if err != nil || len(ps) < 16 {
@@ -105,6 +109,7 @@ func retroWithClasses(t *testing.T, n int, prevRecurred int, classes ...string) 
 }
 
 func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
+	t.Parallel()
 	prev, err := OverhaulReport{Overhaul: 15, Findings: []Straying{{Title: "Split the engine", Principle: 4, Issue: 16}}}.assemble("old")
 	if err != nil {
 		t.Fatal(err)
@@ -203,6 +208,7 @@ func overhaulAnswers(body string) map[string]string {
 }
 
 func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
+	t.Parallel()
 	gh, calls := writes(t, overhaulAnswers(overhaulUnattendedMark))
 	f, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
 	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
@@ -249,6 +255,7 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 }
 
 func TestAnAttendedOverhaulClosesToo(t *testing.T) {
+	t.Parallel()
 	// A person started it, and still nobody waits: its controversial
 	// findings are the issues for the person.
 	gh, calls := writes(t, overhaulAnswers("<!-- se:overhaul attended -->"))
@@ -269,6 +276,7 @@ func TestAnAttendedOverhaulClosesToo(t *testing.T) {
 }
 
 func TestAnOverhaulWithoutJudgmentIsRefused(t *testing.T) {
+	t.Parallel()
 	never := func(args ...string) ([]byte, error) {
 		t.Fatalf("gh %v for a refused overhaul", args)
 		return nil, nil

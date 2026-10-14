@@ -57,9 +57,15 @@ real implementation runs in its contract test alone, kept short.
 The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line: outside
 `src/internal/io/`, no Go file imports `os/exec` or `net/http`, calls the
 clock through `time` (`Now`, `Sleep`, `After` and their kin), or opens, reads
-or writes files through `os`. Test files are left to principle 8.
+or writes files through `os`.
 
 What still breaks it today is named in one allowlist,
 `src/internal/io/allowlist.txt`, one file and what it reaches per line. It
 only shrinks: each I/O module removes its own entries as it lands, the last
 empties it, and the rule refuses an entry that matches nothing.
+
+Test files are held by the `fast-test` rule
+(`src/internal/rules/fasttest.go`) instead: every test calls `t.Parallel`
+first, and outside `src/internal/io/` no test reads the clock through `time`
+or takes `clock.Real`. What still breaks it is named in
+`src/internal/rules/serial.txt`, which only shrinks the same way.

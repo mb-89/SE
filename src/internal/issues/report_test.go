@@ -9,6 +9,7 @@ import (
 )
 
 func TestAReportIsRefusedWhereItBreaksTheRules(t *testing.T) {
+	t.Parallel()
 	with := func(change func(r *Report)) Report {
 		r := failing("it breaks")
 		r.Requirements = append([]Requirement{}, r.Requirements...)
@@ -82,6 +83,7 @@ func reviewWorld(t *testing.T) (Source, map[string]string, *[][]string) {
 }
 
 func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
+	t.Parallel()
 	s, _, wrote := reviewWorld(t)
 	rep := failing("it breaks")
 	for k := 1; k <= 7; k++ {
@@ -133,6 +135,7 @@ func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
 }
 
 func TestAReReviewIsLimitedToTheEarlierBlockers(t *testing.T) {
+	t.Parallel()
 	s, answers, wrote := reviewWorld(t)
 	// #1's last review failed on #3, which has landed since.
 	earlier := Verdict{Report: failing("three")}

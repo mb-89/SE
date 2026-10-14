@@ -46,6 +46,7 @@ func asked(t *testing.T, answers map[string]string) (GH, *[]string) {
 }
 
 func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
+	t.Parallel()
 	gh, paths := asked(t, briefAnswers())
 	b, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.Brief(1, false)
 	if err != nil {
@@ -97,6 +98,7 @@ func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 }
 
 func TestTheBriefOfAReReviewNamesTheEarlierBlockersAndTheDiff(t *testing.T) {
+	t.Parallel()
 	answers := briefAnswers()
 	earlier := Verdict{Report: failing("three")}
 	earlier.Report.Findings[0].Issue = 3

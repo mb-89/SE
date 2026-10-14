@@ -48,6 +48,7 @@ func refreshGH(t *testing.T, answers map[string][]string, fail map[string]string
 }
 
 func TestRefreshUpdatesTheAutoMergePRsBehindMain(t *testing.T) {
+	t.Parallel()
 	c := atNow()
 	gh, writes := refreshGH(t, map[string][]string{
 		mainPullsPath: {"[" + strings.Join([]string{
@@ -86,6 +87,7 @@ func TestRefreshUpdatesTheAutoMergePRsBehindMain(t *testing.T) {
 }
 
 func TestRefreshReportsAFailedUpdateAndGoesOn(t *testing.T) {
+	t.Parallel()
 	gh, writes := refreshGH(t, map[string][]string{
 		mainPullsPath:                            {"[" + refreshPull(10, "a1", "", true) + "," + refreshPull(20, "b1", "", true) + "]"},
 		"repos/o/r/compare/main...a1?per_page=1": {`{"behind_by":1}`},
@@ -106,6 +108,7 @@ func TestRefreshReportsAFailedUpdateAndGoesOn(t *testing.T) {
 }
 
 func TestRefreshSaysWhenTheHeadNeverMoves(t *testing.T) {
+	t.Parallel()
 	gh, writes := refreshGH(t, map[string][]string{
 		mainPullsPath:                            {"[" + refreshPull(10, "a1", "", true) + "]"},
 		"repos/o/r/compare/main...a1?per_page=1": {`{"behind_by":1}`},
