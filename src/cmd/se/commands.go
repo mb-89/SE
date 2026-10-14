@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/daemon"
+	"github.com/mb-89/SE/src/internal/guidance"
 	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
@@ -120,6 +121,8 @@ type World struct {
 	// Check is what issue land runs before it pushes, on procs: the repo's one
 	// definition of green. It answers the check's output when it fails.
 	Check func(procs proc.Procs, dir string) error
+	// Guided reads the hand-over's switches, session.guidance's config.
+	Guided func() (guidance.Settings, error)
 }
 
 // realWorld is what se reaches when it runs for real.
@@ -127,6 +130,7 @@ func realWorld() *World {
 	return &World{
 		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(), GitHub: github.Real(),
 		Getenv: os.Getenv, Environ: os.Environ, Commit: commit, Check: check,
+		Guided: guidance.Configured,
 	}
 }
 
