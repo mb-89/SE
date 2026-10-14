@@ -12,6 +12,7 @@ import (
 	"github.com/mb-89/SE/src/internal/guidance"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
+	"github.com/mb-89/SE/src/internal/reuse"
 )
 
 // fire is the fan-out after a claim, and after the creation of a ready issue:
@@ -578,6 +579,9 @@ func init() {
 			if err := dec.Decode(&rep); err != nil {
 				return Reply{}, fmt.Errorf("the report %s is not a review report (spec/review.md): %v", *report, err)
 			}
+			if err := checkRan(rep); err != nil {
+				return Reply{}, err
+			}
 			s, err := src()
 			if err != nil {
 				return Reply{}, err
@@ -670,7 +674,11 @@ func init() {
 				data, err := json.Marshal(b)
 				return Reply{Text: string(data)}, err
 			}
-			return Reply{Text: strings.TrimRight(b.Text(), "\n")}, nil
+			text := strings.TrimRight(b.Text(), "\n")
+			if ran := c.reused(reuse.Reviewer, reviewerIntro); ran != "" {
+				text += "\n\n" + ran
+			}
+			return Reply{Text: text}, nil
 		},
 	})
 }
