@@ -3,6 +3,7 @@ package proc
 import (
 	"errors"
 	"io/fs"
+	"os"
 	"os/exec"
 )
 
@@ -35,6 +36,8 @@ func (machine) Start(c Cmd) (Running, error) {
 	}
 	return running{c, cmd}, nil
 }
+
+func (machine) Self() (string, error) { return os.Executable() }
 
 type running struct {
 	c   Cmd
