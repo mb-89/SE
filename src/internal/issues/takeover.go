@@ -125,6 +125,7 @@ func (p openPull) dirty() bool { return p.Mergeable != nil && !*p.Mergeable && p
 // waits on an issue for a person. A takeover labels the issue se-final. ok is false when none was
 // taken over.
 func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (took Issue, ok bool, err error) {
+	s.tell("checking the open PRs for a conflict with main")
 	cs, err := s.conflicts(all, pulls)
 	if err != nil {
 		return Issue{}, false, err
@@ -148,6 +149,7 @@ func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (to
 		}
 		body := fmt.Sprintf("Taken over: PR #%d conflicts with main at %s. This box merges main into %s and lands it again.",
 			c.pr.Number, c.pr.Head.SHA, Branch(c.Number)) + heads
+		s.tell("taking over #%d: PR #%d conflicts with main", c.Number, c.pr.Number)
 		won, err := s.markTakeover(c.Number, k, body)
 		if err != nil {
 			return Issue{}, false, err

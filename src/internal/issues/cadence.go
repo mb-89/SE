@@ -154,14 +154,17 @@ func (s Source) TakeDue(dir string) (took Issue, ok bool, c Cadence, err error) 
 }
 
 func (s Source) takeDue(r cadenceRule, dir string, start func() (Issue, error)) (took Issue, ok bool, c Cadence, err error) {
+	s.tell("counting the closed %ss, to see whether %s %s is due", r.noun, r.article, r.kind)
 	if c, err = s.cadence(r); err != nil || !c.Due() {
 		return Issue{}, false, c, err
 	}
+	s.tell("starting the due %s", r.kind)
 	made, err := start()
 	if err != nil {
 		return Issue{}, false, c, err
 	}
 	c.Open = made.Number
+	s.tell("claiming #%d", made.Number)
 	claimed, err := s.Claim(dir, made.Number)
 	if err != nil || !claimed {
 		return Issue{}, false, c, err

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -403,6 +405,94 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 	git(ws, "checkout", "-q", "main")
 	if code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws); code != 0 || fires() != 1 || out != `{"ready":false}`+"\n" {
 		t.Fatalf("exit %d, %d fires, %q", code, fires(), out)
+	}
+}
+
+// lines is stderr as a take writes it, read while gh calls run beside it.
+type lines struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *lines) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *lines) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+// heard is a GitHub that counts the calls that returned before stderr held a line.
+type heard struct {
+	github.GitHub
+	errs   *lines
+	mu     sync.Mutex
+	silent int
+}
+
+func (h *heard) after(out []byte, err error) ([]byte, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.errs.String() == "" {
+		h.silent++
+	}
+	return out, err
+}
+
+func (h *heard) Get(path string) ([]byte, error)  { return h.after(h.GitHub.Get(path)) }
+func (h *heard) List(path string) ([]byte, error) { return h.after(h.GitHub.List(path)) }
+
+func (h *heard) Send(method, path string, fields ...github.Field) ([]byte, error) {
+	return h.after(h.GitHub.Send(method, path, fields...))
+}
+
+func (h *heard) GraphQL(query string, vars ...github.Field) ([]byte, error) {
+	return h.after(h.GitHub.GraphQL(query, vars...))
+}
+
+// A take tells what it starts before each slow step, the first line before
+// any gh call returns, so a box can tell a slow take from a hung one.
+func TestATakeTellsEachSlowStepBeforeItStarts(t *testing.T) {
+	h := &heard{GitHub: recordedIssues(t), errs: &lines{}}
+	hub = h
+	oldClock := wall
+	wall = clock.NewFake(time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC))
+	t.Cleanup(func() { wall = oldClock })
+	root := t.TempDir()
+	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
+	for _, args := range [][]string{
+		{root, "init", "-q", "--bare", "-b", "main", origin},
+		{root, "clone", "-q", origin, ws},
+		{ws, "checkout", "-q", "-b", "main"},
+		{ws, "commit", "-q", "--allow-empty", "-m", "start"},
+		{ws, "push", "-q", "origin", "main"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", args[0], "-c", "user.name=t", "-c", "user.email=t@t"}, args[1:]...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	var out bytes.Buffer
+	if code := run([]string{"issue", "pull", "--take", "--repo", "o/r", "--workspace", ws}, &out, h.errs); code != 0 || !strings.HasPrefix(out.String(), "Took #3 three") {
+		t.Fatalf("exit %d, %q %q", code, out.String(), h.errs.String())
+	}
+	if h.silent != 0 {
+		t.Errorf("%d gh calls returned before the take said a word", h.silent)
+	}
+	want := []string{
+		"se: counting the closed retros, to see whether an overhaul is due",
+		"se: counting the closed se issues, to see whether a retro is due",
+		"se: reading the open se issues",
+		"se: checking the open PRs for a conflict with main",
+		"se: claiming #3",
+		"se: firing the routine once (fan-out)",
+		"se: reading what #3 blocks",
+	}
+	if got := strings.Split(strings.TrimRight(h.errs.String(), "\n"), "\n"); !reflect.DeepEqual(got, want) {
+		t.Errorf("the take told\n%s", strings.Join(got, "\n"))
 	}
 }
 

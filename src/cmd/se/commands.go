@@ -102,6 +102,8 @@ type Call struct {
 	Net sehttp.Net
 	// GitHub is where the command reads and writes issues and pull requests.
 	GitHub github.GitHub
+	// Stderr hears what the command does as it does it, beside its answer.
+	Stderr io.Writer
 	// flags is the flag set Flags made, which the command's help lists.
 	flags *flag.FlagSet
 }
@@ -203,7 +205,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	// The help is coloured on a terminal alone, never in a session's answer.
 	color, errColor := !*session && colors(stdout), !*session && colors(stderr)
-	call := &Call{Workspace: *workspace, Session: *session, Color: color, Clock: wall, Disk: drive, Proc: machine, Net: network, GitHub: hub}
+	call := &Call{Workspace: *workspace, Session: *session, Color: color, Clock: wall, Disk: drive, Proc: machine, Net: network, GitHub: hub, Stderr: stderr}
 	name := ""
 	if fs.NArg() > 0 {
 		name, call.Args = fs.Arg(0), fs.Args()[1:]
@@ -271,3 +273,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // executable is this se, the installed one when it runs from the plugin.
 var executable = os.Executable
+
+// says writes one line of what the call does to its Stderr, beside the answer.
+func (c *Call) says(note string) {
+	w := c.Stderr
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintln(w, "se:", note)
+}

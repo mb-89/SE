@@ -131,9 +131,11 @@ func init() {
 			}
 			fanout := ""
 			if ok {
+				c.says("firing the routine once (fan-out)")
 				fanout = c.fire()
 				// What waits for it, so the box can tell which of them need
 				// what it may leave over.
+				c.says(fmt.Sprintf("reading what #%d blocks", took.Number))
 				if took.Blocks, err = s.Dependents(took.Number); err != nil {
 					return Reply{}, err
 				}
@@ -631,9 +633,9 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 			}
 			*repo = r
 		}
-		// stdout is the answer; what se waits on goes beside it, as it waits.
-		waits := func(note string) { fmt.Fprintln(os.Stderr, "se:", note) }
-		return issues.Source{Repo: *repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Waits: waits}, nil
+		// stdout is the answer; what se waits on, and each slow step it
+		// starts, goes beside it, as it happens.
+		return issues.Source{Repo: *repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Waits: c.says, Tells: c.says}, nil
 	}, asJSON
 }
 

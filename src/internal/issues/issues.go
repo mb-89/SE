@@ -73,9 +73,20 @@ type Source struct {
 	// Waits hears what the source waits on, and for how long, before each
 	// wait, so the person running it is not left waiting blind.
 	Waits func(note string)
+	// Tells hears each slow step a take is about to start (the survey,
+	// closing a parent, a cadence count, a claim), so the box can tell a
+	// slow take from a hung one.
+	Tells func(note string)
 }
 
 func (s Source) now() time.Time { return s.Clock.Now() }
+
+// tell tells Tells what the source starts now.
+func (s Source) tell(format string, args ...any) {
+	if s.Tells != nil {
+		s.Tells(fmt.Sprintf(format, args...))
+	}
+}
 
 // sleep waits d, after telling Waits what for.
 func (s Source) sleep(d time.Duration, what string) {
@@ -256,6 +267,7 @@ func (t tree) depth(n int) int {
 // closing completes closes too. A parent labelled se-review never closes here.
 // The reads more makes from the list run beside the sub-issues' reads.
 func (s Source) load(more func(t tree) []func() error) (tree, error) {
+	s.tell("reading the open %s issues", Label)
 	list, err := api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=100", s.Repo, Label), true)
 	if err != nil {
 		return tree{}, err
@@ -299,6 +311,7 @@ func (s Source) load(more func(t tree) []func() error) (tree, error) {
 		if t.byNum[n].labelled(ReviewLabel) || !t.done(n) {
 			continue
 		}
+		s.tell("closing #%d: its sub-issues are all closed", n)
 		if err := s.closeParent(n); err != nil {
 			return tree{}, err
 		}
@@ -637,6 +650,7 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 		}
 	}
 	for _, st := range takeOrder(all, want) {
+		s.tell("claiming #%d", st.Number)
 		var claimed bool
 		switch {
 		case st.Takeover != nil:
