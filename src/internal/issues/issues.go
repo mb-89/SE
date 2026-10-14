@@ -940,12 +940,9 @@ func (s Source) git(dir string, args ...string) (string, error) {
 	return proc.Output(s.Proc, proc.Cmd{Name: "git", Args: args, Dir: dir})
 }
 
-// noHooks is the git option that runs one command with no hooks.
-var noHooks = []string{"-c", "core.hooksPath="}
-
 // push runs git push with args in dir, with no hooks. The pre-push hook only
-// reruns the battery: land has just run it on this very tree, and a claim
+// reruns the battery: ship has just run it on this very tree, and a claim
 // pushes origin/main, which CI passed. A person's own git push still runs it.
 func (s Source) push(dir string, args ...string) (string, error) {
-	return s.git(dir, append(append(append([]string(nil), noHooks...), "push"), args...)...)
+	return s.git(dir, append([]string{"-c", "core.hooksPath=", "push"}, args...)...)
 }
