@@ -40,5 +40,5 @@ instances:
         - https://skillselion.com/
         - https://www.claudemarket.ai/
 wires:
-  session.events: session/events
-  sessionlog.events: session/events
+  session.events: session/<id>/events
+  sessionlog.events: session/<id>/events
