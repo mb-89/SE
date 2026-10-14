@@ -30,7 +30,8 @@ func TestEverySeCommandProseNamesExists(t *testing.T) {
 			"`se frob` is gone; `se --session help` and `se <command>` are fine.\n" +
 			"`<se> issue pull [--in ROOT] [--json]`, `se issue …`, `cd /opt/se && go build`.\n" +
 			"```sh\nse issue pull --take && se issue nest\n```\n" +
-			"`se help issue pull` takes words; `se --verbose help` has no such flag.\n",
+			"`se help issue pull` takes words; `se --verbose help` has no such flag.\n" +
+			"<!-- se:manifest help -->\n```text\nse <command> [flags]: what se issue in it says\n```\n<!-- /se:manifest -->\n",
 		"spec/a.yaml": "# the `se issue pull --person` list\n",
 		"notes.txt":   "`se frob` in a file that is not prose\n",
 	})
