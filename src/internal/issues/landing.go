@@ -111,11 +111,12 @@ type Facts struct {
 	Takeovers  int `yaml:"takeovers"`
 	MainMerges int `yaml:"main_merges"`
 	// BatteryMs is how long the battery this land ran took, Slowest its
-	// slowest tests, and Overruns each budget it went over; empty where the
-	// check left no profile.
-	BatteryMs int64    `yaml:"battery_ms,omitempty"`
-	Slowest   []string `yaml:"slowest_tests,omitempty"`
-	Overruns  []string `yaml:"budget_overruns,omitempty"`
+	// slowest Go tests, SlowestPlugin its slowest plugin tests, and Overruns
+	// each budget it went over; empty where the check left no profile.
+	BatteryMs     int64    `yaml:"battery_ms,omitempty"`
+	Slowest       []string `yaml:"slowest_tests,omitempty"`
+	SlowestPlugin []string `yaml:"slowest_plugin_tests,omitempty"`
+	Overruns      []string `yaml:"budget_overruns,omitempty"`
 }
 
 // Landed is the record a landing leaves on its issue.
@@ -224,6 +225,9 @@ func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 		f.BatteryMs, f.Overruns = profile.TotalMs, profile.Overruns
 		for _, t := range profile.Slowest {
 			f.Slowest = append(f.Slowest, t.String())
+		}
+		for _, t := range profile.SlowestPlugin {
+			f.SlowestPlugin = append(f.SlowestPlugin, t.String())
 		}
 	}
 	count := func(args ...string) (int, error) {
