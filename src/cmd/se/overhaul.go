@@ -13,7 +13,7 @@ func init() {
 		Usage:   "overhaul new [--unattended] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "start an overhaul: is the design still right?",
-		Details: "create an overhaul: an se issue labelled se-overhaul that checks SE as it stands against every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last 5 runs, and fire the routine so a box takes it at once. Its box creates the findings' issues, those for a person where controversial, and closes it: an overhaul never waits. --unattended records that no person started it; se issue next --take starts one so every 5 closed retros. spec/overhaul.md has the rules.",
+		Details: "create an overhaul: an se issue labelled se-overhaul that checks SE as it stands against every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last 5 runs, and fire the routine so a box takes it at once. Its box creates the findings' issues, those for a person where controversial, and closes it: an overhaul never waits. --unattended records that no person started it; se issue pull --take starts one so every 5 closed retros. spec/overhaul.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul new")

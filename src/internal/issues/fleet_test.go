@@ -193,7 +193,7 @@ func TestAConflictedPRIsFoundAndTakenOver(t *testing.T) {
 	w.pushed(7, recent)
 	w.pr(7, "false", "dirty", true)
 	f := only(t, w.check(), ConflictedPR, 7)
-	if f.PR != 70 || f.What != "PR #70 conflicts with main" || f.Remedy != "se issue next --take 7, merge origin/main into issue-7, make it green, se issue land" {
+	if f.PR != 70 || f.What != "PR #70 conflicts with main" || f.Remedy != "se issue pull --take 7, merge origin/main into issue-7, make it green, se issue land" {
 		t.Fatalf("%+v", f)
 	}
 	// A takeover in flight at this head is left to its box; one an hour old
@@ -215,7 +215,7 @@ func TestARedPRIsFoundOnceItIsQuiet(t *testing.T) {
 	}
 	w.pushed(7, quiet)
 	f := only(t, w.check(), RedPR, 7)
-	if f.What != "PR #70 fails check on its latest commit, and no push since 2026-10-13T09:00:00Z" || !strings.HasPrefix(f.Remedy, "se issue next --take 7") {
+	if f.What != "PR #70 fails check on its latest commit, and no push since 2026-10-13T09:00:00Z" || !strings.HasPrefix(f.Remedy, "se issue pull --take 7") {
 		t.Fatalf("%+v", f)
 	}
 }
@@ -381,7 +381,7 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 	f := only(t, w.check(), StalledRoot, 17)
 	if f.Cause != ConflictedPR || !reflect.DeepEqual(f.Holds, []int{38, 39, 51, 52}) ||
 		f.What != "nothing is ready, and #38, #39, #51, #52 wait on #17: PR #170 conflicts with main" ||
-		f.Remedy != "se issue next --take 17, merge origin/main into issue-17, make it green, se issue land" {
+		f.Remedy != "se issue pull --take 17, merge origin/main into issue-17, make it green, se issue land" {
 		t.Fatalf("%+v", f)
 	}
 	// Its remedy, run: the takeover was made once already, so #17 is
@@ -535,7 +535,7 @@ func TestTheTakeoverRemedyOfAStuckSubIssueLeafRuns(t *testing.T) {
 		}
 		f := got[0]
 		var n int
-		if _, err := fmt.Sscanf(f.Remedy, "se issue next --take %d,", &n); err != nil || n != 7 {
+		if _, err := fmt.Sscanf(f.Remedy, "se issue pull --take %d,", &n); err != nil || n != 7 {
 			t.Fatalf("pushed at %s: remedy %q", at, f.Remedy)
 		}
 		took, ok, err := Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}.Take(a, n)

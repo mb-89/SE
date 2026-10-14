@@ -60,7 +60,7 @@ func TestEveryCommandSaysWhatItIs(t *testing.T) {
 
 func TestTheSessionIsOfferedItsCommandsAlone(t *testing.T) {
 	want := map[string]bool{
-		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue next": true, "issue new": true, "issue land": true, "issue review": true, "ui": true, "fleet check": true, "fleet fix": true, "briefing": true,
+		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue pull": true, "issue new": true, "issue land": true, "issue review": true, "ui": true, "fleet check": true, "fleet fix": true, "briefing": true,
 		"serve": false, "start": false, "stop": false,
 	}
 	for name, offered := range want {
@@ -87,7 +87,7 @@ func TestTheHelpIsMadeFromTheRegistry(t *testing.T) {
 func TestTheHelpGroupsTheCommands(t *testing.T) {
 	want := map[string][]string{
 		"Session":  {"help", "off", "on", "restart", "status", "ui", "update"},
-		"Issues":   {"issue land", "issue new", "issue next", "issue resume", "issue review", "issue tree"},
+		"Issues":   {"issue land", "issue new", "issue pull", "issue resume", "issue review", "issue tree"},
 		"Daemon":   {"serve", "start", "stop"},
 		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune", "fleet refresh"},
 		"Retro":    {"retro collect", "retro new", "retro report"},
@@ -165,13 +165,13 @@ func TestAPipeAndASessionGetNoColour(t *testing.T) {
 }
 
 func TestTheHelpOfACommand(t *testing.T) {
-	code, out, _ := se(t, "help", "issue", "next")
+	code, out, _ := se(t, "help", "issue", "pull")
 	if code != 0 {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 	for _, want := range []string{
-		"se issue next [--in ROOT]",
-		"Name the next ready se issue",
+		"se issue pull [--in ROOT]",
+		"Pull the next ready se issue",
 		"Flags:\n",
 		"\n  --in ROOT          look inside the tree of issue ROOT for its ready leaves\n",
 		"\n  --take             claim the next ready issue",
@@ -188,12 +188,12 @@ func TestTheHelpOfACommand(t *testing.T) {
 			t.Errorf("%d characters: %q", len(line), line)
 		}
 	}
-	if _, flagged, _ := se(t, "issue", "next", "--help"); flagged != out {
-		t.Errorf("se issue next --help:\n%s\nwant:\n%s", flagged, out)
+	if _, flagged, _ := se(t, "issue", "pull", "--help"); flagged != out {
+		t.Errorf("se issue pull --help:\n%s\nwant:\n%s", flagged, out)
 	}
 	usage, rest, _ := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(out, "se"), "\n"), "\n\n")
-	if r := session(t, "help", "issue", "next"); r.Text != "/se"+usage+"\n```\n"+rest+"\n```" {
-		t.Errorf("/se help issue next:\n%s", r.Text)
+	if r := session(t, "help", "issue", "pull"); r.Text != "/se"+usage+"\n```\n"+rest+"\n```" {
+		t.Errorf("/se help issue pull:\n%s", r.Text)
 	}
 }
 
@@ -210,7 +210,7 @@ func TestHelpOfAnUnknownCommand(t *testing.T) {
 	if code, _, errs := se(t, "help", "frob"); code != 1 || !strings.Contains(errs, `"frob"`) {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
-	if _, out, _ := se(t, "help", "issue"); !strings.Contains(out, "  issue next") || strings.Contains(out, "  status") {
+	if _, out, _ := se(t, "help", "issue"); !strings.Contains(out, "  issue pull") || strings.Contains(out, "  status") {
 		t.Fatalf("se help issue: %q", out)
 	}
 }
@@ -285,7 +285,7 @@ func TestUiOffersTheButtonCommandsFromTheRegistry(t *testing.T) {
 	if r.Panel == nil {
 		t.Fatalf("ui opened no panel: %+v", r)
 	}
-	want := []string{"issue next", "restart", "status", "update"}
+	want := []string{"issue pull", "restart", "status", "update"}
 	if strings.Join(r.Panel.Buttons, ",") != strings.Join(want, ",") {
 		t.Errorf("ui offers %q, want %q", r.Panel.Buttons, want)
 	}
@@ -318,7 +318,7 @@ func TestOnlySessionCommandsWithoutTypedWordsAreButtons(t *testing.T) {
 }
 
 func TestNoSessionHelpOpensAFenceOnItsFirstLine(t *testing.T) {
-	for _, words := range [][]string{{"help"}, {"help", "issue"}, {"help", "issue", "next"}, {"issue", "next", "--help"}, {"frob"}} {
+	for _, words := range [][]string{{"help"}, {"help", "issue"}, {"help", "issue", "pull"}, {"issue", "pull", "--help"}, {"frob"}} {
 		r := session(t, words...)
 		if first, _, _ := strings.Cut(r.Text, "\n"); strings.Contains(first, "```") {
 			t.Errorf("/se %s opens a fence on its first line: %q", strings.Join(words, " "), first)
@@ -345,7 +345,7 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 			t.Errorf("%s stands under %q, want %q", name, listed[name], want)
 		}
 	}
-	one := session(t, "help", "issue", "next")
+	one := session(t, "help", "issue", "pull")
 	if one.Help == nil || one.Help.Usage == "" || one.Help.About == "" || len(one.Help.Groups) != 0 {
 		t.Fatalf("%+v", one.Help)
 	}

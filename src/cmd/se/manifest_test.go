@@ -89,10 +89,10 @@ func TestWriteFillsEveryManifestAndTheRulesHoldItThere(t *testing.T) {
 
 func TestTheRulesKnowSesCommands(t *testing.T) {
 	ws := prose(t, map[string]string{
-		"README.md": "# SE\n\nReader: a person meeting SE.\n\nRun `se issue next --take`, not `se issue next --tak` or `se issue take`.\n",
+		"README.md": "# SE\n\nReader: a person meeting SE.\n\nRun `se issue pull --take`, not `se issue pull --tak` or `se issue take`.\n",
 	})
 	code, _, errs := se(t, "--workspace", ws, "rules")
-	if code != 1 || !strings.Contains(errs, "README.md:5: se-command: se issue next takes no flag --tak") ||
+	if code != 1 || !strings.Contains(errs, "README.md:5: se-command: se issue pull takes no flag --tak") ||
 		!strings.Contains(errs, `README.md:5: se-command: se has no command "issue take"`) || strings.Count(errs, "se-command: ") != 2 {
 		t.Fatalf("rules (exit %d): %s", code, errs)
 	}
