@@ -13,6 +13,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "issue supersede",
+		Class:   batch,
 		Usage:   "issue supersede N (--body B | --body-file PATH) [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "close issue N by a final successor with its open questions",
