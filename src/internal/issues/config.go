@@ -2,120 +2,91 @@ package issues
 
 import (
 	"fmt"
-	"slices"
-	"strings"
+	"time"
 
-	"github.com/mb-89/SE/src/internal/io/github"
-	"gopkg.in/yaml.v3"
+	"github.com/mb-89/SE/src/internal/index"
 )
 
-// FleetConfigPath is the fleet's configuration, which se fleet check compares
-// with the live one (principle 22).
-const FleetConfigPath = "src/internal/issues/fleet.yaml"
+// Instance is the wiring's instance of Module, whose config the issue work reads.
+const Instance = "issues"
 
-// driftMark marks the issue a configuration drift went to, so it is reported
-// once while that issue is open.
-const driftMark = "<!-- se:fleet configuration-drift -->"
+// Module declares the issue work's config keys on the index, each with its
+// constant as the built-in value: the retro's and the overhaul's cadence, the
+// lease and the cap on a review's filed findings.
+var Module = index.Declare("issues", "The se issue work: the queue, its takes and leases, its reviews, and the cadences of retros and overhauls.",
+	index.Config("retro-cadence", RetroCadence, "How many se issues close between two retros: at this many closed since the last retro closed, se issue pull --take starts an unattended one."),
+	index.Config("overhaul-cadence", OverhaulCadence, "How many retros close between two overhauls: at this many closed since the last overhaul closed, se issue pull --take starts an unattended one; an overhaul reads the retro's last this many runs."),
+	index.Config("lease", Lease, "How long a claimed leaf may go without a push to its branch before it is stuck; it is under the routine's 4-hour schedule."),
+	index.Config("max-filed", MaxFiled, "How many non-blocking findings one review files as issues; the rest are counted, not filed."),
+)
 
-// fleetConfig is what se fleet check reads of src/internal/issues/fleet.yaml. The routine
-// is written there too, but no API the fleet has reads it.
-type fleetConfig struct {
-	Ruleset struct {
-		Branch         string   `yaml:"branch"`
-		RequiredChecks []string `yaml:"required_checks"`
-		Strict         bool     `yaml:"strict"`
-	} `yaml:"ruleset"`
+func init() { index.Register(Module) }
+
+// Settings are Module's config values.
+type Settings struct {
+	RetroCadence, OverhaulCadence, MaxFiled int
+	Lease                                   time.Duration
 }
 
-// rule is one rule GitHub applies to a branch.
-type rule struct {
-	Type       string `json:"type"`
-	Parameters struct {
-		Strict bool `json:"strict_required_status_checks_policy"`
-		Checks []struct {
-			Context string `json:"context"`
-		} `json:"required_status_checks"`
-	} `json:"parameters"`
+// Builtin is Module's config as its built-in values give it.
+func Builtin() Settings {
+	return Settings{RetroCadence: RetroCadence, OverhaulCadence: OverhaulCadence, MaxFiled: MaxFiled, Lease: Lease}
 }
 
-// drift compares src/internal/issues/fleet.yaml at main with main's live ruleset: each
-// difference is one configuration drift, which goes to a person, since only
-// a person decides which side is right. Without the file there is nothing to
-// compare. reported is the open issue a drift went to already, or 0.
-func (s Source) drift(t tree) ([]Finding, error) {
-	text, err := s.file(FleetConfigPath, "main")
-	if err != nil || text == "" {
-		return nil, err
+// Configured answers the settings of Instance from the wiring se carries.
+func Configured() (Settings, error) {
+	w, err := index.Wired()
+	if err != nil {
+		return Settings{}, err
 	}
-	var want fleetConfig
-	if err := yaml.Unmarshal([]byte(text), &want); err != nil {
-		return nil, fmt.Errorf("reading %s at main: %w", FleetConfigPath, err)
-	}
-	b := want.Ruleset.Branch
-	if b == "" {
-		return nil, fmt.Errorf("%s at main names no ruleset branch", FleetConfigPath)
-	}
-	rules, err := api[rule](s, fmt.Sprintf("repos/%s/rules/branches/%s", s.Repo, b), true)
-	if err != nil && github.Status(err) != 404 {
-		return nil, err
-	}
-	var live []string
-	strict := false
-	for _, r := range rules {
-		if r.Type != "required_status_checks" {
-			continue
-		}
-		strict = strict || r.Parameters.Strict
-		for _, c := range r.Parameters.Checks {
-			live = append(live, c.Context)
-		}
-	}
-	var differs []string
-	if missing := minus(want.Ruleset.RequiredChecks, live); len(missing) > 0 {
-		differs = append(differs, fmt.Sprintf("%s requires %s, which %s's live ruleset does not", FleetConfigPath, strings.Join(missing, ", "), b))
-	}
-	if extra := minus(live, want.Ruleset.RequiredChecks); len(extra) > 0 {
-		differs = append(differs, fmt.Sprintf("%s's live ruleset requires %s, which %s does not", b, strings.Join(extra, ", "), FleetConfigPath))
-	}
-	if strict != want.Ruleset.Strict && len(want.Ruleset.RequiredChecks) > 0 {
-		differs = append(differs, fmt.Sprintf("%s sets strict: %t, %s's live ruleset %t", FleetConfigPath, want.Ruleset.Strict, b, strict))
-	}
-	if len(differs) == 0 {
-		return nil, nil
-	}
-	f := Finding{Kind: ConfigDrift, judgment: true, What: strings.Join(differs, "; ")}
-	for _, n := range t.numbers() {
-		if strings.Contains(t.byNum[n].Body, driftMark) {
-			f.reported = n
-		}
-	}
-	return []Finding{f}, nil
+	return From(w)
 }
 
-// minus is what of a b lacks, in a's order.
-func minus(a, b []string) []string {
-	var out []string
-	for _, x := range a {
-		if !slices.Contains(b, x) {
-			out = append(out, x)
+// From answers the settings of Instance as the wiring w gives them, each read
+// through config/<key>. It starts an index of w's issues instances alone, so
+// it needs no other module.
+func From(w index.Wiring) (Settings, error) {
+	own := index.Wiring{}
+	for _, in := range w.Instances {
+		if in.Module == Module.Name() {
+			own.Instances = append(own.Instances, in)
 		}
 	}
-	return out
+	ix, err := index.Start(own, Module)
+	if err != nil {
+		return Settings{}, err
+	}
+	var s Settings
+	for key, into := range map[string]*int{"retro-cadence": &s.RetroCadence, "overhaul-cadence": &s.OverhaulCadence, "max-filed": &s.MaxFiled} {
+		if err := read(ix, key, into); err != nil {
+			return Settings{}, err
+		}
+	}
+	if err := read(ix, "lease", &s.Lease); err != nil {
+		return Settings{}, err
+	}
+	return s, nil
 }
 
-// reportDrift sends a configuration drift to a person, once while their
-// issue is open.
-func (s Source) reportDrift(x *Fixed) error {
-	if x.reported > 0 {
-		x.Did, x.Made = fmt.Sprintf("reported already as #%d, still open", x.reported), x.reported
-		return nil
-	}
-	title := "Configuration drift: " + x.What
-	body := fmt.Sprintf("Decide which side is right: set the live setting as %s says, or change %s to the live one.\n\nse fleet check found: %s.\n\n%s", FleetConfigPath, FleetConfigPath, x.What, driftMark)
-	made, err := s.ForPerson(title, body, 0, nil)
+// read reads Instance's config key into into.
+func read[T any](ix *index.Index, key string, into *T) error {
+	name := Instance + "/" + index.ConfigPrefix + key
+	v, err := ix.Read(name)
 	if err != nil {
 		return err
 	}
-	x.Made, x.Did = made.Number, fmt.Sprintf("reported it to a person as #%d", made.Number)
+	t, ok := v.V.(T)
+	if !ok {
+		return fmt.Errorf("%s is no %T: %v", name, *into, v.V)
+	}
+	*into = t
 	return nil
+}
+
+// config is the settings s runs under: its Config, else the built-in values.
+func (s Source) config() Settings {
+	if s.Config != nil {
+		return *s.Config
+	}
+	return Builtin()
 }

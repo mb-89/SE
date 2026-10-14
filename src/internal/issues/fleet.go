@@ -13,7 +13,7 @@ import (
 )
 
 // The kinds of finding se fleet check lists, in the order it lists them and
-// the coordination skill works them. spec/coordination.md says what each is.
+// the box, se:coordinator, works them. spec/coordination.md says what each is.
 const (
 	StalledRoot     = "stalled root"
 	ConflictedPR    = "conflicted PR"
@@ -124,6 +124,22 @@ func (s Source) Check() ([]Finding, error) {
 		return nil, err
 	}
 	return s.check(all, t)
+}
+
+// CheckFanOut is Check, and then se fleet check's part in the fan-out on the
+// same survey: a fan-out the routine refused, kept on the alive claims, fires
+// once its retry time has passed and the fleet still needs the box. fire is the fire itself; the
+// line says what happened, empty where no refused fan-out is kept.
+func (s Source) CheckFanOut(fire func() Shot) ([]Finding, string, error) {
+	all, t, err := s.survey()
+	if err != nil {
+		return nil, "", err
+	}
+	found, err := s.check(all, t)
+	if err != nil {
+		return nil, "", err
+	}
+	return found, s.retryFanOut(all, t, fire), nil
 }
 
 // check is Check on a survey already read.
@@ -700,7 +716,7 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 		return Issue{}, false, fmt.Errorf("#%d is final and stuck (%s), so it waits on #%d, an issue for a person", st.Number, f.What, held.Number)
 	}
 	heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, f.head)
-	body := fmt.Sprintf("Taken over: %s at %s. This box merges main into %s, makes it green and lands it again.", f.What, f.head, Branch(st.Number)) + heads
+	body := fmt.Sprintf("Taken over: %s at %s. This box merges main into %s, makes it green and lands it again.", f.What, f.head, Branch(st.Number)) + heads + s.boxLine()
 	won, err := s.markTakeover(st.Number, k, body)
 	if err != nil {
 		return Issue{}, false, err

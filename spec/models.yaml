@@ -1,9 +1,12 @@
-# The models SE runs, set here and nowhere else (spec/review.md).
-# box: what the routine's boxes run; the floor for every agent. No API the
-# fleet has reads the routine, so the owner sets it there by hand, as here
-# (src/internal/issues/fleet.yaml, principle 22).
-box: opus
-# reviewer: what a gate's reviewer sub-agent runs, never weaker than box:
-# a stronger model where one is available. The work skill reads this line
-# through `se issue pull --in ROOT --take --json` ("model" of each review).
+# The model each of SE's agents runs, set here and nowhere else. Each agent's
+# front matter (src/plugin/agents/<name>.md) names the same model, which the
+# rule agents holds to this file. The routine's boxes run coordinator, the
+# floor for every agent; reviewer is never weaker: a stronger model where one
+# is available. No API the fleet has reads the routine, so the owner sets its
+# model there by hand, as coordinator says (src/internal/issues/fleet.yaml,
+# principle 23).
+worker: opus
+coordinator: opus
 reviewer: opus
+retro: opus
+overhaul: opus

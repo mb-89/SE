@@ -1,7 +1,7 @@
-# The fleet's configuration, set here and nowhere else (spec/principles.md, principle 22). se fleet
-# check reads this file at main and compares what an API the fleet has can read
-# with the live setting; a difference is a configuration drift, for a person
-# (spec/coordination.md). A setting no such API reads is written down here all
+# The fleet's configuration, set here and nowhere else (spec/principles.md,
+# principle 23). se fleet check reads this file at main and compares what an
+# API the fleet has can read with the live setting; a difference is a
+# configuration drift, for a person (spec/coordination.md). A setting no such API reads is written down here all
 # the same, and says so. The models the boxes run are in spec/models.yaml.
 
 # ruleset: main's ruleset on GitHub, which se fleet check reads.
@@ -15,10 +15,10 @@ ruleset:
 # routine: the claude.ai routine that starts every box (spec/issues.md, "The
 # routine"). No API the fleet has reads or writes it, so se fleet check does
 # not compare it: the owner sets it by hand, as written here. Its model is
-# box: in spec/models.yaml.
+# coordinator: in spec/models.yaml.
 routine:
   name: SE work
-  prompt: run the work skill
+  prompt: work as se:coordinator
   triggers:
     - "github: pull_request.closed, is-merged = true, base branch = main"
     - "schedule: every 4 hours"

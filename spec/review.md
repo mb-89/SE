@@ -4,9 +4,9 @@ Reader: whoever changes how a gate is reviewed, and the reviewer checking a rule
 
 A gate is an issue labelled `se-review` (see [Reviews](issues.md#reviews)): it
 is reviewed once its sub-issues have closed, by an agent that worked none of
-them. These rules say **how** that agent works. The skill `se:review`
-([src/plugin/skills/review/SKILL.md](../src/plugin/skills/review/SKILL.md)) is
-how a reviewer follows them; `se review brief` and `se issue review` (in
+them. These rules say **how** that agent works. The agent `se:reviewer`
+(see the agents in [spec/issues.md](issues.md#the-box)) is how a reviewer
+follows them; `se review brief` and `se issue review` (in
 `src/internal/issues`) enforce what can be enforced.
 
 ## What it is built on
@@ -38,17 +38,9 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
      The default brief does not even read them. After that,
      `se review brief <n> --claims` shows them as claims to check, never as
      evidence.
-2. **The steps:**
-   1. Restate what the ask requires, in your own words.
-   2. Review the riskiest part first. If letting it through would do damage,
-      say so and stop early.
-   3. Run the tests and reproduce each requirement directly. Check that no
-      test was weakened, deleted or special-cased.
-   4. **Find** in two independent passes with different focus.
-   5. **Verify** each candidate with evidence: a file and line, or a command
-      and its output. Drop anything unproven.
-   6. **Judge** each verified finding as blocking or not, by rule 3. A
-      verified blocker is not downgraded without counter-evidence.
+2. **The steps are the reviewer agent's:** finding, verifying and judging are
+   separate steps, and the riskiest part comes first, so a reviewer that
+   finds damage can stop early. A verified blocker is judged by rule 3.
 3. **What blocks (the owner's rule): only damage.** A finding blocks only if
    letting the work through would make the product worse, or goes against
    what the product is about. Breakage is CI's job. Bad but fixable work does
@@ -64,7 +56,7 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
    - a blocking one becomes a sub-issue of the gate, so the gate is reviewed
      again after it lands.
 
-   At most `MaxFiled` non-blocking findings are filed; the rest are
+   At most `issues/config/max-filed` non-blocking findings are filed; the rest are
    counted in the report, not filed.
 5. **Final is general: any second attempt is final, and a failing final
    issue waits on an issue for a person (the owner's rule).** Labels combine: `se` marks
@@ -112,10 +104,10 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
    review writes nothing.
 8. **The reviewer's model:** a stronger model than the boxes run, where one
    is available. The choice is one line, `reviewer:` in
-   [spec/models.yaml](models.yaml). `se issue pull --in ROOT --take --json`
-   names it as each review's `model`, and the work skill starts the reviewer
-   sub-agent on it. Today's box model is the floor; the reviewer is never
-   weaker.
+   [spec/models.yaml](models.yaml), which the agent's front matter names
+   too (the rule `agents` holds them equal). `se issue pull --in ROOT --take
+   --json` names each review's `agent`, and the box starts it. Today's box
+   model is the floor; the reviewer is never weaker.
 9. **The retro** ([#40](https://github.com/mb-89/SE/issues/40)) counts
    reviews in its window: how many ran; passed or blocked; findings filed;
    `se-final` issues that failed; findings later confirmed (their issue
@@ -124,19 +116,9 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
 
 ## The report
 
-`se issue review pass|fail N --report PATH` reads the report as JSON; an
-unknown field is refused, so a typo never drops a section:
-
-    {
-      "commit": "<the pinned commit the brief named>",
-      "requirements": [{"item": "...", "evidence": "...", "blocker": 0}],
-      "findings": [{"title": "...", "evidence": "...", "blocking": true, "why": "...", "repeats": 0}],
-      "clean": ["..."]
-    }
-
-`blocker` (a requirement) and `repeats` (a finding) are for a re-review only:
-the earlier blocker the item checks, and the earlier blocker whose problem a
-finding shows again. A finding's `title` becomes its issue's title.
+`se issue review pass|fail N --report PATH` reads the report as JSON, in the
+shape the reviewer agent's step 9 gives; an unknown field is refused, so a typo
+never drops a section.
 
 ## The commands
 
