@@ -199,6 +199,31 @@ func TestEachRuleCheck(t *testing.T) {
 	}
 }
 
+func TestTheAnswersCheckSkipsWhatLandsNoBranch(t *testing.T) {
+	a := retroRepo(t, true, "<!-- se:retro attended -->")
+	key := "repos/o/r/issues?labels=se&state=closed&per_page=100" + since
+	at := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	person := closedJSON(27, "completed", at, NewMark, "")
+	person = strings.Replace(person, `[{"name":"se"}]`, `[{"name":"se"},{"name":"se-person"}]`, 1)
+	overhaul := closedJSON(28, "completed", at, NewMark, "")
+	overhaul = strings.Replace(overhaul, `[{"name":"se"}]`, `[{"name":"se"},{"name":"se-overhaul"}]`, 1)
+	a[key] = strings.TrimSuffix(a[key], "]") + "," + person + "," + overhaul + "]"
+	a["repos/o/r/issues/27/comments?per_page=100"] = `[]`
+	a["repos/o/r/issues/28/comments?per_page=100"] = `[]`
+	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rows(c); !reflect.DeepEqual(got, []int{23, 24, 25, 26, 27, 28}) {
+		t.Fatalf("rows %v", got)
+	}
+	for _, x := range c.Checks {
+		if x.Kind == "answers" && x.Subject != "#24" {
+			t.Fatalf("a person's decision or an overhaul broke the answers check: %+v", x)
+		}
+	}
+}
+
 func TestTheCountsAndScripts(t *testing.T) {
 	c := collect(t, true)
 	want := Metrics{

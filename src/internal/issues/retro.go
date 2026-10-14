@@ -139,7 +139,7 @@ var checkKinds = []RuleCheck{
 	{"ci", "every merged PR had green CI (the last run of each check on its head)", 0},
 	{"outside-pr", "no commit reached main outside a PR (every commit on main is some merged PR's merge commit)", 0},
 	{"mark", "every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body", 91},
-	{"answers", "every landed issue (a leaf closed as completed, not a retro) has landing answers", 74},
+	{"answers", "every landed issue (a leaf closed as completed, not a retro, an overhaul or a person's decision) has landing answers", 74},
 }
 
 // RuleChecks are the rule checks, in the order the report lists them.
@@ -441,7 +441,9 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 		}
 	}
 	parent := x.SubIssues != nil && x.SubIssues.Total > 0
-	work := x.StateReason == "completed" && !parent && !x.labelled(RetroLabel)
+	// A retro, an overhaul or a person's decision lands no branch, so it has
+	// no landing answers by design.
+	work := x.StateReason == "completed" && !parent && !x.labelled(RetroLabel) && !x.labelled(OverhaulLabel) && !x.labelled(PersonLabel)
 	if landed != nil {
 		r.Answers = landed.Answers
 	} else if work {
