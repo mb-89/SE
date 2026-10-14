@@ -1,6 +1,7 @@
 package battery_test
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -20,10 +21,27 @@ echo "golangci-lint $*" >>`+log)
 echo "biome $*" >>`+log)
 }
 
+// onPath runs every program on a PATH of bin alone, as check does.
+type onPath struct {
+	proc.Procs
+	bin string
+}
+
+func (p onPath) Run(c proc.Cmd) error {
+	c.Env = []string{"PATH=" + p.bin}
+	for _, v := range os.Environ() {
+		if !strings.HasPrefix(v, "PATH=") {
+			c.Env = append(c.Env, v)
+		}
+	}
+	return p.Procs.Run(c)
+}
+
 func TestFmtRunsEveryFormatterTheBatteryChecks(t *testing.T) {
+	t.Parallel()
 	dir, bin, log := freshBox(t)
 	linters(t, bin, log)
-	if _, err := battery.Format(proc.Real(), dir); err != nil {
+	if _, err := battery.Format(onPath{proc.Real(), bin}, dir); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := calls(t, log), "golangci-lint fmt ./...\nbiome check --write\n"; got != want {
@@ -32,6 +50,7 @@ func TestFmtRunsEveryFormatterTheBatteryChecks(t *testing.T) {
 }
 
 func TestFmtInstallsAMissingFormatterFirst(t *testing.T) {
+	t.Parallel()
 	ln, err := exec.LookPath("ln")
 	if err != nil {
 		t.Skipf("ln is missing: %v", err)
@@ -43,7 +62,7 @@ func TestFmtInstallsAMissingFormatterFirst(t *testing.T) {
 	stub(t, bin, "go", `[ "$1 $2" = "env GOPATH" ] && { echo `+filepath.Join(bin, "gopath")+`; exit 0; }
 echo "go $*" >>`+log+`; `+ln+` -s `+filepath.Join(stand, "golangci-lint")+` `+filepath.Join(bin, "golangci-lint"))
 	stub(t, bin, "npm", `echo "npm $*" >>`+log+`; `+ln+` -s `+filepath.Join(stand, "biome")+` `+filepath.Join(bin, "biome"))
-	if _, err := battery.Format(proc.Real(), dir); err != nil {
+	if _, err := battery.Format(onPath{proc.Real(), bin}, dir); err != nil {
 		t.Fatal(err)
 	}
 	got := strings.Split(strings.TrimSpace(calls(t, log)), "\n")
@@ -59,16 +78,18 @@ echo "go $*" >>`+log+`; `+ln+` -s `+filepath.Join(stand, "golangci-lint")+` `+fi
 }
 
 func TestAFailedFormatterFailsFmt(t *testing.T) {
+	t.Parallel()
 	dir, bin, log := freshBox(t)
 	linters(t, bin, log)
 	stub(t, bin, "biome", `[ "$1" = --version ] && { echo "Version: `+pin(t, "BIOME")+`"; exit 0; }
 echo "biome: 1 error left"; exit 1`)
-	if _, err := battery.Format(proc.Real(), dir); err == nil || !strings.Contains(err.Error(), "1 error left") {
+	if _, err := battery.Format(onPath{proc.Real(), bin}, dir); err == nil || !strings.Contains(err.Error(), "1 error left") {
 		t.Errorf("err = %v, want biome's finding", err)
 	}
 }
 
 func TestFmtNeedsTheToolsScript(t *testing.T) {
+	t.Parallel()
 	if _, err := battery.Format(proc.Real(), t.TempDir()); err == nil {
 		t.Error("formatted a checkout without the tools script")
 	}
