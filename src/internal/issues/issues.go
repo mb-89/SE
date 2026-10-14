@@ -50,8 +50,8 @@ type Issue struct {
 	// Blocks names the open issues it blocks, where a take read them: what
 	// is left of it may hold up those that need it (se issue new --blocks).
 	Blocks []int `json:"blocks,omitempty"`
-	// id is GitHub's id of an issue se just created, which a link takes,
-	// and in the parent it was made a sub-issue of.
+	// id is GitHub's id of an issue se just created, which a link takes;
+	// in is the parent it was made a sub-issue of.
 	id int64
 	in int
 }
