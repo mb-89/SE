@@ -161,3 +161,20 @@ func TestTheRulesSeeWhatGitTracksAndIgnores(t *testing.T) {
 		t.Fatal("the rules see a/bin, a folder git ignores only as a folder, as kept, or a/gone as ignored")
 	}
 }
+
+func TestAMergeInProgressListsAnUnmergedFileOnce(t *testing.T) {
+	t.Parallel()
+	m := proc.NewFake()
+	m.Install("git", func(c proc.Cmd) int {
+		if strings.Join(c.Args, " ") == "ls-files -z --cached --others --exclude-standard" {
+			// git lists an unmerged file once per stage: base, ours, theirs.
+			_, _ = fmt.Fprint(c.Stdout, "spec/a.md\x00spec/b.md\x00spec/b.md\x00spec/b.md\x00spec/c.md\x00")
+			return 0
+		}
+		return 1
+	})
+	repo, err := repoOf(disk.NewFake(), m, "/ws")
+	if err != nil || strings.Join(repo.Paths, " ") != "spec/a.md spec/b.md spec/c.md" {
+		t.Fatalf("%v %v", repo, err)
+	}
+}

@@ -51,14 +51,22 @@ func init() {
 }
 
 // repoOf is the checkout at root as the rules see it: the files git tracks or
-// would track (ignored ones, like .se/.runtime, are not SE's), the paths it
+// would track (ignored ones, like .se/.runtime, are not SE's), each once though
+// a merge in progress lists an unmerged file once per stage, the paths it
 // ignores, se's commands and its manifests. It reads on d and runs git on procs.
 func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
 	var out bytes.Buffer
 	if err := procs.Run(proc.Cmd{Name: "git", Args: []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}, Dir: root, Stdout: &out}); err != nil {
 		return nil, fmt.Errorf("git ls-files: %w", err)
 	}
-	paths := strings.Split(strings.TrimRight(out.String(), "\x00"), "\x00")
+	var paths []string
+	seen := map[string]bool{}
+	for _, p := range strings.Split(strings.TrimRight(out.String(), "\x00"), "\x00") {
+		if !seen[p] {
+			seen[p] = true
+			paths = append(paths, p)
+		}
+	}
 	return &rules.Repo{
 		Root:  root,
 		Disk:  d,
