@@ -42,6 +42,7 @@ command_classes:
   briefing: github
   fleet check: github
   fleet fix: github
+  fleet plugins: github
   fleet prune: github
   fleet refresh: github
   fleet rules: battery
@@ -49,6 +50,7 @@ command_classes:
   help: instant
   hook prompt: local
   hook stop: local
+  issue close: github
   issue edit: github
   issue land: battery
   issue new: github
