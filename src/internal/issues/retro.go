@@ -23,8 +23,9 @@ const unattendedMark = "<!-- se:retro unattended -->"
 // RetroIssue is the retro se retro new created.
 type RetroIssue struct {
 	Issue
-	// Previous is the last closed retro, whose closing opens this one's
-	// window; 0 where there is none, and the window is the whole history.
+	// Previous is the last closed retro with a report, whose closing opens
+	// this one's window; 0 where there is none, and the window is the whole
+	// history.
 	Previous   int  `json:"previous"`
 	Unattended bool `json:"unattended"`
 }
@@ -35,10 +36,27 @@ type past struct {
 	ClosedAt time.Time `json:"closed_at"`
 }
 
-// lastRetro is the closed retro that closed last, apart from n; ok is false
-// where none has closed.
-func (s Source) lastRetro(n int) (last past, ok bool, all []past, err error) {
-	return s.lastClosed(RetroLabel, n)
+// lastRetro is the closed retro that closed last with a report posted, apart
+// from n, and all closed retros, oldest first, with their reports (nil where
+// one has none); ok is false where none has a report. A retro closed without
+// one, as a duplicate is, does not count: its window and findings are the
+// reported one's.
+func (s Source) lastRetro(n int) (last past, ok bool, all []past, reports []*RetroReport, err error) {
+	_, _, all, err = s.lastClosed(RetroLabel, n)
+	if err != nil {
+		return past{}, false, nil, nil, err
+	}
+	for _, r := range all {
+		rep, err := s.postedReport(r.Number)
+		if err != nil {
+			return past{}, false, nil, nil, err
+		}
+		reports = append(reports, rep)
+		if rep != nil {
+			last, ok = r, true
+		}
+	}
+	return last, ok, all, reports, nil
 }
 
 // lastClosed is the closed issue labelled label that closed last, apart from
@@ -65,11 +83,11 @@ func (s Source) lastClosed(label string, n int) (last past, ok bool, all []past,
 // person's field feedback ("" for none), unattended says nobody waits for its
 // report. It goes through the same code as se issue new.
 func (s Source) NewRetro(field string, unattended bool) (RetroIssue, error) {
-	last, ok, _, err := s.lastRetro(0)
+	last, ok, _, _, err := s.lastRetro(0)
 	if err != nil {
 		return RetroIssue{}, err
 	}
-	window := "the repository's whole history: no retro has closed yet"
+	window := "the repository's whole history: no retro has closed with a report yet"
 	r := RetroIssue{Unattended: unattended}
 	if ok {
 		r.Previous = last.Number
@@ -199,7 +217,8 @@ type Collected struct {
 	Before  map[string]int
 	Scripts []Script
 	Metrics Metrics
-	// Previous is the last closed retro's report, Score how it fared; History
+	// Previous is the last closed retro's report (a retro closed without one is
+	// skipped), Score how it fared; History
 	// is every closed retro's metrics, oldest first.
 	Previous *RetroReport
 	Score    *Score
@@ -242,18 +261,15 @@ func (s Source) Collect(n int) (Collected, error) {
 		return Collected{}, err
 	}
 	c := Collected{Retro: n, Attended: !strings.Contains(i.Body, unattendedMark), Window: RetroWindow{Until: s.now().UTC().Truncate(time.Second)}}
-	last, ok, retros, err := s.lastRetro(n)
+	last, ok, retros, reports, err := s.lastRetro(n)
 	if err != nil {
 		return Collected{}, err
 	}
 	if ok {
 		c.Window.Previous, c.Window.Since = last.Number, last.ClosedAt.UTC()
 	}
-	for _, r := range retros {
-		rep, err := s.postedReport(r.Number)
-		if err != nil {
-			return Collected{}, err
-		}
+	for k, r := range retros {
+		rep := reports[k]
 		if rep == nil {
 			continue
 		}

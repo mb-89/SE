@@ -22,8 +22,10 @@ What earlier versions taught, and how this design answers it:
 ## The rules
 
 - **A retro is an issue** labelled `se` and `se-retro`. Its window is
-  everything closed since the last closed `se-retro` issue closed, read from
-  GitHub. The first retro covers the repository's whole history.
+  everything closed since the last closed `se-retro` issue with a report
+  closed, read from GitHub, and that retro is the one it scores. A retro
+  closed without a report, as a duplicate is, does not count. The first
+  retro covers the repository's whole history.
 - **Starting one:** `se retro new` creates the issue (through the same code as
   `se issue new`) and fires the routine, as fan-out does, so a box takes it at
   once.

@@ -242,6 +242,25 @@ func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
 	}
 }
 
+// A duplicate retro, closed without a report after the reported #20, is not a
+// retro: the window opens at #20 and #20 is scored.
+func TestADuplicateRetroClosedWithoutAReportLeavesTheReportedOneAsPrevious(t *testing.T) {
+	t.Parallel()
+	a := retroRepo(t, true, "<!-- se:retro attended -->")
+	a["repos/o/r/issues?labels=se-retro&state=closed&per_page=100"] = `[{"number":10,"state":"closed","closed_at":"2026-09-01T00:00:00Z"},{"number":20,"state":"closed","closed_at":"2026-10-01T00:00:00Z"},{"number":21,"state":"closed","closed_at":"2026-10-01T00:00:08Z"}]`
+	a["repos/o/r/issues/21/comments?per_page=100"] = jsonComments("Closed as a duplicate of #20.")
+	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Window.Previous != 20 || !c.Window.Since.Equal(prevClosed) {
+		t.Fatalf("%+v", c.Window)
+	}
+	if c.Previous == nil || c.Previous.Retro != 20 || c.Score == nil || c.Score.Retro != 20 {
+		t.Fatalf("the reported #20 is scored: %+v %+v", c.Previous, c.Score)
+	}
+}
+
 func TestThePreviousRetroIsScored(t *testing.T) {
 	t.Parallel()
 	c := collect(t, true)

@@ -51,7 +51,7 @@ func init() {
 				}{r, fanout})
 				return Reply{Text: string(data)}, err
 			}
-			window := "the whole history: no retro has closed yet"
+			window := "the whole history: no retro has closed with a report yet"
 			if r.Previous > 0 {
 				window = fmt.Sprintf("everything closed since #%d closed", r.Previous)
 			}
