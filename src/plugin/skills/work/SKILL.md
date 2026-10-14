@@ -7,6 +7,10 @@ description: Take the next ready se issue, do its work, and land it with se issu
 
 Reader: the agent of a box, running this skill.
 
+If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../../spec/principles.md), the one place this rule lives).
+An issue for a person is only for access or a principle, a side issue beside
+your PR, never the way you end.
+
 Every step that can be an `se` command is one. Yours are doing the issue's
 work and fixing a red CI run; follow the rest as written. `se` is
 `./src/plugin/bin/se`; build it first with
@@ -50,13 +54,15 @@ those.
    `./src/plugin/bin/se issue new` (its `--blocked-by` is required: a list, or
    `none`; `--parent` makes it a sub-issue).
 7. **You always end, and never stuck.** Land what you could. Where something
-   is left over, file it with `./src/plugin/bin/se issue new`: with `--person`
-   where it needs the owner's input (its body opens with what they decide),
-   without it where any box can do it. You may land an issue with open points
+   is left over, file it with `./src/plugin/bin/se issue new`, its decision
+   named, so any box can do it; with `--person --why access|principle --what
+   TEXT` only where only the owner can (a setting, an account, a secret, a
+   permission or a payment only they have, or a change to a design
+   principle). You may land an issue with open points
    once they are in an issue. Of the issues your take said yours blocks, name
    in `--blocks` only those that need what you left over, so nothing waits
    that need not. Where you can land nothing at all (a refused push, say),
-   file the issue for a person with `--blocks <n>`, your own issue, say what
+   file the issue for a person (`--why access`) with `--blocks <n>`, your own issue, say what
    you have and where, and end. Never end with only a comment.
 
 ## A parent

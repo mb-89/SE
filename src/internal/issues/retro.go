@@ -191,7 +191,10 @@ type Collected struct {
 	PRs      int
 	Commits  int
 	Reruns   int
-	Checks   []Broken
+	// ForPerson counts the issues for a person (se-person) created in the
+	// window: the last resort, held to PersonBudget per closed issue.
+	ForPerson int
+	Checks    []Broken
 	// Before counts, by kind, what broke a rule in the window before the PR
 	// that brought it merged; Checks leaves it out.
 	Before  map[string]int
@@ -336,6 +339,19 @@ func (s Source) Collect(n int) (Collected, error) {
 		if !viaPR[m.SHA] {
 			subject, _, _ := strings.Cut(m.Commit.Message, "\n")
 			c.Checks = append(c.Checks, Broken{"outside-pr", "commit " + short(m.SHA), subject + ": no merged PR made it"})
+		}
+	}
+
+	persons, err := api[struct {
+		Number    int       `json:"number"`
+		CreatedAt time.Time `json:"created_at"`
+	}](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=all&per_page=100%s", s.Repo, PersonLabel, c.Window.since()), true)
+	if err != nil {
+		return Collected{}, err
+	}
+	for _, p := range persons {
+		if c.Window.holds(p.CreatedAt) {
+			c.ForPerson++
 		}
 	}
 
@@ -547,16 +563,24 @@ type Metrics map[string]float64
 
 // metricNames are the metrics, in the order the report lists them.
 var metricNames = []string{
-	"closed", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand",
-	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue",
+	"closed", "conflicts", "takeovers", "ci_reruns", "person_flags", "person_issues", "by_hand",
+	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "person_issues_per_issue", "by_hand_per_issue",
 	"claim_to_merge_minutes",
 }
+
+// countNames are the metrics counted in the window, each also per closed issue.
+var countNames = []string{"conflicts", "takeovers", "ci_reruns", "person_flags", "person_issues", "by_hand"}
+
+// PersonBudget is the soft budget of issues for a person per closed issue: an
+// issue for a person is the last resort (spec/principles.md, principle 15).
+// Over it, the report says so; it refuses nothing.
+const PersonBudget = 0.1
 
 // lowerIsBetter says which way a metric should move; closed is a size.
 func lowerIsBetter(name string) bool { return name != "closed" }
 
 func (c Collected) measure() Metrics {
-	m := Metrics{"closed": float64(len(c.Rows)), "ci_reruns": float64(c.Reruns)}
+	m := Metrics{"closed": float64(len(c.Rows)), "ci_reruns": float64(c.Reruns), "person_issues": float64(c.ForPerson)}
 	var minutes []int
 	for _, r := range c.Rows {
 		m["conflicts"] += float64(r.Conflicts)
@@ -569,7 +593,7 @@ func (c Collected) measure() Metrics {
 			minutes = append(minutes, r.Minutes)
 		}
 	}
-	for _, name := range []string{"conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand"} {
+	for _, name := range countNames {
 		m[name+"_per_issue"] = 0
 		if len(c.Rows) > 0 {
 			m[name+"_per_issue"] = round2(m[name] / float64(len(c.Rows)))

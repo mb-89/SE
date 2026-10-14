@@ -95,13 +95,28 @@ principle is one sentence and one paragraph, and names what checks it.
     it cannot decide.
     Checked by: overhaul, by judgment.
 
-15. **Persons decide, agents execute.**
-    Anything controversial goes to a person; everything else flows without
-    one. It goes as an issue minted for the person, and only such an issue
-    waits on one: every run ends, a box landing what it could and filing
-    the rest, a retro or an overhaul closing once its issues exist. What
-    needs the person's answer is blocked by their issue, and nothing else is.
-    Checked by: retro, mechanically (`se-person` counts); overhaul, by judgment.
+15. **Agents decide, persons review.**
+    Better to ask for forgiveness than for permission. An agent that can make
+    a decision makes it, names it, and goes on; a person looks at the named
+    decisions afterwards, in the review and the retro, and says where one was
+    wrong. Needing a decision is never a reason to stop. Neither is being
+    unsure, a merge conflict, a trade-off between two metrics, or a fix that
+    failed once. If you can do something yourself, you do it yourself.
+    A person is needed only for what only a person can do, and an issue for
+    a person is the last resort, for one of two kinds:
+    - **access**: a setting, an account, a secret, a permission or a payment
+      only the owner has (a repository ruleset, say);
+    - **principle**: a change to a design principle.
+    `se issue new --person` refuses anything else (`--why access|principle`,
+    and a sentence saying what only the person can do). Such an issue is a
+    side issue beside the work: every run still ends, a box landing what it
+    could, a retro or an overhaul closing once its issues exist. What needs the
+    person's answer is blocked by their issue, and nothing else is. Every
+    landing names its decisions (`decisions` in
+    [landing.yaml](landing.yaml)).
+    Checked by: retro, mechanically (issues for a person per closed issue,
+    against a soft budget, and the window's named decisions listed for the
+    owner); overhaul, by judgment.
 
 16. **Blameless.**
     Fix what produced a bad outcome (a rule, a tool, a prompt), never just the

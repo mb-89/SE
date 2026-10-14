@@ -273,7 +273,7 @@ func TestIssueLandNamesThePR(t *testing.T) {
 		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
 	}
 	code, out, errs = se(t, "issue", "land", "--answers", answers, "--workspace", ws, "--repo", "o/r")
-	if code == 0 || !strings.Contains(errs, "missing: decided, well,") || checked != "" {
+	if code == 0 || !strings.Contains(errs, "missing: decisions, well,") || checked != "" {
 		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
 	}
 	all := ""
@@ -448,12 +448,19 @@ func TestATakeNamesWhatTheIssueBlocks(t *testing.T) {
 
 func TestWhatABoxLeavesOverIsAnIssueForAPersonThatBlocksOnlyWhatNeedsIt(t *testing.T) {
 	gh := recordedIssues(t)
-	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "decide the last 5%", "--blocked-by", "none", "--person", "--blocks", "3")
+	// Without a why, access or principle, it is refused, and nothing is written.
+	for _, why := range [][]string{{}, {"--why", "unsure", "--what", "pick one"}, {"--why", "access"}} {
+		args := append([]string{"issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--person"}, why...)
+		if code, _, errs := se(t, args...); code == 0 || !strings.Contains(errs, "an issue for a person") || len(gh.Writes()) != 0 {
+			t.Fatalf("%v: exit %d, %q, wrote %q", why, code, errs, gh.Writes())
+		}
+	}
+	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "turn on the ruleset", "--blocked-by", "none", "--person", "--why", "access", "--what", "Only the owner can change the repository's rulesets.", "--blocks", "3")
 	if code != 0 || !strings.Contains(out, "It blocks #3.") || !strings.Contains(out, "For a person: labelled se-person") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	made := issueOf(t, gh, 10)
-	if !strings.Contains(made, `{"name":"se-person"}`) || !strings.Contains(made, `"assignees":[{"login":"o"}]`) ||
+	if !strings.Contains(made, `**For a person (access):** Only the owner can change the repository's rulesets.`) || !strings.Contains(made, `{"name":"se-person"}`) || !strings.Contains(made, `"assignees":[{"login":"o"}]`) ||
 		!reflect.DeepEqual(linked(t, gh, "repos/o/r/issues/3/dependencies/blocked_by"), []int{10}) {
 		t.Fatalf("%s; #3 is blocked by %v", made, linked(t, gh, "repos/o/r/issues/3/dependencies/blocked_by"))
 	}

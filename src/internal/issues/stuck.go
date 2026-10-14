@@ -160,7 +160,7 @@ func (s Source) toPerson(st *Status) error {
 func (s Source) hold(i Issue, reason string) (Issue, error) {
 	title := fmt.Sprintf("Decide how #%d goes on: %s", i.Number, i.Title)
 	body := fmt.Sprintf("%s\n\n#%d (%s) is blocked by this issue. Decide how it goes on, say so here, and close this issue: #%d is then back in the queue with a fresh attempt.", reason, i.Number, i.URL, i.Number)
-	made, err := s.ForPerson(title, body, 0, nil)
+	made, err := s.ForPerson(title, body, Why{Kind: WhyAccess, What: holdWhat}, 0, nil)
 	if err != nil {
 		return Issue{}, fmt.Errorf("giving #%d to a person: %w", i.Number, err)
 	}
@@ -182,12 +182,52 @@ func (s Source) hold(i Issue, reason string) (Issue, error) {
 	return made, nil
 }
 
+// The two kinds of thing only a person can do (spec/principles.md, principle
+// 15): access, a setting, an account, a secret, a permission or a payment only
+// the owner has; and principle, a change to a design principle. Anything else
+// a box decides itself, names, and goes on.
+const (
+	WhyAccess    = "access"
+	WhyPrinciple = "principle"
+)
+
+// WhyKinds are the kinds an issue for a person may give.
+var WhyKinds = []string{WhyAccess, WhyPrinciple}
+
+// Why says why an issue goes to a person: its Kind, one of WhyKinds, and What
+// only the person can do there, in a sentence.
+type Why struct {
+	Kind string `json:"kind"`
+	What string `json:"what"`
+}
+
+// check refuses a Why that is not access or principle, or says nothing.
+func (w Why) check() error {
+	if !contains(WhyKinds, w.Kind) {
+		return fmt.Errorf("an issue for a person needs a why, %s, not %q: a decision a box can make is the box's to make, name and go on with (spec/principles.md, principle 15)", strings.Join(WhyKinds, " or "), w.Kind)
+	}
+	if strings.TrimSpace(w.What) == "" {
+		return fmt.Errorf("an issue for a person (%s) needs a sentence saying what only the person can do", w.Kind)
+	}
+	return nil
+}
+
+// holdWhat is what only the person can do for an issue hold takes out of the
+// queue: its boxes have spent their attempts, so what stops them is taken to
+// be beyond a box's reach.
+const holdWhat = "Its boxes spent their last attempt; give what a box cannot reach (a permission, a setting, a secret), or say how it goes on."
+
 // ForPerson creates an issue for a person, through the same code as se issue
 // new: labelled se and se-person and assigned to the repository's owner, so
 // GitHub notifies them and no box is offered it, a sub-issue of parent where
-// that is above zero, and blocked by each of blockedBy. These are the only
-// issues that wait on a person.
-func (s Source) ForPerson(title, body string, parent int, blockedBy []int) (Issue, error) {
+// that is above zero, and blocked by each of blockedBy. Its body opens with
+// why: it refuses, creating nothing, anything but access or a principle.
+// These are the only issues that wait on a person.
+func (s Source) ForPerson(title, body string, why Why, parent int, blockedBy []int) (Issue, error) {
+	if err := why.check(); err != nil {
+		return Issue{}, err
+	}
+	body = fmt.Sprintf("**For a person (%s):** %s\n\n%s", why.Kind, strings.TrimSpace(why.What), body)
 	made, _, err := s.create(title, body, parent, blockedBy, []string{Label, PersonLabel})
 	if err != nil {
 		return Issue{}, err

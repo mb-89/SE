@@ -71,14 +71,16 @@ whole system, not a window.
     (`principle`, `outside`, `consistency`, `principles` for a change to a
     principle, `retro`, `speed`, `mechanize` or `removal`), the `sources` an
     outside one cites, and
-    `controversial` with its `why`.
+    `controversial` with its `kind` and `why`, or the `decision` the box made
+    where it needed one.
   - **What went well** (`went_well`).
 - **Minting:** the same rule as the retro's (the owner's rule in
   [retro.md](retro.md)). Every finding becomes an issue through the same code
-  as `se issue new`. A controversial one is an issue for a person, labelled
-  `se-person` and assigned to the owner; the rest go to the normal queue. A
-  change to a principle is always controversial: `se overhaul file` makes it
-  so. `se overhaul file` creates the issues at once, posts the report as the
+  as `se issue new`. A controversial one, only for access or a principle
+  ([principle 15](principles.md)), is an issue for a person, labelled
+  `se-person` and assigned to the owner; the rest go to the normal queue, the
+  box's decision named. A change to a principle is always controversial, of
+  kind `principle`: `se overhaul file` makes it so. `se overhaul file` creates the issues at once, posts the report as the
   closing comment and closes the overhaul: it never waits. (A report posted
   for the owner before overhauls stopped waiting is handed back by
   `se overhaul read` and filed as it stands.) It deletes the claim `issue-N`,
@@ -88,7 +90,8 @@ whole system, not a window.
   `how`; an empty `looked_at` part ("nothing to change" is an answer); a
   finding without a title, a body, a known area, a principle on the list, a
   place, or `strays`; an outside finding without a source; a controversial
-  one without a `why`; nothing that went well.
+  one without a `kind` (access or principle) and a `why`; nothing that went
+  well.
 - **The report stays on the overhaul issue** as its closing comment, opening
   with `<!-- se:overhaul-report -->`, with a machine-readable block under
   `<!-- se:overhaul-yaml -->`: the principles, the retros' numbers, the

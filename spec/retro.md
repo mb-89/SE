@@ -57,8 +57,12 @@ What earlier versions taught, and how this design answers it:
   - the [rule checks](#the-rule-checks), each broken one with what broke
     it;
   - **counts:** conflicts (conflict takeovers), takeovers, `se-person` flags,
-    CI reruns, `by-hand` answers that are not "none", and the median time from
+    issues for a person created in the window (per closed issue, against a
+    soft budget of 0.1, which the report says it is within or over), CI
+    reruns, `by-hand` answers that are not "none", and the median time from
     claim to merge;
+  - **decisions:** every closed issue's `decisions` answer that is not
+    "none", listed for the owner to look at;
   - **scripts:** every file added under `src/scripts/` in the window, grouped
     by the word its name starts with, each with the comment line that says why;
   - **the previous retro's findings:** did their issues close, and did their
@@ -74,7 +78,8 @@ What earlier versions taught, and how this design answers it:
   - record what went well.
 
   It writes its judgment into the draft's block: `findings` (each a `title`,
-  `class`, `body`, `home`, and `controversial` with its `why`; optionally the
+  `class`, `body`, `home`, and `controversial` with its `kind` and `why`, or
+  the `decision` the box made where it needed one; optionally the
   rule `check` or the `metric` it should move, which the next retro scores it
   by, and `retro: true` for a finding about the retro itself), `classes`
   (`name`, `fix`) and `went_well`. A finding's `home` is one of `check`,
@@ -86,19 +91,23 @@ What earlier versions taught, and how this design answers it:
   - A **controversial** one is an issue for a person: labelled `se-person`
     and assigned to the owner, it waits for them. The retro does not.
 
-  Controversial means any of:
-  - it changes a design principle ([principles.md](principles.md));
-  - it trades one metric against another;
-  - the box is not sure;
-  - it already failed or recurred after an earlier fix (repeated failure goes
-    to a person).
+  Controversial means only what only a person can do
+  ([principle 15](principles.md)), its `kind` one of:
+  - `access`: a setting, an account, a secret, a permission or a payment only
+    the owner has;
+  - `principle`: it changes a design principle.
 
-  Not controversial, so normal work: removing something, and changing a
-  command's interface or a landing question.
+  Its `why` says in a sentence what only the person can do. Everything else
+  is normal work, the box's decision named in the finding's `decision`, which
+  its issue carries for the owner to review afterwards: a trade-off of one
+  metric against another, a finding the box is not sure about, one that
+  recurred after an earlier fix, removing something, and changing a command's
+  interface or a landing question.
 
   `se retro report N` files the judged draft. It refuses, writing nothing, a
   judgment that is not complete: a finding without a title, a body, a class
-  the classes name, a known home, or a `why` where it is controversial; a
+  the classes name, a known home, or a `kind` (access or principle) and a `why`
+  where it is controversial; a
   class without a fix; an unknown check or metric; nothing that went well.
   **A retro never waits**, whoever started it: `se retro report` creates the
   issues at once, by the rule above, posts the report as the retro's closing
@@ -112,7 +121,7 @@ What earlier versions taught, and how this design answers it:
   resumed retro's stale claim is taken over like any stuck claim.
 - **The retro reviews itself**, every time, as a fixed part of the report:
   - **Metrics against the previous retros:** conflicts, takeovers, CI reruns,
-    `se-person` flags, `by-hand` mentions and time from claim to merge, each
+    `se-person` flags, issues for a person, `by-hand` mentions and time from claim to merge, each
     per closed issue. `se retro collect` computes them and stores them in the
     report's machine-readable block, so the trend is a number, not an
     impression; the draft tabulates them against every earlier retro.

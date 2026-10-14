@@ -65,8 +65,9 @@ and only then leaves.**
    - an impossible block, any other leftover claim, or anything else with no remedy is
      reported as an issue (`se fleet fix`, through the same code as
      `se issue new`), labelled `se-person` and assigned to the repository's
-     owner where it is a judgment: a cycle, a blocker outside the fleet, a
-     green PR auto-merge does not merge.
+     owner, of kind `access` ([principle 15](principles.md)), where no box's
+     remedy reaches it: a cycle, a blocker outside the fleet, a green PR
+     auto-merge does not merge.
 4. **It never fixes the same thing twice.** A takeover is recorded with
    `<!-- se:takeover N -->`, every other fix with `<!-- se:fleet KEY M -->` on
    the finding's issue (`M` is the issue it made, or 0). A finding that comes

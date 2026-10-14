@@ -52,8 +52,10 @@ for them where controversial, and closes the overhaul.
      `principle` it names (0 only for a missing one), the `place`, how far
      it `strays` (`slightly`, `far`), `sources` for an outside idea (one
      becomes a finding only with a concrete place in SE it would change),
-     and `controversial` with its `why` when it trades one metric against
-     another, you are not sure, or it recurred after an earlier fix. A
+     and the `decision` you took where it needed one. If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../../spec/principles.md), the one place this rule lives). So
+     `controversial`, with its `kind` (`access` or `principle`) and a `why`
+     saying what only the owner can do, is for those two alone; a trade-off,
+     a doubt or a recurrence is a normal finding with its `decision`. A
      change to a principle is always controversial.
    - `went_well`: what holds and should stay.
 4. `./src/plugin/bin/se overhaul file <n>`. If it refuses, fix what it names

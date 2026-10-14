@@ -37,7 +37,8 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
      descriptions and landing answers (every comment on the tree's leaves).
      The default brief does not even read them. After that,
      `se review brief <n> --claims` shows them as claims to check, never as
-     evidence.
+     evidence, and the reviewer reviews each leaf's named `decisions`: a wrong
+     one is a finding.
 2. **The steps:**
    1. Restate what the ask requires, in your own words.
    2. Review the riskiest part first. If letting it through would do damage,

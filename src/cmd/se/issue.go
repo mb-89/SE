@@ -255,10 +255,10 @@ func init() {
 	})
 	register(Command{
 		Name:    "issue new",
-		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--json] [--repo OWNER/NAME]",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person --why access|principle --what TEXT] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "create an se issue, with its blockers and its parent",
-		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. A ready issue, one nothing open blocks, fires the routine once.",
+		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them. It is the last resort, only for what only a person can do: --why access (a setting, an account, a secret, a permission or a payment only the owner has) or --why principle (a change to a design principle), and --what says in a sentence what only the person can do; it refuses anything else, since a decision a box can make is the box's (spec/principles.md, principle 15). A ready issue, one nothing open blocks, fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -271,11 +271,16 @@ func init() {
 			review := fs.Bool("review", false, "label it se-review: it is reviewed once its sub-issues have closed")
 			final := fs.Bool("final", false, "label it se-final: if it fails, it goes to a person")
 			person := fs.Bool("person", false, "make it an issue for a person: label it se-person and assign it to the owner")
+			why := fs.String("why", "", "with --person, what only a person can do here: `access` or principle")
+			what := fs.String("what", "", "with --person, the sentence `TEXT` saying what only the person can do")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
 			given := map[string]bool{}
 			fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+			if !*person && (given["why"] || given["what"]) {
+				return Reply{}, fmt.Errorf("--why and --what go with --person only")
+			}
 			if !given["blocked-by"] {
 				return Reply{}, fmt.Errorf("issue new needs --blocked-by: the issues that block it, as N,M, or none")
 			}
@@ -329,7 +334,7 @@ func init() {
 				if len(labels) > 0 {
 					return Reply{}, fmt.Errorf("--person takes neither --review nor --final: an issue for a person is no box's work")
 				}
-				made, err = s.ForPerson(*title, *body, *parent, blockers)
+				made, err = s.ForPerson(*title, *body, issues.Why{Kind: *why, What: *what}, *parent, blockers)
 			} else {
 				made, ready, err = s.Create(*title, *body, *parent, blockers, labels...)
 			}

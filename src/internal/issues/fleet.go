@@ -642,8 +642,8 @@ func (s Source) fix(dir string, x *Fixed) error {
 func (s Source) report(f Finding, person bool) (int, error) {
 	title := strings.ToUpper(f.cause()[:1]) + f.cause()[1:] + ": " + f.What
 	if person {
-		body := fmt.Sprintf("Only a person can decide this one: it was fixed once and is back, or the fix is a judgment.\n\nse fleet check found, on #%d: %s.", f.Issue, f.What)
-		made, err := s.ForPerson(title, body, 0, nil)
+		body := fmt.Sprintf("se fleet check found, on #%d: %s.\n\nIt was fixed once and is back, or no box's remedy reaches it.", f.Issue, f.What)
+		made, err := s.ForPerson(title, body, Why{Kind: WhyAccess, What: "No box's remedy reaches it: give what it needs (a setting, a permission, a ruleset), or say how it goes on."}, 0, nil)
 		return made.Number, err
 	}
 	body := fmt.Sprintf("se fleet check found, on #%d: %s.\n\nIt has no remedy a box applies by itself, so it is this issue.", f.Issue, f.What)

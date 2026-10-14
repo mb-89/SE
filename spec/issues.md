@@ -150,12 +150,14 @@ person**, and leaves the agents' queue until the person has closed it.
   containing one (at the top, nor with `--in`). #n's dependents stay blocked
   through their native links.
 - **A box never ends stuck.** It lands what it could, and files what is left
-  as an issue: one for a person (`se issue new --person`) where it needs
-  their input, a normal one where it does not. `se issue pull --take` names
+  as an issue: a normal one, its decisions named, wherever a box can do it;
+  one for a person (`se issue new --person --why access|principle`) only for
+  what only a person can do ([principle 15](principles.md)), as a side issue
+  beside its PR, never as the way it ends (#144). `se issue pull --take` names
   the open issues the taken one blocks; the box names in `--blocks` those of
   them that need what it left over, and only those, so nothing waits that
   need not. Where it can land nothing at all (its push is refused, say), it
-  files the issue for a person with `--blocks <n>`, its own issue, and ends;
+  files the issue for a person (`--why access`) with `--blocks <n>`, its own issue, and ends;
   its claim then waits on that issue instead of going stale.
 - **The person's side:**
   - `se issue pull --person` lists every issue waiting on a person, with its
@@ -173,7 +175,7 @@ person**, and leaves the agents' queue until the person has closed it.
 <!-- se:manifest usage issue review -->
 ```
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
-se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person --why access|principle --what TEXT] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
@@ -290,7 +292,13 @@ it `se-review` as well (see [Reviews](#reviews)), and `--final` labels it
 `se-final`, its last attempt before a person (see
 [spec/review.md](review.md), rule 5). `--person` makes it an issue for a
 person: labelled `se-person` and assigned to the owner (it takes neither
-`--review` nor `--final`); its body opens with what they decide. `--blocks
+`--review` nor `--final`). It is the last resort, for what only a person can
+do ([principle 15](principles.md)): it requires `--why access` (a setting, an
+account, a secret, a permission or a payment only the owner has) or `--why
+principle` (a change to a design principle), and `--what`, a sentence saying
+what only the person can do, which its body opens with; it refuses anything
+else, writing nothing. The issues `se` mints for a person itself (a final
+issue stuck, a fleet finding no remedy reaches) give `access`. `--blocks
 N,M` links each issue it names as blocked by the new one, checked before
 anything is written. Where nothing blocks the
 issue it created (every issue in `--blocked-by` is closed, or it is `none`),

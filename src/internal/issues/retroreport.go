@@ -49,9 +49,15 @@ type Lesson struct {
 	// field (a prefilled one), command (an se command for a step done by
 	// hand), guidance, or removal.
 	Home string `yaml:"home"`
-	// Controversial sends its issue to a person; Why says which rule makes it so.
+	// Controversial sends its issue to a person, only for access or a
+	// principle (Kind, one of WhyKinds); Why says what only the person can do.
 	Controversial bool   `yaml:"controversial"`
+	Kind          string `yaml:"kind,omitempty"`
 	Why           string `yaml:"why,omitempty"`
+	// Decision is the decision the box made where the finding needed one (a
+	// trade-off, a doubt, a recurrence): named in its issue, it stays in the
+	// normal queue, and the owner reviews it afterwards.
+	Decision string `yaml:"decision,omitempty"`
 	// Check is the rule check it answers, Metric the metric it should move;
 	// the next retro scores it by them.
 	Check  string `yaml:"check,omitempty"`
@@ -128,9 +134,14 @@ func (c Collected) facts() string {
 	}
 
 	b.WriteString("\n## Counts\n| | in the window | per closed issue |\n|---|---|---|\n")
-	for _, name := range []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand"} {
+	for _, name := range countNames {
 		fmt.Fprintf(&b, "| %s | %g | %g |\n", name, c.Metrics[name], c.Metrics[name+"_per_issue"])
 	}
+	within := "within it"
+	if c.Metrics["person_issues_per_issue"] > PersonBudget {
+		within = "over it: find which of them a box could have decided"
+	}
+	fmt.Fprintf(&b, "\nIssues for a person: %g per closed issue, against a soft budget of %g, %s.\n", c.Metrics["person_issues_per_issue"], PersonBudget, within)
 	known := 0
 	for _, r := range c.Rows {
 		if r.Minutes >= 0 {
@@ -161,6 +172,18 @@ func (c Collected) facts() string {
 			}
 			fmt.Fprintf(&b, " %g | %s |\n", c.Metrics[name], trend(name, last, c.Metrics))
 		}
+	}
+
+	b.WriteString("\n## Decisions\nThe decisions the boxes made themselves, from their landing answers, for the owner to look at: say on the issue where one was wrong.\n")
+	named := 0
+	for _, r := range c.Rows {
+		if d := r.Answers["decisions"]; !nothing(d) {
+			fmt.Fprintf(&b, "- #%d %s: %s\n", r.Number, r.Title, oneLine(d))
+			named++
+		}
+	}
+	if named == 0 {
+		b.WriteString("None was named in the window.\n")
 	}
 
 	b.WriteString("\n## The previous retro\n")
@@ -327,7 +350,7 @@ func (r RetroReport) judgment() string {
 func (f Lesson) line() string {
 	who := "normal queue"
 	if f.Controversial {
-		who = "for a person: " + f.Why
+		who = "for a person (" + f.Kind + "): " + f.Why
 	}
 	s := fmt.Sprintf("- **%s** (%s; %s)", f.Title, f.Home, who)
 	if f.Issue > 0 {
@@ -363,8 +386,9 @@ func ParseReport(text string) (r RetroReport, facts string, err error) {
 }
 
 // judged refuses a report whose judgment is not complete: every finding
-// needs a title, a class the classes name, a body and a home, and a reason
-// where it is controversial; every class a fix; and something went well.
+// needs a title, a class the classes name, a body and a home, and, where it is
+// controversial, a kind (access or principle) and what only the person can
+// do; every class a fix; and something went well.
 func (r RetroReport) judged() error {
 	var why []string
 	classes := map[string]bool{}
@@ -383,8 +407,12 @@ func (r RetroReport) judged() error {
 			why = append(why, fmt.Sprintf("%s names class %q, which classes does not", name, f.Class))
 		case !contains(homes, f.Home):
 			why = append(why, fmt.Sprintf("%s has home %q, not one of %s", name, f.Home, strings.Join(homes, ", ")))
-		case f.Controversial && strings.TrimSpace(f.Why) == "":
-			why = append(why, name+" is controversial without a why")
+		case f.Controversial:
+			if err := (Why{Kind: f.Kind, What: f.Why}).check(); err != nil {
+				why = append(why, fmt.Sprintf("%s is controversial, but %v; anything else is a normal finding whose decision names what the box chose", name, err))
+			}
+		}
+		switch {
 		case f.Check != "" && kindOrder(f.Check) == len(checkKinds):
 			why = append(why, fmt.Sprintf("%s names check %q, which is no rule check", name, f.Check))
 		case f.Metric != "" && !contains(metricNames, f.Metric):
@@ -494,9 +522,9 @@ func (s Source) FileReport(n int, draft string) (Filed, error) {
 			if f.Issue > 0 {
 				continue
 			}
-			body := fmt.Sprintf("%s\n\nFound by the retro #%d, class **%s**; the fix it asks for is a %s.", strings.TrimSpace(f.Body), n, f.Class, f.Home)
+			body := fmt.Sprintf("%s\n\nFound by the retro #%d, class **%s**; the fix it asks for is a %s.", strings.TrimSpace(f.Body), n, f.Class, f.Home) + decided(f.Decision)
 			var err error
-			if f.Issue, err = s.mint(f.Title, body, f.Controversial, f.Why, out); err != nil {
+			if f.Issue, err = s.mint(f.Title, body, f.person(), out); err != nil {
 				return err
 			}
 		}
@@ -538,12 +566,29 @@ func (s Source) fileRun(i issue, run filing) (Filed, error) {
 	return out, nil
 }
 
-// mint creates one finding's issue through the same code as se issue new: a
-// controversial one for a person (ForPerson), the rest in the normal queue.
+// person is why the finding goes to a person, nil where it does not.
+func (f Lesson) person() *Why {
+	if !f.Controversial {
+		return nil
+	}
+	return &Why{Kind: f.Kind, What: f.Why}
+}
+
+// decided is the line that names a finding's decision in its issue, "" where
+// it names none.
+func decided(decision string) string {
+	if strings.TrimSpace(decision) == "" {
+		return ""
+	}
+	return "\n\n**Decision taken:** " + strings.TrimSpace(decision) + " The owner reviews it afterwards; a box goes on with it."
+}
+
+// mint creates one finding's issue through the same code as se issue new: one
+// for a person (ForPerson) where why is set, the rest in the normal queue.
 // It records the issue in out.
-func (s Source) mint(title, body string, controversial bool, why string, out *Filed) (int, error) {
-	if controversial {
-		made, err := s.ForPerson(title, "Controversial, so it waits for a person: "+why+"\n\n"+body, 0, nil)
+func (s Source) mint(title, body string, why *Why, out *Filed) (int, error) {
+	if why != nil {
+		made, err := s.ForPerson(title, body, *why, 0, nil)
 		if made.Number > 0 {
 			out.Issues = append(out.Issues, made.Number)
 			out.Person = append(out.Person, made.Number)

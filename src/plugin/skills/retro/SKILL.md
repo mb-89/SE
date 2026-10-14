@@ -28,7 +28,7 @@ Tell them the issue it created. A box takes it from there.
    and not, if anything, to `findings` in the draft's block, and go to 4.
 2. Read the draft: the issue's field feedback, the rule checks, the counts,
    the metrics against the previous retros, the previous retro's score, the
-   scripts and the matrix of landing answers. Look too for what the window
+   scripts, the decisions the boxes named and the matrix of landing answers. Look too for what the window
    made inconsistent, restated or written for no reader (principles 17 to
    19).
 3. Judge, and write it into the draft's block (the YAML under
@@ -37,8 +37,10 @@ Tell them the issue it created. A box takes it from there.
      produced it, not who. Each with a `title` (the fix, as an issue title), a
      `class`, a `body` (what happened, with issue and PR numbers, and the fix),
      a `home` (`check`, `refusal`, `gate`, `field`, `command`, `guidance` or `removal`:
-     the cheapest durable one, guidance last), and `controversial` with its
-     `why` where the spec's rule calls it controversial. Name the rule
+     the cheapest durable one, guidance last). If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../../spec/principles.md), the one place this rule lives). So
+     `controversial`, with its `kind` (`access` or `principle`) and a `why`
+     saying what only the owner can do, is for those two alone; a trade-off,
+     a doubt or a recurrence is a normal finding with the `decision` you took. Name the rule
      `check` or the `metric` it should move, so the next retro can score it.
      A finding about the retro itself (its questions, checks, metrics or this
      skill) gets `retro: true`.

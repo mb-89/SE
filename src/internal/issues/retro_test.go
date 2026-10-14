@@ -12,7 +12,7 @@ import (
 )
 
 // rqs are the landing questions the retro tests read.
-var rqs = []Question{{Key: "done", Question: "What does it deliver?"}, {Key: "by-hand", Question: "What did you do by hand?"}}
+var rqs = []Question{{Key: "done", Question: "What does it deliver?"}, {Key: "by-hand", Question: "What did you do by hand?"}, {Key: "decisions", Question: "Which decisions did you make yourself?"}}
 
 var (
 	prevClosed = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
@@ -89,7 +89,7 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 		"repos/o/r/pulls/51/files?per_page=100":                    `[]`,
 		"repos/o/r/issues/23/comments?per_page=100": jsonComments(
 			"<!-- se:takeover 1 -->\n<!-- se:takeover-head abc -->\nTaken over.",
-			landing(t, 23, map[string]string{"done": "it works", "by-hand": "wrote src/scripts/check-claims.sh"}, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))),
+			landing(t, 23, map[string]string{"done": "it works", "by-hand": "wrote src/scripts/check-claims.sh", "decisions": "Took the script over a command:\nit was one call."}, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))),
 		"repos/o/r/issues/24/comments?per_page=100": jsonComments("<!-- se:person -->\nStuck twice."),
 		"repos/o/r/issues/25/comments?per_page=100": `[]`,
 		"repos/o/r/issues/26/comments?per_page=100": `[]`,
@@ -124,6 +124,8 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 	a["repos/o/r/issues/22"] = `{"number":22,"state":"open"}`
 	a["repos/o/r/issues?labels=se&state=closed&per_page=100"+since] = "[" + strings.Join(closed, ",") + "]"
 	a["repos/o/r/commits?sha=main&per_page=100"+since+"&until=2026-10-13T12:00:00Z"] = commits
+	// One issue for a person was created in the window; the other before it.
+	a["repos/o/r/issues?labels=se-person&state=all&per_page=100"+since] = `[{"number":27,"created_at":"2026-10-02T09:00:00Z"},{"number":18,"created_at":"2026-09-20T09:00:00Z"}]`
 	return a
 }
 
@@ -202,12 +204,26 @@ func TestEachRuleCheck(t *testing.T) {
 func TestTheCountsAndScripts(t *testing.T) {
 	c := collect(t, true)
 	want := Metrics{
-		"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1,
-		"conflicts_per_issue": 0.25, "takeovers_per_issue": 0.25, "ci_reruns_per_issue": 0.25, "person_flags_per_issue": 0.25, "by_hand_per_issue": 0.25,
+		"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "person_issues": 1, "by_hand": 1,
+		"conflicts_per_issue": 0.25, "takeovers_per_issue": 0.25, "ci_reruns_per_issue": 0.25, "person_flags_per_issue": 0.25, "person_issues_per_issue": 0.25, "by_hand_per_issue": 0.25,
 		"claim_to_merge_minutes": 90,
 	}
 	if !reflect.DeepEqual(c.Metrics, want) {
 		t.Fatalf("%v", c.Metrics)
+	}
+	// Over the soft budget, the report says so; it lists the named decisions.
+	draft, err := c.Draft(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"| person_issues | 1 | 0.25 |",
+		"Issues for a person: 0.25 per closed issue, against a soft budget of 0.1, over it",
+		"## Decisions\n", "- #23 t23: Took the script over a command: it was one call.\n",
+	} {
+		if !strings.Contains(draft, want) {
+			t.Errorf("the draft lacks %q:\n%s", want, draft)
+		}
 	}
 	if want := []Script{{"src/scripts/check-claims.sh", 50, "Lists claims with no PR, since fleet check had no such view.", "check"}}; !reflect.DeepEqual(c.Scripts, want) {
 		t.Fatalf("%+v", c.Scripts)
@@ -278,14 +294,15 @@ func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
 }
 
 // judged is retro #30's draft with the box's judgment filled in: one
-// controversial finding and one for the normal queue.
+// controversial finding, of kind principle, and one for the normal queue that
+// the box was not sure about, its decision named.
 func judged(t *testing.T, edit func(*RetroReport)) string {
 	t.Helper()
 	r := RetroReport{
 		Retro: 30, Attended: true, Metrics: Metrics{"closed": 4}, Checks: []Broken{},
 		Findings: []Lesson{
-			{Title: "Refuse a PR without Fixes", Class: "landing", Body: "PR #51 said no Fixes.", Home: "refusal", Check: "fixes"},
-			{Title: "Drop the lease", Class: "claims", Body: "It trades speed for safety.", Home: "removal", Controversial: true, Why: "it trades one metric against another"},
+			{Title: "Refuse a PR without Fixes", Class: "landing", Body: "PR #51 said no Fixes.", Home: "refusal", Check: "fixes", Decision: "Not sure whether a refusal or a check fits; chose the refusal, the cheaper one."},
+			{Title: "Drop the lease", Class: "claims", Body: "Principle 14 sets it.", Home: "removal", Controversial: true, Kind: "principle", Why: "Decide whether principle 14 gives up the lease."},
 		},
 		Classes:  []Class{{"landing", "se issue land refuses"}, {"claims", "a person decides"}},
 		WentWell: []string{"the landing answers"},
@@ -305,6 +322,9 @@ func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 		"nothing went well":        func(r *RetroReport) { r.WentWell = nil },
 		"an unknown class":         func(r *RetroReport) { r.Findings[0].Class = "nope" },
 		"controversial, no why":    func(r *RetroReport) { r.Findings[1].Why = "" },
+		"controversial, no kind":   func(r *RetroReport) { r.Findings[1].Kind = "" },
+		"controversial, unsure":    func(r *RetroReport) { r.Findings[1].Kind, r.Findings[1].Why = "unsure", "the box is not sure" },
+		"controversial, trade-off": func(r *RetroReport) { r.Findings[1].Kind = "trade-off" },
 		"a home that is no fix":    func(r *RetroReport) { r.Findings[0].Home = "hope" },
 		"a check that is no check": func(r *RetroReport) { r.Findings[0].Check = "vibes" },
 	} {
@@ -339,6 +359,12 @@ func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
 	if !strings.HasPrefix(normal.Title, "Refuse a PR without Fixes") || !strings.Contains(normal.Body, "Found by the retro #30, class **landing**") || !strings.HasSuffix(normal.Body, NewMark) {
 		t.Fatalf("%+v", normal)
 	}
+	// The finding the box was not sure about is normal work, its decision named;
+	// the one for a person opens with its kind and what only the person can do.
+	if !strings.Contains(normal.Body, "**Decision taken:** Not sure whether a refusal or a check fits; chose the refusal, the cheaper one.") ||
+		!strings.HasPrefix(controversial.Body, "**For a person (principle):** Decide whether principle 14 gives up the lease.") {
+		t.Fatalf("%q\n%q", normal.Body, controversial.Body)
+	}
 	want := []string{
 		"POST repos/o/r/issues",
 		"POST repos/o/r/issues",
@@ -370,7 +396,7 @@ func TestAnAttendedRetroClosesToo(t *testing.T) {
 	}
 	c := commentsAt(t, gh, 30)
 	report := "body=" + c[len(c)-1].Body
-	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease** (removal; for a person: it trades one metric against another)", "- the landing answers", reportBlock} {
+	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease** (removal; for a person (principle): Decide whether principle 14 gives up the lease.)", "- the landing answers", reportBlock} {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
 		}
