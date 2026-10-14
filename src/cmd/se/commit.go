@@ -49,10 +49,15 @@ func pluginCheckout(w *World) string {
 	return filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(exe))))
 }
 
-// commits says where the session's SE came from: the commit its hooks were
-// loaded from, the commit the plugin's checkout is at now, the commit the
-// running se was built from, and whether they agree. "" is a commit nobody knows.
+// commits says where the session's SE came from, kept to its point: one line
+// where the commit its hooks were loaded from, the commit the plugin's
+// checkout is at now and the commit the running se was built from agree;
+// else one short line per commit, and the remedy once. "" is a commit nobody
+// knows.
 func commits(hooks, checkout, built string) string {
+	if hooks != "" && hooks == checkout && built == checkout {
+		return "Hooks, checkout and se agree at " + short(checkout) + "."
+	}
 	known := func(c string) string {
 		if c == "" {
 			return "unknown"
@@ -60,32 +65,14 @@ func commits(hooks, checkout, built string) string {
 		return short(c)
 	}
 	lines := []string{
-		"Hooks loaded from:   " + known(hooks),
-		"Plugin checkout at:  " + known(checkout),
-		"se built from:       " + known(built),
+		"Hooks loaded from " + known(hooks) + ".",
+		"Checkout at " + known(checkout) + ".",
+		"se built from " + known(built) + ".",
 	}
-	var unknown []string
-	for _, c := range []struct{ name, commit string }{{"the hooks'", hooks}, {"the checkout's", checkout}, {"se's", built}} {
-		if c.commit == "" {
-			unknown = append(unknown, c.name)
-		}
+	if hooks == "" || checkout == "" || built == "" {
+		return strings.Join(append(lines, "Whether they agree is unknown."), "\n")
 	}
-	switch {
-	case len(unknown) > 0:
-		lines = append(lines, "Whether they agree is unknown: "+strings.Join(unknown, ", ")+" commit is not known.")
-	case hooks == checkout && built == checkout:
-		lines = append(lines, "They agree.")
-	default:
-		var off []string
-		if hooks != checkout {
-			off = append(off, "the hooks are not the checkout's: they load again on /reload-plugins or in a new session")
-		}
-		if built != checkout {
-			off = append(off, "se was not built from the checkout")
-		}
-		lines = append(lines, "They disagree: "+strings.Join(off, "; ")+".")
-	}
-	return strings.Join(lines, "\n")
+	return strings.Join(append(lines, "They disagree: start a new session."), "\n")
 }
 
 // sessionCommits is commits for this call, from what the plugin said and what git says now.
