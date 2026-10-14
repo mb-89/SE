@@ -4,7 +4,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
@@ -39,7 +39,7 @@ var testedAt = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 
 // worldOf is the World every se call of the test runs in, made on the first
 // call: a fake clock at testedAt, an environment holding only what setenv put
-// there, a GitHub that answers nothing, and the real disk, programs and
+// there, an empty fake GitHub, and the real disk, programs and
 // network, which a test replaces through the fields.
 func worldOf(t *testing.T) *World {
 	t.Helper()
@@ -49,9 +49,7 @@ func worldOf(t *testing.T) *World {
 	w := &testWorld{env: map[string]string{}}
 	w.World = World{
 		Clock: clock.NewFake(testedAt), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(),
-		GH: func(args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("gh is not recorded in this test: %v", args)
-		},
+		GitHub:     github.NewFake(clock.NewFake(testedAt)),
 		Getenv:     func(k string) string { return w.env[k] },
 		Environ:    func() []string { return w.environ() },
 		Executable: os.Executable, Check: check,

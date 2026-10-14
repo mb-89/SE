@@ -4,6 +4,3 @@
 # entries as it lands, and the rule refuses an entry that matches nothing.
 # Adding an entry is no way to pass the check.
 
-# GitHub: github (#63), for the gh calls.
-src/internal/issues/gh.go os/exec
-

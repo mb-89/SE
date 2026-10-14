@@ -15,8 +15,10 @@ func TestOnlyIOModulesReachTheOutside(t *testing.T) {
 		"src/a/pure.go":                  "package a\n\nimport (\n\t\"os\"\n\t\"time\"\n)\n\nvar d = time.Second\nvar e = os.Getenv\n",
 		"src/a/a_test.go":                "package a_test\n\nimport \"os/exec\"\n\nvar _ = exec.Command\n",
 		"src/a/kept.go":                  "package a\n\nimport \"os/exec\"\n\nvar _ = exec.Command\n",
+		"src/a/hub.go":                   "package a\n\nimport run \"os/exec\"\n\nvar _ = run.Command(\"gh\", \"api\")\nvar _ = run.Command(\"git\")\n",
+		"src/internal/io/github/gh.go":   "package github\n\nimport \"os/exec\"\n\nvar _ = exec.Command(\"gh\")\n",
 		"src/internal/io/clock/clock.go": "package clock\n\nimport \"time\"\n\nvar now = time.Now\n",
-		"src/internal/io/allowlist.txt":  "# kept until proc lands\nsrc/a/kept.go os/exec\n",
+		"src/internal/io/allowlist.txt":  "# kept until proc lands\nsrc/a/kept.go os/exec\nsrc/a/hub.go os/exec\n",
 		"src/a/broken.go":                "not go",
 	})
 	want := []string{
@@ -24,6 +26,8 @@ func TestOnlyIOModulesReachTheOutside(t *testing.T) {
 		"src/a/clock.go:7: io-module: time.Sleep reaches the outside",
 		"src/a/clock.go:7: io-module: time.After reaches the outside",
 		"src/a/disk.go:5: io-module: os.ReadFile reaches the outside",
+		// Its os/exec is allowed for now; gh is GitHub's I/O module's alone.
+		"src/a/hub.go:5: io-module: gh reaches the outside",
 		"src/a/net.go:3: io-module: net/http reaches the outside",
 		"src/a/proc.go:3: io-module: os/exec reaches the outside",
 	}

@@ -4,12 +4,14 @@
 # shrinks: the rule refuses an entry that matches nothing. Adding an entry is
 # no way to pass the check.
 
-# The daemon's start and stop poll the disk every 50 ms, which a fake clock
-# passes at once, before the daemon's goroutine is done (#158).
+# The exception spec/io.md names: a restart builds se and stops real daemons.
 src/cmd/se/checkout_test.go clock.Real
+# se stop polls every 50 ms for the endpoint to go, which a fake clock passes
+# at once, before the daemon's goroutine has removed it.
 src/cmd/se/stop_test.go clock.Real
-src/internal/daemon/daemon_test.go clock.Real
 
-# gitenv.Clear empties the process's own git variables; t.Setenv refuses a
-# parallel test.
+# Both change the process's own environment, which t.Setenv refuses a
+# parallel test: gitenv.Clear empties git's variables, and the real GitHub
+# finds gh on PATH.
 src/internal/gitenv/gitenv_test.go TestClear
+src/internal/io/github/real_test.go TestTheRealGitHubSpeaksGh

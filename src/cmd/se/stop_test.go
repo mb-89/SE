@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/io/clock"
@@ -15,7 +16,8 @@ import (
 // network and a fake disk and has se status find it and se stop end it there.
 func TestStatusAndStopReachTheDaemonOverTheNetwork(t *testing.T) {
 	t.Parallel()
-	// se stop polls for the daemon's endpoint to go, which only the real clock waits out.
+	// se stop polls for the daemon's endpoint to go, which only the real clock
+	// waits out while the daemon's goroutine removes it.
 	w := worldOf(t)
 	w.Net, w.Clock = sehttp.NewFake(), clock.Real()
 	d, ws := onFake(t), "/ws"
@@ -23,7 +25,7 @@ func TestStatusAndStopReachTheDaemonOverTheNetwork(t *testing.T) {
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
 		done <- daemon.Serve(context.Background(), daemon.Paths{Workspace: ws, Disk: d}, daemon.Options{
-			Clock: w.Clock, Net: w.Net, Ready: func(ep daemon.Endpoint) { ready <- ep },
+			Clock: clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)), Net: w.Net, Ready: func(ep daemon.Endpoint) { ready <- ep },
 		})
 	}()
 	ep := <-ready

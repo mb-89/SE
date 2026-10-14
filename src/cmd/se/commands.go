@@ -13,11 +13,11 @@ import (
 
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
-	"github.com/mb-89/SE/src/internal/issues"
 )
 
 // Command is one word se answers. A command is one file that calls register
@@ -109,8 +109,8 @@ type World struct {
 	Proc proc.Procs
 	// Net is the network the command serves and calls on.
 	Net sehttp.Net
-	// GH is how the issue commands reach GitHub.
-	GH issues.GH
+	// GitHub is where the command reads and writes issues and pull requests.
+	GitHub github.GitHub
 	// Getenv reads one variable of the environment se runs in; Environ
 	// answers all of it, for the programs se starts.
 	Getenv  func(key string) string
@@ -127,7 +127,7 @@ type World struct {
 // realWorld is what se reaches when it runs for real.
 func realWorld() *World {
 	return &World{
-		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(), GH: issues.Gh,
+		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(), GitHub: github.Real(),
 		Getenv: os.Getenv, Environ: os.Environ, Executable: os.Executable, Commit: commit, Check: check,
 	}
 }

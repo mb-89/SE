@@ -12,31 +12,75 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 const repo = "o/r"
 
-// recorded answers gh api calls from a table keyed by path; a call it does not
-// hold fails the test, so a test names every request the rules make. Reads
-// run in parallel, so it fails the test with Errorf, which any goroutine may
-// call, and answers an error; it never writes to answers.
-func recorded(t *testing.T, answers map[string]string) GH {
+// recorded is a fake GitHub seeded from recorded gh answers, keyed by path.
+func recorded(t *testing.T, answers map[string]string) *github.Fake {
 	t.Helper()
-	return func(args ...string) ([]byte, error) {
-		path := args[len(args)-1]
-		if args[0] != "api" {
-			t.Errorf("gh %v: only gh api is expected", args)
-			return nil, fmt.Errorf("gh %v: only gh api is expected", args)
-		}
-		a, ok := answers[path]
-		if !ok {
-			t.Errorf("gh api %s was not recorded", path)
-			return nil, fmt.Errorf("gh api %s was not recorded", path)
-		}
-		return []byte(a), nil
+	return recordedAt(t, atNow(), answers)
+}
+
+// recordedAt is recorded on the clock c, which the code under test shares.
+func recordedAt(t *testing.T, c *clock.Fake, answers map[string]string) *github.Fake {
+	t.Helper()
+	f := github.NewFake(c)
+	seed(t, f, answers)
+	return f
+}
+
+// seed adds recorded answers to what the fake GitHub holds.
+func seed(t *testing.T, f *github.Fake, answers map[string]string) {
+	t.Helper()
+	if err := f.Seed(answers); err != nil {
+		t.Fatal(err)
 	}
 }
+
+// issueAt reads issue n back from the fake GitHub.
+func issueAt(t *testing.T, gh github.GitHub, n int) issue {
+	t.Helper()
+	got, err := api[issue](Source{Repo: repo, GitHub: gh}, fmt.Sprintf("repos/o/r/issues/%d", n), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got[0]
+}
+
+// labelled says whether the fake GitHub's issue n carries label l.
+func labelled(t *testing.T, gh github.GitHub, n int, l string) bool {
+	t.Helper()
+	return issueAt(t, gh, n).labelled(l)
+}
+
+// commentsAt reads issue n's comments back from the fake GitHub, oldest first.
+func commentsAt(t *testing.T, gh github.GitHub, n int) []comment {
+	t.Helper()
+	got, err := api[comment](Source{Repo: repo, GitHub: gh}, fmt.Sprintf("repos/o/r/issues/%d/comments", n), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// never is a GitHub a test expects no call of.
+type never struct{ t *testing.T }
+
+func (n never) fail(what string) ([]byte, error) {
+	n.t.Helper()
+	n.t.Fatalf("GitHub was asked %s", what)
+	return nil, nil
+}
+
+func (n never) Get(path string) ([]byte, error)  { return n.fail("for " + path) }
+func (n never) List(path string) ([]byte, error) { return n.fail("for " + path) }
+func (n never) Send(method, path string, _ ...github.Field) ([]byte, error) {
+	return n.fail("to " + method + " " + path)
+}
+func (n never) GraphQL(string, ...github.Field) ([]byte, error) { return n.fail("a GraphQL query") }
 
 const (
 	listPath = "repos/o/r/issues?labels=se&state=open&per_page=100"
@@ -89,7 +133,7 @@ func open(n int, body string) string {
 
 func survey(t *testing.T, answers map[string]string) map[int]string {
 	t.Helper()
-	all, err := Source{Proc: machine, Repo: repo, GH: recorded(t, answers), Clock: atNow()}.Survey()
+	all, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, answers), Clock: atNow()}.Survey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +169,7 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 		"repos/mb-89/SE/issues/7/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/mb-89/SE/activity?ref=refs/heads/issue-5&per_page=1":    pushed(fresh),
 	})
-	s := Source{Proc: machine, Repo: "mb-89/SE", GH: gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: "mb-89/SE", GitHub: gh, Clock: atNow()}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +204,7 @@ func TestLowestReadyNumberComesFirst(t *testing.T) {
 		listPath: `[` + open(9, "") + `,` + open(3, "") + `]` + `[` + open(5, "") + `]`, // two pages
 		refsPath: `[]`,
 	}, 3, 5, 9))
-	next, ok, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.Next()
+	next, ok, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Next()
 	if err != nil || !ok || next.Number != 3 || next.Title != "t3" {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
@@ -216,7 +260,7 @@ func TestAStaleSummaryDoesNotMakeABlockedIssueReady(t *testing.T) {
 		links(8):      `[]`,
 		activity(8):   pushed(fresh),
 	})
-	s := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if next, ok, err := s.Next(); err != nil || ok {
 		t.Fatalf("next = %+v %v %v", next, ok, err)
 	}
@@ -240,7 +284,7 @@ func TestNothingReady(t *testing.T) {
 			links(1):    `[]`,
 			activity(1): pushed(fresh),
 		})
-		if next, ok, err := (Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}).Next(); err != nil || ok {
+		if next, ok, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Next(); err != nil || ok {
 			t.Errorf("%s: %+v %v %v", name, next, ok, err)
 		}
 	}
@@ -350,7 +394,7 @@ func TestATakeRefusedMovesToTheNextIssue(t *testing.T) {
 		listPath: `[` + open(5, "") + `,` + open(6, "") + `]`,
 		refsPath: `[]`,
 	}, 5, 6))
-	s := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if took, ok, err := s.Take(a, 0); err != nil || !ok || took.Number != 5 {
 		t.Fatalf("a took %+v %v %v", took, ok, err)
 	}
@@ -373,7 +417,7 @@ func TestTakeRefusesAnIssueThatIsNotReady(t *testing.T) {
 		links(1): `[]`,
 		links(2): `[{"number":1,"state":"open"}]`,
 	})
-	s := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if _, _, err := s.Take(t.TempDir(), 2); err == nil || !strings.Contains(err.Error(), "blocked by #1") {
 		t.Fatalf("%v", err)
 	}
@@ -384,16 +428,15 @@ func TestTakeRefusesAnIssueThatIsNotReady(t *testing.T) {
 
 func TestPagesAsksPageByPageUntilOneIsShort(t *testing.T) {
 	t.Parallel()
-	full := make([]string, PerPage)
-	for k := range full {
-		full[k] = fmt.Sprintf(`{"number":%d}`, k)
+	// One more comment than a page holds.
+	all := make([]string, PerPage+1)
+	for k := range all {
+		all[k] = fmt.Sprintf(`{"id":%d,"body":"c%d","created_at":"2026-10-01T00:00:%02dZ"}`, k+1, k, k%60)
 	}
-	path := "repos/o/r/issues/comments?since=x&per_page=100"
-	got, err := pages[issue](Source{Repo: repo, GH: recorded(t, map[string]string{
-		path + "&page=1": "[" + strings.Join(full, ",") + "]",
-		path + "&page=2": `[{"number":100}]`,
-	})}, path)
-	if err != nil || len(got) != PerPage+1 || got[PerPage].Number != 100 {
+	gh := recorded(t, map[string]string{"repos/o/r/issues/1/comments": "[" + strings.Join(all, ",") + "]"})
+	path := "repos/o/r/issues/comments?since=2026-01-01T00:00:00Z&per_page=100"
+	got, err := pages[comment](Source{Repo: repo, GitHub: gh}, path)
+	if err != nil || len(got) != PerPage+1 {
 		t.Fatalf("%d items, %v", len(got), err)
 	}
 }

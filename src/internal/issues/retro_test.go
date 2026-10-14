@@ -2,12 +2,13 @@
 package issues
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // rqs are the landing questions the retro tests read.
@@ -128,8 +129,8 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 
 func collect(t *testing.T, later bool) Collected {
 	t.Helper()
-	gh, _ := writes(t, retroRepo(t, later, "<!-- se:retro attended -->"))
-	c, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.Collect(30)
+	gh := recorded(t, retroRepo(t, later, "<!-- se:retro attended -->"))
+	c, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Collect(30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,10 +309,6 @@ func judged(t *testing.T, edit func(*RetroReport)) string {
 
 func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 	t.Parallel()
-	never := func(args ...string) ([]byte, error) {
-		t.Fatalf("gh %v for a refused report", args)
-		return nil, nil
-	}
 	for name, edit := range map[string]func(*RetroReport){
 		"nothing went well":        func(r *RetroReport) { r.WentWell = nil },
 		"an unknown class":         func(r *RetroReport) { r.Findings[0].Class = "nope" },
@@ -319,64 +316,51 @@ func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 		"a home that is no fix":    func(r *RetroReport) { r.Findings[0].Home = "hope" },
 		"a check that is no check": func(r *RetroReport) { r.Findings[0].Check = "vibes" },
 	} {
-		if _, err := (Source{Proc: machine, Repo: repo, GH: never, Clock: atNow()}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+		if _, err := (Source{Proc: machine, Repo: repo, GitHub: never{t}, Clock: atNow()}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
 }
 
-func fileFindings(t *testing.T, answers map[string]string) (Filed, [][]string) {
+// fileFindings files retro #30's judged report. The repository's last
+// number is PR #91, so its issues are #92 on.
+func fileFindings(t *testing.T, answers map[string]string) (Filed, *github.Fake) {
 	t.Helper()
-	answers["repos/o/r/issues"] = `{"number":40,"id":4000,"html_url":"u40"}`
-	answers["repos/o/r/issues/40/assignees"] = `{}`
-	answers["repos/o/r/issues/30/comments"] = `{"id":1}`
-	gh, calls := writes(t, answers)
-	f, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
+	gh := recorded(t, answers)
+	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return f, *calls
+	return f, gh
 }
 
 func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
 	t.Parallel()
-	f, calls := fileFindings(t, retroRepo(t, true, "<!-- se:retro unattended -->"))
-	if !reflect.DeepEqual(f.Issues, []int{40, 40}) || !reflect.DeepEqual(f.Person, []int{40}) || !f.Ready {
+	f, gh := fileFindings(t, retroRepo(t, true, "<!-- se:retro unattended -->"))
+	if !reflect.DeepEqual(f.Issues, []int{92, 93}) || !reflect.DeepEqual(f.Person, []int{93}) || !f.Ready {
 		t.Fatalf("%+v", f)
 	}
-	var created [][]string
-	var writes []string
-	for _, c := range calls {
-		if c[len(c)-1] == "repos/o/r/issues" {
-			created = append(created, c)
-		}
-		if c[1] == "-X" {
-			writes = append(writes, c[2]+" "+c[len(c)-1])
-		}
-	}
 	// The normal finding is labelled se alone; the controversial one se-person too.
-	if len(created) != 2 || created[0][len(created[0])-2] != "labels[]=se" ||
-		created[1][len(created[1])-4] != "labels[]=se" || created[1][len(created[1])-2] != "labels[]="+PersonLabel {
-		t.Fatalf("%q", created)
+	normal, controversial := issueAt(t, gh, 92), issueAt(t, gh, 93)
+	if len(normal.Labels) != 1 || !normal.labelled(Label) || len(controversial.Labels) != 2 || !controversial.labelled(Label) || !controversial.labelled(PersonLabel) {
+		t.Fatalf("%+v\n%+v", normal, controversial)
 	}
-	if !strings.HasPrefix(created[0][4], "title=Refuse a PR without Fixes") || !strings.Contains(created[0][6], "Found by the retro #30, class **landing**") || !strings.HasSuffix(created[0][6], NewMark) {
-		t.Fatalf("%q", created[0])
+	if !strings.HasPrefix(normal.Title, "Refuse a PR without Fixes") || !strings.Contains(normal.Body, "Found by the retro #30, class **landing**") || !strings.HasSuffix(normal.Body, NewMark) {
+		t.Fatalf("%+v", normal)
 	}
 	want := []string{
 		"POST repos/o/r/issues",
 		"POST repos/o/r/issues",
-		"POST repos/o/r/issues/40/assignees",
+		"POST repos/o/r/issues/93/assignees",
 		"POST repos/o/r/issues/30/comments",
 		"PATCH repos/o/r/issues/30",
 		"DELETE repos/o/r/git/refs/heads/issue-30",
 	}
-	if !reflect.DeepEqual(writes, want) {
-		t.Fatalf("%q", writes)
+	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
+		t.Fatalf("%q", w)
 	}
-	for _, c := range calls {
-		if c[len(c)-1] == "repos/o/r/issues/30/comments" && !strings.Contains(c[4], "issue: 40") {
-			t.Fatalf("the closing report names no issue: %s", c[4])
-		}
+	if c := commentsAt(t, gh, 30); len(c) != 1 || !strings.Contains(c[0].Body, "issue: 92") {
+		t.Fatalf("the closing report names no issue: %+v", c)
 	}
 }
 
@@ -384,26 +368,18 @@ func TestAnAttendedRetroClosesToo(t *testing.T) {
 	t.Parallel()
 	// A person started it, and still nobody waits: the report is its closing
 	// comment, and the controversial finding is the issue for the person.
-	f, calls := fileFindings(t, retroRepo(t, true, "<!-- se:retro attended -->"))
-	if !reflect.DeepEqual(f.Person, []int{40}) {
+	f, gh := fileFindings(t, retroRepo(t, true, "<!-- se:retro attended -->"))
+	if !reflect.DeepEqual(f.Person, []int{93}) {
 		t.Fatalf("%+v", f)
 	}
-	closed := false
-	for _, c := range calls {
-		if c[len(c)-1] == "repos/o/r/issues/30/labels" {
-			t.Fatalf("the retro was given to a person: %q", c)
-		}
-		closed = closed || c[1] == "-X" && c[2] == "PATCH" && c[len(c)-1] == "repos/o/r/issues/30"
+	if labelled(t, gh, 30, PersonLabel) {
+		t.Fatalf("the retro was given to a person: %q", gh.Writes())
 	}
-	if !closed {
-		t.Fatalf("the attended retro did not close: %q", calls)
+	if issueAt(t, gh, 30).State != "closed" {
+		t.Fatalf("the attended retro did not close: %q", gh.Writes())
 	}
-	report := ""
-	for _, c := range calls {
-		if c[len(c)-1] == "repos/o/r/issues/30/comments" {
-			report = c[4]
-		}
-	}
+	c := commentsAt(t, gh, 30)
+	report := "body=" + c[len(c)-1].Body
 	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease** (removal; for a person: it trades one metric against another)", "- the landing answers", reportBlock} {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
@@ -429,17 +405,10 @@ func TestAResumedRetroCreatesTheIssuesAsDecided(t *testing.T) {
 func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
 	t.Parallel()
 	answers := retroRepo(t, true, "<!-- se:retro attended -->")
-	answers["repos/o/r/issues/30/comments"] = `{}`
-	answers["repos/o/r/issues"] = `{"number":40,"id":4000,"html_url":"u40"}`
-	answers["repos/o/r/issues/40/assignees"] = `{}`
-	inner, _ := writes(t, answers)
-	gh := func(args ...string) ([]byte, error) {
-		if len(args) > 2 && args[2] == "DELETE" {
-			return nil, errors.New("gh: Write access to this GitHub API path is not permitted through this proxy. (HTTP 403)")
-		}
-		return inner(args...)
-	}
-	f, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
+	// Behind a cloud session's proxy, deleting a branch is refused.
+	gh := recorded(t, answers)
+	gh.Proxy = true
+	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
 	if err != nil || !strings.HasPrefix(f.Left, "issue-30 stays (") || !strings.Contains(f.Left, "se fleet prune") {
 		t.Fatalf("%+v %v", f, err)
 	}
@@ -450,8 +419,8 @@ func TestARuleCheckWhosePRDidNotMergeIsRefused(t *testing.T) {
 	a := retroRepo(t, true, "")
 	key := "repos/o/r/pulls?state=closed&base=main&per_page=100"
 	a[key] = strings.Replace(a[key], `"number":91`, `"number":92`, 1)
-	gh, _ := writes(t, a)
-	_, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.Collect(30)
+	gh := recorded(t, a)
+	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Collect(30)
 	if err == nil || !strings.Contains(err.Error(), "the rule check mark started with PR #91, which is not a merged PR") {
 		t.Fatalf("%v", err)
 	}

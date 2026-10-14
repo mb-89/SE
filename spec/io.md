@@ -15,6 +15,14 @@ the process, and its real one is tested on loopback.
 hands over to and the detached daemon. gh is GitHub's, not proc's. Its fake
 is a machine that holds only the programs a case installs, each a function
 that does what the real one would, and records every run.
+GitHub, `src/internal/io/github`, is read and written by REST path through
+gh. Its fake, `github.NewFake(clock)`, is seeded from recorded gh answers
+(`Seed`), each read for what it says about the repository, and keeps issues,
+comments, labels, links, sub-issues, branches and pull requests, so a write
+is read back. What GitHub comes to hold later, such as a PR's mergeability,
+is seeded for a time on the fake's clock (`SeedAt`). Its real contract test
+writes issues, so it runs only against the scratch repository
+`SE_GITHUB_CONTRACT_REPO` names.
 
 ## The layout
 
@@ -28,7 +36,8 @@ Each I/O module is one package, `src/internal/io/<name>`, holding four parts:
 | the contract suite | one function in a `_test.go` file, called by both the fake's test and the real one's |
 
 Code takes the module as an argument: a struct field or a parameter, set
-once where the program starts (`cmd/se` hands every command `clock.Real()`).
+once where the program starts (`cmd/se` hands every command `clock.Real()`
+and `github.Real()`).
 Nothing reaches for the real thing itself, so a test hands in the fake and a
 case replays.
 
@@ -52,20 +61,27 @@ the real thing; a fake without one drifts. The clock's suite is `contract` in
 Every other test runs on fakes: no wall clock, no sleeping, no network. The
 real implementation runs in its contract test alone, kept short.
 
+Two tests are the exceptions, named here. The first,
+`TestRestartRunsTheCheckoutsOwnSource` in `src/cmd/se/checkout_test.go`, builds se and stops the real daemon
+processes it starts, over the real network, by `clock.Real()`. It is what
+shows a restart runs the checkout's own source, which no fake can, and
+`go test -short` skips it. The second,
+`TestStatusAndStopReachTheDaemonOverTheNetwork` in `src/cmd/se/stop_test.go`
+hands se stop the real clock: it polls for the daemon's endpoint to go, which a fake
+clock passes at once, before the daemon has removed it.
+
 ## The rule
 
 The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line: outside
-`src/internal/io/`, no Go file imports `os/exec` or `net/http`, calls the
+`src/internal/io/`, no Go file imports `os/exec` or `net/http`, runs `gh`, calls the
 clock through `time` (`Now`, `Sleep`, `After` and their kin), or opens, reads
-or writes files through `os`.
-
-What still breaks it today is named in one allowlist,
-`src/internal/io/allowlist.txt`, one file and what it reaches per line. It
-only shrinks: each I/O module removes its own entries as it lands, the last
-empties it, and the rule refuses an entry that matches nothing.
-
-Test files are held by the `fast-test` rule
+or writes files through `os`. Test files are held by the `fast-test` rule
 (`src/internal/rules/fasttest.go`) instead: every test calls `t.Parallel`
 first, and outside `src/internal/io/` no test reads the clock through `time`
 or takes `clock.Real`. What still breaks it is named in
-`src/internal/rules/serial.txt`, which only shrinks the same way.
+`src/internal/rules/serial.txt`, which only shrinks as the allowlist below does.
+
+What broke it while the modules landed was named in one allowlist,
+`src/internal/io/allowlist.txt`, one file and what it reaches per line. Each
+I/O module removed its own entries as it landed, and GitHub's, the last,
+emptied it. It only shrinks: the rule refuses an entry that matches nothing.

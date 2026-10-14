@@ -150,20 +150,23 @@ func TestConcurrentEventsAllLand(t *testing.T) {
 	}
 }
 
+// at is the time the fake clocks of these tests stand at.
+var at = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+
 func TestServePublishesAndWithdrawsItsEndpoint(t *testing.T) {
 	t.Parallel()
-	p, n := workspace(t), sehttp.NewFake()
+	p, n, f := workspace(t), sehttp.NewFake(), clock.NewFake(at)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
-		done <- daemon.Serve(ctx, p, daemon.Options{Clock: clock.Real(), Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
+		done <- daemon.Serve(ctx, p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
 	}()
 	ep := <-ready
 	if got, ok := daemon.Healthy(p, n); !ok || got.InstanceID != ep.InstanceID {
 		t.Fatalf("healthy = %v, %v", got, ok)
 	}
-	if err := daemon.Serve(context.Background(), p, daemon.Options{Clock: clock.Real(), Net: n}); !errors.Is(err, daemon.ErrRunning) {
+	if err := daemon.Serve(context.Background(), p, daemon.Options{Clock: f, Net: n}); !errors.Is(err, daemon.ErrRunning) {
 		t.Fatalf("second serve: %v", err)
 	}
 	cancel()
@@ -177,14 +180,15 @@ func TestServePublishesAndWithdrawsItsEndpoint(t *testing.T) {
 
 func TestStopEndsTheDaemon(t *testing.T) {
 	t.Parallel()
-	p, n := workspace(t), sehttp.NewFake()
+	p, n, f := workspace(t), sehttp.NewFake(), clock.NewFake(at)
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
-		done <- daemon.Serve(context.Background(), p, daemon.Options{Clock: clock.Real(), Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
+		done <- daemon.Serve(context.Background(), p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
 	}()
 	<-ready
-	if err := daemon.Stop(p, 5*time.Second, clock.Real(), n); err != nil {
+	// The fake's sleeps pass at once: a day of them leaves the daemon time to withdraw.
+	if err := daemon.Stop(p, 24*time.Hour, f, n); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {
@@ -198,7 +202,7 @@ func TestStopEndsTheDaemon(t *testing.T) {
 func TestAnIdleDaemonEnds(t *testing.T) {
 	t.Parallel()
 	p := workspace(t)
-	f := clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
+	f := clock.NewFake(at)
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
@@ -234,18 +238,19 @@ func TestAnIdleDaemonEnds(t *testing.T) {
 
 func TestTakeOverStepsARunningDaemonAside(t *testing.T) {
 	t.Parallel()
-	p, n := workspace(t), sehttp.NewFake()
+	p, n, f := workspace(t), sehttp.NewFake(), clock.NewFake(at)
 	first := make(chan daemon.Endpoint, 1)
 	firstDone := make(chan error, 1)
 	go func() {
-		firstDone <- daemon.Serve(context.Background(), p, daemon.Options{Clock: clock.Real(), Net: n, Ready: func(ep daemon.Endpoint) { first <- ep }})
+		firstDone <- daemon.Serve(context.Background(), p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { first <- ep }})
 	}()
 	ep1 := <-first
 	ctx, cancel := context.WithCancel(context.Background())
 	second := make(chan daemon.Endpoint, 1)
 	secondDone := make(chan error, 1)
 	go func() {
-		secondDone <- daemon.Serve(ctx, p, daemon.Options{Clock: clock.Real(), Net: n, TakeOver: 10 * time.Second, Ready: func(ep daemon.Endpoint) { second <- ep }})
+		// A day on the fake, whose sleeps pass at once, as in TestStopEndsTheDaemon.
+		secondDone <- daemon.Serve(ctx, p, daemon.Options{Clock: f, Net: n, TakeOver: 24 * time.Hour, Ready: func(ep daemon.Endpoint) { second <- ep }})
 	}()
 	ep2 := <-second
 	if err := <-firstDone; err != nil {

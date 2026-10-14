@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/battery"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // Landing is where an issue's PR stands once se issue land is done.
@@ -109,14 +111,13 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		pr = open[0]
 		// The body shows the profile of the battery this land ran.
 		if profiled {
-			if _, err := s.GH("api", "-X", "PATCH", "-f", "body="+body, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, pr.Number)); err != nil {
+			if _, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/pulls/%d", s.Repo, pr.Number), github.F("body", body)); err != nil {
 				return Landing{}, err
 			}
 		}
 	} else {
 		path := fmt.Sprintf("repos/%s/pulls", s.Repo)
-		out, err := s.GH("api", "-X", "POST", "-f", "title="+got[0].Title, "-f", "head="+branch, "-f", "base=main",
-			"-f", "body="+body, path)
+		out, err := s.GitHub.Send("POST", path, github.F("title", got[0].Title), github.F("head", branch), github.F("base", "main"), github.F("body", body))
 		if err != nil {
 			return Landing{}, err
 		}
@@ -155,11 +156,11 @@ func (s Source) takeIn(dir, branch string) error {
 // autoMerge turns on auto-merge, squashing, for the PR; merged is true where
 // nothing was left to wait for and it was merged at once instead.
 func (s Source) autoMerge(pr pull) (merged bool, err error) {
-	_, err = s.GH("api", "-f", "query="+autoMerge, "-f", "id="+pr.NodeID, "graphql")
+	_, err = s.GitHub.GraphQL(autoMerge, github.F("id", pr.NodeID))
 	if err != nil && strings.Contains(err.Error(), "GraphQL is not available") {
 		// A Claude Code cloud session reaches GitHub through a proxy that
 		// refuses GraphQL and offers auto-merge as a REST route instead.
-		_, err = s.GH("api", "-X", "PUT", "-f", "merge_method=squash", fmt.Sprintf("repos/%s/pulls/%d/ccr/auto_merge", s.Repo, pr.Number))
+		_, err = s.GitHub.Send("PUT", fmt.Sprintf("repos/%s/pulls/%d/ccr/auto_merge", s.Repo, pr.Number), github.F("merge_method", "squash"))
 	}
 	if err != nil {
 		// A PR with nothing left to wait for takes no auto-merge; it is
@@ -168,7 +169,7 @@ func (s Source) autoMerge(pr pull) (merged bool, err error) {
 			return false, fmt.Errorf("PR #%d (%s) is open, but auto-merge is not on: %w", pr.Number, pr.URL, err)
 		}
 		path := fmt.Sprintf("repos/%s/pulls/%d/merge", s.Repo, pr.Number)
-		if _, err := s.GH("api", "-X", "PUT", "-f", "merge_method=squash", path); err != nil {
+		if _, err := s.GitHub.Send("PUT", path, github.F("merge_method", "squash")); err != nil {
 			return false, fmt.Errorf("PR #%d (%s) is open, but merging it failed: %w", pr.Number, pr.URL, err)
 		}
 		return true, nil

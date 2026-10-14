@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -630,7 +631,9 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 			}
 			*repo = r
 		}
-		return issues.Source{Repo: *repo, GH: c.GH, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc}, nil
+		// stdout is the answer; what se waits on goes beside it, as it waits.
+		waits := func(note string) { fmt.Fprintln(os.Stderr, "se:", note) }
+		return issues.Source{Repo: *repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Waits: waits}, nil
 	}, asJSON
 }
 

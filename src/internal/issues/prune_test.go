@@ -23,13 +23,13 @@ func strayWorld(t *testing.T) *world {
 		}
 		return "[" + strings.Join(rs, ",") + "]"
 	}
-	w.answers[refsPath] = refs("issue-19", "issue-20", "issue-21", "issue-x")
-	w.answers["repos/o/r/git/matching-refs/heads/claude/"] = refs("claude/old", "claude/pr", "claude/new")
-	w.answers[allPullsPath] = `[{"number":90,"head":{"ref":"issue-20"}},{"number":91,"head":{"ref":"claude/pr"}}]`
-	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed"}`
-	w.answers["repos/o/r/issues/21"] = `{"number":21,"state":"open"}`
+	w.set(refsPath, refs("issue-19", "issue-20", "issue-21", "issue-x"))
+	w.set("repos/o/r/git/matching-refs/heads/claude/", refs("claude/old", "claude/pr", "claude/new"))
+	w.set(allPullsPath, `[{"number":90,"head":{"ref":"issue-20"}},{"number":91,"head":{"ref":"claude/pr"}}]`)
+	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed"}`)
+	w.set("repos/o/r/issues/21", `{"number":21,"state":"open"}`)
 	commit := func(sha, at string) {
-		w.answers["repos/o/r/commits/"+sha] = fmt.Sprintf(`{"commit":{"committer":{"date":%q}}}`, at)
+		w.set("repos/o/r/commits/"+sha, fmt.Sprintf(`{"commit":{"committer":{"date":%q}}}`, at))
 	}
 	commit("s-claude-old", quiet)
 	commit("s-claude-new", recent)
@@ -39,7 +39,7 @@ func strayWorld(t *testing.T) *world {
 func TestPruneListsOnlyStrayBranches(t *testing.T) {
 	t.Parallel()
 	w := strayWorld(t)
-	s := Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
 	got, err := s.Strays()
 	if err != nil {
 		t.Fatal(err)
@@ -52,14 +52,18 @@ func TestPruneListsOnlyStrayBranches(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 	// Listing deletes nothing.
-	if len(w.writes) != 0 {
-		t.Fatalf("writes %q", w.writes)
+	if len(w.Writes()) != 0 {
+		t.Fatalf("writes %q", w.Writes())
 	}
 	done, err := s.Prune(got)
 	if err != nil || !done[0].Deleted || !done[1].Deleted {
 		t.Fatalf("%+v %v", done, err)
 	}
-	if len(w.writes) != 2 || !wrote(w, "DELETE repos/o/r/git/refs/heads/claude/old") || !wrote(w, "DELETE repos/o/r/git/refs/heads/issue-19") {
-		t.Fatalf("writes %q", w.writes)
+	if got, want := w.Writes(), []string{"DELETE repos/o/r/git/refs/heads/claude/old", "DELETE repos/o/r/git/refs/heads/issue-19"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("writes %q", got)
+	}
+	// Pruned, they are stray no more.
+	if got, err := s.Strays(); err != nil || len(got) != 0 {
+		t.Fatalf("%+v %v", got, err)
 	}
 }
