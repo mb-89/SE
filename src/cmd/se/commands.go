@@ -51,8 +51,11 @@ type Command struct {
 // Reply is what a command answers. On a terminal se prints Text; in a session
 // (--session) it prints the whole Reply as JSON for the plugin to apply.
 type Reply struct {
-	// Text is what to show.
+	// Text is what to show where the command was typed.
 	Text string `json:"text"`
+	// Short, when set, is what a press of the command's button in /se ui
+	// shows instead of Text: a few short lines, the rest left to typing.
+	Short string `json:"short,omitempty"`
 	// Active, when set, switches forwarding on or off for the calling session.
 	Active *bool `json:"active,omitempty"`
 	// Endpoint, when set, is where the workspace's daemon now answers.

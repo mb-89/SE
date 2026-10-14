@@ -202,7 +202,9 @@ func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 		return Briefing{}, err
 	}
 	if order := takeOrder(all, 0); len(order) > 0 {
-		b.Next = &order[0].Issue
+		next := order[0].Issue
+		next.Body, next.Picked = Shown(next.Body), picked(order[0])
+		b.Next = &next
 	}
 	for _, st := range all {
 		switch {

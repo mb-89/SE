@@ -71,7 +71,7 @@ func marksOf(all []comment) marks {
 			case "resume":
 				m = marks{winners: map[int]int64{}}
 			case "person":
-				m.reason = strings.TrimSpace(mark.ReplaceAllString(c.Body, ""))
+				m.reason = Shown(c.Body)
 			case "takeover":
 				round, _ = strconv.Atoi(got[2])
 				if round > m.takeovers {

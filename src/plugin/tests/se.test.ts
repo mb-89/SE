@@ -663,6 +663,52 @@ test('a command se offers as a button appears, and pressing it runs /se <name>',
   expect(w.logs).toEqual(['No SE daemon answers for /work.'])
 })
 
+test('a three-line answer to a press arrives as three lines, never one flattened line', async ($, on) => {
+  const w = world(on)
+  w.replies.status = {
+    text: 'No SE daemon answers for /work.\nHooks loaded from aaa111.\nThey disagree: start a new session.',
+  }
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'run status' })
+  expect(w.logs).toEqual([
+    'No SE daemon answers for /work.',
+    'Hooks loaded from aaa111.',
+    'They disagree: start a new session.',
+  ])
+})
+
+test('a press shows the short form se answers; typing shows the full one', async ($, on) => {
+  const w = world(on)
+  w.replies['issue pull'] = {
+    text: '#7 seven\nu7\nThe lowest ready issue at the top.\n1 se issue closed.\n0 retros closed.',
+    short: '#7 seven\nu7\nThe lowest ready issue at the top.\nCadence: retro at 1 of 10; overhaul at 0 of 5.',
+  }
+  await $.session.start(starts)
+  expect((await $.command.run(se('issue pull')))?.text).toBe(
+    '#7 seven\nu7\nThe lowest ready issue at the top.\n1 se issue closed.\n0 retros closed.',
+  )
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
+  await ui.press({ key: 'run issue pull' })
+  expect(w.logs).toEqual([
+    '#7 seven',
+    'u7',
+    'The lowest ready issue at the top.',
+    'Cadence: retro at 1 of 10; overhaul at 0 of 5.',
+  ])
+})
+
+test('a slow answer that follows in the transcript keeps its lines', async ($, on) => {
+  const w = world(on)
+  w.takes.slow = 5000
+  w.replies.slow = { text: 'one\n\ntwo' }
+  await $.session.start(starts)
+  await Promise.all([$.command.run(se('slow')), w.clock.advance(5000)])
+  expect(w.logs).toEqual(['one', 'two'])
+})
+
 test('a command se does not offer as a button does not appear', async ($, on) => {
   const w = world(on)
   await $.session.start(starts)
