@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -47,7 +48,7 @@ func init() {
 		Summary: "print a manifest, or rewrite every manifest section",
 		Details: "A manifest section stands between <!-- se:manifest <name> --> and <!-- /se:manifest --> in a Markdown file, " +
 			"and is made from its owners: skills (the skills folder), spec (spec/), usage <word>... (the usage lines of the commands under each word). " +
-			"With a name, manifest prints that manifest; with --write, it rewrites every section of every Markdown file git tracks and names the files it changed. " +
+			"With a name, manifest prints that manifest; with --write, it rewrites every section of every Markdown file git tracks and names the files it changed, and refuses while git's index holds unmerged paths. " +
 			"The rule manifest fails where a committed section differs.",
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("manifest")
@@ -71,6 +72,11 @@ func init() {
 				}
 				text, err := manifest(c.Workspace, repo.Paths, name, "README.md")
 				return Reply{Text: text}, err
+			}
+			if unmerged, err := unmergedPaths(c.Workspace); err != nil {
+				return Reply{}, err
+			} else if len(unmerged) > 0 {
+				return Reply{}, fmt.Errorf("manifest --write refuses while git's index holds unmerged paths (%s): resolve the merge first", strings.Join(unmerged, ", "))
 			}
 			var changed []string
 			for _, p := range repo.Paths {
@@ -101,6 +107,22 @@ func init() {
 			return Reply{Text: "rewrote " + strings.Join(changed, ", ")}, nil
 		},
 	})
+}
+
+// unmergedPaths is every path git's index at root holds unmerged, each once:
+// a conflicted file stands there once per stage, which would list it as often.
+func unmergedPaths(root string) ([]string, error) {
+	out, err := exec.Command("git", "-C", root, "diff", "--name-only", "--diff-filter=U", "-z").Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff --diff-filter=U: %w", err)
+	}
+	var paths []string
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
 }
 
 func manifestNames() []string {

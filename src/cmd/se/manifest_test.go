@@ -100,3 +100,36 @@ func TestAFolderGitIgnoresCountsThoughNoCheckoutHoldsIt(t *testing.T) {
 		t.Fatalf("rules (exit %d): %s", code, errs)
 	}
 }
+
+func TestWriteRefusesWhileTheIndexHoldsAConflict(t *testing.T) {
+	readme := "# SE\n\nReader: a person meeting SE.\n\n<!-- se:manifest spec -->\n<!-- /se:manifest -->\n"
+	ws := prose(t, map[string]string{
+		"README.md":      readme,
+		"spec/issues.md": "# Issues\n\nReader: whoever.\n",
+	})
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", ws, "-c", "user.name=se", "-c", "user.email=se@example.com"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git("add", ".")
+	git("commit", "-q", "-m", "base")
+	git("checkout", "-q", "-b", "other")
+	write(t, filepath.Join(ws, "spec", "issues.md"), "# Issues: theirs\n\nReader: whoever.\n")
+	git("commit", "-q", "-am", "theirs")
+	git("checkout", "-q", "-")
+	write(t, filepath.Join(ws, "spec", "issues.md"), "# Issues: ours\n\nReader: whoever.\n")
+	git("commit", "-q", "-am", "ours")
+	if err := exec.Command("git", "-C", ws, "merge", "-q", "other").Run(); err == nil {
+		t.Fatal("the merge did not conflict")
+	}
+	code, out, errs := se(t, "--workspace", ws, "manifest", "--write")
+	if code != 1 || !strings.Contains(errs, "unmerged paths (spec/issues.md)") {
+		t.Fatalf("write during a conflict (exit %d): %q %s", code, out, errs)
+	}
+	if data, _ := os.ReadFile(filepath.Join(ws, "README.md")); string(data) != readme {
+		t.Fatalf("README.md changed:\n%s", data)
+	}
+}
