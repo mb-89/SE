@@ -43,6 +43,9 @@ type Procs interface {
 	// Start starts c and returns at once; the Running's Wait answers its end
 	// as Run would.
 	Start(c Cmd) (Running, error)
+	// Self answers the path of the program running now, the se itself, which
+	// Run runs as any other.
+	Self() (string, error)
 }
 
 // Running is a program Start started.
