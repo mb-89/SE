@@ -203,6 +203,7 @@ func TestEachRuleCheck(t *testing.T) {
 }
 
 func TestTheAnswersCheckSkipsWhatLandsNoBranch(t *testing.T) {
+	t.Parallel()
 	a := retroRepo(t, true, "<!-- se:retro attended -->")
 	key := "repos/o/r/issues?labels=se&state=closed&per_page=100" + since
 	at := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
