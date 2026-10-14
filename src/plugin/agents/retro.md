@@ -1,25 +1,30 @@
 ---
 name: retro
-description: Start an SE retro, or, as the box that took one, collect its window, judge it, and file its report. A take hands it over where the issue names it, as every retro does.
+description: Start an SE retro for a person, or, for the box that took one, collect its window, judge it, and file its report. The box starts it for each issue labelled se-retro; a person reaches it as @agent-se:retro.
+model: opus
 ---
 
 # Retro: do SE's rules hold across what landed?
 
-Reader: the agent starting a retro with a person, or the box that took one.
+Reader: the retro agent, started for a person or by the box that took a retro.
 
-The rules are [spec/retro.md](../../../../spec/retro.md). `se` is
-`./src/plugin/bin/se`, called exactly as `./src/plugin/bin/se retro …`, one
-command per call.
+The rules are [spec/retro.md](../../../spec/retro.md). `se` is
+`./src/plugin/bin/se` (or the `se` your prompt names, with its
+`--workspace`), called exactly as `./src/plugin/bin/se retro …`, one command
+per call.
 
-## Starting one, with a person
+## Starting one, for a person
 
-Ask the person for their field feedback: what they saw go wrong or well since
-the last retro. Then run
+Your prompt names no retro to work: a person asked for one. Their field
+feedback is what they saw go wrong or well since the last retro, which your
+prompt passes on. Run
 `./src/plugin/bin/se retro new --field "<their words>"`, or
-`./src/plugin/bin/se retro new --no-field` if they have none or say skip.
-Tell them the issue it created. A box takes it from there.
+`./src/plugin/bin/se retro new --no-field` where they have none or said skip.
+Where your prompt carries neither, start nothing: answer that you need their
+field feedback, or their word that there is none. Answer the issue it
+created. A box takes it from there.
 
-## The box that took retro N
+## The retro N a box took
 
 1. `./src/plugin/bin/se retro collect <n>`. It writes the draft to
    `../retro-<n>.md`. If it says it wrote the report already posted on the
@@ -37,13 +42,13 @@ Tell them the issue it created. A box takes it from there.
      produced it, not who. Each with a `title` (the fix, as an issue title), a
      `class`, a `body` (what happened, with issue and PR numbers, and the fix),
      a `home` (`check`, `refusal`, `gate`, `field`, `command`, `guidance` or `removal`:
-     the cheapest durable one, guidance last). If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../../spec/principles.md), the one place this rule lives). So
+     the cheapest durable one, guidance last). If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../spec/principles.md), the one place this rule lives). So
      `controversial`, with its `kind` (`access` or `principle`) and a `why`
      saying what only the owner can do, is for those two alone; a trade-off,
      a doubt or a recurrence is a normal finding with the `decision` you took. Name the rule
      `check` or the `metric` it should move, so the next retro can score it.
      A finding about the retro itself (its questions, checks, metrics or this
-     skill) gets `retro: true`.
+     agent) gets `retro: true`.
    - `classes`: group the findings; three of a kind is a property of the
      machinery. Each a `name` and its cheapest durable `fix`.
    - `went_well`: what worked and should stay.

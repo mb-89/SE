@@ -11,9 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # tests/tools.sh pins every tool, Go among them.
+      - id: pins
+        run: . ./tests/tools.sh && echo "go=$GO" >>"$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
         with:
-          go-version-file: src/go.mod
+          go-version: ${{ steps.pins.outputs.go }}
           cache-dependency-path: src/go.sum
       - uses: actions/setup-node@v4
         with:
@@ -22,7 +25,7 @@ jobs:
       - run: npm i -g @anthropic-ai/claude-code@2.1.296
       - run: sh ./tests/tools.sh install
       - run: sh ./tests/check.sh
-      # The battery's profile, for the retro: every step's and every Go test's duration.
+      # The battery's profile, for the retro: every step's, every Go test's and every plugin test's duration.
       - uses: actions/upload-artifact@v4
         if: always()
         with:

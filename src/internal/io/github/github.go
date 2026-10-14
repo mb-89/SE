@@ -89,12 +89,9 @@ func (gh) Get(path string) ([]byte, error) { return run("api", path) }
 // shorter than per_page (30 where path does not say) is the last; so is one
 // that repeats the page before it, where a list takes no page.
 func (gh) List(path string) ([]byte, error) {
-	sep, size := "?", 30
+	sep, size := "?", pageSize(path)
 	if u, err := url.Parse(path); err == nil && u.RawQuery != "" {
 		sep = "&"
-		if n, err := strconv.Atoi(u.Query().Get("per_page")); err == nil && n > 0 {
-			size = n
-		}
 	}
 	all := []json.RawMessage{}
 	var last []byte
@@ -118,6 +115,17 @@ func (gh) List(path string) ([]byte, error) {
 	}
 }
 
+// pageSize is how many items a page of the list at path holds: its per_page,
+// or GitHub's 30 where path does not say.
+func pageSize(path string) int {
+	if u, err := url.Parse(path); err == nil {
+		if n, err := strconv.Atoi(u.Query().Get("per_page")); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 30
+}
+
 func (gh) Send(method, path string, fields ...Field) ([]byte, error) {
 	return run(append(append([]string{"api", "-X", method}, flags(fields)...), path)...)
 }
@@ -138,6 +146,10 @@ func flags(fields []Field) []string {
 	return out
 }
 
+// notSignedIn is what a command that needs GitHub says where gh has no login:
+// the install never asks for one, so this is where a person learns of it.
+const notSignedIn = "gh cannot reach GitHub without a login; run gh auth login, then this command again"
+
 // httpStatus is how gh names the status of a refused request.
 var httpStatus = regexp.MustCompile(`\(HTTP (\d{3})\)`)
 
@@ -147,13 +159,16 @@ func run(args ...string) ([]byte, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if errors.Is(err, exec.ErrNotFound) {
-		return nil, errors.New("gh is missing; RUNME.sh names how to install it")
+		return nil, errors.New("gh is missing; RUNME.sh installs it")
 	}
 	if err != nil {
 		said := strings.TrimSpace(stderr.String())
 		e := &Error{Message: fmt.Sprintf("gh %s: %v: %s", strings.Join(args, " "), err, said)}
 		if m := httpStatus.FindStringSubmatch(said); m != nil {
 			e.Status, _ = strconv.Atoi(m[1])
+		}
+		if e.Status == 401 || strings.Contains(said, "gh auth login") {
+			e.Message = notSignedIn
 		}
 		return nil, e
 	}

@@ -11,8 +11,10 @@ fails as the real one does.
 The network, `src/internal/io/http`, serves and calls the daemon protocol
 (health, event, value, shutdown) and fires the routine; its fake is a network inside
 the process, and its real one is tested on loopback.
-`src/internal/io/proc` runs programs: git, go, check.sh, the se a session
-hands over to and the detached daemon. gh is GitHub's, not proc's. Its fake
+`src/internal/io/proc` runs programs: git, go, the linters (golangci-lint, biome, deadcode), check.sh, the se a session
+hands over to and the detached daemon. It starts only the programs
+`proc.Programs` lists, the one place that list lives: `proc.Listed`, which se
+and the battery run on, refuses any other. gh is GitHub's, not proc's. Its fake
 is a machine that holds only the programs a case installs, each a function
 that does what the real one would, and records every run. It also says which
 program is running now (`Self`): the real one asks the system, the fake
@@ -50,6 +52,11 @@ A fake keeps its own state and answers from it as the real thing would. It
 never scripts answers: a test does not tell it what the next call returns. The
 fake clock stands still until it is told to move: `Advance` moves it and fires
 every `After` whose time has come, and `Sleep` passes its time at once.
+
+Fakes keep time too: `github.Fake.Delay` and `proc.Fake.Delay` make each
+request and each process start pass the latency
+[spec/budgets.yaml](budgets.yaml) names on a fake clock, and the battery runs
+every interactive command on them against its budgets.
 
 ## One contract suite per fake
 
@@ -111,7 +118,19 @@ first, and outside `src/internal/io/` no test reads the clock through `time`
 or takes `clock.Real`. What still breaks it is named in
 `src/internal/rules/serial.txt`, which only shrinks as the allowlist below does.
 
+The plugin has its clock too, `$.clock`. The `plugin-clock` rule
+(`src/internal/rules/pluginclock.go`) refuses, in the plugin's hooks and their
+helpers under `src/plugin/`, a read of the wall clock past it: `Date.now` and
+a `new Date` with no argument. The plugin's tests, which drive the mock clock,
+are aside.
+
 What broke it while the modules landed was named in one allowlist,
 `src/internal/io/allowlist.txt`, one file and what it reaches per line. Each
 I/O module removed its own entries as it landed, and GitHub's, the last,
 emptied it. It only shrinks: the rule refuses an entry that matches nothing.
+
+The `programs` rule (`src/internal/rules/programs.go`) holds principle 6's
+"no process does what a library call can do": no Go file names a program
+`proc.Programs` does not list, and none but proc calls `os/exec`. What still
+breaks it is named in `src/internal/rules/programs.txt`, which only shrinks:
+today gh, until the GitHub module speaks HTTP itself (#186).

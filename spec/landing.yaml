@@ -20,7 +20,7 @@
   question: What did you do by hand, or script, that should be an `se` command? Name any script you put in `src/scripts/`.
   hint: The step, and the command it should be.
 - key: rules
-  question: Did a rule (CLAUDE.md, `spec/issues.md`, the skill) get in your way, or did you bend one? Which?
+  question: Did a rule (CLAUDE.md, `spec/issues.md`, your agent's procedure) get in your way, or did you bend one? Which?
   hint: The rule, where it lives, and what happened.
 - key: guidance
   question: Was any guidance wrong, missing or contradictory? Where?

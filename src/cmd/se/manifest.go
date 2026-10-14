@@ -15,8 +15,10 @@ import (
 
 // A manifest is a map: it points at owners and says nothing of its own, so it
 // is made from them, never written by hand. Each one here reads its owner: the
-// skills folder, spec/, the command registry, or the retro's rule checks.
+// registry of kinds, the skills folder, spec/, the command registry, or the
+// retro's rule checks.
 var manifests = map[string]func(m manifestCall) (string, error){
+	"agents": agentsManifest,
 	"checks": checksManifest,
 	"skills": skillsManifest,
 	"spec":   specManifest,
@@ -45,11 +47,12 @@ func (m manifestCall) link(p string) string {
 func init() {
 	register(Command{
 		Name:    "manifest",
+		Class:   batch,
 		Usage:   "manifest [--write] [<name>]",
 		Group:   "Checks",
 		Summary: "print a manifest, or rewrite every manifest section",
 		Details: "A manifest section stands between <!-- se:manifest <name> --> and <!-- /se:manifest --> in a Markdown file, " +
-			"and is made from its owners: checks (the retro's rule checks), skills (the skills folder), spec (spec/), usage <word>... (the usage lines of the commands under each word). " +
+			"and is made from its owners: agents (the registry of kinds and the plugin's agents), checks (the retro's rule checks), skills (the skills folder), spec (spec/), usage <word>... (the usage lines of the commands under each word). " +
 			"With a name, manifest prints that manifest; with --write, it rewrites every section of every Markdown file git tracks and names the files it changed. " +
 			"The rule manifest fails where a committed section differs.",
 		Run: func(c *Call) (Reply, error) {
@@ -129,6 +132,19 @@ func manifest(d disk.Disk, root string, paths []string, name, at string) (string
 	return made(manifestCall{disk: d, root: root, paths: paths, args: words[1:], at: at})
 }
 
+// agentsManifest lists the plugin's agents, each by its type in a session,
+// linked to its file, with the kind of issue it works, from the registry of kinds.
+func agentsManifest(m manifestCall) (string, error) {
+	var lines []string
+	for _, k := range issues.IssueKinds {
+		if ok, err := m.disk.Exists(filepath.Join(m.root, filepath.FromSlash(k.File()))); err != nil || !ok {
+			return "", fmt.Errorf("the %s kind's agent has no file %s", k.Name, k.File())
+		}
+		lines = append(lines, fmt.Sprintf("- [`%s`](%s), for the kind %s: %s.", k.Type(), m.link(k.File()), k.Name, k.What))
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
 // skillsManifest lists the plugin's skills, each by its name in a session,
 // linked, with its own description.
 func skillsManifest(m manifestCall) (string, error) {
@@ -179,13 +195,17 @@ func specManifest(m manifestCall) (string, error) {
 }
 
 // checksManifest lists the retro's rule checks, each with the PR it is
-// checked from.
+// checked from and whether it holds closing or creation against it.
 func checksManifest(manifestCall) (string, error) {
 	var lines []string
 	for _, k := range issues.RuleChecks() {
 		from := "from the first commit"
 		if k.Since > 0 {
-			from = fmt.Sprintf("on what closed after PR #%d brought it", k.Since)
+			when := "closed"
+			if k.Bound == issues.Creation {
+				when = "was created"
+			}
+			from = fmt.Sprintf("on what %s after PR #%d brought it", when, k.Since)
 		}
 		lines = append(lines, fmt.Sprintf("- `%s`: %s; checked %s.", k.Kind, k.Rule, from))
 	}

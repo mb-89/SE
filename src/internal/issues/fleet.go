@@ -13,7 +13,7 @@ import (
 )
 
 // The kinds of finding se fleet check lists, in the order it lists them and
-// the coordination skill works them. spec/coordination.md says what each is.
+// the box, se:coordinator, works them. spec/coordination.md says what each is.
 const (
 	StalledRoot     = "stalled root"
 	ConflictedPR    = "conflicted PR"
@@ -118,6 +118,22 @@ func (s Source) Check() ([]Finding, error) {
 		return nil, err
 	}
 	return s.check(all, t)
+}
+
+// CheckFanOut is Check, and then se fleet check's part in the fan-out on the
+// same survey: a fan-out the routine refused, kept on the alive claims, fires
+// once its retry time has passed and the fleet still needs the box. fire is the fire itself; the
+// line says what happened, empty where no refused fan-out is kept.
+func (s Source) CheckFanOut(fire func() Shot) ([]Finding, string, error) {
+	all, t, err := s.survey()
+	if err != nil {
+		return nil, "", err
+	}
+	found, err := s.check(all, t)
+	if err != nil {
+		return nil, "", err
+	}
+	return found, s.retryFanOut(all, t, fire), nil
 }
 
 // check is Check on a survey already read.
