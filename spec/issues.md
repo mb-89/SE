@@ -165,7 +165,8 @@ person**, and leaves the agents' queue until the person has closed it.
   2026-10-14). It ends in one of two ways and no other: a PR for what it
   solved, auto-merge on (`se issue land`), with an issue (`se issue new`) for
   everything it could not solve; or a supersede (`se issue supersede <n>`),
-  where it cannot land a PR at all. `se issue pull --take` names the open
+  where it cannot land a PR at all; where another open issue's PR already
+  covers its work, that supersede is `--duplicate-of` that issue. `se issue pull --take` names the open
   issues the taken one blocks; the box names in `--blocks` those of them that
   need what it left over, and only those, so nothing waits that need not. An
   issue for a person (`se issue new --person`) is never a way for a box to
@@ -191,7 +192,7 @@ se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--pa
 se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
-se issue supersede N (--body B | --body-file PATH) [--json] [--repo OWNER/NAME]
+se issue supersede N (--body B | --body-file PATH | --duplicate-of M) [--json] [--repo OWNER/NAME]
 se issue tree [ROOT] [--json] [--repo OWNER/NAME]
 se review brief N [--claims] [--json] [--repo OWNER/NAME]
 ```
@@ -337,6 +338,14 @@ blocked by the successor (GitHub's native links), then closes N, its comment
 naming the successor. A final issue is refused: its box lands a PR. A ready
 successor fires the routine once (with `--json`:
 `{"issue","successor","parent","blocked_by","blocks","ready","fanout"}`).
+
+`se issue supersede N --duplicate-of M` is the supersede of an issue that
+the open issue M already covers, its PR doing the same work (two boxes that
+filed the same bug under different titles): it mints nothing. It links N's
+open dependents as blocked by M, then closes N as a duplicate (state_reason
+`duplicate`), its comment naming M. A final issue closes so too, since its
+work lands under M; a closed M is refused (with `--json`:
+`{"issue","of","url","blocks"}`).
 
 ### The Stop hook
 

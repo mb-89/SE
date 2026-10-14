@@ -40,7 +40,9 @@ command in `<path>`.
      `<se> issue supersede <n> --body-file F`, F holding the open questions
      you could not answer. It makes a final successor in your issue's place
      and closes yours. A final issue (`se-final`) cannot be superseded: its
-     box lands a PR.
+     box lands a PR. Where another open issue's PR already covers your
+     issue's work, final or not, close it as that issue's duplicate instead:
+     `<se> issue supersede <n> --duplicate-of <m>` mints nothing.
 
    An issue for a person (`--person`) is never a way to end, only a side
    issue, for access or a principle. The Stop hook refuses the box's stop

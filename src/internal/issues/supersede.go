@@ -2,6 +2,7 @@ package issues
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/io/github"
@@ -99,4 +100,76 @@ func (s Source) parentOf(n int) (int, error) {
 		return 0, err
 	}
 	return got[0].Number, nil
+}
+
+// Duplicated is what Duplicate did: the issue it closed and the open issue
+// that already covers it.
+type Duplicated struct {
+	// Issue is the duplicate, now closed.
+	Issue int `json:"issue"`
+	// Of is the open issue it duplicates, which carries the work on.
+	Of int `json:"of"`
+	// URL is Of's link.
+	URL string `json:"url"`
+	// Blocks are the duplicate's open dependents, now blocked by Of.
+	Blocks []int `json:"blocks,omitempty"`
+}
+
+// CloseDuplicate is the supersede of an issue another open issue already covers,
+// where its PR does the same work (se issue supersede n --duplicate-of of):
+// it mints nothing. Issue n's open dependents are linked as blocked by of, so
+// nothing that waited on n goes ahead early; then n closes as a duplicate
+// (state_reason duplicate), its comment naming of. A final issue may close so
+// too: the work it would land is landing under of.
+func (s Source) CloseDuplicate(n, of int) (Duplicated, error) {
+	if n == of {
+		return Duplicated{}, fmt.Errorf("#%d cannot duplicate itself", n)
+	}
+	got := map[int]issue{}
+	for _, k := range []int{n, of} {
+		one, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, k), false)
+		if err != nil {
+			if st := github.Status(err); st == 404 || st == 410 {
+				return Duplicated{}, fmt.Errorf("#%d does not exist in %s", k, s.Repo)
+			}
+			return Duplicated{}, err
+		}
+		got[k] = one[0]
+		switch {
+		case one[0].PullRequest != nil:
+			return Duplicated{}, fmt.Errorf("#%d is a pull request, not an issue", k)
+		case one[0].State != "open" && k == n:
+			return Duplicated{}, fmt.Errorf("#%d is closed already: only an open issue is closed as a duplicate", n)
+		case one[0].State != "open":
+			return Duplicated{}, fmt.Errorf("#%d is closed: #%d duplicates only an open issue, which carries its work on", of, n)
+		}
+	}
+	dup := Duplicated{Issue: n, Of: of, URL: got[of].URL}
+	deps, err := s.Dependents(n)
+	if err != nil {
+		return Duplicated{}, err
+	}
+	already, err := s.Dependents(of)
+	if err != nil {
+		return Duplicated{}, err
+	}
+	for _, d := range deps {
+		if d != of && !slices.Contains(already, d) {
+			dup.Blocks = append(dup.Blocks, d)
+		}
+	}
+	for _, d := range dup.Blocks {
+		if err := s.link(d, []int{of}, map[int]int64{of: got[of].ID}); err != nil {
+			return dup, err
+		}
+	}
+	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
+	comment := fmt.Sprintf("Duplicate of #%d, which already covers this issue's work and carries it on.\n%s", of, got[of].URL)
+	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", comment)); err != nil {
+		return dup, fmt.Errorf("commenting on #%d: %w", n, err)
+	}
+	if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "duplicate")); err != nil {
+		return dup, fmt.Errorf("closing #%d: %w", n, err)
+	}
+	return dup, nil
 }
