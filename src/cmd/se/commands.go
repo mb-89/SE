@@ -8,20 +8,20 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/daemon"
+	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
-
-	"github.com/mb-89/SE/src/internal/daemon"
 )
 
 // Command is one word se answers. A command is one file that calls register
-// in its init; the help and the session's /se are made from what registered.
+// in its init. What registered is declared on the index (modules.go), and the
+// help, /se ui and the session's /se are made from the index's catalog.
 type Command struct {
 	// Name is the word that runs it: se <name>, or /se <name> in a session.
 	// A name of two words, "issue pull", is a sub-word of its first: the first
@@ -168,16 +168,13 @@ func (c *Call) Parse(fs *flag.FlagSet) error {
 // Paths names the workspace's runtime files.
 func (c *Call) Paths() daemon.Paths { return daemon.Paths{Workspace: c.Workspace, Disk: c.Disk} }
 
-// offered lists the commands a terminal (session false) or a session can run, by name.
-func offered(session bool) []Command {
-	var out []Command
-	for _, c := range commands {
-		if c.Session || !session {
-			out = append(out, c)
-		}
+// offered lists the commands a terminal (session false) or a session can run,
+// by name, as the index's catalog holds them.
+func offered(session bool) []index.CommandInfo {
+	if session {
+		return catalog().Session()
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	return catalog().Commands
 }
 
 // subWords lists the second words of the commands under first that a terminal
@@ -217,12 +214,13 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() > 0 {
 		name, call.Args = fs.Arg(0), fs.Args()[1:]
 	}
+	cat := catalog()
 	if len(call.Args) > 0 {
-		if _, sub := commands[name+" "+call.Args[0]]; sub {
+		if _, sub := cat.Command(name + " " + call.Args[0]); sub {
 			name, call.Args = name+" "+call.Args[0], call.Args[1:]
 		}
 	}
-	cmd, ok := commands[name]
+	cmd, ok := cat.Command(name)
 	if *session && (!ok || !cmd.Installed) {
 		if code, handed := handsOver(w, *workspace, args, stdout, stderr); handed {
 			return code
@@ -235,7 +233,7 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch {
 	case ok:
-		reply, err = cmd.Run(call)
+		reply, err = runCommand(name, call)
 		if errors.Is(err, flag.ErrHelp) {
 			reply, err = helpReply(commandHelpOf(cmd, call.flags, *session), *session, color), nil
 		}
@@ -276,4 +274,13 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, reply.Text)
 	}
 	return 0
+}
+
+// runCommand runs the command the catalog names with the run the command line registered for it.
+func runCommand(name string, call *Call) (Reply, error) {
+	c, ok := commands[name]
+	if !ok {
+		return Reply{}, fmt.Errorf("%s is declared on the index, but the command line has no run for it", name)
+	}
+	return c.Run(call)
 }
