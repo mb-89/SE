@@ -367,11 +367,16 @@ func fileFindings(t *testing.T, answers map[string]string) (Filed, *github.Fake)
 func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
 	t.Parallel()
 	f, gh := fileFindings(t, retroRepo(t, true, "<!-- se:retro unattended -->"))
-	if !reflect.DeepEqual(f.Issues, []int{92, 93}) || !reflect.DeepEqual(f.Person, []int{93}) || !f.Ready {
+	// The normal finding goes into a new misc manifest, #92; the
+	// controversial one, for a person, stands at the top.
+	if !reflect.DeepEqual(f.Issues, []int{93, 94}) || !reflect.DeepEqual(f.Person, []int{94}) || !f.Ready {
 		t.Fatalf("%+v", f)
 	}
+	if !issueAt(t, gh, 92).labelled(MiscLabel) || issueAt(t, gh, 92).SubIssues.Total != 1 {
+		t.Fatalf("%+v", issueAt(t, gh, 92))
+	}
 	// The normal finding is labelled se alone; the controversial one se-person too.
-	normal, controversial := issueAt(t, gh, 92), issueAt(t, gh, 93)
+	normal, controversial := issueAt(t, gh, 93), issueAt(t, gh, 94)
 	if len(normal.Labels) != 1 || !normal.labelled(Label) || len(controversial.Labels) != 2 || !controversial.labelled(Label) || !controversial.labelled(PersonLabel) {
 		t.Fatalf("%+v\n%+v", normal, controversial)
 	}
@@ -381,7 +386,9 @@ func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
 	want := []string{
 		"POST repos/o/r/issues",
 		"POST repos/o/r/issues",
-		"POST repos/o/r/issues/93/assignees",
+		"POST repos/o/r/issues/92/sub_issues",
+		"POST repos/o/r/issues",
+		"POST repos/o/r/issues/94/assignees",
 		"POST repos/o/r/issues/30/comments",
 		"PATCH repos/o/r/issues/30",
 		"DELETE repos/o/r/git/refs/heads/issue-30",
@@ -389,7 +396,7 @@ func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
 	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
 		t.Fatalf("%q", w)
 	}
-	if c := commentsAt(t, gh, 30); len(c) != 1 || !strings.Contains(c[0].Body, "issue: 92") {
+	if c := commentsAt(t, gh, 30); len(c) != 1 || !strings.Contains(c[0].Body, "issue: 93") {
 		t.Fatalf("the closing report names no issue: %+v", c)
 	}
 }
@@ -399,7 +406,7 @@ func TestAnAttendedRetroClosesToo(t *testing.T) {
 	// A person started it, and still nobody waits: the report is its closing
 	// comment, and the controversial finding is the issue for the person.
 	f, gh := fileFindings(t, retroRepo(t, true, "<!-- se:retro attended -->"))
-	if !reflect.DeepEqual(f.Person, []int{93}) {
+	if !reflect.DeepEqual(f.Person, []int{94}) {
 		t.Fatalf("%+v", f)
 	}
 	if labelled(t, gh, 30, PersonLabel) {

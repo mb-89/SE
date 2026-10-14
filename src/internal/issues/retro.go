@@ -181,8 +181,12 @@ type Row struct {
 	Takeovers int `json:"takeovers"`
 	Conflicts int `json:"conflicts"`
 	Person    int `json:"person"`
-	// Minutes is the time from its claim to its PR's merge; -1 unknown.
+	// Minutes is the time from its claim to its PR's merge, or, for a leaf
+	// landed into its manifest, to that landing; -1 unknown.
 	Minutes int `json:"minutes"`
+	// Into is the manifest's branch a leaf landed into, from its landing
+	// facts; empty for an issue that landed as a PR.
+	Into string `json:"into,omitempty"`
 }
 
 // Script is a file added under src/scripts/ in the window.
@@ -486,6 +490,13 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 		r.PR = p.Number
 		if landed != nil && !landed.Facts.Claimed.IsZero() {
 			r.Minutes = int(p.MergedAt.Sub(landed.Facts.Claimed).Round(time.Minute) / time.Minute)
+		}
+	} else if landed != nil && landed.Facts.Into != "" {
+		// A leaf lands into its manifest's branch, with no PR of its own:
+		// its landing's facts carry its time from claim to land.
+		r.Into = landed.Facts.Into
+		if !landed.Facts.Claimed.IsZero() {
+			r.Minutes = landed.Facts.Minutes
 		}
 	}
 	parent := x.SubIssues != nil && x.SubIssues.Total > 0

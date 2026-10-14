@@ -106,6 +106,9 @@ type Facts struct {
 	Claimed time.Time `yaml:"claimed,omitempty"`
 	Landed  time.Time `yaml:"landed"`
 	Minutes int       `yaml:"minutes,omitempty"`
+	// Into is the branch a leaf landed into, its manifest's issue-<m>;
+	// empty where it landed as a PR into main.
+	Into string `yaml:"into,omitempty"`
 	// Commits counts the branch's own commits, MainMerges its merges of main.
 	Commits    int `yaml:"commits"`
 	Takeovers  int `yaml:"takeovers"`
@@ -159,8 +162,11 @@ func (l Landed) Comment(qs []Question) (string, error) {
 	if !f.Claimed.IsZero() {
 		took = fmt.Sprintf("%s (claimed %s)", span(f.Minutes), f.Claimed.UTC().Format(time.RFC3339))
 	}
-	fmt.Fprintf(&b, "\n### Facts\n- claim to landing: %s\n- landed: %s\n- commits: %d\n- takeovers: %d\n- main merges: %d\n",
-		took, f.Landed.UTC().Format(time.RFC3339), f.Commits, f.Takeovers, f.MainMerges)
+	fmt.Fprintf(&b, "\n### Facts\n- claim to landing: %s\n- landed: %s\n", took, f.Landed.UTC().Format(time.RFC3339))
+	if f.Into != "" {
+		fmt.Fprintf(&b, "- landed into: %s\n", f.Into)
+	}
+	fmt.Fprintf(&b, "- commits: %d\n- takeovers: %d\n- main merges: %d\n", f.Commits, f.Takeovers, f.MainMerges)
 	if f.BatteryMs > 0 {
 		fmt.Fprintf(&b, "- battery: %dms\n", f.BatteryMs)
 		for _, o := range f.Overruns {
@@ -214,8 +220,9 @@ func ParseLanding(body string) (l Landed, ok bool, err error) {
 }
 
 // facts reads what land knows of issue n's work in dir, from its comments,
-// its branch's history and GitHub's record of the branch's creation.
-func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
+// its branch's history against origin's base (main, or the manifest's branch
+// a leaf lands into) and GitHub's record of the branch's creation.
+func (s Source) facts(dir string, n int, comments []comment, base string) (Facts, error) {
 	f := Facts{Landed: s.now().UTC().Truncate(time.Second), Takeovers: marksOf(comments).takeovers}
 	profile, profiled, err := battery.Load(s.Disk, dir)
 	if err != nil {
@@ -237,14 +244,18 @@ func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 		}
 		return strconv.Atoi(out)
 	}
-	// The branch's own work is what main does not hold yet.
-	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
+	// The branch's own work is what its base does not hold yet.
+	if base == "main" {
+		if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
+			return Facts{}, err
+		}
+	} else {
+		f.Into = base
+	}
+	if f.Commits, err = count("--no-merges", "origin/"+base+"..HEAD"); err != nil {
 		return Facts{}, err
 	}
-	if f.Commits, err = count("--no-merges", "origin/main..HEAD"); err != nil {
-		return Facts{}, err
-	}
-	if f.MainMerges, err = count("--merges", "origin/main..HEAD"); err != nil {
+	if f.MainMerges, err = count("--merges", "origin/"+base+"..HEAD"); err != nil {
 		return Facts{}, err
 	}
 	created, err := api[[]struct {
@@ -267,15 +278,28 @@ func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 // postLanding writes issue n's landing comment, or updates the one an
 // earlier land wrote.
 func (s Source) postLanding(dir string, n int, qs []Question, answers map[string]string) error {
+	comments, f, err := s.factsOf(dir, n, "main")
+	if err != nil {
+		return err
+	}
+	return s.post(n, comments, qs, Landed{Issue: n, Answers: answers, Facts: f})
+}
+
+// factsOf reads issue n's comments and the facts of its work in dir against
+// origin's base.
+func (s Source) factsOf(dir string, n int, base string) ([]comment, Facts, error) {
 	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, n), true)
 	if err != nil {
-		return err
+		return nil, Facts{}, err
 	}
-	f, err := s.facts(dir, n, comments)
-	if err != nil {
-		return err
-	}
-	body, err := Landed{Issue: n, Answers: answers, Facts: f}.Comment(qs)
+	f, err := s.facts(dir, n, comments, base)
+	return comments, f, err
+}
+
+// post writes the landing l on issue n, whose comments are comments, or
+// updates the one an earlier land wrote.
+func (s Source) post(n int, comments []comment, qs []Question, l Landed) error {
+	body, err := l.Comment(qs)
 	if err != nil {
 		return err
 	}

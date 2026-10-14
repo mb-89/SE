@@ -256,7 +256,8 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	// A day later the workflow failed: it becomes an se issue.
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-12T11:00:00Z"}`)
 	done = s.Fix(t.TempDir(), w.check())
-	if done[0].Did != "reported it as #101" || !done[0].Ready ||
+	// It goes into a new misc manifest, #101.
+	if done[0].Did != "reported it as #102" || !done[0].Ready ||
 		done[0].What != "issue-19 claims #19, which is closed (not planned), and is still there a day after it closed: the prune workflow did not delete it" {
 		t.Fatalf("%+v", done)
 	}
@@ -308,7 +309,7 @@ func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
 		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
 	}
 	if len(done) != 2 || !strings.HasPrefix(done[0].Did, "failed: deleting issue-19: git push -q origin --delete issue-19: ") || done[0].Failed == "" ||
-		dids[1] != "impossible block #8: reported it as #101" || done[1].Failed != "" {
+		dids[1] != "impossible block #8: reported it as #102" || done[1].Failed != "" {
 		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
 	}
 	if c19, c8 := commentsAt(t, w, 19), commentsAt(t, w, 8); len(c19) != 0 || len(c8) != 1 {
@@ -430,14 +431,19 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 	}
 	want := []string{
 		"green but unmerged #7: turned auto-merge on for PR #70",
-		"leftover claim #19: reported it as #101",
-		"impossible block #8: reported it as #102",
-		"impossible block #9: reported it to a person as #103",
+		"leftover claim #19: reported it as #102",
+		"impossible block #8: reported it as #103",
+		"impossible block #9: reported it to a person as #104",
 	}
 	if !reflect.DeepEqual(dids, want) {
 		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
 	}
-	if !done[1].Ready || done[3].Ready || !strings.Contains(get(t, w, "repos/o/r/issues/103"), `"assignees":[{"login":"o"}]`) ||
+	// The reports go into one misc manifest, #101, which the first opened;
+	// the issue for a person stands at the top.
+	if subs := get(t, w, "repos/o/r/issues/101/sub_issues"); !strings.Contains(subs, `"number":102`) || !strings.Contains(subs, `"number":103`) || strings.Contains(subs, `"number":104`) {
+		t.Fatalf("the misc manifest holds %s", subs)
+	}
+	if !done[1].Ready || done[3].Ready || !strings.Contains(get(t, w, "repos/o/r/issues/104"), `"assignees":[{"login":"o"}]`) ||
 		!strings.Contains(get(t, w, "repos/o/r/pulls/70"), `"auto_merge":{"merge_method":"squash"}`) {
 		t.Fatalf("%+v, writes %q", done, w.Writes())
 	}
@@ -457,12 +463,12 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
 	}
 	want = []string{
-		"green but unmerged #7: it is back after a fix, so it went to a person as #104",
-		"leftover claim #19: reported already as #101, still open",
-		"impossible block #8: reported already as #102, still open",
-		"impossible block #9: reported already as #103, still open",
-		// #103 is for a person, and waits on them.
-		"waiting on a person #103: reported; it waits for a person",
+		"green but unmerged #7: it is back after a fix, so it went to a person as #105",
+		"leftover claim #19: reported already as #102, still open",
+		"impossible block #8: reported already as #103, still open",
+		"impossible block #9: reported already as #104, still open",
+		// #104 is for a person, and waits on them.
+		"waiting on a person #104: reported; it waits for a person",
 	}
 	if !reflect.DeepEqual(dids, want) {
 		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
@@ -472,8 +478,8 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 			t.Fatalf("auto-merge was turned on again: %q", w.Writes()[fixed:])
 		}
 	}
-	if !labelled(t, w, 104, PersonLabel) || !strings.Contains(get(t, w, "repos/o/r/issues/104"), `"assignees":[{"login":"o"}]`) {
-		t.Fatalf("#104 is not for a person: %s", get(t, w, "repos/o/r/issues/104"))
+	if !labelled(t, w, 105, PersonLabel) || !strings.Contains(get(t, w, "repos/o/r/issues/105"), `"assignees":[{"login":"o"}]`) {
+		t.Fatalf("#105 is not for a person: %s", get(t, w, "repos/o/r/issues/105"))
 	}
 	// A takeover is left to the box; a person is only reported.
 	x := s.Fix(t.TempDir(), []Finding{{Kind: ConflictedPR, Issue: 7}, {Kind: WaitingOnPerson, Issue: 12}})

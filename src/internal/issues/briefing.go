@@ -112,6 +112,8 @@ type Counts struct {
 	Claimed int `json:"claimed"`
 	Blocked int `json:"blocked"`
 	InTrees int `json:"in_trees"`
+	// Bare counts the leaves at the top in no manifest, which no box takes.
+	Bare int `json:"bare,omitempty"`
 }
 
 // Briefing reads GitHub and the checkout dir and says where SE stands. It writes
@@ -218,6 +220,8 @@ func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 			b.Counts.Claimed++
 		case st.Ready():
 			b.Counts.Ready++
+		case st.Why == "" && st.Bare != "":
+			b.Counts.Bare++
 		default:
 			b.Counts.Blocked++
 		}

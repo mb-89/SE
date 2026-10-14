@@ -65,7 +65,10 @@ what existed only to support it.
 - **Minting:** the same rule as the retro's (the owner's rule in
   [retro.md](retro.md)). Every finding becomes an issue through the same code
   as `se issue new`. A controversial one is an issue for a person, labelled
-  `se-person` and assigned to the owner; the rest go to the normal queue. A
+  `se-person` and assigned to the owner; the rest go to the normal queue,
+  into the open misc manifest, whose leaves together should take about
+  `issues.manifest/config/target` (an hour); a finding bigger than that is
+  filed as a manifest of its own (`se issue new --manifest`). A
   change to a principle is always controversial: `se overhaul file` makes it
   so. `se overhaul file` creates the issues at once, posts the report as the
   closing comment and closes the overhaul: it never waits. (A report posted

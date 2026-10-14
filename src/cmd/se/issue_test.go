@@ -23,7 +23,7 @@ import (
 // the test ends.
 func hubAt(t *testing.T, answers map[string]string) *github.Fake {
 	t.Helper()
-	f := github.NewFake(clock.NewFake(time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)))
+	f := github.NewFake(clock.NewFake(testedAt))
 	if err := f.Seed(answers); err != nil {
 		t.Fatal(err)
 	}
@@ -38,8 +38,8 @@ const (
 )
 
 // recordedIssues is a fake o/r: #1 claimed, with no open PR, #2 blocked by
-// #1, #3 ready, #4 a pull request, #9 deleted, #5 is closed; so a new issue
-// is #10. The routine's trigger stands on a fake network at routineURL,
+// #1, #3 a ready manifest with the leaf #6 inside it, #4 a pull request, #9
+// deleted, #5 is closed; so a new issue is #10. The routine's trigger stands on a fake network at routineURL,
 // named in the environment, and takes 100 fires.
 func recordedIssues(t *testing.T) *github.Fake {
 	t.Helper()
@@ -59,6 +59,7 @@ func recordedIssues(t *testing.T) *github.Fake {
 		"repos/o/r/issues?labels=se&state=closed&per_page=100":  `[{"number":5,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`,
 		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":  `[{"timestamp":"` + testedAt.Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
 		"repos/o/r/issues/3/dependencies/blocking?per_page=100": `[{"number":7,"state":"open"},{"number":8,"state":"closed"}]`,
+		"repos/o/r/issues/3/sub_issues?per_page=100":            `[{"number":6,"title":"six","state":"open","html_url":"u6","labels":[{"name":"se"}]}]`,
 	})
 	gh.DeleteIssue("o/r", 9)
 	f := sehttp.NewFake()
@@ -111,7 +112,7 @@ func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 	gh := recordedIssues(t)
 	ws := t.TempDir()
 	code, out, errs := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || out != "#3 three\nu3\n\ndo it\n\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n\n0 retros closed and no overhaul has closed yet; an overhaul is due at 5.\n" {
+	if code != 0 || out != "#3 three\nu3\n\n#3 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 3 --take\n\ndo it\n\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n\n0 retros closed and no overhaul has closed yet; an overhaul is due at 5.\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	// Without --take, pull only shows the issue: it writes nothing to GitHub,
@@ -138,7 +139,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "issue", "pull", "--repo", "o/r"); !strings.HasPrefix(r.Text, "#3 three") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--repo", "o/r"); r.Text != "Created #10 t\n"+u10+"\n"+firedOnce {
+	if r := session(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--repo", "o/r"); r.Text != "Created #11 t\n"+u11+"\nFiled into the misc manifest #10: it named no --parent.\n"+firedOnce {
 		t.Fatalf("%+v", r)
 	}
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
@@ -218,21 +219,26 @@ func TestIssueNewCreatesTheIssueAndItsLinks(t *testing.T) {
 	put(t, d, filepath.Join(dir, "body.md"), "the body\n")
 	code, out, errs := se(t, "issue", "new", "--workspace", dir, "--repo", "o/r", "--title", "ten",
 		"--body-file", "body.md", "--blocked-by", "3,#1,3")
-	if code != 0 || out != "Created #10 ten\n"+u10+"\nBlocked by #1, #3.\n" {
+	// Filed into no manifest, it goes into the misc manifest, #10, which it opens.
+	if code != 0 || out != "Created #11 ten\n"+u11+"\nFiled into the misc manifest #10: it named no --parent.\nBlocked by #1, #3.\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	want := []string{"POST repos/o/r/issues", "POST repos/o/r/issues/10/dependencies/blocked_by", "POST repos/o/r/issues/10/dependencies/blocked_by"}
+	want := []string{"POST repos/o/r/issues", "POST repos/o/r/issues", "POST repos/o/r/issues/10/sub_issues", "POST repos/o/r/issues/11/dependencies/blocked_by", "POST repos/o/r/issues/11/dependencies/blocked_by"}
 	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
 		t.Fatalf("writes\n%q\nwant\n%q", w, want)
 	}
-	if by := linked(t, gh, "repos/o/r/issues/10/dependencies/blocked_by"); !reflect.DeepEqual(by, []int{1, 3}) {
-		t.Fatalf("#10 is blocked by %v", by)
+	if by := linked(t, gh, "repos/o/r/issues/11/dependencies/blocked_by"); !reflect.DeepEqual(by, []int{1, 3}) {
+		t.Fatalf("#11 is blocked by %v", by)
 	}
-	if made := issueOf(t, gh, 10); !strings.Contains(made, `"body":"the body\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"}]`) {
+	if made := issueOf(t, gh, 11); !strings.Contains(made, `"body":"the body\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"}]`) {
 		t.Fatal(made)
 	}
-	code, out, _ = se(t, "issue", "new", "--json", "--repo", "o/r", "--title", "eleven", "--body", "b", "--blocked-by", "none")
-	if code != 0 || out != `{"number":11,"url":"`+u11+`","blocked_by":[],"fanout":"`+firedOnce+`"}`+"\n" {
+	if misc := issueOf(t, gh, 10); !strings.Contains(misc, `{"name":"se-misc"}`) || !strings.Contains(misc, `{"name":"se-manifest"}`) {
+		t.Fatal(misc)
+	}
+	// The next one goes into the same misc manifest.
+	code, out, _ = se(t, "issue", "new", "--json", "--repo", "o/r", "--title", "twelve", "--body", "b", "--blocked-by", "none")
+	if code != 0 || out != `{"number":12,"url":"https://github.com/o/r/issues/12","blocked_by":[],"parent":10,"misc":true,"fanout":"`+firedOnce+`"}`+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 }
@@ -253,7 +259,7 @@ func TestIssueNewRefusesAnOpenIssuesTitleUnderTheSameParent(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	// --allow-duplicate creates it anyway.
-	if code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "three", "--body", "b", "--blocked-by", "none", "--allow-duplicate"); code != 0 || !strings.HasPrefix(out, "Created #11 three\n") {
+	if code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "three", "--body", "b", "--blocked-by", "none", "--allow-duplicate"); code != 0 || !strings.HasPrefix(out, "Created #12 three\n") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 }
@@ -392,7 +398,7 @@ func TestIssueNewTakesAParent(t *testing.T) {
 	if code != 0 || !strings.HasPrefix(out, "Created #10 ten\n") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	if subs := linked(t, gh, "repos/o/r/issues/3/sub_issues"); !reflect.DeepEqual(subs, []int{10}) {
+	if subs := linked(t, gh, "repos/o/r/issues/3/sub_issues"); !reflect.DeepEqual(subs, []int{6, 10}) {
 		t.Fatalf("#3's sub-issues are %v", subs)
 	}
 }
@@ -421,17 +427,17 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires", code, fires(t))
 	}
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIts agent: se:worker.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
+	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIts agent: se:coordinator.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\n#3 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 3 --take\n\ndo it\n" {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
-	// The take is recorded for the Stop hook, which holds the box to closing #3.
-	if data, err := os.ReadFile(filepath.Join(ws, ".se", ".runtime", "box.json")); err != nil || string(data) != `{"issue":3}` {
-		t.Fatalf("%q %v", data, err)
+	// A manifest's box coordinates its tree: the Stop hook holds its leaves'
+	// sub-agents, not the box, to closing them.
+	if _, err := os.Stat(filepath.Join(ws, ".se", ".runtime", "box.json")); !os.IsNotExist(err) {
+		t.Fatalf("the take of a parent was recorded for the Stop hook: %v", err)
 	}
-	// #3 is now claimed on origin, but the recorded refs do not say so: the
-	// take is refused, moves on, finds nothing else and fires nothing.
+	// #3 is now claimed on origin: a later take picks its tree up again.
 	git(ws, "checkout", "-q", "main")
-	if code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws); code != 0 || fires(t) != 1 || out != `{"ready":false}`+"\n" {
+	if code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws); code != 0 || !strings.Contains(out, `"ready":true,"issue":{"number":3,`) {
 		t.Fatalf("exit %d, %d fires, %q", code, fires(t), out)
 	}
 }
@@ -445,7 +451,7 @@ func TestANewIssueFiresTheRoutineOnlyWhenNothingBlocksIt(t *testing.T) {
 	}
 	// #5 is closed: nothing blocks it, so it fires once.
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "eleven", "--body", "b", "--blocked-by", "5")
-	if code != 0 || fires(t) != 1 || out != "Created #11 eleven\n"+u11+"\nBlocked by #5.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n" {
+	if code != 0 || fires(t) != 1 || out != "Created #12 eleven\nhttps://github.com/o/r/issues/12\nFiled into the misc manifest #10: it named no --parent.\nBlocked by #5.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n" {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// A fire that is off is reported and never fails the creation.
@@ -554,10 +560,10 @@ func TestIssueNewReviewLabelsItSeReview(t *testing.T) {
 	t.Parallel()
 	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--review")
-	if code != 0 || out != "Created #10 ten\n"+u10+"\nLabelled se-review: it is reviewed once its sub-issues have closed.\n"+firedOnce+"\n" {
+	if code != 0 || out != "Created #11 ten\n"+u11+"\nFiled into the misc manifest #10: it named no --parent.\nLabelled se-review: it is reviewed once its sub-issues have closed.\n"+firedOnce+"\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	if made := issueOf(t, gh, 10); !strings.Contains(made, `"body":"b\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"},{"name":"se-review"}]`) {
+	if made := issueOf(t, gh, 11); !strings.Contains(made, `"body":"b\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"},{"name":"se-review"}]`) {
 		t.Fatal(made)
 	}
 }
@@ -604,10 +610,10 @@ func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
 	t.Parallel()
 	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--final")
-	if code != 0 || out != "Created #10 ten\n"+u10+"\nLabelled se-final: if it fails, it goes to a person.\n"+firedOnce+"\n" {
+	if code != 0 || out != "Created #11 ten\n"+u11+"\nFiled into the misc manifest #10: it named no --parent.\nLabelled se-final: if it fails, it goes to a person.\n"+firedOnce+"\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	if made := issueOf(t, gh, 10); !strings.Contains(made, `"body":"b\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"},{"name":"se-final"}]`) {
+	if made := issueOf(t, gh, 11); !strings.Contains(made, `"body":"b\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"},{"name":"se-final"}]`) {
 		t.Fatal(made)
 	}
 }

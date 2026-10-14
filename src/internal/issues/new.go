@@ -145,7 +145,9 @@ func (s Source) Create(title, body string, parent int, blockedBy []int, labels .
 }
 
 // create is Create with the labels given, se among them. The body ends in
-// NewMark.
+// NewMark. There are no bare issues: one filed into no parent goes into the
+// open misc manifest (FileInto), unless it stands at the top by itself (a
+// manifest, a retro, an overhaul or an issue for a person).
 func (s Source) create(title, body string, parent int, blockedBy []int, labels []string) (made Issue, ready bool, err error) {
 	if strings.TrimSpace(title) == "" {
 		return Issue{}, false, fmt.Errorf("an issue needs a --title")
@@ -153,6 +155,11 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 	ids, ready, err := s.lookup(blockedBy)
 	if err != nil {
 		return Issue{}, false, err
+	}
+	if parent == 0 && !atTop(labels) {
+		if parent, err = s.FileInto(); err != nil {
+			return Issue{}, false, err
+		}
 	}
 	if parent > 0 {
 		if _, err := s.ids([]int{parent}); err != nil {
@@ -173,7 +180,7 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 	if err := json.Unmarshal(out, &i); err != nil || i.Number == 0 {
 		return Issue{}, false, fmt.Errorf("gh api %s answered no issue: %v", path, err)
 	}
-	created := Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, id: i.ID}
+	created := Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, id: i.ID, in: parent}
 	if parent > 0 {
 		path := fmt.Sprintf("repos/%s/issues/%d/sub_issues", s.Repo, parent)
 		if _, err := s.GitHub.Send("POST", path, github.Int("sub_issue_id", i.ID)); err != nil {
