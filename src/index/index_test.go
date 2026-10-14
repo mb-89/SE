@@ -1,6 +1,7 @@
 package index_test
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -437,5 +438,187 @@ func TestTheFakeKeepsAFamilyByKey(t *testing.T) {
 	}
 	if _, err := f.Out("posts"); err == nil {
 		t.Fatal("a family was read without a key")
+	}
+}
+
+// shelf is a fixture I/O module that answers how many of a thing it holds,
+// takes things out, and records each request it answered.
+func shelf(log *[]string) *index.Module {
+	stock := map[string]int{"apples": 3, "pears": 1}
+	return index.Declare("shelf", "Holds things, counted.",
+		index.IO(),
+		index.Verb("count", "How many of a thing it holds.", func(thing string) (int, error) {
+			*log = append(*log, "count "+thing)
+			return stock[thing], nil
+		}),
+		index.Verb("take", "Takes one of a thing out.", func(thing string) (int, error) {
+			*log = append(*log, "take "+thing)
+			if stock[thing] == 0 {
+				return 0, fmt.Errorf("no %s left", thing)
+			}
+			stock[thing]--
+			return stock[thing], nil
+		}),
+	)
+}
+
+var (
+	count = index.Ask[string, int]("count", "Counts a thing on the shelf.")
+	take  = index.Ask[string, int]("take", "Takes a thing off the shelf.")
+	taken = index.Output("taken", "", "What the last shop took.")
+)
+
+// shopper is a fixture compute module whose command counts what it is asked
+// for, then takes each one there is, through its request ports alone.
+var shopper = index.Declare("shopper", "Takes what the shelf holds.",
+	count, take, taken,
+	index.Command(index.CommandDecl{
+		Name: "shop", Usage: "shop THING...", Summary: "Take things.", Help: "Counts each thing, then takes one of each there is.",
+		Group: "Fixtures", Class: index.Batch, Words: index.AnyWords,
+	}, func(_ struct{}, args index.Args) (index.Result, error) {
+		var counts []index.Request
+		for _, w := range args.Words {
+			counts = append(counts, count.Of(w))
+		}
+		return index.Result{Requests: counts, Then: func(answers []any) (index.Result, error) {
+			var takes []index.Request
+			var got []string
+			for i, a := range answers {
+				if count.Answer(a) > 0 {
+					takes = append(takes, take.Of(args.Words[i]))
+					got = append(got, args.Words[i])
+				}
+			}
+			return index.Result{Requests: takes, Then: func(left []any) (index.Result, error) {
+				return index.Result{
+					Text:   fmt.Sprintf("took %s, %d requests", strings.Join(got, " and "), len(args.Words)+len(left)),
+					Writes: []index.Write{taken.Set(strings.Join(got, " "))},
+				}, nil
+			}}, nil
+		}}, nil
+	}),
+)
+
+const shopWiring = `
+instances:
+  shelf: {module: shelf}
+  shopper: {module: shopper}
+wires:
+  shopper.count: shelf.count
+  shopper.take: shelf.take
+`
+
+// A command's requests reach the verbs the wiring binds its ports to, in
+// order, and each continuation reads the answers of the list before it.
+func TestACommandsRequestsReachTheVerbsInOrder(t *testing.T) {
+	t.Parallel()
+	var log []string
+	ix := start(t, shopWiring, shelf(&log), shopper)
+	r, err := ix.Call("shop", "apples", "plums", "pears")
+	must(t, err)
+	if want := []string{"count apples", "count plums", "count pears", "take apples", "take pears"}; !slices.Equal(log, want) {
+		t.Fatalf("the shelf answered %v, want %v", log, want)
+	}
+	if r.Text != "took apples and pears, 5 requests" || len(r.Requests) != 0 || r.Then != nil {
+		t.Fatalf("the shop answered %+v", r)
+	}
+	if got := read(t, ix, "shopper/taken"); got != (index.Value{V: "apples pears", Provided: true}) {
+		t.Fatalf("shopper/taken reads %+v", got)
+	}
+	c := ix.Catalog()
+	for _, in := range c.Instances {
+		switch in.Name {
+		case "shopper":
+			if len(in.Asks) != 2 || in.Asks[0].Name != "count" || in.Asks[0].Verb != "shelf.count" {
+				t.Errorf("the catalog shows shopper's request ports as %+v", in.Asks)
+			}
+		case "shelf":
+			if len(in.Verbs) != 2 || in.Verbs[1].Name != "take" || in.Verbs[1].Help == "" {
+				t.Errorf("the catalog shows shelf's verbs as %+v", in.Verbs)
+			}
+		}
+	}
+}
+
+// A failed request stops the list: the command fails with its reason, no
+// later request goes out, and nothing the run wrote is committed.
+func TestAFailedRequestStopsTheList(t *testing.T) {
+	t.Parallel()
+	var log []string
+	failing := index.Declare("greedy", "Takes twice.", take, taken,
+		index.Command(index.CommandDecl{Name: "grab", Usage: "grab", Summary: "Grab.", Help: "Takes a plum, then an apple.", Group: "Fixtures", Class: index.Batch},
+			func(struct{}, index.Args) (index.Result, error) {
+				return index.Result{Writes: []index.Write{taken.Set("all")}, Requests: []index.Request{take.Of("plums"), take.Of("apples")}}, nil
+			}))
+	ix := start(t, "instances: {shelf: {module: shelf}, greedy: {module: greedy}}\nwires: {greedy.take: shelf.take}", shelf(&log), failing)
+	_, err := ix.Call("grab")
+	if err == nil || !strings.Contains(err.Error(), "take: no plums left") {
+		t.Fatalf("the grab answered %v, want the failed take's reason", err)
+	}
+	if !slices.Equal(log, []string{"take plums"}) {
+		t.Fatalf("the shelf answered %v after the failure", log)
+	}
+	if got := read(t, ix, "greedy/taken"); got.Provided {
+		t.Fatalf("a failed run committed %+v", got)
+	}
+}
+
+func TestABrokenRequestWireIsRefused(t *testing.T) {
+	t.Parallel()
+	var log []string
+	refused(t, "instances: {shelf: {module: shelf}, shopper: {module: shopper}}\nwires: {shopper.count: shelf.count}",
+		"request port shopper.take is bound to no verb", shelf(&log), shopper)
+	refused(t, "instances: {shelf: {module: shelf}, shopper: {module: shopper}}\nwires: {shopper.count: shelf.count, shopper.take: shelf.nothing}",
+		"request port shopper.take is bound to shelf.nothing, which is no verb", shelf(&log), shopper)
+	wrong := index.Declare("scale", "Weighs things.", index.IO(),
+		index.Verb("count", "Weighs a thing.", func(string) (float64, error) { return 0, nil }))
+	refused(t, "instances: {scale: {module: scale}, shelf: {module: shelf}, shopper: {module: shopper}}\nwires: {shopper.count: scale.count, shopper.take: shelf.take}",
+		"two types on one wire: request port shopper.count takes string and answers int, but verb scale.count takes string and answers float64", wrong, shelf(&log), shopper)
+	pure := index.Declare("pure", "Answers without the I/O flag.",
+		index.Verb("count", "Counts.", func(string) (int, error) { return 0, nil }))
+	if err := pure.Err(); err == nil || !strings.Contains(err.Error(), "carries no I/O flag") {
+		t.Fatalf("a verb on a compute module was declared: %v", err)
+	}
+	twice := index.Declare("twice", "Names a port twice.", index.Ask[string, int]("taken", "Asks."), taken)
+	if err := twice.Err(); err == nil || !strings.Contains(err.Error(), "request port taken is also an output") {
+		t.Fatalf("a request port named as an output was declared: %v", err)
+	}
+}
+
+// The fake index hands each request the test's answer, records it, and runs
+// the continuations as the core does.
+func TestTheFakeAnswersRequestsAsTheCoreDoes(t *testing.T) {
+	t.Parallel()
+	var log []string
+	ix := start(t, shopWiring, shelf(&log), shopper)
+	core, err := ix.Call("shop", "apples", "plums", "pears")
+	must(t, err)
+	f, err := indextest.New(shopper)
+	must(t, err)
+	if err := f.Answer("nothing", nil); err == nil {
+		t.Fatal("the fake took an answer for a port the module does not declare")
+	}
+	stock := map[string]int{"apples": 3, "pears": 1}
+	must(t, f.Answer("count", func(r any) (any, error) { return stock[r.(string)], nil }))
+	must(t, f.Answer("take", func(r any) (any, error) { return stock[r.(string)] - 1, nil }))
+	fake, err := f.Call("shop", "apples", "plums", "pears")
+	must(t, err)
+	if fake != core.Text {
+		t.Fatalf("the fake answered %q, the core %q", fake, core.Text)
+	}
+	if got := f.Asked(); len(got) != 5 || got[3] != take.Of("apples") {
+		t.Fatalf("the fake recorded %+v", got)
+	}
+	must(t, f.Answer("take", func(any) (any, error) { return "three", nil }))
+	if _, err := f.Call("shop", "apples"); err == nil || !strings.Contains(err.Error(), "request port take answers int, not string") {
+		t.Fatalf("the fake took an answer of the wrong type: %v", err)
+	}
+	g, err := indextest.New(shelf(&log))
+	must(t, err)
+	if n, err := g.Serve("count", "apples"); err != nil || n != 3 {
+		t.Fatalf("the shelf served %v, %v", n, err)
+	}
+	if _, err := g.Serve("count", 3); err == nil {
+		t.Fatal("the shelf served a request of the wrong type")
 	}
 }

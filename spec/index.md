@@ -55,7 +55,8 @@ A module is one Go package that declares, by **local name** only:
 | **outputs** | the names it writes, each with its type, built-in value and one help line. A **family output** (`index.Family`) is written at keys, each write naming its key, and a drop takes a key out again; the wiring binds it to a family. A derivation that reads a family runs once per key that changed, on that key's value; a command reads no family |
 | **config** | its keys, each with a type, a built-in value and one help line. A key is an input like any other, under `<instance>/config/<key>`; the module never learns where the value came from |
 | **commands** | the functions a person or agent calls, in [Commands and help](#commands-and-help) |
-| **requests** | for an I/O module only: the verbs it accepts from others, in [I/O modules and compute modules](#io-modules-and-compute-modules) |
+| **request ports** | the requests its commands answer, each port (`index.Ask`) taking one type and answering another; the wiring binds it to a verb, in [I/O modules and compute modules](#io-modules-and-compute-modules) |
+| **verbs** | for an I/O module only: the requests it accepts from others (`index.Verb`), each done on its one outside thing, such as `io/github`'s `get`, `list` and `send` |
 | **the I/O flag** | for an I/O module only: it marks the module as one that touches the outside (v5's `q.IO()`). A module without it is a compute module, and the battery's import rule reads the flag, in [Testing](#testing) |
 
 A compute module's run is pure: the module reads its input struct, computes,
@@ -119,8 +120,16 @@ A **compute module** reads a snapshot and commits its outputs. When it must act
 on the outside, its command answers a list of requests addressed to its own
 local request ports; the wiring binds each port to an I/O module's verb, and
 the core delivers them in order. A failed request stops the list and the
-command fails with its reason. A continuation reads the answers and may answer
-the next list, so each step stays pure.
+command fails with its reason: the run commits nothing, and no request
+delivered before it is undone. A continuation (`Result.Then`) reads the
+answers and may answer the next list, so each step stays pure; the last
+step's text is the reply, and every step's writes commit together. The start
+refuses a request port bound to no verb, to anything but a verb, or to a verb
+that takes or answers another type, and a verb on a module without the I/O
+flag. A request's and an answer's types are Go types, one on both ends of a
+wire. A compute module may not import an I/O module, so once one asks a verb,
+the verb's types move to a library under `src/lib`, which the I/O module and
+the asking module both import; until then they stay in the I/O module.
 
 There is **no files module**: nothing mirrors the tree into the index. A module
 that needs a file asks the disk I/O module for it in a request.

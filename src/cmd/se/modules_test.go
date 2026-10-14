@@ -26,7 +26,7 @@ func TestTheWiringSeCarriesStartsItsModules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ix, err := index.Start(w, modules(daemon.Paths{Workspace: t.TempDir()}, clock.NewFake(time.Time{}))...)
+	ix, err := index.Start(w, modules(daemon.Paths{Workspace: t.TempDir()}, clock.NewFake(time.Time{}), nil)...)
 	if err != nil {
 		t.Fatal(err)
 	}

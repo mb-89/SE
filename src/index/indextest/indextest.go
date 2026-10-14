@@ -1,12 +1,14 @@
 // Package indextest is the fake index a module is tested against without the
 // index running: the test seeds the inputs and config the module reads, by
 // local name, runs a derivation or a command, and reads the outputs it
-// committed. It speaks the module contract and nothing more.
+// committed and the requests it answered, handing each request the answer the
+// test gives. It speaks the module contract and nothing more.
 package indextest
 
 import (
 	"fmt"
 	"reflect"
+	"slices"
 
 	"github.com/mb-89/SE/src/index"
 )
@@ -18,6 +20,8 @@ type Fake struct {
 	outputs map[string]index.Port
 	seeded  map[string]any
 	out     map[string]any
+	answer  map[string]func(any) (any, error)
+	asked   []index.Request
 }
 
 // New takes a module, and refuses a broken declaration as the index's start would.
@@ -25,7 +29,7 @@ func New(m *index.Module) (*Fake, error) {
 	if err := m.Err(); err != nil {
 		return nil, err
 	}
-	f := &Fake{m: m, inputs: map[string]index.Port{}, outputs: map[string]index.Port{}, seeded: map[string]any{}, out: map[string]any{}}
+	f := &Fake{m: m, inputs: map[string]index.Port{}, outputs: map[string]index.Port{}, seeded: map[string]any{}, out: map[string]any{}, answer: map[string]func(any) (any, error){}}
 	for _, p := range m.Inputs() {
 		f.inputs[p.Port] = p
 	}
@@ -64,9 +68,27 @@ func (f *Fake) Derive(port string) error {
 	return nil
 }
 
-// Call runs a command with its arguments, commits what it writes, and answers what it shows.
+// Answer sets what a request through the request port gets: fn's answer,
+// or its error, which stops the run as a failed request does on the index.
+// A request through a port the test answers nothing fails the run.
+func (f *Fake) Answer(port string, fn func(request any) (any, error)) error {
+	if !slices.ContainsFunc(f.m.Asks(), func(x index.Exchange) bool { return x.Name == port }) {
+		return fmt.Errorf("module %s has no request port %q", f.m.Name(), port)
+	}
+	f.answer[port] = fn
+	return nil
+}
+
+// Asked answers every request the module's commands delivered, in order.
+func (f *Fake) Asked() []index.Request { return f.asked }
+
+// Serve hands an I/O module's verb a request and answers its answer.
+func (f *Fake) Serve(verb string, request any) (any, error) { return f.m.Serve(verb, request) }
+
+// Call runs a command with its arguments, delivers each request it answers to
+// the test's answer, commits what it writes, and answers what it shows.
 func (f *Fake) Call(name string, args ...string) (string, error) {
-	r, err := f.m.Run(name, f.read, args)
+	r, err := f.m.Run(name, f.read, args, f.deliver)
 	if err != nil {
 		return "", err
 	}
@@ -105,6 +127,15 @@ func at(port, key string) string {
 		return port
 	}
 	return port + "/" + key
+}
+
+func (f *Fake) deliver(port string, request any) (any, error) {
+	f.asked = append(f.asked, index.Request{Port: port, Value: request})
+	fn, ok := f.answer[port]
+	if !ok {
+		return nil, fmt.Errorf("the test answers nothing through request port %s", port)
+	}
+	return fn(request)
 }
 
 func (f *Fake) read(port string) any {

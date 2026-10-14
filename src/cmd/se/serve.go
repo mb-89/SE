@@ -28,7 +28,7 @@ func init() {
 		Run: func(c *Call) (Reply, error) {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			opts := daemon.Options{Idle: c.Args.Duration("idle"), Clock: c.Clock, Net: c.Net, Modules: modules(c.Paths(), c.Clock), Ready: func(ep daemon.Endpoint) {
+			opts := daemon.Options{Idle: c.Args.Duration("idle"), Clock: c.Clock, Net: c.Net, Modules: modules(c.Paths(), c.Clock, c.GitHub), Ready: func(ep daemon.Endpoint) {
 				fmt.Fprintf(os.Stderr, "se: serving %s at %s\n", c.Workspace, ep.Address)
 			}}
 			if c.Args.Bool("takeover") {

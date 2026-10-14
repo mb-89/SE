@@ -17,8 +17,9 @@ import (
 // config/<key>, under <instance>/config/<key> in the store.
 const ConfigPrefix = "config/"
 
-// Part is one thing a module declares: an output, a derivation, a config key
-// or a command. Output, Derived, Config and Command make them.
+// Part is one thing a module declares: an output, a derivation, a config key,
+// a command, a request port or a verb. Output, Derived, Config, Command, Ask
+// and Verb make them.
 type Part interface{ declare(m *Module) }
 
 // Port is one declared port as the catalog and the fake index see it.
@@ -48,7 +49,8 @@ type Write struct {
 	Gone bool
 }
 
-// Result is what a command answers: what to show, and what it commits.
+// Result is what a command answers: what to show, what it commits, and what
+// it asks of I/O modules.
 type Result struct {
 	// Text is what to show; where the command's reply is data and the call
 	// said --json, Run puts Data there as JSON.
@@ -56,7 +58,37 @@ type Result struct {
 	// Data is the reply as data, for a command whose reply is data.
 	Data   any
 	Writes []Write
+	// Requests are what the run asks of I/O modules, each through one of
+	// its module's request ports, delivered in order. A failed request stops
+	// the list, and the command fails with its reason.
+	Requests []Request
+	// Then, where set, reads the answers to Requests, one per request in
+	// their order, and answers the next step: its own text, writes and next
+	// list of requests. The last step's text and data are the reply; every
+	// step's writes are committed once all of them have run.
+	Then func(answers []any) (Result, error)
 }
+
+// Request is one request a run answers: the value it hands its module's
+// request port Port, which the wiring binds to an I/O module's verb.
+type Request struct {
+	Port  string
+	Value any
+}
+
+// Exchange is one request port or verb as the catalog and the fake index see
+// it: what it takes, what it answers, and its one help line.
+type Exchange struct {
+	// Name is the request port's local name, or the verb's.
+	Name string
+	// Request is the Go type of what it takes; Answer of what it answers.
+	Request, Answer reflect.Type
+	Help            string
+}
+
+// Deliver hands a request to whatever answers the request port it names: the
+// index the verb the wiring binds it to, the fake index the test's answer.
+type Deliver func(port string, request any) (any, error)
 
 // CommandDecl is a command as a module declares it, and as every adapter renders it.
 type CommandDecl struct {
@@ -115,7 +147,14 @@ type Module struct {
 	config     map[string]*Port
 	derive     map[string]*derivation
 	commands   map[string]*command
+	asks       map[string]*Exchange
+	verbs      map[string]*verb
 	errs       []string
+}
+
+type verb struct {
+	Exchange
+	serve func(any) (any, error)
 }
 
 type derivation struct {
@@ -145,6 +184,8 @@ func Declare(name, help string, parts ...Part) *Module {
 		config:   map[string]*Port{},
 		derive:   map[string]*derivation{},
 		commands: map[string]*command{},
+		asks:     map[string]*Exchange{},
+		verbs:    map[string]*verb{},
 	}
 	if !pathName(name) {
 		m.fail("a module needs a name of letters, digits and dashes, or <cluster>/<module>, not %q", name)
@@ -154,6 +195,17 @@ func Declare(name, help string, parts ...Part) *Module {
 	}
 	for _, p := range parts {
 		p.declare(m)
+	}
+	if len(m.verbs) > 0 && !m.io {
+		m.fail("module %s answers verbs, but carries no I/O flag: only an I/O module answers requests", name)
+	}
+	for port := range m.asks {
+		if _, out := m.outputs[port]; out {
+			m.fail("request port %s is also an output", port)
+		}
+		if _, in := m.inputs[port]; in {
+			m.fail("request port %s is also an input", port)
+		}
 	}
 	for port, t := range m.inputs {
 		if key, ok := strings.CutPrefix(port, ConfigPrefix); ok {
@@ -214,6 +266,37 @@ func (m *Module) Commands() []CommandDecl {
 	return out
 }
 
+// Asks are the module's request ports, by local name.
+func (m *Module) Asks() []Exchange {
+	var out []Exchange
+	for _, n := range sortedKeys(m.asks) {
+		out = append(out, *m.asks[n])
+	}
+	return out
+}
+
+// Verbs are the verbs the module answers, by name.
+func (m *Module) Verbs() []Exchange {
+	var out []Exchange
+	for _, n := range sortedKeys(m.verbs) {
+		out = append(out, m.verbs[n].Exchange)
+	}
+	return out
+}
+
+// Serve answers request with the verb of that name, refusing a request or an
+// answer of another type than the verb declares.
+func (m *Module) Serve(name string, request any) (any, error) {
+	v, ok := m.verbs[name]
+	switch {
+	case !ok:
+		return nil, fmt.Errorf("module %s answers no verb %q", m.name, name)
+	case !Fits(request, v.Request):
+		return nil, fmt.Errorf("module %s: verb %s takes %s, not %T", m.name, name, v.Request, request)
+	}
+	return v.serve(request)
+}
+
 // Derivations are the outputs a derivation writes.
 func (m *Module) Derivations() []string { return sortedKeys(m.derive) }
 
@@ -242,10 +325,13 @@ func (m *Module) Derive(port string, read Reader) (any, error) {
 }
 
 // Run runs the command name with the words of its call on what read
-// answers: it parses them as the command declares, and answers its text, or
-// its data as JSON where the call said --json. It refuses a result that
-// writes a port the module's commands do not write.
-func (m *Module) Run(name string, read Reader, words []string) (Result, error) {
+// answers: it parses them as the command declares, hands each request the run
+// answers to deliver in order, and each continuation the answers, and answers
+// the last step's text, or its data as JSON where the call said --json, with
+// every step's writes. It refuses a request to a port the module does not
+// declare, a value or an answer of another type than the port's, and a result
+// that writes a port the module's commands do not write.
+func (m *Module) Run(name string, read Reader, words []string, deliver Deliver) (Result, error) {
 	c, ok := m.commands[name]
 	if !ok {
 		return Result{}, fmt.Errorf("module %s has no command %q", m.name, name)
@@ -259,13 +345,50 @@ func (m *Module) Run(name string, read Reader, words []string) (Result, error) {
 		return Result{}, err
 	}
 	r, err := c.run(in, args)
+	var writes []Write
+	for err == nil {
+		writes = append(writes, r.Writes...)
+		var answers []any
+		if answers, err = m.deliver(r.Requests, deliver); err != nil || r.Then == nil {
+			break
+		}
+		r, err = r.Then(answers)
+	}
 	if err != nil {
 		return Result{}, err
 	}
+	r.Writes, r.Requests, r.Then = writes, nil, nil
 	if r.Text, err = args.Render(r.Text, r.Data); err != nil {
 		return Result{}, err
 	}
 	return r, m.CheckWrites(r.Writes)
+}
+
+// deliver hands each request to deliver in order, and answers the answers;
+// the first that fails stops the list, with its reason.
+func (m *Module) deliver(requests []Request, deliver Deliver) ([]any, error) {
+	answers := make([]any, len(requests))
+	for i, q := range requests {
+		a, ok := m.asks[q.Port]
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("module %s has no request port %q", m.name, q.Port)
+		case !Fits(q.Value, a.Request):
+			return nil, fmt.Errorf("module %s: request port %s takes %s, not %T", m.name, q.Port, a.Request, q.Value)
+		}
+		if deliver == nil {
+			return nil, fmt.Errorf("module %s: nothing answers request port %s", m.name, q.Port)
+		}
+		answer, err := deliver(q.Port, q.Value)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", q.Port, err)
+		}
+		if !Fits(answer, a.Answer) {
+			return nil, fmt.Errorf("module %s: request port %s answers %s, not %T", m.name, q.Port, a.Answer, answer)
+		}
+		answers[i] = answer
+	}
+	return answers, nil
 }
 
 // CheckWrites refuses a write to anything but one of the module's outputs a
@@ -368,6 +491,73 @@ func Derived[In, Out any](port string, builtin Out, help string, fn func(In) (Ou
 		}},
 		err: err,
 	}
+}
+
+// AskPort is a request port: a run asks through it, and the wiring binds it
+// to an I/O module's verb that takes Req and answers Ans. Of makes a request,
+// Answer reads its answer.
+type AskPort[Req, Ans any] struct{ x Exchange }
+
+// Ask declares a request port that takes Req and answers Ans, with its help line.
+func Ask[Req, Ans any](port, help string) *AskPort[Req, Ans] {
+	return &AskPort[Req, Ans]{Exchange{Name: port, Request: reflect.TypeFor[Req](), Answer: reflect.TypeFor[Ans](), Help: help}}
+}
+
+// Of is a request of v through the port.
+func (p *AskPort[Req, Ans]) Of(v Req) Request { return Request{Port: p.x.Name, Value: v} }
+
+// Answer reads an answer the port's request got; the delivery checked its type.
+func (p *AskPort[Req, Ans]) Answer(a any) Ans {
+	v, _ := a.(Ans)
+	return v
+}
+
+func (p *AskPort[Req, Ans]) declare(m *Module) {
+	if !m.exchange(p.x, "request port") {
+		return
+	}
+	if _, taken := m.asks[p.x.Name]; taken {
+		m.fail("request port %s is declared twice", p.x.Name)
+	}
+	x := p.x
+	m.asks[x.Name] = &x
+}
+
+type verbPart struct{ v *verb }
+
+// Verb declares a verb an I/O module answers: fn does what a request of Req
+// asks of the module's outside thing, and answers Ans. A compute module's
+// request port that takes Req and answers Ans is wired to it.
+func Verb[Req, Ans any](name, help string, fn func(Req) (Ans, error)) Part {
+	return verbPart{&verb{
+		Exchange: Exchange{Name: name, Request: reflect.TypeFor[Req](), Answer: reflect.TypeFor[Ans](), Help: help},
+		serve: func(v any) (any, error) {
+			r, _ := v.(Req)
+			return fn(r)
+		},
+	}}
+}
+
+func (p verbPart) declare(m *Module) {
+	if !m.exchange(p.v.Exchange, "verb") {
+		return
+	}
+	if _, taken := m.verbs[p.v.Name]; taken {
+		m.fail("verb %s is declared twice", p.v.Name)
+	}
+	m.verbs[p.v.Name] = p.v
+}
+
+// exchange checks a request port's or verb's name and help.
+func (m *Module) exchange(x Exchange, what string) bool {
+	if !portName(x.Name) {
+		m.fail("%s %q needs a local name of letters, digits and dashes", what, x.Name)
+		return false
+	}
+	if strings.TrimSpace(x.Help) == "" {
+		m.fail("%s %s has no help", what, x.Name)
+	}
+	return true
 }
 
 type ioPart struct{}

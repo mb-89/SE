@@ -20,19 +20,42 @@ const (
 	QuotaFloor = 20
 )
 
-// Module is GitHub on the index: its config says how se lives within
-// GitHub's rate limits, which every box and session share through the
-// owner's one token.
-var Module = index.Declare("io/github", "GitHub, read and written through its REST API, within its rate limits.",
-	index.IO(),
-	index.Config("wait-ceiling", WaitCeiling, "The longest an se command waits, all told, for GitHub's rate limit to reset; a reset further off fails the request at once, saying when it comes."),
-	index.Config("write-spacing", WriteSpacing, "The least time between two of an se command's writes to GitHub, which keeps a sweep of comments, issues and labels under GitHub's limit on creating content."),
-	index.Config("quota-floor", QuotaFloor, "The share of the hour's GitHub requests, in percent, below which se fleet check says the quota runs low."),
-)
+// name is the module's name, which the wiring file's instances name.
+const name = "io/github"
 
-func init() { index.Register(Module) }
+// Get is a request of the get verb: the JSON value at Path, such as
+// repos/OWNER/NAME/issues/5.
+type Get struct{ Path string }
 
-// Settings are Module's config values.
+// List is a request of the list verb: every item of the paginated list at
+// Path, every page of it, as one JSON array.
+type List struct{ Path string }
+
+// Send is a request of the send verb: Method (POST, PATCH, PUT or DELETE)
+// to Path with Fields.
+type Send struct {
+	Method, Path string
+	Fields       []Field
+}
+
+// Module is GitHub on the index, read and written through gh: its verbs get,
+// list and send answer GitHub's JSON reply to a compute module's requests,
+// and its config says how se lives within GitHub's rate limits, which every
+// box and session share through the owner's one token.
+func Module(gh GitHub) *index.Module {
+	return index.Declare(name, "GitHub, read and written through its REST API, within its rate limits.",
+		index.IO(),
+		index.Config("wait-ceiling", WaitCeiling, "The longest an se command waits, all told, for GitHub's rate limit to reset; a reset further off fails the request at once, saying when it comes."),
+		index.Config("write-spacing", WriteSpacing, "The least time between two of an se command's writes to GitHub, which keeps a sweep of comments, issues and labels under GitHub's limit on creating content."),
+		index.Config("quota-floor", QuotaFloor, "The share of the hour's GitHub requests, in percent, below which se fleet check says the quota runs low."),
+		index.Verb("get", "Reads the JSON value at a path of GitHub's REST API.", func(r Get) ([]byte, error) { return gh.Get(r.Path) }),
+		index.Verb("list", "Reads every page of the list at a path of GitHub's REST API, as one JSON array.", func(r List) ([]byte, error) { return gh.List(r.Path) }),
+		index.Verb("send", "Sends a write (POST, PATCH, PUT or DELETE) to a path of GitHub's REST API, and answers GitHub's JSON reply.",
+			func(r Send) ([]byte, error) { return gh.Send(r.Method, r.Path, r.Fields...) }),
+	)
+}
+
+// Settings are the module's config values.
 type Settings struct {
 	Limits
 	// Floor is the share of the hour's requests, in percent, below which the
@@ -50,18 +73,19 @@ func Configured() (Settings, error) {
 }
 
 // From answers Module's settings as the wiring w gives them. It starts an
-// index of w's io/github instance alone, so it needs no other module.
+// index of w's io/github instance alone, so it needs no other module, and
+// hands it no GitHub: it reads its config and serves no verb.
 func From(w index.Wiring) (Settings, error) {
 	own, inst := index.Wiring{}, ""
 	for _, in := range w.Instances {
-		if in.Module == Module.Name() {
+		if in.Module == name {
 			own.Instances, inst = append(own.Instances, in), in.Name
 		}
 	}
 	if inst == "" {
-		return Settings{}, fmt.Errorf("the wiring names no instance of the %s module", Module.Name())
+		return Settings{}, fmt.Errorf("the wiring names no instance of the %s module", name)
 	}
-	ix, err := index.Start(own, Module)
+	ix, err := index.Start(own, Module(nil))
 	if err != nil {
 		return Settings{}, err
 	}

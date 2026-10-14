@@ -21,17 +21,17 @@ import (
 
 // modules are the modules se starts the index with, each I/O module handed
 // its outside thing for the workspace p: the clock, the disk, the
-// environment, git, GitHub's rate limits, the network, the programs, the
+// environment, git, GitHub through gh, the network, the programs, the
 // session's posts and its log, the command line's own commands, the
 // hand-over's switches, the issue work's config, and what each tier runs that
 // others built. The wiring file binds them.
-func modules(p daemon.Paths, clk clock.Clock) []*index.Module {
+func modules(p daemon.Paths, clk clock.Clock, gh github.GitHub) []*index.Module {
 	return []*index.Module{
 		clock.Module(clk),
 		disk.Module,
 		env.Module,
 		git.Module,
-		github.Module,
+		github.Module(gh),
 		sehttp.Module,
 		proc.Module,
 		sessions.Posts,
@@ -92,16 +92,16 @@ func declOf(c Command) index.CommandDecl {
 }
 
 // catalog is the collector: what the modules se carries declare, as the
-// wiring file binds them. It reads their declarations alone, so no clock of a
-// run's World reaches it. The help, /se ui and the session's commands read
-// it; a catalog that does not hold together is a broken se, which the
+// wiring file binds them. It reads their declarations alone, so neither a
+// run's clock nor its GitHub reaches it. The help, /se ui and the session's
+// commands read it; a catalog that does not hold together is a broken se, which the
 // battery's tests catch before a merge.
 func catalog() index.Catalog {
 	w, err := index.Wired()
 	if err != nil {
 		panic(err)
 	}
-	c, err := index.Collect(w, modules(daemon.Paths{}, clock.Real())...)
+	c, err := index.Collect(w, modules(daemon.Paths{}, clock.Real(), nil)...)
 	if err != nil {
 		panic(err)
 	}

@@ -19,6 +19,16 @@ type InstanceInfo struct {
 	Inputs  []PortInfo
 	Outputs []PortInfo
 	Config  []PortInfo
+	// Asks are its request ports, each with the verb the wiring binds it to.
+	Asks []AskInfo
+	// Verbs are the verbs it answers, an I/O module's.
+	Verbs []Exchange
+}
+
+// AskInfo is one request port and the verb it is bound to, as instance.verb.
+type AskInfo struct {
+	Exchange
+	Verb string
 }
 
 // PortInfo is one port and the name the wiring binds it to; an input left
@@ -79,6 +89,11 @@ func (b *builder) catalog() Catalog {
 		for _, p := range in.mod.Config() {
 			info.Config = append(info.Config, PortInfo{Port: p, Name: in.in[ConfigPrefix+p.Port]})
 		}
+		for _, a := range in.mod.Asks() {
+			v := in.asks[a.Name]
+			info.Asks = append(info.Asks, AskInfo{Exchange: a, Verb: v.inst + "." + v.verb})
+		}
+		info.Verbs = in.mod.Verbs()
 		c.Instances = append(c.Instances, info)
 		for _, d := range in.mod.Commands() {
 			if first, taken := owner[d.Name]; taken {

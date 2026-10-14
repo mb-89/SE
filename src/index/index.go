@@ -76,8 +76,12 @@ type instance struct {
 	line   int
 	in     map[string]string // input port to the name it reads; "" reads the built-in value
 	out    map[string]string // output port to the name it writes
+	asks   map[string]verbAt // request port to the verb it is bound to
 	height int
 }
+
+// verbAt is a verb of an instance, which a request port is bound to.
+type verbAt struct{ inst, verb string }
 
 // Index is a started index: the store, its names and writers, the running
 // instances and the catalog. It is safe to use from many goroutines; it runs
@@ -180,15 +184,21 @@ func (ix *Index) Commit(instance string, writes ...Write) error {
 	return ix.apply(in, writes)
 }
 
-// Call runs a command on a snapshot of its instance's inputs, commits what it
-// writes, pushes the change, and answers its result.
+// Call runs a command on a snapshot of its instance's inputs, delivers each
+// request it answers to the verb the wiring binds its port to, in order, and
+// hands the answers to its continuation; then it commits what every step
+// wrote, pushes the change, and answers the result. A failed request stops
+// the run: it commits nothing and undoes no request delivered before it.
 func (ix *Index) Call(command string, args ...string) (Result, error) {
 	c, ok := ix.catalog.Command(command)
 	if !ok {
 		return Result{}, fmt.Errorf("index: no command %q", command)
 	}
 	in := ix.insts[c.Instance]
-	r, err := in.mod.Run(command, in.reader(ix.Snapshot(), ""), args)
+	r, err := in.mod.Run(command, in.reader(ix.Snapshot(), ""), args, func(port string, request any) (any, error) {
+		v := in.asks[port]
+		return ix.insts[v.inst].mod.Serve(v.verb, request)
+	})
 	if err != nil {
 		return Result{}, err
 	}
@@ -399,7 +409,7 @@ func (b *builder) instances() {
 		case m == nil:
 			b.fail(wi.Line, "instance %s: no module %s is registered", wi.Name, wi.Module)
 		default:
-			in := &instance{name: wi.Name, mod: m, line: wi.Line, in: map[string]string{}, out: map[string]string{}}
+			in := &instance{name: wi.Name, mod: m, line: wi.Line, in: map[string]string{}, out: map[string]string{}, asks: map[string]verbAt{}}
 			for _, o := range m.Outputs() {
 				in.out[o.Port] = wi.Name + "/" + o.Port
 				if o.Family {
@@ -441,6 +451,7 @@ const (
 	noPort portKind = iota
 	inputPort
 	outputPort
+	requestPort
 )
 
 func (b *builder) kind(inst, port string) portKind {
@@ -450,6 +461,9 @@ func (b *builder) kind(inst, port string) portKind {
 	}
 	if _, ok := m.inputs[port]; ok && !strings.HasPrefix(port, ConfigPrefix) {
 		return inputPort
+	}
+	if _, ok := m.asks[port]; ok {
+		return requestPort
 	}
 	return noPort
 }
@@ -490,6 +504,8 @@ func (b *builder) wires() []ref {
 			default:
 				b.ix.insts[inst].out[port] = w.To
 			}
+		case requestPort:
+			b.ask(w, inst, port, toInst, toPort, toIsPort)
 		case inputPort:
 			switch {
 			case w.To == BuiltIn:
@@ -506,6 +522,25 @@ func (b *builder) wires() []ref {
 		}
 	}
 	return refs
+}
+
+// ask binds the request port inst.port to the verb toInst.toPort, refusing
+// anything but a verb that takes and answers what the port does.
+func (b *builder) ask(w Wire, inst, port, toInst, toVerb string, toIsPort bool) {
+	a := b.ix.insts[inst].mod.asks[port]
+	var v *verb
+	if toIsPort {
+		v = b.ix.insts[toInst].mod.verbs[toVerb]
+	}
+	switch {
+	case v == nil:
+		b.fail(w.Line, "request port %s is bound to %s, which is no verb of an instance", w.Port, w.To)
+	case v.Request != a.Request || v.Answer != a.Answer:
+		b.fail(w.Line, "two types on one wire: request port %s takes %s and answers %s, but verb %s takes %s and answers %s",
+			w.Port, a.Request, a.Answer, w.To, v.Request, v.Answer)
+	default:
+		b.ix.insts[inst].asks[port] = verbAt{toInst, toVerb}
+	}
 }
 
 // outputs gives every output's name its one writer.
@@ -613,6 +648,11 @@ func (b *builder) inputs(refs []ref) {
 	}
 	for _, inst := range sortedKeys(b.ix.insts) {
 		in := b.ix.insts[inst]
+		for _, a := range in.mod.Asks() {
+			if _, bound := in.asks[a.Name]; !bound && lines[inst+"."+a.Name] == 0 {
+				b.fail(in.line, "request port %s.%s is bound to no verb: wire it to an I/O module's verb", inst, a.Name)
+			}
+		}
 		for _, p := range in.mod.Inputs() {
 			port := inst + "." + p.Port
 			name, bound := in.in[p.Port]
