@@ -114,13 +114,14 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	}
 	body, err := Landed{Issue: 6, Answers: full, Facts: Facts{
 		Claimed: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC), Landed: landedAt(), Minutes: 90, Commits: 1,
-		// Those 30, and the 3 this land had made when it counted them (the battery status among them).
-		Requests: 33,
+		// Those 30, and the 4 this land had made when it counted them (the
+		// battery status and the manifest lookup among them).
+		Requests: 34,
 	}}.Comment(qs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 33\n") {
+	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 34\n") {
 		t.Fatalf("the landing comment is %+v, want\n%s", got, body)
 	}
 	want := []string{"POST repos/o/r/statuses/" + run(t, a, "rev-parse", "HEAD"), "POST repos/o/r/issues/6/comments", "POST repos/o/r/pulls", "POST graphql"}
