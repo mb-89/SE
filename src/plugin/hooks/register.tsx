@@ -74,7 +74,7 @@ const working: string[] = []
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const began = Date.now()
+    const began = await $.clock.now()
     await $.command.register({
       name: 'se',
       description: 'SE, the session-event daemon: /se help lists what it does',
@@ -92,7 +92,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'se' }, async ($, e) => {
-    const began = Date.now()
+    const began = await $.clock.now()
     const text = await runs($, e.args)
     took($, 'command.run se', began)
     return { text }
@@ -100,7 +100,7 @@ export const register: Register = on => {
 
   // Every surface draws Box, Text and Button, the phone too, so the pane uses no other.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const began = Date.now()
+    const began = await $.clock.now()
     const { Box, Button } = $.ui.resolve(e)
     const { value: isOn = false } = await $.state.get(ACTIVE)
     const { value: buttons = [] } = await $.state.get(BUTTONS)
@@ -124,7 +124,7 @@ export const register: Register = on => {
   // /se help's output row: the help se answered as data, drawn as a layout. A
   // row whose words carried no help, or an error, is drawn as its text.
   on('ui.render', { component: 'CommandOutput', props: { command: 'se' } }, async ($, e, next) => {
-    const began = Date.now()
+    const began = await $.clock.now()
     if (e.props.isErrored) return next(e)
     const { value: helps = {} } = await $.state.get(HELPS)
     const help = helps[wordsOf(e.props.args).join(' ')]
@@ -196,7 +196,7 @@ export const register: Register = on => {
   // switched SE on, dropped if not.
   on('*', async ($, e, next) => {
     if (next.is('engine.create', e) || (!active && !settingUp)) return next(e)
-    const began = Date.now()
+    const began = await $.clock.now()
     if (!active) {
       if (waiting.length < WAITING_CAP) waiting.push(bodyOf(await $.session.id(), next.event, e, await $.clock.now()))
       return next(e)
@@ -268,18 +268,16 @@ async function timed<T>($: EngineInterface, words: string[], call: () => Promise
   }
 }
 
-// Records how long a hook took since began, while SE is on, as an se.hook row
-// of the daemon's log, without waiting on the post. A hook measures its own
-// work up to handing the event on, with Date.now, which costs nothing.
-// spec/budgets.yaml gives each hook a class by the name it passes here, and
-// se rules fails on a hook it does not.
+// Records how long a hook took since began on the clock, while SE is on, as
+// an se.hook row of the daemon's log, without waiting on the post. A hook
+// measures its own work up to handing the event on. spec/budgets.yaml gives
+// each hook a class by the name it passes here, and se rules fails on a hook
+// it does not.
 function took($: EngineInterface, hook: string, began: number): void {
-  const ms = Date.now() - began
   const to = endpoint
   if (!active || !to) return
-  void $.session
-    .id()
-    .then(session => posts($, to, bodyOf(session, 'se.hook', { hook, ms })))
+  void Promise.all([$.clock.now(), $.session.id()])
+    .then(([now, session]) => posts($, to, bodyOf(session, 'se.hook', { hook, ms: now - began }, now)))
     .catch(() => {})
 }
 
