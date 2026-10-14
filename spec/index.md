@@ -179,6 +179,7 @@ It marks a function as a command with:
 | group | the heading it stands under in the help listing |
 | offered | in a session as `/se <name>`, and whether as a `/se ui` button |
 | installed | answered by the installed `se` even when the session works in an SE checkout, whose own `se` answers every other `/se` word: `on`, `restart`, `update` |
+| class | `interactive`, a command a person waits on, which answers from the snapshot within its budgets in [spec/budgets.yaml](budgets.yaml); or `batch`, one that must write or that the fleet, a hook or the battery runs ([principle 9](principles.md)) |
 
 The command runs like any other run: it reads a snapshot of the module's
 inputs plus its arguments, and answers a reply, a commit of the module's own
@@ -195,6 +196,18 @@ REST API. A new module's commands and help appear everywhere without touching
 an adapter or the core. Today's registry (`src/cmd/se/commands.go`, one file
 per command) becomes that collector, and each command, with its help, moves
 into the module that owns its behaviour.
+
+**The `/se ui` panel is a grid of mechanical buttons**, the owner's rule of
+2026-10-14. Its shape is the renderer's, not a module's: `se ui` answers the
+buttons the catalog offers with the most a row holds, the `cli` instance's
+`columns` config value in the wiring file (3 today), and the plugin's drawing
+of the pane (`gridOf` in `src/plugin/hooks/register.tsx`) lays them out:
+
+- a row holds at most `columns` buttons, the on/off toggle top left counted;
+  the next button starts the next row;
+- every cell is as wide as every other, so the columns align from row to row
+  and a short last row stays to the left;
+- every button is labelled with its command's name.
 
 ## Testing
 

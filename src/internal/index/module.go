@@ -73,7 +73,22 @@ type CommandDecl struct {
 	// Installed has the installed se answer it even when the session works
 	// in an SE checkout, whose own se answers every other /se word.
 	Installed bool
+	// Class is Interactive or Batch: whether a person waits on its answer.
+	Class Class
 }
+
+// Class says who waits on a command (principle 9). The battery runs every
+// interactive command against the fake GitHub and holds it to its budgets.
+type Class string
+
+const (
+	// Interactive is a command a person types or presses and waits on: it
+	// answers from what the snapshot holds, within its time and request budget.
+	Interactive Class = "interactive"
+	// Batch is a command that must write, or that the fleet, a hook or the
+	// battery runs: it goes out at once.
+	Batch Class = "batch"
+)
 
 // Reader answers the value of a local input port.
 type Reader func(port string) any
@@ -391,6 +406,9 @@ func (p commandPart) declare(m *Module) {
 	}
 	if d.Button && !d.Session {
 		m.fail("command %q is a button but not offered in a session", d.Name)
+	}
+	if d.Class != Interactive && d.Class != Batch {
+		m.fail("command %q has no class: %s or %s", d.Name, Interactive, Batch)
 	}
 	if _, taken := m.commands[d.Name]; taken {
 		m.fail("command %q is declared twice", d.Name)

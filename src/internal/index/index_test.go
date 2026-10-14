@@ -237,7 +237,7 @@ func TestABrokenDeclarationIsRefused(t *testing.T) {
 		index.Derived("d", 0, "help", func(untagged) (int, error) { return 0, nil }),
 		index.Command(index.CommandDecl{Name: "broken"}, func(xIn, []string) (index.Result, error) { return index.Result{}, nil }),
 	)
-	for _, want := range []string{"module broken has no help", "output o has no help", "tagged index", `command "broken" has no summary`} {
+	for _, want := range []string{"module broken has no help", "output o has no help", "tagged index", `command "broken" has no summary`, `command "broken" has no class`} {
 		refused(t, "instances: {b: {module: broken}}", want, broken)
 	}
 	if _, err := indextest.New(broken); err == nil {
