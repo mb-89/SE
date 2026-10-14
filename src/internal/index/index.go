@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -21,29 +22,51 @@ type Snapshot struct {
 	rev   uint64
 	vals  map[string]any
 	names map[string]*nameInfo
+	fams  []string // the families among names, sorted
 }
 
 // Revision is the store's revision this snapshot holds; every commit raises it.
 func (s Snapshot) Revision() uint64 { return s.rev }
 
-// Read answers the value of a name at this snapshot's revision.
+// Read answers the value of a name at this snapshot's revision. A name in a
+// family, such as session/s1/events in session/<id>/events, reads the value
+// standing at its key, or the family's built-in value.
 func (s Snapshot) Read(name string) (Value, error) {
-	n, ok := s.names[name]
-	if !ok {
-		return Value{}, fmt.Errorf("no name %s", name)
+	family, _, err := s.lookup(name)
+	if err != nil {
+		return Value{}, err
 	}
 	if v, ok := s.vals[name]; ok {
 		return Value{V: v, Provided: true}, nil
 	}
-	return Value{V: n.builtin}, nil
+	return Value{V: s.names[family].builtin}, nil
 }
 
-// nameInfo is what the index knows of a name: its one writer, type and built-in value.
+// lookup answers the declared name a name reads: itself, or the family it
+// lies in and its key there. A family itself is no name to read.
+func (s Snapshot) lookup(name string) (declared, key string, err error) {
+	if n, ok := s.names[name]; ok {
+		if n.family {
+			return "", "", fmt.Errorf("%s is a family: read a name in it, at a key", name)
+		}
+		return name, "", nil
+	}
+	for _, f := range s.fams {
+		if key, ok := keyIn(f, name); ok {
+			return f, key, nil
+		}
+	}
+	return "", "", fmt.Errorf("no name %s", name)
+}
+
+// nameInfo is what the index knows of a name: its one writer, type and
+// built-in value, and whether it is a family.
 type nameInfo struct {
 	writer  string
 	line    int
 	typ     reflect.Type
 	builtin any
+	family  bool
 }
 
 // instance is one module instance and where its ports are bound.
@@ -62,6 +85,7 @@ type instance struct {
 type Index struct {
 	mu      sync.Mutex
 	names   map[string]*nameInfo
+	fams    []string
 	insts   map[string]*instance
 	order   []*instance // by height, then name
 	snap    Snapshot
@@ -164,7 +188,7 @@ func (ix *Index) Call(command string, args ...string) (Result, error) {
 		return Result{}, fmt.Errorf("index: no command %q", command)
 	}
 	in := ix.insts[c.Instance]
-	r, err := in.mod.Run(command, in.reader(ix.Snapshot()), args)
+	r, err := in.mod.Run(command, in.reader(ix.Snapshot(), ""), args)
 	if err != nil {
 		return Result{}, err
 	}
@@ -176,8 +200,8 @@ func (ix *Index) Call(command string, args ...string) (Result, error) {
 func (ix *Index) Subscribe(name string, fn func(Value)) (cancel func(), err error) {
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
-	if _, ok := ix.names[name]; !ok {
-		return nil, fmt.Errorf("index: no name %s", name)
+	if _, _, err := ix.snap.lookup(name); err != nil {
+		return nil, fmt.Errorf("index: %w", err)
 	}
 	if ix.subs[name] == nil {
 		ix.subs[name] = map[int]func(Value){}
@@ -230,51 +254,91 @@ func (ix *Index) commit(in *instance, writes []Write, changed map[string]bool) {
 	}
 	for _, w := range writes {
 		name := in.out[w.Port]
+		if w.Key != "" {
+			name = atKey(name, w.Key)
+		}
 		if old, ok := vals[name]; !ok || !reflect.DeepEqual(old, w.Value) {
 			changed[name] = true
 		}
 		vals[name] = w.Value
 	}
-	ix.snap = Snapshot{rev: ix.snap.rev + 1, vals: vals, names: ix.names}
+	ix.snap = Snapshot{rev: ix.snap.rev + 1, vals: vals, names: ix.names, fams: ix.fams}
 }
 
 // settle runs, lowest height first, each derivation that reads a changed
 // name, or all of them; so each runs once per change, after everything it
-// reads has settled.
+// reads has settled. A derivation that reads a family runs once per key that
+// changed in it, reading the family at that key.
 func (ix *Index) settle(changed map[string]bool, all bool) error {
 	var errs []error
 	for _, in := range ix.order {
 		for _, port := range in.mod.Derivations() {
-			if !all && !in.reads(port, changed) {
-				continue
+			for _, key := range in.runs(port, changed, all, ix.snap) {
+				v, err := in.mod.Derive(port, in.reader(ix.snap, key))
+				if err != nil {
+					errs = append(errs, fmt.Errorf("index: %s.%s: %w", in.name, port, err))
+					continue
+				}
+				ix.commit(in, []Write{{Port: port, Value: v}}, changed)
 			}
-			v, err := in.mod.Derive(port, in.reader(ix.snap))
-			if err != nil {
-				errs = append(errs, fmt.Errorf("index: %s.%s: %w", in.name, port, err))
-				continue
-			}
-			ix.commit(in, []Write{{Port: port, Value: v}}, changed)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// reads says whether the derivation of port reads a changed name.
-func (in *instance) reads(port string, changed map[string]bool) bool {
+// runs answers the keys the derivation of port runs at for this change: none
+// where it reads nothing that changed, and "" where it reads no family or no
+// key stands in one. A change of a plain name it reads, or a start, runs it at
+// every key that stands in the families it reads.
+func (in *instance) runs(port string, changed map[string]bool, all bool, s Snapshot) []string {
+	fams := map[string]bool{}
+	plain := all
 	for _, p := range in.mod.ReadsOf(port) {
-		if changed[in.in[p]] {
-			return true
+		name := in.in[p]
+		if n := s.names[name]; n != nil && n.family {
+			fams[name] = true
+		} else if changed[name] {
+			plain = true
 		}
 	}
-	return false
+	keys := map[string]bool{}
+	if len(fams) > 0 {
+		at := func(name string) {
+			if f, key, err := s.lookup(name); err == nil && fams[f] {
+				keys[key] = true
+			}
+		}
+		for name := range changed {
+			at(name)
+		}
+		if plain {
+			for name := range s.vals {
+				at(name)
+			}
+		}
+	}
+	switch {
+	case len(keys) > 0:
+		return sortedKeys(keys)
+	case plain:
+		return []string{""}
+	}
+	return nil
 }
 
-// reader answers the instance's inputs from a snapshot, by local port.
-func (in *instance) reader(s Snapshot) Reader {
+// reader answers the instance's inputs from a snapshot, by local port; an
+// input bound to a family reads it at key, or its built-in value where key is "".
+func (in *instance) reader(s Snapshot, key string) Reader {
 	return func(port string) any {
 		name := in.in[port]
 		if name == "" {
 			return nil
+		}
+		if n := s.names[name]; n != nil && n.family {
+			if key == "" {
+				return n.builtin
+			}
+			name = atKey(name, key)
 		}
 		v, _ := s.Read(name)
 		return v.V
@@ -313,7 +377,7 @@ func (b *builder) build(modules []*Module) {
 	b.config()
 	b.inputs(refs)
 	b.heights()
-	b.ix.snap = Snapshot{vals: b.ix.snap.vals, names: b.ix.names}
+	b.ix.snap = Snapshot{vals: b.ix.snap.vals, names: b.ix.names, fams: b.ix.fams}
 	b.ix.catalog = b.catalog()
 }
 
@@ -331,6 +395,9 @@ func (b *builder) instances() {
 			in := &instance{name: wi.Name, mod: m, line: wi.Line, in: map[string]string{}, out: map[string]string{}}
 			for _, o := range m.Outputs() {
 				in.out[o.Port] = wi.Name + "/" + o.Port
+				if o.Family {
+					in.out[o.Port] = wi.Name + "/<key>/" + o.Port
+				}
 			}
 			b.ix.insts[wi.Name] = in
 		}
@@ -390,7 +457,11 @@ func (b *builder) wires() []ref {
 			case toIsPort:
 				b.fail(w.Line, "%s and %s are both outputs: a name with two writers", w.Port, w.To)
 			case !globalName(w.To):
-				b.fail(w.Line, "%s: %q is no name: segments of letters, digits and dashes, split by /", w.Port, w.To)
+				b.fail(w.Line, "%s: %q is no name: segments of letters, digits and dashes, split by /, and at most one key segment such as <id>", w.Port, w.To)
+			case b.ix.insts[inst].mod.outputs[port].Family && !familyName(w.To):
+				b.fail(w.Line, "%s writes at keys, and %q is no family: give it one key segment, such as <id>", w.Port, w.To)
+			case !b.ix.insts[inst].mod.outputs[port].Family && familyName(w.To):
+				b.fail(w.Line, "%s writes no keys, and %q is a family", w.Port, w.To)
 			default:
 				b.ix.insts[inst].out[port] = w.To
 			}
@@ -403,7 +474,7 @@ func (b *builder) wires() []ref {
 			case toIsPort:
 				b.fail(w.Line, "%s is bound to %s, which is no output: an input bound to nothing", w.Port, w.To)
 			case !globalName(w.To):
-				b.fail(w.Line, "%s: %q is no name: segments of letters, digits and dashes, split by /", w.Port, w.To)
+				b.fail(w.Line, "%s: %q is no name: segments of letters, digits and dashes, split by /, and at most one key segment such as <id>", w.Port, w.To)
 			default:
 				b.ix.insts[inst].in[port] = w.To
 			}
@@ -430,7 +501,31 @@ func (b *builder) outputs() {
 				b.fail(line, "name %s has two writers: %s (line %d) and %s", name, n.writer, n.line, writer)
 				continue
 			}
-			b.ix.names[name] = &nameInfo{writer: writer, line: line, typ: o.Type, builtin: o.Builtin}
+			b.ix.names[name] = &nameInfo{writer: writer, line: line, typ: o.Type, builtin: o.Builtin, family: o.Family}
+			if o.Family {
+				b.ix.fams = append(b.ix.fams, name)
+			}
+		}
+	}
+	b.overlaps()
+}
+
+// overlaps refuses two families that hold the same names, and a name that
+// lies in a family: either is a name with two writers.
+func (b *builder) overlaps() {
+	sort.Strings(b.ix.fams)
+	for i, f := range b.ix.fams {
+		for _, g := range b.ix.fams[i+1:] {
+			if atKey(f, "") == atKey(g, "") {
+				n, m := b.ix.names[f], b.ix.names[g]
+				b.fail(m.line, "families %s and %s hold the same names: two writers, %s (line %d) and %s", f, g, n.writer, n.line, m.writer)
+			}
+		}
+		for _, name := range sortedKeys(b.ix.names) {
+			if _, in := keyIn(f, name); in {
+				n, m := b.ix.names[f], b.ix.names[name]
+				b.fail(m.line, "name %s lies in family %s: two writers, %s (line %d) and %s", name, f, n.writer, n.line, m.writer)
+			}
 		}
 	}
 }
@@ -494,6 +589,8 @@ func (b *builder) inputs(refs []ref) {
 			case name == "":
 			case b.ix.names[name] == nil:
 				b.fail(lines[port], "input %s is bound to %s, which nothing writes", port, name)
+			case b.ix.names[name].family && commandReads(in.mod, p.Port):
+				b.fail(lines[port], "input %s is bound to the family %s, and a command reads it: only a derivation reads a family, at the key that changed", port, name)
 			case b.ix.names[name].typ != p.Type:
 				n := b.ix.names[name]
 				b.fail(lines[port], "two types on one wire: %s reads %s as %s, but %s writes %s", port, name, p.Type, n.writer, n.typ)
@@ -545,14 +642,73 @@ func (b *builder) heights() {
 	sort.SliceStable(b.ix.order, func(i, j int) bool { return b.ix.order[i].height < b.ix.order[j].height })
 }
 
-// globalName says whether s is a name: segments of letters, digits and dashes, split by /.
+// commandReads says whether a command of m reads the local input port.
+func commandReads(m *Module, port string) bool {
+	for _, c := range m.Commands() {
+		if slices.Contains(m.ReadsOf(c.Name), port) {
+			return true
+		}
+	}
+	return false
+}
+
+// globalName says whether s is a name: segments of letters, digits and
+// dashes, split by /, at most one of them a key segment such as <id>.
 func globalName(s string) bool {
+	keys := 0
 	for _, seg := range strings.Split(s, "/") {
-		if !portName(seg) {
+		switch {
+		case keySegment(seg):
+			keys++
+		case !portName(seg):
 			return false
 		}
 	}
-	return true
+	return keys <= 1
+}
+
+// familyName says whether s is a family: a name with one key segment.
+func familyName(s string) bool {
+	if !globalName(s) {
+		return false
+	}
+	return slices.ContainsFunc(strings.Split(s, "/"), keySegment)
+}
+
+// keySegment says whether seg is a key segment: <name>.
+func keySegment(seg string) bool {
+	inner, ok := strings.CutPrefix(seg, "<")
+	inner, closed := strings.CutSuffix(inner, ">")
+	return ok && closed && portName(inner)
+}
+
+// atKey is the name at key in family f.
+func atKey(f, key string) string {
+	segs := strings.Split(f, "/")
+	for i, seg := range segs {
+		if keySegment(seg) {
+			segs[i] = key
+		}
+	}
+	return strings.Join(segs, "/")
+}
+
+// keyIn answers the key name stands at in family f, if it lies in f.
+func keyIn(f, name string) (string, bool) {
+	fs, ns := strings.Split(f, "/"), strings.Split(name, "/")
+	if len(fs) != len(ns) {
+		return "", false
+	}
+	key := ""
+	for i, seg := range fs {
+		switch {
+		case keySegment(seg):
+			key = ns[i]
+		case seg != ns[i]:
+			return "", false
+		}
+	}
+	return key, Key(key)
 }
 
 func sortedValues(m map[string]string) []string {

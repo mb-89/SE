@@ -71,21 +71,36 @@ func (f *Fake) Call(name string, args ...string) (string, error) {
 		return "", err
 	}
 	for _, w := range r.Writes {
-		f.out[w.Port] = w.Value
+		f.out[at(w.Port, w.Key)] = w.Value
 	}
 	return r.Text, nil
 }
 
 // Out answers what the module committed to an output, or its built-in value while it committed nothing.
-func (f *Fake) Out(port string) (index.Value, error) {
+func (f *Fake) Out(port string) (index.Value, error) { return f.OutAt(port, "") }
+
+// OutAt answers what the module committed to a family output at key, or its
+// built-in value while it committed nothing there.
+func (f *Fake) OutAt(port, key string) (index.Value, error) {
 	p, ok := f.outputs[port]
-	if !ok {
+	switch {
+	case !ok:
 		return index.Value{}, fmt.Errorf("module %s writes no output %q", f.m.Name(), port)
+	case p.Family != (key != ""):
+		return index.Value{}, fmt.Errorf("output %s of module %s: a family is read at a key, and only a family", port, f.m.Name())
 	}
-	if v, ok := f.out[port]; ok {
+	if v, ok := f.out[at(port, key)]; ok {
 		return index.Value{V: v, Provided: true}, nil
 	}
 	return index.Value{V: p.Builtin}, nil
+}
+
+// at is where a write to port at key stands among the fake's outputs.
+func at(port, key string) string {
+	if key == "" {
+		return port
+	}
+	return port + "/" + key
 }
 
 func (f *Fake) read(port string) any {
