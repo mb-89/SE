@@ -115,6 +115,19 @@ follows them; `se review brief` and `se issue review` (in
    closed with a change) versus dropped. The reports' machine-readable blocks
    are what it counts from.
 
+10. **What others built runs on the delta:** the brief ends with the
+   reviewer's list from the reuse config of
+   [src/internal/index/wiring.yaml](../src/internal/index/wiring.yaml)
+   (the simplifier, `/security-review` and the pr-review-toolkit agents),
+   each resolved against the plugins the box loaded. What they report are
+   candidates, verified like any other. The report's `ran` names each entry
+   once, with what it found or why it did not run, and `se issue review`
+   refuses a report that leaves one out; the verdict shows them under "Ran
+   on the delta". The worker runs its light list before it commits, the
+   overhaul its heavy one over everything, each handed over by the take;
+   an agent's front matter preloads (`skills`) only what its tier's list
+   names (the rule `agents`).
+
 ## The report
 
 `se issue review pass|fail N --report PATH` reads the report as JSON, in the
