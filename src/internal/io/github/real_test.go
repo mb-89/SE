@@ -25,7 +25,7 @@ func TestTheRealGitHubKeepsTheContract(t *testing.T) {
 }
 
 // A stand-in gh on the PATH shows how Real speaks to gh: the arguments it
-// passes, the pages it joins, and the status it reads out of a refusal.
+// passes, the pages it asks for by repos/ path and joins, and the status it reads out of a refusal.
 func TestTheRealGitHubSpeaksGh(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in gh is a shell script")
@@ -35,7 +35,9 @@ func TestTheRealGitHubSpeaksGh(t *testing.T) {
 	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >>" + said + "\n" +
 		"case \"$*\" in\n" +
 		"*missing*) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;\n" +
-		"*--paginate*) echo '[1,2]'; echo '[3]' ;;\n" +
+		"*per_page=2\\&page=1*) echo '[1,2]' ;;\n" +
+		"*per_page=2\\&page=2*) echo '[3]' ;;\n" +
+		"*refs*) echo '[9]' ;;\n" +
 		"*) echo '{\"number\":5}' ;;\n" +
 		"esac\n"
 	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
@@ -43,8 +45,11 @@ func TestTheRealGitHubSpeaksGh(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	gh := github.Real()
-	if out, err := gh.List("repos/o/r/issues"); err != nil || string(out) != "[1,2,3]" {
+	if out, err := gh.List("repos/o/r/issues?per_page=2"); err != nil || string(out) != "[1,2,3]" {
 		t.Fatalf("%s %v", out, err)
+	}
+	if out, err := gh.List("repos/o/r/refs?per_page=1"); err != nil || string(out) != "[9]" {
+		t.Fatalf("a list that takes no page: %s %v", out, err)
 	}
 	if out, err := gh.Get("repos/o/r/issues/5"); err != nil || !strings.Contains(string(out), `"number":5`) {
 		t.Fatalf("%s %v", out, err)
@@ -64,7 +69,10 @@ func TestTheRealGitHubSpeaksGh(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := strings.Join([]string{
-		"api", "--paginate", "repos/o/r/issues",
+		"api", "repos/o/r/issues?per_page=2&page=1",
+		"api", "repos/o/r/issues?per_page=2&page=2",
+		"api", "repos/o/r/refs?per_page=1&page=1",
+		"api", "repos/o/r/refs?per_page=1&page=2",
 		"api", "repos/o/r/issues/5",
 		"api", "-X", "POST", "-F", "sub_issue_id=7", "-f", "labels[]=se", "repos/o/r/issues/5/sub_issues",
 		"api", "-f", "query=mutation", "-f", "id=PR_1", "graphql",
