@@ -363,19 +363,20 @@ issue with open sub-issues ("a parent holds no work") and a tree with
 uncommitted changes. A leaf inside a manifest (an issue with a parent) lands
 into the manifest's branch: it merges origin's `issue-<n>` and then
 `issue-<manifest>` into the checkout (never a rebase; a conflict is undone
-and left to the worker), runs `tests/check.sh`, pushes the result to both
+and left to the worker), runs `tests/check.sh`, records the worker, posts
+the landing answers on the leaf, pushes the result to both
 branches at once (where another leaf landed in between, it merges again and
-pushes again), records the worker, posts the landing answers on the leaf and
-closes it, with no PR (with `--json`: `{"issue","manifest","into","closed"}`).
+pushes again) and closes the leaf, with no PR (with `--json`: `{"issue","manifest","into","closed"}`).
 An issue at the top (a manifest whose leaves are all closed, a retro, an
 overhaul) lands to main: it merges origin's copy of the branch and
 `origin/main` in, runs `tests/check.sh` and goes on only if it passes,
 refuses a tree the battery did not record as passed and a branch main moved
-past meanwhile, pushes the branch, posts the commit status `se/battery`
+past meanwhile, records on the issue who worked it (see
+[Reviews](#reviews)) and posts the landing answers on it before anything is
+pushed, so a land stopped later (a refused status post, say) still leaves its
+record, then pushes the branch, posts the commit status `se/battery`
 naming its tree on the pushed commit, which CI trusts (see
-[spec/coordination.md](coordination.md#up-to-date-with-main)), records on
-the leaf who worked it (see
-[Reviews](#reviews)), posts the landing answers on the issue, opens one PR against main titled after the issue with the
+[spec/coordination.md](coordination.md#up-to-date-with-main)), opens one PR against main titled after the issue with the
 body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left
 to wait for is squash-merged at once. It prints the PR's number and link (with
 `--json`: `{"issue","number","url","created","merged"}`). Where the branch's PR
@@ -470,10 +471,12 @@ where it cannot land a PR. It creates N's successor through the same code as
 `se issue new`: N's title and text, then the open questions the box could not
 answer (`--body` or `--body-file`), labelled `se-final`, a sub-issue of N's
 parent and blocked by N's open blockers; it links N's open dependents as
-blocked by the successor (GitHub's native links), then closes N, its comment
-naming the successor. A final issue is refused: its box lands a PR. A ready
-successor fires the routine once (with `--json`:
-`{"issue","successor","parent","blocked_by","blocks","ready","fanout"}`).
+blocked by the successor (GitHub's native links), closes N's open PR with a
+comment naming the successor and deletes N's `issue-N` claim, as
+`--duplicate-of` does, then closes N, its comment naming the successor. A
+final issue is refused: its box lands a PR. A ready successor fires the
+routine once (with `--json`:
+`{"issue","successor","parent","blocked_by","blocks","ready","pulls","branch","fanout"}`).
 
 `se issue supersede N --duplicate-of M` is the supersede of an issue that
 the open issue M already covers, its PR doing the same work (two boxes that
@@ -493,9 +496,12 @@ unless SHA names a commit that `origin/main` holds, refuses a pull request, a
 closed issue and a parent ("a parent holds no work"), and reads FILE as
 `se issue land` does, refusing a missing, empty or unknown answer, all before
 it writes anything. Then it records the worker, posts the landing answers on N
-as `land` does (see [Landing answers](#landing-answers)), comments naming the
-commit and its link under the marker `<!-- se:fixed-by SHA -->`, and closes N
-as completed (with `--json`: `{"issue","commit","subject","url"}`). N's
+as `land` does (see [Landing answers](#landing-answers)), closes N's open PR
+with a comment naming the commit and deletes N's `issue-N` claim, as
+`--duplicate-of` does, comments naming the commit and its link under the
+marker `<!-- se:fixed-by SHA -->`, and closes N as completed (with `--json`:
+`{"issue","commit","subject","url","pulls","branch"}`). So no way of closing
+leaves an open PR or a closed issue's claim behind. N's
 dependents become ready as when a PR closes it.
 
 ### The Stop hook

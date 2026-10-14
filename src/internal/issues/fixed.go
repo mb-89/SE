@@ -20,6 +20,12 @@ type Moot struct {
 	Subject string `json:"subject"`
 	// URL is the commit's page on GitHub.
 	URL string `json:"url"`
+	// Pulls are the issue's open PRs, now closed, each with a comment naming
+	// the commit.
+	Pulls []int `json:"pulls,omitempty"`
+	// Branch is its issue-<n> claim, now deleted; empty where origin held
+	// none.
+	Branch string `json:"branch,omitempty"`
 }
 
 // FixedBy closes issue n, a leaf whose work reached main before its box
@@ -28,7 +34,8 @@ type Moot struct {
 // answers answer every question in qs and sha names a commit that origin's
 // main holds (fetched in dir), and refuses a pull request, a closed issue and
 // a parent. Then it records the worker (where session is set), posts the
-// landing answers as se issue land does, comments naming the commit and
+// landing answers as se issue land does, closes n's open PR and deletes its
+// issue-<n> claim as CloseDuplicate does, comments naming the commit and
 // closes n as completed.
 func (s Source) FixedBy(dir, session string, n int, sha string, qs []Question, answers map[string]string) (Moot, error) {
 	if err := answered(qs, answers); err != nil {
@@ -74,8 +81,13 @@ func (s Source) FixedBy(dir, session string, n int, sha string, qs []Question, a
 	if err := s.postLanding(dir, n, qs, answers); err != nil {
 		return f, err
 	}
+	short := full[:min(len(full), 12)]
+	why := fmt.Sprintf("#%d's work is on main already, in %s.\n%s", n, short, f.URL)
+	if f.Pulls, f.Branch, err = s.dropClaim(dir, n, why); err != nil {
+		return f, err
+	}
 	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
-	comment := fmt.Sprintf(fixedMark+"\nClosed: its work is on main already, in %s (%s), so no PR lands it.\n%s", full, full[:min(len(full), 12)], subject, f.URL)
+	comment := fmt.Sprintf(fixedMark+"\nClosed: its work is on main already, in %s (%s), so no PR lands it.\n%s", full, short, subject, f.URL)
 	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", comment)); err != nil {
 		return f, fmt.Errorf("commenting on #%d: %w", n, err)
 	}

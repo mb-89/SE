@@ -172,6 +172,13 @@ func (s Source) landInto(dir string, n, root int, session string, qs []Question,
 	if err != nil {
 		return Landing{}, err
 	}
+	// The answers go on the issue before the push, as Land's do.
+	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
+		return Landing{}, err
+	}
+	if err := s.post(n, comments, qs, Landed{Issue: n, Answers: answers, Facts: f}); err != nil {
+		return Landing{}, err
+	}
 	for k := 0; ; k++ {
 		_, err := s.git(dir, "push", "-q", "--atomic", "origin", "HEAD:refs/heads/"+into, "HEAD:refs/heads/"+branch)
 		if err == nil {
@@ -183,12 +190,6 @@ func (s Source) landInto(dir string, n, root int, session string, qs []Question,
 		if err := s.mergeIn(dir, branch, into); err != nil {
 			return Landing{}, err
 		}
-	}
-	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
-		return Landing{}, err
-	}
-	if err := s.post(n, comments, qs, Landed{Issue: n, Answers: answers, Facts: f}); err != nil {
-		return Landing{}, err
 	}
 	if err := s.labelManifest(root); err != nil {
 		return Landing{}, err
