@@ -191,7 +191,7 @@ Each step is its own issue, and SE works after each one.
 3. **The session event log** becomes the session I/O module: the bridgehead's posts come in as the `session/<id>/events` family, and it keeps the log file. It is the first real module and the smallest.
 4. **The issue rules** (next, new, land, review and the tree rules in `src/internal/issues`) become compute modules on the GitHub I/O module (#44), and their commands move with them.
 5. **The rest of the fleet's work**, one module each: retro, overhaul, review brief, fleet, briefing, and the checks behind `se rules` and `se manifest`.
-6. **The daemon's session commands** (on, off, status, restart, update, ui) move into a session module. The daemon's process stays the host, not a module.
+6. **The daemon's session commands** that need a running daemon (off, ui) move into a session module. The host's own commands stay with the adapter (open question 1), and the daemon's process stays the host, not a module.
 
 ## What v5 learned
 
@@ -205,7 +205,7 @@ Each step is its own issue, and SE works after each one.
 
 ## Open questions for the owner
 
-1. **The host's own commands.** `se serve`, `se start` and `se stop` run before any index exists. Proposed: they stay the CLI adapter's own commands, talking only about the adapter. Or should a module the daemon always loads declare them?
+1. **The host's own commands.** `se serve`, `se start` and `se stop` run before any index exists; `se on` starts the daemon, `se status` says whether one answers, and `se restart` and `se update` replace the running one, so none of the seven can be answered by a module inside the daemon. Proposed: they stay the CLI adapter's own commands, talking only about the adapter. Or should a module the daemon always loads declare them?
 2. **Where modules live.** Proposed: the core and its fake in two packages under `src/internal`, and each module one package under a modules folder. v5 put one module per file, several per package; is a package per module right for SE?
 3. **Actions without undo.** SE takes requests now and leaves v5's undo step out. Is a failed list that stops without rolling back acceptable for GitHub and the disk?
 4. **Config layers.** Until a module needs one, config is the built-in value or the wiring file's. Which layer comes first when one is needed: environment or a local file?
