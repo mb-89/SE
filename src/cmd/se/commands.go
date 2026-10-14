@@ -92,6 +92,15 @@ type Call struct {
 	Session bool
 	// Color is set when the help may colour what it prints.
 	Color bool
+	// World is everything outside se the command reaches.
+	World
+	// flags is the flag set Flags made, which the command's help lists.
+	flags *flag.FlagSet
+}
+
+// World is everything outside se that a run reaches. main hands run the real
+// one; a test hands in its own, so tests share nothing and run in parallel.
+type World struct {
 	// Clock is the time the command reads, sleeps and waits by.
 	Clock clock.Clock
 	// Disk is what the command reads and writes files on.
@@ -102,26 +111,28 @@ type Call struct {
 	Net sehttp.Net
 	// GitHub is where the command reads and writes issues and pull requests.
 	GitHub github.GitHub
-	// flags is the flag set Flags made, which the command's help lists.
-	flags *flag.FlagSet
+	// Getenv reads one variable of the environment se runs in; Environ
+	// answers all of it, for the programs se starts.
+	Getenv  func(key string) string
+	Environ func() []string
+	// Executable is this se, the installed one when it runs from the plugin.
+	Executable func() (string, error)
+	// Commit is the SE commit this se was built from, "" where the build did not say.
+	Commit string
+	// Check is what issue land runs before it pushes, on procs: the repo's one
+	// definition of green. It answers the check's output when it fails.
+	Check func(procs proc.Procs, dir string) error
+}
+
+// realWorld is what se reaches when it runs for real.
+func realWorld() *World {
+	return &World{
+		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(), GitHub: github.Real(),
+		Getenv: os.Getenv, Environ: os.Environ, Executable: os.Executable, Commit: commit, Check: check,
+	}
 }
 
 var commands = map[string]Command{}
-
-// wall is the clock every call is handed: the real one, which a test replaces.
-var wall = clock.Real()
-
-// drive is the disk every call is handed: the real one, which a test replaces.
-var drive = disk.Real()
-
-// machine runs every call's programs: the real one, which a test replaces.
-var machine = proc.Real()
-
-// network is the network every call is handed: the real one, which a test replaces.
-var network = sehttp.Real()
-
-// hub is the GitHub every call is handed: the real one, which a test replaces.
-var hub = github.Real()
 
 // register adds a command; a command file calls it from init.
 func register(c Command) {
@@ -190,9 +201,9 @@ func prog(session bool) string {
 	return "se"
 }
 
-// run is se: it reads --session and --workspace, then the command's name, and
+// run is se in world w: it reads --session and --workspace, then the command's name, and
 // runs that command. It answers the exit code.
-func run(args []string, stdout, stderr io.Writer) int {
+func run(w *World, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("se", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	session := fs.Bool("session", false, "called by the plugin from a session: answer JSON")
@@ -203,7 +214,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	// The help is coloured on a terminal alone, never in a session's answer.
 	color, errColor := !*session && colors(stdout), !*session && colors(stderr)
-	call := &Call{Workspace: *workspace, Session: *session, Color: color, Clock: wall, Disk: drive, Proc: machine, Net: network, GitHub: hub}
+	call := &Call{Workspace: *workspace, Session: *session, Color: color, World: *w}
 	name := ""
 	if fs.NArg() > 0 {
 		name, call.Args = fs.Arg(0), fs.Args()[1:]
@@ -215,7 +226,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	cmd, ok := commands[name]
 	if *session && (!ok || !cmd.Installed) {
-		if code, handed := handsOver(drive, machine, *workspace, args, stdout, stderr); handed {
+		if code, handed := handsOver(w, *workspace, args, stdout, stderr); handed {
 			return code
 		}
 	}
@@ -268,6 +279,3 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	return 0
 }
-
-// executable is this se, the installed one when it runs from the plugin.
-var executable = os.Executable
