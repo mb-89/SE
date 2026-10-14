@@ -688,6 +688,41 @@ func TestWorktreeIsTheBoxsTakeAtTheTop(t *testing.T) {
 	}
 }
 
+func TestATakeoverWritesBackTheLandingAnswersBesideItsWorktree(t *testing.T) {
+	t.Parallel()
+	posted, err := issues.Landed{Issue: 6, Answers: map[string]string{"done": "half of it", "left": "the tests"}}.Comment([]issues.Question{{Key: "done", Question: "Done?"}, {Key: "left", Question: "Left?"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	comments, _ := json.Marshal([]map[string]any{{"id": 1, "body": posted}})
+	hubAt(t, map[string]string{"repos/o/r/issues/6/comments?per_page=100": string(comments)})
+	ws := filepath.Join(t.TempDir(), "SE")
+	c := &Call{Workspace: ws, World: *worldOf(t)}
+	s := issues.Source{Repo: "o/r", GitHub: c.GitHub, Disk: c.Disk}
+	took := issues.Issue{Number: 6, Title: "six", URL: "u6", Takeover: &issues.Takeover{Count: 1, Stale: "nothing pushed for 3h"}}
+	if err := restoreAnswers(c, s, &took, true); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(filepath.Dir(ws), "issue-6-landing.yaml")
+	got, err := issues.ReadAnswers(c.Disk, path)
+	if err != nil || strings.TrimSpace(got["done"]) != "half of it" || strings.TrimSpace(got["left"]) != "the tests" || took.Takeover.Answers != path {
+		t.Fatalf("%q %v, takeover %+v", got, err, took.Takeover)
+	}
+	r, err := issueReply(false, took, true, "issue-6", "git worktree add …", "", handed{})
+	if err != nil || !strings.Contains(r.Text, "Its landing answers, as its last land posted them, are in "+path+": bring them up to date, and land with --answers "+path+".") {
+		t.Fatalf("%v\n%s", err, r.Text)
+	}
+	r, err = issueReply(true, took, true, "issue-6", "", "", handed{})
+	if want, _ := json.Marshal(path); err != nil || !strings.Contains(r.Text, `"answers":`+string(want)) {
+		t.Fatalf("%v\n%s", err, r.Text)
+	}
+	// New work restores nothing.
+	fresh := issues.Issue{Number: 7}
+	if err := restoreAnswers(c, s, &fresh, true); err != nil || fresh.Takeover != nil {
+		t.Fatalf("%v %+v", err, fresh)
+	}
+}
+
 func TestIssueCloseTakesANumberACommitAndAnswers(t *testing.T) {
 	t.Parallel()
 	for args, why := range map[string]string{
