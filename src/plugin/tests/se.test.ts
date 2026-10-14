@@ -95,7 +95,7 @@ function world(on: On, env: Record<string, string> = {}): World {
       off: { text: 'SE is off.', active: false },
       update: { text: 'SE updated aaa → bbb. Its daemon restarted.', endpoint: DAEMON, reload: true },
       status: { text: 'No SE daemon answers for /work.' },
-      ui: { text: "SE's control panel is open.", panel: { buttons: ['issue pull', 'status'] } },
+      ui: { text: "SE's control panel is open.", panel: { buttons: ['issue pull', 'status'], columns: 3 } },
       help: { text: HELP, help: OVERVIEW },
       'help issue pull': { text: '/se issue pull [--take [N]]\n```\n…\n```', help: ISSUE_PULL },
     },
@@ -608,12 +608,55 @@ test('/se ui opens a pane titled SE that draws on every surface', async ($, on) 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const drawn = await ui.drawn()
-    expect(drawn).toMatchObject({ type: 'Box', props: { flexWrap: 'wrap', width: 40 } })
+    expect(drawn).toMatchObject({ type: 'Box', props: { flexDirection: 'column', width: 40 } })
     const buttons = await ui.findAll({ type: 'Button' })
     // The toggle first, top left; then se's buttons in the order it named them.
     expect(buttons.map(b => b.props.label)).toEqual(['SE off', 'issue pull', 'status'])
     await ui.unmount()
   }
+})
+
+// The grid as drawn: each row's cells, by the label of the Button each holds and the cell's width.
+type Drawn = { type: string; props?: Record<string, unknown>; children?: unknown[] }
+const rowsOf = (drawn: Drawn) =>
+  (drawn.children as Drawn[]).map(row =>
+    (row.children as Drawn[]).map(cell => ({
+      label: (cell.children as Drawn[])[0]?.props?.label,
+      width: cell.props?.width,
+    })),
+  )
+
+test('/se ui draws a panel of 7 buttons as aligned rows of 3, 3 and 1', async ($, on) => {
+  const w = world(on)
+  const six = ['issue pull', 'restart', 'status', 'update', 'briefing', 'fleet check']
+  w.replies.ui = { text: "SE's control panel is open.", panel: { buttons: six, columns: 3 } }
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const rows = rowsOf((await ui.drawn()) as Drawn)
+    // At most three to a row: the fourth button starts the next row.
+    expect(rows.map(r => r.length)).toEqual([3, 3, 1])
+    // Every button is labelled with its command's name, the toggle first, top left.
+    expect(rows.flat().map(c => c.label)).toEqual(['SE off', ...six])
+    // Every cell is as wide as every other, so the columns align and the last row stays left.
+    const widths = new Set(rows.flat().map(c => c.width))
+    expect(widths.size).toBe(1)
+    expect([...widths][0]).toBeGreaterThanOrEqual('fleet check'.length + 4)
+    await ui.unmount()
+  }
+})
+
+test("the columns of the grid are the ones se answers, not the plugin's", async ($, on) => {
+  const w = world(on)
+  w.replies.ui = { text: "SE's control panel is open.", panel: { buttons: ['a', 'b', 'c', 'd'], columns: 2 } }
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const rows = rowsOf((await ui.drawn()) as Drawn)
+  expect(rows.map(r => r.map(c => c.label))).toEqual([['SE off', 'a'], ['b', 'c'], ['d']])
+  // Two cells and their gap fill the pane.
+  expect(rows[0]?.[0]?.width).toBe(19)
 })
 
 test('pressing the toggle runs /se on and /se off, and switches the flag', async ($, on) => {
