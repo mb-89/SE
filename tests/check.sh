@@ -48,9 +48,20 @@ within() (
   "$@"
 )
 
+# dead fails on any function nothing reaches, the tests counted as callers:
+# such code is deleted, not argued about (spec/overhaul.md, pruning).
+dead() {
+  out=$(within src deadcode -test ./...)
+  [ -z "$out" ] && return
+  echo "$out"
+  echo "check: nothing reaches the functions above, not even a test: delete them" >&2
+  return 1
+}
+
 step "se rules" go -C src run ./cmd/se rules --workspace "$PWD"
 step "golangci-lint" within src golangci-lint run ./...
 step "biome" within src/plugin biome check --error-on-warnings
+step "deadcode" dead
 step "go test" go -C src run ./cmd/battery gotest "$PWD" ./...
 step "plugin validate" claude plugin validate src/plugin
 step "marketplace validate" claude plugin validate .
