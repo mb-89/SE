@@ -3,6 +3,7 @@ package main
 func init() {
 	register(Command{
 		Name:    "off",
+		Class:   interactive,
 		Usage:   "off",
 		Group:   "Session",
 		Summary: "switch SE off for this session; the daemon runs on",

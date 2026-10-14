@@ -29,7 +29,7 @@ func main() {
 	top := os.Args[2]
 	switch os.Args[1] {
 	case "gotest":
-		fail(gotest(proc.Real(), top, os.Args[3:]))
+		fail(gotest(proc.Listed(proc.Real()), top, os.Args[3:]))
 	case "report":
 		fail(report(top))
 	default:
