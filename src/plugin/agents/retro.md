@@ -36,14 +36,19 @@ created. A box takes it from there.
    scripts, the open points and the matrix of landing answers. The open
    points (`## Open points`, the `open` answers) are work no box filed, since
    a box opens no issue: turn each that still holds into a finding, or name
-   why it does not. Look too for what the window
+   why it does not. Each answer is headed by how its issue closed: one
+   closed with no merged PR (as fixed by a commit, a duplicate or a person's
+   decision) answered for its own branch, so read what it says it changed as
+   on that branch, not on main; check main before a finding rests on it.
+   Look too for what the window
    made inconsistent, restated or written for no reader (principles 17 to
    19).
 3. Judge, and write it into the draft's block (the YAML under
    `<!-- se:retro-yaml -->`); leave the facts as they are.
    - `findings`: what went wrong, blamelessly: the rule, tool or prompt that
-     produced it, not who. Each with a `title` (the fix, as an issue title), a
-     `class`, a `body` (what happened, with issue and PR numbers, and the fix),
+     produced it, not who. Each with a `title` (the fix, as an issue title:
+     five words or more, a whole sentence), a `class`, a `body` (what
+     happened, with issue and PR numbers, and the fix),
      a `home` (`check`, `refusal`, `gate`, `field`, `command`, `guidance` or `removal`:
      the cheapest durable one, guidance last), and `controversial` with its
      `why` where the spec's rule calls it controversial. Name the rule

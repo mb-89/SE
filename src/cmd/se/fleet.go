@@ -20,7 +20,14 @@ func init() {
 		Usage:   "fleet check [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list what is broken in the fleet, each with its remedy",
-		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, a bare issue (in no manifest), an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says healthy. Where GitHub's answers say the hour's quota of requests has fallen below the github instance's quota-floor share (github/config/quota-floor), a last line says how many are left and when it resets. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
+		Details: []string{
+			"read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a manifest whose branch lacks main's commits (stale), a leftover claim, an impossible block, a bare issue (in no manifest), an issue waiting on a person.",
+			"Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them.",
+			"Nothing found, it says healthy.",
+			"Where GitHub's answers say the hour's quota of requests has fallen below the github instance's quota-floor share (github/config/quota-floor), a last line says how many are left and when it resets.",
+			"With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so.",
+			"spec/coordination.md has the rules.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet check")
@@ -77,7 +84,12 @@ func init() {
 		Usage:   "fleet fix [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "fix what fleet check finds that needs no checkout",
-		Details: "run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, and a bare issue is filed into the open misc manifest (opening the next where none is open) by a sub-issue link. Every other finding is reported, never filed: it writes no issue and no comment (an issue is work, not a report). A takeover is named for the next take. A remedy that fails is reported, and the ones after it are still applied.",
+		Details: []string{
+			"run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a stale manifest's branch takes main in as se fleet refresh does, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, and a bare issue is filed into the open misc manifest (opening the next where none is open) by a sub-issue link.",
+			"Every other finding is reported, never filed: it writes no issue and no comment (an issue is work, not a report).",
+			"A takeover is named for the next take.",
+			"A remedy that fails is reported, and the ones after it are still applied.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet fix")
@@ -116,7 +128,12 @@ func init() {
 		Usage:   "fleet prune [--apply] [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list the stray branches; --apply deletes them",
-		Details: "list every issue-<n> branch whose issue is closed and every claude/* branch whose last commit is more than an hour old, each with no open PR. --apply deletes them; without it nothing is deleted. It never touches main or any other branch. The prune workflow runs it with the repository's token.",
+		Details: []string{
+			"list every issue-<n> branch whose issue is closed and every claude/* branch whose last commit is more than an hour old, each with no open PR.",
+			"--apply deletes them; without it nothing is deleted.",
+			"It never touches main or any other branch.",
+			"The prune workflow runs it with the repository's token.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet prune")
@@ -165,7 +182,11 @@ func init() {
 		Usage:   "fleet trust [--rev REV] [--json]",
 		Group:   "Fleet",
 		Summary: "say whether CI may trust the battery a box ran on a commit",
-		Details: "CI's check job asks it first, in its checkout: exit 0 and say why where commit REV (default HEAD) holds the battery's record (battery/config/passed) naming REV's git tree with the record left out, as tests/check.sh writes it and se issue land and se issue keep commit it with the work; else (no record, or one naming another tree, as where main moved since) exit 1 and say why, and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}). It asks GitHub nothing. It is trust in one's own boxes: faking the record is sabotage, not an accident.",
+		Details: []string{
+			"CI's check job asks it first, in its checkout: exit 0 and say why where commit REV (default HEAD) holds the battery's record (battery/config/passed) naming REV's git tree with the record left out, as tests/check.sh writes it and se issue land and se issue keep commit it with the work; else (no record, or one naming another tree, as where main moved since) exit 1 and say why, and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}).",
+			"It asks GitHub nothing.",
+			"It is trust in one's own boxes: faking the record is sabotage, not an accident.",
+		},
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("fleet trust")
 			asJSON := fs.Bool("json", false, "answer JSON")
@@ -193,7 +214,11 @@ func init() {
 		Group:   "Fleet",
 		Class:   batch,
 		Summary: "tell each open se PR the se checks it breaks merged with main",
-		Details: "for every open se PR against main: merge its head with origin's main in a worktree under .se/.runtime/rules, build se there and run se rules and the tests of the battery, the budgets and the programs list on the merge, and comment on each PR it breaks the findings and what to do, once for the same findings, so the box that owns it acts before its CI goes red. A PR that conflicts with main is left to its takeover; one whose check fails is reported, and the others are still checked. The rules workflow runs it when main takes a change to se's rules, tests/check.sh, the battery, spec/budgets.yaml or proc.",
+		Details: []string{
+			"for every open se PR against main: merge its head with origin's main in a worktree under .se/.runtime/rules, build se there and run se rules and the tests of the battery, the budgets and the programs list on the merge, and comment on each PR it breaks the findings and what to do, once for the same findings, so the box that owns it acts before its CI goes red.",
+			"A PR that conflicts with main is left to its takeover; one whose check fails is reported, and the others are still checked.",
+			"The rules workflow runs it when main takes a change to se's rules, tests/check.sh, the battery, spec/budgets.yaml or proc.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet rules")
@@ -223,6 +248,48 @@ func init() {
 			}
 			if len(done) == 0 {
 				return Reply{Text: "no open se PR"}, nil
+			}
+			return Reply{Text: strings.Join(lines, "\n")}, nil
+		},
+	})
+	register(Command{
+		Name:    "fleet refresh",
+		Usage:   "fleet refresh [--json] [--repo OWNER/NAME]",
+		Group:   "Fleet",
+		Class:   batch,
+		Summary: "merge main into each open manifest's branch",
+		Details: []string{
+			"for every open manifest whose branch issue-<m> is on origin with no open PR into main (se issue keep keeps that one): where main has moved past it, merge origin/main in (never a rebase) in a worktree under .se/.runtime/refresh and push, so main's moves reach its leaves once, through the manifest, not as each leaf's conflict.",
+			"A merge that conflicts pushes nothing and is named: se fleet check lists it as a stale manifest, to merge by hand.",
+			"A refresh that fails is reported, and the others are still refreshed.",
+			"The refresh workflow runs it on every push to main (with --json: {\"refreshed\":[{\"issue\",\"branch\",\"merged\",\"conflict\",\"did\"}]}).",
+		},
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "fleet refresh")
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			done, refreshErr := s.Refresh(c.Workspace)
+			lines := make([]string, len(done))
+			for k, r := range done {
+				lines[k] = fmt.Sprintf("manifest #%d (%s): %s", r.Issue, r.Branch, r.Did)
+			}
+			if refreshErr != nil {
+				return Reply{}, fmt.Errorf("%w\n%s", refreshErr, strings.Join(lines, "\n"))
+			}
+			if *asJSON {
+				data, err := json.Marshal(struct {
+					Refreshed []issues.Refreshed `json:"refreshed"`
+				}{append([]issues.Refreshed{}, done...)})
+				return Reply{Text: string(data)}, err
+			}
+			if len(done) == 0 {
+				return Reply{Text: "no open manifest has a branch to refresh"}, nil
 			}
 			return Reply{Text: strings.Join(lines, "\n")}, nil
 		},

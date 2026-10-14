@@ -13,12 +13,14 @@ import (
 
 func init() {
 	register(Command{
-		Name:      "update",
-		Class:     batch,
-		Usage:     "update [--repo DIR] [--session-start]",
-		Group:     "Session",
-		Summary:   "pull main into the installed SE, rebuild se and reload",
-		Details:   "pull main into the installed SE checkout, rebuild se, restart a running daemon and reload the plugin.",
+		Name:    "update",
+		Class:   batch,
+		Usage:   "update [--repo DIR] [--session-start]",
+		Group:   "Session",
+		Summary: "pull main into the installed SE, rebuild se and reload",
+		Details: []string{
+			"pull main into the installed SE checkout, rebuild se, restart a running daemon and reload the plugin.",
+		},
 		Session:   true,
 		Installed: true,
 		Button:    true,

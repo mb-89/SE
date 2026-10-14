@@ -475,7 +475,7 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	w.closedPRs(7, `[]`)
 	w.pushed(7, quiet)
 	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(a, 7)
-	if err != nil || !ok || took.Takeover == nil || *took.Takeover != (Takeover{Count: 1, Stale: "issue-7 has no PR, and no push since 2026-10-13T09:00:00Z"}) {
+	if err != nil || !ok || took.Takeover == nil || !reflect.DeepEqual(*took.Takeover, Takeover{Count: 1, Stale: "issue-7 has no PR, and no push since 2026-10-13T09:00:00Z"}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 	if got := run(t, a, "log", "-1", "--format=%s"); got != "work on 7" {

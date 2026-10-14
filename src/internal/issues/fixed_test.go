@@ -33,7 +33,7 @@ func TestFixedByClosesTheIssueNamingTheCommitOnMain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (Moot{Issue: 6, Commit: fix, Subject: "the fix, from another issue", URL: "https://github.com/o/r/commit/" + fix}); m != want {
+	if want := (Moot{Issue: 6, Commit: fix, Subject: "the fix, from another issue", URL: "https://github.com/o/r/commit/" + fix, Branch: "issue-6"}); !reflect.DeepEqual(m, want) {
 		t.Fatalf("%+v", m)
 	}
 	if it := issueAt(t, gh, 6); it.State != "closed" || it.StateReason != "completed" {
@@ -50,6 +50,32 @@ func TestFixedByClosesTheIssueNamingTheCommitOnMain(t *testing.T) {
 	want := []string{"POST repos/o/r/issues/6/comments", "POST repos/o/r/issues/6/comments", "PATCH repos/o/r/issues/6"}
 	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
 		t.Fatalf("writes %q", w)
+	}
+}
+
+func TestFixedByClosesTheClaimItLeaves(t *testing.T) {
+	t.Parallel()
+	// #271's case: the issue's box opened PR 90 from its claim before
+	// another issue's PR did the work on main.
+	s, gh, a, fix := moot(t, map[string]string{
+		issue6: `{"number":6,"state":"open","title":"the work"}`,
+		"repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100": `[{"number":90,"html_url":"p90"}]`,
+	})
+	m, err := s.FixedBy(a, "", 6, fix, qs, full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(m.Pulls, []int{90}) || m.Branch != "issue-6" {
+		t.Fatalf("%+v", m)
+	}
+	if p, err := api[openPull](s, "repos/o/r/pulls?state=open&per_page=100", true); err != nil || len(p) != 0 {
+		t.Fatalf("open PRs %+v %v", p, err)
+	}
+	if cs := commentsAt(t, gh, 90); len(cs) != 1 || !strings.Contains(cs[0].Body, fix[:12]) {
+		t.Fatalf("%+v", cs)
+	}
+	if got := run(t, a, "ls-remote", "origin", "refs/heads/issue-6"); got != "" {
+		t.Fatalf("origin still has %q", got)
 	}
 }
 

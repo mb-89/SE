@@ -24,7 +24,11 @@ func init() {
 		Usage:   "guidance [--session-id ID]",
 		Group:   "Session",
 		Summary: "answer the principles and the skills a session holds",
-		Details: "answer the guidance a session's context carries: spec/principles.md where the guidance instance's principles switch is on, in a box the whole procedure of its agent, se:coordinator, and each skill a take handed to session ID, as its log records them, in full where the inline switch is on, else by name. Each is read from the SE checkout the plugin was loaded from (SE_PLUGIN_CHECKOUT, else the workspace), so a project holds no SE file. The plugin's SessionStart hook puts it into the context on startup, resume, clear and compact; the hand-again is a row of the session's log.",
+		Details: []string{
+			"answer the guidance a session's context carries: spec/principles.md where the guidance instance's principles switch is on, in a box the whole procedure of its agent, se:coordinator, and each skill a take handed to session ID, as its log records them, in full where the inline switch is on, else by name.",
+			"Each is read from the SE checkout the plugin was loaded from (SE_PLUGIN_CHECKOUT, else the workspace), so a project holds no SE file.",
+			"The plugin's SessionStart hook puts it into the context on startup, resume, clear and compact; the hand-again is a row of the session's log.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			flags := c.Flags("guidance")

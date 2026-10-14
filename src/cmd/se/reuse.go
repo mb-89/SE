@@ -16,7 +16,11 @@ func init() {
 		Group:   "Fleet",
 		Class:   batch,
 		Summary: "fetch the outside plugins and skills SE runs, pinned",
-		Details: "fetch every source of the reuse config (src/index/wiring.yaml) at its pinned commit into DIR, as a folder of plugins that one entry of " + reuse.DirsVar + " loads: each plugin as DIR/<name>, each lone skill inside DIR/" + reuse.Adopted + ". A folder there that no source names any more is removed. A cloud environment's setup script runs it (spec/cloud.md).",
+		Details: []string{
+			fmt.Sprintf("fetch every source of the reuse config (src/index/wiring.yaml) at its pinned commit into DIR, as a folder of plugins that one entry of %v loads: each plugin as DIR/<name>, each lone skill inside DIR/%v.", reuse.DirsVar, reuse.Adopted),
+			"A folder there that no source names any more is removed.",
+			"A cloud environment's setup script runs it (spec/cloud.md).",
+		},
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("fleet plugins")
 			into := fs.String("into", "", "the `DIR` to fetch them into")

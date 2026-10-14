@@ -273,6 +273,34 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 	}
 }
 
+// A land whose push is refused, here by origin's pre-receive hook, has
+// already written its answers on the issue (#491).
+func TestLandPostsTheAnswersBeforeItPushes(t *testing.T) {
+	t.Parallel()
+	origin, a := claimed(t)
+	before := run(t, origin, "rev-parse", "issue-6")
+	hook := filepath.Join(origin, "hooks", "pre-receive")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho refused >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gh := landGH(t, map[string]string{pullsPath: `[]`})
+	d := disk.NewFake()
+	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered())
+	if err == nil {
+		t.Fatal("a refused push landed")
+	}
+	if got := run(t, origin, "rev-parse", "issue-6"); got != before {
+		t.Fatalf("origin's issue-6 moved to %s", got)
+	}
+	c := commentsAt(t, gh, 6)
+	if len(c) != 1 {
+		t.Fatalf("the issue's comments are %+v", c)
+	}
+	if got, ok, err := ParseLanding(c[0].Body); err != nil || !ok || !reflect.DeepEqual(got.Answers, full) {
+		t.Fatalf("%v %v: %+v", ok, err, got)
+	}
+}
+
 func TestLandSaysWhenAutoMergeFails(t *testing.T) {
 	t.Parallel()
 	_, a := claimed(t)

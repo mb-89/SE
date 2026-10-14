@@ -23,15 +23,23 @@ type Superseded struct {
 	Blocks []int `json:"blocks,omitempty"`
 	// Ready is true where nothing open blocks the successor.
 	Ready bool `json:"ready"`
+	// Pulls are the superseded issue's open PRs, now closed, each with a
+	// comment naming the successor.
+	Pulls []int `json:"pulls,omitempty"`
+	// Branch is its issue-<n> claim, now deleted; empty where origin held
+	// none.
+	Branch string `json:"branch,omitempty"`
 }
 
 // Supersede is the second of the three ways a box closes the issue it took
 // (the first is a PR, the third se issue close --fixed-by): issue n's
 // successor, made through the same code as se issue new, carries n's title and text and the open questions the box could not
 // answer, labelled se-final. It has n's parent and n's open blockers, and n's
-// open dependents are linked as blocked by it. Then n closes, its comment
-// naming the successor. A final issue is refused: its box lands a PR.
-func (s Source) Supersede(n int, questions string) (Superseded, error) {
+// open dependents are linked as blocked by it. Then n's open PR closes and
+// its issue-<n> claim is deleted from dir, as CloseDuplicate does, and n
+// closes, its comment naming the successor. A final issue is refused: its box
+// lands a PR.
+func (s Source) Supersede(dir string, n int, questions string) (Superseded, error) {
 	if strings.TrimSpace(questions) == "" {
 		return Superseded{}, fmt.Errorf("superseding #%d needs the open questions its box could not answer", n)
 	}
@@ -78,6 +86,10 @@ func (s Source) Supersede(n int, questions string) (Superseded, error) {
 	sup.Successor, sup.Ready = made, ready
 	if err := s.Blocking(made, sup.Blocks); err != nil {
 		return sup, err
+	}
+	why := fmt.Sprintf("#%d is superseded by #%d, which carries this work on.\n%s", n, made.Number, made.URL)
+	if sup.Pulls, sup.Branch, err = s.dropClaim(dir, n, why); err != nil {
+		return sup, fmt.Errorf("created #%d (%s), but dropping #%d's claim: %w", made.Number, made.URL, n, err)
 	}
 	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
 	comment := fmt.Sprintf("Superseded by #%d, which carries this issue on with the questions its box could not answer.\n%s", made.Number, made.URL)
@@ -192,7 +204,8 @@ func (s Source) CloseDuplicate(dir string, n, of int) (Duplicated, error) {
 			return dup, err
 		}
 	}
-	if err := s.dropClaim(dir, &dup); err != nil {
+	why := fmt.Sprintf("#%d is a duplicate of #%d, which carries this work on.\n%s", n, of, dup.URL)
+	if dup.Pulls, dup.Branch, err = s.dropClaim(dir, n, why); err != nil {
 		return dup, err
 	}
 	comment := fmt.Sprintf("Duplicate of #%d, which already covers this issue's work and carries it on.\n%s", of, got[of].URL)
@@ -218,7 +231,8 @@ func (s Source) duplicateOfPull(dir string, n, of int) (Duplicated, error) {
 		return Duplicated{}, fmt.Errorf("pull request #%d is merged but names no commit", of)
 	}
 	dup := Duplicated{Issue: n, Of: of, Commit: p.SHA, URL: fmt.Sprintf("https://github.com/%s/commit/%s", s.Repo, p.SHA)}
-	if err := s.dropClaim(dir, &dup); err != nil {
+	why := fmt.Sprintf("#%d is a duplicate of PR #%d, merged, whose work is on main already.\n%s", n, of, dup.URL)
+	if dup.Pulls, dup.Branch, err = s.dropClaim(dir, n, why); err != nil {
 		return dup, err
 	}
 	comment := fmt.Sprintf(fixedMark+"\nDuplicate of PR #%d, merged: its work is on main already, in %s (%s), so no PR lands it.\n%s",
@@ -238,35 +252,48 @@ func (s Source) closeAsDuplicate(n int, comment string) error {
 	return nil
 }
 
-// dropClaim closes the duplicate's open PRs, each with a comment naming the
-// issue it duplicates, then deletes its issue-<n> branch where origin holds
-// it, by a git push from dir. Run again, it finds nothing left to do.
-func (s Source) dropClaim(dir string, dup *Duplicated) error {
-	b := Branch(dup.Issue)
-	open, err := s.openPulls(b)
-	if err != nil {
-		return err
-	}
-	for _, p := range open {
-		body := fmt.Sprintf("Closed unmerged: #%d is a duplicate of #%d, which covers this work.\n%s", dup.Issue, dup.Of, dup.URL)
-		if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, p.Number), github.F("body", body)); err != nil {
-			return fmt.Errorf("commenting on PR #%d: %w", p.Number, err)
-		}
-		if _, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/pulls/%d", s.Repo, p.Number), github.F("state", "closed")); err != nil {
-			return fmt.Errorf("closing PR #%d: %w", p.Number, err)
-		}
-		dup.Pulls = append(dup.Pulls, p.Number)
+// dropClaim lets go of issue n's claim as it closes without a PR of its own
+// (a supersede, a duplicate, a close --fixed-by): it closes n's open PRs, each
+// with a comment saying where its work went (why), then deletes its issue-<n>
+// branch where origin holds it, by a git push from dir (the boxes' proxy
+// refuses the REST route). So no PR stays open with no issue behind it, and
+// se fleet check finds no closed issue's leftover claim. It returns the PRs it
+// closed and the branch it deleted, empty where origin held none; run again,
+// it finds nothing left to do.
+func (s Source) dropClaim(dir string, n int, why string) (pulls []int, branch string, err error) {
+	b := Branch(n)
+	if pulls, err = s.closePulls(b, why); err != nil {
+		return pulls, "", err
 	}
 	held, err := s.git(dir, "ls-remote", "origin", "refs/heads/"+b)
 	if err != nil {
-		return fmt.Errorf("reading origin's %s: %w", b, err)
+		return pulls, "", fmt.Errorf("reading origin's %s: %w", b, err)
 	}
 	if strings.TrimSpace(held) == "" {
-		return nil
+		return pulls, "", nil
 	}
 	if _, err := s.git(dir, "push", "-q", "origin", "--delete", b); err != nil {
-		return fmt.Errorf("deleting %s: %w", b, err)
+		return pulls, "", fmt.Errorf("deleting %s: %w", b, err)
 	}
-	dup.Branch = b
-	return nil
+	return pulls, b, nil
+}
+
+// closePulls closes the open PRs from branch against main, each with a
+// comment saying where its work went (why); closing one turns its auto-merge
+// off. It returns the PRs it closed.
+func (s Source) closePulls(branch, why string) (pulls []int, err error) {
+	open, err := s.openPulls(branch)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range open {
+		if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, p.Number), github.F("body", "Closed unmerged: "+why)); err != nil {
+			return pulls, fmt.Errorf("commenting on PR #%d: %w", p.Number, err)
+		}
+		if _, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/pulls/%d", s.Repo, p.Number), github.F("state", "closed")); err != nil {
+			return pulls, fmt.Errorf("closing PR #%d: %w", p.Number, err)
+		}
+		pulls = append(pulls, p.Number)
+	}
+	return pulls, nil
 }
