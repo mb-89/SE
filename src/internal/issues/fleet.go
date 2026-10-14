@@ -393,13 +393,16 @@ func (s Source) checks(sha string) (red []string, pending bool, err error) {
 
 // leftovers is the issue-<n> branches whose issue is no open se issue. One
 // whose issue is closed and that has no open PR is prunable: the prune
-// workflow deletes it. Any other that main holds whole is spent: its fix
-// deletes it.
+// workflow deletes it. One whose issue is closed and whose open PR into main
+// has auto-merge on and no failed check is no leftover: the PR lands, and its
+// close lets the prune workflow delete the branch. Any other that main holds
+// whole is spent: its fix deletes it.
 func (s Source) leftovers(t tree) ([]Finding, error) {
 	open := map[string]bool{}
 	for _, p := range t.pulls {
 		open[p.Head.Ref] = true
 	}
+	landing := toMain(t.pulls)
 	var stray []ref
 	for _, r := range t.refs {
 		b := strings.TrimPrefix(r.Ref, "refs/heads/")
@@ -411,13 +414,19 @@ func (s Source) leftovers(t tree) ([]Finding, error) {
 			stray = append(stray, r)
 		}
 	}
-	found, err := each(len(stray), func(k int) (Finding, error) {
+	found, err := each(len(stray), func(k int) (*Finding, error) {
 		r := stray[k]
 		b := strings.TrimPrefix(r.Ref, "refs/heads/")
 		n := atoi(strings.TrimPrefix(b, "issue-"))
 		got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
 		if err != nil {
-			return Finding{}, err
+			return nil, err
+		}
+		if p, ok := landing[b]; ok && got[0].State == "closed" && got[0].PullRequest == nil && p.AutoMerge != nil {
+			red, _, err := t.runs.checks(s, p.Head.SHA)
+			if err != nil || len(red) == 0 {
+				return nil, err
+			}
 		}
 		i, why := got[0], ""
 		switch {
@@ -434,9 +443,9 @@ func (s Source) leftovers(t tree) ([]Finding, error) {
 			AheadBy int `json:"ahead_by"`
 		}](s, fmt.Sprintf("repos/%s/compare/main...%s?per_page=1", s.Repo, r.Object.SHA), false)
 		if err != nil {
-			return Finding{}, err
+			return nil, err
 		}
-		f := Finding{
+		f := &Finding{
 			Kind: LeftoverClaim, Issue: n, head: r.Object.SHA, key: "leftover-claim",
 			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why),
 		}
@@ -450,7 +459,13 @@ func (s Source) leftovers(t tree) ([]Finding, error) {
 		}
 		return f, nil
 	})
-	return found, err
+	var out []Finding
+	for _, f := range found {
+		if f != nil {
+			out = append(out, *f)
+		}
+	}
+	return out, err
 }
 
 // impossible is the blocks no box can ever lift: a blocker closed as not

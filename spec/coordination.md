@@ -35,7 +35,10 @@ and only then leaves.**
    - **no PR**: a claimed leaf whose branch has no PR, open or closed, and no
      push for an hour.
    - **leftover claim**: an `issue-<n>` branch whose issue is closed (or no
-     open `se` issue), or whose PR was closed unmerged.
+     open `se` issue), or whose PR was closed unmerged. A closed issue's
+     branch whose open PR has auto-merge on and no failed check is none: the
+     PR lands by itself, and its close lets the prune workflow delete the
+     branch.
    - **impossible block**: an issue blocked by an issue closed as not planned,
      by an open issue no box works (not labelled `se`, or in another
      repository), or by itself through a cycle.

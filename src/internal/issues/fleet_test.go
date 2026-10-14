@@ -267,6 +267,27 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	}
 }
 
+func TestAClosedIssuesPRThatLandsByItselfIsNoLeftoverClaim(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t, []string{item(5, 0)}, 19)
+	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"duplicate","closed_at":"2026-10-13T11:00:00Z"}`)
+	// Its PR has auto-merge on and CI green or running: it lands, and its
+	// close lets the prune workflow delete the branch.
+	w.pr(19, "true", "blocked", true, "check:success")
+	if got := w.check(); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+	w.pr(19, "true", "blocked", true, "check:")
+	if got := w.check(); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+	// Red, it lands nothing: the claim is left over.
+	w.pr(19, "true", "blocked", true, "check:failure")
+	if f := only(t, w.check(), LeftoverClaim, 19); f.What != "issue-19 claims #19, which is closed (duplicate)" {
+		t.Fatalf("%+v", f)
+	}
+}
+
 func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t, []string{item(5, 0)}, 19)
