@@ -43,7 +43,11 @@ changes.
 ## Checks
 
 `sh ./tests/check.sh` is the one definition of green; the pre-push hook and CI
-run it, and it names each step it runs. SE's own rules are one file each in
+run it, and it names each step it runs. Once it passed, it records the tree
+it ran over (`HEAD^{tree}` of a clean worktree), which is the only tree
+`se issue land` pushes, and CI trusts a box's push for that tree instead of
+running it again (see
+[spec/coordination.md](coordination.md#up-to-date-with-main)). SE's own rules are one file each in
 `src/internal/rules`, run by `se rules`; where a rule can apply the mechanical
 part of its finding (the `fast-test` rule's `t.Parallel()` as a test's first
 statement), `se rules --fix` applies it, so no agent does it by hand. Every

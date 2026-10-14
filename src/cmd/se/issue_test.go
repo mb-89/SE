@@ -195,7 +195,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: close, edit, keep, land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -203,7 +203,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	t.Parallel()
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: close, edit, keep, land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -213,7 +213,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue pull, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: close, edit, keep, land, new, pull, resume, review, supersede, tree.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -341,7 +341,15 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	answers := filepath.Join(root, "answers.yaml")
 	put(t, d, answers, "done: one\ntimeline: two\n")
 	checked := ""
-	worldOf(t).Check = func(_ proc.Procs, dir string) error { checked = dir; return nil }
+	// The check records the tree it passed, as tests/check.sh does.
+	worldOf(t).Check = func(procs proc.Procs, dir string) error {
+		checked = dir
+		tree, err := battery.Tree(procs, dir)
+		if err == nil {
+			_, err = battery.Pass(d, procs, dir, tree)
+		}
+		return err
+	}
 	setenv(t, issues.SessionVar, "s1")
 	gh := hubAt(t, map[string]string{
 		"repos/o/r/issues/6": `{"number":6,"title":"six","state":"open"}`,

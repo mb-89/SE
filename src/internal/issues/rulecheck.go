@@ -12,13 +12,13 @@ import (
 )
 
 // Ruled is one open se PR into main, its head merged with main and checked
-// against se rules.
+// against se's checks: se rules and the tests the rules workflow names.
 type Ruled struct {
 	PR     int    `json:"pr"`
 	Branch string `json:"branch"`
 	// Head is the PR's head that was merged with main.
 	Head string `json:"head"`
-	// Findings is what se rules found on the merge, one per line; empty, none.
+	// Findings is what the checks found on the merge, one per line; empty, none.
 	Findings string `json:"findings,omitempty"`
 	// Did says what was done, in a few words.
 	Did string `json:"did"`
@@ -39,9 +39,9 @@ const RulesDir = ".se/.runtime/rules"
 
 // Rules merges the head of every open se PR into main (an issue-<n> branch)
 // with origin's main in a worktree of the checkout dir, and runs check on
-// the merge, which answers se rules' findings on it, empty where there are
-// none. On each PR whose merge breaks a rule it comments the findings and
-// what to do, once for the same findings: a rule main took breaks the PRs
+// the merge, which answers the checks' findings on it, empty where there are
+// none. On each PR whose merge breaks a check it comments the findings and
+// what to do, once for the same findings: a rule or check main took breaks the PRs
 // opened before it, and the box that owns one acts on that comment before
 // its CI goes red. A PR that conflicts with main is left to its takeover. A
 // PR whose check fails is reported, and the ones after it are still checked.
@@ -72,7 +72,7 @@ func (s Source) Rules(dir string, check func(dir string) (string, error)) ([]Rul
 		out = append(out, r)
 	}
 	if len(failed) > 0 {
-		return out, fmt.Errorf("could not check %s against se rules", strings.Join(failed, ", "))
+		return out, fmt.Errorf("could not check %s against se's checks", strings.Join(failed, ", "))
 	}
 	return out, nil
 }
@@ -107,7 +107,7 @@ func (s Source) ruleOne(dir, main string, r *Ruled, check func(dir string) (stri
 		return err
 	}
 	if r.Findings == "" {
-		r.Did = "passes se rules merged with main"
+		r.Did = "passes se's checks merged with main"
 		return nil
 	}
 	sum := sha256.Sum256([]byte(r.Findings))
@@ -119,17 +119,17 @@ func (s Source) ruleOne(dir, main string, r *Ruled, check func(dir string) (stri
 	for _, c := range comments {
 		for _, m := range rulesMark.FindAllStringSubmatch(c.Body, -1) {
 			if m[1] == key {
-				r.Did = "breaks se rules merged with main, as it was told already"
+				r.Did = "breaks se's checks merged with main, as it was told already"
 				return nil
 			}
 		}
 	}
-	body := fmt.Sprintf("Main took a change to se's rules (main at %s), and this PR's head %s, merged with main, breaks them:\n\n```\n%s\n```\n\n"+
+	body := fmt.Sprintf("Main took a change to se's rules or checks (main at %s), and this PR's head %s, merged with main, breaks them:\n\n```\n%s\n```\n\n"+
 		"Merge origin/main into %s (never rebase, never force-push), fix these, and land it again with se issue land, before its CI goes red.\n\n<!-- se:rules %s -->",
 		main, head, r.Findings, r.Branch, key)
 	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, r.PR), github.F("body", body)); err != nil {
 		return fmt.Errorf("commenting on PR #%d: %w", r.PR, err)
 	}
-	r.Did = "breaks se rules merged with main: told on the PR what to fix"
+	r.Did = "breaks se's checks merged with main: told on the PR what to fix"
 	return nil
 }

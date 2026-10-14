@@ -59,7 +59,9 @@ func (s Source) issued(dir string) (int, error) {
 // manifest whose leaves are all closed or a retro, lands to main: answers must
 // answer every question in qs, and check must pass on a clean tree of an
 // issue with no open sub-issues, after origin's branch and main are merged
-// in, so the check runs on what lands; then the branch is pushed, the answers
+// in, so the check runs on what lands; the battery must have recorded that
+// tree, and main must not have moved past it since (ship). Then the branch is
+// pushed with the battery's status on its head, the answers
 // posted on the issue, its PR against main opened (or, where it is open
 // already, found) with the battery's profile in its body, and auto-merge
 // turned on with squash. Run again after a
@@ -95,19 +97,19 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		return s.landInto(dir, n, root, session, qs, answers, check)
 	}
 	branch := Branch(n)
-	if err := s.takeIn(dir, branch); err != nil {
-		return Landing{}, err
-	}
 	if subs != nil && subs.Total > 0 {
 		// A manifest whose leaves landed nothing has nothing to land.
+		if err := s.takeIn(dir, branch); err != nil {
+			return Landing{}, err
+		}
 		if ahead, err := s.git(dir, "rev-list", "--count", "origin/main..HEAD"); err != nil {
 			return Landing{}, err
 		} else if ahead == "0" {
 			return s.closeEmpty(n)
 		}
 	}
-	if err := check(dir); err != nil {
-		return Landing{}, fmt.Errorf("the check failed, so nothing was pushed: %w", err)
+	if err := s.ship(dir, branch, check); err != nil {
+		return Landing{}, err
 	}
 	body := fmt.Sprintf("Fixes #%d", n)
 	profile, profiled, err := battery.Load(s.Disk, dir)
@@ -116,9 +118,6 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	}
 	if profiled {
 		body += "\n\n" + profile.Markdown()
-	}
-	if _, err := s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
-		return Landing{}, err
 	}
 	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
 		return Landing{}, err
@@ -168,7 +167,7 @@ func (s Source) closeEmpty(n int) (Landing, error) {
 }
 
 // takeIn merges into the branch checked out in dir what origin's copy of it
-// has (se fleet refresh merges main into it there) and then origin's main, so
+// has (a takeover's box, or this box's se issue keep, pushed there) and then origin's main, so
 // the check runs on what lands and the push is a fast-forward. A merge that
 // conflicts is undone, and the box resolves it by hand.
 func (s Source) takeIn(dir, branch string) error {
