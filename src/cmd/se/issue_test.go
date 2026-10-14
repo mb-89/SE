@@ -17,6 +17,7 @@ import (
 	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
@@ -332,7 +333,8 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	git(ws, "push", "-q", "origin", "main")
 	git(ws, "checkout", "-q", "-b", "issue-6")
 	git(ws, "commit", "-q", "--allow-empty", "-m", "work")
-	// git keeps the checkout on the real disk; se reads its files from a fake.
+	// git keeps the checkout on the real disk, the battery's record in it among
+	// them; se reads its other files from a fake.
 	spec, err := os.ReadFile(filepath.Join("..", "..", "..", issues.QuestionsFile))
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +349,7 @@ func TestIssueLandNamesThePR(t *testing.T) {
 		checked = dir
 		tree, err := battery.Tree(procs, dir)
 		if err == nil {
-			_, err = battery.Pass(d, procs, dir, tree)
+			_, err = battery.Pass(disk.Real(), procs, dir, tree)
 		}
 		return err
 	}

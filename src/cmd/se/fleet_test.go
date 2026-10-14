@@ -4,6 +4,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
@@ -176,26 +179,63 @@ func TestRulesOnBuildsTheMergesSeAndAnswersItsRuleAndTestFindingsWithoutTimings(
 	}
 }
 
-func TestFleetTrustPassesOnlyAHeadCarryingTheBatterysStatusForItsTree(t *testing.T) {
+// CI's checkout is a git repository, and se fleet trust reads it with git
+// alone: it asks GitHub nothing, and se's disk is a fake.
+func TestFleetTrustSkipsTheBatteryOnlyWhereTheRecordNamesTheTreeCheckedOut(t *testing.T) {
 	t.Parallel()
-	const sha, tree = "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"
 	gh := hubAt(t, map[string]string{})
-	trust := func() (int, string, string) {
-		return se(t, "fleet", "trust", "--repo", "o/r", "--sha", sha, "--tree", tree)
+	onFake(t)
+	ws := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", ws, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
 	}
-	// A push without SE: CI runs the battery.
-	if code, out, errs := trust(); code == 0 || out != "" || !strings.Contains(errs, "not trusted, so CI runs the battery") {
-		t.Fatalf("exit %d, %q %q", code, out, errs)
+	commit := func(name, text string) {
+		t.Helper()
+		at := filepath.Join(ws, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(at), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(at, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("add", "-A")
+		git("commit", "-q", "-m", name)
 	}
-	// A box's push: CI passes without it.
-	if _, err := gh.Send("POST", "repos/o/r/statuses/"+sha, github.F("state", "success"), github.F("context", issues.BatteryContext), github.F("description", issues.BatteryDescription(tree))); err != nil {
+	git("init", "-q", "-b", "main")
+	commit("src/a.go", "package a\n")
+	file, err := battery.Passed()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if code, out, errs := trust(); code != 0 || !strings.HasPrefix(out, "trusted: "+sha+" passed the battery on tree "+tree) {
+	trust := func(args ...string) (int, string, string) {
+		return se(t, append([]string{"fleet", "trust", "--workspace", ws}, args...)...)
+	}
+	// A missing record: a push without SE, and CI runs the battery.
+	if code, out, errs := trust(); code == 0 || out != "" || !strings.Contains(errs, "not trusted, so CI runs the battery: HEAD holds no "+file) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	if code, _, errs := se(t, "fleet", "trust", "--repo", "o/r", "--sha", sha); code == 0 || !strings.Contains(errs, "--tree TREE") {
+	// A box's push: its record names the tree without it, and CI skips the battery.
+	tree := git("rev-parse", "HEAD^{tree}")
+	commit(file, tree+"\n")
+	sha := git("rev-parse", "HEAD")
+	if code, out, errs := trust("--rev", sha); code != 0 || out != "trusted: "+sha+"'s "+file+" names its tree "+tree+": the battery passed it\n" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if code, out, _ := trust("--json"); code != 0 || !strings.Contains(out, `{"trusted":true,"why":"HEAD's `+file+` names its tree `+tree) {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+	// A mismatch: the tree moved past the record (main merged in, say), and CI runs the battery.
+	commit("src/b.go", "package a\n")
+	if code, _, errs := trust(); code == 0 || !strings.Contains(errs, "HEAD's "+file+" names tree "+tree+", and its tree without it is") {
 		t.Fatalf("exit %d, %q", code, errs)
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("trust wrote %q", w)
 	}
 }
 

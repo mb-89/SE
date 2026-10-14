@@ -23,9 +23,8 @@ import (
 // assignees, sub-issues and blocked-by links, branches (git refs: each
 // repository starts with main, and a file written to a branch through
 // contents is a new commit on it), pull requests with their merge and
-// auto-merge, commit statuses, and who may write: the account it is logged in
-// as administers every repository. Any other path it answers from what was
-// seeded at that path, read-only.
+// auto-merge. Any other path it answers from what was seeded at that path,
+// read-only.
 //
 // Seed fills it from recorded gh answers, each read for what it says about
 // the repository rather than kept as an answer.
@@ -96,9 +95,7 @@ type repo struct {
 	commits   int
 	pulls     map[int]obj
 	pullOrder []int
-	// statuses are each commit's statuses, by its sha, newest first.
-	statuses map[string][]obj
-	docs     map[string][]byte
+	docs      map[string][]byte
 }
 
 // NewFake answers an empty fake GitHub whose stamps are read from c.
@@ -238,7 +235,7 @@ func (f *Fake) repo(name string) *repo {
 	if !ok {
 		r = &repo{
 			name: name, issues: map[int]obj{}, seen: map[int]bool{}, deleted: map[int]bool{}, comments: map[int][]obj{},
-			subs: map[int][]int{}, blockedBy: map[int][]int{}, refs: map[string]obj{}, pulls: map[int]obj{}, statuses: map[string][]obj{}, docs: map[string][]byte{},
+			subs: map[int][]int{}, blockedBy: map[int][]int{}, refs: map[string]obj{}, pulls: map[int]obj{}, docs: map[string][]byte{},
 		}
 		// A repository has its default branch from the start, as GitHub's do.
 		r.refs[mainRef] = r.ref(mainRef, r.commit())
@@ -423,21 +420,9 @@ func (f *Fake) whole(path string) (any, error) {
 			return nil, notFound()
 		}
 		return p, nil
-	case len(w) == 3 && w[0] == "commits" && w[2] == "statuses" && len(r.statuses[w[1]]) > 0:
-		out := []any{}
-		for _, st := range r.statuses[w[1]] {
-			out = append(out, st)
-		}
-		return out, nil
 	}
 	if doc, ok := r.docs[path]; ok {
 		return json.RawMessage(doc), nil
-	}
-	switch {
-	case len(w) == 3 && w[0] == "commits" && w[2] == "statuses":
-		return []any{}, nil
-	case len(w) == 3 && w[0] == "collaborators" && w[1] == f.Login && w[2] == "permission":
-		return obj{"permission": "admin", "user": obj{"login": f.Login}}, nil
 	}
 	return nil, notFound()
 }
@@ -835,20 +820,6 @@ func (f *Fake) write(method, path string, v map[string]any) (any, error) {
 		at := f.now()
 		p["state"], p["merged"], p["merged_at"], p["closed_at"] = "closed", true, at, at
 		return obj{"merged": true, "message": "Pull Request successfully merged"}, nil
-	case method == "POST" && len(w) == 2 && w[0] == "statuses":
-		state, _ := str(v, "state")
-		if !containsString([]string{"error", "failure", "pending", "success"}, state) {
-			return nil, refuse(422, "Validation Failed: state is not included in the list")
-		}
-		st := obj{"id": f.nextID(), "state": state, "creator": obj{"login": f.Login}, "created_at": f.now(), "updated_at": f.now()}
-		for _, k := range []string{"context", "description", "target_url"} {
-			st[k], _ = str(v, k)
-		}
-		if st["context"] == "" {
-			st["context"] = "default"
-		}
-		r.statuses[w[1]] = append([]obj{st}, r.statuses[w[1]]...)
-		return st, nil
 	case method == "PUT" && f.Proxy && match(w, "pulls", "#", "ccr", "auto_merge"):
 		p, ok := r.pulls[num(w[1])]
 		if !ok {
@@ -923,11 +894,6 @@ func (f *Fake) nextID() int64 {
 		}
 		for _, p := range r.pulls {
 			top = max(top, idOf(p))
-		}
-		for _, sts := range r.statuses {
-			for _, st := range sts {
-				top = max(top, idOf(st))
-			}
 		}
 	}
 	return top + 1

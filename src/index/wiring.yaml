@@ -9,6 +9,7 @@ instances:
   guidance: {module: guidance, config: {inline: true, principles: true}}
   github: {module: github}
   issues: {module: issues}
+  battery: {module: battery}
   # What SE runs that others built (src/internal/reuse): each source pinned
   # to a commit, with its licence, and each tier's list, staggered by cost.
   # Moving a skill between tiers is a change of one list here.

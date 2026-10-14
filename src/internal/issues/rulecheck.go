@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
@@ -96,12 +97,16 @@ func (s Source) ruleOne(dir, main string, r *Ruled, check func(dir string) (stri
 	defer func() { _, _ = s.git(dir, "worktree", "remove", "--force", wt) }()
 	// The merge is never committed, but git asks for a name to merge under,
 	// which a workflow's checkout has none of.
+	// A conflict in the battery's record alone is no conflict: every branch
+	// writes its own.
 	if _, err := s.git(wt, "-c", "user.name=se", "-c", "user.email=se@localhost", "merge", "-q", "--no-commit", "--no-ff", head); err != nil {
 		if unmerged, _ := s.git(wt, "ls-files", "--unmerged"); unmerged == "" {
 			return err
 		}
-		r.Did = "left to its takeover: it conflicts with main"
-		return nil
+		if settled, err := battery.Resolve(s.Proc, wt); err != nil || !settled {
+			r.Did = "left to its takeover: it conflicts with main"
+			return nil
+		}
 	}
 	if r.Findings, err = check(wt); err != nil {
 		return err

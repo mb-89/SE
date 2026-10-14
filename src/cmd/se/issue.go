@@ -468,7 +468,7 @@ func init() {
 		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "check and land issue-N: a leaf into its manifest, else one PR",
-		Details: "on an issue-N branch: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), and refuse an issue with open sub-issues. A leaf inside a manifest (an issue with a parent) lands into the manifest's branch: merge origin's issue-N and the manifest's issue-M into it (never a rebase), pass tests/check.sh, push it to both, post the answers on the leaf with its facts (its time from claim to land among them) and close it; a leaf gets no PR of its own. An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit (where GitHub refuses it with 403, as a cloud box's proxy does, it goes on and warns, since CI then runs the battery itself), post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a manifest whose branch holds nothing main does not closes with no PR.",
+		Details: "on an issue-N branch: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), and refuse an issue with open sub-issues. A leaf inside a manifest (an issue with a parent) lands into the manifest's branch: merge origin's issue-N and the manifest's issue-M into it (never a rebase), pass tests/check.sh, push it to both, post the answers on the leaf with its facts (its time from claim to land among them) and close it; a leaf gets no PR of its own. An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, commit the battery's record (battery/config/passed, which names the tree) with the work, so CI trusts it (se fleet trust), push, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a manifest whose branch holds nothing main does not closes with no PR.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue land")
@@ -525,9 +525,6 @@ func init() {
 			} else {
 				text += ", auto-merge (squash) on."
 			}
-			if l.Warning != "" {
-				text += "\nWarning: " + l.Warning
-			}
 			return Reply{Text: text + "\n" + l.URL}, nil
 		},
 	})
@@ -545,7 +542,7 @@ func init() {
 		Usage:   "issue keep [--for D] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "keep an issue-N branch's PR up to date until it merges",
-		Details: "on an issue-N branch whose PR se issue land opened: a box keeps its PR until it merges. Every minute, for D at most (default 8m, so one call fits a tool's timeout), it looks at the PR; whenever main has moved past the branch on origin, it merges origin/main in (never a rebase), passes tests/check.sh, pushes and posts the battery's status, as se issue land does, so CI trusts it and auto-merge merges. It says when the PR merged, or another box took the issue over, or that it is still open: run it again. A merge that conflicts, a failing check and a PR closed unmerged are errors to fix, then land again (with --json: {\"issue\",\"pr\",\"url\",\"merged\",\"taken_over\",\"updated\"}).",
+		Details: "on an issue-N branch whose PR se issue land opened: a box keeps its PR until it merges. Every minute, for D at most (default 8m, so one call fits a tool's timeout), it looks at the PR; whenever main has moved past the branch on origin, it merges origin/main in (never a rebase), passes tests/check.sh, commits the battery's record and pushes, as se issue land does, so CI trusts it and auto-merge merges. It says when the PR merged, or another box took the issue over, or that it is still open: run it again. A merge that conflicts, a failing check and a PR closed unmerged are errors to fix, then land again (with --json: {\"issue\",\"pr\",\"url\",\"merged\",\"taken_over\",\"updated\"}).",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue keep")

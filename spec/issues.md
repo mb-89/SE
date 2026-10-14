@@ -376,12 +376,9 @@ An issue at the top (a manifest whose leaves are all closed, a retro, an
 overhaul) lands to main: it merges origin's copy of the branch and
 `origin/main` in, runs `tests/check.sh` and goes on only if it passes,
 refuses a tree the battery did not record as passed and a branch main moved
-past meanwhile, pushes the branch, posts the commit status `se/battery`
-naming its tree on the pushed commit, which CI trusts (see
-[spec/coordination.md](coordination.md#up-to-date-with-main)); where
-GitHub refuses that status with 403 (a cloud box's proxy does), it goes on
-and names the refusal (with `--json`: `warning`), as `se issue keep` goes
-on, since CI then runs the battery for the commit itself. It records on
+past meanwhile, commits the battery's record of the tree it passed with the
+work and pushes the branch, so CI trusts the pushed commit (see
+[spec/coordination.md](coordination.md#up-to-date-with-main)). It records on
 the leaf who worked it (see
 [Reviews](#reviews)), posts the landing answers on the issue, opens one PR against main titled after the issue with the
 body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left

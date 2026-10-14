@@ -5,8 +5,10 @@
 // it for the CI summary and se issue land, and fails only on a hard budget's
 // overrun. `battery tree <top>` prints the tree of the clean worktree before
 // the first step, and `battery passed <top> <tree>` records it once the
-// report passed, where the worktree still holds it (src/internal/battery,
-// TreeFile). top is the checkout, where the battery's files live.
+// report passed, where the worktree still holds it, in the file
+// battery/config/passed names (src/internal/battery, Passed), which se issue
+// land commits and CI trusts. top is the checkout, where the battery's files
+// live.
 package main
 
 import (
