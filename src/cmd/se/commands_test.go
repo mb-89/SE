@@ -64,9 +64,9 @@ func TestTheHelpIsMadeFromTheRegistry(t *testing.T) {
 func TestTheHelpGroupsTheCommands(t *testing.T) {
 	want := map[string][]string{
 		"Session":  {"help", "off", "on", "restart", "status", "ui", "update"},
-		"Issues":   {"issue land", "issue new", "issue next", "issue resume", "issue review"},
+		"Issues":   {"issue land", "issue new", "issue next", "issue resume", "issue review", "issue tree"},
 		"Daemon":   {"serve", "start", "stop"},
-		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune"},
+		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune", "fleet refresh"},
 		"Retro":    {"retro collect", "retro new", "retro report"},
 		"Overhaul": {"overhaul file", "overhaul new", "overhaul read"},
 	}
