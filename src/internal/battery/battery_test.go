@@ -208,3 +208,23 @@ func TestTheBudgetsFileBudgetsEveryStepOfTheBattery(t *testing.T) {
 		}
 	}
 }
+
+func TestAStepWithoutABudgetIsReported(t *testing.T) {
+	t.Parallel()
+	d, dir := workspace(t, "biome\t40\nnew step\t5\n", budgets)
+	var summary bytes.Buffer
+	p, err := battery.Report(d, dir, &summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "step new step has no budget in spec/budgets.yaml"
+	if len(p.Unbudgeted) != 1 || p.Unbudgeted[0] != want {
+		t.Errorf("unbudgeted = %q, want %q", p.Unbudgeted, want)
+	}
+	if !strings.Contains(p.Text(), "battery: NO BUDGET: "+want) || !strings.Contains(summary.String(), "> **No budget:** "+want) {
+		t.Errorf("the report does not name the step without a budget:\n%s\n%s", p.Text(), summary.String())
+	}
+	if len(p.Overruns) != 0 || len(p.Hard) != 0 {
+		t.Errorf("a step without a budget counts as an overrun: %q", p.Overruns)
+	}
+}
