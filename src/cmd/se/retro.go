@@ -18,7 +18,7 @@ func init() {
 		Usage:   "retro new (--field TEXT | --no-field | --unattended) [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "start a retro over everything closed since the last one",
-		Details: "create a retro: an se issue labelled se-retro, whose window is everything closed since the last retro closed, and fire the routine so a box takes it at once. A person starts it with --field TEXT, their field feedback, which goes into the issue (the retro skill asks for it), or --no-field. --unattended never asks. Either way its box creates the findings' issues, those for a person where controversial, and closes it: a retro never waits. spec/retro.md has the rules.",
+		Details: "create a retro: an se issue labelled se-retro, whose window is everything closed since the last retro closed, and fire the routine so a box takes it at once. A person starts it with --field TEXT, their field feedback, which goes into the issue (the agent se:retro passes it on), or --no-field. --unattended never asks. Either way its box creates the findings' issues, those for a person where controversial, and closes it: a retro never waits. spec/retro.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "retro new")
