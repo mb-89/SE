@@ -98,7 +98,8 @@ What earlier versions taught, and how this design answers it:
   command's interface or a landing question.
 
   `se retro report N` files the judged draft. It refuses, writing nothing, a
-  judgment that is not complete: a finding without a title, a body, a class
+  judgment that is not complete: a finding without a title, or with one under
+  five words or ending in a comma or a conjunction, without a body, a class
   the classes name, a known home, or a `why` where it is controversial; a
   class without a fix; an unknown check or metric; nothing that went well.
   **A retro never waits**, whoever started it: `se retro report` creates the
