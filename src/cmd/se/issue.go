@@ -17,15 +17,15 @@ import (
 // fire is the fan-out after a claim, and after the creation of a ready issue:
 // it fires the routine named in the environment once, on the call's network,
 // and answers a line saying what happened.
-func (c *Call) fire() string { return issues.Fire(os.Getenv, c.Net) }
+func (c *Call) fire() string { return issues.Fire(c.Getenv, c.Net) }
 
 // sessionID names the session se runs in, which land records as the leaf's
-// worker and review tells apart from them. Tests put a fixed one here.
-var sessionID = func() string { return os.Getenv(issues.SessionVar) }
+// worker and review tells apart from them.
+func (c *Call) sessionID() string { return c.Getenv(issues.SessionVar) }
 
-// check is what issue land runs before it pushes, on procs: the repo's one
-// definition of green. It answers the check's output when it fails.
-var check = func(procs proc.Procs, dir string) error {
+// check is the real World's Check: sh ./tests/check.sh, with the last 40
+// lines of its output when it fails.
+func check(procs proc.Procs, dir string) error {
 	out, err := proc.Combined(procs, proc.Cmd{Name: "sh", Args: []string{"./tests/check.sh"}, Dir: dir})
 	if err != nil {
 		lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
@@ -260,10 +260,10 @@ func init() {
 	})
 	register(Command{
 		Name:    "issue new",
-		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "create an se issue, with its blockers and its parent",
-		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). A ready issue, one nothing open blocks, fires the routine once.",
+		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. A ready issue, one nothing open blocks, fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -277,6 +277,7 @@ func init() {
 			final := fs.Bool("final", false, "label it se-final: if it fails, it goes to a person")
 			person := fs.Bool("person", false, "make it an issue for a person: label it se-person and assign it to the owner")
 			skills := fs.String("skills", "", "the skills its work needs, as `NAME,NAME`: a take hands each over")
+			allowDuplicate := fs.Bool("allow-duplicate", false, "create it although an open se issue under the same parent has its title")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
@@ -326,8 +327,18 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			if err := s.CloseParents(); err != nil {
+			if *allowDuplicate {
+				if err := s.CloseParents(); err != nil {
+					return Reply{}, err
+				}
+			} else if dup, err := s.Duplicate(*title, *parent); err != nil {
 				return Reply{}, err
+			} else if dup > 0 {
+				where := "at the top"
+				if *parent > 0 {
+					where = fmt.Sprintf("a sub-issue of #%d", *parent)
+				}
+				return Reply{}, fmt.Errorf("#%d is an open se issue titled %q, %s, already; --allow-duplicate creates another", dup, strings.TrimSpace(*title), where)
 			}
 			var labels []string
 			if *review {
@@ -436,7 +447,7 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			l, err := s.Land(c.Workspace, sessionID(), qs, answers, func(dir string) error { return check(c.Proc, dir) })
+			l, err := s.Land(c.Workspace, c.sessionID(), qs, answers, func(dir string) error { return c.Check(c.Proc, dir) })
 			if err != nil {
 				return Reply{}, err
 			}
@@ -513,7 +524,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			reviewer := issues.Worker{Session: sessionID(), Workspace: c.Workspace}
+			reviewer := issues.Worker{Session: c.sessionID(), Workspace: c.Workspace}
 			r, err := s.Review(n, reviewer, words[0] == "pass", rep)
 			if err != nil {
 				return Reply{}, err

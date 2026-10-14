@@ -10,6 +10,7 @@ import (
 )
 
 func TestOverhaulNewCreatesTheOverhaulAndFires(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	code, out, errs := se(t, "overhaul", "new", "--repo", "o/r")
 	if code != 0 || !strings.Contains(out, "Created the overhaul #10") || !strings.Contains(out, "closes it") || !strings.HasSuffix(out, firedOnce+"\n") {
@@ -30,6 +31,7 @@ func TestOverhaulNewCreatesTheOverhaulAndFires(t *testing.T) {
 }
 
 func TestTakingAnOverhaulHandsOverTheSkillItsBodyNames(t *testing.T) {
+	t.Parallel()
 	cad := issues.Cadence{Kind: "overhaul", Every: 5, Closed: 5}
 	h := handed{Text: "the overhaul skill, in full"}
 	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE overhaul", Overhaul: true}, true, "issue-30", "", h, cad)

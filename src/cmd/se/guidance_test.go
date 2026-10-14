@@ -12,7 +12,6 @@ import (
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/guidance"
-	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
@@ -25,12 +24,11 @@ var skillTexts = map[string]string{"work": "Take the next issue and land it.\n",
 // inlineOff switches the hand-over's inline switch off for the test.
 func inlineOff(t *testing.T) {
 	t.Helper()
-	old := guided
-	guided = func() (guidance.Settings, error) { return guidance.Settings{Inline: false, Principles: true}, nil }
-	t.Cleanup(func() { guided = old })
+	worldOf(t).Guided = func() (guidance.Settings, error) { return guidance.Settings{Inline: false, Principles: true}, nil }
 }
 
 func TestATakeHandsOverEverySkillItsIssueNamesInFull(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	// #3 names two skills in its marked line.
 	if _, err := gh.Send("PATCH", "repos/o/r/issues/3", github.Field{Name: "body", Value: guidance.With("do it", []string{"work", "retro"})}); err != nil {
@@ -70,7 +68,7 @@ func TestATakeHandsOverEverySkillItsIssueNamesInFull(t *testing.T) {
 	}
 	// With the inline switch off, the hand-over names them only.
 	inlineOff(t)
-	c := &Call{Workspace: ws, Disk: disk.Real(), Net: network, Clock: clock.Real()}
+	c := &Call{Workspace: ws, World: *worldOf(t)}
 	h := c.handOver(issues.Issue{Number: 3, Body: guidance.With("do it", []string{"work", "retro"})})
 	if len(h.Skills) != 2 || strings.Contains(h.Text, "Take the next issue") || !strings.Contains(h.Text, "- retro: src/plugin/skills/retro/SKILL.md") {
 		t.Fatalf("%+v", h)
@@ -78,6 +76,7 @@ func TestATakeHandsOverEverySkillItsIssueNamesInFull(t *testing.T) {
 }
 
 func TestIssueNewNamesTheSkillsAndRefusesOneThatDoesNotExist(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	ws := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(ws, "src/plugin/skills/work"), 0o755); err != nil {
@@ -103,10 +102,10 @@ func TestIssueNewNamesTheSkillsAndRefusesOneThatDoesNotExist(t *testing.T) {
 // log, by name and hash, and se guidance, which the plugin runs after a
 // compaction, answers the principles and the skills that row names.
 func TestTheSessionLogRecordsTheHandOverAndACompactionHandsItAgain(t *testing.T) {
-	old, oldID := network, sessionID
-	network = sehttp.NewFake()
-	sessionID = func() string { return "s1" }
-	t.Cleanup(func() { network, sessionID = old, oldID })
+	t.Parallel()
+	net := sehttp.NewFake()
+	worldOf(t).Net = net
+	setenv(t, issues.SessionVar, "s1")
 	d, ws := onFake(t), "/ws"
 	put(t, d, filepath.Join(ws, guidance.Principles), "1. Mechanize first.\n")
 	for name, text := range skillTexts {
@@ -117,7 +116,7 @@ func TestTheSessionLogRecordsTheHandOverAndACompactionHandsItAgain(t *testing.T)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
 		done <- daemon.Serve(ctx, daemon.Paths{Workspace: ws, Disk: d}, daemon.Options{
-			Clock: clock.Real(), Net: network, Ready: func(ep daemon.Endpoint) { ready <- ep },
+			Clock: worldOf(t).Clock, Net: net, Ready: func(ep daemon.Endpoint) { ready <- ep },
 		})
 	}()
 	<-ready
@@ -125,7 +124,7 @@ func TestTheSessionLogRecordsTheHandOverAndACompactionHandsItAgain(t *testing.T)
 		stop()
 		<-done
 	})
-	c := &Call{Workspace: ws, Disk: d, Net: network, Clock: clock.Real()}
+	c := &Call{Workspace: ws, World: *worldOf(t)}
 	h := c.handOver(issues.Issue{Number: 3, Body: guidance.With("do it", []string{"work", "retro"})})
 	if len(h.Skills) != 2 || !strings.Contains(h.Text, "Take the next issue") || !strings.Contains(h.Text, "Collect the window") {
 		t.Fatalf("%+v", h)

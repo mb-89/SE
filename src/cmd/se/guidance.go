@@ -17,9 +17,6 @@ import (
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
-// guided reads the hand-over's switches; tests put other ones here.
-var guided = guidance.Configured
-
 func init() {
 	register(Command{
 		Name:    "guidance",
@@ -34,7 +31,7 @@ func init() {
 			if err := c.Parse(flags); err != nil {
 				return Reply{}, err
 			}
-			set, err := guided()
+			set, err := c.Guided()
 			if err != nil {
 				return Reply{}, err
 			}
@@ -75,7 +72,7 @@ func (c *Call) handOver(i issues.Issue) handed {
 	if len(names) == 0 {
 		return handed{}
 	}
-	set, err := guided()
+	set, err := c.Guided()
 	if err != nil {
 		return handed{Text: fmt.Sprintf("Its skills, %s, were not handed over: %v", strings.Join(names, ", "), err)}
 	}
@@ -84,7 +81,7 @@ func (c *Call) handOver(i issues.Issue) handed {
 		return handed{Text: fmt.Sprintf("Its skills, %s, were not handed over: %v", strings.Join(names, ", "), err)}
 	}
 	h := handed{Skills: skills, Text: guidance.Text(skills, set.Inline)}
-	if why := c.logHandOver(sessionID(), skills, false); why != "" {
+	if why := c.logHandOver(c.sessionID(), skills, false); why != "" {
 		h.Text += "\n\n" + why
 	}
 	return h
