@@ -652,3 +652,16 @@ func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
 		}
 	}
 }
+
+func TestWorktreeIsTheBoxsTakeAtTheTop(t *testing.T) {
+	recordedIssues(t)
+	for _, args := range [][]string{{"--worktree"}, {"--take", "--worktree", "--in", "3"}} {
+		code, _, errs := se(t, append([]string{"issue", "pull", "--repo", "o/r"}, args...)...)
+		if code == 0 || !strings.Contains(errs, "takes --worktree with --take at the top") {
+			t.Errorf("%v: exit %d, %q", args, code, errs)
+		}
+	}
+	if fires() != 0 {
+		t.Fatalf("%d fires", fires())
+	}
+}

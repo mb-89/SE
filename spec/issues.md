@@ -102,11 +102,11 @@ follows from its structure alone:
   separate PRs. `--in` reaches leaves at any depth, so the coordinator of the
   root hands out every leaf of the tree, and a sub-agent is only ever given a
   leaf.
-- **The coordinator** is the box that took the parent. It starts one sub-agent
-  per ready leaf inside its own box (no separate cloud sessions), each in the
-  leaf's worktree, and one reviewer per parent ready for review, and repeats
-  until the root has closed. When nothing inside is ready while the root is
-  open, it ends; a later box picks the tree up.
+- **The coordinator** is the box that took the parent. A tree is coordinated
+  by the box's one loop ([The box](#the-box)), limited to the tree: its leaves
+  go to sub-agents under the same cap as the box's other issues, and each
+  parent ready for review gets one reviewer. When nothing inside is ready
+  while the root is open, the box leaves the tree; a later take picks it up.
 
 ## Stuck work
 
@@ -174,7 +174,7 @@ person**, and leaves the agents' queue until the person has closed it.
 ```
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
 se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--json] [--repo OWNER/NAME]
-se issue pull [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
+se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
 se issue tree [ROOT] [--json] [--repo OWNER/NAME]
@@ -215,9 +215,18 @@ no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.m
 or where it is stuck past the lease, so every takeover remedy the check names
 runs; labelled `se-final`, it waits on an issue for a person instead. A claim whose work is moving
 is refused.
-Once it has claimed an issue, `--take` fires the routine once (the fan-out,
-below) and adds a line saying what the fire did; with `--json` that line is
-the field `fanout`. It also names the open issues the taken one blocks (with
+Every claim records the claiming box's session on the issue, a comment
+carrying `<!-- se:box <session> -->` (a takeover's comment carries it too).
+Once it has claimed an issue, `--take` runs the fan-out (below), which fires
+the routine only where the fleet needs another box, and adds a line saying
+what it did; with `--json` that line is the field `fanout`.
+`--take --worktree` is a box's take: it claims as `--take` does but checks
+nothing out (a takeover's branch is only fetched) and names the command that
+checks the issue's branch out in its own worktree beside the checkout, for
+its sub-agent (with `--json`: the field `worktree`; a parent gets none, as the
+box coordinates its tree itself). Where the box (its session) already runs
+its cap of sub-agents, `--worktree` and `--in ROOT --take` take nothing and
+say so (with `--json`: `{"ready":false,"full":true,"why"}`). It also names the open issues the taken one blocks (with
 `--json`: the issue's `blocks`), for `se issue new --blocks`.
 
 `se issue pull --in ROOT` names what is ready inside ROOT's tree: its stuck
@@ -234,7 +243,7 @@ checks it out in its own worktree beside the checkout (with `--json`:
 `{"ready","closed","issue","branch","worktree","review"}`). It also names the
 parents ready for review, each with the command that makes its reviewer's
 fresh worktree (`review`: a list of issues, each with its `worktree`). That claim fires nothing:
-the leaf is worked on by a sub-agent inside the coordinator's box.
+the leaf is worked on by a sub-agent inside the coordinator's box, under its cap.
 
 `se issue land` runs on the checked-out `issue-<n>` branch. It refuses
 without an answer to each landing question (see [Landing
@@ -294,9 +303,9 @@ person: labelled `se-person` and assigned to the owner (it takes neither
 N,M` links each issue it names as blocked by the new one, checked before
 anything is written. Where nothing blocks the
 issue it created (every issue in `--blocked-by` is closed, or it is `none`),
-it fires the routine once, as the fan-out does, and adds a line saying what
-the fire did (with `--json`: the field `fanout`); otherwise a new ready issue
-would wait for the next merge or the schedule. A blocked issue fires nothing.
+it runs the fan-out (below) and adds a line saying what it did (with
+`--json`: the field `fanout`); otherwise a new ready issue could wait for the
+next merge or the schedule. A blocked issue fires nothing.
 A session has it as `/se issue new`.
 
 `se issue review` passes or fails a parent ready for review, and
@@ -386,20 +395,47 @@ The routine has two triggers:
 
 It also has an API trigger, which `se` fires for the fan-out.
 
+### The box
+
+One box is the fleet. A box never works an issue itself: it coordinates
+sub-agents, so one box can hold the whole queue, and each claim does not
+cost a fire of the routine (whose limit the fan-out ran into on 2026-10-14).
+
+- **The loop:** the box pulls each ready issue with
+  `se issue pull --take --worktree`, makes its worktree, and hands it to a
+  fresh sub-agent with a clean context, several at once up to its cap. A
+  parent it takes it coordinates the same way with `--in ROOT --take`.
+- **The cap** is `fleet.box/config/parallel`, 4 (`Parallel` in
+  `src/internal/issues/box.go` until the fleet's rules move onto the index):
+  the box's disk allowance and CPU limit it, and the battery takes about
+  25s. `se` refuses a take that would pass it.
+- **When it pulls again:** when a sub-agent's PR is up with auto-merge on, or
+  its issue is superseded. A red CI or a review on a PR goes back to that PR's
+  sub-agent.
+- **Its context** keeps only issue, worktree and PR numbers, so it can run
+  for days. It ends when nothing is ready and no sub-agent is running.
+- **Alive:** a box is alive while one of its claims is: a claimed leaf whose
+  branch saw a push within the lease, the box named by its last
+  `<!-- se:box -->` comment. Its sub-agent counts against the cap until the
+  claim's PR has auto-merge on. A claim with no box comment counts as a box of
+  its own at its cap. A box that dies is left to the stuck sweep: its claims
+  are taken over once their lease runs out.
+
 ### Fan-out
 
-One merge starts one box, but there should be as many boxes as there is ready
-work. So boxes start boxes, mechanically, never by an agent's choice:
+The fan-out adds a box only when the boxes are full, mechanically, never by an
+agent's choice:
 
-- **Fan-out:** whenever `se issue pull --take` has claimed an issue, it fires
-  the routine `SE work` once, so another box starts and takes the next ready
-  issue. That box fires again after its own claim, and so on.
-- **A new ready issue** fires it too: `se issue new` fires once when nothing
-  blocks the issue it created.
+- **When it fires:** `se issue pull --take` after its claim, and `se issue new`
+  for an issue nothing blocks, count the alive boxes from the open claims and
+  fire the routine `SE work` once in two cases: issues are ready and no box is
+  alive (a restart), or every alive box runs its cap and another issue is
+  ready. While a box has room under its cap, it takes the issue itself and
+  nothing fires; the taking box counts as alive. The line says which.
 - **The end:** a box that finds nothing ready claims nothing and fires
-  nothing, so the fan-out ends by itself. Such a box leaves at once.
-- **No cap** on boxes in flight; the owner decided against one. The only limit
-  is the routine's own: 30 fires an hour. A fire refused for that is reported
+  nothing. It leaves once no sub-agent of its own is running.
+- **No cap** on boxes in flight; the owner decided against one. The routine's
+  own limit stands: 30 fires an hour. A fire refused for that is reported
   and the box goes on.
 - **How it fires:** an HTTP POST of the body `{}` to the URL in
   `SE_ROUTINE_FIRE_URL`, with the headers
@@ -409,9 +445,9 @@ work. So boxes start boxes, mechanically, never by an agent's choice:
   route is documented at <https://code.claude.com/docs/en/routines>. `se`
   prints the started session's link from the answer.
 - **Never fails a claim:** where either variable is unset (on a desk, say),
-  `se` says in one line that fan-out is off; a failed or refused fire is
-  reported the same way. The claim stands either way. The token is never
-  printed.
+  `se` says in one line that fan-out is off, and counts nothing; a failed or
+  refused fire is reported the same way, and a count that fails fires. The
+  claim stands either way. The token is never printed.
 
 The owner's one-time setup: add an API trigger to the routine `SE work`, and
 put its fire URL in `SE_ROUTINE_FIRE_URL` and its token in

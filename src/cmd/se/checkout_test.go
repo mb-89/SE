@@ -19,6 +19,7 @@ import (
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/gitenv"
+	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/update"
 )
 
@@ -34,6 +35,8 @@ func repoRoot(t *testing.T) string {
 
 func TestMain(m *testing.M) {
 	gitenv.Clear()
+	// The tests run as no box: a box's session would mark every claim.
+	_ = os.Unsetenv(issues.SessionVar)
 	code := m.Run()
 	if installedSE != "" {
 		os.RemoveAll(filepath.Dir(installedSE))

@@ -30,7 +30,7 @@ func TestOverhaulNewCreatesTheOverhaulAndFires(t *testing.T) {
 
 func TestTakingAnOverhaulHandsItToTheOverhaulSkill(t *testing.T) {
 	cad := issues.Cadence{Kind: "overhaul", Every: 5, Closed: 5}
-	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE overhaul", Overhaul: true}, true, "issue-30", "", cad)
+	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE overhaul", Overhaul: true}, true, "issue-30", "", "", cad)
 	if err != nil || !strings.HasPrefix(r.Text, "Started the unattended overhaul #30 SE overhaul, as 5 retros closed since the last one (the cadence is 5)") ||
 		!strings.Contains(r.Text, "#30 is an overhaul (se-overhaul): follow the overhaul skill, src/plugin/skills/overhaul/SKILL.md, from se overhaul read 30") {
 		t.Fatalf("%q %v", r.Text, err)
