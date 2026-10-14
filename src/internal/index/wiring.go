@@ -1,6 +1,7 @@
 package index
 
 import (
+	_ "embed"
 	"fmt"
 	"reflect"
 	"strings"
@@ -38,6 +39,14 @@ type Wire struct {
 	Port, To string
 	Line     int
 }
+
+// wired is the wiring file the se binary carries.
+//
+//go:embed wiring.yaml
+var wired []byte
+
+// Wired answers the wiring file the se binary was built with.
+func Wired() (Wiring, error) { return ParseWiring(wired) }
 
 // ParseWiring reads a wiring file.
 func ParseWiring(data []byte) (Wiring, error) {

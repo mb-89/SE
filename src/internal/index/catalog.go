@@ -14,9 +14,11 @@ type Catalog struct {
 // InstanceInfo is one instance as the catalog shows it.
 type InstanceInfo struct {
 	Name, Module, Help string
-	Inputs             []PortInfo
-	Outputs            []PortInfo
-	Config             []PortInfo
+	// IO is set on an instance of a module that carries the I/O flag.
+	IO      bool
+	Inputs  []PortInfo
+	Outputs []PortInfo
+	Config  []PortInfo
 }
 
 // PortInfo is one port and the name the wiring binds it to; an input left
@@ -67,7 +69,7 @@ func (b *builder) catalog() Catalog {
 	owner := map[string]string{}
 	for _, name := range sortedKeys(b.ix.insts) {
 		in := b.ix.insts[name]
-		info := InstanceInfo{Name: name, Module: in.mod.Name(), Help: in.mod.Help()}
+		info := InstanceInfo{Name: name, Module: in.mod.Name(), Help: in.mod.Help(), IO: in.mod.IO()}
 		for _, p := range in.mod.Inputs() {
 			info.Inputs = append(info.Inputs, PortInfo{Port: p, Name: in.in[p.Port]})
 		}

@@ -63,6 +63,9 @@ type CommandDecl struct {
 	Session bool
 	// Button offers it as a /se ui button; only a session command is one.
 	Button bool
+	// Installed has the installed se answer it even when the session works
+	// in an SE checkout, whose own se answers every other /se word.
+	Installed bool
 }
 
 // Reader answers the value of a local input port.
@@ -73,6 +76,7 @@ type Reader func(port string) any
 // core and the fake index both speak.
 type Module struct {
 	name, help string
+	io         bool
 	inputs     map[string]reflect.Type
 	outputs    map[string]*Port
 	config     map[string]*Port
@@ -138,6 +142,9 @@ func (m *Module) fail(format string, a ...any) {
 
 // Name is the module's name, which the wiring file's instances name.
 func (m *Module) Name() string { return m.name }
+
+// IO says whether the module carries the I/O flag: it touches its one outside thing.
+func (m *Module) IO() bool { return m.io }
 
 // Help is the module's one help line.
 func (m *Module) Help() string { return m.help }
@@ -292,6 +299,14 @@ func Derived[In, Out any](port string, builtin Out, help string, fn func(In) (Ou
 		err: err,
 	}
 }
+
+type ioPart struct{}
+
+func (ioPart) declare(m *Module) { m.io = true }
+
+// IO is the I/O flag: the module touches its one outside thing. A module
+// without it is a compute module.
+func IO() Part { return ioPart{} }
 
 type configPart struct{ port Port }
 

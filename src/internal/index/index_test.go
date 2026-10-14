@@ -13,6 +13,7 @@ import (
 
 // source is a fixture module whose outputs a test commits, as an I/O module commits what comes in.
 var source = index.Declare("source", "Holds what a test commits.",
+	index.IO(),
 	index.Output("n", 7, "A number."),
 	index.Output("list", []int(nil), "Some numbers."),
 )
@@ -256,6 +257,9 @@ func TestAFixtureModulesCommandReachesTheCollector(t *testing.T) {
 	if c.Instances[1].Name != "tally" || c.Instances[1].Inputs[0].Name != "tally/config/scale" || c.Instances[1].Inputs[1].Name != "numbers/all" {
 		t.Fatalf("the catalog binds tally as %+v", c.Instances[1])
 	}
+	if !c.Instances[0].IO || c.Instances[1].IO {
+		t.Fatalf("the I/O flag reads %v for source and %v for tally", c.Instances[0].IO, c.Instances[1].IO)
+	}
 	refused(t, "instances: {a: {module: tally}, b: {module: tally}}\nwires: {a.numbers: built-in, b.numbers: built-in}",
 		`command "tally note" is declared by a and b`, fixture.Module)
 }
@@ -277,5 +281,14 @@ func TestTheFakeAndTheCoreAgree(t *testing.T) {
 	total, _ := f.Out("total")
 	if fake != core.Text || total != read(t, ix, "tally/total") {
 		t.Fatalf("the fake answered %q and %+v, the core %q and %+v", fake, total, core.Text, read(t, ix, "tally/total"))
+	}
+}
+
+func TestTheWiringSeCarriesStarts(t *testing.T) {
+	t.Parallel()
+	w, err := index.Wired()
+	must(t, err)
+	if _, err := index.Start(w, index.Registered()...); err != nil {
+		t.Fatal(err)
 	}
 }
