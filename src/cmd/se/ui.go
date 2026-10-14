@@ -5,7 +5,7 @@ func init() {
 		Name:    "ui",
 		Usage:   "ui",
 		Group:   "Session",
-		Summary: "open SE's control panel: the on/off toggle and command buttons",
+		Summary: "open SE's control panel: the on/off toggle and the commands",
 		Details: "open SE's control panel, a pane of buttons every surface draws, the phone included: the on/off toggle top left, then a button for each command registered as one (a command that takes no typed words). A press runs what typing /se <name> runs.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
