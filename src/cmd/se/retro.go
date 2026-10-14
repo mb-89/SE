@@ -44,7 +44,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			fanout := fire()
+			fanout := c.fire()
 			if *asJSON {
 				data, err := json.Marshal(struct {
 					issues.RetroIssue
@@ -139,7 +139,7 @@ func init() {
 			}
 			fanout := ""
 			if filed.Ready {
-				fanout = fire()
+				fanout = c.fire()
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
