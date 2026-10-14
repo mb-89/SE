@@ -149,9 +149,16 @@ func Configured() (Settings, error) {
 	return From(w)
 }
 
-// From answers the settings of Instance as the wiring w gives them.
+// From answers the settings of Instance as the wiring w gives them. It starts
+// an index of w's guidance instances alone, so it needs no other module.
 func From(w index.Wiring) (Settings, error) {
-	ix, err := index.Start(w, index.Registered()...)
+	own := index.Wiring{}
+	for _, in := range w.Instances {
+		if in.Module == Module.Name() {
+			own.Instances = append(own.Instances, in)
+		}
+	}
+	ix, err := index.Start(own, Module)
 	if err != nil {
 		return Settings{}, err
 	}

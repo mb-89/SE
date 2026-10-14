@@ -2,5 +2,11 @@
 # It is the only place that knows the global layout; spec/index.md says what
 # an entry may say. The se binary embeds it, and reads config values from it.
 instances:
-  guidance: { module: guidance, config: { inline: true, principles: true } }
-wires: {}
+  clock: {module: clock}
+  session: {module: session}
+  sessionlog: {module: sessionlog}
+  cli: {module: cli}
+  guidance: {module: guidance, config: {inline: true, principles: true}}
+wires:
+  session.events: session/events
+  sessionlog.events: session/events

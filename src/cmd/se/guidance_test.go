@@ -116,10 +116,15 @@ func TestTheSessionLogRecordsTheHandOverAndACompactionHandsItAgain(t *testing.T)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
 		done <- daemon.Serve(ctx, daemon.Paths{Workspace: ws, Disk: d}, daemon.Options{
-			Clock: worldOf(t).Clock, Net: net, Ready: func(ep daemon.Endpoint) { ready <- ep },
+			Clock: worldOf(t).Clock, Net: net, Modules: modules(daemon.Paths{Workspace: ws, Disk: d}, worldOf(t).Clock),
+			Ready: func(ep daemon.Endpoint) { ready <- ep },
 		})
 	}()
-	<-ready
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("the daemon did not start: %v", err)
+	}
 	t.Cleanup(func() {
 		stop()
 		<-done

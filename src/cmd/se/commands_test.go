@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/guidance"
+	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
@@ -179,7 +180,7 @@ func TestACommandStandsUnderTheGroupItRegisters(t *testing.T) {
 	probe := Command{Name: "zz probe", Usage: "zz probe", Group: "Probes", Summary: "probe the help", Session: true}
 	for _, session := range []bool{false, true} {
 		o := overview(session)
-		o.Groups = groupsOf(append(offered(session), probe), session)
+		o.Groups = groupsOf(append(offered(session), index.CommandInfo{CommandDecl: declOf(probe)}), session)
 		if h := helpText(o, session, false); !regexp.MustCompile(`Probes:\n  zz probe +probe the help\n`).MatchString(h) {
 			t.Errorf("session %v:\n%s", session, h)
 		}
