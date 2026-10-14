@@ -2,6 +2,8 @@
 export type SeActive = boolean
 // The commands /se ui offers as buttons, by name, as se answered them.
 export type SeButtons = string[]
+// The most buttons a row of /se ui holds, the toggle counted, as se answered it.
+export type SeColumns = number
 // The help se answered as data beside its text (Help in src/cmd/se/help.go).
 export type SeHelp = {
   usage?: string
@@ -16,6 +18,6 @@ export type SeHelps = Record<string, SeHelp>
 
 declare module 'claude-code' {
   interface PluginState {
-    se: { active: SeActive; buttons: SeButtons; helps: SeHelps }
+    se: { active: SeActive; buttons: SeButtons; columns: SeColumns; helps: SeHelps }
   }
 }

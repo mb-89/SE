@@ -155,7 +155,7 @@ func TestTheHelpGroupsTheCommands(t *testing.T) {
 		"Issues":   {"issue land", "issue new", "issue pull", "issue resume", "issue review", "issue supersede", "issue tree"},
 		"Hooks":    {"hook prompt", "hook stop"},
 		"Daemon":   {"serve", "start", "stop"},
-		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune", "fleet refresh"},
+		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune", "fleet refresh", "fleet rules"},
 		"Retro":    {"retro collect", "retro new", "retro report"},
 		"Overhaul": {"overhaul file", "overhaul new", "overhaul read"},
 	}
@@ -372,6 +372,30 @@ func TestUiOffersTheButtonCommandsFromTheRegistry(t *testing.T) {
 	if strings.Join(r.Panel.Buttons, ",") != strings.Join(want, ",") {
 		t.Errorf("ui offers %q, want %q", r.Panel.Buttons, want)
 	}
+	for _, name := range r.Panel.Buttons {
+		if strings.TrimSpace(name) == "" {
+			t.Errorf("ui offers a button with no label: %q", r.Panel.Buttons)
+		}
+	}
+}
+
+func TestUiRowsHoldTheColumnsTheWiringSets(t *testing.T) {
+	t.Parallel()
+	if r := session(t, "ui"); r.Panel == nil || r.Panel.Columns != 3 {
+		t.Fatalf("ui's rows hold %+v, want the wiring's 3 columns", r.Panel)
+	}
+	wired := func(yaml string) func() (index.Wiring, error) {
+		return func() (index.Wiring, error) { return index.ParseWiring([]byte(yaml)) }
+	}
+	if n, err := panelColumns(wired("instances:\n  cli: {module: cli, config: {columns: 2}}\n")); err != nil || n != 2 {
+		t.Errorf("a wiring of 2 columns answers %d, %v", n, err)
+	}
+	if n, err := panelColumns(wired("instances:\n  cli: {module: cli}\n")); err != nil || n != defaultColumns {
+		t.Errorf("a wiring that sets no columns answers %d, %v, want the built-in %d", n, err, defaultColumns)
+	}
+	if _, err := panelColumns(wired("instances:\n  cli: {module: cli, config: {columns: 0}}\n")); err == nil {
+		t.Error("a wiring of 0 columns is answered")
+	}
 }
 
 func TestOnlySessionCommandsWithoutTypedWordsAreButtons(t *testing.T) {
@@ -449,11 +473,15 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 
 func TestTheHelpRendersTheConfigValues(t *testing.T) {
 	t.Parallel()
+	cfg, err := issues.Configured()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, want := range map[string][]string{
-		"issue pull":    {fmt.Sprintf("%d retros (OverhaulCadence)", issues.OverhaulCadence), fmt.Sprintf("%d se issues (RetroCadence)", issues.RetroCadence), fmt.Sprintf("%s lease (Lease)", issues.Lease)},
-		"issue review":  {fmt.Sprintf("at most %d, MaxFiled", issues.MaxFiled)},
-		"overhaul new":  {fmt.Sprintf("last %d runs (OverhaulCadence)", issues.OverhaulCadence)},
-		"overhaul read": {fmt.Sprintf("last %d retros' metrics (OverhaulCadence)", issues.OverhaulCadence)},
+		"issue pull":    {fmt.Sprintf("%d retros (issues/config/overhaul-cadence)", cfg.OverhaulCadence), fmt.Sprintf("%d se issues (issues/config/retro-cadence)", cfg.RetroCadence), fmt.Sprintf("%s lease (issues/config/lease)", cfg.Lease)},
+		"issue review":  {fmt.Sprintf("at most %d, issues/config/max-filed", cfg.MaxFiled)},
+		"overhaul new":  {fmt.Sprintf("last %d runs (issues/config/overhaul-cadence)", cfg.OverhaulCadence)},
+		"overhaul read": {fmt.Sprintf("last %d retros' metrics (issues/config/overhaul-cadence)", cfg.OverhaulCadence)},
 	} {
 		for _, w := range want {
 			if !strings.Contains(commands[name].Details, w) {
