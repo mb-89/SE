@@ -3,9 +3,13 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // Takeover is a claimed leaf taken over by this box: its branch is checked
@@ -28,6 +32,20 @@ type Takeover struct {
 	Pushed time.Time `json:"pushed,omitempty"`
 	// Pull is where the branch's open PR stands; nil where it has none.
 	Pull *PullState `json:"pull,omitempty"`
+	// Base is the branch the issue lands into: its manifest's, or main.
+	Base string `json:"base,omitempty"`
+	// Foreign is the branch's commits, not on Base, whose subject or merge
+	// names another closed issue: work that closed in its own form, whose
+	// files the merge takes from Base's side.
+	Foreign []Foreign `json:"foreign,omitempty"`
+}
+
+// Foreign is a commit on a taken-over branch that names another closed issue.
+type Foreign struct {
+	SHA     string   `json:"sha"`
+	Subject string   `json:"subject"`
+	Issue   int      `json:"issue"`
+	Files   []string `json:"files"`
 }
 
 // PullState is where a takeover's open PR stands, read from GitHub's REST
@@ -45,7 +63,8 @@ type PullState struct {
 
 // ReadTakeover fills in where took's takeover stands: when its branch was
 // last pushed, and its open PR's mergeable state and the last run of each
-// of its checks. It reads nothing for an issue not taken over.
+// of its checks, and the commits on its branch that name another closed
+// issue (see foreign). It reads nothing for an issue not taken over.
 func (s Source) ReadTakeover(took *Issue) error {
 	if took.Takeover == nil {
 		return nil
@@ -74,8 +93,88 @@ func (s Source) ReadTakeover(took *Issue) error {
 		}
 		t.Pull = &PullState{Number: p.Number, URL: p.URL, Head: p.Head.SHA, Mergeable: state, Checks: runs}
 	}
+	if t.Base, t.Foreign, err = s.foreign(took.Number); err != nil {
+		return err
+	}
 	took.Takeover = &t
 	return nil
+}
+
+// named finds the issues a commit subject names: #N, or a branch issue-N.
+var named = regexp.MustCompile(`(?:#|\bissue-)(\d+)\b`)
+
+// foreign reads issue n's base (its manifest's branch, or main) and the
+// commits on its branch not on the base whose subject names another issue
+// that has closed, with the files each touched; the base's own issue and n
+// are not another.
+func (s Source) foreign(n int) (string, []Foreign, error) {
+	top, err := s.manifestOf(n)
+	if err != nil {
+		return "", nil, err
+	}
+	base := "main"
+	if top != 0 {
+		base = Branch(top)
+	}
+	got, err := api[struct {
+		Commits []struct {
+			SHA    string `json:"sha"`
+			Commit struct {
+				Message string `json:"message"`
+			} `json:"commit"`
+		} `json:"commits"`
+	}](s, fmt.Sprintf("repos/%s/compare/%s...%s?per_page=100", s.Repo, base, Branch(n)), false)
+	if github.Status(err) == 404 {
+		return base, nil, nil
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	var cands []Foreign
+	for _, c := range got[0].Commits {
+		subject, _, _ := strings.Cut(c.Commit.Message, "\n")
+		for _, m := range named.FindAllStringSubmatch(subject, -1) {
+			if k, _ := strconv.Atoi(m[1]); k != n && k != top {
+				cands = append(cands, Foreign{SHA: c.SHA, Subject: subject, Issue: k})
+				break
+			}
+		}
+	}
+	closed, err := each(len(cands), func(k int) (bool, error) {
+		i, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, cands[k].Issue), false)
+		if github.Status(err) == 404 {
+			return false, nil
+		}
+		return err == nil && i[0].State == "closed", err
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	var out []Foreign
+	for k, f := range cands {
+		if closed[k] {
+			out = append(out, f)
+		}
+	}
+	files, err := each(len(out), func(k int) ([]string, error) {
+		c, err := api[struct {
+			Files []struct {
+				Name string `json:"filename"`
+			} `json:"files"`
+		}](s, fmt.Sprintf("repos/%s/commits/%s", s.Repo, out[k].SHA), false)
+		if err != nil {
+			return nil, err
+		}
+		names := []string{}
+		for _, f := range c[0].Files {
+			names = append(names, f.Name)
+		}
+		return names, nil
+	})
+	for k := range out {
+		out[k].Files = files[k]
+	}
+	return base, out, err
 }
 
 // Line says where a takeover's branch and PR stand, in one line.

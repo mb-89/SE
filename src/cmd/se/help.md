@@ -540,28 +540,32 @@ the issue's last land posted on it back to <checkout>-landing.yaml beside its
 checkout (its worktree with --worktree or --in), keeping a file there already,
 and names it. A takeover also says, from the REST API, when its branch was last
 pushed and its open PR's mergeable state and the last run of each of its checks,
-so no box reaches for gh. A claim stuck a second time, or conflicting after a
-takeover, is taken over again; nothing mints an issue for a person on a box's
-behalf. A claim records the box's session on the issue, and fires the routine
-once only where the fleet needs another box: every alive box runs its cap of
-sub-agents (fleet.box/config/parallel, 4, Parallel) and another issue is ready
-(fan-out); a fire the routine refuses with 429 is kept on the claim with the
-retry time it names, nothing fires before that time, and the next take or se
-fleet check after it fires it. --worktree is the box's take: it checks nothing
-out, names the command that makes the issue's worktree for its sub-agent, and is
-refused while the box runs its cap. A take hands over every skill the issue's
-marked skills line names (se issue new --skills): their full text follows the
-issue, or, where the guidance instance's inline switch is off, their names and
-files; the session's log records each by name and hash. A name there that is an
-agent's role, as retro or overhaul, is no skill: the take's agent holds it, so
-it is neither handed over nor reported missing. A take names the agent that
-works the issue, by its kind (the registry in src/internal/issues/kinds.go):
-se:worker for a leaf, se:coordinator for a parent, which is the box itself,
-se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the
-ready leaves inside ROOT's tree, and --take claims one for a worktree. Every
---take also refuses where main has moved past the commit se was built from,
-naming se update: the agents and guidance it hands over come from main. --person
-lists the issues waiting on a person.
+so no box reaches for gh. A takeover lists its branch's commits, not on its base
+(its manifest's branch, or main), whose subject or merge names another closed
+issue, with the files each touched, and says to take the base's side of those
+files where merging the base conflicts: that work closed in its own form. A
+claim stuck a second time, or conflicting after a takeover, is taken over again;
+nothing mints an issue for a person on a box's behalf. A claim records the box's
+session on the issue, and fires the routine once only where the fleet needs
+another box: every alive box runs its cap of sub-agents
+(fleet.box/config/parallel, 4, Parallel) and another issue is ready (fan-out); a
+fire the routine refuses with 429 is kept on the claim with the retry time it
+names, nothing fires before that time, and the next take or se fleet check after
+it fires it. --worktree is the box's take: it checks nothing out, names the
+command that makes the issue's worktree for its sub-agent, and is refused while
+the box runs its cap. A take hands over every skill the issue's marked skills
+line names (se issue new --skills): their full text follows the issue, or, where
+the guidance instance's inline switch is off, their names and files; the
+session's log records each by name and hash. A name there that is an agent's
+role, as retro or overhaul, is no skill: the take's agent holds it, so it is
+neither handed over nor reported missing. A take names the agent that works the
+issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for
+a leaf, se:coordinator for a parent, which is the box itself, se:retro and
+se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves
+inside ROOT's tree, and --take claims one for a worktree. Every --take also
+refuses where main has moved past the commit se was built from, naming se
+update: the agents and guidance it hands over come from main. --person lists the
+issues waiting on a person.
 
 Flags:
   --full             without --take: show the issue's body too

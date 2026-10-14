@@ -79,6 +79,7 @@ func init() {
 			fmt.Sprintf("A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands.", issueConfig().Lease),
 			"A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it.",
 			"A takeover also says, from the REST API, when its branch was last pushed and its open PR's mergeable state and the last run of each of its checks, so no box reaches for gh.",
+			"A takeover lists its branch's commits, not on its base (its manifest's branch, or main), whose subject or merge names another closed issue, with the files each touched, and says to take the base's side of those files where merging the base conflicts: that work closed in its own form.",
 			"A claim stuck a second time, or conflicting after a takeover, is taken over again; nothing mints an issue for a person on a box's behalf.",
 			fmt.Sprintf("A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it.", issues.Parallel),
 			"--worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap.",
@@ -1094,11 +1095,25 @@ func takeoverLines(t *issues.Takeover, branch string) string {
 	if t == nil {
 		return ""
 	}
-	text := "\n" + t.Line(branch)
+	text := "\n" + t.Line(branch) + foreignLines(t)
 	if t.Answers == "" {
 		return text
 	}
 	return text + "\nIts landing answers, as its last land posted them, are in " + t.Answers + ": bring them up to date, and land with --answers " + t.Answers + "."
+}
+
+// foreignLines name the commits on a takeover's branch that name another
+// closed issue, whose work its base holds in its own form: the merge of the
+// base takes the base's side of their files.
+func foreignLines(t *issues.Takeover) string {
+	if len(t.Foreign) == 0 {
+		return ""
+	}
+	lines := []string{fmt.Sprintf("\nIts branch holds %d commit(s) naming another closed issue, not on %s: that work closed in its own form, so where merging %s conflicts in their files, take %s's side.", len(t.Foreign), t.Base, t.Base, t.Base)}
+	for _, f := range t.Foreign {
+		lines = append(lines, fmt.Sprintf("- %.8s %s (#%d closed): %s", f.SHA, f.Subject, f.Issue, strings.Join(f.Files, ", ")))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // pausedReply answers a take while the fleet is paused (with --json:
