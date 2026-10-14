@@ -9,6 +9,7 @@ import (
 
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
 // prose makes a git workspace holding files, and answers its folder.
@@ -44,8 +45,11 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 	if code, _, errs := se(t, "--workspace", ws, "manifest", "agents"); code != 1 || !strings.Contains(errs, "the leaf kind's agent has no file src/plugin/agents/worker.md") {
 		t.Fatalf("agents without their files (exit %d): %s", code, errs)
 	}
-	_, out, _ = se(t, "--workspace", "../../..", "manifest", "agents")
-	if !strings.HasPrefix(out, "- [`se:worker`](src/plugin/agents/worker.md), for the kind leaf: ") || strings.Count(out, "\n") != 5 {
+	for _, k := range issues.IssueKinds {
+		put(t, onFake(t), filepath.Join(ws, filepath.FromSlash(k.File())), "---\nname: "+k.Agent+"\n---\n")
+	}
+	_, out, _ = se(t, "--workspace", ws, "manifest", "agents")
+	if !strings.HasPrefix(out, "- [`se:worker`](src/plugin/agents/worker.md), for the kind leaf: ") || strings.Count(out, "\n") != len(issues.IssueKinds) {
 		t.Fatalf("agents: %q", out)
 	}
 	_, out, _ = se(t, "--workspace", ws, "manifest", "checks")
