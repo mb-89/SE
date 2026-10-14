@@ -23,6 +23,7 @@ func env(vars map[string]string) func(string) string {
 }
 
 func TestAFireNamesTheSessionItStarted(t *testing.T) {
+	t.Parallel()
 	f := routine(1)
 	note := issues.Fire(env(map[string]string{issues.FireURLVar: trigger, issues.FireTokenVar: "sekrit"}), f)
 	if note != "Fan-out fired the routine: https://claude.ai/code/session_fake1" || f.Fired(trigger) != 1 {
@@ -31,6 +32,7 @@ func TestAFireNamesTheSessionItStarted(t *testing.T) {
 }
 
 func TestUnsetVariablesTurnFanOutOff(t *testing.T) {
+	t.Parallel()
 	f := routine(5)
 	for _, vars := range []map[string]string{{}, {issues.FireURLVar: trigger}, {issues.FireTokenVar: "sekrit"}} {
 		if note := issues.Fire(env(vars), f); !strings.HasPrefix(note, "Fan-out is off") || strings.Contains(note, "sekrit") {
@@ -43,6 +45,7 @@ func TestUnsetVariablesTurnFanOutOff(t *testing.T) {
 }
 
 func TestARefusedOrFailedFireIsReported(t *testing.T) {
+	t.Parallel()
 	f := routine(0)
 	note := issues.Fire(env(map[string]string{issues.FireURLVar: trigger, issues.FireTokenVar: "sekrit"}), f)
 	if !strings.HasPrefix(note, "Fan-out refused: 429 Too Many Requests") || strings.Contains(note, "sekrit") {
