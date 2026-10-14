@@ -198,6 +198,66 @@ func init() {
 		},
 	})
 	register(Command{
+		Name:    "issue tree",
+		Usage:   "issue tree [ROOT] [--json] [--repo OWNER/NAME]",
+		Group:   "Issues",
+		Summary: "list the se trees and how many of their sub-issues are closed",
+		Details: "list every se issue with sub-issues, open or closed, open first: its number, state, how many of its sub-issues are closed, its labels and its title. With ROOT, list ROOT and every issue below it, open or closed, each indented under its parent.",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "issue tree")
+			var words []string
+			for rest := c.Args; ; {
+				if err := fs.Parse(rest); err != nil {
+					return Reply{}, err
+				}
+				if fs.NArg() == 0 {
+					break
+				}
+				words, rest = append(words, fs.Arg(0)), fs.Args()[1:]
+			}
+			c.Args = nil
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			root := 0
+			if len(words) > 0 {
+				root, _ = strconv.Atoi(strings.TrimPrefix(words[0], "#"))
+				if len(words) > 1 || root <= 0 {
+					return Reply{}, fmt.Errorf("issue tree takes at most one issue number, not %q", strings.Join(words, " "))
+				}
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			if err := s.CloseParents(); err != nil {
+				return Reply{}, err
+			}
+			var nodes []issues.Node
+			if root > 0 {
+				nodes, err = s.TreeOf(root)
+			} else {
+				nodes, err = s.Trees()
+			}
+			if err != nil {
+				return Reply{}, err
+			}
+			if *asJSON {
+				data, err := json.Marshal(nodes)
+				return Reply{Text: string(data)}, err
+			}
+			if len(nodes) == 0 {
+				return Reply{Text: "No se issue has sub-issues."}, nil
+			}
+			lines := make([]string, len(nodes))
+			for k, n := range nodes {
+				lines[k] = n.Line()
+			}
+			return Reply{Text: strings.Join(lines, "\n")}, nil
+		},
+	})
+	register(Command{
 		Name:    "issue new",
 		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
