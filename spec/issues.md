@@ -28,7 +28,10 @@ choice is deterministic and no prompt restates it.
 - **Skills**: an issue names the skills its work needs in one place, the
   marked line `se issue new --skills` writes into its body. The take hands
   each over in full in its answer, and the session's log records it; no label
-  picks a skill ([principle 22](principles.md)).
+  picks a skill ([principle 22](principles.md)). A role an agent holds
+  (`work`, `coordination`, `review`, `retro`, `overhaul`) is no skill: `se
+  issue new` writes no such name into the line, and a take of an older issue
+  whose line names one leaves it to the agent it names.
 - **Blockers**: an issue waits while any of its blockers is open. Blockers are
   GitHub's native "blocked by" links, and nothing else; a "Blocked by: #12"
   line in an issue's body does not block it. `se issue new --blocked-by` is
@@ -67,10 +70,63 @@ choice is deterministic and no prompt restates it.
   se mints below and in [retro.md](retro.md)); every other issue that needs a
   person waits on one of those through a native "blocked by" link. No run
   waits on a person: a box, a retro and an overhaul always end.
-- **Done**: the PR's body says `Fixes #n`, so GitHub closes the issue when the
-  PR merges, and the issues it blocked become ready.
+- **Done**: a leaf inside a manifest is closed by its landing into the
+  manifest's branch; a manifest's PR body says `Fixes #n`, so GitHub closes
+  it when the PR merges, and the issues it blocked become ready.
   A PR merges only when it is up to date with main, so CI ran on what lands
   ([coordination.md](coordination.md#up-to-date-with-main)).
+
+## Manifests: all work moves in them
+
+The owner, 2026-10-14: **all work moves in manifests.** One PR per small
+issue meant many PRs, CI runs, merges of main under the strict up-to-date
+rule, conflicts, takeovers and fan-outs, and GitHub's rate limits refused
+the owner's account for an hour.
+
+- **A manifest** is an issue at the top on one topic whose sub-issues are its
+  work. It is labelled `se-manifest` (by `se issue new --manifest`, or by
+  the first leaf that lands into it), so it never closes by itself.
+- **About an hour.** A manifest's leaves together should fit one config
+  value, `issues.manifest/config/target`, 60m (`issues/config/manifest-target`
+  on the index, `ManifestTarget` in `src/internal/issues/manifest.go`).
+  Several manifests run in parallel.
+- **It lands once.** Its coordinator works it on one branch,
+  `issue-<manifest>`. Each leaf's sub-agent works in its own worktree on
+  `issue-<leaf>`, claimed from the manifest's branch; its `se issue land`
+  runs the battery, merges the leaf into `issue-<manifest>` (never a
+  rebase), posts the leaf's landing answers on the leaf and closes it. A leaf
+  gets no PR of its own. When every leaf is closed, the coordinator lands the
+  manifest: one PR from `issue-<manifest>` to main, `Fixes #<manifest>`,
+  auto-merge on, and it stays with that PR until it merges. A manifest whose
+  branch holds nothing main does not closes with no PR.
+- **No bare issues.** `se issue new` files every issue into a manifest:
+  `--parent N` names it, or `--manifest` makes the issue a new manifest.
+  Without either it goes into the open **misc manifest**, labelled
+  `se-misc`: it takes new issues for the target time from its creation and
+  while its PR is not open; after that the next one opens, and the old one
+  lands once its leaves are done. What se files itself (the retro's, the
+  overhaul's, a review's non-blocking findings, `se fleet fix`'s reports, a
+  supersede of a bare issue) goes the same way. An issue for a person, a
+  retro and an overhaul stand at the top by themselves.
+- **Boxes take only manifests.** At the top, `se issue pull --take` offers a
+  manifest (a parent), a retro or an overhaul, never a bare leaf (with
+  `--json`: its `bare`); a claimed bare leaf from before is still taken over
+  when it is stuck or conflicted. A manifest can be extended while it runs
+  (`se issue new --parent`): its coordinator pulls inside its tree each
+  round. Once its PR is open, a new leaf goes in with the next push, or waits
+  for the next manifest.
+- **Duration is measured.** The landing facts of a leaf and of a manifest
+  record the time from its claim to its landing, which se reads from GitHub,
+  and for a leaf the branch it landed into (`into`). No agent is asked. The
+  retro and `se issue tree`'s estimate read them.
+- **The pause switch.** One config value on main, `fleet.box/config/paused`
+  (`issues/config/paused` on the index, in
+  `src/internal/index/wiring.yaml`). Every take (`--take`, at the top and
+  `--in`) reads it from origin/main first and, while it is set, takes nothing
+  (with `--json`: `{"ready":false,"paused":true,"why"}`), and the box ends.
+  So the owner stops every running box with one change on main.
+- **The migration.** The bare open issues from before were regrouped into
+  manifests once, by topic, else into the misc manifest.
 
 ## Nesting: leaves are work, parents coordinate
 
@@ -79,14 +135,15 @@ parent of milestones, a milestone a parent of work items. What an issue is
 follows from its structure alone:
 
 - **A leaf** (no sub-issues) is **work**: one worker does it on its branch
-  `issue-<n>` and lands one PR with `se issue land`.
+  `issue-<n>` and lands it with `se issue land`, into its manifest's branch.
 - **A parent** (has sub-issues) **holds no work of its own**. It is
-  coordinated, never landed: `se issue land` refuses it, and it never gets a
-  `Fixes` line.
+  coordinated: `se issue land` refuses it while a sub-issue is open. A
+  manifest, the parent at the top, lands once all are closed, as one PR.
 - **Parents close by themselves.** Every `se issue` command first closes,
   deepest first, each open parent whose sub-issues are all closed, with a
   comment saying so; closing a parent can complete its own parent, which then
-  closes in the same run.
+  closes in the same run. A manifest (labelled `se-manifest`, at the top)
+  never closes by itself: it is landed.
 - **Except for reviews.** A parent labelled `se-review` never closes by
   itself. Once its sub-issues are all closed it is *ready for review*, which
   is not work: it is never taken as a leaf, and it keeps blocking its
@@ -97,9 +154,11 @@ follows from its structure alone:
   ready when it is open, not claimed, and neither it nor any of its ancestors
   has an open blocker: with milestone M2 blocked by M1, no leaf of M2 starts
   before M1 has closed.
-- **The top**: `se issue pull` offers only issues without a parent. A parent
-  there is ready while some leaf inside it is, or some parent in its tree
-  (itself included) is ready for review; a sub-issue is never offered at the
+- **The top**: `se issue pull` offers only issues without a parent, and of
+  them only manifests, retros and overhauls. A parent there is ready while
+  some leaf inside it is, or some parent in its tree (itself included) is
+  ready for review, or it is a manifest whose leaves are all closed and whose
+  PR is not open yet (ready to land); a sub-issue is never offered at the
   top. So a review never waits on the coordinator that was running when its
   last leaf merged: any later box takes the tree and starts the reviewer.
 - **The tree's claim**: taking a parent at the top pushes `issue-<root>`,
@@ -108,9 +167,10 @@ follows from its structure alone:
   parent again and picks the tree up from the claim. The leaves' own claims keep two
   coordinators from taking one leaf twice.
 - **Leaves inside a tree** are claimed by `se issue pull --in <root> --take`,
-  each with its own branch `issue-<n>` from `origin/main`, and worked on in
-  their own git worktrees, so several are in flight at once and land as
-  separate PRs. `--in` reaches leaves at any depth, so the coordinator of the
+  each with its own branch `issue-<n>` from the manifest's branch
+  `origin/issue-<root>` (from `origin/main` where that is not on origin), and
+  worked on in their own git worktrees, so several are in flight at once,
+  each landing into the manifest's branch. `--in` reaches leaves at any depth, so the coordinator of the
   root hands out every leaf of the tree, and a sub-agent is only ever given a
   leaf.
 - **The coordinator** is the box that took the parent. A tree is coordinated
@@ -166,7 +226,8 @@ person**, and leaves the agents' queue until the person has closed it.
   solved, auto-merge on (`se issue land`) and kept until it merges
   (`se issue keep`), with an issue (`se issue new`) for
   everything it could not solve; a supersede (`se issue supersede <n>`),
-  where it cannot land a PR at all; or, where the issue's work reached main
+  where it cannot land a PR at all, `--duplicate-of` another open issue
+  whose PR already covers its work; or, where the issue's work reached main
   before the take, a close naming that commit
   (`se issue close <n> --fixed-by SHA`), so a moot issue ends without an
   empty PR. `se issue pull --take` names the open
@@ -194,11 +255,11 @@ se issue close N --fixed-by SHA --answers FILE [--json] [--repo OWNER/NAME]
 se issue edit N [--title T] [--body B | --body-file PATH] [--json] [--repo OWNER/NAME]
 se issue keep [--for D] [--json] [--repo OWNER/NAME]
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
-se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
-se issue supersede N (--body B | --body-file PATH) [--json] [--repo OWNER/NAME]
+se issue supersede N (--body B | --body-file PATH | --duplicate-of M) [--json] [--repo OWNER/NAME]
 se issue tree [ROOT] [--json] [--repo OWNER/NAME]
 se review brief N [--claims] [--json] [--repo OWNER/NAME]
 ```
@@ -249,6 +310,12 @@ to the answers file beside the branch's checkout, `<path>-landing.yaml` where
 box that takes over brings them up to date rather than writing them anew; a
 file there already is kept. It names the file (with `--json`: the
 takeover's `answers`).
+Every `--take`, at the top or with `--in`, first fetches `main` into the
+SE checkout se runs from and refuses where main has moved past the commit se
+was built from, naming `se update`: the agents and guidance a take hands over
+come from that checkout, so a box that ran on while main moved would hand its
+sub-agents the procedures of its start. Where it cannot tell (the build or its
+checkout unknown, the fetch failed), the take goes on.
 Every claim records the claiming box's session on the issue, a comment
 carrying `<!-- se:box <session> -->` (a takeover's comment carries it too).
 Once it has claimed an issue, `--take` runs the fan-out (below), which fires
@@ -268,8 +335,10 @@ say so (with `--json`: `{"ready":false,"full":true,"why"}`). It also names the o
 leaves to take over, then its ready leaves, at any depth, lowest number first,
 and apart from them the `se-review` parents ready for review; or says that
 nothing is ready (with why, where the tree holds an issue waiting on a
-person), or that ROOT has closed (with `--json`:
-`{"root","closed","ready","review","why"}`). With `--take`
+person), that every leaf is closed and the manifest lands (with the command
+that checks its branch out in its own worktree), or that ROOT has closed (with
+`--json`: `{"root","closed","ready","review","why","land"}`; with `--take`,
+`land` comes with the manifest's `branch` and `worktree`). With `--take`
 (or `--take N`) it claims the first of those leaves (or leaf `N`), moving on where
 another box claimed it first: it pushes `origin/main` as `issue-<n>` and
 fetches it, checking nothing out (a stuck leaf it takes over and fetches as
@@ -285,12 +354,21 @@ the leaf is worked on by a sub-agent inside the coordinator's box, under its cap
 without an answer to each landing question (see [Landing
 answers](#landing-answers)), refuses an
 issue with open sub-issues ("a parent holds no work") and a tree with
-uncommitted changes, merges origin's copy of the branch and `origin/main` in,
-runs `tests/check.sh` and goes on only if it passes, refuses a tree the
-battery did not record as passed and a branch main moved past meanwhile,
-pushes the branch, posts the commit status `se/battery` naming its tree on
-the pushed commit, which CI trusts (see
-[spec/coordination.md](coordination.md#up-to-date-with-main)), records on the leaf who worked it (see
+uncommitted changes. A leaf inside a manifest (an issue with a parent) lands
+into the manifest's branch: it merges origin's `issue-<n>` and then
+`issue-<manifest>` into the checkout (never a rebase; a conflict is undone
+and left to the worker), runs `tests/check.sh`, pushes the result to both
+branches at once (where another leaf landed in between, it merges again and
+pushes again), records the worker, posts the landing answers on the leaf and
+closes it, with no PR (with `--json`: `{"issue","manifest","into","closed"}`).
+An issue at the top (a manifest whose leaves are all closed, a retro, an
+overhaul) lands to main: it merges origin's copy of the branch and
+`origin/main` in, runs `tests/check.sh` and goes on only if it passes,
+refuses a tree the battery did not record as passed and a branch main moved
+past meanwhile, pushes the branch, posts the commit status `se/battery`
+naming its tree on the pushed commit, which CI trusts (see
+[spec/coordination.md](coordination.md#up-to-date-with-main)), records on
+the leaf who worked it (see
 [Reviews](#reviews)), posts the landing answers on the issue, opens one PR against main titled after the issue with the
 body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left
 to wait for is squash-merged at once. It prints the PR's number and link (with
@@ -327,10 +405,12 @@ the only place they are written; `se issue land` and the retro both read it.
   list's order, `facts`) right under the marker `<!-- se:landing-yaml -->`,
   which the retro parses.
 - The facts: when the branch was created (the claim, from GitHub's activity
-  record) and the minutes from it to landing; the branch's commits, merges
+  record) and the minutes from it to landing, its duration; for a leaf, the
+  manifest's branch it landed `into`; the branch's commits, merges
   excluded; its takeovers, from their markers; and its merges of main, all
-  counted against `origin/main`; and the GitHub requests the `se` commands
-  run in the checkout made, from its ledger, this land's so far included
+  counted against `origin/main` (a leaf's against its manifest's branch);
+  and the GitHub requests the `se` commands run in the checkout made, from
+  its ledger, this land's so far included
   ([io.md](io.md#living-within-githubs-rate-limits)).
 - Landing again (after a CI fix, say) updates that comment rather than
   adding a second.
@@ -342,7 +422,11 @@ the only place they are written; `se issue land` and the retro both read it.
 `se issue new` creates an issue labelled `se` on the repository, makes it a
 sub-issue of `--parent` where that is given, and links it as blocked by each
 issue `--blocked-by` names, then prints its number and link
-(with `--json`: `{"number","url","blocked_by","parent","blocks","person"}`). `--blocked-by` is required: a
+(with `--json`: `{"number","url","blocked_by","parent","blocks","person","manifest","misc"}`).
+`--manifest` makes it a new manifest at the top, labelled `se-manifest`.
+Without `--parent`, `--manifest` or `--person` it files the issue into the
+open misc manifest, opening the next one where none takes issues now (see
+[Manifests](#manifests-all-work-moves-in-them)); its help says the target. `--blocked-by` is required: a
 comma-separated list of issue numbers (`--blocked-by 5,8`) or the word `none`.
 Every issue in the list is looked up before anything is written, so a list
 naming an issue that does not exist, or a pull request, creates nothing; so
@@ -385,6 +469,17 @@ naming the successor. A final issue is refused: its box lands a PR. A ready
 successor fires the routine once (with `--json`:
 `{"issue","successor","parent","blocked_by","blocks","ready","fanout"}`).
 
+`se issue supersede N --duplicate-of M` is the supersede of an issue that
+the open issue M already covers, its PR doing the same work (two boxes that
+filed the same bug under different titles): it mints nothing. It links N's
+open dependents as blocked by M, closes N's open PR with a comment naming M
+and deletes N's `issue-N` claim by a git push from the workspace (so no PR
+stays open with no issue behind it, and `se fleet fix` finds no leftover
+claim), then closes N as a duplicate (state_reason `duplicate`), its comment
+naming M. A final issue closes so too, since its
+work lands under M; a closed M is refused (with `--json`:
+`{"issue","of","url","blocks","pulls","branch"}`).
+
 `se issue close N --fixed-by SHA --answers FILE` is the third way, for an
 issue whose work reached main before its box took it (another issue's PR did
 it): landing would take an empty commit. It fetches `origin/main` and refuses
@@ -409,6 +504,12 @@ until it merges (`se issue keep`). A merged PR, a supersede or a close by
 one `se issue pull --take` took (a parent's box coordinates and closes
 nothing itself); a leaf's sub-agent is held to the leaf its prompt names. It
 is enforcement, so it fails closed: only what GitHub shows lets the box end.
+`se issue land` records the PR it landed, auto-merge on, in
+`.se/.runtime/box.json` of its workspace
+(`{"landed":{"N":{"pr":P,"auto_merge":true}}}`), and the hook takes that
+PR's auto-merge as on, the record in its own workspace or in the issue's
+worktree beside it, whatever GitHub's `auto_merge` field shows, which a
+proxy's auto-merge route may leave unset.
 Its escape hatches: a box waiting on background work passes; it refuses at
 most `refusals` times in a row ([spec/stop.yaml](stop.yaml)); a prompt from a
 person resets the count (`se hook prompt`); and a check that cannot judge
@@ -439,8 +540,9 @@ fixed each, and the claim time in its landing answers):
 
 - **the work left**: every open leaf, and every open review gate, which is
   reviewed once its tree is done;
-- **the pace**: the se issues merged an hour, and their claim-to-merge times,
-  p50 and p90;
+- **the pace**: the se issues merged an hour, a leaf landed into its
+  manifest counting as merged, and their claim-to-merge times (a leaf's
+  claim-to-landing, from its landing facts), p50 and p90;
 - **the parallelism**: how many run at once, the leaves in flight now that
   are not stuck past the lease, or the merges an hour times the p50,
   whichever is more, and at least one;
@@ -535,8 +637,8 @@ It also has an API trigger, which `se` fires for the fan-out.
 The plugin's agents, one file each, holding each role's whole procedure:
 
 <!-- se:manifest agents -->
-- [`se:worker`](../src/plugin/agents/worker.md), for the kind leaf: an issue with no sub-issues: work, landed as one PR.
-- [`se:coordinator`](../src/plugin/agents/coordinator.md), for the kind parent: an issue with sub-issues: the box coordinates its tree, as it runs the queue and checks the fleet when nothing is ready.
+- [`se:worker`](../src/plugin/agents/worker.md), for the kind leaf: an issue with no sub-issues: work, landed into its manifest's branch.
+- [`se:coordinator`](../src/plugin/agents/coordinator.md), for the kind parent: an issue with sub-issues, a manifest at the top: the box coordinates its tree and lands it as one PR, as it runs the queue and checks the fleet when nothing is ready.
 - [`se:reviewer`](../src/plugin/agents/reviewer.md), for the kind gate: an se-review parent ready for review: reviewed cold.
 - [`se:retro`](../src/plugin/agents/retro.md), for the kind retro: an issue labelled se-retro.
 - [`se:overhaul`](../src/plugin/agents/overhaul.md), for the kind overhaul: an issue labelled se-overhaul.
@@ -551,6 +653,9 @@ cost a fire of the routine (whose limit the fan-out ran into on 2026-10-14).
   fresh sub-agent of the agent the take names, with a clean context, several
   at once up to its cap. A parent it takes it coordinates the same way with
   `--in ROOT --take`.
+- **The pause switch**, `fleet.box/config/paused` on main: every take reads
+  it first, and a box whose take says the fleet is paused starts nothing
+  more and ends.
 - **The cap** is `fleet.box/config/parallel`, 4 (`Parallel` in
   `src/internal/issues/box.go` until the fleet's rules move onto the index):
   the box's disk allowance and CPU limit it, and the battery takes about

@@ -66,7 +66,7 @@ func TestTheQueueEstimateFollowsThePaceAndNamesTheChain(t *testing.T) {
 	if q.P50Hours != 8 || q.P90Hours != 16 || !q.P50At.Equal(now.Add(8*time.Hour)) || !q.P90At.Equal(now.Add(16*time.Hour)) {
 		t.Fatalf("%+v", q)
 	}
-	if len(nodes) != 14 || nodes[0].Why != "claimed by issue-1" || nodes[4].Why != "ready" || nodes[13].Why != "blocked by #13" {
+	if len(nodes) != 14 || nodes[0].Why != "claimed by issue-1" || nodes[4].Why != BareWhy || nodes[13].Why != "blocked by #13" {
 		t.Fatalf("%+v", nodes)
 	}
 	text := q.Text()

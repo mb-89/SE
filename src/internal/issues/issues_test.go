@@ -127,6 +127,26 @@ func pushedAt(answers map[string]string, when string, ns ...int) map[string]stri
 	return answers
 }
 
+// manifested makes each issue n a manifest with one open leaf inside it,
+// 1000+n, so a take at the top may have n: boxes take only manifests.
+func manifested(answers map[string]string, ns ...int) map[string]string {
+	for _, n := range ns {
+		withLeaf(answers, n, 1000+n)
+	}
+	return answers
+}
+
+// withLeaf makes issue m a manifest with the open leaf inside it.
+func withLeaf(answers map[string]string, m, leaf int) map[string]string {
+	answers[fmt.Sprintf("repos/o/r/issues/%d/sub_issues?per_page=100", m)] = fmt.Sprintf(`[{"number":%d,"title":"t%d","state":"open","labels":[{"name":"se"}]}]`, leaf, leaf)
+	return answers
+}
+
+// openRetro is open, labelled se-retro: a leaf a take at the top may have.
+func openRetro(n int, body string) string {
+	return fmt.Sprintf(`{"number":%d,"title":"t%d","body":%q,"state":"open","html_url":"u%d","labels":[{"name":"se-retro"}]}`, n, n, body, n)
+}
+
 func open(n int, body string) string {
 	return fmt.Sprintf(`{"number":%d,"title":"t%d","body":%q,"state":"open","html_url":"u%d","issue_dependencies_summary":{"total_blocked_by":0}}`, n, n, body, n)
 }
@@ -180,8 +200,14 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 			t.Errorf("%d: #%d %q, want #%d %q", k, st.Number, st.Why, 5+k, want[k])
 		}
 	}
-	next, ok, err := s.Next()
-	if err != nil || !ok || next.Number != 6 || !strings.Contains(next.URL, "/issues/6") {
+	// #6 and #7 stand in no manifest, and boxes take only manifests: a take
+	// at the top skips a bare leaf.
+	for _, st := range all[1:] {
+		if st.Bare != BareWhy || st.Ready() {
+			t.Errorf("#%d: %+v", st.Number, st)
+		}
+	}
+	if next, ok, err := s.Next(); err != nil || ok {
 		t.Fatalf("next = %+v %v %v", next, ok, err)
 	}
 }
@@ -200,10 +226,10 @@ func TestOnlyOpenSeIssuesAreTheFleets(t *testing.T) {
 
 func TestLowestReadyNumberComesFirst(t *testing.T) {
 	t.Parallel()
-	gh := recorded(t, unblocked(map[string]string{
+	gh := recorded(t, manifested(unblocked(map[string]string{
 		listPath: `[` + open(9, "") + `,` + open(3, "") + `]` + `[` + open(5, "") + `]`, // two pages
 		refsPath: `[]`,
-	}, 3, 5, 9))
+	}, 3, 5, 9), 3, 5, 9))
 	next, ok, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Next()
 	if err != nil || !ok || next.Number != 3 || next.Title != "t3" {
 		t.Fatalf("%+v %v %v", next, ok, err)
@@ -389,9 +415,13 @@ func TestTheSecondClaimIsRefused(t *testing.T) {
 func TestATakeRefusedMovesToTheNextIssue(t *testing.T) {
 	t.Parallel()
 	_, a, b := boxes(t)
-	// Both boxes read the same issues; a claims #5 before b pushes.
+	// Both boxes read the same issues, two retros (the leaves a box takes at
+	// the top); a claims #5 before b pushes.
+	retro := func(n int) string {
+		return fmt.Sprintf(`{"number":%d,"title":"t%d","state":"open","html_url":"u%d","labels":[{"name":"se-retro"}]}`, n, n, n)
+	}
 	gh := recorded(t, unblocked(map[string]string{
-		listPath: `[` + open(5, "") + `,` + open(6, "") + `]`,
+		listPath: `[` + retro(5) + `,` + retro(6) + `]`,
 		refsPath: `[]`,
 	}, 5, 6))
 	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}

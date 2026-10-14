@@ -177,6 +177,20 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 		return r, nil
 	}
 	if pass {
+		// A manifest passed is not closed: its leaves' work is on its
+		// branch, and it lands as one PR, which closes it.
+		if got, err := api[issue](s, path, false); err != nil {
+			return r, err
+		} else if got[0].labelled(ManifestLabel) {
+			if top, err := s.manifestOf(n); err != nil {
+				return r, err
+			} else if top == 0 {
+				if _, err := s.GitHub.Send("DELETE", path+"/labels/"+ReviewLabel); err != nil {
+					return r, fmt.Errorf("taking %s off #%d: %w", ReviewLabel, n, err)
+				}
+				return r, nil
+			}
+		}
 		if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
 			return r, fmt.Errorf("closing #%d: %w", n, err)
 		}
