@@ -51,12 +51,13 @@ func TestOverhaulReadWritesTheCodeFactsIntoTheDraft(t *testing.T) {
 	})
 	d := disk.NewFake()
 	for path, text := range map[string]string{
-		"/ws/spec/principles.md":    "# Design principles\n\n1. **Mechanize first.**\n   Checked by: retro, mechanically.\n",
-		"/ws/src/go.mod":            "module example.com/ws\n",
-		"/ws/src/cmd/app/main.go":   "package main\n\nfunc main() {}\n",
-		"/ws/src/internal/x/x.go":   "package x\n\n// Gone is kept for old reports.\nfunc Gone() {}\n",
-		"/ws/src/scripts/fix.sh":    "#!/bin/sh\n# Why: a one-off.\n",
-		"/ws/src/scripts/README.md": "# Scripts\n",
+		"/ws/spec/principles.md":         "# Design principles\n\n1. **Mechanize first.**\n   Checked by: retro, mechanically.\n",
+		"/ws/src/go.mod":                 "module example.com/ws\n",
+		"/ws/src/cmd/app/main.go":        "package main\n\nfunc main() {}\n",
+		"/ws/src/internal/x/x.go":        "package x\n\n// Gone is kept for old reports.\nfunc Gone() {}\n",
+		"/ws/src/scripts/fix.sh":         "#!/bin/sh\n# Why: a one-off.\n",
+		"/ws/src/scripts/README.md":      "# Scripts\n",
+		"/ws/.se/.runtime/logs/s1.jsonl": `{"at":"2026-10-01T00:00:00Z","event":"se.call","e":{"words":["overhaul","read","31"],"ms":5}}` + "\n",
 	} {
 		if err := d.MkdirAll(filepath.Dir(path)); err != nil {
 			t.Fatal(err)
@@ -82,14 +83,49 @@ func TestOverhaulReadWritesTheCodeFactsIntoTheDraft(t *testing.T) {
 		"## Pruning and code shape",
 		"- src/internal/x/x.go:4: Gone",
 		"- src/internal/x/x.go:3: Gone is kept for old reports.",
-		"`se overhaul read`",
+		"`se overhaul new`",
 		"- src/scripts/fix.sh (not read by a retro yet, added at no known time): a one-off",
 	} {
 		if !strings.Contains(string(draft), want) {
 			t.Errorf("the draft lacks %q:\n%s", want, draft)
 		}
 	}
+	if strings.Contains(string(draft), "`se overhaul read`") {
+		t.Errorf("the draft says se overhaul read, which ran, is unused:\n%s", draft)
+	}
 	if _, _, err := issues.ParseOverhaul(string(draft)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOverhaulReadRefusesADeadcodeThatCannotRun(t *testing.T) {
+	t.Parallel()
+	hubAt(t, map[string]string{
+		"repos/o/r/issues/31": `{"number":31,"state":"open","body":"<!-- se:overhaul attended -->","labels":[{"name":"se-overhaul"}]}`,
+	})
+	d := disk.NewFake()
+	for path, text := range map[string]string{
+		"/ws/spec/principles.md":  "# Design principles\n\n1. **Mechanize first.**\n   Checked by: retro, mechanically.\n",
+		"/ws/src/go.mod":          "module example.com/ws\n",
+		"/ws/src/cmd/app/main.go": "package main\n\nfunc main() {}\n",
+	} {
+		if err := d.MkdirAll(filepath.Dir(path)); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.WriteFile(path, []byte(text)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := proc.NewFake()
+	m.Install("sh", func(proc.Cmd) int { return 1 })
+	m.Install("git", func(proc.Cmd) int { return 0 })
+	w := worldOf(t)
+	w.Disk, w.Proc = d, m
+	code, out, errs := se(t, "overhaul", "read", "31", "--repo", "o/r", "--workspace", "/ws", "--out", "/draft.md")
+	if code == 0 || !strings.Contains(errs, "deadcode") || !strings.Contains(errs, "sh tests/tools.sh install") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if ok, _ := d.Exists("/draft.md"); ok {
+		t.Fatal("a draft was written without the production-unreachable fact")
 	}
 }

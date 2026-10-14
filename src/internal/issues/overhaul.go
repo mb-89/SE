@@ -183,11 +183,11 @@ type OverhaulReport struct {
 }
 
 // OverhaulWindow is what se overhaul read hands the code facts: since when
-// (the previous overhaul's close; zero, ever), the landing answers given
-// since, and when the last retro's window ended.
+// (the previous overhaul's close; zero, ever), the se command lines the
+// comments se wrote since stand for, and when the last retro's window ended.
 type OverhaulWindow struct {
 	Since, ReadBy time.Time
-	Answers       []string
+	Ran           []string
 }
 
 // Judged is the box's judgment of one principle: how far SE strays from it.
@@ -327,7 +327,7 @@ func (s Source) CollectOverhaul(n int, ps []Principle) (OverhaulReport, error) {
 	if err := s.earlier(&r, n); err != nil {
 		return OverhaulReport{}, err
 	}
-	r.Window.Answers, err = s.answersSince(r.Window.Since)
+	r.Window.Ran, err = s.ranSince(r.Window.Since)
 	return r, err
 }
 
@@ -359,9 +359,20 @@ func (s Source) earlier(r *OverhaulReport, n int) error {
 	return nil
 }
 
-// answersSince reads every landing answer given since t (zero: ever), in one
-// listing of the repository's comments.
-func (s Source) answersSince(t time.Time) ([]string, error) {
+// wrote is, for each mark se leaves on a comment, the se command line that
+// leaves it: a claim, a landing, a retro's and an overhaul's report, a
+// review's verdict, a fleet fix.
+var wrote = []struct{ mark, line string }{
+	{"<!-- se:box ", "se issue pull --take"},
+	{landingMark, "se issue land --answers"},
+	{reportMark, "se retro report"},
+	{overhaulReportMark, "se overhaul file"},
+	{"<!-- se:review {", "se issue review --report"},
+	{"<!-- se:fleet ", "se fleet fix"},
+}
+
+// ranSince is the se command lines the comments se wrote since t stand for.
+func (s Source) ranSince(t time.Time) ([]string, error) {
 	path := fmt.Sprintf("repos/%s/issues/comments?per_page=%d", s.Repo, PerPage)
 	if !t.IsZero() {
 		path += "&since=" + t.Format(time.RFC3339)
@@ -372,9 +383,9 @@ func (s Source) answersSince(t time.Time) ([]string, error) {
 	}
 	var out []string
 	for _, c := range comments {
-		if l, ok, err := ParseLanding(c.Body); ok && err == nil {
-			for _, a := range l.Answers {
-				out = append(out, a)
+		for _, w := range wrote {
+			if strings.Contains(c.Body, w.mark) {
+				out = append(out, w.line)
 			}
 		}
 	}

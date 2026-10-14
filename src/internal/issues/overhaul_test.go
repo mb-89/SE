@@ -4,6 +4,7 @@ package issues
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -144,7 +145,7 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 		"repos/o/r/issues?labels=se-overhaul&state=closed&per_page=100": `[{"number":15,"state":"closed","closed_at":"2026-09-01T00:00:00Z"}]`,
 		"repos/o/r/issues/15/comments?per_page=100":                     jsonComments(prev),
 		"repos/o/r/issues/16":                                           `{"number":16,"state":"closed","state_reason":"completed"}`,
-		"repos/o/r/issues/40/comments?per_page=100":                     jsonComments(landing(t, 40, map[string]string{"by-hand": "ran se fleet prune"}, atNow().Now())),
+		"repos/o/r/issues/40/comments?per_page=100":                     jsonComments("Claimed.\n\n<!-- se:box s1 -->", landing(t, 40, map[string]string{"by-hand": "ran se fleet prune"}, atNow().Now())),
 	})
 	r, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.CollectOverhaul(31, []Principle{{Number: 1, Name: "Mechanize first"}})
 	if err != nil {
@@ -164,9 +165,17 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 	if !reflect.DeepEqual(r.Recurring, []string{"landing", "merging"}) || !reflect.DeepEqual(r.Earlier, []Overhauled{{Title: "Split the engine", Principle: 4, Issue: 16, State: "completed"}}) {
 		t.Fatalf("%v %+v", r.Recurring, r.Earlier)
 	}
-	// The code facts' window: since #15 closed, with the landing answers given since.
-	if !r.Window.Since.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) || !strings.Contains(strings.Join(r.Window.Answers, "\n"), "ran se fleet prune") {
+	// The code facts' window: since #15 closed, with the command lines the
+	// comments se wrote stand for, the reports', a claim's and a landing's;
+	// what a landing answer says ran is no command line.
+	ran := strings.Join(r.Window.Ran, "\n")
+	if !r.Window.Since.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) || strings.Contains(ran, "fleet prune") {
 		t.Fatalf("%+v", r.Window)
+	}
+	for _, line := range []string{"se issue pull --take", "se issue land --answers", "se retro report", "se overhaul file"} {
+		if !slices.Contains(r.Window.Ran, line) {
+			t.Errorf("the window lacks %q: %+v", line, r.Window)
+		}
 	}
 	draft, err := r.OverhaulDraft()
 	if err != nil {

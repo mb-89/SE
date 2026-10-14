@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 
 	"github.com/mb-89/SE/src/internal/issues"
@@ -77,7 +79,9 @@ func init() {
 				if err != nil {
 					return Reply{}, err
 				}
-				r.Code = codeFacts(c, r.Window)
+				if r.Code, err = codeFacts(c, r.Window); err != nil {
+					return Reply{}, err
+				}
 				if text, err = r.OverhaulDraft(); err != nil {
 					return Reply{}, err
 				}
@@ -152,11 +156,19 @@ var flagNamed = regexp.MustCompile(`--([a-z][a-z-]*)`)
 
 // codeFacts are the pruning and code-shape facts of the workspace's code,
 // with the commands and flags registered and what GitHub said in w. They are
-// advice: what cannot be read is said in their place.
-func codeFacts(c *Call, w issues.OverhaulWindow) string {
-	in, err := shape.Read(c.Disk, c.Proc, c.Workspace)
+// advice: what cannot be read is said in their place, but a deadcode that
+// cannot run refuses them, so no fact is silently empty.
+func codeFacts(c *Call, w issues.OverhaulWindow) (string, error) {
+	logs, err := filepath.Rel(c.Workspace, c.Paths().Logs())
 	if err != nil {
-		return "## Pruning and code shape\nNot read: " + err.Error() + ".\n"
+		return "", err
+	}
+	in, err := shape.Read(c.Disk, c.Proc, c.Workspace, logs)
+	if errors.Is(err, shape.ErrDeadcode) {
+		return "", err
+	}
+	if err != nil {
+		return "## Pruning and code shape\nNot read: " + err.Error() + ".\n", nil
 	}
 	for _, name := range sortedNames() {
 		sur := shape.Surface{Name: name}
@@ -165,6 +177,9 @@ func codeFacts(c *Call, w issues.OverhaulWindow) string {
 		}
 		in.Commands = append(in.Commands, sur)
 	}
-	in.Answers, in.Since, in.ReadBy = w.Answers, w.Since, w.ReadBy
-	return shape.Find(in).Markdown()
+	for _, line := range w.Ran {
+		in.Ran = append(in.Ran, shape.Ran{Line: line})
+	}
+	in.Since, in.ReadBy = w.Since, w.ReadBy
+	return shape.Find(in).Markdown(), nil
 }

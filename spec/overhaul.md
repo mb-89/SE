@@ -41,11 +41,15 @@ whole system, not a window.
   - the previous overhaul's findings and the state of their issues;
   - the pruning and code-shape facts of the code (`src/internal/shape`):
     what `deadcode` finds nothing but tests reach (the fakes and test helpers
-    left out), duplicates and near-duplicates, lines of code and of tests per
-    package and module, one-user abstractions (a library one other module
-    imports, a registry with one entry, an interface with one implementation
-    and no fake), the `se` commands and flags no landing answer named since
-    the last overhaul, comments that say code serves an old state, the
+    left out; a missing deadcode is installed at its pin through
+    `sh tests/tools.sh install`, and one that cannot run refuses the read),
+    duplicates and near-duplicates, lines of code and of tests per package
+    and module, one-user abstractions (a library one other module imports,
+    a program left out, a registry with one entry, an interface with one
+    implementation and no fake), the `se` commands and flags no `se` command
+    line ran since the last overhaul (the session logs' lines, and those the
+    comments `se` writes stand for: claims, landings, reports, reviews, fleet
+    fixes; where none names a command, the fact is dropped), comments that say code serves an old state, the
     scripts and whether the last retro read them, the files untouched
     longest, the longest functions, files and parameter lists, the switches
     on a kind, and the files touched per change.

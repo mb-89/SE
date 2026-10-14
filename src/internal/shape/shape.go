@@ -30,16 +30,16 @@ type Input struct {
 	// checkout; Module is the Go module's path.
 	Files, Scripts map[string][]byte
 	Module         string
-	// Deadcode is what `deadcode ./...` printed in src; Unrun says why it did
-	// not run, "" where it did.
-	Deadcode, Unrun string
+	// Deadcode is what `deadcode ./...` printed in src.
+	Deadcode string
 	// Tracked are the files git tracks; Log is git log in Read's format.
 	Tracked []string
 	Log     string
-	// Commands are se's commands with their flags; Answers the landing
-	// answers given since Since (zero: the whole history).
+	// Commands are se's commands with their flags; Ran the se command lines
+	// that ran: the session logs' and those the comments se wrote stand for.
+	// Those that ran before Since (zero: the whole history) do not count.
 	Commands []Surface
-	Answers  []string
+	Ran      []Ran
 	Since    time.Time
 	// ReadBy is when the last retro's window ended: a script added before
 	// then, that retro has read. Zero where no retro reported.
@@ -99,7 +99,6 @@ type Change struct {
 // Facts are what Find found, longest or most alike first.
 type Facts struct {
 	Unreachable []Place
-	Unrun       string
 	Duplicates  []Pair
 	Near        []Pair
 	Packages    []Size
@@ -109,15 +108,18 @@ type Facts struct {
 	Libraries   []Place
 	Registries  []Place
 	Interfaces  []Place
-	Unused      []string
-	Since       time.Time
-	Legacy      []Place
-	Scripts     []Script
-	Untouched   []Touched
-	LongFuncs   []Measure
-	LongFiles   []Measure
-	LongParams  []Measure
-	Switches    []Measure
+	// Unused are the commands, and the flags of those that ran, that no line
+	// ran; Counted says how many commands ran: none, and the fact is dropped.
+	Unused     []string
+	Counted    int
+	Since      time.Time
+	Legacy     []Place
+	Scripts    []Script
+	Untouched  []Touched
+	LongFuncs  []Measure
+	LongFiles  []Measure
+	LongParams []Measure
+	Switches   []Measure
 	// Changes counts the changes on main the files-touched figures read.
 	Changes, MedianFiles, MaxFiles int
 	Widest                         []Change
@@ -176,7 +178,7 @@ func Find(in Input) Facts {
 		importers: map[string]map[string]bool{}, tested: map[string]bool{}, methods: map[string]map[string]bool{},
 		typeAt: map[string]string{}, registers: map[string]string{}, calls: map[string]int{},
 	}
-	s.f.Since, s.f.Unrun = in.Since, in.Unrun
+	s.f.Since = in.Since
 	for _, p := range slices.Sorted(maps.Keys(in.Files)) {
 		s.file(p, in.Files[p])
 	}
@@ -520,13 +522,14 @@ func (s *scan) sizes() {
 }
 
 // oneUser finds the abstractions with one user: a library one other module
-// imports, a registry with one entry, an interface with one implementation
-// and no fake.
+// imports, a program left out (internal packages serving the program are the
+// layout, not a smell), a registry with one entry, an interface with one
+// implementation and no fake.
 func (s *scan) oneUser() {
 	for _, dir := range slices.Sorted(maps.Keys(s.importers)) {
 		users := map[string]bool{}
 		for from := range s.importers[dir] {
-			if module(from) != module(dir) {
+			if module(from) != module(dir) && !s.mains[from] {
 				users[module(from)] = true
 			}
 		}
@@ -567,17 +570,27 @@ func covers(have map[string]bool, want []string) bool {
 	return true
 }
 
-// unused lists the se commands, and the flags of the commands named, that no
-// landing answer since the window started names.
+// unused lists the se commands that no line run since the window started
+// names, and the flags of those that ran that none gave.
 func (s *scan) unused() {
-	said := strings.ToLower(strings.Join(s.in.Answers, "\n"))
+	var lines []string
+	for _, r := range s.in.Ran {
+		if r.At.IsZero() || !r.At.Before(s.in.Since) {
+			lines = append(lines, r.Line)
+		}
+	}
+	ran := used(lines, s.in.Commands)
+	if s.f.Counted = len(ran); s.f.Counted == 0 {
+		return
+	}
 	for _, c := range s.in.Commands {
-		if !strings.Contains(said, "se "+c.Name) {
+		flags, ok := ran[c.Name]
+		if !ok {
 			s.f.Unused = append(s.f.Unused, "se "+c.Name)
 			continue
 		}
 		for _, flag := range c.Flags {
-			if !strings.Contains(said, "--"+flag) {
+			if !flags[flag] {
 				s.f.Unused = append(s.f.Unused, "se "+c.Name+" --"+flag)
 			}
 		}

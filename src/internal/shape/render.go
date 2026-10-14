@@ -16,11 +16,7 @@ func (f Facts) Markdown() string {
 	b.WriteString("## Pruning and code shape\nCandidates, not verdicts: the overhaul agent's pruning rules (src/plugin/agents/overhaul.md) and spec/principles.md's \"How code is written\" judge them. Each removal or reshaping is a finding with area `removal` or `principle`.\n")
 
 	section(&b, "Production-unreachable", "What `deadcode ./...` finds nothing in production reaches, the fakes and test helpers left out: code only tests reach.")
-	if f.Unrun != "" {
-		fmt.Fprintf(&b, "Not found: %s.\n", f.Unrun)
-	} else {
-		places(&b, f.Unreachable)
-	}
+	places(&b, f.Unreachable)
 
 	section(&b, "Duplicates", fmt.Sprintf("Function bodies the same token for token (%d tokens or more).", minTokens))
 	pairs(&b, f.Duplicates)
@@ -37,17 +33,20 @@ func (f Facts) Markdown() string {
 	b.WriteString("\n")
 	sizes(&b, "package", f.Packages)
 
-	section(&b, "One-user abstractions", "A library one other module imports, a registry with one entry, an interface with one implementation and no fake.")
+	section(&b, "One-user abstractions", "A library one other module imports, a program left out, a registry with one entry, an interface with one implementation and no fake.")
 	places(&b, append(append(append([]Place{}, f.Libraries...), f.Registries...), f.Interfaces...))
 
 	window := "in the whole history"
 	if !f.Since.IsZero() {
 		window = "since " + f.Since.Format("2006-01-02")
 	}
-	section(&b, "Unused surfaces", "The se commands, and the flags of those named, that no landing answer names "+window+" (the daemon's calls do not reach GitHub, so the landing answers stand in).")
-	if len(f.Unused) == 0 {
+	section(&b, "Unused surfaces", "The se commands, and the flags of those that ran, that no se command line ran "+window+": the session logs' and those the comments se wrote stand for (a claim, a landing, a report, a review, a fleet fix).")
+	switch {
+	case f.Counted == 0:
+		b.WriteString("Dropped: no session log here and no comment se wrote names an se command that ran " + window + ", so nothing says what runs.\n")
+	case len(f.Unused) == 0:
 		b.WriteString("None.\n")
-	} else {
+	default:
 		b.WriteString("`" + strings.Join(f.Unused, "`, `") + "`.\n")
 	}
 

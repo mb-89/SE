@@ -9,7 +9,7 @@ import (
 
 func main() {
 	lib.Register("only")
-	fmt.Println(lib.Used(), lib.Copy("a"), lib.Again("b"), lib.Near(1), lib.Far(2), kind("x"), wide(1, 2, 3, 4, 5, 6))
+	fmt.Println(lib.Used(), lib.Say(), lib.Copy("a"), lib.Again("b"), lib.Near(1), lib.Far(2), kind("x"), wide(1, 2, 3, 4, 5, 6))
 	var s lib.Store = lib.Disk{}
 	fmt.Println(s.Get("k"))
 }
