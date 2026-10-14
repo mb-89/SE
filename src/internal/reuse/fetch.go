@@ -69,16 +69,9 @@ func Fetch(p proc.Procs, d disk.Disk, into string, sources []Source) ([]string, 
 		if clean := filepath.ToSlash(filepath.Clean(s.Path)); clean != "." {
 			tree += ":" + clean
 		}
-		tarball := filepath.Join(repos, s.Name+".tar")
-		if err := git(repo, "archive", "--format=tar", "-o", tarball, tree); err != nil {
+		// A tree checked out into its own work tree lands at target's root.
+		if err := git(repo, "--work-tree="+target, "checkout", "-q", tree, "--", "."); err != nil {
 			return lines, fmt.Errorf("%s: %w", s.Name, err)
-		}
-		out, err := proc.Combined(p, proc.Cmd{Name: "tar", Args: []string{"-xf", tarball, "-C", target}})
-		if err != nil {
-			return lines, fmt.Errorf("%s: tar: %v %s", s.Name, err, strings.TrimSpace(string(out)))
-		}
-		if err := d.Remove(tarball); err != nil {
-			return lines, err
 		}
 		lines = append(lines, fmt.Sprintf("%s: %s %s at %s (%s), as the plugin %s", s.Name, s.Repo, s.Path, s.Commit[:12], s.Licence, s.Plugin()))
 	}

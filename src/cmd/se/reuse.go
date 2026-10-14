@@ -14,6 +14,7 @@ func init() {
 		Name:    "fleet plugins",
 		Usage:   "fleet plugins --into DIR",
 		Group:   "Fleet",
+		Class:   batch,
 		Summary: "fetch the outside plugins and skills SE runs, pinned",
 		Details: "fetch every source of the reuse config (src/internal/index/wiring.yaml) at its pinned commit into DIR, as a folder of plugins that one entry of " + reuse.DirsVar + " loads: each plugin as DIR/<name>, each lone skill inside DIR/" + reuse.Adopted + ". A folder there that no source names any more is removed. A cloud environment's setup script runs it (spec/cloud.md).",
 		Run: func(c *Call) (Reply, error) {

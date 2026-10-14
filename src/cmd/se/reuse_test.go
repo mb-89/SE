@@ -118,24 +118,17 @@ func TestFleetPluginsFetchesEverySourceAtItsPinAsAFolderOfPlugins(t *testing.T) 
 	d := onFake(t)
 	m := proc.NewFake()
 	onMachine(t, m)
-	// git makes the repository and the archive it is asked for; tar unpacks
-	// the archive as one file.
+	// git makes the repository it is asked for, and checks a tree out as one file.
 	m.Install("git", func(c proc.Cmd) int {
-		if c.Args[2] == "init" {
+		switch {
+		case c.Args[2] == "init":
 			if err := d.MkdirAll(filepath.Join(c.Args[1], ".git")); err != nil {
 				return 1
 			}
-		}
-		if len(c.Args) > 5 && c.Args[2] == "archive" {
-			if err := d.WriteFile(c.Args[5], []byte("tar")); err != nil {
+		case strings.HasPrefix(c.Args[2], "--work-tree="):
+			if err := d.WriteFile(filepath.Join(strings.TrimPrefix(c.Args[2], "--work-tree="), "SKILL.md"), []byte("x")); err != nil {
 				return 1
 			}
-		}
-		return 0
-	})
-	m.Install("tar", func(c proc.Cmd) int {
-		if err := d.WriteFile(filepath.Join(c.Args[3], "SKILL.md"), []byte("x")); err != nil {
-			return 1
 		}
 		return 0
 	})
@@ -158,9 +151,8 @@ func TestFleetPluginsFetchesEverySourceAtItsPinAsAFolderOfPlugins(t *testing.T) 
 	lines := strings.Join(m.Lines(), "\n")
 	for _, want := range []string{
 		"git -C " + filepath.Join(into, reuse.Repos, "anthropics-claude-plugins-official") + " fetch -q --depth 1 https://github.com/anthropics/claude-plugins-official 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3",
-		"archive --format=tar -o " + filepath.Join(into, reuse.Repos, "pr-review-toolkit.tar") + " 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3:plugins/pr-review-toolkit",
-		"archive --format=tar -o " + filepath.Join(into, reuse.Repos, "clean-code.tar") + " 8476ba6f4f6146095d653d9ee09c53fe970f599e\n",
-		"tar -xf " + filepath.Join(into, reuse.Repos, "clean-code.tar") + " -C " + filepath.Join(into, reuse.Adopted, "skills", "clean-code"),
+		"--work-tree=" + filepath.Join(into, "pr-review-toolkit") + " checkout -q 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3:plugins/pr-review-toolkit -- .",
+		"--work-tree=" + filepath.Join(into, reuse.Adopted, "skills", "clean-code") + " checkout -q 8476ba6f4f6146095d653d9ee09c53fe970f599e -- .",
 	} {
 		if !strings.Contains(lines+"\n", want) {
 			t.Errorf("no run %q in:\n%s", want, lines)
@@ -176,9 +168,6 @@ func TestFleetPluginsFetchesEverySourceAtItsPinAsAFolderOfPlugins(t *testing.T) 
 		if ok, _ := d.Exists(filepath.Join(into, gone)); ok {
 			t.Errorf("%s, which no source names, stayed", gone)
 		}
-	}
-	if ok, _ := d.Exists(filepath.Join(into, reuse.Repos, "clean-code.tar")); ok {
-		t.Error("an archive stayed behind")
 	}
 	if !strings.Contains(out, "gone: removed") || !strings.Contains(out, reuse.DirsVar+"=<the se plugin>"+string(filepath.ListSeparator)+into) {
 		t.Errorf("%s", out)
