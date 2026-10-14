@@ -68,10 +68,14 @@ type Reply struct {
 	Help *Help `json:"help,omitempty"`
 }
 
-// Panel is what /se ui draws beside its on/off toggle.
+// Panel is what /se ui draws: a grid of buttons, the on/off toggle top left,
+// then one button per command offered as one, each labelled with its name.
 type Panel struct {
 	// Buttons are the names of the commands offered as buttons, in order.
 	Buttons []string `json:"buttons"`
+	// Columns is the most buttons a row holds, the toggle counted: the next
+	// starts the next row, and every cell is as wide as every other.
+	Columns int `json:"columns"`
 }
 
 // Endpoint is the part of daemon.json the plugin posts with.
