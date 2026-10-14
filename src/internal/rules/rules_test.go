@@ -61,7 +61,7 @@ func TestEveryRuleIsRegisteredWithItsParts(t *testing.T) {
 		}
 		names = append(names, r.Name)
 	}
-	if got := strings.Join(names, " "); got != "fake-contract fast-test go-in-src io-module manifest reader repo-path rule-of-five se-command test-package test-swap todo-issue" {
+	if got := strings.Join(names, " "); got != "fake-contract fast-test go-in-src io-module manifest plugin-clock reader repo-path rule-of-five se-command test-package test-swap todo-issue" {
 		t.Fatalf("rules = %s", got)
 	}
 }
