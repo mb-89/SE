@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
 func se(t *testing.T, args ...string) (int, string, string) {
@@ -440,5 +442,21 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 	}
 	if r := session(t, "status"); r.Help != nil {
 		t.Fatalf("/se status carries help: %+v", r.Help)
+	}
+}
+
+func TestTheHelpRendersTheConfigValues(t *testing.T) {
+	t.Parallel()
+	for name, want := range map[string][]string{
+		"issue pull":    {fmt.Sprintf("%d retros (OverhaulCadence)", issues.OverhaulCadence), fmt.Sprintf("%d se issues (RetroCadence)", issues.RetroCadence), fmt.Sprintf("%s lease (Lease)", issues.Lease)},
+		"issue review":  {fmt.Sprintf("at most %d, MaxFiled", issues.MaxFiled)},
+		"overhaul new":  {fmt.Sprintf("last %d runs (OverhaulCadence)", issues.OverhaulCadence)},
+		"overhaul read": {fmt.Sprintf("last %d retros' metrics (OverhaulCadence)", issues.OverhaulCadence)},
+	} {
+		for _, w := range want {
+			if !strings.Contains(commands[name].Details, w) {
+				t.Errorf("se help %s does not render %q from the config", name, w)
+			}
+		}
 	}
 }
