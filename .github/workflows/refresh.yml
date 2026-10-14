@@ -22,8 +22,9 @@ jobs:
           ref: main
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-      - run: go build -o se ./src/cmd/se
+          go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
+      - run: sh src/build.sh se
       # Its output names every PR it updated, and the head it started CI on.
       - run: ./se fleet refresh --repo "$GITHUB_REPOSITORY"
         env:
