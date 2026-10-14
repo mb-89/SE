@@ -821,7 +821,7 @@ func pulled(i issues.Issue, ok, full bool, cads []issues.Cadence) Reply {
 	}
 	text := strings.Join(head, "\n")
 	if ok && i.Parent {
-		text += fmt.Sprintf("\n#%d is a parent: it holds no work. Coordinate its tree: se issue pull --in %d --take", i.Number, i.Number)
+		text += fmt.Sprintf("\n#%d is a parent: it holds no work. Its agent, %s, is the box itself: coordinate its tree with se issue pull --in %d --take", i.Number, issues.KindOf(i).Type(), i.Number)
 	}
 	if ok && full && i.Body != "" {
 		text += "\n\n" + i.Body + "\n"
