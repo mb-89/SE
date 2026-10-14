@@ -14,11 +14,12 @@ steps:
   marketplace validate: {ms: 15000, hard: false}
   plugin test: {ms: 30000, hard: false}
 # The interactive commands' hard budgets (principle 9): the battery runs each
-# command whose class is interactive (spec/index.md) against the fakes, which
+# command whose class is interactive (spec/index.md) against the fakes, with
+# the workspace's daemon warm, which
 # add latency to each GitHub request and each process start, and fails one
 # that takes longer than ms or makes more outside requests than requests. over
 # names the commands that still break them; it only shrinks.
 commands:
   interactive: {ms: 1000, requests: 3}
   latency: {request_ms: 300, process_ms: 50}
-  over: [briefing, fleet check, issue pull, issue tree]
+  over: [briefing, fleet check, issue tree]

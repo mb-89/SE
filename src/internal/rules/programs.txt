@@ -3,6 +3,6 @@
 # not list. The list only shrinks: the rule refuses an entry that matches
 # nothing. Adding an entry is no way to pass the check.
 
-# GitHub's I/O module speaks HTTP itself (#186); it starts gh once per
-# process, only for gh auth token, the login it authenticates with.
+# The GitHub I/O module calls the REST API itself (#186); it asks gh once for
+# its token (gh auth token), where the environment holds none.
 src/internal/io/github/real.go gh
