@@ -102,7 +102,7 @@ func (s Source) conflicts(all []Status, pulls []openPull) ([]conflict, error) {
 func (s Source) mergeability(p openPull) (openPull, error) {
 	for k := 0; k < asks; k++ {
 		if k > 0 {
-			s.Clock.Sleep(pause)
+			s.sleep(pause, fmt.Sprintf("GitHub to compute whether PR #%d merges (ask %d of %d)", p.Number, k+1, asks))
 		}
 		got, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, p.Number), false)
 		if err != nil {
