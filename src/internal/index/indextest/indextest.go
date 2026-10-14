@@ -71,6 +71,10 @@ func (f *Fake) Call(name string, args ...string) (string, error) {
 		return "", err
 	}
 	for _, w := range r.Writes {
+		if w.Gone {
+			delete(f.out, at(w.Port, w.Key))
+			continue
+		}
 		f.out[at(w.Port, w.Key)] = w.Value
 	}
 	return r.Text, nil

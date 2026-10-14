@@ -51,7 +51,7 @@ A module is one Go package that declares, by **local name** only:
 | it declares | what it is |
 |---|---|
 | **inputs** | the names it reads, as fields of one input struct, tagged with a local port name |
-| **outputs** | the names it writes, each with its type, built-in value and one help line. A **family output** (`index.Family`) is written at keys, each write naming its key; the wiring binds it to a family. A derivation that reads a family runs once per key that changed, on that key's value; a command reads no family |
+| **outputs** | the names it writes, each with its type, built-in value and one help line. A **family output** (`index.Family`) is written at keys, each write naming its key, and a drop takes a key out again; the wiring binds it to a family. A derivation that reads a family runs once per key that changed, on that key's value; a command reads no family |
 | **config** | its keys, each with a type, a built-in value and one help line. A key is an input like any other, under `<instance>/config/<key>`; the module never learns where the value came from |
 | **commands** | the functions a person or agent calls, in [Commands and help](#commands-and-help) |
 | **requests** | for an I/O module only: the verbs it accepts from others, in [I/O modules and compute modules](#io-modules-and-compute-modules) |

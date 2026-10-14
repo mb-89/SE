@@ -257,6 +257,13 @@ func (ix *Index) commit(in *instance, writes []Write, changed map[string]bool) {
 		if w.Key != "" {
 			name = atKey(name, w.Key)
 		}
+		if w.Gone {
+			if _, ok := vals[name]; ok {
+				changed[name] = true
+				delete(vals, name)
+			}
+			continue
+		}
 		if old, ok := vals[name]; !ok || !reflect.DeepEqual(old, w.Value) {
 			changed[name] = true
 		}

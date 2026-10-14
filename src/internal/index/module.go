@@ -44,6 +44,8 @@ type Write struct {
 	Value any
 	// Key is the key a write to a family output stands at; a plain output's has none.
 	Key string
+	// Gone drops the key from the family: its name reads the built-in value again.
+	Gone bool
 }
 
 // Result is what a command answers: what to show, and what it commits.
@@ -241,7 +243,9 @@ func (m *Module) CheckWrites(writes []Write) error {
 			return fmt.Errorf("module %s writes no output %q", m.name, w.Port)
 		case o.Derived:
 			return fmt.Errorf("module %s: output %s is written by its derivation alone", m.name, w.Port)
-		case !Fits(w.Value, o.Type):
+		case w.Gone && !o.Family:
+			return fmt.Errorf("module %s: output %s is no family, and drops no key", m.name, w.Port)
+		case !w.Gone && !Fits(w.Value, o.Type):
 			return fmt.Errorf("module %s: output %s takes %s, not %T", m.name, w.Port, o.Type, w.Value)
 		case o.Family && !Key(w.Key):
 			return fmt.Errorf("module %s: output %s is a family, and %q is no key: letters, digits, dots, dashes and underscores", m.name, w.Port, w.Key)
@@ -295,6 +299,9 @@ func Family[T any](port string, builtin T, help string) *FamilyPort[T] {
 func (o *FamilyPort[T]) At(key string, v T) Write {
 	return Write{Port: o.port.Port, Value: v, Key: key}
 }
+
+// Drop is a write that takes key out of the family.
+func (o *FamilyPort[T]) Drop(key string) Write { return Write{Port: o.port.Port, Key: key, Gone: true} }
 
 func (o *FamilyPort[T]) declare(m *Module) { m.addOutput(o.port) }
 

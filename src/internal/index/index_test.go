@@ -342,8 +342,16 @@ wires:
 			t.Fatalf("%s is %+v, want %d, provided", name, got, want)
 		}
 	}
-	if !reflect.DeepEqual(pushed, []any{5}) {
-		t.Fatalf("posts/b/last pushed %v, want 5 alone", pushed)
+	must(t, ix.Commit("p", posts.Drop("b")))
+	if got := read(t, ix, "posts/b/last"); got != (index.Value{V: 0}) {
+		t.Fatalf("posts/b/last after its key went is %+v, want the built-in 0, not provided", got)
+	}
+	if got := read(t, ix, "d/twice"); got.V != 0 {
+		t.Fatalf("d/twice after b went is %+v, want 0 from the built-in", got)
+	}
+	must(t, ix.Commit("p", posts.Drop("b")))
+	if !reflect.DeepEqual(pushed, []any{5, 0}) {
+		t.Fatalf("posts/b/last pushed %v, want 5, then 0 once as its key went", pushed)
 	}
 	for _, name := range []string{"posts/<id>/last", "posts/a/b/last", "posts/../last"} {
 		if _, err := ix.Read(name); err == nil {
@@ -357,6 +365,9 @@ wires:
 	}
 	if err := ix.Commit("s", index.Write{Port: "n", Value: 1, Key: "a"}); err == nil {
 		t.Fatal("a commit at a key to no family was taken")
+	}
+	if err := ix.Commit("s", index.Write{Port: "n", Gone: true}); err == nil {
+		t.Fatal("a drop from no family was taken")
 	}
 }
 
