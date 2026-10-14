@@ -76,6 +76,10 @@ func TestThePrinciplesAreReadFromTheSpec(t *testing.T) {
 	if p := ps[3]; p.Name != "Modularity" || p.Mechanical {
 		t.Fatalf("%+v", p)
 	}
+	// A "Checked by:" text that runs over several lines is read whole.
+	if p := ps[16]; p.Name != "Consistency" || !strings.HasPrefix(p.CheckedBy, "the battery (mechanical checks, generated manifests); the reviewer") || !strings.HasSuffix(p.CheckedBy, "the overhaul (the whole system).") {
+		t.Fatalf("%+v", p)
+	}
 }
 
 // retroWithClasses is retro n's report with one finding, and its issue, per class;

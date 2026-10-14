@@ -11,7 +11,7 @@ import (
 func TestOverhaulNewCreatesTheOverhaulAndFires(t *testing.T) {
 	calls := recordedIssues(t)
 	code, out, errs := se(t, "overhaul", "new", "--repo", "o/r")
-	if code != 0 || !strings.Contains(out, "Created the overhaul #10") || !strings.Contains(out, "closes it") || !strings.HasSuffix(out, "Fired.\n") {
+	if code != 0 || !strings.Contains(out, "Created the overhaul #10") || !strings.Contains(out, "closes it") || !strings.HasSuffix(out, firedOnce+"\n") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	made := (*calls)[len(*calls)-1]

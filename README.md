@@ -44,6 +44,8 @@ The rules, each file owning one part:
 - [spec/development.md](spec/development.md): Development: working on SE
 - [spec/index.md](spec/index.md): Index: the core and the module contract
 - [spec/io.md](spec/io.md): I/O modules: the shape every one follows
+- [spec/io.md](spec/io.md): I/O modules: the shape every one follows
+- [spec/io.md](spec/io.md): I/O modules: the shape every one follows
 - [spec/issues.md](spec/issues.md): Issues: how the fleet picks its work
 - [spec/landing.yaml](spec/landing.yaml)
 - [spec/models.yaml](spec/models.yaml)

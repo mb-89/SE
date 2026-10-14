@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
@@ -64,15 +65,15 @@ func daemonExe(procs proc.Procs, p daemon.Paths) (exe, note string, err error) {
 }
 
 // startDaemon answers the running daemon, or starts one with daemonExe.
-func startDaemon(procs proc.Procs, p daemon.Paths, clk clock.Clock) (daemon.Endpoint, string, error) {
-	if ep, ok := daemon.Healthy(p); ok {
+func startDaemon(procs proc.Procs, p daemon.Paths, clk clock.Clock, net sehttp.Net) (daemon.Endpoint, string, error) {
+	if ep, ok := daemon.Healthy(p, net); ok {
 		return ep, "", nil
 	}
 	exe, note, err := daemonExe(procs, p)
 	if err != nil {
 		return daemon.Endpoint{}, "", err
 	}
-	ep, err := daemon.Start(procs, p, exe, startWait, clk)
+	ep, err := daemon.Start(procs, p, exe, startWait, clk, net)
 	return ep, note, err
 }
 

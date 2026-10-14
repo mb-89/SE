@@ -3,11 +3,9 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
 	"strings"
-	"time"
+
+	sehttp "github.com/mb-89/SE/src/internal/io/http"
 )
 
 // The environment variables that name the routine's API trigger: its fire URL
@@ -22,38 +20,22 @@ const (
 // the claim: it answers one line saying what happened, a refused or failed
 // fire included. getenv reads the two variables; a missing one turns fan-out
 // off. The token is never part of the answer.
-func Fire(getenv func(string) string, client *http.Client) string {
+func Fire(getenv func(string) string, net sehttp.Net) string {
 	url, token := getenv(FireURLVar), getenv(FireTokenVar)
 	if url == "" || token == "" {
 		return fmt.Sprintf("Fan-out is off: %s and %s are not both set.", FireURLVar, FireTokenVar)
 	}
-	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader("{}"))
+	answer, err := net.Fire(url, token)
 	if err != nil {
 		return fmt.Sprintf("Fan-out failed: %v", hide(err, token))
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("anthropic-beta", "experimental-cc-routine-2026-04-01")
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Sprintf("Fan-out failed: %v", hide(err, token))
+	if !answer.OK() {
+		return fmt.Sprintf("Fan-out refused: %s %s", sehttp.StatusText(answer.Status), hide(fmt.Errorf("%s", brief(answer.Body)), token))
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	if resp.StatusCode/100 != 2 {
-		return fmt.Sprintf("Fan-out refused: %s %s", resp.Status, hide(fmt.Errorf("%s", brief(body)), token))
-	}
-	if u := sessionURL(body); u != "" {
+	if u := sessionURL(answer.Body); u != "" {
 		return "Fan-out fired the routine: " + u
 	}
-	return "Fan-out fired the routine: " + hide(fmt.Errorf("%s", brief(body)), token).Error()
-}
-
-// FireFromEnv is Fire with this process's environment and a client that gives
-// up after 30 seconds.
-func FireFromEnv() string {
-	return Fire(os.Getenv, &http.Client{Timeout: 30 * time.Second})
+	return "Fan-out fired the routine: " + hide(fmt.Errorf("%s", brief(answer.Body)), token).Error()
 }
 
 // sessionURL finds the started session's link in the fire's answer: the first

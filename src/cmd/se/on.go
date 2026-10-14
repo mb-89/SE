@@ -22,7 +22,7 @@ func init() {
 				return Reply{}, err
 			}
 			reply := Reply{Active: switched(true)}
-			ep, note, err := startDaemon(c.Proc, c.Paths(), c.Clock)
+			ep, note, err := startDaemon(c.Proc, c.Paths(), c.Clock, c.Net)
 			if err != nil {
 				reply.Text = joined(fmt.Sprintf("SE is on, but its daemon did not start: %v. Events pass unlogged until it does.", err), note)
 				return reply, nil
