@@ -39,40 +39,11 @@ whole system, not a window.
     of those closed, how many the next retro found recurred anyway, and the
     finding classes more than one of them named;
   - the previous overhaul's findings and the state of their issues.
-- **What the box checks, and writes into the draft's block:**
-  - **Every principle, one by one** (`verdicts`: each a `principle`, how far
-    SE `strays`, `none`, `slightly` or `far`, and `how`): the mechanically
-    checkable ones through the latest retros' rule checks and metrics; the
-    rest by reading the code and spec against the principle's text.
-  - **The outside world** (`looked_at.outside`): current practice and tools
-    relevant to SE's parts (agent orchestration, issue-driven work, testing
-    with fakes and contracts, plugin and hook design), and what comparable
-    systems do. Sources are cited, and an outside idea becomes a finding only
-    with a concrete place in SE it would change.
-  - **Consistency across the whole system** (`looked_at.consistency`;
-    #83): do the README, the spec, the help, the skills and
-    CLAUDE.md still describe what the code does, and does every part still
-    fit the parts that rely on it?
-  - **The principles themselves** (`looked_at.principles`): is one missing,
-    obsolete or in conflict with another?
-  - **The retro's effectiveness over its last five runs**
-    (`looked_at.retro`): did the metrics move, and did findings recur anyway?
-  - **Speed** (`looked_at.speed`): what could be faster? What runs one after
-    another that could run in parallel; where a run asks the outside world
-    for the same thing twice, or item by item where one batched query, or a
-    query that does more on the server, would do (principles 6 and 9).
-  - **Mechanize** (`looked_at.mechanize`): what an agent still does, or a
-    person still remembers, that could be a tested `se` command (principle 1).
-  - **Removal** (`looked_at.removal`): what could go: a command, a rule, a
-    file, a step or a check that no longer earns its place.
-  - **Findings** (`findings`): each names the principle (`principle`; 0 only
-    for a missing one), the place (`place`) and how far it strays (`strays`,
-    `slightly` or `far`), with a `title`, a `body`, the `area` that found it
-    (`principle`, `outside`, `consistency`, `principles` for a change to a
-    principle, `retro`, `speed`, `mechanize` or `removal`), the `sources` an
-    outside one cites, and
-    `controversial` with its `why`.
-  - **What went well** (`went_well`).
+- **The judgment half (the box):** every principle one by one, the outside
+  world, the consistency of the whole system, the principles themselves, the
+  retro's effectiveness, speed, what to mechanize and what to remove, the
+  findings and what went well. What each part asks and the fields it writes
+  into the draft's block are the overhaul skill's (its step 3).
 - **Minting:** the same rule as the retro's (the owner's rule in
   [retro.md](retro.md)). Every finding becomes an issue through the same code
   as `se issue new`. A controversial one is an issue for a person, labelled
@@ -97,9 +68,13 @@ whole system, not a window.
 
 ## The commands
 
-    se overhaul new [--unattended] [--json] [--repo OWNER/NAME]
-    se overhaul read N [--out FILE] [--json] [--repo OWNER/NAME]
-    se overhaul file N [--draft FILE] [--json] [--repo OWNER/NAME]
+<!-- se:manifest usage overhaul -->
+```
+se overhaul file N [--draft FILE] [--json] [--repo OWNER/NAME]
+se overhaul new [--unattended] [--json] [--repo OWNER/NAME]
+se overhaul read N [--out FILE] [--json] [--repo OWNER/NAME]
+```
+<!-- /se:manifest -->
 
 All three are offered in a session, as `/se overhaul <word>`. They read and
 write GitHub through `gh api`, as the issue commands do

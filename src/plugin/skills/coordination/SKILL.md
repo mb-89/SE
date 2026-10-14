@@ -20,8 +20,6 @@ You are on `origin/main`, as the work skill left you.
    - If it says the issue went to a person, or another box took it over, or
      nothing about it is stuck, go to the next takeover.
    - If it took the issue over, you are on its branch `issue-<n>`: follow the
-     work skill's steps 3 to 5 for it (merge `origin/main` in, never rebase;
-     make it green; land it with `./src/plugin/bin/se issue land`; subscribe to
-     the PR and fix a red CI run). The takeover's comment on the issue is the
-     record. One takeover per box: when it is landed, end.
+     work skill's steps 3 to 5 for it. The takeover's comment on the issue is
+     the record. One takeover per box: when it is landed, end.
 4. With no takeover left, end.

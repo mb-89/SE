@@ -63,23 +63,11 @@ What earlier versions taught, and how this design answers it:
     by the word its name starts with, each with the comment line that says why;
   - **the previous retro's findings:** did their issues close, and did their
     classes recur?
-- **The judgment half (the box):**
-  - read the draft;
-  - look for what became inconsistent in the window, a hand-written element
-    that now restates what another owns, and prose that serves no reader its
-    file names (principles 17 to 19); each is a finding like any other;
-  - group findings into classes, where three of a kind is a property of the
-    machinery;
-  - pick each class's cheapest durable fix;
-  - record what went well.
-
-  It writes its judgment into the draft's block: `findings` (each a `title`,
-  `class`, `body`, `home`, and `controversial` with its `why`; optionally the
-  rule `check` or the `metric` it should move, which the next retro scores it
-  by, and `retro: true` for a finding about the retro itself), `classes`
-  (`name`, `fix`) and `went_well`. A finding's `home` is one of `check`,
-  `refusal`, `gate`, `field` (a prefilled one), `command` (an `se` command
-  for a step done by hand), `guidance` or `removal`.
+- **The judgment half (the box):** it reads the draft, looks for what the
+  window made inconsistent, restated or written for no reader (principles 17
+  to 19), groups the findings into classes, picks each class's cheapest
+  durable fix and records what went well. How, and the fields it writes into
+  the draft's block, are the retro skill's (its steps 2 and 3).
 - **Who decides (the owner's rule for retros and overhauls alike):** every
   finding becomes an issue through the same code as `se issue new`.
   - A **non-controversial** finding goes into the normal queue.
@@ -156,6 +144,5 @@ se retro report N [--draft FILE] [--json] [--repo OWNER/NAME]
 ```
 <!-- /se:manifest -->
 
-`new` is offered in a session as `/se retro new`; all three are, as
-`/se retro <word>`. They read and write GitHub through `gh api`, as the issue
+All three are offered in a session, as `/se retro <word>`. They read and write GitHub through `gh api`, as the issue
 commands do ([issues.md](issues.md)), in `src/internal/issues`.

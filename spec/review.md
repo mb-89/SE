@@ -38,17 +38,9 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
      The default brief does not even read them. After that,
      `se review brief <n> --claims` shows them as claims to check, never as
      evidence.
-2. **The steps:**
-   1. Restate what the ask requires, in your own words.
-   2. Review the riskiest part first. If letting it through would do damage,
-      say so and stop early.
-   3. Run the tests and reproduce each requirement directly. Check that no
-      test was weakened, deleted or special-cased.
-   4. **Find** in two independent passes with different focus.
-   5. **Verify** each candidate with evidence: a file and line, or a command
-      and its output. Drop anything unproven.
-   6. **Judge** each verified finding as blocking or not, by rule 3. A
-      verified blocker is not downgraded without counter-evidence.
+2. **The steps are the review skill's:** finding, verifying and judging are
+   separate steps, and the riskiest part comes first, so a reviewer that
+   finds damage can stop early. A verified blocker is judged by rule 3.
 3. **What blocks (the owner's rule): only damage.** A finding blocks only if
    letting the work through would make the product worse, or goes against
    what the product is about. Breakage is CI's job. Bad but fixable work does
@@ -124,19 +116,9 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
 
 ## The report
 
-`se issue review pass|fail N --report PATH` reads the report as JSON; an
-unknown field is refused, so a typo never drops a section:
-
-    {
-      "commit": "<the pinned commit the brief named>",
-      "requirements": [{"item": "...", "evidence": "...", "blocker": 0}],
-      "findings": [{"title": "...", "evidence": "...", "blocking": true, "why": "...", "repeats": 0}],
-      "clean": ["..."]
-    }
-
-`blocker` (a requirement) and `repeats` (a finding) are for a re-review only:
-the earlier blocker the item checks, and the earlier blocker whose problem a
-finding shows again. A finding's `title` becomes its issue's title.
+`se issue review pass|fail N --report PATH` reads the report as JSON, in the
+shape the review skill's step 9 gives; an unknown field is refused, so a typo
+never drops a section.
 
 ## The commands
 
