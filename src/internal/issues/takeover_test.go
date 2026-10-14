@@ -241,3 +241,14 @@ func TestAConflictAfterAStuckTakeoverGoesToAPerson(t *testing.T) {
 		t.Fatalf("comments %+v", c)
 	}
 }
+
+func TestATakeoverWithNoPRSaysSoAndItsLastPush(t *testing.T) {
+	t.Parallel()
+	if got := (Takeover{}).Line("issue-6"); got != "Where it stands: no open PR from issue-6; GitHub keeps no record of a push to issue-6." {
+		t.Fatal(got)
+	}
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if got := (Takeover{Pushed: at, Pull: &PullState{Number: 9, Head: "abc", Mergeable: "clean"}}).Line("issue-6"); got != "Where it stands: PR #9 is clean at abc; no check ran on its head; last pushed to issue-6 at 2026-01-02T03:04:05Z." {
+		t.Fatal(got)
+	}
+}
