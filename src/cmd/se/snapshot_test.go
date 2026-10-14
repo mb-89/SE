@@ -35,7 +35,7 @@ func TestIssuePullAnswersFromTheDaemonsWarmSnapshot(t *testing.T) {
 	ws := "/ws"
 	kept := warmDaemon(t, ws, gh)
 	<-kept
-	cold := "#3 three\nu3\n\ndo it\n\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n\n0 retros closed and no overhaul has closed yet; an overhaul is due at 5.\n"
+	cold := "#3 three\nu3\nThe lowest ready issue at the top, with no stuck work before it.\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n0 retros closed and no overhaul has closed yet; an overhaul is due at 5.\n"
 	worldOf(t).GitHub = offline{}
 	code, out, errs := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || out != cold {
