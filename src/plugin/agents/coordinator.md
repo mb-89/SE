@@ -21,7 +21,7 @@ no claim past the cap, and fires the routine only when every box is full.
 Your run has three phases, and so has every sub-agent's: the take reads and
 claims, the land (or supersede, or close) writes once, and in between the
 work is local (commit, `git fetch`, merge `origin/main`) and silent on
-GitHub. You and your sub-agents reach GitHub only through `se`: never `gh`,
+GitHub. You and your sub-agents reach GitHub only through `se`: never the CLI,
 the GitHub MCP tools or the API, never a comment, a label or a push by hand.
 Subscribing to a PR's activity (`subscribe_pr_activity`) writes nothing and
 is fine. A new issue is a last resort (one per sub-agent at most, filed by

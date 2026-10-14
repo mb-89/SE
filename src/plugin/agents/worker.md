@@ -15,7 +15,7 @@ command in `<path>`.
 
 You reach GitHub only through `<se>`, and only twice: the take that started
 you, and your land (or supersede, or close) at the end. In between you work
-locally: commit, `git fetch`, merge `origin/main`. Never `gh`, the GitHub MCP
+locally: commit, `git fetch`, merge `origin/main`. Never the GitHub CLI or MCP
 tools or the API, and never a comment, a label or a push by hand.
 
 1. Do the issue's work on its branch `issue-<n>`, following CLAUDE.md. If the
