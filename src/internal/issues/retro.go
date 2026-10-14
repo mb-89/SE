@@ -200,6 +200,11 @@ type Row struct {
 	// Into is the manifest's branch a leaf landed into, from its landing
 	// facts; empty for an issue that landed as a PR.
 	Into string `json:"into,omitempty"`
+	// Closed is how it closed, which heads its answers in the matrix: by a
+	// merged PR, into its manifest's branch, as a duplicate, as fixed by a
+	// commit, or as a person's decision. Answers from an issue with no merged
+	// PR describe a branch, not main.
+	Closed string `json:"closed"`
 }
 
 // Script is a file added under src/scripts/ in the window.
@@ -258,6 +263,7 @@ var (
 	fixesLine    = regexp.MustCompile(`(?i)\bfixes #(\d+)\b`)
 	takeoverMark = regexp.MustCompile(`<!-- se:takeover (\d+) -->`)
 	conflictMark = regexp.MustCompile(`<!-- se:takeover-head [0-9a-f]+ -->`)
+	fixedByMark  = regexp.MustCompile(`<!-- se:fixed-by ([0-9a-f]+) -->`)
 	personMark   = regexp.MustCompile(`<!-- se:person -->`)
 )
 
@@ -511,7 +517,11 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 	}
 	rounds := map[string]bool{}
 	var landed *Landed
+	fixed := ""
 	for _, c := range comments {
+		if m := fixedByMark.FindStringSubmatch(c.Body); m != nil {
+			fixed = m[1]
+		}
 		for _, m := range takeoverMark.FindAllStringSubmatch(c.Body, -1) {
 			rounds[m[1]] = true
 		}
@@ -547,12 +557,29 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 	// A retro, an overhaul or a person's decision lands no branch, so it has
 	// no landing answers by design.
 	r.Landed = x.StateReason == "completed" && !parent && !x.labelled(RetroLabel) && !x.labelled(OverhaulLabel) && !r.ForPerson
+	r.Closed = closedHow(r, fixed)
 	if landed != nil {
 		r.Answers = landed.Answers
 	} else if r.Landed {
 		checks = append(checks, Broken{"answers", subject, x.Title + ": closed as completed without landing answers"})
 	}
 	return r, checks, nil
+}
+
+// closedHow says how the issue of row r closed, fixed naming the commit an
+// se issue close --fixed-by comment names ("" for none).
+func closedHow(r Row, fixed string) string {
+	switch {
+	case r.PR != 0:
+		return fmt.Sprintf("by merged PR #%d", r.PR)
+	case r.Into != "":
+		return "into its manifest's branch " + r.Into
+	case r.Reason == "duplicate":
+		return "as a duplicate, no merged PR of its own"
+	case fixed != "":
+		return "as fixed by " + short(fixed) + ", no merged PR of its own"
+	}
+	return "as a person's decision, no merged PR of its own"
 }
 
 // mergedCI reads the check runs on a merged PR's head: red names what was not

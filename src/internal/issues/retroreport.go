@@ -253,7 +253,7 @@ func trend(name string, last, now Metrics) string {
 // matrix is every closed issue × every landing question, a question at a time.
 func (c Collected) matrix(qs []Question) string {
 	var b strings.Builder
-	b.WriteString("## The matrix\nEvery closed issue's landing answer, a question at a time; \"none\" answers are left out. It stays in the draft, not in the posted report.\n")
+	b.WriteString("## The matrix\nEvery closed issue's landing answer, a question at a time; \"none\" answers are left out. Each is headed by how its issue closed: one with no merged PR (nor a landing into its manifest's branch) describes a branch, not main. It stays in the draft, not in the posted report.\n")
 	missing := []string{}
 	for _, r := range c.Rows {
 		if r.Answers == nil {
@@ -272,7 +272,7 @@ func (c Collected) matrix(qs []Question) string {
 				continue
 			}
 			said++
-			fmt.Fprintf(&b, "- #%d %s: %s\n", r.Number, r.Title, strings.ReplaceAll(strings.TrimSpace(a), "\n", "\n  "))
+			fmt.Fprintf(&b, "- #%d %s (closed %s): %s\n", r.Number, r.Title, r.Closed, strings.ReplaceAll(strings.TrimSpace(a), "\n", "\n  "))
 		}
 		if said == 0 {
 			b.WriteString("Nothing but none.\n")

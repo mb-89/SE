@@ -290,9 +290,9 @@ func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
 	_, matrix, _ := strings.Cut(draft, matrixMark)
 	for _, want := range []string{
 		"No landing answers: #24, #25, #26.",
-		"### `done`: What does it deliver?\n- #19 t19: old\n- #23 t23: it works\n",
+		"### `done`: What does it deliver?\n- #19 t19 (closed by merged PR #49): old\n- #23 t23 (closed by merged PR #50): it works\n",
 		// #19's by-hand answer is none, so it is left out.
-		"### `by-hand`: What did you do by hand?\n- #23 t23: wrote src/scripts/check-claims.sh\n",
+		"### `by-hand`: What did you do by hand?\n- #23 t23 (closed by merged PR #50): wrote src/scripts/check-claims.sh\n",
 	} {
 		if !strings.Contains(matrix, want) {
 			t.Errorf("the matrix lacks %q:\n%s", want, matrix)
@@ -301,6 +301,41 @@ func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
 	r, facts, err := ParseReport(draft)
 	if err != nil || r.Retro != 30 || len(r.Checks) != len(c.Checks) || !strings.HasPrefix(facts, "## The window") || strings.Contains(facts, "The matrix") {
 		t.Fatalf("%+v %q %v", r, facts, err)
+	}
+}
+
+// Each row says how its issue closed, so the matrix can head its answers
+// with it: an issue closed with no merged PR answered for a branch, not main.
+func TestARowSaysHowItsIssueClosed(t *testing.T) {
+	t.Parallel()
+	answered := landing(t, 0, map[string]string{"done": "on a branch", "by-hand": "none"}, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))
+	gh := recorded(t, map[string]string{
+		"repos/o/r/issues/1/comments?per_page=100": jsonComments(answered),
+		"repos/o/r/issues/2/comments?per_page=100": jsonComments(answered, fmt.Sprintf(fixedMark+"\nClosed.", "4957ced7aaaabbbbccccdddd")),
+		"repos/o/r/issues/3/comments?per_page=100": jsonComments(answered),
+		"repos/o/r/issues/4/comments?per_page=100": `[]`,
+	})
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	at := time.Date(2026, 10, 2, 11, 0, 0, 0, time.UTC)
+	fixedBy := map[int]merged{1: {Number: 9, MergedAt: &at}}
+	for n, want := range map[int]string{
+		1: "by merged PR #9",
+		2: "as fixed by 4957ced, no merged PR of its own",
+		3: "as a duplicate, no merged PR of its own",
+		4: "as a person's decision, no merged PR of its own",
+	} {
+		reason := map[int]string{3: "duplicate", 4: "not_planned"}[n]
+		if reason == "" {
+			reason = "completed"
+		}
+		r, _, err := s.row(past{issue: issue{Number: n, Title: "t", StateReason: reason}}, fixedBy)
+		if err != nil || r.Closed != want {
+			t.Errorf("#%d closed %q, want %q (%v)", n, r.Closed, want, err)
+		}
+	}
+	c := Collected{Rows: []Row{{Number: 2, Title: "t2", Closed: "as fixed by 4957ced, no merged PR of its own", Answers: map[string]string{"done": "on a branch"}}}}
+	if m := c.matrix(rqs); !strings.Contains(m, "- #2 t2 (closed as fixed by 4957ced, no merged PR of its own): on a branch\n") {
+		t.Errorf("the matrix does not head #2's answer with how it closed:\n%s", m)
 	}
 }
 

@@ -62,7 +62,10 @@ What earlier versions taught, and how this design answers it:
   is what every later retro reads, so a stale se would count and store the
   window by rules main has replaced. Where it cannot tell, they go on. It holds:
   - the matrix: every closed issue × every landing question, from the
-    answers' machine-readable blocks; it stays in the draft and is not posted;
+    answers' machine-readable blocks, each answer headed by how its issue
+    closed (by a merged PR, into its manifest's branch, as a duplicate, as
+    fixed by a commit, or as a person's decision); it stays in the draft and
+    is not posted;
   - the [rule checks](#the-rule-checks), each broken one with what broke
     it;
   - **sizes:** the closed issues, the landed ones (those the `answers` check
