@@ -13,6 +13,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "fleet check",
+		Class:   interactive,
 		Usage:   "fleet check [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list what is broken in the fleet, each with its remedy",
@@ -62,6 +63,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "fleet fix",
+		Class:   batch,
 		Usage:   "fleet fix [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "fix what fleet check finds that needs no checkout",
@@ -111,6 +113,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "fleet prune",
+		Class:   batch,
 		Usage:   "fleet prune [--apply] [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list the stray branches; --apply deletes them",
@@ -159,6 +162,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "fleet refresh",
+		Class:   batch,
 		Usage:   "fleet refresh [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "merge main into each auto-merge PR behind it and rerun its CI",

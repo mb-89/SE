@@ -45,10 +45,88 @@ type Budget struct {
 	Hard bool  `yaml:"hard" json:"hard"`
 }
 
-// Budgets are spec/budgets.yaml: one for the battery's total, one per step by its name.
+// Budgets are spec/budgets.yaml: one for the battery's total, one per step
+// by its name, and the interactive commands'.
 type Budgets struct {
-	Total Budget            `yaml:"total"`
-	Steps map[string]Budget `yaml:"steps"`
+	Total    Budget            `yaml:"total"`
+	Steps    map[string]Budget `yaml:"steps"`
+	Commands CommandBudgets    `yaml:"commands"`
+}
+
+// CommandBudgets hold every interactive command (principle 9): the battery
+// runs each against the fake GitHub, each request and each process start
+// delayed by Latency, and fails one over Interactive, unless Over names it.
+type CommandBudgets struct {
+	Interactive CommandBudget `yaml:"interactive" json:"interactive"`
+	Latency     Latency       `yaml:"latency" json:"latency"`
+	// Over names the interactive commands that still run over; it only shrinks.
+	Over []string `yaml:"over" json:"over"`
+}
+
+// CommandBudget is how long one run of a command may take, and how many
+// outside requests (GitHub requests and process starts) it may make.
+type CommandBudget struct {
+	Ms       int64 `yaml:"ms" json:"ms"`
+	Requests int   `yaml:"requests" json:"requests"`
+}
+
+// Latency is what the fakes add to each request to GitHub and each process start.
+type Latency struct {
+	RequestMs int64 `yaml:"request_ms" json:"request_ms"`
+	ProcessMs int64 `yaml:"process_ms" json:"process_ms"`
+}
+
+// Command is one interactive command's run in the battery: its outside
+// requests and how long it took on the fakes' clock.
+type Command struct {
+	Name     string `json:"name"`
+	Requests int    `json:"requests"`
+	Ms       int64  `json:"ms"`
+}
+
+// CommandMark starts the line a test writes for each command it measured,
+// which the profile reads from go test's output.
+const CommandMark = "battery-command:"
+
+// CommandLine is the line a test logs for a command it measured.
+func CommandLine(c Command) string {
+	return fmt.Sprintf("%s %s\t%d\t%d", CommandMark, c.Name, c.Requests, c.Ms)
+}
+
+// ParseCommands reads go test -json's events for the lines CommandLine wrote:
+// each command measured, once, by its name.
+func ParseCommands(r io.Reader) ([]Command, error) {
+	byName := map[string]Command{}
+	lines := bufio.NewScanner(r)
+	lines.Buffer(make([]byte, 0, 64<<10), 16<<20)
+	for lines.Scan() {
+		var e struct {
+			Action string `json:"Action"`
+			Output string `json:"Output"`
+		}
+		if json.Unmarshal(lines.Bytes(), &e) != nil || e.Action != "output" {
+			continue
+		}
+		_, line, ok := strings.Cut(e.Output, CommandMark)
+		if !ok {
+			continue
+		}
+		f := strings.Split(strings.TrimSpace(line), "\t")
+		if len(f) != 3 {
+			continue
+		}
+		n, err1 := strconv.Atoi(f[1])
+		ms, err2 := strconv.ParseInt(f[2], 10, 64)
+		if err1 == nil && err2 == nil {
+			byName[f[0]] = Command{Name: f[0], Requests: n, Ms: ms}
+		}
+	}
+	out := make([]Command, 0, len(byName))
+	for _, c := range byName {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, lines.Err()
 }
 
 // Step is one step of the battery and how long it took.
@@ -74,6 +152,9 @@ type Profile struct {
 	TotalBudget *Budget `json:"total_budget,omitempty"`
 	Steps       []Step  `json:"steps"`
 	Slowest     []Test  `json:"slowest_tests"`
+	// Commands are the interactive commands' runs, against CommandBudget.
+	Commands      []Command      `json:"commands"`
+	CommandBudget *CommandBudget `json:"command_budget,omitempty"`
 	// Overruns names each budget the run went over; Hard those of them that fail it.
 	Overruns []string `json:"overruns"`
 	Hard     []string `json:"hard_overruns"`
@@ -181,10 +262,24 @@ func (p Profile) Text() string {
 	for _, t := range p.Slowest {
 		fmt.Fprintf(&b, "battery:   %dms %s %s\n", t.Ms, t.Package, t.Name)
 	}
+	if len(p.Commands) > 0 {
+		fmt.Fprintf(&b, "battery: the %d interactive commands%s\n", len(p.Commands), p.commandBudget())
+	}
+	for _, c := range p.Commands {
+		fmt.Fprintf(&b, "battery:   %dms %d requests se %s\n", c.Ms, c.Requests, c.Name)
+	}
 	for _, o := range p.Overruns {
 		fmt.Fprintf(&b, "battery: OVER BUDGET: %s\n", o)
 	}
 	return b.String()
+}
+
+// commandBudget names the interactive commands' budget; nothing where there is none.
+func (p Profile) commandBudget() string {
+	if p.CommandBudget == nil {
+		return ""
+	}
+	return fmt.Sprintf(" (budget %dms and %d requests each)", p.CommandBudget.Ms, p.CommandBudget.Requests)
 }
 
 // Markdown is the profile as the CI summary and the PR body show it.
@@ -208,6 +303,12 @@ func (p Profile) Markdown() string {
 	fmt.Fprintf(&b, "\nThe %d slowest tests:\n\n| test | package | ms |\n|---|---|---:|\n", len(p.Slowest))
 	for _, t := range p.Slowest {
 		fmt.Fprintf(&b, "| %s | %s | %d |\n", t.Name, t.Package, t.Ms)
+	}
+	if len(p.Commands) > 0 {
+		fmt.Fprintf(&b, "\nThe %d interactive commands%s:\n\n| command | requests | ms |\n|---|---:|---:|\n", len(p.Commands), p.commandBudget())
+		for _, c := range p.Commands {
+			fmt.Fprintf(&b, "| se %s | %d | %d |\n", c.Name, c.Requests, c.Ms)
+		}
 	}
 	return b.String()
 }
@@ -238,8 +339,12 @@ func Report(d disk.Disk, dir string, summary io.Writer) (Profile, error) {
 		return Profile{}, err
 	}
 	var tests []Test
+	var commands []Command
 	if g, err := d.ReadFile(filepath.Join(at, GoTestFile)); err == nil {
 		if tests, err = ParseGoTest(bytes.NewReader(g)); err != nil {
+			return Profile{}, err
+		}
+		if commands, err = ParseCommands(bytes.NewReader(g)); err != nil {
 			return Profile{}, err
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -250,6 +355,10 @@ func Report(d disk.Disk, dir string, summary io.Writer) (Profile, error) {
 		return Profile{}, err
 	}
 	p := Build(steps, tests, budgets)
+	p.Commands = commands
+	if len(commands) > 0 {
+		p.CommandBudget = &budgets.Commands.Interactive
+	}
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return Profile{}, err
