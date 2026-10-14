@@ -139,6 +139,24 @@ token:
 | `/se ui`, `se help`, the manifests | read the collector's catalog from the daemon and render it |
 | any later adapter (a REST API, an MCP tool list) | reads values by name, calls commands by name, and subscribes to changes, the same three verbs |
 
+### What a command waits on
+
+A person waits on every `se` command, so the adapter follows
+[principle 9](principles.md): feedback within 1 second, never blind.
+
+| the daemon | what the command waits on | what the person sees |
+|---|---|---|
+| answers | the post and the command's reply | the reply |
+| does not run, or does not answer | the daemon's start: `se serve` takes the lock, loads the wiring, starts the modules and publishes `daemon.json`, then the post | after 1 second without an answer, one line on stderr: the daemon is starting for this workspace; then the reply |
+| does not answer within the start wait (10 seconds today) or exits at start | nothing more | an error naming the daemon log; the command does not run |
+
+The adapter never runs a command in its own process when the daemon is slow:
+the index has one host, and a second one would give its names a second writer.
+The cold start is the command's longest wait, so the daemon records its
+duration like any command's, and a soft budget in
+[spec/budgets.yaml](budgets.yaml) reports when it grows. The core's issue
+(step 1 of the migration) sets that budget from its first measurement.
+
 ## Commands and help
 
 A module declares its own user-facing commands in its own files ([principle 18](principles.md)).
@@ -194,7 +212,7 @@ holds both once the first module lands.
 
 Each step is its own issue, and SE works after each one.
 
-1. **The core, the fake index and the wiring loader**, hosted in `se serve`, tested with fixture modules. No module moves yet.
+1. **The core, the fake index and the wiring loader**, hosted in `se serve`, tested with fixture modules. It measures the daemon's cold start and sets its budget. No module moves yet.
 2. **The collector.** The command registry gathers declarations, and the CLI, `/se`, `/se ui`, the help and the manifests render from it. Commands keep their current files and get the declaration shape.
 3. **The session event log** becomes the session I/O module: the bridgehead's posts come in as the `session/<id>/events` family, and it keeps the log file. It is the first real module and the smallest.
 4. **The issue rules** (next, new, land, review and the tree rules in `src/internal/issues`) become compute modules on the GitHub I/O module (#44), and their commands move with them.
