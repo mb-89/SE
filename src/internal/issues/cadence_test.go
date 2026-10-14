@@ -117,6 +117,7 @@ func TestTheFirstCadenceCountsTheWholeHistory(t *testing.T) {
 }
 
 func TestASecondRetroStartedByARacingBoxClosesAsADuplicate(t *testing.T) {
+	t.Parallel()
 	origin, a, b := boxes(t)
 	gh := recorded(t, cadenceRepo(10, 0))
 	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
@@ -160,6 +161,7 @@ func TestASecondRetroStartedByARacingBoxClosesAsADuplicate(t *testing.T) {
 }
 
 func TestADuplicateRetroIsNoRetroToTheOverhaul(t *testing.T) {
+	t.Parallel()
 	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, map[string]string{
 		"repos/o/r/issues?labels=se-overhaul&state=closed&per_page=100": `[]`,
 		"repos/o/r/issues?labels=se-overhaul&state=open&per_page=100":   `[]`,
