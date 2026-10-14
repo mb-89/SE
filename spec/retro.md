@@ -60,6 +60,10 @@ What earlier versions taught, and how this design answers it:
     answers' machine-readable blocks; it stays in the draft and is not posted;
   - the [rule checks](#the-rule-checks), each broken one with what broke
     it;
+  - **sizes:** the closed issues, the landed ones (those the `answers` check
+    counts: a leaf closed as completed, not a retro, an overhaul or a
+    person's decision), the closed issues for a person and the duplicates,
+    each its own count, so a sweep closing issues for a person reads as one;
   - **counts:** conflicts (conflict takeovers), takeovers, `se-person` flags,
     CI reruns, `by-hand` answers that are not "none", the GitHub requests the
     landing facts counted, their rate-limit refusals and the minutes waited
@@ -75,7 +79,12 @@ What earlier versions taught, and how this design answers it:
   the draft's block, are the agent's (its steps 2 and 3).
 - **Who decides (the owner's rule for retros and overhauls alike):** every
   finding becomes an issue through the same code as `se issue new`.
-  - A **non-controversial** finding goes into the normal queue.
+  - A **non-controversial** finding goes into the normal queue: into the
+    open misc manifest, as every issue filed into no manifest does
+    ([issues.md](issues.md#manifests-all-work-moves-in-them)), whose leaves
+    together should take about `issues.manifest/config/target` (an hour). A
+    class too big for that is filed as a manifest of its own
+    (`se issue new --manifest`, its leaves with `--parent`).
   - A **controversial** one is an issue for a person: labelled `se-person`
     and assigned to the owner, it waits for them. The retro does not.
 
@@ -108,12 +117,15 @@ What earlier versions taught, and how this design answers it:
     `se-person` flags, `by-hand` mentions, duplicates (issues closed as
     duplicate, and issues for a person made in the window beyond the first
     for each issue they hold back), GitHub requests, rate-limit refusals and minutes waited for
-    the reset, and time from claim to merge, each per closed issue. `se retro collect` computes them and stores them in the
+    the reset, and time from claim to merge, each per landed issue (never per closed issue: closing issues
+    for a person or duplicates must not make a metric read better), beside
+    the sizes. `se retro collect` computes them and stores them in the
     report's machine-readable block, so the trend is a number, not an
     impression; the draft tabulates them against every earlier retro.
   - **Did the last retro's fixes help?** For each of its findings: did its
     issue close, did the rule check it named break again, did its metric
-    drop.
+    drop. A metric's move counts for a finding only once its issue closed
+    as completed: before its fix is on main, a drop is not the fix's.
   - **Is the retro itself effective?** How many findings became issues, how
     many of those closed, and which findings recurred anyway.
   - **Should the retro change itself?** Proposals for the landing questions

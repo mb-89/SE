@@ -28,4 +28,11 @@ func TestEachKindNamesItsAgent(t *testing.T) {
 	if agents := issues.Agents(); len(agents) != len(issues.IssueKinds) {
 		t.Errorf("%d kinds share %d agents", len(issues.IssueKinds), len(agents))
 	}
+	// A role, or an agent's name, is no skill.
+	if got := issues.Skills([]string{"overhaul", "triage", "retro", "work", "reviewer"}); len(got) != 1 || got[0] != "triage" {
+		t.Errorf("the skills of a line naming roles: %v", got)
+	}
+	if k, ok := issues.RoleNamed("coordination"); !ok || k.Agent != "coordinator" {
+		t.Errorf("coordination: %+v %v", k, ok)
+	}
 }

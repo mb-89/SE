@@ -176,12 +176,19 @@ type Row struct {
 	Reason string `json:"reason"`
 	// Answers are its landing answers, by key; nil where it has none.
 	Answers map[string]string `json:"answers,omitempty"`
+	// Landed says it is a landed issue, one the answers check holds to its
+	// landing answers: a leaf closed as completed, not a retro, an overhaul
+	// or a person's decision. The per-issue metrics divide by these.
+	Landed bool `json:"landed"`
+	// ForPerson says it is an issue for a person (se-person).
+	ForPerson bool `json:"for_person"`
 	// PR is the merged PR that fixed it, 0 for none.
 	PR        int `json:"pr,omitempty"`
 	Takeovers int `json:"takeovers"`
 	Conflicts int `json:"conflicts"`
 	Person    int `json:"person"`
-	// Minutes is the time from its claim to its PR's merge; -1 unknown.
+	// Minutes is the time from its claim to its PR's merge, or, for a leaf
+	// landed into its manifest, to that landing; -1 unknown.
 	Minutes int `json:"minutes"`
 	// Requests is the GitHub requests its landing facts counted; 0 unknown.
 	Requests int `json:"requests,omitempty"`
@@ -190,6 +197,9 @@ type Row struct {
 	// its landing facts counted them; 0 none or unknown.
 	RateLimits       int     `json:"rate_limits,omitempty"`
 	RateLimitMinutes float64 `json:"rate_limit_minutes,omitempty"`
+	// Into is the manifest's branch a leaf landed into, from its landing
+	// facts; empty for an issue that landed as a PR.
+	Into string `json:"into,omitempty"`
 }
 
 // Script is a file added under src/scripts/ in the window.
@@ -489,7 +499,7 @@ func short(sha string) string {
 // row reads one closed issue: its landing answers, its marks, the PR that
 // fixed it, and the rules it broke.
 func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
-	r := Row{Number: x.Number, Title: x.Title, Reason: x.StateReason, Minutes: -1}
+	r := Row{Number: x.Number, Title: x.Title, Reason: x.StateReason, Minutes: -1, ForPerson: x.labelled(PersonLabel)}
 	subject := "#" + strconv.Itoa(x.Number)
 	var checks []Broken
 	if !strings.Contains(x.Body, NewMark) {
@@ -525,14 +535,21 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 		if landed != nil && !landed.Facts.Claimed.IsZero() {
 			r.Minutes = int(p.MergedAt.Sub(landed.Facts.Claimed).Round(time.Minute) / time.Minute)
 		}
+	} else if landed != nil && landed.Facts.Into != "" {
+		// A leaf lands into its manifest's branch, with no PR of its own:
+		// its landing's facts carry its time from claim to land.
+		r.Into = landed.Facts.Into
+		if !landed.Facts.Claimed.IsZero() {
+			r.Minutes = landed.Facts.Minutes
+		}
 	}
 	parent := x.SubIssues != nil && x.SubIssues.Total > 0
 	// A retro, an overhaul or a person's decision lands no branch, so it has
 	// no landing answers by design.
-	work := x.StateReason == "completed" && !parent && !x.labelled(RetroLabel) && !x.labelled(OverhaulLabel) && !x.labelled(PersonLabel)
+	r.Landed = x.StateReason == "completed" && !parent && !x.labelled(RetroLabel) && !x.labelled(OverhaulLabel) && !r.ForPerson
 	if landed != nil {
 		r.Answers = landed.Answers
-	} else if work {
+	} else if r.Landed {
 		checks = append(checks, Broken{"answers", subject, x.Title + ": closed as completed without landing answers"})
 	}
 	return r, checks, nil
@@ -630,25 +647,36 @@ func group(path string) string {
 }
 
 // Metrics are a retro's numbers, by name; the per-issue ones divide by the
-// closed issues, so retros of different sizes compare.
+// landed issues (those the answers check counts), so retros of different
+// sizes compare, and a sweep closing issues for a person or duplicates does
+// not dilute them.
 type Metrics map[string]float64
 
-// metricNames are the metrics, in the order the report lists them. duplicates
-// are the closed issues closed as duplicate, and the issues for a person made
-// beyond the first for each issue they hold back.
+// metricNames are the metrics, in the order the report lists them. closed,
+// landed and for_person are the window's sizes: every closed issue, the
+// landed ones, and the closed issues for a person. duplicates are the closed
+// issues closed as duplicate, and the issues for a person made beyond the
+// first for each issue they hold back.
 var metricNames = []string{
-	"closed", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand", "duplicates", "requests", "rate_limits", "rate_limit_minutes",
+	"closed", "landed", "for_person", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand", "duplicates", "requests", "rate_limits", "rate_limit_minutes",
 	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue", "duplicates_per_issue", "requests_per_issue", "rate_limits_per_issue", "rate_limit_minutes_per_issue",
 	"claim_to_merge_minutes",
 }
 
-// lowerIsBetter says which way a metric should move; closed is a size.
-func lowerIsBetter(name string) bool { return name != "closed" }
+// size says a metric is a size of the window, which moves neither way for
+// the better.
+func size(name string) bool { return name == "closed" || name == "landed" || name == "for_person" }
 
 func (c Collected) measure() Metrics {
-	m := Metrics{"closed": float64(len(c.Rows)), "ci_reruns": float64(c.Reruns), "duplicates": float64(c.Reholds)}
+	m := Metrics{"closed": float64(len(c.Rows)), "landed": 0, "for_person": 0, "ci_reruns": float64(c.Reruns), "duplicates": float64(c.Reholds)}
 	var minutes []int
 	for _, r := range c.Rows {
+		if r.Landed {
+			m["landed"]++
+		}
+		if r.ForPerson {
+			m["for_person"]++
+		}
 		m["conflicts"] += float64(r.Conflicts)
 		m["takeovers"] += float64(r.Takeovers)
 		m["person_flags"] += float64(r.Person)
@@ -667,15 +695,15 @@ func (c Collected) measure() Metrics {
 	}
 	for _, name := range counted {
 		m[name+"_per_issue"] = 0
-		if len(c.Rows) > 0 {
-			m[name+"_per_issue"] = round2(m[name] / float64(len(c.Rows)))
+		if m["landed"] > 0 {
+			m[name+"_per_issue"] = round2(m[name] / m["landed"])
 		}
 	}
 	m["claim_to_merge_minutes"] = float64(median(minutes))
 	return m
 }
 
-// counted are the metrics counted in the window, each also per closed issue.
+// counted are the metrics counted in the window, each also per landed issue.
 var counted = []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand", "duplicates", "requests", "rate_limits", "rate_limit_minutes"}
 
 func round2(x float64) float64 { return float64(int(x*100+0.5)) / 100 }
@@ -743,12 +771,16 @@ type ScoreItem struct {
 	Metric   string  `yaml:"metric,omitempty"`
 	Before   float64 `yaml:"before,omitempty"`
 	Now      float64 `yaml:"now,omitempty"`
-	// Dropped says whether its metric moved the right way; nil without one.
+	// Dropped says whether its metric moved the right way; nil without one,
+	// or where its issue has not closed as completed: a drop is credited to
+	// a fix only once it landed.
 	Dropped *bool `yaml:"dropped,omitempty"`
 }
 
 // score reads how each finding of the previous report fared: did its issue
-// close, did the rule check it named break again, did its metric drop.
+// close, did the rule check it named break again, did its metric drop. A
+// metric's move is judged only where the finding's issue closed as
+// completed; before that, no fix of its is on main to credit or blame.
 func (s Source) score(prev RetroReport, checks []Broken, now Metrics) (Score, error) {
 	broke := map[string]bool{}
 	for _, c := range checks {
@@ -776,12 +808,11 @@ func (s Source) score(prev RetroReport, checks []Broken, now Metrics) (Score, er
 			after, has := now[f.Metric]
 			if had && has {
 				it.Metric, it.Before, it.Now = f.Metric, before, after
-				dropped := after < before
-				if !lowerIsBetter(f.Metric) {
-					dropped = after > before
+				if it.State == "completed" && !size(f.Metric) {
+					dropped := after < before
+					it.Dropped = &dropped
+					it.Recurred = it.Recurred || !dropped && after > 0
 				}
-				it.Dropped = &dropped
-				it.Recurred = it.Recurred || !dropped && after > 0
 			}
 		}
 		if it.Recurred {
