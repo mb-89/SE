@@ -234,6 +234,21 @@ func TestIssueNewCreatesTheIssueAndItsLinks(t *testing.T) {
 	}
 }
 
+// checking is a machine whose check.sh passes at once, recording the folder
+// it ran in; every other program runs on Procs.
+type checking struct {
+	proc.Procs
+	checked *string
+}
+
+func (m checking) Run(c proc.Cmd) error {
+	if c.Name == "sh" && len(c.Args) > 0 && c.Args[0] == "./tests/check.sh" {
+		*m.checked = c.Dir
+		return nil
+	}
+	return m.Procs.Run(c)
+}
+
 func TestIssueLandNamesThePR(t *testing.T) {
 	root := t.TempDir()
 	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
@@ -259,11 +274,9 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	put(t, d, filepath.Join(ws, issues.QuestionsFile), string(spec))
 	answers := filepath.Join(root, "answers.yaml")
 	put(t, d, answers, "done: one\ntimeline: two\n")
-	oldCheck, oldSession := check, sessionID
-	t.Cleanup(func() { check, sessionID = oldCheck, oldSession })
 	checked := ""
-	check = func(_ proc.Procs, dir string) error { checked = dir; return nil }
-	sessionID = func() string { return "s1" }
+	onMachine(t, checking{Procs: proc.Real(), checked: &checked})
+	t.Setenv(issues.SessionVar, "s1")
 	gh := hubAt(t, map[string]string{
 		"repos/o/r/issues/6": `{"number":6,"title":"six","state":"open"}`,
 		"repos/o/r/activity?ref=refs/heads/issue-6&activity_type=branch_creation&per_page=100": `[]`,
@@ -503,9 +516,7 @@ func TestIssueNewReviewLabelsItSeReview(t *testing.T) {
 
 func TestIssueReviewReadsItsWords(t *testing.T) {
 	gh := recordedIssues(t)
-	old := sessionID
-	t.Cleanup(func() { sessionID = old })
-	sessionID = func() string { return "" }
+	t.Setenv(issues.SessionVar, "")
 	d, dir := onFake(t), filepath.FromSlash("/reports")
 	good, bad := filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json")
 	put(t, d, good, `{"commit":"c","requirements":[{"item":"i","evidence":"e"}],"clean":["x"]}`)

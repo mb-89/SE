@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -268,6 +267,3 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	return 0
 }
-
-// executable is this se, the installed one when it runs from the plugin.
-var executable = os.Executable

@@ -19,12 +19,12 @@ import (
 func (c *Call) fire() string { return issues.Fire(os.Getenv, c.Net) }
 
 // sessionID names the session se runs in, which land records as the leaf's
-// worker and review tells apart from them. Tests put a fixed one here.
-var sessionID = func() string { return os.Getenv(issues.SessionVar) }
+// worker and review tells apart from them.
+func sessionID() string { return os.Getenv(issues.SessionVar) }
 
 // check is what issue land runs before it pushes, on procs: the repo's one
 // definition of green. It answers the check's output when it fails.
-var check = func(procs proc.Procs, dir string) error {
+func check(procs proc.Procs, dir string) error {
 	out, err := proc.Combined(procs, proc.Cmd{Name: "sh", Args: []string{"./tests/check.sh"}, Dir: dir})
 	if err != nil {
 		lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")

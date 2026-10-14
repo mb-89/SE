@@ -39,11 +39,11 @@ func builtFrom() string {
 
 // pluginCheckout is the checkout the session's plugin was loaded from: the one
 // the plugin names, else the one this se was built into (<checkout>/src/plugin/bin/se).
-func pluginCheckout() string {
+func pluginCheckout(procs proc.Procs) string {
 	if repo := os.Getenv(pluginRepoEnv); repo != "" {
 		return repo
 	}
-	exe, err := executable()
+	exe, err := procs.Self()
 	if err != nil {
 		return ""
 	}
@@ -92,7 +92,7 @@ func commits(hooks, checkout, built string) string {
 // sessionCommits is commits for this call, from what the plugin said and what git says now.
 func sessionCommits(procs proc.Procs) string {
 	checkout := ""
-	if repo := pluginCheckout(); repo != "" {
+	if repo := pluginCheckout(procs); repo != "" {
 		checkout, _ = update.Head(procs, repo)
 	}
 	return commits(os.Getenv(hooksCommitEnv), checkout, builtFrom())

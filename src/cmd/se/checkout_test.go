@@ -47,8 +47,9 @@ var (
 	installedErr  error
 )
 
-// installed stands an se built from this checkout in for the installed se,
-// since the test binary cannot serve as a daemon.
+// installed builds an se from this checkout to stand in for the installed
+// se, since the test binary cannot serve as a daemon. A machine runs as it
+// through runningAs.
 func installed(t *testing.T) string {
 	t.Helper()
 	installedOnce.Do(func() {
@@ -63,11 +64,16 @@ func installed(t *testing.T) string {
 	if installedErr != nil {
 		t.Fatal(installedErr)
 	}
-	was := executable
-	executable = func() (string, error) { return installedSE, nil }
-	t.Cleanup(func() { executable = was })
 	return installedSE
 }
+
+// runningAs is a machine whose running program, its Self, is self.
+type runningAs struct {
+	proc.Procs
+	self string
+}
+
+func (m runningAs) Self() (string, error) { return m.self, nil }
 
 // scratch copies this checkout's source into a fresh workspace.
 func scratch(t *testing.T) string {
@@ -143,6 +149,7 @@ func TestAnyOtherWorkspaceRunsTheInstalledSe(t *testing.T) {
 	ws := t.TempDir()
 	write(t, filepath.Join(ws, "go.mod"), "module example.com/other\n")
 	m := proc.NewFake()
+	m.RunAs(se)
 	exe, note, err := daemonExe(m, daemon.Paths{Workspace: ws, Disk: drive})
 	if err != nil || exe != se || note != "" || len(m.Ran()) != 0 {
 		t.Fatalf("exe %q, note %q, err %v, ran %q", exe, note, err, m.Lines())
@@ -187,6 +194,7 @@ func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
 		t.Skip("builds se twice")
 	}
 	se := installed(t)
+	onMachine(t, runningAs{proc.Real(), se})
 	ws := scratch(t)
 	paths := daemon.Paths{Workspace: ws, Disk: drive}
 	t.Cleanup(func() { _ = daemon.Stop(paths, 5*time.Second, clock.Real(), sehttp.Real()) })

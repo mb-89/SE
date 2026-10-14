@@ -52,6 +52,8 @@ type Repo struct {
 
 	files, dirs map[string]bool
 	texts       map[string][]byte
+	// funcVars is test-swap's package-level func variables, by folder.
+	funcVars map[string]map[string]bool
 }
 
 // Read answers the text of a slash-separated path relative to Root, read once

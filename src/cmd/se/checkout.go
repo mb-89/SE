@@ -48,7 +48,7 @@ func handsOver(d disk.Disk, procs proc.Procs, workspace string, args []string, s
 // workspace is an SE checkout. note says which se that is, and why, where it
 // is not simply the installed one.
 func daemonExe(procs proc.Procs, p daemon.Paths) (exe, note string, err error) {
-	installed, err := executable()
+	installed, err := procs.Self()
 	if err != nil {
 		return "", "", err
 	}

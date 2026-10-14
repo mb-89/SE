@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -45,6 +46,8 @@ func checkout(t *testing.T, branch string) string {
 	w := gitCheckout{dir: t.TempDir(), branch: branch, head: strings.Repeat("c", 40)}
 	m := proc.NewFake()
 	m.Install("git", w.git)
+	// The se running is the one built into the checkout.
+	m.RunAs(filepath.Join(w.dir, "src", "plugin", "bin", "se"))
 	onMachine(t, m)
 	return w.dir
 }
