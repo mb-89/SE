@@ -34,6 +34,10 @@ and only then leaves.**
      push.
    - **no PR**: a claimed leaf whose branch has no PR, open or closed, and no
      push for an hour.
+   - **stale manifest**: an open manifest's branch on origin, with no open
+     PR into main, that lacks commits of main: `se fleet refresh` has not
+     merged them in yet, or the merge conflicts (see **Manifests take main**
+     below).
    - **leftover claim**: an `issue-<n>` branch whose issue is closed (or no
      open `se` issue), or whose PR was closed unmerged.
    - **impossible block**: an issue blocked by an issue closed as not planned,
@@ -57,6 +61,10 @@ and only then leaves.**
      over: `se issue pull --take <n> --worktree` fetches its branch as it
      stands, and the box hands it to the agent the take names, which lands it;
    - a green PR with auto-merge off gets auto-merge turned on (`se fleet fix`);
+   - a stale manifest's branch takes main in (`se fleet fix`, as
+     `se fleet refresh` does); a merge that conflicts pushes nothing, and is
+     merged by hand. Main moves often, so this fix is not recorded, and a
+     stale manifest back after it is no fix that failed;
    - a leftover claim whose issue is closed and whose branch has no open PR
      is left to the prune workflow, which deletes the branch (see **Pruning**
      below); `se fleet fix` reports it as an issue only if the branch is
@@ -95,6 +103,7 @@ se fleet check [--json] [--repo OWNER/NAME]
 se fleet fix [--json] [--repo OWNER/NAME]
 se fleet plugins --into DIR
 se fleet prune [--apply] [--json] [--repo OWNER/NAME]
+se fleet refresh [--json] [--repo OWNER/NAME]
 se fleet rules [--json] [--repo OWNER/NAME]
 se fleet trust [--json]
 ```
@@ -185,6 +194,23 @@ battery the box already ran.**
   fixes before it lands again. The Stop hook counts an open PR as unfinished
   ([spec/issues.md](issues.md#the-stop-hook)), so a box ends only once its
   PRs have merged or are taken over.
+
+## Manifests take main
+
+A manifest's leaves branch from its branch `issue-<manifest>` and land into
+it, so main's moves reach them only through it. A manifest branch left behind
+main made each leaf that took it meet main's moves on its own, as conflicts:
+#490 still tracked the 14 MB `src/se` main had removed in #474, and #503,
+#504 and #505 each resolved it. So `se fleet refresh` merges `origin/main`
+into the branch of every open manifest that has one on origin and no open PR
+into main (`se issue keep` keeps that one, and a push it did not make would
+start no CI), in a worktree under `.se/.runtime/refresh`, never a rebase, and
+pushes the merge: main's moves are merged once, on the manifest, and reach
+each leaf through its landing. A merge that conflicts pushes nothing; the
+command names it, and `se fleet check` lists the branch as a **stale
+manifest**, to merge by hand. The workflow `.github/workflows/refresh.yml`
+runs it on every push to main, with the repository's own token, and
+`se fleet fix` runs it for each stale manifest `se fleet check` finds.
 
 ## A rule main takes
 

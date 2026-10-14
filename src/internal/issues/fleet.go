@@ -20,6 +20,7 @@ const (
 	RedPR           = "red PR"
 	GreenUnmerged   = "green but unmerged"
 	NoPR            = "no PR"
+	StaleManifest   = "stale manifest"
 	LeftoverClaim   = "leftover claim"
 	ImpossibleBlock = "impossible block"
 	BareIssue       = "bare issue"
@@ -27,7 +28,7 @@ const (
 )
 
 // Kinds is every kind of finding, in the order se fleet check lists them.
-var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, LeftoverClaim, ImpossibleBlock, BareIssue, WaitingOnPerson}
+var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, StaleManifest, LeftoverClaim, ImpossibleBlock, BareIssue, WaitingOnPerson}
 
 // Grace is how long the prune workflow has to delete a leftover claim of a
 // closed issue before se fleet fix reports it.
@@ -97,6 +98,8 @@ func (f *Finding) setRemedy() {
 		f.Remedy = fmt.Sprintf("the prune workflow deletes %s; se fleet fix reports it only if it is still there a day after #%d closed", Branch(f.Issue), f.Issue)
 	case f.Kind == BareIssue:
 		f.Remedy = "se fleet fix files it into the open misc manifest"
+	case f.Kind == StaleManifest:
+		f.Remedy = fmt.Sprintf("se fleet fix merges origin/main into %s, as se fleet refresh does; where it conflicts, merge it by hand (never rebase)", Branch(f.Issue))
 	case f.spent:
 		f.Remedy = "se fleet fix deletes " + Branch(f.Issue) + ": main holds all its commits"
 	case f.judgment || f.cause() == GreenUnmerged:
@@ -143,13 +146,15 @@ func (s Source) CheckFanOut(fire func() Shot) ([]Finding, string, error) {
 
 // check is Check on a survey already read.
 func (s Source) check(all []Status, t tree) ([]Finding, error) {
-	var claims, out []Finding
+	var claims, stale, out []Finding
 	if err := parallel([]func() error{
 		func() (err error) { claims, err = s.claimFindings(all, t); return err },
+		func() (err error) { stale, err = s.staleManifests(t); return err },
 		func() (err error) { out, err = s.leftovers(t); return err },
 	}); err != nil {
 		return nil, err
 	}
+	out = append(out, stale...)
 	deps := t.deps
 	out = append(out, s.impossible(t)...)
 
@@ -492,6 +497,38 @@ func (s Source) leftovers(t tree) ([]Finding, error) {
 	return found, err
 }
 
+// staleManifests is the open manifests whose branch, on origin with no open
+// PR into main, lacks commits of main: se fleet refresh had not merged them
+// in, or the merge conflicts.
+func (s Source) staleManifests(t tree) ([]Finding, error) {
+	var ns []int
+	for _, n := range t.numbers() {
+		if t.byNum[n].labelled(ManifestLabel) {
+			ns = append(ns, n)
+		}
+	}
+	ms := refreshable(ns, t.refs, t.pulls)
+	found, err := each(len(ms), func(k int) (*Finding, error) {
+		cmp, err := api[struct {
+			AheadBy int `json:"ahead_by"`
+		}](s, fmt.Sprintf("repos/%s/compare/%s...main?per_page=1", s.Repo, ms[k].sha), false)
+		if err != nil || cmp[0].AheadBy == 0 {
+			return nil, err
+		}
+		return &Finding{
+			Kind: StaleManifest, Issue: ms[k].n, head: ms[k].sha,
+			What: fmt.Sprintf("%s lacks %d commit(s) of main, which its leaves would each meet on their own", Branch(ms[k].n), cmp[0].AheadBy),
+		}, nil
+	})
+	var out []Finding
+	for _, f := range found {
+		if f != nil {
+			out = append(out, *f)
+		}
+	}
+	return out, err
+}
+
 // impossible is the blocks no box can ever lift: a blocker closed as not
 // planned, an open blocker no box works, and blockers in a cycle.
 func (s Source) impossible(t tree) []Finding {
@@ -576,7 +613,8 @@ type Fixed struct {
 var fleetMark = regexp.MustCompile(`<!-- se:fleet (\S+) (\d+) -->`)
 
 // Fix applies, in order, the remedy of every finding that needs no checkout:
-// auto-merge goes on where it is off, a spent leftover branch is deleted, a
+// auto-merge goes on where it is off, a stale manifest's branch takes main
+// in (refreshOne, unrecorded), a spent leftover branch is deleted, a
 // bare issue is filed into the open misc manifest, and a finding with no
 // other remedy becomes an issue, labelled se-person where it is a judgment.
 // A takeover is left to the box, which runs its remedy. Each fix is recorded on the
@@ -594,6 +632,11 @@ func (s Source) Fix(dir string, findings []Finding) []Fixed {
 			x.Did = "reported; it waits for a person"
 		case f.takeover():
 			x.Did, x.Take = "left to this box: "+f.Remedy, true
+		case f.Kind == StaleManifest:
+			// Main moves often, so a refresh is no fix to record: a stale
+			// manifest back after one is main moving again.
+			r := s.refreshOne(dir, f.Issue)
+			x.Did, x.Failed = r.Did, r.Failed
 		case f.prunable && s.now().Sub(f.closed) < Grace:
 			x.Did = fmt.Sprintf("left to the prune workflow until a day after #%d closed", f.Issue)
 		case f.prunable:

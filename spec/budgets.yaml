@@ -44,6 +44,7 @@ command_classes:
   fleet fix: github
   fleet plugins: github
   fleet prune: github
+  fleet refresh: github
   fleet rules: battery
   fleet trust: local
   guidance: local
