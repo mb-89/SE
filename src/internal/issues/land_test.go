@@ -252,15 +252,20 @@ func TestLandSaysWhenAutoMergeFails(t *testing.T) {
 }
 
 // checkout is a fake git's one checkout, /a: the branch it is on and what
-// git status says of it. It does only what land asks before it pushes.
+// git status says of it, with an origin whose main it already holds and
+// that has no copy of the branch. It does only what land asks before it pushes.
 type checkout struct{ branch, dirty string }
 
 func (w *checkout) git(c proc.Cmd) int {
-	switch strings.Join(c.Args, " ") {
+	switch args := strings.Join(c.Args, " "); args {
 	case "rev-parse --abbrev-ref HEAD":
 		fmt.Fprintln(c.Stdout, w.branch)
 	case "status --porcelain":
 		_, _ = fmt.Fprint(c.Stdout, w.dirty)
+	case "fetch -q origin main", "merge -q --no-edit origin/main":
+	case "fetch -q origin refs/heads/" + w.branch + ":refs/remotes/origin/" + w.branch:
+		fmt.Fprintf(c.Stderr, "fatal: couldn't find remote ref refs/heads/%s\n", w.branch)
+		return 128
 	default:
 		fmt.Fprintf(c.Stderr, "fatal: this git only reads /a: %s\n", c.Args)
 		return 128
@@ -319,6 +324,88 @@ func TestLandRefusesAParent(t *testing.T) {
 		t.Fatalf("%q", *calls)
 	}
 	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, origin, "rev-parse", "main"); got != want {
+		t.Fatalf("a refused land moved issue-6 to %s", got)
+	}
+}
+
+// claimedBy is claimed with the second box b: a is on issue-6 with one commit
+// of work, both able to merge.
+func claimedBy(t *testing.T) (origin, a, b string) {
+	t.Helper()
+	origin, a, b = boxes(t)
+	for _, d := range []string{a, b} {
+		run(t, d, "config", "user.name", "t")
+		run(t, d, "config", "user.email", "t@t")
+	}
+	if ok, err := (Source{Proc: machine}).Claim(a, 6); err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	commitFile(t, a, "work", "a")
+	return origin, a, b
+}
+
+// commitFile commits name holding text in dir.
+func commitFile(t *testing.T, dir, name, text string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, dir, "add", name)
+	run(t, dir, "commit", "-q", "-m", name)
+}
+
+func TestLandMergesTheBranchAndMainInBeforeTheCheck(t *testing.T) {
+	origin, a, b := claimedBy(t)
+	run(t, a, "push", "-q", "origin", "HEAD:issue-6")
+	commitFile(t, a, "fix", "a")
+	// On origin, main moved, and se fleet refresh merged an older main into issue-6.
+	run(t, b, "fetch", "-q", "origin")
+	run(t, b, "checkout", "-q", "-b", "issue-6", "origin/issue-6")
+	commitFile(t, b, "refreshed", "b")
+	run(t, b, "push", "-q", "origin", "issue-6")
+	run(t, b, "checkout", "-q", "main")
+	commitFile(t, b, "rule", "b")
+	run(t, b, "push", "-q", "origin", "main")
+	gh, _ := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`, "graphql": `{"data":{}}`}, nil)
+	var saw []string
+	check := func(dir string) error {
+		for _, f := range []string{"work", "fix", "refreshed", "rule"} {
+			if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+				saw = append(saw, f)
+			}
+		}
+		return nil
+	}
+	if _, err := (Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}).Land(a, "", qs, full, check); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"work", "fix", "refreshed", "rule"}; !reflect.DeepEqual(saw, want) {
+		t.Fatalf("the check saw %v, want %v", saw, want)
+	}
+	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("origin's issue-6 is %s, want %s", got, want)
+	}
+}
+
+func TestLandStopsWhereMainConflicts(t *testing.T) {
+	origin, a, b := claimedBy(t)
+	before := run(t, origin, "rev-parse", "issue-6")
+	commitFile(t, b, "work", "b")
+	run(t, b, "push", "-q", "origin", "main")
+	head := run(t, a, "rev-parse", "HEAD")
+	gh, _ := landGH(t, map[string]string{}, nil)
+	checked := false
+	_, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
+	if err == nil || !strings.Contains(err.Error(), "merging origin/main into issue-6 conflicts") || checked {
+		t.Fatalf("%v, checked %v", err, checked)
+	}
+	if got := run(t, a, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("a moved to %s", got)
+	}
+	if dirty := run(t, a, "status", "--porcelain"); dirty != "" {
+		t.Fatalf("the merge was left half done:\n%s", dirty)
+	}
+	if got := run(t, origin, "rev-parse", "issue-6"); got != before {
 		t.Fatalf("a refused land moved issue-6 to %s", got)
 	}
 }

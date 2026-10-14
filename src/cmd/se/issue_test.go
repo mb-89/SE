@@ -96,14 +96,14 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, next, resume, review." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, next, resume, review, tree." {
 		t.Fatalf("%+v", r)
 	}
 }
 
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, next, resume, review." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, next, resume, review, tree." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -112,7 +112,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue next, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, next, resume, review.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, next, resume, review, tree.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -638,5 +638,54 @@ func TestTheCheckRunsCheckShInTheCheckoutAndAnswersTheTailOfAFailure(t *testing.
 	}
 	if got := m.Lines(); len(got) != 2 || got[0] != "sh ./tests/check.sh" {
 		t.Fatalf("ran %q", got)
+	}
+}
+
+func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
+	old := gh
+	t.Cleanup(func() { gh = old })
+	answers := map[string]string{
+		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
+			{"number":1,"title":"root","state":"open","html_url":"u1","sub_issues_summary":{"total":2,"completed":1}},
+			{"number":3,"title":"three","state":"open","html_url":"u3","labels":[{"name":"se"},{"name":"se-review"}],"sub_issues_summary":{"total":1,"completed":1}}]`,
+		"repos/o/r/issues?labels=se&state=all&per_page=100": `[
+			{"number":7,"title":"old","state":"closed","html_url":"u7","labels":[{"name":"se"}],"sub_issues_summary":{"total":2,"completed":2}},
+			{"number":3,"title":"three","state":"open","html_url":"u3","labels":[{"name":"se"},{"name":"se-review"}],"sub_issues_summary":{"total":1,"completed":1}},
+			{"number":2,"title":"two","state":"closed","html_url":"u2","labels":[{"name":"se"}]},
+			{"number":1,"title":"root","state":"open","html_url":"u1","labels":[{"name":"se"}],"sub_issues_summary":{"total":2,"completed":1}},
+			{"number":8,"title":"a PR","state":"open","pull_request":{},"sub_issues_summary":{"total":1}}]`,
+		"repos/o/r/issues/1":                         `{"number":1,"title":"root","state":"open","html_url":"u1","labels":[{"name":"se"}],"sub_issues_summary":{"total":2,"completed":1}}`,
+		"repos/o/r/issues/2":                         `{"number":2,"title":"two","state":"closed","html_url":"u2","labels":[{"name":"se"}]}`,
+		"repos/o/r/issues/5":                         `{"number":5,"title":"not se","state":"open","html_url":"u5"}`,
+		"repos/o/r/issues/1/sub_issues?per_page=100": `[{"number":2,"title":"two","state":"closed","labels":[{"name":"se"}]},{"number":3,"title":"three","state":"open","labels":[{"name":"se"},{"name":"se-review"}],"sub_issues_summary":{"total":1,"completed":1}}]`,
+		"repos/o/r/issues/3/sub_issues?per_page=100": `[{"number":4,"title":"four","state":"closed","labels":[{"name":"se"}]}]`,
+	}
+	gh = func(args ...string) ([]byte, error) {
+		if a, ok := answers[args[len(args)-1]]; ok {
+			return []byte(a), nil
+		}
+		return nil, fmt.Errorf("not recorded: %v", args)
+	}
+	code, out, errs := se(t, "issue", "tree", "--repo", "o/r")
+	want := "#1  open  1/2 closed  se  root\n#3  open  1/1 closed  se,se-review  three\n#7  closed  2/2 closed  se  old\n"
+	if code != 0 || out != want {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	code, out, errs = se(t, "issue", "tree", "#1", "--repo", "o/r")
+	want = "#1  open  1/2 closed  se  root\n  #2  closed  se  two\n  #3  open  1/1 closed  se,se-review  three\n    #4  closed  se  four\n"
+	if code != 0 || out != want {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	code, out, _ = se(t, "issue", "tree", "--json", "1", "--repo", "o/r")
+	if code != 0 || !strings.Contains(out, `{"number":4,"title":"four","state":"closed","url":"","labels":["se"],"depth":2,"closed":0,"total":0}`) {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+	if code, out, _ = se(t, "issue", "tree", "2", "--repo", "o/r"); code != 0 || out != "#2  closed  se  two\n" {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+	for _, args := range [][]string{{"5"}, {"x"}, {"1", "2"}} {
+		if code, _, errs := se(t, append([]string{"issue", "tree", "--repo", "o/r"}, args...)...); code != 1 || errs == "" {
+			t.Errorf("%v: exit %d, %q", args, code, errs)
+		}
 	}
 }
