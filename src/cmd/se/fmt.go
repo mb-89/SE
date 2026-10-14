@@ -7,6 +7,7 @@ func init() {
 		Name:    "fmt",
 		Usage:   "fmt",
 		Group:   "Checks",
+		Class:   batch,
 		Summary: "run every formatter tests/check.sh checks",
 		Details: "install each pinned linter tests/tools.sh names that is missing or at another version, " +
 			"as the battery does, then run their formatters where the battery lints: golangci-lint fmt in src and biome check --write in src/plugin. " +
