@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints the trees the plugin draws for /se help and /se help issue next from se's real answers, as the test kit mounts them, for a PR body.
+# Prints the trees the plugin draws for /se help and /se help issue pull from se's real answers, as the test kit mounts them, for a PR body.
 set -eu
 cd "$(dirname "$0")/../.."
 tmp=$(mktemp -d)
@@ -9,11 +9,11 @@ mkdir "$tmp/plugin"
 cp -r src/plugin/.claude-plugin src/plugin/hooks src/plugin/types "$tmp/plugin/"
 mkdir "$tmp/plugin/tests"
 help=$("$tmp/se" --session --workspace "$tmp" help)
-next=$("$tmp/se" --session --workspace "$tmp" help issue next)
+next=$("$tmp/se" --session --workspace "$tmp" help issue pull)
 cat > "$tmp/plugin/tests/trees.test.ts" <<EOF
 import { mock, test } from 'claude-code/testing'
 
-const replies: Record<string, string> = { help: $(printf '%s' "$help" | jq -Rs .), 'help issue next': $(printf '%s' "$next" | jq -Rs .) }
+const replies: Record<string, string> = { help: $(printf '%s' "$help" | jq -Rs .), 'help issue pull': $(printf '%s' "$next" | jq -Rs .) }
 
 const outline = (node: unknown, depth = 0): string[] => {
   if (typeof node === 'string') return [\`\${'  '.repeat(depth)}"\${node}"\`]
