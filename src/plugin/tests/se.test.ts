@@ -180,6 +180,8 @@ function world(on: On, env: Record<string, string> = {}): World {
     return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
   })
   on('attribution.text', ($, e) => ({ text: e.text }))
+  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
+  on('session.compact', () => ({ messages: [{ role: 'user', text: 'the summary', toolUses: [] }] }) as never)
   on('classic.Stop', () => ({}))
   on('classic.SubagentStop', () => ({}))
   on('prompt.submit', ($, e) => ({ text: e.text }) as never)
@@ -748,6 +750,35 @@ test('a line that no longer answers help draws as its text', async ($, on) => {
   await $.command.run(se('help'))
   const ui = await $.ui.mount(output('help', 'se has moved on.', 'desktop'))
   expect(await ui.find({ key: 'usage' })).toBeUndefined()
+})
+
+test('the context carries the guidance se answers, asked once, and again after a compaction', async ($, on) => {
+  const w = world(on)
+  w.replies['guidance --session-id s1'] = { text: 'the principles, and the skills handed over' }
+  await $.session.start(starts)
+  const blocks = async () => (await $.prompt.context({ blocks: [{ name: 'currentDate', text: 'today' }] })).blocks
+  expect(await blocks()).toEqual([
+    { name: 'currentDate', text: 'today' },
+    { name: 'se-guidance', text: 'the principles, and the skills handed over' },
+  ])
+  await blocks()
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toEqual(['/se guidance --session-id s1'])
+  // SE is off: the guidance goes into the context all the same, and nothing is posted.
+  expect(posted(w)).toEqual([])
+  await $.session.compact({
+    trigger: 'manual',
+    messages: [{ role: 'user', text: 'all so far', toolUses: [] }],
+  } as never)
+  w.replies['guidance --session-id s1'] = { text: 'the skills handed over, again' }
+  expect((await blocks()).at(-1)).toEqual({ name: 'se-guidance', text: 'the skills handed over, again' })
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(2)
+})
+
+test('guidance se answers empty adds no block', async ($, on) => {
+  const w = world(on)
+  w.replies['guidance --session-id s1'] = { text: '' }
+  await $.session.start(starts)
+  expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
 })
 
 // A cloud session no person attends, as a routine starts it.

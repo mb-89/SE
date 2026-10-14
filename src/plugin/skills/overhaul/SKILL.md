@@ -1,6 +1,6 @@
 ---
 name: overhaul
-description: Start an SE overhaul, or, as the box that took one, judge SE against every principle and the outside world and file its report. The work skill hands an issue labelled se-overhaul to it.
+description: Start an SE overhaul, or, as the box that took one, judge SE against every principle and the outside world and file its report. A take hands it over where the issue names it, as every overhaul does.
 ---
 
 # Overhaul: is the design still right?
