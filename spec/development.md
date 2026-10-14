@@ -47,10 +47,13 @@ run it, and it names each step it runs. The two pushes `se` makes itself, a
 claim's and `se issue land`'s, run with no hooks: land has just run the check
 on that tree, and a claim pushes `origin/main`, which CI passed; a person's own
 `git push` still runs the hook. SE's own rules are one file each in
-`src/internal/rules`, run by `se rules`. Every tool SE needs is pinned in
-`tests/tools.sh` (gh, Go, dlv, deadcode and the linters, whose formatters are
-the ones SE uses), and each linter's config gives the reason for anything it switches
-off. RUNME.sh, CI and check.sh run `sh tests/tools.sh install`, which installs
+`src/internal/rules`, run by `se rules`; where a rule can apply the mechanical
+part of its finding (the `fast-test` rule's `t.Parallel()` as a test's first
+statement), `se rules --fix` applies it, so no agent does it by hand. Every
+tool SE needs is pinned in `tests/tools.sh` (gh, Go, dlv, deadcode and the
+linters, whose formatters are the ones SE uses), and each linter's config gives
+the reason for anything it switches off. RUNME.sh, CI and check.sh run
+`sh tests/tools.sh install`, which installs
 whatever is missing, and a linter at another version, into `~/.se` without
 admin rights: each from its release file for the platform, checked against
 the checksum its release publishes (biome publishes none, so tools.sh pins
