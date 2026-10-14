@@ -421,7 +421,7 @@ func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
 		"| takeovers | – | 1 | new |",
 		"| duplicates_per_issue | – | 1 | new |",
 		"| duplicates | 2 | 1 |",
-		"Duplicates: 1 closed as duplicate, 1 issues for a person minted again for an issue one already held back.",
+		"Duplicates: 1 closed as duplicate, 1 issue for a person minted again for an issue one already held back.",
 	} {
 		if !strings.Contains(draft, want) {
 			t.Errorf("the draft lacks %q", want)
@@ -608,6 +608,41 @@ func TestByHandCountsAnAnswerThatProposesACommand(t *testing.T) {
 	} {
 		if got := byHand(answer); got != want {
 			t.Errorf("byHand(%q) = %v, want %v", answer, got, want)
+		}
+	}
+}
+
+func TestTheMetricsTableRoundsEachChangeAsItsValues(t *testing.T) {
+	t.Parallel()
+	c := Collected{
+		Window:  RetroWindow{Until: prevClosed},
+		Metrics: Metrics{"landed": 3, "for_person": 1, "conflicts_per_issue": 0.29, "ci_reruns_per_issue": 0.25, "requests_per_issue": 20.07},
+		History: []Past{{Retro: 20, Metrics: Metrics{"landed": 3, "for_person": 2, "conflicts_per_issue": 0.33, "ci_reruns_per_issue": 0.3, "requests_per_issue": 20}}},
+		Reholds: 1,
+	}
+	text := c.facts()
+	// 0.29-0.33 is -0.040000000000000036 and 0.25-0.3 is -0.04999999999999999
+	// in floats; the table says what the judge reads in the values.
+	for _, line := range []string{
+		"| conflicts_per_issue | 0.33 | 0.29 | better (-0.04) |",
+		"| ci_reruns_per_issue | 0.3 | 0.25 | better (-0.05) |",
+		"| requests_per_issue | 20 | 20.07 | worse (+0.07) |",
+		"| for_person | 2 | 1 | -1 |",
+		"| landed | 3 | 3 | same |",
+		"and 1 was for a person.",
+		"1 issue for a person minted again",
+	} {
+		if !strings.Contains(text, line) {
+			t.Errorf("the draft does not say %q:\n%s", line, text)
+		}
+	}
+}
+
+func TestRound2RoundsHalfAwayFromZero(t *testing.T) {
+	t.Parallel()
+	for x, want := range map[float64]float64{-0.04999999999999999: -0.05, -0.040000000000000036: -0.04, 0.125: 0.13, -0.125: -0.13, 2.0 / 3: 0.67} {
+		if got := round2(x); got != want {
+			t.Errorf("round2(%v) = %v, want %v", x, got, want)
 		}
 	}
 }

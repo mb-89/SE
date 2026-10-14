@@ -100,8 +100,8 @@ func (c Collected) facts() string {
 	}
 	fmt.Fprintf(&b, "## The window\n%s, up to %s: %d closed `se` issues, %d merged PRs, %d commits on main.\n",
 		scope, w.Until.Format(time.RFC3339), len(c.Rows), c.PRs, c.Commits)
-	fmt.Fprintf(&b, "\nOf the closed issues, %g landed (the ones the answers check counts, which the per-issue metrics divide by) and %g were for a person.\n",
-		c.Metrics["landed"], c.Metrics["for_person"])
+	fmt.Fprintf(&b, "\nOf the closed issues, %g landed (the ones the answers check counts, which the per-issue metrics divide by) and %g %s for a person.\n",
+		c.Metrics["landed"], c.Metrics["for_person"], agree(c.Metrics["for_person"], "was", "were"))
 
 	b.WriteString("\n## Rule checks\n")
 	for _, k := range checkKinds {
@@ -147,7 +147,7 @@ func (c Collected) facts() string {
 	}
 	fmt.Fprintf(&b, "\nGitHub requests: %g per landed issue, counted by the landing facts of %d of the %d closed issues.\n", c.Metrics["requests_per_issue"], withRequests, len(c.Rows))
 	fmt.Fprintf(&b, "\nGitHub rate limits: %g refusals and %g minutes waited for the reset per landed issue; %d of the %d closed issues met one.\n", c.Metrics["rate_limits_per_issue"], c.Metrics["rate_limit_minutes_per_issue"], withWaits, len(c.Rows))
-	fmt.Fprintf(&b, "\nDuplicates: %g closed as duplicate, %d issues for a person minted again for an issue one already held back.\n", c.Metrics["duplicates"]-float64(c.Reholds), c.Reholds)
+	fmt.Fprintf(&b, "\nDuplicates: %g closed as duplicate, %d %s for a person minted again for an issue one already held back.\n", c.Metrics["duplicates"]-float64(c.Reholds), c.Reholds, agree(float64(c.Reholds), "issue", "issues"))
 	fmt.Fprintf(&b, "\nClaim to merge: median %s over the %d issues whose claim and merge are both on record.\n", span(int(c.Metrics["claim_to_merge_minutes"])), known)
 
 	b.WriteString("\n## Metrics against the previous retros\n")
@@ -249,17 +249,29 @@ func count(n int) string {
 // the right way.
 func trend(name string, last, now Metrics) string {
 	before, ok := last[name]
-	switch {
-	case !ok:
+	if !ok {
 		return "new"
-	case now[name] == before:
+	}
+	// The change is rounded as the values are, so float noise neither shows
+	// nor turns a same into a move.
+	d := round2(now[name] - before)
+	switch {
+	case d == 0:
 		return "same"
 	case size(name):
-		return fmt.Sprintf("%+g", now[name]-before)
-	case now[name] < before:
-		return fmt.Sprintf("better (%+g)", now[name]-before)
+		return fmt.Sprintf("%+g", d)
+	case d < 0:
+		return fmt.Sprintf("better (%+g)", d)
 	}
-	return fmt.Sprintf("worse (%+g)", now[name]-before)
+	return fmt.Sprintf("worse (%+g)", d)
+}
+
+// agree is the word that agrees with count n: one for 1, many otherwise.
+func agree(n float64, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // matrix is every closed issue × every landing question, a question at a time.

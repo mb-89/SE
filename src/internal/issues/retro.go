@@ -2,6 +2,7 @@ package issues
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -810,7 +811,9 @@ func (c Collected) movers(metric string) []string {
 // counted are the metrics counted in the window, each also per landed issue.
 var counted = []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand", "duplicates", "requests", "rate_limits", "rate_limit_minutes"}
 
-func round2(x float64) float64 { return float64(int(x*100+0.5)) / 100 }
+// round2 rounds x to two decimals, half away from zero, so a change in a
+// metric reads like the metric itself: -0.04, not -0.040000000000000036.
+func round2(x float64) float64 { return math.Round(x*100) / 100 }
 
 func median(xs []int) int { return percentile(xs, 0.5) }
 
