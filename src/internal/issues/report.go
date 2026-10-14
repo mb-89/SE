@@ -233,7 +233,7 @@ func (v Verdict) render(by Worker) string {
 		if f.Blocking {
 			judged = "blocking"
 		}
-		became := "not filed (past the first five)"
+		became := fmt.Sprintf("not filed (past the first %d)", MaxFiled)
 		switch {
 		case f.Repeats != 0:
 			became = fmt.Sprintf("repeats #%d, so this goes to a person", f.Repeats)
