@@ -1,23 +1,26 @@
 ---
 name: overhaul
-description: Start an SE overhaul, or, as the box that took one, judge SE against every principle and the outside world and file its report. A take hands it over where the issue names it, as every overhaul does.
+description: Start an SE overhaul for a person, or, for the box that took one, judge SE against every principle and the outside world and file its report. The box starts it for each issue labelled se-overhaul; a person reaches it as @agent-se:overhaul.
+model: opus
 ---
 
 # Overhaul: is the design still right?
 
-Reader: the agent starting an overhaul with a person, or the box that took one.
+Reader: the overhaul agent, started for a person or by the box that took an overhaul.
 
-The rules are [spec/overhaul.md](../../../../spec/overhaul.md). `se` is
-`./src/plugin/bin/se`, called exactly as `./src/plugin/bin/se overhaul …`,
-one command per call.
+The rules are [spec/overhaul.md](../../../spec/overhaul.md). `se` is
+`./src/plugin/bin/se` (or the `se` your prompt names, with its
+`--workspace`), called exactly as `./src/plugin/bin/se overhaul …`, one
+command per call.
 
-## Starting one, with a person
+## Starting one, for a person
 
-Run `./src/plugin/bin/se overhaul new` and tell the person the issue it
-created. A box takes it from there: it files the findings as issues, those
-for them where controversial, and closes the overhaul.
+Your prompt names no overhaul to work: a person asked for one. Run
+`./src/plugin/bin/se overhaul new` and answer the issue it created. A box
+takes it from there: it files the findings as issues, those for them where
+controversial, and closes the overhaul.
 
-## The box that took overhaul N
+## The overhaul N a box took
 
 1. `./src/plugin/bin/se overhaul read <n>`. It writes the draft to
    `../overhaul-<n>.md`. If it says it wrote the report already posted on the
@@ -26,7 +29,7 @@ for them where controversial, and closes the overhaul.
    and not, if anything, to `findings` in the draft's block, and go to 4.
 2. Read the draft's facts: the principles, the retro's last `issues/config/overhaul-cadence` runs, the
    previous overhaul's findings. Then read SE itself: `spec/`, the README,
-   CLAUDE.md, the skills, `se help`, and the code under `src/`.
+   CLAUDE.md, the plugin's agents and skills, `se help`, and the code under `src/`.
 3. Judge, and write it into the draft's block (the YAML under
    `<!-- se:overhaul-yaml -->`); leave the facts as they are.
    - `verdicts`: one per principle, `principle`, `strays` (`none`,
@@ -36,7 +39,7 @@ for them where controversial, and closes the overhaul.
    - `looked_at`: `outside` (search the web for current practice and tools in
      agent orchestration, issue-driven work, testing with fakes and
      contracts, plugin and hook design, and for comparable systems; cite
-     them), `consistency` (do the README, spec, help, skills and CLAUDE.md
+     them), `consistency` (do the README, spec, help, agents, skills and CLAUDE.md
      describe what the code does; does every part fit the parts that rely on
      it), `principles` (is one missing, obsolete or in conflict), `retro`
      (did its metrics move; did findings recur anyway), `speed` (what runs one
