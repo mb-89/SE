@@ -198,6 +198,9 @@ func (s Source) landInto(dir string, n, root int, session string, qs []Question,
 	if err := check(dir); err != nil {
 		return Landing{}, fmt.Errorf("the check failed, so nothing was pushed: %w", err)
 	}
+	if err := s.commitStamp(dir); err != nil {
+		return Landing{}, err
+	}
 	comments, f, err := s.factsOf(dir, n, into)
 	if err != nil {
 		return Landing{}, err

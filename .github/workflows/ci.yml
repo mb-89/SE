@@ -1,12 +1,13 @@
 name: ci
 on:
   pull_request:
+  push:
+    branches: [main]
 concurrency:
   group: ci-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 permissions:
   contents: read
-  statuses: read
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -19,20 +20,20 @@ jobs:
         with:
           go-version: ${{ steps.pins.outputs.go }}
           cache-dependency-path: src/go.sum
-      # A box pushes only a tree its battery passed, and posts the se/battery
-      # status naming it on the commit (se issue land, se issue keep). Where
-      # the head carries it for the tree checked out here, posted by an
-      # account that writes to the repository, CI trusts it and runs nothing
-      # more; any other push runs the battery (spec/coordination.md).
+      # The battery writes its stamp once it passed, the hash of the tree it
+      # passed with the stamp left out (tests/battery.stamp, the issues
+      # instance's config/stamp), and se issue land and se issue keep commit
+      # it with the work. se fleet trust computes the same hash of the tree
+      # checked out here, on a PR's merge with main and on a push to main:
+      # where the stamp names it, CI runs nothing more; where it does not
+      # (main moved, the stamp is missing or stale), it runs the battery
+      # (spec/coordination.md). It reads no GitHub.
       - id: trust
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         # se is built outside the checkout, which the battery wants clean; a
         # tree whose se does not build is not trusted either.
         run: |
           se="$RUNNER_TEMP/se"
-          if sh src/build.sh "$se" && "$se" fleet trust --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" --tree "$(git rev-parse 'HEAD^{tree}')"; then
+          if sh src/build.sh "$se" && "$se" fleet trust --workspace "$PWD"; then
             echo "trusted=true" >>"$GITHUB_OUTPUT"
           fi
       - if: steps.trust.outputs.trusted != 'true'

@@ -96,7 +96,7 @@ se fleet fix [--json] [--repo OWNER/NAME]
 se fleet plugins --into DIR
 se fleet prune [--apply] [--json] [--repo OWNER/NAME]
 se fleet rules [--json] [--repo OWNER/NAME]
-se fleet trust --sha SHA --tree TREE [--json] [--repo OWNER/NAME]
+se fleet trust [--json]
 ```
 <!-- /se:manifest -->
 
@@ -135,36 +135,49 @@ owner's rule (2026-10-14): **a box stays with its PR until it merges, it
 pushes only what is up to date with main and checked, and CI trusts the
 battery the box already ran.**
 
-- **The battery records what it passed.** `tests/check.sh` records the git
-  tree it ran over, `HEAD^{tree}` of a clean worktree, read before its first
-  step and again once it passed, in `.se/.runtime/battery/tree`
-  (`src/internal/battery`, `TreeFile`): a battery run is bound to the exact
-  code.
-- **`se issue land` pushes only what is current and checked.** It merges
-  origin's copy of the branch and then `origin/main` into it before it runs
-  the check, so the check runs on what lands. It refuses to push a tree the
-  battery did not record as passed, and a branch `origin/main` (fetched
-  again after the check) has moved past: only a fast-forward onto main is
-  pushed, and main's ruleset enforces the merge side. A merge that conflicts
-  is undone, and the box resolves it by hand (never a rebase, never a
-  force-push). After the push it posts the commit status `se/battery`,
-  success, on the pushed commit, its description naming the tree, through
-  the GitHub I/O module.
-- **CI trusts that status.** The `check` job, the one main's ruleset
-  requires, first runs `se fleet trust` (built from the PR's tree, outside
-  the checkout): where the head commit's latest `se/battery` status is a
-  success naming the tree CI checked out, posted by an account with write
-  access to the repository, it passes in seconds. Otherwise (a person's push
-  without SE, say) it runs the battery as before. A status not posted yet is
-  asked for again a few times, since CI can start on a push before the box
-  posts it. It is trust in one's own boxes, not a cryptographic proof, and
-  the owner changes no setting.
+- **The battery stamps what it passed.** `tests/check.sh` writes one file
+  in the checkout, the stamp (`tests/battery.stamp`; the issues instance's
+  `config/stamp` in `src/index/wiring.yaml` names its path, and
+  `src/internal/battery`, `Stamp`, is its built-in value). It holds the hash
+  of the tree the battery ran over with the stamp itself left out: SHA-256
+  over every entry `git ls-tree -r` lists of `HEAD` but the stamp's, of a
+  clean worktree (a changed stamp counts as clean), read before the first
+  step and again once it passed. A battery run is bound to the exact code,
+  and committing a new stamp leaves the hash as it was. `.gitattributes`
+  merges the stamp as a union, so two branches that both changed it merge
+  without a conflict, into a stamp that names no hash until the battery runs
+  again.
+- **`se issue land` pushes only what is current and checked, its stamp
+  committed with it.** It merges origin's copy of the branch and then
+  `origin/main` into it before it runs the check, so the check runs on what
+  lands. It then commits the stamp, alone, where it changed (the landing
+  facts count no such commit), and refuses to push a tree the stamp does not
+  name, and a branch `origin/main` (fetched again after the check) has moved
+  past: only a fast-forward onto main is pushed, and main's ruleset enforces
+  the merge side. A merge that conflicts is undone, and the box resolves it
+  by hand (never a rebase, never a force-push). A leaf landing into its
+  manifest's branch commits the stamp too. Nothing is posted to GitHub for
+  it: the commit status `se/battery` it posted before is gone, since the
+  cloud boxes' proxy refuses it (#449, #468).
+- **CI trusts the stamp.** The `check` job, the one main's ruleset
+  requires, runs on every pull request and on every push to main. It first
+  runs `se fleet trust` (built from the tree checked out, outside the
+  checkout), which computes the same hash of the tree checked out, `HEAD`
+  with the stamp left out, and reads the stamp `HEAD` holds. Where they
+  match, it passes in seconds. Where they differ, it runs the battery as
+  before: on a pull request CI checks out the PR's merge with main, which
+  is the tree the box stamped only while main has not moved past the
+  branch; on a push to main the squash commit holds the PR's tree, and so
+  its stamp. A missing or stale stamp (a person's push without SE, or a
+  union of two) runs the battery too. It reads no GitHub. It is trust in
+  one's own boxes, not a proof: whoever can push can commit a stamp, as they
+  could post the status before, and the owner changes no setting.
 - **The box keeps each PR it opened until it merges.** The worker that
   landed it runs `se issue keep` in its worktree: every minute it looks at
   the PR, and whenever main has moved past the branch on origin it merges
-  `origin/main` in (never a rebase), runs the battery, pushes and posts the
-  status as `se issue land` does. The push starts CI like any person's push,
-  CI passes in seconds on the status, and auto-merge merges it. It answers
+  `origin/main` in (never a rebase), runs the battery, commits its stamp
+  and pushes as `se issue land` does. The push starts CI like any person's
+  push, CI passes in seconds on the stamp, and auto-merge merges it. It answers
   within `--for` (8 minutes), saying the PR merged, another box took the
   issue over (a takeover marker, or another box's claim, since it started),
   or that it is still open, and the worker runs it again. A merge that

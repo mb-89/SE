@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
@@ -190,29 +191,21 @@ func init() {
 	register(Command{
 		Name:    "fleet trust",
 		Class:   batch,
-		Usage:   "fleet trust --sha SHA --tree TREE [--json] [--repo OWNER/NAME]",
+		Usage:   "fleet trust [--json]",
 		Group:   "Fleet",
-		Summary: "say whether CI may trust the battery a box ran on a commit",
+		Summary: "say whether CI may skip the battery on the commit checked out",
 		Details: []string{
-			fmt.Sprintf("CI's check job asks it first: exit 0 and say why where commit SHA's latest %s status is a success naming TREE, the tree CI checked out, posted by an account with write access to the repository, as se issue land and se issue keep post it on the commit they pushed; else exit 1 and say why, and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}).", issues.BatteryContext),
-			"A status not posted yet is asked for again a few times.",
+			"CI's check job asks it first, on a pull request and on a push to main: exit 0 and say why where the battery's stamp (issues/config/stamp), as the workspace's HEAD holds it, names the hash of HEAD's tree with the stamp left out, as tests/check.sh wrote it and se issue land and se issue keep committed it with the work; else exit 1 and say why (main moved, or the stamp is missing or stale), and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}).",
+			"It reads no GitHub: the stamp is a file in the commit.",
 			"It is trust in one's own boxes, not a proof.",
 		},
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "fleet trust")
-			sha := fs.String("sha", "", "the `SHA` of the PR's head commit")
-			tree := fs.String("tree", "", "the `TREE` CI checked out, HEAD^{tree}")
+			fs := c.Flags("fleet trust")
+			asJSON := fs.Bool("json", false, "answer JSON")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
-			if *sha == "" || *tree == "" {
-				return Reply{}, fmt.Errorf("fleet trust takes --sha SHA and --tree TREE")
-			}
-			s, err := src()
-			if err != nil {
-				return Reply{}, err
-			}
-			why, err := s.Trusted(*sha, *tree)
+			why, err := battery.Trusted(c.Proc, c.Workspace, "HEAD", issueConfig().Stamp)
 			if err != nil {
 				return Reply{}, fmt.Errorf("not trusted, so CI runs the battery: %w", err)
 			}

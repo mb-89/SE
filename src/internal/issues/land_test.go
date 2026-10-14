@@ -74,15 +74,16 @@ func claimed(t *testing.T) (origin, a string) {
 
 func passes(string) error { return nil }
 
-// battered is a check that passes and records on d the tree it ran over, as
-// tests/check.sh does.
-func battered(d disk.Disk) func(string) error {
+// battered is a check that passes and writes the stamp naming the tree it
+// ran over, as tests/check.sh does, into the checkout on the real disk,
+// where git commits it.
+func battered() func(string) error {
 	return func(dir string) error {
-		tree, err := battery.Tree(machine, dir)
+		tree, err := battery.Tree(machine, dir, battery.Stamp)
 		if err != nil {
 			return err
 		}
-		_, err = battery.Pass(d, machine, dir, tree)
+		_, err = battery.Pass(disk.Real(), machine, dir, battery.Stamp, tree)
 		return err
 	}
 }
@@ -99,7 +100,7 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	if err := RecordRequests(d, a, "issue pull", 30, landedAt()); err != nil {
 		t.Fatal(err)
 	}
-	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}.Land(a, "", qs, full, battered(d))
+	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}.Land(a, "", qs, full, battered())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	body, err := Landed{Issue: 6, Answers: full, Facts: Facts{
 		Claimed: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC), Landed: landedAt(), Minutes: 90, Commits: 1,
 		// Those 30, and the 3 this land had made when it counted them (the
-		// manifest lookup among them; the battery status comes after).
+		// manifest lookup among them).
 		Requests: 33,
 	}}.Comment(qs)
 	if err != nil {
@@ -122,7 +123,7 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 33\n") {
 		t.Fatalf("the landing comment is %+v, want\n%s", got, body)
 	}
-	want := []string{"POST repos/o/r/issues/6/comments", "POST repos/o/r/statuses/" + run(t, a, "rev-parse", "HEAD"), "POST repos/o/r/pulls", "POST graphql"}
+	want := []string{"POST repos/o/r/issues/6/comments", "POST repos/o/r/pulls", "POST graphql"}
 	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
 		t.Fatalf("writes\n%q\nwant\n%q", w, want)
 	}
@@ -151,7 +152,7 @@ func profiles(t *testing.T, d disk.Disk, p battery.Profile) func(string) error {
 		if err := d.WriteFile(filepath.Join(at, battery.ProfileFile), data); err != nil {
 			return err
 		}
-		return battered(d)(dir)
+		return battered()(dir)
 	}
 }
 
@@ -220,7 +221,7 @@ func TestLandAgainPushesAndReportsTheOpenPR(t *testing.T) {
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "fix ci")
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
 	d := disk.NewFake()
-	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered())
 	if err != nil || l.Created || l.Number != 14 {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -240,7 +241,7 @@ func TestLandMergesAPRWithNothingToWaitFor(t *testing.T) {
 	// No check is pending on #14: GitHub calls it clean.
 	gh := landGH(t, map[string]string{pullsPath: `[` + clean14 + `]`})
 	d := disk.NewFake()
-	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered())
 	if err != nil || !l.Merged {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -255,7 +256,7 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
 	gh.Proxy = true
 	d := disk.NewFake()
-	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered())
 	if err != nil || l.Merged || l.Number != 14 {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -264,16 +265,16 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 	}
 }
 
-// A land stopped after the push, here by a refused status post (#449), has
-// already written its answers on the issue (#491).
+// A land stopped after the push, here by a repository that allows no
+// auto-merge, has already written its answers on the issue (#491).
 func TestLandPostsTheAnswersBeforeItPushes(t *testing.T) {
 	t.Parallel()
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
-	gh.NoStatuses = true
+	gh.NoAutoMerge = true
 	d := disk.NewFake()
-	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
-	if err == nil || !strings.Contains(err.Error(), "status failed") {
+	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered())
+	if err == nil || !strings.Contains(err.Error(), "auto-merge is not on") {
 		t.Fatalf("%v", err)
 	}
 	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
@@ -294,7 +295,7 @@ func TestLandSaysWhenAutoMergeFails(t *testing.T) {
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
 	gh.NoAutoMerge = true
 	d := disk.NewFake()
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered(d)); err == nil || !strings.Contains(err.Error(), "PR #14") || !strings.Contains(err.Error(), "auto-merge is not on") {
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered()); err == nil || !strings.Contains(err.Error(), "PR #14") || !strings.Contains(err.Error(), "auto-merge is not on") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -310,6 +311,7 @@ func (w *checkout) git(c proc.Cmd) int {
 		fmt.Fprintln(c.Stdout, w.branch)
 	case "status --porcelain":
 		_, _ = fmt.Fprint(c.Stdout, w.dirty)
+	case "status --porcelain -- " + battery.Stamp:
 	case "fetch -q origin main", "merge -q --no-edit origin/main":
 	case "fetch -q origin refs/heads/" + w.branch + ":refs/remotes/origin/" + w.branch:
 		fmt.Fprintf(c.Stderr, "fatal: couldn't find remote ref refs/heads/%s\n", w.branch)
@@ -420,7 +422,7 @@ func TestLandMergesTheBranchAndMainInBeforeTheCheck(t *testing.T) {
 				saw = append(saw, f)
 			}
 		}
-		return battered(d)(dir)
+		return battered()(dir)
 	}
 	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, check); err != nil {
 		t.Fatal(err)
