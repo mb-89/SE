@@ -65,6 +65,12 @@ controversial, and closes the overhaul.
      saying what only the owner can do, is for those two alone; a trade-off,
      a doubt or a recurrence is a normal finding with its `decision`. A
      change to a principle is always controversial.
+     Before you write a finding, `git fetch origin main` and grep
+     `origin/main` for the thing it asks for (`git grep <term> origin/main`),
+     since the code you read may be older than main's head. Drop the
+     finding when main has it already; narrow it to the part main lacks when
+     main has some of it (#139 asked to inject a clock that #127 had
+     injected already).
    - `went_well`: what holds and should stay.
 4. `./src/plugin/bin/se overhaul file <n>`. If it refuses, fix what it names
    and run it again. It creates the issues, those for a person where
