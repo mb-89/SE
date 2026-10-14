@@ -133,37 +133,66 @@ func (s Status) since() string {
 	return "nothing was pushed to " + Branch(s.Number) + " since " + s.Since.UTC().Format(time.RFC3339)
 }
 
-// toPerson gives a final issue that is stuck to a person: it is labelled
-// se-person, assigned to the repository's owner and told why.
+// toPerson gives a final issue that is stuck to a person: an issue for a
+// person holds it, and it waits on that one.
 func (s Source) toPerson(st *Status) error {
-	reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s, longer than the %s lease. "+
-		"A person decides how it goes on; `se issue resume %d` puts it back in the queue.",
-		FinalLabel, st.since(), Lease, st.Number)
-	if err := s.flag(st.Issue, reason, ""); err != nil {
+	reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s, longer than the %s lease.", FinalLabel, st.since(), Lease)
+	held, err := s.hold(st.Issue, reason)
+	if err != nil {
 		return err
 	}
-	st.Person, st.Stuck, st.Takeover, st.Reason, st.Why, st.claimed = true, false, nil, reason, "waits on a person", false
+	st.Stuck, st.Takeover, st.claimed = false, nil, false
+	st.Why = fmt.Sprintf("blocked by #%d", held.Number)
 	return nil
 }
 
-// flag takes issue i out of the queue for a person: it is labelled se-person,
-// assigned to the repository's owner, and told the reason, followed by marks.
-func (s Source) flag(i Issue, reason, marks string) error {
-	owner, _, _ := strings.Cut(s.Repo, "/")
+// hold takes issue i out of the queue until a person has looked: it mints an
+// issue for the person that says why, links i as blocked by it (GitHub's
+// native link), and records on i that it waits on that one, with a resume
+// that clears its takeovers. i itself never waits on a person, and is no
+// longer final: once the person closes their issue, i is back in the queue
+// with a fresh attempt. This is the one link se writes on an issue that
+// already exists: no box is left to write it.
+func (s Source) hold(i Issue, reason string) (Issue, error) {
+	title := fmt.Sprintf("Decide how #%d goes on: %s", i.Number, i.Title)
+	body := fmt.Sprintf("%s\n\n#%d (%s) is blocked by this issue. Decide how it goes on, say so here, and close this issue: #%d is then back in the queue with a fresh attempt.", reason, i.Number, i.URL, i.Number)
+	made, err := s.ForPerson(title, body, 0, nil)
+	if err != nil {
+		return Issue{}, fmt.Errorf("giving #%d to a person: %w", i.Number, err)
+	}
+	if err := s.Blocking(made, []int{i.Number}); err != nil {
+		return made, err
+	}
 	base := fmt.Sprintf("repos/%s/issues/%d", s.Repo, i.Number)
-	for _, args := range [][]string{
-		{"api", "-X", "POST", "-f", "labels[]=" + PersonLabel, base + "/labels"},
-		{"api", "-X", "POST", "-f", "assignees[]=" + owner, base + "/assignees"},
-		{"api", "-X", "POST", "-f", "body=<!-- se:person -->\n" + reason + marks, base + "/comments"},
-	} {
-		if _, err := s.GH(args...); err != nil {
-			return fmt.Errorf("giving #%d to a person: %w", i.Number, err)
-		}
+	note := fmt.Sprintf("<!-- se:person -->\n%s\n\nIt is blocked by #%d, an issue for a person; closing #%d gives it back to the boxes, no longer final.\n<!-- se:resume -->", reason, made.Number, made.Number)
+	if _, err := s.GH("api", "-X", "POST", "-f", "body="+note, base+"/comments"); err != nil {
+		return made, fmt.Errorf("created #%d for a person, but recording it on #%d: %w", made.Number, i.Number, err)
+	}
+	// A 404 is a label already gone.
+	if _, err := s.GH("api", "-X", "DELETE", base+"/labels/"+FinalLabel); err != nil && !strings.Contains(err.Error(), "HTTP 404") {
+		return made, fmt.Errorf("created #%d for a person, but taking %s off #%d: %w", made.Number, FinalLabel, i.Number, err)
 	}
 	if s.Flagged != nil {
 		s.Flagged(i, reason)
 	}
-	return nil
+	return made, nil
+}
+
+// ForPerson creates an issue for a person, through the same code as se issue
+// new: labelled se and se-person and assigned to the repository's owner, so
+// GitHub notifies them and no box is offered it, a sub-issue of parent where
+// that is above zero, and blocked by each of blockedBy. These are the only
+// issues that wait on a person.
+func (s Source) ForPerson(title, body string, parent int, blockedBy []int) (Issue, error) {
+	made, _, err := s.create(title, body, parent, blockedBy, []string{Label, PersonLabel})
+	if err != nil {
+		return Issue{}, err
+	}
+	owner, _, _ := strings.Cut(s.Repo, "/")
+	if _, err := s.GH("api", "-X", "POST", "-f", "assignees[]="+owner, fmt.Sprintf("repos/%s/issues/%d/assignees", s.Repo, made.Number)); err != nil {
+		return made, fmt.Errorf("created #%d, but assigning it to @%s: %w", made.Number, owner, err)
+	}
+	return made, nil
 }
 
 // finalize labels issue n se-final: its next failure goes to a person.

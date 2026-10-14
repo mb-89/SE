@@ -386,12 +386,12 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 		t.Fatalf("%+v", f)
 	}
 	// Its remedy, run: the takeover was made once already, so #17 is
-	// se-final and goes to a person.
+	// se-final and waits on an issue for a person.
 	_, _, err := Source{Repo: repo, GH: w.gh, Now: clock}.Take(t.TempDir(), 17)
-	if err == nil || !strings.Contains(err.Error(), "went to a person") {
+	if err == nil || !strings.Contains(err.Error(), "an issue for a person") {
 		t.Fatalf("%v", err)
 	}
-	if !wrote(w, "labels[]=se-person repos/o/r/issues/17/labels") {
+	if !wrote(w, "issue_id=101 repos/o/r/issues/17/dependencies/blocked_by") || wrote(w, "labels[]=se-person repos/o/r/issues/17/labels") {
 		t.Fatalf("writes %q", w.writes)
 	}
 }

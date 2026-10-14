@@ -64,10 +64,15 @@ func activity(n int) string {
 
 func pushed(when string) string { return `[{"timestamp":"` + when + `"}]` }
 
-// pushedAt records that each claimed branch issue-<n> was last pushed at when.
+// pushedAt records that each claimed branch issue-<n> was last pushed at when,
+// and, where no test said otherwise, that nothing blocks its issue: a claim's
+// links are read too, as one that waits on its blockers is not stuck.
 func pushedAt(answers map[string]string, when string, ns ...int) map[string]string {
 	for _, n := range ns {
 		answers[activity(n)] = pushed(when)
+		if _, ok := answers[links(n)]; !ok {
+			answers[links(n)] = `[]`
+		}
 	}
 	return answers
 }
@@ -110,6 +115,7 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 		"repos/mb-89/SE/issues/6/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/mb-89/SE/issues/7/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/mb-89/SE/activity?ref=refs/heads/issue-5&per_page=1":    pushed(fresh),
+		"repos/mb-89/SE/issues/5/dependencies/blocked_by?per_page=100": `[]`,
 	})
 	s := Source{Repo: "mb-89/SE", GH: gh, Now: clock}
 	all, err := s.Survey()
@@ -192,6 +198,7 @@ func TestAStaleSummaryDoesNotMakeABlockedIssueReady(t *testing.T) {
 		listPath:    `[` + open(6, "") + `,` + open(8, "") + `]`,
 		refsPath:    `[{"ref":"refs/heads/issue-8"}]`,
 		links(6):    `[{"number":8,"state":"open"}]`,
+		links(8):    `[]`,
 		activity(8): pushed(fresh),
 	})
 	s := Source{Repo: repo, GH: gh, Now: clock}
@@ -212,6 +219,7 @@ func TestNothingReady(t *testing.T) {
 			listPath: list,
 			refsPath: `[{"ref":"refs/heads/issue-1"}]`,
 			"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
+			links(1):    `[]`,
 			activity(1): pushed(fresh),
 		})
 		if next, ok, err := (Source{Repo: repo, GH: gh, Now: clock}).Next(); err != nil || ok {

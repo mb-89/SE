@@ -1,6 +1,8 @@
 name: ci
 on:
   pull_request:
+  # se fleet refresh starts it on a PR head it brought up to date with main.
+  workflow_dispatch:
 concurrency:
   group: ci-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true

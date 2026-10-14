@@ -48,8 +48,16 @@ those.
    `./src/plugin/bin/se issue land --answers ../landing-<n>.yaml` again.
 6. Anything that belongs in a separate change becomes an issue through
    `./src/plugin/bin/se issue new` (its `--blocked-by` is required: a list, or
-   `none`; `--parent` makes it a sub-issue). If you are stuck on a decision
-   only the owner can make, say so in a comment on the issue and end.
+   `none`; `--parent` makes it a sub-issue).
+7. **You always end, and never stuck.** Land what you could. Where something
+   is left over, file it with `./src/plugin/bin/se issue new`: with `--person`
+   where it needs the owner's input (its body opens with what they decide),
+   without it where any box can do it. You may land an issue with open points
+   once they are in an issue. Of the issues your take said yours blocks, name
+   in `--blocks` only those that need what you left over, so nothing waits
+   that need not. Where you can land nothing at all (a refused push, say),
+   file the issue for a person with `--blocks <n>`, your own issue, say what
+   you have and where, and end. Never end with only a comment.
 
 ## A parent
 

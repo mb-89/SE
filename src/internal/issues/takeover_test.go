@@ -40,7 +40,7 @@ func newPulls(t *testing.T, pr ...string) *pulls {
 		openPullsPath: `[{"number":70,"head":{"ref":"issue-7"}},{"number":71,"head":{"ref":"someone-else"}}]`,
 		// #7's branch saw a push inside the lease: it is not stuck.
 		activity(7): pushed(fresh),
-	}, 5)}
+	}, 5, 7)}
 	return g
 }
 
@@ -56,6 +56,10 @@ func (g *pulls) gh(args ...string) ([]byte, error) {
 			c := comment{ID: int64(100 + len(g.comments)), Body: strings.TrimPrefix(args[4], "body=")}
 			g.comments = append(g.comments, c)
 			return json.Marshal(c)
+		}
+		// The issue for a person a final conflict mints.
+		if args[2] == "POST" && path == "repos/o/r/issues" {
+			return []byte(`{"number":101,"id":1010,"html_url":"u101"}`), nil
 		}
 		return []byte(`{}`), nil
 	}
@@ -160,7 +164,7 @@ func finalSeven(g *pulls) {
 	g.answers[listPath] = `[` + open(5, "new work") + `,{"number":7,"title":"old work","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-final"}]}]`
 }
 
-func TestASecondConflictTakeoverGoesToAPerson(t *testing.T) {
+func TestASecondConflictTakeoverWaitsOnAnIssueForAPerson(t *testing.T) {
 	noPause(t)
 	_, a, _ := boxes(t)
 	g := newPulls(t, pr70("false", "dirty"))
@@ -171,29 +175,35 @@ func TestASecondConflictTakeoverGoesToAPerson(t *testing.T) {
 	if err != nil || !ok || took.Number != 5 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	if len(g.comments) != 2 || !strings.Contains(g.comments[1].Body, "<!-- se:takeover 2 -->") {
+	// #7 itself is not given to a person: an issue for one, #101, blocks it.
+	var writes []string
+	for _, w := range g.writes {
+		writes = append(writes, strings.Join(w[2:], " "))
+	}
+	for _, want := range []string{
+		"POST -f assignees[]=o repos/o/r/issues/101/assignees",
+		"POST -F issue_id=1010 repos/o/r/issues/7/dependencies/blocked_by",
+		"DELETE repos/o/r/issues/7/labels/se-final",
+	} {
+		if !contains(writes, want) {
+			t.Errorf("not written: %s (writes %q)", want, writes)
+		}
+	}
+	for _, w := range writes {
+		if strings.Contains(w, "se-person repos/o/r/issues/7/") {
+			t.Fatalf("#7 was labelled for a person: %q", writes)
+		}
+	}
+	if len(g.comments) != 2 || !strings.Contains(g.comments[1].Body, "blocked by #101") || !strings.HasSuffix(g.comments[1].Body, "<!-- se:resume -->") {
 		t.Fatalf("comments %+v", g.comments)
 	}
-	want := map[string]bool{"labels[]=se-person repos/o/r/issues/7/labels": false, "assignees[]=o repos/o/r/issues/7/assignees": false}
-	for _, w := range g.writes {
-		if k := strings.Join(w[len(w)-2:], " "); len(w) > 4 {
-			if _, ok := want[k]; ok {
-				want[k] = true
-			}
-		}
-	}
-	for k, done := range want {
-		if !done {
-			t.Errorf("not written: %s (writes %q)", k, g.writes)
-		}
-	}
-	// Labelled se-person, #7 has left the queue.
+	// Blocked by #101, #7's claim waits, and is not stuck.
 	got := survey(t, unblocked(map[string]string{
-		listPath:  `[{"number":7,"state":"open","labels":[{"name":"se"},{"name":"se-person"}]}]`,
-		refsPath:  `[{"ref":"refs/heads/issue-7"}]`,
-		comments7: `[]`,
+		listPath: `[{"number":7,"state":"open","labels":[{"name":"se"}]}]`,
+		refsPath: `[{"ref":"refs/heads/issue-7"}]`,
+		links(7): `[{"number":101,"state":"open"}]`,
 	}))
-	if got[7] != "waits on a person" {
+	if got[7] != "issue-7 waits: blocked by #101" {
 		t.Fatalf("%v", got)
 	}
 }
