@@ -225,6 +225,7 @@ type merged struct {
 	SHA      string     `json:"merge_commit_sha"`
 	Head     struct {
 		SHA string `json:"sha"`
+		Ref string `json:"ref"`
 	} `json:"head"`
 }
 
@@ -403,7 +404,7 @@ func (s Source) Collect(n int) (Collected, error) {
 	}
 	c.Metrics = c.measure()
 	if c.Previous != nil {
-		score, err := s.score(*c.Previous, c.Checks, c.Metrics)
+		score, err := s.score(*c.Previous, c.Checks, c.Metrics, pulls)
 		if err != nil {
 			return Collected{}, err
 		}
@@ -862,10 +863,13 @@ func nothing(answer string) bool {
 
 // Score is how the previous retro's findings fared.
 type Score struct {
-	Retro    int         `yaml:"retro"`
-	Findings int         `yaml:"findings"`
-	Issues   int         `yaml:"issues"`
-	Closed   int         `yaml:"closed"`
+	Retro    int `yaml:"retro"`
+	Findings int `yaml:"findings"`
+	Issues   int `yaml:"issues"`
+	Closed   int `yaml:"closed"`
+	// Unmerged counts the issues that closed as completed by landing into a
+	// manifest's branch whose PR has not merged to main: not Closed.
+	Unmerged int         `yaml:"unmerged,omitempty"`
 	Recurred int         `yaml:"recurred"`
 	Items    []ScoreItem `yaml:"items"`
 }
@@ -875,7 +879,9 @@ type ScoreItem struct {
 	Title string `yaml:"title"`
 	Class string `yaml:"class"`
 	Issue int    `yaml:"issue,omitempty"`
-	// State is its issue's: open, completed, not_planned, or none.
+	// State is its issue's: open, completed, not_planned, or none; or, for
+	// one that landed into a manifest's branch whose PR has not merged to
+	// main, "landed into manifest #N, not on main", its recurrence unread.
 	State string `yaml:"state"`
 	// Recurred is set where the rule check it named broke again.
 	Recurred bool    `yaml:"recurred"`
@@ -894,11 +900,20 @@ type ScoreItem struct {
 // score reads how each finding of the previous report fared: did its issue
 // close, did the rule check it named break again, did its metric drop. A
 // metric's move is judged only where the finding's issue closed as
-// completed; before that, no fix of its is on main to credit or blame.
-func (s Source) score(prev RetroReport, checks []Broken, now Metrics) (Score, error) {
+// completed; before that, no fix of its is on main to credit or blame. An
+// issue that landed into a manifest's branch has its fix on main only once
+// that manifest's PR merged, one of pulls (every PR into main): until then
+// it is not closed, and its recurrence is not read.
+func (s Source) score(prev RetroReport, checks []Broken, now Metrics, pulls []merged) (Score, error) {
 	broke := map[string]bool{}
 	for _, c := range checks {
 		broke[c.Kind] = true
+	}
+	onMain := map[string]bool{}
+	for _, p := range pulls {
+		if p.MergedAt != nil {
+			onMain[p.Head.Ref] = true
+		}
 	}
 	sc := Score{Retro: prev.Retro, Findings: len(prev.Findings)}
 	for _, f := range prev.Findings {
@@ -912,7 +927,17 @@ func (s Source) score(prev RetroReport, checks []Broken, now Metrics) (Score, er
 			it.State = got[0].State
 			if got[0].State == "closed" {
 				it.State = got[0].StateReason
-				if it.State == "completed" {
+			}
+			if it.State == "completed" {
+				into, err := s.landedInto(f.Issue)
+				if err != nil {
+					return Score{}, err
+				}
+				if into != "" && !onMain[into] {
+					it.State = fmt.Sprintf("%s%s, not on main", notOnMain, strings.TrimPrefix(into, "issue-"))
+					it.Recurred = false
+					sc.Unmerged++
+				} else {
 					sc.Closed++
 				}
 			}
@@ -935,4 +960,24 @@ func (s Source) score(prev RetroReport, checks []Broken, now Metrics) (Score, er
 		sc.Items = append(sc.Items, it)
 	}
 	return sc, nil
+}
+
+// notOnMain opens the state of a finding whose issue landed into a manifest's
+// branch whose PR has not merged to main.
+const notOnMain = "landed into manifest #"
+
+// landedInto names the manifest's branch issue n's last landing went into,
+// or "" where it landed as a PR into main or left no landing.
+func (s Source) landedInto(n int) (string, error) {
+	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, n), true)
+	if err != nil {
+		return "", err
+	}
+	into := ""
+	for _, c := range comments {
+		if l, ok, err := ParseLanding(c.Body); ok && err == nil {
+			into = l.Facts.Into
+		}
+	}
+	return into, nil
 }
