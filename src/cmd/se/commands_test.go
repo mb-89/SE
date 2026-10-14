@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/guidance"
 	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
@@ -56,6 +57,7 @@ func worldOf(t *testing.T) *World {
 		Getenv:  func(k string) string { return w.env[k] },
 		Environ: func() []string { return w.environ() },
 		Check:   check,
+		Guided:  guidance.Configured,
 	}
 	worlds.Store(t, w)
 	t.Cleanup(func() { worlds.Delete(t) })
@@ -149,7 +151,7 @@ func TestTheHelpIsMadeFromTheRegistry(t *testing.T) {
 func TestTheHelpGroupsTheCommands(t *testing.T) {
 	t.Parallel()
 	want := map[string][]string{
-		"Session":  {"help", "off", "on", "restart", "status", "ui", "update"},
+		"Session":  {"guidance", "help", "off", "on", "restart", "status", "ui", "update"},
 		"Issues":   {"issue land", "issue new", "issue pull", "issue resume", "issue review", "issue supersede", "issue tree"},
 		"Hooks":    {"hook prompt", "hook stop"},
 		"Daemon":   {"serve", "start", "stop"},
