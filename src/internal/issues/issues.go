@@ -3,11 +3,8 @@
 package issues
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -16,6 +13,7 @@ import (
 
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
@@ -59,11 +57,11 @@ type Issue struct {
 // Branch is the branch whose presence on origin claims issue n.
 func Branch(n int) string { return fmt.Sprintf("issue-%d", n) }
 
-// Source reads one repository's issues through gh.
+// Source reads one repository's issues through GitHub.
 type Source struct {
 	// Repo is OWNER/NAME.
-	Repo string
-	GH   GH
+	Repo   string
+	GitHub github.GitHub
 	// Clock is the time leases, windows and stamps are read against.
 	Clock clock.Clock
 	// Disk is what checkouts' files are read from.
@@ -72,9 +70,20 @@ type Source struct {
 	Proc proc.Procs
 	// Flagged hears of each issue the sweep gave to a person, and why.
 	Flagged func(i Issue, reason string)
+	// Waits hears what the source waits on, and for how long, before each
+	// wait, so the person running it is not left waiting blind.
+	Waits func(note string)
 }
 
 func (s Source) now() time.Time { return s.Clock.Now() }
+
+// sleep waits d, after telling Waits what for.
+func (s Source) sleep(d time.Duration, what string) {
+	if s.Waits != nil {
+		s.Waits(fmt.Sprintf("waiting %s for %s", d, what))
+	}
+	s.Clock.Sleep(d)
+}
 
 // issue is the part of GitHub's issue object the rules read.
 type issue struct {
@@ -111,35 +120,28 @@ func (i issue) labelled(name string) bool {
 	return false
 }
 
-// api reads a gh api path, every page of it, into out. A paginated list comes
-// back as one JSON array per page; their items are joined.
+// api reads a GitHub path, every page of it where list is set, into out.
 func api[T any](s Source, path string, list bool) ([]T, error) {
-	args := []string{"api", path}
-	if list {
-		args = []string{"api", "--paginate", path}
+	if !list {
+		out, err := s.GitHub.Get(path)
+		if err != nil {
+			return nil, err
+		}
+		var one T
+		if err := json.Unmarshal(out, &one); err != nil {
+			return nil, fmt.Errorf("gh api %s: %v", path, err)
+		}
+		return []T{one}, nil
 	}
-	out, err := s.GH(args...)
+	out, err := s.GitHub.List(path)
 	if err != nil {
 		return nil, err
 	}
 	var all []T
-	dec := json.NewDecoder(bytes.NewReader(out))
-	for {
-		if !list {
-			var one T
-			if err := dec.Decode(&one); err != nil {
-				return nil, fmt.Errorf("gh api %s: %v", path, err)
-			}
-			return []T{one}, nil
-		}
-		var page []T
-		if err := dec.Decode(&page); errors.Is(err, io.EOF) {
-			return all, nil
-		} else if err != nil {
-			return nil, fmt.Errorf("gh api %s: %v", path, err)
-		}
-		all = append(all, page...)
+	if err := json.Unmarshal(out, &all); err != nil {
+		return nil, fmt.Errorf("gh api %s: %v", path, err)
 	}
+	return all, nil
 }
 
 // PerPage is how many items pages asks for on each page.
@@ -325,10 +327,10 @@ func (t tree) done(n int) bool {
 // closeParent closes a parent whose sub-issues are all closed, saying why.
 func (s Source) closeParent(n int) error {
 	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
-	if _, err := s.GH("api", "-X", "POST", "-f", fmt.Sprintf("body=All sub-issues of #%d are closed, so it closes by itself.", n), path+"/comments"); err != nil {
+	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", fmt.Sprintf("All sub-issues of #%d are closed, so it closes by itself.", n))); err != nil {
 		return fmt.Errorf("closing parent #%d: %w", n, err)
 	}
-	if _, err := s.GH("api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", path); err != nil {
+	if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
 		return fmt.Errorf("closing parent #%d: %w", n, err)
 	}
 	return nil
