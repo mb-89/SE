@@ -70,7 +70,7 @@ func init() {
 			fanout := ""
 			for _, d := range done {
 				if d.Ready {
-					fanout = fire()
+					fanout = c.fire()
 					break
 				}
 			}
