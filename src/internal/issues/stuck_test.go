@@ -6,75 +6,67 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
-// github answers gh api calls like recorded, and keeps each issue's comments:
-// a comment posted is read back by the next read. It records every write.
-// Links and open PRs not recorded answer none. Calls may come from several
-// goroutines at once; mu takes them one at a time.
-type github struct {
-	mu       sync.Mutex
-	t        *testing.T
-	answers  map[string]string
-	comments map[int][]comment
-	nextID   int64
-	writes   [][]string
+// hub is a fake GitHub seeded from recorded answers, which keeps what it is
+// written: a comment posted is read back by the next read.
+type hub struct {
+	*github.Fake
+	t *testing.T
 }
 
-func newGithub(t *testing.T, answers map[string]string) *github {
-	return &github{t: t, answers: answers, comments: map[int][]comment{}, nextID: 1000}
+func newHub(t *testing.T, answers map[string]string) *hub {
+	return &hub{Fake: recorded(t, answers), t: t}
 }
 
 // say records a comment on issue n made before the test's now.
-func (g *github) say(n int, body string) {
-	g.nextID++
-	g.comments[n] = append(g.comments[n], comment{ID: g.nextID, Body: body, Created: now.Add(-5 * time.Hour)})
+func (h *hub) say(n int, body string) {
+	h.t.Helper()
+	all := h.comments(n)
+	all = append(all, comment{Body: body, Created: now.Add(-5 * time.Hour)})
+	data, err := json.Marshal(all)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	seed(h.t, h.Fake, map[string]string{fmt.Sprintf("repos/o/r/issues/%d/comments", n): string(data)})
 }
 
-func (g *github) gh(args ...string) ([]byte, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	path := args[len(args)-1]
-	var n int
-	if _, err := fmt.Sscanf(path, "repos/o/r/issues/%d/comments", &n); err == nil {
-		if args[1] == "-X" {
-			g.writes = append(g.writes, args)
-			g.nextID++
-			c := comment{ID: g.nextID, Body: strings.TrimPrefix(args[len(args)-2], "body="), Created: now}
-			g.comments[n] = append(g.comments[n], c)
-			return json.Marshal(c)
-		}
-		list := g.comments[n]
-		if list == nil {
-			list = []comment{}
-		}
-		return json.Marshal(list)
+// comments reads issue n's comments back, oldest first.
+func (h *hub) comments(n int) []comment {
+	h.t.Helper()
+	out, err := h.List(fmt.Sprintf("repos/o/r/issues/%d/comments", n))
+	if github.Status(err) == 404 {
+		return nil
 	}
-	if args[1] == "-X" {
-		g.writes = append(g.writes, args)
-		// The issue for a person the sweep mints.
-		if args[2] == "POST" && path == "repos/o/r/issues" {
-			return []byte(`{"number":101,"id":1010,"html_url":"u101"}`), nil
-		}
-		return []byte(`{}`), nil
+	if err != nil {
+		h.t.Fatal(err)
 	}
-	a, ok := g.answers[path]
-	if !ok && (strings.HasSuffix(path, "/dependencies/blocked_by?per_page=100") || path == openPullsPath) {
-		// An issue whose links are not recorded is blocked by nothing, and
-		// open PRs not recorded are none.
-		a, ok = `[]`, true
+	var all []comment
+	if err := json.Unmarshal(out, &all); err != nil {
+		h.t.Fatal(err)
 	}
-	if !ok {
-		g.t.Errorf("gh api %s was not recorded", path)
-		return nil, fmt.Errorf("gh api %s was not recorded", path)
-	}
-	return []byte(a), nil
+	return all
 }
 
-func (g *github) source() Source { return Source{Proc: machine, Repo: repo, GH: g.gh, Clock: atNow()} }
+// labelled says whether issue n carries label l.
+func (h *hub) labelled(n int, l string) bool {
+	h.t.Helper()
+	out, err := h.Get(fmt.Sprintf("repos/o/r/issues/%d", n))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	var i issue
+	if err := json.Unmarshal(out, &i); err != nil {
+		h.t.Fatal(err)
+	}
+	return i.labelled(l)
+}
+
+func (h *hub) source() Source { return Source{Proc: machine, Repo: repo, GitHub: h, Clock: atNow()} }
 
 func refs(ns ...int) string {
 	var out []string
@@ -85,7 +77,7 @@ func refs(ns ...int) string {
 }
 
 func TestAFreshClaimIsNotStuckAndAStaleOneIs(t *testing.T) {
-	g := newGithub(t, map[string]string{
+	g := newHub(t, map[string]string{
 		listPath:    list(node(1, 0), node(2, 0), node(3, 0), node(4, 0)),
 		refsPath:    refs(1, 2, 3, 4),
 		activity(1): pushed(fresh),
@@ -95,7 +87,7 @@ func TestAFreshClaimIsNotStuckAndAStaleOneIs(t *testing.T) {
 		// A branch GitHub keeps no push record of is stuck.
 		activity(4): `[]`,
 	})
-	g.comments[3] = []comment{{ID: 1, Body: "<!-- se:takeover 1 -->\nTaken over", Created: now.Add(-time.Hour)}}
+	seed(t, g.Fake, map[string]string{"repos/o/r/issues/3/comments": `[{"id":1,"body":"<!-- se:takeover 1 -->\nTaken over","created_at":"` + now.Add(-time.Hour).Format(time.RFC3339) + `"}]`})
 	all, err := g.source().Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -113,8 +105,8 @@ func TestAFreshClaimIsNotStuckAndAStaleOneIs(t *testing.T) {
 	if all[2].Takeovers != 1 || all[2].Takeover != nil || all[1].Takeover == nil {
 		t.Fatalf("%+v", all)
 	}
-	if len(g.writes) != 0 {
-		t.Fatalf("writes %q", g.writes)
+	if w := g.Writes(); len(w) != 0 {
+		t.Fatalf("writes %q", w)
 	}
 }
 
@@ -126,7 +118,7 @@ func TestATakeoverComesBeforeNewWorkAndContinuesTheBranch(t *testing.T) {
 	}
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "half done")
 	run(t, a, "push", "-q", "origin", "issue-5")
-	g := newGithub(t, map[string]string{
+	g := newHub(t, map[string]string{
 		listPath:    list(node(3, 0), node(5, 0)),
 		refsPath:    refs(5),
 		activity(5): pushed(stale),
@@ -151,9 +143,9 @@ func TestATakeoverComesBeforeNewWorkAndContinuesTheBranch(t *testing.T) {
 		t.Fatalf("b tracks %s", got)
 	}
 	// The takeover is recorded, and makes #5 final.
-	if len(g.writes) != 2 || !strings.Contains(strings.Join(g.writes[0], " "), "<!-- se:takeover 1 -->") ||
-		!reflect.DeepEqual(g.writes[1], []string{"api", "-X", "POST", "-f", "labels[]=se-final", "repos/o/r/issues/5/labels"}) {
-		t.Fatalf("writes %q", g.writes)
+	if w := g.Writes(); !reflect.DeepEqual(w, []string{"POST repos/o/r/issues/5/comments", "POST repos/o/r/issues/5/labels"}) ||
+		!strings.Contains(g.comments(5)[0].Body, "<!-- se:takeover 1 -->") || !g.labelled(5, FinalLabel) {
+		t.Fatalf("writes %q", w)
 	}
 	// The takeover renewed the lease: the next box finds #5 claimed, not
 	// stuck, and takes #3.
@@ -168,7 +160,7 @@ func TestATakeoverComesBeforeNewWorkAndContinuesTheBranch(t *testing.T) {
 
 func TestOfTwoTakeoversTheFirstCommentWins(t *testing.T) {
 	_, _, b := boxes(t)
-	g := newGithub(t, map[string]string{
+	g := newHub(t, map[string]string{
 		listPath:    list(node(5, 0), node(6, 0)),
 		refsPath:    refs(5),
 		activity(5): pushed(stale),
@@ -194,7 +186,7 @@ func TestOfTwoTakeoversTheFirstCommentWins(t *testing.T) {
 
 func TestAStaleFinalClaimWaitsOnAnIssueForAPerson(t *testing.T) {
 	// #5 is se-final: taken over once already, or filed by a review.
-	g := newGithub(t, map[string]string{
+	g := newHub(t, map[string]string{
 		listPath:    list(node(5, 0, FinalLabel), node(6, 0)),
 		refsPath:    refs(5),
 		activity(5): pushed(stale),
@@ -214,13 +206,10 @@ func TestAStaleFinalClaimWaitsOnAnIssueForAPerson(t *testing.T) {
 	}
 	// An issue for a person, #101, is minted and blocks #5; #5 is told so,
 	// resumed, and no longer final. #5 itself is never labelled se-person.
-	var paths []string
-	for _, w := range g.writes {
-		paths = append(paths, w[2]+" "+w[len(w)-1])
-	}
+	paths := g.Writes()
 	want := []string{
 		"POST repos/o/r/issues",
-		"POST repos/o/r/issues/101/assignees",
+		"POST repos/o/r/issues/7/assignees",
 		"POST repos/o/r/issues/5/dependencies/blocked_by",
 		"POST repos/o/r/issues/5/comments",
 		"DELETE repos/o/r/issues/5/labels/se-final",
@@ -228,21 +217,24 @@ func TestAStaleFinalClaimWaitsOnAnIssueForAPerson(t *testing.T) {
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("writes %q", paths)
 	}
-	if made := strings.Join(g.writes[0], " "); !strings.Contains(made, "title=Decide how #5 goes on: t5") || !strings.Contains(made, "labels[]=se-person") {
-		t.Fatalf("minted %q", made)
+	if made, err := g.Get("repos/o/r/issues/7"); err != nil || !strings.Contains(string(made), `"title":"Decide how #5 goes on: t5"`) ||
+		!strings.Contains(string(made), `{"name":"se-person"}`) || !strings.Contains(string(made), `"assignees":[{"login":"o"}]`) {
+		t.Fatalf("minted %s %v", made, err)
 	}
-	if c := g.comments[5][len(g.comments[5])-1].Body; !strings.HasPrefix(c, "<!-- se:person -->\nStuck on its final attempt") || !strings.HasSuffix(c, "<!-- se:resume -->") {
+	if g.labelled(5, FinalLabel) || g.labelled(5, PersonLabel) {
+		t.Fatal("#5 is still final, or waits on a person itself")
+	}
+	if c := g.comments(5)[len(g.comments(5))-1].Body; !strings.HasPrefix(c, "<!-- se:person -->\nStuck on its final attempt") || !strings.HasSuffix(c, "<!-- se:resume -->") {
 		t.Fatalf("comment %q", c)
 	}
-	// Blocked by #101, #5's claim waits: it is neither stuck nor taken over.
-	g.answers[links(5)] = `[{"number":101,"state":"open"}]`
-	if _, _, err := s.Take(t.TempDir(), 5); err == nil || !strings.Contains(err.Error(), "blocked by #101") {
+	// Blocked by #7, #5's claim waits: it is neither stuck nor taken over.
+	if _, _, err := s.Take(t.TempDir(), 5); err == nil || !strings.Contains(err.Error(), "blocked by #7") {
 		t.Fatalf("%v", err)
 	}
 }
 
 func TestIssuesWaitingOnAPersonAndTheirTreesAreNeverOffered(t *testing.T) {
-	g := newGithub(t, map[string]string{
+	g := newHub(t, map[string]string{
 		// #10's tree holds #11, which waits on a person, and #12, ready;
 		// #20 is blocked by #11, #21 by #20; #30 is free.
 		listPath:        list(node(10, 2), node(11, 0, PersonLabel), node(12, 0), node(20, 0), node(21, 0), node(30, 0)),
@@ -273,8 +265,8 @@ func TestIssuesWaitingOnAPersonAndTheirTreesAreNeverOffered(t *testing.T) {
 	if want := []Waiting{{11, "t11", "u11", "Stuck a second time.", 4}}; err != nil || !reflect.DeepEqual(waiting, want) {
 		t.Fatalf("waiting %+v %v", waiting, err)
 	}
-	if len(g.writes) != 0 {
-		t.Fatalf("writes %q", g.writes)
+	if w := g.Writes(); len(w) != 0 {
+		t.Fatalf("writes %q", w)
 	}
 }
 
@@ -288,7 +280,7 @@ func TestAStuckLeafInATreeIsTakenOverFirst(t *testing.T) {
 	run(t, a, "checkout", "-q", "-b", "w", "origin/issue-11")
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "half done")
 	run(t, a, "push", "-q", "origin", "w:issue-11")
-	g := newGithub(t, map[string]string{
+	g := newHub(t, map[string]string{
 		// #5 stands alone; #10's leaves #11 (stuck) and #12 (ready).
 		listPath:     list(node(5, 0), node(10, 2), node(11, 0), node(12, 0)),
 		refsPath:     refs(10, 11),
@@ -315,8 +307,8 @@ func TestAStuckLeafInATreeIsTakenOverFirst(t *testing.T) {
 	if got := run(t, b, "rev-parse", "--abbrev-ref", "HEAD"); got != "main" {
 		t.Fatalf("b moved to %s", got)
 	}
-	if len(g.writes) != 2 || !strings.Contains(strings.Join(g.writes[0], " "), "<!-- se:takeover 1 -->") || g.writes[1][4] != "labels[]=se-final" {
-		t.Fatalf("writes %q", g.writes)
+	if w := g.Writes(); len(w) != 2 || !strings.Contains(g.comments(11)[0].Body, "<!-- se:takeover 1 -->") || !g.labelled(11, FinalLabel) {
+		t.Fatalf("writes %q", w)
 	}
 	// Taken over, #11 is claimed again; #12 is next.
 	tr, err = s.In(10)
@@ -327,7 +319,7 @@ func TestAStuckLeafInATreeIsTakenOverFirst(t *testing.T) {
 
 func TestAParentsClaimIsNeverStuck(t *testing.T) {
 	// No activity is recorded for issue-10: none is asked for.
-	g := newGithub(t, map[string]string{
+	g := newHub(t, map[string]string{
 		listPath:     list(node(10, 1), node(11, 0)),
 		refsPath:     refs(10),
 		subsPath(10): subs(11),
@@ -338,10 +330,10 @@ func TestAParentsClaimIsNeverStuck(t *testing.T) {
 }
 
 func TestResumeResetsTheTakeoverCount(t *testing.T) {
-	g := newGithub(t, map[string]string{
+	g := newHub(t, map[string]string{
 		"repos/o/r/issues/5": node(5, 0, FinalLabel, PersonLabel),
 		"repos/o/r/issues/6": node(6, 0),
-		listPath:             list(node(5, 0)),
+		listPath:             list(node(5, 0, FinalLabel, PersonLabel)),
 		refsPath:             refs(5),
 		activity(5):          pushed(stale),
 	})
@@ -355,17 +347,16 @@ func TestResumeResetsTheTakeoverCount(t *testing.T) {
 		t.Fatalf("%+v %v", i, err)
 	}
 	// It is no longer final either: it gets one more attempt.
-	if len(g.writes) != 3 || g.writes[0][len(g.writes[0])-1] != "repos/o/r/issues/5/comments" ||
-		!reflect.DeepEqual(g.writes[1], []string{"api", "-X", "DELETE", "repos/o/r/issues/5/labels/se-final"}) ||
-		!reflect.DeepEqual(g.writes[2], []string{"api", "-X", "DELETE", "repos/o/r/issues/5/labels/se-person"}) {
-		t.Fatalf("writes %q", g.writes)
+	want := []string{"POST repos/o/r/issues/5/comments", "DELETE repos/o/r/issues/5/labels/se-final", "DELETE repos/o/r/issues/5/labels/se-person"}
+	if w := g.Writes(); !reflect.DeepEqual(w, want) || g.labelled(5, FinalLabel) || g.labelled(5, PersonLabel) {
+		t.Fatalf("writes %q", w)
 	}
 	// Back in the queue, still stale: the next take takes it over, round one.
 	all, err := s.Survey()
 	if err != nil || !all[0].Stuck || all[0].Takeovers != 0 || !all[0].Takeable() {
 		t.Fatalf("%+v %v", all, err)
 	}
-	if len(g.writes) != 3 {
-		t.Fatalf("the survey flagged it again: %q", g.writes)
+	if w := g.Writes(); len(w) != 3 {
+		t.Fatalf("the survey flagged it again: %q", w)
 	}
 }

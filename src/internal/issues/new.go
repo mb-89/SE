@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // ParseBlockedBy reads --blocked-by: a comma-separated list of issue numbers,
@@ -57,7 +59,7 @@ func (s Source) lookup(numbers []int) (map[int]int64, bool, error) {
 	for _, n := range numbers {
 		got, err := api[lookup](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
 		if err != nil {
-			if strings.Contains(err.Error(), "HTTP 404") || strings.Contains(err.Error(), "HTTP 410") {
+			if st := github.Status(err); st == 404 || st == 410 {
 				return nil, false, fmt.Errorf("#%d does not exist in %s", n, s.Repo)
 			}
 			return nil, false, err
@@ -88,7 +90,7 @@ func (s Source) link(n int, blockers []int, ids map[int]int64) error {
 			return fmt.Errorf("#%d cannot block itself", n)
 		}
 		path := fmt.Sprintf("repos/%s/issues/%d/dependencies/blocked_by", s.Repo, n)
-		if _, err := s.GH("api", "-X", "POST", "-F", fmt.Sprintf("issue_id=%d", ids[b]), path); err != nil {
+		if _, err := s.GitHub.Send("POST", path, github.Int("issue_id", ids[b])); err != nil {
 			return fmt.Errorf("linking #%d as blocked by #%d: %w", n, b, err)
 		}
 	}
@@ -159,11 +161,11 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 	}
 	path := fmt.Sprintf("repos/%s/issues", s.Repo)
 	// The mark tells the retro this issue was made here, not by hand.
-	args := []string{"api", "-X", "POST", "-f", "title=" + title, "-f", "body=" + strings.TrimRight(body, "\n") + "\n\n" + NewMark}
+	fields := []github.Field{github.F("title", title), github.F("body", strings.TrimRight(body, "\n")+"\n\n"+NewMark)}
 	for _, l := range labels {
-		args = append(args, "-f", "labels[]="+l)
+		fields = append(fields, github.F("labels[]", l))
 	}
-	out, err := s.GH(append(args, path)...)
+	out, err := s.GitHub.Send("POST", path, fields...)
 	if err != nil {
 		return Issue{}, false, err
 	}
@@ -174,7 +176,7 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 	created := Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, id: i.ID}
 	if parent > 0 {
 		path := fmt.Sprintf("repos/%s/issues/%d/sub_issues", s.Repo, parent)
-		if _, err := s.GH("api", "-X", "POST", "-F", fmt.Sprintf("sub_issue_id=%d", i.ID), path); err != nil {
+		if _, err := s.GitHub.Send("POST", path, github.Int("sub_issue_id", i.ID)); err != nil {
 			return created, false, fmt.Errorf("created #%d (%s), but making it a sub-issue of #%d: %w", i.Number, i.URL, parent, err)
 		}
 	}

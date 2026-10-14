@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // node is an open se issue with subs sub-issues; labels are its labels beyond se.
@@ -31,18 +33,11 @@ func subs(ns ...int) string {
 	return "[" + strings.Join(out, ",") + "]"
 }
 
-// inTree answers like recorded, and an issue's links it holds no answer for
-// as none, since every unclaimed issue's links are asked for.
-func inTree(t *testing.T, answers map[string]string) GH {
+// inTree is recorded: an issue's links it holds no answer for are none, as
+// the fake GitHub answers for an issue it knows.
+func inTree(t *testing.T, answers map[string]string) *github.Fake {
 	t.Helper()
-	gh := recorded(t, answers)
-	return func(args ...string) ([]byte, error) {
-		path := args[len(args)-1]
-		if _, ok := answers[path]; !ok && strings.HasSuffix(path, "/dependencies/blocked_by?per_page=100") {
-			return []byte(`[]`), nil
-		}
-		return gh(args...)
-	}
+	return recorded(t, answers)
 }
 
 func subsPath(n int) string { return fmt.Sprintf("repos/o/r/issues/%d/sub_issues?per_page=100", n) }
@@ -60,7 +55,8 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 		refsPath:    `[]`,
 		subsPath(1): subs(2, 3),
 	}
-	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()}
+	gh := inTree(t, answers)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	next, ok, err := s.Next()
 	if err != nil || !ok || next.Number != 1 || !next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
@@ -69,16 +65,15 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	// With the parent blocked, its sub-issues are still not offered.
-	answers[listPath] = list(node(3, 0), node(2, 0), node(1, 2), node(4, 0))
-	answers[blockedPath(1)] = subs(9)
+	seed(t, gh, map[string]string{listPath: list(node(3, 0), node(2, 0), node(1, 2), node(4, 0))})
+	seed(t, gh, map[string]string{blockedPath(1): subs(9)})
 	next, ok, err = s.Next()
 	if err != nil || !ok || next.Number != 4 || next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
 	// Nor with every leaf at the top claimed.
-	answers[refsPath] = `[{"ref":"refs/heads/issue-4"}]`
-	answers[openPullsPath] = `[]`
-	answers[activity(4)] = pushed(fresh)
+	seed(t, gh, map[string]string{refsPath: `[{"ref":"refs/heads/issue-4"}]`})
+	seed(t, gh, map[string]string{activity(4): pushed(fresh)})
 	if next, ok, err := s.Next(); err != nil || ok {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
@@ -116,7 +111,8 @@ func TestInOffersTheReadyLeavesAtAnyDepth(t *testing.T) {
 		blockedPath(50): subs(30),
 		activity(15):    pushed(fresh),
 	}
-	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()}
+	gh := inTree(t, answers)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -161,35 +157,29 @@ func numbers(is []Issue) []int {
 }
 
 func TestParentsCloseByThemselvesDeepestFirst(t *testing.T) {
-	gh, calls := writes(t, map[string]string{
+	gh := recorded(t, map[string]string{
 		// #1 holds #2 and a closed #3; #2 holds only closed sub-issues, so
 		// once #2 closes, #1 does too. #6 still has an open sub-issue.
-		listPath:                      list(node(1, 2), node(2, 2), node(6, 2), node(7, 0)),
-		subsPath(1):                   subs(2, -3),
-		subsPath(2):                   subs(-4, -5),
-		subsPath(6):                   subs(7, -8),
-		"repos/o/r/issues/1/comments": `{}`,
-		"repos/o/r/issues/1":          `{}`,
-		"repos/o/r/issues/2/comments": `{}`,
-		"repos/o/r/issues/2":          `{}`,
+		listPath:    list(node(1, 2), node(2, 2), node(6, 2), node(7, 0)),
+		subsPath(1): subs(2, -3),
+		subsPath(2): subs(-4, -5),
+		subsPath(6): subs(7, -8),
 	})
-	if err := (Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}).CloseParents(); err != nil {
+	if err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).CloseParents(); err != nil {
 		t.Fatal(err)
 	}
-	var wrote [][]string
-	for _, c := range *calls {
-		if c[1] == "-X" {
-			wrote = append(wrote, c)
+	want := []string{"POST repos/o/r/issues/2/comments", "PATCH repos/o/r/issues/2", "POST repos/o/r/issues/1/comments", "PATCH repos/o/r/issues/1"}
+	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
+		t.Fatalf("%q\nwant %q", w, want)
+	}
+	for _, n := range []int{1, 2} {
+		i, c := issueAt(t, gh, n), commentsAt(t, gh, n)
+		if i.State != "closed" || i.StateReason != "completed" || len(c) != 1 || c[0].Body != fmt.Sprintf("All sub-issues of #%d are closed, so it closes by itself.", n) {
+			t.Fatalf("#%d: %+v %+v", n, i, c)
 		}
 	}
-	want := [][]string{
-		{"api", "-X", "POST", "-f", "body=All sub-issues of #2 are closed, so it closes by itself.", "repos/o/r/issues/2/comments"},
-		{"api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", "repos/o/r/issues/2"},
-		{"api", "-X", "POST", "-f", "body=All sub-issues of #1 are closed, so it closes by itself.", "repos/o/r/issues/1/comments"},
-		{"api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", "repos/o/r/issues/1"},
-	}
-	if !reflect.DeepEqual(wrote, want) {
-		t.Fatalf("%q\nwant %q", wrote, want)
+	if i := issueAt(t, gh, 6); i.State != "open" {
+		t.Fatalf("#6 closed: %+v", i)
 	}
 }
 
@@ -203,7 +193,8 @@ func TestAReviewParentNeverClosesByItself(t *testing.T) {
 		subsPath(2):    subs(-3, -4),
 		blockedPath(5): subs(2),
 	}
-	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()} // a write would not be recorded
+	gh := inTree(t, answers)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()} // a write would not be recorded
 	tr, err := s.In(1)
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +212,7 @@ func TestAReviewParentNeverClosesByItself(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	// With the review parent blocked, nothing in the tree is offered.
-	answers[blockedPath(2)] = subs(9)
+	seed(t, gh, map[string]string{blockedPath(2): subs(9)})
 	if next, ok, err := s.Next(); err != nil || ok {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
@@ -235,7 +226,8 @@ func TestAReviewAtTheTopIsTakenByAnyBox(t *testing.T) {
 		refsPath:    `[]`,
 		subsPath(2): subs(-3),
 	}
-	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()}
+	gh := inTree(t, answers)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if next, ok, err := s.Next(); err != nil || !ok || next.Number != 2 || !next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
@@ -245,8 +237,7 @@ func TestAReviewAtTheTopIsTakenByAnyBox(t *testing.T) {
 	}
 	// The coordinator that claimed the tree has ended: another box picks the
 	// tree up from its claim.
-	answers[refsPath] = `[{"ref":"refs/heads/issue-2"}]`
-	answers[openPullsPath] = `[]`
+	seed(t, gh, map[string]string{refsPath: `[{"ref":"refs/heads/issue-2"}]`})
 	if took, ok, err := s.Take(b, 2); err != nil || !ok || took.Number != 2 {
 		t.Fatalf("%+v %v %v", took, ok, err)
 	}
@@ -265,7 +256,8 @@ func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
 		refsPath:    `[]`,
 		subsPath(1): subs(2, 3),
 	}
-	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()}
+	gh := inTree(t, answers)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if ok, err := (Source{Proc: machine}).claimTree(a, 1); err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
@@ -304,23 +296,21 @@ func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
 
 func TestInSaysWhenTheRootHasClosed(t *testing.T) {
 	answers := map[string]string{
-		listPath:                      list(node(1, 1)),
-		refsPath:                      `[]`,
-		subsPath(1):                   subs(-2),
-		"repos/o/r/issues/1/comments": `{}`,
-		"repos/o/r/issues/1":          `{}`,
+		listPath:    list(node(1, 1)),
+		refsPath:    `[]`,
+		subsPath(1): subs(-2),
 	}
-	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()}
+	gh := inTree(t, answers)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if tr, err := s.In(1); err != nil || !tr.Closed {
 		t.Fatalf("%+v %v", tr, err)
 	}
 	// Read again, it is closed already.
-	answers[listPath] = `[]`
-	answers["repos/o/r/issues/1"] = `{"number":1,"state":"closed"}`
 	if took, ok, tr, err := s.TakeIn(t.TempDir(), 1, 0); err != nil || ok || !tr.Closed {
 		t.Fatalf("%+v %v %+v %v", took, ok, tr, err)
 	}
-	answers["repos/o/r/issues/1"] = `{"number":1,"state":"open"}`
+	// Reopened by hand without its label, it is no fleet issue.
+	seed(t, gh, map[string]string{"repos/o/r/issues/1": `{"number":1,"state":"open","labels":[]}`})
 	if _, err := s.In(1); err == nil || !strings.Contains(err.Error(), "not an issue labelled se") {
 		t.Fatalf("%v", err)
 	}
