@@ -12,25 +12,28 @@ const Instance = "issues"
 
 // Module declares the issue work's config keys on the index, each with its
 // constant as the built-in value: the retro's and the overhaul's cadence, the
-// lease and the cap on a review's filed findings.
+// lease, the cap on a review's filed findings, and the cap on a box's
+// follow-ups with the share of them the retro holds the fleet to.
 var Module = index.Declare("issues", "The se issue work: the queue, its takes and leases, its reviews, and the cadences of retros and overhauls.",
 	index.Config("retro-cadence", RetroCadence, "How many se issues close between two retros: at this many closed since the last retro closed, se issue pull --take starts an unattended one."),
 	index.Config("overhaul-cadence", OverhaulCadence, "How many retros close between two overhauls: at this many closed since the last overhaul closed, se issue pull --take starts an unattended one; an overhaul reads the retro's last this many runs."),
 	index.Config("lease", Lease, "How long a claimed leaf may go without a push to its branch before it is stuck; it is under the routine's 4-hour schedule."),
 	index.Config("max-filed", MaxFiled, "How many non-blocking findings one review files as issues; the rest are counted, not filed."),
+	index.Config("max-followups", MaxFollowups, "How many issues a box files with se issue new: they are queued, and its land, supersede or close files them; what is left beyond goes into them, or into one for a person."),
+	index.Config("followup-share", FollowupShare, "The percent of the issues a box closed that may have filed a follow-up: above it, the retro finds the followups rule check broken."),
 )
 
 func init() { index.Register(Module) }
 
 // Settings are Module's config values.
 type Settings struct {
-	RetroCadence, OverhaulCadence, MaxFiled int
-	Lease                                   time.Duration
+	RetroCadence, OverhaulCadence, MaxFiled, MaxFollowups, FollowupShare int
+	Lease                                                                time.Duration
 }
 
 // Builtin is Module's config as its built-in values give it.
 func Builtin() Settings {
-	return Settings{RetroCadence: RetroCadence, OverhaulCadence: OverhaulCadence, MaxFiled: MaxFiled, Lease: Lease}
+	return Settings{RetroCadence: RetroCadence, OverhaulCadence: OverhaulCadence, MaxFiled: MaxFiled, MaxFollowups: MaxFollowups, FollowupShare: FollowupShare, Lease: Lease}
 }
 
 // Configured answers the settings of Instance from the wiring se carries.
@@ -57,7 +60,7 @@ func From(w index.Wiring) (Settings, error) {
 		return Settings{}, err
 	}
 	var s Settings
-	for key, into := range map[string]*int{"retro-cadence": &s.RetroCadence, "overhaul-cadence": &s.OverhaulCadence, "max-filed": &s.MaxFiled} {
+	for key, into := range map[string]*int{"retro-cadence": &s.RetroCadence, "overhaul-cadence": &s.OverhaulCadence, "max-filed": &s.MaxFiled, "max-followups": &s.MaxFollowups, "followup-share": &s.FollowupShare} {
 		if err := read(ix, key, into); err != nil {
 			return Settings{}, err
 		}

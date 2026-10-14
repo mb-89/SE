@@ -238,7 +238,7 @@ func TestTheCountsAndScripts(t *testing.T) {
 	want := Metrics{
 		"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1,
 		"conflicts_per_issue": 0.25, "takeovers_per_issue": 0.25, "ci_reruns_per_issue": 0.25, "person_flags_per_issue": 0.25, "by_hand_per_issue": 0.25,
-		"claim_to_merge_minutes": 90,
+		"claim_to_merge_minutes": 90, "followups": 0, "followup_share": 0,
 	}
 	if !reflect.DeepEqual(c.Metrics, want) {
 		t.Fatalf("%v", c.Metrics)
@@ -471,6 +471,49 @@ func TestByHandCountsAnAnswerThatProposesACommand(t *testing.T) {
 	} {
 		if got := byHand(answer); got != want {
 			t.Errorf("byHand(%q) = %v, want %v", answer, got, want)
+		}
+	}
+}
+
+// A box's follow-up carries the mark that names the issue the box closed:
+// #23 landed and #25 was superseded, so two issues a box closed, and #31
+// follows #23 up; a share of 50%, over the 5% ceiling, breaks the followups
+// check. A mark naming an issue no box closed counts nothing.
+func TestTheFollowupShareIsAMetricAndOverItsCeilingABrokenCheck(t *testing.T) {
+	t.Parallel()
+	a := retroRepo(t, true, "<!-- se:retro attended -->")
+	a["repos/o/r/issues/25/comments?per_page=100"] = jsonComments("Superseded by #29, which carries this issue on with the questions its box could not answer.\nu29")
+	a["repos/o/r/issues?labels=se&state=open&per_page=100"] = `[` +
+		`{"number":31,"title":"what is left of #23","state":"open","body":"left\n\n<!-- se:followup #23 -->\n\n<!-- se:new -->","labels":[{"name":"se"}]},` +
+		`{"number":32,"title":"not a box's","state":"open","body":"<!-- se:followup #24 -->","labels":[{"name":"se"}]}]`
+	collect := func(cfg Settings) Collected {
+		c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow(), Config: &cfg}.Collect(30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	c := collect(Builtin())
+	if c.Metrics["followups"] != 1 || c.Metrics["followup_share"] != 50 {
+		t.Fatalf("%v", c.Metrics)
+	}
+	last := c.Checks[len(c.Checks)-1]
+	if last.Kind != "followups" || !strings.Contains(last.What, "1 of the 2 issues a box closed filed a follow-up, 50%, above the 5%") {
+		t.Fatalf("%+v", c.Checks)
+	}
+	draft, err := c.Draft(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(draft, "Follow-ups: 1 of the 2 issues a box closed (by a land, a supersede or a close) filed one, 50%") || !strings.Contains(draft, "(`followups`): broken once.") {
+		t.Fatalf("%s", draft)
+	}
+	// At a ceiling of 50% the share holds.
+	cfg := Builtin()
+	cfg.FollowupShare = 50
+	for _, x := range collect(cfg).Checks {
+		if x.Kind == "followups" {
+			t.Fatalf("%+v", x)
 		}
 	}
 }

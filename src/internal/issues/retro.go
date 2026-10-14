@@ -163,6 +163,7 @@ var checkKinds = []RuleCheck{
 	// The mark is written at creation, so an issue made before #91 is not held to it.
 	{"mark", "every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body", 91, Creation},
 	{"answers", "every landed issue (a leaf closed as completed, not a retro, an overhaul or a person's decision) has landing answers", 74, Closing},
+	{"followups", "at most `issues/config/followup-share` percent of the issues a box closed (by a land, a supersede or a close) filed a follow-up, each counted by the mark `<!-- se:followup #n -->` in its body", 0, Closing},
 }
 
 // RuleChecks are the rule checks, in the order the report lists them.
@@ -183,6 +184,10 @@ type Row struct {
 	Person    int `json:"person"`
 	// Minutes is the time from its claim to its PR's merge; -1 unknown.
 	Minutes int `json:"minutes"`
+	// Box says a box closed it, by a land, a supersede or a close; Followup
+	// that the box filed a follow-up as it did.
+	Box      bool `json:"box,omitempty"`
+	Followup bool `json:"followup,omitempty"`
 }
 
 // Script is a file added under src/scripts/ in the window.
@@ -239,6 +244,10 @@ var (
 	takeoverMark = regexp.MustCompile(`<!-- se:takeover (\d+) -->`)
 	conflictMark = regexp.MustCompile(`<!-- se:takeover-head [0-9a-f]+ -->`)
 	personMark   = regexp.MustCompile(`<!-- se:person -->`)
+	// supersededLine and fixedLine open the comments se issue supersede and
+	// se issue close --fixed-by close an issue with.
+	supersededLine = regexp.MustCompile(`^Superseded by #\d+`)
+	fixedLine      = regexp.MustCompile(`^<!-- se:fixed-by [0-9a-f]+ -->`)
 )
 
 // retroIssue reads retro n: it must be an open issue labelled se-retro.
@@ -352,15 +361,24 @@ func (s Source) Collect(n int) (Collected, error) {
 		}
 	}
 
+	followed, err := s.followedUp(c.Window)
+	if err != nil {
+		return Collected{}, err
+	}
 	for _, x := range closed {
 		row, checks, err := s.row(x, fixedBy)
 		if err != nil {
 			return Collected{}, err
 		}
+		row.Followup = row.Box && followed[row.Number]
 		c.Rows = append(c.Rows, row)
 		for _, b := range checks {
 			broke(b, checkKinds[kindOrder(b.Kind)].at(x.ClosedAt, x.Created))
 		}
+	}
+	if boxed, filed := c.followups(); filed*100 > s.config().FollowupShare*boxed {
+		c.Checks = append(c.Checks, Broken{"followups", "the window", fmt.Sprintf("%d of the %d issues a box closed filed a follow-up, %g%%, above the %d%% of issues/config/followup-share",
+			filed, boxed, share(filed, boxed), s.config().FollowupShare)})
 	}
 	sort.SliceStable(c.Checks, func(a, b int) bool { return kindOrder(c.Checks[a].Kind) < kindOrder(c.Checks[b].Kind) })
 	c.Metrics = c.measure()
@@ -411,6 +429,44 @@ func (s Source) closedIn(w RetroWindow, skip int) ([]past, error) {
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Number < out[b].Number })
 	return out, nil
+}
+
+// followedUp names the issues a box filed a follow-up for, by the marks in
+// the bodies of the se issues that changed in w, open or closed.
+func (s Source) followedUp(w RetroWindow) (map[int]bool, error) {
+	list, err := api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=all&per_page=100%s", s.Repo, Label, w.since()), true)
+	if err != nil {
+		return nil, err
+	}
+	out := map[int]bool{}
+	for _, i := range list {
+		for _, n := range followupsOf(i.Body) {
+			out[n] = true
+		}
+	}
+	return out, nil
+}
+
+// followups counts the window's issues a box closed, and those of them
+// whose box filed a follow-up.
+func (c Collected) followups() (boxed, filed int) {
+	for _, r := range c.Rows {
+		if r.Box {
+			boxed++
+		}
+		if r.Followup {
+			filed++
+		}
+	}
+	return boxed, filed
+}
+
+// share is part of whole in percent, 0 for none.
+func share(part, whole int) float64 {
+	if whole == 0 {
+		return 0
+	}
+	return round2(100 * float64(part) / float64(whole))
 }
 
 // ruleStarts are the times the rule checks started: when the PR that brought
@@ -468,6 +524,7 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 	rounds := map[string]bool{}
 	var landed *Landed
 	for _, c := range comments {
+		r.Box = r.Box || supersededLine.MatchString(c.Body) || fixedLine.MatchString(c.Body)
 		for _, m := range takeoverMark.FindAllStringSubmatch(c.Body, -1) {
 			rounds[m[1]] = true
 		}
@@ -483,7 +540,7 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 	}
 	r.Takeovers = len(rounds)
 	if p, ok := fixedBy[x.Number]; ok {
-		r.PR = p.Number
+		r.PR, r.Box = p.Number, true
 		if landed != nil && !landed.Facts.Claimed.IsZero() {
 			r.Minutes = int(p.MergedAt.Sub(landed.Facts.Claimed).Round(time.Minute) / time.Minute)
 		}
@@ -599,7 +656,7 @@ type Metrics map[string]float64
 var metricNames = []string{
 	"closed", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand",
 	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue",
-	"claim_to_merge_minutes",
+	"claim_to_merge_minutes", "followups", "followup_share",
 }
 
 // lowerIsBetter says which way a metric should move; closed is a size.
@@ -626,6 +683,8 @@ func (c Collected) measure() Metrics {
 		}
 	}
 	m["claim_to_merge_minutes"] = float64(median(minutes))
+	boxed, filed := c.followups()
+	m["followups"], m["followup_share"] = float64(filed), share(filed, boxed)
 	return m
 }
 
