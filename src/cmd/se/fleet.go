@@ -201,6 +201,7 @@ func init() {
 		Name:    "fleet rules",
 		Usage:   "fleet rules [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
+		Class:   batch,
 		Summary: "tell each open se PR the se rules it breaks merged with main",
 		Details: "for every open se PR against main: merge its head with origin's main in a worktree under .se/.runtime/rules, build se there and run se rules on the merge, and comment on each PR it breaks the findings and what to do, once for the same findings, so the box that owns it acts before its CI goes red. A PR that conflicts with main is left to its takeover; one whose check fails is reported, and the others are still checked. The rules workflow runs it when main takes a change to se's rules.",
 		Session: true,
