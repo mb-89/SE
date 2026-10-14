@@ -31,7 +31,7 @@ func init() {
 				return Reply{}, err
 			}
 			// The path is read before the update renames this binary away.
-			exe, err := c.Executable()
+			exe, err := c.Proc.Self()
 			if err != nil {
 				return Reply{}, err
 			}
