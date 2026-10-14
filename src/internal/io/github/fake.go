@@ -530,6 +530,18 @@ func (r *repo) listIssues(q url.Values) []any {
 			out = append(out, v)
 		}
 	}
+	// sort=updated lists the issues updated last first, as GitHub's
+	// direction=desc does; any other order is the fake's own.
+	if q.Get("sort") == "updated" {
+		at := func(v any) string { s, _ := v.(obj)["updated_at"].(string); return s }
+		desc := q.Get("direction") != "asc"
+		sort.SliceStable(out, func(a, b int) bool {
+			if desc {
+				return at(out[a]) > at(out[b])
+			}
+			return at(out[a]) < at(out[b])
+		})
+	}
 	return out
 }
 

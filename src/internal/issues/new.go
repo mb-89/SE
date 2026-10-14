@@ -211,7 +211,7 @@ func (s Source) Duplicate(title string, parent int) (int, error) {
 // duplicate is Duplicate, issue except left out: an issue retitled is no
 // duplicate of itself.
 func (s Source) duplicate(title string, parent, except int) (int, error) {
-	t, err := s.load(nil)
+	t, err := s.load(nil, nil)
 	if err != nil {
 		return 0, err
 	}

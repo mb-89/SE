@@ -416,17 +416,24 @@ They read and write GitHub's REST API through the GitHub I/O module
 `/repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by`, the tree through
 `/repos/{owner}/{repo}/issues/{n}/sub_issues`), and work on the repository of
 the workspace's `origin` unless `--repo` names another. The links of an issue
-are read only where the issue list's `issue_dependencies_summary` counts any,
-or the issue changed within the settle time (`github/config/settle`, 5
-minutes): the summary can lag a link just written, and writing a link changes
-the issue.
+are read only where the issue list's `issue_dependencies_summary` counts an
+open blocker (`blocked_by`), or says nothing of them, or the issue changed
+within the settle time (`github/config/settle`, 5 minutes): the summary can
+lag a link just written, and writing a link changes the issue. A settled
+summary with no open blocker stands for the links however many closed ones it
+counts; only `se fleet check`, which judges a blocker closed as not planned,
+reads the links of every issue whose summary counts any.
 
 `se issue pull` at the top answers from the daemon's warm snapshot of GitHub
 where the workspace's daemon keeps one (see [io.md](io.md#the-snapshot)), and
 says how old it is where it is older than its refresh. `--take` re-reads from
 GitHub only what its claim must be sure of: that the issue is open and that
 nothing open blocks it. The push of its branch settles a race, as it always
-does. Without a daemon, the pull reads GitHub itself.
+does. Without a daemon, the pull reads GitHub itself, on a short critical
+path: each page of the open issue list starts its issues' reads as it
+arrives, beside the next page, and each cadence reads the counted issues
+updated last beside its last closed run, reading its whole window after that
+only where they do not reach back to the run.
 
 ## Reviews
 

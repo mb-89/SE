@@ -92,14 +92,27 @@ func (s Source) Cadence() (Cadence, error) { return s.cadence(retroRule) }
 // OverhaulCadence reads where the overhaul cadence stands from GitHub.
 func (s Source) OverhaulCadence() (Cadence, error) { return s.cadence(overhaulRule) }
 
+// recentPage is how many of the counted issues updated last the cadence
+// reads beside the last closed run: issues closed since that run were updated
+// since it too, so where the page reaches back past it, it holds them all.
+const recentPage = 30
+
 func (s Source) cadence(r cadenceRule) (Cadence, error) {
 	c := Cadence{Kind: r.kind, Every: r.every(s.config())}
-	// The last closed run and the open ones are read at once.
+	// The last closed run, the open ones and the counted issues updated last
+	// are read at once: the count needs no read after the last run's.
 	var last past
 	var ok bool
+	var recent []past
 	if err := parallel([]func() error{
 		func() (err error) { last, ok, _, err = s.lastClosed(r.label, 0); return err },
 		func() (err error) { c.Open, err = s.firstOpen(r.label); return err },
+		func() error {
+			return eachPage(s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&sort=updated&direction=desc&per_page=%d", s.Repo, r.counts, recentPage), func(page []past) bool {
+				recent = page
+				return false
+			})
+		},
 	}); err != nil {
 		return Cadence{}, err
 	}
@@ -107,9 +120,14 @@ func (s Source) cadence(r cadenceRule) (Cadence, error) {
 	if ok {
 		c.Previous, w.Since = last.Number, last.ClosedAt.UTC()
 	}
-	closed, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100%s", s.Repo, r.counts, w.since()), true)
-	if err != nil {
-		return Cadence{}, err
+	closed := recent
+	if len(recent) == recentPage && (!ok || recent[len(recent)-1].Updated.After(w.Since)) {
+		// The page does not reach back to the last run: the window is read whole.
+		all, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100%s", s.Repo, r.counts, w.since()), true)
+		if err != nil {
+			return Cadence{}, err
+		}
+		closed = all
 	}
 	// GitHub's since is about updates; the window is about closing.
 	for _, i := range closed {

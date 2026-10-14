@@ -48,3 +48,45 @@ func each[T any](n int, read func(k int) (T, error)) ([]T, error) {
 	}
 	return out, parallel(reads)
 }
+
+// inflight runs reads as they come in, each at once on its own goroutine, at
+// most Workers of them reading at a time, so a read that becomes known late,
+// such as one for an issue on a list's second page, starts the moment it is
+// known rather than when the whole list is. Wait answers the error of the
+// first read, in the order they came, that failed. A read may add more.
+type inflight struct {
+	slots chan struct{}
+	wg    sync.WaitGroup
+	mu    sync.Mutex
+	errs  []*error
+}
+
+func newGroup() *inflight { return &inflight{slots: make(chan struct{}, Workers)} }
+
+// Go starts read.
+func (g *inflight) Go(read func() error) {
+	err := new(error)
+	g.mu.Lock()
+	g.errs = append(g.errs, err)
+	g.mu.Unlock()
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		g.slots <- struct{}{}
+		defer func() { <-g.slots }()
+		*err = read()
+	}()
+}
+
+// Wait waits for every read started, those they started included.
+func (g *inflight) Wait() error {
+	g.wg.Wait()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, err := range g.errs {
+		if *err != nil {
+			return *err
+		}
+	}
+	return nil
+}

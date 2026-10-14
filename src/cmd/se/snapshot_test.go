@@ -54,7 +54,7 @@ func TestIssuePullAnswersFromTheDaemonsWarmSnapshot(t *testing.T) {
 	if code, _, errs = se(t, "issue", "new", "--repo", "o/r", "--workspace", ws, "--title", "four", "--body", "b", "--blocked-by", "none"); code != 0 {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
-	if snap := <-kept; !strings.Contains(snap.Answers["LIST repos/o/r/issues?labels=se&state=open&per_page=100"], `"four"`) {
+	if snap := <-kept; !strings.Contains(snap.Answers["GET repos/o/r/issues?labels=se&state=open&per_page=100&page=1"], `"four"`) {
 		t.Fatalf("the snapshot after the write: %v", snap.Answers)
 	}
 }
