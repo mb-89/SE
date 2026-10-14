@@ -22,4 +22,4 @@ steps:
 commands:
   interactive: {ms: 1000, requests: 3}
   latency: {request_ms: 300, process_ms: 50}
-  over: [briefing, fleet check]
+  over: [briefing, fleet check, issue tree]
