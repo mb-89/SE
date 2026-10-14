@@ -52,5 +52,8 @@ created. A box takes it from there.
    - `went_well`: what worked and should stay.
 4. `./src/plugin/bin/se retro report <n>`. If it refuses, fix what it names
    and run it again. It creates the issues, those for a person where
-   controversial, and closes the retro. End: there is no PR to land, and
+   controversial, the rest into the open misc manifest, and closes the retro.
+   All work moves in manifests, each one topic whose leaves together take
+   about `issues.manifest/config/target` (an hour): size each finding's fix
+   to fit it. End: there is no PR to land, and
    nothing waits for the owner but the issues for them.
