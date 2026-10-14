@@ -138,6 +138,8 @@ func (c Collected) facts() string {
 		}
 	}
 	fmt.Fprintf(&b, "\nClaim to merge: median %s over the %d issues whose claim and merge are both on record.\n", span(int(c.Metrics["claim_to_merge_minutes"])), known)
+	boxed, filed := c.followups()
+	fmt.Fprintf(&b, "\nFollow-ups: %d of the %d issues a box closed (by a land, a supersede or a close) filed one, %g%%; the rule check `followups` holds it to issues/config/followup-share.\n", filed, boxed, c.Metrics["followup_share"])
 
 	b.WriteString("\n## Metrics against the previous retros\n")
 	if len(c.History) == 0 {

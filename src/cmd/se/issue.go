@@ -258,10 +258,10 @@ func init() {
 	register(Command{
 		Name:    "issue new",
 		Class:   batch,
-		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--replace] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "create an se issue, with its blockers and its parent",
-		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt: never superseded again. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. A ready issue, one nothing open blocks, fires the routine once.",
+		Summary: "create an se issue with its links; in a box, queue it",
+		Details: fmt.Sprintf("create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt: never superseded again. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. A ready issue, one nothing open blocks, fires the routine once. In a box, which writes to GitHub once, at its end, it creates nothing: it queues the issue, every flag with it, in the workspace (.se/.runtime/followups.json), and the se issue land, se issue supersede or se issue close --fixed-by of the box's issue files it after its own work, as this command would, its body marked as that issue's follow-up (<!-- se:followup #N -->). A box files at most %d (issues/config/max-followups): one more is refused; fold both into one and pass --replace to replace the queued one, or make the one --person where what is left is too big for one issue.", issueConfig().MaxFollowups),
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -276,6 +276,7 @@ func init() {
 			person := fs.Bool("person", false, "make it an issue for a person: label it se-person and assign it to the owner")
 			skills := fs.String("skills", "", "the skills its work needs, as `NAME,NAME`: a take hands each over")
 			allowDuplicate := fs.Bool("allow-duplicate", false, "create it although an open se issue under the same parent has its title")
+			replace := fs.Bool("replace", false, "in a box: queue it in place of the issue queued already")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
@@ -284,13 +285,13 @@ func init() {
 			if !given["blocked-by"] {
 				return Reply{}, fmt.Errorf("issue new needs --blocked-by: the issues that block it, as N,M, or none")
 			}
-			blockers, err := issues.ParseBlockedBy(*blockedBy)
-			if err != nil {
+			n := newIssue{Title: *title, Parent: *parent, Review: *review, Final: *final, Person: *person, AllowDuplicate: *allowDuplicate}
+			var err error
+			if n.BlockedBy, err = issues.ParseBlockedBy(*blockedBy); err != nil {
 				return Reply{}, err
 			}
-			var dependents []int
 			if given["blocks"] {
-				if dependents, err = issues.ParseBlockedBy(*blocks); err != nil || len(dependents) == 0 {
+				if n.Blocks, err = issues.ParseBlockedBy(*blocks); err != nil || len(n.Blocks) == 0 {
 					return Reply{}, fmt.Errorf("--blocks takes issue numbers, like 5,8, not %q", *blocks)
 				}
 			}
@@ -300,6 +301,7 @@ func init() {
 			if given["body"] == given["body-file"] {
 				return Reply{}, fmt.Errorf("issue new takes one of --body and --body-file")
 			}
+			n.Body = *body
 			if given["body-file"] {
 				path := *bodyFile
 				if !filepath.IsAbs(path) {
@@ -309,59 +311,37 @@ func init() {
 				if err != nil {
 					return Reply{}, err
 				}
-				*body = string(data)
+				n.Body = string(data)
 			}
 			if given["skills"] {
-				names, err := guidance.Parse(*skills)
-				if err != nil {
+				if n.Skills, err = guidance.Parse(*skills); err != nil {
 					return Reply{}, err
 				}
-				if _, err := guidance.Read(c.Disk, c.seRoot(), names); err != nil {
+				if _, err := guidance.Read(c.Disk, c.seRoot(), n.Skills); err != nil {
 					return Reply{}, err
 				}
-				*body = guidance.With(*body, names)
+			}
+			if strings.TrimSpace(n.Title) == "" {
+				return Reply{}, fmt.Errorf("an issue needs a --title")
+			}
+			if n.Person && (n.Review || n.Final) {
+				return Reply{}, fmt.Errorf("--person takes neither --review nor --final: an issue for a person is no box's work")
+			}
+			if c.isBox() {
+				return queue(c, n, *replace, *asJSON)
+			}
+			if *replace {
+				return Reply{}, fmt.Errorf("--replace replaces the issue a box queued; this session is no box, and se issue new creates the issue at once")
 			}
 			s, err := src()
 			if err != nil {
 				return Reply{}, err
 			}
-			if *allowDuplicate {
-				if err := s.CloseParents(); err != nil {
-					return Reply{}, err
-				}
-			} else if dup, err := s.Duplicate(*title, *parent); err != nil {
-				return Reply{}, err
-			} else if dup > 0 {
-				where := "at the top"
-				if *parent > 0 {
-					where = fmt.Sprintf("a sub-issue of #%d", *parent)
-				}
-				return Reply{}, fmt.Errorf("#%d is an open se issue titled %q, %s, already; --allow-duplicate creates another", dup, strings.TrimSpace(*title), where)
-			}
-			var labels []string
-			if *review {
-				labels = append(labels, issues.ReviewLabel)
-			}
-			if *final {
-				labels = append(labels, issues.FinalLabel)
-			}
-			if err := s.Exist(dependents); err != nil {
+			if err := n.refused(s); err != nil {
 				return Reply{}, err
 			}
-			var made issues.Issue
-			ready := false
-			if *person {
-				if len(labels) > 0 {
-					return Reply{}, fmt.Errorf("--person takes neither --review nor --final: an issue for a person is no box's work")
-				}
-				made, err = s.ForPerson(*title, *body, *parent, blockers)
-			} else {
-				made, ready, err = s.Create(*title, *body, *parent, blockers, labels...)
-			}
+			made, ready, err := n.create(s, 0)
 			if err != nil {
-				return Reply{}, err
-			}
-			if err := s.Blocking(made, dependents); err != nil {
 				return Reply{}, err
 			}
 			fanout := ""
@@ -369,42 +349,10 @@ func init() {
 				fanout = c.fanOut(s, 0)
 			}
 			if *asJSON {
-				data, err := json.Marshal(struct {
-					Number    int    `json:"number"`
-					URL       string `json:"url"`
-					BlockedBy []int  `json:"blocked_by"`
-					Parent    int    `json:"parent,omitempty"`
-					Blocks    []int  `json:"blocks,omitempty"`
-					Review    bool   `json:"review,omitempty"`
-					Final     bool   `json:"final,omitempty"`
-					Person    bool   `json:"person,omitempty"`
-					Fanout    string `json:"fanout,omitempty"`
-				}{made.Number, made.URL, append([]int{}, blockers...), *parent, dependents, *review, *final, *person, fanout})
+				data, err := json.Marshal(n.answer(made, fanout))
 				return Reply{Text: string(data)}, err
 			}
-			text := fmt.Sprintf("Created #%d %s\n%s", made.Number, made.Title, made.URL)
-			if *parent > 0 {
-				text += fmt.Sprintf("\nA sub-issue of #%d.", *parent)
-			}
-			if *review {
-				text += "\nLabelled " + issues.ReviewLabel + ": it is reviewed once its sub-issues have closed."
-			}
-			if len(dependents) > 0 {
-				text += "\nIt blocks " + numbers(dependents) + "."
-			}
-			if *person {
-				text += "\nFor a person: labelled " + issues.PersonLabel + " and assigned to the owner."
-			}
-			if *final {
-				text += "\nLabelled " + issues.FinalLabel + ": its last attempt, never superseded again."
-			}
-			if len(blockers) > 0 {
-				names := make([]string, len(blockers))
-				for k, b := range blockers {
-					names[k] = "#" + strconv.Itoa(b)
-				}
-				text += "\nBlocked by " + strings.Join(names, ", ") + "."
-			}
+			text := n.text(fmt.Sprintf("Created #%d %s", made.Number, made.Title), made)
 			if fanout != "" {
 				text += "\n" + fanout
 			}
@@ -417,7 +365,7 @@ func init() {
 		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "check, push and open an issue-N branch's PR, auto-merge on",
-		Details: "on an issue-N branch of a leaf: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), pass tests/check.sh, push, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash).",
+		Details: "on an issue-N branch of a leaf: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), pass tests/check.sh, push, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash). Then it files the issue the box queued with se issue new, if any, as se issue new would create it, its body marked as N's follow-up (<!-- se:followup #N -->), names it and clears the queue; a queued issue se issue new would refuse refuses the whole command first, before anything is written.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue land")
@@ -446,25 +394,39 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
+			q, err := queued(c, s)
+			if err != nil {
+				return Reply{}, err
+			}
 			l, err := s.Land(c.Workspace, c.sessionID(), qs, answers, func(dir string) error { return c.Check(c.Proc, dir) })
 			if err != nil {
 				return Reply{}, err
 			}
-			if *asJSON {
-				data, err := json.Marshal(l)
-				return Reply{Text: string(data)}, err
-			}
-			did := "Pushed issue-%d; its PR #%d is open"
-			if l.Created {
-				did = "Pushed issue-%d and opened PR #%d"
-			}
-			text := fmt.Sprintf(did, l.Issue, l.Number)
-			if l.Merged {
-				text += "; nothing was left to wait for, so it is merged (squash)."
-			} else {
-				text += ", auto-merge (squash) on."
-			}
-			return Reply{Text: text + "\n" + l.URL}, nil
+			return landed(c, s, l.Issue, q, *asJSON, false, func() string { return c.fanOut(s, 0) }, func(filed []newAnswer, fanout string) (Reply, error) {
+				if *asJSON {
+					data, err := json.Marshal(struct {
+						issues.Landing
+						Filed  []newAnswer `json:"filed,omitempty"`
+						Fanout string      `json:"fanout,omitempty"`
+					}{l, filed, fanout})
+					return Reply{Text: string(data)}, err
+				}
+				did := "Pushed issue-%d; its PR #%d is open"
+				if l.Created {
+					did = "Pushed issue-%d and opened PR #%d"
+				}
+				text := fmt.Sprintf(did, l.Issue, l.Number)
+				if l.Merged {
+					text += "; nothing was left to wait for, so it is merged (squash)."
+				} else {
+					text += ", auto-merge (squash) on."
+				}
+				text += "\n" + l.URL
+				if fanout != "" {
+					text += "\n" + fanout
+				}
+				return Reply{Text: text}, nil
+			})
 		},
 	})
 }

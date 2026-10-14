@@ -157,8 +157,9 @@ nothing mints an issue for a person on a box's behalf.
   a resume mark resets the takeover count.
 - **A box that takes an issue closes it, always** (the owner's rule,
   2026-10-14). It ends in one of three ways and no other: a PR for what it
-  solved, auto-merge on (`se issue land`), with an issue (`se issue new`) for
-  everything it could not solve; a supersede (`se issue supersede <n>`),
+  solved, auto-merge on (`se issue land`), with at most one issue
+  (`se issue new`) for everything it could not solve, filed as the box ends
+  (see [A box's follow-up](#a-boxs-follow-up)); a supersede (`se issue supersede <n>`),
   where it cannot land a PR at all; or, where the issue's work reached main
   before the take, a close naming that commit
   (`se issue close <n> --fixed-by SHA`), so a moot issue ends without an
@@ -182,7 +183,7 @@ nothing mints an issue for a person on a box's behalf.
 se issue close N --fixed-by SHA --answers FILE [--json] [--repo OWNER/NAME]
 se issue edit N [--title T] [--body B | --body-file PATH] [--json] [--repo OWNER/NAME]
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
-se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--replace] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
 se issue supersede N (--body B | --body-file PATH) [--json] [--repo OWNER/NAME]
@@ -364,6 +365,28 @@ as `land` does (see [Landing answers](#landing-answers)), comments naming the
 commit and its link under the marker `<!-- se:fixed-by SHA -->`, and closes N
 as completed (with `--json`: `{"issue","commit","subject","url"}`). N's
 dependents become ready as when a PR closes it.
+
+### A box's follow-up
+
+A box writes to GitHub once, at the end of its work (the owner's rule,
+2026-10-14), and files at most `issues/config/max-followups` issues (one):
+what is left of its issue goes into that one, and where that is too big for
+one issue, the one is for a person (`--person`). Filing one is a last resort;
+the retro holds the fleet to it (the rule check `followups`,
+[spec/retro.md](retro.md#the-rule-checks)).
+
+- `se issue new` in a box creates nothing: it queues the issue in the
+  workspace, every flag with it, and answers that the land, supersede or
+  close files it. One past the limit is refused; `--replace` replaces the
+  queued one with the two folded together.
+- `se issue land`, `se issue supersede` and `se issue close --fixed-by` refuse,
+  before they write anything, a queued issue `se issue new` would refuse; after
+  their own work they file it as `se issue new` would create it, its body
+  marked `<!-- se:followup #N -->` with N their issue, name it (with
+  `--json`: the field `filed`, a list as `se issue new --json` answers each),
+  and clear the queue.
+
+`se help issue new` has the flags.
 
 ### The Stop hook
 
