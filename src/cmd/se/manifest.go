@@ -64,7 +64,7 @@ func init() {
 				return Reply{}, err
 			}
 			c.Workspace = root
-			repo, err := repoOf(c.Disk, c.Workspace)
+			repo, err := repoOf(c.Disk, c.Proc, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}

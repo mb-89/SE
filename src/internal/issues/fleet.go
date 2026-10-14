@@ -600,7 +600,7 @@ func (s Source) fix(dir string, x *Fixed) error {
 			x.Did = fmt.Sprintf("merged PR #%d, which had nothing left to wait for", f.PR)
 		}
 	case f.spent:
-		if _, err := git(dir, "push", "-q", "origin", "--delete", Branch(f.Issue)); err != nil {
+		if _, err := s.git(dir, "push", "-q", "origin", "--delete", Branch(f.Issue)); err != nil {
 			return fmt.Errorf("deleting %s: %w", Branch(f.Issue), err)
 		}
 		x.Did = fmt.Sprintf("deleted %s at %s, which main holds whole", Branch(f.Issue), f.head)
@@ -685,7 +685,7 @@ func (s Source) takeOverClaim(dir string, st Status) (took Issue, ok bool, err e
 	if err := s.finalize(st.Number); err != nil {
 		return Issue{}, false, err
 	}
-	if err := pickUp(dir, st.Number); err != nil {
+	if err := s.pickUp(dir, st.Number); err != nil {
 		return Issue{}, false, err
 	}
 	took = st.Issue

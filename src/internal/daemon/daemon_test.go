@@ -17,6 +17,7 @@ import (
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/internal/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 )
@@ -246,5 +247,26 @@ func TestTakeOverStepsARunningDaemonAside(t *testing.T) {
 	cancel()
 	if err := <-secondDone; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStartRunsTheDaemonDetachedAndSaysWhenItExits(t *testing.T) {
+	t.Parallel()
+	p := workspace(t)
+	m := proc.NewFake()
+	m.Install("/bin/se", func(c proc.Cmd) int {
+		fmt.Fprintln(c.Stderr, "se serve: no port left")
+		return 1
+	})
+	_, err := daemon.Start(m, p, "/bin/se", time.Minute, clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)), sehttp.NewFake())
+	if err == nil || !strings.Contains(err.Error(), "the daemon exited at start (exit status 1)") {
+		t.Fatalf("%v", err)
+	}
+	ran := m.Ran()
+	if len(ran) != 1 || ran[0].String() != "/bin/se serve --workspace "+p.Workspace || !ran[0].Detached {
+		t.Fatalf("ran %+v", ran)
+	}
+	if log, err := p.Disk.ReadFile(p.DaemonLog()); err != nil || !strings.Contains(string(log), "no port left") {
+		t.Fatalf("the daemon's log holds %q (%v)", log, err)
 	}
 }

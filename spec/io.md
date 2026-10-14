@@ -5,12 +5,16 @@ Reader: an agent writing, moving or testing an I/O module, or code that needs on
 Processes, the disk, the clock, the network and GitHub are each reached
 through exactly one I/O module ([principles 6 to 8](principles.md)). The
 clock, `src/internal/io/clock`, is the first and the model for the rest.
-The disk, `src/internal/io/disk`, is the second: reading, writing, listing,
+The disk, `src/internal/io/disk`, covers reading, writing, listing,
 locking and atomically replacing files, its fake a filesystem in memory that
 fails as the real one does.
 The network, `src/internal/io/http`, serves and calls the daemon protocol
 (health, event, shutdown) and fires the routine; its fake is a network inside
 the process, and its real one is tested on loopback.
+`src/internal/io/proc` runs programs: git, go, check.sh, the se a session
+hands over to and the detached daemon. gh is GitHub's, not proc's. Its fake
+is a machine that holds only the programs a case installs, each a function
+that does what the real one would, and records every run.
 
 ## The layout
 

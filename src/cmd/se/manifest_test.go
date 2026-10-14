@@ -2,6 +2,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 // prose makes a git workspace holding files, and answers its folder.
@@ -126,5 +128,29 @@ func TestAManifestReadsItsOwnersFromTheDisk(t *testing.T) {
 	}
 	if _, err := manifest(d, root, paths, "skills", "README.md"); err == nil {
 		t.Fatal("a skill gone from the disk was listed")
+	}
+}
+
+func TestTheRulesSeeWhatGitTracksAndIgnores(t *testing.T) {
+	m := proc.NewFake()
+	m.Install("git", func(c proc.Cmd) int {
+		args := strings.Join(c.Args, " ")
+		switch {
+		case c.Dir != "/ws":
+			return 128
+		case args == "ls-files -z --cached --others --exclude-standard":
+			_, _ = fmt.Fprint(c.Stdout, "README.md\x00a/x.md\x00")
+			return 0
+		case args == "check-ignore -q --no-index "+filepath.FromSlash("a/bin/"):
+			return 0
+		}
+		return 1
+	})
+	repo, err := repoOf(disk.NewFake(), m, "/ws")
+	if err != nil || strings.Join(repo.Paths, " ") != "README.md a/x.md" {
+		t.Fatalf("%v %v", repo, err)
+	}
+	if !repo.Ignored("a/bin") || repo.Ignored("a/gone") {
+		t.Fatal("the rules see a/bin, a folder git ignores only as a folder, as kept, or a/gone as ignored")
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/internal/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/gitenv"
@@ -57,7 +58,7 @@ func installed(t *testing.T) string {
 			return
 		}
 		installedSE = filepath.Join(dir, filepath.Base(daemon.Paths{}.Bin()))
-		installedErr = update.Build(drive, repoRoot(t), installedSE)
+		installedErr = update.Build(drive, proc.Real(), repoRoot(t), installedSE)
 	})
 	if installedErr != nil {
 		t.Fatal(installedErr)
@@ -141,9 +142,10 @@ func TestAnyOtherWorkspaceRunsTheInstalledSe(t *testing.T) {
 	se := installed(t)
 	ws := t.TempDir()
 	write(t, filepath.Join(ws, "go.mod"), "module example.com/other\n")
-	exe, note, err := daemonExe(daemon.Paths{Workspace: ws, Disk: drive})
-	if err != nil || exe != se || note != "" {
-		t.Fatalf("exe %q, note %q, err %v", exe, note, err)
+	m := proc.NewFake()
+	exe, note, err := daemonExe(m, daemon.Paths{Workspace: ws, Disk: drive})
+	if err != nil || exe != se || note != "" || len(m.Ran()) != 0 {
+		t.Fatalf("exe %q, note %q, err %v, ran %q", exe, note, err, m.Lines())
 	}
 	if _, err := os.Stat(daemon.Paths{Workspace: ws, Disk: drive}.Bin()); err == nil {
 		t.Fatal("se was built in a workspace that is no SE checkout")
@@ -302,11 +304,11 @@ func TestWithdrawRemovesABuildOrMovesItAway(t *testing.T) {
 
 func TestOnlyACheckoutWithABuildHandsOver(t *testing.T) {
 	d, ws := disk.NewFake(), filepath.FromSlash("/ws")
-	if _, handed := handsOver(d, ws, []string{"status"}, nil, nil); handed {
+	if _, handed := handsOver(d, proc.NewFake(), ws, []string{"status"}, nil, nil); handed {
 		t.Fatal("a folder that is no checkout handed over")
 	}
 	put(t, d, filepath.Join(ws, "go.mod"), "module "+update.Module+"\n")
-	if _, handed := handsOver(d, ws, []string{"status"}, nil, nil); handed {
+	if _, handed := handsOver(d, proc.NewFake(), ws, []string{"status"}, nil, nil); handed {
 		t.Fatal("a checkout with nothing built handed over")
 	}
 }

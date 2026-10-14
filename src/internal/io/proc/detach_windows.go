@@ -1,10 +1,10 @@
 //go:build windows
 
-package daemon
+package proc
 
 import "syscall"
 
-// detachedProcess is DETACHED_PROCESS: the daemon outlives the console that started it.
+// detachedProcess is DETACHED_PROCESS: the program outlives the console that started it.
 const detachedProcess = 0x00000008
 
 func detached() *syscall.SysProcAttr {

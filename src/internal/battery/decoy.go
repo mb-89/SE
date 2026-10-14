@@ -4,13 +4,13 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/gitenv"
 	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 // Decoy is a throwaway repository go test runs under: GIT_DIR points at it,
@@ -23,13 +23,14 @@ type Decoy struct {
 }
 
 // NewDecoy makes the decoy in dir on d, a repository with one commit, and
-// records what it holds.
-func NewDecoy(d disk.Disk, dir string) (*Decoy, error) {
+// records what it holds. It runs git on procs.
+func NewDecoy(d disk.Disk, procs proc.Procs, dir string) (*Decoy, error) {
 	git := func(args ...string) error {
-		cmd := exec.Command("git", append([]string{"-c", "user.name=battery", "-c", "user.email=battery@se", "-c", "commit.gpgsign=false"}, args...)...)
-		cmd.Dir = dir
-		cmd.Env = Isolated(os.Environ())
-		if out, err := cmd.CombinedOutput(); err != nil {
+		cmd := proc.Cmd{
+			Name: "git", Args: append([]string{"-c", "user.name=battery", "-c", "user.email=battery@se", "-c", "commit.gpgsign=false"}, args...),
+			Dir: dir, Env: Isolated(os.Environ()),
+		}
+		if out, err := proc.Combined(procs, cmd); err != nil {
 			return fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, out)
 		}
 		return nil

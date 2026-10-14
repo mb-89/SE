@@ -2,14 +2,13 @@
 package update
 
 import (
-	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 // Result says what an update did.
@@ -27,9 +26,11 @@ func (u *Untouched) Error() string { return u.Reason }
 
 // Run pulls main into repo and, when that brought anything, builds se to out on d.
 // It refuses, with an *Untouched, a checkout that is not on a clean main. A
-// shallow clone (git clone --depth 1) updates like a full one.
-func Run(d disk.Disk, repo, out string) (Result, error) {
+// shallow clone (git clone --depth 1) updates like a full one. It reads and
+// writes on d and runs git and go on p.
+func Run(d disk.Disk, p proc.Procs, repo, out string) (Result, error) {
 	var r Result
+	git := func(repo string, args ...string) (string, error) { return git(p, repo, args...) }
 	if inside, err := git(repo, "rev-parse", "--is-inside-work-tree"); err != nil || inside != "true" {
 		return r, &Untouched{fmt.Sprintf("%s is no git checkout", repo)}
 	}
@@ -56,27 +57,25 @@ func Run(d disk.Disk, repo, out string) (Result, error) {
 	if r.To, err = git(repo, "rev-parse", "--short", "HEAD"); err != nil || r.To == r.From {
 		return r, err
 	}
-	if err := Build(d, repo, out); err != nil {
+	if err := Build(d, p, repo, out); err != nil {
 		return r, err
 	}
 	r.Built = out
 	return r, nil
 }
 
-// Build compiles se from repo to out on d, replacing the old binary only once the new one stands.
-func Build(d disk.Disk, repo, out string) error {
+// Build compiles se from repo to out on d, running go on p, replacing the old binary only once the new one stands.
+func Build(d disk.Disk, p proc.Procs, repo, out string) error {
 	if err := d.MkdirAll(filepath.Dir(out)); err != nil {
 		return err
 	}
 	// Two starts may build at once; each builds to a file of its own.
 	fresh := fmt.Sprintf("%s.%d.new", out, os.Getpid())
 	args := []string{"build", "-o", fresh}
-	if head, err := Head(repo); err == nil {
+	if head, err := Head(p, repo); err == nil {
 		args = append(args, "-ldflags", Ldflags(head))
 	}
-	cmd := exec.Command("go", append(args, "./src/cmd/se")...)
-	cmd.Dir = repo
-	if said, err := cmd.CombinedOutput(); err != nil {
+	if said, err := proc.Combined(p, proc.Cmd{Name: "go", Args: append(args, "./src/cmd/se"), Dir: repo}); err != nil {
 		_ = d.Remove(fresh)
 		return fmt.Errorf("go build: %v\n%s", err, said)
 	}
@@ -92,7 +91,7 @@ func Build(d disk.Disk, repo, out string) error {
 }
 
 // Head is the commit repo is at.
-func Head(repo string) (string, error) { return git(repo, "rev-parse", "HEAD") }
+func Head(p proc.Procs, repo string) (string, error) { return git(p, repo, "rev-parse", "HEAD") }
 
 // Ldflags embeds commit in se as the commit it was built from; every build of
 // se passes them (see main.commit).
@@ -115,13 +114,6 @@ func IsCheckout(d disk.Disk, dir string) bool {
 	return false
 }
 
-func git(repo string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return strings.TrimSpace(string(out)), nil
+func git(p proc.Procs, repo string, args ...string) (string, error) {
+	return proc.Output(p, proc.Cmd{Name: "git", Args: args, Dir: repo})
 }
