@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -16,14 +15,10 @@ import (
 // to se hook stop, which refuses a box's stop while its issue is open with
 // neither; se issue pull --take records the issue a box took.
 
-// boxEnv reads the environment that tells a box from an interactive session;
-// tests put their own here.
-var boxEnv = os.Getenv
-
 // isBox says whether this session is a box: a cloud session that no person
 // attends, as a routine starts it. Every other session is interactive.
-func isBox() bool {
-	return boxEnv("CLAUDE_CODE_REMOTE") == "true" && boxEnv("CLAUDE_CODE_SESSION_ATTENDED") == "0"
+func (c *Call) isBox() bool {
+	return c.Getenv("CLAUDE_CODE_REMOTE") == "true" && c.Getenv("CLAUDE_CODE_SESSION_ATTENDED") == "0"
 }
 
 // StopPath is the file in the repository that sets how often in a row the
@@ -125,7 +120,7 @@ func init() {
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
-			if !isBox() {
+			if !c.isBox() {
 				return verdict{Pass: "an interactive session is never refused"}.reply()
 			}
 			if *waiting {

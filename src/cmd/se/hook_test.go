@@ -10,29 +10,18 @@ import (
 	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
-// asBox makes the test's session a box (box true) or an interactive one.
-func asBox(t *testing.T, box bool) {
+// asBox makes the test's session a box: a cloud session no person attends.
+func asBox(t *testing.T) {
 	t.Helper()
-	old := boxEnv
-	boxEnv = func(k string) string {
-		switch {
-		case !box:
-			return ""
-		case k == "CLAUDE_CODE_REMOTE":
-			return "true"
-		case k == "CLAUDE_CODE_SESSION_ATTENDED":
-			return "0"
-		}
-		return ""
-	}
-	t.Cleanup(func() { boxEnv = old })
+	setenv(t, "CLAUDE_CODE_REMOTE", "true")
+	setenv(t, "CLAUDE_CODE_SESSION_ATTENDED", "0")
 }
 
 // stopWorld is a box in /ws that took #3, GitHub answering a's paths, and
 // the Stop hook capped at 2 refusals in a row.
 func stopWorld(t *testing.T, a map[string]string) *disk.Fake {
 	t.Helper()
-	asBox(t, true)
+	asBox(t)
 	d := onFake(t)
 	put(t, d, "/ws/.se/.runtime/box.json", `{"issue":3}`)
 	put(t, d, "/ws/"+StopPath, "refusals: 2\n")
@@ -54,6 +43,7 @@ func stops(t *testing.T, args ...string) verdict {
 }
 
 func TestAClaimWithoutAPRIsRefusedUpToTheCap(t *testing.T) {
+	t.Parallel()
 	d := stopWorld(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[]`})
 	for k := 1; k <= 2; k++ {
 		v := stops(t)
@@ -78,6 +68,7 @@ func TestAClaimWithoutAPRIsRefusedUpToTheCap(t *testing.T) {
 }
 
 func TestAPRWithAutoMergeOrASupersedeLetsTheBoxEnd(t *testing.T) {
+	t.Parallel()
 	stopWorld(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[{"number":9,"html_url":"p9","auto_merge":null}]`})
 	if v := stops(t); !strings.Contains(v.Block, "PR #9 (p9) has auto-merge off") {
 		t.Fatalf("%+v", v)
@@ -94,8 +85,9 @@ func TestAPRWithAutoMergeOrASupersedeLetsTheBoxEnd(t *testing.T) {
 }
 
 func TestAnInteractiveSessionIsNeverRefused(t *testing.T) {
+	t.Parallel()
 	stopWorld(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[]`})
-	asBox(t, false)
+	setenv(t, "CLAUDE_CODE_SESSION_ATTENDED", "1")
 	for range 5 {
 		if v := stops(t); v.Block != "" || !strings.Contains(v.Pass, "interactive") {
 			t.Fatalf("%+v", v)
@@ -104,6 +96,7 @@ func TestAnInteractiveSessionIsNeverRefused(t *testing.T) {
 }
 
 func TestABoxWaitingOnBackgroundWorkOrWithoutATakePasses(t *testing.T) {
+	t.Parallel()
 	d := stopWorld(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[]`})
 	if v := stops(t, "--waiting"); v.Block != "" {
 		t.Fatalf("%+v", v)
@@ -115,6 +108,7 @@ func TestABoxWaitingOnBackgroundWorkOrWithoutATakePasses(t *testing.T) {
 }
 
 func TestALeafsSubAgentIsHeldToItsLeaf(t *testing.T) {
+	t.Parallel()
 	d := stopWorld(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"closed"}`, "repos/o/r/issues/6": `{"number":6,"state":"open"}`, "repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100": `[]`})
 	put(t, d, "/t/leaf.jsonl", `{"type":"user","message":{"content":"Work on se issue #6 in the worktree /issue-6, on its branch issue-6."}}`+"\n")
 	put(t, d, "/t/review.jsonl", `{"type":"user","message":{"content":"Review se gate #2 in the worktree /r."}}`+"\n")
@@ -131,6 +125,7 @@ func TestALeafsSubAgentIsHeldToItsLeaf(t *testing.T) {
 }
 
 func TestABrokenCheckLetsTheTurnEndAndLogsWhy(t *testing.T) {
+	t.Parallel()
 	d := stopWorld(t, map[string]string{})
 	if v := stops(t); v.Block != "" || !strings.Contains(v.Pass, "the check is broken") {
 		t.Fatalf("%+v", v)
@@ -141,8 +136,9 @@ func TestABrokenCheckLetsTheTurnEndAndLogsWhy(t *testing.T) {
 }
 
 func TestATakeRecordsTheIssueForTheStopHook(t *testing.T) {
+	t.Parallel()
 	d := onFake(t)
-	c := &Call{Workspace: "/ws", Disk: d}
+	c := &Call{Workspace: "/ws", World: World{Disk: d}}
 	if err := recordTake(c, 3); err != nil {
 		t.Fatal(err)
 	}
@@ -152,6 +148,7 @@ func TestATakeRecordsTheIssueForTheStopHook(t *testing.T) {
 }
 
 func TestIssueSupersedeReadsItsWords(t *testing.T) {
+	t.Parallel()
 	for args, want := range map[string]string{
 		"":                                 "takes one issue number",
 		"3 4 --body q":                     "takes one issue number",
