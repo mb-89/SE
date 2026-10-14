@@ -20,11 +20,12 @@ import (
 )
 
 // Programs are the only programs SE starts, by name: go, the battery's
-// linters, git where Go has no library for it, sh for the battery itself
-// (tests/check.sh), and se, the daemon and the checkout's se it hands over to.
+// linters (golangci-lint, biome, deadcode), git where Go has no library for
+// it, sh for the battery itself (tests/check.sh), and se, the daemon and the
+// checkout's se it hands over to.
 // Listed refuses any other, and the battery's programs rule refuses a program
 // the code names that is not here (src/internal/rules/programs.go).
-var Programs = []string{"go", "git", "golangci-lint", "biome", "sh", "se"}
+var Programs = []string{"go", "git", "golangci-lint", "biome", "deadcode", "sh", "se"}
 
 // ErrNotListed is the error of a program Programs does not name.
 var ErrNotListed = errors.New("is no program SE starts")

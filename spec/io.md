@@ -11,7 +11,7 @@ fails as the real one does.
 The network, `src/internal/io/http`, serves and calls the daemon protocol
 (health, event, value, shutdown) and fires the routine; its fake is a network inside
 the process, and its real one is tested on loopback.
-`src/internal/io/proc` runs programs: git, go, check.sh, the se a session
+`src/internal/io/proc` runs programs: git, go, the linters (golangci-lint, biome, deadcode), check.sh, the se a session
 hands over to and the detached daemon. It starts only the programs
 `proc.Programs` lists, the one place that list lives: `proc.Listed`, which se
 and the battery run on, refuses any other. gh is GitHub's, not proc's. Its fake
