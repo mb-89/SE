@@ -33,9 +33,11 @@ func RealAt(base, token string) GitHub {
 	return newRest(strings.TrimSuffix(base, "/"), func() string { return token })
 }
 
-// InFlight is how many requests Real has open at once at most, well below
-// the hundred GitHub allows before it limits a client.
-const InFlight = 32
+// InFlight is how many requests Real has open at once at most, below the
+// hundred GitHub allows before it limits a client: through the box proxy,
+// which speaks HTTP/1.1 only, each takes 0.3 to 1.4s, so a cold pull's 150 or
+// so reads are two rounds of requests, not five.
+const InFlight = 96
 
 func newRest(base string, token func() string) *rest {
 	return &rest{base: base, token: token, client: client(), seen: map[string]cached{}, slots: make(chan struct{}, InFlight)}

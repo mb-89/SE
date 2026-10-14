@@ -73,7 +73,7 @@ func (w *heldBack) List(path string) ([]byte, error) {
 func TestAPagesReadsStartBeforeTheNextPage(t *testing.T) {
 	t.Parallel()
 	var list []string
-	for n := 1; n <= PerPage+1; n++ {
+	for n := 1; n <= ListPage+1; n++ {
 		list = append(list, fmt.Sprintf(`{"id":%d,"number":%d,"title":"t%d","state":"open"}`, 100+n, n, n))
 	}
 	gh := recorded(t, map[string]string{listPath: "[" + strings.Join(list, ",") + "]", refsPath: `[]`})
@@ -83,13 +83,13 @@ func TestAPagesReadsStartBeforeTheNextPage(t *testing.T) {
 	}
 	s := Source{Proc: machine, Repo: repo, GitHub: waitFor(gh, func(path string, list bool) bool {
 		// The second page, or the whole list read at once, which holds it.
-		return strings.HasPrefix(path, listPath) && (list || strings.HasSuffix(path, "&page=2"))
+		return strings.HasPrefix(path, "repos/o/r/issues?labels=se&state=open&") && (list || strings.HasSuffix(path, "&page=2"))
 	}, links(1)), Clock: atNow()}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != PerPage+1 || all[0].Why != "blocked by #2" || all[PerPage].Why != "" {
+	if len(all) != ListPage+1 || all[0].Why != "blocked by #2" || all[ListPage].Why != "" {
 		t.Fatalf("%d issues, #1 %q", len(all), all[0].Why)
 	}
 }
@@ -147,11 +147,13 @@ func (l listing) List(path string) ([]byte, error) { l.paths <- path; return l.G
 // reach back to the run.
 func TestTheCadenceCountsBesideTheLastRun(t *testing.T) {
 	t.Parallel()
-	// Retro #20 closed on October 1st; of 40 se issues closed, after is how
-	// many closed, and were last updated, after it.
+	// Retro #20 closed on October 1st; of the se issues closed, more than the
+	// pages read beside it hold, after is how many closed, and were last
+	// updated, after it.
+	all := recentPage*recentPages + 10
 	repoOf := func(after int) map[string]string {
 		var closed []string
-		for k := 0; k < 40; k++ {
+		for k := 0; k < all; k++ {
 			at := "2026-09-20T12:00:00Z"
 			if k < after {
 				at = fmt.Sprintf("2026-10-%02dT12:00:00Z", 2+k%9)
@@ -167,8 +169,8 @@ func TestTheCadenceCountsBesideTheLastRun(t *testing.T) {
 	for _, tc := range []struct {
 		after  int
 		window bool
-	}{{5, false}, {35, true}} {
-		paths := make(chan string, 100)
+	}{{5, false}, {all - 5, true}} {
+		paths := make(chan string, 1000)
 		gh := waitFor(listing{GitHub: recorded(t, repoOf(tc.after)), paths: paths}, holds(closedRetrosPath), "&sort=updated")
 		c, err := Source{Repo: repo, GitHub: gh, Clock: atNow()}.Cadence()
 		if err != nil || c.Closed != tc.after || c.Previous != 20 {

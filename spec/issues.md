@@ -430,8 +430,8 @@ says how old it is where it is older than its refresh. `--take` re-reads from
 GitHub only what its claim must be sure of: that the issue is open and that
 nothing open blocks it. The push of its branch settles a race, as it always
 does. Without a daemon, the pull reads GitHub itself, on a short critical
-path: each page of the open issue list starts its issues' reads as it
-arrives, beside the next page, and each cadence reads the counted issues
+path: the open issue list is read several small pages at once, each page
+starting its issues' reads as it arrives, beside the others, and each cadence reads the counted issues
 updated last beside its last closed run, reading its whole window after that
 only where they do not reach back to the run.
 

@@ -224,12 +224,7 @@ func pages[T any](s Source, path string) ([]T, error) {
 // it arrives, so what the page needs is read while the next page is; got
 // answers false to stop before the next page.
 func eachPage[T any](s Source, path string, got func(page []T) bool) error {
-	size := PerPage
-	if u, err := url.Parse(path); err == nil {
-		if n, err := strconv.Atoi(u.Query().Get("per_page")); err == nil && n > 0 {
-			size = n
-		}
-	}
+	size := perPage(path)
 	for k := 1; ; k++ {
 		page, err := api[[]T](s, fmt.Sprintf("%s&page=%d", path, k), false)
 		if err != nil {
@@ -240,6 +235,59 @@ func eachPage[T any](s Source, path string, got func(page []T) bool) error {
 		}
 	}
 }
+
+// pagesAtOnce reads a list path as eachPage does, but at pages at once: pages
+// 1 to at together, then the next at, while the last of them comes back
+// full. Each page is a request of its own, so the pages arrive in about the
+// time of one, and got has each, with its number, the moment it arrives, one
+// at a time; answering false stops before the next pages.
+func pagesAtOnce[T any](s Source, path string, at int, got func(k int, page []T) bool) error {
+	size := perPage(path)
+	var mu sync.Mutex
+	for first := 1; ; first += at {
+		last, more := 0, true
+		reads := make([]func() error, at)
+		for k := range at {
+			reads[k] = func() error {
+				page, err := api[[]T](s, fmt.Sprintf("%s&page=%d", path, first+k), false)
+				if err != nil {
+					return err
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				more = got(first+k, page[0]) && more
+				if k == at-1 {
+					last = len(page[0])
+				}
+				return nil
+			}
+		}
+		if err := parallel(reads); err != nil {
+			return err
+		}
+		if !more || last < size {
+			return nil
+		}
+	}
+}
+
+// perPage is the per_page a list path asks for, PerPage where it says none.
+func perPage(path string) int {
+	if u, err := url.Parse(path); err == nil {
+		if n, err := strconv.Atoi(u.Query().Get("per_page")); err == nil && n > 0 {
+			return n
+		}
+	}
+	return PerPage
+}
+
+// ListPage and ListPages are how the open fleet issues are read: ListPages
+// pages of ListPage issues at once, each page smaller than one of PerPage, so
+// each arrives sooner and its issues' reads start sooner.
+const (
+	ListPage  = 25
+	ListPages = 6
+)
 
 // Status is where one open fleet issue stands.
 type Status struct {
@@ -330,8 +378,8 @@ func (t tree) depth(n int) int {
 // load reads the open fleet issues with their sub-issues, then closes every
 // parent whose sub-issues are all closed, deepest first, so a parent its
 // closing completes closes too. A parent labelled se-review never closes here.
-// Each page of the list starts its issues' reads as it arrives, beside the
-// next page: the sub-issues of each parent, and what more starts on g for
+// The list is read several pages at once (pagesAtOnce), and each page starts
+// its issues' reads as it arrives, beside the other pages: the sub-issues of each parent, and what more starts on g for
 // each issue. load waits for every read on g, which may be nil.
 func (s Source) load(g *inflight, more func(i issue)) (tree, error) {
 	if g == nil {
@@ -339,9 +387,9 @@ func (s Source) load(g *inflight, more func(i issue)) (tree, error) {
 	}
 	t := tree{byNum: map[int]issue{}, subs: map[int][]issue{}, above: map[int]int{}, closed: map[int]bool{}}
 	subs := map[int]*[]issue{}
-	err := eachPage(s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=%d", s.Repo, Label, PerPage), func(page []issue) bool {
+	err := pagesAtOnce(s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=%d", s.Repo, Label, ListPage), ListPages, func(_ int, page []issue) bool {
 		for _, i := range page {
-			// An issue the list moves to the next page while it is read
+			// An issue the list moves to another page while it is read
 			// comes twice; its reads start once.
 			if _, seen := t.byNum[i.Number]; seen || i.PullRequest != nil {
 				continue
