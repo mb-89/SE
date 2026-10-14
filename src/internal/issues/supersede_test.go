@@ -100,24 +100,123 @@ func TestUnclosedNamesWhatIsMissing(t *testing.T) {
 		}
 		return Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}
 	}
-	if why, err := at(nil).Unclosed(5); err != nil || !strings.Contains(why, "neither a PR from issue-5 nor a supersede") {
+	if why, err := at(nil).Unclosed(5, 0); err != nil || !strings.Contains(why, "neither a PR from issue-5 nor a supersede") {
 		t.Fatalf("%q %v", why, err)
 	}
 	s := at(map[string]string{pulls: `[{"number":9,"html_url":"p9","auto_merge":null}]`})
-	if why, err := s.Unclosed(5); err != nil || !strings.Contains(why, "PR #9 (p9) has auto-merge off") {
+	if why, err := s.Unclosed(5, 0); err != nil || !strings.Contains(why, "PR #9 (p9) has auto-merge off") {
 		t.Fatalf("%q %v", why, err)
 	}
+	// The PR se issue land recorded with auto-merge on has it on, whatever
+	// GitHub's field shows; another PR number does not.
+	if why, err := s.Unclosed(5, 9); err != nil || !strings.Contains(why, "PR #9 (p9) has not merged") {
+		t.Fatalf("%q %v", why, err)
+	}
+	if why, err := s.Unclosed(5, 8); err != nil || !strings.Contains(why, "auto-merge off") {
+		t.Fatalf("%q %v", why, err)
+	}
+	// A box keeps its PR until it merges: auto-merge on is not yet done.
 	s = at(map[string]string{pulls: `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`})
-	if why, err := s.Unclosed(5); err != nil || why != "" {
+	if why, err := s.Unclosed(5, 0); err != nil || !strings.Contains(why, "PR #9 (p9) has not merged") || !strings.Contains(why, "se issue keep") {
+		t.Fatalf("%q %v", why, err)
+	}
+	// Taken over by another box, it is that box's to keep.
+	s = at(map[string]string{
+		pulls:                         `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`,
+		"repos/o/r/issues/5/comments": `[{"id":1,"body":"Claimed.\n<!-- se:box s1 -->"},{"id":2,"body":"Took over.\n<!-- se:box s2 -->"}]`,
+	})
+	s.Box = "s1"
+	if why, err := s.Unclosed(5, 0); err != nil || why != "" {
+		t.Fatalf("%q %v", why, err)
+	}
+	s.Box = "s2"
+	if why, err := s.Unclosed(5, 0); err != nil || !strings.Contains(why, "has not merged") {
 		t.Fatalf("%q %v", why, err)
 	}
 	// Superseded, or merged: closed.
 	s = at(map[string]string{"repos/o/r/issues/5": `{"number":5,"state":"closed"}`})
-	if why, err := s.Unclosed(5); err != nil || why != "" {
+	if why, err := s.Unclosed(5, 0); err != nil || why != "" {
 		t.Fatalf("%q %v", why, err)
 	}
 	// What GitHub does not answer is an error, never a pass.
-	if _, err := s.Unclosed(6); err == nil {
+	if _, err := s.Unclosed(6, 0); err == nil {
 		t.Fatal("answered without GitHub")
+	}
+}
+
+func TestDuplicateClosesTheIssueAndMintsNothing(t *testing.T) {
+	t.Parallel()
+	// Issue 5 is final: a duplicate closes it all the same.
+	gh := superseding(t, `{"name":"se"},{"name":"se-final"}`)
+	seed(t, gh, map[string]string{
+		"repos/o/r/issues/6": `{"id":606,"number":6,"state":"open","title":"The same","html_url":"u6"}`,
+		"repos/o/r/issues/6/dependencies/blocking?per_page=100": `[]`,
+		// Issue 5's box landed its fix as PR 90 before the duplicate showed.
+		"repos/o/r/pulls?head=o:issue-5&base=main&state=open&per_page=100": `[{"number":90,"html_url":"p90"}]`,
+	})
+	origin, a, _ := boxes(t)
+	run(t, a, "push", "-q", "origin", "main:issue-5")
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	dup, err := s.CloseDuplicate(a, 5, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dup.Issue != 5 || dup.Of != 6 || dup.URL != "u6" || !reflect.DeepEqual(dup.Blocks, []int{7}) ||
+		!reflect.DeepEqual(dup.Pulls, []int{90}) || dup.Branch != "issue-5" {
+		t.Fatalf("%+v", dup)
+	}
+	// Its PR closes naming the survivor, and its claim goes, so no PR stays
+	// open with no issue behind it and no leftover claim is found.
+	if p, err := api[openPull](s, "repos/o/r/pulls?state=open&per_page=100", true); err != nil || len(p) != 0 {
+		t.Fatalf("open PRs %+v %v", p, err)
+	}
+	if cs := commentsAt(t, gh, 90); len(cs) != 1 || !strings.Contains(cs[0].Body, "duplicate of #6") {
+		t.Fatalf("%+v", cs)
+	}
+	if got := run(t, origin, "branch", "--list", "issue-5"); got != "" {
+		t.Fatalf("origin still has %q", got)
+	}
+	// Run again, it finds nothing left to drop.
+	again := Duplicated{Issue: 5, Of: 6}
+	if err := s.dropClaim(a, &again); err != nil || again.Pulls != nil || again.Branch != "" {
+		t.Fatalf("%+v %v", again, err)
+	}
+	old := issueAt(t, gh, 5)
+	if old.State != "closed" || old.StateReason != "duplicate" {
+		t.Fatalf("%+v", old)
+	}
+	if cs := commentsAt(t, gh, 5); len(cs) != 1 || !strings.HasPrefix(cs[0].Body, "Duplicate of #6,") {
+		t.Fatalf("%+v", cs)
+	}
+	// What waited on the duplicate waits on the issue that covers it.
+	if got := linksOf(t, gh, "repos/o/r/issues/7/dependencies/blocked_by"); !slices.Contains(got, 6) {
+		t.Fatalf("#7 is blocked by %v", got)
+	}
+	for _, w := range gh.Writes() {
+		if strings.HasPrefix(w, "POST repos/o/r/issues ") || w == "POST repos/o/r/issues" {
+			t.Fatalf("minted an issue: %q", gh.Writes())
+		}
+	}
+}
+
+func TestDuplicateRefusesAClosedOrMissingIssue(t *testing.T) {
+	t.Parallel()
+	gh := superseding(t, `{"name":"se"}`)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	for _, c := range []struct {
+		n, of int
+		want  string
+	}{
+		{5, 5, "cannot duplicate itself"},
+		{5, 4, "#4 is closed"},
+		{4, 3, "#4 is closed already"},
+		{5, 99, "#99 does not exist"},
+	} {
+		if _, err := s.CloseDuplicate(t.TempDir(), c.n, c.of); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("%d of %d: %v", c.n, c.of, err)
+		}
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("wrote %q", w)
 	}
 }

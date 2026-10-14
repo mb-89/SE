@@ -53,7 +53,7 @@ func init() {
 		Summary: "print a manifest, or rewrite every manifest section",
 		Details: "A manifest section stands between <!-- se:manifest <name> --> and <!-- /se:manifest --> in a Markdown file, " +
 			"and is made from its owners: agents (the registry of kinds and the plugin's agents), checks (the retro's rule checks), skills (the skills folder), spec (spec/), usage <word>... (the usage lines of the commands under each word). " +
-			"With a name, manifest prints that manifest; with --write, it rewrites every section of every Markdown file git tracks and names the files it changed. " +
+			"With a name, manifest prints that manifest; with --write, it rewrites every section of every Markdown file git tracks and names the files it changed, and refuses while git's index holds unmerged paths. " +
 			"The rule manifest fails where a committed section differs.",
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("manifest")
@@ -77,6 +77,11 @@ func init() {
 				}
 				text, err := manifest(c.Disk, c.Workspace, repo.Paths, name, "README.md")
 				return Reply{Text: text}, err
+			}
+			if unmerged, err := unmergedPaths(c.Proc, c.Workspace); err != nil {
+				return Reply{}, err
+			} else if len(unmerged) > 0 {
+				return Reply{}, fmt.Errorf("manifest --write refuses while git's index holds unmerged paths (%s): resolve the merge first", strings.Join(unmerged, ", "))
 			}
 			var changed []string
 			for _, p := range repo.Paths {

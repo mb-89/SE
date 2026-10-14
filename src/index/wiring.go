@@ -41,6 +41,11 @@ type Wire struct {
 	Line     int
 }
 
+// WiringFile is where the wiring file stands, relative to a checkout: a
+// value set there on main reaches a running box, which reads it from
+// origin/main before it takes anything.
+const WiringFile = "src/internal/index/wiring.yaml"
+
 // wired is the wiring file the se binary carries.
 //
 //go:embed wiring.yaml

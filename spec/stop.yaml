@@ -1,5 +1,6 @@
 # The Stop hook (se hook stop): a box may not end while any issue it took is
-# open with neither an open PR with auto-merge on nor a supersede. refusals
-# is how often in a row it refuses for an issue before it lets that issue go
-# and logs why; a prompt from a person counts afresh.
+# open: its PR merged, a supersede or a close closes it, and a box keeps its
+# PR until it merges (se issue keep). refusals is how often in a row it
+# refuses for an issue before it lets that issue go and logs why; a prompt
+# from a person counts afresh.
 refusals: 5
