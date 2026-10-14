@@ -6,24 +6,27 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
 const (
-	openPullsPath = "repos/o/r/pulls?base=main&state=open&per_page=100"
+	openPullsPath = "repos/o/r/pulls?state=open&per_page=100"
 	comments7     = "repos/o/r/issues/7/comments?per_page=100"
 )
 
 // pr70 is #7's PR at head abc as GitHub reports it: mergeable is "null",
 // "true" or "false", with its mergeable_state.
 func pr70(mergeable, state string) string {
-	return fmt.Sprintf(`{"number":70,"html_url":"p70","mergeable":%s,"mergeable_state":%q,"head":{"ref":"issue-7","sha":"abc"}}`, mergeable, state)
+	return fmt.Sprintf(`{"number":70,"html_url":"p70","mergeable":%s,"mergeable_state":%q,"head":{"ref":"issue-7","sha":"abc"},"base":{"ref":"main"}}`, mergeable, state)
 }
 
 // pulls is a recorded repository with #5 ready and #7 claimed, its PR #70
 // answering pr. It keeps #7's comments, so a takeover's marker is written and
 // read back, and every write it was asked.
 type pulls struct {
+	// mu takes calls from several goroutines one at a time.
+	mu       sync.Mutex
 	t        *testing.T
 	answers  map[string]string
 	pr       []string // #70 as asked, one answer per ask; the last repeats
@@ -37,7 +40,7 @@ func newPulls(t *testing.T, pr ...string) *pulls {
 	g := &pulls{t: t, pr: pr, answers: unblocked(map[string]string{
 		listPath:      `[` + open(5, "new work") + `,` + open(7, "old work") + `]`,
 		refsPath:      `[{"ref":"refs/heads/issue-7"}]`,
-		openPullsPath: `[{"number":70,"head":{"ref":"issue-7"}},{"number":71,"head":{"ref":"someone-else"}}]`,
+		openPullsPath: `[{"number":70,"head":{"ref":"issue-7"},"base":{"ref":"main"}},{"number":71,"head":{"ref":"someone-else"},"base":{"ref":"main"}}]`,
 		// #7's branch saw a push inside the lease: it is not stuck.
 		activity(7): pushed(fresh),
 	}, 5, 7)}
@@ -45,7 +48,8 @@ func newPulls(t *testing.T, pr ...string) *pulls {
 }
 
 func (g *pulls) gh(args ...string) ([]byte, error) {
-	g.t.Helper()
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	path := args[len(args)-1]
 	if args[1] == "-X" {
 		g.writes = append(g.writes, args)
@@ -75,7 +79,8 @@ func (g *pulls) gh(args ...string) ([]byte, error) {
 	}
 	a, ok := g.answers[path]
 	if !ok {
-		g.t.Fatalf("gh %v was not recorded", args)
+		g.t.Errorf("gh %v was not recorded", args)
+		return nil, fmt.Errorf("gh %v was not recorded", args)
 	}
 	return []byte(a), nil
 }
@@ -189,9 +194,11 @@ func TestASecondConflictTakeoverWaitsOnAnIssueForAPerson(t *testing.T) {
 	}
 	// Blocked by #101, #7's claim waits, and is not stuck.
 	got := survey(t, unblocked(map[string]string{
-		listPath: `[{"number":7,"state":"open","labels":[{"name":"se"}]}]`,
-		refsPath: `[{"ref":"refs/heads/issue-7"}]`,
-		links(7): `[{"number":101,"state":"open"}]`,
+		listPath:      `[{"number":7,"state":"open","labels":[{"name":"se"}]}]`,
+		refsPath:      `[{"ref":"refs/heads/issue-7"}]`,
+		openPullsPath: `[]`,
+		activity(7):   pushed(fresh),
+		links(7):      `[{"number":101,"state":"open"}]`,
 	}))
 	if got[7] != "issue-7 waits: blocked by #101" {
 		t.Fatalf("%v", got)

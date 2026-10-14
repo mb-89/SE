@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -21,12 +22,16 @@ func TestBlockedByIsANumberListOrNone(t *testing.T) {
 	}
 }
 
-// writes answers gh api calls by path and keeps every call it was asked.
+// writes answers gh api calls by path and keeps every call it was asked,
+// one at a time, as reads run in parallel.
 func writes(t *testing.T, answers map[string]string) (GH, *[][]string) {
 	t.Helper()
 	var calls [][]string
+	var mu sync.Mutex
 	return func(args ...string) ([]byte, error) {
+		mu.Lock()
 		calls = append(calls, args)
+		mu.Unlock()
 		path := args[len(args)-1]
 		a, ok := answers[path]
 		if !ok {

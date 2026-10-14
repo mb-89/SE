@@ -19,6 +19,9 @@ func refreshPull(n int, sha, state string, autoMerge bool) string {
 		n, state != "dirty", state, am, n/10, sha)
 }
 
+// mainPullsPath is the open PRs into main, which Refresh reads.
+const mainPullsPath = "repos/o/r/pulls?base=main&state=open&per_page=100"
+
 // refreshGH answers by path; a path with several answers gives them in turn
 // and then keeps the last. It records every write, and fails those in fail.
 func refreshGH(t *testing.T, answers map[string][]string, fail map[string]string) (GH, *[]string) {
@@ -47,7 +50,7 @@ func refreshGH(t *testing.T, answers map[string][]string, fail map[string]string
 func TestRefreshUpdatesTheAutoMergePRsBehindMain(t *testing.T) {
 	c := atNow()
 	gh, writes := refreshGH(t, map[string][]string{
-		openPullsPath: {"[" + strings.Join([]string{
+		mainPullsPath: {"[" + strings.Join([]string{
 			refreshPull(10, "a1", "", true),      // behind: updated
 			refreshPull(20, "b1", "", true),      // up to date
 			refreshPull(30, "c1", "", false),     // auto-merge off
@@ -84,7 +87,7 @@ func TestRefreshUpdatesTheAutoMergePRsBehindMain(t *testing.T) {
 
 func TestRefreshReportsAFailedUpdateAndGoesOn(t *testing.T) {
 	gh, writes := refreshGH(t, map[string][]string{
-		openPullsPath:                            {"[" + refreshPull(10, "a1", "", true) + "," + refreshPull(20, "b1", "", true) + "]"},
+		mainPullsPath:                            {"[" + refreshPull(10, "a1", "", true) + "," + refreshPull(20, "b1", "", true) + "]"},
 		"repos/o/r/compare/main...a1?per_page=1": {`{"behind_by":1}`},
 		"repos/o/r/compare/main...b1?per_page=1": {`{"behind_by":1}`},
 		"repos/o/r/pulls/10":                     {refreshPull(10, "a1", "behind", true)},
@@ -104,7 +107,7 @@ func TestRefreshReportsAFailedUpdateAndGoesOn(t *testing.T) {
 
 func TestRefreshSaysWhenTheHeadNeverMoves(t *testing.T) {
 	gh, writes := refreshGH(t, map[string][]string{
-		openPullsPath:                            {"[" + refreshPull(10, "a1", "", true) + "]"},
+		mainPullsPath:                            {"[" + refreshPull(10, "a1", "", true) + "]"},
 		"repos/o/r/compare/main...a1?per_page=1": {`{"behind_by":1}`},
 		"repos/o/r/pulls/10":                     {refreshPull(10, "a1", "behind", true)},
 	}, nil)
