@@ -11,9 +11,6 @@ import (
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
-// clock is the time se briefing reads its window against.
-var clock = time.Now
-
 func init() {
 	register(Command{
 		Name:    "briefing",
@@ -36,7 +33,7 @@ func init() {
 			case *last < 0:
 				return Reply{}, errors.New("--last takes a count above zero")
 			case *since != "":
-				t, err := parseSince(*since, clock())
+				t, err := parseSince(*since, c.Clock.Now())
 				if err != nil {
 					return Reply{}, err
 				}
@@ -47,7 +44,6 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			s.Now = clock
 			b, err := s.Briefing(c.Workspace, w)
 			if err != nil {
 				return Reply{}, err

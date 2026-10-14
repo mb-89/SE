@@ -46,8 +46,9 @@ changes.
 run it, and it names each step it runs. SE's own rules are one file each in
 `src/internal/rules`, run by `se rules`. The linters' versions are pinned in
 `tests/tools.sh`, and each linter's config gives the reason for anything it
-switches off. A claim (`se issue next --take`) runs `sh tests/tools.sh install`
-before its push, so a fresh box's pre-push check finds them.
+switches off. Only the battery needs them, so check.sh runs
+`sh tests/tools.sh install` first for any that is missing or at another
+version; a fresh box's first push installs them itself.
 
 ## Debugging the daemon
 

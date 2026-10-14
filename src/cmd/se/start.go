@@ -17,7 +17,7 @@ func init() {
 			if err := c.Parse(c.Flags("start")); err != nil {
 				return Reply{}, err
 			}
-			ep, note, err := startDaemon(c.Paths())
+			ep, note, err := startDaemon(c.Paths(), c.Clock)
 			if err != nil {
 				return Reply{}, err
 			}
