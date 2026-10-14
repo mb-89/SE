@@ -389,6 +389,7 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 // landed PR #127 anyway. A takeover a minute old renews the claim as a push
 // does: neither se fleet check nor se issue next --take N holds it.
 func TestAFinalClaimTakenOverAMinuteAgoIsNotHeld(t *testing.T) {
+	t.Parallel()
 	for name, pr := range map[string]func(w *world){
 		"no PR":  func(w *world) { w.closedPRs(7, `[]`) },
 		"red PR": func(w *world) { w.pr(7, "true", "clean", true, "check:failure") },

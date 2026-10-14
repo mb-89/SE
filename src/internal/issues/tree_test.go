@@ -334,6 +334,7 @@ func held(h, n int) string {
 // closed closes by itself; one whose held issue is open, or one a person
 // made by hand, stays.
 func TestAHoldWhoseIssueClosedClosesItself(t *testing.T) {
+	t.Parallel()
 	gh := recorded(t, map[string]string{
 		listPath:              list(node(5, 0), held(134, 95), held(135, 5), held(136, 96), node(137, 0, PersonLabel)),
 		"repos/o/r/issues/95": `{"number":95,"state":"closed"}`,
