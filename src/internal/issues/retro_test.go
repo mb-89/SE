@@ -438,7 +438,7 @@ func TestARuleCheckWhosePRDidNotMergeIsRefused(t *testing.T) {
 	key := "repos/o/r/pulls?state=closed&base=main&per_page=100"
 	a[key] = strings.Replace(a[key], `"number":91`, `"number":92`, 1)
 	gh, _ := writes(t, a)
-	_, err := Source{Repo: repo, GH: gh, Now: clock}.Collect(30)
+	_, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Collect(30)
 	if err == nil || !strings.Contains(err.Error(), "the rule check mark started with PR #91, which is not a merged PR") {
 		t.Fatalf("%v", err)
 	}

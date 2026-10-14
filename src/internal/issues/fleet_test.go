@@ -538,7 +538,7 @@ func TestTheTakeoverRemedyOfAStuckSubIssueLeafRuns(t *testing.T) {
 		if _, err := fmt.Sscanf(f.Remedy, "se issue next --take %d,", &n); err != nil || n != 7 {
 			t.Fatalf("pushed at %s: remedy %q", at, f.Remedy)
 		}
-		took, ok, err := Source{Repo: repo, GH: w.gh, Now: clock}.Take(a, n)
+		took, ok, err := Source{Repo: repo, GH: w.gh, Clock: atNow()}.Take(a, n)
 		if err != nil || !ok || took.Number != 7 || took.Takeover == nil {
 			t.Fatalf("pushed at %s: took %+v %v %v", at, took, ok, err)
 		}
