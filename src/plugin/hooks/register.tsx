@@ -5,7 +5,9 @@
 // event the engine raises is posted to the workspace's se daemon before it
 // goes on, unchanged. The daemon owns what happens to it: today it appends
 // the event to the session's log. While SE is off, every hook hands the event
-// straight on and contacts nothing. /se ui opens a pane of buttons: the on/off
+// straight on and contacts nothing, but one: the context carries the guidance
+// se answers (the principles, the skills a take handed over), on or off, made
+// again after each compaction. /se ui opens a pane of buttons: the on/off
 // toggle and the commands se offers as buttons, each pressed as /se <words>.
 // In a box, SE on or off, every Stop and SubagentStop goes to se hook stop,
 // which refuses the stop while the issue the box took is open with neither a
@@ -77,6 +79,11 @@ const WAITING_CAP = 1000
 let settingUp: Promise<void> | null = null
 // What the status line says is working, one line per call still running past FEEDBACK.
 const working: string[] = []
+// The context block se's guidance goes under.
+const GUIDANCE = 'se-guidance'
+// The guidance se answered for this session's context; null until it answers,
+// and again after a compaction, so the next context asks anew.
+let guidance: string | null = null
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -96,6 +103,20 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'se' }, async ($, e) => ({ text: await runs($, e.args) }))
+
+  // The guidance goes into the context, which the engine sends once while the
+  // conversation holds none: at its first request, and after each compaction.
+  on('prompt.context', async ($, e, next) => {
+    const said = await next(e)
+    const text = await guided($)
+    return text ? { ...said, blocks: [...said.blocks, { name: GUIDANCE, text }] } : said
+  })
+
+  on('session.compact', async ($, e, next) => {
+    const compacted = await next(e)
+    if (e.trigger !== 'precompute' && !compacted.skip) guidance = null
+    return compacted
+  })
 
   // Every surface draws Box, Text and Button, the phone too, so the pane uses no other.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -290,6 +311,18 @@ async function updatesItself($: EngineInterface): Promise<void> {
   const asked = await asks($, ['update', '--session-start', '--repo', checkoutOf($)], UPDATING)
   const said = typeof asked === 'string' ? `SE did not update itself: ${asked}` : await applies($, asked)
   if (said) $.ui.toast(said.split('\n')[0])
+}
+
+// The guidance se answers for this session, asked once and again after a
+// compaction; '' while se has not answered within FEEDBACK, or failed.
+async function guided($: EngineInterface): Promise<string> {
+  if (guidance !== null) return guidance
+  const asking = asks($, ['guidance', '--session-id', await $.session.id()]).then(said => {
+    if (typeof said !== 'string') guidance = said.text
+    return guidance ?? ''
+  })
+  const ran = await within($, 'reading its guidance', asking)
+  return ran.done ? ran.value : ''
 }
 
 // Hands the words to se as a session call; answers its reply, or why there is none.
