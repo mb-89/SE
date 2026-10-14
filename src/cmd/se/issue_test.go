@@ -678,7 +678,7 @@ func TestTheCheckRunsCheckShInTheCheckoutAndAnswersTheTailOfAFailure(t *testing.
 	}
 }
 
-func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
+func TestIssueTreeListsTheQueueAndATree(t *testing.T) {
 	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
@@ -698,20 +698,24 @@ func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
 	}
 	hubAt(t, answers)
 	code, out, errs := se(t, "issue", "tree", "--repo", "o/r")
-	want := "#1  open  1/2 closed  se  root\n#3  open  1/1 closed  se,se-review  three\n#7  closed  2/2 closed  se  old\n"
+	// The open queue: #3, a review gate whose tree is done, is the work left.
+	want := "#1  open  ready  1/2 closed  se  root\n  #3  open  ready  1/1 closed  se,se-review  three\n\n" +
+		"Estimate: 1 open, 0 in flight; no estimate: no se issue merged with a claim time since 2026-10-07T12:00:00Z.\n" +
+		"Pace since 2026-10-07 12:00Z (7d, PaceWindow): 0 merged, 0.00 an hour; no claim-to-merge time measured.\n" +
+		"Critical path, 1 in a row: #3.\n"
 	if code != 0 || out != want {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, errs = se(t, "issue", "tree", "#1", "--repo", "o/r")
-	want = "#1  open  1/2 closed  se  root\n  #2  closed  se  two\n  #3  open  1/1 closed  se,se-review  three\n    #4  closed  se  four\n"
-	if code != 0 || out != want {
+	want = "#1  open  ready  1/2 closed  se  root\n  #2  closed  se  two\n  #3  open  ready  1/1 closed  se,se-review  three\n    #4  closed  se  four\n\n"
+	if code != 0 || !strings.HasPrefix(out, want) || !strings.Contains(out, "Critical path, 1 in a row: #3.") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, _ = se(t, "issue", "tree", "--json", "1", "--repo", "o/r")
 	if code != 0 || !strings.Contains(out, `{"number":4,"title":"four","state":"closed","url":"","labels":["se"],"depth":2,"closed":0,"total":0}`) {
 		t.Fatalf("exit %d, %q", code, out)
 	}
-	if code, out, _ = se(t, "issue", "tree", "2", "--repo", "o/r"); code != 0 || out != "#2  closed  se  two\n" {
+	if code, out, _ = se(t, "issue", "tree", "2", "--repo", "o/r"); code != 0 || !strings.HasPrefix(out, "#2  closed  se  two\n\nEstimate: 0 open, 0 in flight; no estimate: #2's tree holds no open work.") {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 	for _, args := range [][]string{{"5"}, {"x"}, {"1", "2"}} {
