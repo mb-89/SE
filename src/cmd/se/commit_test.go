@@ -49,7 +49,7 @@ Whether they agree is unknown: the hooks' commit is not known.`},
 
 func TestStatusSaysTheCommitsThePluginNames(t *testing.T) {
 	repo := checkout(t, "main")
-	head, err := update.Head(repo)
+	head, err := update.Head(machine, repo)
 	if err != nil {
 		t.Fatal(err)
 	}

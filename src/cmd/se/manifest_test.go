@@ -2,11 +2,14 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 // prose makes a git workspace holding files, and answers its folder.
@@ -43,8 +46,13 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 	if want := "- [`se:work`](src/plugin/skills/work/SKILL.md): Take the next issue.\n"; out != want {
 		t.Fatalf("skills: %q", out)
 	}
+	_, out, _ = se(t, "--workspace", ws, "manifest", "checks")
+	if !strings.Contains(out, "- `ci`: every merged PR had green CI (the last run of each check on its head); checked from the first commit.\n") ||
+		!strings.Contains(out, "; checked on what closed after PR #91 brought it.\n") {
+		t.Fatalf("checks: %q", out)
+	}
 	_, out, _ = se(t, "--workspace", ws, "manifest", "usage", "fleet", "rules")
-	if want := "```\nse fleet check [--json] [--repo OWNER/NAME]\nse fleet fix [--json] [--repo OWNER/NAME]\nse fleet prune [--apply] [--json] [--repo OWNER/NAME]\nse rules\n```\n"; out != want {
+	if want := "```\nse fleet check [--json] [--repo OWNER/NAME]\nse fleet fix [--json] [--repo OWNER/NAME]\nse fleet prune [--apply] [--json] [--repo OWNER/NAME]\nse fleet refresh [--json] [--repo OWNER/NAME]\nse rules\n```\n"; out != want {
 		t.Fatalf("usage: %q", out)
 	}
 	if code, _, errs := se(t, "--workspace", ws, "manifest", "frob"); code != 1 || !strings.Contains(errs, `no manifest "frob"`) {
@@ -98,5 +106,29 @@ func TestAFolderGitIgnoresCountsThoughNoCheckoutHoldsIt(t *testing.T) {
 	code, _, errs := se(t, "--workspace", ws, "rules")
 	if code != 1 || !strings.Contains(errs, "README.md:5: repo-path: no such path: a/gone") || strings.Count(errs, "repo-path: ") != 1 {
 		t.Fatalf("rules (exit %d): %s", code, errs)
+	}
+}
+
+func TestTheRulesSeeWhatGitTracksAndIgnores(t *testing.T) {
+	m := proc.NewFake()
+	m.Install("git", func(c proc.Cmd) int {
+		args := strings.Join(c.Args, " ")
+		switch {
+		case c.Dir != "/ws":
+			return 128
+		case args == "ls-files -z --cached --others --exclude-standard":
+			_, _ = fmt.Fprint(c.Stdout, "README.md\x00a/x.md\x00")
+			return 0
+		case args == "check-ignore -q --no-index "+filepath.FromSlash("a/bin/"):
+			return 0
+		}
+		return 1
+	})
+	repo, err := repoOf(m, "/ws")
+	if err != nil || strings.Join(repo.Paths, " ") != "README.md a/x.md" {
+		t.Fatalf("%v %v", repo, err)
+	}
+	if !repo.Ignored("a/bin") || repo.Ignored("a/gone") {
+		t.Fatal("the rules see a/bin, a folder git ignores only as a folder, as kept, or a/gone as ignored")
 	}
 }

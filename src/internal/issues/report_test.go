@@ -71,13 +71,13 @@ func reviewWorld(t *testing.T) (Source, map[string]string, *[][]string) {
 	}
 	gh, wrote := reviewGH(t, answers)
 	next := 10
-	s := Source{Repo: repo, GH: func(args ...string) ([]byte, error) {
+	s := Source{Proc: machine, Repo: repo, GH: func(args ...string) ([]byte, error) {
 		if args[len(args)-1] == "repos/o/r/issues" {
 			next++
 			answers["repos/o/r/issues"] = fmt.Sprintf(`{"id":%d,"number":%d,"title":"f%d","html_url":"u%d"}`, 1000+next-1, next-1, next-1, next-1)
 		}
 		return gh(args...)
-	}}
+	}, Clock: atNow()}
 	return s, answers, wrote
 }
 

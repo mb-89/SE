@@ -23,14 +23,14 @@ func init() {
 				return Reply{}, err
 			}
 			// The build runs while the old daemon still serves.
-			exe, note, err := daemonExe(c.Paths())
+			exe, note, err := daemonExe(c.Proc, c.Paths())
 			if err != nil {
 				return Reply{}, err
 			}
-			if err := daemon.Stop(c.Paths(), 5*time.Second); err != nil {
+			if err := daemon.Stop(c.Paths(), 5*time.Second, c.Clock, c.Net); err != nil {
 				return Reply{}, fmt.Errorf("the running daemon did not stop: %w", err)
 			}
-			ep, err := daemon.Start(c.Paths(), exe, startWait)
+			ep, err := daemon.Start(c.Proc, c.Paths(), exe, startWait, c.Clock, c.Net)
 			if err != nil {
 				return Reply{Text: joined(fmt.Sprintf("SE's daemon stopped but did not start again: %v.", err), note)}, nil
 			}

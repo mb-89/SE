@@ -75,7 +75,13 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 			`{"number":49,"body":"Fixes #19","merged_at":"2026-09-29T00:00:00Z","merge_commit_sha":"m49","head":{"sha":"h49"}},` +
 			`{"number":50,"title":"fifty","body":"Fixes #23","merged_at":"2026-10-02T11:30:00Z","merge_commit_sha":"m50","head":{"sha":"h50"}},` +
 			`{"number":51,"title":"fifty-one","body":"for #24","merged_at":"` + at(3, 9) + `","merge_commit_sha":"m51","head":{"sha":"h51"}},` +
-			`{"number":52,"title":"closed","body":"Fixes #25","merged_at":null}]`,
+			`{"number":52,"title":"closed","body":"Fixes #25","merged_at":null},` +
+			// The PRs that brought the rule checks; #91 brought the mark.
+			`{"number":14,"title":"land","body":"Fixes #6","merged_at":"2026-09-01T00:00:00Z","merge_commit_sha":"m14","head":{"sha":"h14"}},` +
+			`{"number":74,"title":"answers","body":"Fixes #39","merged_at":"2026-09-01T00:00:00Z","merge_commit_sha":"m74","head":{"sha":"h74"}},` +
+			`{"number":91,"title":"retro","body":"Fixes #40","merged_at":"2026-10-03T10:30:00Z","merge_commit_sha":"m91","head":{"sha":"h91"}}]`,
+		"repos/o/r/commits/h91/check-runs?filter=all&per_page=100": `{"check_runs":[{"id":7,"name":"check","status":"completed","conclusion":"success"}]}`,
+		"repos/o/r/pulls/91/files?per_page=100":                    `[]`,
 		"repos/o/r/commits/h50/check-runs?filter=all&per_page=100": `{"check_runs":[{"id":1,"name":"check","status":"completed","conclusion":"failure"},{"id":2,"name":"check","status":"completed","conclusion":"success"}]}`,
 		"repos/o/r/commits/h51/check-runs?filter=all&per_page=100": `{"check_runs":[{"id":3,"name":"check","status":"completed","conclusion":"failure"}]}`,
 		"repos/o/r/pulls/50/files?per_page=100":                    `[{"filename":"src/scripts/check-claims.sh","status":"added","patch":"@@ -0,0 +1,3 @@\n+#!/bin/sh\n+# Lists claims with no PR, since fleet check had no such view.\n+gh api x"},{"filename":"src/x.go","status":"added"}]`,
@@ -99,6 +105,10 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 		a["repos/o/r/issues/19/comments?per_page=100"] = jsonComments(landing(t, 19, map[string]string{"done": "old", "by-hand": "none"}, time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)))
 		a["repos/o/r/commits/h49/check-runs?filter=all&per_page=100"] = `{"check_runs":[{"id":9,"name":"check","status":"completed","conclusion":"success"}]}`
 		a["repos/o/r/pulls/49/files?per_page=100"] = `[]`
+		for _, n := range []int{14, 74} {
+			a[fmt.Sprintf("repos/o/r/commits/h%d/check-runs?filter=all&per_page=100", n)] = `{"check_runs":[{"id":8,"name":"check","status":"completed","conclusion":"success"}]}`
+			a[fmt.Sprintf("repos/o/r/pulls/%d/files?per_page=100", n)] = `[]`
+		}
 		a["repos/o/r/issues?labels=se&state=closed&per_page=100"] = "[" + strings.Join(closed, ",") + "]"
 		a["repos/o/r/commits?sha=main&per_page=100&until=2026-10-13T12:00:00Z"] = commits[:len(commits)-1] + `,{"sha":"m49","commit":{"message":"m"}},{"sha":"first","commit":{"message":"the first commit"}}]`
 		return a
@@ -119,7 +129,7 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 func collect(t *testing.T, later bool) Collected {
 	t.Helper()
 	gh, _ := writes(t, retroRepo(t, later, "<!-- se:retro attended -->"))
-	c, err := Source{Repo: repo, GH: gh, Now: clock}.Collect(30)
+	c, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.Collect(30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +149,7 @@ func TestTheFirstRetroCoversTheWholeHistory(t *testing.T) {
 	if c.Window.Previous != 0 || !c.Window.Since.IsZero() || !c.Window.Until.Equal(now) || !c.Attended {
 		t.Fatalf("%+v", c.Window)
 	}
-	if got := rows(c); !reflect.DeepEqual(got, []int{19, 23, 24, 25, 26}) || c.PRs != 3 || c.Commits != 5 {
+	if got := rows(c); !reflect.DeepEqual(got, []int{19, 23, 24, 25, 26}) || c.PRs != 6 || c.Commits != 5 {
 		t.Fatalf("rows %v, %d PRs, %d commits", got, c.PRs, c.Commits)
 	}
 	if c.Previous != nil || c.Score != nil || len(c.History) != 0 {
@@ -152,7 +162,7 @@ func TestALaterRetroCoversWhatClosedSinceTheLastOne(t *testing.T) {
 	if c.Window.Previous != 20 || !c.Window.Since.Equal(prevClosed) {
 		t.Fatalf("%+v", c.Window)
 	}
-	if got := rows(c); !reflect.DeepEqual(got, []int{23, 24, 25, 26}) || c.PRs != 2 || c.Commits != 3 {
+	if got := rows(c); !reflect.DeepEqual(got, []int{23, 24, 25, 26}) || c.PRs != 3 || c.Commits != 3 {
 		t.Fatalf("rows %v, %d PRs, %d commits", got, c.PRs, c.Commits)
 	}
 }
@@ -167,11 +177,21 @@ func TestEachRuleCheck(t *testing.T) {
 		"fixes PR #51",          // its body names no Fixes #n
 		"ci PR #51",             // its last run failed; #50's rerun passed
 		"outside-pr commit x99", // no merged PR made it
-		"mark #24",              // not made by se issue new
 		"answers #24",           // completed leaf, no answers; #25 not planned, #26 a parent
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%q", got)
+	}
+	// #24 lacks the mark, but closed before #91 brought it: a count, not a check.
+	if want := map[string]int{"mark": 1}; !reflect.DeepEqual(c.Before, want) {
+		t.Fatalf("before %v", c.Before)
+	}
+	draft, err := c.Draft(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(draft, "(`mark`): held. Before the rule came with PR #91: broken once, not counted.\n") {
+		t.Fatalf("the draft lacks the count before the mark:\n%s", draft)
 	}
 	if !strings.Contains(c.Checks[1].What, "check failure") || !strings.Contains(c.Checks[2].What, "pushed straight:") {
 		t.Fatalf("%+v", c.Checks)
@@ -291,7 +311,7 @@ func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 		"a home that is no fix":    func(r *RetroReport) { r.Findings[0].Home = "hope" },
 		"a check that is no check": func(r *RetroReport) { r.Findings[0].Check = "vibes" },
 	} {
-		if _, err := (Source{Repo: repo, GH: never}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+		if _, err := (Source{Proc: machine, Repo: repo, GH: never, Clock: atNow()}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -303,7 +323,7 @@ func fileFindings(t *testing.T, answers map[string]string) (Filed, [][]string) {
 	answers["repos/o/r/issues/40/assignees"] = `{}`
 	answers["repos/o/r/issues/30/comments"] = `{"id":1}`
 	gh, calls := writes(t, answers)
-	f, err := Source{Repo: repo, GH: gh}.FileReport(30, judged(t, nil))
+	f, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,8 +427,19 @@ func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
 		}
 		return inner(args...)
 	}
-	f, err := Source{Repo: repo, GH: gh}.FileReport(30, judged(t, nil))
+	f, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
 	if err != nil || !strings.HasPrefix(f.Left, "issue-30 stays (") || !strings.Contains(f.Left, "se fleet prune") {
 		t.Fatalf("%+v %v", f, err)
+	}
+}
+
+func TestARuleCheckWhosePRDidNotMergeIsRefused(t *testing.T) {
+	a := retroRepo(t, true, "")
+	key := "repos/o/r/pulls?state=closed&base=main&per_page=100"
+	a[key] = strings.Replace(a[key], `"number":91`, `"number":92`, 1)
+	gh, _ := writes(t, a)
+	_, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.Collect(30)
+	if err == nil || !strings.Contains(err.Error(), "the rule check mark started with PR #91, which is not a merged PR") {
+		t.Fatalf("%v", err)
 	}
 }

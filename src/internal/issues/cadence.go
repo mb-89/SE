@@ -162,7 +162,7 @@ func (s Source) takeDue(r cadenceRule, dir string, start func() (Issue, error)) 
 		return Issue{}, false, c, err
 	}
 	c.Open = made.Number
-	claimed, err := Claim(dir, made.Number)
+	claimed, err := s.Claim(dir, made.Number)
 	if err != nil || !claimed {
 		return Issue{}, false, c, err
 	}

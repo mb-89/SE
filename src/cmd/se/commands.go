@@ -11,6 +11,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/io/clock"
+	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/internal/io/proc"
+
 	"github.com/mb-89/SE/src/internal/daemon"
 )
 
@@ -86,11 +90,26 @@ type Call struct {
 	Session bool
 	// Color is set when the help may colour what it prints.
 	Color bool
+	// Clock is the time the command reads, sleeps and waits by.
+	Clock clock.Clock
+	// Proc runs the programs the command starts: git, go, check.sh, the daemon.
+	Proc proc.Procs
+	// Net is the network the command serves and calls on.
+	Net sehttp.Net
 	// flags is the flag set Flags made, which the command's help lists.
 	flags *flag.FlagSet
 }
 
 var commands = map[string]Command{}
+
+// wall is the clock every call is handed: the real one, which a test replaces.
+var wall = clock.Real()
+
+// machine runs every call's programs: the real one, which a test replaces.
+var machine = proc.Real()
+
+// network is the network every call is handed: the real one, which a test replaces.
+var network = sehttp.Real()
 
 // register adds a command; a command file calls it from init.
 func register(c Command) {
@@ -172,7 +191,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	// The help is coloured on a terminal alone, never in a session's answer.
 	color, errColor := !*session && colors(stdout), !*session && colors(stderr)
-	call := &Call{Workspace: *workspace, Session: *session, Color: color}
+	call := &Call{Workspace: *workspace, Session: *session, Color: color, Clock: wall, Proc: machine, Net: network}
 	name := ""
 	if fs.NArg() > 0 {
 		name, call.Args = fs.Arg(0), fs.Args()[1:]
@@ -184,7 +203,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	cmd, ok := commands[name]
 	if *session && (!ok || !cmd.Installed) {
-		if code, handed := handsOver(*workspace, args, stdout, stderr); handed {
+		if code, handed := handsOver(machine, *workspace, args, stdout, stderr); handed {
 			return code
 		}
 	}

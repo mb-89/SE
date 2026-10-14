@@ -40,7 +40,7 @@ func init() {
 				// se is built to <checkout>/src/plugin/bin/se.
 				*repo = filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(exe))))
 			}
-			r, err := update.Run(*repo, exe)
+			r, err := update.Run(c.Proc, *repo, exe)
 			var untouched *update.Untouched
 			switch {
 			case err == nil:
@@ -59,13 +59,13 @@ func init() {
 				return Reply{Text: fmt.Sprintf("SE is at the newest main already (%s).", r.To)}, nil
 			}
 			// A running daemon runs the old se until it starts again.
-			if _, running := daemon.Healthy(c.Paths()); !running {
+			if _, running := daemon.Healthy(c.Paths(), c.Net); !running {
 				return reply, nil
 			}
-			if err := daemon.Stop(c.Paths(), 5*time.Second); err != nil {
+			if err := daemon.Stop(c.Paths(), 5*time.Second, c.Clock, c.Net); err != nil {
 				return reply, fmt.Errorf("updated %s → %s, but the old daemon did not stop: %w", r.From, r.To, err)
 			}
-			ep, note, err := startDaemon(c.Paths())
+			ep, note, err := startDaemon(c.Proc, c.Paths(), c.Clock, c.Net)
 			if err != nil {
 				reply.Text = joined(reply.Text+fmt.Sprintf(" The daemon did not start again: %v.", err), note)
 				return reply, nil

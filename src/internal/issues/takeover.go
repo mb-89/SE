@@ -22,8 +22,8 @@ type Takeover struct {
 }
 
 // pause is the wait before asking GitHub again for a mergeability it has not
-// computed yet; tests make it nothing.
-var pause = func() { time.Sleep(3 * time.Second) }
+// computed yet.
+const pause = 3 * time.Second
 
 // asks is how often a PR's mergeability is asked for before a null answer is
 // taken as no conflict.
@@ -89,7 +89,7 @@ func (s Source) conflicts(all []Status) ([]conflict, error) {
 func (s Source) mergeability(p openPull) (openPull, error) {
 	for k := 0; k < asks; k++ {
 		if k > 0 {
-			pause()
+			s.Clock.Sleep(pause)
 		}
 		got, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, p.Number), false)
 		if err != nil {
@@ -145,7 +145,7 @@ func (s Source) takeOverConflict(dir string, all []Status) (took Issue, ok bool,
 		if err := s.finalize(c.Number); err != nil {
 			return Issue{}, false, err
 		}
-		if err := pickUp(dir, c.Number); err != nil {
+		if err := s.pickUp(dir, c.Number); err != nil {
 			return Issue{}, false, err
 		}
 		took = c.Issue

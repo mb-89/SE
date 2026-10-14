@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 func TestTheLandingQuestionsAreTheSpecsList(t *testing.T) {
@@ -44,7 +46,7 @@ func TestLandRefusesAnswersMissingEmptyOrUnknown(t *testing.T) {
 		{map[string]string{"done": "x", "left": "none", "extra": "y", "also": "z"}, "not in spec/landing.yaml: also, extra"},
 	} {
 		checked := false
-		_, err := Source{Repo: repo, GH: never}.Land(a, "", qs, c.answers, func(string) error { checked = true; return nil })
+		_, err := Source{Proc: machine, Repo: repo, GH: never, Clock: atNow()}.Land(a, "", qs, c.answers, func(string) error { checked = true; return nil })
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "nothing was pushed") || checked {
 			t.Errorf("%v: %v, checked %v", c.answers, err, checked)
 		}
@@ -121,7 +123,7 @@ func TestLandingFactsCountCommitsMergesAndTakeovers(t *testing.T) {
 		}
 		return gh(args...)
 	}
-	if _, err := (Source{Repo: repo, GH: spy, Now: landedAt}).Land(a, "", qs, full, passes); err != nil {
+	if _, err := (Source{Proc: machine, Repo: repo, GH: spy, Clock: clock.NewFake(landedAt())}).Land(a, "", qs, full, passes); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := ParseLanding(posted)
@@ -142,7 +144,7 @@ func TestLandAgainUpdatesTheLandingComment(t *testing.T) {
 		comments6:                      `[{"id":5,"body":"Worked by someone."},{"id":77,"body":"<!-- se:landing -->\nolder answers"}]`,
 		"repos/o/r/issues/comments/77": `{}`,
 	}, nil)
-	if _, err := (Source{Repo: repo, GH: gh}).Land(a, "", qs, full, passes); err != nil {
+	if _, err := (Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}).Land(a, "", qs, full, passes); err != nil {
 		t.Fatal(err)
 	}
 	patched := 0

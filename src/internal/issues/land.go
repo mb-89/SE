@@ -31,9 +31,9 @@ type pull struct {
 // autoMerge turns on GitHub's auto-merge, squashing, for the PR with this node id.
 const autoMerge = `mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId } }`
 
-// Issued reads n from the issue branch checked out in dir.
-func Issued(dir string) (int, error) {
-	branch, err := git(dir, "rev-parse", "--abbrev-ref", "HEAD")
+// issued reads n from the issue branch checked out in dir.
+func (s Source) issued(dir string) (int, error) {
+	branch, err := s.git(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return 0, err
 	}
@@ -46,7 +46,8 @@ func Issued(dir string) (int, error) {
 
 // Land brings the issue branch checked out in dir to main: answers must
 // answer every question in qs, and check must pass on a clean tree of an
-// issue with no open sub-issues; then the branch is pushed, the answers
+// issue with no open sub-issues, after origin's branch and main are merged
+// in, so the check runs on what lands; then the branch is pushed, the answers
 // posted on the issue, its PR against main opened (or, where it is open
 // already, found) with the battery's profile in its body, and auto-merge
 // turned on with squash. Run again after a
@@ -54,14 +55,14 @@ func Issued(dir string) (int, error) {
 // is set, the leaf records who worked it, so a review of its tree can refuse
 // that worker.
 func (s Source) Land(dir, session string, qs []Question, answers map[string]string, check func(dir string) error) (Landing, error) {
-	n, err := Issued(dir)
+	n, err := s.issued(dir)
 	if err != nil {
 		return Landing{}, err
 	}
 	if err := answered(qs, answers); err != nil {
 		return Landing{}, err
 	}
-	if dirty, err := git(dir, "status", "--porcelain"); err != nil {
+	if dirty, err := s.git(dir, "status", "--porcelain"); err != nil {
 		return Landing{}, err
 	} else if dirty != "" {
 		return Landing{}, fmt.Errorf("land pushes commits, and %s has changes not committed:\n%s", dir, dirty)
@@ -72,6 +73,10 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	}
 	if subs := got[0].SubIssues; subs != nil && subs.Total > subs.Completed {
 		return Landing{}, fmt.Errorf("#%d has open sub-issues, and a parent holds no work: its sub-issues land, and it closes by itself", n)
+	}
+	branch := Branch(n)
+	if err := s.takeIn(dir, branch); err != nil {
+		return Landing{}, err
 	}
 	if err := check(dir); err != nil {
 		return Landing{}, fmt.Errorf("the check failed, so nothing was pushed: %w", err)
@@ -84,8 +89,7 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	if profiled {
 		body += "\n\n" + profile.Markdown()
 	}
-	branch := Branch(n)
-	if _, err := git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
+	if _, err := s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
 		return Landing{}, err
 	}
 	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
@@ -124,6 +128,28 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	l.Number, l.URL = pr.Number, pr.URL
 	l.Merged, err = s.autoMerge(pr)
 	return l, err
+}
+
+// takeIn merges into the branch checked out in dir what origin's copy of it
+// has (se fleet refresh merges main into it there) and then origin's main, so
+// the check runs on what lands and the push is a fast-forward. A merge that
+// conflicts is undone, and the box resolves it by hand.
+func (s Source) takeIn(dir, branch string) error {
+	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
+		return err
+	}
+	refs := []string{"origin/main"}
+	// A branch not on origin yet has nothing to take in.
+	if _, err := s.git(dir, "fetch", "-q", "origin", "refs/heads/"+branch+":refs/remotes/origin/"+branch); err == nil {
+		refs = []string{"origin/" + branch, "origin/main"}
+	}
+	for _, ref := range refs {
+		if _, err := s.git(dir, "merge", "-q", "--no-edit", ref); err != nil {
+			_, _ = s.git(dir, "merge", "--abort")
+			return fmt.Errorf("merging %s into %s conflicts, so nothing was pushed: merge it by hand (never rebase), resolve the conflict, commit and land again: %w", ref, branch, err)
+		}
+	}
+	return nil
 }
 
 // autoMerge turns on auto-merge, squashing, for the PR; merged is true where

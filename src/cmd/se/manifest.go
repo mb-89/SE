@@ -9,13 +9,15 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/rules"
 )
 
 // A manifest is a map: it points at owners and says nothing of its own, so it
 // is made from them, never written by hand. Each one here reads its owner: the
-// skills folder, spec/, or the command registry.
+// skills folder, spec/, the command registry, or the retro's rule checks.
 var manifests = map[string]func(m manifestCall) (string, error){
+	"checks": checksManifest,
 	"skills": skillsManifest,
 	"spec":   specManifest,
 	"usage":  usageManifest,
@@ -46,7 +48,7 @@ func init() {
 		Group:   "Checks",
 		Summary: "print a manifest, or rewrite every manifest section",
 		Details: "A manifest section stands between <!-- se:manifest <name> --> and <!-- /se:manifest --> in a Markdown file, " +
-			"and is made from its owners: skills (the skills folder), spec (spec/), usage <word>... (the usage lines of the commands under each word). " +
+			"and is made from its owners: checks (the retro's rule checks), skills (the skills folder), spec (spec/), usage <word>... (the usage lines of the commands under each word). " +
 			"With a name, manifest prints that manifest; with --write, it rewrites every section of every Markdown file git tracks and names the files it changed. " +
 			"The rule manifest fails where a committed section differs.",
 		Run: func(c *Call) (Reply, error) {
@@ -61,7 +63,7 @@ func init() {
 				return Reply{}, err
 			}
 			c.Workspace = root
-			repo, err := repoOf(c.Workspace)
+			repo, err := repoOf(c.Proc, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -172,6 +174,20 @@ func specManifest(m manifestCall) (string, error) {
 		lines = append(lines, line)
 	}
 	sort.Strings(lines)
+	return strings.Join(lines, "\n"), nil
+}
+
+// checksManifest lists the retro's rule checks, each with the PR it is
+// checked from.
+func checksManifest(manifestCall) (string, error) {
+	var lines []string
+	for _, k := range issues.RuleChecks() {
+		from := "from the first commit"
+		if k.Since > 0 {
+			from = fmt.Sprintf("on what closed after PR #%d brought it", k.Since)
+		}
+		lines = append(lines, fmt.Sprintf("- `%s`: %s; checked %s.", k.Kind, k.Rule, from))
+	}
 	return strings.Join(lines, "\n"), nil
 }
 

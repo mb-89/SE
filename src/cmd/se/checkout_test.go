@@ -12,6 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/io/clock"
+	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/internal/io/proc"
+
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/gitenv"
 	"github.com/mb-89/SE/src/internal/update"
@@ -53,7 +57,7 @@ func installed(t *testing.T) string {
 			return
 		}
 		installedSE = filepath.Join(dir, filepath.Base(daemon.Paths{}.Bin()))
-		installedErr = update.Build(repoRoot(t), installedSE)
+		installedErr = update.Build(proc.Real(), repoRoot(t), installedSE)
 	})
 	if installedErr != nil {
 		t.Fatal(installedErr)
@@ -113,7 +117,7 @@ func runs(t *testing.T, ep *Endpoint, ws string) string {
 	if runtime.GOOS != "linux" {
 		return ""
 	}
-	got, ok := daemon.Healthy(daemon.Paths{Workspace: ws})
+	got, ok := daemon.Healthy(daemon.Paths{Workspace: ws}, sehttp.Real())
 	if !ok || ep == nil || got.Address != ep.Address {
 		t.Fatalf("no daemon answers at %+v (healthy %v at %s)", ep, ok, got.Address)
 	}
@@ -137,9 +141,10 @@ func TestAnyOtherWorkspaceRunsTheInstalledSe(t *testing.T) {
 	se := installed(t)
 	ws := t.TempDir()
 	write(t, filepath.Join(ws, "go.mod"), "module example.com/other\n")
-	exe, note, err := daemonExe(daemon.Paths{Workspace: ws})
-	if err != nil || exe != se || note != "" {
-		t.Fatalf("exe %q, note %q, err %v", exe, note, err)
+	m := proc.NewFake()
+	exe, note, err := daemonExe(m, daemon.Paths{Workspace: ws})
+	if err != nil || exe != se || note != "" || len(m.Ran()) != 0 {
+		t.Fatalf("exe %q, note %q, err %v, ran %q", exe, note, err, m.Lines())
 	}
 	if _, err := os.Stat(daemon.Paths{Workspace: ws}.Bin()); err == nil {
 		t.Fatal("se was built in a workspace that is no SE checkout")
@@ -183,7 +188,7 @@ func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
 	se := installed(t)
 	ws := scratch(t)
 	paths := daemon.Paths{Workspace: ws}
-	t.Cleanup(func() { _ = daemon.Stop(paths, 5*time.Second) })
+	t.Cleanup(func() { _ = daemon.Stop(paths, 5*time.Second, clock.Real(), sehttp.Real()) })
 
 	// The checkout changes a summary and adds a command.
 	helpGo := filepath.Join(ws, "src", "cmd", "se", "help.go")
@@ -240,7 +245,7 @@ func init() {
 
 	// Once it builds again, /se on starts the rebuilt se.
 	os.Remove(filepath.Join(ws, "src", "cmd", "se", "broken.go"))
-	if err := daemon.Stop(paths, 5*time.Second); err != nil {
+	if err := daemon.Stop(paths, 5*time.Second, clock.Real(), sehttp.Real()); err != nil {
 		t.Fatal(err)
 	}
 	r = in(t, ws, "on")

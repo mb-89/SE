@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,6 +13,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
+	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/internal/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 )
@@ -28,13 +30,30 @@ func workspace(t *testing.T) daemon.Paths {
 	return p
 }
 
-func post(t *testing.T, h http.Handler, token, body string) int {
+// served serves a fresh daemon for p on a fake network behind "tok" until
+// the test ends, and answers a post that sends one event with token and
+// answers its status.
+func served(t *testing.T, p daemon.Paths) func(token string, ev daemon.Event) int {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/event", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	return rec.Code
+	n := sehttp.NewFake()
+	ctx, cancel := context.WithCancel(context.Background())
+	addr, done, err := n.Serve(ctx, "tok", daemon.NewServer(p, "i1", nil, clock.NewFake(time.Time{})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cancel(); <-done })
+	return func(token string, ev daemon.Event) int {
+		var refused *sehttp.StatusError
+		switch err := n.Event(addr, token, ev); {
+		case err == nil:
+			return sehttp.StatusOK
+		case errors.As(err, &refused):
+			return refused.Status
+		default:
+			t.Fatal(err)
+			return 0
+		}
+	}
 }
 
 func rows(t *testing.T, p daemon.Paths, session string) []map[string]any {
@@ -67,10 +86,9 @@ func TestPrepareIgnoresTheRuntimeFolder(t *testing.T) {
 
 func TestAnEventIsAppended(t *testing.T) {
 	p := workspace(t)
-	h := daemon.NewServer(p, "tok", "i1", nil).Handler()
+	post := served(t, p)
 	for _, ev := range []string{"session.start", "tool.call"} {
-		body := fmt.Sprintf(`{"session":"s1","event":%q,"at":"t","e":{"x":1}}`, ev)
-		if code := post(t, h, "tok", body); code != http.StatusOK {
+		if code := post("tok", daemon.Event{Session: "s1", Event: ev, At: "t", E: json.RawMessage(`{"x":1}`)}); code != sehttp.StatusOK {
 			t.Fatalf("%s: status %d", ev, code)
 		}
 	}
@@ -82,18 +100,17 @@ func TestAnEventIsAppended(t *testing.T) {
 
 func TestAWrongTokenIsRefused(t *testing.T) {
 	p := workspace(t)
-	h := daemon.NewServer(p, "tok", "i1", nil).Handler()
-	if code := post(t, h, "nope", `{"session":"s1","event":"x"}`); code != http.StatusUnauthorized {
+	post := served(t, p)
+	if code := post("nope", daemon.Event{Session: "s1", Event: "x"}); code != sehttp.StatusUnauthorized {
 		t.Fatalf("status %d", code)
 	}
 }
 
 func TestASessionNameCannotLeaveTheLogFolder(t *testing.T) {
 	p := workspace(t)
-	h := daemon.NewServer(p, "tok", "i1", nil).Handler()
+	post := served(t, p)
 	for _, s := range []string{"../escape", "a/b", "", ".hidden"} {
-		body := fmt.Sprintf(`{"session":%q,"event":"x"}`, s)
-		if code := post(t, h, "tok", body); code != http.StatusBadRequest {
+		if code := post("tok", daemon.Event{Session: s, Event: "x"}); code != sehttp.StatusBadRequest {
 			t.Fatalf("session %q: status %d", s, code)
 		}
 	}
@@ -101,9 +118,9 @@ func TestASessionNameCannotLeaveTheLogFolder(t *testing.T) {
 
 func TestALongPayloadLandsCut(t *testing.T) {
 	p := workspace(t)
-	h := daemon.NewServer(p, "tok", "i1", nil).Handler()
+	post := served(t, p)
 	long := strings.Repeat("a", daemon.PayloadCap*2)
-	post(t, h, "tok", fmt.Sprintf(`{"session":"s1","event":"x","e":%q}`, long))
+	post("tok", daemon.Event{Session: "s1", Event: "x", E: json.RawMessage(fmt.Sprintf("%q", long))})
 	e := rows(t, p, "s1")[0]["e"].(map[string]any)
 	if e["cut"] != true || int(e["length"].(float64)) != len(long)+2 {
 		t.Fatalf("e = %v", e)
@@ -112,13 +129,13 @@ func TestALongPayloadLandsCut(t *testing.T) {
 
 func TestConcurrentEventsAllLand(t *testing.T) {
 	p := workspace(t)
-	h := daemon.NewServer(p, "tok", "i1", nil).Handler()
+	post := served(t, p)
 	var wg sync.WaitGroup
 	for i := range 50 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			post(t, h, "tok", fmt.Sprintf(`{"session":"s1","event":"e%d"}`, i))
+			post("tok", daemon.Event{Session: "s1", Event: fmt.Sprintf("e%d", i)})
 		}()
 	}
 	wg.Wait()
@@ -128,17 +145,19 @@ func TestConcurrentEventsAllLand(t *testing.T) {
 }
 
 func TestServePublishesAndWithdrawsItsEndpoint(t *testing.T) {
-	p := workspace(t)
+	p, n := workspace(t), sehttp.NewFake()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
-	go func() { done <- daemon.Serve(ctx, p, daemon.Options{Ready: func(ep daemon.Endpoint) { ready <- ep }}) }()
+	go func() {
+		done <- daemon.Serve(ctx, p, daemon.Options{Clock: clock.Real(), Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
+	}()
 	ep := <-ready
-	if got, ok := daemon.Healthy(p); !ok || got.InstanceID != ep.InstanceID {
+	if got, ok := daemon.Healthy(p, n); !ok || got.InstanceID != ep.InstanceID {
 		t.Fatalf("healthy = %v, %v", got, ok)
 	}
 	if runtime.GOOS != "windows" {
-		if err := daemon.Serve(context.Background(), p, daemon.Options{}); !errors.Is(err, daemon.ErrRunning) {
+		if err := daemon.Serve(context.Background(), p, daemon.Options{Clock: clock.Real(), Net: n}); !errors.Is(err, daemon.ErrRunning) {
 			t.Fatalf("second serve: %v", err)
 		}
 	}
@@ -152,64 +171,107 @@ func TestServePublishesAndWithdrawsItsEndpoint(t *testing.T) {
 }
 
 func TestStopEndsTheDaemon(t *testing.T) {
-	p := workspace(t)
+	p, n := workspace(t), sehttp.NewFake()
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
-		done <- daemon.Serve(context.Background(), p, daemon.Options{Ready: func(ep daemon.Endpoint) { ready <- ep }})
+		done <- daemon.Serve(context.Background(), p, daemon.Options{Clock: clock.Real(), Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
 	}()
 	<-ready
-	if err := daemon.Stop(p, 5*time.Second); err != nil {
+	if err := daemon.Stop(p, 5*time.Second, clock.Real(), n); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := daemon.Healthy(p); ok {
+	if _, ok := daemon.Healthy(p, n); ok {
 		t.Fatal("still healthy after stop")
 	}
 }
 
 func TestAnIdleDaemonEnds(t *testing.T) {
 	p := workspace(t)
+	f := clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
 	done := make(chan error, 1)
-	go func() { done <- daemon.Serve(context.Background(), p, daemon.Options{Idle: 200 * time.Millisecond}) }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
+	ready := make(chan daemon.Endpoint, 1)
+	go func() {
+		done <- daemon.Serve(context.Background(), p, daemon.Options{Idle: 30 * time.Minute, Clock: f, Net: sehttp.NewFake(), Ready: func(ep daemon.Endpoint) { ready <- ep }})
+	}()
+	<-ready
+	// ended moves the fake clock on a minute and says whether the daemon has ended.
+	ended := func() bool {
+		f.Advance(time.Minute)
+		runtime.Gosched()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true
+		default:
+			return false
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the daemon did not idle out")
 	}
+	for range 29 {
+		if ended() {
+			t.Fatalf("the daemon ended at %v, before its idle half hour", f.Now())
+		}
+	}
+	for range 1_000_000 {
+		if ended() {
+			return
+		}
+	}
+	t.Fatal("the daemon did not idle out")
 }
 
 func TestTakeOverStepsARunningDaemonAside(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the lock is not exclusive here")
 	}
-	p := workspace(t)
+	p, n := workspace(t), sehttp.NewFake()
 	first := make(chan daemon.Endpoint, 1)
 	firstDone := make(chan error, 1)
 	go func() {
-		firstDone <- daemon.Serve(context.Background(), p, daemon.Options{Ready: func(ep daemon.Endpoint) { first <- ep }})
+		firstDone <- daemon.Serve(context.Background(), p, daemon.Options{Clock: clock.Real(), Net: n, Ready: func(ep daemon.Endpoint) { first <- ep }})
 	}()
 	ep1 := <-first
 	ctx, cancel := context.WithCancel(context.Background())
 	second := make(chan daemon.Endpoint, 1)
 	secondDone := make(chan error, 1)
 	go func() {
-		secondDone <- daemon.Serve(ctx, p, daemon.Options{TakeOver: 10 * time.Second, Ready: func(ep daemon.Endpoint) { second <- ep }})
+		secondDone <- daemon.Serve(ctx, p, daemon.Options{Clock: clock.Real(), Net: n, TakeOver: 10 * time.Second, Ready: func(ep daemon.Endpoint) { second <- ep }})
 	}()
 	ep2 := <-second
 	if err := <-firstDone; err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := daemon.Healthy(p); !ok || got.InstanceID != ep2.InstanceID || ep2.InstanceID == ep1.InstanceID {
+	if got, ok := daemon.Healthy(p, n); !ok || got.InstanceID != ep2.InstanceID || ep2.InstanceID == ep1.InstanceID {
 		t.Fatalf("healthy = %v, %v", got, ok)
 	}
 	cancel()
 	if err := <-secondDone; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStartRunsTheDaemonDetachedAndSaysWhenItExits(t *testing.T) {
+	t.Parallel()
+	p := workspace(t)
+	m := proc.NewFake()
+	m.Install("/bin/se", func(c proc.Cmd) int {
+		fmt.Fprintln(c.Stderr, "se serve: no port left")
+		return 1
+	})
+	_, err := daemon.Start(m, p, "/bin/se", time.Minute, clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)), sehttp.NewFake())
+	if err == nil || !strings.Contains(err.Error(), "the daemon exited at start (exit status 1)") {
+		t.Fatalf("%v", err)
+	}
+	ran := m.Ran()
+	if len(ran) != 1 || ran[0].String() != "/bin/se serve --workspace "+p.Workspace || !ran[0].Detached {
+		t.Fatalf("ran %+v", ran)
+	}
+	if log, err := os.ReadFile(p.DaemonLog()); err != nil || !strings.Contains(string(log), "no port left") {
+		t.Fatalf("the daemon's log holds %q (%v)", log, err)
 	}
 }

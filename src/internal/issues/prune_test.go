@@ -38,7 +38,7 @@ func strayWorld(t *testing.T) *world {
 
 func TestPruneListsOnlyStrayBranches(t *testing.T) {
 	w := strayWorld(t)
-	s := Source{Repo: repo, GH: w.gh, Now: clock}
+	s := Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}
 	got, err := s.Strays()
 	if err != nil {
 		t.Fatal(err)

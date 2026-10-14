@@ -91,16 +91,29 @@ func Principles(dir string) ([]Principle, error) {
 		return nil, fmt.Errorf("the design principles: %w", err)
 	}
 	var ps []Principle
+	// checked says the line before belongs to a "Checked by:" text, which
+	// runs on over indented lines until a blank line or the next principle.
+	checked := false
 	for _, line := range strings.Split(string(data), "\n") {
 		if m := principleLine.FindStringSubmatch(line); m != nil {
 			ps = append(ps, Principle{Number: atoi(m[1]), Name: strings.TrimSuffix(m[2], ".")})
+			checked = false
 			continue
 		}
 		if m := checkedLine.FindStringSubmatch(line); m != nil && len(ps) > 0 {
-			p := &ps[len(ps)-1]
-			p.CheckedBy = strings.TrimSpace(m[1])
-			p.Mechanical = strings.Contains(p.CheckedBy, "mechanically") || strings.Contains(p.CheckedBy, "battery")
+			ps[len(ps)-1].CheckedBy = strings.TrimSpace(m[1])
+			checked = true
+			continue
 		}
+		if checked && strings.TrimSpace(line) != "" && strings.TrimLeft(line, " \t") != line {
+			ps[len(ps)-1].CheckedBy += " " + strings.TrimSpace(line)
+			continue
+		}
+		checked = false
+	}
+	for i := range ps {
+		p := &ps[i]
+		p.Mechanical = strings.Contains(p.CheckedBy, "mechanically") || strings.Contains(p.CheckedBy, "battery")
 	}
 	if len(ps) == 0 {
 		return nil, fmt.Errorf("%s states no principle", path)
@@ -355,9 +368,9 @@ func (r OverhaulReport) facts() string {
 			b.WriteString("\n")
 		}
 		for _, k := range checkKinds {
-			fmt.Fprintf(&b, "| broken `%s` |", k.kind)
+			fmt.Fprintf(&b, "| broken `%s` |", k.Kind)
 			for _, run := range r.Retros {
-				fmt.Fprintf(&b, " %d |", run.Broken[k.kind])
+				fmt.Fprintf(&b, " %d |", run.Broken[k.Kind])
 			}
 			b.WriteString("\n")
 		}

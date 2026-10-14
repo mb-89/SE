@@ -5,11 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -17,19 +17,18 @@ import (
 var gh issues.GH = issues.Gh
 
 // fire is the fan-out after a claim, and after the creation of a ready issue:
-// it fires the routine once and answers a line saying what happened. Tests put a fake here.
-var fire = issues.FireFromEnv
+// it fires the routine named in the environment once, on the call's network,
+// and answers a line saying what happened.
+func (c *Call) fire() string { return issues.Fire(os.Getenv, c.Net) }
 
 // sessionID names the session se runs in, which land records as the leaf's
 // worker and review tells apart from them. Tests put a fixed one here.
 var sessionID = func() string { return os.Getenv(issues.SessionVar) }
 
-// check is what issue land runs before it pushes: the repo's one definition of
-// green. It answers the check's output when it fails.
-var check = func(dir string) error {
-	cmd := exec.Command("sh", "./tests/check.sh")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+// check is what issue land runs before it pushes, on procs: the repo's one
+// definition of green. It answers the check's output when it fails.
+var check = func(procs proc.Procs, dir string) error {
+	out, err := proc.Combined(procs, proc.Cmd{Name: "sh", Args: []string{"./tests/check.sh"}, Dir: dir})
 	if err != nil {
 		lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
 		if len(lines) > 40 {
@@ -135,7 +134,7 @@ func init() {
 			}
 			fanout := ""
 			if ok {
-				fanout = fire()
+				fanout = c.fire()
 				// What waits for it, so the box can tell which of them need
 				// what it may leave over.
 				if took.Blocks, err = s.Dependents(took.Number); err != nil {
@@ -195,6 +194,66 @@ func init() {
 				return Reply{Text: string(data)}, err
 			}
 			return Reply{Text: fmt.Sprintf("Resumed #%d %s: back in the queue, its takeover count reset.\n%s", i.Number, i.Title, i.URL)}, nil
+		},
+	})
+	register(Command{
+		Name:    "issue tree",
+		Usage:   "issue tree [ROOT] [--json] [--repo OWNER/NAME]",
+		Group:   "Issues",
+		Summary: "list the se trees and how many of their sub-issues are closed",
+		Details: "list every se issue with sub-issues, open or closed, open first: its number, state, how many of its sub-issues are closed, its labels and its title. With ROOT, list ROOT and every issue below it, open or closed, each indented under its parent.",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "issue tree")
+			var words []string
+			for rest := c.Args; ; {
+				if err := fs.Parse(rest); err != nil {
+					return Reply{}, err
+				}
+				if fs.NArg() == 0 {
+					break
+				}
+				words, rest = append(words, fs.Arg(0)), fs.Args()[1:]
+			}
+			c.Args = nil
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			root := 0
+			if len(words) > 0 {
+				root, _ = strconv.Atoi(strings.TrimPrefix(words[0], "#"))
+				if len(words) > 1 || root <= 0 {
+					return Reply{}, fmt.Errorf("issue tree takes at most one issue number, not %q", strings.Join(words, " "))
+				}
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			if err := s.CloseParents(); err != nil {
+				return Reply{}, err
+			}
+			var nodes []issues.Node
+			if root > 0 {
+				nodes, err = s.TreeOf(root)
+			} else {
+				nodes, err = s.Trees()
+			}
+			if err != nil {
+				return Reply{}, err
+			}
+			if *asJSON {
+				data, err := json.Marshal(nodes)
+				return Reply{Text: string(data)}, err
+			}
+			if len(nodes) == 0 {
+				return Reply{Text: "No se issue has sub-issues."}, nil
+			}
+			lines := make([]string, len(nodes))
+			for k, n := range nodes {
+				lines[k] = n.Line()
+			}
+			return Reply{Text: strings.Join(lines, "\n")}, nil
 		},
 	})
 	register(Command{
@@ -285,7 +344,7 @@ func init() {
 			}
 			fanout := ""
 			if ready {
-				fanout = fire()
+				fanout = c.fire()
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
@@ -364,7 +423,7 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			l, err := s.Land(c.Workspace, sessionID(), qs, answers, check)
+			l, err := s.Land(c.Workspace, sessionID(), qs, answers, func(dir string) error { return check(c.Proc, dir) })
 			if err != nil {
 				return Reply{}, err
 			}
@@ -449,7 +508,7 @@ func init() {
 			// A filed finding is a ready issue in the queue: it fires once.
 			fanout := ""
 			if len(r.Filed) > 0 {
-				fanout = fire()
+				fanout = c.fire()
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
@@ -569,13 +628,13 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 	repo := fs.String("repo", "", "the repository as `OWNER/NAME` (default: the workspace's origin)")
 	return fs, func() (issues.Source, error) {
 		if *repo == "" {
-			r, err := issues.Repo(c.Workspace)
+			r, err := issues.Repo(c.Proc, c.Workspace)
 			if err != nil {
 				return issues.Source{}, err
 			}
 			*repo = r
 		}
-		return issues.Source{Repo: *repo, GH: gh}, nil
+		return issues.Source{Repo: *repo, GH: gh, Clock: c.Clock, Proc: c.Proc}, nil
 	}, asJSON
 }
 

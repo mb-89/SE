@@ -68,7 +68,7 @@ func (g *github) gh(args ...string) ([]byte, error) {
 	return []byte(a), nil
 }
 
-func (g *github) source() Source { return Source{Repo: repo, GH: g.gh, Now: clock} }
+func (g *github) source() Source { return Source{Proc: machine, Repo: repo, GH: g.gh, Clock: atNow()} }
 
 func refs(ns ...int) string {
 	var out []string
@@ -115,7 +115,7 @@ func TestAFreshClaimIsNotStuckAndAStaleOneIs(t *testing.T) {
 func TestATakeoverComesBeforeNewWorkAndContinuesTheBranch(t *testing.T) {
 	origin, a, b := boxes(t)
 	// a claimed #5, pushed some work, and stalled.
-	if ok, err := Claim(a, 5); err != nil || !ok {
+	if ok, err := (Source{Proc: machine}).Claim(a, 5); err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "half done")
@@ -275,7 +275,7 @@ func TestIssuesWaitingOnAPersonAndTheirTreesAreNeverOffered(t *testing.T) {
 func TestAStuckLeafInATreeIsTakenOverFirst(t *testing.T) {
 	origin, a, b := boxes(t)
 	// A sub-agent claimed leaf #11 of #10, pushed some work, and stalled.
-	if ok, err := stake(a, 11); err != nil || !ok {
+	if ok, err := (Source{Proc: machine}).stake(a, 11); err != nil || !ok {
 		t.Fatalf("stake: %v %v", ok, err)
 	}
 	run(t, a, "push", "-q", "origin", "main:issue-10")

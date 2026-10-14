@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/io/clock"
+
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -70,8 +72,8 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 	if person {
 		answers["repos/o/r/issues/2/dependencies/blocked_by?per_page=100"] = `[{"number":6,"state":"open"}]`
 	}
-	old, oldClock := gh, clock
-	clock = func() time.Time { return briefedAt }
+	old, oldClock := gh, wall
+	wall = clock.NewFake(briefedAt)
 	gh = func(args ...string) ([]byte, error) {
 		path := strings.Replace(args[len(args)-1], "repos/o/probe/", "repos/o/r/", 1)
 		if a, ok := answers[path]; ok {
@@ -85,7 +87,7 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 		}
 		return nil, fmt.Errorf("not recorded: %v", args)
 	}
-	t.Cleanup(func() { gh, clock = old, oldClock })
+	t.Cleanup(func() { gh, wall = old, oldClock })
 }
 
 // briefed runs se briefing in a workspace with a README and answers its text.
