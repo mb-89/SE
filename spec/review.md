@@ -71,21 +71,25 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
    fleet work, and `se-final` is a separate label beside it. An issue becomes
    `se-final` when:
    - a review creates it to fix a finding;
-   - `se issue pull --take` takes it over, stuck or with a conflicted PR
-     ([Stuck work](issues.md#stuck-work), [The rules](issues.md#the-rules)).
+   - `se issue pull --take` takes it over stuck, with no push for too long
+     or a red PR ([Stuck work](issues.md#stuck-work)).
+
+   A conflict is no failure: main moves on under a PR through no fault of
+   its box, so a conflict takeover neither makes an issue final nor, on one
+   already final, makes it wait on a person ([The rules](issues.md#the-rules)).
 
    If an `se-final` issue fails again, it is not given another round: `se`
    mints an issue for a person that says what failed, and links the failing
    issue as blocked by it ([Stuck work](issues.md#stuck-work)); closing it
    gives the work back for a fresh attempt. Failing again is:
-   - stuck, or its PR conflicted, again: the issue itself waits;
+   - stuck again: the issue itself waits;
    - its re-review finds the same problem: the finding says it `repeats` the
      earlier blocker, and the gate, which holds that closed issue, waits (an
      open issue is what leaves the queue).
 
    This bounds every loop at one retry. The label is the single record of a
-   takeover: a takeover sets it, and a takeover of an issue that is already
-   final makes it wait on an issue for a person instead. The
+   takeover of stuck work: such a takeover sets it, and one of an issue that is
+   already final makes it wait on an issue for a person instead. The
    `<!-- se:takeover N -->` comment stays as the human-readable record, and
    its round only settles two boxes racing for one takeover. Minting that
    issue takes `se-final` off and resets the takeovers, so once the person

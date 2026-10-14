@@ -265,11 +265,15 @@ var failed = map[string]bool{"failure": true, "timed_out": true, "cancelled": tr
 // where open is true, and whose branch is at sha; nil where its work is
 // moving, or a takeover of it is. What t holds already is not read again.
 func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tree) (*Finding, error) {
-	n, b, last := st.Number, Branch(st.Number), st.pushed
-	var err error
+	n, b, pushed := st.Number, Branch(st.Number), st.pushed
+	// A takeover renews the claim as a push does: a box has just taken it.
+	last, m, err := s.active(n, pushed, Quiet)
+	if err != nil {
+		return nil, err
+	}
 	quiet := s.now().Sub(last) > Quiet
-	since := "no push since " + last.UTC().Format(time.RFC3339)
-	if last.IsZero() {
+	since := "no push since " + pushed.UTC().Format(time.RFC3339)
+	if pushed.IsZero() {
 		since = "no push on record"
 	}
 	var f *Finding
@@ -329,9 +333,12 @@ func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tre
 	}
 	f.Issue = n
 	if f.takeover() {
-		m, err := s.marks(n)
-		if err != nil {
-			return nil, err
+		if m == nil {
+			got, err := s.marks(n)
+			if err != nil {
+				return nil, err
+			}
+			m = &got
 		}
 		if m.takeovers > 0 && m.head == f.head && s.now().Sub(m.lastTakeover) < Quiet {
 			return nil, nil
@@ -661,8 +668,9 @@ func atoi(s string) int {
 
 // takeOverClaim takes over claimed leaf st, named by se issue pull --take N,
 // where se fleet check finds it stuck: its branch is checked out as it stands.
-// A takeover labels it se-final; a final issue stuck waits on an issue for a
-// person instead.
+// A takeover of a stuck claim labels it se-final, and a final issue stuck
+// waits on an issue for a person instead; a conflict is no failure, so its
+// takeover neither holds the issue nor makes it final.
 func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok bool, err error) {
 	fs, err := s.claimFindings([]Status{st}, t)
 	if err != nil {
@@ -677,7 +685,8 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 		return Issue{}, false, err
 	}
 	k := m.takeovers + 1
-	if st.Final {
+	conflict := f.cause() == ConflictedPR
+	if st.Final && !conflict {
 		reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s.", FinalLabel, f.What)
 		held, err := s.hold(st.Issue, reason)
 		if err != nil {
@@ -694,8 +703,10 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 	if !won {
 		return Issue{}, false, fmt.Errorf("#%d was taken over by another box just now", st.Number)
 	}
-	if err := s.finalize(st.Number); err != nil {
-		return Issue{}, false, err
+	if !conflict {
+		if err := s.finalize(st.Number); err != nil {
+			return Issue{}, false, err
+		}
 	}
 	if err := s.pickUp(dir, st.Number); err != nil {
 		return Issue{}, false, err
