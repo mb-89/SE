@@ -18,8 +18,8 @@ whole system, not a window.
   person started it; the cadence starts overhauls this way. The issue's body
   records which it is, `<!-- se:overhaul attended -->` or
   `<!-- se:overhaul unattended -->`.
-- **The cadence:** every `OverhaulCadence` (in
-  `src/internal/issues/cadence.go`) closed retros since the last closed
+- **The cadence:** every `issues/config/overhaul-cadence` (the
+  issues instance's config value, built-in in `src/internal/issues/cadence.go`) closed retros since the last closed
   overhaul (with none closed yet, the whole history), `se issue pull --take`
   starts an unattended overhaul and takes it first, ahead of a due retro and
   all other work. It is the same mechanism as the retro cadence, one constant.
@@ -35,7 +35,7 @@ whole system, not a window.
   the checkout (`../overhaul-N.md`). It holds:
   - every principle of [principles.md](principles.md), with what checks it,
     and whether the retro or the battery checks it mechanically;
-  - the retro's last `OverhaulCadence` runs, from their reports' blocks: each metric, the
+  - the retro's last `issues/config/overhaul-cadence` runs, from their reports' blocks: each metric, the
     broken rule checks by kind, how many findings became issues and how many
     of those closed, how many the next retro found recurred anyway, and the
     finding classes more than one of them named;

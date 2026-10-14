@@ -449,11 +449,15 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 
 func TestTheHelpRendersTheConfigValues(t *testing.T) {
 	t.Parallel()
+	cfg, err := issues.Configured()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, want := range map[string][]string{
-		"issue pull":    {fmt.Sprintf("%d retros (OverhaulCadence)", issues.OverhaulCadence), fmt.Sprintf("%d se issues (RetroCadence)", issues.RetroCadence), fmt.Sprintf("%s lease (Lease)", issues.Lease)},
-		"issue review":  {fmt.Sprintf("at most %d, MaxFiled", issues.MaxFiled)},
-		"overhaul new":  {fmt.Sprintf("last %d runs (OverhaulCadence)", issues.OverhaulCadence)},
-		"overhaul read": {fmt.Sprintf("last %d retros' metrics (OverhaulCadence)", issues.OverhaulCadence)},
+		"issue pull":    {fmt.Sprintf("%d retros (issues/config/overhaul-cadence)", cfg.OverhaulCadence), fmt.Sprintf("%d se issues (issues/config/retro-cadence)", cfg.RetroCadence), fmt.Sprintf("%s lease (issues/config/lease)", cfg.Lease)},
+		"issue review":  {fmt.Sprintf("at most %d, issues/config/max-filed", cfg.MaxFiled)},
+		"overhaul new":  {fmt.Sprintf("last %d runs (issues/config/overhaul-cadence)", cfg.OverhaulCadence)},
+		"overhaul read": {fmt.Sprintf("last %d retros' metrics (issues/config/overhaul-cadence)", cfg.OverhaulCadence)},
 	} {
 		for _, w := range want {
 			if !strings.Contains(commands[name].Details, w) {

@@ -124,7 +124,8 @@ person**, and leaves the agents' queue until the person has closed it.
 - **Stuck** is decided by a timer, not judgment. A claimed leaf (claimed at
   the top or with `--in`) is stuck when nothing has been pushed to its branch
   `issue-<n>` (or its PR), nor a takeover recorded, for longer than the lease,
-  `Lease` in `src/internal/issues/stuck.go`. It is under the routine's
+  `issues/config/lease` (the issues instance's config value, built-in in
+  `src/internal/issues/stuck.go`). It is under the routine's
   4-hour schedule, so a scheduled box always catches it. The last push is
   GitHub's activity on the branch (`/repos/{owner}/{repo}/activity`), its
   creation included; a branch GitHub keeps no push record of is stuck. A
@@ -393,7 +394,7 @@ through `se`, with every verdict on the reviewed issue's thread.
   `se issue new --parent N --blocked-by none --final` would, its body the
   finding. N stays open: the fixes are work inside it, and once they have
   landed it is ready for review again, as a re-review.
-- **Either way**, the non-blocking findings (at most `MaxFiled`) become `se-final`
+- **Either way**, the non-blocking findings (at most `issues/config/max-filed`) become `se-final`
   issues in the normal queue.
 - **Who worked a leaf** is recorded by `se issue land`: a comment on the leaf,
   `Worked by session S in W.`, with the marker
