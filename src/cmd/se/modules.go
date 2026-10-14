@@ -34,11 +34,7 @@ type noInput struct{}
 // collector gathers it. The command line runs them itself; on the index they
 // are declarations, which every adapter renders.
 func cliModule() *index.Module {
-	names := make([]string, 0, len(commands))
-	for n := range commands {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	names := sortedNames()
 	parts := make([]index.Part, 0, len(names))
 	for _, n := range names {
 		decl := declOf(commands[n])
@@ -80,4 +76,14 @@ func catalog() index.Catalog {
 		panic(err)
 	}
 	return c
+}
+
+// sortedNames are the registered commands' names, sorted.
+func sortedNames() []string {
+	names := make([]string, 0, len(commands))
+	for n := range commands {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
