@@ -13,11 +13,6 @@ import (
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 )
 
-// Parallel is the built-in value of fleet.box/config/parallel: how many
-// sub-agents one box runs at once. The box's disk allowance and CPU limit it,
-// and the battery takes about 25s.
-const Parallel = 4
-
 // boxMark records on an issue the box whose claim it is: <!-- se:box ID -->,
 // ID the box's session. The last one on an issue names its box.
 var boxMark = regexp.MustCompile(`<!-- se:box (\S+) -->`)
@@ -44,13 +39,8 @@ func (s Source) markBox(n int) error {
 	return err
 }
 
-// parallel is the cap s runs under: Parallel unless set.
-func (s Source) parallel() int {
-	if s.Parallel > 0 {
-		return s.Parallel
-	}
-	return Parallel
-}
+// parallel is the cap s runs under, fleet.box/config/parallel.
+func (s Source) parallel() int { return s.config().Parallel }
 
 // Full is a box's take refused because the box runs its cap of sub-agents.
 type Full struct {

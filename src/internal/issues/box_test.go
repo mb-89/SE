@@ -7,8 +7,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/io/github"
 )
+
+// capped is the built-in config with the box's cap set to n.
+func capped(n int) *Settings {
+	cfg := Builtin()
+	cfg.Parallel = n
+	return &cfg
+}
 
 // fired counts the fires a fan-out made.
 type fired int
@@ -59,7 +67,7 @@ func TestTheBoxesAreCountedFromTheAliveClaims(t *testing.T) {
 	// A takeover moves #2 to s1: the last mark names the box.
 	g.say(2, "Taken over"+(Source{Box: "s1"}).boxLine())
 	s := g.source()
-	s.Parallel = 2
+	s.Config = capped(2)
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -97,8 +105,17 @@ func TestABoxRunsItsCapAndPullsTheNextWhenOneLands(t *testing.T) {
 		refsPath: `[]`,
 	}, 1, 2, 3), fresh)
 	g := newHub(t, answers)
+	// The wiring sets the box's cap, fleet.box/config/parallel, to 2.
+	w, err := index.ParseWiring([]byte("instances:\n  issues: { module: issues, config: { parallel: 2 } }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := From(w)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := g.source()
-	s.Box, s.Worktrees, s.Parallel = "s1", true, 2
+	s.Box, s.Worktrees, s.Config = "s1", true, &cfg
 	claims := []int{}
 	take := func() (Issue, bool, error) {
 		took, ok, err := s.Take(a, 0)
@@ -146,7 +163,7 @@ func TestARefusedFanOutIsKeptAndFiresOnceItsRetryTimeHasPassed(t *testing.T) {
 	g.say(2, (Source{Box: "s1"}).boxNote())
 	clk := atNow()
 	s := g.source()
-	s.Box, s.Parallel, s.Clock = "s1", 2, clk
+	s.Box, s.Config, s.Clock = "s1", capped(2), clk
 	var f fired
 	// s1 runs its cap after taking #2, and #3 is ready: the fire is refused
 	// with 429, and kept on #2 until the time it names.

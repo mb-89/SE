@@ -11,8 +11,10 @@ import (
 const Instance = "issues"
 
 // Module declares the issue work's config keys on the index, each with its
-// constant as the built-in value: the retro's and the overhaul's cadence, the
-// lease and the cap on a review's filed findings.
+// built-in value: the retro's and the overhaul's cadence, the lease, the cap
+// on a review's filed findings, the manifest's target, and the fleet's box
+// rules (fleet.box/config/<key>, on this instance until the fleet is a module
+// of its own).
 var Module = index.Declare("issues", "The se issue work: the queue, its takes and leases, its reviews, and the cadences of retros and overhauls.",
 	index.Config("retro-cadence", RetroCadence, "How many se issues close between two retros: at this many closed since the last retro closed, se issue pull --take starts an unattended one."),
 	index.Config("overhaul-cadence", OverhaulCadence, "How many retros close between two overhauls: at this many closed since the last overhaul closed, se issue pull --take starts an unattended one; an overhaul reads the retro's last this many runs."),
@@ -20,14 +22,16 @@ var Module = index.Declare("issues", "The se issue work: the queue, its takes an
 	index.Config("max-filed", MaxFiled, "How many non-blocking findings one review files as issues; the rest are counted, not filed."),
 	index.Config("manifest-target", ManifestTarget, "issues.manifest/config/target: how long one manifest's leaves together should take, and how long a misc manifest takes new issues from its creation."),
 	index.Config("paused", false, "fleet.box/config/paused: set on main, every box ends before its next pull, and se issue pull --take takes nothing."),
+	index.Config("parallel", 4, "fleet.box/config/parallel: how many sub-agents one box runs at once; the box's disk allowance and CPU limit it, and the battery takes about 25s. se issue pull --take --worktree refuses a take past it."),
 )
 
 func init() { index.Register(Module) }
 
 // Settings are Module's config values.
 type Settings struct {
-	RetroCadence, OverhaulCadence, MaxFiled int
-	Lease                                   time.Duration
+	// Parallel is the cap of sub-agents one box runs.
+	RetroCadence, OverhaulCadence, MaxFiled, Parallel int
+	Lease                                             time.Duration
 	// ManifestTarget is how long a manifest's leaves together should take;
 	// Paused stops the fleet's takes.
 	ManifestTarget time.Duration
@@ -36,7 +40,20 @@ type Settings struct {
 
 // Builtin is Module's config as its built-in values give it.
 func Builtin() Settings {
-	return Settings{RetroCadence: RetroCadence, OverhaulCadence: OverhaulCadence, MaxFiled: MaxFiled, Lease: Lease, ManifestTarget: ManifestTarget}
+	return Settings{
+		RetroCadence: RetroCadence, OverhaulCadence: OverhaulCadence, MaxFiled: MaxFiled, Lease: Lease, ManifestTarget: ManifestTarget,
+		Parallel: declared("parallel").(int),
+	}
+}
+
+// declared answers Module's built-in value of its config key.
+func declared(key string) any {
+	for _, p := range Module.Config() {
+		if p.Port == key {
+			return p.Builtin
+		}
+	}
+	panic("issues declares no config key " + key)
 }
 
 // Configured answers the settings of Instance from the wiring se carries.
@@ -63,7 +80,7 @@ func From(w index.Wiring) (Settings, error) {
 		return Settings{}, err
 	}
 	var s Settings
-	for key, into := range map[string]*int{"retro-cadence": &s.RetroCadence, "overhaul-cadence": &s.OverhaulCadence, "max-filed": &s.MaxFiled} {
+	for key, into := range map[string]*int{"retro-cadence": &s.RetroCadence, "overhaul-cadence": &s.OverhaulCadence, "max-filed": &s.MaxFiled, "parallel": &s.Parallel} {
 		if err := read(ix, key, into); err != nil {
 			return Settings{}, err
 		}

@@ -13,14 +13,14 @@ import (
 func TestTheCadencesTheLeaseAndTheCapAreConfigValues(t *testing.T) {
 	t.Parallel()
 	s, err := Configured()
-	if err != nil || s != Builtin() {
+	if err != nil || s != Builtin() || s.Parallel != 4 {
 		t.Fatalf("the wiring se carries: %+v %v, want %+v", s, err, Builtin())
 	}
-	w, err := index.ParseWiring([]byte("instances:\n  issues: { module: issues, config: { lease: 1h, retro-cadence: 2, overhaul-cadence: 3, max-filed: 1, manifest-target: 30m, paused: true } }\n"))
+	w, err := index.ParseWiring([]byte("instances:\n  issues: { module: issues, config: { lease: 1h, retro-cadence: 2, overhaul-cadence: 3, max-filed: 1, manifest-target: 30m, paused: true, parallel: 2 } }\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Settings{RetroCadence: 2, OverhaulCadence: 3, MaxFiled: 1, Lease: time.Hour, ManifestTarget: 30 * time.Minute, Paused: true}
+	want := Settings{RetroCadence: 2, OverhaulCadence: 3, MaxFiled: 1, Lease: time.Hour, ManifestTarget: 30 * time.Minute, Paused: true, Parallel: 2}
 	if s, err = From(w); err != nil || s != want {
 		t.Fatalf("set by the wiring: %+v %v, want %+v", s, err, want)
 	}

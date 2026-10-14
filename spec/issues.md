@@ -682,8 +682,9 @@ cost a fire of the routine (whose limit the fan-out ran into on 2026-10-14).
 - **The pause switch**, `fleet.box/config/paused` on main: every take reads
   it first, and a box whose take says the fleet is paused starts nothing
   more and ends.
-- **The cap** is `fleet.box/config/parallel`, 4 (`Parallel` in
-  `src/internal/issues/box.go` until the fleet's rules move onto the index):
+- **The cap** is `fleet.box/config/parallel`, built-in 4
+  (`issues/config/parallel` on the index, in `src/index/wiring.yaml`, which
+  `se issue pull` and `se issue new` read):
   the box's disk allowance and CPU limit it, and the battery takes about
   25s. `se` refuses a take that would pass it.
 - **When it pulls again:** when a sub-agent's PR is up with auto-merge on, or

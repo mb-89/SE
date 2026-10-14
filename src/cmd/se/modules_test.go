@@ -29,12 +29,19 @@ func TestTheWiringSeCarriesStartsItsModules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var instances []string
+	var instances, keys []string
 	for _, in := range ix.Catalog().Instances {
 		instances = append(instances, in.Name)
+		for _, c := range in.Config {
+			keys = append(keys, in.Name+"/"+index.ConfigPrefix+c.Port.Port)
+		}
 	}
 	if want := []string{"cli", "clock", "github", "guidance", "issues", "reuse", "session", "sessionlog"}; !slices.Equal(instances, want) {
 		t.Fatalf("the index runs %v, want %v", instances, want)
+	}
+	// The box's cap, fleet.box/config/parallel, is a config key on the index.
+	if !slices.Contains(keys, "issues/config/parallel") {
+		t.Fatalf("the catalog's config keys are %v, without issues/config/parallel", keys)
 	}
 }
 
