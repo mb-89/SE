@@ -104,7 +104,9 @@ func (c *Call) boxAgent() (string, error) {
 // handOver reads the skills issue i names, records the hand-over in the
 // session's log, and answers them with the text a take adds to its answer,
 // followed by what its tier runs that others built (tierText).
-// The claim stands either way: a skill that cannot be handed over is said.
+// The claim stands either way: a skill that cannot be handed over is said. A
+// name that is an agent's role (retro, overhaul) is no skill: the take's
+// agent holds that role, so it is neither handed over nor missing.
 func (c *Call) handOver(i issues.Issue) handed {
 	h := c.handOverSkills(i)
 	if tier := c.tierText(i); tier != "" {
@@ -115,7 +117,7 @@ func (c *Call) handOver(i issues.Issue) handed {
 
 // handOverSkills hands over the skills issue i names, as handOver says.
 func (c *Call) handOverSkills(i issues.Issue) handed {
-	names := guidance.Named(i.Body)
+	names := issues.Skills(guidance.Named(i.Body))
 	if len(names) == 0 {
 		return handed{}
 	}
@@ -186,7 +188,7 @@ func handedTo(c *Call, session string) ([]string, error) {
 			continue
 		}
 		for _, s := range row.E.Skills {
-			if !seen[s.Name] {
+			if _, role := issues.RoleNamed(s.Name); !role && !seen[s.Name] {
 				seen[s.Name] = true
 				names = append(names, s.Name)
 			}
