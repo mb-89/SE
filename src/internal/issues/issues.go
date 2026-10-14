@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 // Label marks an issue as the fleet's work.
@@ -79,18 +81,13 @@ type Source struct {
 	// Repo is OWNER/NAME.
 	Repo string
 	GH   GH
-	// Now is the clock the lease is read against; nil is the wall clock.
-	Now func() time.Time
+	// Clock is the time leases, windows and stamps are read against.
+	Clock clock.Clock
 	// Flagged hears of each issue the sweep gave to a person, and why.
 	Flagged func(i Issue, reason string)
 }
 
-func (s Source) now() time.Time {
-	if s.Now == nil {
-		return time.Now()
-	}
-	return s.Now()
-}
+func (s Source) now() time.Time { return s.Clock.Now() }
 
 // issue is the part of GitHub's issue object the rules read.
 type issue struct {

@@ -51,7 +51,6 @@ func dep(n int, state, reason string, se bool) string {
 
 func newWorld(t *testing.T, items []string, claimed ...int) *world {
 	t.Helper()
-	noPause(t)
 	w := &world{t: t, comments: map[int][]comment{}, made: 100, answers: map[string]string{
 		listPath:      "[" + strings.Join(items, ",") + "]",
 		openPullsPath: `[]`,
@@ -150,7 +149,7 @@ func numbered(path, format string) int {
 
 func (w *world) check() []Finding {
 	w.t.Helper()
-	got, err := Source{Repo: repo, GH: w.gh, Now: clock}.Check()
+	got, err := Source{Repo: repo, GH: w.gh, Clock: atNow()}.Check()
 	if err != nil {
 		w.t.Fatal(err)
 	}
@@ -265,7 +264,7 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	}
 	// Within a day of the close, se fleet fix leaves it to the prune
 	// workflow and writes nothing.
-	s := Source{Repo: repo, GH: w.gh, Now: clock}
+	s := Source{Repo: repo, GH: w.gh, Clock: atNow()}
 	done := s.Fix(t.TempDir(), []Finding{f})
 	if done[0].Did != "left to the prune workflow until a day after #19 closed" || len(w.writes) != 0 {
 		t.Fatalf("%+v, writes %q", done, w.writes)
@@ -296,7 +295,7 @@ func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 	// which the boxes' proxy refuses.
 	origin, a, _ := boxes(t)
 	run(t, a, "push", "-q", "origin", "main:issue-19")
-	done := Source{Repo: repo, GH: w.gh, Now: clock}.Fix(a, []Finding{f})
+	done := Source{Repo: repo, GH: w.gh, Clock: atNow()}.Fix(a, []Finding{f})
 	if done[0].Did != "deleted issue-19 at c19, which main holds whole" || done[0].Made != 0 || done[0].Failed != "" {
 		t.Fatalf("%+v", done)
 	}
@@ -317,7 +316,7 @@ func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
 	w.ahead(19, 0)
 	w.answers[links(8)] = "[" + dep(3, "closed", "not_planned", true) + "]"
 	// The workspace is no checkout, so the push that deletes issue-19 fails.
-	done := Source{Repo: repo, GH: w.gh, Now: clock}.Fix(t.TempDir(), w.check())
+	done := Source{Repo: repo, GH: w.gh, Clock: atNow()}.Fix(t.TempDir(), w.check())
 	var dids []string
 	for _, d := range done {
 		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
@@ -387,7 +386,7 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 	}
 	// Its remedy, run: the takeover was made once already, so #17 is
 	// se-final and waits on an issue for a person.
-	_, _, err := Source{Repo: repo, GH: w.gh, Now: clock}.Take(t.TempDir(), 17)
+	_, _, err := Source{Repo: repo, GH: w.gh, Clock: atNow()}.Take(t.TempDir(), 17)
 	if err == nil || !strings.Contains(err.Error(), "an issue for a person") {
 		t.Fatalf("%v", err)
 	}
@@ -402,7 +401,7 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	w.answers["repos/o/r/git/matching-refs/heads/issue-7"] = w.answers[refsPath]
 	w.closedPRs(7, `[]`)
 	w.pushed(7, quiet)
-	took, ok, err := Source{Repo: repo, GH: w.gh, Now: clock}.Take(a, 7)
+	took, ok, err := Source{Repo: repo, GH: w.gh, Clock: atNow()}.Take(a, 7)
 	if err != nil || !ok || took.Takeover == nil || *took.Takeover != (Takeover{Count: 1, Stale: "issue-7 has no PR, and no push since 2026-10-13T09:00:00Z"}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -419,7 +418,7 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	// Moving work is no takeover.
 	w.pushed(7, recent)
 	w.comments[7] = nil
-	if _, _, err := (Source{Repo: repo, GH: w.gh, Now: clock}).Take(t.TempDir(), 7); err == nil || !strings.Contains(err.Error(), "nothing about it is stuck") {
+	if _, _, err := (Source{Repo: repo, GH: w.gh, Clock: atNow()}).Take(t.TempDir(), 7); err == nil || !strings.Contains(err.Error(), "nothing about it is stuck") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -440,7 +439,7 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-11T12:00:00Z"}`
 	w.answers[links(8)] = "[" + dep(3, "closed", "not_planned", true) + "]"
 	w.answers[links(9)] = "[" + dep(4, "open", "", false) + "]"
-	s := Source{Repo: repo, GH: w.gh, Now: clock}
+	s := Source{Repo: repo, GH: w.gh, Clock: atNow()}
 	found := w.check()
 	done := s.Fix(t.TempDir(), found)
 	var dids []string

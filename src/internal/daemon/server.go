@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 // PayloadCap is the longest event input a row carries whole; a longer one lands cut.
@@ -35,21 +37,23 @@ type Server struct {
 	token    string
 	instance string
 	shutdown func()
+	clock    clock.Clock
 	mu       sync.Mutex
 	last     atomic.Int64
 }
 
-// NewServer makes the handler side of a daemon; shutdown runs when /shutdown is posted.
-func NewServer(paths Paths, token, instance string, shutdown func()) *Server {
-	s := &Server{paths: paths, token: token, instance: instance, shutdown: shutdown}
+// NewServer makes the handler side of a daemon; shutdown runs when /shutdown
+// is posted, and clk says how long it has idled.
+func NewServer(paths Paths, token, instance string, shutdown func(), clk clock.Clock) *Server {
+	s := &Server{paths: paths, token: token, instance: instance, shutdown: shutdown, clock: clk}
 	s.touch()
 	return s
 }
 
-func (s *Server) touch() { s.last.Store(time.Now().UnixNano()) }
+func (s *Server) touch() { s.last.Store(s.clock.Now().UnixNano()) }
 
 // Idle is how long the server has gone without a post.
-func (s *Server) Idle() time.Duration { return time.Since(time.Unix(0, s.last.Load())) }
+func (s *Server) Idle() time.Duration { return s.clock.Now().Sub(time.Unix(0, s.last.Load())) }
 
 // Handler routes /health, /event and /shutdown, each behind the token.
 func (s *Server) Handler() http.Handler {

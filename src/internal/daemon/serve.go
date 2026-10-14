@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 // ErrRunning says another daemon holds this workspace.
@@ -25,6 +27,8 @@ type Options struct {
 	// for the workspace until this long has passed, so a daemon that is started
 	// again in between is asked to step down too.
 	TakeOver time.Duration
+	// Clock is the time the daemon stamps, idles and waits by.
+	Clock clock.Clock
 }
 
 // Serve runs the workspace's daemon until ctx ends, /shutdown is posted, or it idles out.
@@ -32,7 +36,7 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 	if err := Prepare(paths); err != nil {
 		return err
 	}
-	held, err := acquire(paths, opts.TakeOver)
+	held, err := acquire(paths, opts.TakeOver, opts.Clock)
 	if err != nil {
 		return err
 	}
@@ -50,9 +54,9 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 		Token:           randomHex(32),
 		InstanceID:      randomHex(8),
 		ProtocolVersion: ProtocolVersion,
-		StartedAt:       time.Now().UTC(),
+		StartedAt:       opts.Clock.Now().UTC(),
 	}
-	srv := NewServer(paths, ep.Token, ep.InstanceID, cancel)
+	srv := NewServer(paths, ep.Token, ep.InstanceID, cancel, opts.Clock)
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := WriteEndpoint(paths.Endpoint(), ep); err != nil {
 		ln.Close()
@@ -66,7 +70,7 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 	served := make(chan error, 1)
 	go func() { served <- httpSrv.Serve(ln) }()
 	if opts.Idle > 0 {
-		go idles(ctx, srv, opts.Idle, cancel)
+		go idles(ctx, srv, opts.Idle, cancel, opts.Clock)
 	}
 	select {
 	case err := <-served:
@@ -79,26 +83,25 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 }
 
 // acquire takes the lifetime lock, stepping a running daemon aside for up to takeOver.
-func acquire(paths Paths, takeOver time.Duration) (*os.File, error) {
-	deadline := time.Now().Add(takeOver)
+func acquire(paths Paths, takeOver time.Duration, clk clock.Clock) (*os.File, error) {
+	deadline := clk.Now().Add(takeOver)
 	for {
 		held, err := lock(paths.Lock())
-		if !errors.Is(err, ErrRunning) || takeOver <= 0 || !time.Now().Before(deadline) {
+		if !errors.Is(err, ErrRunning) || takeOver <= 0 || !clk.Now().Before(deadline) {
 			return held, err
 		}
-		_ = Stop(paths, time.Until(deadline))
-		time.Sleep(50 * time.Millisecond)
+		_ = Stop(paths, deadline.Sub(clk.Now()), clk)
+		clk.Sleep(50 * time.Millisecond)
 	}
 }
 
-func idles(ctx context.Context, srv *Server, idle time.Duration, cancel func()) {
-	tick := time.NewTicker(min(idle/4, time.Minute))
-	defer tick.Stop()
+func idles(ctx context.Context, srv *Server, idle time.Duration, cancel func(), clk clock.Clock) {
+	every := min(idle/4, time.Minute)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-clk.After(every):
 			if srv.Idle() >= idle {
 				cancel()
 				return
