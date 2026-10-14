@@ -279,46 +279,6 @@ func judged(t *testing.T, edit func(*RetroReport)) string {
 	return text + "\n" + matrixMark + "\n## The matrix\nbig"
 }
 
-func TestAnAttendedRetroStopsForTheOwner(t *testing.T) {
-	answers := retroRepo(t, true, "<!-- se:retro attended -->")
-	answers["repos/o/r/issues/30/comments"] = `{"id":1}`
-	answers["repos/o/r/issues/30/labels"] = `[]`
-	answers["repos/o/r/issues/30/assignees"] = `{}`
-	gh, calls := writes(t, answers)
-	f, err := Source{Repo: repo, GH: gh}.FileReport(30, judged(t, nil))
-	if err != nil || !f.Stopped || len(f.Issues) != 0 {
-		t.Fatalf("%+v %v", f, err)
-	}
-	var writes []string
-	for _, c := range *calls {
-		if c[1] == "-X" {
-			writes = append(writes, c[2]+" "+c[len(c)-1])
-		}
-	}
-	want := []string{
-		"POST repos/o/r/issues/30/comments", // the report
-		"POST repos/o/r/issues/30/labels",
-		"POST repos/o/r/issues/30/assignees",
-		"POST repos/o/r/issues/30/comments", // why it waits on a person
-		"DELETE repos/o/r/git/refs/heads/issue-30",
-	}
-	if !reflect.DeepEqual(writes, want) {
-		t.Fatalf("%q", writes)
-	}
-	report := (*calls)[2][4]
-	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease** (removal; for a person: it trades one metric against another)", "- the landing answers", reportBlock} {
-		if !strings.Contains(report, part) {
-			t.Errorf("the report lacks %q:\n%s", part, report)
-		}
-	}
-	if strings.Contains(report, "The matrix") {
-		t.Errorf("the posted report carries the matrix")
-	}
-	if label := (*calls)[3]; label[4] != "labels[]="+PersonLabel {
-		t.Fatalf("%q", label)
-	}
-}
-
 func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 	never := func(args ...string) ([]byte, error) {
 		t.Fatalf("gh %v for a refused report", args)
@@ -352,7 +312,7 @@ func fileFindings(t *testing.T, answers map[string]string) (Filed, [][]string) {
 
 func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
 	f, calls := fileFindings(t, retroRepo(t, true, "<!-- se:retro unattended -->"))
-	if f.Stopped || !reflect.DeepEqual(f.Issues, []int{40, 40}) || !reflect.DeepEqual(f.Person, []int{40}) || !f.Ready {
+	if !reflect.DeepEqual(f.Issues, []int{40, 40}) || !reflect.DeepEqual(f.Person, []int{40}) || !f.Ready {
 		t.Fatalf("%+v", f)
 	}
 	var created [][]string
@@ -391,20 +351,55 @@ func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
 	}
 }
 
+func TestAnAttendedRetroClosesToo(t *testing.T) {
+	// A person started it, and still nobody waits: the report is its closing
+	// comment, and the controversial finding is the issue for the person.
+	f, calls := fileFindings(t, retroRepo(t, true, "<!-- se:retro attended -->"))
+	if !reflect.DeepEqual(f.Person, []int{40}) {
+		t.Fatalf("%+v", f)
+	}
+	closed := false
+	for _, c := range calls {
+		if c[len(c)-1] == "repos/o/r/issues/30/labels" {
+			t.Fatalf("the retro was given to a person: %q", c)
+		}
+		closed = closed || c[1] == "-X" && c[2] == "PATCH" && c[len(c)-1] == "repos/o/r/issues/30"
+	}
+	if !closed {
+		t.Fatalf("the attended retro did not close: %q", calls)
+	}
+	report := ""
+	for _, c := range calls {
+		if c[len(c)-1] == "repos/o/r/issues/30/comments" {
+			report = c[4]
+		}
+	}
+	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease** (removal; for a person: it trades one metric against another)", "- the landing answers", reportBlock} {
+		if !strings.Contains(report, part) {
+			t.Errorf("the report lacks %q:\n%s", part, report)
+		}
+	}
+	if strings.Contains(report, "The matrix") {
+		t.Errorf("the posted report carries the matrix")
+	}
+}
+
+// A retro posted for the owner before retros stopped waiting is filed as it
+// stands, with what the owner moved.
 func TestAResumedRetroCreatesTheIssuesAsDecided(t *testing.T) {
 	answers := retroRepo(t, true, "<!-- se:retro attended -->")
 	answers["repos/o/r/issues/30/comments?per_page=100"] = jsonComments(judged(t, nil), "<!-- se:person -->\nwaits", "move finding 2 to normal", "<!-- se:resume -->\nResumed.")
 	f, _ := fileFindings(t, answers)
-	if f.Stopped || len(f.Issues) != 2 {
+	if len(f.Issues) != 2 {
 		t.Fatalf("%+v", f)
 	}
 }
 
 func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
 	answers := retroRepo(t, true, "<!-- se:retro attended -->")
-	for _, p := range []string{"repos/o/r/issues/30/comments", "repos/o/r/issues/30/labels", "repos/o/r/issues/30/assignees"} {
-		answers[p] = `{}`
-	}
+	answers["repos/o/r/issues/30/comments"] = `{}`
+	answers["repos/o/r/issues"] = `{"number":40,"id":4000,"html_url":"u40"}`
+	answers["repos/o/r/issues/40/assignees"] = `{}`
 	inner, _ := writes(t, answers)
 	gh := func(args ...string) ([]byte, error) {
 		if len(args) > 2 && args[2] == "DELETE" {
@@ -413,30 +408,7 @@ func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
 		return inner(args...)
 	}
 	f, err := Source{Repo: repo, GH: gh}.FileReport(30, judged(t, nil))
-	if err != nil || !f.Stopped || !strings.HasPrefix(f.Left, "issue-30 stays (") || !strings.Contains(f.Left, "se fleet prune") {
+	if err != nil || !strings.HasPrefix(f.Left, "issue-30 stays (") || !strings.Contains(f.Left, "se fleet prune") {
 		t.Fatalf("%+v %v", f, err)
-	}
-}
-
-func TestFiledAgainBeforeTheOwnerDecidedItOnlyUpdatesTheReport(t *testing.T) {
-	answers := retroRepo(t, true, "<!-- se:retro attended -->")
-	answers["repos/o/r/issues/30"] = strings.Replace(answers["repos/o/r/issues/30"], `{"name":"se-retro"}`, `{"name":"se-retro"},{"name":"se-person"}`, 1)
-	answers["repos/o/r/issues/30/comments?per_page=100"] = jsonComments(judged(t, nil), "<!-- se:person -->\nwaits")
-	answers["repos/o/r/issues/comments/100"] = `{}`
-	gh, calls := writes(t, answers)
-	if f, err := (Source{Repo: repo, GH: gh}).FileReport(30, judged(t, nil)); err != nil || !f.Stopped {
-		t.Fatalf("%+v %v", f, err)
-	}
-	var writes []string
-	for _, c := range *calls {
-		if c[1] == "-X" {
-			writes = append(writes, c[2]+" "+c[len(c)-1])
-		}
-	}
-	if want := []string{"PATCH repos/o/r/issues/comments/100", "DELETE repos/o/r/git/refs/heads/issue-30"}; !reflect.DeepEqual(writes, want) {
-		t.Fatalf("%q", writes)
-	}
-	if body := (*calls)[len(*calls)-2][4]; !strings.Contains(body, "**Drop the lease**") || !strings.Contains(body, "\n  It trades speed for safety.\n") {
-		t.Fatalf("the finding's body is not under it: %s", body)
 	}
 }

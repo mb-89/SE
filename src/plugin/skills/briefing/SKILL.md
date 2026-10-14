@@ -27,7 +27,9 @@ with `go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin
       the last retro and its headline findings.
    4. **Next:** what `se issue pull` would take, and the counts.
    Keep each item to its facts; add no judgment of your own.
-4. Ask the person what they want to work on.
+4. Ask the person what they want to discuss. This session is for design;
+   what comes out of it that is clear becomes an `se` issue for the fleet
+   (`se issue new`), not work this session does ([principle 20](../../../../spec/principles.md)).
 
 Change nothing: no issue, label, branch, comment or PR. If the person asks
 for something, that is a new request, handled after the briefing.

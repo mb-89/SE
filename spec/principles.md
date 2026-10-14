@@ -38,8 +38,15 @@ principle is one sentence and one paragraph, and names what checks it.
 6. **One I/O module per outside thing.**
    Processes, disk, the clock, the network and GitHub are each reached
    through exactly one I/O module, and nothing reaches the outside any other
-   way.
-   Checked by: the battery (a lint rule, #44's tree).
+   way. A run has three phases: it reads its inputs, computes, then writes
+   its outputs. It reads everything it needs once, at the start, batched
+   (one list or one server-side query, not one call per item) and in
+   parallel where reads are independent, into one snapshot. The computing in
+   between is pure and works on that snapshot alone. A run never asks the
+   outside world again for what it already has: that is slow, and inputs
+   read at different times disagree.
+   Checked by: the battery (a lint rule, #44's tree); overhaul, by judgment
+   (`looked_at.speed`).
 
 7. **Fakes that behave, held to contracts.**
    Every I/O module has a fake, and one contract suite runs against both the
@@ -58,8 +65,9 @@ principle is one sentence and one paragraph, and names what checks it.
    their duration, and soft budgets in one file
    ([spec/budgets.yaml](budgets.yaml)) report what grows (#50). One hard
    rule: anything a person waits on gives feedback within 1 second and never
-   blocks.
-   Checked by: the battery and the bridgehead; retro, mechanically (trend).
+   blocks. What can run in parallel does.
+   Checked by: the battery and the bridgehead; retro, mechanically (trend);
+   overhaul, by judgment (`looked_at.speed`).
 
 10. **Lint and style checks are part of the battery.**
     Standard linters and formatters, plus SE's own rules written as checks;
@@ -89,7 +97,10 @@ principle is one sentence and one paragraph, and names what checks it.
 
 15. **Persons decide, agents execute.**
     Anything controversial goes to a person; everything else flows without
-    one.
+    one. It goes as an issue minted for the person, and only such an issue
+    waits on one: every run ends, a box landing what it could and filing
+    the rest, a retro or an overhaul closing once its issues exist. What
+    needs the person's answer is blocked by their issue, and nothing else is.
     Checked by: retro, mechanically (`se-person` counts); overhaul, by judgment.
 
 16. **Blameless.**
@@ -131,3 +142,9 @@ principle is one sentence and one paragraph, and names what checks it.
     `spec/`, whoever changes that part).
     Checked by: the battery (the line is there); the reviewer, the retro and
     the overhaul (prose that serves no named reader is a finding).
+
+20. **The fleet works; sessions discuss.**
+    An interactive session with a person is for design: deciding what SE
+    should be and how. Work that is clear becomes an `se` issue, and the
+    cloud fleet does it; the session does not do it itself.
+    Checked by: retro and overhaul, by judgment.

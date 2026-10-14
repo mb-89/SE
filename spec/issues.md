@@ -49,8 +49,13 @@ choice is deterministic and no prompt restates it.
   to its box. Of two boxes writing the same `N` at once, the earlier comment
   wins and the other box deletes its own. A conflict on an issue that is
   already `se-final` (taken over before, for a conflict or stuck, or filed by
-  a review) instead goes to a person, as a final stuck claim does (below).
-- **Waits on a person**: an issue labelled `se-person` is never ready.
+  a review) instead waits on an issue for a person, as a final stuck claim
+  does (below).
+- **Waits on a person**: an issue labelled `se-person` is never ready. Only
+  issues minted for a person carry it (`se issue new --person`, and the issues
+  se mints below and in [retro.md](retro.md)); every other issue that needs a
+  person waits on one of those through a native "blocked by" link. No run
+  waits on a person: a box, a retro and an overhaul always end.
 - **Done**: the PR's body says `Fixes #n`, so GitHub closes the issue when the
   PR merges, and the issues it blocked become ready.
 
@@ -106,8 +111,8 @@ follows from its structure alone:
 A box can stall: its session dies, or it waits forever. Its issue then stays
 claimed, and the queue behind it stops. Releasing and escalating stuck work is
 mechanical, done inside `se issue pull` by every box, never left to an
-agent's memory. Work that needs a decision goes to a **person**, and leaves
-the agents' queue until a person has looked.
+agent's memory. Work that needs a decision waits on an **issue for a
+person**, and leaves the agents' queue until the person has closed it.
 
 - **Stuck** is decided by a timer, not judgment. A claimed leaf (claimed at
   the top or with `--in`) is stuck when nothing has been pushed to its branch
@@ -128,31 +133,45 @@ the agents' queue until a person has looked.
   takeover does. Of two boxes taking over one issue, the first comment of the
   round wins; the other deletes its own and moves on. A takeover renews the
   lease.
-- **Final and stuck: to a person.** A leaf labelled `se-final` (taken over
-  once already, or filed by a review) that is stuck gets the label
-  `se-person`, is assigned to the repository
-  owner (so GitHub notifies them), and gets a comment saying why, with the
-  marker `<!-- se:person -->`. This sweep runs inside every `se issue pull`.
-  The issue leaves the queue: `se issue pull` never offers an `se-person`
-  issue, or a tree containing one (at the top, nor with `--in`). Its
-  dependents stay blocked through their native links.
-- **No self-flagging.** A box cannot flag its own issue for a person: no
-  command does it. A box that cannot go on comments on the issue and ends;
-  its claim then goes stale, and the timer does the rest.
+- **Final and stuck: an issue for a person.** A leaf labelled `se-final`
+  (taken over once already, or filed by a review) that is stuck is never
+  labelled `se-person` itself. `se` mints an issue for a person, "Decide how
+  #n goes on", labelled `se-person` and assigned to the repository owner (so
+  GitHub notifies them), and links #n as blocked by it: the one link `se`
+  writes on an issue that already exists, since no box is left to write it.
+  #n gets a comment saying why, with the markers `<!-- se:person -->` and
+  `<!-- se:resume -->`, and loses `se-final`: once the person closes their
+  issue, #n is back in the queue for a fresh attempt. This sweep runs inside
+  every `se issue pull`. A claim waiting on its blockers is not stuck; once
+  they close, its old push makes it stuck at once, and the next box takes it
+  over. `se issue pull` never offers an `se-person` issue, or a tree
+  containing one (at the top, nor with `--in`). #n's dependents stay blocked
+  through their native links.
+- **A box never ends stuck.** It lands what it could, and files what is left
+  as an issue: one for a person (`se issue new --person`) where it needs
+  their input, a normal one where it does not. `se issue pull --take` names
+  the open issues the taken one blocks; the box names in `--blocks` those of
+  them that need what it left over, and only those, so nothing waits that
+  need not. Where it can land nothing at all (its push is refused, say), it
+  files the issue for a person with `--blocks <n>`, its own issue, and ends;
+  its claim then waits on that issue instead of going stale.
 - **The person's side:**
   - `se issue pull --person` lists every issue waiting on a person, with its
-    reason and how many open issues it blocks, directly or through a tree.
-  - `se issue resume <n>` removes the label, and `se-final` with it, and puts
-    the issue back in the queue, its takeover count reset (a comment with the
-    marker `<!-- se:resume -->`). A claim still stale is then taken over by
-    the next box, as a first takeover.
+    reason and how many open issues it holds up, directly or through a tree.
+  - The person decides, says so on the issue, and closes it; what it blocked
+    goes on.
+  - `se issue resume <n>` is for an issue labelled `se-person` by hand, or
+    before issues for a person existed: it removes the label, and `se-final`
+    with it, and puts the issue back in the queue, its takeover count reset
+    (a comment with the marker `<!-- se:resume -->`). A claim still stale is
+    then taken over by the next box, as a first takeover.
 
 ## The commands
 
 <!-- se:manifest usage issue review -->
 ```
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
-se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--review] [--final] [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
@@ -189,11 +208,12 @@ into the branch and land it again (with `--json`: the issue's `takeover`,
 `{"pr","url","count","why"}`). `--take N` takes over claimed leaf `N`, at
 any depth, where `se fleet check` finds it stuck (a conflicted or red PR, or
 no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.md));
-labelled `se-final`, it goes to a person instead. A claim whose work is moving
+labelled `se-final`, it waits on an issue for a person instead. A claim whose work is moving
 is refused.
 Once it has claimed an issue, `--take` fires the routine once (the fan-out,
 below) and adds a line saying what the fire did; with `--json` that line is
-the field `fanout`.
+the field `fanout`. It also names the open issues the taken one blocks (with
+`--json`: the issue's `blocks`), for `se issue new --blocks`.
 
 `se issue pull --in ROOT` names what is ready inside ROOT's tree: its stuck
 leaves to take over, then its ready leaves, at any depth, lowest number first,
@@ -255,7 +275,7 @@ the only place they are written; `se issue land` and the retro both read it.
 `se issue new` creates an issue labelled `se` on the repository, makes it a
 sub-issue of `--parent` where that is given, and links it as blocked by each
 issue `--blocked-by` names, then prints its number and link
-(with `--json`: `{"number","url","blocked_by","parent"}`). `--blocked-by` is required: a
+(with `--json`: `{"number","url","blocked_by","parent","blocks","person"}`). `--blocked-by` is required: a
 comma-separated list of issue numbers (`--blocked-by 5,8`) or the word `none`.
 Every issue in the list is looked up before anything is written, so a list
 naming an issue that does not exist, or a pull request, creates nothing; so
@@ -263,7 +283,11 @@ does a `--parent` that does not exist. The
 body comes from `--body` or from `--body-file`, one of them. `--review` labels
 it `se-review` as well (see [Reviews](#reviews)), and `--final` labels it
 `se-final`, its last attempt before a person (see
-[spec/review.md](review.md), rule 5). Where nothing blocks the
+[spec/review.md](review.md), rule 5). `--person` makes it an issue for a
+person: labelled `se-person` and assigned to the owner (it takes neither
+`--review` nor `--final`); its body opens with what they decide. `--blocks
+N,M` links each issue it names as blocked by the new one, checked before
+anything is written. Where nothing blocks the
 issue it created (every issue in `--blocked-by` is closed, or it is `none`),
 it fires the routine once, as the fan-out does, and adds a line saying what
 the fire did (with `--json`: the field `fanout`); otherwise a new ready issue
@@ -278,7 +302,8 @@ and [spec/review.md](review.md). A session has them as `/se issue review` and
 `se issue pull --person` lists every open issue labelled `se-person`, each
 with its reason and how many open issues it blocks, directly or through a tree
 (with `--json`: a list of `{"number","title","url","reason","blocks"}`), or
-says that none waits on a person. `se issue resume N` is the person's: it
+says that none waits on a person. `se issue resume N` is the person's, for an
+issue labelled `se-person` by hand or before issues for a person existed: it
 refuses an issue not labelled `se-person`; see [Stuck work](#stuck-work).
 
 They read and write GitHub through `gh api` (the links through

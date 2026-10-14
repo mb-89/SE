@@ -84,7 +84,7 @@ type Reviewed struct {
 	Filed   []Issue `json:"filed"`
 	Unfiled int     `json:"unfiled"`
 	// Person is set where a re-review found a final issue's problem again:
-	// the gate then waits on a person.
+	// the gate then waits on an issue for a person.
 	Person bool `json:"person,omitempty"`
 }
 
@@ -168,9 +168,8 @@ func (s Source) Review(n int, reviewer Worker, pass bool, rep Report) (Reviewed,
 		for k, f := range again {
 			names[k] = fmt.Sprintf("#%d (%s)", f.Repeats, f.Title)
 		}
-		reason := fmt.Sprintf("Its re-review finds the problem of %s again. Each was a final attempt (labelled %s), so it gets no other round: "+
-			"a person decides how #%d goes on; `se issue resume %d` puts it back in the queue.", strings.Join(names, ", "), FinalLabel, n, n)
-		if err := s.flag(st.Issue, reason, ""); err != nil {
+		reason := fmt.Sprintf("Its re-review finds the problem of %s again. Each was a final attempt (labelled %s), so it gets no other round.", strings.Join(names, ", "), FinalLabel)
+		if _, err := s.hold(st.Issue, reason); err != nil {
 			return r, err
 		}
 		r.Person = true

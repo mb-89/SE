@@ -14,11 +14,11 @@ func init() {
 		Usage:   "overhaul new [--unattended] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "start an overhaul: is the design still right?",
-		Details: "create an overhaul: an se issue labelled se-overhaul that checks SE as it stands against every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last 5 runs, and fire the routine so a box takes it at once. Started by a person (the default), its box posts the report and stops for the owner; --unattended, its box creates the findings' issues at once and closes it. se issue pull --take starts one unattended every 5 closed retros. spec/overhaul.md has the rules.",
+		Details: "create an overhaul: an se issue labelled se-overhaul that checks SE as it stands against every design principle, the outside world, the consistency of the whole system, the principles themselves and the retro's last 5 runs, and fire the routine so a box takes it at once. Its box creates the findings' issues, those for a person where controversial, and closes it: an overhaul never waits. --unattended records that no person started it; se issue pull --take starts one so every 5 closed retros. spec/overhaul.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul new")
-			unattended := fs.Bool("unattended", false, "nobody waits for the report: create the issues at once")
+			unattended := fs.Bool("unattended", false, "no person started it: the cadence did")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
@@ -38,11 +38,7 @@ func init() {
 				}{o, fanout})
 				return Reply{Text: string(data)}, err
 			}
-			mode := "its box posts the report and stops for you"
-			if o.Unattended {
-				mode = "unattended: its box creates the findings' issues and closes it"
-			}
-			return Reply{Text: fmt.Sprintf("Created the overhaul #%d %s, %s.\n%s\n%s", o.Number, o.Title, mode, o.URL, fanout)}, nil
+			return Reply{Text: fmt.Sprintf("Created the overhaul #%d %s: its box creates the findings' issues and closes it.\n%s\n%s", o.Number, o.Title, o.URL, fanout)}, nil
 		},
 	})
 	register(Command{
@@ -50,7 +46,7 @@ func init() {
 		Usage:   "overhaul read N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "read an overhaul's facts and write its report draft",
-		Details: "read overhaul N's facts and write its report draft to FILE (default: ../overhaul-N.md beside the workspace): every design principle from spec/principles.md, mechanical or judged; the last 5 retros' metrics, broken rule checks and findings, how many became issues and closed, and which recurred; and the previous overhaul's findings with their issues' state. Where a report is already posted on N, it writes that one instead, for the box that picks the overhaul up after the owner decided.",
+		Details: "read overhaul N's facts and write its report draft to FILE (default: ../overhaul-N.md beside the workspace): every design principle from spec/principles.md, mechanical or judged; the last 5 retros' metrics, broken rule checks and findings, how many became issues and closed, and which recurred; and the previous overhaul's findings with their issues' state. Where a report is already posted on N (an overhaul from before overhauls stopped waiting for the owner), it writes that one instead, to be filed as it stands.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul read")
@@ -68,7 +64,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			text, what := posted, "the report posted on it, as the owner left it: apply what the owner decided in its block, then run se overhaul file"
+			text, what := posted, "the report posted on it: apply what the owner said in its comments, if anything, to its block, then run se overhaul file"
 			if posted == "" {
 				ps, err := issues.Principles(c.Workspace)
 				if err != nil {
@@ -101,8 +97,8 @@ func init() {
 		Name:    "overhaul file",
 		Usage:   "overhaul file N [--draft FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
-		Summary: "file a judged report: stop for the owner, or create the issues",
-		Details: "file overhaul N's report from its judged draft FILE (default: ../overhaul-N.md beside the workspace). It refuses a judgment that is not complete: a principle without a verdict, nothing said on the outside world, the system's consistency, the principles themselves or the retro, a finding without its principle, place or how far it strays, an outside finding without a source. A change to a principle is always controversial. An overhaul a person started, whose owner has not decided yet, gets the report posted on it and goes to the owner (se-person); one started --unattended, or resumed by the owner, gets one se issue per finding, se-person where it is controversial, then the report as its closing comment, and closes. Either way its claim issue-N goes.",
+		Summary: "file a judged report: create its issues and close it",
+		Details: "file overhaul N's report from its judged draft FILE (default: ../overhaul-N.md beside the workspace). It refuses a judgment that is not complete: a principle without a verdict, nothing said on the outside world, the system's consistency, the principles themselves, the retro, speed, mechanizing or removal, a finding without its principle, place or how far it strays, an outside finding without a source. A change to a principle is always controversial. It gets one se issue per finding, one for a person (se-person) where it is controversial, then the report as its closing comment, and closes: it never waits for the owner. Its claim issue-N goes.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul file")
@@ -135,9 +131,6 @@ func init() {
 				return Reply{Text: string(data)}, err
 			}
 			text := fmt.Sprintf("Created %d issue(s) from the overhaul #%d's findings, %d of them for a person: %s. The report is its closing comment, and it is closed.", len(filed.Issues), n, len(filed.Person), numbers(filed.Issues))
-			if filed.Stopped {
-				text = fmt.Sprintf("Posted the report on the overhaul #%d and gave it to the owner (%s): they decide, then run se issue resume %d. End here.", n, issues.PersonLabel, n)
-			}
 			if filed.Left != "" {
 				text += "\n" + filed.Left + "."
 			}

@@ -46,6 +46,11 @@ type Issue struct {
 	// or its PR in conflict with main: taking it continues its branch and PR
 	// as they stand.
 	Takeover *Takeover `json:"takeover,omitempty"`
+	// Blocks names the open issues it blocks, where a take read them: what
+	// is left of it may hold up those that need it (se issue new --blocks).
+	Blocks []int `json:"blocks,omitempty"`
+	// id is GitHub's id of an issue se just created, which a link takes.
+	id int64
 }
 
 // Branch is the branch whose presence on origin claims issue n.
@@ -361,8 +366,21 @@ func (s Source) survey() ([]Status, tree, error) {
 			if err != nil {
 				return nil, tree{}, err
 			}
-			st.Reason = m.reason
+			if st.Reason = m.reason; st.Reason == "" {
+				st.Reason = firstParagraph(i.Body)
+			}
 		case !parent && claimed[Branch(n)]:
+			// A claim waiting on its blockers (an issue for a person that
+			// holds it) is not stuck; once they close, its old push makes it
+			// stuck at once, and the next box takes it over afresh.
+			why, err := held(n)
+			if err != nil {
+				return nil, tree{}, err
+			}
+			if why != "" {
+				st.Why = Branch(n) + " waits: " + why
+				break
+			}
 			st.Why, st.claimed = "claimed by "+Branch(n), true
 			if err := s.lease(st); err != nil {
 				return nil, tree{}, err
@@ -439,6 +457,13 @@ func (s Source) survey() ([]Status, tree, error) {
 		all[k] = *st
 	}
 	return all, t, nil
+}
+
+// firstParagraph is the first paragraph of an issue's body, on one line: an
+// issue minted for a person opens with why it waits.
+func firstParagraph(body string) string {
+	first, _, _ := strings.Cut(strings.TrimSpace(body), "\n\n")
+	return strings.Join(strings.Fields(first), " ")
 }
 
 // openBlockers names the issue's blockers that are still open, in ascending

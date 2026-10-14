@@ -165,7 +165,7 @@ func overhauled(t *testing.T, edit func(*OverhaulReport)) string {
 		Overhaul:   30,
 		Principles: []Principle{{Number: 1, Name: "Mechanize first"}, {Number: 2, Name: "Single point of truth"}},
 		Verdicts:   []Judged{{1, "slightly", "the landing answers are typed by hand"}, {2, "none", "held"}},
-		LookedAt:   LookedAt{"agent tools converge on hooks", "the README is current", "none missing", "the metrics fell"},
+		LookedAt:   LookedAt{"agent tools converge on hooks", "the README is current", "none missing", "the metrics fell", "the survey runs one call at a time", "nothing by hand", "nothing to drop"},
 		Findings: []Straying{
 			{Title: "Prefill the landing answers", Body: "by-hand answers repeat.", Area: "principle", Principle: 1, Place: "spec/landing.yaml", Strays: "slightly"},
 			{Title: "Add a principle on cost", Body: "Nothing weighs tokens.", Area: "principles", Place: "spec/principles.md", Strays: "far"},
@@ -195,10 +195,10 @@ func overhaulAnswers(body string) map[string]string {
 	}
 }
 
-func TestAnUnattendedOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
+func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	gh, calls := writes(t, overhaulAnswers(overhaulUnattendedMark))
 	f, err := Source{Repo: repo, GH: gh}.FileOverhaul(30, overhauled(t, nil))
-	if err != nil || f.Stopped || len(f.Issues) != 3 || len(f.Person) != 2 {
+	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
 		t.Fatalf("%+v %v", f, err)
 	}
 	var created, writes []string
@@ -234,23 +234,30 @@ func TestAnUnattendedOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) 
 	if err != nil || back.Findings[0].Issue != 40 || !back.Findings[1].Controversial || back.Verdicts[0].Strays != "slightly" {
 		t.Fatalf("%+v %v", back, err)
 	}
-	for _, part := range []string{"| 1 | Mechanize first | slightly |", "**Add a principle on cost** (principles, principle 0, strays far, at spec/principles.md; for a person: it changes a design principle): #40", "- **The outside world:** agent tools converge on hooks"} {
+	for _, part := range []string{"| 1 | Mechanize first | slightly |", "**Add a principle on cost** (principles, principle 0, strays far, at spec/principles.md; for a person: it changes a design principle): #40", "- **The outside world:** agent tools converge on hooks", "**Speed (what could run in parallel, or ask the server for more at once):** the survey runs one call at a time"} {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
 		}
 	}
 }
 
-func TestAnAttendedOverhaulStopsForTheOwner(t *testing.T) {
+func TestAnAttendedOverhaulClosesToo(t *testing.T) {
+	// A person started it, and still nobody waits: its controversial
+	// findings are the issues for the person.
 	gh, calls := writes(t, overhaulAnswers("<!-- se:overhaul attended -->"))
 	f, err := Source{Repo: repo, GH: gh}.FileOverhaul(30, overhauled(t, nil))
-	if err != nil || !f.Stopped || len(f.Issues) != 0 {
+	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
 		t.Fatalf("%+v %v", f, err)
 	}
+	closed := false
 	for _, c := range *calls {
-		if c[len(c)-1] == "repos/o/r/issues" || c[len(c)-1] == "repos/o/r/issues/30" && c[1] == "-X" {
-			t.Fatalf("an attended overhaul created or closed: %q", c)
+		if c[len(c)-1] == "repos/o/r/issues/30/labels" {
+			t.Fatalf("the overhaul was given to a person: %q", c)
 		}
+		closed = closed || c[len(c)-1] == "repos/o/r/issues/30" && c[1] == "-X"
+	}
+	if !closed {
+		t.Fatalf("the attended overhaul did not close: %q", *calls)
 	}
 }
 
@@ -263,6 +270,7 @@ func TestAnOverhaulWithoutJudgmentIsRefused(t *testing.T) {
 		"a principle without verdict": func(r *OverhaulReport) { r.Verdicts = r.Verdicts[:1] },
 		"an outside idea, no source":  func(r *OverhaulReport) { r.Findings[2].Sources = nil },
 		"nothing on consistency":      func(r *OverhaulReport) { r.LookedAt.Consistency = "" },
+		"nothing on speed":            func(r *OverhaulReport) { r.LookedAt.Speed = "" },
 		"a finding without a place":   func(r *OverhaulReport) { r.Findings[0].Place = "" },
 		"a principle that is no one":  func(r *OverhaulReport) { r.Findings[0].Principle = 9 },
 		"strays none":                 func(r *OverhaulReport) { r.Findings[0].Strays = "none" },

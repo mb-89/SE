@@ -45,6 +45,10 @@ func recordedIssues(t *testing.T) *[][]string {
 		"repos/o/r/issues?labels=se&state=closed&per_page=100":          `[{"number":5,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`,
 		"repos/o/r/issues/10/dependencies/blocked_by":                   `{"id":101}`,
 		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":          `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
+		"repos/o/r/issues/1/dependencies/blocked_by?per_page=100":       `[]`,
+		"repos/o/r/issues/3/dependencies/blocking?per_page=100":         `[{"number":7,"state":"open"},{"number":8,"state":"closed"}]`,
+		"repos/o/r/issues/10/assignees":                                 `{}`,
+		"repos/o/r/issues/3/dependencies/blocked_by":                    `{}`,
 	}
 	var calls [][]string
 	old, oldFire := gh, fire
@@ -395,7 +399,7 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires", code, fires)
 	}
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || fires != 1 || out != "Took #3 three, on branch issue-3.\nu3\nFan-out fired the routine: s1\n\ndo it\n" {
+	if code != 0 || fires != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: s1\n\ndo it\n" {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires, out, errs)
 	}
 	// #3 is now claimed on origin, but the recorded refs do not say so: the
@@ -426,6 +430,66 @@ func TestANewIssueFiresTheRoutineOnlyWhenNothingBlocksIt(t *testing.T) {
 	if code, out, _ := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none"); code != 0 || !strings.HasSuffix(out, "Fan-out is off: SE_ROUTINE_FIRE_URL and SE_ROUTINE_FIRE_TOKEN are not both set.\n") {
 		t.Fatalf("exit %d, %q", code, out)
 	}
+}
+
+func TestATakeNamesWhatTheIssueBlocks(t *testing.T) {
+	recordedIssues(t)
+	root := t.TempDir()
+	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
+	for _, args := range [][]string{
+		{root, "init", "-q", "--bare", "-b", "main", origin},
+		{root, "clone", "-q", origin, ws},
+		{ws, "checkout", "-q", "-b", "main"},
+		{ws, "commit", "-q", "--allow-empty", "-m", "start"},
+		{ws, "push", "-q", "origin", "main"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", args[0], "-c", "user.name=t", "-c", "user.email=t@t"}, args[1:]...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	// #3 blocks #7, open, and #8, closed: only #7 still waits for it.
+	code, out, _ := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
+	if code != 0 || !strings.Contains(out, "It blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.") {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+}
+
+func TestWhatABoxLeavesOverIsAnIssueForAPersonThatBlocksOnlyWhatNeedsIt(t *testing.T) {
+	calls := recordedIssues(t)
+	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "decide the last 5%", "--blocked-by", "none", "--person", "--blocks", "3")
+	if code != 0 || !strings.Contains(out, "It blocks #3.") || !strings.Contains(out, "For a person: labelled se-person") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	var writes []string
+	for _, c := range *calls {
+		if c[1] == "-X" {
+			writes = append(writes, strings.Join(c[len(c)-2:], " "))
+		}
+	}
+	for _, want := range []string{"labels[]=se-person repos/o/r/issues", "assignees[]=o repos/o/r/issues/10/assignees", "issue_id=110 repos/o/r/issues/3/dependencies/blocked_by"} {
+		if !contains(writes, want) {
+			t.Errorf("not written: %s (%q)", want, writes)
+		}
+	}
+	// A number that is no issue creates nothing.
+	before := len(*calls)
+	if code, _, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--blocks", "9"); code == 0 || !strings.Contains(errs, "#9 does not exist") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	for _, c := range (*calls)[before:] {
+		if c[1] == "-X" {
+			t.Fatalf("a refused --blocks wrote %q", c)
+		}
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {

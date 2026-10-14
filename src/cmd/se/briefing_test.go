@@ -122,8 +122,8 @@ func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
 	inOrder(t, out,
 		"SE briefing for o/r, 2026-10-13T12:00:00Z",
 		"## Waits on you",
-		"- #7 retro (report waiting, holds up 0)", "its report waits for the owner: the retro report is posted", "u7",
 		"- #6 six (waiting on a person, holds up 1)", "needs the owner's call", "u6",
+		"- #7 retro (waiting on a person, holds up 0)", "the retro report is posted", "u7",
 		"## In flight",
 		"- #1 one: PR #11 p11; CI green, auto-merge on",
 		"fleet check:", "waiting on a person #6", "waiting on a person #7",
@@ -145,7 +145,7 @@ func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
 	if err := json.Unmarshal([]byte(js), &b); code != 0 || err != nil {
 		t.Fatalf("exit %d, %q: %v", code, js, err)
 	}
-	if len(b.Pending) != 2 || b.Pending[1].Holds != 1 || len(b.InFlight) != 1 || b.InFlight[0].PR != 11 ||
+	if len(b.Pending) != 2 || b.Pending[0].Holds != 1 || len(b.InFlight) != 1 || b.InFlight[0].PR != 11 ||
 		b.Happened[0].Done != "twenty is done" || b.Retro == nil || b.Retro.Number != 18 || b.Next == nil || b.Next.Number != 3 {
 		t.Fatalf("%+v", b)
 	}
