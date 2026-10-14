@@ -105,8 +105,11 @@ that needs a file asks the disk I/O module for it in a request.
 
 ## The wiring file
 
-One file names the module instances and binds their ports. It is the only
-place that knows the global layout.
+One file, src/internal/index/wiring.yaml, names the module instances and
+binds their ports. It is the only place that knows the global layout. It sits
+beside the core's package, src/internal/index, because `go:embed` reaches no
+file above the embedding package, so v5's spec/wiring.yaml cannot be
+embedded from there.
 
 | an entry | what it says |
 |---|---|
@@ -221,7 +224,7 @@ holds both once the first module lands.
 
 Each step is its own issue, and SE works after each one.
 
-1. **The core, the fake index and the wiring loader**, hosted in `se serve`, tested with fixture modules. It measures the daemon's cold start and sets its budget. No module moves yet.
+1. **The core, the fake index and the wiring loader**, with src/internal/index/wiring.yaml, hosted in `se serve`, tested with fixture modules. It measures the daemon's cold start and sets its budget. No module moves yet.
 2. **The collector.** The command registry gathers declarations, and the CLI, `/se`, `/se ui`, the help and the manifests render from it. Commands keep their current files and get the declaration shape.
 3. **The session event log** becomes the session I/O module: the bridgehead's posts come in as the `session/<id>/events` family, and it keeps the log file. It is the first real module and the smallest.
 4. **The issue rules** (next, new, land, review and the tree rules in `src/internal/issues`) become compute modules on the GitHub I/O module (#44), and their commands move with them.
