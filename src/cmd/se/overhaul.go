@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/mb-89/SE/src/internal/issues"
 )
@@ -66,7 +65,7 @@ func init() {
 			}
 			text, what := posted, "the report posted on it: apply what the owner said in its comments, if anything, to its block, then run se overhaul file"
 			if posted == "" {
-				ps, err := issues.Principles(c.Workspace)
+				ps, err := issues.Principles(c.Disk, c.Workspace)
 				if err != nil {
 					return Reply{}, err
 				}
@@ -79,7 +78,7 @@ func init() {
 				}
 				what = fmt.Sprintf("its draft: %d principles to judge, %d retros' reports", len(r.Principles), len(r.Retros))
 			}
-			if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			if err := c.Disk.WriteFile(path, []byte(text)); err != nil {
 				return Reply{}, err
 			}
 			if *asJSON {
@@ -107,7 +106,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			data, err := os.ReadFile(draftPath(c, *file, "overhaul", n))
+			data, err := c.Disk.ReadFile(draftPath(c, *file, "overhaul", n))
 			if err != nil {
 				return Reply{}, err
 			}

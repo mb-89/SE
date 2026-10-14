@@ -4,11 +4,11 @@ package daemon
 
 import (
 	"encoding/json"
-	"errors"
-	"os"
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // ProtocolVersion is what the bridgehead and the daemon agree on.
@@ -24,8 +24,11 @@ type Endpoint struct {
 	StartedAt       time.Time `json:"startedAt"`
 }
 
-// Paths names the files a workspace's runtime folder holds.
-type Paths struct{ Workspace string }
+// Paths names the files a workspace's runtime folder holds, and the disk they are on.
+type Paths struct {
+	Workspace string
+	Disk      disk.Disk
+}
 
 func (p Paths) Runtime() string   { return filepath.Join(p.Workspace, ".se", ".runtime") }
 func (p Paths) Endpoint() string  { return filepath.Join(p.Runtime(), "daemon.json") }
@@ -43,41 +46,30 @@ func (p Paths) Bin() string {
 
 // Prepare makes the runtime folder and the file that keeps it out of git.
 func Prepare(p Paths) error {
-	if err := os.MkdirAll(p.Logs(), 0o755); err != nil {
+	if err := p.Disk.MkdirAll(p.Logs()); err != nil {
 		return err
 	}
 	ignore := filepath.Join(p.Runtime(), ".gitignore")
-	if _, err := os.Stat(ignore); errors.Is(err, os.ErrNotExist) {
-		return os.WriteFile(ignore, []byte("*\n"), 0o644)
+	there, err := p.Disk.Exists(ignore)
+	if err != nil || there {
+		return err
 	}
-	return nil
+	return p.Disk.WriteFile(ignore, []byte("*\n"))
 }
 
-// WriteEndpoint publishes daemon.json whole or not at all.
-func WriteEndpoint(path string, ep Endpoint) error {
+// WriteEndpoint publishes the workspace's daemon.json whole or not at all.
+func WriteEndpoint(p Paths, ep Endpoint) error {
 	data, err := json.MarshalIndent(ep, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "daemon-*.json")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return p.Disk.Replace(p.Endpoint(), append(data, '\n'))
 }
 
-// ReadEndpoint reads daemon.json.
-func ReadEndpoint(path string) (Endpoint, error) {
+// ReadEndpoint reads the workspace's daemon.json.
+func ReadEndpoint(p Paths) (Endpoint, error) {
 	var ep Endpoint
-	data, err := os.ReadFile(path)
+	data, err := p.Disk.ReadFile(p.Endpoint())
 	if err != nil {
 		return ep, err
 	}

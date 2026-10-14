@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/rules"
 )
@@ -25,7 +26,7 @@ func init() {
 			if err := c.Parse(c.Flags("rules")); err != nil {
 				return Reply{}, err
 			}
-			repo, err := repoOf(c.Proc, c.Workspace)
+			repo, err := repoOf(c.Disk, c.Proc, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -51,8 +52,8 @@ func init() {
 
 // repoOf is the checkout at root as the rules see it: the files git tracks or
 // would track (ignored ones, like .se/.runtime, are not SE's), the paths it
-// ignores, se's commands and its manifests. It runs git on procs.
-func repoOf(procs proc.Procs, root string) (*rules.Repo, error) {
+// ignores, se's commands and its manifests. It reads on d and runs git on procs.
+func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
 	var out bytes.Buffer
 	if err := procs.Run(proc.Cmd{Name: "git", Args: []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}, Dir: root, Stdout: &out}); err != nil {
 		return nil, fmt.Errorf("git ls-files: %w", err)
@@ -60,6 +61,7 @@ func repoOf(procs proc.Procs, root string) (*rules.Repo, error) {
 	paths := strings.Split(strings.TrimRight(out.String(), "\x00"), "\x00")
 	return &rules.Repo{
 		Root:  root,
+		Disk:  d,
 		Paths: paths,
 		// A folder git ignores by a pattern ending in / matches only as a
 		// folder, which a fresh checkout may not hold: so p/ is asked too.
@@ -72,7 +74,7 @@ func repoOf(procs proc.Procs, root string) (*rules.Repo, error) {
 			return false
 		},
 		Commands: commandFlags(),
-		Manifest: func(name, at string) (string, error) { return manifest(root, paths, name, at) },
+		Manifest: func(name, at string) (string, error) { return manifest(d, root, paths, name, at) },
 	}, nil
 }
 
