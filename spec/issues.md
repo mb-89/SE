@@ -494,6 +494,16 @@ agent's choice:
 - **No cap** on boxes in flight; the owner decided against one. The routine's
   own limit stands: 30 fires an hour. A fire refused for that is reported
   and the box goes on.
+- **A refused fire is kept:** where the routine refuses the fire after a take
+  with 429, `se` keeps it on the claim, in the fleet state it already keeps
+  there: a comment `<!-- se:fanout-retry T -->`, T the time its
+  `Retry-After` names (an hour where it names none). Until T nothing fires: a
+  take says the fan-out waits, and keeps the same mark on its own claim, so
+  the refusal outlives the claim that first kept it. Once T has passed, the
+  next take or `se fleet check` that finds the fleet needs another box (the
+  two cases above) fires it, once, and leaves `<!-- se:fanout-fired -->` on
+  every claim that kept it. A refusal kept only on claims that have since
+  closed is gone; the merge that closed them starts a box anyway.
 - **How it fires:** an HTTP POST of the body `{}` to the URL in
   `SE_ROUTINE_FIRE_URL`, with the headers
   `Authorization: Bearer $SE_ROUTINE_FIRE_TOKEN`,
