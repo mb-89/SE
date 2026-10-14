@@ -545,6 +545,7 @@ func (w *world) configured(want string, live []string, strict bool) {
 }
 
 func TestALiveRulesetAsSpecFleetYamlSaysIsHealthy(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0)})
 	w.configured("check", []string{"check"}, true)
 	if got := w.check(); len(got) != 0 {
@@ -553,6 +554,7 @@ func TestALiveRulesetAsSpecFleetYamlSaysIsHealthy(t *testing.T) {
 }
 
 func TestARulesetThatDriftedFromSpecFleetYamlGoesToAPersonOnce(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0)})
 	w.configured("check", []string{"lint"}, false)
 	f := only(t, w.check(), ConfigDrift, 0)
@@ -576,6 +578,7 @@ func TestARulesetThatDriftedFromSpecFleetYamlGoesToAPersonOnce(t *testing.T) {
 }
 
 func TestAMainWithoutRulesDriftsFromSpecFleetYaml(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t, []string{item(5, 0)})
 	w.configured("check", nil, false)
 	w.set("repos/o/r/rules/branches/main", `[]`)
