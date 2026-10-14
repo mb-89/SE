@@ -349,6 +349,32 @@ func TestIssueNewRefusesAnOpenIssuesTitleUnderTheSameParent(t *testing.T) {
 	}
 }
 
+func TestIssueNewRefusesABodyNamingOpenWorkItDoesNotWaitFor(t *testing.T) {
+	t.Parallel()
+	gh := recordedIssues(t)
+	// #1 and #3 are open se issues, #5 is closed and #9 is no issue: only the
+	// open ones refuse it, each named with both ways out.
+	body := "builds on #3 and #1, after #5 and #9; o/r#2 is another's"
+	code, _, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "t", "--body", body, "--blocked-by", "none")
+	if code != 1 || !strings.Contains(errs, "the body names #1, #3, open se work not on main yet: --blocked-by 1,3 makes the take hold this issue until it merges, or --not-blocked 1,3 says the mention is only a reference") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("a refused issue new wrote %q", w)
+	}
+	// Waiting for one and naming the other a reference creates it.
+	if code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "t", "--body", body, "--blocked-by", "3", "--not-blocked", "#1"); code != 0 || !strings.HasPrefix(out, "Created #11 t\n") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	// Its parent, and what it blocks, it names freely.
+	if code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "u", "--body", "under #1, before #3", "--blocked-by", "none", "--parent", "1", "--blocks", "3"); code != 0 || !strings.HasPrefix(out, "Created #12 u\n") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if code, _, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "v", "--body", "b", "--blocked-by", "none", "--not-blocked", "none"); code != 1 || !strings.Contains(errs, "--not-blocked takes issue numbers") {
+		t.Fatalf("exit %d, %q", code, errs)
+	}
+}
+
 func TestIssueLandNamesThePR(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -377,7 +403,9 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	answers := filepath.Join(root, "answers.yaml")
 	put(t, d, answers, "done: one\ntimeline: two\n")
 	checked := ""
-	// The check records the tree it passed, as tests/check.sh does.
+	// The check writes the stamp naming the tree it passed, as
+	// tests/check.sh does, into the checkout on the real disk, where git
+	// commits it.
 	worldOf(t).Check = func(procs proc.Procs, dir string) error {
 		checked = dir
 		tree, err := battery.Tree(procs, dir)
@@ -922,12 +950,21 @@ func TestATakeoverWritesBackTheLandingAnswersBesideItsWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	comments, _ := json.Marshal([]map[string]any{{"id": 1, "body": posted}})
-	hubAt(t, map[string]string{"repos/o/r/issues/6/comments?per_page=100": string(comments)})
+	hubAt(t, map[string]string{
+		"repos/o/r/issues/6/comments?per_page=100":                         string(comments),
+		"repos/o/r/activity?ref=refs/heads/issue-6&per_page=1":             `[{"timestamp":"2026-01-02T03:04:05Z"}]`,
+		"repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100": `[{"number":90,"html_url":"p90","head":{"ref":"issue-6","sha":"abc"},"base":{"ref":"main"}}]`,
+		"repos/o/r/pulls/90":                            `{"number":90,"html_url":"p90","mergeable":false,"mergeable_state":"dirty","head":{"ref":"issue-6","sha":"abc"},"base":{"ref":"main"}}`,
+		"repos/o/r/commits/abc/check-runs?per_page=100": `{"check_runs":[{"name":"rules","status":"completed","conclusion":"failure"},{"name":"check","status":"in_progress"}]}`,
+		"repos/o/r/compare/main...issue-6?per_page=100": `{"commits":[{"sha":"0123456789ab","commit":{"message":"Merge origin/issue-4 into issue-6"}}]}`,
+		"repos/o/r/issues/4":                            `{"number":4,"state":"closed"}`,
+		"repos/o/r/commits/0123456789ab":                `{"files":[{"filename":"spec/a.md"},{"filename":"src/b.go"}]}`,
+	})
 	ws := filepath.Join(t.TempDir(), "SE")
 	c := &Call{Workspace: ws, World: *worldOf(t)}
 	s := issues.Source{Repo: "o/r", GitHub: c.GitHub, Disk: c.Disk}
 	took := issues.Issue{Number: 6, Title: "six", URL: "u6", Takeover: &issues.Takeover{Count: 1, Stale: "nothing pushed for 3h"}}
-	if err := restoreAnswers(c, s, &took, true); err != nil {
+	if err := readTakeover(c, s, &took, true); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(filepath.Dir(ws), "issue-6-landing.yaml")
@@ -936,16 +973,24 @@ func TestATakeoverWritesBackTheLandingAnswersBesideItsWorktree(t *testing.T) {
 		t.Fatalf("%q %v, takeover %+v", got, err, took.Takeover)
 	}
 	r, err := issueReply(false, false, took, true, "issue-6", "git worktree add …", "", handed{})
+	// The take says where the PR stands, from the REST API, so no box reaches for gh.
+	if err != nil || !strings.Contains(r.Text, "Where it stands: PR #90 is dirty at abc; its checks' last runs: check in_progress, rules failure; last pushed to issue-6 at 2026-01-02T03:04:05Z.") {
+		t.Fatalf("%v\n%s", err, r.Text)
+	}
+	// It names the branch's commits of another closed issue, and says to take main's side of their files.
+	if err != nil || !strings.Contains(r.Text, "Its branch holds 1 commit(s) naming another closed issue, not on main: that work closed in its own form, so where merging main conflicts in their files, take main's side.\n- 01234567 Merge origin/issue-4 into issue-6 (#4 closed): spec/a.md, src/b.go") {
+		t.Fatalf("%v\n%s", err, r.Text)
+	}
 	if err != nil || !strings.Contains(r.Text, "Its landing answers, as its last land posted them, are in "+path+": bring them up to date, and land with --answers "+path+".") {
 		t.Fatalf("%v\n%s", err, r.Text)
 	}
 	r, err = issueReply(true, false, took, true, "issue-6", "", "", handed{})
-	if want, _ := json.Marshal(path); err != nil || !strings.Contains(r.Text, `"answers":`+string(want)) {
+	if want, _ := json.Marshal(path); err != nil || !strings.Contains(r.Text, `"answers":`+string(want)) || !strings.Contains(r.Text, `"mergeable":"dirty"`) {
 		t.Fatalf("%v\n%s", err, r.Text)
 	}
 	// New work restores nothing.
 	fresh := issues.Issue{Number: 7}
-	if err := restoreAnswers(c, s, &fresh, true); err != nil || fresh.Takeover != nil {
+	if err := readTakeover(c, s, &fresh, true); err != nil || fresh.Takeover != nil {
 		t.Fatalf("%v %+v", err, fresh)
 	}
 }

@@ -345,8 +345,9 @@ func (s Source) facts(dir string, n int, comments []comment, base string) (Facts
 			f.SlowestPlugin = append(f.SlowestPlugin, t.String())
 		}
 	}
+	// The commits of the battery's record are no work of the branch's.
 	count := func(args ...string) (int, error) {
-		out, err := s.git(dir, append([]string{"rev-list", "--count"}, args...)...)
+		out, err := s.git(dir, append([]string{"rev-list", "--count", "--invert-grep", "--fixed-strings", "--grep=" + battery.CommitSubject}, args...)...)
 		if err != nil {
 			return 0, err
 		}

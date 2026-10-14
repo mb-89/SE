@@ -19,7 +19,9 @@ func init() {
 		Usage:   "serve [--idle D] [--takeover]",
 		Group:   "Daemon",
 		Summary: "run this workspace's daemon in the foreground",
-		Details: "run this workspace's daemon in the foreground: the debugger's way in.",
+		Details: []string{
+			"run this workspace's daemon in the foreground: the debugger's way in.",
+		},
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("serve")
 			idle := fs.Duration("idle", 30*time.Minute, "end after this long (`D`) without an event; 0 never")

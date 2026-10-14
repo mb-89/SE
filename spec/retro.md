@@ -57,9 +57,17 @@ What earlier versions taught, and how this design answers it:
   a retro and names its agent, `se:retro`) and starts that agent, which files
   the report instead of landing a branch.
 - **The mechanical half,** `se retro collect N`, reads the window from GitHub
-  and writes a report draft beside the checkout (`../retro-N.md`). It holds:
+  and writes a report draft beside the checkout (`../retro-N.md`). Like a
+  take ([spec/issues.md](issues.md)), it and `se retro report` first fetch
+  `main` into the SE checkout se runs from and refuse where main has moved
+  past the commit se was built from, naming `se update`: the block they write
+  is what every later retro reads, so a stale se would count and store the
+  window by rules main has replaced. Where it cannot tell, they go on. It holds:
   - the matrix: every closed issue × every landing question, from the
-    answers' machine-readable blocks; it stays in the draft and is not posted;
+    answers' machine-readable blocks, each answer headed by how its issue
+    closed (by a merged PR, into its manifest's branch, as a duplicate, as
+    fixed by a commit, or as a person's decision); it stays in the draft and
+    is not posted;
   - the [rule checks](#the-rule-checks), each broken one with what broke
     it;
   - **sizes:** the closed issues, the landed ones (those the `answers` check
@@ -113,9 +121,10 @@ What earlier versions taught, and how this design answers it:
   something, and changing a command's interface or a landing question.
 
   `se retro report N` files the judged draft. It refuses, writing nothing, a
-  judgment that is not complete: a finding without a title, a body, a class
-  the classes name, a known home, or a `kind` (access or principle) and a `why`
-  where it is controversial; a
+  judgment that is not complete: a finding without a title, or with one under
+  five words or ending in a comma or a conjunction, without a body, a class
+  the classes name, a known home, or a `kind` (access or principle) and a `why` where it is
+  controversial; a
   class without a fix; an unknown check or metric; nothing that went well.
   **A retro never waits**, whoever started it: `se retro report` creates the
   issues at once, by the rule above, posts the report as the retro's closing
@@ -140,7 +149,15 @@ What earlier versions taught, and how this design answers it:
   - **Did the last retro's fixes help?** For each of its findings: did its
     issue close, did the rule check it named break again, did its metric
     drop. A metric's move counts for a finding only once its issue closed
-    as completed: before its fix is on main, a drop is not the fix's.
+    as completed: before its fix is on main, a drop is not the fix's. An
+    issue that landed into a manifest's branch counts as closed only once
+    that manifest's PR merged to main; until then its state reads "landed
+    into manifest #N, not on main", and its recurrence is not read.
+    Beside a finding its metric scores as recurred, the draft lists what in
+    the window moved that metric (`moved_by`): for `by-hand` each issue and
+    its answer, for a count each issue's share, largest first, so the judge
+    sees whether the class came back or a broad metric rose for other
+    reasons.
   - **Is the retro itself effective?** How many findings became issues, how
     many of those closed, and which findings recurred anyway.
   - **Should the retro change itself?** Proposals for the landing questions

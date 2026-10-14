@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/gitpaths"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
@@ -21,11 +22,12 @@ func init() {
 		Usage:   "rules [--fix]",
 		Group:   "Checks",
 		Summary: "check this checkout against every SE rule",
-		Details: "check every file git tracks or would track against each rule in src/internal/rules, " +
-			"naming each finding by file, line and rule, and how long each rule took. " +
-			"The rules that read prose know se's commands and its manifests. It fails on a finding; tests/check.sh runs it. " +
-			"--fix first applies the mechanical part of each finding where the rule can, such as the fast-test rule's t.Parallel() " +
-			"as a test's first statement, names each file it changed, and then checks.",
+		Details: []string{
+			"check every file git tracks or would track against each rule in src/internal/rules, naming each finding by file, line and rule, and how long each rule took.",
+			"The rules that read prose know se's commands and its manifests.",
+			"It fails on a finding; tests/check.sh runs it.",
+			"--fix first applies the mechanical part of each finding where the rule can, such as the fast-test rule's t.Parallel() as a test's first statement, names each file it changed, and then checks.",
+		},
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("rules")
 			fix := fs.Bool("fix", false, "apply the mechanical part of each finding where the rule can, then check")
@@ -66,14 +68,13 @@ func init() {
 }
 
 // repoOf is the checkout at root as the rules see it: the files git tracks or
-// would track (ignored ones, like .se/.runtime, are not SE's), the paths it
+// would track, each once (ignored ones, like .se/.runtime, are not SE's), the paths it
 // ignores, se's commands and its manifests. It reads on d and runs git on procs.
 func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
-	var out bytes.Buffer
-	if err := procs.Run(proc.Cmd{Name: "git", Args: []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}, Dir: root, Stdout: &out}); err != nil {
-		return nil, fmt.Errorf("git ls-files: %w", err)
+	paths, err := gitpaths.Tracked(procs, root, true)
+	if err != nil {
+		return nil, err
 	}
-	paths := strings.Split(strings.TrimRight(out.String(), "\x00"), "\x00")
 	return &rules.Repo{
 		Root:  root,
 		Disk:  d,

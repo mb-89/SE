@@ -188,8 +188,10 @@ func (s Source) labelManifest(n int) error {
 // into it (never a rebase), runs check, and pushes the result to both
 // branches at once, a fast-forward of the manifest's branch. Where another
 // leaf landed in between, it merges the manifest's branch again and pushes
-// again; the manifest's PR checks the whole. Then it records the worker,
-// posts the landing answers on the leaf and closes it: a leaf gets no PR.
+// again; the manifest's PR checks the whole. Before the push it records the
+// worker, posts the landing answers on the leaf and closes any open PR of the
+// leaf to main, an earlier box's, naming the manifest; then it closes the
+// leaf: a leaf gets no PR.
 func (s Source) landInto(dir string, n, root int, session string, qs []Question, answers map[string]string, check func(dir string) error) (Landing, error) {
 	branch, into := Branch(n), Branch(root)
 	if err := s.takeInto(dir, branch, into); err != nil {
@@ -200,6 +202,18 @@ func (s Source) landInto(dir string, n, root int, session string, qs []Question,
 	}
 	comments, f, err := s.factsOf(dir, n, into)
 	if err != nil {
+		return Landing{}, err
+	}
+	// The answers go on the issue before the push, as Land's do.
+	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
+		return Landing{}, err
+	}
+	if err := s.post(n, comments, qs, Landed{Issue: n, Answers: answers, Facts: f}); err != nil {
+		return Landing{}, err
+	}
+	// An earlier box's PR of the leaf to main would merge it there on its
+	// own, ahead of the manifest, once the push below moves its head.
+	if _, err := s.closePulls(branch, fmt.Sprintf("#%d lands into %s, the branch of manifest #%d, which lands as one PR once its leaves are done.", n, into, root)); err != nil {
 		return Landing{}, err
 	}
 	for k := 0; ; k++ {
@@ -213,12 +227,6 @@ func (s Source) landInto(dir string, n, root int, session string, qs []Question,
 		if err := s.mergeIn(dir, branch, into); err != nil {
 			return Landing{}, err
 		}
-	}
-	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
-		return Landing{}, err
-	}
-	if err := s.post(n, comments, qs, Landed{Issue: n, Answers: answers, Facts: f}); err != nil {
-		return Landing{}, err
 	}
 	if err := s.labelManifest(root); err != nil {
 		return Landing{}, err

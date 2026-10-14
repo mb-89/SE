@@ -129,6 +129,58 @@ func TestAManifestOfThreeLeavesLandsAsOnePR(t *testing.T) {
 	}
 }
 
+// A leaf whose earlier box opened a PR to main lands into its manifest, and
+// that PR closes, its auto-merge off, with a comment naming the manifest: it
+// cannot merge the leaf into main ahead of the manifest.
+func TestALeafLandingIntoItsManifestClosesItsPRToMain(t *testing.T) {
+	t.Parallel()
+	_, a, _ := boxes(t)
+	c := clock.NewFake(landedAt())
+	answers := map[string]string{
+		listPath:      list(node(1, 1), node(2, 0)),
+		subsPath(1):   list(node(2, 0)),
+		refsPath:      `[{"ref":"refs/heads/issue-1"}]`,
+		openPullsPath: `[]`,
+	}
+	for n := 1; n <= 2; n++ {
+		path, at := branchCreated(n, landedAt().Add(-time.Hour))
+		answers[path] = at
+	}
+	gh := recordedAt(t, c, answers)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c, Disk: disk.NewFake()}
+	if took, ok, err := s.Take(a, 0); err != nil || !ok || took.Number != 1 {
+		t.Fatalf("took %+v %v %v", took, ok, err)
+	}
+	run(t, a, "checkout", "-q", "main")
+	if took, ok, _, err := s.TakeIn(a, 1, 2); err != nil || !ok || took.Number != 2 {
+		t.Fatalf("took %+v %v %v", took, ok, err)
+	}
+	// The earlier box of #2 opened PR #50 to main, auto-merge on.
+	seed(t, gh, map[string]string{"repos/o/r/pulls/50": `{"state":"open","head":{"ref":"issue-2"},"base":{"ref":"main"},"auto_merge":{"merge_method":"squash"}}`})
+	wt := filepath.Join(filepath.Dir(a), Branch(2))
+	run(t, a, "worktree", "add", "-q", "--track", "-b", Branch(2), wt, "origin/"+Branch(2))
+	if err := os.WriteFile(filepath.Join(wt, "leaf2"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, wt, "add", ".")
+	run(t, wt, "commit", "-q", "-m", "work on 2")
+	l, err := s.Land(wt, "", qs, full, passes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Landing{Issue: 2, Manifest: 1, Into: "issue-1", Closed: true}); l != want {
+		t.Fatalf("landed %+v, want %+v", l, want)
+	}
+	pr := pullOf(t, gh, 50)
+	if pr["state"] != "closed" || pr["auto_merge"] != nil {
+		t.Fatalf("PR #50 is %+v", pr)
+	}
+	said := commentsAt(t, gh, 50)
+	if len(said) != 1 || !strings.Contains(said[0].Body, "manifest #1") || !strings.Contains(said[0].Body, "issue-1") {
+		t.Fatalf("PR #50 says %+v", said)
+	}
+}
+
 // A manifest whose leaves landed nothing closes with no PR.
 func TestAnEmptyManifestClosesWithNoPR(t *testing.T) {
 	t.Parallel()

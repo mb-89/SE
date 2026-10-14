@@ -15,7 +15,11 @@ func init() {
 		Usage:   "issue edit N [--title T] [--body B | --body-file PATH] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "rewrite se issue N's title and body, keeping its mark",
-		Details: "rewrite se issue N through the same code as se issue new, never by hand: --title T replaces its title (an empty one, or one an open se issue under N's parent has already, is refused); --body B or --body-file PATH replaces its body, which still ends in se issue new's mark, <!-- se:new -->, and keeps each se block of the old body (a line holding <!-- se:KIND -->, such as the skills line or a retro's mark) whose kind the new body does not carry itself. With neither, it writes the body again as it stands, its mark put back. A pull request, or an issue not labelled se, is refused.",
+		Details: []string{
+			"rewrite se issue N through the same code as se issue new, never by hand: --title T replaces its title (an empty one, or one an open se issue under N's parent has already, is refused); --body B or --body-file PATH replaces its body, which still ends in se issue new's mark, <!-- se:new -->, and keeps each se block of the old body (a line holding <!-- se:KIND -->, such as the skills line or a retro's mark) whose kind the new body does not carry itself.",
+			"With neither, it writes the body again as it stands, its mark put back.",
+			"A pull request, or an issue not labelled se, is refused.",
+		},
 		Session: true,
 		Class:   batch,
 		Run: func(c *Call) (Reply, error) {
