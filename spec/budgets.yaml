@@ -46,6 +46,7 @@ command_classes:
   fleet prune: github
   fleet refresh: github
   fleet rules: battery
+  fmt: build
   guidance: local
   help: instant
   hook prompt: local
