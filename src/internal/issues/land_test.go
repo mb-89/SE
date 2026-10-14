@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 
 	"github.com/mb-89/SE/src/internal/battery"
@@ -23,10 +23,10 @@ import (
 const (
 	pullsPath = "repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100"
 	pr14      = `{"number":14,"node_id":"PR_14","html_url":"https://github.com/o/r/pull/14"}`
+	clean14   = `{"number":14,"node_id":"PR_14","html_url":"https://github.com/o/r/pull/14","mergeable_state":"clean"}`
 	issue6    = "repos/o/r/issues/6"
 	leaf6     = `{"number":6,"title":"the work","sub_issues_summary":{"total":0,"completed":0}}`
 	comments6 = "repos/o/r/issues/6/comments?per_page=100"
-	post6     = "repos/o/r/issues/6/comments"
 	created6  = "repos/o/r/activity?ref=refs/heads/issue-6&activity_type=branch_creation&per_page=100"
 )
 
@@ -36,31 +36,29 @@ var (
 	full = map[string]string{"done": "the landing", "left": "nothing"}
 )
 
-// landGH answers land's gh calls by path, fails those in fail, and keeps
-// every call it was asked.
-func landGH(t *testing.T, answers map[string]string, fail map[string]string) (GH, *[][]string) {
+// landGH is a fake GitHub holding leaf #6, claimed at 10:00, and answers.
+func landGH(t *testing.T, answers map[string]string) *github.Fake {
 	t.Helper()
-	for path, a := range map[string]string{issue6: leaf6, comments6: `[]`, post6: `{}`, created6: `[{"timestamp":"2026-01-02T10:00:00Z"}]`} {
+	for path, a := range map[string]string{issue6: leaf6, comments6: `[]`, created6: `[{"timestamp":"2026-01-02T10:00:00Z"}]`} {
 		if _, ok := answers[path]; !ok {
 			answers[path] = a
 		}
 	}
-	var calls [][]string
-	var mu sync.Mutex
-	return func(args ...string) ([]byte, error) {
-		mu.Lock()
-		calls = append(calls, args)
-		mu.Unlock()
-		path := args[len(args)-1]
-		if msg, ok := fail[path]; ok {
-			return nil, errors.New(msg)
-		}
-		a, ok := answers[path]
-		if !ok {
-			t.Fatalf("gh %v was not recorded", args)
-		}
-		return []byte(a), nil
-	}, &calls
+	return recorded(t, answers)
+}
+
+// pullOf reads PR n back from the fake GitHub.
+func pullOf(t *testing.T, gh github.GitHub, n int) map[string]any {
+	t.Helper()
+	out, err := gh.Get(fmt.Sprintf("repos/o/r/pulls/%d", n))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p map[string]any
+	if err := json.Unmarshal(out, &p); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // claimed is box a on issue-6, claimed from origin's main, with one commit of work.
@@ -81,16 +79,13 @@ func landedAt() time.Time { return time.Date(2026, 1, 2, 11, 30, 0, 0, time.UTC)
 
 func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	origin, a := claimed(t)
-	gh, calls := landGH(t, map[string]string{
-		pullsPath:         `[]`,
-		"repos/o/r/pulls": pr14,
-		"graphql":         `{"data":{}}`,
-	}, nil)
-	l, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}.Land(a, "", qs, full, passes)
+	gh := landGH(t, map[string]string{pullsPath: `[]`})
+	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}.Land(a, "", qs, full, passes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (Landing{Issue: 6, Number: 14, URL: "https://github.com/o/r/pull/14", Created: true}); l != want {
+	// The PR is the repository's next number, after #6.
+	if want := (Landing{Issue: 6, Number: 7, URL: "https://github.com/o/r/pull/7", Created: true}); l != want {
 		t.Fatalf("%+v", l)
 	}
 	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
@@ -102,17 +97,17 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := [][]string{
-		{"api", "repos/o/r/issues/6"},
-		{"api", "--paginate", comments6},
-		{"api", created6},
-		{"api", "-X", "POST", "-f", "body=" + body, post6},
-		{"api", "--paginate", pullsPath},
-		{"api", "-X", "POST", "-f", "title=the work", "-f", "head=issue-6", "-f", "base=main", "-f", "body=Fixes #6", "repos/o/r/pulls"},
-		{"api", "-f", "query=" + autoMerge, "-f", "id=PR_14", "graphql"},
+	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body {
+		t.Fatalf("the landing comment is %+v, want\n%s", got, body)
 	}
-	if !reflect.DeepEqual(*calls, want) {
-		t.Fatalf("gh calls\n%q\nwant\n%q", *calls, want)
+	want := []string{"POST repos/o/r/issues/6/comments", "POST repos/o/r/pulls", "POST graphql"}
+	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
+		t.Fatalf("writes\n%q\nwant\n%q", w, want)
+	}
+	pr := pullOf(t, gh, 7)
+	if pr["title"] != "the work" || pr["body"] != "Fixes #6" || pr["head"].(map[string]any)["ref"] != "issue-6" || pr["base"].(map[string]any)["ref"] != "main" ||
+		pr["auto_merge"].(map[string]any)["merge_method"] != "squash" {
+		t.Fatalf("the PR is %+v", pr)
 	}
 	if !strings.Contains(autoMerge, "mergeMethod: SQUASH") {
 		t.Fatal(autoMerge)
@@ -145,23 +140,13 @@ var profile = battery.Profile{
 func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 	_, a := claimed(t)
 	d := disk.NewFake()
-	gh, calls := landGH(t, map[string]string{
-		pullsPath:         `[]`,
-		"repos/o/r/pulls": pr14,
-		"graphql":         `{"data":{}}`,
-	}, nil)
-	if _, err := (Source{Proc: machine, Repo: repo, GH: gh, Clock: clock.NewFake(landedAt()), Disk: d}).Land(a, "", qs, full, profiles(t, d, profile)); err != nil {
+	gh := landGH(t, map[string]string{pullsPath: `[]`})
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}).Land(a, "", qs, full, profiles(t, d, profile)); err != nil {
 		t.Fatal(err)
 	}
-	var opened, posted string
-	for _, c := range *calls {
-		switch c[len(c)-1] {
-		case "repos/o/r/pulls":
-			opened = c[len(c)-2]
-		case post6:
-			posted = c[len(c)-2]
-		}
-	}
+	opened, _ := pullOf(t, gh, 7)["body"].(string)
+	opened = "body=" + opened
+	posted := "body=" + commentsAt(t, gh, 6)[0].Body
 	if want := "body=Fixes #6\n\n" + profile.Markdown(); opened != want {
 		t.Errorf("the PR body is\n%s\nwant\n%s", opened, want)
 	}
@@ -186,74 +171,65 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 func TestLandAgainUpdatesTheOpenPRsProfile(t *testing.T) {
 	_, a := claimed(t)
 	d := disk.NewFake()
-	gh, calls := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`, "repos/o/r/pulls/14": pr14, "graphql": `{"data":{}}`}, nil)
-	if _, err := (Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, profiles(t, d, profile)); err != nil {
+	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, profiles(t, d, profile)); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"api", "-X", "PATCH", "-f", "body=Fixes #6\n\n" + profile.Markdown(), "repos/o/r/pulls/14"}
-	for _, c := range *calls {
-		if reflect.DeepEqual(c, want) {
-			return
-		}
+	if body := pullOf(t, gh, 14)["body"]; body != "Fixes #6\n\n"+profile.Markdown() {
+		t.Fatalf("the open PR's body was not updated: %q", body)
 	}
-	t.Fatalf("the open PR's body was not updated: %q", *calls)
 }
 
 func TestLandAgainPushesAndReportsTheOpenPR(t *testing.T) {
 	origin, a := claimed(t)
 	run(t, a, "push", "-q", "origin", "HEAD:issue-6")
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "fix ci")
-	gh, calls := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`, "graphql": `{"data":{}}`}, nil)
-	l, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, passes)
+	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
+	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, passes)
 	if err != nil || l.Created || l.Number != 14 {
 		t.Fatalf("%+v %v", l, err)
 	}
 	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
 		t.Fatalf("origin's issue-6 is %s, want %s", got, want)
 	}
-	for _, c := range *calls {
-		if c[len(c)-1] == "repos/o/r/pulls" {
-			t.Fatalf("opened a second PR: %v", c)
+	for _, w := range gh.Writes() {
+		if w == "POST repos/o/r/pulls" {
+			t.Fatalf("opened a second PR: %q", gh.Writes())
 		}
 	}
 }
 
 func TestLandMergesAPRWithNothingToWaitFor(t *testing.T) {
 	_, a := claimed(t)
-	gh, calls := landGH(t, map[string]string{
-		pullsPath:                  `[` + pr14 + `]`,
-		"repos/o/r/pulls/14/merge": `{"merged":true}`,
-	}, map[string]string{"graphql": "gh: Pull request Pull request is in clean status (enablePullRequestAutoMerge)"})
-	l, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, passes)
+	// No check is pending on #14: GitHub calls it clean.
+	gh := landGH(t, map[string]string{pullsPath: `[` + clean14 + `]`})
+	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, passes)
 	if err != nil || !l.Merged {
 		t.Fatalf("%+v %v", l, err)
 	}
-	last := (*calls)[len(*calls)-1]
-	if want := []string{"api", "-X", "PUT", "-f", "merge_method=squash", "repos/o/r/pulls/14/merge"}; !reflect.DeepEqual(last, want) {
-		t.Fatalf("%q", last)
+	if pr := pullOf(t, gh, 14); pr["merged"] != true || pr["state"] != "closed" {
+		t.Fatalf("%+v", pr)
 	}
 }
 
 func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 	_, a := claimed(t)
-	gh, calls := landGH(t, map[string]string{
-		pullsPath:                           `[` + pr14 + `]`,
-		"repos/o/r/pulls/14/ccr/auto_merge": `{"enabled":true,"merge_method":"squash"}`,
-	}, map[string]string{"graphql": "gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (HTTP 403)"})
-	l, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, passes)
+	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
+	gh.Proxy = true
+	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, passes)
 	if err != nil || l.Merged || l.Number != 14 {
 		t.Fatalf("%+v %v", l, err)
 	}
-	last := (*calls)[len(*calls)-1]
-	if want := []string{"api", "-X", "PUT", "-f", "merge_method=squash", "repos/o/r/pulls/14/ccr/auto_merge"}; !reflect.DeepEqual(last, want) {
-		t.Fatalf("%q", last)
+	if w := gh.Writes(); w[len(w)-1] != "PUT repos/o/r/pulls/14/ccr/auto_merge" || pullOf(t, gh, 14)["auto_merge"] == nil {
+		t.Fatalf("%q", w)
 	}
 }
 
 func TestLandSaysWhenAutoMergeFails(t *testing.T) {
 	_, a := claimed(t)
-	gh, _ := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`}, map[string]string{"graphql": "gh: auto-merge is not allowed"})
-	if _, err := (Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow(), Disk: disk.NewFake()}).Land(a, "", qs, full, passes); err == nil || !strings.Contains(err.Error(), "PR #14") || !strings.Contains(err.Error(), "auto-merge is not on") {
+	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
+	gh.NoAutoMerge = true
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}).Land(a, "", qs, full, passes); err == nil || !strings.Contains(err.Error(), "PR #14") || !strings.Contains(err.Error(), "auto-merge is not on") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -282,21 +258,13 @@ func (w *checkout) git(c proc.Cmd) int {
 
 func TestLandRefusesBeforePushing(t *testing.T) {
 	t.Parallel()
-	// It reads the issue, and nothing else.
-	never := func(t *testing.T) GH {
-		return func(args ...string) ([]byte, error) {
-			if reflect.DeepEqual(args, []string{"api", issue6}) {
-				return []byte(leaf6), nil
-			}
-			t.Fatalf("gh %v after a refusal", args)
-			return nil, nil
-		}
-	}
+	// It reads the issue, and writes nothing.
+	gh := landGH(t, map[string]string{})
 	w := &checkout{branch: "issue-6"}
 	m := proc.NewFake()
 	m.Install("git", w.git)
 	land := func(check func(string) error) error {
-		_, err := Source{Proc: m, Repo: repo, GH: never(t), Clock: atNow(), Disk: disk.NewFake()}.Land("/a", "", qs, full, check)
+		_, err := Source{Proc: m, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land("/a", "", qs, full, check)
 		return err
 	}
 	fails := func(string) error { return errors.New("go test: FAIL") }
@@ -317,18 +285,21 @@ func TestLandRefusesBeforePushing(t *testing.T) {
 			t.Fatalf("a refused land pushed: %s", line)
 		}
 	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("a refused land wrote %q", w)
+	}
 }
 
 func TestLandRefusesAParent(t *testing.T) {
 	origin, a := claimed(t)
-	gh, calls := landGH(t, map[string]string{issue6: `{"number":6,"title":"the tree","sub_issues_summary":{"total":2,"completed":1}}`}, nil)
+	gh := landGH(t, map[string]string{issue6: `{"number":6,"title":"the tree","sub_issues_summary":{"total":2,"completed":1}}`})
 	checked := false
-	_, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
+	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
 	if err == nil || !strings.Contains(err.Error(), "a parent holds no work") || checked {
 		t.Fatalf("%v, checked %v", err, checked)
 	}
-	if len(*calls) != 1 {
-		t.Fatalf("%q", *calls)
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("%q", w)
 	}
 	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, origin, "rev-parse", "main"); got != want {
 		t.Fatalf("a refused land moved issue-6 to %s", got)
@@ -373,7 +344,7 @@ func TestLandMergesTheBranchAndMainInBeforeTheCheck(t *testing.T) {
 	run(t, b, "checkout", "-q", "main")
 	commitFile(t, b, "rule", "b")
 	run(t, b, "push", "-q", "origin", "main")
-	gh, _ := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`, "graphql": `{"data":{}}`}, nil)
+	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
 	var saw []string
 	check := func(dir string) error {
 		for _, f := range []string{"work", "fix", "refreshed", "rule"} {
@@ -383,7 +354,7 @@ func TestLandMergesTheBranchAndMainInBeforeTheCheck(t *testing.T) {
 		}
 		return nil
 	}
-	if _, err := (Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow(), Disk: disk.NewFake()}).Land(a, "", qs, full, check); err != nil {
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}).Land(a, "", qs, full, check); err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"work", "fix", "refreshed", "rule"}; !reflect.DeepEqual(saw, want) {
@@ -400,9 +371,9 @@ func TestLandStopsWhereMainConflicts(t *testing.T) {
 	commitFile(t, b, "work", "b")
 	run(t, b, "push", "-q", "origin", "main")
 	head := run(t, a, "rev-parse", "HEAD")
-	gh, _ := landGH(t, map[string]string{}, nil)
+	gh := landGH(t, map[string]string{})
 	checked := false
-	_, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
+	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
 	if err == nil || !strings.Contains(err.Error(), "merging origin/main into issue-6 conflicts") || checked {
 		t.Fatalf("%v, checked %v", err, checked)
 	}

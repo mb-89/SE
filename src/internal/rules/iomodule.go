@@ -34,7 +34,7 @@ var (
 func init() {
 	register(Rule{
 		Name: "io-module",
-		Doc: "outside src/internal/io, no Go file imports os/exec or net/http, reads the clock, sleeps or waits through time, " +
+		Doc: "outside src/internal/io, no Go file imports os/exec or net/http, runs gh, reads the clock, sleeps or waits through time, " +
 			"or opens, reads or writes files through os, except as " + Allowlist + " names; an entry there that matches nothing is refused",
 		Applies: func(p string) bool {
 			return p == Allowlist || (path.Ext(p) == ".go" && !strings.HasSuffix(p, "_test.go") && !strings.HasPrefix(p, "src/internal/io/"))
@@ -120,6 +120,28 @@ func entriesOf(text []byte) []entry {
 	return out
 }
 
+// runsGh says whether call is exec.Command("gh", …), or its CommandContext:
+// GitHub, which only its I/O module reaches.
+func runsGh(call *ast.CallExpr, execName string) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	if id, ok := sel.X.(*ast.Ident); !ok || id.Name != execName {
+		return false
+	}
+	at, ok := map[string]int{"Command": 0, "CommandContext": 1}[sel.Sel.Name]
+	if !ok || len(call.Args) <= at {
+		return false
+	}
+	lit, ok := call.Args[at].(*ast.BasicLit)
+	if !ok {
+		return false
+	}
+	name, err := strconv.Unquote(lit.Value)
+	return err == nil && name == "gh"
+}
+
 // Reach is one way a Go file reaches the outside: an import path, such as
 // os/exec, or a call, such as time.Now, and the first line it is on.
 type Reach struct {
@@ -142,11 +164,18 @@ func Reaches(p string, text []byte) []Reach {
 		}
 	}
 	local := map[string]string{} // the name a package goes by in the file, to its path
+	execName := ""               // the name os/exec goes by in the file
 	for _, im := range f.Imports {
 		ip, _ := strconv.Unquote(im.Path.Value)
 		for _, o := range outsideImports {
 			if ip == o {
 				note(ip, im.Pos())
+			}
+		}
+		if ip == "os/exec" {
+			execName = "exec"
+			if im.Name != nil {
+				execName = im.Name.Name
 			}
 		}
 		if _, ok := outsideCalls[ip]; ok {
@@ -158,6 +187,9 @@ func Reaches(p string, text []byte) []Reach {
 		}
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok && execName != "" && runsGh(call, execName) {
+			note("gh", call.Pos())
+		}
 		sel, ok := n.(*ast.SelectorExpr)
 		if !ok {
 			return true

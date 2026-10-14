@@ -12,6 +12,8 @@ import (
 	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"gopkg.in/yaml.v3"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // QuestionsFile is where the landing questions are written, relative to the
@@ -275,14 +277,14 @@ func (s Source) postLanding(dir string, n int, qs []Question, answers map[string
 	}
 	for _, c := range comments {
 		if strings.Contains(c.Body, landingMark) {
-			_, err := s.GH("api", "-X", "PATCH", "-f", "body="+body, fmt.Sprintf("repos/%s/issues/comments/%d", s.Repo, c.ID))
+			_, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/issues/comments/%d", s.Repo, c.ID), github.F("body", body))
 			if err != nil {
 				return fmt.Errorf("updating #%d's landing answers: %w", n, err)
 			}
 			return nil
 		}
 	}
-	if _, err := s.GH("api", "-X", "POST", "-f", "body="+body, fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, n)); err != nil {
+	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, n), github.F("body", body)); err != nil {
 		return fmt.Errorf("posting #%d's landing answers: %w", n, err)
 	}
 	return nil

@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // noon is the recorded fleet's clock: pushes at 11:30 are recent, at 9:00 quiet.
@@ -19,18 +20,28 @@ const (
 	quiet  = "2026-10-13T09:00:00Z"
 )
 
-// world is a recorded repository o/r for se fleet check. Every open issue's
-// "blocked by" links are recorded as none unless a test sets them; comments
-// are kept per issue, so a record is written and read back, and every write
-// is kept.
+// world is a fake repository o/r for se fleet check, seeded from recorded
+// answers. Every open issue is blocked by nothing unless a test links it,
+// and its last issue is #100, so what se fleet fix reports is #101 on.
 type world struct {
-	// mu takes calls from several goroutines one at a time.
-	mu       sync.Mutex
-	t        *testing.T
-	answers  map[string]string
-	comments map[int][]comment
-	writes   [][]string
-	made     int
+	t *testing.T
+	*github.Fake
+}
+
+// set records one answer more.
+func (w *world) set(path, answer string) {
+	w.t.Helper()
+	seed(w.t, w.Fake, map[string]string{path: answer})
+}
+
+// said sets issue n's comments to the one body, made at at.
+func (w *world) said(n int, body string, at time.Time) {
+	w.t.Helper()
+	data, err := json.Marshal([]comment{{ID: 1, Body: body, Created: at}})
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	w.set(fmt.Sprintf("repos/o/r/issues/%d/comments", n), string(data))
 }
 
 // item is one issue as GitHub lists it: its labels after se, and how many
@@ -54,34 +65,27 @@ func dep(n int, state, reason string, se bool) string {
 
 func newWorld(t *testing.T, items []string, claimed ...int) *world {
 	t.Helper()
-	w := &world{t: t, comments: map[int][]comment{}, made: 100, answers: map[string]string{
-		listPath:      "[" + strings.Join(items, ",") + "]",
-		openPullsPath: `[]`,
-	}}
+	w := &world{t: t, Fake: recorded(t, map[string]string{
+		listPath:               "[" + strings.Join(items, ",") + "]",
+		"repos/o/r/issues/100": `{"number":100,"state":"closed"}`,
+	})}
 	var refs []string
 	for _, n := range claimed {
 		refs = append(refs, fmt.Sprintf(`{"ref":"refs/heads/issue-%d","object":{"sha":"c%d"}}`, n, n))
 		w.ahead(n, 1)
 	}
-	w.answers[refsPath] = "[" + strings.Join(refs, ",") + "]"
-	for _, it := range items {
-		var i issue
-		if err := json.Unmarshal([]byte(it), &i); err != nil {
-			t.Fatal(err)
-		}
-		w.answers[links(i.Number)] = `[]`
-	}
+	w.set(refsPath, "["+strings.Join(refs, ",")+"]")
 	return w
 }
 
 // ahead records how many commits issue-n's branch has that main lacks.
 func (w *world) ahead(n, by int) {
-	w.answers[fmt.Sprintf("repos/o/r/compare/main...c%d?per_page=1", n)] = fmt.Sprintf(`{"ahead_by":%d}`, by)
+	w.set(fmt.Sprintf("repos/o/r/compare/main...c%d?per_page=1", n), fmt.Sprintf(`{"ahead_by":%d}`, by))
 }
 
 // pushed records the last push to issue-n's branch.
 func (w *world) pushed(n int, at string) {
-	w.answers[fmt.Sprintf("repos/o/r/activity?ref=refs/heads/issue-%d&per_page=1", n)] = fmt.Sprintf(`[{"timestamp":%q,"activity_type":"push"}]`, at)
+	w.set(fmt.Sprintf("repos/o/r/activity?ref=refs/heads/issue-%d&per_page=1", n), fmt.Sprintf(`[{"timestamp":%q,"activity_type":"push"}]`, at))
 }
 
 // pr records issue-n's open PR n*10 at head e<n>: whether it merges, its
@@ -93,8 +97,7 @@ func (w *world) pr(n int, mergeable, state string, autoMerge bool, runs ...strin
 	}
 	p := fmt.Sprintf(`{"number":%d,"html_url":"p%d","node_id":"N%d","mergeable":%s,"mergeable_state":%q,"auto_merge":%s,"head":{"ref":"issue-%d","sha":"e%d"},"base":{"ref":"main"}}`,
 		n*10, n*10, n*10, mergeable, state, am, n, n)
-	w.answers[openPullsPath] = "[" + p + "]"
-	w.answers[fmt.Sprintf("repos/o/r/pulls/%d", n*10)] = p
+	w.set(openPullsPath, "["+p+"]")
 	var rs []string
 	for _, r := range runs {
 		name, conclusion, _ := strings.Cut(r, ":")
@@ -104,56 +107,27 @@ func (w *world) pr(n int, mergeable, state string, autoMerge bool, runs ...strin
 		}
 		rs = append(rs, fmt.Sprintf(`{"name":%q,"status":%q,"conclusion":%q}`, name, status, conclusion))
 	}
-	w.answers[fmt.Sprintf("repos/o/r/commits/e%d/check-runs?per_page=100", n)] = `{"check_runs":[` + strings.Join(rs, ",") + `]}`
+	w.set(fmt.Sprintf("repos/o/r/commits/e%d/check-runs?per_page=100", n), `{"check_runs":[`+strings.Join(rs, ",")+`]}`)
 }
 
 // closedPRs records issue-n's closed PRs.
 func (w *world) closedPRs(n int, prs string) {
-	w.answers[fmt.Sprintf("repos/o/r/pulls?head=o:issue-%d&base=main&state=closed&per_page=100", n)] = prs
+	w.set(fmt.Sprintf("repos/o/r/pulls?head=o:issue-%d&base=main&state=closed&per_page=100", n), prs)
 }
 
-func (w *world) gh(args ...string) ([]byte, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	path := args[len(args)-1]
-	if args[1] == "-X" || args[1] == "-f" {
-		w.writes = append(w.writes, args)
-		switch {
-		case path == "repos/o/r/issues":
-			w.made++
-			return []byte(fmt.Sprintf(`{"id":%d,"number":%d,"html_url":"u%d"}`, w.made, w.made, w.made)), nil
-		case numbered(path, "repos/o/r/issues/%d/comments") > 0:
-			n := numbered(path, "repos/o/r/issues/%d/comments")
-			c := comment{ID: int64(1000 + len(w.writes)), Body: strings.TrimPrefix(args[4], "body="), Created: noon}
-			w.comments[n] = append(w.comments[n], c)
-			return json.Marshal(c)
-		}
-		return []byte(`{}`), nil
+// get reads path from the fake GitHub, as text.
+func get(t *testing.T, gh github.GitHub, path string) string {
+	t.Helper()
+	out, err := gh.Get(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if n := numbered(path, "repos/o/r/issues/%d/comments?per_page=100"); n > 0 {
-		return json.Marshal(append([]comment{}, w.comments[n]...))
-	}
-	a, ok := w.answers[path]
-	if !ok {
-		w.t.Errorf("gh %v was not recorded", args)
-		return nil, fmt.Errorf("gh %v was not recorded", args)
-	}
-	return []byte(a), nil
-}
-
-// numbered is the issue number in path, made by format; 0 where format does
-// not make path.
-func numbered(path, format string) int {
-	var n int
-	if _, err := fmt.Sscanf(path, format, &n); err != nil || fmt.Sprintf(format, n) != path {
-		return 0
-	}
-	return n
+	return string(out)
 }
 
 func (w *world) check() []Finding {
 	w.t.Helper()
-	got, err := Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}.Check()
+	got, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Check()
 	if err != nil {
 		w.t.Fatal(err)
 	}
@@ -174,7 +148,7 @@ func TestAFleetWithNothingBrokenIsHealthy(t *testing.T) {
 	// #5 is ready, #6 waits on #5, #7 is claimed and its PR is green, mergeable,
 	// with auto-merge on and a push half an hour ago.
 	w := newWorld(t, []string{item(5, 0), item(6, 0), item(7, 0)}, 7)
-	w.answers[links(6)] = "[" + dep(5, "open", "", true) + "]"
+	w.set(links(6), "["+dep(5, "open", "", true)+"]")
 	w.pushed(7, recent)
 	w.pr(7, "true", "clean", true, "check:success")
 	if got := w.check(); len(got) != 0 {
@@ -185,8 +159,8 @@ func TestAFleetWithNothingBrokenIsHealthy(t *testing.T) {
 	if got := w.check(); len(got) != 0 {
 		t.Fatalf("%+v", got)
 	}
-	w.answers[openPullsPath] = `[]`
-	w.closedPRs(7, `[]`)
+	w = newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
+	w.pushed(7, recent)
 	if got := w.check(); len(got) != 0 {
 		t.Fatalf("%+v", got)
 	}
@@ -202,11 +176,11 @@ func TestAConflictedPRIsFoundAndTakenOver(t *testing.T) {
 	}
 	// A takeover in flight at this head is left to its box; one an hour old
 	// at the same head is stuck again.
-	w.comments[7] = []comment{{ID: 1, Body: "<!-- se:takeover 1 -->\n<!-- se:takeover-head e7 -->", Created: noon.Add(-10 * time.Minute)}}
+	w.said(7, "<!-- se:takeover 1 -->\n<!-- se:takeover-head e7 -->", noon.Add(-10*time.Minute))
 	if got := w.check(); len(got) != 0 {
 		t.Fatalf("%+v", got)
 	}
-	w.comments[7][0].Created = noon.Add(-2 * time.Hour)
+	w.said(7, "<!-- se:takeover 1 -->\n<!-- se:takeover-head e7 -->", noon.Add(-2*time.Hour))
 	only(t, w.check(), ConflictedPR, 7)
 }
 
@@ -260,7 +234,7 @@ func TestAClaimWithNoPRIsFoundOnceItIsQuiet(t *testing.T) {
 
 func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	w := newWorld(t, []string{item(5, 0)}, 19)
-	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-13T11:00:00Z"}`
+	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-13T11:00:00Z"}`)
 	f := only(t, w.check(), LeftoverClaim, 19)
 	if f.What != "issue-19 claims #19, which is closed (not planned)" ||
 		f.Remedy != "the prune workflow deletes issue-19; se fleet fix reports it only if it is still there a day after #19 closed" {
@@ -268,20 +242,20 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	}
 	// Within a day of the close, se fleet fix leaves it to the prune
 	// workflow and writes nothing.
-	s := Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
 	done := s.Fix(t.TempDir(), []Finding{f})
-	if done[0].Did != "left to the prune workflow until a day after #19 closed" || len(w.writes) != 0 {
-		t.Fatalf("%+v, writes %q", done, w.writes)
+	if done[0].Did != "left to the prune workflow until a day after #19 closed" || len(w.Writes()) != 0 {
+		t.Fatalf("%+v, writes %q", done, w.Writes())
 	}
 	// A day later the workflow failed: it becomes an se issue.
-	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-12T11:00:00Z"}`
+	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-12T11:00:00Z"}`)
 	done = s.Fix(t.TempDir(), w.check())
 	if done[0].Did != "reported it as #101" || !done[0].Ready ||
 		done[0].What != "issue-19 claims #19, which is closed (not planned), and is still there a day after it closed: the prune workflow did not delete it" {
 		t.Fatalf("%+v", done)
 	}
 	// With an open PR, the workflow leaves it, so se fleet fix reports it.
-	w.answers[allPullsPath] = `[{"number":90,"head":{"ref":"issue-19","sha":"c19"}}]`
+	w.set(allPullsPath, `[{"number":90,"head":{"ref":"issue-19","sha":"c19"}}]`)
 	if f := only(t, w.check(), LeftoverClaim, 19); f.Remedy != "se fleet fix reports it as an se issue" {
 		t.Fatalf("%+v", f)
 	}
@@ -289,7 +263,7 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 
 func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 	w := newWorld(t, []string{item(5, 0)}, 19)
-	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"open"}`
+	w.set("repos/o/r/issues/19", `{"number":19,"state":"open"}`)
 	w.ahead(19, 0)
 	f := only(t, w.check(), LeftoverClaim, 19)
 	if f.What != "issue-19 claims #19, which is not labelled se, and main holds all its commits" || f.Remedy != "se fleet fix deletes issue-19: main holds all its commits" {
@@ -299,28 +273,28 @@ func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 	// which the boxes' proxy refuses.
 	origin, a, _ := boxes(t)
 	run(t, a, "push", "-q", "origin", "main:issue-19")
-	done := Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}.Fix(a, []Finding{f})
+	done := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Fix(a, []Finding{f})
 	if done[0].Did != "deleted issue-19 at c19, which main holds whole" || done[0].Made != 0 || done[0].Failed != "" {
 		t.Fatalf("%+v", done)
 	}
 	if got := run(t, origin, "branch", "--list", "issue-19"); got != "" {
 		t.Fatalf("origin still has %q", got)
 	}
-	if len(w.writes) != 1 || wrote(w, "DELETE repos/o/r/git/refs/heads/issue-19") {
-		t.Fatalf("writes %q", w.writes)
+	if got := w.Writes(); !reflect.DeepEqual(got, []string{"POST repos/o/r/issues/19/comments"}) {
+		t.Fatalf("writes %q", got)
 	}
-	if len(w.comments[19]) != 1 || !strings.Contains(w.comments[19][0].Body, "<!-- se:fleet leftover-branch 0 -->") {
-		t.Fatalf("#19 has no record: %+v", w.comments[19])
+	if c := commentsAt(t, w, 19); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:fleet leftover-branch 0 -->") {
+		t.Fatalf("#19 has no record: %+v", c)
 	}
 }
 
 func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
 	w := newWorld(t, []string{item(5, 0), item(8, 0)}, 19)
-	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"open"}`
+	w.set("repos/o/r/issues/19", `{"number":19,"state":"open"}`)
 	w.ahead(19, 0)
-	w.answers[links(8)] = "[" + dep(3, "closed", "not_planned", true) + "]"
+	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
 	// The workspace is no checkout, so the push that deletes issue-19 fails.
-	done := Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}.Fix(t.TempDir(), w.check())
+	done := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Fix(t.TempDir(), w.check())
 	var dids []string
 	for _, d := range done {
 		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
@@ -329,18 +303,18 @@ func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
 		dids[1] != "impossible block #8: reported it as #101" || done[1].Failed != "" {
 		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
 	}
-	if len(w.comments[19]) != 0 || len(w.comments[8]) != 1 {
-		t.Fatalf("records: #19 %+v, #8 %+v", w.comments[19], w.comments[8])
+	if c19, c8 := commentsAt(t, w, 19), commentsAt(t, w, 8); len(c19) != 0 || len(c8) != 1 {
+		t.Fatalf("records: #19 %+v, #8 %+v", c19, c8)
 	}
 }
 
 func TestImpossibleBlocksAreFound(t *testing.T) {
 	w := newWorld(t, []string{item(5, 0), item(8, 0), item(9, 0), item(10, 0), item(11, 0), item(12, 0)})
-	w.answers[links(8)] = "[" + dep(3, "closed", "not_planned", true) + "]"
-	w.answers[links(9)] = "[" + dep(4, "open", "", false) + "]"
-	w.answers[links(10)] = "[" + dep(11, "open", "", true) + "]"
-	w.answers[links(11)] = "[" + dep(12, "open", "", true) + "]"
-	w.answers[links(12)] = "[" + dep(10, "open", "", true) + "]"
+	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
+	w.set(links(9), "["+dep(4, "open", "", false)+"]")
+	w.set(links(10), "["+dep(11, "open", "", true)+"]")
+	w.set(links(11), "["+dep(12, "open", "", true)+"]")
+	w.set(links(12), "["+dep(10, "open", "", true)+"]")
 	got := w.check()
 	var whats []string
 	for _, f := range got {
@@ -361,7 +335,7 @@ func TestImpossibleBlocksAreFound(t *testing.T) {
 
 func TestAnIssueWaitingOnAPersonIsReportedWithWhatItHoldsUp(t *testing.T) {
 	w := newWorld(t, []string{item(5, 0), item(12, 0, PersonLabel), item(13, 0)})
-	w.answers[links(13)] = "[" + dep(12, "open", "", true) + "]"
+	w.set(links(13), "["+dep(12, "open", "", true)+"]")
 	f := only(t, w.check(), WaitingOnPerson, 12)
 	if !reflect.DeepEqual(f.Holds, []int{13}) || f.What != "#12 waits for a person (se-person), holding up #13" || f.Remedy != "none: it waits for a person" {
 		t.Fatalf("%+v", f)
@@ -374,14 +348,13 @@ func TestAnIssueWaitingOnAPersonIsReportedWithWhatItHoldsUp(t *testing.T) {
 // and so does its sub-issue #52. Nothing is ready, and every box left.
 func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing.T) {
 	w := newWorld(t, []string{item(17, 0, FinalLabel), item(38, 0), item(39, 0), item(51, 1), item(52, 0)}, 17)
-	w.answers[subsPath(51)] = `[` + item(52, 0) + `]`
-	w.answers[links(38)] = "[" + dep(17, "open", "", true) + "]"
-	w.answers[links(39)] = "[" + dep(38, "open", "", true) + "]"
-	w.answers[links(51)] = "[" + dep(38, "open", "", true) + "]"
+	w.set(subsPath(51), `[`+item(52, 0)+`]`)
+	w.set(links(38), "["+dep(17, "open", "", true)+"]")
+	w.set(links(39), "["+dep(38, "open", "", true)+"]")
+	w.set(links(51), "["+dep(38, "open", "", true)+"]")
 	w.pushed(17, quiet)
 	w.pr(17, "false", "dirty", true)
-	w.comments[17] = []comment{{ID: 1, Body: "<!-- se:takeover 1 -->\n<!-- se:takeover-head e17 -->", Created: noon.Add(-3 * time.Hour)}}
-	w.answers["repos/o/r/git/matching-refs/heads/issue-17"] = w.answers[refsPath]
+	w.said(17, "<!-- se:takeover 1 -->\n<!-- se:takeover-head e17 -->", noon.Add(-3*time.Hour))
 	f := only(t, w.check(), StalledRoot, 17)
 	if f.Cause != ConflictedPR || !reflect.DeepEqual(f.Holds, []int{38, 39, 51, 52}) ||
 		f.What != "nothing is ready, and #38, #39, #51, #52 wait on #17: PR #170 conflicts with main" ||
@@ -390,60 +363,52 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 	}
 	// Its remedy, run: the takeover was made once already, so #17 is
 	// se-final and waits on an issue for a person.
-	_, _, err := Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}.Take(t.TempDir(), 17)
+	_, _, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(t.TempDir(), 17)
 	if err == nil || !strings.Contains(err.Error(), "an issue for a person") {
 		t.Fatalf("%v", err)
 	}
-	if !wrote(w, "issue_id=101 repos/o/r/issues/17/dependencies/blocked_by") || wrote(w, "labels[]=se-person repos/o/r/issues/17/labels") {
-		t.Fatalf("writes %q", w.writes)
+	// The issue for the person is #171, after PR #170.
+	if by := linksOf(t, w.Fake, links(17)); !reflect.DeepEqual(by, []int{171}) || labelled(t, w, 17, PersonLabel) || !labelled(t, w, 171, PersonLabel) {
+		t.Fatalf("#17 is blocked by %v; writes %q", by, w.Writes())
 	}
 }
 
 func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	a := claimed7(t)
 	w := newWorld(t, []string{item(5, 0), item(7, 0)}, 7)
-	w.answers["repos/o/r/git/matching-refs/heads/issue-7"] = w.answers[refsPath]
 	w.closedPRs(7, `[]`)
 	w.pushed(7, quiet)
-	took, ok, err := Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}.Take(a, 7)
+	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(a, 7)
 	if err != nil || !ok || took.Takeover == nil || *took.Takeover != (Takeover{Count: 1, Stale: "issue-7 has no PR, and no push since 2026-10-13T09:00:00Z"}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 	if got := run(t, a, "log", "-1", "--format=%s"); got != "work on 7" {
 		t.Fatalf("issue-7 is not checked out as it stands: %s", got)
 	}
-	if c := w.comments[7]; len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:takeover 1 -->") || !strings.Contains(c[0].Body, "<!-- se:takeover-head c7 -->") {
+	if c := commentsAt(t, w, 7); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:takeover 1 -->") || !strings.Contains(c[0].Body, "<!-- se:takeover-head c7 -->") {
 		t.Fatalf("%+v", c)
 	}
 	// The takeover makes #7 final: stuck again, it goes to a person.
-	if !wrote(w, "labels[]=se-final repos/o/r/issues/7/labels") {
-		t.Fatalf("writes %q", w.writes)
+	if !labelled(t, w, 7, FinalLabel) {
+		t.Fatalf("writes %q", w.Writes())
 	}
 	// Moving work is no takeover.
 	w.pushed(7, recent)
-	w.comments[7] = nil
-	if _, _, err := (Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}).Take(t.TempDir(), 7); err == nil || !strings.Contains(err.Error(), "nothing about it is stuck") {
+	w.set("repos/o/r/issues/7/comments", `[]`)
+	if _, _, err := (Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}).Take(t.TempDir(), 7); err == nil || !strings.Contains(err.Error(), "nothing about it is stuck") {
 		t.Fatalf("%v", err)
 	}
 }
 
-func wrote(w *world, tail string) bool {
-	for _, args := range w.writes {
-		if strings.Join(args[len(args)-2:], " ") == tail {
-			return true
-		}
-	}
-	return false
-}
-
 func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 	w := newWorld(t, []string{item(5, 0), item(7, 0), item(8, 0), item(9, 0)}, 7, 19)
-	w.pr(7, "true", "clean", false, "check:success")
+	// A review is still required on #70, so auto-merge waits for it.
+	w.pr(7, "true", "blocked", false, "check:success")
 	w.pushed(7, recent)
-	w.answers["repos/o/r/issues/19"] = `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-11T12:00:00Z"}`
-	w.answers[links(8)] = "[" + dep(3, "closed", "not_planned", true) + "]"
-	w.answers[links(9)] = "[" + dep(4, "open", "", false) + "]"
-	s := Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}
+	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-11T12:00:00Z"}`)
+	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
+	w.set(links(9), "["+dep(4, "open", "", false)+"]")
+	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
 	found := w.check()
 	done := s.Fix(t.TempDir(), found)
 	var dids []string
@@ -459,21 +424,20 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 	if !reflect.DeepEqual(dids, want) {
 		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
 	}
-	if !done[1].Ready || done[3].Ready || !wrote(w, "assignees[]=o repos/o/r/issues/103/assignees") || !wrote(w, "id=N70 graphql") {
-		t.Fatalf("%+v, writes %q", done, w.writes)
+	if !done[1].Ready || done[3].Ready || !strings.Contains(get(t, w, "repos/o/r/issues/103"), `"assignees":[{"login":"o"}]`) ||
+		!strings.Contains(get(t, w, "repos/o/r/pulls/70"), `"auto_merge":{"merge_method":"squash"}`) {
+		t.Fatalf("%+v, writes %q", done, w.Writes())
 	}
 	for _, n := range []int{7, 19, 8, 9} {
-		if len(w.comments[n]) != 1 || !strings.Contains(w.comments[n][0].Body, "<!-- se:fleet ") {
-			t.Errorf("#%d has no record: %+v", n, w.comments[n])
+		if c := commentsAt(t, w, n); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:fleet ") {
+			t.Errorf("#%d has no record: %+v", n, c)
 		}
 	}
 	// Run again with the same findings: the reported ones are still open and
-	// are left as they are; the green PR is back after its fix, so it goes
-	// to a person.
-	for _, n := range []int{101, 102, 103} {
-		w.answers[fmt.Sprintf("repos/o/r/issues/%d", n)] = fmt.Sprintf(`{"number":%d,"state":"open"}`, n)
-	}
-	w.writes = nil
+	// are left as they are; the green PR is back after its fix, as GitHub
+	// turned its auto-merge off again, so it goes to a person.
+	w.pr(7, "true", "blocked", false, "check:success")
+	fixed := len(w.Writes())
 	done = s.Fix(t.TempDir(), w.check())
 	dids = nil
 	for _, d := range done {
@@ -484,19 +448,19 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 		"leftover claim #19: reported already as #101, still open",
 		"impossible block #8: reported already as #102, still open",
 		"impossible block #9: reported already as #103, still open",
+		// #103 is for a person, and waits on them.
+		"waiting on a person #103: reported; it waits for a person",
 	}
 	if !reflect.DeepEqual(dids, want) {
 		t.Fatalf("got\n%s", strings.Join(dids, "\n"))
 	}
-	if !wrote(w, "assignees[]=o repos/o/r/issues/104/assignees") || wrote(w, "id=N70 graphql") {
-		t.Fatalf("writes %q", w.writes)
+	for _, x := range w.Writes()[fixed:] {
+		if x == "POST graphql" {
+			t.Fatalf("auto-merge was turned on again: %q", w.Writes()[fixed:])
+		}
 	}
-	var person bool
-	for _, args := range w.writes {
-		person = person || (args[len(args)-1] == "repos/o/r/issues" && strings.Contains(strings.Join(args, " "), "labels[]=se-person"))
-	}
-	if !person {
-		t.Fatalf("#104 is not labelled se-person: %q", w.writes)
+	if !labelled(t, w, 104, PersonLabel) || !strings.Contains(get(t, w, "repos/o/r/issues/104"), `"assignees":[{"login":"o"}]`) {
+		t.Fatalf("#104 is not for a person: %s", get(t, w, "repos/o/r/issues/104"))
 	}
 	// A takeover is left to the box; a person is only reported.
 	x := s.Fix(t.TempDir(), []Finding{{Kind: ConflictedPR, Issue: 7}, {Kind: WaitingOnPerson, Issue: 12}})
@@ -512,9 +476,9 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 func TestFourteenOctoberAClaimAPersonBlocksIsNoStalledRoot(t *testing.T) {
 	for _, blocked := range []int{60, 59} {
 		w := newWorld(t, []string{item(44, 0), item(59, 1), item(60, 0), item(117, 0, PersonLabel)}, 60)
-		w.answers[subsPath(59)] = `[` + item(60, 0) + `]`
-		w.answers[links(blocked)] = "[" + dep(117, "open", "", true) + "]"
-		w.answers[links(44)] = "[" + dep(60, "open", "", true) + "]"
+		w.set(subsPath(59), `[`+item(60, 0)+`]`)
+		w.set(links(blocked), "["+dep(117, "open", "", true)+"]")
+		w.set(links(44), "["+dep(60, "open", "", true)+"]")
 		w.pushed(60, quiet)
 		f := only(t, w.check(), WaitingOnPerson, 117)
 		if !reflect.DeepEqual(f.Holds, []int{44, 59, 60}) {
@@ -529,8 +493,7 @@ func TestTheTakeoverRemedyOfAStuckSubIssueLeafRuns(t *testing.T) {
 	for _, at := range []string{quiet, "2026-10-13T07:00:00Z"} {
 		a := claimed7(t)
 		w := newWorld(t, []string{item(5, 1), item(7, 0)}, 7)
-		w.answers[subsPath(5)] = `[` + item(7, 0) + `]`
-		w.answers["repos/o/r/git/matching-refs/heads/issue-7"] = w.answers[refsPath]
+		w.set(subsPath(5), `[`+item(7, 0)+`]`)
 		w.closedPRs(7, `[]`)
 		w.pushed(7, at)
 		got := w.check()
@@ -542,7 +505,7 @@ func TestTheTakeoverRemedyOfAStuckSubIssueLeafRuns(t *testing.T) {
 		if _, err := fmt.Sscanf(f.Remedy, "se issue pull --take %d,", &n); err != nil || n != 7 {
 			t.Fatalf("pushed at %s: remedy %q", at, f.Remedy)
 		}
-		took, ok, err := Source{Proc: machine, Repo: repo, GH: w.gh, Clock: atNow()}.Take(a, n)
+		took, ok, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(a, n)
 		if err != nil || !ok || took.Number != 7 || took.Takeover == nil {
 			t.Fatalf("pushed at %s: took %+v %v %v", at, took, ok, err)
 		}
