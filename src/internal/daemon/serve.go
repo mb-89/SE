@@ -37,6 +37,10 @@ type Options struct {
 	Modules []*index.Module
 	// Wiring, when set, binds them in place of the wiring file se carries.
 	Wiring *index.Wiring
+	// HoldLock keeps the lifetime lock past Serve's return, for the system to
+	// let go when the process exits: se serve's, so that Stop, which waits for
+	// the lock, returns only once the process has made its last write.
+	HoldLock bool
 }
 
 // Serve runs the workspace's daemon until ctx ends, /shutdown is posted, or it idles out.
@@ -48,7 +52,9 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 	if err != nil {
 		return err
 	}
-	defer held.Close()
+	if !opts.HoldLock {
+		defer held.Close()
+	}
 	ix, err := startIndex(opts)
 	if err != nil {
 		return err

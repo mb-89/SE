@@ -302,6 +302,29 @@ func TestStopEndsTheDaemon(t *testing.T) {
 	}
 }
 
+// Stop means stopped: a daemon that withdrew daemon.json, but whose process
+// still holds the lifetime lock and may still write, has not stopped.
+func TestStopWaitsUntilTheLockIsFree(t *testing.T) {
+	t.Parallel()
+	p, n, f := workspace(t), sehttp.NewFake(), clock.NewFake(at)
+	done := make(chan error, 1)
+	ready := make(chan daemon.Endpoint, 1)
+	go func() {
+		// HoldLock stands for a process that goes on after Serve returns, as se serve's does.
+		done <- daemon.Serve(context.Background(), p, indexed(p, daemon.Options{HoldLock: true, Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }}))
+	}()
+	<-ready
+	if err := daemon.Stop(p, time.Hour, f, n); err == nil {
+		t.Fatal("Stop returned while the daemon still held its lock")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if there, err := p.Disk.Exists(p.Endpoint()); there || err != nil {
+		t.Fatalf("daemon.json stands after the daemon withdrew: %v", err)
+	}
+}
+
 func TestAnIdleDaemonEnds(t *testing.T) {
 	t.Parallel()
 	p := workspace(t)
