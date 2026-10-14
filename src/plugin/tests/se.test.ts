@@ -180,8 +180,7 @@ function world(on: On, env: Record<string, string> = {}): World {
     return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
   })
   on('attribution.text', ($, e) => ({ text: e.text }))
-  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
-  on('session.compact', () => ({ messages: [{ role: 'user', text: 'the summary', toolUses: [] }] }) as never)
+  on('classic.SessionStart', () => ({ additionalContext: ['the project hook'] }))
   on('classic.Stop', () => ({}))
   on('classic.SubagentStop', () => ({}))
   on('prompt.submit', ($, e) => ({ text: e.text }) as never)
@@ -795,33 +794,49 @@ test('a line that no longer answers help draws as its text', async ($, on) => {
   expect(await ui.find({ key: 'usage' })).toBeUndefined()
 })
 
-test('the context carries the guidance se answers, asked once, and again after a compaction', async ($, on) => {
+test('the session start hands the guidance se answers to the context, on each source that starts one', async ($, on) => {
   const w = world(on)
   w.replies['guidance --session-id s1'] = { text: 'the principles, and the skills handed over' }
   await $.session.start(starts)
-  const blocks = async () => (await $.prompt.context({ blocks: [{ name: 'currentDate', text: 'today' }] })).blocks
-  expect(await blocks()).toEqual([
-    { name: 'currentDate', text: 'today' },
-    { name: 'se-guidance', text: 'the principles, and the skills handed over' },
-  ])
-  await blocks()
-  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toEqual(['/se guidance --session-id s1'])
+  for (const source of ['startup', 'resume', 'clear', 'compact'] as const) {
+    expect((await $.classic.SessionStart({ source })).additionalContext).toEqual([
+      'the project hook',
+      'the principles, and the skills handed over',
+    ])
+  }
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(4)
   // SE is off: the guidance goes into the context all the same, and nothing is posted.
   expect(posted(w)).toEqual([])
-  await $.session.compact({
-    trigger: 'manual',
-    messages: [{ role: 'user', text: 'all so far', toolUses: [] }],
-  } as never)
-  w.replies['guidance --session-id s1'] = { text: 'the skills handed over, again' }
-  expect((await blocks()).at(-1)).toEqual({ name: 'se-guidance', text: 'the skills handed over, again' })
-  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(2)
+  // A fork carries its parent's context, guidance and all.
+  expect((await $.classic.SessionStart({ source: 'fork' })).additionalContext).toEqual(['the project hook'])
+  expect(verbs(w).filter(v => v.startsWith('/se guidance'))).toHaveLength(4)
 })
 
-test('guidance se answers empty adds no block', async ($, on) => {
+test('guidance se answers empty, or not at all, adds nothing', async ($, on) => {
   const w = world(on)
   w.replies['guidance --session-id s1'] = { text: '' }
   await $.session.start(starts)
-  expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
+  expect((await $.classic.SessionStart({ source: 'startup' })).additionalContext).toEqual(['the project hook'])
+  w.replies['guidance --session-id s1'] = 'not json' as never
+  expect((await $.classic.SessionStart({ source: 'clear' })).additionalContext).toEqual(['the project hook'])
+})
+
+test('a slow guidance says it is working, and the session start waits for it', async ($, on) => {
+  const w = world(on)
+  const clock = w.clock
+  w.replies['guidance --session-id s1'] = { text: 'the principles' }
+  w.takes['guidance --session-id s1'] = 5000
+  await $.session.start(starts)
+  let said: string[] | undefined
+  const starting = $.classic.SessionStart({ source: 'startup' }).then(r => {
+    said = r.additionalContext
+  })
+  await clock.advance(1000)
+  expect(w.statuses).toContain('se: reading its guidance…')
+  expect(said).toBeUndefined()
+  await clock.advance(4000)
+  await starting
+  expect(said).toEqual(['the project hook', 'the principles'])
 })
 
 // A cloud session no person attends, as a routine starts it.
