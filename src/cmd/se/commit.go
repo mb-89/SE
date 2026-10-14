@@ -41,7 +41,7 @@ func pluginCheckout(w *World) string {
 	if repo := w.Getenv(pluginRepoEnv); repo != "" {
 		return repo
 	}
-	exe, err := w.Executable()
+	exe, err := w.Proc.Self()
 	if err != nil {
 		return ""
 	}
