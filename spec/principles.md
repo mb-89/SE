@@ -173,3 +173,12 @@ principle is one sentence and one paragraph, and names what checks it.
     today's violations, which only shrinks, live in one configuration.
     Checked by: the battery (the `rule-of-five` rule of `se rules`, configured
     in `src/internal/rules/five.yaml`).
+
+22. **Steer before, check at the push.**
+    What an agent gets is settled before it starts: the take hands over the
+    skills its issue names, in full, and the session starts with these
+    principles. What must hold is checked when the work is pushed, by the
+    battery and the landing. Nothing steers the agent in between: no canary,
+    no tool refusals during the work.
+    Checked by: the take (`se issue pull --take` hands the skills over, the
+    session's log records them); the battery and `se issue land` (the push).

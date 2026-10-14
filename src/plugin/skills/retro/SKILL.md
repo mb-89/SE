@@ -1,6 +1,6 @@
 ---
 name: retro
-description: Start an SE retro, or, as the box that took one, collect its window, judge it, and file its report. The work skill hands an issue labelled se-retro to it.
+description: Start an SE retro, or, as the box that took one, collect its window, judge it, and file its report. A take hands it over where the issue names it, as every retro does.
 ---
 
 # Retro: do SE's rules hold across what landed?
