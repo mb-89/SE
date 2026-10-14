@@ -3,7 +3,7 @@
 Reader: whoever designs, reviews or judges a change to SE, and the retro and the overhaul.
 
 The list SE's design is measured against. The retro (#40) checks the
-principles it can check mechanically; the overhaul judges the rest. Each
+principles it can check mechanically; the overhaul judges every one. Each
 principle is one sentence and one paragraph, and names what checks it.
 
 1. **Mechanize first.**
