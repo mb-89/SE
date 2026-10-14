@@ -110,6 +110,9 @@ type Facts struct {
 	Commits    int `yaml:"commits"`
 	Takeovers  int `yaml:"takeovers"`
 	MainMerges int `yaml:"main_merges"`
+	// Requests counts the GitHub requests the se commands run in the
+	// checkout made (RequestsFile), this land's so far included.
+	Requests int `yaml:"requests,omitempty"`
 	// BatteryMs is how long the battery this land ran took, Slowest its
 	// slowest Go tests, SlowestPlugin its slowest plugin tests, Overruns each
 	// budget it went over, and Unbudgeted each step it ran with no budget;
@@ -163,6 +166,9 @@ func (l Landed) Comment(qs []Question) (string, error) {
 	}
 	fmt.Fprintf(&b, "\n### Facts\n- claim to landing: %s\n- landed: %s\n- commits: %d\n- takeovers: %d\n- main merges: %d\n",
 		took, f.Landed.UTC().Format(time.RFC3339), f.Commits, f.Takeovers, f.MainMerges)
+	if f.Requests > 0 {
+		fmt.Fprintf(&b, "- GitHub requests: %d\n", f.Requests)
+	}
 	if f.BatteryMs > 0 {
 		fmt.Fprintf(&b, "- battery: %dms\n", f.BatteryMs)
 		for _, o := range f.Overruns {
@@ -299,6 +305,12 @@ func answersFile(n int, block string) ([]byte, error) {
 // its branch's history and GitHub's record of the branch's creation.
 func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 	f := Facts{Landed: s.now().UTC().Truncate(time.Second), Takeovers: marksOf(comments).takeovers}
+	recorded, err := Requests(s.Disk, dir)
+	if err != nil {
+		return Facts{}, err
+	}
+	running, _ := github.Metered(s.GitHub)
+	f.Requests = recorded + running
 	profile, profiled, err := battery.Load(s.Disk, dir)
 	if err != nil {
 		return Facts{}, err
