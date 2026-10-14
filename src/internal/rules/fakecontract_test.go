@@ -6,6 +6,7 @@ import (
 )
 
 func TestAFakeHasItsContractSuite(t *testing.T) {
+	t.Parallel()
 	found := check(t, "fake-contract", map[string]string{
 		"src/internal/io/clock/fake.go":          "package clock\n",
 		"src/internal/io/clock/contract_test.go": "package clock_test\n",
