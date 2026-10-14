@@ -11,6 +11,7 @@ import (
 
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/rules"
 )
 
 // prose makes a git workspace holding files, and answers its folder.
@@ -160,4 +161,39 @@ func TestTheRulesSeeWhatGitTracksAndIgnores(t *testing.T) {
 	if !repo.Ignored("a/bin") || repo.Ignored("a/gone") {
 		t.Fatal("the rules see a/bin, a folder git ignores only as a folder, as kept, or a/gone as ignored")
 	}
+}
+
+// An unmerged path stands in the index once per stage (1, 2 and 3), and git
+// ls-files lists each: the manifest and the rule of five see one file.
+func TestAnUnmergedPathIsOneFile(t *testing.T) {
+	t.Parallel()
+	m := proc.NewFake()
+	m.Install("git", func(c proc.Cmd) int {
+		if strings.Join(c.Args, " ") == "ls-files -z --cached --others --exclude-standard" {
+			_, _ = fmt.Fprint(c.Stdout, "spec/a.md\x00spec/issues.md\x00spec/issues.md\x00spec/issues.md\x00"+rules.FiveConfig+"\x00")
+			return 0
+		}
+		return 1
+	})
+	d, five := disk.NewFake(), "limit: 2\nsurfaces: [spec]\n"
+	put(t, d, filepath.Join("/ws", "spec", "a.md"), "# A\n")
+	put(t, d, filepath.Join("/ws", "spec", "issues.md"), "# Issues\n")
+	put(t, d, filepath.Join("/ws", filepath.FromSlash(rules.FiveConfig)), five)
+	repo, err := repoOf(d, m, "/ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Manifest("spec", "README.md")
+	if want := "- [spec/a.md](spec/a.md): A\n- [spec/issues.md](spec/issues.md): Issues"; err != nil || got != want {
+		t.Fatalf("spec: %q %v", got, err)
+	}
+	for _, r := range rules.Rules() {
+		if r.Name == "rule-of-five" {
+			if found := r.Check(repo, rules.FiveConfig, []byte(five)); len(found) != 0 {
+				t.Fatalf("spec/ holds 2 files, but the rule of five found %v", found)
+			}
+			return
+		}
+	}
+	t.Fatal("no rule-of-five")
 }
