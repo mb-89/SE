@@ -40,7 +40,7 @@ func init() {
 				// se is built to <checkout>/src/plugin/bin/se.
 				*repo = filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(exe))))
 			}
-			r, err := update.Run(*repo, exe)
+			r, err := update.Run(c.Proc, *repo, exe)
 			var untouched *update.Untouched
 			switch {
 			case err == nil:
@@ -65,7 +65,7 @@ func init() {
 			if err := daemon.Stop(c.Paths(), 5*time.Second, c.Clock, c.Net); err != nil {
 				return reply, fmt.Errorf("updated %s → %s, but the old daemon did not stop: %w", r.From, r.To, err)
 			}
-			ep, note, err := startDaemon(c.Paths(), c.Clock, c.Net)
+			ep, note, err := startDaemon(c.Proc, c.Paths(), c.Clock, c.Net)
 			if err != nil {
 				reply.Text = joined(reply.Text+fmt.Sprintf(" The daemon did not start again: %v.", err), note)
 				return reply, nil

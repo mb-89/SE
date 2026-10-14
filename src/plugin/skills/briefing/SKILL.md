@@ -25,7 +25,7 @@ with `go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin
       what fleet check reports.
    3. **What happened:** the closed issues, each with its `done` line, then
       the last retro and its headline findings.
-   4. **Next:** what `se issue next` would take, and the counts.
+   4. **Next:** what `se issue pull` would take, and the counts.
    Keep each item to its facts; add no judgment of your own.
 4. Ask the person what they want to discuss. This session is for design;
    what comes out of it that is clear becomes an `se` issue for the fleet

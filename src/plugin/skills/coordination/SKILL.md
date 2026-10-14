@@ -1,6 +1,6 @@
 ---
 name: coordination
-description: When se issue next --take takes nothing, check what is broken in the fleet and fix it before ending. The work skill hands over to it.
+description: When se issue pull --take takes nothing, check what is broken in the fleet and fix it before ending. The work skill hands over to it.
 ---
 
 # Coordination: nothing to take, so check what is broken
@@ -16,7 +16,7 @@ You are on `origin/main`, as the work skill left you.
 2. `./src/plugin/bin/se fleet fix`. It applies every remedy that needs no
    checkout; its lines `did: left to this box: …` are the takeovers.
 3. For the first takeover it names, run its remedy:
-   `./src/plugin/bin/se issue next --take <n>`.
+   `./src/plugin/bin/se issue pull --take <n>`.
    - If it says the issue went to a person, or another box took it over, or
      nothing about it is stuck, go to the next takeover.
    - If it took the issue over, you are on its branch `issue-<n>`: follow the

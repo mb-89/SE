@@ -8,10 +8,11 @@ import (
 
 	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/gitenv"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 func TestDecoyUnchanged(t *testing.T) {
-	decoy, err := battery.NewDecoy(t.TempDir())
+	decoy, err := battery.NewDecoy(proc.Real(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +23,7 @@ func TestDecoyUnchanged(t *testing.T) {
 
 // A git that inherits the decoy's GIT_DIR acts on the decoy, wherever it runs.
 func TestDecoyCatchesInheritedGitDir(t *testing.T) {
-	decoy, err := battery.NewDecoy(t.TempDir())
+	decoy, err := battery.NewDecoy(proc.Real(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
