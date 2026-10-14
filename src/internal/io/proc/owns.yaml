@@ -1,0 +1,4 @@
+# What the proc door guards, and what going around it looks like (spec/io.md).
+guards: "processes: starting programs and waiting on them"
+go: [os/exec]
+commands: []

@@ -102,7 +102,7 @@ func TestAManifestBehindMainIsAStaleManifestThatFleetFixRefreshes(t *testing.T) 
 	if done[0].Did != "merged main in and pushed" || done[0].Failed != "" || !strings.HasPrefix(done[1].Did, "conflicts with main") {
 		t.Fatalf("%+v", done)
 	}
-	// Main moves often: a refresh is no fix to record.
+	// The refresh is a push, never a write to GitHub.
 	if wr := w.Writes(); len(wr) != 0 {
 		t.Fatalf("it wrote to GitHub: %q", wr)
 	}

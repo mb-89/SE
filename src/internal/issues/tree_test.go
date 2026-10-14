@@ -3,6 +3,8 @@ package issues
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -286,12 +288,10 @@ func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
 	if took, ok, _, err := s.TakeIn(b, 1, 2); err != nil || !ok || took.Number != 3 {
 		t.Fatalf("%+v %v %v", took, ok, err)
 	}
-	cmd := Worktree(a, 3)
-	if !strings.HasPrefix(cmd, "git worktree add --track -b issue-3 ") || !strings.HasSuffix(cmd, " origin/issue-3") {
-		t.Fatal(cmd)
+	shell(t, a, Worktree(a, 3))
+	if got := run(t, WorktreeDir(a, 3), "rev-parse", "--abbrev-ref", "HEAD", "@{upstream}"); got != "issue-3\norigin/issue-3" {
+		t.Fatalf("the worktree is on %s", got)
 	}
-	run(t, a, "fetch", "-q", "origin", "issue-3:refs/remotes/origin/issue-3")
-	run(t, a, strings.Fields(cmd)[1:]...)
 	if _, _, _, err := s.TakeIn(a, 1, 9); err == nil || !strings.Contains(err.Error(), "not an open issue inside #1") {
 		t.Fatalf("%v", err)
 	}
@@ -320,40 +320,55 @@ func TestInSaysWhenTheRootHasClosed(t *testing.T) {
 	}
 }
 
-// held is an open issue for a person that hold minted, holding #n.
-func held(h, n int) string {
-	return fmt.Sprintf(`{"id":%d,"number":%d,"title":"Decide how #%d goes on","state":"open","html_url":"u%d","body":"Stuck.\n\n<!-- se:holds %d -->","labels":[{"name":"se"},{"name":"se-person"}]}`,
-		1000+h, h, n, h, n)
+// shell runs a command line as a box does, in dir.
+func shell(t *testing.T, dir, line string) {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", line)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v %s", line, err, out)
+	}
 }
 
-// Recorded from mb-89/SE on 14 October: #134, for a person, held #95, and
-// stayed open after #95 closed. An issue for a person whose held issue is
-// closed closes by itself; one whose held issue is open, or one a person
-// made by hand, stays.
-func TestAHoldWhoseIssueClosedClosesItself(t *testing.T) {
+func TestTheWorktreeCommandStartsFromTheNewestBranchAndMain(t *testing.T) {
 	t.Parallel()
-	gh := recorded(t, map[string]string{
-		listPath:              list(node(5, 0), held(134, 95), held(135, 5), held(136, 96), node(137, 0, PersonLabel)),
-		"repos/o/r/issues/95": `{"number":95,"state":"closed"}`,
-		"repos/o/r/issues/96": `{"number":96,"state":"open"}`,
-	})
-	if err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).CloseParents(); err != nil {
-		t.Fatal(err)
+	origin, a, b := boxes(t)
+	if ok, err := (Source{Proc: machine, Worktrees: true}).Claim(a, 4); err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
 	}
-	want := []string{"POST repos/o/r/issues/134/comments", "PATCH repos/o/r/issues/134"}
-	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
-		t.Fatalf("%q\nwant %q", w, want)
+	wt := WorktreeDir(a, 4)
+	shell(t, a, Worktree(a, 4))
+	// Another box pushes to issue-4 and to main while a's branch stands.
+	run(t, b, "fetch", "-q", "origin")
+	run(t, b, "checkout", "-q", "-b", "issue-4", "origin/issue-4")
+	commitFile(t, b, "work", "b")
+	run(t, b, "push", "-q", "origin", "issue-4")
+	run(t, b, "checkout", "-q", "main")
+	commitFile(t, b, "newer", "main")
+	run(t, b, "push", "-q", "origin", "main")
+	// a takes it over: its local branch and worktree are behind both.
+	shell(t, a, Worktree(a, 4))
+	for _, ref := range []string{run(t, origin, "rev-parse", "issue-4"), run(t, origin, "rev-parse", "main")} {
+		run(t, wt, "merge-base", "--is-ancestor", ref, "HEAD")
 	}
-	if i, c := issueAt(t, gh, 134), commentsAt(t, gh, 134); i.State != "closed" || len(c) != 1 || !strings.HasPrefix(c[0].Body, "#95, which this issue held, is closed") {
-		t.Fatalf("#134: %+v %+v", i, c)
+	if got := run(t, wt, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-4" {
+		t.Fatalf("the worktree is on %s", got)
 	}
-	// hold marks the issue it mints with the issue it holds.
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
-	made, err := s.hold(Issue{Number: 5, Title: "t5", URL: "u5"}, "Stuck.")
-	if err != nil {
-		t.Fatal(err)
+	run(t, wt, "push", "-q", "origin", "issue-4")
+	// A main that conflicts is left for the agent to merge: the branch stands as origin has it.
+	run(t, b, "fetch", "-q", "origin")
+	run(t, b, "checkout", "-q", "-B", "issue-4", "origin/issue-4")
+	commitFile(t, b, "both", "branch")
+	run(t, b, "push", "-q", "origin", "issue-4")
+	run(t, b, "checkout", "-q", "-B", "main", "origin/main")
+	commitFile(t, b, "both", "main")
+	run(t, b, "push", "-q", "origin", "main")
+	shell(t, a, Worktree(a, 4))
+	if got, want := run(t, wt, "rev-parse", "HEAD"), run(t, origin, "rev-parse", "issue-4"); got != want {
+		t.Fatalf("the worktree is at %s, not %s", got, want)
 	}
-	if got := issueAt(t, gh, made.Number); got.holds() != 5 {
-		t.Fatalf("#%d holds %d: %q", made.Number, got.holds(), got.Body)
+	if got := run(t, wt, "status", "--porcelain"); got != "" {
+		t.Fatalf("the worktree is not clean: %s", got)
 	}
 }

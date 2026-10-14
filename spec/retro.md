@@ -134,7 +134,10 @@ What earlier versions taught, and how this design answers it:
   - **Did the last retro's fixes help?** For each of its findings: did its
     issue close, did the rule check it named break again, did its metric
     drop. A metric's move counts for a finding only once its issue closed
-    as completed: before its fix is on main, a drop is not the fix's.
+    as completed: before its fix is on main, a drop is not the fix's. An
+    issue that landed into a manifest's branch counts as closed only once
+    that manifest's PR merged to main; until then its state reads "landed
+    into manifest #N, not on main", and its recurrence is not read.
     Beside a finding its metric scores as recurred, the draft lists what in
     the window moved that metric (`moved_by`): for `by-hand` each issue and
     its answer, for a count each issue's share, largest first, so the judge

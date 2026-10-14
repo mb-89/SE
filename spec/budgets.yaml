@@ -57,7 +57,6 @@ command_classes:
   issue land: battery
   issue new: github
   issue pull: github
-  issue resume: github
   issue review: github
   issue supersede: github
   issue tree: github
