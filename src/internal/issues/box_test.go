@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mb-89/SE/src/internal/io/github"
 )
@@ -13,6 +14,17 @@ import (
 type fired int
 
 func (f *fired) fire() string { *f++; return "fired" }
+
+// shot is fire as FanOut takes it: a fire the routine took.
+func (f *fired) shot() Shot { *f++; return Shot{Line: "fired"} }
+
+// limited is a fire the routine refused for its rate limit, naming after.
+func (f *fired) limited(after string) func() Shot {
+	return func() Shot {
+		*f++
+		return Shot{Line: "Fan-out refused: 429 Too Many Requests", Limited: true, RetryAfter: after}
+	}
+}
 
 func TestABoxUnderItsCapTakesTheIssueAndNothingFires(t *testing.T) {
 	t.Parallel()
@@ -66,12 +78,12 @@ func TestTheBoxesAreCountedFromTheAliveClaims(t *testing.T) {
 	}
 	var f fired
 	// #5 is ready and every alive box is full: one fire.
-	if note := s.FanOut(f.fire, false); f != 1 || note != "fired" {
+	if note := s.FanOut(f.shot, 0); f != 1 || note != "fired" {
 		t.Fatalf("%d fires: %q", f, note)
 	}
 	// A box that takes counts as alive with room.
 	s.Box = "s3"
-	if note := s.FanOut(f.fire, true); f != 1 || !strings.Contains(note, "s3 runs 0 of its 2") {
+	if note := s.FanOut(f.shot, 5); f != 1 || !strings.Contains(note, "s3 runs 0 of its 2") {
 		t.Fatalf("%d fires: %q", f, note)
 	}
 }
@@ -121,4 +133,75 @@ func TestABoxRunsItsCapAndPullsTheNextWhenOneLands(t *testing.T) {
 	if took, ok, err := take(); err != nil || !ok || took.Number != 3 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
+}
+
+func TestARefusedFanOutIsKeptAndFiresOnceItsRetryTimeHasPassed(t *testing.T) {
+	t.Parallel()
+	g := newHub(t, pushedAt(unblocked(map[string]string{
+		listPath: list(node(1, 0), node(2, 0), node(3, 0), node(4, 0)),
+		refsPath: refs(1, 2),
+	}, 4), fresh, 1, 2))
+	g.say(1, (Source{Box: "s1"}).boxNote())
+	g.say(2, (Source{Box: "s1"}).boxNote())
+	clk := atNow()
+	s := g.source()
+	s.Box, s.Parallel, s.Clock = "s1", 2, clk
+	var f fired
+	// s1 runs its cap after taking #2, and #3 is ready: the fire is refused
+	// with 429, and kept on #2 until the time it names.
+	note := s.FanOut(f.limited("1800"), 2)
+	at := now.Add(30 * time.Minute).Format(time.RFC3339)
+	if f != 1 || !strings.Contains(note, "Kept on #2") || !strings.Contains(note, at) {
+		t.Fatalf("%d fires: %q", f, note)
+	}
+	if last := g.comments(2); !strings.Contains(last[len(last)-1].Body, "<!-- se:fanout-retry "+at+" -->") {
+		t.Fatalf("%+v", last)
+	}
+	// The next take before that time fires nothing, and keeps it on its own
+	// claim too, so it outlives #2.
+	if note := s.FanOut(f.shot, 1); f != 1 || !strings.HasPrefix(note, "Fan-out waits") || !strings.Contains(note, at) {
+		t.Fatalf("%d fires: %q", f, note)
+	}
+	if last := g.comments(1); !strings.Contains(last[len(last)-1].Body, "<!-- se:fanout-retry "+at+" -->") {
+		t.Fatalf("%+v", last)
+	}
+	// se fleet check before the time fires nothing either.
+	if _, note, err := s.CheckFanOut(f.shot); err != nil || f != 1 || !strings.HasPrefix(note, "Fan-out waits") {
+		t.Fatalf("%d fires: %q %v", f, note, err)
+	}
+	// Once it has passed, se fleet check fires it, once: every claim that
+	// kept it is told.
+	clk.Advance(31 * time.Minute)
+	if _, note, err := s.CheckFanOut(f.shot); err != nil || f != 2 || note != "fired" {
+		t.Fatalf("%d fires: %q %v", f, note, err)
+	}
+	for _, n := range []int{1, 2} {
+		if last := g.comments(n); !strings.Contains(last[len(last)-1].Body, "<!-- se:fanout-fired -->") {
+			t.Fatalf("#%d: %+v", n, last)
+		}
+	}
+	if _, note, err := s.CheckFanOut(f.shot); err != nil || f != 2 || note != "" {
+		t.Fatalf("%d fires: %q %v", f, note, err)
+	}
+	// A 429 that names no retry keeps the fan-out RetryWait; the take once
+	// it has passed fires it.
+	if note := s.FanOut(f.limited(""), 2); f != 3 || !strings.Contains(note, clk.Now().Add(RetryWait).Format(time.RFC3339)) {
+		t.Fatalf("%d fires: %q", f, note)
+	}
+	clk.Advance(RetryWait)
+	if note := s.FanOut(f.shot, 2); f != 4 || note != "fired" {
+		t.Fatalf("%d fires: %q", f, note)
+	}
+	if _, p, err := s.fleet(mustSurvey(t, s), nil); err != nil || len(p.on) != 0 {
+		t.Fatalf("%+v %v", p, err)
+	}
+}
+
+func mustSurvey(t *testing.T, s Source) []Status {
+	t.Helper()
+	all, err := s.Survey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return all
 }
