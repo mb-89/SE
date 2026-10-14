@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -333,10 +334,10 @@ func init() {
 	register(Command{
 		Name:    "issue new",
 		Class:   batch,
-		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--not-blocked N,M] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "create an se issue in a manifest, with its blockers",
-		Details: fmt.Sprintf("create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), and name it. All work moves in manifests: a manifest is an issue at the top on one topic whose sub-issues are its work, landing as one PR, its leaves together about %s (issues.manifest/config/target), and boxes take only manifests. --parent N files it into a manifest (a sub-issue of N); --manifest makes it a new manifest itself, labelled se-manifest, whose leaves follow with --parent; without either it goes into the open misc manifest (labelled se-misc), which takes new issues for that time from its creation, after which the next one opens.", issues.Span(issueConfig().ManifestTarget.Minutes())) + " --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). A name that is an agent's role (work, coordination, review, retro, overhaul, or the agent's own name) is left out of that line, since the take names the agent that holds it. It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. An issue for a person stands at the top, in no manifest. A ready issue, one nothing open blocks, fires the routine once.",
+		Details: fmt.Sprintf("create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), and name it. All work moves in manifests: a manifest is an issue at the top on one topic whose sub-issues are its work, landing as one PR, its leaves together about %s (issues.manifest/config/target), and boxes take only manifests. --parent N files it into a manifest (a sub-issue of N); --manifest makes it a new manifest itself, labelled se-manifest, whose leaves follow with --parent; without either it goes into the open misc manifest (labelled se-misc), which takes new issues for that time from its creation, after which the next one opens.", issues.Span(issueConfig().ManifestTarget.Minutes())) + " --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). A name that is an agent's role (work, coordination, review, retro, overhaul, or the agent's own name) is left out of that line, since the take names the agent that holds it. It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. It refuses a body that names (#N) an open se issue, one whose work is not on main yet, unless --blocked-by names it, so the take holds the new issue until it merges, or --not-blocked does, saying the mention is only a reference; --parent and --blocks name issues it may mention freely. An issue for a person stands at the top, in no manifest. A ready issue, one nothing open blocks, fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -352,6 +353,7 @@ func init() {
 			manifest := fs.Bool("manifest", false, "make it a new manifest, labelled se-manifest: its leaves follow with --parent")
 			skills := fs.String("skills", "", "the skills its work needs, as `NAME,NAME`: a take hands each over")
 			allowDuplicate := fs.Bool("allow-duplicate", false, "create it although an open se issue under the same parent has its title")
+			notBlocked := fs.String("not-blocked", "", "the open se issues its body names only as a reference, as `N,M`: it need not wait for them")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
@@ -368,6 +370,12 @@ func init() {
 			if given["blocks"] {
 				if dependents, err = issues.ParseBlockedBy(*blocks); err != nil || len(dependents) == 0 {
 					return Reply{}, fmt.Errorf("--blocks takes issue numbers, like 5,8, not %q", *blocks)
+				}
+			}
+			var references []int
+			if given["not-blocked"] {
+				if references, err = issues.ParseBlockedBy(*notBlocked); err != nil || len(references) == 0 {
+					return Reply{}, fmt.Errorf("--not-blocked takes issue numbers, like 5,8, not %q", *notBlocked)
 				}
 			}
 			if *parent < 0 {
@@ -405,6 +413,24 @@ func init() {
 			s, err := src()
 			if err != nil {
 				return Reply{}, err
+			}
+			// An issue built on unmerged work waits for it, or says it is not
+			// built on it: the mentions it does not account for refuse it.
+			var unaccounted []int
+			for _, n := range issues.Mentions(*body) {
+				if n != *parent && !slices.Contains(blockers, n) && !slices.Contains(dependents, n) && !slices.Contains(references, n) {
+					unaccounted = append(unaccounted, n)
+				}
+			}
+			if open, err := s.Unmerged(unaccounted); err != nil {
+				return Reply{}, err
+			} else if len(open) > 0 {
+				list := make([]string, len(open))
+				for k, n := range open {
+					list[k] = strconv.Itoa(n)
+				}
+				ns := strings.Join(list, ",")
+				return Reply{}, fmt.Errorf("the body names %s, open se work not on main yet: --blocked-by %s makes the take hold this issue until it merges, or --not-blocked %s says the mention is only a reference", numbers(open), ns, ns)
 			}
 			// No bare issues: without --parent or --manifest it goes into the
 			// open misc manifest, or the next one.
