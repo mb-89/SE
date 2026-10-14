@@ -98,7 +98,7 @@ func init() {
 		Usage:   "overhaul file N [--draft FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Overhaul",
 		Summary: "file a judged report: create its issues and close it",
-		Details: "file overhaul N's report from its judged draft FILE (default: ../overhaul-N.md beside the workspace). It refuses a judgment that is not complete: a principle without a verdict, nothing said on the outside world, the system's consistency, the principles themselves or the retro, a finding without its principle, place or how far it strays, an outside finding without a source. A change to a principle is always controversial. It gets one se issue per finding, one for a person (se-person) where it is controversial, then the report as its closing comment, and closes: it never waits for the owner. Its claim issue-N goes.",
+		Details: "file overhaul N's report from its judged draft FILE (default: ../overhaul-N.md beside the workspace). It refuses a judgment that is not complete: a principle without a verdict, nothing said on the outside world, the system's consistency, the principles themselves, the retro, speed, mechanizing or removal, a finding without its principle, place or how far it strays, an outside finding without a source. A change to a principle is always controversial. It gets one se issue per finding, one for a person (se-person) where it is controversial, then the report as its closing comment, and closes: it never waits for the owner. Its claim issue-N goes.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "overhaul file")

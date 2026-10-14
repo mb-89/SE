@@ -2,6 +2,10 @@
 
 Reader: an agent working in this repository.
 
+In an interactive session with a person, talk design; work that is clear
+becomes an issue (`se issue new`) for the cloud fleet, not work you do
+yourself ([principle 20](spec/principles.md)).
+
 SE's design principles, which the retro and the overhaul measure against, are in [spec/principles.md](spec/principles.md).
 
 1. Work on your own branch. main takes merged PRs alone.

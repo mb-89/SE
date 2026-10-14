@@ -67,27 +67,29 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
    At most five non-blocking findings are filed (`MaxFiled`); the rest are
    counted in the report, not filed.
 5. **Final is general: any second attempt is final, and a failing final
-   issue goes to a person (the owner's rule).** Labels combine: `se` marks
+   issue waits on an issue for a person (the owner's rule).** Labels combine: `se` marks
    fleet work, and `se-final` is a separate label beside it. An issue becomes
    `se-final` when:
    - a review creates it to fix a finding;
    - `se issue next --take` takes it over, stuck or with a conflicted PR
      ([Stuck work](issues.md#stuck-work), [The rules](issues.md#the-rules)).
 
-   If an `se-final` issue fails again, it is not given another round: it gets
-   `se-person`, is assigned to the owner, and states what failed. Failing
-   again is:
-   - stuck, or its PR conflicted, again: the issue itself goes to a person;
+   If an `se-final` issue fails again, it is not given another round: `se`
+   mints an issue for a person that says what failed, and links the failing
+   issue as blocked by it ([Stuck work](issues.md#stuck-work)); closing it
+   gives the work back for a fresh attempt. Failing again is:
+   - stuck, or its PR conflicted, again: the issue itself waits;
    - its re-review finds the same problem: the finding says it `repeats` the
-     earlier blocker, and the gate, which holds that closed issue, goes to a
-     person (an open issue is what leaves the queue).
+     earlier blocker, and the gate, which holds that closed issue, waits (an
+     open issue is what leaves the queue).
 
    This bounds every loop at one retry. The label is the single record of a
    takeover: a takeover sets it, and a takeover of an issue that is already
-   final sends it to a person instead. The `<!-- se:takeover N -->` comment
-   stays as the human-readable record, and its round only settles two boxes
-   racing for one takeover. `se issue resume` takes `se-final` off with
-   `se-person`, so a resumed issue gets one more attempt.
+   final makes it wait on an issue for a person instead. The
+   `<!-- se:takeover N -->` comment stays as the human-readable record, and
+   its round only settles two boxes racing for one takeover. Minting that
+   issue takes `se-final` off and resets the takeovers, so once the person
+   closes it the work gets one more attempt.
 6. **A re-review** is the review of a gate whose last review failed. It
    checks only the earlier blockers and the code that changed since (the
    brief names both: the blockers, and `git diff <then>..<now>`), and raises

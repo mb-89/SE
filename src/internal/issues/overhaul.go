@@ -505,8 +505,10 @@ func (r *OverhaulReport) judged() error {
 			why = append(why, fmt.Sprintf("principle %d (%s) has no verdict", p.Number, p.Name))
 		}
 	}
-	for name, said := range map[string]string{"outside": r.LookedAt.Outside, "consistency": r.LookedAt.Consistency, "principles": r.LookedAt.Principles, "retro": r.LookedAt.Retro,
-		"speed": r.LookedAt.Speed, "mechanize": r.LookedAt.Mechanize, "removal": r.LookedAt.Removal} {
+	for name, said := range map[string]string{
+		"outside": r.LookedAt.Outside, "consistency": r.LookedAt.Consistency, "principles": r.LookedAt.Principles, "retro": r.LookedAt.Retro,
+		"speed": r.LookedAt.Speed, "mechanize": r.LookedAt.Mechanize, "removal": r.LookedAt.Removal,
+	} {
 		if strings.TrimSpace(said) == "" {
 			why = append(why, "looked_at."+name+" is empty: say what was found, nothing included")
 		}
