@@ -110,6 +110,10 @@ branch. The workflow `.github/workflows/prune.yml` runs
 `se fleet prune --apply` when an issue or a PR closes, and every hour, and
 its output names what it deleted.
 
+Nothing else closes a PR or deletes a branch by age: an open PR, a person's
+included, stays open, and a stalled claim is taken over through the lease
+([spec/issues.md](issues.md#stuck-work)), never closed.
+
 ## Up to date with main
 
 CI must run on what lands, so main's ruleset merges a PR only when its
