@@ -113,8 +113,10 @@ func TestUnclosedNamesWhatIsMissing(t *testing.T) {
 		t.Fatalf("%q %v", why, err)
 	}
 	// Taken over by another box, it is that box's to keep.
-	s = at(map[string]string{pulls: `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`,
-		"repos/o/r/issues/5/comments": `[{"id":1,"body":"Claimed.\n<!-- se:box s1 -->"},{"id":2,"body":"Took over.\n<!-- se:box s2 -->"}]`})
+	s = at(map[string]string{
+		pulls:                         `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`,
+		"repos/o/r/issues/5/comments": `[{"id":1,"body":"Claimed.\n<!-- se:box s1 -->"},{"id":2,"body":"Took over.\n<!-- se:box s2 -->"}]`,
+	})
 	s.Box = "s1"
 	if why, err := s.Unclosed(5); err != nil || why != "" {
 		t.Fatalf("%q %v", why, err)

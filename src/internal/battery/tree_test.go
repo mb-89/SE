@@ -16,7 +16,7 @@ type worktree struct{ dirty, tree string }
 func (w *worktree) git(c proc.Cmd) int {
 	switch strings.Join(c.Args, " ") {
 	case "status --porcelain":
-		fmt.Fprint(c.Stdout, w.dirty)
+		_, _ = fmt.Fprint(c.Stdout, w.dirty)
 	case "rev-parse HEAD^{tree}":
 		fmt.Fprintln(c.Stdout, w.tree)
 	default:
