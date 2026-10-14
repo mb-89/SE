@@ -322,6 +322,12 @@ to the answers file beside the branch's checkout, `<path>-landing.yaml` where
 box that takes over brings them up to date rather than writing them anew; a
 file there already is kept. It names the file (with `--json`: the
 takeover's `answers`).
+Every `--take`, at the top or with `--in`, first fetches `main` into the
+SE checkout se runs from and refuses where main has moved past the commit se
+was built from, naming `se update`: the agents and guidance a take hands over
+come from that checkout, so a box that ran on while main moved would hand its
+sub-agents the procedures of its start. Where it cannot tell (the build or its
+checkout unknown, the fetch failed), the take goes on.
 Every claim records the claiming box's session on the issue, a comment
 carrying `<!-- se:box <session> -->` (a takeover's comment carries it too).
 Once it has claimed an issue, `--take` runs the fan-out (below), which fires
