@@ -129,7 +129,7 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 func collect(t *testing.T, later bool) Collected {
 	t.Helper()
 	gh, _ := writes(t, retroRepo(t, later, "<!-- se:retro attended -->"))
-	c, err := Source{Repo: repo, GH: gh, Now: clock}.Collect(30)
+	c, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Collect(30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 		"a home that is no fix":    func(r *RetroReport) { r.Findings[0].Home = "hope" },
 		"a check that is no check": func(r *RetroReport) { r.Findings[0].Check = "vibes" },
 	} {
-		if _, err := (Source{Repo: repo, GH: never}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+		if _, err := (Source{Repo: repo, GH: never, Clock: atNow()}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -323,7 +323,7 @@ func fileFindings(t *testing.T, answers map[string]string) (Filed, [][]string) {
 	answers["repos/o/r/issues/40/assignees"] = `{}`
 	answers["repos/o/r/issues/30/comments"] = `{"id":1}`
 	gh, calls := writes(t, answers)
-	f, err := Source{Repo: repo, GH: gh}.FileReport(30, judged(t, nil))
+	f, err := Source{Repo: repo, GH: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
 		}
 		return inner(args...)
 	}
-	f, err := Source{Repo: repo, GH: gh}.FileReport(30, judged(t, nil))
+	f, err := Source{Repo: repo, GH: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
 	if err != nil || !strings.HasPrefix(f.Left, "issue-30 stays (") || !strings.Contains(f.Left, "se fleet prune") {
 		t.Fatalf("%+v %v", f, err)
 	}

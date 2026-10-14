@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 // direct never goes through a proxy: the daemon answers on loopback alone.
@@ -29,8 +31,8 @@ func Healthy(paths Paths) (Endpoint, bool) {
 	return ep, said.ProtocolVersion == ProtocolVersion && said.InstanceID == ep.InstanceID
 }
 
-// Start answers the running daemon, or starts exe as the workspace's daemon and waits for it.
-func Start(paths Paths, exe string, wait time.Duration) (Endpoint, error) {
+// Start answers the running daemon, or starts exe as the workspace's daemon and waits for it by clk.
+func Start(paths Paths, exe string, wait time.Duration, clk clock.Clock) (Endpoint, error) {
 	if ep, ok := Healthy(paths); ok {
 		return ep, nil
 	}
@@ -50,8 +52,8 @@ func Start(paths Paths, exe string, wait time.Duration) (Endpoint, error) {
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
+	deadline := clk.Now().Add(wait)
+	for clk.Now().Before(deadline) {
 		if ep, ok := Healthy(paths); ok {
 			return ep, nil
 		}
@@ -62,14 +64,14 @@ func Start(paths Paths, exe string, wait time.Duration) (Endpoint, error) {
 				return ep, nil
 			}
 			return Endpoint{}, fmt.Errorf("the daemon exited at start (%v); see %s", err, paths.DaemonLog())
-		case <-time.After(50 * time.Millisecond):
+		case <-clk.After(50 * time.Millisecond):
 		}
 	}
 	return Endpoint{}, fmt.Errorf("the daemon did not answer within %s; see %s", wait, paths.DaemonLog())
 }
 
-// Stop asks the workspace's daemon to end and waits until it has withdrawn.
-func Stop(paths Paths, wait time.Duration) error {
+// Stop asks the workspace's daemon to end and waits by clk until it has withdrawn.
+func Stop(paths Paths, wait time.Duration, clk clock.Clock) error {
 	ep, ok := Healthy(paths)
 	if !ok {
 		return nil
@@ -77,12 +79,12 @@ func Stop(paths Paths, wait time.Duration) error {
 	if err := call(ep, http.MethodPost, "/shutdown", nil); err != nil {
 		return err
 	}
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
+	deadline := clk.Now().Add(wait)
+	for clk.Now().Before(deadline) {
 		if _, err := os.Stat(paths.Endpoint()); errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		clk.Sleep(50 * time.Millisecond)
 	}
 	return fmt.Errorf("the daemon did not stop within %s", wait)
 }

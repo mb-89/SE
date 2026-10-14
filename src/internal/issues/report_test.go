@@ -77,7 +77,7 @@ func reviewWorld(t *testing.T) (Source, map[string]string, *[][]string) {
 			answers["repos/o/r/issues"] = fmt.Sprintf(`{"id":%d,"number":%d,"title":"f%d","html_url":"u%d"}`, 1000+next-1, next-1, next-1, next-1)
 		}
 		return gh(args...)
-	}}
+	}, Clock: atNow()}
 	return s, answers, wrote
 }
 

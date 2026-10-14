@@ -196,7 +196,8 @@ only create the branch, never move it), then checks the branch out; a stuck
 leaf it takes over instead, checking its branch out as it stands. Where the
 push is refused because another box claimed the issue first, it moves to the
 next ready issue. It prints what it took, or that nothing is ready. `--take N`
-refuses an issue that is not ready, or a sub-issue, and says why. There is no
+refuses an issue that is not ready, or a sub-issue that is no stuck leaf,
+and says why. There is no
 separate `take` command. Taking a parent whose branch exists already checks
 that branch out: the tree is picked up from its claim. Plain `--take` first
 takes over a conflicted claim (see [The rules](#the-rules)): it prints
@@ -204,8 +205,9 @@ takes over a conflicted claim (see [The rules](#the-rules)): it prints
 into the branch and land it again (with `--json`: the issue's `takeover`,
 `{"pr","url","count","why"}`). `--take N` takes over claimed leaf `N`, at
 any depth, where `se fleet check` finds it stuck (a conflicted or red PR, or
-no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.md));
-labelled `se-final`, it waits on an issue for a person instead. A claim whose work is moving
+no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.md)),
+or where it is stuck past the lease, so every takeover remedy the check names
+runs; labelled `se-final`, it waits on an issue for a person instead. A claim whose work is moving
 is refused.
 Once it has claimed an issue, `--take` fires the routine once (the fan-out,
 below) and adds a line saying what the fire did; with `--json` that line is
