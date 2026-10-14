@@ -473,3 +473,11 @@ func TestPagesAsksPageByPageUntilOneIsShort(t *testing.T) {
 
 // atNow is a fresh fake clock standing at now.
 func atNow() *clock.Fake { return clock.NewFake(now) }
+
+func TestMentionsNamesTheIssuesATextNames(t *testing.T) {
+	t.Parallel()
+	got := Mentions("#7 first, then (#3), #3 again; not o/r#4, &#39;, x#5 nor issues/6#8.\n#12")
+	if want := []int{3, 7, 12}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}

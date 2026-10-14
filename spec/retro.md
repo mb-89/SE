@@ -55,7 +55,12 @@ What earlier versions taught, and how this design answers it:
   a retro and names its agent, `se:retro`) and starts that agent, which files
   the report instead of landing a branch.
 - **The mechanical half,** `se retro collect N`, reads the window from GitHub
-  and writes a report draft beside the checkout (`../retro-N.md`). It holds:
+  and writes a report draft beside the checkout (`../retro-N.md`). Like a
+  take ([spec/issues.md](issues.md)), it and `se retro report` first fetch
+  `main` into the SE checkout se runs from and refuse where main has moved
+  past the commit se was built from, naming `se update`: the block they write
+  is what every later retro reads, so a stale se would count and store the
+  window by rules main has replaced. Where it cannot tell, they go on. It holds:
   - the matrix: every closed issue × every landing question, from the
     answers' machine-readable blocks; it stays in the draft and is not posted;
   - the [rule checks](#the-rule-checks), each broken one with what broke

@@ -60,9 +60,10 @@ func (s Source) issued(dir string) (int, error) {
 // answer every question in qs, and check must pass on a clean tree of an
 // issue with no open sub-issues, after origin's branch and main are merged
 // in, so the check runs on what lands; the battery must have recorded that
-// tree, and main must not have moved past it since (ship). Then the branch is
-// pushed with the battery's status on its head, the answers
-// posted on the issue, its PR against main opened (or, where it is open
+// tree, and main must not have moved past it since (ship). Then the answers
+// are posted on the issue, before anything is pushed, so a land stopped later
+// still leaves them; the branch is pushed with the battery's status on its
+// head, its PR against main opened (or, where it is open
 // already, found) with the battery's profile in its body, and auto-merge
 // turned on with squash. Run again after a
 // fix, it pushes, updates the answers and reports the same PR. Where session
@@ -108,7 +109,14 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 			return s.closeEmpty(n)
 		}
 	}
-	if err := s.ship(dir, branch, check); err != nil {
+	// The answers go on the issue before the push, so a land stopped after
+	// it (a refused status post, a PR it could not open) leaves its record.
+	if err := s.ship(dir, branch, check, func() error {
+		if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
+			return err
+		}
+		return s.postLanding(dir, n, qs, answers)
+	}); err != nil {
 		return Landing{}, err
 	}
 	body := fmt.Sprintf("Fixes #%d", n)
@@ -118,12 +126,6 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	}
 	if profiled {
 		body += "\n\n" + profile.Markdown()
-	}
-	if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
-		return Landing{}, err
-	}
-	if err := s.postLanding(dir, n, qs, answers); err != nil {
-		return Landing{}, err
 	}
 	l := Landing{Issue: n}
 	pr, open, err := s.openPR(n)
