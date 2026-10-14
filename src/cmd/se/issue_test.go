@@ -144,7 +144,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: edit, land, new, pull, resume, review, supersede, tree." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -152,7 +152,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	t.Parallel()
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: edit, land, new, pull, resume, review, supersede, tree." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -162,7 +162,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue pull, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: edit, land, new, pull, resume, review, supersede, tree.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -739,5 +739,19 @@ func TestWorktreeIsTheBoxsTakeAtTheTop(t *testing.T) {
 	}
 	if fires(t) != 0 {
 		t.Fatalf("%d fires", fires(t))
+	}
+}
+
+func TestIssueCloseTakesANumberACommitAndAnswers(t *testing.T) {
+	t.Parallel()
+	for args, why := range map[string]string{
+		"issue close --fixed-by abc --answers a.yaml":     "takes one issue number",
+		"issue close 5 --answers a.yaml":                  "takes --fixed-by SHA",
+		"issue close 5 --fixed-by abc":                    "takes --answers FILE",
+		"issue close 5 6 --fixed-by abc --answers a.yaml": "takes one issue number",
+	} {
+		if code, _, errs := se(t, strings.Fields(args)...); code == 0 || !strings.Contains(errs, why) {
+			t.Errorf("%s: exit %d, %q", args, code, errs)
+		}
 	}
 }
