@@ -36,6 +36,13 @@ func NewDecoy(dir string) (*Decoy, error) {
 	if err := git("init", "-q", "-b", "decoy"); err != nil {
 		return nil, err
 	}
+	// Git's automatic maintenance runs in the background after a commit and
+	// would change the decoy after its snapshot.
+	for _, kv := range [][2]string{{"maintenance.auto", "false"}, {"gc.auto", "0"}} {
+		if err := git("config", kv[0], kv[1]); err != nil {
+			return nil, err
+		}
+	}
 	if err := git("commit", "-q", "--allow-empty", "-m", "decoy"); err != nil {
 		return nil, err
 	}
