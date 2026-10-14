@@ -31,12 +31,9 @@ type noInput struct{}
 // collector gathers it. The command line runs them itself; on the index they
 // are declarations, which every adapter renders.
 func cliModule() *index.Module {
-	names := make([]string, 0, len(commands))
-	for n := range commands {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	parts := make([]index.Part, 0, len(names))
+	names := sortedNames()
+	parts := make([]index.Part, 0, len(names)+1)
+	parts = append(parts, index.Config(columnsKey, defaultColumns, "The most buttons a row of /se ui holds; the next button starts the next row."))
 	for _, n := range names {
 		decl := declOf(commands[n])
 		parts = append(parts, index.Command(decl, func(noInput, []string) (index.Result, error) {
@@ -51,7 +48,7 @@ func cliModule() *index.Module {
 func declOf(c Command) index.CommandDecl {
 	d := index.CommandDecl{
 		Name: c.Name, Usage: c.Usage, Summary: c.Summary, Help: c.Details, Group: c.Group,
-		Session: c.Session, Button: c.Button, Installed: c.Installed,
+		Session: c.Session, Button: c.Button, Installed: c.Installed, Class: c.Class,
 	}
 	if d.Group == "" {
 		d.Group = "Other"
@@ -77,4 +74,14 @@ func catalog() index.Catalog {
 		panic(err)
 	}
 	return c
+}
+
+// sortedNames are the registered commands' names, sorted.
+func sortedNames() []string {
+	names := make([]string, 0, len(commands))
+	for n := range commands {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }

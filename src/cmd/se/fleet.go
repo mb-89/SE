@@ -11,10 +11,11 @@ import (
 func init() {
 	register(Command{
 		Name:    "fleet check",
+		Class:   interactive,
 		Usage:   "fleet check [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list what is broken in the fleet, each with its remedy",
-		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the coordination skill fixes them. Nothing found, it says healthy. spec/coordination.md has the rules.",
+		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the coordination skill fixes them. Nothing found, it says healthy. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet check")
@@ -25,7 +26,15 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			found, err := s.Check()
+			// With fan-out on, a fan-out the routine refused, kept on the
+			// alive claims, fires once its retry time has passed.
+			var found []issues.Finding
+			fanout := ""
+			if c.fanOutOn() {
+				found, fanout, err = s.CheckFanOut(c.shoot)
+			} else {
+				found, err = s.Check()
+			}
 			if err != nil {
 				return Reply{}, err
 			}
@@ -33,21 +42,26 @@ func init() {
 				data, err := json.Marshal(struct {
 					Healthy  bool             `json:"healthy"`
 					Findings []issues.Finding `json:"findings"`
-				}{len(found) == 0, append([]issues.Finding{}, found...)})
+					Fanout   string           `json:"fanout,omitempty"`
+				}{len(found) == 0, append([]issues.Finding{}, found...), fanout})
 				return Reply{Text: string(data)}, err
 			}
-			if len(found) == 0 {
-				return Reply{Text: "healthy"}, nil
+			lines := make([]string, 0, len(found)+1)
+			for _, f := range found {
+				lines = append(lines, findingText(f))
 			}
-			lines := make([]string, len(found))
-			for k, f := range found {
-				lines[k] = findingText(f)
+			if len(found) == 0 {
+				lines = append(lines, "healthy")
+			}
+			if fanout != "" {
+				lines = append(lines, fanout)
 			}
 			return Reply{Text: strings.Join(lines, "\n")}, nil
 		},
 	})
 	register(Command{
 		Name:    "fleet fix",
+		Class:   batch,
 		Usage:   "fleet fix [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "fix what fleet check finds that needs no checkout",
@@ -97,6 +111,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "fleet prune",
+		Class:   batch,
 		Usage:   "fleet prune [--apply] [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list the stray branches; --apply deletes them",
@@ -145,6 +160,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "fleet refresh",
+		Class:   batch,
 		Usage:   "fleet refresh [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "merge main into each auto-merge PR behind it and rerun its CI",

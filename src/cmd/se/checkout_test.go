@@ -220,7 +220,7 @@ func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
 	write(t, filepath.Join(ws, "src", "cmd", "se", "hello.go"), `package main
 
 func init() {
-	register(Command{Name: "hello", Usage: "hello", Summary: "say hello", Session: true,
+	register(Command{Name: "hello", Usage: "hello", Summary: "say hello", Session: true, Class: batch,
 		Run: func(c *Call) (Reply, error) { return Reply{Text: "hello from the checkout"}, nil }})
 }
 `)

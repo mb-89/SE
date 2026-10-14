@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mb-89/SE/src/internal/io/disk"
 )
@@ -92,6 +93,10 @@ func TestThePrinciplesAreReadFromTheSpec(t *testing.T) {
 	if p := ps[16]; p.Name != "Consistency" || !strings.HasPrefix(p.CheckedBy, "the battery (mechanical checks, generated manifests); the reviewer") || !strings.HasSuffix(p.CheckedBy, "the overhaul (the whole system).") {
 		t.Fatalf("%+v", p)
 	}
+	// The second part, how code is written, holds no principle of the list.
+	if p := ps[len(ps)-1]; p.Name != "Steer before, check at the push" || strings.Contains(p.CheckedBy, "overhaul read") {
+		t.Fatalf("%+v", p)
+	}
 }
 
 // retroWithClasses is retro n's report with one finding, and its issue, per class;
@@ -139,6 +144,7 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 		"repos/o/r/issues?labels=se-overhaul&state=closed&per_page=100": `[{"number":15,"state":"closed","closed_at":"2026-09-01T00:00:00Z"}]`,
 		"repos/o/r/issues/15/comments?per_page=100":                     jsonComments(prev),
 		"repos/o/r/issues/16":                                           `{"number":16,"state":"closed","state_reason":"completed"}`,
+		"repos/o/r/issues/40/comments?per_page=100":                     jsonComments(landing(t, 40, map[string]string{"by-hand": "ran se fleet prune"}, atNow().Now())),
 	})
 	r, err := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}.CollectOverhaul(31, []Principle{{Number: 1, Name: "Mechanize first"}})
 	if err != nil {
@@ -157,6 +163,10 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 	}
 	if !reflect.DeepEqual(r.Recurring, []string{"landing", "merging"}) || !reflect.DeepEqual(r.Earlier, []Overhauled{{Title: "Split the engine", Principle: 4, Issue: 16, State: "completed"}}) {
 		t.Fatalf("%v %+v", r.Recurring, r.Earlier)
+	}
+	// The code facts' window: since #15 closed, with the landing answers given since.
+	if !r.Window.Since.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) || !strings.Contains(strings.Join(r.Window.Answers, "\n"), "ran se fleet prune") {
+		t.Fatalf("%+v", r.Window)
 	}
 	draft, err := r.OverhaulDraft()
 	if err != nil {
@@ -250,6 +260,23 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
 		}
+	}
+}
+
+func TestARemovalsIssueSaysToRepeatTheCascade(t *testing.T) {
+	t.Parallel()
+	gh := recorded(t, overhaulAnswers(overhaulUnattendedMark))
+	draft := overhauled(t, func(r *OverhaulReport) { r.Findings[0].Area = "removal" })
+	if _, err := (Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}).FileOverhaul(30, draft); err != nil {
+		t.Fatal(err)
+	}
+	removal, err := gh.Get("repos/o/r/issues/31")
+	if err != nil || !strings.Contains(string(removal), "Repeat the removal until nothing more falls out") {
+		t.Fatalf("%s %v", removal, err)
+	}
+	other, err := gh.Get("repos/o/r/issues/32")
+	if err != nil || strings.Contains(string(other), "Repeat the removal") {
+		t.Fatalf("%s %v", other, err)
 	}
 }
 
