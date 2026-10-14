@@ -28,7 +28,10 @@ choice is deterministic and no prompt restates it.
 - **Skills**: an issue names the skills its work needs in one place, the
   marked line `se issue new --skills` writes into its body. The take hands
   each over in full in its answer, and the session's log records it; no label
-  picks a skill ([principle 22](principles.md)).
+  picks a skill ([principle 22](principles.md)). A role an agent holds
+  (`work`, `coordination`, `review`, `retro`, `overhaul`) is no skill: `se
+  issue new` writes no such name into the line, and a take of an older issue
+  whose line names one leaves it to the agent it names.
 - **Blockers**: an issue waits while any of its blockers is open. Blockers are
   GitHub's native "blocked by" links, and nothing else; a "Blocked by: #12"
   line in an issue's body does not block it. `se issue new --blocked-by` is
