@@ -11,7 +11,7 @@ import (
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
-// Lease is how long a claimed leaf may go without a push to its branch before
+// Lease is the built-in value of issues/config/lease: how long a claimed leaf may go without a push to its branch before
 // it is stuck. It is under the routine's 4-hour schedule, so a scheduled box
 // always finds a stuck issue.
 const Lease = 3 * time.Hour
@@ -46,6 +46,12 @@ type marks struct {
 	reason string
 	// winners maps each takeover round to its first comment's id.
 	winners map[int]int64
+	// box is the session of the box whose claim it is, from the last box mark.
+	box string
+	// retry is when a fan-out the routine refused for its rate limit, after
+	// this claim, may fire again: the last retry mark, zero once one after it
+	// says the retry fired.
+	retry time.Time
 }
 
 func (s Source) marks(n int) (marks, error) {
@@ -60,6 +66,9 @@ func (s Source) marks(n int) (marks, error) {
 func marksOf(all []comment) marks {
 	m := marks{winners: map[int]int64{}}
 	for _, c := range all {
+		for _, got := range boxMark.FindAllStringSubmatch(c.Body, -1) {
+			m.box = got[1]
+		}
 		round := 0
 		for _, got := range mark.FindAllStringSubmatch(c.Body, -1) {
 			switch got[1] {
@@ -82,6 +91,13 @@ func marksOf(all []comment) marks {
 				if round == m.takeovers {
 					m.head = got[2]
 				}
+			}
+		}
+		for _, got := range fanoutMark.FindAllStringSubmatch(c.Body, -1) {
+			if got[1] == "fired" {
+				m.retry = time.Time{}
+			} else if at, err := time.Parse(time.RFC3339, got[2]); err == nil {
+				m.retry = at
 			}
 		}
 	}
@@ -133,14 +149,14 @@ func (s Source) lease(st *Status) error {
 		return err
 	}
 	st.pushed = pushed
-	since, m, err := s.active(st.Number, pushed, Lease)
+	since, m, err := s.active(st.Number, pushed, s.config().Lease)
 	if err != nil {
 		return err
 	}
 	st.Since = since
 	if m != nil {
 		st.Takeovers = m.takeovers
-		st.Stuck = s.now().Sub(since) > Lease
+		st.Stuck = s.now().Sub(since) > s.config().Lease
 	}
 	return nil
 }
@@ -155,7 +171,7 @@ func (s Status) since() string {
 // toPerson gives a final issue that is stuck to a person: an issue for a
 // person holds it, and it waits on that one.
 func (s Source) toPerson(st *Status) error {
-	reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s, longer than the %s lease.", FinalLabel, st.since(), Lease)
+	reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s, longer than the %s lease.", FinalLabel, st.since(), s.config().Lease)
 	held, err := s.hold(st.Issue, reason)
 	if err != nil {
 		return err
@@ -258,7 +274,7 @@ func (s Source) finalize(n int) error {
 // wins; the other answers false and changes nothing in dir.
 func (s Source) takeOverStuck(dir string, st Status, checkout bool) (took bool, err error) {
 	body := fmt.Sprintf("<!-- se:takeover %d -->\nTaken over: %s, longer than the %s lease. A new box continues the branch and its PR.",
-		st.Takeover.Count, st.since(), Lease)
+		st.Takeover.Count, st.since(), s.config().Lease) + s.boxLine()
 	if won, err := s.markTakeover(st.Number, st.Takeover.Count, body); err != nil || !won {
 		return false, err
 	}

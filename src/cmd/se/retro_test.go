@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/guidance"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -35,7 +34,7 @@ func TestRetroNewCreatesTheRetroAndFires(t *testing.T) {
 	}
 	// The closed retros are listed first; the recorded repository has none.
 	made := issueOf(t, gh, 10)
-	for _, want := range []string{"## Field feedback\\nthe boxes were slow", "<!-- se:retro attended -->", "Skills: retro " + guidance.Mark, "<!-- se:new -->"} {
+	for _, want := range []string{"## Field feedback\\nthe boxes were slow", "<!-- se:retro attended -->", "starts its agent, se:retro", "<!-- se:new -->"} {
 		if !strings.Contains(made, want) {
 			t.Errorf("the body lacks %q: %s", want, made)
 		}
@@ -47,7 +46,7 @@ func TestRetroNewCreatesTheRetroAndFires(t *testing.T) {
 
 func TestARetroIsNoLongerDispatchedByItsLabel(t *testing.T) {
 	t.Parallel()
-	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE retro", Retro: true}, true, "issue-30", "", handed{})
+	r, err := issueReply(false, issues.Issue{Number: 30, Title: "SE retro", Retro: true}, true, "issue-30", "", "", handed{})
 	if err != nil || strings.Contains(r.Text, "se-retro") || strings.Contains(r.Text, "SKILL.md") {
 		t.Fatalf("%q %v", r.Text, err)
 	}

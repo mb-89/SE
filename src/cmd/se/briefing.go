@@ -14,10 +14,11 @@ import (
 func init() {
 	register(Command{
 		Name:    "briefing",
+		Class:   interactive,
 		Usage:   "briefing [--since TIME | --last N] [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "where SE stands: what waits on you, in flight, happened, next",
-		Details: "read GitHub and the checkout and tell, pending first: every se-person issue with its reason and what it holds up, and every report waiting for the owner, from every registered pending source; the claimed issues and their PRs, and what fleet check reports; the issues closed in the window, each with its PR and landing answer done, and the last retro; what issue pull would take, and how many issues are ready, claimed, blocked or in trees; and what SE is. The window is the last day or the last 10 closed issues, whichever are more; --since takes a time (RFC 3339, a date, or an age such as 36h or 3d), --last a count. The skill se:briefing presents it.",
+		Details: "read GitHub and the checkout and tell, pending first: every se-person issue with its reason and what it holds up, and every report waiting for the owner, from every registered pending source; the claimed issues and their PRs, and what fleet check reports; the issues closed in the window, each with its PR and landing answer done, and the last retro; what issue pull would take, how many issues are ready, claimed, blocked or in trees, and the queue's size with when its last issue is estimated to close (issue tree tells the detail); and what SE is. The window is the last day or the last 10 closed issues, whichever are more; --since takes a time (RFC 3339, a date, or an age such as 36h or 3d), --last a count. The skill se:briefing presents it.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "briefing")
@@ -155,6 +156,7 @@ func briefingText(b issues.Briefing) string {
 		fmt.Fprintf(&t, "se issue pull would take #%d %s\n%s\n", b.Next.Number, b.Next.Title, b.Next.URL)
 	}
 	fmt.Fprintf(&t, "%d ready, %d claimed, %d blocked, %d in trees\n", b.Counts.Ready, b.Counts.Claimed, b.Counts.Blocked, b.Counts.InTrees)
+	fmt.Fprintf(&t, "Queue: %s se issue tree tells the detail.\n", b.Queue.Line())
 
 	t.WriteString("\n## What SE is\n")
 	for _, l := range b.About.Lines {

@@ -27,8 +27,8 @@ What earlier versions taught, and how this design answers it:
 - **Starting one:** `se retro new` creates the issue (through the same code as
   `se issue new`) and fires the routine, as fan-out does, so a box takes it at
   once.
-  - Started by a person (the default): the retro skill first asks the person
-    for **field feedback**, which `--field TEXT` puts into the issue.
+  - Started by a person (the default): the agent `se:retro` first takes the
+    person's **field feedback**, which `--field TEXT` puts into the issue.
     `--no-field` skips the question. `se retro new` refuses to guess: it takes
     exactly one of `--field`, `--no-field` and `--unattended`.
   - `--unattended` never asks. The automatic cadence (below) starts retros this
@@ -38,21 +38,22 @@ What earlier versions taught, and how this design answers it:
 - **The cadence:** retros happen without anyone remembering them. When
   `se issue pull --take` runs, before offering anything else, it counts the
   `se` issues closed since the last closed `se-retro` issue closed, retros and
-  overhauls not counted (with none closed yet, the whole history). At `RetroCadence` (in
-  `src/internal/issues/cadence.go`) or more, with no `se-retro` issue open,
+  overhauls not counted (with none closed yet, the whole history). At `issues/config/retro-cadence` (the
+  issues instance's config value, built-in in `src/internal/issues/cadence.go`) or more, with no `se-retro` issue open,
   it starts an unattended retro, as `se retro new --unattended` does, and
   takes it ahead of all other work but a due overhaul
   ([overhaul.md](overhaul.md)). An open `se-retro` issue, attended or not,
   means no second one is started, under a race too: after starting one,
   `--take` reads the open `se-retro` issues again, and where a lower one is
   open, closes its own as a duplicate of it, with a comment naming it, takes
-  nothing from the cadence and goes on to the normal take. `--take N` names its issue and skips the
+  nothing from the cadence and goes on to the normal take. A retro closed as
+  a duplicate never ran: it opens no window and the overhaul does not count
+  it. `--take N` names its issue and skips the
   cadence. The plain `se issue pull` only reports the count, and that a retro
   is due.
 - **The box** takes a retro like any issue (`se issue pull --take` says it is
-  a retro) and follows the retro skill,
-  [src/plugin/skills/retro/SKILL.md](../src/plugin/skills/retro/SKILL.md),
-  instead of landing a branch.
+  a retro and names its agent, `se:retro`) and starts that agent, which files
+  the report instead of landing a branch.
 - **The mechanical half,** `se retro collect N`, reads the window from GitHub
   and writes a report draft beside the checkout (`../retro-N.md`). It holds:
   - the matrix: every closed issue × every landing question, from the
@@ -66,23 +67,11 @@ What earlier versions taught, and how this design answers it:
     by the word its name starts with, each with the comment line that says why;
   - **the previous retro's findings:** did their issues close, and did their
     classes recur?
-- **The judgment half (the box):**
-  - read the draft;
-  - look for what became inconsistent in the window, a hand-written element
-    that now restates what another owns, and prose that serves no reader its
-    file names (principles 17 to 19); each is a finding like any other;
-  - group findings into classes, where three of a kind is a property of the
-    machinery;
-  - pick each class's cheapest durable fix;
-  - record what went well.
-
-  It writes its judgment into the draft's block: `findings` (each a `title`,
-  `class`, `body`, `home`, and `controversial` with its `why`; optionally the
-  rule `check` or the `metric` it should move, which the next retro scores it
-  by, and `retro: true` for a finding about the retro itself), `classes`
-  (`name`, `fix`) and `went_well`. A finding's `home` is one of `check`,
-  `refusal`, `gate`, `field` (a prefilled one), `command` (an `se` command
-  for a step done by hand), `guidance` or `removal`.
+- **The judgment half (the box):** it reads the draft, looks for what the
+  window made inconsistent, restated or written for no reader (principles 17
+  to 19), groups the findings into classes, picks each class's cheapest
+  durable fix and records what went well. How, and the fields it writes into
+  the draft's block, are the agent's (its steps 2 and 3).
 - **Who decides (the owner's rule for retros and overhauls alike):** every
   finding becomes an issue through the same code as `se issue new`.
   - A **non-controversial** finding goes into the normal queue.
@@ -126,7 +115,7 @@ What earlier versions taught, and how this design answers it:
     many of those closed, and which findings recurred anyway.
   - **Should the retro change itself?** Proposals for the landing questions
     ([landing.yaml](landing.yaml)), the rule checks, the metrics or the retro
-    skill are findings like any other, with the same homes (`retro: true`).
+    agent are findings like any other, with the same homes (`retro: true`).
 - **The report stays on the retro issue** as its closing comment, opening
   with `<!-- se:retro-report -->`, with a machine-readable block under
   `<!-- se:retro-yaml -->`: the window, metrics, rule checks, the previous
@@ -136,7 +125,8 @@ What earlier versions taught, and how this design answers it:
 ## The rule checks
 
 Each rule is checked only on what closed after the PR that brought it merged,
-so a rule does not count the history it predates. What broke it before, in the
+so a rule does not count the history it predates; a rule on what is written at
+creation, as the mark is, only on what was created after it. What broke it before, in the
 window, the draft gives once as a count beside it, outside the broken checks
 the next retro scores. `RuleChecks` in `src/internal/issues/retro.go` owns the
 list:
@@ -145,8 +135,8 @@ list:
 - `fixes`: every merged PR said `Fixes #n`; checked on what closed after PR #14 brought it.
 - `ci`: every merged PR had green CI (the last run of each check on its head); checked from the first commit.
 - `outside-pr`: no commit reached main outside a PR (every commit on main is some merged PR's merge commit); checked from the first commit.
-- `mark`: every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body; checked on what closed after PR #91 brought it.
-- `answers`: every landed issue (a leaf closed as completed, not a retro) has landing answers; checked on what closed after PR #74 brought it.
+- `mark`: every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body; checked on what was created after PR #91 brought it.
+- `answers`: every landed issue (a leaf closed as completed, not a retro, an overhaul or a person's decision) has landing answers; checked on what closed after PR #74 brought it.
 <!-- /se:manifest -->
 
 ## The commands
@@ -159,6 +149,5 @@ se retro report N [--draft FILE] [--json] [--repo OWNER/NAME]
 ```
 <!-- /se:manifest -->
 
-`new` is offered in a session as `/se retro new`; all three are, as
-`/se retro <word>`. They read and write GitHub through `gh api`, as the issue
+All three are offered in a session, as `/se retro <word>`. They read and write GitHub through `gh api`, as the issue
 commands do ([issues.md](issues.md)), in `src/internal/issues`.

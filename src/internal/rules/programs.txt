@@ -1,0 +1,7 @@
+# The programs rule's allowlist (src/internal/rules/programs.go, principle 6):
+# each line is a Go file and a program it still starts that proc.Programs does
+# not list. The list only shrinks: the rule refuses an entry that matches
+# nothing. Adding an entry is no way to pass the check.
+
+# GitHub goes through gh until its I/O module speaks HTTP itself (#186).
+src/internal/io/github/github.go gh
