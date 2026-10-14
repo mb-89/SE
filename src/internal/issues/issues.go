@@ -73,6 +73,16 @@ type Source struct {
 	// Waits hears what the source waits on, and for how long, before each
 	// wait, so the person running it is not left waiting blind.
 	Waits func(note string)
+	// Box is the session of the box that claims: each claim records it, so
+	// the fan-out counts each alive box's claims. Empty records nothing.
+	Box string
+	// Worktrees makes a take at the top check nothing out: the box hands
+	// the issue to a sub-agent in its own worktree, and a take refuses
+	// where the box runs its cap of sub-agents already.
+	Worktrees bool
+	// Parallel is the cap of sub-agents one box runs, fleet.box/config/parallel;
+	// zero is its built-in value, Parallel.
+	Parallel int
 }
 
 func (s Source) now() time.Time { return s.Clock.Now() }
@@ -608,6 +618,11 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 	if err != nil {
 		return Issue{}, false, err
 	}
+	if s.Worktrees {
+		if err := s.room(all, t.pulls); err != nil {
+			return Issue{}, false, err
+		}
+	}
 	if want == 0 {
 		if took, ok, err := s.takeOverConflict(dir, all, t.pulls); err != nil || ok {
 			return took, ok, err
@@ -640,7 +655,7 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 		var claimed bool
 		switch {
 		case st.Takeover != nil:
-			claimed, err = s.takeOverStuck(dir, st, true)
+			claimed, err = s.takeOverStuck(dir, st, !s.Worktrees)
 		case st.Parent:
 			claimed, err = s.claimTree(dir, st.Number)
 		default:
@@ -681,30 +696,32 @@ func (tr Tree) ReviewWorktree(dir string, n int) string {
 // In says what is ready inside root's tree: its ready leaves at any depth,
 // and apart from them its parents ready for review.
 func (s Source) In(root int) (Tree, error) {
-	tr, _, err := s.in(root)
+	tr, _, _, err := s.in(root)
 	return tr, err
 }
 
-func (s Source) in(root int) (Tree, []Status, error) {
+// in is In with the statuses inside root's tree, and all statuses with what
+// they were read with.
+func (s Source) in(root int) (Tree, []Status, surveyed, error) {
 	all, t, err := s.survey()
 	if err != nil {
-		return Tree{}, nil, err
+		return Tree{}, nil, surveyed{}, err
 	}
 	tr := Tree{Root: root, Ready: []Issue{}, Review: []Issue{}, rounds: map[int]int{}}
 	if t.closed[root] {
 		tr.Closed = true
-		return tr, nil, nil
+		return tr, nil, surveyed{all, t}, nil
 	}
 	if _, ok := t.byNum[root]; !ok {
 		got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, root), false)
 		if err != nil {
-			return Tree{}, nil, err
+			return Tree{}, nil, surveyed{}, err
 		}
 		if got[0].PullRequest == nil && got[0].State == "closed" {
 			tr.Closed = true
-			return tr, nil, nil
+			return tr, nil, surveyed{all, t}, nil
 		}
-		return Tree{}, nil, fmt.Errorf("#%d is not an issue labelled %s", root, Label)
+		return Tree{}, nil, surveyed{}, fmt.Errorf("#%d is not an issue labelled %s", root, Label)
 	}
 	var inside []Status
 	top := root
@@ -725,7 +742,7 @@ func (s Source) in(root int) (Tree, []Status, error) {
 		inside = append(inside, st)
 	}
 	if tr.Why != "" {
-		return tr, nil, nil
+		return tr, nil, surveyed{all, t}, nil
 	}
 	var fresh []Issue
 	for _, st := range inside {
@@ -740,7 +757,7 @@ func (s Source) in(root int) (Tree, []Status, error) {
 		}
 	}
 	tr.Ready = append(tr.Ready, fresh...)
-	return tr, inside, nil
+	return tr, inside, surveyed{all, t}, nil
 }
 
 // TakeIn claims a leaf inside root's tree: want, when it is above zero, else
@@ -751,8 +768,11 @@ func (s Source) in(root int) (Tree, []Status, error) {
 // stands.
 // ok is false when nothing was left to take; tr says where the tree stands.
 func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree, err error) {
-	tr, inside, err := s.in(root)
+	tr, inside, read, err := s.in(root)
 	if err != nil || tr.Closed {
+		return Issue{}, false, tr, err
+	}
+	if err := s.room(read.all, read.t.pulls); err != nil {
 		return Issue{}, false, tr, err
 	}
 	if tr.Why != "" && want > 0 {
@@ -821,10 +841,11 @@ func (s Source) claimTree(dir string, n int) (bool, error) {
 	return true, s.pickUp(dir, n)
 }
 
-// pickUp checks out issue n's branch as it stands on origin.
+// pickUp checks out issue n's branch as it stands on origin; with Worktrees
+// it only fetches it.
 func (s Source) pickUp(dir string, n int) error {
 	branch := Branch(n)
-	if _, err := s.git(dir, "fetch", "-q", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch); err != nil {
+	if _, err := s.git(dir, "fetch", "-q", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch); err != nil || s.Worktrees {
 		return err
 	}
 	if _, err := s.git(dir, "checkout", "-q", "-B", branch, "--track", "origin/"+branch); err != nil {
@@ -833,11 +854,12 @@ func (s Source) pickUp(dir string, n int) error {
 	return nil
 }
 
-// Claim pushes the current origin/main as issue n's branch and checks it out.
+// Claim pushes the current origin/main as issue n's branch and checks it out,
+// or with Worktrees only fetches it.
 // The push only creates the branch, never moves it, so of two boxes racing for
 // one issue the second is refused: claimed is then false and nothing changed.
 func (s Source) Claim(dir string, n int) (claimed bool, err error) {
-	if claimed, err := s.stake(dir, n); err != nil || !claimed {
+	if claimed, err := s.stake(dir, n); err != nil || !claimed || s.Worktrees {
 		return claimed, err
 	}
 	branch := Branch(n)
@@ -848,7 +870,7 @@ func (s Source) Claim(dir string, n int) (claimed bool, err error) {
 }
 
 // stake is Claim without the checkout: it pushes the branch and fetches it as
-// origin/issue-<n>.
+// origin/issue-<n>, and records the claim's box on the issue.
 func (s Source) stake(dir string, n int) (claimed bool, err error) {
 	branch := Branch(n)
 	ref := "refs/heads/" + branch
@@ -871,7 +893,7 @@ func (s Source) stake(dir string, n int) (claimed bool, err error) {
 	if _, err := s.git(dir, "fetch", "-q", "origin", ref+":refs/remotes/origin/"+branch); err != nil {
 		return true, err
 	}
-	return true, nil
+	return true, s.markBox(n)
 }
 
 // Repo reads OWNER/NAME from the checkout's origin URL, whatever its form:
