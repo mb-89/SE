@@ -14,6 +14,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "briefing",
+		Class:   interactive,
 		Usage:   "briefing [--since TIME | --last N] [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "where SE stands: what waits on you, in flight, happened, next",

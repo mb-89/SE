@@ -61,6 +61,7 @@ func check(procs proc.Procs, dir string) error {
 func init() {
 	register(Command{
 		Name:    "issue pull",
+		Class:   interactive,
 		Usage:   "issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "show the next se issue, stuck work first; --take claims it",
@@ -187,6 +188,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "issue resume",
+		Class:   batch,
 		Usage:   "issue resume N [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "for a person: put issue N back in the queue",
@@ -238,6 +240,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "issue tree",
+		Class:   interactive,
 		Usage:   "issue tree [ROOT] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "list the open queue and estimate when its last issue closes",
@@ -309,6 +312,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "issue new",
+		Class:   batch,
 		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "create an se issue, with its blockers and its parent",
@@ -464,6 +468,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "issue land",
+		Class:   batch,
 		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "check, push and open an issue-N branch's PR, auto-merge on",
@@ -522,6 +527,7 @@ func init() {
 func init() {
 	register(Command{
 		Name:    "issue review",
+		Class:   batch,
 		Usage:   "issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "pass or fail a gate whose sub-issues closed, by its report",
@@ -619,6 +625,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "review brief",
+		Class:   batch,
 		Usage:   "review brief N [--claims] [--json] [--repo OWNER/NAME]",
 		Group:   "Reviews",
 		Summary: "everything a reviewer of gate N starts from",
