@@ -61,7 +61,8 @@ func declOf(c Command) index.CommandDecl {
 }
 
 // catalog is the collector: what the modules se carries declare, as the
-// wiring file binds them. The help, /se ui and the session's commands read
+// wiring file binds them. It reads their declarations alone, so no clock of a
+// run's World reaches it. The help, /se ui and the session's commands read
 // it; a catalog that does not hold together is a broken se, which the
 // battery's tests catch before a merge.
 func catalog() index.Catalog {
@@ -69,7 +70,7 @@ func catalog() index.Catalog {
 	if err != nil {
 		panic(err)
 	}
-	c, err := index.Collect(w, modules(daemon.Paths{}, wall)...)
+	c, err := index.Collect(w, modules(daemon.Paths{}, clock.Real())...)
 	if err != nil {
 		panic(err)
 	}

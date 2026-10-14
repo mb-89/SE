@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -19,6 +20,7 @@ import (
 // The wiring se carries starts the modules se carries, as the daemon starts
 // them, so a broken catalog fails here before a merge.
 func TestTheWiringSeCarriesStartsItsModules(t *testing.T) {
+	t.Parallel()
 	w, err := index.Wired()
 	if err != nil {
 		t.Fatal(err)
@@ -38,6 +40,7 @@ func TestTheWiringSeCarriesStartsItsModules(t *testing.T) {
 
 // Every command se registers is declared on the index, and the index declares no other.
 func TestTheIndexDeclaresEveryRegisteredCommand(t *testing.T) {
+	t.Parallel()
 	var declared, registered []string
 	for _, c := range catalog().Commands {
 		declared = append(declared, c.Name)
@@ -58,14 +61,10 @@ func TestTheIndexDeclaresEveryRegisteredCommand(t *testing.T) {
 // session log module's input and is written to its session's log, and the
 // clock's start reads by name.
 func TestServeLogsEachPostedEventThroughTheIndex(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
-	old := wall
-	wall = clock.NewFake(at)
-	t.Cleanup(func() { wall = old })
-	oldNet := network
-	n := sehttp.NewFake()
-	network = n
-	t.Cleanup(func() { network = oldNet })
+	n, w := sehttp.NewFake(), worldOf(t)
+	w.Clock, w.Net = clock.NewFake(at), n
 	d, ws := onFake(t), "/ws"
 	paths := daemon.Paths{Workspace: ws, Disk: d}
 	served := make(chan int, 1)
@@ -80,7 +79,7 @@ func TestServeLogsEachPostedEventThroughTheIndex(t *testing.T) {
 			t.Fatalf("se serve ended at start: exit %d", code)
 		default:
 		}
-		time.Sleep(5 * time.Millisecond)
+		runtime.Gosched()
 		ep, ok = daemon.Healthy(paths, n)
 	}
 	for _, ev := range []string{"session.start", "tool.call", "tool.call"} {

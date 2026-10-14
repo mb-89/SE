@@ -7,6 +7,7 @@ import (
 )
 
 func TestAMarkerInCodeNamesItsIssue(t *testing.T) {
+	t.Parallel()
 	m := "TO" + "DO"
 	found := check(t, "todo-issue", map[string]string{
 		"a.go":       "package a\n// " + m + "(#12) numbered\n// " + m + " bare\n",

@@ -150,6 +150,7 @@ func survey(t *testing.T, answers map[string]string) map[int]string {
 }
 
 func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
+	t.Parallel()
 	read := func(name string) string {
 		data, err := os.ReadFile(filepath.Join("testdata", name))
 		if err != nil {
@@ -186,6 +187,7 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 }
 
 func TestOnlyOpenSeIssuesAreTheFleets(t *testing.T) {
+	t.Parallel()
 	// The list is already filtered by label and state; a pull request in it is dropped.
 	got := survey(t, unblocked(map[string]string{
 		listPath: `[` + open(4, "") + `,{"number":3,"state":"open","pull_request":{}}]`,
@@ -197,6 +199,7 @@ func TestOnlyOpenSeIssuesAreTheFleets(t *testing.T) {
 }
 
 func TestLowestReadyNumberComesFirst(t *testing.T) {
+	t.Parallel()
 	gh := recorded(t, unblocked(map[string]string{
 		listPath: `[` + open(9, "") + `,` + open(3, "") + `]` + `[` + open(5, "") + `]`, // two pages
 		refsPath: `[]`,
@@ -208,6 +211,7 @@ func TestLowestReadyNumberComesFirst(t *testing.T) {
 }
 
 func TestAClaimedBranchHoldsItsIssue(t *testing.T) {
+	t.Parallel()
 	got := survey(t, pushedAt(unblocked(map[string]string{
 		listPath: `[` + open(1, "") + `,` + open(2, "") + `,` + open(12, "") + `]`,
 		// issue-12 is not issue-1; issue-2-old is not issue-2.
@@ -220,6 +224,7 @@ func TestAClaimedBranchHoldsItsIssue(t *testing.T) {
 }
 
 func TestNativeLinksBlockWhileTheirIssuesAreOpen(t *testing.T) {
+	t.Parallel()
 	native := func(n, total int) string {
 		return fmt.Sprintf(`{"number":%d,"title":"t","state":"open","issue_dependencies_summary":{"total_blocked_by":%d}}`, n, total)
 	}
@@ -244,6 +249,7 @@ func TestNativeLinksBlockWhileTheirIssuesAreOpen(t *testing.T) {
 }
 
 func TestAStaleSummaryDoesNotMakeABlockedIssueReady(t *testing.T) {
+	t.Parallel()
 	// Right after #6 is linked as blocked by #8, the list's summary can
 	// still count 0; the links already name #8.
 	gh := recorded(t, map[string]string{
@@ -264,6 +270,7 @@ func TestAStaleSummaryDoesNotMakeABlockedIssueReady(t *testing.T) {
 }
 
 func TestNothingReady(t *testing.T) {
+	t.Parallel()
 	for name, list := range map[string]string{
 		"no issues": `[]`,
 		"all held":  `[` + open(1, "") + `,{"number":2,"state":"open","issue_dependencies_summary":{"total_blocked_by":1}}]`,
@@ -353,6 +360,7 @@ func boxes(t *testing.T) (origin, a, b string) {
 }
 
 func TestTheSecondClaimIsRefused(t *testing.T) {
+	t.Parallel()
 	origin, a, b := boxes(t)
 	if ok, err := (Source{Proc: machine}).Claim(a, 5); err != nil || !ok {
 		t.Fatalf("first claim: %v %v", ok, err)
@@ -379,6 +387,7 @@ func TestTheSecondClaimIsRefused(t *testing.T) {
 }
 
 func TestATakeRefusedMovesToTheNextIssue(t *testing.T) {
+	t.Parallel()
 	_, a, b := boxes(t)
 	// Both boxes read the same issues; a claims #5 before b pushes.
 	gh := recorded(t, unblocked(map[string]string{
@@ -401,6 +410,7 @@ func TestATakeRefusedMovesToTheNextIssue(t *testing.T) {
 }
 
 func TestTakeRefusesAnIssueThatIsNotReady(t *testing.T) {
+	t.Parallel()
 	gh := recorded(t, map[string]string{
 		listPath: `[` + open(1, "") + `,{"number":2,"state":"open","issue_dependencies_summary":{"total_blocked_by":1}}]`,
 		refsPath: `[]`,
@@ -417,6 +427,7 @@ func TestTakeRefusesAnIssueThatIsNotReady(t *testing.T) {
 }
 
 func TestPagesAsksPageByPageUntilOneIsShort(t *testing.T) {
+	t.Parallel()
 	// One more comment than a page holds.
 	all := make([]string, PerPage+1)
 	for k := range all {
