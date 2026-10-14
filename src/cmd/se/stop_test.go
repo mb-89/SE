@@ -21,11 +21,12 @@ func TestStatusAndStopReachTheDaemonOverTheNetwork(t *testing.T) {
 	w := worldOf(t)
 	w.Net, w.Clock = sehttp.NewFake(), clock.Real()
 	d, ws := onFake(t), "/ws"
+	fake := clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
 		done <- daemon.Serve(context.Background(), daemon.Paths{Workspace: ws, Disk: d}, daemon.Options{
-			Clock: clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)), Net: w.Net, Ready: func(ep daemon.Endpoint) { ready <- ep },
+			Clock: fake, Net: w.Net, Modules: modules(daemon.Paths{Workspace: ws, Disk: d}, fake), Ready: func(ep daemon.Endpoint) { ready <- ep },
 		})
 	}()
 	ep := <-ready

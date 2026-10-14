@@ -81,9 +81,9 @@ func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
 // commandFlags is every command by name, with the flags it takes.
 func commandFlags() map[string][]string {
 	out := map[string][]string{}
-	for name, c := range commands {
-		flags := []string{}
-		if fs := flagsOf(c, false); fs != nil {
+	for _, c := range catalog().Commands {
+		name, flags := c.Name, []string{}
+		if fs := flagsOf(name, false); fs != nil {
 			fs.VisitAll(func(f *flag.Flag) { flags = append(flags, f.Name) })
 		}
 		out[name] = flags
