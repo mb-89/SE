@@ -66,7 +66,7 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 	// The usage lines' want comes from the registered commands, so a new
 	// command edits no list here.
 	_, out, _ = se(t, "--workspace", ws, "manifest", "usage", "fleet", "rules")
-	if want := "```\n" + usagesUnder("fleet") + usagesUnder("rules") + "```\n"; !strings.HasPrefix(want, "```\nse fleet check ") || !strings.HasSuffix(want, "\nse rules\n```\n") || out != want {
+	if want := "```\n" + usagesUnder("fleet") + usagesUnder("rules") + "```\n"; !strings.HasPrefix(want, "```\nse fleet check ") || !strings.HasSuffix(want, "\nse rules [--fix]\n```\n") || out != want {
 		t.Fatalf("usage: %q, want %q", out, want)
 	}
 	if code, _, errs := se(t, "--workspace", ws, "manifest", "frob"); code != 1 || !strings.Contains(errs, `no manifest "frob"`) {
