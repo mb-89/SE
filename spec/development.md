@@ -44,11 +44,28 @@ changes.
 
 `sh ./tests/check.sh` is the one definition of green; the pre-push hook and CI
 run it, and it names each step it runs. SE's own rules are one file each in
-`src/internal/rules`, run by `se rules`. The linters' versions are pinned in
-`tests/tools.sh`, and each linter's config gives the reason for anything it
-switches off. Only the battery needs them, so check.sh runs
-`sh tests/tools.sh install` first for any that is missing or at another
-version; a fresh box's first push installs them itself.
+`src/internal/rules`, run by `se rules`. Every tool SE needs is pinned in
+`tests/tools.sh` (gh, Go, dlv and the linters, whose formatters are the ones
+SE uses), and each linter's config gives the reason for anything it switches
+off. RUNME.sh, CI and check.sh run `sh tests/tools.sh install`, which installs
+whatever is missing, and a linter at another version, into `~/.se` without
+admin rights: each from its release file for the platform, checked against
+the checksum its release publishes (biome publishes none, so tools.sh pins
+its binaries' checksums), and claude by Anthropic's native installer. It puts
+`~/.se/bin` on the PATH in `~/.bashrc` (and `~/.zshrc` where zsh is the
+shell). A fresh box's first push installs them itself.
+
+## The Windows check
+
+No box runs Windows, so a person runs this one check on a Windows machine
+after a change to `RUNME.sh` or `tests/tools.sh`: in Git Bash, on an account
+without gh, Go, golangci-lint and biome on its PATH, run `./RUNME.sh`, open a
+new Git Bash, and see `gh --version`, `go version`, `golangci-lint --version`
+and `biome --version` answer at the versions tools.sh pins, each from
+`~/.se`, and a new `claude` session offer `/se`. The case table in
+`src/internal/battery/tools_test.go` covers the names Windows' release files
+and binaries carry; this check covers the downloads, the unpacking and the
+PATH line.
 
 ## The gate
 
