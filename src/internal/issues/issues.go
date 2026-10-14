@@ -25,7 +25,7 @@ const Label = "se"
 const ReviewLabel = "se-review"
 
 // FinalLabel marks an issue on its last attempt: one a review filed for a
-// finding, or one taken over once already. A final issue that fails again goes
+// finding, or one taken over stuck once already. A final issue that fails again goes
 // to a person instead of another round.
 const FinalLabel = "se-final"
 
@@ -310,6 +310,7 @@ func (t tree) depth(n int) int {
 }
 
 // load reads the open fleet issues with their sub-issues, then closes every
+// issue for a person that hold minted whose held issue is closed, and every
 // parent whose sub-issues are all closed, deepest first, so a parent its
 // closing completes closes too. A parent labelled se-review never closes here.
 // The reads more makes from the list run beside the sub-issues' reads.
@@ -338,11 +339,43 @@ func (s Source) load(more func(t tree) []func() error) (tree, error) {
 			return err
 		})
 	}
+	// An issue for a person whose held issue is not open in the list is
+	// moot where that issue is closed; it is read to be sure.
+	moot := map[int]*bool{}
+	for _, h := range t.numbers() {
+		n := t.byNum[h].holds()
+		if _, open := t.byNum[n]; n == 0 || open {
+			continue
+		}
+		shut := false
+		moot[h] = &shut
+		reads = append(reads, func() error {
+			got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
+			// A 404 is an issue gone, which holds nothing either.
+			if github.Status(err) == 404 {
+				shut = true
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			shut = got[0].State == "closed"
+			return nil
+		})
+	}
 	if more != nil {
 		reads = append(reads, more(t)...)
 	}
 	if err := parallel(reads); err != nil {
 		return tree{}, err
+	}
+	for _, h := range t.numbers() {
+		if shut, ok := moot[h]; ok && *shut {
+			if err := s.closeMoot(h, t.byNum[h].holds()); err != nil {
+				return tree{}, err
+			}
+			delete(t.byNum, h)
+		}
 	}
 	for k, n := range parents {
 		t.subs[n] = subs[k]
@@ -403,8 +436,9 @@ func (s Source) closeParent(n int) error {
 }
 
 // CloseParents closes every open parent whose sub-issues are all closed,
-// deepest first, except those labelled se-review. Every se issue command does
-// this first.
+// deepest first, except those labelled se-review, and every moot issue for a
+// person: one hold minted whose held issue is closed. Every se issue command
+// does this first.
 func (s Source) CloseParents() error {
 	_, err := s.load(nil)
 	return err
