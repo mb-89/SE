@@ -188,6 +188,8 @@ type Row struct {
 	// that the box filed a follow-up as it did.
 	Box      bool `json:"box,omitempty"`
 	Followup bool `json:"followup,omitempty"`
+	// Requests is the GitHub requests its landing facts counted; 0 unknown.
+	Requests int `json:"requests,omitempty"`
 }
 
 // Script is a file added under src/scripts/ in the window.
@@ -219,7 +221,10 @@ type Collected struct {
 	PRs      int
 	Commits  int
 	Reruns   int
-	Checks   []Broken
+	// Reholds counts the issues for a person made in the window beyond the
+	// first for each issue they hold back: one hold minted again.
+	Reholds int
+	Checks  []Broken
 	// Before counts, by kind, what broke a rule in the window but closed (or,
 	// for a rule bounded by creation, was created) before the PR that brought
 	// it merged; Checks leaves it out.
@@ -381,6 +386,9 @@ func (s Source) Collect(n int) (Collected, error) {
 			filed, boxed, share(filed, boxed), s.config().FollowupShare)})
 	}
 	sort.SliceStable(c.Checks, func(a, b int) bool { return kindOrder(c.Checks[a].Kind) < kindOrder(c.Checks[b].Kind) })
+	if c.Reholds, err = s.reholds(c.Window); err != nil {
+		return Collected{}, err
+	}
 	c.Metrics = c.measure()
 	if c.Previous != nil {
 		score, err := s.score(*c.Previous, c.Checks, c.Metrics)
@@ -469,6 +477,31 @@ func share(part, whole int) float64 {
 	return round2(100 * float64(part) / float64(whole))
 }
 
+// holdOf reads the issue a hold, an issue for a person an older se minted,
+// holds back from its title; no se mints one now, but the window may hold them.
+var holdOf = regexp.MustCompile(`^Decide how #(\d+) goes on: `)
+
+// reholds counts the issues for a person created in w beyond the first for
+// each issue they hold back, open or closed: a hold minted more than once.
+func (s Source) reholds(w RetroWindow) (int, error) {
+	list, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=all&per_page=100%s", s.Repo, PersonLabel, w.since()), true)
+	if err != nil {
+		return 0, err
+	}
+	seen, extra := map[string]bool{}, 0
+	for _, x := range list {
+		m := holdOf.FindStringSubmatch(x.Title)
+		if x.PullRequest != nil || m == nil || !w.holds(x.Created) {
+			continue
+		}
+		if seen[m[1]] {
+			extra++
+		}
+		seen[m[1]] = true
+	}
+	return extra, nil
+}
+
 // ruleStarts are the times the rule checks started: when the PR that brought
 // each merged. A rule from the first commit has none.
 func ruleStarts(pulls []merged) (map[string]time.Time, error) {
@@ -539,6 +572,9 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 		}
 	}
 	r.Takeovers = len(rounds)
+	if landed != nil {
+		r.Requests = landed.Facts.Requests
+	}
 	if p, ok := fixedBy[x.Number]; ok {
 		r.PR, r.Box = p.Number, true
 		if landed != nil && !landed.Facts.Claimed.IsZero() {
@@ -652,10 +688,12 @@ func group(path string) string {
 // closed issues, so retros of different sizes compare.
 type Metrics map[string]float64
 
-// metricNames are the metrics, in the order the report lists them.
+// metricNames are the metrics, in the order the report lists them. duplicates
+// are the closed issues closed as duplicate, and the issues for a person made
+// beyond the first for each issue they hold back.
 var metricNames = []string{
-	"closed", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand",
-	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue",
+	"closed", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand", "duplicates", "requests",
+	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue", "duplicates_per_issue", "requests_per_issue",
 	"claim_to_merge_minutes", "followups", "followup_share",
 }
 
@@ -663,12 +701,16 @@ var metricNames = []string{
 func lowerIsBetter(name string) bool { return name != "closed" }
 
 func (c Collected) measure() Metrics {
-	m := Metrics{"closed": float64(len(c.Rows)), "ci_reruns": float64(c.Reruns)}
+	m := Metrics{"closed": float64(len(c.Rows)), "ci_reruns": float64(c.Reruns), "duplicates": float64(c.Reholds)}
 	var minutes []int
 	for _, r := range c.Rows {
 		m["conflicts"] += float64(r.Conflicts)
 		m["takeovers"] += float64(r.Takeovers)
 		m["person_flags"] += float64(r.Person)
+		m["requests"] += float64(r.Requests)
+		if r.Reason == "duplicate" {
+			m["duplicates"]++
+		}
 		if r.Answers != nil && byHand(r.Answers["by-hand"]) {
 			m["by_hand"]++
 		}
@@ -676,7 +718,7 @@ func (c Collected) measure() Metrics {
 			minutes = append(minutes, r.Minutes)
 		}
 	}
-	for _, name := range []string{"conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand"} {
+	for _, name := range counted {
 		m[name+"_per_issue"] = 0
 		if len(c.Rows) > 0 {
 			m[name+"_per_issue"] = round2(m[name] / float64(len(c.Rows)))
@@ -687,6 +729,9 @@ func (c Collected) measure() Metrics {
 	m["followups"], m["followup_share"] = float64(filed), share(filed, boxed)
 	return m
 }
+
+// counted are the metrics counted in the window, each also per closed issue.
+var counted = []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand", "duplicates", "requests"}
 
 func round2(x float64) float64 { return float64(int(x*100+0.5)) / 100 }
 

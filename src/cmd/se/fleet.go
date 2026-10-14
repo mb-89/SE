@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 )
@@ -17,7 +18,7 @@ func init() {
 		Usage:   "fleet check [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list what is broken in the fleet, each with its remedy",
-		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says healthy. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
+		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says healthy. Where GitHub's answers say the hour's quota of requests has fallen below the github instance's quota-floor share (github/config/quota-floor), a last line says how many are left and when it resets. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet check")
@@ -40,12 +41,16 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
+			// The quota, as GitHub's answers to these reads gave it.
+			_, rate := github.Metered(c.GitHub)
+			quota := rate.Low(githubSettings().Floor)
 			if *asJSON {
 				data, err := json.Marshal(struct {
 					Healthy  bool             `json:"healthy"`
 					Findings []issues.Finding `json:"findings"`
 					Fanout   string           `json:"fanout,omitempty"`
-				}{len(found) == 0, append([]issues.Finding{}, found...), fanout})
+					Quota    string           `json:"quota,omitempty"`
+				}{len(found) == 0, append([]issues.Finding{}, found...), fanout, quota})
 				return Reply{Text: string(data)}, err
 			}
 			lines := make([]string, 0, len(found)+1)
@@ -57,6 +62,9 @@ func init() {
 			}
 			if fanout != "" {
 				lines = append(lines, fanout)
+			}
+			if quota != "" {
+				lines = append(lines, quota)
 			}
 			return Reply{Text: strings.Join(lines, "\n")}, nil
 		},
