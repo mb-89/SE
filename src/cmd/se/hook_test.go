@@ -3,7 +3,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,14 +36,7 @@ func stopWorld(t *testing.T, a map[string]string) *disk.Fake {
 	d := onFake(t)
 	put(t, d, "/ws/.se/.runtime/box.json", `{"issue":3}`)
 	put(t, d, "/ws/"+StopPath, "refusals: 2\n")
-	old := gh
-	gh = func(args ...string) ([]byte, error) {
-		if v, ok := a[args[len(args)-1]]; ok {
-			return []byte(v), nil
-		}
-		return nil, errors.New("gh: Not Found (HTTP 404)")
-	}
-	t.Cleanup(func() { gh = old })
+	hubAt(t, a)
 	return d
 }
 
@@ -86,18 +78,16 @@ func TestAClaimWithoutAPRIsRefusedUpToTheCap(t *testing.T) {
 }
 
 func TestAPRWithAutoMergeOrASupersedeLetsTheBoxEnd(t *testing.T) {
-	a := map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[{"number":9,"html_url":"p9","auto_merge":null}]`}
-	stopWorld(t, a)
+	stopWorld(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[{"number":9,"html_url":"p9","auto_merge":null}]`})
 	if v := stops(t); !strings.Contains(v.Block, "PR #9 (p9) has auto-merge off") {
 		t.Fatalf("%+v", v)
 	}
-	a[pulls3] = `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`
+	hubAt(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`})
 	if v := stops(t); v.Block != "" || v.Pass == "" {
 		t.Fatalf("%+v", v)
 	}
 	// A superseded issue is closed.
-	a[pulls3] = `[]`
-	a["repos/o/r/issues/3"] = `{"number":3,"state":"closed"}`
+	hubAt(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"closed"}`})
 	if v := stops(t); v.Block != "" || v.Pass == "" {
 		t.Fatalf("%+v", v)
 	}

@@ -113,6 +113,12 @@ func contract(t *testing.T, fresh func(t *testing.T) (github.GitHub, string)) {
 		if subs := list[issue](t, gh, path+"/sub_issues?per_page=100"); len(subs) != 1 || subs[0].Number != sub.Number {
 			t.Fatalf("sub-issues %+v", subs)
 		}
+		if got := get[issue](t, gh, fmt.Sprintf("repos/%s/issues/%d/parent", repo, sub.Number)); got.Number != parent.Number {
+			t.Fatalf("parent %+v", got)
+		}
+		if _, err := gh.Get(path + "/parent"); github.Status(err) != 404 {
+			t.Fatalf("a parent's parent: %v", err)
+		}
 		send(t, gh, "PATCH", fmt.Sprintf("repos/%s/issues/%d", repo, sub.Number), github.F("state", "closed"))
 		if got := get[issue](t, gh, path); got.SubIssues == nil || got.SubIssues.Total != 1 || got.SubIssues.Completed != 1 {
 			t.Fatalf("summary %+v", got.SubIssues)

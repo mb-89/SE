@@ -3,6 +3,8 @@ package issues
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // Superseded is what Supersede did: the issue it closed and the successor
@@ -34,7 +36,7 @@ func (s Source) Supersede(n int, questions string) (Superseded, error) {
 	}
 	got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
 	if err != nil {
-		if strings.Contains(err.Error(), "HTTP 404") || strings.Contains(err.Error(), "HTTP 410") {
+		if st := github.Status(err); st == 404 || st == 410 {
 			return Superseded{}, fmt.Errorf("#%d does not exist in %s", n, s.Repo)
 		}
 		return Superseded{}, err
@@ -78,10 +80,10 @@ func (s Source) Supersede(n int, questions string) (Superseded, error) {
 	}
 	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
 	comment := fmt.Sprintf("Superseded by #%d, which carries this issue on with the questions its box could not answer.\n%s", made.Number, made.URL)
-	if _, err := s.GH("api", "-X", "POST", "-f", "body="+comment, path+"/comments"); err != nil {
+	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", comment)); err != nil {
 		return sup, fmt.Errorf("created #%d (%s), but commenting on #%d: %w", made.Number, made.URL, n, err)
 	}
-	if _, err := s.GH("api", "-X", "PATCH", "-f", "state=closed", "-f", "state_reason=not_planned", path); err != nil {
+	if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "not_planned")); err != nil {
 		return sup, fmt.Errorf("created #%d (%s), but closing #%d: %w", made.Number, made.URL, n, err)
 	}
 	return sup, nil
@@ -91,7 +93,7 @@ func (s Source) Supersede(n int, questions string) (Superseded, error) {
 func (s Source) parentOf(n int) (int, error) {
 	got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d/parent", s.Repo, n), false)
 	if err != nil {
-		if strings.Contains(err.Error(), "HTTP 404") {
+		if github.Status(err) == 404 {
 			return 0, nil
 		}
 		return 0, err
