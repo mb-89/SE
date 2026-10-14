@@ -77,7 +77,10 @@ controversial, and closes the overhaul.
    - `went_well`: what holds and should stay.
 4. `./src/plugin/bin/se overhaul file <n>`. If it refuses, fix what it names
    and run it again. It creates the issues, those for a person where
-   controversial, and closes the overhaul. End: there is no PR to land, and
+   controversial, the rest into the open misc manifest, and closes the
+   overhaul. All work moves in manifests, each one topic whose leaves
+   together take about `issues.manifest/config/target` (an hour): size each
+   finding's fix to fit it. End: there is no PR to land, and
    nothing waits for the owner but the issues for them.
 
 ## Pruning

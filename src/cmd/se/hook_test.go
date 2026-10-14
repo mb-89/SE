@@ -91,6 +91,43 @@ func TestOnlyAMergedPROrASupersedeLetsTheBoxEnd(t *testing.T) {
 	}
 }
 
+func TestALandRecordCountsAsAutoMergeOn(t *testing.T) {
+	t.Parallel()
+	// GitHub shows the PR with auto-merge unset, as a proxy's route may leave it.
+	d := stopWorld(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[{"number":9,"html_url":"p9","auto_merge":null}]`})
+	if v := stops(t); !strings.Contains(v.Block, "auto-merge off") {
+		t.Fatalf("%+v", v)
+	}
+	// The sub-agent landed #3 in its worktree beside the box's checkout: its
+	// auto-merge is on, and the box keeps the PR until it merges.
+	put(t, d, "/issue-3/.se/.runtime/box.json", `{"landed":{"3":{"pr":9,"auto_merge":true}}}`)
+	if v := stops(t); !strings.Contains(v.Block, "PR #9 (p9) has not merged") {
+		t.Fatalf("%+v", v)
+	}
+	// A leaf's sub-agent is judged by the same record (the count afresh).
+	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[3]}`)
+	put(t, d, "/t/leaf.jsonl", `{"type":"user","message":{"content":"Work on se issue #3 in the worktree /issue-3, on its branch issue-3."}}`+"\n")
+	if v := stops(t, "--agent-transcript", "/t/leaf.jsonl"); !strings.Contains(v.Block, "has not merged") {
+		t.Fatalf("%+v", v)
+	}
+	// A record in the box's own workspace counts too; a record without
+	// auto-merge does not.
+	put(t, d, "/issue-3/.se/.runtime/box.json", `{}`)
+	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[3],"landed":{"3":{"pr":9,"auto_merge":false}}}`)
+	if v := stops(t); !strings.Contains(v.Block, "auto-merge off") {
+		t.Fatalf("%+v", v)
+	}
+	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[3],"landed":{"3":{"pr":9,"auto_merge":true}}}`)
+	if v := stops(t); !strings.Contains(v.Block, "has not merged") {
+		t.Fatalf("%+v", v)
+	}
+	// Merged, the issue is closed.
+	hubAt(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"closed"}`})
+	if v := stops(t); v.Block != "" {
+		t.Fatalf("%+v", v)
+	}
+}
+
 func TestAnInteractiveSessionIsNeverRefused(t *testing.T) {
 	t.Parallel()
 	stopWorld(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[]`})
@@ -159,6 +196,16 @@ func TestATakeRecordsTheIssueForTheStopHook(t *testing.T) {
 		}
 	}
 	if b := readBox(c); !slices.Equal(b.Issues, []int{3, 4}) {
+		t.Fatalf("%+v", b)
+	}
+	// A later take keeps the PRs landed here before.
+	if err := recordLand(c, 3, 9); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordTake(c, 5); err != nil {
+		t.Fatal(err)
+	}
+	if b := readBox(c); !slices.Equal(b.Issues, []int{3, 4, 5}) || b.Landed[3] != (landed{PR: 9, AutoMerge: true}) {
 		t.Fatalf("%+v", b)
 	}
 }
