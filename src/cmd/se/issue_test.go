@@ -144,7 +144,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: edit, land, new, pull, resume, review, supersede, tree." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -152,7 +152,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	t.Parallel()
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: edit, land, new, pull, resume, review, supersede, tree." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -162,7 +162,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue pull, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: edit, land, new, pull, resume, review, supersede, tree.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -421,11 +421,11 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires", code, fires(t))
 	}
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIts agent: se:worker.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
+	if code != 0 || fires(t) != 1 || !strings.HasPrefix(out, "Took #3 three, on branch issue-3.\nu3\nIts agent: se:worker.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n\n"+workerIntro) {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// The take is recorded for the Stop hook, which holds the box to closing #3.
-	if data, err := os.ReadFile(filepath.Join(ws, ".se", ".runtime", "box.json")); err != nil || string(data) != `{"issue":3}` {
+	if data, err := os.ReadFile(filepath.Join(ws, ".se", ".runtime", "box.json")); err != nil || string(data) != `{"issues":[3]}` {
 		t.Fatalf("%q %v", data, err)
 	}
 	// #3 is now claimed on origin, but the recorded refs do not say so: the
@@ -567,7 +567,7 @@ func TestIssueReviewReadsItsWords(t *testing.T) {
 	gh := recordedIssues(t)
 	d, dir := onFake(t), filepath.FromSlash("/reports")
 	good, bad := filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json")
-	put(t, d, good, `{"commit":"c","requirements":[{"item":"i","evidence":"e"}],"clean":["x"]}`)
+	put(t, d, good, `{"commit":"c","requirements":[{"item":"i","evidence":"e"}],"clean":["x"],"ran":`+ranAll(t)+`}`)
 	put(t, d, bad, `{"verdict":"pass"}`)
 	for args, want := range map[string]string{
 		"pass":                          "pass or fail, then an issue number",
@@ -732,5 +732,54 @@ func TestWorktreeIsTheBoxsTakeAtTheTop(t *testing.T) {
 	}
 	if fires(t) != 0 {
 		t.Fatalf("%d fires", fires(t))
+	}
+}
+
+func TestATakeoverWritesBackTheLandingAnswersBesideItsWorktree(t *testing.T) {
+	t.Parallel()
+	posted, err := issues.Landed{Issue: 6, Answers: map[string]string{"done": "half of it", "left": "the tests"}}.Comment([]issues.Question{{Key: "done", Question: "Done?"}, {Key: "left", Question: "Left?"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	comments, _ := json.Marshal([]map[string]any{{"id": 1, "body": posted}})
+	hubAt(t, map[string]string{"repos/o/r/issues/6/comments?per_page=100": string(comments)})
+	ws := filepath.Join(t.TempDir(), "SE")
+	c := &Call{Workspace: ws, World: *worldOf(t)}
+	s := issues.Source{Repo: "o/r", GitHub: c.GitHub, Disk: c.Disk}
+	took := issues.Issue{Number: 6, Title: "six", URL: "u6", Takeover: &issues.Takeover{Count: 1, Stale: "nothing pushed for 3h"}}
+	if err := restoreAnswers(c, s, &took, true); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(filepath.Dir(ws), "issue-6-landing.yaml")
+	got, err := issues.ReadAnswers(c.Disk, path)
+	if err != nil || strings.TrimSpace(got["done"]) != "half of it" || strings.TrimSpace(got["left"]) != "the tests" || took.Takeover.Answers != path {
+		t.Fatalf("%q %v, takeover %+v", got, err, took.Takeover)
+	}
+	r, err := issueReply(false, took, true, "issue-6", "git worktree add …", "", handed{})
+	if err != nil || !strings.Contains(r.Text, "Its landing answers, as its last land posted them, are in "+path+": bring them up to date, and land with --answers "+path+".") {
+		t.Fatalf("%v\n%s", err, r.Text)
+	}
+	r, err = issueReply(true, took, true, "issue-6", "", "", handed{})
+	if want, _ := json.Marshal(path); err != nil || !strings.Contains(r.Text, `"answers":`+string(want)) {
+		t.Fatalf("%v\n%s", err, r.Text)
+	}
+	// New work restores nothing.
+	fresh := issues.Issue{Number: 7}
+	if err := restoreAnswers(c, s, &fresh, true); err != nil || fresh.Takeover != nil {
+		t.Fatalf("%v %+v", err, fresh)
+	}
+}
+
+func TestIssueCloseTakesANumberACommitAndAnswers(t *testing.T) {
+	t.Parallel()
+	for args, why := range map[string]string{
+		"issue close --fixed-by abc --answers a.yaml":     "takes one issue number",
+		"issue close 5 --answers a.yaml":                  "takes --fixed-by SHA",
+		"issue close 5 --fixed-by abc":                    "takes --answers FILE",
+		"issue close 5 6 --fixed-by abc --answers a.yaml": "takes one issue number",
+	} {
+		if code, _, errs := se(t, strings.Fields(args)...); code == 0 || !strings.Contains(errs, why) {
+			t.Errorf("%s: exit %d, %q", args, code, errs)
+		}
 	}
 }
