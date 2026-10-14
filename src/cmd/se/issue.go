@@ -67,7 +67,7 @@ func init() {
 		Usage:   "issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "show the next se issue, stuck work first; --take claims it",
-		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link, why it is at the top, and where the cadences stand; --full adds the body), or says that none is ready, and takes nothing; a press of its /se ui button shows the short form, the cadences in one line. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands. A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. A take names the agent that works the issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a parent, which is the box itself, se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. Every --take first refuses where main has moved past the commit se was built from, naming se update: the agents and guidance it hands over come from main. --person lists the issues waiting on a person.", issueConfig().OverhaulCadence, issueConfig().RetroCadence, issueConfig().Lease, issues.Parallel),
+		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work; boxes take only manifests, so at the top it offers a manifest (a parent), a retro or an overhaul, never a leaf in no manifest, and a manifest whose leaves are all closed is offered to be landed as one PR. Every --take first reads fleet.box/config/paused (issues/config/paused) in the wiring file on origin/main, and while it is set takes nothing and says the fleet is paused, so the box ends. Without --take it only shows it (number, title, link, why it is at the top, and where the cadences stand; --full adds the body), or says that none is ready, and takes nothing; a press of its /se ui button shows the short form, the cadences in one line. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands. A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. A name there that is an agent's role, as retro or overhaul, is no skill: the take's agent holds it, so it is neither handed over nor reported missing. A take names the agent that works the issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a parent, which is the box itself, se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. Every --take also refuses where main has moved past the commit se was built from, naming se update: the agents and guidance it hands over come from main. --person lists the issues waiting on a person.", issueConfig().OverhaulCadence, issueConfig().RetroCadence, issueConfig().Lease, issues.Parallel),
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -124,6 +124,15 @@ func init() {
 			}
 			if *in < 0 {
 				return Reply{}, fmt.Errorf("--in takes an issue number, not %d", *in)
+			}
+			// The pause switch on main stops every take, at the top and
+			// inside a tree, so the owner stops the fleet with one change.
+			if take.set {
+				if paused, err := s.Paused(c.Workspace); err != nil {
+					return Reply{}, err
+				} else if paused {
+					return pausedReply(*asJSON)
+				}
 			}
 			if *in > 0 {
 				r, err := inReply(c, s, *asJSON, *in, take)
@@ -324,10 +333,10 @@ func init() {
 	register(Command{
 		Name:    "issue new",
 		Class:   batch,
-		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "create an se issue, with its blockers and its parent",
-		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. A ready issue, one nothing open blocks, fires the routine once.",
+		Summary: "create an se issue in a manifest, with its blockers",
+		Details: fmt.Sprintf("create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), and name it. All work moves in manifests: a manifest is an issue at the top on one topic whose sub-issues are its work, landing as one PR, its leaves together about %s (issues.manifest/config/target), and boxes take only manifests. --parent N files it into a manifest (a sub-issue of N); --manifest makes it a new manifest itself, labelled se-manifest, whose leaves follow with --parent; without either it goes into the open misc manifest (labelled se-misc), which takes new issues for that time from its creation, after which the next one opens.", issues.Span(issueConfig().ManifestTarget.Minutes())) + " --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). A name that is an agent's role (work, coordination, review, retro, overhaul, or the agent's own name) is left out of that line, since the take names the agent that holds it. It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. An issue for a person stands at the top, in no manifest. A ready issue, one nothing open blocks, fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -340,6 +349,7 @@ func init() {
 			review := fs.Bool("review", false, "label it se-review: it is reviewed once its sub-issues have closed")
 			final := fs.Bool("final", false, "label it se-final: if it fails, it goes to a person")
 			person := fs.Bool("person", false, "make it an issue for a person: label it se-person and assign it to the owner")
+			manifest := fs.Bool("manifest", false, "make it a new manifest, labelled se-manifest: its leaves follow with --parent")
 			skills := fs.String("skills", "", "the skills its work needs, as `NAME,NAME`: a take hands each over")
 			allowDuplicate := fs.Bool("allow-duplicate", false, "create it although an open se issue under the same parent has its title")
 			if err := c.Parse(fs); err != nil {
@@ -363,6 +373,9 @@ func init() {
 			if *parent < 0 {
 				return Reply{}, fmt.Errorf("--parent takes an issue number, not %d", *parent)
 			}
+			if *manifest && (*parent > 0 || *person) {
+				return Reply{}, fmt.Errorf("--manifest makes an issue at the top: it takes neither --parent nor --person")
+			}
 			if given["body"] == given["body-file"] {
 				return Reply{}, fmt.Errorf("issue new takes one of --body and --body-file")
 			}
@@ -382,6 +395,8 @@ func init() {
 				if err != nil {
 					return Reply{}, err
 				}
+				// A role an agent holds is no skill: the take names its agent.
+				names = issues.Skills(names)
 				if _, err := guidance.Read(c.Disk, c.seRoot(), names); err != nil {
 					return Reply{}, err
 				}
@@ -390,6 +405,15 @@ func init() {
 			s, err := src()
 			if err != nil {
 				return Reply{}, err
+			}
+			// No bare issues: without --parent or --manifest it goes into the
+			// open misc manifest, or the next one.
+			misc := 0
+			if *parent == 0 && !*manifest && !*person {
+				if misc, err = s.Misc(); err != nil {
+					return Reply{}, err
+				}
+				*parent = misc
 			}
 			if *allowDuplicate {
 				if err := s.CloseParents(); err != nil {
@@ -405,6 +429,9 @@ func init() {
 				return Reply{}, fmt.Errorf("#%d is an open se issue titled %q, %s, already; --allow-duplicate creates another", dup, strings.TrimSpace(*title), where)
 			}
 			var labels []string
+			if *manifest {
+				labels = append(labels, issues.ManifestLabel)
+			}
 			if *review {
 				labels = append(labels, issues.ReviewLabel)
 			}
@@ -430,6 +457,11 @@ func init() {
 			if err := s.Blocking(made, dependents); err != nil {
 				return Reply{}, err
 			}
+			// Filed into no manifest, it went into the misc manifest, which
+			// it may have opened.
+			if *parent == 0 && made.In() > 0 {
+				misc, *parent = made.In(), made.In()
+			}
 			fanout := ""
 			if ready {
 				fanout = c.fanOut(s, 0)
@@ -444,13 +476,20 @@ func init() {
 					Review    bool   `json:"review,omitempty"`
 					Final     bool   `json:"final,omitempty"`
 					Person    bool   `json:"person,omitempty"`
+					Manifest  bool   `json:"manifest,omitempty"`
+					Misc      bool   `json:"misc,omitempty"`
 					Fanout    string `json:"fanout,omitempty"`
-				}{made.Number, made.URL, append([]int{}, blockers...), *parent, dependents, *review, *final, *person, fanout})
+				}{made.Number, made.URL, append([]int{}, blockers...), *parent, dependents, *review, *final, *person, *manifest, misc > 0, fanout})
 				return Reply{Text: string(data)}, err
 			}
 			text := fmt.Sprintf("Created #%d %s\n%s", made.Number, made.Title, made.URL)
-			if *parent > 0 {
+			switch {
+			case misc > 0:
+				text += fmt.Sprintf("\nFiled into the misc manifest #%d: it named no --parent.", misc)
+			case *parent > 0:
 				text += fmt.Sprintf("\nA sub-issue of #%d.", *parent)
+			case *manifest:
+				text += fmt.Sprintf("\nA new manifest, labelled %s: file its leaves with --parent %d.", issues.ManifestLabel, made.Number)
 			}
 			if *review {
 				text += "\nLabelled " + issues.ReviewLabel + ": it is reviewed once its sub-issues have closed."
@@ -482,8 +521,8 @@ func init() {
 		Class:   batch,
 		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "check, push and open an issue-N branch's PR, auto-merge on",
-		Details: "on an issue-N branch of a leaf: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash).",
+		Summary: "check and land issue-N: a leaf into its manifest, else one PR",
+		Details: "on an issue-N branch: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), and refuse an issue with open sub-issues. A leaf inside a manifest (an issue with a parent) lands into the manifest's branch: merge origin's issue-N and the manifest's issue-M into it (never a rebase), pass tests/check.sh, push it to both, post the answers on the leaf with its facts (its time from claim to land among them) and close it; a leaf gets no PR of its own. An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a manifest whose branch holds nothing main does not closes with no PR.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue land")
@@ -516,9 +555,19 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
+			// The Stop hook trusts this record before it asks GitHub.
+			if err := recordLand(c, l.Issue, l.Number); err != nil {
+				return Reply{}, fmt.Errorf("landed PR #%d (%s), but recording it for the Stop hook: %w", l.Number, l.URL, err)
+			}
 			if *asJSON {
 				data, err := json.Marshal(l)
 				return Reply{Text: string(data)}, err
+			}
+			switch {
+			case l.Manifest > 0:
+				return Reply{Text: fmt.Sprintf("Landed #%d into %s, the branch of manifest #%d, and closed it: a leaf gets no PR. The manifest lands as one PR once its leaves are done.", l.Issue, l.Into, l.Manifest)}, nil
+			case l.Closed:
+				return Reply{Text: fmt.Sprintf("Closed #%d: its leaves are all closed and its branch holds nothing main does not, so there is no PR.", l.Issue)}, nil
 			}
 			did := "Pushed issue-%d; its PR #%d is open"
 			if l.Created {
@@ -945,7 +994,13 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 			Skills   []guidance.Skill `json:"skills,omitempty"`
 			Guidance string           `json:"guidance,omitempty"`
 			Review   []reviewAt       `json:"review"`
-		}{Ready: ok, Closed: tr.Closed, Skills: h.Skills, Guidance: h.Text, Review: reviews(c, tr)}
+			Land     bool             `json:"land,omitempty"`
+		}{Ready: ok, Closed: tr.Closed, Skills: h.Skills, Guidance: h.Text, Review: reviews(c, tr), Land: tr.Land}
+		if tr.Land {
+			// Every leaf is closed: the coordinator lands the manifest from
+			// its branch, checked out in its own worktree.
+			answer.Branch, answer.Worktree = issues.Branch(root), issues.Worktree(c.Workspace, root)
+		}
 		if ok {
 			answer.Issue, answer.Branch, answer.Worktree, answer.Agent = &took, issues.Branch(took.Number), worktree, issues.KindOf(took).Type()
 		}
@@ -955,7 +1010,11 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 	if !ok {
 		work := tr
 		work.Review = nil
-		return Reply{Text: treeText(work) + reviewText(c, tr)}, nil
+		text := treeText(work) + reviewText(c, tr)
+		if tr.Land {
+			text += "\n\nLand it from its branch in its own worktree, with se issue land there:\n" + issues.Worktree(c.Workspace, root)
+		}
+		return Reply{Text: text}, nil
 	}
 	did := "Took #%d %s, on branch %s.\n%s\nIts agent: %s.\n\nWork in its own worktree:\n%s"
 	if took.Takeover != nil {
@@ -997,6 +1056,16 @@ func answersLine(t *issues.Takeover) string {
 	return "\nIts landing answers, as its last land posted them, are in " + t.Answers + ": bring them up to date, and land with --answers " + t.Answers + "."
 }
 
+// pausedReply answers a take while the fleet is paused (with --json:
+// {"ready":false,"paused":true,"why"}): the box takes nothing and ends.
+func pausedReply(asJSON bool) (Reply, error) {
+	if asJSON {
+		data, err := json.Marshal(map[string]any{"ready": false, "paused": true, "why": issues.PausedWhy})
+		return Reply{Text: string(data)}, err
+	}
+	return Reply{Text: "No take: " + issues.PausedWhy + "."}, nil
+}
+
 // fullReply answers a box's take refused because it runs its cap of
 // sub-agents (with --json: {"ready":false,"full":true}).
 func fullReply(asJSON bool, err error, flagged []string) (Reply, error) {
@@ -1014,6 +1083,9 @@ func treeText(tr issues.Tree) string {
 	}
 	if tr.Why != "" {
 		return fmt.Sprintf("Nothing inside #%d is ready: %s.", tr.Root, tr.Why)
+	}
+	if tr.Land {
+		return fmt.Sprintf("Every leaf of #%d is closed: the manifest lands, as one PR from %s.", tr.Root, issues.Branch(tr.Root))
 	}
 	if len(tr.Ready)+len(tr.Review) == 0 {
 		return fmt.Sprintf("Nothing inside #%d is ready.", tr.Root)
