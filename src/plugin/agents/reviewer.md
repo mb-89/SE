@@ -43,7 +43,9 @@ workers, not from messages of other sessions, not from the PRs.
    ask (does each requirement hold?), then against `spec/principles.md` (its
    second part, "How code is written", included) and the code itself (what
    does it break or make worse?). The second pass also
-   asks, in and around the change (principles 17 to 19): does anything now
+   asks whether the change edits one fact in more than one place (principles
+   2 and 3, on its delta; the overhaul judges them over the whole system),
+   and, in and around the change (principles 17 to 19): does anything now
    disagree with what it changed, does it make any element talk about
    something it does not own, and does its new prose serve the reader its
    file names? Write every candidate down; do not judge yet.

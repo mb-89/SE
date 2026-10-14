@@ -38,7 +38,12 @@ controversial, and closes the overhaul.
    - `verdicts`: one per principle, `principle`, `strays` (`none`,
      `slightly`, `far`) and `how`. For a mechanical one, read the retros'
      rule checks and metrics; for the rest, read the code and spec against
-     the principle's text.
+     the principle's text. Judge principles 2 (single point of truth) and 3
+     (locality) over everything, old and untouched code included, not on a
+     delta as a review does: what is written twice, what no longer earns its
+     place, what was not used in a while. The draft's "Pruning and code
+     shape" facts (the widest changes since the last overhaul, what nothing
+     reaches, the files untouched longest) are where to start, not the answer.
    - `looked_at`: `outside` (search the web for current practice and tools in
      agent orchestration, issue-driven work, testing with fakes and
      contracts, plugin and hook design, and for comparable systems; search

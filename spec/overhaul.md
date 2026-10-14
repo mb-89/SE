@@ -60,7 +60,10 @@ what existed only to support it.
 - **The judgment half (the box):** every principle one by one, the outside
   world, the consistency of the whole system, the principles themselves, the
   retro's effectiveness, speed, what to mechanize and what to remove, the
-  findings and what went well. What each part asks and the fields it writes
+  findings and what went well. Principles 2 and 3 it judges over the whole
+  system, old and untouched code included: what is written twice, what no
+  longer earns its place, what was not used in a while. A review judges them
+  on its delta alone ([review.md](review.md)). What each part asks and the fields it writes
   into the draft's block are the agent's (its step 3).
 - **Minting:** the same rule as the retro's (the owner's rule in
   [retro.md](retro.md)). Every finding becomes an issue through the same code
