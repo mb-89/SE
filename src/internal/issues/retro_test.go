@@ -382,6 +382,43 @@ func TestAMetricIsCreditedOnceItsIssueClosedAsCompleted(t *testing.T) {
 	}
 }
 
+// A finding whose issue landed into a manifest's branch is closed only once
+// that manifest's PR merged to main: until then no fix of its is on main, so
+// it is not counted closed and its recurrence is not read.
+func TestAFindingLandedIntoAnUnmergedManifestIsNotClosed(t *testing.T) {
+	t.Parallel()
+	into, err := Landed{Issue: 21, Answers: map[string]string{"done": "d", "by-hand": "none"}, Facts: Facts{Landed: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC), Into: "issue-90"}}.Comment(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := retroRepo(t, true, "<!-- se:retro attended -->")
+	a["repos/o/r/issues/21/comments?per_page=100"] = jsonComments(into)
+	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fixes check broke again, yet #21's fix is not on main to blame.
+	it := c.Score.Items[0]
+	if it.State != "landed into manifest #90, not on main" || it.Recurred || c.Score.Closed != 0 || c.Score.Unmerged != 1 || c.Score.Recurred != 0 {
+		t.Fatalf("%+v", c.Score)
+	}
+	draft, err := c.Draft(rqs)
+	if err != nil || !strings.Contains(draft, "and 0 of those closed as completed (1 more landed into a manifest's branch not yet on main, their recurrence not read); 0 recurred.") ||
+		!strings.Contains(draft, "| #21 | landed into manifest #90, not on main | false |") {
+		t.Fatalf("%v\n%s", err, draft)
+	}
+	// Once the manifest's PR merged, #21 is closed and its recurrence read.
+	pulls := a["repos/o/r/pulls?state=closed&base=main&per_page=100"]
+	a["repos/o/r/pulls?state=closed&base=main&per_page=100"] = pulls[:len(pulls)-1] + `,{"number":95,"title":"manifest","body":"Fixes #90","merged_at":"2026-10-20T00:00:00Z","merge_commit_sha":"m95","head":{"sha":"h95","ref":"issue-90"}}]`
+	c, err = Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := c.Score.Items[0]; it.State != "completed" || !it.Recurred || c.Score.Closed != 1 || c.Score.Unmerged != 0 {
+		t.Fatalf("%+v", c.Score)
+	}
+}
+
 func TestMoversListWhatMovedAMetric(t *testing.T) {
 	t.Parallel()
 	c := Collected{Rows: []Row{

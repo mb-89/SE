@@ -179,8 +179,11 @@ func (c Collected) facts() string {
 		b.WriteString("None: this is the first retro.\n")
 	} else {
 		sc := c.Score
-		fmt.Fprintf(&b, "#%d found %d, of which %d became issues and %d of those closed as completed; %d recurred.\n",
-			sc.Retro, sc.Findings, sc.Issues, sc.Closed, sc.Recurred)
+		fmt.Fprintf(&b, "#%d found %d, of which %d became issues and %d of those closed as completed", sc.Retro, sc.Findings, sc.Issues, sc.Closed)
+		if sc.Unmerged > 0 {
+			fmt.Fprintf(&b, " (%d more landed into a manifest's branch not yet on main, their recurrence not read)", sc.Unmerged)
+		}
+		fmt.Fprintf(&b, "; %d recurred.\n", sc.Recurred)
 		if len(sc.Items) > 0 {
 			b.WriteString("\n| finding | class | issue | state | recurred | metric |\n|---|---|---|---|---|---|\n")
 		}
@@ -191,7 +194,9 @@ func (c Collected) facts() string {
 			}
 			if it.Metric != "" {
 				metric = fmt.Sprintf("%s %g → %g", it.Metric, it.Before, it.Now)
-				if it.State != "completed" {
+				if strings.HasPrefix(it.State, notOnMain) {
+					metric += " (not credited: its fix is not on main)"
+				} else if it.State != "completed" {
 					metric += " (not credited: its issue did not close as completed)"
 				}
 			}
