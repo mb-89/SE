@@ -66,6 +66,12 @@ of them is refused.
 Every other test runs on fakes: no wall clock, no sleeping, no network. The
 real implementation runs in its contract test alone, kept short.
 
+One test is the exception, named here: `TestRestartRunsTheCheckoutsOwnSource`
+in `src/cmd/se/checkout_test.go` builds se and stops the real daemon
+processes it starts, over the real network, by `clock.Real()`. It is what
+shows a restart runs the checkout's own source, which no fake can, and
+`go test -short` skips it.
+
 ## The rule
 
 The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line: outside
