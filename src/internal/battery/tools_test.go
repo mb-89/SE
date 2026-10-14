@@ -35,8 +35,10 @@ func newBox(t *testing.T, has ...string) box {
 	}
 	b := box{dir: t.TempDir(), bin: t.TempDir(), home: t.TempDir(), src: t.TempDir()}
 	b.log = filepath.Join(b.bin, "calls")
-	if err := os.MkdirAll(filepath.Join(b.dir, "tests"), 0o755); err != nil {
-		t.Fatal(err)
+	for _, sub := range []string{"tests", "src/plugin"} {
+		if err := os.MkdirAll(filepath.Join(b.dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, name := range []string{"check.sh", "tools.sh"} {
 		script, err := os.ReadFile("../../../tests/" + name)
@@ -73,10 +75,6 @@ if [ -n "$out" ]; then cp "$file" "$out"; else cat "$file"; fi
 		write(t, filepath.Join(b.bin, tool), b.stub(t, tool), 0o755)
 	}
 	b.release(t)
-	t.Setenv("PATH", b.bin)
-	t.Setenv("HOME", b.home)
-	t.Setenv("SE_HOME", "")
-	t.Setenv("SHELL", "/bin/bash")
 	return b
 }
 
@@ -137,10 +135,26 @@ chmod +x "$HOME/.local/bin/claude"
 
 func (b box) run(t *testing.T, script string, args ...string) (string, error) {
 	t.Helper()
-	cmd := exec.Command("sh", append([]string{script}, args...)...)
+	cmd := exec.Command(filepath.Join(b.bin, "sh"), append([]string{script}, args...)...)
 	cmd.Dir = b.dir
+	cmd.Env = env(map[string]string{"PATH": b.bin, "HOME": b.home, "SE_HOME": "", "SHELL": "/bin/bash"})
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// env is this process's environment with the variables set.
+func env(set map[string]string) []string {
+	var vars []string
+	for _, v := range os.Environ() {
+		name, _, _ := strings.Cut(v, "=")
+		if _, ok := set[name]; !ok {
+			vars = append(vars, v)
+		}
+	}
+	for name, value := range set {
+		vars = append(vars, name+"="+value)
+	}
+	return vars
 }
 
 func (b box) calls(t *testing.T) string {
@@ -209,6 +223,7 @@ func write(t *testing.T, path, body string, mode os.FileMode) {
 }
 
 func TestRUNMEsInstallStepInstallsEveryToolABoxLacks(t *testing.T) {
+	t.Parallel()
 	b := newBox(t)
 	if out, err := b.run(t, "tests/tools.sh", "install"); err != nil {
 		t.Fatalf("tools.sh install failed: %v\n%s", err, out)
@@ -254,6 +269,7 @@ func TestRUNMEsInstallStepInstallsEveryToolABoxLacks(t *testing.T) {
 }
 
 func TestADownloadThatMissesItsChecksumIsNotInstalled(t *testing.T) {
+	t.Parallel()
 	b := newBox(t, "go", "dlv", "claude", "golangci-lint", "biome")
 	write(t, filepath.Join(b.src, asset(t, "gh")), "tampered", 0o644)
 	out, err := b.run(t, "tests/tools.sh", "install")
@@ -266,6 +282,7 @@ func TestADownloadThatMissesItsChecksumIsNotInstalled(t *testing.T) {
 }
 
 func TestTheBatteryInstallsThePinnedLintersABoxLacks(t *testing.T) {
+	t.Parallel()
 	b := newBox(t, "go", "gh", "dlv", "claude")
 	if out, err := b.run(t, "tests/check.sh"); err != nil {
 		t.Fatalf("check.sh failed: %v\n%s", err, out)
@@ -274,7 +291,7 @@ func TestTheBatteryInstallsThePinnedLintersABoxLacks(t *testing.T) {
 	for _, want := range []string{
 		"curl https://github.com/golangci/golangci-lint/releases/download/v" + pin(t, "GOLANGCI_LINT") + "/" + asset(t, "golangci-lint"),
 		"curl https://github.com/biomejs/biome/releases/download/%40biomejs%2Fbiome%40" + pin(t, "BIOME") + "/" + asset(t, "biome"),
-		"go run ./src/cmd/battery gotest ./...",
+		"go -C src run ./cmd/battery gotest " + b.dir + " ./...",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no %q among the calls:\n%s", want, got)
@@ -283,6 +300,7 @@ func TestTheBatteryInstallsThePinnedLintersABoxLacks(t *testing.T) {
 }
 
 func TestTheBatteryInstallsNothingWhereTheToolsStand(t *testing.T) {
+	t.Parallel()
 	b := newBox(t, "go", "gh", "dlv", "claude", "golangci-lint", "biome")
 	if out, err := b.run(t, "tests/check.sh"); err != nil {
 		t.Fatalf("check.sh failed: %v\n%s", err, out)
@@ -293,6 +311,7 @@ func TestTheBatteryInstallsNothingWhereTheToolsStand(t *testing.T) {
 }
 
 func TestAFailedInstallStopsTheBattery(t *testing.T) {
+	t.Parallel()
 	b := newBox(t, "go", "gh", "dlv", "claude", "golangci-lint")
 	if err := os.Remove(filepath.Join(b.src, asset(t, "biome"))); err != nil {
 		t.Fatal(err)
@@ -310,13 +329,12 @@ func TestAFailedInstallStopsTheBattery(t *testing.T) {
 // of each tool, its binary's name, and the PATH line, which Git Bash on
 // Windows reads from ~/.bashrc as Linux does.
 func TestToolsNamesEachPlatformsReleaseFiles(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("tools.sh runs under sh")
 	}
 	gh, golang, golangci := pin(t, "GH"), pin(t, "GO"), pin(t, "GOLANGCI_LINT")
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("SE_HOME", "")
 	for _, c := range []struct {
 		system, machine             string
 		gh, golang, golangci, biome string
@@ -329,10 +347,12 @@ func TestToolsNamesEachPlatformsReleaseFiles(t *testing.T) {
 		{"MINGW64_NT-10.0-19045", "x86_64", "gh_" + gh + "_windows_amd64.zip", "go" + golang + ".windows-amd64.zip", "golangci-lint-" + golangci + "-windows-amd64.zip", "biome-win32-x64.exe", "gh.exe"},
 		{"MSYS_NT-10.0-22631", "aarch64", "gh_" + gh + "_windows_arm64.zip", "go" + golang + ".windows-arm64.zip", "golangci-lint-" + golangci + "-windows-arm64.zip", "biome-win32-arm64.exe", "gh.exe"},
 	} {
-		out, err := exec.Command("sh", "-c", `. ../../../tests/tools.sh
+		cmd := exec.Command("sh", "-c", `. ../../../tests/tools.sh
 for tool in gh go golangci-lint biome; do tools_asset $tool "$0" "$1"; done
 tools_exe gh "$0"
-tools_path`, c.system, c.machine).CombinedOutput()
+tools_path`, c.system, c.machine)
+		cmd.Env = env(map[string]string{"HOME": home, "SE_HOME": ""})
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%s %s: %v\n%s", c.system, c.machine, err, out)
 		}

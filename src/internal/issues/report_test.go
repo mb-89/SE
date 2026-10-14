@@ -11,6 +11,7 @@ import (
 )
 
 func TestAReportIsRefusedWhereItBreaksTheRules(t *testing.T) {
+	t.Parallel()
 	with := func(change func(r *Report)) Report {
 		r := failing("it breaks")
 		r.Requirements = append([]Requirement{}, r.Requirements...)
@@ -72,6 +73,7 @@ func reviewWorld(t *testing.T) (Source, *github.Fake) {
 }
 
 func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
+	t.Parallel()
 	s, gh := reviewWorld(t)
 	rep := failing("it breaks")
 	for k := 1; k <= 7; k++ {
@@ -94,7 +96,7 @@ func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
 	}
 	report := commentsAt(t, gh, 1)[0].Body
 	for _, want := range []string{
-		"- **it breaks** (blocking, #10)", "- **nit 1** (not blocking, #11)", "- **nit 7** (not blocking, not filed (past the first five))",
+		"- **it breaks** (blocking, #10)", "- **nit 1** (not blocking, #11)", "- **nit 7** (not blocking, not filed (past the first 5))",
 		"2 more non-blocking finding(s) counted, not filed.", "### Checked and clean\n- the tests: none weakened",
 	} {
 		if !strings.Contains(report, want) {
@@ -113,6 +115,7 @@ func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
 }
 
 func TestAReReviewIsLimitedToTheEarlierBlockers(t *testing.T) {
+	t.Parallel()
 	s, gh := reviewWorld(t)
 	// #1's last review failed on #3, which has landed since.
 	earlier := Verdict{Report: failing("three")}

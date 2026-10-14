@@ -40,11 +40,19 @@ step() {
   printf '%s\t%s\n' "$name" "$took" >>"$battery/steps.tsv"
 }
 
-step "se rules" go run ./src/cmd/se rules
-step "golangci-lint" golangci-lint run ./...
-step "biome" biome check --error-on-warnings
-step "go test" go run ./src/cmd/battery gotest ./...
+# within runs a command in a folder: golangci-lint in src/, which holds go.mod, and
+# biome in src/plugin, which holds its configuration. Go itself takes -C src.
+within() (
+  cd "$1"
+  shift
+  "$@"
+)
+
+step "se rules" go -C src run ./cmd/se rules --workspace "$PWD"
+step "golangci-lint" within src golangci-lint run ./...
+step "biome" within src/plugin biome check --error-on-warnings
+step "go test" go -C src run ./cmd/battery gotest "$PWD" ./...
 step "plugin validate" claude plugin validate src/plugin
 step "marketplace validate" claude plugin validate .
 step "plugin test" claude plugin test src/plugin
-go run ./src/cmd/battery report
+go -C src run ./cmd/battery report "$PWD"

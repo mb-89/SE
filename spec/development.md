@@ -13,8 +13,8 @@ installed `se` in its `src/plugin/bin`. At every session start the plugin
 pulls that checkout's `main` as `/se update` does, when it is a clean `main`
 (see [spec/cloud.md](cloud.md)). Work on SE in the other clone, on a branch.
 
-A workspace that is itself an SE checkout (its `go.mod` declares
-`module github.com/mb-89/SE`) runs its own `se`. Whenever `se` starts that
+A workspace that is itself an SE checkout (its `src/go.mod` declares
+`module github.com/mb-89/SE/src`) runs its own `se`. Whenever `se` starts that
 workspace's daemon (`/se on`, `/se restart`, or the plugin starting a daemon it
 found down) it first builds `se` from the checkout's source into
 `.se/.runtime/bin/`, and the daemon runs that build. The session's `/se` words

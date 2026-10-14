@@ -20,7 +20,43 @@ import (
 	"github.com/mb-89/SE/src/internal/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
+	"github.com/mb-89/SE/src/internal/index"
+	"github.com/mb-89/SE/src/internal/io/session"
 )
+
+// wiring binds the session's modules and the clock as se's wiring file does;
+// the daemon's tests start the index on it without the se command's own module.
+const wiring = `
+instances:
+  clock: {module: clock}
+  session: {module: session}
+  sessionlog: {module: sessionlog}
+wires:
+  session.events: session/events
+  sessionlog.events: session/events
+`
+
+// indexed are o with the index's modules, the log kept in p's log folder.
+func indexed(p daemon.Paths, o daemon.Options) daemon.Options {
+	w, err := index.ParseWiring([]byte(wiring))
+	if err != nil {
+		panic(err)
+	}
+	o.Wiring = &w
+	o.Modules = []*index.Module{clock.Module(o.Clock), session.Posts, session.LogModule(session.Folder(p.Disk, p.Logs()))}
+	return o
+}
+
+// started is the index a daemon for p hosts on clk.
+func started(t *testing.T, p daemon.Paths, clk clock.Clock) *index.Index {
+	t.Helper()
+	o := indexed(p, daemon.Options{Clock: clk})
+	ix, err := index.Start(*o.Wiring, o.Modules...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ix
+}
 
 func workspace(t *testing.T) daemon.Paths {
 	t.Helper()
@@ -38,7 +74,7 @@ func served(t *testing.T, p daemon.Paths) func(token string, ev daemon.Event) in
 	t.Helper()
 	n := sehttp.NewFake()
 	ctx, cancel := context.WithCancel(context.Background())
-	addr, done, err := n.Serve(ctx, "tok", daemon.NewServer(p, "i1", nil, clock.NewFake(time.Time{})))
+	addr, done, err := n.Serve(ctx, "tok", daemon.NewServer(started(t, p, clock.NewFake(time.Time{})), "i1", nil, clock.NewFake(time.Time{})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +112,64 @@ func rows(t *testing.T, p daemon.Paths, session string) []map[string]any {
 	return out
 }
 
+// Two posts alike are two events: each lands as the log module's input, and each is written.
+func TestTwoEventsAlikeAreBothWritten(t *testing.T) {
+	t.Parallel()
+	p := workspace(t)
+	post := served(t, p)
+	for range 2 {
+		post("tok", daemon.Event{Session: "s1", Event: "x", At: "t"})
+	}
+	if n := len(rows(t, p, "s1")); n != 2 {
+		t.Fatalf("%d rows", n)
+	}
+}
+
+// The daemon answers a name's value on its index over the protocol: the
+// clock's start, and the number of the last event the log wrote.
+func TestTheDaemonAnswersValuesByName(t *testing.T) {
+	t.Parallel()
+	p := workspace(t)
+	at := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	n := sehttp.NewFake()
+	ctx, cancel := context.WithCancel(context.Background())
+	addr, done, err := n.Serve(ctx, "tok", daemon.NewServer(started(t, p, clock.NewFake(at)), "i1", nil, clock.NewFake(at)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cancel(); <-done })
+	value := func(name string) sehttp.Value {
+		t.Helper()
+		v, err := n.Value(addr, "tok", name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return v
+	}
+	if v := value("clock/started"); v.Value != at.Format(time.RFC3339) || !v.Provided {
+		t.Fatalf("clock/started = %+v", v)
+	}
+	if v := value("sessionlog/written"); v.Value != float64(0) {
+		t.Fatalf("sessionlog/written before any event = %+v", v)
+	}
+	for _, s := range []string{"s1", "s2"} {
+		if err := n.Event(addr, "tok", daemon.Event{Session: s, Event: "x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if v := value("sessionlog/written"); v.Value != float64(2) || !v.Provided {
+		t.Fatalf("sessionlog/written after two events = %+v", v)
+	}
+	if _, err := n.Value(addr, "tok", "no/such"); err == nil {
+		t.Fatal("a name nothing declares reads")
+	}
+	if _, err := n.Value(addr, "nope", "clock/started"); err == nil {
+		t.Fatal("a wrong token reads")
+	}
+}
+
 func TestPrepareIgnoresTheRuntimeFolder(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	got, err := p.Disk.ReadFile(filepath.Join(p.Runtime(), ".gitignore"))
 	if err != nil || string(got) != "*\n" {
@@ -85,6 +178,7 @@ func TestPrepareIgnoresTheRuntimeFolder(t *testing.T) {
 }
 
 func TestAnEventIsAppended(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	for _, ev := range []string{"session.start", "tool.call"} {
@@ -99,6 +193,7 @@ func TestAnEventIsAppended(t *testing.T) {
 }
 
 func TestAWrongTokenIsRefused(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	if code := post("nope", daemon.Event{Session: "s1", Event: "x"}); code != sehttp.StatusUnauthorized {
@@ -107,6 +202,7 @@ func TestAWrongTokenIsRefused(t *testing.T) {
 }
 
 func TestASessionNameCannotLeaveTheLogFolder(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	for _, s := range []string{"../escape", "a/b", "", ".hidden"} {
@@ -117,9 +213,10 @@ func TestASessionNameCannotLeaveTheLogFolder(t *testing.T) {
 }
 
 func TestALongPayloadLandsCut(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
-	long := strings.Repeat("a", daemon.PayloadCap*2)
+	long := strings.Repeat("a", session.PayloadCap*2)
 	post("tok", daemon.Event{Session: "s1", Event: "x", E: json.RawMessage(fmt.Sprintf("%q", long))})
 	e := rows(t, p, "s1")[0]["e"].(map[string]any)
 	if e["cut"] != true || int(e["length"].(float64)) != len(long)+2 {
@@ -128,6 +225,7 @@ func TestALongPayloadLandsCut(t *testing.T) {
 }
 
 func TestConcurrentEventsAllLand(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	var wg sync.WaitGroup
@@ -148,18 +246,19 @@ func TestConcurrentEventsAllLand(t *testing.T) {
 var at = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 
 func TestServePublishesAndWithdrawsItsEndpoint(t *testing.T) {
+	t.Parallel()
 	p, n, f := workspace(t), sehttp.NewFake(), clock.NewFake(at)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
-		done <- daemon.Serve(ctx, p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
+		done <- daemon.Serve(ctx, p, indexed(p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }}))
 	}()
 	ep := <-ready
 	if got, ok := daemon.Healthy(p, n); !ok || got.InstanceID != ep.InstanceID {
 		t.Fatalf("healthy = %v, %v", got, ok)
 	}
-	if err := daemon.Serve(context.Background(), p, daemon.Options{Clock: f, Net: n}); !errors.Is(err, daemon.ErrRunning) {
+	if err := daemon.Serve(context.Background(), p, indexed(p, daemon.Options{Clock: f, Net: n})); !errors.Is(err, daemon.ErrRunning) {
 		t.Fatalf("second serve: %v", err)
 	}
 	cancel()
@@ -172,11 +271,12 @@ func TestServePublishesAndWithdrawsItsEndpoint(t *testing.T) {
 }
 
 func TestStopEndsTheDaemon(t *testing.T) {
+	t.Parallel()
 	p, n, f := workspace(t), sehttp.NewFake(), clock.NewFake(at)
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
-		done <- daemon.Serve(context.Background(), p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }})
+		done <- daemon.Serve(context.Background(), p, indexed(p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { ready <- ep }}))
 	}()
 	<-ready
 	// The fake's sleeps pass at once: a day of them leaves the daemon time to withdraw.
@@ -192,12 +292,13 @@ func TestStopEndsTheDaemon(t *testing.T) {
 }
 
 func TestAnIdleDaemonEnds(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	f := clock.NewFake(at)
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
-		done <- daemon.Serve(context.Background(), p, daemon.Options{Idle: 30 * time.Minute, Clock: f, Net: sehttp.NewFake(), Ready: func(ep daemon.Endpoint) { ready <- ep }})
+		done <- daemon.Serve(context.Background(), p, indexed(p, daemon.Options{Idle: 30 * time.Minute, Clock: f, Net: sehttp.NewFake(), Ready: func(ep daemon.Endpoint) { ready <- ep }}))
 	}()
 	<-ready
 	// ended moves the fake clock on a minute and says whether the daemon has ended.
@@ -228,11 +329,12 @@ func TestAnIdleDaemonEnds(t *testing.T) {
 }
 
 func TestTakeOverStepsARunningDaemonAside(t *testing.T) {
+	t.Parallel()
 	p, n, f := workspace(t), sehttp.NewFake(), clock.NewFake(at)
 	first := make(chan daemon.Endpoint, 1)
 	firstDone := make(chan error, 1)
 	go func() {
-		firstDone <- daemon.Serve(context.Background(), p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { first <- ep }})
+		firstDone <- daemon.Serve(context.Background(), p, indexed(p, daemon.Options{Clock: f, Net: n, Ready: func(ep daemon.Endpoint) { first <- ep }}))
 	}()
 	ep1 := <-first
 	ctx, cancel := context.WithCancel(context.Background())
@@ -240,7 +342,7 @@ func TestTakeOverStepsARunningDaemonAside(t *testing.T) {
 	secondDone := make(chan error, 1)
 	go func() {
 		// A day on the fake, whose sleeps pass at once, as in TestStopEndsTheDaemon.
-		secondDone <- daemon.Serve(ctx, p, daemon.Options{Clock: f, Net: n, TakeOver: 24 * time.Hour, Ready: func(ep daemon.Endpoint) { second <- ep }})
+		secondDone <- daemon.Serve(ctx, p, indexed(p, daemon.Options{Clock: f, Net: n, TakeOver: 24 * time.Hour, Ready: func(ep daemon.Endpoint) { second <- ep }}))
 	}()
 	ep2 := <-second
 	if err := <-firstDone; err != nil {

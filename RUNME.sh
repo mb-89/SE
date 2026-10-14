@@ -19,7 +19,7 @@ sh "$root/tests/tools.sh" install
 set --
 . "$root/tests/tools.sh"
 git -C "$root" config core.hooksPath .githooks
-(cd "$root" && go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se)
+sh "$root/src/build.sh"
 if ! claude plugin marketplace list 2>/dev/null | grep -q "$root"; then
   claude plugin marketplace add "$root"
 fi
