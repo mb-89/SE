@@ -546,8 +546,8 @@ It also has an API trigger, which `se` fires for the fan-out.
 The plugin's agents, one file each, holding each role's whole procedure:
 
 <!-- se:manifest agents -->
-- [`se:worker`](../src/plugin/agents/worker.md), for the kind leaf: an issue with no sub-issues: work, landed as one PR.
-- [`se:coordinator`](../src/plugin/agents/coordinator.md), for the kind parent: an issue with sub-issues: the box coordinates its tree, as it runs the queue and checks the fleet when nothing is ready.
+- [`se:worker`](../src/plugin/agents/worker.md), for the kind leaf: an issue with no sub-issues: work, landed into its manifest's branch.
+- [`se:coordinator`](../src/plugin/agents/coordinator.md), for the kind parent: an issue with sub-issues, a manifest at the top: the box coordinates its tree and lands it as one PR, as it runs the queue and checks the fleet when nothing is ready.
 - [`se:reviewer`](../src/plugin/agents/reviewer.md), for the kind gate: an se-review parent ready for review: reviewed cold.
 - [`se:retro`](../src/plugin/agents/retro.md), for the kind retro: an issue labelled se-retro.
 - [`se:overhaul`](../src/plugin/agents/overhaul.md), for the kind overhaul: an issue labelled se-overhaul.

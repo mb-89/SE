@@ -27,8 +27,8 @@ type Kind struct {
 
 // IssueKinds is every kind, each with its agent.
 var IssueKinds = []Kind{
-	{Name: "leaf", Agent: "worker", Role: "work", What: "an issue with no sub-issues: work, landed as one PR"},
-	{Name: "parent", Agent: "coordinator", Role: "coordination", What: "an issue with sub-issues: the box coordinates its tree, as it runs the queue and checks the fleet when nothing is ready"},
+	{Name: "leaf", Agent: "worker", Role: "work", What: "an issue with no sub-issues: work, landed into its manifest's branch"},
+	{Name: "parent", Agent: "coordinator", Role: "coordination", What: "an issue with sub-issues, a manifest at the top: the box coordinates its tree and lands it as one PR, as it runs the queue and checks the fleet when nothing is ready"},
 	{Name: "gate", Agent: "reviewer", Role: "review", What: "an se-review parent ready for review: reviewed cold"},
 	{Name: "retro", Agent: "retro", Role: "retro", What: "an issue labelled se-retro"},
 	{Name: "overhaul", Agent: "overhaul", Role: "overhaul", What: "an issue labelled se-overhaul"},
