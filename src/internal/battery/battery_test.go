@@ -9,6 +9,7 @@ import (
 
 	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/disk"
+	"gopkg.in/yaml.v3"
 )
 
 const budgets = `total: {ms: 1000, hard: false}
@@ -226,5 +227,27 @@ func TestAStepWithoutABudgetIsReported(t *testing.T) {
 	}
 	if len(p.Overruns) != 0 || len(p.Hard) != 0 {
 		t.Errorf("a step without a budget counts as an overrun: %q", p.Overruns)
+	}
+}
+
+// TestALintRunWaitsForAnotherWorktreesLint keeps golangci-lint's lock a wait:
+// several worktrees in one container check at once (#361).
+func TestALintRunWaitsForAnotherWorktreesLint(t *testing.T) {
+	t.Parallel()
+	// This reads the checkout's own config, so it reads the real disk.
+	raw, err := os.ReadFile("../../../.golangci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Run struct {
+			Serial bool `yaml:"allow-serial-runners"`
+		}
+	}
+	if err := yaml.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	if !config.Run.Serial {
+		t.Error(".golangci.yml does not set run.allow-serial-runners: a second check fails on the lock instead of waiting for it")
 	}
 }

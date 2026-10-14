@@ -123,8 +123,20 @@ the owner's account for an hour.
   `--in`) reads it from origin/main first and, while it is set, takes nothing
   (with `--json`: `{"ready":false,"paused":true,"why"}`), and the box ends.
   So the owner stops every running box with one change on main.
-- **The migration.** The bare open issues from before were regrouped into
-  manifests once, by topic, else into the misc manifest.
+- **Priority.** An issue labelled `se-priority` goes first. A manifest is a
+  priority manifest where it, or any open leaf inside it, carries the label;
+  an open retro or overhaul, which the cadence made due, counts as priority
+  too (with `--json`: `priority`). A take at the top offers stuck and
+  conflicted work first, as before, then the priority manifests, lowest
+  number first, then the rest; inside a manifest, after the leaves to take
+  over, its priority leaves come before the others (`PriorityLabel`,
+  `takeOrder` and `in` in `src/internal/issues`). A box never drops a
+  manifest it has started for a priority one: it finishes the manifest it
+  works on, and only its next take sees the priority.
+- **The migration.** The bare open issues no box had claimed were regrouped
+  into manifests once, by topic (#471, #472), with
+  `src/scripts/regroup-into-manifests.sh`; a claimed bare leaf from before
+  is taken over when it is stuck or conflicted, as above.
 
 ## Nesting: leaves are work, parents coordinate
 
@@ -354,7 +366,10 @@ overhaul) lands to main: it merges origin's copy of the branch and
 refuses a tree the battery did not record as passed and a branch main moved
 past meanwhile, pushes the branch, posts the commit status `se/battery`
 naming its tree on the pushed commit, which CI trusts (see
-[spec/coordination.md](coordination.md#up-to-date-with-main)), records on
+[spec/coordination.md](coordination.md#up-to-date-with-main)); where
+GitHub refuses that status with 403 (a cloud box's proxy does), it goes on
+and names the refusal (with `--json`: `warning`), as `se issue keep` goes
+on, since CI then runs the battery for the commit itself. It records on
 the leaf who worked it (see
 [Reviews](#reviews)), posts the landing answers on the issue, opens one PR against main titled after the issue with the
 body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left

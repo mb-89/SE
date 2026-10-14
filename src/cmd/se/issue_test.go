@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/battery"
+	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
@@ -462,6 +463,44 @@ func TestIssueNewTakesAParent(t *testing.T) {
 	}
 	if subs := linked(t, gh, "repos/o/r/issues/3/sub_issues"); !reflect.DeepEqual(subs, []int{6, 10}) {
 		t.Fatalf("#3's sub-issues are %v", subs)
+	}
+}
+
+// A set pause switch on main makes a box end: its take, at the top and
+// inside a tree, takes nothing, fires nothing and says the fleet is paused.
+func TestAPausedFleetTakesNothing(t *testing.T) {
+	t.Parallel()
+	gh := recordedIssues(t)
+	root := t.TempDir()
+	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
+	git := func(dir string, args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git(root, "init", "-q", "--bare", "-b", "main", origin)
+	git(root, "clone", "-q", origin, ws)
+	git(ws, "checkout", "-q", "-b", "main")
+	wiring := filepath.Join(ws, filepath.FromSlash(index.WiringFile))
+	if err := os.MkdirAll(filepath.Dir(wiring), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wiring, []byte("instances:\n  issues: {module: issues, config: {paused: true}}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(ws, "add", ".")
+	git(ws, "commit", "-q", "-m", "pause the fleet")
+	git(ws, "push", "-q", "origin", "main")
+	writes := len(gh.Writes())
+	for _, args := range [][]string{{"--take", "--worktree"}, {"--in", "3", "--take"}} {
+		code, out, errs := se(t, append(append([]string{"issue", "pull"}, args...), "--json", "--repo", "o/r", "--workspace", ws)...)
+		if code != 0 || !strings.Contains(out, `"paused":true`) || fires(t) != 0 {
+			t.Fatalf("%v: exit %d, %d fires, %q %q", args, code, fires(t), out, errs)
+		}
+	}
+	if w := gh.Writes()[writes:]; len(w) != 0 {
+		t.Fatalf("a paused take wrote %q", w)
 	}
 }
 
