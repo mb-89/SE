@@ -29,14 +29,25 @@ func main() {
 }
 
 // gotest runs go test -json on the packages, shows what go test shows a
-// person, keeps the events for report, and fails as go test failed.
+// person, keeps the events for report, and fails as go test failed. It runs
+// go test with GIT_DIR on a decoy repository, and fails if a test changed it.
 func gotest(packages []string) error {
+	dir, err := os.MkdirTemp("", "battery-decoy-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	decoy, err := battery.NewDecoy(dir)
+	if err != nil {
+		return err
+	}
 	raw, err := os.Create(filepath.Join(battery.Dir, battery.GoTestFile))
 	if err != nil {
 		return err
 	}
 	defer raw.Close()
 	cmd := exec.Command("go", append([]string{"test", "-json"}, packages...)...)
+	cmd.Env = decoy.Env(os.Environ())
 	cmd.Stderr = os.Stderr
 	events, err := cmd.StdoutPipe()
 	if err != nil {
@@ -46,8 +57,12 @@ func gotest(packages []string) error {
 		return err
 	}
 	relayed := battery.Relay(events, os.Stdout, raw)
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("go test: %v", err)
+	waited := cmd.Wait()
+	if err := decoy.Check(); err != nil {
+		return err
+	}
+	if waited != nil {
+		return fmt.Errorf("go test: %v", waited)
 	}
 	return relayed
 }
