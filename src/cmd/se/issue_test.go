@@ -391,7 +391,7 @@ func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
 	}
 	hubAt(t, answers)
 	code, out, errs := se(t, "issue", "pull", "--repo", "o/r")
-	if code != 0 || !strings.Contains(out, "#1 is a parent: it holds no work. Coordinate its tree: se issue pull --in 1 --take") {
+	if code != 0 || !strings.Contains(out, "#1 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 1 --take") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, errs = se(t, "issue", "pull", "--in", "1", "--repo", "o/r")
@@ -410,11 +410,11 @@ func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
 	ws := filepath.Join(t.TempDir(), "SE")
 	code, out, errs = se(t, "issue", "pull", "--in", "3", "--take", "--json", "--repo", "o/r", "--workspace", ws)
 	wt := "git fetch -q origin main \\u0026\\u0026 git worktree add --detach " + filepath.Join(filepath.Dir(ws), "review-3-1") + " origin/main"
-	if code != 0 || !strings.HasPrefix(out, `{"ready":false,"closed":false,"review":[{"number":3,`) || !strings.Contains(out, `"worktree":"`+wt+`"`) {
+	if code != 0 || !strings.HasPrefix(out, `{"ready":false,"closed":false,"review":[{"number":3,`) || !strings.Contains(out, `"worktree":"`+wt+`","agent":"se:reviewer"`) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, errs = se(t, "issue", "pull", "--in", "3", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || !strings.HasPrefix(out, "Nothing inside #3 is ready.\n\nReady for review: #3 three\nu3\nA reviewer that worked none of its tree works in a fresh worktree:\ngit fetch") {
+	if code != 0 || !strings.HasPrefix(out, "Nothing inside #3 is ready.\n\nReady for review: #3 three\nu3\nIts agent, se:reviewer, worked none of its tree and works in a fresh worktree:\ngit fetch") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 }
@@ -455,7 +455,7 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires", code, fires(t))
 	}
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
+	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIts agent: se:worker.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// The take is recorded for the Stop hook, which holds the box to closing #3.

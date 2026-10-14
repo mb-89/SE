@@ -65,7 +65,7 @@ func init() {
 		Usage:   "issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "show the next se issue, stuck work first; --take claims it",
-		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link, why it is at the top, and where the cadences stand; --full adds the body), or says that none is ready, and takes nothing; a press of its /se ui button shows the short form, the cadences in one line. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issueConfig().OverhaulCadence, issueConfig().RetroCadence, issueConfig().Lease, issues.Parallel),
+		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link, why it is at the top, and where the cadences stand; --full adds the body), or says that none is ready, and takes nothing; a press of its /se ui button shows the short form, the cadences in one line. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. A take names the agent that works the issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a parent, which is the box itself, se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issueConfig().OverhaulCadence, issueConfig().RetroCadence, issueConfig().Lease, issues.Parallel),
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -361,7 +361,7 @@ func init() {
 				if err != nil {
 					return Reply{}, err
 				}
-				if _, err := guidance.Read(c.Disk, c.Workspace, names); err != nil {
+				if _, err := guidance.Read(c.Disk, c.seRoot(), names); err != nil {
 					return Reply{}, err
 				}
 				*body = guidance.With(*body, names)
@@ -736,6 +736,7 @@ func issueReply(asJSON, full bool, i issues.Issue, ok bool, branch, worktree, fa
 			Branch    string           `json:"branch,omitempty"`
 			Worktree  string           `json:"worktree,omitempty"`
 			Fanout    string           `json:"fanout,omitempty"`
+			Agent     string           `json:"agent,omitempty"`
 			Skills    []guidance.Skill `json:"skills,omitempty"`
 			Guidance  string           `json:"guidance,omitempty"`
 			Retros    *issues.Cadence  `json:"retros,omitempty"`
@@ -749,7 +750,7 @@ func issueReply(asJSON, full bool, i issues.Issue, ok bool, branch, worktree, fa
 			}
 		}
 		if ok {
-			answer.Issue, answer.Branch, answer.Worktree = &i, branch, worktree
+			answer.Issue, answer.Branch, answer.Worktree, answer.Agent = &i, branch, worktree, issues.KindOf(i).Type()
 		}
 		data, err := json.Marshal(answer)
 		return Reply{Text: string(data)}, err
@@ -776,6 +777,9 @@ func issueReply(asJSON, full bool, i issues.Issue, ok bool, branch, worktree, fa
 	default:
 		head = fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
 	}
+	if branch != "" {
+		head += fmt.Sprintf("\nIts agent: %s.", issues.KindOf(i).Type())
+	}
 	if worktree != "" {
 		head += "\n\nIts sub-agent works in its own worktree:\n" + worktree
 	}
@@ -786,7 +790,7 @@ func issueReply(asJSON, full bool, i issues.Issue, ok bool, branch, worktree, fa
 		head += "\n" + fanout
 	}
 	if i.Parent {
-		head += fmt.Sprintf("\n\n#%d is a parent: it holds no work. Coordinate its tree: se issue pull --in %d --take", i.Number, i.Number)
+		head += fmt.Sprintf("\n\n#%d is a parent: it holds no work. Its agent, %s, is the box itself: coordinate its tree with se issue pull --in %d --take", i.Number, issues.KindOf(i).Type(), i.Number)
 	}
 	text := strings.TrimRight(head+"\n\n"+i.Body, "\n")
 	if h.Text != "" {
@@ -863,12 +867,13 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 			Issue    *issues.Issue    `json:"issue,omitempty"`
 			Branch   string           `json:"branch,omitempty"`
 			Worktree string           `json:"worktree,omitempty"`
+			Agent    string           `json:"agent,omitempty"`
 			Skills   []guidance.Skill `json:"skills,omitempty"`
 			Guidance string           `json:"guidance,omitempty"`
 			Review   []reviewAt       `json:"review"`
 		}{Ready: ok, Closed: tr.Closed, Skills: h.Skills, Guidance: h.Text, Review: reviews(c, tr)}
 		if ok {
-			answer.Issue, answer.Branch, answer.Worktree = &took, issues.Branch(took.Number), worktree
+			answer.Issue, answer.Branch, answer.Worktree, answer.Agent = &took, issues.Branch(took.Number), worktree, issues.KindOf(took).Type()
 		}
 		data, err := json.Marshal(answer)
 		return Reply{Text: string(data)}, err
@@ -878,11 +883,11 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 		work.Review = nil
 		return Reply{Text: treeText(work) + reviewText(c, tr)}, nil
 	}
-	did := "Took #%d %s, on branch %s.\n%s\n\nWork in its own worktree:\n%s"
+	did := "Took #%d %s, on branch %s.\n%s\nIts agent: %s.\n\nWork in its own worktree:\n%s"
 	if took.Takeover != nil {
-		did = "Took over #%d %s, on branch %s as it stands: it was stuck.\n%s\n\nContinue the branch and its PR in its own worktree:\n%s"
+		did = "Took over #%d %s, on branch %s as it stands: it was stuck.\n%s\nIts agent: %s.\n\nContinue the branch and its PR in its own worktree:\n%s"
 	}
-	text := fmt.Sprintf(did, took.Number, took.Title, issues.Branch(took.Number), took.URL, worktree) + reviewText(c, tr)
+	text := fmt.Sprintf(did, took.Number, took.Title, issues.Branch(took.Number), took.URL, issues.KindOf(took).Type(), worktree) + reviewText(c, tr)
 	text = strings.TrimRight(text+"\n\n"+took.Body, "\n")
 	if h.Text != "" {
 		text += "\n\n" + h.Text
@@ -926,18 +931,17 @@ func treeText(tr issues.Tree) string {
 }
 
 // reviewAt is a parent ready for review, with the command that makes its
-// reviewer's fresh worktree and the model its reviewer runs (spec/models.yaml;
-// empty: the box's own).
+// reviewer's fresh worktree and the agent that reviews it.
 type reviewAt struct {
 	issues.Issue
 	Worktree string `json:"worktree"`
-	Model    string `json:"model,omitempty"`
+	Agent    string `json:"agent"`
 }
 
 func reviews(c *Call, tr issues.Tree) []reviewAt {
 	out := []reviewAt{}
 	for _, i := range tr.Review {
-		out = append(out, reviewAt{i, tr.ReviewWorktree(c.Workspace, i.Number), issues.ReviewerModel(c.Disk, c.Workspace)})
+		out = append(out, reviewAt{i, tr.ReviewWorktree(c.Workspace, i.Number), issues.KindNamed("gate").Type()})
 	}
 	return out
 }
@@ -947,10 +951,7 @@ func reviews(c *Call, tr issues.Tree) []reviewAt {
 func reviewText(c *Call, tr issues.Tree) string {
 	text := ""
 	for _, r := range reviews(c, tr) {
-		text += fmt.Sprintf("\n\nReady for review: #%d %s\n%s\nA reviewer that worked none of its tree works in a fresh worktree:\n%s", r.Number, r.Title, r.URL, r.Worktree)
-		if r.Model != "" {
-			text += "\nIts reviewer runs the model " + r.Model + " (" + issues.ModelsPath + ")."
-		}
+		text += fmt.Sprintf("\n\nReady for review: #%d %s\n%s\nIts agent, %s, worked none of its tree and works in a fresh worktree:\n%s", r.Number, r.Title, r.URL, r.Agent, r.Worktree)
 	}
 	return text
 }
