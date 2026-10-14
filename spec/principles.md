@@ -18,13 +18,15 @@ principles of code once.
    Every fact lives in one place, and everything else is derived from it: the
    command registry, the landing questions, this list. A fact written twice
    drifts.
-   Checked by: retro, mechanically (a fact written twice is a finding); overhaul, by judgment.
+   Checked by: `se overhaul read` (duplicates, near-duplicates); overhaul, by
+   judgment.
 
 3. **Locality.**
    One change happens in one place, and the system picks it up everywhere by
    registration, never by hand-kept lists; understanding a change means
    reading one place.
-   Checked by: retro, mechanically (files touched per issue, as a metric); overhaul, by judgment.
+   Checked by: `se overhaul read` (files touched per change); overhaul, by
+   judgment.
 
 4. **Modularity.**
    Behaviour lives in modules that register with a small core, the index
@@ -35,7 +37,7 @@ principles of code once.
 5. **Thin adapters.**
    The Go program owns the logic. The plugin, the CLI and the UI are thin,
    and the UI is generated from the registry.
-   Checked by: retro, mechanically (logic in the plugin hooks); overhaul, by judgment.
+   Checked by: overhaul, by judgment.
 
 6. **One I/O module per outside thing.**
    Processes, disk, the clock, the network and GitHub are each reached
@@ -70,7 +72,7 @@ principles of code once.
    clock, no sleeping, tests run in parallel, fixtures are built once, and
    test code stays at or under code size.
    Checked by: the battery (the `fast-test` rule: parallel tests, no wall
-   clock); retro, mechanically (battery time and the test ratio as metrics).
+   clock); `se overhaul read` (the test ratio); overhaul, by judgment.
 
 9. **Performance is measured, and a person never waits blind.**
    The battery, every test, each `se` command and each plugin hook record
@@ -85,8 +87,8 @@ principles of code once.
    interactive one keeps a hard time and request budget, run against fakes
    that delay each request and process start as the outside world does.
    Checked by: the battery (each interactive command against its budgets,
-   reported in its profile) and the bridgehead; retro, mechanically (trend);
-   overhaul, by judgment (`looked_at.speed`).
+   reported in its profile) and the bridgehead; overhaul, by judgment
+   (`looked_at.speed`).
 
 10. **Lint and style checks are part of the battery.**
     Standard linters and formatters, plus SE's own rules written as checks;
@@ -110,7 +112,7 @@ principles of code once.
 13. **Every session starts at main.**
     Both the code being worked on and the SE that runs the session start at
     main.
-    Checked by: retro, mechanically (commit drift reported by `/se status`).
+    Checked by: overhaul, by judgment.
 
 14. **Fail open for advice, closed for enforcement.**
     Logging and help never block; a rule that guards something refuses when
