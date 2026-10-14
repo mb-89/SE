@@ -56,6 +56,7 @@ type gitPlace struct {
 	index     map[string]string // nil in a bare repository
 	merging   string            // MERGE_HEAD while a merge waits
 	conflicts map[string]bool
+	linked    bool // a work tree git worktree add made, the only kind git worktree remove takes
 }
 
 // NewGit answers a fake git holding no repository, its work trees on d.
@@ -1601,7 +1602,7 @@ func (r *gitRun) worktree(args []string) int {
 	if err := r.g.disk.MkdirAll(dir); err != nil {
 		return r.fail(128, "fatal: could not create directory of '%s'", rest[0])
 	}
-	p := &gitPlace{repo: r.p.repo, dir: dir, head: head, index: map[string]string{}}
+	p := &gitPlace{repo: r.p.repo, dir: dir, head: head, index: map[string]string{}, linked: true}
 	r.g.places[dir] = p
 	for name, content := range r.g.tree(id) {
 		r.write(p, name, content)
@@ -1621,6 +1622,9 @@ func (r *gitRun) worktreeRemove(args []string) int {
 	p, ok := r.g.places[dir]
 	if !ok || p.repo != r.p.repo || p.index == nil {
 		return r.fail(128, "fatal: '%s' is not a working tree", rest[0])
+	}
+	if !p.linked {
+		return r.fail(128, "fatal: '%s' is a main working tree", rest[0])
 	}
 	if !has(f, "-f", "--force") && (p.merging != "" || !sameFiles(r.work(p), r.g.tree(p.headID())) || !sameFiles(p.index, r.g.tree(p.headID()))) {
 		return r.fail(128, "fatal: '%s' contains modified or untracked files, use --force to delete it", rest[0])
