@@ -252,15 +252,15 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch {
 	case ok:
-		began := call.Clock.Now()
 		// A command that wrote to GitHub leaves the daemon's snapshot stale.
 		gh := &noting{GitHub: call.GitHub}
 		call.GitHub = gh
+		began := call.Clock.Now()
 		reply, err = runCommand(name, call)
+		timed(call, name, began, stderr)
 		if gh.wrote.Load() {
 			call.stale()
 		}
-		timed(call, name, began, stderr)
 		if errors.Is(err, flag.ErrHelp) {
 			reply, err = helpReply(commandHelpOf(cmd, call.flags, *session), *session, color), nil
 		}

@@ -264,30 +264,20 @@ const PerPage = 100
 // repositories/{id} for some lists, which the box proxy refuses.
 func pages[T any](s Source, path string) ([]T, error) {
 	var all []T
-	err := eachPage(s, path, func(page []T) bool {
-		all = append(all, page...)
-		return true
-	})
-	return all, err
-}
-
-// eachPage reads a list path as pages does, handing got each page the moment
-// it arrives, so what the page needs is read while the next page is; got
-// answers false to stop before the next page.
-func eachPage[T any](s Source, path string, got func(page []T) bool) error {
 	size := perPage(path)
 	for k := 1; ; k++ {
 		page, err := api[[]T](s, fmt.Sprintf("%s&page=%d", path, k), false)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if !got(page[0]) || len(page[0]) < size {
-			return nil
+		all = append(all, page[0]...)
+		if len(page[0]) < size {
+			return all, nil
 		}
 	}
 }
 
-// pagesAtOnce reads a list path as eachPage does, but at pages at once: pages
+// pagesAtOnce reads a list path as pages does, but at pages at once: pages
 // 1 to at together, then the next at, while the last of them comes back
 // full. Each page is a request of its own, so the pages arrive in about the
 // time of one, and got has each, with its number, the moment it arrives, one
