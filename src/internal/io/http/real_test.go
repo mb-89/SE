@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 )
@@ -31,6 +32,7 @@ func routine(t *testing.T, token string, limit int) (string, func() int) {
 			w.WriteHeader(http.StatusUnauthorized)
 			io.WriteString(w, `{"type":"error","error":{"type":"authentication_error"}}`)
 		case fired >= limit:
+			w.Header().Set("Retry-After", "1800")
 			w.WriteHeader(http.StatusTooManyRequests)
 			io.WriteString(w, `{"type":"error","error":{"type":"rate_limit_error"}}`)
 		default:
@@ -49,4 +51,21 @@ func TestTheRealNetKeepsTheContract(t *testing.T) {
 			return routine(t, token, limit)
 		}}
 	})
+}
+
+func TestARetryAfterNamesWhenTheRefusalEnds(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
+	for header, want := range map[string]time.Time{
+		"1800":                          now.Add(30 * time.Minute),
+		" 0 ":                           now,
+		"Wed, 14 Oct 2026 10:15:00 GMT": time.Date(2026, 10, 14, 10, 15, 0, 0, time.UTC),
+		"":                              {},
+		"soon":                          {},
+		"-5":                            {},
+	} {
+		if got := sehttp.RetryAt(now, header); !got.Equal(want) {
+			t.Errorf("%q: %v, want %v", header, got, want)
+		}
+	}
 }
