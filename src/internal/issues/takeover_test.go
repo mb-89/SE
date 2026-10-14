@@ -116,8 +116,19 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 		_, a, _ := boxes(t)
 		c := atNow()
 		g := newPulls(t, c, answers...)
-		took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: c}.Take(a, 0)
+		// Each pause is told before it begins: the clock has not moved past the pauses told before it.
+		var told []string
+		waits := func(note string) {
+			if at := c.Now().Sub(now); at != time.Duration(len(told))*pause {
+				t.Errorf("%s: told %q only %s in", name, note, at)
+			}
+			told = append(told, note)
+		}
+		took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: c, Waits: waits}.Take(a, 0)
 		paused := int(c.Now().Sub(now) / pause)
+		if len(told) != paused || paused > 0 && !strings.Contains(told[0], "PR #70") {
+			t.Errorf("%s: paused %d times, told %q", name, paused, told)
+		}
 		if err != nil || !ok || took.Number != 5 || took.Takeover != nil || len(commentsAt(t, g, 7)) != 0 {
 			t.Errorf("%s: took %+v %v %v", name, took, ok, err)
 		}
