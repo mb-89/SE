@@ -44,6 +44,10 @@ type Fake struct {
 	writes []string
 	// later is what the repository comes to hold at a time, earliest first.
 	later []timed
+	// requests counts what gh would have asked GitHub; each passes delay on delayOn.
+	requests int
+	delay    time.Duration
+	delayOn  clock.Clock
 }
 
 // timed is recorded answers the repository holds from at on.
@@ -77,6 +81,34 @@ type repo struct {
 // NewFake answers an empty fake GitHub whose stamps are read from c.
 func NewFake(c clock.Clock) *Fake {
 	return &Fake{Login: "se-fake", clock: c, repos: map[string]*repo{}}
+}
+
+// Delay makes each request the fake takes pass d on c, as a request to
+// GitHub takes time: the battery runs the interactive commands so, against
+// their budgets (spec/budgets.yaml).
+func (f *Fake) Delay(c clock.Clock, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delayOn, f.delay = c, d
+}
+
+// Requests answers how many requests the fake took, as gh would make them:
+// one for each Get, Send and GraphQL, and one for each page of a List.
+func (f *Fake) Requests() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.requests
+}
+
+// spend counts n requests and passes their delay, with the fake unlocked.
+func (f *Fake) spend(n int) {
+	f.mu.Lock()
+	f.requests += n
+	c, d := f.delayOn, f.delay
+	f.mu.Unlock()
+	if c != nil && d > 0 {
+		c.Sleep(time.Duration(n) * d)
+	}
 }
 
 // Writes lists every write the fake took, oldest first, as "METHOD path"
@@ -136,6 +168,7 @@ func (f *Fake) now() string { return f.clock.Now().UTC().Format(time.RFC3339) }
 
 // Get answers the value at path.
 func (f *Fake) Get(path string) ([]byte, error) {
+	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.catchUp()
@@ -146,8 +179,10 @@ func (f *Fake) Get(path string) ([]byte, error) {
 	return encode(v)
 }
 
-// List answers the list at path, whole.
+// List answers the list at path, whole, as the pages gh would ask for.
 func (f *Fake) List(path string) ([]byte, error) {
+	pages := 1
+	defer func() { f.spend(pages) }()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.catchUp()
@@ -160,11 +195,14 @@ func (f *Fake) List(path string) ([]byte, error) {
 		if json.Unmarshal(raw, &list) != nil {
 			return nil, fmt.Errorf("gh api --paginate %s: not a list", path)
 		}
+		pages = len(list)/pageSize(path) + 1
 		return raw, nil
 	}
-	if _, ok := v.([]any); !ok {
+	list, ok := v.([]any)
+	if !ok {
 		return nil, fmt.Errorf("gh api --paginate %s: not a list", path)
 	}
+	pages = len(list)/pageSize(path) + 1
 	return encode(v)
 }
 
@@ -497,6 +535,7 @@ func (r *repo) listPulls(q url.Values) []any {
 
 // Send takes a write and changes the repository as GitHub would.
 func (f *Fake) Send(method, path string, fields ...Field) ([]byte, error) {
+	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.catchUp()
@@ -936,6 +975,7 @@ func (f *Fake) enableAutoMerge(p obj) error {
 
 // GraphQL answers the one mutation SE sends, turning on auto-merge.
 func (f *Fake) GraphQL(query string, vars ...Field) ([]byte, error) {
+	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.catchUp()
