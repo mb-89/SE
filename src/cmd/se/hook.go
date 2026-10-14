@@ -13,9 +13,9 @@ import (
 )
 
 // The owner's rule: a box that takes an issue closes it, always, with a PR
-// (auto-merge on) or a supersede. The plugin hands every Stop and SubagentStop
-// to se hook stop, which refuses a box's stop while any issue it took is open
-// with neither; se issue pull --take records each issue a box takes.
+// (auto-merge on, kept until it merges) or a supersede. The plugin hands every
+// Stop and SubagentStop to se hook stop, which refuses a box's stop while any
+// issue it took is open; se issue pull --take records each issue a box takes.
 
 // isBox says whether this session is a box: a cloud session that no person
 // attends, as a routine starts it. Every other session is interactive.
@@ -122,8 +122,8 @@ func init() {
 		Class:   batch,
 		Usage:   "hook stop [--agent-transcript PATH] [--waiting] [--repo OWNER/NAME]",
 		Group:   "Hooks",
-		Summary: "hold a box to a PR or supersede for each issue it took",
-		Details: "answer the plugin's Stop (or, with --agent-transcript, SubagentStop) as JSON: block, naming each, while any issue this box took is open with neither an open PR from its branch with auto-merge on nor a supersede; else pass, with why. The issues are every one se issue pull --take recorded, or for a sub-agent the leaf its prompt names. An interactive session, and a box waiting on background work (--waiting), always pass. It refuses at most refusals times in a row (spec/stop.yaml); a prompt from a person resets the count (se hook prompt). A check that cannot judge lets the turn end and logs why in .se/.runtime/logs/stop.log.",
+		Summary: "hold a box to a merged PR or supersede for each issue it took",
+		Details: "answer the plugin's Stop (or, with --agent-transcript, SubagentStop) as JSON: block, naming each, while any issue this box took is open: with no PR from its branch, with one whose auto-merge is off, or with one not merged yet (a box keeps its PR until it merges: se issue keep), unless another box took the issue over; else pass, with why. A merged PR or a supersede closes the issue. The issues are every one se issue pull --take recorded, or for a sub-agent the leaf its prompt names. An interactive session, and a box waiting on background work (--waiting), always pass. It refuses at most refusals times in a row (spec/stop.yaml); a prompt from a person resets the count (se hook prompt). A check that cannot judge lets the turn end and logs why in .se/.runtime/logs/stop.log.",
 		Run: func(c *Call) (Reply, error) {
 			fs, src, _ := issueFlags(c, "hook stop")
 			transcript := fs.String("agent-transcript", "", "the sub-agent's transcript `PATH`: the stop is a SubagentStop")
@@ -190,7 +190,7 @@ func init() {
 			}
 			if len(open) == 0 {
 				_ = writeBox(c, b)
-				return verdict{Pass: fmt.Sprintf("%s: each is closed, or its PR has auto-merge on", numbers(judge))}.reply()
+				return verdict{Pass: fmt.Sprintf("%s: each is closed, or another box took it over", numbers(judge))}.reply()
 			}
 			if err := writeBox(c, b); err != nil {
 				// A count that cannot be kept would refuse without end.
