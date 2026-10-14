@@ -477,9 +477,9 @@ Flags:
 
 ```text
 se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none
-    [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person]
-    [--allow-duplicate] [--not-blocked N,M] [--skills NAME,NAME] [--json]
-    [--repo OWNER/NAME]
+    [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person
+    --why access|principle --what TEXT] [--allow-duplicate] [--not-blocked N,M]
+    [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
 
 Create an se issue, linked as blocked by each issue --blocked-by names (GitHub's
 native links), and name it. All work moves in manifests: a manifest is an issue
@@ -493,21 +493,26 @@ opens. --blocks links each issue it names as blocked by the new one: those
 dependents of a box's issue that need what is left of it. --review labels it
 se-review; --final labels it se-final, its last attempt: never superseded again.
 --person makes it an issue for a person: labelled se-person and assigned to the
-owner, it waits for them, and its body opens with what they decide. --skills
-names the skills its work needs, each a folder of src/plugin/skills in the
-workspace, in one marked line of its body: the take hands each over (se help
-issue pull). A name that is an agent's role (work, coordination, review, retro,
-overhaul, or the agent's own name) is left out of that line, since the take
-names the agent that holds it. It refuses a title an open se issue under the
-same --parent (or at the top) has already, naming it, unless --allow-duplicate
-is given. It refuses a body that names (#N) an open se issue, one whose work is
-not on main yet, unless --blocked-by names it, so the take holds the new issue
-until it merges, or --not-blocked does, saying the mention is only a reference;
---parent and --blocks name issues it may mention freely. An issue for a person
-stands at the top, in no manifest. A ready issue, one nothing open blocks, fires
-the routine once. In a box it refuses, writing nothing: a box opens no issue,
-its work ends in a PR (se issue land) or a supersede (se issue supersede);
-retros, reviews and overhauls file theirs through their own commands.
+owner, it waits for them, and its body opens with what only they can do. It is
+the last resort: --why access (a setting, an account, a secret, a permission or
+a payment only the owner has) or --why principle (a change to a design
+principle), and --what says in a sentence what only the person can do; it
+refuses anything else, since a decision an agent can make is its own
+(spec/principles.md, principle 15). --skills names the skills its work needs,
+each a folder of src/plugin/skills in the workspace, in one marked line of its
+body: the take hands each over (se help issue pull). A name that is an agent's
+role (work, coordination, review, retro, overhaul, or the agent's own name) is
+left out of that line, since the take names the agent that holds it. It refuses
+a title an open se issue under the same --parent (or at the top) has already,
+naming it, unless --allow-duplicate is given. It refuses a body that names (#N)
+an open se issue, one whose work is not on main yet, unless --blocked-by names
+it, so the take holds the new issue until it merges, or --not-blocked does,
+saying the mention is only a reference; --parent and --blocks name issues it may
+mention freely. An issue for a person stands at the top, in no manifest. A ready
+issue, one nothing open blocks, fires the routine once. In a box it refuses,
+writing nothing: a box opens no issue, its work ends in a PR (se issue land) or
+a supersede (se issue supersede); retros, reviews and overhauls file theirs
+through their own commands.
 
 Flags:
   --allow-duplicate   create it although an open se issue under the same parent
@@ -533,6 +538,10 @@ Flags:
   --skills NAME,NAME  the skills its work needs, as NAME,NAME: a take hands each
                       over
   --title T           the issue's title T
+  --what TEXT         with --person, the sentence TEXT saying what only the
+                      person can do
+  --why access        with --person, what only a person can do here: access or
+                      principle
   --workspace DIR     the workspace DIR the daemon serves (default: here)
 ```
 
