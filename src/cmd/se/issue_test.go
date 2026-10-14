@@ -3,32 +3,49 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"slices"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
-// recordedIssues answers the issue commands' gh calls for o/r: #1 claimed,
-// with no open PR, #2 blocked by #1, #3 ready, #4 a pull request, #9 does not
-// exist, #5 is closed; a new issue comes back as #10. It answers the calls
-// made, in order. The routine's trigger stands on a fake network at
-// routineURL, named in the environment, and takes 100 fires.
-func recordedIssues(t *testing.T) *[][]string {
+// hubAt hands every call a fake GitHub, seeded from recorded answers, until
+// the test ends.
+func hubAt(t *testing.T, answers map[string]string) *github.Fake {
 	t.Helper()
-	answers := map[string]string{
+	f := github.NewFake(clock.NewFake(time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)))
+	if err := f.Seed(answers); err != nil {
+		t.Fatal(err)
+	}
+	old := hub
+	hub = f
+	t.Cleanup(func() { hub = old })
+	return f
+}
+
+// u10 and u11 are the URLs of the issues the fake GitHub creates first.
+const (
+	u10 = "https://github.com/o/r/issues/10"
+	u11 = "https://github.com/o/r/issues/11"
+)
+
+// recordedIssues is a fake o/r: #1 claimed, with no open PR, #2 blocked by
+// #1, #3 ready, #4 a pull request, #9 deleted, #5 is closed; so a new issue
+// is #10. The routine's trigger stands on a fake network at routineURL,
+// named in the environment, and takes 100 fires.
+func recordedIssues(t *testing.T) *github.Fake {
+	t.Helper()
+	gh := hubAt(t, map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
 			{"number":3,"title":"three","body":"do it","state":"open","html_url":"u3"},
 			{"number":2,"title":"two","body":"","state":"open","html_url":"u2","issue_dependencies_summary":{"total_blocked_by":1}},
@@ -36,49 +53,52 @@ func recordedIssues(t *testing.T) *[][]string {
 		"repos/o/r/git/matching-refs/heads/issue-":                `[{"ref":"refs/heads/issue-1"}]`,
 		"repos/o/r/issues/1/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
-		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
-		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
+		"repos/o/r/pulls?base=main&state=open&per_page=100":       `[]`,
 		"repos/o/r/issues/1": `{"id":101,"number":1,"state":"open"}`,
 		"repos/o/r/issues/3": `{"id":103,"number":3,"state":"open"}`,
 		"repos/o/r/issues/5": `{"id":105,"number":5,"state":"closed"}`,
 		"repos/o/r/issues/4": `{"id":104,"number":4,"pull_request":{}}`,
-		"repos/o/r/issues":   `{"id":110,"number":10,"title":"ten","html_url":"u10"}`,
-		"repos/o/r/issues?labels=se-retro&state=closed&per_page=100":    `[]`,
-		"repos/o/r/issues?labels=se-retro&state=open&per_page=100":      `[]`,
-		"repos/o/r/issues?labels=se-overhaul&state=closed&per_page=100": `[]`,
-		"repos/o/r/issues?labels=se-overhaul&state=open&per_page=100":   `[]`,
-		"repos/o/r/issues?labels=se&state=closed&per_page=100":          `[{"number":5,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`,
-		"repos/o/r/issues/10/dependencies/blocked_by":                   `{"id":101}`,
-		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":          `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
-		"repos/o/r/issues/3/dependencies/blocking?per_page=100":         `[{"number":7,"state":"open"},{"number":8,"state":"closed"}]`,
-		"repos/o/r/issues/10/assignees":                                 `{}`,
-		"repos/o/r/issues/3/dependencies/blocked_by":                    `{}`,
-	}
-	var calls [][]string
-	var mu sync.Mutex
-	old, oldNet := gh, network
+		"repos/o/r/issues?labels=se&state=closed&per_page=100":  `[{"number":5,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`,
+		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":  `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
+		"repos/o/r/issues/3/dependencies/blocking?per_page=100": `[{"number":7,"state":"open"},{"number":8,"state":"closed"}]`,
+	})
+	gh.DeleteIssue("o/r", 9)
+	oldNet := network
 	f := sehttp.NewFake()
 	f.Routine(routineURL, "tok", 100)
 	network = f
 	t.Setenv(issues.FireURLVar, routineURL)
 	t.Setenv(issues.FireTokenVar, "tok")
-	gh = func(args ...string) ([]byte, error) {
-		// Reads run in parallel; the calls are recorded one at a time.
-		mu.Lock()
-		calls = append(calls, args)
-		mu.Unlock()
-		path := args[len(args)-1]
-		if path == "repos/o/r/issues/9" {
-			return nil, errors.New("gh api repos/o/r/issues/9: exit status 1: gh: Not Found (HTTP 404)")
-		}
-		a, ok := answers[path]
-		if !ok {
-			return nil, fmt.Errorf("not recorded: %v", args)
-		}
-		return []byte(a), nil
+	t.Cleanup(func() { network = oldNet })
+	return gh
+}
+
+// issueOf reads issue n back from the fake GitHub, as text.
+func issueOf(t *testing.T, gh github.GitHub, n int) string {
+	t.Helper()
+	out, err := gh.Get(fmt.Sprintf("repos/o/r/issues/%d", n))
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { gh, network = old, oldNet })
-	return &calls
+	return string(out)
+}
+
+// linked reads the numbers of the issues a links path lists.
+func linked(t *testing.T, gh github.GitHub, path string) []int {
+	t.Helper()
+	out, err := gh.List(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var is []struct{ Number int }
+	if err := json.Unmarshal(out, &is); err != nil {
+		t.Fatal(err)
+	}
+	ns := []int{}
+	for _, i := range is {
+		ns = append(ns, i.Number)
+	}
+	return ns
 }
 
 // routineURL is where recordedIssues stands the routine's trigger.
@@ -91,7 +111,7 @@ const firedOnce = "Fan-out fired the routine: https://claude.ai/code/session_fak
 func fires() int { return network.(*sehttp.Fake).Fired(routineURL) }
 
 func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
-	calls := recordedIssues(t)
+	gh := recordedIssues(t)
 	ws := t.TempDir()
 	code, out, errs := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || out != "#3 three\nu3\n\ndo it\n\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n\n0 retros closed and no overhaul has closed yet; an overhaul is due at 5.\n" {
@@ -99,10 +119,8 @@ func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 	}
 	// Without --take, pull only shows the issue: it writes nothing to GitHub,
 	// fires nothing and leaves the workspace as it was.
-	for _, c := range *calls {
-		if slices.Contains(c, "-X") || slices.Contains(c, "-f") {
-			t.Errorf("pull without --take wrote to GitHub: %v", c)
-		}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Errorf("pull without --take wrote to GitHub: %q", w)
 	}
 	if entries, _ := os.ReadDir(ws); fires() != 0 || len(entries) != 0 {
 		t.Errorf("pull without --take fired %d times, left %v in the workspace", fires(), entries)
@@ -122,7 +140,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "issue", "pull", "--repo", "o/r"); !strings.HasPrefix(r.Text, "#3 three") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--repo", "o/r"); r.Text != "Created #10 ten\nu10\n"+firedOnce {
+	if r := session(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--repo", "o/r"); r.Text != "Created #10 t\n"+u10+"\n"+firedOnce {
 		t.Fatalf("%+v", r)
 	}
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
@@ -170,7 +188,7 @@ func TestIssuePullTakeRefusesABadNumber(t *testing.T) {
 }
 
 func TestIssueNewNeedsBlockedBy(t *testing.T) {
-	calls := recordedIssues(t)
+	gh := recordedIssues(t)
 	for args, want := range map[string]string{
 		"--title t --body b":                              "needs --blocked-by",
 		"--title t --body b --blocked-by=":                "--blocked-by is required",
@@ -186,35 +204,32 @@ func TestIssueNewNeedsBlockedBy(t *testing.T) {
 			t.Errorf("%s: exit %d, %q, want %q", args, code, errs, want)
 		}
 	}
-	for _, c := range *calls {
-		if strings.Contains(strings.Join(c, " "), "POST") {
-			t.Fatalf("a refused issue new wrote %v", c)
-		}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("a refused issue new wrote %q", w)
 	}
 }
 
 func TestIssueNewCreatesTheIssueAndItsLinks(t *testing.T) {
-	calls := recordedIssues(t)
+	gh := recordedIssues(t)
 	d, dir := onFake(t), filepath.FromSlash("/ws")
 	put(t, d, filepath.Join(dir, "body.md"), "the body\n")
 	code, out, errs := se(t, "issue", "new", "--workspace", dir, "--repo", "o/r", "--title", "ten",
 		"--body-file", "body.md", "--blocked-by", "3,#1,3")
-	if code != 0 || out != "Created #10 ten\nu10\nBlocked by #1, #3.\n" {
+	if code != 0 || out != "Created #10 ten\n"+u10+"\nBlocked by #1, #3.\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	want := [][]string{
-		{"api", "--paginate", "repos/o/r/issues?labels=se&state=open&per_page=100"},
-		{"api", "repos/o/r/issues/1"},
-		{"api", "repos/o/r/issues/3"},
-		{"api", "-X", "POST", "-f", "title=ten", "-f", "body=the body\n\n<!-- se:new -->", "-f", "labels[]=se", "repos/o/r/issues"},
-		{"api", "-X", "POST", "-F", "issue_id=101", "repos/o/r/issues/10/dependencies/blocked_by"},
-		{"api", "-X", "POST", "-F", "issue_id=103", "repos/o/r/issues/10/dependencies/blocked_by"},
+	want := []string{"POST repos/o/r/issues", "POST repos/o/r/issues/10/dependencies/blocked_by", "POST repos/o/r/issues/10/dependencies/blocked_by"}
+	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
+		t.Fatalf("writes\n%q\nwant\n%q", w, want)
 	}
-	if !reflect.DeepEqual(*calls, want) {
-		t.Fatalf("gh calls\n%q\nwant\n%q", *calls, want)
+	if by := linked(t, gh, "repos/o/r/issues/10/dependencies/blocked_by"); !reflect.DeepEqual(by, []int{1, 3}) {
+		t.Fatalf("#10 is blocked by %v", by)
+	}
+	if made := issueOf(t, gh, 10); !strings.Contains(made, `"body":"the body\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"}]`) {
+		t.Fatal(made)
 	}
 	code, out, _ = se(t, "issue", "new", "--json", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none")
-	if code != 0 || out != `{"number":10,"url":"u10","blocked_by":[],"fanout":"`+firedOnce+`"}`+"\n" {
+	if code != 0 || out != `{"number":11,"url":"`+u11+`","blocked_by":[],"fanout":"`+firedOnce+`"}`+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 }
@@ -244,42 +259,15 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	put(t, d, filepath.Join(ws, issues.QuestionsFile), string(spec))
 	answers := filepath.Join(root, "answers.yaml")
 	put(t, d, answers, "done: one\ntimeline: two\n")
-	old, oldCheck, oldSession := gh, check, sessionID
-	t.Cleanup(func() { gh, check, sessionID = old, oldCheck, oldSession })
+	oldCheck, oldSession := check, sessionID
+	t.Cleanup(func() { check, sessionID = oldCheck, oldSession })
 	checked := ""
 	check = func(_ proc.Procs, dir string) error { checked = dir; return nil }
 	sessionID = func() string { return "s1" }
-	recorded, landed := "", ""
-	gh = func(args ...string) ([]byte, error) {
-		switch args[len(args)-1] {
-		case "repos/o/r/issues/6/comments?per_page=100":
-			return []byte(`[{"id":1,"body":` + strconv.Quote(recorded) + `},{"id":2,"body":` + strconv.Quote(landed) + `}]`), nil
-		case "repos/o/r/issues/6/comments":
-			body := strings.TrimPrefix(args[len(args)-2], "body=")
-			if strings.HasPrefix(body, "<!-- se:landing -->") {
-				landed = body
-			} else {
-				recorded = body
-			}
-			return []byte(`{}`), nil
-		case "repos/o/r/issues/comments/2":
-			landed = strings.TrimPrefix(args[len(args)-2], "body=")
-			return []byte(`{}`), nil
-		case "repos/o/r/activity?ref=refs/heads/issue-6&activity_type=branch_creation&per_page=100":
-			return []byte(`[]`), nil
-		case "repos/o/r/issues?labels=se&state=open&per_page=100":
-			return []byte(`[]`), nil
-		case "repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100":
-			return []byte(`[]`), nil
-		case "repos/o/r/issues/6":
-			return []byte(`{"number":6,"title":"six"}`), nil
-		case "repos/o/r/pulls":
-			return []byte(`{"number":14,"node_id":"PR_14","html_url":"u14"}`), nil
-		case "graphql":
-			return []byte(`{}`), nil
-		}
-		return nil, fmt.Errorf("not recorded: %v", args)
-	}
+	gh := hubAt(t, map[string]string{
+		"repos/o/r/issues/6": `{"number":6,"title":"six","state":"open"}`,
+		"repos/o/r/activity?ref=refs/heads/issue-6&activity_type=branch_creation&per_page=100": `[]`,
+	})
 	code, out, errs := se(t, "issue", "land", "--workspace", ws, "--repo", "o/r")
 	if code == 0 || !strings.Contains(errs, "takes --answers FILE") || checked != "" {
 		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
@@ -297,14 +285,25 @@ func TestIssueLandNamesThePR(t *testing.T) {
 		all += q.Key + ": none\n"
 	}
 	put(t, d, answers, all)
+	// The PR is the repository's next number, #7.
 	code, out, errs = se(t, "issue", "land", "--answers", answers, "--workspace", ws, "--repo", "o/r")
-	if code != 0 || out != "Pushed issue-6 and opened PR #14, auto-merge (squash) on.\nu14\n" || checked != ws {
+	if code != 0 || out != "Pushed issue-6 and opened PR #7, auto-merge (squash) on.\nhttps://github.com/o/r/pull/7\n" || checked != ws {
 		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
 	}
+	// Landed again, the PR is open already.
 	code, out, _ = se(t, "issue", "land", "--json", "--answers", answers, "--workspace", ws, "--repo", "o/r")
-	if code != 0 || out != `{"issue":6,"number":14,"url":"u14","created":true,"merged":false}`+"\n" {
+	if code != 0 || out != `{"issue":6,"number":7,"url":"https://github.com/o/r/pull/7","created":false,"merged":false}`+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
 	}
+	out6, err := gh.List("repos/o/r/issues/6/comments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cs []struct{ Body string }
+	if err := json.Unmarshal(out6, &cs); err != nil || len(cs) != 2 {
+		t.Fatalf("%s %v", out6, err)
+	}
+	recorded, landed := cs[0].Body, cs[1].Body
 	if l, ok, err := issues.ParseLanding(landed); err != nil || !ok || len(l.Answers) != len(qs) || l.Answers["else"] != "none" {
 		t.Fatalf("landed %+v %v %v", l, ok, err)
 	}
@@ -315,8 +314,6 @@ func TestIssueLandNamesThePR(t *testing.T) {
 }
 
 func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
-	old := gh
-	t.Cleanup(func() { gh = old })
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
 			{"number":1,"title":"root","state":"open","html_url":"u1","sub_issues_summary":{"total":2}},
@@ -334,12 +331,7 @@ func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
 	for _, n := range []int{1, 2, 3} {
 		answers[fmt.Sprintf("repos/o/r/issues/%d/dependencies/blocked_by?per_page=100", n)] = `[]`
 	}
-	gh = func(args ...string) ([]byte, error) {
-		if a, ok := answers[args[len(args)-1]]; ok {
-			return []byte(a), nil
-		}
-		return nil, fmt.Errorf("not recorded: %v", args)
-	}
+	hubAt(t, answers)
 	code, out, errs := se(t, "issue", "pull", "--repo", "o/r")
 	if code != 0 || !strings.Contains(out, "#1 is a parent: it holds no work. Coordinate its tree: se issue pull --in 1 --take") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
@@ -370,15 +362,13 @@ func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
 }
 
 func TestIssueNewTakesAParent(t *testing.T) {
-	calls := recordedIssues(t)
+	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--parent", "3")
-	if code != 1 || !strings.Contains(errs, "making it a sub-issue of #3") {
-		// The recording holds no sub-issue endpoint, so the link fails after the create.
+	if code != 0 || !strings.HasPrefix(out, "Created #10 ten\n") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	last := (*calls)[len(*calls)-1]
-	if want := []string{"api", "-X", "POST", "-F", "sub_issue_id=110", "repos/o/r/issues/3/sub_issues"}; !reflect.DeepEqual(last, want) {
-		t.Fatalf("%q", last)
+	if subs := linked(t, gh, "repos/o/r/issues/3/sub_issues"); !reflect.DeepEqual(subs, []int{10}) {
+		t.Fatalf("#3's sub-issues are %v", subs)
 	}
 }
 
@@ -424,7 +414,7 @@ func TestANewIssueFiresTheRoutineOnlyWhenNothingBlocksIt(t *testing.T) {
 	}
 	// #5 is closed: nothing blocks it, so it fires once.
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "5")
-	if code != 0 || fires() != 1 || out != "Created #10 ten\nu10\nBlocked by #5.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n" {
+	if code != 0 || fires() != 1 || out != "Created #11 ten\n"+u11+"\nBlocked by #5.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n" {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(), out, errs)
 	}
 	// A fire that is off is reported and never fails the creation.
@@ -457,41 +447,24 @@ func TestATakeNamesWhatTheIssueBlocks(t *testing.T) {
 }
 
 func TestWhatABoxLeavesOverIsAnIssueForAPersonThatBlocksOnlyWhatNeedsIt(t *testing.T) {
-	calls := recordedIssues(t)
+	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "decide the last 5%", "--blocked-by", "none", "--person", "--blocks", "3")
 	if code != 0 || !strings.Contains(out, "It blocks #3.") || !strings.Contains(out, "For a person: labelled se-person") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	var writes []string
-	for _, c := range *calls {
-		if c[1] == "-X" {
-			writes = append(writes, strings.Join(c[len(c)-2:], " "))
-		}
-	}
-	for _, want := range []string{"labels[]=se-person repos/o/r/issues", "assignees[]=o repos/o/r/issues/10/assignees", "issue_id=110 repos/o/r/issues/3/dependencies/blocked_by"} {
-		if !contains(writes, want) {
-			t.Errorf("not written: %s (%q)", want, writes)
-		}
+	made := issueOf(t, gh, 10)
+	if !strings.Contains(made, `{"name":"se-person"}`) || !strings.Contains(made, `"assignees":[{"login":"o"}]`) ||
+		!reflect.DeepEqual(linked(t, gh, "repos/o/r/issues/3/dependencies/blocked_by"), []int{10}) {
+		t.Fatalf("%s; #3 is blocked by %v", made, linked(t, gh, "repos/o/r/issues/3/dependencies/blocked_by"))
 	}
 	// A number that is no issue creates nothing.
-	before := len(*calls)
+	before := len(gh.Writes())
 	if code, _, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--blocks", "9"); code == 0 || !strings.Contains(errs, "#9 does not exist") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
-	for _, c := range (*calls)[before:] {
-		if c[1] == "-X" {
-			t.Fatalf("a refused --blocks wrote %q", c)
-		}
+	if w := gh.Writes()[before:]; len(w) != 0 {
+		t.Fatalf("a refused --blocks wrote %q", w)
 	}
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
@@ -518,19 +491,18 @@ func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 }
 
 func TestIssueNewReviewLabelsItSeReview(t *testing.T) {
-	calls := recordedIssues(t)
+	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--review")
-	if code != 0 || out != "Created #10 ten\nu10\nLabelled se-review: it is reviewed once its sub-issues have closed.\n"+firedOnce+"\n" {
+	if code != 0 || out != "Created #10 ten\n"+u10+"\nLabelled se-review: it is reviewed once its sub-issues have closed.\n"+firedOnce+"\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	last := (*calls)[len(*calls)-1]
-	if want := []string{"api", "-X", "POST", "-f", "title=ten", "-f", "body=b\n\n<!-- se:new -->", "-f", "labels[]=se", "-f", "labels[]=se-review", "repos/o/r/issues"}; !reflect.DeepEqual(last, want) {
-		t.Fatalf("%q", last)
+	if made := issueOf(t, gh, 10); !strings.Contains(made, `"body":"b\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"},{"name":"se-review"}]`) {
+		t.Fatal(made)
 	}
 }
 
 func TestIssueReviewReadsItsWords(t *testing.T) {
-	calls := recordedIssues(t)
+	gh := recordedIssues(t)
 	old := sessionID
 	t.Cleanup(func() { sessionID = old })
 	sessionID = func() string { return "" }
@@ -553,10 +525,8 @@ func TestIssueReviewReadsItsWords(t *testing.T) {
 			t.Errorf("%s: exit %d, %q, want %q", args, code, errs, want)
 		}
 	}
-	for _, c := range *calls {
-		if strings.Contains(strings.Join(c, " "), "-X") {
-			t.Fatalf("a refused review wrote %v", c)
-		}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("a refused review wrote %q", w)
 	}
 }
 
@@ -571,14 +541,13 @@ func TestReviewBriefReadsOneIssueNumber(t *testing.T) {
 }
 
 func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
-	calls := recordedIssues(t)
+	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--final")
-	if code != 0 || out != "Created #10 ten\nu10\nLabelled se-final: if it fails, it goes to a person.\n"+firedOnce+"\n" {
+	if code != 0 || out != "Created #10 ten\n"+u10+"\nLabelled se-final: if it fails, it goes to a person.\n"+firedOnce+"\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	last := (*calls)[len(*calls)-1]
-	if want := []string{"api", "-X", "POST", "-f", "title=ten", "-f", "body=b\n\n<!-- se:new -->", "-f", "labels[]=se", "-f", "labels[]=se-final", "repos/o/r/issues"}; !reflect.DeepEqual(last, want) {
-		t.Fatalf("%q", last)
+	if made := issueOf(t, gh, 10); !strings.Contains(made, `"body":"b\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"},{"name":"se-final"}]`) {
+		t.Fatal(made)
 	}
 }
 
@@ -592,22 +561,8 @@ func TestIssuePullPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
 		"repos/o/r/issues/7/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/issues/8/dependencies/blocked_by?per_page=100": `[{"number":7,"state":"open"}]`,
 		"repos/o/r/issues/7":                                      `{"number":7,"title":"seven","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-person"}]}`,
-		"repos/o/r/issues/7/comments":                             `{"id":2}`,
-		"repos/o/r/issues/7/labels/se-person":                     `[]`,
 	}
-	var writes []string
-	old := gh
-	gh = func(args ...string) ([]byte, error) {
-		if args[1] == "-X" {
-			writes = append(writes, args[2]+" "+args[len(args)-1])
-		}
-		a, ok := answers[args[len(args)-1]]
-		if !ok {
-			return nil, fmt.Errorf("not recorded: %v", args)
-		}
-		return []byte(a), nil
-	}
-	t.Cleanup(func() { gh = old })
+	gh := hubAt(t, answers)
 	code, out, errs := se(t, "issue", "pull", "--person", "--repo", "o/r")
 	if code != 0 || out != "#7 seven\nu7\nBlocks 1 open issue(s).\nStuck a second time.\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
@@ -622,8 +577,11 @@ func TestIssuePullPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
 	if code != 0 || out != "Resumed #7 seven: back in the queue, its takeover count reset.\nu7\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	if want := []string{"POST repos/o/r/issues/7/comments", "DELETE repos/o/r/issues/7/labels/se-person"}; !reflect.DeepEqual(writes, want) {
-		t.Fatalf("writes %q", writes)
+	if want := []string{"POST repos/o/r/issues/7/comments", "DELETE repos/o/r/issues/7/labels/se-person"}; !reflect.DeepEqual(gh.Writes(), want) {
+		t.Fatalf("writes %q", gh.Writes())
+	}
+	if strings.Contains(issueOf(t, gh, 7), "se-person") {
+		t.Fatal(issueOf(t, gh, 7))
 	}
 }
 
@@ -654,8 +612,6 @@ func TestTheCheckRunsCheckShInTheCheckoutAndAnswersTheTailOfAFailure(t *testing.
 }
 
 func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
-	old := gh
-	t.Cleanup(func() { gh = old })
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
 			{"number":1,"title":"root","state":"open","html_url":"u1","sub_issues_summary":{"total":2,"completed":1}},
@@ -672,12 +628,7 @@ func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
 		"repos/o/r/issues/1/sub_issues?per_page=100": `[{"number":2,"title":"two","state":"closed","labels":[{"name":"se"}]},{"number":3,"title":"three","state":"open","labels":[{"name":"se"},{"name":"se-review"}],"sub_issues_summary":{"total":1,"completed":1}}]`,
 		"repos/o/r/issues/3/sub_issues?per_page=100": `[{"number":4,"title":"four","state":"closed","labels":[{"name":"se"}]}]`,
 	}
-	gh = func(args ...string) ([]byte, error) {
-		if a, ok := answers[args[len(args)-1]]; ok {
-			return []byte(a), nil
-		}
-		return nil, fmt.Errorf("not recorded: %v", args)
-	}
+	hubAt(t, answers)
 	code, out, errs := se(t, "issue", "tree", "--repo", "o/r")
 	want := "#1  open  1/2 closed  se  root\n#3  open  1/1 closed  se,se-review  three\n#7  closed  2/2 closed  se  old\n"
 	if code != 0 || out != want {
