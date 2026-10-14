@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/guidance"
 	"github.com/mb-89/SE/src/internal/index"
@@ -259,7 +261,9 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 		// A command that wrote to GitHub leaves the daemon's snapshot stale.
 		gh := &noting{GitHub: call.GitHub}
 		call.GitHub = gh
+		began := call.Clock.Now()
 		reply, err = runCommand(name, call)
+		timed(call, name, began, stderr)
 		if gh.wrote.Load() {
 			call.stale()
 		}
@@ -303,6 +307,17 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, reply.Text)
 	}
 	return 0
+}
+
+// timed records how long the command named took in the workspace's
+// battery.CallsFile, against its budget; a terminal call over it says so on
+// stderr. Timing never fails the command.
+func timed(call *Call, name string, began time.Time, stderr io.Writer) {
+	took := call.Clock.Now().Sub(began)
+	c, err := battery.Record(call.Disk, call.Workspace, battery.Call{At: began.UTC(), Name: name, Ms: took.Milliseconds()})
+	if err == nil && !call.Session && c.Over {
+		fmt.Fprintln(stderr, "se:", c.Overrun())
+	}
 }
 
 // runCommand runs the command the catalog names with the run the command line registered for it.
