@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: src/go.mod
       # Without the token the suite would skip and the job pass on nothing.
       - run: test -n "$GH_TOKEN" || { echo "the secret SE_CONTRACT_TOKEN is not set"; exit 1; }
-      - run: go test -count=1 -v -run '^TestTheRealGitHubKeepsTheContract$' ./src/internal/io/github
+      - run: go -C src test -count=1 -v -run '^TestTheRealGitHubKeepsTheContract$' ./internal/io/github

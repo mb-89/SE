@@ -1,8 +1,8 @@
-// Biome lints and formats the plugin's TypeScript; tests/check.sh runs it.
+// Biome lints and formats the plugin's TypeScript; tests/check.sh runs it here.
 {
   "$schema": "https://biomejs.dev/schemas/2.2.4/schema.json",
-  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
-  "files": { "includes": ["src/plugin/**"] },
+  // What git ignores here: se's build and the types Claude Code generates.
+  "files": { "includes": ["**", "!bin", "!.claude-plugin/types"] },
   "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
   "javascript": {
     "formatter": {

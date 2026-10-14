@@ -4,7 +4,7 @@ set -eu
 cd "$(dirname "$0")/../.."
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-go build -o "$tmp/se" ./src/cmd/se
+sh src/build.sh "$tmp/se"
 mkdir "$tmp/plugin"
 cp -r src/plugin/.claude-plugin src/plugin/hooks src/plugin/types "$tmp/plugin/"
 mkdir "$tmp/plugin/tests"
