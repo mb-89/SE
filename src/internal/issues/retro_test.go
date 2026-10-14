@@ -25,7 +25,7 @@ func closedJSON(n int, reason, closed, body string, extra string) string {
 
 func landing(t *testing.T, n int, answers map[string]string, claimed time.Time) string {
 	t.Helper()
-	body, err := Landed{Issue: n, Answers: answers, Facts: Facts{Claimed: claimed, Landed: claimed.Add(time.Hour), Requests: 40}}.Comment(rqs)
+	body, err := Landed{Issue: n, Answers: answers, Facts: Facts{Claimed: claimed, Landed: claimed.Add(time.Hour), Requests: 40, RateLimits: 3, RateLimitWaitS: 90 * 60}}.Comment(rqs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,14 +251,15 @@ func TestTheCountsAndScripts(t *testing.T) {
 	t.Parallel()
 	c := collect(t, true)
 	want := Metrics{
-		"closed": 4, "landed": 2, "for_person": 0, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1, "duplicates": 2, "requests": 40,
-		"conflicts_per_issue": 0.5, "takeovers_per_issue": 0.5, "ci_reruns_per_issue": 0.5, "person_flags_per_issue": 0.5, "by_hand_per_issue": 0.5, "duplicates_per_issue": 1, "requests_per_issue": 20,
+		"closed": 4, "landed": 2, "for_person": 0, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1, "duplicates": 2, "requests": 40, "rate_limits": 3, "rate_limit_minutes": 90,
+		"conflicts_per_issue": 0.5, "takeovers_per_issue": 0.5, "ci_reruns_per_issue": 0.5, "person_flags_per_issue": 0.5, "by_hand_per_issue": 0.5, "duplicates_per_issue": 1, "requests_per_issue": 20, "rate_limits_per_issue": 1.5, "rate_limit_minutes_per_issue": 45,
 		"claim_to_merge_minutes": 90,
 	}
 	if !reflect.DeepEqual(c.Metrics, want) {
 		t.Fatalf("%v", c.Metrics)
 	}
-	// The draft shows the fleet's GitHub requests per landed issue, from the
+	// The draft shows the fleet's GitHub requests, and the rate-limit
+	// refusals and minutes waited for the reset, per landed issue, from the
 	// landing facts, and what the closed issues were.
 	draft, err := c.Draft(rqs)
 	if err != nil {
@@ -267,6 +268,8 @@ func TestTheCountsAndScripts(t *testing.T) {
 	for _, line := range []string{
 		"| requests | 40 | 20 |", "GitHub requests: 20 per landed issue, counted by the landing facts of 1 of the 4 closed issues.",
 		"Of the closed issues, 2 landed (the ones the answers check counts, which the per-issue metrics divide by) and 0 were for a person.",
+		"| rate_limits | 3 | 1.5 |", "| rate_limit_minutes | 90 | 45 |",
+		"GitHub rate limits: 1.5 refusals and 45 minutes waited for the reset per landed issue; 1 of the 4 closed issues met one.",
 	} {
 		if !strings.Contains(draft, line) {
 			t.Errorf("the draft does not say %q:\n%s", line, draft)

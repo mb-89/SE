@@ -122,41 +122,42 @@ func (s Source) lastPush(n int) (time.Time, error) {
 	return last, nil
 }
 
-// active is when claimed leaf n last moved, its branch last pushed at pushed:
-// that push, or its last takeover where that is later, as a takeover records
-// a comment, not a push. Its comments are read only where the push is older
-// than within, and m is then what they say; nil otherwise. The lease and se
-// fleet check both read activity here, so they never disagree.
-func (s Source) active(n int, pushed time.Time, within time.Duration) (last time.Time, m *marks, err error) {
-	if s.now().Sub(pushed) <= within {
-		return pushed, nil, nil
+// quiet is the one rule for when a claim has stopped moving, which the lease
+// (stuck, with the lease as window) and se fleet check (with Quiet) both
+// read: nothing pushed to issue n's branch since pushed, nor a takeover of
+// it recorded, for longer than window. n's comments are read only where the
+// push is that old; moved is when the claim last moved, its push or its last
+// takeover, and m the marks read, nil where none were.
+func (s Source) quiet(n int, pushed time.Time, window time.Duration) (quiet bool, moved time.Time, m *marks, err error) {
+	if s.now().Sub(pushed) <= window {
+		return false, pushed, nil, nil
 	}
 	got, err := s.marks(n)
 	if err != nil {
-		return time.Time{}, nil, err
+		return false, pushed, nil, err
 	}
-	if got.lastTakeover.After(pushed) {
-		return got.lastTakeover, &got, nil
+	moved = pushed
+	if got.lastTakeover.After(moved) {
+		moved = got.lastTakeover
 	}
-	return pushed, &got, nil
+	return s.now().Sub(moved) > window, moved, &got, nil
 }
 
-// lease reads whether a claimed leaf is stuck: nothing pushed to its branch,
-// nor a takeover recorded, for longer than the lease.
+// lease reads whether a claimed leaf is stuck: quiet for longer than the
+// lease.
 func (s Source) lease(st *Status) error {
 	pushed, err := s.lastPush(st.Number)
 	if err != nil {
 		return err
 	}
 	st.pushed = pushed
-	since, m, err := s.active(st.Number, pushed, s.config().Lease)
+	stuck, moved, m, err := s.quiet(st.Number, pushed, s.config().Lease)
 	if err != nil {
 		return err
 	}
-	st.Since = since
+	st.Since, st.Stuck = moved, stuck
 	if m != nil {
 		st.Takeovers = m.takeovers
-		st.Stuck = s.now().Sub(since) > s.config().Lease
 	}
 	return nil
 }

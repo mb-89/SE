@@ -244,7 +244,8 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	switch {
 	case ok:
 		// Every command reaches GitHub within its rate limits, and records
-		// the requests it made in its workspace.
+		// in its workspace the requests it made and each rate-limit refusal
+		// it met, with its wait.
 		limited := github.Limit(call.GitHub, call.Clock, githubSettings().Limits, stderr)
 		call.GitHub = limited
 		before := limited.Requests()
@@ -254,6 +255,11 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 		if n := limited.Requests() - before; n > 0 {
 			if rerr := issues.RecordRequests(call.Disk, call.Workspace, name, n, call.Clock.Now()); rerr != nil {
 				fmt.Fprintf(stderr, "se: recording %s's %d GitHub requests: %v\n", name, n, rerr)
+			}
+		}
+		if refused := limited.Refusals(); len(refused) > 0 {
+			if rerr := issues.RecordRefusals(call.Disk, call.Workspace, name, refused); rerr != nil {
+				fmt.Fprintf(stderr, "se: recording %s's %d GitHub rate-limit refusals: %v\n", name, len(refused), rerr)
 			}
 		}
 		if errors.Is(err, flag.ErrHelp) {
