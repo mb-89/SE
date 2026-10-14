@@ -44,9 +44,13 @@ principle is one sentence and one paragraph, and names what checks it.
    parallel where reads are independent, into one snapshot. The computing in
    between is pure and works on that snapshot alone. A run never asks the
    outside world again for what it already has: that is slow, and inputs
-   read at different times disagree.
-   Checked by: the battery (a lint rule, #44's tree); overhaul, by judgment
-   (`looked_at.speed`).
+   read at different times disagree. No process does what a library call
+   can do: the proc I/O module starts only programs that are themselves the
+   work (`go`, the battery's linters, `git` where Go has no library for it),
+   one listed value, `proc.Programs`; GitHub is reached through its own
+   module's HTTP client, never `gh`.
+   Checked by: the battery (the `io-module` and `programs` rules of
+   `se rules`); overhaul, by judgment (`looked_at.speed`).
 
 7. **Fakes that behave, held to contracts.**
    Every I/O module has a fake, and one contract suite runs against both the
@@ -66,8 +70,15 @@ principle is one sentence and one paragraph, and names what checks it.
    their duration, and soft budgets in one file
    ([spec/budgets.yaml](budgets.yaml)) report what grows (#50). One hard
    rule: anything a person waits on gives feedback within 1 second and never
-   blocks. What can run in parallel does.
-   Checked by: the battery and the bridgehead; retro, mechanically (trend);
+   blocks. What can run in parallel does. A person never waits on the outside
+   world: what a person triggers, typed or pressed, is answered from the
+   snapshot the daemon holds, which the I/O modules refresh in the
+   background; only a command that must write (a claim, a land) goes out at
+   once. Every command declares its class, interactive or batch, and each
+   interactive one keeps a hard time and request budget, run against fakes
+   that delay each request and process start as the outside world does.
+   Checked by: the battery (each interactive command against its budgets,
+   reported in its profile) and the bridgehead; retro, mechanically (trend);
    overhaul, by judgment (`looked_at.speed`).
 
 10. **Lint and style checks are part of the battery.**

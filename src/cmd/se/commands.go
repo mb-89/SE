@@ -44,6 +44,9 @@ type Command struct {
 	// Button offers it as a button in /se ui, pressed as /se <name> is typed.
 	// Only a session command that takes no typed words is one.
 	Button bool
+	// Class says whether a person waits on it, index.Interactive, which the
+	// battery holds to its budgets (spec/budgets.yaml), or not, index.Batch.
+	Class index.Class
 	// Run does it and answers what to show, and in a session what the plugin applies.
 	Run func(c *Call) (Reply, error)
 }
@@ -128,11 +131,17 @@ type World struct {
 // realWorld is what se reaches when it runs for real.
 func realWorld() *World {
 	return &World{
-		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(), GitHub: github.Real(),
+		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Listed(proc.Real()), Net: sehttp.Real(), GitHub: github.Real(),
 		Getenv: os.Getenv, Environ: os.Environ, Commit: commit, Check: check,
 		Guided: guidance.Configured,
 	}
 }
+
+// The two classes a command declares, by their short names.
+const (
+	interactive = index.Interactive
+	batch       = index.Batch
+)
 
 var commands = map[string]Command{}
 

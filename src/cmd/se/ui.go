@@ -3,6 +3,7 @@ package main
 func init() {
 	register(Command{
 		Name:    "ui",
+		Class:   interactive,
 		Usage:   "ui",
 		Group:   "Session",
 		Summary: "open SE's control panel: the on/off toggle and the commands",

@@ -178,6 +178,7 @@ It marks a function as a command with:
 | group | the heading it stands under in the help listing |
 | offered | in a session as `/se <name>`, and whether as a `/se ui` button |
 | installed | answered by the installed `se` even when the session works in an SE checkout, whose own `se` answers every other `/se` word: `on`, `restart`, `update` |
+| class | `interactive`, a command a person waits on, which answers from the snapshot within its budgets in [spec/budgets.yaml](budgets.yaml); or `batch`, one that must write or that the fleet, a hook or the battery runs ([principle 9](principles.md)) |
 
 The command runs like any other run: it reads a snapshot of the module's
 inputs plus its arguments, and answers a reply, a commit of the module's own
