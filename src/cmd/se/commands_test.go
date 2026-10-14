@@ -494,6 +494,40 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 	}
 }
 
+func TestEveryCommandRecordsItsDurationAndATerminalOneSaysItsOverrun(t *testing.T) {
+	t.Parallel()
+	d := onFake(t)
+	worldOf(t).Clock = slow{clock.NewFake(time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC))}
+	ws := filepath.FromSlash("/ws")
+	put(t, d, filepath.Join(ws, "spec", "budgets.yaml"), "classes:\n  instant: {ms: 1000, hard: false}\ncommand_classes:\n  help: instant\n")
+	if err := d.MkdirAll(filepath.Join(ws, ".se", ".runtime")); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := se(t, "--workspace", ws, "help"); code != 0 ||
+		!strings.Contains(errs, "se: help took 2000ms, over its budget of 1000ms (spec/budgets.yaml)") {
+		t.Fatalf("code %d, stderr %q", code, errs)
+	}
+	if code, _, errs := se(t, "--session", "--workspace", ws, "help"); code != 0 || errs != "" {
+		t.Fatalf("a session call: code %d, stderr %q", code, errs)
+	}
+	data, err := d.ReadFile(filepath.Join(ws, ".se", ".runtime", "calls.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(strings.TrimSpace(string(data)), "\n"); len(lines) != 2 || !strings.Contains(lines[1], `"name":"help","ms":2000`) {
+		t.Fatalf("calls.jsonl:\n%s", data)
+	}
+}
+
+// slow is a fake clock two seconds later each time it is read, so every
+// command it times takes two seconds.
+type slow struct{ *clock.Fake }
+
+func (s slow) Now() time.Time {
+	s.Advance(2 * time.Second)
+	return s.Fake.Now()
+}
+
 func TestTheHelpRendersTheConfigValues(t *testing.T) {
 	t.Parallel()
 	cfg, err := issues.Configured()
