@@ -68,13 +68,19 @@ func TestAClaimWithoutAPRIsRefusedUpToTheCap(t *testing.T) {
 	}
 }
 
-func TestAPRWithAutoMergeOrASupersedeLetsTheBoxEnd(t *testing.T) {
+func TestOnlyAMergedPROrASupersedeLetsTheBoxEnd(t *testing.T) {
 	t.Parallel()
 	stopWorld(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[{"number":9,"html_url":"p9","auto_merge":null}]`})
 	if v := stops(t); !strings.Contains(v.Block, "PR #9 (p9) has auto-merge off") {
 		t.Fatalf("%+v", v)
 	}
+	// A box keeps its PR until it merges: auto-merge on is not the end.
 	hubAt(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`})
+	if v := stops(t); !strings.Contains(v.Block, "PR #9 (p9) has not merged") || !strings.Contains(v.Block, "se issue keep") {
+		t.Fatalf("%+v", v)
+	}
+	// Merged, its PR closed the issue.
+	hubAt(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"closed"}`})
 	if v := stops(t); v.Block != "" || v.Pass == "" {
 		t.Fatalf("%+v", v)
 	}
@@ -85,38 +91,39 @@ func TestAPRWithAutoMergeOrASupersedeLetsTheBoxEnd(t *testing.T) {
 	}
 }
 
-func TestALandRecordLetsTheBoxEndBeforeGitHubIsAsked(t *testing.T) {
+func TestALandRecordCountsAsAutoMergeOn(t *testing.T) {
 	t.Parallel()
 	// GitHub shows the PR with auto-merge unset, as a proxy's route may leave it.
 	d := stopWorld(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"open"}`, pulls3: `[{"number":9,"html_url":"p9","auto_merge":null}]`})
-	if v := stops(t); v.Block == "" {
+	if v := stops(t); !strings.Contains(v.Block, "auto-merge off") {
 		t.Fatalf("%+v", v)
 	}
-	// The sub-agent landed #3 in its worktree beside the box's checkout.
+	// The sub-agent landed #3 in its worktree beside the box's checkout: its
+	// auto-merge is on, and the box keeps the PR until it merges.
 	put(t, d, "/issue-3/.se/.runtime/box.json", `{"landed":{"3":{"pr":9,"auto_merge":true}}}`)
-	if v := stops(t); v.Block != "" || !strings.Contains(v.Pass, "recorded a PR with auto-merge on for #3") {
+	if v := stops(t); !strings.Contains(v.Block, "PR #9 (p9) has not merged") {
 		t.Fatalf("%+v", v)
 	}
-	// A leaf's sub-agent is let go by the same record.
+	// A leaf's sub-agent is judged by the same record (the count afresh).
+	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[3]}`)
 	put(t, d, "/t/leaf.jsonl", `{"type":"user","message":{"content":"Work on se issue #3 in the worktree /issue-3, on its branch issue-3."}}`+"\n")
-	if v := stops(t, "--agent-transcript", "/t/leaf.jsonl"); v.Block != "" {
+	if v := stops(t, "--agent-transcript", "/t/leaf.jsonl"); !strings.Contains(v.Block, "has not merged") {
 		t.Fatalf("%+v", v)
 	}
 	// A record in the box's own workspace counts too; a record without
 	// auto-merge does not.
 	put(t, d, "/issue-3/.se/.runtime/box.json", `{}`)
 	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[3],"landed":{"3":{"pr":9,"auto_merge":false}}}`)
-	if v := stops(t); v.Block == "" {
+	if v := stops(t); !strings.Contains(v.Block, "auto-merge off") {
 		t.Fatalf("%+v", v)
 	}
 	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[3],"landed":{"3":{"pr":9,"auto_merge":true}}}`)
-	if v := stops(t); v.Block != "" {
+	if v := stops(t); !strings.Contains(v.Block, "has not merged") {
 		t.Fatalf("%+v", v)
 	}
-	// Of several issues, the recorded one passes and the rest are judged.
-	hubAt(t, map[string]string{"repos/o/r/issues/1": `{"number":1,"state":"open"}`, "repos/o/r/pulls?head=o:issue-1&base=main&state=open&per_page=100": `[]`})
-	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[1,3],"landed":{"3":{"pr":9,"auto_merge":true}}}`)
-	if v := stops(t); !strings.Contains(v.Block, "#1 is open") || strings.Contains(v.Block, "#3") {
+	// Merged, the issue is closed.
+	hubAt(t, map[string]string{"repos/o/r/issues/3": `{"number":3,"state":"closed"}`})
+	if v := stops(t); v.Block != "" {
 		t.Fatalf("%+v", v)
 	}
 }
@@ -213,7 +220,8 @@ func TestABoxIsHeldToEveryIssueItTook(t *testing.T) {
 	})
 	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[1,2]}`)
 	v := stops(t)
-	if !strings.Contains(v.Block, "#1 is open with neither a PR from issue-1 nor a supersede") || strings.Contains(v.Block, "#2") {
+	// #2's PR is up, auto-merge on, but a box keeps it until it merges.
+	if !strings.Contains(v.Block, "#1 is open with neither a PR from issue-1 nor a supersede") || !strings.Contains(v.Block, "#2 is open and its PR #9 (p9) has not merged") {
 		t.Fatalf("%+v", v)
 	}
 }

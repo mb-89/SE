@@ -15,9 +15,9 @@ import (
 )
 
 // The owner's rule: a box that takes an issue closes it, always, with a PR
-// (auto-merge on) or a supersede. The plugin hands every Stop and SubagentStop
-// to se hook stop, which refuses a box's stop while any issue it took is open
-// with neither; se issue pull --take records each issue a box takes.
+// (auto-merge on, kept until it merges) or a supersede. The plugin hands every
+// Stop and SubagentStop to se hook stop, which refuses a box's stop while any
+// issue it took is open; se issue pull --take records each issue a box takes.
 
 // isBox says whether this session is a box: a cloud session that no person
 // attends, as a routine starts it. Every other session is interactive.
@@ -43,8 +43,8 @@ type boxState struct {
 
 // landed is what se issue land records of the PR it landed: its number, and
 // that auto-merge went on (or it was merged at once). The Stop hook trusts it
-// before it asks GitHub, whose auto_merge field a proxy's auto-merge route
-// may leave unset.
+// over GitHub's auto_merge field, which a proxy's auto-merge route may leave
+// unset.
 type landed struct {
 	PR        int  `json:"pr"`
 	AutoMerge bool `json:"auto_merge"`
@@ -77,23 +77,23 @@ func readBoxIn(c *Call, ws string) boxState {
 }
 
 // recordLand keeps the PR se issue land landed for issue n in this
-// workspace's box.json, so the Stop hook need not ask GitHub.
+// workspace's box.json, so the Stop hook knows its auto-merge is on.
 func recordLand(c *Call, n, pr int) error {
 	b := readBox(c)
 	b.Landed[n] = landed{PR: pr, AutoMerge: true}
 	return writeBox(c, b)
 }
 
-// landedRecord answers the PR se issue land recorded for issue n with
-// auto-merge on: in this workspace, or in n's worktree beside it, where the
+// landedPR answers the PR se issue land recorded for issue n with auto-merge
+// on, 0 for none: in this workspace, or in n's worktree beside it, where the
 // sub-agent that worked n landed it.
-func landedRecord(c *Call, n int) (landed, bool) {
+func landedPR(c *Call, n int) int {
 	for _, ws := range []string{c.Workspace, issues.WorktreeDir(c.Workspace, n)} {
-		if l, ok := readBoxIn(c, ws).Landed[n]; ok && l.AutoMerge && l.PR > 0 {
-			return l, true
+		if l := readBoxIn(c, ws).Landed[n]; l.AutoMerge && l.PR > 0 {
+			return l.PR
 		}
 	}
-	return landed{}, false
+	return 0
 }
 
 func writeBox(c *Call, b boxState) error {
@@ -167,8 +167,8 @@ func init() {
 		Class:   batch,
 		Usage:   "hook stop [--agent-transcript PATH] [--waiting] [--repo OWNER/NAME]",
 		Group:   "Hooks",
-		Summary: "hold a box to a PR or supersede for each issue it took",
-		Details: "answer the plugin's Stop (or, with --agent-transcript, SubagentStop) as JSON: block, naming each, while any issue this box took is open with neither an open PR from its branch with auto-merge on nor a supersede; else pass, with why. The issues are every one se issue pull --take recorded, or for a sub-agent the leaf its prompt names. A PR se issue land recorded with auto-merge on in .se/.runtime/box.json, of this workspace or of the issue's worktree beside it, passes its issue before GitHub is asked. An interactive session, and a box waiting on background work (--waiting), always pass. It refuses at most refusals times in a row (spec/stop.yaml); a prompt from a person resets the count (se hook prompt). A check that cannot judge lets the turn end and logs why in .se/.runtime/logs/stop.log.",
+		Summary: "hold a box to a merged PR or supersede for each issue it took",
+		Details: "answer the plugin's Stop (or, with --agent-transcript, SubagentStop) as JSON: block, naming each, while any issue this box took is open: with no PR from its branch, with one whose auto-merge is off, or with one not merged yet (a box keeps its PR until it merges: se issue keep), unless another box took the issue over; else pass, with why. A merged PR or a supersede closes the issue. A PR se issue land recorded with auto-merge on in .se/.runtime/box.json, of this workspace or of the issue's worktree beside it, counts as auto-merge on whatever GitHub's auto_merge field shows. The issues are every one se issue pull --take recorded, or for a sub-agent the leaf its prompt names. An interactive session, and a box waiting on background work (--waiting), always pass. It refuses at most refusals times in a row (spec/stop.yaml); a prompt from a person resets the count (se hook prompt). A check that cannot judge lets the turn end and logs why in .se/.runtime/logs/stop.log.",
 		Run: func(c *Call) (Reply, error) {
 			fs, src, _ := issueFlags(c, "hook stop")
 			transcript := fs.String("agent-transcript", "", "the sub-agent's transcript `PATH`: the stop is a SubagentStop")
@@ -201,25 +201,15 @@ func init() {
 			}
 			// An issue refused up to the cap is let go; the rest are judged.
 			limit := refusals(c)
-			var judge, recorded []int
+			var judge []int
 			for _, n := range taken {
 				if b.Refused[n] >= limit {
 					stopLog(c, fmt.Sprintf("let the box end with #%d unclosed: refused %d times in a row, the cap in %s", n, b.Refused[n], StopPath))
 					continue
 				}
-				// A PR se issue land recorded is trusted before GitHub is asked.
-				if _, ok := landedRecord(c, n); ok {
-					delete(b.Refused, n)
-					recorded = append(recorded, n)
-					continue
-				}
 				judge = append(judge, n)
 			}
 			if len(judge) == 0 {
-				if len(recorded) > 0 {
-					_ = writeBox(c, b)
-					return verdict{Pass: fmt.Sprintf("se issue land recorded a PR with auto-merge on for %s", numbers(recorded))}.reply()
-				}
 				return verdict{Pass: fmt.Sprintf("refused %d times in a row, the cap", limit)}.reply()
 			}
 			s, err := src()
@@ -230,7 +220,7 @@ func init() {
 			var whys []string
 			var open []int
 			for _, n := range judge {
-				why, err := s.Unclosed(n)
+				why, err := s.Unclosed(n, landedPR(c, n))
 				if err != nil {
 					stopLog(c, fmt.Sprintf("let the box end unjudged on #%d: %s", n, oneLine(err)))
 					return verdict{Pass: "the check is broken: " + oneLine(err)}.reply()
@@ -245,7 +235,7 @@ func init() {
 			}
 			if len(open) == 0 {
 				_ = writeBox(c, b)
-				return verdict{Pass: fmt.Sprintf("%s: each is closed, or its PR has auto-merge on", numbers(judge))}.reply()
+				return verdict{Pass: fmt.Sprintf("%s: each is closed, or another box took it over", numbers(judge))}.reply()
 			}
 			if err := writeBox(c, b); err != nil {
 				// A count that cannot be kept would refuse without end.
