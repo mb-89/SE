@@ -94,7 +94,7 @@ func TestThePrinciplesAreReadFromTheSpec(t *testing.T) {
 		t.Fatalf("%+v", p)
 	}
 	// The second part, how code is written, holds no principle of the list.
-	if p := ps[len(ps)-1]; p.Name != "Steer before, check at the push" || strings.Contains(p.CheckedBy, "overhaul read") {
+	if p := ps[len(ps)-1]; p.Name != "The fleet's configuration lives in the repository" || strings.Contains(p.CheckedBy, "overhaul read") {
 		t.Fatalf("%+v", p)
 	}
 }
