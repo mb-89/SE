@@ -31,14 +31,33 @@ func superseding(t *testing.T, labels string) *github.Fake {
 func TestSupersedeHandsTheIssueOnToAFinalSuccessor(t *testing.T) {
 	t.Parallel()
 	gh := superseding(t, `{"name":"se"}`)
+	// #271's case: issue 5's box opened PR 90 from its claim before the
+	// issue went obsolete.
+	seed(t, gh, map[string]string{
+		"repos/o/r/pulls?head=o:issue-5&base=main&state=open&per_page=100": `[{"number":90,"html_url":"p90"}]`,
+	})
+	origin, a, _ := boxes(t)
+	run(t, a, "push", "-q", "origin", "main:issue-5")
 	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
-	sup, err := s.Supersede(5, "Which API?\n")
+	sup, err := s.Supersede(a, 5, "Which API?\n")
 	if err != nil {
 		t.Fatal(err)
 	}
 	m := sup.Successor.Number
-	if m == 0 || sup.Parent != 1 || !reflect.DeepEqual(sup.BlockedBy, []int{3}) || !reflect.DeepEqual(sup.Blocks, []int{7}) || sup.Ready {
+	if m == 0 || sup.Parent != 1 || !reflect.DeepEqual(sup.BlockedBy, []int{3}) || !reflect.DeepEqual(sup.Blocks, []int{7}) || sup.Ready ||
+		!reflect.DeepEqual(sup.Pulls, []int{90}) || sup.Branch != "issue-5" {
 		t.Fatalf("%+v", sup)
+	}
+	// No PR stays open with no issue behind it, and no closed issue's claim
+	// is left for se fleet check to hand a person.
+	if p, err := api[openPull](s, "repos/o/r/pulls?state=open&per_page=100", true); err != nil || len(p) != 0 {
+		t.Fatalf("open PRs %+v %v", p, err)
+	}
+	if cs := commentsAt(t, gh, 90); len(cs) != 1 || !strings.Contains(cs[0].Body, "superseded by #"+strconv.Itoa(m)) {
+		t.Fatalf("%+v", cs)
+	}
+	if got := run(t, origin, "branch", "--list", "issue-5"); got != "" {
+		t.Fatalf("origin still has %q", got)
 	}
 	next := issueAt(t, gh, m)
 	want := "Supersedes #5, whose box could not close it with a PR. This is its last attempt (se-final): its box lands a PR.\n\nThe task.\n\n## Open questions\nWhich API?\n\n<!-- se:new -->"
@@ -67,7 +86,7 @@ func TestSupersedeHandsTheIssueOnToAFinalSuccessor(t *testing.T) {
 func TestSupersedeRefusesAFinalIssue(t *testing.T) {
 	t.Parallel()
 	gh := superseding(t, `{"name":"se"},{"name":"se-final"}`)
-	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Supersede(5, "Which API?")
+	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Supersede(t.TempDir(), 5, "Which API?")
 	if err == nil || !strings.Contains(err.Error(), "#5 is final") {
 		t.Fatalf("%v", err)
 	}
@@ -79,13 +98,13 @@ func TestSupersedeRefusesAFinalIssue(t *testing.T) {
 func TestSupersedeRefusesNoQuestionsAndAClosedIssue(t *testing.T) {
 	t.Parallel()
 	s := Source{Proc: machine, Repo: repo, GitHub: superseding(t, `{"name":"se"}`), Clock: atNow()}
-	if _, err := s.Supersede(5, " \n"); err == nil || !strings.Contains(err.Error(), "open questions") {
+	if _, err := s.Supersede(t.TempDir(), 5, " \n"); err == nil || !strings.Contains(err.Error(), "open questions") {
 		t.Fatalf("%v", err)
 	}
-	if _, err := s.Supersede(4, "Which API?"); err == nil || !strings.Contains(err.Error(), "closed already") {
+	if _, err := s.Supersede(t.TempDir(), 4, "Which API?"); err == nil || !strings.Contains(err.Error(), "closed already") {
 		t.Fatalf("%v", err)
 	}
-	if _, err := s.Supersede(99, "Which API?"); err == nil || !strings.Contains(err.Error(), "#99 does not exist") {
+	if _, err := s.Supersede(t.TempDir(), 99, "Which API?"); err == nil || !strings.Contains(err.Error(), "#99 does not exist") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -177,9 +196,8 @@ func TestDuplicateClosesTheIssueAndMintsNothing(t *testing.T) {
 		t.Fatalf("origin still has %q", got)
 	}
 	// Run again, it finds nothing left to drop.
-	again := Duplicated{Issue: 5, Of: 6}
-	if err := s.dropClaim(a, &again); err != nil || again.Pulls != nil || again.Branch != "" {
-		t.Fatalf("%+v %v", again, err)
+	if pulls, b, err := s.dropClaim(a, 5, "again"); err != nil || pulls != nil || b != "" {
+		t.Fatalf("%v %q %v", pulls, b, err)
 	}
 	old := issueAt(t, gh, 5)
 	if old.State != "closed" || old.StateReason != "duplicate" {
