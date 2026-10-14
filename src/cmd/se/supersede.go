@@ -131,11 +131,14 @@ func duplicate(c *Call, src func() (issues.Source, error), asJSON bool, n, of in
 	if dup.Commit != "" {
 		text = fmt.Sprintf("Closed #%d as a duplicate of the merged PR #%d, its work on main in %s.\n%s", n, of, dup.Commit, dup.URL)
 	}
-	if dup.Commit != "" {
-		text = fmt.Sprintf("Closed #%d as a duplicate of the merged PR #%d, its work on main in %s.\n%s", n, of, dup.Commit, dup.URL)
-	}
 	if len(dup.Blocks) > 0 {
 		text += "\n" + numbers(dup.Blocks) + " now wait on #" + strconv.Itoa(of) + "."
+	}
+	for _, p := range dup.Pulls {
+		text += fmt.Sprintf("\nClosed its PR #%d, naming #%d.", p, of)
+	}
+	if dup.Branch != "" {
+		text += "\nDeleted its claim " + dup.Branch + "."
 	}
 	return Reply{Text: text}, nil
 }
