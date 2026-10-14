@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
-
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
