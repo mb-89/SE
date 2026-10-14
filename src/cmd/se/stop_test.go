@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/io/clock"
@@ -22,7 +23,7 @@ func TestStatusAndStopReachTheDaemonOverTheNetwork(t *testing.T) {
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
 		done <- daemon.Serve(context.Background(), daemon.Paths{Workspace: ws, Disk: d}, daemon.Options{
-			Clock: clock.Real(), Net: network, Ready: func(ep daemon.Endpoint) { ready <- ep },
+			Clock: clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)), Net: network, Ready: func(ep daemon.Endpoint) { ready <- ep },
 		})
 	}()
 	ep := <-ready
