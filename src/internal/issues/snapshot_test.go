@@ -1,3 +1,5 @@
+// Internal test package: it reads through the package's test fakes and its
+// links paths, as the other internal tests do.
 package issues
 
 import (

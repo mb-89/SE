@@ -43,28 +43,28 @@ func TestTheRealGitHubSpeaksRest(t *testing.T) {
 		switch q := r.URL.RequestURI(); {
 		case strings.Contains(q, "missing"):
 			w.WriteHeader(404)
-			fmt.Fprint(w, `{"message":"Not Found"}`)
+			_, _ = fmt.Fprint(w, `{"message":"Not Found"}`)
 		case strings.Contains(q, "login"):
 			w.WriteHeader(401)
-			fmt.Fprint(w, `{"message":"Bad credentials"}`)
+			_, _ = fmt.Fprint(w, `{"message":"Bad credentials"}`)
 		case strings.Contains(q, "invalid"):
 			w.WriteHeader(422)
-			fmt.Fprint(w, `{"message":"Validation Failed","errors":[{"code":"custom","message":"already linked"}]}`)
+			_, _ = fmt.Fprint(w, `{"message":"Validation Failed","errors":[{"code":"custom","message":"already linked"}]}`)
 		case r.Method == "DELETE":
 			w.WriteHeader(204)
 		case strings.Contains(q, "per_page=2&page=1"):
-			fmt.Fprint(w, `[1,2]`)
+			_, _ = fmt.Fprint(w, `[1,2]`)
 		case strings.Contains(q, "per_page=2&page=2"):
-			fmt.Fprint(w, `[3]`)
+			_, _ = fmt.Fprint(w, `[3]`)
 		case strings.Contains(q, "refs"):
-			fmt.Fprint(w, `[9]`)
+			_, _ = fmt.Fprint(w, `[9]`)
 		case q == "/graphql" && strings.Contains(string(body), "clean"):
-			fmt.Fprint(w, `{"data":null,"errors":[{"message":"Pull request is in clean status"}]}`)
+			_, _ = fmt.Fprint(w, `{"data":null,"errors":[{"message":"Pull request is in clean status"}]}`)
 		case r.Header.Get("If-None-Match") == `"v1"`:
 			w.WriteHeader(304)
 		default:
 			w.Header().Set("ETag", `"v1"`)
-			fmt.Fprint(w, `{"number":5}`)
+			_, _ = fmt.Fprint(w, `{"number":5}`)
 		}
 	}))
 	defer srv.Close()
