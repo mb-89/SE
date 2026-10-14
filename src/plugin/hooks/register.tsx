@@ -66,7 +66,8 @@ let active: SeActive = false
 let hooksCommit = ''
 let root = ''
 let endpoint: Endpoint | null = null
-let lastStart = 0
+// When the plugin last started the daemon; -Infinity while it never did.
+let lastStart = -Infinity
 // The one start in flight, which every caller finding the daemon down awaits.
 let starting: Promise<string> | null = null
 // Events raised while a start runs, the start's own among them, sent once it answers.
@@ -212,7 +213,7 @@ export const register: Register = on => {
   on('*', async ($, e, next) => {
     if (next.is('engine.create', e) || (!active && !settingUp)) return next(e)
     if (!active) {
-      if (waiting.length < WAITING_CAP) waiting.push(bodyOf(await $.session.id(), next.event, e))
+      if (waiting.length < WAITING_CAP) waiting.push(bodyOf(await $.session.id(), next.event, e, await $.clock.now()))
       return next(e)
     }
     await within(
@@ -355,7 +356,7 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
   }
   if (typeof reply.active === 'boolean') {
     // An on that found no daemon tries again on the road, not at once.
-    if (reply.active) lastStart = Date.now()
+    if (reply.active) lastStart = await $.clock.now()
     active = reply.active
     await $.state.set(ACTIVE, reply.active)
   }
@@ -433,7 +434,7 @@ function starts($: EngineInterface): Promise<string> {
 
 // Build se where it is missing, then have it start the workspace's daemon.
 async function startsOnce($: EngineInterface): Promise<string> {
-  lastStart = Date.now()
+  lastStart = await $.clock.now()
   root = await $.session.root()
   try {
     const { path: bin, failed: unbuilt } = await builds($)
@@ -455,7 +456,7 @@ async function startsOnce($: EngineInterface): Promise<string> {
 // under the debugger) is found again through daemon.json; one that is gone is
 // started again, at most once a minute.
 async function forwards($: EngineInterface, event: string, e: unknown): Promise<void> {
-  const body = bodyOf(await $.session.id(), event, e)
+  const body = bodyOf(await $.session.id(), event, e, await $.clock.now())
   if (endpoint && (await posts($, endpoint, body))) return
   // An event that waited on the start would hold up the start's own events.
   if (starting) {
@@ -464,7 +465,7 @@ async function forwards($: EngineInterface, event: string, e: unknown): Promise<
   }
   endpoint = await recorded($)
   if (endpoint && (await posts($, endpoint, body))) return
-  if (Date.now() - lastStart < RESTART_EVERY) return
+  if ((await $.clock.now()) - lastStart < RESTART_EVERY) return
   if (!(await starts($)) && endpoint) await posts($, endpoint, body)
 }
 
@@ -490,9 +491,10 @@ async function recorded($: EngineInterface): Promise<Endpoint | null> {
   }
 }
 
-// The post's body: the event whole, which the daemon trims; one that is no JSON goes as text.
-export function bodyOf(session: string, event: string, e: unknown): string {
-  const at = new Date().toISOString()
+// The post's body: the event whole, at ms on the clock, which the daemon
+// trims; one that is no JSON goes as text.
+export function bodyOf(session: string, event: string, e: unknown, ms: number): string {
+  const at = new Date(ms).toISOString()
   try {
     return JSON.stringify({ session, event, at, e: e ?? null })
   } catch {

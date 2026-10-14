@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 func TestAReportIsRefusedWhereItBreaksTheRules(t *testing.T) {
@@ -56,33 +58,21 @@ func TestAReportIsRefusedWhereItBreaksTheRules(t *testing.T) {
 }
 
 // reviewWorld is a gate #1, ready for review, whose leaf #2 was worked by
-// someone else; issues created come back numbered from 10 up.
-func reviewWorld(t *testing.T) (Source, map[string]string, *[][]string) {
-	answers := map[string]string{
-		listPath:                        list(node(1, 1, ReviewLabel)),
-		refsPath:                        `[]`,
-		subsPath(1):                     subs(-2),
-		commentsPath(2):                 workedBy(Worker{Session: "w", Workspace: "/w"}),
-		"repos/o/r/issues/1":            `{"id":1001,"number":1}`,
-		"repos/o/r/issues/1/comments":   `{}`,
-		"repos/o/r/issues/1/labels":     `{}`,
-		"repos/o/r/issues/1/assignees":  `{}`,
-		"repos/o/r/issues/1/sub_issues": `{}`,
-	}
-	gh, wrote := reviewGH(t, answers)
-	next := 10
-	s := Source{Proc: machine, Repo: repo, GH: func(args ...string) ([]byte, error) {
-		if args[len(args)-1] == "repos/o/r/issues" {
-			next++
-			answers["repos/o/r/issues"] = fmt.Sprintf(`{"id":%d,"number":%d,"title":"f%d","html_url":"u%d"}`, 1000+next-1, next-1, next-1, next-1)
-		}
-		return gh(args...)
-	}, Clock: atNow()}
-	return s, answers, wrote
+// someone else; the repository's last issue is #9, so issues created are
+// numbered from 10 up.
+func reviewWorld(t *testing.T) (Source, *github.Fake) {
+	gh := recorded(t, map[string]string{
+		listPath:             list(node(1, 1, ReviewLabel)),
+		refsPath:             `[]`,
+		subsPath(1):          subs(-2),
+		commentsPath(2):      workedBy(Worker{Session: "w", Workspace: "/w"}),
+		"repos/o/r/issues/9": `{"number":9,"state":"closed"}`,
+	})
+	return Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}, gh
 }
 
 func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
-	s, _, wrote := reviewWorld(t)
+	s, gh := reviewWorld(t)
 	rep := failing("it breaks")
 	for k := 1; k <= 7; k++ {
 		rep.Findings = append(rep.Findings, ReviewFinding{Title: fmt.Sprintf("nit %d", k), Evidence: "y.go:1", Why: "fixable"})
@@ -94,24 +84,15 @@ func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
 	if !reflect.DeepEqual(numbers(r.Fixes), []int{10}) || !reflect.DeepEqual(numbers(r.Filed), []int{11, 12, 13, 14, 15}) || r.Unfiled != 2 || r.Passed || r.Person {
 		t.Fatalf("%+v", r)
 	}
-	var created, under []string
-	var report string
-	for _, w := range *wrote {
-		switch path := w[len(w)-1]; path {
-		case "repos/o/r/issues":
-			if !reflect.DeepEqual(w[len(w)-5:], []string{"-f", "labels[]=se", "-f", "labels[]=se-final", path}) {
-				t.Errorf("not se-final: %q", w)
-			}
-			created = append(created, w[4])
-		case "repos/o/r/issues/1/sub_issues":
-			under = append(under, w[4])
-		case "repos/o/r/issues/1/comments":
-			report = w[4]
+	for n := 10; n <= 15; n++ {
+		if i := issueAt(t, gh, n); !i.labelled(Label) || !i.labelled(FinalLabel) {
+			t.Errorf("#%d is not se-final: %+v", n, i)
 		}
 	}
-	if len(created) != 6 || created[0] != "title=it breaks" || !reflect.DeepEqual(under, []string{"sub_issue_id=1010"}) {
-		t.Fatalf("created %q, under the gate %q", created, under)
+	if created := gh.Writes(); len(created) != 8 || issueAt(t, gh, 10).Title != "it breaks" || !reflect.DeepEqual(linksOf(t, gh, subsPath(1)), []int{2, 10}) {
+		t.Fatalf("created %q, under the gate %v", created, linksOf(t, gh, subsPath(1)))
 	}
+	report := commentsAt(t, gh, 1)[0].Body
 	for _, want := range []string{
 		"- **it breaks** (blocking, #10)", "- **nit 1** (not blocking, #11)", "- **nit 7** (not blocking, not filed (past the first five))",
 		"2 more non-blocking finding(s) counted, not filed.", "### Checked and clean\n- the tests: none weakened",
@@ -125,7 +106,6 @@ func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
 	if v == nil {
 		t.Fatal(report)
 	}
-	s.GH = recorded(t, map[string]string{commentsPath(1): fmt.Sprintf(`[{"body":%q}]`, report)})
 	got, err := s.lastVerdict(1)
 	if err != nil || !reflect.DeepEqual(got.blockers(), []int{10}) {
 		t.Fatalf("%+v %v", got, err)
@@ -133,41 +113,45 @@ func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {
 }
 
 func TestAReReviewIsLimitedToTheEarlierBlockers(t *testing.T) {
-	s, answers, wrote := reviewWorld(t)
+	s, gh := reviewWorld(t)
 	// #1's last review failed on #3, which has landed since.
 	earlier := Verdict{Report: failing("three")}
 	earlier.Report.Findings[0].Issue = 3
-	answers[subsPath(1)] = subs(-2, -3)
-	answers[commentsPath(3)] = workedBy(Worker{Session: "f", Workspace: "/f"})
-	answers[commentsPath(1)] = fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r0", Workspace: "/r0"}))
-	answers[listPath] = list(node(1, 2, ReviewLabel))
+	seed(t, gh, map[string]string{
+		subsPath(1):     subs(-2, -3),
+		commentsPath(3): workedBy(Worker{Session: "f", Workspace: "/f"}),
+		commentsPath(1): fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r0", Workspace: "/r0"})),
+	})
 	r := Worker{Session: "r", Workspace: "/r"}
 	if _, err := s.Review(1, r, true, passing); err == nil || !strings.Contains(err.Error(), "checks only the earlier blockers (#3)") {
 		t.Fatalf("%v", err)
 	}
-	if len(*wrote) != 0 {
-		t.Fatalf("a refused review wrote %q", *wrote)
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("a refused review wrote %q", w)
 	}
 	// The re-review finds #3's problem again: #3 was final, so #1 waits on
 	// an issue for a person, #10.
 	again := failing("three, again")
 	again.Requirements = []Requirement{{Item: "three is fixed", Evidence: "x.go:3 still breaks", Blocker: 3}}
 	again.Findings[0].Repeats = 3
-	answers["repos/o/r/issues/10/assignees"] = `{}`
-	answers["repos/o/r/issues/1/dependencies/blocked_by"] = `{}`
-	answers["repos/o/r/issues/1/labels/se-final"] = `{}`
 	got, err := s.Review(1, r, false, again)
 	if err != nil || !got.Person || len(got.Fixes)+len(got.Filed) != 0 {
 		t.Fatalf("%+v %v", got, err)
 	}
-	var paths []string
-	for _, w := range *wrote {
-		paths = append(paths, w[len(w)-2]+" "+w[len(w)-1])
+	want := []string{
+		"POST repos/o/r/issues/1/comments", "POST repos/o/r/issues", "POST repos/o/r/issues/10/assignees",
+		"POST repos/o/r/issues/1/dependencies/blocked_by", "POST repos/o/r/issues/1/comments", "DELETE repos/o/r/issues/1/labels/se-final",
 	}
-	if len(paths) != 6 || !strings.HasPrefix(paths[0], "body=## Re-review: FAIL") || !strings.Contains(paths[0], "repeats #3, so this goes to a person") ||
-		paths[1] != "labels[]=se-person repos/o/r/issues" || paths[2] != "assignees[]=o repos/o/r/issues/10/assignees" ||
-		paths[3] != "issue_id=1010 repos/o/r/issues/1/dependencies/blocked_by" ||
-		!strings.Contains(paths[4], "Its re-review finds the problem of #3 (three, again) again") {
-		t.Fatalf("%q", paths)
+	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
+		t.Fatalf("%q", w)
+	}
+	c := commentsAt(t, gh, 1)
+	if len(c) != 3 || !strings.HasPrefix(c[1].Body, "## Re-review: FAIL") || !strings.Contains(c[1].Body, "repeats #3, so this goes to a person") ||
+		!strings.Contains(c[2].Body, "Its re-review finds the problem of #3 (three, again) again") {
+		t.Fatalf("%+v", c)
+	}
+	if !labelled(t, gh, 10, PersonLabel) || !strings.Contains(get(t, gh, "repos/o/r/issues/10"), `"assignees":[{"login":"o"}]`) ||
+		!reflect.DeepEqual(linksOf(t, gh, links(1)), []int{10}) {
+		t.Fatalf("#10 is no issue for a person blocking #1: %s", get(t, gh, "repos/o/r/issues/10"))
 	}
 }
