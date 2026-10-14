@@ -536,7 +536,7 @@ func TestWhatABoxLeavesOverIsAnIssueForAPersonThatBlocksOnlyWhatNeedsIt(t *testi
 
 func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 	t.Parallel()
-	recordedIssues(t)
+	gh := recordedIssues(t)
 	root := t.TempDir()
 	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
 	for _, args := range [][]string{
@@ -553,8 +553,34 @@ func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 	// The routine's fires are spent: the refusal is reported, and the take stands.
 	worldOf(t).Net.(*sehttp.Fake).Routine(routineURL, "tok", 0)
 	code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"fanout":"Fan-out refused: 429 Too Many Requests`) {
+	if code != 0 || !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"fanout":"Fan-out refused: 429 Too Many Requests`) || !strings.Contains(out, "Kept on #") {
 		t.Fatalf("exit %d, %q", code, out)
+	}
+	// GitHub now lists #3's claim, and #6 is ready besides.
+	if err := gh.Seed(map[string]string{
+		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
+			{"number":6,"title":"six","body":"","state":"open","html_url":"u6"},
+			{"number":3,"title":"three","body":"do it","state":"open","html_url":"u3"},
+			{"number":1,"title":"one","body":"","state":"open","html_url":"u1"}]`,
+		"repos/o/r/git/matching-refs/heads/issue-":                `[{"ref":"refs/heads/issue-1"},{"ref":"refs/heads/issue-3"}]`,
+		"repos/o/r/issues/6/dependencies/blocked_by?per_page=100": `[]`,
+		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
+		"repos/o/r/activity?ref=refs/heads/issue-3&per_page=1":    `[{"timestamp":"` + testedAt.UTC().Format(time.RFC3339) + `"}]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The refusal is kept with the retry its 429 named: se fleet check fires
+	// nothing before it, and fires it once it has passed and the fires are back.
+	if code, out, _ := se(t, "fleet", "check", "--repo", "o/r"); code != 0 || !strings.Contains(out, "Fan-out waits") {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+	worldOf(t).Clock.(*clock.Fake).Advance(31 * time.Minute)
+	worldOf(t).Net.(*sehttp.Fake).Routine(routineURL, "tok", 1)
+	if code, out, _ := se(t, "fleet", "check", "--json", "--repo", "o/r"); code != 0 || !strings.Contains(out, `"fanout":"`+firedOnce) || fires(t) != 1 {
+		t.Fatalf("exit %d, %q, %d fires", code, out, fires(t))
+	}
+	if code, out, _ := se(t, "fleet", "check", "--repo", "o/r"); code != 0 || strings.Contains(out, "Fan-out") || fires(t) != 1 {
+		t.Fatalf("exit %d, %q, %d fires", code, out, fires(t))
 	}
 }
 
