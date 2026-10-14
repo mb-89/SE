@@ -86,7 +86,7 @@ func (s Source) Strays() ([]Stray, error) {
 // Prune deletes the strays, stopping at the first delete GitHub refuses.
 func (s Source) Prune(strays []Stray) ([]Stray, error) {
 	for k := range strays {
-		if _, err := s.GH("api", "-X", "DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, strays[k].Branch)); err != nil {
+		if _, err := s.GitHub.Send("DELETE", fmt.Sprintf("repos/%s/git/refs/heads/%s", s.Repo, strays[k].Branch)); err != nil {
 			return strays, fmt.Errorf("deleting %s: %w", strays[k].Branch, err)
 		}
 		strays[k].Deleted = true

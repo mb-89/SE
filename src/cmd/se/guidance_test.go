@@ -14,6 +14,7 @@ import (
 	"github.com/mb-89/SE/src/internal/guidance"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/issues"
 )
@@ -30,15 +31,10 @@ func inlineOff(t *testing.T) {
 }
 
 func TestATakeHandsOverEverySkillItsIssueNamesInFull(t *testing.T) {
-	recordedIssues(t)
-	recorded := gh
+	gh := recordedIssues(t)
 	// #3 names two skills in its marked line.
-	gh = func(args ...string) ([]byte, error) {
-		if args[len(args)-1] == "repos/o/r/issues?labels=se&state=open&per_page=100" {
-			body, _ := json.Marshal(guidance.With("do it", []string{"work", "retro"}))
-			return []byte(`[{"number":3,"title":"three","body":` + string(body) + `,"state":"open","html_url":"u3"}]`), nil
-		}
-		return recorded(args...)
+	if _, err := gh.Send("PATCH", "repos/o/r/issues/3", github.Field{Name: "body", Value: guidance.With("do it", []string{"work", "retro"})}); err != nil {
+		t.Fatal(err)
 	}
 	root := t.TempDir()
 	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
@@ -82,7 +78,7 @@ func TestATakeHandsOverEverySkillItsIssueNamesInFull(t *testing.T) {
 }
 
 func TestIssueNewNamesTheSkillsAndRefusesOneThatDoesNotExist(t *testing.T) {
-	calls := recordedIssues(t)
+	gh := recordedIssues(t)
 	ws := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(ws, "src/plugin/skills/work"), 0o755); err != nil {
 		t.Fatal(err)
@@ -90,22 +86,15 @@ func TestIssueNewNamesTheSkillsAndRefusesOneThatDoesNotExist(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, guidance.PathOf("work")), []byte("w"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, errs := se(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--skills", "work,nope", "--repo", "o/r", "--workspace", ws); code == 0 || !strings.Contains(errs, "no skill nope") || len(*calls) != 0 {
-		t.Fatalf("exit %d, %q, %d calls", code, errs, len(*calls))
+	if code, _, errs := se(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--skills", "work,nope", "--repo", "o/r", "--workspace", ws); code == 0 || !strings.Contains(errs, "no skill nope") || len(gh.Writes()) != 0 {
+		t.Fatalf("exit %d, %q, wrote %q", code, errs, gh.Writes())
 	}
 	if code, out, errs := se(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--skills", "work", "--repo", "o/r", "--workspace", ws); code != 0 {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	var body string
-	for _, c := range *calls {
-		for _, a := range c {
-			if b, ok := strings.CutPrefix(a, "body="); ok {
-				body = b
-			}
-		}
-	}
-	if !strings.Contains(body, "b\n\nSkills: work "+guidance.Mark+"\n\n"+issues.NewMark) {
-		t.Fatalf("%q", body)
+	var made struct{ Body string }
+	if err := json.Unmarshal([]byte(issueOf(t, gh, 10)), &made); err != nil || !strings.Contains(made.Body, "b\n\nSkills: work "+guidance.Mark+"\n\n"+issues.NewMark) {
+		t.Fatalf("%q %v", made.Body, err)
 	}
 }
 

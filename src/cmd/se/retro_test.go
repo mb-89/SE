@@ -10,7 +10,7 @@ import (
 )
 
 func TestRetroNewAsksForFieldFeedbackOrNone(t *testing.T) {
-	calls := recordedIssues(t)
+	gh := recordedIssues(t)
 	for _, args := range [][]string{
 		{"retro", "new", "--repo", "o/r"},
 		{"retro", "new", "--no-field", "--unattended", "--repo", "o/r"},
@@ -20,27 +20,26 @@ func TestRetroNewAsksForFieldFeedbackOrNone(t *testing.T) {
 			t.Errorf("%q: exit %d, %q", args, code, errs)
 		}
 	}
-	if len(*calls) != 0 {
-		t.Fatalf("a refused retro new called gh: %q", *calls)
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("a refused retro new wrote %q", w)
 	}
 }
 
 func TestRetroNewCreatesTheRetroAndFires(t *testing.T) {
-	calls := recordedIssues(t)
+	gh := recordedIssues(t)
 	code, out, errs := se(t, "retro", "new", "--field", "the boxes were slow", "--repo", "o/r")
 	if code != 0 || !strings.Contains(out, "Created the retro #10") || !strings.Contains(out, "over the whole history") || !strings.HasSuffix(out, firedOnce+"\n") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	// The closed retros are listed first; the recorded repository has none.
-	made := (*calls)[len(*calls)-1]
-	body := made[6]
-	for _, want := range []string{"## Field feedback\nthe boxes were slow", "<!-- se:retro attended -->", "Skills: retro " + guidance.Mark, "<!-- se:new -->"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("the body lacks %q: %s", want, body)
+	made := issueOf(t, gh, 10)
+	for _, want := range []string{"## Field feedback\\nthe boxes were slow", "<!-- se:retro attended -->", "Skills: retro " + guidance.Mark, "<!-- se:new -->"} {
+		if !strings.Contains(made, want) {
+			t.Errorf("the body lacks %q: %s", want, made)
 		}
 	}
-	if made[len(made)-4] != "labels[]=se" || made[len(made)-2] != "labels[]=se-retro" {
-		t.Fatalf("%q", made)
+	if !strings.Contains(made, `"labels":[{"name":"se"},{"name":"se-retro"}]`) {
+		t.Fatal(made)
 	}
 }
 
