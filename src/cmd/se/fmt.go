@@ -15,7 +15,7 @@ func init() {
 			if err := c.Parse(c.Flags("fmt")); err != nil {
 				return Reply{}, err
 			}
-			said, err := battery.Format(c.Workspace)
+			said, err := battery.Format(c.Proc, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}

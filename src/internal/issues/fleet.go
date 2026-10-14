@@ -84,7 +84,7 @@ func (f *Finding) setRemedy() {
 	case f.Kind == WaitingOnPerson:
 		f.Remedy = "none: it waits for a person"
 	case f.takeover():
-		f.Remedy = fmt.Sprintf("se issue next --take %d, merge origin/main into %s, make it green, se issue land", f.Issue, Branch(f.Issue))
+		f.Remedy = fmt.Sprintf("se issue pull --take %d, merge origin/main into %s, make it green, se issue land", f.Issue, Branch(f.Issue))
 	case f.cause() == GreenUnmerged && !f.autoMerge:
 		f.Remedy = "se fleet fix turns auto-merge on"
 	case f.prunable:
@@ -600,7 +600,7 @@ func (s Source) fix(dir string, x *Fixed) error {
 			x.Did = fmt.Sprintf("merged PR #%d, which had nothing left to wait for", f.PR)
 		}
 	case f.spent:
-		if _, err := git(dir, "push", "-q", "origin", "--delete", Branch(f.Issue)); err != nil {
+		if _, err := s.git(dir, "push", "-q", "origin", "--delete", Branch(f.Issue)); err != nil {
 			return fmt.Errorf("deleting %s: %w", Branch(f.Issue), err)
 		}
 		x.Did = fmt.Sprintf("deleted %s at %s, which main holds whole", Branch(f.Issue), f.head)
@@ -643,7 +643,7 @@ func atoi(s string) int {
 	return n
 }
 
-// takeOverClaim takes over claimed leaf st, named by se issue next --take N,
+// takeOverClaim takes over claimed leaf st, named by se issue pull --take N,
 // where se fleet check finds it stuck: its branch is checked out as it stands.
 // A takeover labels it se-final; a final issue stuck waits on an issue for a
 // person instead.
@@ -685,7 +685,7 @@ func (s Source) takeOverClaim(dir string, st Status) (took Issue, ok bool, err e
 	if err := s.finalize(st.Number); err != nil {
 		return Issue{}, false, err
 	}
-	if err := pickUp(dir, st.Number); err != nil {
+	if err := s.pickUp(dir, st.Number); err != nil {
 		return Issue{}, false, err
 	}
 	took = st.Issue

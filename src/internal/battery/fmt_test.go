@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mb-89/SE/src/internal/battery"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 // linters puts stubs of the pinned linters on bin, at the versions tools.sh
@@ -22,7 +23,7 @@ echo "biome $*" >>`+log)
 func TestFmtRunsEveryFormatterTheBatteryChecks(t *testing.T) {
 	dir, bin, log := freshBox(t)
 	linters(t, bin, log)
-	if _, err := battery.Format(dir); err != nil {
+	if _, err := battery.Format(proc.Real(), dir); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := calls(t, log), "golangci-lint fmt ./...\nbiome check --write\n"; got != want {
@@ -42,7 +43,7 @@ func TestFmtInstallsAMissingFormatterFirst(t *testing.T) {
 	stub(t, bin, "go", `[ "$1 $2" = "env GOPATH" ] && { echo `+filepath.Join(bin, "gopath")+`; exit 0; }
 echo "go $*" >>`+log+`; `+ln+` -s `+filepath.Join(stand, "golangci-lint")+` `+filepath.Join(bin, "golangci-lint"))
 	stub(t, bin, "npm", `echo "npm $*" >>`+log+`; `+ln+` -s `+filepath.Join(stand, "biome")+` `+filepath.Join(bin, "biome"))
-	if _, err := battery.Format(dir); err != nil {
+	if _, err := battery.Format(proc.Real(), dir); err != nil {
 		t.Fatal(err)
 	}
 	got := strings.Split(strings.TrimSpace(calls(t, log)), "\n")
@@ -62,13 +63,13 @@ func TestAFailedFormatterFailsFmt(t *testing.T) {
 	linters(t, bin, log)
 	stub(t, bin, "biome", `[ "$1" = --version ] && { echo "Version: `+pin(t, "BIOME")+`"; exit 0; }
 echo "biome: 1 error left"; exit 1`)
-	if _, err := battery.Format(dir); err == nil || !strings.Contains(err.Error(), "1 error left") {
+	if _, err := battery.Format(proc.Real(), dir); err == nil || !strings.Contains(err.Error(), "1 error left") {
 		t.Errorf("err = %v, want biome's finding", err)
 	}
 }
 
 func TestFmtNeedsTheToolsScript(t *testing.T) {
-	if _, err := battery.Format(t.TempDir()); err == nil {
+	if _, err := battery.Format(proc.Real(), t.TempDir()); err == nil {
 		t.Error("formatted a checkout without the tools script")
 	}
 }

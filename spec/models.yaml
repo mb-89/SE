@@ -3,5 +3,5 @@
 box: opus
 # reviewer: what a gate's reviewer sub-agent runs, never weaker than box:
 # a stronger model where one is available. The work skill reads this line
-# through `se issue next --in ROOT --take --json` ("model" of each review).
+# through `se issue pull --in ROOT --take --json` ("model" of each review).
 reviewer: opus

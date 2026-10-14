@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 // Label marks an issue as the fleet's work.
@@ -58,24 +58,6 @@ type Issue struct {
 // Branch is the branch whose presence on origin claims issue n.
 func Branch(n int) string { return fmt.Sprintf("issue-%d", n) }
 
-// GH runs gh with these arguments and answers what it printed.
-type GH func(args ...string) ([]byte, error)
-
-// Gh is the gh CLI on this machine; it owns the authentication.
-func Gh(args ...string) ([]byte, error) {
-	cmd := exec.Command("gh", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if errors.Is(err, exec.ErrNotFound) {
-		return nil, errors.New("gh is missing; RUNME.sh names how to install it")
-	}
-	if err != nil {
-		return nil, fmt.Errorf("gh %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return out, nil
-}
-
 // Source reads one repository's issues through gh.
 type Source struct {
 	// Repo is OWNER/NAME.
@@ -83,6 +65,8 @@ type Source struct {
 	GH   GH
 	// Clock is the time leases, windows and stamps are read against.
 	Clock clock.Clock
+	// Proc runs git in the checkouts the source claims, picks up and lands from.
+	Proc proc.Procs
 	// Flagged hears of each issue the sweep gave to a person, and why.
 	Flagged func(i Issue, reason string)
 }
@@ -573,9 +557,9 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 		case st.Takeover != nil:
 			claimed, err = s.takeOverStuck(dir, st, true)
 		case st.Parent:
-			claimed, err = claimTree(dir, st.Number)
+			claimed, err = s.claimTree(dir, st.Number)
 		default:
-			claimed, err = Claim(dir, st.Number)
+			claimed, err = s.Claim(dir, st.Number)
 		}
 		if err != nil {
 			return Issue{}, false, err
@@ -723,7 +707,7 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 		if i.Takeover != nil {
 			claimed, err = s.takeOverStuck(dir, byNum[i.Number], false)
 		} else {
-			claimed, err = stake(dir, i.Number)
+			claimed, err = s.stake(dir, i.Number)
 		}
 		if err != nil {
 			return Issue{}, false, tr, err
@@ -745,20 +729,20 @@ func Worktree(dir string, n int) string {
 // claimTree claims a parent's tree with its branch, as Claim does; where the
 // branch exists already, the tree is picked up from that claim and the
 // branch checked out.
-func claimTree(dir string, n int) (bool, error) {
-	if claimed, err := Claim(dir, n); err != nil || claimed {
+func (s Source) claimTree(dir string, n int) (bool, error) {
+	if claimed, err := s.Claim(dir, n); err != nil || claimed {
 		return claimed, err
 	}
-	return true, pickUp(dir, n)
+	return true, s.pickUp(dir, n)
 }
 
 // pickUp checks out issue n's branch as it stands on origin.
-func pickUp(dir string, n int) error {
+func (s Source) pickUp(dir string, n int) error {
 	branch := Branch(n)
-	if _, err := git(dir, "fetch", "-q", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch); err != nil {
+	if _, err := s.git(dir, "fetch", "-q", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch); err != nil {
 		return err
 	}
-	if _, err := git(dir, "checkout", "-q", "-B", branch, "--track", "origin/"+branch); err != nil {
+	if _, err := s.git(dir, "checkout", "-q", "-B", branch, "--track", "origin/"+branch); err != nil {
 		return fmt.Errorf("could not check out %s: %w", branch, err)
 	}
 	return nil
@@ -767,12 +751,12 @@ func pickUp(dir string, n int) error {
 // Claim pushes the current origin/main as issue n's branch and checks it out.
 // The push only creates the branch, never moves it, so of two boxes racing for
 // one issue the second is refused: claimed is then false and nothing changed.
-func Claim(dir string, n int) (claimed bool, err error) {
-	if claimed, err := stake(dir, n); err != nil || !claimed {
+func (s Source) Claim(dir string, n int) (claimed bool, err error) {
+	if claimed, err := s.stake(dir, n); err != nil || !claimed {
 		return claimed, err
 	}
 	branch := Branch(n)
-	if _, err := git(dir, "checkout", "-q", "-b", branch, "--track", "origin/"+branch); err != nil {
+	if _, err := s.git(dir, "checkout", "-q", "-b", branch, "--track", "origin/"+branch); err != nil {
 		return true, fmt.Errorf("claimed %s, but could not check it out: %w", branch, err)
 	}
 	return true, nil
@@ -780,18 +764,18 @@ func Claim(dir string, n int) (claimed bool, err error) {
 
 // stake is Claim without the checkout: it pushes the branch and fetches it as
 // origin/issue-<n>.
-func stake(dir string, n int) (claimed bool, err error) {
+func (s Source) stake(dir string, n int) (claimed bool, err error) {
 	branch := Branch(n)
 	ref := "refs/heads/" + branch
-	if _, err := git(dir, "fetch", "-q", "origin", "main"); err != nil {
+	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
 		return false, err
 	}
 	// An empty lease: the ref must not exist on origin yet. Where it already
 	// points at this very commit the push is no update at all and succeeds,
 	// so the claim is the push's own word that it created the ref ("*").
-	said, pushErr := git(dir, "push", "--porcelain", "--force-with-lease="+ref+":", "origin", "refs/remotes/origin/main:"+ref)
+	said, pushErr := s.git(dir, "push", "--porcelain", "--force-with-lease="+ref+":", "origin", "refs/remotes/origin/main:"+ref)
 	if pushErr != nil {
-		if _, err := git(dir, "ls-remote", "--exit-code", "origin", ref); err == nil {
+		if _, err := s.git(dir, "ls-remote", "--exit-code", "origin", ref); err == nil {
 			return false, nil
 		}
 		return false, pushErr
@@ -799,16 +783,17 @@ func stake(dir string, n int) (claimed bool, err error) {
 	if !strings.Contains("\n"+said, "\n*\t") {
 		return false, nil
 	}
-	if _, err := git(dir, "fetch", "-q", "origin", ref+":refs/remotes/origin/"+branch); err != nil {
+	if _, err := s.git(dir, "fetch", "-q", "origin", ref+":refs/remotes/origin/"+branch); err != nil {
 		return true, err
 	}
 	return true, nil
 }
 
 // Repo reads OWNER/NAME from the checkout's origin URL, whatever its form:
-// https://github.com/o/n.git, git@github.com:o/n, or a proxy's …/o/n.
-func Repo(dir string) (string, error) {
-	url, err := git(dir, "remote", "get-url", "origin")
+// https://github.com/o/n.git, git@github.com:o/n, or a proxy's …/o/n. It
+// runs git on p.
+func Repo(p proc.Procs, dir string) (string, error) {
+	url, err := Source{Proc: p}.git(dir, "remote", "get-url", "origin")
 	if err != nil {
 		return "", err
 	}
@@ -820,13 +805,7 @@ func Repo(dir string) (string, error) {
 	return parts[len(parts)-2] + "/" + parts[len(parts)-1], nil
 }
 
-func git(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return strings.TrimSpace(string(out)), nil
+// git runs git in the checkout dir and answers what it printed, trimmed.
+func (s Source) git(dir string, args ...string) (string, error) {
+	return proc.Output(s.Proc, proc.Cmd{Name: "git", Args: args, Dir: dir})
 }

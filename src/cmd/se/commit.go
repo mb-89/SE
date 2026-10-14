@@ -6,6 +6,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/update"
 )
 
@@ -89,10 +90,10 @@ func commits(hooks, checkout, built string) string {
 }
 
 // sessionCommits is commits for this call, from what the plugin said and what git says now.
-func sessionCommits() string {
+func sessionCommits(procs proc.Procs) string {
 	checkout := ""
 	if repo := pluginCheckout(); repo != "" {
-		checkout, _ = update.Head(repo)
+		checkout, _ = update.Head(procs, repo)
 	}
 	return commits(os.Getenv(hooksCommitEnv), checkout, builtFrom())
 }

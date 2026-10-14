@@ -225,14 +225,14 @@ func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 		}
 	}
 	count := func(args ...string) (int, error) {
-		out, err := git(dir, append([]string{"rev-list", "--count"}, args...)...)
+		out, err := s.git(dir, append([]string{"rev-list", "--count"}, args...)...)
 		if err != nil {
 			return 0, err
 		}
 		return strconv.Atoi(out)
 	}
 	// The branch's own work is what main does not hold yet.
-	if _, err := git(dir, "fetch", "-q", "origin", "main"); err != nil {
+	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
 		return Facts{}, err
 	}
 	if f.Commits, err = count("--no-merges", "origin/main..HEAD"); err != nil {

@@ -7,11 +7,12 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/mb-89/SE/src/internal/battery"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 func main() {
@@ -20,7 +21,7 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "gotest":
-		fail(gotest(os.Args[2:]))
+		fail(gotest(proc.Real(), os.Args[2:]))
 	case "report":
 		fail(report())
 	default:
@@ -31,13 +32,14 @@ func main() {
 // gotest runs go test -json on the packages, shows what go test shows a
 // person, keeps the events for report, and fails as go test failed. It runs
 // go test with GIT_DIR on a decoy repository, and fails if a test changed it.
-func gotest(packages []string) error {
+// It runs git and go on procs.
+func gotest(procs proc.Procs, packages []string) error {
 	dir, err := os.MkdirTemp("", "battery-decoy-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	decoy, err := battery.NewDecoy(dir)
+	decoy, err := battery.NewDecoy(procs, dir)
 	if err != nil {
 		return err
 	}
@@ -46,18 +48,24 @@ func gotest(packages []string) error {
 		return err
 	}
 	defer raw.Close()
-	cmd := exec.Command("go", append([]string{"test", "-json"}, packages...)...)
-	cmd.Env = decoy.Env(os.Environ())
-	cmd.Stderr = os.Stderr
-	events, err := cmd.StdoutPipe()
+	events, written := io.Pipe()
+	run, err := procs.Start(proc.Cmd{
+		Name: "go", Args: append([]string{"test", "-json"}, packages...),
+		Env: decoy.Env(os.Environ()), Stdout: written, Stderr: os.Stderr,
+	})
 	if err != nil {
 		return err
 	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	relayed := battery.Relay(events, os.Stdout, raw)
-	waited := cmd.Wait()
+	relaying := make(chan error, 1)
+	go func() {
+		err := battery.Relay(events, os.Stdout, raw)
+		// What Relay left unread must not hold go test up.
+		_, _ = io.Copy(io.Discard, events)
+		relaying <- err
+	}()
+	waited := run.Wait()
+	_ = written.Close()
+	relayed := <-relaying
 	if err := decoy.Check(); err != nil {
 		return err
 	}

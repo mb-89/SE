@@ -4,16 +4,8 @@
 # entries as it lands, and the rule refuses an entry that matches nothing.
 # Adding an entry is no way to pass the check.
 
-# Processes: proc (#61), and github (#63) for the gh calls.
-src/cmd/battery/main.go os/exec
-src/cmd/se/checkout.go os/exec
-src/cmd/se/issue.go os/exec
-src/cmd/se/rules.go os/exec
-src/internal/battery/decoy.go os/exec
-src/internal/battery/fmt.go os/exec
-src/internal/daemon/client.go os/exec
-src/internal/issues/issues.go os/exec
-src/internal/update/update.go os/exec
+# GitHub: github (#63), for the gh calls.
+src/internal/issues/gh.go os/exec
 
 # Files and folders: disk (#62).
 src/cmd/battery/main.go os.Create

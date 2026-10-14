@@ -3,12 +3,12 @@ package issues
 import "fmt"
 
 // RetroCadence is how many se issues close between two retros: at this many
-// closed since the last retro closed, se issue next --take starts an
+// closed since the last retro closed, se issue pull --take starts an
 // unattended one and takes it before all other work (spec/retro.md).
 const RetroCadence = 10
 
 // OverhaulCadence is how many retros close between two overhauls: at this
-// many closed since the last overhaul closed, se issue next --take starts an
+// many closed since the last overhaul closed, se issue pull --take starts an
 // unattended one and takes it first (spec/overhaul.md).
 const OverhaulCadence = 5
 
@@ -73,7 +73,7 @@ func (c Cadence) Line() string {
 		return fmt.Sprintf("%s; the %s #%d is open.", head, r.kind, c.Open)
 	case c.Due():
 		article := string(r.article[0]-'a'+'A') + r.article[1:]
-		return fmt.Sprintf("%s %s is due: %s (the cadence is %d); se issue next --take starts it unattended.", article, r.kind, head, c.Every)
+		return fmt.Sprintf("%s %s is due: %s (the cadence is %d); se issue pull --take starts it unattended.", article, r.kind, head, c.Every)
 	default:
 		return fmt.Sprintf("%s; %s %s is due at %d.", head, r.article, r.kind, c.Every)
 	}
@@ -162,7 +162,7 @@ func (s Source) takeDue(r cadenceRule, dir string, start func() (Issue, error)) 
 		return Issue{}, false, c, err
 	}
 	c.Open = made.Number
-	claimed, err := Claim(dir, made.Number)
+	claimed, err := s.Claim(dir, made.Number)
 	if err != nil || !claimed {
 		return Issue{}, false, c, err
 	}
