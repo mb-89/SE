@@ -9,8 +9,7 @@ Reader: the agent of a box, running this skill.
 
 Every step that can be an `se` command is one. Yours are doing the issue's
 work and fixing a red CI run; follow the rest as written. `se` is
-`./src/plugin/bin/se`; build it first with
-`go build -ldflags "-X main.commit=$(git rev-parse HEAD)" -o src/plugin/bin/se ./src/cmd/se`.
+`./src/plugin/bin/se`; build it first with `sh ./src/build.sh`.
 Call it exactly as `./src/plugin/bin/se issue …` (or `./src/plugin/bin/se fleet …`),
 one command per call, never through a variable: the forms
 [.claude/settings.json](../../../../.claude/settings.json) allows run without a
