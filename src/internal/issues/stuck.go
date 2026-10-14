@@ -218,10 +218,10 @@ func (s Source) takeOverStuck(dir string, st Status, checkout bool) (took bool, 
 	}
 	if !checkout {
 		branch := Branch(st.Number)
-		_, err := git(dir, "fetch", "-q", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch)
+		_, err := s.git(dir, "fetch", "-q", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch)
 		return true, err
 	}
-	if err := pickUp(dir, st.Number); err != nil {
+	if err := s.pickUp(dir, st.Number); err != nil {
 		return true, fmt.Errorf("took over %s, but: %w", Branch(st.Number), err)
 	}
 	return true, nil

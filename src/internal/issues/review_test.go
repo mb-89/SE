@@ -59,7 +59,7 @@ func TestRecordWritesTheWorkerOnce(t *testing.T) {
 	w := Worker{Session: "s1", Workspace: "/b/issue-2"}
 	answers := map[string]string{"repos/o/r/issues/2/comments": `{}`}
 	gh, wrote := reviewGH(t, answers)
-	s := Source{Repo: repo, GH: gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}
 	if err := s.record(2, w); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 		subsPath(1): subs(2),
 	}
 	gh, wrote := reviewGH(t, answers)
-	s := Source{Repo: repo, GH: gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}
 
 	// Before the leaf lands, #1 is not ready for review.
 	if tr, err := s.In(1); err != nil || !reflect.DeepEqual(numbers(tr.Ready), []int{2}) || len(tr.Review) != 0 {
@@ -186,7 +186,7 @@ func TestAPassClosesTheParentItCompletes(t *testing.T) {
 		"repos/o/r/issues/1":          `{}`,
 	}
 	gh, wrote := reviewGH(t, answers)
-	s := Source{Repo: repo, GH: gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}
 	// The closing is read back before the parent-closing rule runs.
 	closing := gh
 	s.GH = func(args ...string) ([]byte, error) {
@@ -217,7 +217,7 @@ func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
 		commentsPath(4): workedBy(Worker{Session: "w", Workspace: "/w"}),
 	}
 	gh, wrote := reviewGH(t, answers)
-	s := Source{Repo: repo, GH: gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}
 	r := Worker{Session: "r", Workspace: "/r"}
 	for _, c := range []struct {
 		n    int

@@ -5,11 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -25,12 +25,10 @@ func (c *Call) fire() string { return issues.Fire(os.Getenv, c.Net) }
 // worker and review tells apart from them. Tests put a fixed one here.
 var sessionID = func() string { return os.Getenv(issues.SessionVar) }
 
-// check is what issue land runs before it pushes: the repo's one definition of
-// green. It answers the check's output when it fails.
-var check = func(dir string) error {
-	cmd := exec.Command("sh", "./tests/check.sh")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+// check is what issue land runs before it pushes, on procs: the repo's one
+// definition of green. It answers the check's output when it fails.
+var check = func(procs proc.Procs, dir string) error {
+	out, err := proc.Combined(procs, proc.Cmd{Name: "sh", Args: []string{"./tests/check.sh"}, Dir: dir})
 	if err != nil {
 		lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
 		if len(lines) > 40 {
@@ -425,7 +423,7 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			l, err := s.Land(c.Workspace, sessionID(), qs, answers, check)
+			l, err := s.Land(c.Workspace, sessionID(), qs, answers, func(dir string) error { return check(c.Proc, dir) })
 			if err != nil {
 				return Reply{}, err
 			}
@@ -630,13 +628,13 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 	repo := fs.String("repo", "", "the repository as `OWNER/NAME` (default: the workspace's origin)")
 	return fs, func() (issues.Source, error) {
 		if *repo == "" {
-			r, err := issues.Repo(c.Workspace)
+			r, err := issues.Repo(c.Proc, c.Workspace)
 			if err != nil {
 				return issues.Source{}, err
 			}
 			*repo = r
 		}
-		return issues.Source{Repo: *repo, GH: gh, Clock: c.Clock}, nil
+		return issues.Source{Repo: *repo, GH: gh, Clock: c.Clock, Proc: c.Proc}, nil
 	}, asJSON
 }
 

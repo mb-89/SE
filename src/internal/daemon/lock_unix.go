@@ -19,5 +19,3 @@ func lock(path string) (*os.File, error) {
 	}
 	return f, nil
 }
-
-func detached() *syscall.SysProcAttr { return &syscall.SysProcAttr{Setsid: true} }
