@@ -575,7 +575,7 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 			}
 			*repo = r
 		}
-		return issues.Source{Repo: *repo, GH: gh}, nil
+		return issues.Source{Repo: *repo, GH: gh, Clock: c.Clock}, nil
 	}, asJSON
 }
 
