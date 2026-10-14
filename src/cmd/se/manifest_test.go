@@ -115,6 +115,7 @@ func TestAFolderGitIgnoresCountsThoughNoCheckoutHoldsIt(t *testing.T) {
 }
 
 func TestWriteRefusesWhileTheIndexHoldsAConflict(t *testing.T) {
+	t.Parallel()
 	readme := "# SE\n\nReader: a person meeting SE.\n\n<!-- se:manifest spec -->\n<!-- /se:manifest -->\n"
 	ws := prose(t, map[string]string{
 		"README.md":      readme,
