@@ -39,9 +39,9 @@ type Issue struct {
 	// Parent is true for an issue with sub-issues: it holds no work of its
 	// own, and taking it means coordinating them.
 	Parent bool `json:"parent,omitempty"`
-	// Retro is true for an issue labelled se-retro: the retro skill does it.
+	// Retro is true for an issue labelled se-retro: the agent se:retro does it.
 	Retro bool `json:"retro,omitempty"`
-	// Overhaul is true for an issue labelled se-overhaul: the overhaul skill
+	// Overhaul is true for an issue labelled se-overhaul: the agent se:overhaul
 	// does it.
 	Overhaul bool `json:"overhaul,omitempty"`
 	// Takeover is set for a leaf a take takes over, stuck for the first time
@@ -91,6 +91,9 @@ type Source struct {
 	// (github.Replay): a take re-reads through it what its claim must be sure
 	// of, the issue's state and its open blockers.
 	Live github.GitHub
+	// Config is the issue work's config, issues/config/<key>, as Configured
+	// reads it; nil runs on the built-in values.
+	Config *Settings
 }
 
 // Settle is the built-in value of github/config/settle: an issue unchanged

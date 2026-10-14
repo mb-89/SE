@@ -129,7 +129,11 @@ func (c *Call) keepers() []daemon.Keeper {
 		return nil
 	}
 	read := func(set github.Settings) (github.Snapshot, error) {
-		return issues.Warm(issues.Source{Repo: repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Settle: set.Settle})
+		cfg, err := issues.Configured()
+		if err != nil {
+			return github.Snapshot{}, err
+		}
+		return issues.Warm(issues.Source{Repo: repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Config: &cfg, Settle: set.Settle})
 	}
 	log := func(s string) { fmt.Fprintln(os.Stderr, "se:", s) }
 	return []daemon.Keeper{github.NewKeeper(read, c.Clock, log)}
