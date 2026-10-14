@@ -52,4 +52,5 @@ The rules, each file owning one part:
 - [spec/principles.md](spec/principles.md): Design principles
 - [spec/retro.md](spec/retro.md): Retro: do SE's rules hold across what landed?
 - [spec/review.md](spec/review.md): Review: how a gate is reviewed
+- [spec/stop.yaml](spec/stop.yaml)
 <!-- /se:manifest -->
