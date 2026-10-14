@@ -16,15 +16,15 @@ import (
 // fire is the fan-out after a claim, and after the creation of a ready issue:
 // it fires the routine named in the environment once, on the call's network,
 // and answers a line saying what happened.
-func (c *Call) fire() string { return issues.Fire(os.Getenv, c.Net) }
+func (c *Call) fire() string { return issues.Fire(c.Getenv, c.Net) }
 
 // sessionID names the session se runs in, which land records as the leaf's
-// worker and review tells apart from them. Tests put a fixed one here.
-var sessionID = func() string { return os.Getenv(issues.SessionVar) }
+// worker and review tells apart from them.
+func (c *Call) sessionID() string { return c.Getenv(issues.SessionVar) }
 
-// check is what issue land runs before it pushes, on procs: the repo's one
-// definition of green. It answers the check's output when it fails.
-var check = func(procs proc.Procs, dir string) error {
+// check is the real World's Check: sh ./tests/check.sh, with the last 40
+// lines of its output when it fails.
+func check(procs proc.Procs, dir string) error {
 	out, err := proc.Combined(procs, proc.Cmd{Name: "sh", Args: []string{"./tests/check.sh"}, Dir: dir})
 	if err != nil {
 		lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
@@ -427,7 +427,7 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			l, err := s.Land(c.Workspace, sessionID(), qs, answers, func(dir string) error { return check(c.Proc, dir) })
+			l, err := s.Land(c.Workspace, c.sessionID(), qs, answers, func(dir string) error { return c.Check(c.Proc, dir) })
 			if err != nil {
 				return Reply{}, err
 			}
@@ -504,7 +504,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			reviewer := issues.Worker{Session: sessionID(), Workspace: c.Workspace}
+			reviewer := issues.Worker{Session: c.sessionID(), Workspace: c.Workspace}
 			r, err := s.Review(n, reviewer, words[0] == "pass", rep)
 			if err != nil {
 				return Reply{}, err
