@@ -10,8 +10,9 @@ commits its outputs. It never spells another module's name: one **wiring file**
 binds the names. A module is tested alone, against a fake index.
 
 This is the design; the code lands in the order of
-[the migration](#the-migration). The core is `src/internal/index`, its fake
-`src/internal/index/indextest`; their doc comments are the contract's detail. It adapts v5's model
+[the migration](#the-migration). The core is `src/index`, its fake
+`src/index/indextest`; their doc comments are the contract's detail, and
+[Where the code lives](#where-the-code-lives) places the modules and libraries. It adapts v5's model
 ([quackitect's `model.md` on `v5`](https://github.com/mb-89/quackitect/blob/v5/spec/design_output/model.md)): it keeps one writer per name, local ports with
 outside wiring, one snapshot per run, built-in values, declarations that every
 surface renders, and the fake index; it drops what SE does not need yet.
@@ -89,6 +90,23 @@ func init() { index.Register(Module) }
 | config layers (environment, local file, contexts, overrides) | **later**: until then a config value is its built-in value or the wiring file's |
 | processes, the NATS bus, placements, leases, operations, views, the `files/` mirror | **not taken**: one daemon process, in-process calls, and no files module |
 
+## Where the code lives
+
+`src/` holds the core, the modules and the libraries, each in its own folder
+(#142 decided it):
+
+| the folder | what it holds |
+|---|---|
+| `src/index` | the core, its fake `indextest`, the `fixture` module the two are tested with, and the wiring file |
+| `src/modules/<cluster>/<module>` | **one package per module, one folder per cluster**: the module's logic, the commands it declares to the collector, and its tests, together. A cluster (`io`, `issues`, `qa`, `fleet`, `session`) groups modules on one subject and holds no code of its own |
+| `src/lib/<library>` | the shared libraries: each one pure, under a compute module's import rule, and imported by at least two modules. Code one module alone uses stays in that module |
+
+Modules nest as their folders do: the module `pull` in the cluster `issues`
+is named `issues/pull`, and the wiring runs it as the instance `issues/pull`.
+An instance **owns the names under its own**: `issues/pull` alone writes
+`issues/pull/...`, even beside an instance `issues`, and the start refuses any
+other writer there, its config among them.
+
 ## I/O modules and compute modules
 
 Only **I/O modules** (#44) touch the outside: processes, the disk, the clock,
@@ -109,15 +127,15 @@ that needs a file asks the disk I/O module for it in a request.
 
 ## The wiring file
 
-One file, src/internal/index/wiring.yaml, names the module instances and
+One file, src/index/wiring.yaml, names the module instances and
 binds their ports. It is the only place that knows the global layout. It sits
-beside the core's package, src/internal/index, because `go:embed` reaches no
+beside the core's package, src/index, because `go:embed` reaches no
 file above the embedding package, so v5's spec/wiring.yaml cannot be
 embedded from there.
 
 | an entry | what it says |
 |---|---|
-| an instance | its name and its module, such as `issues: { module: issues }`. One module can run as two instances with different config |
+| an instance | its name and its module, such as `issues: { module: issues }`, or nested, such as `issues/pull: { module: issues/pull }`. One module can run as two instances with different config |
 | a wire to a name | `issues.open: issues/open`. Ports bound to one name meet there, and neither side knows the other |
 | a wire port to port | `briefing.open: issues.open` |
 | a wire to a family | `session.events: session/<id>/events`: a family output to a name with one key segment, read at a key as `session/s1/events`. A plain output to a family, a family output to a plain name, two families holding the same names, or a name inside a family, the start refuses |
@@ -235,14 +253,16 @@ the index. A compute module imports the index contract and the pure standard
 library only: no package that reaches the outside, such as `os`, `os/exec`,
 `net` or `net/http`, and no read of the clock (`time.Now`). An I/O module, one
 that carries the I/O flag, imports the index contract, the standard library
-and what its outside thing needs. A rule in the battery reads the flag and
-holds both once the first module lands.
+and what its outside thing needs. The battery's `module-imports` rule
+reads the flag and holds every compute module under `src/modules`, and every
+library under `src/lib`, to the first; its `library-users` rule refuses a
+library fewer than two modules import.
 
 ## The migration
 
 Each step is its own issue, and SE works after each one.
 
-1. **The core, the fake index and the wiring loader**, with src/internal/index/wiring.yaml, hosted in `se serve`, tested with fixture modules. It measures the daemon's cold start and sets its budget. No module moves yet.
+1. **The core, the fake index and the wiring loader**, with src/index/wiring.yaml, hosted in `se serve`, tested with fixture modules. It measures the daemon's cold start and sets its budget. No module moves yet.
 2. **The collector.** The command registry gathers declarations, and the CLI, `/se`, `/se ui`, the help and the manifests render from it. Commands keep their current files and get the declaration shape.
 3. **The session event log** becomes the session I/O module: the bridgehead's posts come in as the `session/<id>/events` family, and it keeps the log file. It is the first real module and the smallest.
 4. **The issue rules** (next, new, land, review and the tree rules in `src/internal/issues`) become compute modules on the GitHub I/O module (#44), and their commands move with them.
@@ -262,7 +282,7 @@ Each step is its own issue, and SE works after each one.
 ## Open questions for the owner
 
 1. **The host's own commands.** `se serve`, `se start` and `se stop` run before any index exists; `se on` starts the daemon, `se status` says whether one answers, and `se restart` and `se update` replace the running one, so none of the seven can be answered by a module inside the daemon. Proposed: they stay the CLI adapter's own commands, talking only about the adapter. Or should a module the daemon always loads declare them?
-2. **Where modules live.** Proposed: the core and its fake in two packages under `src/internal`, and each module one package under a modules folder. v5 put one module per file, several per package; is a package per module right for SE?
+2. **Where modules live.** Decided by #142: one package per module, one folder per cluster, in [Where the code lives](#where-the-code-lives).
 3. **Actions without undo.** SE takes requests now and leaves v5's undo step out. Is a failed list that stops without rolling back acceptable for GitHub and the disk?
 4. **Config layers.** Until a module needs one, config is the built-in value or the wiring file's. Which layer comes first when one is needed: environment or a local file?
 5. **Pushes over HTTP.** Adapters read and call today; a subscription stream (for `/se ui` to update live) waits until an adapter needs it. Is that the right order?

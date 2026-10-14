@@ -81,7 +81,7 @@ func (m runningAs) Self() (string, error) { return m.self, nil }
 func scratch(t *testing.T) string {
 	t.Helper()
 	root, dst := repoRoot(t), t.TempDir()
-	for _, part := range []string{"src/cmd", "src/internal", "src/go.mod", "src/go.sum"} {
+	for _, part := range []string{"src/cmd", "src/index", "src/internal", "src/lib", "src/modules", "src/go.mod", "src/go.sum"} {
 		err := filepath.WalkDir(filepath.Join(root, part), func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err

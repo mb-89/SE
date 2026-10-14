@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/index"
+	"github.com/mb-89/SE/src/index"
 )
 
 // The four values are the issues instance's config keys: the wiring se
