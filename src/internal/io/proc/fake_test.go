@@ -72,6 +72,24 @@ func TestTheFakeGitKeepsTheContract(t *testing.T) {
 	})
 }
 
+func TestAFakeProgramMadeBusyFailsSoManyStartsThenRuns(t *testing.T) {
+	t.Parallel()
+	f := proc.NewFake()
+	f.Install("se", func(c proc.Cmd) int { return 0 })
+	f.Busy("se", 2)
+	for range 2 {
+		if err := f.Run(proc.Cmd{Name: "se"}); !errors.Is(err, proc.ErrBusy) {
+			t.Fatalf("got %v, want ErrBusy", err)
+		}
+	}
+	if err := f.Run(proc.Cmd{Name: "se"}); err != nil {
+		t.Fatalf("the third run: %v", err)
+	}
+	if len(f.Ran()) != 3 {
+		t.Fatalf("ran %q", f.Lines())
+	}
+}
+
 func TestAListedMachineStartsOnlyTheListedPrograms(t *testing.T) {
 	t.Parallel()
 	f := proc.NewFake()

@@ -1,7 +1,10 @@
 package proc_test
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/mb-89/SE/src/internal/gitenv"
@@ -42,4 +45,27 @@ func TestTheRealGitKeepsTheContract(t *testing.T) {
 	gitContract(t, func(t *testing.T) gitOn {
 		return gitOn{procs: proc.Real(), disk: disk.Real(), root: t.TempDir()}
 	})
+}
+
+func TestAProgramStillOpenForWritingIsBusy(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "linux" {
+		t.Skip("text file busy is Linux's")
+	}
+	path := filepath.Join(t.TempDir(), "script")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString("#!/bin/sh\nexit 0\n"); err != nil {
+		t.Fatal(err)
+	}
+	err = proc.Real().Run(proc.Cmd{Name: path})
+	if !errors.Is(err, proc.ErrBusy) {
+		t.Fatalf("got %v, want ErrBusy", err)
+	}
+	if _, ok := proc.ExitCode(err); ok {
+		t.Fatal("a busy program has an exit code")
+	}
 }
