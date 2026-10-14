@@ -18,6 +18,7 @@ type Fake struct {
 	mu       sync.Mutex
 	programs map[string]Program
 	ran      []Cmd
+	self     string
 }
 
 // NewFake answers a fake machine with no programs on it.
@@ -28,6 +29,24 @@ func (f *Fake) Install(name string, p Program) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.programs[name] = p
+}
+
+// RunAs makes name the program running now, which Self answers: an installed
+// one, or a path the case names.
+func (f *Fake) RunAs(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.self = name
+}
+
+// Self answers the program RunAs named; on a machine where none was, it fails.
+func (f *Fake) Self() (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.self == "" {
+		return "", fmt.Errorf("the fake machine runs no program as itself: %w", ErrNotFound)
+	}
+	return f.self, nil
 }
 
 // Ran answers every run asked of the machine, found or not, in order.
