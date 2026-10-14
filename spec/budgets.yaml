@@ -8,6 +8,7 @@ steps:
   se rules: {ms: 5000, hard: false}
   golangci-lint: {ms: 120000, hard: false}
   biome: {ms: 5000, hard: false}
+  deadcode: {ms: 30000, hard: false}
   go test: {ms: 120000, hard: false}
   plugin validate: {ms: 15000, hard: false}
   marketplace validate: {ms: 15000, hard: false}
