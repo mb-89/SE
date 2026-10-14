@@ -1,9 +1,9 @@
 #!/bin/sh
-# The battery's linters, pinned: one place for their versions. RUNME.sh and CI
-# run `sh tests/tools.sh install`; tests/check.sh sources this file and refuses
-# any other version, so every machine lints alike. `sh tests/tools.sh fmt`
-# (what `se fmt` runs) installs them the same way, then runs every formatter
-# the battery checks.
+# The battery's linters, pinned: one place for their versions. RUNME.sh, CI
+# and tests/check.sh run `sh tests/tools.sh install`; check.sh sources this
+# file and refuses any other version, so every machine lints alike.
+# `sh tests/tools.sh fmt` (what `se fmt` runs) installs them the same way,
+# then runs every formatter the battery checks.
 GOLANGCI_LINT=2.5.0
 BIOME=2.2.4
 

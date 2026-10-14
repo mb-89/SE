@@ -62,10 +62,10 @@ func init() {
 			if _, running := daemon.Healthy(c.Paths()); !running {
 				return reply, nil
 			}
-			if err := daemon.Stop(c.Paths(), 5*time.Second); err != nil {
+			if err := daemon.Stop(c.Paths(), 5*time.Second, c.Clock); err != nil {
 				return reply, fmt.Errorf("updated %s → %s, but the old daemon did not stop: %w", r.From, r.To, err)
 			}
-			ep, note, err := startDaemon(c.Paths())
+			ep, note, err := startDaemon(c.Paths(), c.Clock)
 			if err != nil {
 				reply.Text = joined(reply.Text+fmt.Sprintf(" The daemon did not start again: %v.", err), note)
 				return reply, nil

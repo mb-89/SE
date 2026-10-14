@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/io/clock"
+
 	"github.com/mb-89/SE/src/internal/battery"
 )
 
@@ -77,7 +79,7 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 		"repos/o/r/pulls": pr14,
 		"graphql":         `{"data":{}}`,
 	}, nil)
-	l, err := Source{Repo: repo, GH: gh, Now: landedAt}.Land(a, "", qs, full, passes)
+	l, err := Source{Repo: repo, GH: gh, Clock: clock.NewFake(landedAt())}.Land(a, "", qs, full, passes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +142,7 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 		"repos/o/r/pulls": pr14,
 		"graphql":         `{"data":{}}`,
 	}, nil)
-	if _, err := (Source{Repo: repo, GH: gh, Now: landedAt}).Land(a, "", qs, full, profiles(t, profile)); err != nil {
+	if _, err := (Source{Repo: repo, GH: gh, Clock: clock.NewFake(landedAt())}).Land(a, "", qs, full, profiles(t, profile)); err != nil {
 		t.Fatal(err)
 	}
 	var opened, posted string
@@ -176,7 +178,7 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 func TestLandAgainUpdatesTheOpenPRsProfile(t *testing.T) {
 	_, a := claimed(t)
 	gh, calls := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`, "repos/o/r/pulls/14": pr14, "graphql": `{"data":{}}`}, nil)
-	if _, err := (Source{Repo: repo, GH: gh}).Land(a, "", qs, full, profiles(t, profile)); err != nil {
+	if _, err := (Source{Repo: repo, GH: gh, Clock: atNow()}).Land(a, "", qs, full, profiles(t, profile)); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"api", "-X", "PATCH", "-f", "body=Fixes #6\n\n" + profile.Markdown(), "repos/o/r/pulls/14"}
@@ -193,7 +195,7 @@ func TestLandAgainPushesAndReportsTheOpenPR(t *testing.T) {
 	run(t, a, "push", "-q", "origin", "HEAD:issue-6")
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "fix ci")
 	gh, calls := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`, "graphql": `{"data":{}}`}, nil)
-	l, err := Source{Repo: repo, GH: gh}.Land(a, "", qs, full, passes)
+	l, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Land(a, "", qs, full, passes)
 	if err != nil || l.Created || l.Number != 14 {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -213,7 +215,7 @@ func TestLandMergesAPRWithNothingToWaitFor(t *testing.T) {
 		pullsPath:                  `[` + pr14 + `]`,
 		"repos/o/r/pulls/14/merge": `{"merged":true}`,
 	}, map[string]string{"graphql": "gh: Pull request Pull request is in clean status (enablePullRequestAutoMerge)"})
-	l, err := Source{Repo: repo, GH: gh}.Land(a, "", qs, full, passes)
+	l, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Land(a, "", qs, full, passes)
 	if err != nil || !l.Merged {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -229,7 +231,7 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 		pullsPath:                           `[` + pr14 + `]`,
 		"repos/o/r/pulls/14/ccr/auto_merge": `{"enabled":true,"merge_method":"squash"}`,
 	}, map[string]string{"graphql": "gh: GitHub GraphQL is not available from Claude Code sessions; use the REST API (HTTP 403)"})
-	l, err := Source{Repo: repo, GH: gh}.Land(a, "", qs, full, passes)
+	l, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Land(a, "", qs, full, passes)
 	if err != nil || l.Merged || l.Number != 14 {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -242,7 +244,7 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 func TestLandSaysWhenAutoMergeFails(t *testing.T) {
 	_, a := claimed(t)
 	gh, _ := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`}, map[string]string{"graphql": "gh: auto-merge is not allowed"})
-	if _, err := (Source{Repo: repo, GH: gh}).Land(a, "", qs, full, passes); err == nil || !strings.Contains(err.Error(), "PR #14") || !strings.Contains(err.Error(), "auto-merge is not on") {
+	if _, err := (Source{Repo: repo, GH: gh, Clock: atNow()}).Land(a, "", qs, full, passes); err == nil || !strings.Contains(err.Error(), "PR #14") || !strings.Contains(err.Error(), "auto-merge is not on") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -260,19 +262,19 @@ func TestLandRefusesBeforePushing(t *testing.T) {
 		}
 	}
 	fails := func(string) error { return errors.New("go test: FAIL") }
-	if _, err := (Source{Repo: repo, GH: never(t)}).Land(a, "", qs, full, fails); err == nil || !strings.Contains(err.Error(), "nothing was pushed: go test: FAIL") {
+	if _, err := (Source{Repo: repo, GH: never(t), Clock: atNow()}).Land(a, "", qs, full, fails); err == nil || !strings.Contains(err.Error(), "nothing was pushed: go test: FAIL") {
 		t.Fatalf("%v", err)
 	}
 	if err := os.WriteFile(filepath.Join(a, "x"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	checked := false
-	if _, err := (Source{Repo: repo, GH: never(t)}).Land(a, "", qs, full, func(string) error { checked = true; return nil }); err == nil || !strings.Contains(err.Error(), "not committed") || checked {
+	if _, err := (Source{Repo: repo, GH: never(t), Clock: atNow()}).Land(a, "", qs, full, func(string) error { checked = true; return nil }); err == nil || !strings.Contains(err.Error(), "not committed") || checked {
 		t.Fatalf("%v, checked %v", err, checked)
 	}
 	run(t, a, "stash", "-u", "-q")
 	run(t, a, "checkout", "-q", "main")
-	if _, err := (Source{Repo: repo, GH: never(t)}).Land(a, "", qs, full, passes); err == nil || !strings.Contains(err.Error(), "issue-<n> branch") {
+	if _, err := (Source{Repo: repo, GH: never(t), Clock: atNow()}).Land(a, "", qs, full, passes); err == nil || !strings.Contains(err.Error(), "issue-<n> branch") {
 		t.Fatalf("%v", err)
 	}
 	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, origin, "rev-parse", "main"); got != want {
@@ -284,7 +286,7 @@ func TestLandRefusesAParent(t *testing.T) {
 	origin, a := claimed(t)
 	gh, calls := landGH(t, map[string]string{issue6: `{"number":6,"title":"the tree","sub_issues_summary":{"total":2,"completed":1}}`}, nil)
 	checked := false
-	_, err := Source{Repo: repo, GH: gh}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
+	_, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
 	if err == nil || !strings.Contains(err.Error(), "a parent holds no work") || checked {
 		t.Fatalf("%v, checked %v", err, checked)
 	}

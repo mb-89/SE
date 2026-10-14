@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
 // Label marks an issue as the fleet's work.
@@ -79,18 +81,13 @@ type Source struct {
 	// Repo is OWNER/NAME.
 	Repo string
 	GH   GH
-	// Now is the clock the lease is read against; nil is the wall clock.
-	Now func() time.Time
+	// Clock is the time leases, windows and stamps are read against.
+	Clock clock.Clock
 	// Flagged hears of each issue the sweep gave to a person, and why.
 	Flagged func(i Issue, reason string)
 }
 
-func (s Source) now() time.Time {
-	if s.Now == nil {
-		return time.Now()
-	}
-	return s.Now()
-}
+func (s Source) now() time.Time { return s.Clock.Now() }
 
 // issue is the part of GitHub's issue object the rules read.
 type issue struct {
@@ -535,8 +532,8 @@ func takeOrder(all []Status, want int) []Status {
 // stands. A parent's branch claims its whole
 // tree; where it exists already, Take picks the tree up from that claim. A
 // claimed leaf named as want, at any depth, is taken over where se fleet
-// check finds it stuck (see takeOverClaim). ok is false when nothing was left
-// to take.
+// check finds it stuck (see takeOverClaim), or where it is stuck past the
+// lease. ok is false when nothing was left to take.
 func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 	all, err := s.Survey()
 	if err != nil {
@@ -557,7 +554,9 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 			if st.claimed && st.Takeover == nil {
 				return s.takeOverClaim(dir, st)
 			}
-			if st.Above != 0 {
+			// A stuck leaf is taken over at any depth, as se fleet check's
+			// remedy names it; other work inside a tree is taken with --in.
+			if st.Above != 0 && st.Takeover == nil {
 				return Issue{}, false, fmt.Errorf("#%d is a sub-issue of #%d; it is taken with --in", want, st.Above)
 			}
 			if !st.Takeable() {
@@ -779,15 +778,11 @@ func Claim(dir string, n int) (claimed bool, err error) {
 	return true, nil
 }
 
-// stake is Claim without the checkout: it readies the pinned linters the push
-// hook needs, pushes the branch and fetches it as
+// stake is Claim without the checkout: it pushes the branch and fetches it as
 // origin/issue-<n>.
 func stake(dir string, n int) (claimed bool, err error) {
 	branch := Branch(n)
 	ref := "refs/heads/" + branch
-	if err := ReadyTools(dir); err != nil {
-		return false, err
-	}
 	if _, err := git(dir, "fetch", "-q", "origin", "main"); err != nil {
 		return false, err
 	}
