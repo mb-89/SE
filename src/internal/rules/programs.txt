@@ -1,0 +1,8 @@
+# The programs rule's allowlist (src/internal/rules/programs.go, principle 6):
+# each line is a Go file and a program it still starts that proc.Programs does
+# not list. The list only shrinks: the rule refuses an entry that matches
+# nothing. Adding an entry is no way to pass the check.
+
+# The GitHub I/O module calls the REST API itself (#186); it asks gh once for
+# its token (gh auth token), where the environment holds none.
+src/internal/io/github/real.go gh

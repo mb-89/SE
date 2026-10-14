@@ -74,14 +74,15 @@ func (s *Server) Event(ev Event) error {
 	return nil
 }
 
-// Post commits the event as the session posts module's next one; the
+// Post commits the event as the session posts module's next one, at its
+// session; the
 // modules that read it, the session log among them, run before it returns.
 func (s *Server) Post(ev session.Event) error {
 	if s.posts == "" {
 		return errors.New("the wiring names no instance of the session posts module")
 	}
 	ev.Seq = s.seq.Add(1)
-	return s.ix.Commit(s.posts, session.Events.Set(ev))
+	return s.ix.Commit(s.posts, session.Events.At(ev.Session, ev))
 }
 
 // Value answers a name's value on the index, and whether anything provided it.

@@ -11,7 +11,6 @@ import (
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/github"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -31,26 +30,9 @@ func (offline) GraphQL(string, ...github.Field) ([]byte, error)      { return ni
 func TestIssuePullAnswersFromTheDaemonsWarmSnapshot(t *testing.T) {
 	t.Parallel()
 	gh := recordedIssues(t)
-	net := worldOf(t).Net.(*sehttp.Fake)
-	d, ws := onFake(t), "/ws"
-	keeperClock := clock.NewFake(testedAt)
-	k := github.NewKeeper(func(set github.Settings) (github.Snapshot, error) {
-		return issues.Warm(issues.Source{Repo: "o/r", GitHub: gh, Clock: keeperClock, Settle: set.Settle})
-	}, keeperClock, func(s string) { t.Error(s) })
-	kept := make(chan github.Snapshot, 4)
-	k.Kept = func(s github.Snapshot) { kept <- s }
-	ctx, stop := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		done <- daemon.Serve(ctx, daemon.Paths{Workspace: ws, Disk: d}, daemon.Options{
-			Clock: worldOf(t).Clock, Net: net, Modules: modules(daemon.Paths{Workspace: ws, Disk: d}, worldOf(t).Clock),
-			Keepers: []daemon.Keeper{k},
-		})
-	}()
-	t.Cleanup(func() {
-		stop()
-		<-done
-	})
+	onFake(t)
+	ws := "/ws"
+	kept := warmDaemon(t, ws, gh)
 	<-kept
 	cold := "#3 three\nu3\n\ndo it\n\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n\n0 retros closed and no overhaul has closed yet; an overhaul is due at 5.\n"
 	worldOf(t).GitHub = offline{}
@@ -75,4 +57,31 @@ func TestIssuePullAnswersFromTheDaemonsWarmSnapshot(t *testing.T) {
 	if snap := <-kept; !strings.Contains(snap.Answers["LIST repos/o/r/issues?labels=se&state=open&per_page=100"], `"four"`) {
 		t.Fatalf("the snapshot after the write: %v", snap.Answers)
 	}
+}
+
+// warmDaemon serves the workspace ws's daemon on the test's network and disk
+// until the test ends, its keeper reading the snapshot of o/r from gh on a
+// clock of its own. It answers each snapshot the keeper commits.
+func warmDaemon(t *testing.T, ws string, gh github.GitHub) <-chan github.Snapshot {
+	t.Helper()
+	w := worldOf(t)
+	keeperClock := clock.NewFake(testedAt)
+	k := github.NewKeeper(func(set github.Settings) (github.Snapshot, error) {
+		return issues.Warm(issues.Source{Repo: "o/r", GitHub: gh, Clock: keeperClock, Settle: set.Settle})
+	}, keeperClock, func(s string) { t.Error(s) })
+	kept := make(chan github.Snapshot, 4)
+	k.Kept = func(s github.Snapshot) { kept <- s }
+	paths := daemon.Paths{Workspace: ws, Disk: w.Disk}
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- daemon.Serve(ctx, paths, daemon.Options{
+			Clock: w.Clock, Net: w.Net, Modules: modules(paths, w.Clock), Keepers: []daemon.Keeper{k},
+		})
+	}()
+	t.Cleanup(func() {
+		stop()
+		<-done
+	})
+	return kept
 }

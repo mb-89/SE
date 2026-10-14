@@ -10,12 +10,13 @@ import (
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sessions "github.com/mb-89/SE/src/internal/io/session"
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
 // modules are the modules se starts the index with, each I/O module handed
 // its outside thing for the workspace p: the clock, the session's posts and
-// its log, the command line's own commands, the hand-over's switches, and
-// GitHub's snapshot. The wiring file binds them.
+// its log, the command line's own commands, the hand-over's switches, the
+// issue work's config, and GitHub's snapshot. The wiring file binds them.
 func modules(p daemon.Paths, clk clock.Clock) []*index.Module {
 	return []*index.Module{
 		clock.Module(clk),
@@ -24,7 +25,19 @@ func modules(p daemon.Paths, clk clock.Clock) []*index.Module {
 		cliModule(),
 		guidance.Module,
 		github.Module,
+		issues.Module,
 	}
+}
+
+// issueConfig is the issues instance's config, as the wiring file se carries
+// gives it, which the help renders. A wiring that does not give it is a
+// broken se, which the battery's tests catch before a merge.
+func issueConfig() issues.Settings {
+	s, err := issues.Configured()
+	if err != nil {
+		panic(err)
+	}
+	return s
 }
 
 // noInput is what a command of the command line reads on the index: nothing.
@@ -35,7 +48,8 @@ type noInput struct{}
 // are declarations, which every adapter renders.
 func cliModule() *index.Module {
 	names := sortedNames()
-	parts := make([]index.Part, 0, len(names))
+	parts := make([]index.Part, 0, len(names)+1)
+	parts = append(parts, index.Config(columnsKey, defaultColumns, "The most buttons a row of /se ui holds; the next button starts the next row."))
 	for _, n := range names {
 		decl := declOf(commands[n])
 		parts = append(parts, index.Command(decl, func(noInput, []string) (index.Result, error) {
@@ -50,7 +64,7 @@ func cliModule() *index.Module {
 func declOf(c Command) index.CommandDecl {
 	d := index.CommandDecl{
 		Name: c.Name, Usage: c.Usage, Summary: c.Summary, Help: c.Details, Group: c.Group,
-		Session: c.Session, Button: c.Button, Installed: c.Installed,
+		Session: c.Session, Button: c.Button, Installed: c.Installed, Class: c.Class,
 	}
 	if d.Group == "" {
 		d.Group = "Other"

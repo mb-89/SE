@@ -3,18 +3,21 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
 func init() {
 	register(Command{
 		Name:    "fleet check",
+		Class:   interactive,
 		Usage:   "fleet check [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list what is broken in the fleet, each with its remedy",
-		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the coordination skill fixes them. Nothing found, it says healthy. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
+		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says healthy. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet check")
@@ -60,6 +63,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "fleet fix",
+		Class:   batch,
 		Usage:   "fleet fix [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "fix what fleet check finds that needs no checkout",
@@ -109,6 +113,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "fleet prune",
+		Class:   batch,
 		Usage:   "fleet prune [--apply] [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list the stray branches; --apply deletes them",
@@ -157,6 +162,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "fleet refresh",
+		Class:   batch,
 		Usage:   "fleet refresh [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "merge main into each auto-merge PR behind it and rerun its CI",
@@ -191,6 +197,79 @@ func init() {
 			return Reply{Text: strings.Join(lines, "\n")}, nil
 		},
 	})
+	register(Command{
+		Name:    "fleet rules",
+		Usage:   "fleet rules [--json] [--repo OWNER/NAME]",
+		Group:   "Fleet",
+		Class:   batch,
+		Summary: "tell each open se PR the se rules it breaks merged with main",
+		Details: "for every open se PR against main: merge its head with origin's main in a worktree under .se/.runtime/rules, build se there and run se rules on the merge, and comment on each PR it breaks the findings and what to do, once for the same findings, so the box that owns it acts before its CI goes red. A PR that conflicts with main is left to its takeover; one whose check fails is reported, and the others are still checked. The rules workflow runs it when main takes a change to se's rules.",
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "fleet rules")
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			done, rulesErr := s.Rules(c.Workspace, func(dir string) (string, error) { return rulesOn(c.Proc, dir) })
+			lines := make([]string, len(done))
+			for k, r := range done {
+				lines[k] = fmt.Sprintf("PR #%d (%s at %s): %s", r.PR, r.Branch, r.Head, r.Did)
+				if r.Findings != "" {
+					lines[k] += "\n  " + strings.ReplaceAll(r.Findings, "\n", "\n  ")
+				}
+			}
+			if rulesErr != nil {
+				return Reply{}, fmt.Errorf("%w\n%s", rulesErr, strings.Join(lines, "\n"))
+			}
+			if *asJSON {
+				data, err := json.Marshal(struct {
+					Ruled []issues.Ruled `json:"ruled"`
+				}{append([]issues.Ruled{}, done...)})
+				return Reply{Text: string(data)}, err
+			}
+			if len(done) == 0 {
+				return Reply{Text: "no open se PR"}, nil
+			}
+			return Reply{Text: strings.Join(lines, "\n")}, nil
+		},
+	})
+}
+
+// rulesOn builds se from the checkout at dir and runs its se rules there,
+// answering the findings, one per line, without the rules' timings; empty
+// where it passes. A checkout that does not build answers that as its finding.
+func rulesOn(procs proc.Procs, dir string) (string, error) {
+	bin := filepath.Join(dir, ".se", ".runtime", "se-rules")
+	if out, err := proc.Combined(procs, proc.Cmd{Name: "go", Args: []string{"-C", filepath.Join(dir, "src"), "build", "-o", bin, "./cmd/se"}}); err != nil {
+		if _, ok := proc.ExitCode(err); !ok {
+			return "", fmt.Errorf("go build: %w", err)
+		}
+		return "it does not build:\n" + strings.TrimSpace(string(out)), nil
+	}
+	out, err := proc.Combined(procs, proc.Cmd{Name: bin, Args: []string{"rules", "--workspace", dir}, Dir: dir})
+	if err == nil {
+		return "", nil
+	}
+	if _, ok := proc.ExitCode(err); !ok {
+		return "", fmt.Errorf("se rules: %w", err)
+	}
+	return rulesFindings(string(out)), nil
+}
+
+// rulesFindings is se rules' failing output without its timings, which
+// change from run to run while the findings stay.
+func rulesFindings(out string) string {
+	var kept []string
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		if !strings.HasPrefix(l, "check: rule ") {
+			kept = append(kept, l)
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
 // findingText is one finding: its kind and issue, what is wrong, and its remedy.
