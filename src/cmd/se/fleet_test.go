@@ -15,7 +15,7 @@ func recordedFleet(t *testing.T) {
 		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3"}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[]`,
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
-		"repos/o/r/pulls?base=main&state=open&per_page=100":       `[]`,
+		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
 	}
 	old := gh
 	gh = func(args ...string) ([]byte, error) {

@@ -6,14 +6,17 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 // github answers gh api calls like recorded, and keeps each issue's comments:
 // a comment posted is read back by the next read. It records every write.
-// Links not recorded answer none.
+// Links and open PRs not recorded answer none. Calls may come from several
+// goroutines at once; mu takes them one at a time.
 type github struct {
+	mu       sync.Mutex
 	t        *testing.T
 	answers  map[string]string
 	comments map[int][]comment
@@ -32,7 +35,8 @@ func (g *github) say(n int, body string) {
 }
 
 func (g *github) gh(args ...string) ([]byte, error) {
-	g.t.Helper()
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	path := args[len(args)-1]
 	var n int
 	if _, err := fmt.Sscanf(path, "repos/o/r/issues/%d/comments", &n); err == nil {
@@ -54,12 +58,14 @@ func (g *github) gh(args ...string) ([]byte, error) {
 		return []byte(`{}`), nil
 	}
 	a, ok := g.answers[path]
-	if !ok && strings.HasSuffix(path, "/dependencies/blocked_by?per_page=100") {
-		// An issue whose links are not recorded is blocked by nothing.
+	if !ok && (strings.HasSuffix(path, "/dependencies/blocked_by?per_page=100") || path == openPullsPath) {
+		// An issue whose links are not recorded is blocked by nothing, and
+		// open PRs not recorded are none.
 		a, ok = `[]`, true
 	}
 	if !ok {
-		g.t.Fatalf("gh api %s was not recorded", path)
+		g.t.Errorf("gh api %s was not recorded", path)
+		return nil, fmt.Errorf("gh api %s was not recorded", path)
 	}
 	return []byte(a), nil
 }

@@ -42,6 +42,20 @@ type openPull struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
 	} `json:"head"`
+	Base struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+}
+
+// toMain is the open PRs into main, by their head branch.
+func toMain(pulls []openPull) map[string]openPull {
+	byRef := map[string]openPull{}
+	for _, p := range pulls {
+		if p.Base.Ref == "main" {
+			byRef[p.Head.Ref] = p
+		}
+	}
+	return byRef
 }
 
 // conflict is a claimed leaf whose open PR GitHub reports in conflict with main.
@@ -53,7 +67,7 @@ type conflict struct {
 // conflicts names the claimed leaves whose open PR is not mergeable
 // (mergeable_state dirty), lowest number first. A null mergeable is asked
 // again shortly, and is no conflict while it stays null.
-func (s Source) conflicts(all []Status) ([]conflict, error) {
+func (s Source) conflicts(all []Status, pulls []openPull) ([]conflict, error) {
 	claimed := map[string]Status{}
 	for _, st := range all {
 		if st.claimed {
@@ -63,21 +77,20 @@ func (s Source) conflicts(all []Status) ([]conflict, error) {
 	if len(claimed) == 0 {
 		return nil, nil
 	}
-	pulls, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?base=main&state=open&per_page=100", s.Repo), true)
+	var mine []openPull
+	for _, p := range pulls {
+		if _, ok := claimed[p.Head.Ref]; ok && p.Base.Ref == "main" {
+			mine = append(mine, p)
+		}
+	}
+	asked, err := each(len(mine), func(k int) (openPull, error) { return s.mergeability(mine[k]) })
 	if err != nil {
 		return nil, err
 	}
 	var out []conflict
-	for _, p := range pulls {
-		st, ok := claimed[p.Head.Ref]
-		if !ok {
-			continue
-		}
-		if p, err = s.mergeability(p); err != nil {
-			return nil, err
-		}
+	for _, p := range asked {
 		if p.dirty() {
-			out = append(out, conflict{st, p})
+			out = append(out, conflict{claimed[p.Head.Ref], p})
 		}
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Number < out[b].Number })
@@ -111,8 +124,8 @@ func (p openPull) dirty() bool { return p.Mergeable != nil && !*p.Mergeable && p
 // conflict on a final issue (one taken over before, or filed by a review) goes
 // to a person. A takeover labels the issue se-final. ok is false when none was
 // taken over.
-func (s Source) takeOverConflict(dir string, all []Status) (took Issue, ok bool, err error) {
-	cs, err := s.conflicts(all)
+func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (took Issue, ok bool, err error) {
+	cs, err := s.conflicts(all, pulls)
 	if err != nil {
 		return Issue{}, false, err
 	}

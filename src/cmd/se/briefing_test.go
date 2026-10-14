@@ -22,8 +22,10 @@ var briefedAt = time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
 // #6 waits on a person and holds up #2, which it blocks; #7 is a retro whose
 // report waits for the owner. Closed are #20 (landed through PR #21 with its
 // answers), #19 (not planned, went to a person on its way), #18 (the last
-// retro, three days ago) and the issues of closed, each closed that long ago.
-// With person false, nothing waits on a person.
+// retro, three days ago) and the issues of closed, each closed that long ago,
+// each created an hour before it closed. Comments on closed issues are read
+// once, since a time, as GitHub answers it. A fork's PR from a branch named
+// issue-20 lands nothing. With person false, nothing waits on a person.
 func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 	t.Helper()
 	ago := func(d time.Duration) string { return briefedAt.Add(-d).Format(time.RFC3339) }
@@ -38,34 +40,54 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 			`{"number":7,"title":"retro","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-retro"},{"name":"se-person"}]}`)
 	}
 	shut := []string{
-		`{"number":20,"title":"twenty","state":"closed","state_reason":"completed","html_url":"u20","closed_at":"` + ago(time.Hour) + `"}`,
-		`{"number":19,"title":"nineteen","state":"closed","state_reason":"not_planned","html_url":"u19","closed_at":"` + ago(2*time.Hour) + `"}`,
-		`{"number":18,"title":"a retro","state":"closed","html_url":"u18","closed_at":"` + ago(72*time.Hour) + `","labels":[{"name":"se"},{"name":"se-retro"}]}`,
+		`{"number":20,"title":"twenty","state":"closed","state_reason":"completed","html_url":"u20","created_at":"` + ago(2*time.Hour) + `","closed_at":"` + ago(time.Hour) + `"}`,
+		`{"number":19,"title":"nineteen","state":"closed","state_reason":"not_planned","html_url":"u19","created_at":"` + ago(3*time.Hour) + `","closed_at":"` + ago(2*time.Hour) + `"}`,
+		`{"number":18,"title":"a retro","state":"closed","html_url":"u18","created_at":"` + ago(73*time.Hour) + `","closed_at":"` + ago(72*time.Hour) + `","labels":[{"name":"se"},{"name":"se-retro"}]}`,
 		`{"number":17,"title":"a PR","state":"closed","html_url":"p17","closed_at":"` + ago(time.Minute) + `","pull_request":{}}`,
 	}
 	for n, d := range closed {
-		shut = append(shut, fmt.Sprintf(`{"number":%d,"title":"closed %d","state":"closed","html_url":"u%d","closed_at":"%s"}`, n, n, n, ago(d)))
+		shut = append(shut, fmt.Sprintf(`{"number":%d,"title":"closed %d","state":"closed","html_url":"u%d","created_at":"%s","closed_at":"%s"}`, n, n, n, ago(d+time.Hour), ago(d)))
 	}
 	landing, err := issues.Landed{Issue: 20, Answers: map[string]string{"done": "twenty is done"}}.Comment([]issues.Question{{Key: "done", Question: "What?"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	quote := func(s string) string { data, _ := json.Marshal(s); return string(data) }
 	answers := map[string]string{
-		"repos/o/r/issues?labels=se&state=open&per_page=100":                  "[" + strings.Join(open, ",") + "]",
-		"repos/o/r/issues?labels=se&state=closed&per_page=100":                "[" + strings.Join(shut, ",") + "]",
-		"repos/o/r/git/matching-refs/heads/issue-":                            `[{"ref":"refs/heads/issue-1","object":{"sha":"s1"}}]`,
-		"repos/o/r/pulls?base=main&state=open&per_page=100":                   `[{"number":11,"html_url":"p11","head":{"ref":"issue-1","sha":"s1"}}]`,
-		"repos/o/r/pulls/11":                                                  `{"number":11,"html_url":"p11","mergeable":true,"mergeable_state":"clean","auto_merge":{},"head":{"ref":"issue-1","sha":"s1"}}`,
-		"repos/o/r/commits/s1/check-runs?per_page=100":                        `{"check_runs":[{"name":"check","status":"completed","conclusion":"success"}]}`,
-		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":                `[{"timestamp":"` + ago(10*time.Minute) + `"}]`,
-		"repos/o/r/issues/6/comments?per_page=100":                            `[{"id":1,"body":"<!-- se:person -->\nneeds the owner's call"}]`,
-		"repos/o/r/issues/7/comments?per_page=100":                            `[{"id":2,"body":"<!-- se:person -->\nthe retro report is posted"}]`,
-		"repos/o/r/issues/20/comments?per_page=100":                           `[{"id":3,"body":` + quote(landing) + `}]`,
-		"repos/o/r/issues/19/comments?per_page=100":                           `[{"id":4,"body":"<!-- se:person -->\nstuck twice"}]`,
-		"repos/o/r/issues/18/comments?per_page=100":                           `[{"id":5,"body":"early"},{"id":6,"body":"## Retro report\n- finding one\n- finding two\n<!-- se:retro -->"}]`,
-		"repos/o/r/pulls?head=o:issue-20&base=main&state=closed&per_page=100": `[{"number":21,"html_url":"p21","merged_at":"` + ago(time.Hour) + `"}]`,
-		"repos/o/r/pulls?head=o:issue-19&base=main&state=closed&per_page=100": `[]`,
+		"repos/o/r/issues?labels=se&state=open&per_page=100":   "[" + strings.Join(open, ",") + "]",
+		"repos/o/r/issues?labels=se&state=closed&per_page=100": "[" + strings.Join(shut, ",") + "]",
+		"repos/o/r/git/matching-refs/heads/issue-":             `[{"ref":"refs/heads/issue-1","object":{"sha":"s1"}}]`,
+		"repos/o/r/pulls?state=open&per_page=100":              `[{"number":11,"html_url":"p11","head":{"ref":"issue-1","sha":"s1"},"base":{"ref":"main"}}]`,
+		"repos/o/r/pulls/11":                                   `{"number":11,"html_url":"p11","mergeable":true,"mergeable_state":"clean","auto_merge":{},"head":{"ref":"issue-1","sha":"s1"}}`,
+		"repos/o/r/commits/s1/check-runs?per_page=100":         `{"check_runs":[{"name":"check","status":"completed","conclusion":"success"}]}`,
+		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1": `[{"timestamp":"` + ago(10*time.Minute) + `"}]`,
+		"repos/o/r/issues/6/comments?per_page=100":             `[{"id":1,"body":"<!-- se:person -->\nneeds the owner's call"}]`,
+		"repos/o/r/issues/7/comments?per_page=100":             `[{"id":2,"body":"<!-- se:person -->\nthe retro report is posted"}]`,
+		"repos/o/r/pulls?base=main&state=closed&per_page=100&page=1": `[{"number":22,"html_url":"p22","merged_at":"` + ago(time.Hour) + `","head":{"ref":"issue-20","repo":{"full_name":"fork/r"}}},` +
+			`{"number":21,"html_url":"p21","merged_at":"` + ago(time.Hour) + `","head":{"ref":"issue-20","repo":{"full_name":"o/r"}}},` +
+			`{"number":16,"html_url":"p16","merged_at":null,"head":{"ref":"issue-16","repo":null}}]`,
+	}
+	type comment struct {
+		ID      int       `json:"id"`
+		Body    string    `json:"body"`
+		Created time.Time `json:"created_at"`
+		URL     string    `json:"issue_url"`
+	}
+	on := func(n int, d time.Duration) (time.Time, string) {
+		return briefedAt.Add(-d), fmt.Sprintf("https://api.github.com/repos/o/r/issues/%d", n)
+	}
+	var comments []comment
+	for _, c := range []struct {
+		n    int
+		d    time.Duration
+		body string
+	}{
+		{18, 73 * time.Hour, "early"},
+		{18, 72 * time.Hour, "## Retro report\n- finding one\n- finding two\n<!-- se:retro -->"},
+		{19, 2 * time.Hour, "<!-- se:person -->\nstuck twice"},
+		{20, time.Hour, landing},
+	} {
+		at, url := on(c.n, c.d)
+		comments = append(comments, comment{len(comments) + 3, c.body, at, url})
 	}
 	if person {
 		answers["repos/o/r/issues/2/dependencies/blocked_by?per_page=100"] = `[{"number":6,"state":"open"}]`
@@ -77,8 +99,22 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 		if a, ok := answers[path]; ok {
 			return []byte(a), nil
 		}
-		// What the record leaves out has nothing: no blockers, no comments, no PR.
-		for _, empty := range []string{"/dependencies/blocked_by?", "/comments?", "pulls?head="} {
+		if rest, ok := strings.CutPrefix(path, "repos/o/r/issues/comments?since="); ok {
+			rest, page, _ := strings.Cut(rest, "&per_page=100&page=")
+			since, err := time.Parse(time.RFC3339, rest)
+			if err != nil {
+				return nil, err
+			}
+			got := []comment{}
+			for _, c := range comments {
+				if page == "1" && !c.Created.Before(since) {
+					got = append(got, c)
+				}
+			}
+			return json.Marshal(got)
+		}
+		// What the record leaves out has nothing: no blockers, no comments.
+		for _, empty := range []string{"/dependencies/blocked_by?", "/comments?"} {
 			if strings.Contains(path, empty) {
 				return []byte(`[]`), nil
 			}

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -114,25 +115,20 @@ func (s Source) Check() ([]Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	refs, err := api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/issue-", s.Repo), true)
-	if err != nil {
+	return s.check(all, t)
+}
+
+// check is Check on a survey already read.
+func (s Source) check(all []Status, t tree) ([]Finding, error) {
+	var claims, out []Finding
+	if err := parallel([]func() error{
+		func() (err error) { claims, err = s.claimFindings(all, t); return err },
+		func() (err error) { out, err = s.leftovers(t); return err },
+	}); err != nil {
 		return nil, err
 	}
-	deps := map[int][]issue{}
-	for _, n := range t.numbers() {
-		if deps[n], err = api[issue](s, fmt.Sprintf("repos/%s/issues/%d/dependencies/blocked_by?per_page=100", s.Repo, n), true); err != nil {
-			return nil, err
-		}
-	}
-	claims, err := s.claimFindings(all, refs)
-	if err != nil {
-		return nil, err
-	}
-	out, err := s.leftovers(t, refs)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, s.impossible(t, deps)...)
+	deps := t.deps
+	out = append(out, s.impossible(t)...)
 
 	// What each open issue waits on, at the end of its links: the claimed
 	// leaves and the se-person issues it cannot move without.
@@ -229,31 +225,30 @@ func holding(ns []int) string {
 	return ", holding up " + names(ns)
 }
 
-// claimFindings is what is stuck about each claimed leaf.
-func (s Source) claimFindings(all []Status, refs []ref) ([]Finding, error) {
-	pulls, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?base=main&state=open&per_page=100", s.Repo), true)
+// claimFindings is what is stuck about each claimed leaf, read from the
+// survey's branches and open PRs.
+func (s Source) claimFindings(all []Status, t tree) ([]Finding, error) {
+	byRef := toMain(t.pulls)
+	shas := map[string]string{}
+	for _, r := range t.refs {
+		shas[strings.TrimPrefix(r.Ref, "refs/heads/")] = r.Object.SHA
+	}
+	var claimed []Status
+	for _, st := range all {
+		if st.claimed {
+			claimed = append(claimed, st)
+		}
+	}
+	found, err := each(len(claimed), func(k int) (*Finding, error) {
+		b := Branch(claimed[k].Number)
+		p, ok := byRef[b]
+		return s.claimFinding(claimed[k], p, ok, shas[b], t)
+	})
 	if err != nil {
 		return nil, err
 	}
-	byRef := map[string]openPull{}
-	for _, p := range pulls {
-		byRef[p.Head.Ref] = p
-	}
-	shas := map[string]string{}
-	for _, r := range refs {
-		shas[strings.TrimPrefix(r.Ref, "refs/heads/")] = r.Object.SHA
-	}
 	var out []Finding
-	for _, st := range all {
-		if !st.claimed {
-			continue
-		}
-		b := Branch(st.Number)
-		p, ok := byRef[b]
-		f, err := s.claimFinding(st.Number, p, ok, shas[b])
-		if err != nil {
-			return nil, err
-		}
+	for _, f := range found {
 		if f != nil {
 			out = append(out, *f)
 		}
@@ -264,15 +259,12 @@ func (s Source) claimFindings(all []Status, refs []ref) ([]Finding, error) {
 // failed is the conclusions of a check run that make CI red.
 var failed = map[string]bool{"failure": true, "timed_out": true, "cancelled": true, "action_required": true, "startup_failure": true}
 
-// claimFinding is what is stuck about claimed leaf n, whose open PR is p
+// claimFinding is what is stuck about claimed leaf st, whose open PR is p
 // where open is true, and whose branch is at sha; nil where its work is
-// moving, or a takeover of it is.
-func (s Source) claimFinding(n int, p openPull, open bool, sha string) (*Finding, error) {
-	b := Branch(n)
-	last, err := s.lastPush(n)
-	if err != nil {
-		return nil, err
-	}
+// moving, or a takeover of it is. What t holds already is not read again.
+func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tree) (*Finding, error) {
+	n, b, last := st.Number, Branch(st.Number), st.pushed
+	var err error
 	quiet := s.now().Sub(last) > Quiet
 	since := "no push since " + last.UTC().Format(time.RFC3339)
 	if last.IsZero() {
@@ -280,13 +272,12 @@ func (s Source) claimFinding(n int, p openPull, open bool, sha string) (*Finding
 	}
 	var f *Finding
 	if !open {
-		owner, _, _ := strings.Cut(s.Repo, "/")
-		closed, err := api[struct {
-			Number int     `json:"number"`
-			Merged *string `json:"merged_at"`
-		}](s, fmt.Sprintf("repos/%s/pulls?head=%s:%s&base=main&state=closed&per_page=100", s.Repo, owner, b), true)
-		if err != nil {
-			return nil, err
+		closed := t.shut[b]
+		if t.shut == nil {
+			owner, _, _ := strings.Cut(s.Repo, "/")
+			if closed, err = api[closedPull](s, fmt.Sprintf("repos/%s/pulls?head=%s:%s&base=main&state=closed&per_page=100", s.Repo, owner, b), true); err != nil {
+				return nil, err
+			}
 		}
 		merged := false
 		for _, c := range closed {
@@ -308,7 +299,7 @@ func (s Source) claimFinding(n int, p openPull, open bool, sha string) (*Finding
 		if p.dirty() {
 			f = &Finding{Kind: ConflictedPR, What: fmt.Sprintf("PR #%d conflicts with main", p.Number)}
 		} else {
-			red, pending, err := s.checks(p.Head.SHA)
+			red, pending, err := t.runs.checks(s, p.Head.SHA)
 			if err != nil {
 				return nil, err
 			}
@@ -347,6 +338,34 @@ func (s Source) claimFinding(n int, p openPull, open bool, sha string) (*Finding
 	return f, nil
 }
 
+// runs is the check runs read, by commit, so that each is read once.
+type runs struct {
+	mu   sync.Mutex
+	read map[string]*checked
+}
+
+// checked is the check runs on one commit, read once.
+type checked struct {
+	once    sync.Once
+	red     []string
+	pending bool
+	err     error
+}
+
+// checks is the check runs on commit sha as checks reads them, read the
+// first time they are asked for.
+func (r *runs) checks(s Source, sha string) (red []string, pending bool, err error) {
+	r.mu.Lock()
+	c, ok := r.read[sha]
+	if !ok {
+		c = &checked{}
+		r.read[sha] = c
+	}
+	r.mu.Unlock()
+	c.once.Do(func() { c.red, c.pending, c.err = s.checks(sha) })
+	return c.red, c.pending, c.err
+}
+
 // checks reads the check runs on commit sha: the names of those that failed,
 // and whether any is still running.
 func (s Source) checks(sha string) (red []string, pending bool, err error) {
@@ -374,21 +393,29 @@ func (s Source) checks(sha string) (red []string, pending bool, err error) {
 // whose issue is closed and that has no open PR is prunable: the prune
 // workflow deletes it. Any other that main holds whole is spent: its fix
 // deletes it.
-func (s Source) leftovers(t tree, refs []ref) ([]Finding, error) {
-	var out []Finding
-	var open map[string]bool
-	for _, r := range refs {
+func (s Source) leftovers(t tree) ([]Finding, error) {
+	open := map[string]bool{}
+	for _, p := range t.pulls {
+		open[p.Head.Ref] = true
+	}
+	var stray []ref
+	for _, r := range t.refs {
 		b := strings.TrimPrefix(r.Ref, "refs/heads/")
 		n, err := strconv.Atoi(strings.TrimPrefix(b, "issue-"))
 		if err != nil || Branch(n) != b {
 			continue
 		}
-		if _, ok := t.byNum[n]; ok {
-			continue
+		if _, ok := t.byNum[n]; !ok {
+			stray = append(stray, r)
 		}
+	}
+	found, err := each(len(stray), func(k int) (Finding, error) {
+		r := stray[k]
+		b := strings.TrimPrefix(r.Ref, "refs/heads/")
+		n := atoi(strings.TrimPrefix(b, "issue-"))
 		got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
 		if err != nil {
-			return nil, err
+			return Finding{}, err
 		}
 		i, why := got[0], ""
 		switch {
@@ -405,41 +432,28 @@ func (s Source) leftovers(t tree, refs []ref) ([]Finding, error) {
 			AheadBy int `json:"ahead_by"`
 		}](s, fmt.Sprintf("repos/%s/compare/main...%s?per_page=1", s.Repo, r.Object.SHA), false)
 		if err != nil {
-			return nil, err
+			return Finding{}, err
 		}
 		f := Finding{
 			Kind: LeftoverClaim, Issue: n, head: r.Object.SHA, key: "leftover-claim",
 			What: fmt.Sprintf("%s claims #%d, which is %s", b, n, why),
 		}
-		if i.State == "closed" && i.PullRequest == nil {
-			if open == nil {
-				pulls, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?state=open&per_page=100", s.Repo), true)
-				if err != nil {
-					return nil, err
-				}
-				open = map[string]bool{}
-				for _, p := range pulls {
-					open[p.Head.Ref] = true
-				}
-			}
-			if !open[b] {
-				f.prunable, f.closed = true, i.ClosedAt
-				out = append(out, f)
-				continue
-			}
+		if i.State == "closed" && i.PullRequest == nil && !open[b] {
+			f.prunable, f.closed = true, i.ClosedAt
+			return f, nil
 		}
 		if cmp[0].AheadBy == 0 {
 			f.spent, f.key = true, "leftover-branch"
 			f.What += ", and main holds all its commits"
 		}
-		out = append(out, f)
-	}
-	return out, nil
+		return f, nil
+	})
+	return found, err
 }
 
 // impossible is the blocks no box can ever lift: a blocker closed as not
 // planned, an open blocker no box works, and blockers in a cycle.
-func (s Source) impossible(t tree, deps map[int][]issue) []Finding {
+func (s Source) impossible(t tree) []Finding {
 	var out []Finding
 	repoURL := "/repos/" + s.Repo
 	links := map[int][]int{}
@@ -447,7 +461,7 @@ func (s Source) impossible(t tree, deps map[int][]issue) []Finding {
 		if t.byNum[n].labelled(PersonLabel) {
 			continue
 		}
-		for _, d := range deps[n] {
+		for _, d := range t.deps[n] {
 			ours := d.labelled(Label) && (d.RepositoryURL == "" || strings.HasSuffix(d.RepositoryURL, repoURL))
 			switch {
 			case d.State == "closed" && d.StateReason == "not_planned":
@@ -655,12 +669,8 @@ func atoi(s string) int {
 // takeOverClaim takes over claimed leaf st, named by se issue next --take N,
 // where se fleet check finds it stuck: its branch is checked out as it stands.
 // A takeover labels it se-final; a final issue stuck goes to a person instead.
-func (s Source) takeOverClaim(dir string, st Status) (took Issue, ok bool, err error) {
-	refs, err := api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/%s", s.Repo, Branch(st.Number)), true)
-	if err != nil {
-		return Issue{}, false, err
-	}
-	fs, err := s.claimFindings([]Status{st}, refs)
+func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok bool, err error) {
+	fs, err := s.claimFindings([]Status{st}, t)
 	if err != nil {
 		return Issue{}, false, err
 	}

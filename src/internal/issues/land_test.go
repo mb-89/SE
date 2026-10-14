@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,8 +41,11 @@ func landGH(t *testing.T, answers map[string]string, fail map[string]string) (GH
 		}
 	}
 	var calls [][]string
+	var mu sync.Mutex
 	return func(args ...string) ([]byte, error) {
+		mu.Lock()
 		calls = append(calls, args)
+		mu.Unlock()
 		path := args[len(args)-1]
 		if msg, ok := fail[path]; ok {
 			return nil, errors.New(msg)

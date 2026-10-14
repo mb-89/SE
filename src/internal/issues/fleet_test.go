@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -23,6 +24,8 @@ const (
 // are kept per issue, so a record is written and read back, and every write
 // is kept.
 type world struct {
+	// mu takes calls from several goroutines one at a time.
+	mu       sync.Mutex
 	t        *testing.T
 	answers  map[string]string
 	comments map[int][]comment
@@ -55,7 +58,6 @@ func newWorld(t *testing.T, items []string, claimed ...int) *world {
 	w := &world{t: t, comments: map[int][]comment{}, made: 100, answers: map[string]string{
 		listPath:      "[" + strings.Join(items, ",") + "]",
 		openPullsPath: `[]`,
-		allPullsPath:  `[]`,
 	}}
 	var refs []string
 	for _, n := range claimed {
@@ -90,7 +92,7 @@ func (w *world) pr(n int, mergeable, state string, autoMerge bool, runs ...strin
 	if autoMerge {
 		am = `{"merge_method":"squash"}`
 	}
-	p := fmt.Sprintf(`{"number":%d,"html_url":"p%d","node_id":"N%d","mergeable":%s,"mergeable_state":%q,"auto_merge":%s,"head":{"ref":"issue-%d","sha":"e%d"}}`,
+	p := fmt.Sprintf(`{"number":%d,"html_url":"p%d","node_id":"N%d","mergeable":%s,"mergeable_state":%q,"auto_merge":%s,"head":{"ref":"issue-%d","sha":"e%d"},"base":{"ref":"main"}}`,
 		n*10, n*10, n*10, mergeable, state, am, n, n)
 	w.answers[openPullsPath] = "[" + p + "]"
 	w.answers[fmt.Sprintf("repos/o/r/pulls/%d", n*10)] = p
@@ -112,7 +114,8 @@ func (w *world) closedPRs(n int, prs string) {
 }
 
 func (w *world) gh(args ...string) ([]byte, error) {
-	w.t.Helper()
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	path := args[len(args)-1]
 	if args[1] == "-X" || args[1] == "-f" {
 		w.writes = append(w.writes, args)
@@ -133,7 +136,8 @@ func (w *world) gh(args ...string) ([]byte, error) {
 	}
 	a, ok := w.answers[path]
 	if !ok {
-		w.t.Fatalf("gh %v was not recorded", args)
+		w.t.Errorf("gh %v was not recorded", args)
+		return nil, fmt.Errorf("gh %v was not recorded", args)
 	}
 	return []byte(a), nil
 }

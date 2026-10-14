@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -30,12 +31,16 @@ func briefAnswers() map[string]string {
 	}
 }
 
-// asked records the paths a brief reads.
+// asked records the paths a brief reads, one at a time, as reads run in
+// parallel.
 func asked(t *testing.T, answers map[string]string) (GH, *[]string) {
 	var paths []string
+	var mu sync.Mutex
 	gh := recorded(t, answers)
 	return func(args ...string) ([]byte, error) {
+		mu.Lock()
 		paths = append(paths, args[len(args)-1])
+		mu.Unlock()
 		return gh(args...)
 	}, &paths
 }

@@ -111,29 +111,95 @@ type Counts struct {
 }
 
 // Briefing reads GitHub and the checkout dir and says where SE stands. It writes
-// nothing but what every se issue command writes.
+// nothing but what every se issue command writes. It reads everything first,
+// each thing once and independent reads in parallel, then judges what it read.
 func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 	b := Briefing{Repo: s.Repo, At: s.now().UTC().Truncate(time.Second), InFlight: []Flight{}}
 	b.About = about(dir, s.Repo)
-	all, t, err := s.survey()
-	if err != nil {
+	var (
+		all     []Status
+		t       tree
+		done    []closedIssue
+		in      []closedIssue
+		retro   *closedIssue
+		pulls   []closedPull
+		history []comment
+	)
+	if err := parallel([]func() error{
+		func() (err error) { all, t, err = s.survey(); return err },
+		// The closed issues, the window, and the comments of every issue
+		// told of, read at once: every one was written after the oldest of
+		// those issues was created.
+		func() error {
+			closed, err := api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100", s.Repo, Label), true)
+			if err != nil {
+				return err
+			}
+			for _, i := range closed {
+				if i.PullRequest == nil {
+					done = append(done, closedIssue{i, i.ClosedAt})
+				}
+			}
+			sort.Slice(done, func(a, c int) bool {
+				if !done[a].at.Equal(done[c].at) {
+					return done[a].at.After(done[c].at)
+				}
+				return done[a].Number > done[c].Number
+			})
+			in, b.Window = s.window(done, w)
+			told := in
+			for k := range done {
+				if done[k].labelled(RetroLabel) {
+					retro = &done[k]
+					told = append(append([]closedIssue{}, in...), *retro)
+					break
+				}
+			}
+			if len(told) == 0 {
+				return nil
+			}
+			since := told[0].Created
+			for _, c := range told {
+				if c.Created.Before(since) {
+					since = c.Created
+				}
+			}
+			history, err = pages[comment](s, fmt.Sprintf("repos/%s/issues/comments?since=%s&per_page=%d", s.Repo, since.UTC().Format(time.RFC3339), PerPage))
+			return err
+		},
+		func() (err error) {
+			pulls, err = pages[closedPull](s, fmt.Sprintf("repos/%s/pulls?base=main&state=closed&per_page=%d", s.Repo, PerPage))
+			return err
+		},
+	}); err != nil {
 		return Briefing{}, err
 	}
-	waiting, err := s.waiting(all, t)
-	if err != nil {
+	// The PRs from this repository's own branches, newest first.
+	t.shut = map[string][]closedPull{}
+	for _, p := range pulls {
+		if p.Head.Repo != nil && p.Head.Repo.FullName == s.Repo {
+			t.shut[p.Head.Ref] = append(t.shut[p.Head.Ref], p)
+		}
+	}
+	if err := parallel([]func() error{
+		func() (err error) { b.InFlight, err = s.inFlight(all, t); return err },
+		func() (err error) { b.Findings, err = s.check(all, t); return err },
+	}); err != nil {
 		return Briefing{}, err
 	}
-	if b.Pending, err = pending(Open{Repo: s.Repo, Waiting: waiting, t: t}); err != nil {
+	comments := map[int][]comment{}
+	for _, m := range history {
+		n := atoi(m.IssueURL[strings.LastIndex(m.IssueURL, "/")+1:])
+		comments[n] = append(comments[n], m)
+	}
+	for _, cs := range comments {
+		sort.Slice(cs, func(a, c int) bool { return cs[a].ID < cs[c].ID })
+	}
+	b.Findings = append([]Finding{}, b.Findings...)
+	var err error
+	if b.Pending, err = pending(Open{Repo: s.Repo, Waiting: waiting(all, t), t: t}); err != nil {
 		return Briefing{}, err
 	}
-	if b.InFlight, err = s.inFlight(all); err != nil {
-		return Briefing{}, err
-	}
-	found, err := s.Check()
-	if err != nil {
-		return Briefing{}, err
-	}
-	b.Findings = append([]Finding{}, found...)
 	if order := takeOrder(all, 0); len(order) > 0 {
 		b.Next = &order[0].Issue
 	}
@@ -149,41 +215,27 @@ func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 			b.Counts.Blocked++
 		}
 	}
-	closed, err := api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100", s.Repo, Label), true)
-	if err != nil {
-		return Briefing{}, err
-	}
-	var done []closedIssue
-	for _, i := range closed {
-		if i.PullRequest == nil {
-			done = append(done, closedIssue{i, i.ClosedAt})
-		}
-	}
-	sort.Slice(done, func(a, c int) bool {
-		if !done[a].at.Equal(done[c].at) {
-			return done[a].at.After(done[c].at)
-		}
-		return done[a].Number > done[c].Number
-	})
-	var in []closedIssue
-	in, b.Window = s.window(done, w)
 	b.Happened = []Closed{}
 	for _, c := range in {
-		got, err := s.closedOf(c)
-		if err != nil {
-			return Briefing{}, err
-		}
-		b.Happened = append(b.Happened, got)
+		b.Happened = append(b.Happened, closedOf(c, comments[c.Number], t.shut[Branch(c.Number)]))
 	}
-	for _, c := range done {
-		if c.labelled(RetroLabel) {
-			if b.Retro, err = s.retro(c); err != nil {
-				return Briefing{}, err
-			}
-			break
-		}
+	if retro != nil {
+		b.Retro = retroOf(*retro, comments[retro.Number])
 	}
 	return b, nil
+}
+
+// closedPull is the part of GitHub's pull request object a briefing reads.
+type closedPull struct {
+	Number int     `json:"number"`
+	URL    string  `json:"html_url"`
+	Merged *string `json:"merged_at"`
+	Head   struct {
+		Ref  string `json:"ref"`
+		Repo *struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
+	} `json:"head"`
 }
 
 // closedIssue is a closed issue and when it closed.
@@ -217,19 +269,16 @@ func (s Source) window(done []closedIssue, w Window) ([]closedIssue, string) {
 	return last(DefaultLast), fmt.Sprintf("the last %d closed", DefaultLast)
 }
 
-// closedOf tells of one closed issue: its PR, its landing answer done, and
-// whether it ran a retro or an overhaul or went to a person.
-func (s Source) closedOf(c closedIssue) (Closed, error) {
+// closedOf tells of one closed issue from its comments and the closed PRs of
+// its branch, newest first: its PR, its landing answer done, and whether it
+// ran a retro or an overhaul or went to a person.
+func closedOf(c closedIssue, comments []comment, pulls []closedPull) Closed {
 	out := Closed{Number: c.Number, Title: c.Title, URL: c.URL, At: c.at, NotPlanned: c.StateReason == "not_planned"}
 	switch {
 	case c.labelled(RetroLabel):
 		out.Run = "retro"
 	case c.labelled(OverhaulLabel):
 		out.Run = "overhaul"
-	}
-	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, c.Number), true)
-	if err != nil {
-		return Closed{}, err
 	}
 	for _, m := range comments {
 		if l, ok, err := ParseLanding(m.Body); ok && err == nil {
@@ -239,15 +288,6 @@ func (s Source) closedOf(c closedIssue) (Closed, error) {
 			out.Person = out.Person || got[1] == "person"
 		}
 	}
-	owner, _, _ := strings.Cut(s.Repo, "/")
-	pulls, err := api[struct {
-		Number int     `json:"number"`
-		URL    string  `json:"html_url"`
-		Merged *string `json:"merged_at"`
-	}](s, fmt.Sprintf("repos/%s/pulls?head=%s:%s&base=main&state=closed&per_page=100", s.Repo, owner, Branch(c.Number)), true)
-	if err != nil {
-		return Closed{}, err
-	}
 	for _, p := range pulls {
 		if out.PR == 0 || p.Merged != nil {
 			out.PR, out.PRURL = p.Number, p.URL
@@ -256,19 +296,18 @@ func (s Source) closedOf(c closedIssue) (Closed, error) {
 			break
 		}
 	}
-	return out, nil
+	return out
 }
 
 // Headlines is how many findings of the last retro a briefing shows.
 const Headlines = 5
 
-// retro tells of the last closed retro: the first findings of its closing
-// comment, its bullet points, or else its first lines.
-func (s Source) retro(c closedIssue) (*Retro, error) {
+// retroOf tells of the last closed retro from its comments: the first
+// findings of its closing comment, its bullet points, or else its first lines.
+func retroOf(c closedIssue, comments []comment) *Retro {
 	r := &Retro{Number: c.Number, Title: c.Title, URL: c.URL, At: c.at, Headlines: []string{}}
-	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, c.Number), true)
-	if err != nil || len(comments) == 0 {
-		return r, err
+	if len(comments) == 0 {
+		return r
 	}
 	var bullets, lines []string
 	for _, l := range strings.Split(comments[len(comments)-1].Body, "\n") {
@@ -285,42 +324,38 @@ func (s Source) retro(c closedIssue) (*Retro, error) {
 		bullets = lines
 	}
 	r.Headlines = append(r.Headlines, bullets[:min(Headlines, len(bullets))]...)
-	return r, nil
+	return r
 }
 
 // inFlight is every claimed leaf, with where its open PR stands.
-func (s Source) inFlight(all []Status) ([]Flight, error) {
-	pulls, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?base=main&state=open&per_page=100", s.Repo), true)
-	if err != nil {
-		return nil, err
-	}
-	byRef := map[string]openPull{}
-	for _, p := range pulls {
-		byRef[p.Head.Ref] = p
-	}
-	out := []Flight{}
+func (s Source) inFlight(all []Status, t tree) ([]Flight, error) {
+	byRef := toMain(t.pulls)
+	var claimed []Status
 	for _, st := range all {
-		if !st.claimed {
-			continue
+		if st.claimed {
+			claimed = append(claimed, st)
 		}
+	}
+	return each(len(claimed), func(k int) (Flight, error) {
+		st := claimed[k]
 		f := Flight{Number: st.Number, Title: st.Title, URL: st.URL, State: "no PR yet"}
 		if st.Stuck {
 			f.State += ", stuck: " + st.since()
 		}
 		if p, ok := byRef[Branch(st.Number)]; ok {
-			if f.State, err = s.pullState(p); err != nil {
-				return nil, err
+			state, err := s.pullState(p, t.runs)
+			if err != nil {
+				return Flight{}, err
 			}
-			f.PR, f.PRURL = p.Number, p.URL
+			f.State, f.PR, f.PRURL = state, p.Number, p.URL
 		}
-		out = append(out, f)
-	}
-	return out, nil
+		return f, nil
+	})
 }
 
 // pullState says where an open PR stands: whether it conflicts with main,
 // its CI on its latest commit, and its auto-merge.
-func (s Source) pullState(p openPull) (string, error) {
+func (s Source) pullState(p openPull, runs *runs) (string, error) {
 	p, err := s.mergeability(p)
 	if err != nil {
 		return "", err
@@ -329,7 +364,7 @@ func (s Source) pullState(p openPull) (string, error) {
 	if p.dirty() {
 		parts = append(parts, "conflicts with main")
 	}
-	red, running, err := s.checks(p.Head.SHA)
+	red, running, err := runs.checks(s, p.Head.SHA)
 	if err != nil {
 		return "", err
 	}

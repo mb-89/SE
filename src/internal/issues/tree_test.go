@@ -77,6 +77,7 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 	}
 	// Nor with every leaf at the top claimed.
 	answers[refsPath] = `[{"ref":"refs/heads/issue-4"}]`
+	answers[openPullsPath] = `[]`
 	answers[activity(4)] = pushed(fresh)
 	if next, ok, err := s.Next(); err != nil || ok {
 		t.Fatalf("%+v %v %v", next, ok, err)
@@ -102,6 +103,7 @@ func TestInOffersTheReadyLeavesAtAnyDepth(t *testing.T) {
 			node(50, 1),  // a root blocked by #30
 			node(51, 0)), // inside #50, so held by its root's blocker
 		refsPath:        `[{"ref":"refs/heads/issue-15"},{"ref":"refs/heads/issue-10"}]`,
+		openPullsPath:   `[]`,
 		subsPath(10):    subs(11, 12, 14, 15, 16, 18, -17),
 		subsPath(12):    subs(13),
 		subsPath(18):    subs(19),
@@ -244,6 +246,7 @@ func TestAReviewAtTheTopIsTakenByAnyBox(t *testing.T) {
 	// The coordinator that claimed the tree has ended: another box picks the
 	// tree up from its claim.
 	answers[refsPath] = `[{"ref":"refs/heads/issue-2"}]`
+	answers[openPullsPath] = `[]`
 	if took, ok, err := s.Take(b, 2); err != nil || !ok || took.Number != 2 {
 		t.Fatalf("%+v %v %v", took, ok, err)
 	}

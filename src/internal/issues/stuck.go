@@ -28,6 +28,8 @@ type comment struct {
 	ID      int64     `json:"id"`
 	Body    string    `json:"body"`
 	Created time.Time `json:"created_at"`
+	// IssueURL is the API URL of the issue it is on.
+	IssueURL string `json:"issue_url"`
 }
 
 // marks is what an issue's comments say about it since a person last resumed it.
@@ -110,7 +112,7 @@ func (s Source) lease(st *Status) error {
 	if err != nil {
 		return err
 	}
-	st.Since = pushed
+	st.Since, st.pushed = pushed, pushed
 	if s.now().Sub(st.Since) <= Lease {
 		return nil
 	}
@@ -242,20 +244,16 @@ func (s Source) Waiting() ([]Waiting, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.waiting(all, t)
+	return waiting(all, t), nil
 }
 
 // waiting is Waiting on a survey already read.
-func (s Source) waiting(all []Status, t tree) ([]Waiting, error) {
+func waiting(all []Status, t tree) []Waiting {
 	// held links each open issue to the open issues it holds: its dependents,
 	// and the rest of its tree, which is never offered while it waits.
 	held := map[int][]int{}
 	for _, n := range t.numbers() {
-		blockers, err := s.openBlockers(t.byNum[n])
-		if err != nil {
-			return nil, err
-		}
-		for _, b := range blockers {
+		for _, b := range t.openBlockers(n) {
 			held[b] = append(held[b], n)
 		}
 		if p, ok := t.above[n]; ok {
@@ -281,7 +279,7 @@ func (s Source) waiting(all []Status, t tree) ([]Waiting, error) {
 		}
 		out = append(out, Waiting{st.Number, st.Title, st.URL, reason, len(seen) - 1})
 	}
-	return out, nil
+	return out
 }
 
 // Resume gives issue n back to the boxes: it removes the se-person label and
