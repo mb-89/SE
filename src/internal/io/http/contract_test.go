@@ -20,7 +20,8 @@ type world struct {
 }
 
 // daemon is a Daemon that keeps what it is told: it refuses the session "bad"
-// as malformed and fails to keep the session "broken".
+// as malformed and fails to keep the session "broken". Its one value,
+// events/kept, is how many events it kept.
 type daemon struct {
 	mu     sync.Mutex
 	events []sehttp.Event
@@ -45,6 +46,13 @@ func (d *daemon) Event(ev sehttp.Event) error {
 	defer d.mu.Unlock()
 	d.events = append(d.events, ev)
 	return nil
+}
+
+func (d *daemon) Value(name string) (sehttp.Value, error) {
+	if name != "events/kept" {
+		return sehttp.Value{}, fmt.Errorf("%w: %s", sehttp.ErrUnknown, name)
+	}
+	return sehttp.Value{Value: len(d.kept()), Provided: true}, nil
 }
 
 func (d *daemon) Shutdown() { d.once.Do(func() { close(d.ended) }) }
@@ -95,6 +103,9 @@ func contract(t *testing.T, fresh func(t *testing.T) world) {
 		}
 		if err := w.net.Event(addr, "nope", sehttp.Event{Session: "s1", Event: "x"}); status(err) != sehttp.StatusUnauthorized {
 			t.Fatalf("event: %v", err)
+		}
+		if _, err := w.net.Value(addr, "nope", "events/kept"); status(err) != sehttp.StatusUnauthorized {
+			t.Fatalf("value: %v", err)
 		}
 		if err := w.net.Shutdown(addr, ""); status(err) != sehttp.StatusUnauthorized {
 			t.Fatalf("shutdown: %v", err)
@@ -158,6 +169,20 @@ func contract(t *testing.T, fresh func(t *testing.T) world) {
 		wg.Wait()
 		if n := len(d.kept()); n != 20 {
 			t.Fatalf("%d events arrived", n)
+		}
+	})
+	t.Run("a value answers by its name, an unknown name is not found", func(t *testing.T) {
+		w := fresh(t)
+		_, addr := serve(t, w.net)
+		if err := w.net.Event(addr, "tok", sehttp.Event{Session: "s1", Event: "x"}); err != nil {
+			t.Fatal(err)
+		}
+		v, err := w.net.Value(addr, "tok", "events/kept")
+		if err != nil || v.Value != float64(1) || !v.Provided {
+			t.Fatalf("events/kept = %+v, %v", v, err)
+		}
+		if _, err := w.net.Value(addr, "tok", "no/such"); status(err) != sehttp.StatusNotFound || !strings.Contains(err.Error(), "no/such") {
+			t.Fatalf("no/such: %v", err)
 		}
 	})
 	t.Run("shutdown reaches the daemon", func(t *testing.T) {
@@ -230,7 +255,7 @@ func contract(t *testing.T, fresh func(t *testing.T) world) {
 			t.Fatalf("first fire = %d, %v", a.Status, err)
 		}
 		a, err := w.net.Fire(url, "sekrit")
-		if err != nil || a.Status != sehttp.StatusTooMany || fired() != 1 {
+		if err != nil || a.Status != sehttp.StatusTooMany || a.RetryAfter != "1800" || fired() != 1 {
 			t.Fatalf("second fire = %d %s, %v; %d fired", a.Status, a.Body, err, fired())
 		}
 	})

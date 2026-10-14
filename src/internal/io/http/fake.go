@@ -32,6 +32,10 @@ type routine struct {
 	fired int
 }
 
+// FakeRetryAfter is the Retry-After a fake routine's 429 carries: its fires
+// come back in half an hour.
+const FakeRetryAfter = "1800"
+
 // NewFake answers an empty fake network: nothing is served, no routine stands.
 func NewFake() *Fake {
 	return &Fake{port: 40000, served: map[string]served{}, routines: map[string]*routine{}}
@@ -123,6 +127,25 @@ func (f *Fake) Event(address, token string, ev Event) error {
 	return nil
 }
 
+func (f *Fake) Value(address, token, name string) (Value, error) {
+	path := "/value/" + name
+	d, err := f.reach(address, token, path)
+	if err != nil {
+		return Value{}, err
+	}
+	v, err := d.Value(name)
+	if err != nil {
+		code := StatusInternal
+		if errors.Is(err, ErrUnknown) {
+			code = StatusNotFound
+		}
+		return Value{}, &StatusError{Path: path, Status: code, Said: err.Error()}
+	}
+	var got Value
+	err = roundTrip(v, &got)
+	return got, err
+}
+
 func (f *Fake) Shutdown(address, token string) error {
 	d, err := f.reach(address, token, "/shutdown")
 	if err != nil {
@@ -143,7 +166,7 @@ func (f *Fake) Fire(to, token string) (Answer, error) {
 	case r.token != token:
 		return Answer{Status: StatusUnauthorized, Body: []byte(`{"type":"error","error":{"type":"authentication_error","message":"invalid bearer token"}}`)}, nil
 	case r.left <= 0:
-		return Answer{Status: StatusTooMany, Body: []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"the routine's fires are spent"}}`)}, nil
+		return Answer{Status: StatusTooMany, Body: []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"the routine's fires are spent"}}`), RetryAfter: FakeRetryAfter}, nil
 	}
 	r.left--
 	r.fired++

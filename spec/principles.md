@@ -3,8 +3,10 @@
 Reader: whoever designs, reviews or judges a change to SE, and the retro and the overhaul.
 
 The list SE's design is measured against. The retro (#40) checks the
-principles it can check mechanically; the overhaul judges the rest. Each
-principle is one sentence and one paragraph, and names what checks it.
+principles it can check mechanically; the overhaul judges every one. Each
+principle is one sentence and one paragraph, and names what checks it. The
+second part, [How code is written](#how-code-is-written), names the general
+principles of code once.
 
 1. **Mechanize first.**
    Every step that can be a deterministic, tested `se` command is one; agents
@@ -44,29 +46,41 @@ principle is one sentence and one paragraph, and names what checks it.
    parallel where reads are independent, into one snapshot. The computing in
    between is pure and works on that snapshot alone. A run never asks the
    outside world again for what it already has: that is slow, and inputs
-   read at different times disagree.
-   Checked by: the battery (a lint rule, #44's tree); overhaul, by judgment
-   (`looked_at.speed`).
+   read at different times disagree. No process does what a library call
+   can do: the proc I/O module starts only programs that are themselves the
+   work (`go`, the battery's linters, `git` where Go has no library for it),
+   one listed value, `proc.Programs`; GitHub is reached through its own
+   module's HTTP client, never `gh`.
+   Checked by: the battery (the `io-module` and `programs` rules of
+   `se rules`); overhaul, by judgment (`looked_at.speed`).
 
 7. **Fakes that behave, held to contracts.**
    Every I/O module has a fake, and one contract suite runs against both the
    fake and the real thing; a fake without its suite is refused.
-   Checked by: the battery (a lint rule).
+   Checked by: the battery (the `fake-contract` rule of `se rules`).
 
 8. **Fast tests.**
    Test a behaviour once, at the outermost interface (the `se` command), on
    fakes. Real I/O modules appear only in their contract tests. No wall
    clock, no sleeping, tests run in parallel, fixtures are built once, and
    test code stays at or under code size.
-   Checked by: retro, mechanically (battery time and the test ratio as metrics).
+   Checked by: the battery (the `fast-test` rule: parallel tests, no wall
+   clock); retro, mechanically (battery time and the test ratio as metrics).
 
 9. **Performance is measured, and a person never waits blind.**
    The battery, every test, each `se` command and each plugin hook record
    their duration, and soft budgets in one file
    ([spec/budgets.yaml](budgets.yaml)) report what grows (#50). One hard
    rule: anything a person waits on gives feedback within 1 second and never
-   blocks. What can run in parallel does.
-   Checked by: the battery and the bridgehead; retro, mechanically (trend);
+   blocks. What can run in parallel does. A person never waits on the outside
+   world: what a person triggers, typed or pressed, is answered from the
+   snapshot the daemon holds, which the I/O modules refresh in the
+   background; only a command that must write (a claim, a land) goes out at
+   once. Every command declares its class, interactive or batch, and each
+   interactive one keeps a hard time and request budget, run against fakes
+   that delay each request and process start as the outside world does.
+   Checked by: the battery (each interactive command against its budgets,
+   reported in its profile) and the bridgehead; retro, mechanically (trend);
    overhaul, by judgment (`looked_at.speed`).
 
 10. **Lint and style checks are part of the battery.**
@@ -148,3 +162,71 @@ principle is one sentence and one paragraph, and names what checks it.
     should be and how. Work that is clear becomes an `se` issue, and the
     cloud fleet does it; the session does not do it itself.
     Checked by: retro and overhaul, by judgment.
+
+21. **The rule of five.**
+    A surface a person sees, the root, `spec/` and `src/`, holds at most five
+    visible files and at most five visible folders; dot files and dot folders
+    do not count. A person looking at SE sees what is there for them, not the
+    tools SE is built with. The limit, the surfaces and the allowlist of
+    today's violations, which only shrinks, live in one configuration.
+    Checked by: the battery (the `rule-of-five` rule of `se rules`, configured
+    in `src/internal/rules/five.yaml`).
+
+22. **Steer before, check at the push.**
+    What an agent gets is settled before it starts: the take hands over the
+    skills its issue names, in full, and the session starts with these
+    principles. What must hold is checked when the work is pushed, by the
+    battery and the landing. Nothing steers the agent in between: no canary,
+    no tool refusals during the work.
+    Checked by: the take (`se issue pull --take` hands the skills over, the
+    session's log records them); the battery and `se issue land` (the push).
+
+## How code is written
+
+The general principles of code, named once, one line each. The overhaul
+applies them to all of SE and the reviewer to its change; `se overhaul read`
+lists the facts a command can find for them. A finding names the principle or
+smell, the places, and the shape the code should take (for example "one run
+engine; retro and overhaul become strategies").
+
+- **Once and only once (DRY)**, with principle 2, held against the **rule of
+  three**: generalize at the third repetition, not the second; a little copying
+  is better than a little dependency. Checked by: `se overhaul read`
+  (duplicates, near-duplicates); overhaul and reviewer, by judgment.
+- **KISS and YAGNI:** no speculative generality, nothing built for a second
+  user that does not exist. Checked by: `se overhaul read` (one-user
+  abstractions, unused surfaces); overhaul and reviewer, by judgment.
+- **Single responsibility, separation of concerns, command–query separation.**
+  Checked by: `se overhaul read` (longest functions and files); overhaul and
+  reviewer, by judgment.
+- **Open for extension by registration** (principle 3), **dependency
+  inversion** (I/O behind interfaces, principle 6), **interface segregation**
+  (the bigger the interface, the weaker the abstraction). Checked by: the
+  battery (the io-module rule); overhaul and reviewer, by judgment.
+- **Functional core, imperative shell:** principle 6's three phases. Checked
+  by: overhaul and reviewer, by judgment.
+- **Fail fast** at the edges. Checked by: overhaul and reviewer, by judgment.
+- **Clear is better than clever.** Checked by: overhaul and reviewer, by
+  judgment.
+- **Reuse before you write:** before building a check, a skill or an agent,
+  look for one that exists (Go's own tools, golangci-lint's linters, published
+  Claude Code plugins) and integrate it rather than rewrite it. Checked by:
+  overhaul (`looked_at.outside`) and reviewer, by judgment.
+- **Patterns, where they fit:** strategy (one algorithm, its variants as
+  pluggable strategies or configuration), table-driven code in place of switch
+  chains, template method (one flow with hooks), registry, adapter (thin,
+  principle 5), command (requests as data, the index's actions) and state
+  machine (lifecycles such as an issue's). Checked by: `se overhaul read`
+  (switches on a kind); overhaul and reviewer, by judgment.
+- **Smells to find:** shotgun surgery (one change in many files: fixing one
+  thing in five places), divergent change, duplicated and near-duplicated
+  code, long function, large module, long parameter list, data clumps,
+  primitive obsession, feature envy, switch on a kind. Checked by:
+  `se overhaul read` (files touched per change, duplicates, longest functions,
+  files and parameter lists, sizes, switches on a kind); overhaul and
+  reviewer, by judgment.
+- **The less code, the less to maintain:** code nothing reaches, code for a
+  state that no longer occurs, and code that restates what another place
+  holds is removed. Checked by: the battery (`deadcode -test` reports
+  nothing); `se overhaul read` (the pruning facts); overhaul, by judgment
+  (`looked_at.removal`).

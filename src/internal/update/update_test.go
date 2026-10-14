@@ -49,7 +49,7 @@ func shallow(t *testing.T) (origin, clone string) {
 	t.Helper()
 	origin = repo(t, "main")
 	for name, text := range map[string]string{
-		"go.mod":             "module github.com/mb-89/SE\n\ngo 1.21\n",
+		"src/go.mod":         "module github.com/mb-89/SE/src\n\ngo 1.21\n",
 		"src/cmd/se/main.go": "package main\n\nfunc main() {}\n",
 	} {
 		path := filepath.Join(origin, name)
@@ -71,6 +71,7 @@ func shallow(t *testing.T) (origin, clone string) {
 }
 
 func TestAShallowCloneIsPulledAndRebuilt(t *testing.T) {
+	t.Parallel()
 	origin, clone := shallow(t)
 	out := filepath.Join(clone, "src", "plugin", "bin", "se")
 	r, err := update.Run(drive, machine, clone, out)
@@ -86,6 +87,7 @@ func TestAShallowCloneIsPulledAndRebuilt(t *testing.T) {
 }
 
 func TestACurrentCheckoutIsNotRebuilt(t *testing.T) {
+	t.Parallel()
 	origin, clone := shallow(t)
 	run(t, clone, "pull", "-q", "--ff-only", "origin", "main")
 	out := filepath.Join(clone, "se")
@@ -99,6 +101,7 @@ func TestACurrentCheckoutIsNotRebuilt(t *testing.T) {
 }
 
 func TestAFailedPullIsAnErrorThatTouchedNothing(t *testing.T) {
+	t.Parallel()
 	origin, clone := shallow(t)
 	if err := os.RemoveAll(origin); err != nil {
 		t.Fatal(err)
@@ -150,7 +153,7 @@ func (b *box) git(c proc.Cmd) int {
 }
 
 func (b *box) goTool(c proc.Cmd) int {
-	if c.Dir != b.dir || len(c.Args) < 3 || c.Args[0] != "build" || c.Args[1] != "-o" {
+	if c.Dir != filepath.Join(b.dir, update.ModuleDir) || len(c.Args) < 3 || c.Args[0] != "build" || c.Args[1] != "-o" {
 		return 2
 	}
 	if err := os.WriteFile(c.Args[2], []byte("se "+strings.Join(c.Args, " ")), 0o755); err != nil {
@@ -182,7 +185,7 @@ func TestAnUpdateThatBroughtSomethingBuildsSeFromTheNewHead(t *testing.T) {
 		t.Fatalf("%+v %v", r, err)
 	}
 	built, err := os.ReadFile(out)
-	if err != nil || !strings.Contains(string(built), update.Ldflags(newer)) || !strings.HasSuffix(string(built), "./src/cmd/se") {
+	if err != nil || !strings.Contains(string(built), update.Ldflags(newer)) || !strings.HasSuffix(string(built), "./cmd/se") {
 		t.Fatalf("se was built as %q (%v)", built, err)
 	}
 }
@@ -232,17 +235,18 @@ func TestAnUpdateRefusesUncommittedWork(t *testing.T) {
 }
 
 func TestACheckoutIsKnownByItsModule(t *testing.T) {
+	t.Parallel()
 	for mod, want := range map[string]bool{
-		"module github.com/mb-89/SE\n\ngo 1.24\n": true,
-		"// SE\nmodule \"github.com/mb-89/SE\"\n": true,
-		"module github.com/mb-89/SE/sub\n":        false,
-		"module example.com/other\n":              false,
+		"module github.com/mb-89/SE/src\n\ngo 1.24\n": true,
+		"// SE\nmodule \"github.com/mb-89/SE/src\"\n": true,
+		"module github.com/mb-89/SE\n":                false,
+		"module example.com/other\n":                  false,
 	} {
 		d, dir := disk.NewFake(), filepath.FromSlash("/se")
-		if err := d.MkdirAll(dir); err != nil {
+		if err := d.MkdirAll(filepath.Join(dir, update.ModuleDir)); err != nil {
 			t.Fatal(err)
 		}
-		if err := d.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod)); err != nil {
+		if err := d.WriteFile(filepath.Join(dir, update.ModuleDir, "go.mod"), []byte(mod)); err != nil {
 			t.Fatal(err)
 		}
 		if got := update.IsCheckout(d, dir); got != want {

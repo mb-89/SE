@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
+	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
@@ -25,13 +23,22 @@ import (
 // handedOver marks an se run by another se; it hands nothing over again.
 const handedOver = "SE_HANDED_OVER"
 
-// handsOver runs the se built from the workspace's checkout on d with these args,
+// A checkout's se that was just written can be busy for a moment, while a
+// process forked meanwhile still holds it open; handsOver tries it busyTries
+// times, busyWait apart on the world's clock, before it answers itself.
+const (
+	busyTries = 20
+	busyWait  = 50 * time.Millisecond
+)
+
+// handsOver runs the se built from the workspace's checkout in w with these args,
 // when there is one, and answers its exit code. handed is false where this se
 // answers itself: not a checkout, nothing built, or the build would not run.
-func handsOver(d disk.Disk, procs proc.Procs, workspace string, args []string, stdout, stderr io.Writer) (code int, handed bool) {
-	if os.Getenv(handedOver) != "" {
+func handsOver(w *World, workspace string, args []string, stdout, stderr io.Writer) (code int, handed bool) {
+	if w.Getenv(handedOver) != "" {
 		return 0, false
 	}
+	d := w.Disk
 	root, err := filepath.Abs(workspace)
 	if err != nil || !update.IsCheckout(d, root) {
 		return 0, false
@@ -40,15 +47,21 @@ func handsOver(d disk.Disk, procs proc.Procs, workspace string, args []string, s
 	if there, err := d.Exists(bin); err != nil || !there {
 		return 0, false
 	}
-	err = procs.Run(proc.Cmd{Name: bin, Args: args, Stdout: stdout, Stderr: stderr, Env: append(os.Environ(), handedOver+"=1")})
-	return proc.ExitCode(err)
+	c := proc.Cmd{Name: bin, Args: args, Stdout: stdout, Stderr: stderr, Env: append(w.Environ(), handedOver+"=1")}
+	for try := 1; ; try++ {
+		err = w.Proc.Run(c)
+		if !errors.Is(err, proc.ErrBusy) || try == busyTries {
+			return proc.ExitCode(err)
+		}
+		w.Clock.Sleep(busyWait)
+	}
 }
 
 // daemonExe is the se the workspace's daemon runs, built first where the
 // workspace is an SE checkout. note says which se that is, and why, where it
 // is not simply the installed one.
-func daemonExe(procs proc.Procs, p daemon.Paths) (exe, note string, err error) {
-	installed, err := executable()
+func daemonExe(w *World, p daemon.Paths) (exe, note string, err error) {
+	installed, err := w.Proc.Self()
 	if err != nil {
 		return "", "", err
 	}
@@ -58,7 +71,7 @@ func daemonExe(procs proc.Procs, p daemon.Paths) (exe, note string, err error) {
 	if err := daemon.Prepare(p); err != nil {
 		return "", "", err
 	}
-	if err := update.Build(p.Disk, procs, p.Workspace, p.Bin()); err != nil {
+	if err := update.Build(p.Disk, w.Proc, p.Workspace, p.Bin()); err != nil {
 		// A build left from before would answer the session's /se words.
 		withdraw(p.Disk, p.Bin())
 		return installed, fmt.Sprintf("This checkout's se does not build, so the daemon runs the installed se (%s):\n%v", installed, err), nil
@@ -67,15 +80,15 @@ func daemonExe(procs proc.Procs, p daemon.Paths) (exe, note string, err error) {
 }
 
 // startDaemon answers the running daemon, or starts one with daemonExe.
-func startDaemon(procs proc.Procs, p daemon.Paths, clk clock.Clock, net sehttp.Net) (daemon.Endpoint, string, error) {
-	if ep, ok := daemon.Healthy(p, net); ok {
+func startDaemon(w *World, p daemon.Paths) (daemon.Endpoint, string, error) {
+	if ep, ok := daemon.Healthy(p, w.Net); ok {
 		return ep, "", nil
 	}
-	exe, note, err := daemonExe(procs, p)
+	exe, note, err := daemonExe(w, p)
 	if err != nil {
 		return daemon.Endpoint{}, "", err
 	}
-	ep, err := daemon.Start(procs, p, exe, startWait, clk, net)
+	ep, err := daemon.Start(w.Proc, p, exe, startWait, w.Clock, w.Net)
 	return ep, note, err
 }
 

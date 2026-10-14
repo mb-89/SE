@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	nethttp "net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -52,7 +53,7 @@ func (w wire) Serve(ctx context.Context, token string, d Daemon) (string, <-chan
 	return ln.Addr().String(), done, nil
 }
 
-// handler routes /health, /event and /shutdown, each behind the token.
+// handler routes /health, /event, /value/<name> and /shutdown, each behind the token.
 func handler(token string, d Daemon) nethttp.Handler {
 	mux := nethttp.NewServeMux()
 	mux.HandleFunc("GET /health", func(rw nethttp.ResponseWriter, _ *nethttp.Request) { answer(rw, d.Health()) })
@@ -71,6 +72,18 @@ func handler(token string, d Daemon) nethttp.Handler {
 			return
 		}
 		answer(rw, struct{}{})
+	})
+	mux.HandleFunc("GET /value/{name...}", func(rw nethttp.ResponseWriter, r *nethttp.Request) {
+		v, err := d.Value(r.PathValue("name"))
+		if err != nil {
+			code := StatusInternal
+			if errors.Is(err, ErrUnknown) {
+				code = StatusNotFound
+			}
+			nethttp.Error(rw, err.Error(), code)
+			return
+		}
+		answer(rw, v)
 	})
 	mux.HandleFunc("POST /shutdown", func(rw nethttp.ResponseWriter, _ *nethttp.Request) {
 		answer(rw, struct{}{})
@@ -103,6 +116,12 @@ func (w wire) Event(address, token string, ev Event) error {
 		return err
 	}
 	return w.call(address, token, nethttp.MethodPost, "/event", body, nil)
+}
+
+func (w wire) Value(address, token, name string) (Value, error) {
+	var v Value
+	err := w.call(address, token, nethttp.MethodGet, "/value/"+name, nil, &v)
+	return v, err
 }
 
 func (w wire) Shutdown(address, token string) error {
@@ -148,7 +167,21 @@ func (w wire) Fire(url, token string) (Answer, error) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, BodyCap))
-	return Answer{Status: resp.StatusCode, Body: body}, nil
+	return Answer{Status: resp.StatusCode, Body: body, RetryAfter: resp.Header.Get("Retry-After")}, nil
+}
+
+// RetryAt is when a refusal's Retry-After header, said at now, lets the
+// caller try again: now plus its seconds, or its HTTP date. A header that is
+// missing or malformed answers the zero time.
+func RetryAt(now time.Time, header string) time.Time {
+	header = strings.TrimSpace(header)
+	if secs, err := strconv.Atoi(header); err == nil && secs >= 0 {
+		return now.Add(time.Duration(secs) * time.Second)
+	}
+	if at, err := nethttp.ParseTime(header); err == nil {
+		return at
+	}
+	return time.Time{}
 }
 
 // StatusText names a status code, as "429 Too Many Requests".

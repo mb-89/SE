@@ -1,9 +1,12 @@
 // Package proc is the I/O module for programs: the one place SE starts git,
 // go, check.sh, the se it hands over to, and the detached daemon. Code that
-// runs a program takes a Procs as an argument; the se binary hands it Real, a
-// test hands it a Fake with the programs its case needs installed.
+// runs a program takes a Procs as an argument; the se binary hands it
+// Listed(Real()), a test hands it a Fake with the programs its case needs
+// installed.
 //
-// gh is not run through here: GitHub is its own module, src/internal/io/github.
+// It starts only the programs that are themselves the work, Programs: no
+// process does what a library call can do (principle 6). gh is not one:
+// GitHub is its own module, src/internal/io/github.
 package proc
 
 import (
@@ -11,8 +14,54 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
+	"slices"
 	"strings"
 )
+
+// Programs are the only programs SE starts, by name: go, the battery's
+// linters (golangci-lint, biome, deadcode), git where Go has no library for
+// it, sh for the battery itself (tests/check.sh), and se, the daemon and the
+// checkout's se it hands over to.
+// Listed refuses any other, and the battery's programs rule refuses a program
+// the code names that is not here (src/internal/rules/programs.go).
+var Programs = []string{"go", "git", "golangci-lint", "biome", "deadcode", "sh", "se"}
+
+// ErrNotListed is the error of a program Programs does not name.
+var ErrNotListed = errors.New("is no program SE starts")
+
+// NameOf is the name a program goes by, without its folder or .exe: a path
+// to se is se.
+func NameOf(name string) string {
+	return strings.TrimSuffix(filepath.Base(filepath.ToSlash(name)), ".exe")
+}
+
+// Listed is p starting only the programs Programs names; any other fails with
+// ErrNotListed and is never started.
+func Listed(p Procs) Procs { return listed{p} }
+
+type listed struct{ Procs }
+
+func (l listed) check(c Cmd) error {
+	if !slices.Contains(Programs, NameOf(c.Name)) {
+		return fmt.Errorf("%s %w (%s); reach what it does through its I/O module (spec/io.md)", c.Name, ErrNotListed, strings.Join(Programs, ", "))
+	}
+	return nil
+}
+
+func (l listed) Run(c Cmd) error {
+	if err := l.check(c); err != nil {
+		return err
+	}
+	return l.Procs.Run(c)
+}
+
+func (l listed) Start(c Cmd) (Running, error) {
+	if err := l.check(c); err != nil {
+		return nil, err
+	}
+	return l.Procs.Start(c)
+}
 
 // Cmd is one run of a program.
 type Cmd struct {
@@ -38,11 +87,15 @@ func (c Cmd) String() string { return strings.Join(append([]string{c.Name}, c.Ar
 // Procs is what SE asks of programs.
 type Procs interface {
 	// Run runs c to its end. A program that is not there fails with
-	// ErrNotFound; one that exits other than 0 with an *ExitError.
+	// ErrNotFound; one still open for writing, which the system will not run
+	// yet, with ErrBusy; one that exits other than 0 with an *ExitError.
 	Run(c Cmd) error
 	// Start starts c and returns at once; the Running's Wait answers its end
 	// as Run would.
 	Start(c Cmd) (Running, error)
+	// Self answers the path of the program running now, the se itself, which
+	// Run runs as any other.
+	Self() (string, error)
 }
 
 // Running is a program Start started.
@@ -53,6 +106,12 @@ type Running interface {
 
 // ErrNotFound is the error of a program that is not there.
 var ErrNotFound = errors.New("no such program")
+
+// ErrBusy is the error of a program the system will not run yet, since a
+// file handle still writes it: Linux's "text file busy". A program just
+// written can be busy for a moment, while a process forked meanwhile still
+// holds the handle; it runs once that process has gone on.
+var ErrBusy = errors.New("program busy, still open for writing")
 
 // ExitError is the end of a program that exited other than 0.
 type ExitError struct{ Code int }
