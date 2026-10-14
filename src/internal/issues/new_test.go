@@ -121,3 +121,23 @@ func TestCreateMakesASubIssueOfItsParent(t *testing.T) {
 		t.Fatalf("wrote %q", w)
 	}
 }
+
+func TestDuplicateIsAnOpenIssueOfTheSameTitleUnderTheSameParent(t *testing.T) {
+	gh := recorded(t, map[string]string{
+		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
+			{"number":1,"title":"root","state":"open","sub_issues_summary":{"total":2}},
+			{"number":2,"title":"leaf","state":"open"},
+			{"number":3,"title":"leaf ","state":"open"}]`,
+		"repos/o/r/issues/1/sub_issues?per_page=100": `[{"number":3,"state":"open"},{"number":4,"title":"done","state":"closed"}]`,
+	})
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	for _, c := range []struct {
+		title  string
+		parent int
+		want   int
+	}{{"leaf", 0, 2}, {" leaf", 1, 3}, {"root", 0, 1}, {"root", 1, 0}, {"done", 1, 0}, {"Leaf", 0, 0}} {
+		if got, err := s.Duplicate(c.title, c.parent); err != nil || got != c.want {
+			t.Errorf("%q under #%d: %d %v, want %d", c.title, c.parent, got, err, c.want)
+		}
+	}
+}
