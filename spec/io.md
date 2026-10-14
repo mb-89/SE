@@ -46,6 +46,36 @@ and `github.Real()`).
 Nothing reaches for the real thing itself, so a test hands in the fake and a
 case replays.
 
+## A door declares what it guards
+
+An I/O module is a door. Its folder holds `owns.yaml`, which says three
+things, and the `io-module` rule reads every folder under `src/internal/io`
+that holds a file as a door, so a new module is picked up by being there:
+
+| key | what it holds |
+|---|---|
+| `guards` | the resource, in one line: what it is, a colon, what of it. GitHub's is `"GitHub: issues, pull requests, branches, comments, labels"` |
+| `go` | the Go imports (`os/exec`, covering its subpackages) and package members (`time.Now`) that reach it |
+| `commands` | the words that reach it from a shell line or from text a box is told to run: GitHub's are `gh`, `api.github.com` and `mcp__github__*`, the last any word it starts |
+
+A name belongs to one door. A folder without `owns.yaml` is refused, and so is
+a declaration with no resource or a key it does not take.
+
+The rule refuses going around a door: a Go file outside `src/internal/io`
+that uses a `go` name, or starts a program, through `os/exec`, that a
+`commands` word names; and a line naming a `commands` word in the plugin
+(`src/plugin`: agents, skills, hooks), in `src/scripts`, in `tests/*.sh` or in
+`CLAUDE.md`. So an agent file telling a box to run `gh pr view` is refused:
+it reaches GitHub around its door; it goes through se. A word is matched
+whole: `ghost` and `gh-calls` are not `gh`.
+
+There are two ways past. A line that may go around a door for good, such as
+one that forbids the bypass ("never run gh"), carries the marker
+`se: around-the-door - <why>`, in a comment where the file has them; a marker
+without a reason passes nothing, and one on a line that goes around no door is
+refused. What cannot change yet is named in `src/internal/io/allowlist.txt`,
+a file and what it names per line, which only shrinks.
+
 ## Fakes behave
 
 A fake keeps its own state and answers from it as the real thing would. It
@@ -109,13 +139,15 @@ assigns a package-level func variable, its own package's or an imported one's.
 A test does not swap how code reaches the outside; it hands the code a fake,
 as an argument or a field, such as the `World` `cmd/se` hands every call.
 
-The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line: outside
+The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line, off
+each door's `owns.yaml` ([above](#a-door-declares-what-it-guards)): outside
 `src/internal/io/`, no Go file imports `os/exec` or `net/http`, runs `gh`, calls the
 clock through `time` (`Now`, `Sleep`, `After` and their kin), or opens, reads
-or writes files through `os`. Test files are held by the `fast-test` rule
+or writes files through `os`, and no text a box is told to run names `gh`.
+Test files are held by the `fast-test` rule
 (`src/internal/rules/fasttest.go`) instead: every test calls `t.Parallel`
 first, and outside `src/internal/io/` no test reads the clock through `time`
-or takes `clock.Real`. What still breaks it is named in
+(the members the clock's `owns.yaml` names) or takes `clock.Real`. What still breaks it is named in
 `src/internal/rules/serial.txt`, which only shrinks as the allowlist below does.
 
 The plugin has its clock too, `$.clock`. The `plugin-clock` rule
@@ -127,7 +159,10 @@ are aside.
 What broke it while the modules landed was named in one allowlist,
 `src/internal/io/allowlist.txt`, one file and what it reaches per line. Each
 I/O module removed its own entries as it landed, and GitHub's, the last,
-emptied it. It only shrinks: the rule refuses an entry that matches nothing.
+emptied it. When the rule came to read scripts and shell files, it took two:
+`tests/tools.sh` installs gh and `src/scripts/profile-gh-calls.sh` wraps it,
+both until the GitHub module runs no gh (#186). It only shrinks: the rule
+refuses an entry that matches nothing.
 
 The `programs` rule (`src/internal/rules/programs.go`) holds principle 6's
 "no process does what a library call can do": no Go file names a program
