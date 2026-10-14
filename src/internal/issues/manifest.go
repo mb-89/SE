@@ -30,6 +30,36 @@ const ManifestLabel = "se-manifest"
 // for the target time from its creation.
 const MiscLabel = "se-misc"
 
+// PriorityLabel marks an issue that goes first: a manifest is a priority
+// one where it, or any leaf inside it, carries it. A take at the top offers
+// the priority manifests (and the retros and overhauls, which the cadence
+// makes due) before all others, lowest number first, and a take inside a
+// manifest its priority leaves before the rest. Stuck and conflicted work
+// keeps its place ahead of it, and a box finishes the manifest it works on
+// before its next take sees a priority one.
+const PriorityLabel = "se-priority"
+
+// prioritize marks each status in all a priority one: an issue labelled
+// se-priority, a retro or an overhaul, and a parent with a priority issue
+// open anywhere in its tree.
+func prioritize(all []*Status, t tree) {
+	var inside func(n int) bool
+	inside = func(n int) bool {
+		if i := t.byNum[n]; i.labelled(PriorityLabel) || i.labelled(RetroLabel) || i.labelled(OverhaulLabel) {
+			return true
+		}
+		for _, c := range t.subs[n] {
+			if _, open := t.byNum[c.Number]; open && inside(c.Number) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, st := range all {
+		st.Priority = inside(st.Number)
+	}
+}
+
 // atTop says whether an issue labelled so stands at the top by itself, in no
 // manifest: a manifest, a retro, an overhaul, or an issue for a person.
 func atTop(labels []string) bool {
