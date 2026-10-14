@@ -98,6 +98,7 @@ func TestInOffersTheReadyLeavesAtAnyDepth(t *testing.T) {
 			node(50, 1),  // a root blocked by #30
 			node(51, 0)), // inside #50, so held by its root's blocker
 		refsPath:        `[{"ref":"refs/heads/issue-15"},{"ref":"refs/heads/issue-10"}]`,
+		openPullsPath:   `[]`,
 		subsPath(10):    subs(11, 12, 14, 15, 16, 18, -17),
 		subsPath(12):    subs(13),
 		subsPath(18):    subs(19),

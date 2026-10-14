@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mb-89/SE/src/internal/io/github"
@@ -32,26 +33,34 @@ func briefAnswers() map[string]string {
 	}
 }
 
-// reads is a GitHub that keeps the paths it was asked to read.
+// reads is a GitHub that keeps the paths it was asked to read, one at a
+// time, as reads run in parallel.
 type reads struct {
 	github.GitHub
+	mu    *sync.Mutex
 	paths *[]string
 }
 
-func (r reads) Get(path string) ([]byte, error) {
+func (r reads) note(path string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	*r.paths = append(*r.paths, path)
+}
+
+func (r reads) Get(path string) ([]byte, error) {
+	r.note(path)
 	return r.GitHub.Get(path)
 }
 
 func (r reads) List(path string) ([]byte, error) {
-	*r.paths = append(*r.paths, path)
+	r.note(path)
 	return r.GitHub.List(path)
 }
 
 // asked records the paths a brief reads.
 func asked(t *testing.T, answers map[string]string) (github.GitHub, *[]string) {
 	var paths []string
-	return reads{recorded(t, answers), &paths}, &paths
+	return reads{recorded(t, answers), &sync.Mutex{}, &paths}, &paths
 }
 
 func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {

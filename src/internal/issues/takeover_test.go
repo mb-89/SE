@@ -13,14 +13,14 @@ import (
 )
 
 const (
-	openPullsPath = "repos/o/r/pulls?base=main&state=open&per_page=100"
+	openPullsPath = "repos/o/r/pulls?state=open&per_page=100"
 	comments7     = "repos/o/r/issues/7/comments?per_page=100"
 )
 
 // pr70 is #7's PR at head abc as GitHub reports it: mergeable is "null",
 // "true" or "false", with its mergeable_state.
 func pr70(mergeable, state string) string {
-	return fmt.Sprintf(`{"number":70,"html_url":"p70","mergeable":%s,"mergeable_state":%q,"head":{"ref":"issue-7","sha":"abc"}}`, mergeable, state)
+	return fmt.Sprintf(`{"number":70,"html_url":"p70","mergeable":%s,"mergeable_state":%q,"head":{"ref":"issue-7","sha":"abc"},"base":{"ref":"main"}}`, mergeable, state)
 }
 
 // newPulls is a fake repository with #5 ready and #7 claimed, its PR #70
@@ -31,7 +31,7 @@ func newPulls(t *testing.T, c *clock.Fake, pr ...string) *github.Fake {
 	gh := recordedAt(t, c, unblocked(map[string]string{
 		listPath:      `[` + open(5, "new work") + `,` + open(7, "old work") + `]`,
 		refsPath:      `[{"ref":"refs/heads/issue-7"}]`,
-		openPullsPath: `[{"number":70,"head":{"ref":"issue-7"}},{"number":71,"head":{"ref":"someone-else"}}]`,
+		openPullsPath: `[{"number":70,"head":{"ref":"issue-7"},"base":{"ref":"main"}},{"number":71,"head":{"ref":"someone-else"},"base":{"ref":"main"}}]`,
 		// #7's branch saw a push inside the lease: it is not stuck.
 		activity(7): pushed(fresh),
 	}, 5, 7))

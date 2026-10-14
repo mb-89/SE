@@ -51,15 +51,16 @@ func recordedIssues(t *testing.T) *github.Fake {
 			{"number":2,"title":"two","body":"","state":"open","html_url":"u2","issue_dependencies_summary":{"total_blocked_by":1}},
 			{"number":1,"title":"one","body":"","state":"open","html_url":"u1"}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[{"ref":"refs/heads/issue-1"}]`,
+		"repos/o/r/issues/1/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
 		"repos/o/r/pulls?base=main&state=open&per_page=100":       `[]`,
-		"repos/o/r/issues/1":                                      `{"id":101,"number":1,"state":"open"}`,
-		"repos/o/r/issues/3":                                      `{"id":103,"number":3,"state":"open"}`,
-		"repos/o/r/issues/5":                                      `{"id":105,"number":5,"state":"closed"}`,
-		"repos/o/r/issues/4":                                      `{"id":104,"number":4,"pull_request":{}}`,
-		"repos/o/r/issues?labels=se&state=closed&per_page=100":    `[{"number":5,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`,
-		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":    `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
-		"repos/o/r/issues/3/dependencies/blocking?per_page=100":   `[{"number":7,"state":"open"},{"number":8,"state":"closed"}]`,
+		"repos/o/r/issues/1": `{"id":101,"number":1,"state":"open"}`,
+		"repos/o/r/issues/3": `{"id":103,"number":3,"state":"open"}`,
+		"repos/o/r/issues/5": `{"id":105,"number":5,"state":"closed"}`,
+		"repos/o/r/issues/4": `{"id":104,"number":4,"pull_request":{}}`,
+		"repos/o/r/issues?labels=se&state=closed&per_page=100":  `[{"number":5,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`,
+		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":  `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
+		"repos/o/r/issues/3/dependencies/blocking?per_page=100": `[{"number":7,"state":"open"},{"number":8,"state":"closed"}]`,
 	})
 	gh.DeleteIssue("o/r", 9)
 	oldNet := network

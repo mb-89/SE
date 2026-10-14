@@ -163,7 +163,30 @@ func encode(v any) ([]byte, error) {
 	return bytes.TrimRight(b.Bytes(), "\n"), nil
 }
 
+// read answers the value at path; a list asked for by page answers that
+// page alone, per_page items to a page (30 where it is not said).
 func (f *Fake) read(path string) (any, error) {
+	v, err := f.whole(path)
+	if err != nil {
+		return nil, err
+	}
+	u, _ := url.Parse(path)
+	list, ok := v.([]any)
+	if !ok || u == nil || u.Query().Get("page") == "" {
+		return v, nil
+	}
+	page, size := num(u.Query().Get("page")), num(u.Query().Get("per_page"))
+	if size == 0 {
+		size = 30
+	}
+	from, to := min((page-1)*size, len(list)), min(page*size, len(list))
+	if page < 1 {
+		from, to = 0, 0
+	}
+	return list[from:to], nil
+}
+
+func (f *Fake) whole(path string) (any, error) {
 	name, w, q, err := route(path)
 	if err != nil {
 		return nil, err
@@ -174,6 +197,8 @@ func (f *Fake) read(path string) (any, error) {
 		return r.listIssues(q), nil
 	case match(w, "issues", "#"):
 		return r.issue(num(w[1]))
+	case match(w, "issues", "comments"):
+		return r.allComments(q.Get("since")), nil
 	case match(w, "issues", "#", "comments"):
 		n := num(w[1])
 		if !r.exists(n) {
@@ -302,6 +327,44 @@ func (r *repo) issue(n int) (any, error) {
 		out["sub_issues_summary"] = obj{"total": len(subs), "completed": done, "percent_completed": pct}
 	}
 	return out, nil
+}
+
+// allComments is every comment on the repository's issues updated since
+// since (RFC 3339; empty, all), oldest first, each naming its issue.
+func (r *repo) allComments(since string) []any {
+	var all []obj
+	for n, cs := range r.comments {
+		for _, c := range cs {
+			at, _ := c["updated_at"].(string)
+			if at == "" {
+				at, _ = c["created_at"].(string)
+			}
+			if since != "" && at != "" && at < since {
+				continue
+			}
+			out := obj{}
+			for k, v := range c {
+				out[k] = v
+			}
+			if _, ok := out["issue_url"]; !ok {
+				out["issue_url"] = fmt.Sprintf("https://api.github.com/repos/%s/issues/%d", r.name, n)
+			}
+			all = append(all, out)
+		}
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		a, _ := all[i]["created_at"].(string)
+		b, _ := all[j]["created_at"].(string)
+		if a != b {
+			return a < b
+		}
+		return idOf(all[i]) < idOf(all[j])
+	})
+	out := []any{}
+	for _, c := range all {
+		out = append(out, c)
+	}
+	return out
 }
 
 func (r *repo) issuesOf(n int, links map[int][]int) (any, error) {

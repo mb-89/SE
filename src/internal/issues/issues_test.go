@@ -162,10 +162,11 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 	gh := recorded(t, map[string]string{
 		"repos/mb-89/SE/issues?labels=se&state=open&per_page=100":      read("issues.json"),
 		"repos/mb-89/SE/git/matching-refs/heads/issue-":                read("refs.json"),
+		"repos/mb-89/SE/pulls?state=open&per_page=100":                 `[]`,
+		"repos/mb-89/SE/issues/5/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/mb-89/SE/issues/6/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/mb-89/SE/issues/7/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/mb-89/SE/activity?ref=refs/heads/issue-5&per_page=1":    pushed(fresh),
-		"repos/mb-89/SE/issues/5/dependencies/blocked_by?per_page=100": `[]`,
 	})
 	s := Source{Proc: machine, Repo: "mb-89/SE", GitHub: gh, Clock: atNow()}
 	all, err := s.Survey()
@@ -210,8 +211,9 @@ func TestAClaimedBranchHoldsItsIssue(t *testing.T) {
 	got := survey(t, pushedAt(unblocked(map[string]string{
 		listPath: `[` + open(1, "") + `,` + open(2, "") + `,` + open(12, "") + `]`,
 		// issue-12 is not issue-1; issue-2-old is not issue-2.
-		refsPath: `[{"ref":"refs/heads/issue-1"},{"ref":"refs/heads/issue-2-old"}]`,
-	}, 2, 12), fresh, 1))
+		refsPath:      `[{"ref":"refs/heads/issue-1"},{"ref":"refs/heads/issue-2-old"}]`,
+		openPullsPath: `[]`,
+	}, 1, 2, 12), fresh, 1))
 	if !reflect.DeepEqual(got, map[int]string{1: "claimed by issue-1", 2: "", 12: ""}) {
 		t.Fatalf("%v", got)
 	}
@@ -245,11 +247,12 @@ func TestAStaleSummaryDoesNotMakeABlockedIssueReady(t *testing.T) {
 	// Right after #6 is linked as blocked by #8, the list's summary can
 	// still count 0; the links already name #8.
 	gh := recorded(t, map[string]string{
-		listPath:    `[` + open(6, "") + `,` + open(8, "") + `]`,
-		refsPath:    `[{"ref":"refs/heads/issue-8"}]`,
-		links(6):    `[{"number":8,"state":"open"}]`,
-		links(8):    `[]`,
-		activity(8): pushed(fresh),
+		listPath:      `[` + open(6, "") + `,` + open(8, "") + `]`,
+		refsPath:      `[{"ref":"refs/heads/issue-8"}]`,
+		openPullsPath: `[]`,
+		links(6):      `[{"number":8,"state":"open"}]`,
+		links(8):      `[]`,
+		activity(8):   pushed(fresh),
 	})
 	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if next, ok, err := s.Next(); err != nil || ok {
@@ -266,8 +269,10 @@ func TestNothingReady(t *testing.T) {
 		"all held":  `[` + open(1, "") + `,{"number":2,"state":"open","issue_dependencies_summary":{"total_blocked_by":1}}]`,
 	} {
 		gh := recorded(t, map[string]string{
-			listPath: list,
-			refsPath: `[{"ref":"refs/heads/issue-1"}]`,
+			listPath:      list,
+			refsPath:      `[{"ref":"refs/heads/issue-1"}]`,
+			openPullsPath: `[]`,
+			links(1):      `[]`,
 			"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
 			links(1):    `[]`,
 			activity(1): pushed(fresh),
@@ -408,6 +413,20 @@ func TestTakeRefusesAnIssueThatIsNotReady(t *testing.T) {
 	}
 	if _, _, err := s.Take(t.TempDir(), 3); err == nil || !strings.Contains(err.Error(), "not an open issue") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestPagesAsksPageByPageUntilOneIsShort(t *testing.T) {
+	// One more comment than a page holds.
+	all := make([]string, PerPage+1)
+	for k := range all {
+		all[k] = fmt.Sprintf(`{"id":%d,"body":"c%d","created_at":"2026-10-01T00:00:%02dZ"}`, k+1, k, k%60)
+	}
+	gh := recorded(t, map[string]string{"repos/o/r/issues/1/comments": "[" + strings.Join(all, ",") + "]"})
+	path := "repos/o/r/issues/comments?since=2026-01-01T00:00:00Z&per_page=100"
+	got, err := pages[comment](Source{Repo: repo, GitHub: gh}, path)
+	if err != nil || len(got) != PerPage+1 {
+		t.Fatalf("%d items, %v", len(got), err)
 	}
 }
 

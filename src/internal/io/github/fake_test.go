@@ -183,3 +183,18 @@ func TestTheFakeTakesABranchUpdateAndAWorkflowDispatch(t *testing.T) {
 		t.Fatalf("a dispatch without a ref: %v", err)
 	}
 }
+
+func TestTheFakeListsTheRepositorysCommentsSinceATimeByPage(t *testing.T) {
+	t.Parallel()
+	f := seeded(t, map[string]string{
+		"repos/o/r/issues/1/comments": `[{"id":1,"body":"old","created_at":"2026-10-01T00:00:00Z"},{"id":3,"body":"new","created_at":"2026-10-03T00:00:00Z"}]`,
+		"repos/o/r/issues/2/comments": `[{"id":2,"body":"mid","created_at":"2026-10-02T00:00:00Z"}]`,
+	})
+	out, err := f.List("repos/o/r/issues/comments?since=2026-10-02T00:00:00Z&per_page=1&page=2")
+	if err != nil || !strings.Contains(string(out), `"body":"new"`) || !strings.Contains(string(out), `"issue_url":"https://api.github.com/repos/o/r/issues/1"`) || strings.Contains(string(out), "mid") {
+		t.Fatalf("%s %v", out, err)
+	}
+	if out, _ := f.List("repos/o/r/issues/comments?since=2026-10-02T00:00:00Z&per_page=1&page=3"); string(out) != "[]" {
+		t.Fatalf("past the last page: %s", out)
+	}
+}

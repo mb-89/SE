@@ -95,7 +95,7 @@ func (w *world) pr(n int, mergeable, state string, autoMerge bool, runs ...strin
 	if autoMerge {
 		am = `{"merge_method":"squash"}`
 	}
-	p := fmt.Sprintf(`{"number":%d,"html_url":"p%d","node_id":"N%d","mergeable":%s,"mergeable_state":%q,"auto_merge":%s,"head":{"ref":"issue-%d","sha":"e%d"}}`,
+	p := fmt.Sprintf(`{"number":%d,"html_url":"p%d","node_id":"N%d","mergeable":%s,"mergeable_state":%q,"auto_merge":%s,"head":{"ref":"issue-%d","sha":"e%d"},"base":{"ref":"main"}}`,
 		n*10, n*10, n*10, mergeable, state, am, n, n)
 	w.set(openPullsPath, "["+p+"]")
 	var rs []string
