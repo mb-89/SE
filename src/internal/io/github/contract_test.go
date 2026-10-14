@@ -227,6 +227,15 @@ func contract(t *testing.T, fresh func(t *testing.T) (github.GitHub, string)) {
 			t.Fatalf("a deleted branch is still there: %+v", refs)
 		}
 	})
+	t.Run("an answer says the hour's quota, and each request is counted", func(t *testing.T) {
+		gh, repo := fresh(t)
+		before, _ := github.Metered(gh)
+		list[struct{}](t, gh, fmt.Sprintf("repos/%s/git/matching-refs/heads/se-contract-never-", repo))
+		n, r := github.Metered(gh)
+		if n != before+1 || !r.Known || r.Limit <= 0 || r.Remaining >= r.Limit || r.Reset.IsZero() {
+			t.Fatalf("after one request: %d counted, the quota %+v", n-before, r)
+		}
+	})
 	t.Run("what is not there is refused", func(t *testing.T) {
 		gh, repo := fresh(t)
 		if _, err := gh.Get(fmt.Sprintf("repos/%s/issues/999999999", repo)); github.Status(err) != 404 {
