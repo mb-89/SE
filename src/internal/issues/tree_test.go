@@ -49,6 +49,7 @@ func blockedPath(n int) string {
 func list(nodes ...string) string { return "[" + strings.Join(nodes, ",") + "]" }
 
 func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		// #1 is a parent of #2 and #3; #4 stands alone.
 		listPath:    list(node(3, 0), node(2, 0), node(1, 2), node(4, 0)),
@@ -80,6 +81,7 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 }
 
 func TestInOffersTheReadyLeavesAtAnyDepth(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		listPath: list(
 			node(10, 6),  // the root
@@ -157,6 +159,7 @@ func numbers(is []Issue) []int {
 }
 
 func TestParentsCloseByThemselvesDeepestFirst(t *testing.T) {
+	t.Parallel()
 	gh := recorded(t, map[string]string{
 		// #1 holds #2 and a closed #3; #2 holds only closed sub-issues, so
 		// once #2 closes, #1 does too. #6 still has an open sub-issue.
@@ -184,6 +187,7 @@ func TestParentsCloseByThemselvesDeepestFirst(t *testing.T) {
 }
 
 func TestAReviewParentNeverClosesByItself(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		// #1 is the root; #2, labelled se-review, has only closed sub-issues;
 		// #5 waits on #2.
@@ -219,6 +223,7 @@ func TestAReviewParentNeverClosesByItself(t *testing.T) {
 }
 
 func TestAReviewAtTheTopIsTakenByAnyBox(t *testing.T) {
+	t.Parallel()
 	_, a, b := boxes(t)
 	answers := map[string]string{
 		// #2, labelled se-review, stands at the top; its only leaf has closed.
@@ -250,6 +255,7 @@ func TestAReviewAtTheTopIsTakenByAnyBox(t *testing.T) {
 }
 
 func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
+	t.Parallel()
 	origin, a, b := boxes(t)
 	answers := map[string]string{
 		listPath:    list(node(1, 2), node(2, 0), node(3, 0)),
@@ -295,6 +301,7 @@ func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
 }
 
 func TestInSaysWhenTheRootHasClosed(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		listPath:    list(node(1, 1)),
 		refsPath:    `[]`,

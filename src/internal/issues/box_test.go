@@ -15,6 +15,7 @@ type fired int
 func (f *fired) fire() string { *f++; return "fired" }
 
 func TestABoxUnderItsCapTakesTheIssueAndNothingFires(t *testing.T) {
+	t.Parallel()
 	var f fired
 	// A take or a new ready issue with a box alive and under its cap.
 	if got := fanOut(map[string]int{"s1": 4, "s2": 1}, 4, true, f.fire); f != 0 || !strings.Contains(got, "s2 runs 1 of its 4") {
@@ -35,6 +36,7 @@ func TestABoxUnderItsCapTakesTheIssueAndNothingFires(t *testing.T) {
 }
 
 func TestTheBoxesAreCountedFromTheAliveClaims(t *testing.T) {
+	t.Parallel()
 	g := newHub(t, pushedAt(unblocked(map[string]string{
 		listPath: list(node(1, 0), node(2, 0), node(3, 0), node(4, 0), node(5, 0)),
 		refsPath: refs(1, 2, 3, 4),
@@ -75,6 +77,7 @@ func TestTheBoxesAreCountedFromTheAliveClaims(t *testing.T) {
 }
 
 func TestABoxRunsItsCapAndPullsTheNextWhenOneLands(t *testing.T) {
+	t.Parallel()
 	_, a, _ := boxes(t)
 	answers := pushedAt(unblocked(map[string]string{
 		listPath: list(node(1, 0), node(2, 0), node(3, 0)),

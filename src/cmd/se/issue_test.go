@@ -27,9 +27,7 @@ func hubAt(t *testing.T, answers map[string]string) *github.Fake {
 	if err := f.Seed(answers); err != nil {
 		t.Fatal(err)
 	}
-	old := hub
-	hub = f
-	t.Cleanup(func() { hub = old })
+	worldOf(t).GitHub = f
 	return f
 }
 
@@ -59,17 +57,15 @@ func recordedIssues(t *testing.T) *github.Fake {
 		"repos/o/r/issues/5": `{"id":105,"number":5,"state":"closed"}`,
 		"repos/o/r/issues/4": `{"id":104,"number":4,"pull_request":{}}`,
 		"repos/o/r/issues?labels=se&state=closed&per_page=100":  `[{"number":5,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`,
-		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":  `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
+		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":  `[{"timestamp":"` + testedAt.Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
 		"repos/o/r/issues/3/dependencies/blocking?per_page=100": `[{"number":7,"state":"open"},{"number":8,"state":"closed"}]`,
 	})
 	gh.DeleteIssue("o/r", 9)
-	oldNet := network
 	f := sehttp.NewFake()
 	f.Routine(routineURL, "tok", 100)
-	network = f
-	t.Setenv(issues.FireURLVar, routineURL)
-	t.Setenv(issues.FireTokenVar, "tok")
-	t.Cleanup(func() { network = oldNet })
+	worldOf(t).Net = f
+	setenv(t, issues.FireURLVar, routineURL)
+	setenv(t, issues.FireTokenVar, "tok")
 	return gh
 }
 
@@ -108,9 +104,10 @@ const routineURL = "https://api.example/v1/routines/se/fire"
 const firedOnce = "Fan-out fired the routine: https://claude.ai/code/session_fake1"
 
 // fires answers how many fires the routine recordedIssues stood up has taken.
-func fires() int { return network.(*sehttp.Fake).Fired(routineURL) }
+func fires(t *testing.T) int { return worldOf(t).Net.(*sehttp.Fake).Fired(routineURL) }
 
 func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	ws := t.TempDir()
 	code, out, errs := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws)
@@ -122,8 +119,8 @@ func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 	if w := gh.Writes(); len(w) != 0 {
 		t.Errorf("pull without --take wrote to GitHub: %q", w)
 	}
-	if entries, _ := os.ReadDir(ws); fires() != 0 || len(entries) != 0 {
-		t.Errorf("pull without --take fired %d times, left %v in the workspace", fires(), entries)
+	if entries, _ := os.ReadDir(ws); fires(t) != 0 || len(entries) != 0 {
+		t.Errorf("pull without --take fired %d times, left %v in the workspace", fires(t), entries)
 	}
 	code, out, _ = se(t, "issue", "pull", "--json", "--repo", "o/r")
 	var answer struct {
@@ -136,6 +133,7 @@ func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 }
 
 func TestIssueCommandsAreOfferedInASession(t *testing.T) {
+	t.Parallel()
 	recordedIssues(t)
 	if r := session(t, "issue", "pull", "--repo", "o/r"); !strings.HasPrefix(r.Text, "#3 three") {
 		t.Fatalf("%+v", r)
@@ -152,6 +150,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 }
 
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
+	t.Parallel()
 	code, _, errs := se(t, "issue")
 	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, pull, resume, review, tree." {
 		t.Fatalf("exit %d, %q", code, errs)
@@ -159,6 +158,7 @@ func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 }
 
 func TestThereIsNoTakeCommand(t *testing.T) {
+	t.Parallel()
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue pull, not a command")
 	}
@@ -168,6 +168,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 }
 
 func TestIssuePullTakeRefusesABadNumber(t *testing.T) {
+	t.Parallel()
 	recordedIssues(t)
 	for _, args := range [][]string{{"3"}, {"--take", "x"}, {"--take", "3", "4"}, {"--take=3", "4"}, {"--take", "0"}} {
 		code, _, errs := se(t, append([]string{"issue", "pull", "--repo", "o/r"}, args...)...)
@@ -188,6 +189,7 @@ func TestIssuePullTakeRefusesABadNumber(t *testing.T) {
 }
 
 func TestIssueNewNeedsBlockedBy(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	for args, want := range map[string]string{
 		"--title t --body b":                              "needs --blocked-by",
@@ -210,6 +212,7 @@ func TestIssueNewNeedsBlockedBy(t *testing.T) {
 }
 
 func TestIssueNewCreatesTheIssueAndItsLinks(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	d, dir := onFake(t), filepath.FromSlash("/ws")
 	put(t, d, filepath.Join(dir, "body.md"), "the body\n")
@@ -235,6 +238,7 @@ func TestIssueNewCreatesTheIssueAndItsLinks(t *testing.T) {
 }
 
 func TestIssueLandNamesThePR(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
 	git := func(dir string, args ...string) {
@@ -259,11 +263,9 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	put(t, d, filepath.Join(ws, issues.QuestionsFile), string(spec))
 	answers := filepath.Join(root, "answers.yaml")
 	put(t, d, answers, "done: one\ntimeline: two\n")
-	oldCheck, oldSession := check, sessionID
-	t.Cleanup(func() { check, sessionID = oldCheck, oldSession })
 	checked := ""
-	check = func(_ proc.Procs, dir string) error { checked = dir; return nil }
-	sessionID = func() string { return "s1" }
+	worldOf(t).Check = func(_ proc.Procs, dir string) error { checked = dir; return nil }
+	setenv(t, issues.SessionVar, "s1")
 	gh := hubAt(t, map[string]string{
 		"repos/o/r/issues/6": `{"number":6,"title":"six","state":"open"}`,
 		"repos/o/r/activity?ref=refs/heads/issue-6&activity_type=branch_creation&per_page=100": `[]`,
@@ -314,6 +316,7 @@ func TestIssueLandNamesThePR(t *testing.T) {
 }
 
 func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
 			{"number":1,"title":"root","state":"open","html_url":"u1","sub_issues_summary":{"total":2}},
@@ -362,6 +365,7 @@ func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
 }
 
 func TestIssueNewTakesAParent(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--parent", "3")
 	if code != 0 || !strings.HasPrefix(out, "Created #10 ten\n") {
@@ -373,6 +377,7 @@ func TestIssueNewTakesAParent(t *testing.T) {
 }
 
 func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
+	t.Parallel()
 	recordedIssues(t)
 	root := t.TempDir()
 	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
@@ -388,43 +393,45 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 	git(ws, "commit", "-q", "--allow-empty", "-m", "start")
 	git(ws, "push", "-q", "origin", "main")
 	// Naming an issue and failing to take one fire nothing.
-	if code, _, _ := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws); code != 0 || fires() != 0 {
-		t.Fatalf("exit %d, %d fires", code, fires())
+	if code, _, _ := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws); code != 0 || fires(t) != 0 {
+		t.Fatalf("exit %d, %d fires", code, fires(t))
 	}
-	if code, _, _ := se(t, "issue", "pull", "--take", "2", "--repo", "o/r", "--workspace", ws); code != 1 || fires() != 0 {
-		t.Fatalf("exit %d, %d fires", code, fires())
+	if code, _, _ := se(t, "issue", "pull", "--take", "2", "--repo", "o/r", "--workspace", ws); code != 1 || fires(t) != 0 {
+		t.Fatalf("exit %d, %d fires", code, fires(t))
 	}
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || fires() != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
-		t.Fatalf("exit %d, %d fires, %q %q", code, fires(), out, errs)
+	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
+		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// #3 is now claimed on origin, but the recorded refs do not say so: the
 	// take is refused, moves on, finds nothing else and fires nothing.
 	git(ws, "checkout", "-q", "main")
-	if code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws); code != 0 || fires() != 1 || out != `{"ready":false}`+"\n" {
-		t.Fatalf("exit %d, %d fires, %q", code, fires(), out)
+	if code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws); code != 0 || fires(t) != 1 || out != `{"ready":false}`+"\n" {
+		t.Fatalf("exit %d, %d fires, %q", code, fires(t), out)
 	}
 }
 
 func TestANewIssueFiresTheRoutineOnlyWhenNothingBlocksIt(t *testing.T) {
+	t.Parallel()
 	recordedIssues(t)
 	// #1 is open: the new issue is blocked, so no box would find it ready.
-	if code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "1,5"); code != 0 || fires() != 0 || strings.Contains(out, "Fan-out") {
-		t.Fatalf("exit %d, %d fires, %q %q", code, fires(), out, errs)
+	if code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "1,5"); code != 0 || fires(t) != 0 || strings.Contains(out, "Fan-out") {
+		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// #5 is closed: nothing blocks it, so it fires once.
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "5")
-	if code != 0 || fires() != 1 || out != "Created #11 ten\n"+u11+"\nBlocked by #5.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n" {
-		t.Fatalf("exit %d, %d fires, %q %q", code, fires(), out, errs)
+	if code != 0 || fires(t) != 1 || out != "Created #11 ten\n"+u11+"\nBlocked by #5.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n" {
+		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// A fire that is off is reported and never fails the creation.
-	t.Setenv(issues.FireURLVar, "")
+	setenv(t, issues.FireURLVar, "")
 	if code, out, _ := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none"); code != 0 || !strings.HasSuffix(out, "Fan-out is off: SE_ROUTINE_FIRE_URL and SE_ROUTINE_FIRE_TOKEN are not both set.\n") {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 }
 
 func TestATakeNamesWhatTheIssueBlocks(t *testing.T) {
+	t.Parallel()
 	recordedIssues(t)
 	root := t.TempDir()
 	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
@@ -447,6 +454,7 @@ func TestATakeNamesWhatTheIssueBlocks(t *testing.T) {
 }
 
 func TestWhatABoxLeavesOverIsAnIssueForAPersonThatBlocksOnlyWhatNeedsIt(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "decide the last 5%", "--blocked-by", "none", "--person", "--blocks", "3")
 	if code != 0 || !strings.Contains(out, "It blocks #3.") || !strings.Contains(out, "For a person: labelled se-person") {
@@ -468,6 +476,7 @@ func TestWhatABoxLeavesOverIsAnIssueForAPersonThatBlocksOnlyWhatNeedsIt(t *testi
 }
 
 func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
+	t.Parallel()
 	recordedIssues(t)
 	root := t.TempDir()
 	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
@@ -483,7 +492,7 @@ func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 		}
 	}
 	// The routine's fires are spent: the refusal is reported, and the take stands.
-	network.(*sehttp.Fake).Routine(routineURL, "tok", 0)
+	worldOf(t).Net.(*sehttp.Fake).Routine(routineURL, "tok", 0)
 	code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"fanout":"Fan-out refused: 429 Too Many Requests`) {
 		t.Fatalf("exit %d, %q", code, out)
@@ -491,6 +500,7 @@ func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 }
 
 func TestIssueNewReviewLabelsItSeReview(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--review")
 	if code != 0 || out != "Created #10 ten\n"+u10+"\nLabelled se-review: it is reviewed once its sub-issues have closed.\n"+firedOnce+"\n" {
@@ -502,10 +512,8 @@ func TestIssueNewReviewLabelsItSeReview(t *testing.T) {
 }
 
 func TestIssueReviewReadsItsWords(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
-	old := sessionID
-	t.Cleanup(func() { sessionID = old })
-	sessionID = func() string { return "" }
 	d, dir := onFake(t), filepath.FromSlash("/reports")
 	good, bad := filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json")
 	put(t, d, good, `{"commit":"c","requirements":[{"item":"i","evidence":"e"}],"clean":["x"]}`)
@@ -531,6 +539,7 @@ func TestIssueReviewReadsItsWords(t *testing.T) {
 }
 
 func TestReviewBriefReadsOneIssueNumber(t *testing.T) {
+	t.Parallel()
 	recordedIssues(t)
 	for _, args := range []string{"", "x", "3 4"} {
 		code, _, errs := se(t, append([]string{"review", "brief", "--repo", "o/r"}, strings.Fields(args)...)...)
@@ -541,6 +550,7 @@ func TestReviewBriefReadsOneIssueNumber(t *testing.T) {
 }
 
 func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
+	t.Parallel()
 	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--final")
 	if code != 0 || out != "Created #10 ten\n"+u10+"\nLabelled se-final: if it fails, it goes to a person.\n"+firedOnce+"\n" {
@@ -552,6 +562,7 @@ func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
 }
 
 func TestIssuePullPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
 			{"number":7,"title":"seven","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-person"}]},
@@ -586,6 +597,7 @@ func TestIssuePullPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
 }
 
 func TestTheCheckRunsCheckShInTheCheckoutAndAnswersTheTailOfAFailure(t *testing.T) {
+	t.Parallel()
 	m := proc.NewFake()
 	m.Install("sh", func(c proc.Cmd) int {
 		if c.Dir != "/ws" || strings.Join(c.Args, " ") != "./tests/check.sh" {
@@ -612,6 +624,7 @@ func TestTheCheckRunsCheckShInTheCheckoutAndAnswersTheTailOfAFailure(t *testing.
 }
 
 func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
 			{"number":1,"title":"root","state":"open","html_url":"u1","sub_issues_summary":{"total":2,"completed":1}},
@@ -654,6 +667,7 @@ func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
 }
 
 func TestWorktreeIsTheBoxsTakeAtTheTop(t *testing.T) {
+	t.Parallel()
 	recordedIssues(t)
 	for _, args := range [][]string{{"--worktree"}, {"--take", "--worktree", "--in", "3"}} {
 		code, _, errs := se(t, append([]string{"issue", "pull", "--repo", "o/r"}, args...)...)
@@ -661,7 +675,7 @@ func TestWorktreeIsTheBoxsTakeAtTheTop(t *testing.T) {
 			t.Errorf("%v: exit %d, %q", args, code, errs)
 		}
 	}
-	if fires() != 0 {
-		t.Fatalf("%d fires", fires())
+	if fires(t) != 0 {
+		t.Fatalf("%d fires", fires(t))
 	}
 }
