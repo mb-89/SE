@@ -9,7 +9,7 @@ import (
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
-// onFake is a fake machine with tool installed as "tool".
+// onFake is a fake machine with tool installed as "tool", and running as it.
 func onFake(*testing.T) toolOn {
 	f := proc.NewFake()
 	f.Install("tool", func(c proc.Cmd) int {
@@ -23,12 +23,20 @@ func onFake(*testing.T) toolOn {
 		}
 		return tool(c.Args, c.Dir, getenv, c.Stdin, c.Stdout, c.Stderr)
 	})
+	f.RunAs("tool")
 	return toolOn{procs: f, run: func(words ...string) proc.Cmd { return proc.Cmd{Name: "tool", Args: words} }}
 }
 
 func TestTheFakeMachineKeepsTheContract(t *testing.T) {
 	t.Parallel()
 	contract(t, onFake)
+}
+
+func TestAFakeMachineRunningNothingAsItselfHasNoSelf(t *testing.T) {
+	t.Parallel()
+	if self, err := proc.NewFake().Self(); !errors.Is(err, proc.ErrNotFound) {
+		t.Fatalf("self %q, %v", self, err)
+	}
 }
 
 func TestTheFakeMachineRecordsEveryRunInOrder(t *testing.T) {
