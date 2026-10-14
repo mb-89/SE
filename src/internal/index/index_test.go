@@ -389,7 +389,7 @@ func TestABrokenFamilyIsRefused(t *testing.T) {
 func TestTheFakeKeepsAFamilyByKey(t *testing.T) {
 	t.Parallel()
 	f, err := indextest.New(index.Declare("post", "Posts 1 at its argument.", posts,
-		index.Command(index.CommandDecl{Name: "post", Usage: "post <key>", Summary: "Post.", Help: "Posts 1 at key.", Group: "Fixtures"},
+		index.Command(index.CommandDecl{Name: "post", Usage: "post <key>", Summary: "Post.", Help: "Posts 1 at key.", Group: "Fixtures", Class: index.Batch},
 			func(_ struct{}, args []string) (index.Result, error) {
 				return index.Result{Writes: []index.Write{posts.At(args[0], 1)}}, nil
 			})))
