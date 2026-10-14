@@ -66,7 +66,7 @@ func init() {
 		Usage:   "issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "show the next se issue, stuck work first; --take claims it",
-		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. A take names the agent that works the issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a parent, which is the box itself, se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issueConfig().OverhaulCadence, issueConfig().RetroCadence, issueConfig().Lease, issues.Parallel),
+		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands. A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. A take names the agent that works the issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a parent, which is the box itself, se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issueConfig().OverhaulCadence, issueConfig().RetroCadence, issueConfig().Lease, issues.Parallel),
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -162,6 +162,9 @@ func init() {
 			}
 			fanout, wt := "", ""
 			if ok {
+				if err := restoreAnswers(c, s, &took, *worktree); err != nil {
+					return Reply{}, err
+				}
 				fanout = c.fanOut(s, took.Number)
 				if *worktree && !took.Parent {
 					wt = issues.Worktree(c.Workspace, took.Number)
@@ -806,6 +809,7 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, worktree, fanout s
 	}
 	if branch != "" {
 		head += fmt.Sprintf("\nIts agent: %s.", issues.KindOf(i).Type())
+		head += answersLine(t)
 	}
 	if worktree != "" {
 		head += "\n\nIts sub-agent works in its own worktree:\n" + worktree
@@ -850,6 +854,9 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 	worktree := ""
 	var h handed
 	if ok {
+		if err := restoreAnswers(c, s, &took, true); err != nil {
+			return Reply{}, err
+		}
 		worktree = issues.Worktree(c.Workspace, took.Number)
 		h = c.handOver(took)
 	}
@@ -880,12 +887,40 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 	if took.Takeover != nil {
 		did = "Took over #%d %s, on branch %s as it stands: it was stuck.\n%s\nIts agent: %s.\n\nContinue the branch and its PR in its own worktree:\n%s"
 	}
-	text := fmt.Sprintf(did, took.Number, took.Title, issues.Branch(took.Number), took.URL, issues.KindOf(took).Type(), worktree) + reviewText(c, tr)
+	text := fmt.Sprintf(did, took.Number, took.Title, issues.Branch(took.Number), took.URL, issues.KindOf(took).Type(), worktree) + answersLine(took.Takeover) + reviewText(c, tr)
 	text = strings.TrimRight(text+"\n\n"+took.Body, "\n")
 	if h.Text != "" {
 		text += "\n\n" + h.Text
 	}
 	return Reply{Text: text}, nil
+}
+
+// restoreAnswers writes the landing answers a takeover's issue has on it back
+// to the answers file beside the leaf's checkout (its own worktree where
+// worktree is set), and names that file in took's takeover.
+func restoreAnswers(c *Call, s issues.Source, took *issues.Issue, worktree bool) error {
+	if took.Takeover == nil || took.Parent {
+		return nil
+	}
+	path := issues.AnswersFile(c.Workspace, took.Number, worktree)
+	restored, err := s.RestoreAnswers(took.Number, path)
+	if err != nil {
+		return fmt.Errorf("took over #%d, but restoring its landing answers: %w", took.Number, err)
+	}
+	if restored {
+		t := *took.Takeover
+		t.Answers = path
+		took.Takeover = &t
+	}
+	return nil
+}
+
+// answersLine names the answers file a takeover wrote back, if any.
+func answersLine(t *issues.Takeover) string {
+	if t == nil || t.Answers == "" {
+		return ""
+	}
+	return "\nIts landing answers, as its last land posted them, are in " + t.Answers + ": bring them up to date, and land with --answers " + t.Answers + "."
 }
 
 // fullReply answers a box's take refused because it runs its cap of
