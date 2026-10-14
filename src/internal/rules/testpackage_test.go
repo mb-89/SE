@@ -6,6 +6,7 @@ import (
 )
 
 func TestATestFileIsInTheExternalPackage(t *testing.T) {
+	t.Parallel()
 	found := check(t, "test-package", map[string]string{
 		"a/a_test.go":   "package a_test\n",
 		"b/b_test.go":   "// Internal test package: it drives the unexported step.\npackage b\n",

@@ -61,18 +61,25 @@ the real thing; a fake without one drifts. The clock's suite is `contract` in
 Every other test runs on fakes: no wall clock, no sleeping, no network. The
 real implementation runs in its contract test alone, kept short.
 
-One test is the exception, named here: `TestRestartRunsTheCheckoutsOwnSource`
-in `src/cmd/se/checkout_test.go` builds se and stops the real daemon
+Two tests are the exceptions, named here. The first,
+`TestRestartRunsTheCheckoutsOwnSource` in `src/cmd/se/checkout_test.go`, builds se and stops the real daemon
 processes it starts, over the real network, by `clock.Real()`. It is what
 shows a restart runs the checkout's own source, which no fake can, and
-`go test -short` skips it.
+`go test -short` skips it. The second,
+`TestStatusAndStopReachTheDaemonOverTheNetwork` in `src/cmd/se/stop_test.go`
+hands se stop the real clock: it polls for the daemon's endpoint to go, which a fake
+clock passes at once, before the daemon has removed it.
 
 ## The rule
 
 The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line: outside
 `src/internal/io/`, no Go file imports `os/exec` or `net/http`, runs `gh`, calls the
 clock through `time` (`Now`, `Sleep`, `After` and their kin), or opens, reads
-or writes files through `os`. Test files are left to principle 8.
+or writes files through `os`. Test files are held by the `fast-test` rule
+(`src/internal/rules/fasttest.go`) instead: every test calls `t.Parallel`
+first, and outside `src/internal/io/` no test reads the clock through `time`
+or takes `clock.Real`. What still breaks it is named in
+`src/internal/rules/serial.txt`, which only shrinks as the allowlist below does.
 
 What broke it while the modules landed was named in one allowlist,
 `src/internal/io/allowlist.txt`, one file and what it reaches per line. Each
