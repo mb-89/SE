@@ -310,6 +310,12 @@ to the answers file beside the branch's checkout, `<path>-landing.yaml` where
 box that takes over brings them up to date rather than writing them anew; a
 file there already is kept. It names the file (with `--json`: the
 takeover's `answers`).
+Every takeover also says where its branch and PR stand, read from GitHub's
+REST API, so the box that takes over never reaches for `gh pr view` (whose
+GraphQL the box proxy refuses): when the branch was last pushed, and its open
+PR's mergeable state, head and the last run of each of its checks, or that it
+has no open PR (with `--json`: the takeover's `pushed`, and its `pull`,
+`{"number","url","head","mergeable","checks"}`).
 Every `--take`, at the top or with `--in`, first fetches `main` into the
 SE checkout se runs from and refuses where main has moved past the commit se
 was built from, naming `se update`: the agents and guidance a take hands over

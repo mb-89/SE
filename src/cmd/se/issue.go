@@ -76,6 +76,7 @@ func init() {
 			fmt.Sprintf("Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into.", issueConfig().OverhaulCadence, issueConfig().RetroCadence),
 			fmt.Sprintf("A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands.", issueConfig().Lease),
 			"A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it.",
+			"A takeover also says, from the REST API, when its branch was last pushed and its open PR's mergeable state and the last run of each of its checks, so no box reaches for gh.",
 			"A claim stuck a second time, or conflicting after a takeover, goes to a person on the way.",
 			fmt.Sprintf("A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it.", issues.Parallel),
 			"--worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap.",
@@ -196,7 +197,7 @@ func init() {
 			}
 			fanout, wt := "", ""
 			if ok {
-				if err := restoreAnswers(c, s, &took, *worktree); err != nil {
+				if err := readTakeover(c, s, &took, *worktree); err != nil {
 					return Reply{}, err
 				}
 				fanout = c.fanOut(s, took.Number)
@@ -980,7 +981,7 @@ func issueReply(asJSON, full bool, i issues.Issue, ok bool, branch, worktree, fa
 	}
 	if branch != "" {
 		head += fmt.Sprintf("\nIts agent: %s.", issues.KindOf(i).Type())
-		head += answersLine(t)
+		head += takeoverLines(t, branch)
 	}
 	if worktree != "" {
 		head += "\n\nIts sub-agent works in its own worktree:\n" + worktree
@@ -1058,7 +1059,7 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 	worktree := ""
 	var h handed
 	if ok {
-		if err := restoreAnswers(c, s, &took, true); err != nil {
+		if err := readTakeover(c, s, &took, true); err != nil {
 			return Reply{}, err
 		}
 		worktree = issues.Worktree(c.Workspace, took.Number)
@@ -1102,7 +1103,7 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 	if took.Takeover != nil {
 		did = "Took over #%d %s, on branch %s as it stands: it was stuck.\n%s\nIts agent: %s.\n\nContinue the branch and its PR in its own worktree:\n%s"
 	}
-	text := fmt.Sprintf(did, took.Number, took.Title, issues.Branch(took.Number), took.URL, issues.KindOf(took).Type(), worktree) + answersLine(took.Takeover) + reviewText(c, tr)
+	text := fmt.Sprintf(did, took.Number, took.Title, issues.Branch(took.Number), took.URL, issues.KindOf(took).Type(), worktree) + takeoverLines(took.Takeover, issues.Branch(took.Number)) + reviewText(c, tr)
 	text = strings.TrimRight(text+"\n\n"+took.Body, "\n")
 	if h.Text != "" {
 		text += "\n\n" + h.Text
@@ -1110,12 +1111,16 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 	return Reply{Text: text}, nil
 }
 
-// restoreAnswers writes the landing answers a takeover's issue has on it back
-// to the answers file beside the leaf's checkout (its own worktree where
-// worktree is set), and names that file in took's takeover.
-func restoreAnswers(c *Call, s issues.Source, took *issues.Issue, worktree bool) error {
+// readTakeover reads where took's takeover stands (its last push, its PR's
+// mergeable state and checks), and writes the landing answers its issue has
+// on it back to the answers file beside the leaf's checkout (its own worktree
+// where worktree is set), naming that file in took's takeover.
+func readTakeover(c *Call, s issues.Source, took *issues.Issue, worktree bool) error {
 	if took.Takeover == nil || took.Parent {
 		return nil
+	}
+	if err := s.ReadTakeover(took); err != nil {
+		return fmt.Errorf("took over #%d, but reading where its PR stands: %w", took.Number, err)
 	}
 	path := issues.AnswersFile(c.Workspace, took.Number, worktree)
 	restored, err := s.RestoreAnswers(took.Number, path)
@@ -1130,12 +1135,16 @@ func restoreAnswers(c *Call, s issues.Source, took *issues.Issue, worktree bool)
 	return nil
 }
 
-// answersLine names the answers file a takeover wrote back, if any.
-func answersLine(t *issues.Takeover) string {
-	if t == nil || t.Answers == "" {
+// takeoverLines say where a takeover's branch and PR stand, and name the answers file it wrote back, if any.
+func takeoverLines(t *issues.Takeover, branch string) string {
+	if t == nil {
 		return ""
 	}
-	return "\nIts landing answers, as its last land posted them, are in " + t.Answers + ": bring them up to date, and land with --answers " + t.Answers + "."
+	text := "\n" + t.Line(branch)
+	if t.Answers == "" {
+		return text
+	}
+	return text + "\nIts landing answers, as its last land posted them, are in " + t.Answers + ": bring them up to date, and land with --answers " + t.Answers + "."
 }
 
 // pausedReply answers a take while the fleet is paused (with --json:
