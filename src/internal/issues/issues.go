@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
@@ -65,6 +66,8 @@ type Source struct {
 	GH   GH
 	// Clock is the time leases, windows and stamps are read against.
 	Clock clock.Clock
+	// Disk is what checkouts' files are read from.
+	Disk disk.Disk
 	// Proc runs git in the checkouts the source claims, picks up and lands from.
 	Proc proc.Procs
 	// Flagged hears of each issue the sweep gave to a person, and why.

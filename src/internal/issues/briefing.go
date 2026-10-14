@@ -2,11 +2,12 @@ package issues
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // RetroLabel and OverhaulLabel mark the issues that run a retro and an overhaul.
@@ -115,7 +116,7 @@ type Counts struct {
 // each thing once and independent reads in parallel, then judges what it read.
 func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 	b := Briefing{Repo: s.Repo, At: s.now().UTC().Truncate(time.Second), InFlight: []Flight{}}
-	b.About = about(dir, s.Repo)
+	b.About = about(s.Disk, dir, s.Repo)
 	var (
 		all     []Status
 		t       tree
@@ -389,12 +390,12 @@ const AboutSentences = 4
 
 // about is what SE is: the first sentences of the README's first paragraph,
 // and the documents a briefing links.
-func about(dir, repo string) About {
+func about(d disk.Disk, dir, repo string) About {
 	a := About{Lines: []string{}}
 	for _, p := range Briefed {
 		a.Links = append(a.Links, Link{Path: p, URL: fmt.Sprintf("https://github.com/%s/blob/main/%s", repo, p)})
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	data, err := d.ReadFile(filepath.Join(dir, "README.md"))
 	if err != nil {
 		return a
 	}

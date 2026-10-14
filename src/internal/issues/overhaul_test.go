@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // overhaulRepo records o/r as cadenceRepo(10, 0) does, a retro due, with
@@ -66,7 +68,8 @@ func TestAnOpenOverhaulBlocksASecond(t *testing.T) {
 }
 
 func TestThePrinciplesAreReadFromTheSpec(t *testing.T) {
-	ps, err := Principles("../../..")
+	// The principles are the checkout's own file, so they are read from the real disk.
+	ps, err := Principles(disk.Real(), "../../..")
 	if err != nil || len(ps) < 16 {
 		t.Fatalf("%d principles, %v", len(ps), err)
 	}

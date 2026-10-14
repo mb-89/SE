@@ -6,17 +6,20 @@ package battery
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 const (
@@ -76,9 +79,9 @@ type Profile struct {
 	Hard     []string `json:"hard_overruns"`
 }
 
-// ReadBudgets reads the budgets file in dir.
-func ReadBudgets(dir string) (Budgets, error) {
-	data, err := os.ReadFile(filepath.Join(dir, BudgetsFile))
+// ReadBudgets reads the budgets file in dir on d.
+func ReadBudgets(d disk.Disk, dir string) (Budgets, error) {
+	data, err := d.ReadFile(filepath.Join(dir, BudgetsFile))
 	if err != nil {
 		return Budgets{}, err
 	}
@@ -221,31 +224,28 @@ func of(b *Budget) string {
 	return fmt.Sprintf(" (%s budget %dms)", kind, b.Ms)
 }
 
-// Report profiles the battery check.sh just ran in dir: it reads the
+// Report profiles the battery check.sh just ran in dir on d: it reads the
 // durations and the budgets, writes the profile into Dir and, where summary
 // is not nil, its Markdown there too. It fails only on a hard budget's overrun.
-func Report(dir string, summary io.Writer) (Profile, error) {
+func Report(d disk.Disk, dir string, summary io.Writer) (Profile, error) {
 	at := filepath.Join(dir, Dir)
-	f, err := os.Open(filepath.Join(at, StepsFile))
+	f, err := d.ReadFile(filepath.Join(at, StepsFile))
 	if err != nil {
 		return Profile{}, err
 	}
-	steps, err := ParseSteps(f)
-	f.Close()
+	steps, err := ParseSteps(bytes.NewReader(f))
 	if err != nil {
 		return Profile{}, err
 	}
 	var tests []Test
-	if g, err := os.Open(filepath.Join(at, GoTestFile)); err == nil {
-		tests, err = ParseGoTest(g)
-		g.Close()
-		if err != nil {
+	if g, err := d.ReadFile(filepath.Join(at, GoTestFile)); err == nil {
+		if tests, err = ParseGoTest(bytes.NewReader(g)); err != nil {
 			return Profile{}, err
 		}
-	} else if !errors.Is(err, os.ErrNotExist) {
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		return Profile{}, err
 	}
-	budgets, err := ReadBudgets(dir)
+	budgets, err := ReadBudgets(d, dir)
 	if err != nil {
 		return Profile{}, err
 	}
@@ -254,10 +254,10 @@ func Report(dir string, summary io.Writer) (Profile, error) {
 	if err != nil {
 		return Profile{}, err
 	}
-	if err := os.WriteFile(filepath.Join(at, ProfileFile), append(data, '\n'), 0o644); err != nil {
+	if err := d.WriteFile(filepath.Join(at, ProfileFile), append(data, '\n')); err != nil {
 		return Profile{}, err
 	}
-	if err := os.WriteFile(filepath.Join(at, MarkdownFile), []byte(p.Markdown()), 0o644); err != nil {
+	if err := d.WriteFile(filepath.Join(at, MarkdownFile), []byte(p.Markdown())); err != nil {
 		return Profile{}, err
 	}
 	if summary != nil {
@@ -271,10 +271,10 @@ func Report(dir string, summary io.Writer) (Profile, error) {
 	return p, nil
 }
 
-// Load reads the profile the last battery run in dir wrote; ok is false where there is none.
-func Load(dir string) (p Profile, ok bool, err error) {
-	data, err := os.ReadFile(filepath.Join(dir, Dir, ProfileFile))
-	if errors.Is(err, os.ErrNotExist) {
+// Load reads the profile the last battery run in dir on d wrote; ok is false where there is none.
+func Load(d disk.Disk, dir string) (p Profile, ok bool, err error) {
+	data, err := d.ReadFile(filepath.Join(dir, Dir, ProfileFile))
+	if errors.Is(err, fs.ErrNotExist) {
 		return Profile{}, false, nil
 	}
 	if err != nil {
