@@ -57,7 +57,7 @@ starts `se serve --takeover` under the debugger: the running daemon is asked to
 step down, and if the plugin starts another meanwhile, that one is too. Set a
 breakpoint in `event` in `src/internal/daemon/server.go`: every event a session in
 that workspace raises stops there, and the session waits until you continue.
-The plugin finds the debugged daemon through `.se/.runtime/daemon.json`.
+The plugin finds the debugged daemon through `se ensure`, which reads `.se/.runtime/daemon.json`.
 
 The debugger builds `se serve` from the source open in VS Code, so the
 breakpoint is in the code that runs. `/se restart` ends the debugged daemon and

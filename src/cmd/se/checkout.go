@@ -66,10 +66,28 @@ func daemonExe(procs proc.Procs, p daemon.Paths) (exe, note string, err error) {
 	return p.Bin(), "The daemon runs se built from this checkout.", nil
 }
 
-// startDaemon answers the running daemon, or starts one with daemonExe.
+// startDaemon answers the running daemon, or starts one with daemonExe. Starts
+// in every process run one at a time.
 func startDaemon(procs proc.Procs, p daemon.Paths, clk clock.Clock, net sehttp.Net) (daemon.Endpoint, string, error) {
 	if ep, ok := daemon.Healthy(p, net); ok {
 		return ep, "", nil
+	}
+	held, err := starting(p, clk)
+	if err != nil {
+		return daemon.Endpoint{}, "", err
+	}
+	defer held.Close()
+	return startsDaemon(procs, p, clk, net)
+}
+
+// startsDaemon is startDaemon for a caller that holds the start lock.
+func startsDaemon(procs proc.Procs, p daemon.Paths, clk clock.Clock, net sehttp.Net) (daemon.Endpoint, string, error) {
+	// Another start may have answered while this one waited for the lock.
+	if ep, ok := daemon.Healthy(p, net); ok {
+		return ep, "", nil
+	}
+	if err := tries(p, clk); err != nil {
+		return daemon.Endpoint{}, "", err
 	}
 	exe, note, err := daemonExe(procs, p)
 	if err != nil {

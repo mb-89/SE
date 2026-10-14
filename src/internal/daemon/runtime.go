@@ -36,6 +36,10 @@ func (p Paths) Lock() string      { return filepath.Join(p.Runtime(), "daemon.lo
 func (p Paths) Logs() string      { return filepath.Join(p.Runtime(), "logs") }
 func (p Paths) DaemonLog() string { return filepath.Join(p.Logs(), "daemon.log") }
 
+// Tried records when a start was last tried; Starting is held while one runs.
+func (p Paths) Tried() string    { return filepath.Join(p.Runtime(), "daemon.tried") }
+func (p Paths) Starting() string { return filepath.Join(p.Runtime(), "daemon.starting") }
+
 // Bin is where se built from a workspace that is an SE checkout lands.
 func (p Paths) Bin() string {
 	if runtime.GOOS == "windows" {

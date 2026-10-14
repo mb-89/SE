@@ -247,7 +247,7 @@ Each step is its own issue, and SE works after each one.
 
 ## Open questions for the owner
 
-1. **The host's own commands.** `se serve`, `se start` and `se stop` run before any index exists; `se on` starts the daemon, `se status` says whether one answers, and `se restart` and `se update` replace the running one, so none of the seven can be answered by a module inside the daemon. Proposed: they stay the CLI adapter's own commands, talking only about the adapter. Or should a module the daemon always loads declare them?
+1. **The host's own commands.** `se serve`, `se start`, `se ensure` and `se stop` run before any index exists; `se on` starts the daemon, `se status` says whether one answers, and `se restart` and `se update` replace the running one, so none of the eight can be answered by a module inside the daemon. Proposed: they stay the CLI adapter's own commands, talking only about the adapter. Or should a module the daemon always loads declare them?
 2. **Where modules live.** Proposed: the core and its fake in two packages under `src/internal`, and each module one package under a modules folder. v5 put one module per file, several per package; is a package per module right for SE?
 3. **Actions without undo.** SE takes requests now and leaves v5's undo step out. Is a failed list that stops without rolling back acceptable for GitHub and the disk?
 4. **Config layers.** Until a module needs one, config is the built-in value or the wiring file's. Which layer comes first when one is needed: environment or a local file?

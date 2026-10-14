@@ -22,6 +22,15 @@ func init() {
 			if err := c.Parse(c.Flags("restart")); err != nil {
 				return Reply{}, err
 			}
+			// No other start runs meanwhile; this one is a try, too.
+			held, err := starting(c.Paths(), c.Clock)
+			if err != nil {
+				return Reply{}, err
+			}
+			defer held.Close()
+			if err := tries(c.Paths(), c.Clock); err != nil {
+				return Reply{}, err
+			}
 			// The build runs while the old daemon still serves.
 			exe, note, err := daemonExe(c.Proc, c.Paths())
 			if err != nil {

@@ -61,7 +61,7 @@ func TestEveryCommandSaysWhatItIs(t *testing.T) {
 func TestTheSessionIsOfferedItsCommandsAlone(t *testing.T) {
 	want := map[string]bool{
 		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue pull": true, "issue new": true, "issue land": true, "issue review": true, "ui": true, "fleet check": true, "fleet fix": true, "briefing": true,
-		"serve": false, "start": false, "stop": false,
+		"serve": false, "start": false, "stop": false, "ensure": false,
 	}
 	for name, offered := range want {
 		c, ok := commands[name]
@@ -88,7 +88,7 @@ func TestTheHelpGroupsTheCommands(t *testing.T) {
 	want := map[string][]string{
 		"Session":  {"help", "off", "on", "restart", "status", "ui", "update"},
 		"Issues":   {"issue land", "issue new", "issue pull", "issue resume", "issue review", "issue tree"},
-		"Daemon":   {"serve", "start", "stop"},
+		"Daemon":   {"ensure", "serve", "start", "stop"},
 		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune", "fleet refresh"},
 		"Retro":    {"retro collect", "retro new", "retro report"},
 		"Overhaul": {"overhaul file", "overhaul new", "overhaul read"},

@@ -11,8 +11,9 @@ type World = {
   // Where the fake daemon answers now; null while it is down.
   live: string | null
   built: boolean
-  // What `se start` says on stderr when it fails; null while it starts.
+  // Why `se ensure` could not start the daemon; null while it starts.
   startFails: string | null
+  // What daemon.json says, which se ensure finds the daemon through.
   endpointFile: string | null
   // What the fake se answers a session call, by the words typed after /se.
   replies: Record<string, unknown>
@@ -123,11 +124,6 @@ function world(on: On, env: Record<string, string> = {}): World {
   on('session.root', () => ({ value: ROOT }))
   on('session.id', () => ({ value: 's1' }))
   on('fs.exists', ($, e) => ({ value: e.path.endsWith('/bin/se') ? w.built : false }))
-  on('fs.read', ($, e) =>
-    e.path === `${ROOT}/.se/.runtime/daemon.json` && w.endpointFile !== null
-      ? { value: w.endpointFile }
-      : { deny: `ENOENT: ${e.path}` },
-  )
   on('process.run', async ($, e) => {
     const argv = [...e.argv]
     if (argv[0] === 'git') {
@@ -148,14 +144,24 @@ function world(on: On, env: Record<string, string> = {}): World {
       const words = argv.slice(4).join(' ')
       const takes = w.takes[words]
       if (takes) await w.clock.sleep(takes)
-      if (words === 'on') w.live = DAEMON.address
       const reply = w.replies[words] ?? { text: `${HELP}\n\nse has no command "${words}".` }
+      // A call that answers an endpoint started or moved the daemon there, and daemon.json says so.
+      const moved = (reply as { endpoint?: { address: string } }).endpoint
+      if (moved) {
+        w.live = moved.address
+        w.endpointFile = JSON.stringify(moved)
+      }
       return { value: { exitCode: 0, stdout: JSON.stringify(reply), stderr: '' } }
     }
-    if (verb === 'start' && w.startFails !== null) {
-      return { value: { exitCode: 1, stdout: '', stderr: w.startFails } }
-    }
-    if (verb === 'start') {
+    if (verb === 'ensure') {
+      const recorded = w.endpointFile === null ? null : JSON.parse(w.endpointFile)
+      if (recorded && recorded.address === w.live) {
+        return { value: { exitCode: 0, stdout: JSON.stringify(recorded), stderr: '' } }
+      }
+      if (w.startFails !== null) {
+        const said = { retryInMs: 60_000, error: w.startFails }
+        return { value: { exitCode: 0, stdout: JSON.stringify(said), stderr: '' } }
+      }
       w.live = DAEMON.address
       return { value: { exitCode: 0, stdout: JSON.stringify(DAEMON), stderr: '' } }
     }
@@ -253,7 +259,7 @@ test('a slow update at session start does not hold the session up', async ($, on
   await $.attribution.text(probe)
   expect(posted(w)).toEqual([])
   await clock.advance(4000)
-  expect(verbs(w)).toEqual([UPDATE, 'start'])
+  expect(verbs(w)).toEqual([UPDATE, 'ensure'])
   expect(posted(w)).toContain('attribution.text')
   expect(w.statuses).toEqual(['se: updating itself…', undefined])
 })
@@ -346,7 +352,7 @@ test('a se that does not answer says so', async ($, on) => {
 test('SE_DEFAULT=on starts the session switched on', async ($, on) => {
   const w = world(on, { SE_DEFAULT: 'on' })
   await $.session.start(starts)
-  expect(verbs(w).filter(v => v === 'start').length).toBe(1)
+  expect(verbs(w).filter(v => v === 'ensure').length).toBe(1)
   // The start's own events waited for the daemon, and reached it.
   expect(posted(w)).toContain('process.run')
   await $.attribution.text(probe)
@@ -365,7 +371,7 @@ test('a missing se is built before the default start too', async ($, on) => {
   const w = world(on, { SE_DEFAULT: 'on' })
   w.built = false
   await $.session.start(starts)
-  expect(verbs(w).slice(0, 3)).toEqual(['build', UPDATE, 'start'])
+  expect(verbs(w).slice(0, 3)).toEqual(['build', UPDATE, 'ensure'])
 })
 
 test('SE_DEFAULT=on says nothing when the daemon does not start, and passes events', async ($, on) => {
@@ -377,7 +383,7 @@ test('SE_DEFAULT=on says nothing when the daemon does not start, and passes even
   expect(w.posts).toEqual([])
 })
 
-test('a daemon that moved is found again through daemon.json', async ($, on) => {
+test('a daemon that moved is found again through se ensure', async ($, on) => {
   const w = world(on)
   await $.session.start(starts)
   await $.command.run(se('on'))
@@ -387,6 +393,24 @@ test('a daemon that moved is found again through daemon.json', async ($, on) => 
   await $.attribution.text(probe)
   expect(w.posts.at(-1)?.url).toBe('http://127.0.0.1:4200/event')
   expect(w.posts.at(-1)?.auth).toBe('Bearer tok2')
+})
+
+test('a daemon se cannot start is asked of se again no sooner than se said', async ($, on) => {
+  const w = world(on)
+  const clock = w.clock
+  await $.session.start(starts)
+  await $.command.run(se('on'))
+  w.live = null
+  w.startFails = 'no room'
+  w.ran = []
+  await $.attribution.text(probe)
+  await $.attribution.text(probe)
+  expect(verbs(w)).toEqual(['ensure'])
+  await clock.advance(60_000)
+  w.startFails = null
+  await $.attribution.text(probe)
+  expect(verbs(w)).toEqual(['ensure', 'ensure'])
+  expect(posted(w)).toContain('attribution.text')
 })
 
 test('a daemon that is down never holds the event up', async ($, on) => {
@@ -404,7 +428,6 @@ test('/se update applies the new endpoint and reloads once it has answered', asy
   await $.session.start(starts)
   await $.command.run(se('on'))
   w.ran = []
-  w.live = '127.0.0.1:4300'
   w.replies.update = {
     text: 'SE updated aaa → bbb. Its daemon restarted.',
     endpoint: { address: '127.0.0.1:4300', token: 'tok3' },
@@ -413,7 +436,8 @@ test('/se update applies the new endpoint and reloads once it has answered', asy
   const said = await $.command.run(se('update'))
   expect(said?.text ?? '').toContain('aaa → bbb')
   expect(said?.text ?? '').toContain('The plugins reload now.')
-  expect(verbs(w)).toEqual(['/se update'])
+  // The call's own se.call row found the moved daemon through se ensure.
+  expect(verbs(w)).toEqual(['/se update', 'ensure'])
   await clock.settle()
   expect(w.reloads).toBe(1)
   await $.attribution.text(probe)
@@ -426,15 +450,14 @@ test('/se restart moves the session to the daemon se answers, without a reload',
   await $.session.start(starts)
   await $.command.run(se('on'))
   w.ran = []
-  // The old daemon is gone; the restarted one answers on a new port with a new token.
-  w.live = '127.0.0.1:4400'
+  // The restarted daemon answers on a new port with a new token.
   w.replies.restart = {
     text: "SE's daemon restarted at 127.0.0.1:4400 (pid 7). The daemon runs se built from this checkout.",
     endpoint: { address: '127.0.0.1:4400', token: 'tok4' },
   }
   const said = await $.command.run(se('restart'))
   expect(said?.text ?? '').toContain('built from this checkout')
-  expect(verbs(w)).toEqual(['/se restart'])
+  expect(verbs(w)).toEqual(['/se restart', 'ensure'])
   await clock.settle()
   expect(w.reloads).toBe(0)
   await $.attribution.text(probe)
@@ -446,7 +469,6 @@ test('a restart whose build failed shows why, and still moves to the daemon', as
   const w = world(on)
   await $.session.start(starts)
   await $.command.run(se('on'))
-  w.live = '127.0.0.1:4500'
   w.replies.restart = {
     text: "SE's daemon restarted at 127.0.0.1:4500 (pid 8). This checkout's se does not build, so the daemon runs the installed se (/se/src/plugin/bin/se):\ngo build: exit status 1\n./x.go:3: undefined: y",
     endpoint: { address: '127.0.0.1:4500', token: 'tok5' },
@@ -468,7 +490,7 @@ test('session start updates the checkout the plugin came from, then reloads once
   expect(update[6]).toBe('--repo')
   expect(update[7]).toMatch(/\/\.\.$/)
   // The update comes before the daemon starts, so the daemon is the new se's.
-  expect(verbs(w).slice(0, 2)).toEqual([UPDATE, 'start'])
+  expect(verbs(w).slice(0, 2)).toEqual([UPDATE, 'ensure'])
   expect(w.toasts).toEqual(['SE updated aaa → bbb. The plugins reload now.'])
   expect(w.reloads).toBe(0)
   await clock.settle()
@@ -507,7 +529,7 @@ test('a failed update does not block session start: the session goes on and says
   expect(w.toasts[0]).not.toContain('\n')
   expect(w.reloads).toBe(0)
   // The session started on, as asked, with the SE it has.
-  expect(verbs(w)).toContain('start')
+  expect(verbs(w)).toContain('ensure')
   await $.attribution.text(probe)
   expect(posted(w)).toContain('attribution.text')
 })
@@ -541,12 +563,13 @@ test('hooks whose checkout git cannot read tell se no commit', async ($, on) => 
   expect(w.envs.status?.SE_HOOKS_COMMIT).toBe('')
 })
 
-test('a missing se is built with the commit it is built from', async ($, on) => {
+test('a missing se is built plainly: Go records the commit it builds from', async ($, on) => {
   const w = world(on)
   w.built = false
   await $.session.start(starts)
   const build = w.ran.find(argv => argv[0] === 'go') ?? []
-  expect(build.slice(0, 4)).toEqual(['go', 'build', '-ldflags', '-X main.commit=aaa111'])
+  expect(build.slice(0, 3)).toEqual(['go', 'build', '-o'])
+  expect(build.slice(4)).toEqual(['./src/cmd/se'])
 })
 
 const SURFACES = ['terminal', 'desktop', 'vscode', 'mobile'] as const

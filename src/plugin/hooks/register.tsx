@@ -4,7 +4,9 @@
 // where the daemon now answers, reload the plugins). While SE is on, every
 // event the engine raises is posted to the workspace's se daemon before it
 // goes on, unchanged. The daemon owns what happens to it: today it appends
-// the event to the session's log. While SE is off, every hook hands the event
+// the event to the session's log. se owns finding and starting the daemon: an
+// event that finds none asks se ensure, which answers where it is, or how long
+// to wait before asking again. While SE is off, every hook hands the event
 // straight on and contacts nothing. /se ui opens a pane of buttons: the on/off
 // toggle and the commands se offers as buttons, each pressed as /se <words>.
 // /se help draws as a layout: se answers the help as data beside its text, and
@@ -24,19 +26,18 @@ const BUTTONS = { plugin: 'se', key: 'buttons' } as const
 const PANE = 'se-ui'
 // The help se answered for each /se line that asked for it, by its words.
 const HELPS = { plugin: 'se', key: 'helps' } as const
-// The folder the daemon owns in a workspace, and its endpoint record there.
+// The folder the daemon owns in a workspace.
 export const RUNTIME = '.se/.runtime'
-const ENDPOINT = `${RUNTIME}/daemon.json`
 // How long a start may take: a first start builds se from the checkout.
 const STARTING = 300_000
 // How long the update at session start may take: a pull and a rebuild.
 const UPDATING = 120_000
-// A daemon found down is started again at most this often.
-const RESTART_EVERY = 60_000
 // What a person waits on shows it is working after this long, and holds nothing up.
 export const FEEDBACK = 1_000
 
 type Endpoint = { address: string; token: string }
+// What se ensure answers (Ensured in src/cmd/se/ensure.go).
+type Ensured = { address?: string; token?: string; retryInMs?: number; error?: string }
 
 // What the plugin tells se on every session call (see src/cmd/se/commit.go).
 const HOOKS_COMMIT = 'SE_HOOKS_COMMIT'
@@ -60,10 +61,12 @@ let active: SeActive = false
 let hooksCommit = ''
 let root = ''
 let endpoint: Endpoint | null = null
-let lastStart = 0
-// The one start in flight, which every caller finding the daemon down awaits.
-let starting: Promise<string> | null = null
-// Events raised while a start runs, the start's own among them, sent once it answers.
+// The one se ensure in flight, which every caller finding no daemon awaits.
+let ensuring: Promise<string> | null = null
+// Until when se said not to ask it for the daemon again, by the session's clock.
+let retryAt = 0
+// Events raised while se ensure runs, its own among them, sent once it answers.
+// The bound only keeps the session's memory in check.
 const waiting: string[] = []
 const WAITING_CAP = 1000
 // The session start's update and daemon start, while they run past session.start's answer.
@@ -207,7 +210,7 @@ async function setsUp($: EngineInterface): Promise<void> {
       if ((await $.env.get('SE_DEFAULT')) === 'on') await switchOn($)
     } else {
       active = value
-      if (active) await starts($)
+      if (active) await ensures($)
     }
   } finally {
     settingUp = null
@@ -291,8 +294,6 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
     for (const body of waiting.splice(0)) await posts($, endpoint, body)
   }
   if (typeof reply.active === 'boolean') {
-    // An on that found no daemon tries again on the road, not at once.
-    if (reply.active) lastStart = Date.now()
     active = reply.active
     await $.state.set(ACTIVE, reply.active)
   }
@@ -351,36 +352,37 @@ async function presses($: EngineInterface, words: string): Promise<void> {
   $.ui.log(await runs($, words))
 }
 
-// Switches SE on and starts the daemon; answers why the daemon did not start, or ''.
+// Switches SE on and has se find or start the daemon; answers why there is none, or ''.
 async function switchOn($: EngineInterface): Promise<string> {
   active = true
-  // The start begins before anything else raises an event, so those events wait for it.
-  const started = starts($)
+  // The ensure begins before anything else raises an event, so those events wait for it.
+  const ensured = ensures($)
   await $.state.set(ACTIVE, true)
-  return started
+  return ensured
 }
 
-// The start road, run once however many callers ask at the same time.
-function starts($: EngineInterface): Promise<string> {
-  starting ??= startsOnce($).finally(() => {
-    starting = null
+// se ensure, run once however many callers ask at the same time.
+function ensures($: EngineInterface): Promise<string> {
+  ensuring ??= ensuresOnce($).finally(() => {
+    ensuring = null
   })
-  return starting
+  return ensuring
 }
 
-// Build se where it is missing, then have it start the workspace's daemon.
-async function startsOnce($: EngineInterface): Promise<string> {
-  lastStart = Date.now()
+// Builds se where it is missing, then asks it for the workspace's daemon and
+// applies its answer: where the daemon is, or how long to wait.
+async function ensuresOnce($: EngineInterface): Promise<string> {
   root = await $.session.root()
   try {
     const { path: bin, failed: unbuilt } = await builds($)
     if (unbuilt) return unbuilt
-    const ran = await timed($, ['start'], () =>
-      $.process.run([bin, 'start', '--workspace', root], { timeoutMs: STARTING }),
+    const ran = await timed($, ['ensure'], () =>
+      $.process.run([bin, 'ensure', '--workspace', root], { timeoutMs: STARTING }),
     )
-    const said = parsed(ran.stdout) as Endpoint | null
-    if (ran.exitCode !== 0 || !said?.address) return failed(ran)
-    endpoint = { address: said.address, token: said.token }
+    const said = parsed(ran.stdout) as Ensured | null
+    if (said?.retryInMs) retryAt = (await $.clock.now()) + said.retryInMs
+    if (!said?.address) return said?.error || failed(ran)
+    endpoint = { address: said.address, token: said.token ?? '' }
     for (const body of waiting.splice(0)) await posts($, endpoint, body)
     return ''
   } catch (error) {
@@ -388,21 +390,19 @@ async function startsOnce($: EngineInterface): Promise<string> {
   }
 }
 
-// Posts the event to the daemon. A daemon that moved (restarted, or started
-// under the debugger) is found again through daemon.json; one that is gone is
-// started again, at most once a minute.
+// Posts the event to the daemon. One that does not answer is asked of se,
+// no sooner than se said; the event waits for se's answer.
 async function forwards($: EngineInterface, event: string, e: unknown): Promise<void> {
   const body = bodyOf(await $.session.id(), event, e)
   if (endpoint && (await posts($, endpoint, body))) return
-  // An event that waited on the start would hold up the start's own events.
-  if (starting) {
+  // An event that waited on the ensure would hold up the ensure's own events.
+  if (ensuring) {
     if (waiting.length < WAITING_CAP) waiting.push(body)
     return
   }
-  endpoint = await recorded($)
-  if (endpoint && (await posts($, endpoint, body))) return
-  if (Date.now() - lastStart < RESTART_EVERY) return
-  if (!(await starts($)) && endpoint) await posts($, endpoint, body)
+  if ((await $.clock.now()) < retryAt) return
+  if (waiting.length < WAITING_CAP) waiting.push(body)
+  await ensures($)
 }
 
 async function posts($: EngineInterface, to: Endpoint, body: string): Promise<boolean> {
@@ -415,15 +415,6 @@ async function posts($: EngineInterface, to: Endpoint, body: string): Promise<bo
     return said.ok
   } catch {
     return false
-  }
-}
-
-async function recorded($: EngineInterface): Promise<Endpoint | null> {
-  try {
-    const said = parsed(await $.fs.read(`${root}/${ENDPOINT}`)) as Endpoint | null
-    return said?.address ? { address: said.address, token: said.token } : null
-  } catch {
-    return null
   }
 }
 
@@ -452,14 +443,12 @@ async function headOf($: EngineInterface): Promise<string> {
   }
 }
 
-// se under the plugin folder, built from the checkout where it is missing,
-// with the commit it was built from embedded (see src/cmd/se/commit.go).
+// se under the plugin folder, built from the checkout where it is missing: the
+// bootstrap, plain, since Go records the commit it builds from (see src/cmd/se/commit.go).
 async function builds($: EngineInterface): Promise<{ path: string; failed?: string }> {
   const path = binaryOf($.plugin.root)
   if (await $.fs.exists(path)) return { path }
-  const head = await headOf($)
-  const ldflags = head ? ['-ldflags', `-X main.commit=${head}`] : []
-  const built = await $.process.run(['go', 'build', ...ldflags, '-o', path, './src/cmd/se'], {
+  const built = await $.process.run(['go', 'build', '-o', path, './src/cmd/se'], {
     cwd: checkoutOf($),
     timeoutMs: STARTING,
   })
