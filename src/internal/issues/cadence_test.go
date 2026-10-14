@@ -186,7 +186,7 @@ func TestASecondRetroStartedByARacingBoxClosesAsADuplicate(t *testing.T) {
 	if c, err := s.Cadence(); err != nil || c.Previous != 20 || c.Open != 110 {
 		t.Fatalf("%+v %v", c, err)
 	}
-	if last, ok, _, err := s.lastRetro(0); err != nil || !ok || last.Number != 20 {
+	if last, ok, _, err := s.lastClosed(RetroLabel, 0); err != nil || !ok || last.Number != 20 {
 		t.Fatalf("last retro %+v %v %v", last, ok, err)
 	}
 	// Box b goes on to other work.
