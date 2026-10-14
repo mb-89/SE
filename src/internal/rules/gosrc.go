@@ -87,17 +87,32 @@ func inSrc(args []string) bool {
 }
 
 // moduleFree says whether the go command reads no module, so it may run
-// anywhere: go env, go version, and go install or go run of a pkg@version.
+// anywhere: go env, go version, go run of a pkg@version, and go install of
+// packages none of which is a local path, as pkg@version is, spelled out or
+// held in a variable ("$pkg").
 func moduleFree(args []string) bool {
 	switch args[0] {
 	case "env", "version":
 		return true
-	case "install", "run":
+	case "run":
 		for _, a := range args[1:] {
 			if strings.Contains(strings.Trim(a, `"'`), "@") {
 				return true
 			}
 		}
+	case "install":
+		pkgs := 0
+		for _, a := range args[1:] {
+			a = strings.Trim(a, `"'`)
+			if strings.HasPrefix(a, "-") {
+				continue
+			}
+			if a == "" || strings.HasPrefix(a, ".") || strings.HasPrefix(a, "/") {
+				return false
+			}
+			pkgs++
+		}
+		return pkgs > 0
 	}
 	return false
 }
