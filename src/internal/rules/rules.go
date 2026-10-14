@@ -1,6 +1,8 @@
 // Package rules holds SE's own rules as checks. A rule is one file that calls
 // register in its init, with a test beside it; tests/check.sh runs every
-// registered rule through se rules, so adding the file is all it takes.
+// registered rule through se rules, so adding the file is all it takes. A rule
+// that can apply the mechanical part of its finding has a Fix, which
+// se rules --fix runs.
 package rules
 
 import (
@@ -27,6 +29,10 @@ type Rule struct {
 	Applies func(path string) bool
 	// Check answers what the file breaks, by line.
 	Check func(repo *Repo, path string, text []byte) []Finding
+	// Fix, where the rule has one, answers the file with the mechanical part
+	// of its findings applied, and whether it changed; se rules --fix runs it.
+	// What it leaves is still found.
+	Fix func(repo *Repo, path string, text []byte) ([]byte, bool)
 }
 
 // Repo is what a rule may know beyond the file it reads: the checkout's
@@ -134,6 +140,39 @@ func Rules() []Rule {
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
 	return all
+}
+
+// Fix applies every rule's Fix to the repo's files, writing each file it
+// changes, and answers what it changed, one "path: rule" each, in order.
+func Fix(repo *Repo) ([]string, error) {
+	var fixed []string
+	for _, r := range Rules() {
+		if r.Fix == nil {
+			continue
+		}
+		for _, p := range repo.Paths {
+			if !r.Applies(p) {
+				continue
+			}
+			t, ok, err := repo.Read(p)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			out, changed := r.Fix(repo, p, t)
+			if !changed {
+				continue
+			}
+			if err := repo.Disk.WriteFile(filepath.Join(repo.Root, filepath.FromSlash(p)), out); err != nil {
+				return nil, err
+			}
+			repo.texts[p] = out
+			fixed = append(fixed, p+": "+r.Name)
+		}
+	}
+	return fixed, nil
 }
 
 // Run checks the repo's files against every registered rule. A path that is

@@ -16,14 +16,18 @@ import (
 func init() {
 	register(Command{
 		Name:    "rules",
-		Usage:   "rules",
+		Usage:   "rules [--fix]",
 		Group:   "Checks",
 		Summary: "check this checkout against every SE rule",
 		Details: "check every file git tracks or would track against each rule in src/internal/rules, " +
 			"naming each finding by file, line and rule, and how long each rule took. " +
-			"The rules that read prose know se's commands and its manifests. It fails on a finding; tests/check.sh runs it.",
+			"The rules that read prose know se's commands and its manifests. It fails on a finding; tests/check.sh runs it. " +
+			"--fix first applies the mechanical part of each finding where the rule can, such as the fast-test rule's t.Parallel() " +
+			"as a test's first statement, names each file it changed, and then checks.",
 		Run: func(c *Call) (Reply, error) {
-			if err := c.Parse(c.Flags("rules")); err != nil {
+			fs := c.Flags("rules")
+			fix := fs.Bool("fix", false, "apply the mechanical part of each finding where the rule can, then check")
+			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
 			repo, err := repoOf(c.Disk, c.Proc, c.Workspace)
@@ -31,11 +35,20 @@ func init() {
 				return Reply{}, err
 			}
 			repo.Clock = c.Clock
+			var lines, findings []string
+			if *fix {
+				fixed, err := rules.Fix(repo)
+				if err != nil {
+					return Reply{}, err
+				}
+				for _, f := range fixed {
+					lines = append(lines, "fixed: "+f)
+				}
+			}
 			results, err := rules.Run(repo)
 			if err != nil {
 				return Reply{}, err
 			}
-			var lines, findings []string
 			for _, r := range results {
 				for _, f := range r.Findings {
 					findings = append(findings, f.String())
