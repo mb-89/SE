@@ -32,8 +32,8 @@ instances:
   session: {module: session}
   sessionlog: {module: sessionlog}
 wires:
-  session.events: session/events
-  sessionlog.events: session/events
+  session.events: session/<id>/events
+  sessionlog.events: session/<id>/events
 `
 
 // indexed are o with the index's modules, the log kept in p's log folder.
@@ -126,7 +126,8 @@ func TestTwoEventsAlikeAreBothWritten(t *testing.T) {
 }
 
 // The daemon answers a name's value on its index over the protocol: the
-// clock's start, and the number of the last event the log wrote.
+// clock's start, the number of the last event the log wrote, and the last
+// event of each session, in the family session/<id>/events.
 func TestTheDaemonAnswersValuesByName(t *testing.T) {
 	t.Parallel()
 	p := workspace(t)
@@ -159,6 +160,16 @@ func TestTheDaemonAnswersValuesByName(t *testing.T) {
 	}
 	if v := value("sessionlog/written"); v.Value != float64(2) || !v.Provided {
 		t.Fatalf("sessionlog/written after two events = %+v", v)
+	}
+	for _, s := range []string{"s1", "s2"} {
+		v := value("session/" + s + "/events")
+		ev, _ := v.Value.(map[string]any)
+		if !v.Provided || ev["session"] != s || ev["event"] != "x" {
+			t.Fatalf("session/%s/events = %+v", s, v)
+		}
+	}
+	if v := value("session/s3/events"); v.Provided {
+		t.Fatalf("session/s3/events, which no post reached, = %+v", v)
 	}
 	if _, err := n.Value(addr, "tok", "no/such"); err == nil {
 		t.Fatal("a name nothing declares reads")
