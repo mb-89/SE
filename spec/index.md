@@ -51,7 +51,7 @@ A module is one Go package that declares, by **local name** only:
 | it declares | what it is |
 |---|---|
 | **inputs** | the names it reads, as fields of one input struct, tagged with a local port name |
-| **outputs** | the names it writes, each with its type, built-in value and one help line |
+| **outputs** | the names it writes, each with its type, built-in value and one help line. A **family output** (`index.Family`) is written at keys, each write naming its key, and a drop takes a key out again; the wiring binds it to a family. A derivation that reads a family runs once per key that changed, on that key's value; a command reads no family |
 | **config** | its keys, each with a type, a built-in value and one help line. A key is an input like any other, under `<instance>/config/<key>`; the module never learns where the value came from |
 | **commands** | the functions a person or agent calls, in [Commands and help](#commands-and-help) |
 | **requests** | for an I/O module only: the verbs it accepts from others, in [I/O modules and compute modules](#io-modules-and-compute-modules) |
@@ -120,7 +120,8 @@ embedded from there.
 | an instance | its name and its module, such as `issues: { module: issues }`. One module can run as two instances with different config |
 | a wire to a name | `issues.open: issues/open`. Ports bound to one name meet there, and neither side knows the other |
 | a wire port to port | `briefing.open: issues.open` |
-| an output with no wire | readable as `<instance>/<port>` |
+| a wire to a family | `session.events: session/<id>/events`: a family output to a name with one key segment, read at a key as `session/s1/events`. A plain output to a family, a family output to a plain name, two families holding the same names, or a name inside a family, the start refuses |
+| an output with no wire | readable as `<instance>/<port>`, a family output as `<instance>/<key>/<port>` |
 | an input with no wire | the start refuses, unless the wiring marks it `built-in` |
 | a config value | `issues: { config: { lease: 3h } }`, under `<instance>/config/<key>` |
 | a request port | bound to an I/O module's verb, such as `issues.create: github.create-issue` |
@@ -178,6 +179,7 @@ It marks a function as a command with:
 | group | the heading it stands under in the help listing |
 | offered | in a session as `/se <name>`, and whether as a `/se ui` button |
 | installed | answered by the installed `se` even when the session works in an SE checkout, whose own `se` answers every other `/se` word: `on`, `restart`, `update` |
+| class | `interactive`, a command a person waits on, which answers from the snapshot within its budgets in [spec/budgets.yaml](budgets.yaml); or `batch`, one that must write or that the fleet, a hook or the battery runs ([principle 9](principles.md)) |
 
 The command runs like any other run: it reads a snapshot of the module's
 inputs plus its arguments, and answers a reply, a commit of the module's own
