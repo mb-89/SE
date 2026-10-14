@@ -32,11 +32,11 @@ func overhaulRepo(n, openOverhaul int) map[string]string {
 func TestFourRetrosStartNoOverhaulAndTheDueRetroIsTaken(t *testing.T) {
 	_, a, _ := boxes(t)
 	gh, w := writing(t, overhaulRepo(4, 0))
-	took, ok, c, err := Source{Repo: repo, GH: gh, Clock: atNow()}.TakeDue(a)
+	took, ok, c, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.TakeDue(a)
 	if err != nil || !ok || !took.Retro || took.Overhaul || c.Kind != "retro" || len(*w) != 1 || !strings.Contains(strings.Join((*w)[0], " "), "labels[]=se-retro") {
 		t.Fatalf("took %+v %v, %+v %v, writes %q", took, ok, c, err, *w)
 	}
-	o, err := Source{Repo: repo, GH: recorded(t, overhaulRepo(4, 0)), Clock: atNow()}.OverhaulCadence()
+	o, err := Source{Proc: machine, Repo: repo, GH: recorded(t, overhaulRepo(4, 0)), Clock: atNow()}.OverhaulCadence()
 	if err != nil || o.Closed != 4 || o.Due() || o.Line() != "4 retros closed since the overhaul #15 closed; an overhaul is due at 5." {
 		t.Fatalf("%+v %v %q", o, err, o.Line())
 	}
@@ -45,7 +45,7 @@ func TestFourRetrosStartNoOverhaulAndTheDueRetroIsTaken(t *testing.T) {
 func TestFiveRetrosStartAnUnattendedOverhaulAndTakeItFirst(t *testing.T) {
 	_, a, _ := boxes(t)
 	gh, w := writing(t, overhaulRepo(5, 0))
-	took, ok, c, err := Source{Repo: repo, GH: gh, Clock: atNow()}.TakeDue(a)
+	took, ok, c, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.TakeDue(a)
 	if err != nil || !ok || !took.Overhaul || took.Retro || c.Kind != "overhaul" || c.Closed != 5 || c.Every != OverhaulCadence {
 		t.Fatalf("took %+v %v, %+v %v", took, ok, c, err)
 	}
@@ -59,7 +59,7 @@ func TestFiveRetrosStartAnUnattendedOverhaulAndTakeItFirst(t *testing.T) {
 }
 
 func TestAnOpenOverhaulBlocksASecond(t *testing.T) {
-	c, err := Source{Repo: repo, GH: recorded(t, overhaulRepo(7, 31)), Clock: atNow()}.OverhaulCadence()
+	c, err := Source{Proc: machine, Repo: repo, GH: recorded(t, overhaulRepo(7, 31)), Clock: atNow()}.OverhaulCadence()
 	if err != nil || c.Open != 31 || c.Due() || !strings.HasSuffix(c.Line(), "; the overhaul #31 is open.") {
 		t.Fatalf("%+v %v %q", c, err, c.Line())
 	}
@@ -127,7 +127,7 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 		"repos/o/r/issues/15/comments?per_page=100":                     jsonComments(prev),
 		"repos/o/r/issues/16":                                           `{"number":16,"state":"closed","state_reason":"completed"}`,
 	})
-	r, err := Source{Repo: repo, GH: gh, Clock: atNow()}.CollectOverhaul(31, []Principle{{Number: 1, Name: "Mechanize first"}})
+	r, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.CollectOverhaul(31, []Principle{{Number: 1, Name: "Mechanize first"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func overhaulAnswers(body string) map[string]string {
 
 func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	gh, calls := writes(t, overhaulAnswers(overhaulUnattendedMark))
-	f, err := Source{Repo: repo, GH: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
+	f, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
 	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
 		t.Fatalf("%+v %v", f, err)
 	}
@@ -249,7 +249,7 @@ func TestAnAttendedOverhaulClosesToo(t *testing.T) {
 	// A person started it, and still nobody waits: its controversial
 	// findings are the issues for the person.
 	gh, calls := writes(t, overhaulAnswers("<!-- se:overhaul attended -->"))
-	f, err := Source{Repo: repo, GH: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
+	f, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
 	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
 		t.Fatalf("%+v %v", f, err)
 	}
@@ -280,7 +280,7 @@ func TestAnOverhaulWithoutJudgmentIsRefused(t *testing.T) {
 		"strays none":                 func(r *OverhaulReport) { r.Findings[0].Strays = "none" },
 		"nothing went well":           func(r *OverhaulReport) { r.WentWell = nil },
 	} {
-		if _, err := (Source{Repo: repo, GH: never, Clock: atNow()}).FileOverhaul(30, overhauled(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+		if _, err := (Source{Proc: machine, Repo: repo, GH: never, Clock: atNow()}).FileOverhaul(30, overhauled(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}

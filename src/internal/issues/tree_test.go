@@ -60,7 +60,7 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 		refsPath:    `[]`,
 		subsPath(1): subs(2, 3),
 	}
-	s := Source{Repo: repo, GH: inTree(t, answers), Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()}
 	next, ok, err := s.Next()
 	if err != nil || !ok || next.Number != 1 || !next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
@@ -116,7 +116,7 @@ func TestInOffersTheReadyLeavesAtAnyDepth(t *testing.T) {
 		blockedPath(50): subs(30),
 		activity(15):    pushed(fresh),
 	}
-	s := Source{Repo: repo, GH: inTree(t, answers), Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestParentsCloseByThemselvesDeepestFirst(t *testing.T) {
 		"repos/o/r/issues/2/comments": `{}`,
 		"repos/o/r/issues/2":          `{}`,
 	})
-	if err := (Source{Repo: repo, GH: gh, Clock: atNow()}).CloseParents(); err != nil {
+	if err := (Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}).CloseParents(); err != nil {
 		t.Fatal(err)
 	}
 	var wrote [][]string
@@ -203,7 +203,7 @@ func TestAReviewParentNeverClosesByItself(t *testing.T) {
 		subsPath(2):    subs(-3, -4),
 		blockedPath(5): subs(2),
 	}
-	s := Source{Repo: repo, GH: inTree(t, answers), Clock: atNow()} // a write would not be recorded
+	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()} // a write would not be recorded
 	tr, err := s.In(1)
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +235,7 @@ func TestAReviewAtTheTopIsTakenByAnyBox(t *testing.T) {
 		refsPath:    `[]`,
 		subsPath(2): subs(-3),
 	}
-	s := Source{Repo: repo, GH: inTree(t, answers), Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()}
 	if next, ok, err := s.Next(); err != nil || !ok || next.Number != 2 || !next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
@@ -265,12 +265,12 @@ func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
 		refsPath:    `[]`,
 		subsPath(1): subs(2, 3),
 	}
-	s := Source{Repo: repo, GH: inTree(t, answers), Clock: atNow()}
-	if ok, err := claimTree(a, 1); err != nil || !ok {
+	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()}
+	if ok, err := (Source{Proc: machine}).claimTree(a, 1); err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
 	// Another box picks the tree up from its claim.
-	if ok, err := claimTree(b, 1); err != nil || !ok {
+	if ok, err := (Source{Proc: machine}).claimTree(b, 1); err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
 	if got := run(t, b, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-1" {
@@ -310,7 +310,7 @@ func TestInSaysWhenTheRootHasClosed(t *testing.T) {
 		"repos/o/r/issues/1/comments": `{}`,
 		"repos/o/r/issues/1":          `{}`,
 	}
-	s := Source{Repo: repo, GH: inTree(t, answers), Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GH: inTree(t, answers), Clock: atNow()}
 	if tr, err := s.In(1); err != nil || !tr.Closed {
 		t.Fatalf("%+v %v", tr, err)
 	}

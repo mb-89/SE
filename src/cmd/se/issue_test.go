@@ -16,6 +16,7 @@ import (
 	"time"
 
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -243,7 +244,7 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	old, oldCheck, oldSession := gh, check, sessionID
 	t.Cleanup(func() { gh, check, sessionID = old, oldCheck, oldSession })
 	checked := ""
-	check = func(dir string) error { checked = dir; return nil }
+	check = func(_ proc.Procs, dir string) error { checked = dir; return nil }
 	sessionID = func() string { return "s1" }
 	recorded, landed := "", ""
 	gh = func(args ...string) ([]byte, error) {
@@ -626,6 +627,32 @@ func TestIssueNextPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
 	}
 	if want := []string{"POST repos/o/r/issues/7/comments", "DELETE repos/o/r/issues/7/labels/se-person"}; !reflect.DeepEqual(writes, want) {
 		t.Fatalf("writes %q", writes)
+	}
+}
+
+func TestTheCheckRunsCheckShInTheCheckoutAndAnswersTheTailOfAFailure(t *testing.T) {
+	m := proc.NewFake()
+	m.Install("sh", func(c proc.Cmd) int {
+		if c.Dir != "/ws" || strings.Join(c.Args, " ") != "./tests/check.sh" {
+			return 127
+		}
+		for i := 1; i <= 50; i++ {
+			fmt.Fprintf(c.Stdout, "line %d\n", i)
+		}
+		fmt.Fprintln(c.Stderr, "check: go test failed")
+		return 1
+	})
+	err := check(m, "/ws")
+	if err == nil || !strings.Contains(err.Error(), "exit status 1") || !strings.Contains(err.Error(), "check: go test failed") ||
+		strings.Contains(err.Error(), "line 11\n") || !strings.Contains(err.Error(), "line 12\n") {
+		t.Fatalf("%v", err)
+	}
+	m.Install("sh", func(proc.Cmd) int { return 0 })
+	if err := check(m, "/ws"); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Lines(); len(got) != 2 || got[0] != "sh ./tests/check.sh" {
+		t.Fatalf("ran %q", got)
 	}
 }
 

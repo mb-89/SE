@@ -100,7 +100,7 @@ func claimed7(t *testing.T) (a string) {
 func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 	a := claimed7(t)
 	g := newPulls(t, pr70("false", "dirty"))
-	took, ok, err := Source{Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
+	took, ok, err := Source{Proc: machine, Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || *took.Takeover != (Takeover{PR: 70, URL: "p70", Count: 1}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -120,7 +120,7 @@ func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 	// Named with --take N, the issue named is taken, and no PR is asked.
 	g = newPulls(t)
 	_, b, _ := boxes(t)
-	if took, ok, err := (Source{Repo: repo, GH: g.gh, Clock: atNow()}).Take(b, 5); err != nil || !ok || took.Number != 5 || took.Takeover != nil {
+	if took, ok, err := (Source{Proc: machine, Repo: repo, GH: g.gh, Clock: atNow()}).Take(b, 5); err != nil || !ok || took.Number != 5 || took.Takeover != nil {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 }
@@ -135,7 +135,7 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 		_, a, _ := boxes(t)
 		g := newPulls(t, answers...)
 		c := atNow()
-		took, ok, err := Source{Repo: repo, GH: g.gh, Clock: c}.Take(a, 0)
+		took, ok, err := Source{Proc: machine, Repo: repo, GH: g.gh, Clock: c}.Take(a, 0)
 		paused := int(c.Now().Sub(now) / pause)
 		if err != nil || !ok || took.Number != 5 || took.Takeover != nil || len(g.comments) != 0 {
 			t.Errorf("%s: took %+v %v %v", name, took, ok, err)
@@ -150,7 +150,7 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 	// A null answer that turns dirty is a conflict.
 	a := claimed7(t)
 	g := newPulls(t, pr70("null", "unknown"), pr70("false", "dirty"))
-	if took, ok, err := (Source{Repo: repo, GH: g.gh, Clock: atNow()}).Take(a, 0); err != nil || !ok || took.Number != 7 {
+	if took, ok, err := (Source{Proc: machine, Repo: repo, GH: g.gh, Clock: atNow()}).Take(a, 0); err != nil || !ok || took.Number != 7 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 }
@@ -166,7 +166,7 @@ func TestASecondConflictTakeoverWaitsOnAnIssueForAPerson(t *testing.T) {
 	finalSeven(g)
 	// The first takeover found head 0ld; the PR conflicts again at abc.
 	g.comments = []comment{{ID: 1, Body: "Taken over.\n<!-- se:takeover 1 -->\n<!-- se:takeover-head 0ld -->"}}
-	took, ok, err := Source{Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
+	took, ok, err := Source{Proc: machine, Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -210,7 +210,7 @@ func TestATakeoverInFlightIsLeftToItsBox(t *testing.T) {
 	g := newPulls(t, pr70("false", "dirty"))
 	// A box took #7 over at this very head and has not landed the merge yet.
 	g.comments = []comment{{ID: 1, Body: "<!-- se:takeover 1 -->\n<!-- se:takeover-head abc -->"}}
-	took, ok, err := Source{Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
+	took, ok, err := Source{Proc: machine, Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 || len(g.writes) != 0 {
 		t.Fatalf("took %+v %v %v, writes %q", took, ok, err, g.writes)
 	}
@@ -220,7 +220,7 @@ func TestOfTwoBoxesTakingOverAtOnceTheFirstMarkerWins(t *testing.T) {
 	_, a, _ := boxes(t)
 	g := newPulls(t, pr70("false", "dirty"))
 	g.before = &comment{ID: 50, Body: "<!-- se:takeover 1 -->\n<!-- se:takeover-head abc -->"}
-	took, ok, err := Source{Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
+	took, ok, err := Source{Proc: machine, Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -236,7 +236,7 @@ func TestAConflictAfterAStuckTakeoverGoesToAPerson(t *testing.T) {
 	// #7 was taken over once already, stuck, so it is final; its PR now conflicts.
 	finalSeven(g)
 	g.comments = []comment{{ID: 1, Body: "<!-- se:takeover 1 -->\nTaken over: nothing was pushed."}}
-	took, ok, err := Source{Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
+	took, ok, err := Source{Proc: machine, Repo: repo, GH: g.gh, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}

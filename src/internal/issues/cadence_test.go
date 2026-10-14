@@ -58,7 +58,7 @@ func writing(t *testing.T, answers map[string]string) (GH, *[][]string) {
 func TestNineClosedStartNoRetro(t *testing.T) {
 	_, a, _ := boxes(t)
 	gh, w := writing(t, cadenceRepo(9, 0))
-	s := Source{Repo: repo, GH: gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}
 	took, ok, c, err := s.TakeRetro(a)
 	if err != nil || ok || c.Closed != 9 || c.Previous != 20 || c.Due() || len(*w) != 0 {
 		t.Fatalf("took %+v %v, %+v %v, writes %q", took, ok, c, err, *w)
@@ -74,7 +74,7 @@ func TestNineClosedStartNoRetro(t *testing.T) {
 func TestTenClosedStartAnUnattendedRetroAndTakeItFirst(t *testing.T) {
 	_, a, _ := boxes(t)
 	gh, w := writing(t, cadenceRepo(10, 0))
-	s := Source{Repo: repo, GH: gh, Clock: atNow()}
+	s := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}
 	took, ok, c, err := s.TakeRetro(a)
 	if err != nil || !ok || took.Number != 30 || !took.Retro || c.Closed != 10 {
 		t.Fatalf("took %+v %v, %+v %v", took, ok, c, err)
@@ -90,7 +90,7 @@ func TestTenClosedStartAnUnattendedRetroAndTakeItFirst(t *testing.T) {
 func TestAnOpenRetroBlocksASecond(t *testing.T) {
 	for _, n := range []int{10, 25} {
 		gh, w := writing(t, cadenceRepo(n, 31))
-		took, ok, c, err := Source{Repo: repo, GH: gh, Clock: atNow()}.TakeRetro(t.TempDir())
+		took, ok, c, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.TakeRetro(t.TempDir())
 		if err != nil || ok || c.Open != 31 || c.Due() || len(*w) != 0 {
 			t.Fatalf("%d closed: took %+v %v, %+v %v, writes %q", n, took, ok, c, err, *w)
 		}
@@ -103,14 +103,14 @@ func TestAnOpenRetroBlocksASecond(t *testing.T) {
 func TestRetroIssuesAreNotCounted(t *testing.T) {
 	// cadenceRepo(9, …) holds a closed retro and a pull request inside the
 	// window, besides the nine: counted, they would make the cadence due.
-	c, err := Source{Repo: repo, GH: recorded(t, cadenceRepo(9, 0)), Clock: atNow()}.Cadence()
+	c, err := Source{Proc: machine, Repo: repo, GH: recorded(t, cadenceRepo(9, 0)), Clock: atNow()}.Cadence()
 	if err != nil || c.Closed != 9 {
 		t.Fatalf("%+v %v", c, err)
 	}
 }
 
 func TestTheFirstCadenceCountsTheWholeHistory(t *testing.T) {
-	c, err := Source{Repo: repo, GH: recorded(t, map[string]string{
+	c, err := Source{Proc: machine, Repo: repo, GH: recorded(t, map[string]string{
 		closedRetrosPath: `[]`,
 		openRetrosPath:   `[]`,
 		"repos/o/r/issues?labels=se&state=closed&per_page=100": `[{"number":1,"state":"closed","closed_at":"2026-01-01T00:00:00Z"}]`,

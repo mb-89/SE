@@ -158,7 +158,7 @@ func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (to
 		if err := s.finalize(c.Number); err != nil {
 			return Issue{}, false, err
 		}
-		if err := pickUp(dir, c.Number); err != nil {
+		if err := s.pickUp(dir, c.Number); err != nil {
 			return Issue{}, false, err
 		}
 		took = c.Issue

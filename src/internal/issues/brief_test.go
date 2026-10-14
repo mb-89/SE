@@ -47,7 +47,7 @@ func asked(t *testing.T, answers map[string]string) (GH, *[]string) {
 
 func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 	gh, paths := asked(t, briefAnswers())
-	b, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Brief(1, false)
+	b, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.Brief(1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 
 	// Once the findings are verified, --claims shows them, as claims.
 	gh, _ = asked(t, briefAnswers())
-	b, err = Source{Repo: repo, GH: gh, Clock: atNow()}.Brief(1, true)
+	b, err = Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.Brief(1, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestTheBriefOfAReReviewNamesTheEarlierBlockersAndTheDiff(t *testing.T) {
 	// Without a principles file, the brief says so.
 	answers["repos/o/r/contents/spec/principles.md?ref=abc"] = ""
 	gh := recorded(t, answers)
-	s := Source{Repo: repo, GH: func(args ...string) ([]byte, error) {
+	s := Source{Proc: machine, Repo: repo, GH: func(args ...string) ([]byte, error) {
 		if strings.HasPrefix(args[len(args)-1], "repos/o/r/contents/") {
 			return nil, fmt.Errorf("gh api: Not Found (HTTP 404)")
 		}
