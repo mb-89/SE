@@ -60,6 +60,14 @@ with the github instance's config ([index.md](index.md#the-wiring-file)):
   reports them per closed issue ([retro.md](retro.md)), and `se fleet check`
   says when the quota left falls below `github/config/quota-floor` percent
   of the hour's ([coordination.md](coordination.md)).
+- **It records each rate-limit refusal.** The module keeps each request
+  GitHub refused for a rate limit, with its status and the wait it made for
+  the reset, or that it gave up past the ceiling (`github.Refuser`). Each
+  command appends them, with its own name, to its workspace's ledger
+  `.se/.runtime/ratelimits.log`; `se issue land` adds up its checkout's
+  refusals and minutes waited into the landing facts, and the retro counts
+  both per closed issue, so a quota that starves the fleet is a metric, not
+  something read from free-text answers or hidden in claim to merge.
 
 ## The layout
 

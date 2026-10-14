@@ -131,7 +131,7 @@ func (c Collected) facts() string {
 	for _, name := range counted {
 		fmt.Fprintf(&b, "| %s | %g | %g |\n", name, c.Metrics[name], c.Metrics[name+"_per_issue"])
 	}
-	known, withRequests := 0, 0
+	known, withRequests, withWaits := 0, 0, 0
 	for _, r := range c.Rows {
 		if r.Minutes >= 0 {
 			known++
@@ -139,8 +139,12 @@ func (c Collected) facts() string {
 		if r.Requests > 0 {
 			withRequests++
 		}
+		if r.RateLimits > 0 {
+			withWaits++
+		}
 	}
 	fmt.Fprintf(&b, "\nGitHub requests: %g per closed issue, counted by the landing facts of %d of the %d closed issues.\n", c.Metrics["requests_per_issue"], withRequests, len(c.Rows))
+	fmt.Fprintf(&b, "\nGitHub rate limits: %g refusals and %g minutes waited for the reset per closed issue; %d of the %d closed issues met one.\n", c.Metrics["rate_limits_per_issue"], c.Metrics["rate_limit_minutes_per_issue"], withWaits, len(c.Rows))
 	fmt.Fprintf(&b, "\nDuplicates: %g closed as duplicate, %d issues for a person minted again for an issue one already held back.\n", c.Metrics["duplicates"]-float64(c.Reholds), c.Reholds)
 	fmt.Fprintf(&b, "\nClaim to merge: median %s over the %d issues whose claim and merge are both on record.\n", span(int(c.Metrics["claim_to_merge_minutes"])), known)
 

@@ -185,6 +185,11 @@ type Row struct {
 	Minutes int `json:"minutes"`
 	// Requests is the GitHub requests its landing facts counted; 0 unknown.
 	Requests int `json:"requests,omitempty"`
+	// RateLimits is the requests GitHub refused its se commands for a rate
+	// limit, and RateLimitMinutes the minutes se waited for the resets, as
+	// its landing facts counted them; 0 none or unknown.
+	RateLimits       int     `json:"rate_limits,omitempty"`
+	RateLimitMinutes float64 `json:"rate_limit_minutes,omitempty"`
 }
 
 // Script is a file added under src/scripts/ in the window.
@@ -513,6 +518,7 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 	r.Takeovers = len(rounds)
 	if landed != nil {
 		r.Requests = landed.Facts.Requests
+		r.RateLimits, r.RateLimitMinutes = landed.Facts.RateLimits, round2(float64(landed.Facts.RateLimitWaitS)/60)
 	}
 	if p, ok := fixedBy[x.Number]; ok {
 		r.PR = p.Number
@@ -631,8 +637,8 @@ type Metrics map[string]float64
 // are the closed issues closed as duplicate, and the issues for a person made
 // beyond the first for each issue they hold back.
 var metricNames = []string{
-	"closed", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand", "duplicates", "requests",
-	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue", "duplicates_per_issue", "requests_per_issue",
+	"closed", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand", "duplicates", "requests", "rate_limits", "rate_limit_minutes",
+	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue", "duplicates_per_issue", "requests_per_issue", "rate_limits_per_issue", "rate_limit_minutes_per_issue",
 	"claim_to_merge_minutes",
 }
 
@@ -647,6 +653,8 @@ func (c Collected) measure() Metrics {
 		m["takeovers"] += float64(r.Takeovers)
 		m["person_flags"] += float64(r.Person)
 		m["requests"] += float64(r.Requests)
+		m["rate_limits"] += float64(r.RateLimits)
+		m["rate_limit_minutes"] += r.RateLimitMinutes
 		if r.Reason == "duplicate" {
 			m["duplicates"]++
 		}
@@ -668,7 +676,7 @@ func (c Collected) measure() Metrics {
 }
 
 // counted are the metrics counted in the window, each also per closed issue.
-var counted = []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand", "duplicates", "requests"}
+var counted = []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand", "duplicates", "requests", "rate_limits", "rate_limit_minutes"}
 
 func round2(x float64) float64 { return float64(int(x*100+0.5)) / 100 }
 

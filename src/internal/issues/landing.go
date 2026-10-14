@@ -113,6 +113,11 @@ type Facts struct {
 	// Requests counts the GitHub requests the se commands run in the
 	// checkout made (RequestsFile), this land's so far included.
 	Requests int `yaml:"requests,omitempty"`
+	// RateLimits counts the requests GitHub refused those commands for a
+	// rate limit (RateLimitsFile), this land's so far included, and
+	// RateLimitWaitS the seconds se waited for the resets all told.
+	RateLimits     int `yaml:"rate_limits,omitempty"`
+	RateLimitWaitS int `yaml:"rate_limit_wait_s,omitempty"`
 	// BatteryMs is how long the battery this land ran took, Slowest its
 	// slowest Go tests, SlowestPlugin its slowest plugin tests, Overruns each
 	// budget it went over, and Unbudgeted each step it ran with no budget;
@@ -168,6 +173,9 @@ func (l Landed) Comment(qs []Question) (string, error) {
 		took, f.Landed.UTC().Format(time.RFC3339), f.Commits, f.Takeovers, f.MainMerges)
 	if f.Requests > 0 {
 		fmt.Fprintf(&b, "- GitHub requests: %d\n", f.Requests)
+	}
+	if f.RateLimits > 0 {
+		fmt.Fprintf(&b, "- GitHub rate-limit refusals: %d, waited %s for the reset\n", f.RateLimits, time.Duration(f.RateLimitWaitS)*time.Second)
 	}
 	if f.BatteryMs > 0 {
 		fmt.Fprintf(&b, "- battery: %dms\n", f.BatteryMs)
@@ -311,6 +319,12 @@ func (s Source) facts(dir string, n int, comments []comment) (Facts, error) {
 	}
 	running, _ := github.Metered(s.GitHub)
 	f.Requests = recorded + running
+	waits, err := RateLimitWaits(s.Disk, dir)
+	if err != nil {
+		return Facts{}, err
+	}
+	waits = waits.add(github.RefusedBy(s.GitHub))
+	f.RateLimits, f.RateLimitWaitS = waits.Refusals, int(waits.Wait/time.Second)
 	profile, profiled, err := battery.Load(s.Disk, dir)
 	if err != nil {
 		return Facts{}, err
