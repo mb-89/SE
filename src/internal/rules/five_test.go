@@ -19,6 +19,7 @@ func surfaces(allowlist string, files ...string) map[string]string {
 }
 
 func TestASurfaceHoldsAtMostItsLimit(t *testing.T) {
+	t.Parallel()
 	found := check(t, "rule-of-five", surfaces("",
 		// The root: four files, three folders (src holds the configuration), and dot entries that do not count.
 		"README.md", "RUNME.sh", "CLAUDE.md", ".gitignore", ".github/ci.yml", "spec/a.md", "tests/check.sh",
@@ -34,6 +35,7 @@ func TestASurfaceHoldsAtMostItsLimit(t *testing.T) {
 }
 
 func TestTheFiveAllowlistOnlyShrinks(t *testing.T) {
+	t.Parallel()
 	found := check(t, "rule-of-five", surfaces(
 		"  .: {files: 2, folders: 4}\n  spec: {files: 3}\n  tests: {files: 9}\n",
 		"a", "b", "c", "spec/1", "spec/2", "spec/3", "spec/4", "s1/x", "s2/x", "s3/x",
@@ -48,6 +50,7 @@ func TestTheFiveAllowlistOnlyShrinks(t *testing.T) {
 }
 
 func TestAnEntryAboveTheCountIsLowered(t *testing.T) {
+	t.Parallel()
 	found := check(t, "rule-of-five", surfaces("  spec: {files: 9}\n  .: {files: 2}\n", "spec/1", "spec/2", "spec/3", "a"))
 	same(t, found, []string{
 		rules.FiveConfig + ":4: rule-of-five: spec/ holds 3 visible files: lower its allowlist entry from 9 to 3",

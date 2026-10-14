@@ -185,3 +185,21 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 	}
 	return created, ready, nil
 }
+
+// Duplicate names the lowest open fleet issue titled title, its spaces
+// trimmed, that is a sub-issue of parent, or at the top where parent is 0;
+// 0 where there is none. It reads the fleet as CloseParents does, closing the
+// parents it closes, so se issue new reads it once.
+func (s Source) Duplicate(title string, parent int) (int, error) {
+	t, err := s.load(nil)
+	if err != nil {
+		return 0, err
+	}
+	title = strings.TrimSpace(title)
+	for _, n := range t.numbers() {
+		if strings.TrimSpace(t.byNum[n].Title) == title && t.above[n] == parent {
+			return n, nil
+		}
+	}
+	return 0, nil
+}

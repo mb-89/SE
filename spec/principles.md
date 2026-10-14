@@ -58,7 +58,8 @@ principle is one sentence and one paragraph, and names what checks it.
    fakes. Real I/O modules appear only in their contract tests. No wall
    clock, no sleeping, tests run in parallel, fixtures are built once, and
    test code stays at or under code size.
-   Checked by: retro, mechanically (battery time and the test ratio as metrics).
+   Checked by: the battery (the `fast-test` rule: parallel tests, no wall
+   clock); retro, mechanically (battery time and the test ratio as metrics).
 
 9. **Performance is measured, and a person never waits blind.**
    The battery, every test, each `se` command and each plugin hook record

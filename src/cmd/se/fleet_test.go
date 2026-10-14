@@ -21,6 +21,7 @@ func recordedFleet(t *testing.T) {
 }
 
 func TestAHealthyFleetSaysSo(t *testing.T) {
+	t.Parallel()
 	recordedFleet(t)
 	for _, cmd := range []string{"check", "fix"} {
 		if code, out, errs := se(t, "fleet", cmd, "--repo", "o/r"); code != 0 || out != "healthy\n" {
@@ -41,6 +42,7 @@ func TestAHealthyFleetSaysSo(t *testing.T) {
 }
 
 func TestFleetPruneDeletesOnlyWithApply(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/pulls?state=open&per_page=100":   `[]`,
 		"repos/o/r/git/matching-refs/heads/issue-":  `[{"ref":"refs/heads/issue-19","object":{"sha":"c19"}}]`,

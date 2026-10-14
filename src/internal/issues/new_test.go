@@ -12,6 +12,7 @@ import (
 )
 
 func TestBlockedByIsANumberListOrNone(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string][]int{"none": nil, "5": {5}, "5,8": {5, 8}, " #8, 5 ,8": {5, 8}} {
 		if got, err := ParseBlockedBy(in); err != nil || !reflect.DeepEqual(got, want) {
 			t.Errorf("%q: %v %v, want %v", in, got, err, want)
@@ -43,6 +44,7 @@ func linksOf(t *testing.T, gh *github.Fake, path string) []int {
 }
 
 func TestBlockWritesNativeLinksByIssueID(t *testing.T) {
+	t.Parallel()
 	gh := recorded(t, map[string]string{
 		"repos/o/r/issues/8": `{"id":808,"number":8,"state":"open"}`,
 		"repos/o/r/issues/6": `{"id":606,"number":6,"state":"open"}`,
@@ -59,6 +61,7 @@ func TestBlockWritesNativeLinksByIssueID(t *testing.T) {
 }
 
 func TestBlockRefusesAMissingBlockerBeforeWriting(t *testing.T) {
+	t.Parallel()
 	gh := recorded(t, map[string]string{"repos/o/r/issues/8": `{"id":808,"number":8}`, "repos/o/r/issues/6": `{"id":606,"number":6}`})
 	err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Block(6, []int{8, 99})
 	if err == nil || !strings.Contains(err.Error(), "#99 does not exist") {
@@ -73,6 +76,7 @@ func TestBlockRefusesAMissingBlockerBeforeWriting(t *testing.T) {
 }
 
 func TestCreateNamesTheIssueWhoseLinkFailed(t *testing.T) {
+	t.Parallel()
 	// #8 is a pull request on GitHub's side by the time the link is written:
 	// the link is refused, and the error names the issue already created.
 	gh := recorded(t, map[string]string{
@@ -97,6 +101,7 @@ func (r refuseLinks) Send(method, path string, fields ...github.Field) ([]byte, 
 }
 
 func TestCreateMakesASubIssueOfItsParent(t *testing.T) {
+	t.Parallel()
 	gh := recorded(t, map[string]string{"repos/o/r/issues/1": `{"id":101,"number":1,"state":"open"}`})
 	made, _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Create("t", "b", 1, nil)
 	if err != nil {
@@ -119,5 +124,26 @@ func TestCreateMakesASubIssueOfItsParent(t *testing.T) {
 	}
 	if w := gh.Writes(); len(w) != 2 {
 		t.Fatalf("wrote %q", w)
+	}
+}
+
+func TestDuplicateIsAnOpenIssueOfTheSameTitleUnderTheSameParent(t *testing.T) {
+	t.Parallel()
+	gh := recorded(t, map[string]string{
+		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
+			{"number":1,"title":"root","state":"open","sub_issues_summary":{"total":2}},
+			{"number":2,"title":"leaf","state":"open"},
+			{"number":3,"title":"leaf ","state":"open"}]`,
+		"repos/o/r/issues/1/sub_issues?per_page=100": `[{"number":3,"state":"open"},{"number":4,"title":"done","state":"closed"}]`,
+	})
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	for _, c := range []struct {
+		title  string
+		parent int
+		want   int
+	}{{"leaf", 0, 2}, {" leaf", 1, 3}, {"root", 0, 1}, {"root", 1, 0}, {"done", 1, 0}, {"Leaf", 0, 0}} {
+		if got, err := s.Duplicate(c.title, c.parent); err != nil || got != c.want {
+			t.Errorf("%q under #%d: %d %v, want %d", c.title, c.parent, got, err, c.want)
+		}
 	}
 }
