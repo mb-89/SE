@@ -38,7 +38,8 @@ func (c Cmd) String() string { return strings.Join(append([]string{c.Name}, c.Ar
 // Procs is what SE asks of programs.
 type Procs interface {
 	// Run runs c to its end. A program that is not there fails with
-	// ErrNotFound; one that exits other than 0 with an *ExitError.
+	// ErrNotFound; one still open for writing, which the system will not run
+	// yet, with ErrBusy; one that exits other than 0 with an *ExitError.
 	Run(c Cmd) error
 	// Start starts c and returns at once; the Running's Wait answers its end
 	// as Run would.
@@ -56,6 +57,12 @@ type Running interface {
 
 // ErrNotFound is the error of a program that is not there.
 var ErrNotFound = errors.New("no such program")
+
+// ErrBusy is the error of a program the system will not run yet, since a
+// file handle still writes it: Linux's "text file busy". A program just
+// written can be busy for a moment, while a process forked meanwhile still
+// holds the handle; it runs once that process has gone on.
+var ErrBusy = errors.New("program busy, still open for writing")
 
 // ExitError is the end of a program that exited other than 0.
 type ExitError struct{ Code int }
