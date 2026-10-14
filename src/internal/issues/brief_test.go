@@ -120,7 +120,7 @@ func TestTheBriefOfAReReviewNamesTheEarlierBlockersAndTheDiff(t *testing.T) {
 	answers := briefAnswers()
 	earlier := Verdict{Report: failing("three")}
 	earlier.Report.Findings[0].Issue = 3
-	answers[commentsPath(1)] = fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r", Workspace: "/r"}))
+	answers[commentsPath(1)] = fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r", Workspace: "/r"}, MaxFiled))
 	// Without a principles file, the brief says so.
 	delete(answers, "repos/o/r/contents/spec/principles.md?ref=abc")
 	s := Source{Proc: machine, Repo: repo, GitHub: recorded(t, answers), Clock: atNow()}
