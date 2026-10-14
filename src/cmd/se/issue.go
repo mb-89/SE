@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -269,10 +270,10 @@ func init() {
 	register(Command{
 		Name:    "issue new",
 		Class:   batch,
-		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--replace] [--json] [--repo OWNER/NAME]",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "create an se issue in a manifest; in a box, queue it",
-		Details: fmt.Sprintf("create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), and name it. All work moves in manifests: a manifest is an issue at the top on one topic whose sub-issues are its work, landing as one PR, its leaves together about %s (issues.manifest/config/target), and boxes take only manifests. --parent N files it into a manifest (a sub-issue of N); --manifest makes it a new manifest itself, labelled se-manifest, whose leaves follow with --parent; without either it goes into the open misc manifest (labelled se-misc), which takes new issues for that time from its creation, after which the next one opens.", issues.Span(issueConfig().ManifestTarget.Minutes())) + " --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt: never superseded again. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). A name that is an agent's role (work, coordination, review, retro, overhaul, or the agent's own name) is left out of that line, since the take names the agent that holds it. It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. An issue for a person stands at the top, in no manifest. A ready issue, one nothing open blocks, fires the routine once. " + fmt.Sprintf("In a box, which writes to GitHub once, at its end, it creates nothing: it queues the issue, every flag with it, in the workspace (.se/.runtime/followups.json), and the se issue land, se issue supersede or se issue close --fixed-by of the box's issue files it after its own work, as this command would, its body marked as that issue's follow-up (<!-- se:followup #N -->). A box files at most %d (issues/config/max-followups): one more is refused; fold both into one and pass --replace to replace the queued one, or make the one --person where what is left is too big for one issue.", issueConfig().MaxFollowups),
+		Summary: "create an se issue in a manifest, with its blockers",
+		Details: fmt.Sprintf("create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), and name it. All work moves in manifests: a manifest is an issue at the top on one topic whose sub-issues are its work, landing as one PR, its leaves together about %s (issues.manifest/config/target), and boxes take only manifests. --parent N files it into a manifest (a sub-issue of N); --manifest makes it a new manifest itself, labelled se-manifest, whose leaves follow with --parent; without either it goes into the open misc manifest (labelled se-misc), which takes new issues for that time from its creation, after which the next one opens.", issues.Span(issueConfig().ManifestTarget.Minutes())) + " --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt: never superseded again. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). A name that is an agent's role (work, coordination, review, retro, overhaul, or the agent's own name) is left out of that line, since the take names the agent that holds it. It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. An issue for a person stands at the top, in no manifest. A ready issue, one nothing open blocks, fires the routine once. In a box it refuses, writing nothing: a box opens no issue, its work ends in a PR (se issue land) or a supersede (se issue supersede); retros, reviews and overhauls file theirs through their own commands.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -288,22 +289,25 @@ func init() {
 			manifest := fs.Bool("manifest", false, "make it a new manifest, labelled se-manifest: its leaves follow with --parent")
 			skills := fs.String("skills", "", "the skills its work needs, as `NAME,NAME`: a take hands each over")
 			allowDuplicate := fs.Bool("allow-duplicate", false, "create it although an open se issue under the same parent has its title")
-			replace := fs.Bool("replace", false, "in a box: queue it in place of the issue queued already")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
+			}
+			// A box opens no issue: refused before anything is read or written.
+			if c.isBox() {
+				return Reply{}, errBoxOpensNoIssue
 			}
 			given := map[string]bool{}
 			fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
 			if !given["blocked-by"] {
 				return Reply{}, fmt.Errorf("issue new needs --blocked-by: the issues that block it, as N,M, or none")
 			}
-			n := newIssue{Title: *title, Parent: *parent, Review: *review, Final: *final, Person: *person, Manifest: *manifest, AllowDuplicate: *allowDuplicate}
-			var err error
-			if n.BlockedBy, err = issues.ParseBlockedBy(*blockedBy); err != nil {
+			blockers, err := issues.ParseBlockedBy(*blockedBy)
+			if err != nil {
 				return Reply{}, err
 			}
+			var dependents []int
 			if given["blocks"] {
-				if n.Blocks, err = issues.ParseBlockedBy(*blocks); err != nil || len(n.Blocks) == 0 {
+				if dependents, err = issues.ParseBlockedBy(*blocks); err != nil || len(dependents) == 0 {
 					return Reply{}, fmt.Errorf("--blocks takes issue numbers, like 5,8, not %q", *blocks)
 				}
 			}
@@ -316,7 +320,6 @@ func init() {
 			if given["body"] == given["body-file"] {
 				return Reply{}, fmt.Errorf("issue new takes one of --body and --body-file")
 			}
-			n.Body = *body
 			if given["body-file"] {
 				path := *bodyFile
 				if !filepath.IsAbs(path) {
@@ -326,50 +329,128 @@ func init() {
 				if err != nil {
 					return Reply{}, err
 				}
-				n.Body = string(data)
+				*body = string(data)
 			}
 			if given["skills"] {
-				if n.Skills, err = guidance.Parse(*skills); err != nil {
+				names, err := guidance.Parse(*skills)
+				if err != nil {
 					return Reply{}, err
 				}
 				// A role an agent holds is no skill: the take names its agent.
-				n.Skills = issues.Skills(n.Skills)
-				if _, err := guidance.Read(c.Disk, c.seRoot(), n.Skills); err != nil {
+				names = issues.Skills(names)
+				if _, err := guidance.Read(c.Disk, c.seRoot(), names); err != nil {
 					return Reply{}, err
 				}
-			}
-			if strings.TrimSpace(n.Title) == "" {
-				return Reply{}, fmt.Errorf("an issue needs a --title")
-			}
-			if n.Person && (n.Review || n.Final) {
-				return Reply{}, fmt.Errorf("--person takes neither --review nor --final: an issue for a person is no box's work")
-			}
-			if c.isBox() {
-				return queue(c, n, *replace, *asJSON)
-			}
-			if *replace {
-				return Reply{}, fmt.Errorf("--replace replaces the issue a box queued; this session is no box, and se issue new creates the issue at once")
+				*body = guidance.With(*body, names)
 			}
 			s, err := src()
 			if err != nil {
 				return Reply{}, err
 			}
-			if err := n.refused(s); err != nil {
+			// No bare issues: without --parent or --manifest it goes into the
+			// open misc manifest, or the next one.
+			misc := 0
+			if *parent == 0 && !*manifest && !*person {
+				if misc, err = s.Misc(); err != nil {
+					return Reply{}, err
+				}
+				*parent = misc
+			}
+			if *allowDuplicate {
+				if err := s.CloseParents(); err != nil {
+					return Reply{}, err
+				}
+			} else if dup, err := s.Duplicate(*title, *parent); err != nil {
+				return Reply{}, err
+			} else if dup > 0 {
+				where := "at the top"
+				if *parent > 0 {
+					where = fmt.Sprintf("a sub-issue of #%d", *parent)
+				}
+				return Reply{}, fmt.Errorf("#%d is an open se issue titled %q, %s, already; --allow-duplicate creates another", dup, strings.TrimSpace(*title), where)
+			}
+			var labels []string
+			if *manifest {
+				labels = append(labels, issues.ManifestLabel)
+			}
+			if *review {
+				labels = append(labels, issues.ReviewLabel)
+			}
+			if *final {
+				labels = append(labels, issues.FinalLabel)
+			}
+			if err := s.Exist(dependents); err != nil {
 				return Reply{}, err
 			}
-			made, ready, err := n.create(s, 0)
+			var made issues.Issue
+			ready := false
+			if *person {
+				if len(labels) > 0 {
+					return Reply{}, fmt.Errorf("--person takes neither --review nor --final: an issue for a person is no box's work")
+				}
+				made, err = s.ForPerson(*title, *body, *parent, blockers)
+			} else {
+				made, ready, err = s.Create(*title, *body, *parent, blockers, labels...)
+			}
 			if err != nil {
 				return Reply{}, err
+			}
+			if err := s.Blocking(made, dependents); err != nil {
+				return Reply{}, err
+			}
+			// Filed into no manifest, it went into the misc manifest, which
+			// it may have opened.
+			if *parent == 0 && made.In() > 0 {
+				misc, *parent = made.In(), made.In()
 			}
 			fanout := ""
 			if ready {
 				fanout = c.fanOut(s, 0)
 			}
 			if *asJSON {
-				data, err := json.Marshal(n.answer(made, fanout))
+				data, err := json.Marshal(struct {
+					Number    int    `json:"number"`
+					URL       string `json:"url"`
+					BlockedBy []int  `json:"blocked_by"`
+					Parent    int    `json:"parent,omitempty"`
+					Blocks    []int  `json:"blocks,omitempty"`
+					Review    bool   `json:"review,omitempty"`
+					Final     bool   `json:"final,omitempty"`
+					Person    bool   `json:"person,omitempty"`
+					Manifest  bool   `json:"manifest,omitempty"`
+					Misc      bool   `json:"misc,omitempty"`
+					Fanout    string `json:"fanout,omitempty"`
+				}{made.Number, made.URL, append([]int{}, blockers...), *parent, dependents, *review, *final, *person, *manifest, misc > 0, fanout})
 				return Reply{Text: string(data)}, err
 			}
-			text := n.text(fmt.Sprintf("Created #%d %s", made.Number, made.Title), made)
+			text := fmt.Sprintf("Created #%d %s\n%s", made.Number, made.Title, made.URL)
+			switch {
+			case misc > 0:
+				text += fmt.Sprintf("\nFiled into the misc manifest #%d: it named no --parent.", misc)
+			case *parent > 0:
+				text += fmt.Sprintf("\nA sub-issue of #%d.", *parent)
+			case *manifest:
+				text += fmt.Sprintf("\nA new manifest, labelled %s: file its leaves with --parent %d.", issues.ManifestLabel, made.Number)
+			}
+			if *review {
+				text += "\nLabelled " + issues.ReviewLabel + ": it is reviewed once its sub-issues have closed."
+			}
+			if len(dependents) > 0 {
+				text += "\nIt blocks " + numbers(dependents) + "."
+			}
+			if *person {
+				text += "\nFor a person: labelled " + issues.PersonLabel + " and assigned to the owner."
+			}
+			if *final {
+				text += "\nLabelled " + issues.FinalLabel + ": its last attempt, never superseded again."
+			}
+			if len(blockers) > 0 {
+				names := make([]string, len(blockers))
+				for k, b := range blockers {
+					names[k] = "#" + strconv.Itoa(b)
+				}
+				text += "\nBlocked by " + strings.Join(names, ", ") + "."
+			}
 			if fanout != "" {
 				text += "\n" + fanout
 			}
@@ -382,7 +463,7 @@ func init() {
 		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "check and land issue-N: a leaf into its manifest, else one PR",
-		Details: "on an issue-N branch: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), and refuse an issue with open sub-issues. A leaf inside a manifest (an issue with a parent) lands into the manifest's branch: merge origin's issue-N and the manifest's issue-M into it (never a rebase), pass tests/check.sh, push it to both, post the answers on the leaf with its facts (its time from claim to land among them) and close it; a leaf gets no PR of its own. An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a manifest whose branch holds nothing main does not closes with no PR. Then it files the issue the box queued with se issue new, if any, as se issue new would create it, its body marked as N's follow-up (<!-- se:followup #N -->), names it and clears the queue; a queued issue se issue new would refuse refuses the whole command first, before anything is written.",
+		Details: "on an issue-N branch: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), and refuse an issue with open sub-issues. A leaf inside a manifest (an issue with a parent) lands into the manifest's branch: merge origin's issue-N and the manifest's issue-M into it (never a rebase), pass tests/check.sh, push it to both, post the answers on the leaf with its facts (its time from claim to land among them) and close it; a leaf gets no PR of its own. An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a manifest whose branch holds nothing main does not closes with no PR.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue land")
@@ -411,10 +492,6 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			q, err := queued(c, s)
-			if err != nil {
-				return Reply{}, err
-			}
 			l, err := s.Land(c.Workspace, c.sessionID(), qs, answers, func(dir string) error { return c.Check(c.Proc, dir) })
 			if err != nil {
 				return Reply{}, err
@@ -423,42 +500,35 @@ func init() {
 			if err := recordLand(c, l.Issue, l.Number); err != nil {
 				return Reply{}, fmt.Errorf("landed PR #%d (%s), but recording it for the Stop hook: %w", l.Number, l.URL, err)
 			}
-			return closeOut(c, s, l.Issue, q, *asJSON, false, func() string { return c.fanOut(s, 0) }, func(filed []newAnswer, fanout string) (Reply, error) {
-				if *asJSON {
-					data, err := json.Marshal(struct {
-						issues.Landing
-						Filed  []newAnswer `json:"filed,omitempty"`
-						Fanout string      `json:"fanout,omitempty"`
-					}{l, filed, fanout})
-					return Reply{Text: string(data)}, err
-				}
-				var text string
-				switch {
-				case l.Manifest > 0:
-					text = fmt.Sprintf("Landed #%d into %s, the branch of manifest #%d, and closed it: a leaf gets no PR. The manifest lands as one PR once its leaves are done.", l.Issue, l.Into, l.Manifest)
-				case l.Closed:
-					text = fmt.Sprintf("Closed #%d: its leaves are all closed and its branch holds nothing main does not, so there is no PR.", l.Issue)
-				default:
-					did := "Pushed issue-%d; its PR #%d is open"
-					if l.Created {
-						did = "Pushed issue-%d and opened PR #%d"
-					}
-					text = fmt.Sprintf(did, l.Issue, l.Number)
-					if l.Merged {
-						text += "; nothing was left to wait for, so it is merged (squash)."
-					} else {
-						text += ", auto-merge (squash) on."
-					}
-					text += "\n" + l.URL
-				}
-				if fanout != "" {
-					text += "\n" + fanout
-				}
-				return Reply{Text: text}, nil
-			})
+			if *asJSON {
+				data, err := json.Marshal(l)
+				return Reply{Text: string(data)}, err
+			}
+			switch {
+			case l.Manifest > 0:
+				return Reply{Text: fmt.Sprintf("Landed #%d into %s, the branch of manifest #%d, and closed it: a leaf gets no PR. The manifest lands as one PR once its leaves are done.", l.Issue, l.Into, l.Manifest)}, nil
+			case l.Closed:
+				return Reply{Text: fmt.Sprintf("Closed #%d: its leaves are all closed and its branch holds nothing main does not, so there is no PR.", l.Issue)}, nil
+			}
+			did := "Pushed issue-%d; its PR #%d is open"
+			if l.Created {
+				did = "Pushed issue-%d and opened PR #%d"
+			}
+			text := fmt.Sprintf(did, l.Issue, l.Number)
+			if l.Merged {
+				text += "; nothing was left to wait for, so it is merged (squash)."
+			} else {
+				text += ", auto-merge (squash) on."
+			}
+			return Reply{Text: text + "\n" + l.URL}, nil
 		},
 	})
 }
+
+// errBoxOpensNoIssue is se issue new's refusal in a box. The owner's rule: a
+// box's outcome is a PR, a supersede or a close --fixed-by, never a new
+// issue; retros, reviews and overhauls file theirs through their own commands.
+var errBoxOpensNoIssue = errors.New("a box opens no issue: its work ends in a PR (se issue land), or, where it cannot land one, a supersede (se issue supersede) that carries what is left. Retros, reviews and overhauls file issues through their own commands")
 
 func init() {
 	register(Command{
@@ -783,7 +853,7 @@ func issueReply(asJSON, full bool, i issues.Issue, ok bool, branch, worktree, fa
 		head += "\n\nIts sub-agent works in its own worktree:\n" + worktree
 	}
 	if branch != "" && len(i.Blocks) > 0 {
-		head += fmt.Sprintf("\nIt blocks %s. What you leave over, filed with se issue new, names in --blocks those of them that need it.", numbers(i.Blocks))
+		head += fmt.Sprintf("\nIt blocks %s. What you cannot finish goes into a supersede (se issue supersede), which they then wait on.", numbers(i.Blocks))
 	}
 	if fanout != "" {
 		head += "\n" + fanout

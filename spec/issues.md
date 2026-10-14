@@ -219,19 +219,16 @@ nothing mints an issue for a person on a box's behalf.
 - **A box that takes an issue closes it, always** (the owner's rule,
   2026-10-14). It ends in one of three ways and no other: a PR for what it
   solved, auto-merge on (`se issue land`) and kept until it merges
-  (`se issue keep`), with at most one issue (`se issue new`) for everything
-  it could not solve, filed as the box ends
-  (see [A box's follow-up](#a-boxs-follow-up)); a supersede (`se issue supersede <n>`),
-  where it cannot land a PR at all, `--duplicate-of` another open issue
-  whose PR already covers its work; or, where the issue's work reached main
-  before the take, a close naming that commit
+  (`se issue keep`); a supersede (`se issue supersede <n>`), where it cannot
+  land a PR at all, carrying what is left, `--duplicate-of` another open
+  issue whose PR already covers its work; or, where the issue's work reached
+  main before the take, a close naming that commit
   (`se issue close <n> --fixed-by SHA`), so a moot issue ends without an
-  empty PR. `se issue pull --take` names the open
-  issues the taken one blocks; the box names in `--blocks` those of them that
-  need what it left over, and only those, so nothing waits that need not. An
-  issue for a person (`se issue new --person`) is never a way for a box to
-  end: it is only a side issue, for access or a principle. The plugin's Stop
-  hook holds a box to the rule (see [The Stop hook](#the-stop-hook)).
+  empty PR. A box opens no issue (the owner's rule, 2026-10-14):
+  `se issue new` refuses in one, before it asks GitHub anything, and only
+  retros, reviews and overhauls file issues, through their own commands. The
+  plugin's Stop hook holds a box to the rule (see
+  [The Stop hook](#the-stop-hook)).
 - **The person's side:**
   - `se issue pull --person` lists every issue waiting on a person, with its
     reason and how many open issues it holds up, directly or through a tree.
@@ -247,7 +244,7 @@ se issue close N --fixed-by SHA --answers FILE [--json] [--repo OWNER/NAME]
 se issue edit N [--title T] [--body B | --body-file PATH] [--json] [--repo OWNER/NAME]
 se issue keep [--for D] [--json] [--repo OWNER/NAME]
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
-se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--replace] [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
 se issue supersede N (--body B | --body-file PATH | --duplicate-of M) [--json] [--repo OWNER/NAME]
@@ -430,6 +427,8 @@ issue it created (every issue in `--blocked-by` is closed, or it is `none`),
 it runs the fan-out (below) and adds a line saying what it did (with
 `--json`: the field `fanout`); otherwise a new ready issue could wait for the
 next merge or the schedule. A blocked issue fires nothing.
+In a box it refuses, writing nothing and asking GitHub nothing: a box opens
+no issue (see [Stuck work](#stuck-work)).
 A session has it as `/se issue new`.
 
 `se issue edit N` is how an `se` issue changes after it is made, never by
@@ -475,28 +474,6 @@ as `land` does (see [Landing answers](#landing-answers)), comments naming the
 commit and its link under the marker `<!-- se:fixed-by SHA -->`, and closes N
 as completed (with `--json`: `{"issue","commit","subject","url"}`). N's
 dependents become ready as when a PR closes it.
-
-### A box's follow-up
-
-A box writes to GitHub once, at the end of its work (the owner's rule,
-2026-10-14), and files at most `issues/config/max-followups` issues (one):
-what is left of its issue goes into that one, and where that is too big for
-one issue, the one is for a person (`--person`). Filing one is a last resort;
-the retro holds the fleet to it (the rule check `followups`,
-[spec/retro.md](retro.md#the-rule-checks)).
-
-- `se issue new` in a box creates nothing: it queues the issue in the
-  workspace, every flag with it, and answers that the land, supersede or
-  close files it. One past the limit is refused; `--replace` replaces the
-  queued one with the two folded together.
-- `se issue land`, `se issue supersede` and `se issue close --fixed-by` refuse,
-  before they write anything, a queued issue `se issue new` would refuse; after
-  their own work they file it as `se issue new` would create it, its body
-  marked `<!-- se:followup #N -->` with N their issue, name it (with
-  `--json`: the field `filed`, a list as `se issue new --json` answers each),
-  and clear the queue.
-
-`se help issue new` has the flags.
 
 ### The Stop hook
 

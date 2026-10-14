@@ -489,7 +489,7 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires", code, fires(t))
 	}
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || fires(t) != 1 || !strings.HasPrefix(out, "Took #3 three, on branch issue-3.\nu3\nIts agent: se:coordinator.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\n#3 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 3 --take\n\ndo it\n") {
+	if code != 0 || fires(t) != 1 || !strings.HasPrefix(out, "Took #3 three, on branch issue-3.\nu3\nIts agent: se:coordinator.\nIt blocks #7. What you cannot finish goes into a supersede (se issue supersede), which they then wait on.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\n#3 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 3 --take\n\ndo it\n") {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// A manifest's box coordinates its tree: the Stop hook holds its leaves'
@@ -541,7 +541,7 @@ func TestATakeNamesWhatTheIssueBlocks(t *testing.T) {
 	}
 	// #3 blocks #7, open, and #8, closed: only #7 still waits for it.
 	code, out, _ := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || !strings.Contains(out, "It blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.") {
+	if code != 0 || !strings.Contains(out, "It blocks #7. What you cannot finish goes into a supersede (se issue supersede), which they then wait on.") {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 }
@@ -677,6 +677,34 @@ func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
 	}
 	if made := issueOf(t, gh, 11); !strings.Contains(made, `"body":"b\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"},{"name":"se-final"}]`) {
 		t.Fatal(made)
+	}
+}
+
+// A box opens no issue: se issue new refuses before it asks GitHub
+// anything or writes a file, and an interactive session creates as before.
+func TestIssueNewInABoxRefusesAndWritesNothing(t *testing.T) {
+	t.Parallel()
+	gh := recordedIssues(t)
+	asBox(t)
+	d, ws := onFake(t), filepath.FromSlash("/ws")
+	put(t, d, filepath.Join(ws, "left.md"), "what is left\n")
+	before := gh.Requests()
+	newIn := func() (int, string, string) {
+		return se(t, "issue", "new", "--workspace", ws, "--repo", "o/r", "--title", "ten", "--body-file", "left.md", "--blocked-by", "none")
+	}
+	code, out, errs := newIn()
+	if code != 1 || out != "" || !strings.Contains(errs, "a box opens no issue: its work ends in a PR (se issue land), or, where it cannot land one, a supersede (se issue supersede)") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if n := gh.Requests(); n != before || len(gh.Writes()) != 0 || fires(t) != 0 {
+		t.Fatalf("a box's se issue new asked GitHub %d times, wrote %q, fired %d", n-before, gh.Writes(), fires(t))
+	}
+	if files, err := d.Walk(ws); err != nil || !reflect.DeepEqual(files, []string{filepath.Join(ws, "left.md")}) {
+		t.Fatalf("files %q %v", files, err)
+	}
+	setenv(t, "CLAUDE_CODE_SESSION_ATTENDED", "1")
+	if code, out, errs := newIn(); code != 0 || !strings.HasPrefix(out, "Created #11 ten\n") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 }
 

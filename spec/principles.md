@@ -123,14 +123,14 @@ principles of code once.
     waits on one: every run ends, a box landing what it could, a retro or an
     overhaul closing once its issues exist. What needs the person's answer is
     blocked by their issue, and nothing else is. Nothing mints an issue for
-    a person on a box's behalf. A worker's output is a PR, and a new issue is
-    its safety valve: at most one, filed at its land; if what is left is too
-    big for one issue, that one issue is for a person, and more than one
-    worker in twenty filing one means something is wrong. A review, a retro
-    or an overhaul exists to file issues: it files them in one go at its
-    end, as one group, one issue holding the rest as sub-issues.
-    Checked by: retro, mechanically (`se-person` counts, the share of boxes
-    that filed an issue); overhaul, by judgment.
+    a person on a box's behalf. A worker's output is a PR or a supersede,
+    never a new issue: a box that opens an issue is a defect, and
+    `se issue new` refuses in one. A review, a retro or an overhaul exists
+    to file issues: they are its output, filed through its own command in
+    one go at its end, as one group, one issue holding the rest as
+    sub-issues.
+    Checked by: retro, mechanically (`se-person` counts); overhaul, by
+    judgment.
 
 16. **Blameless.**
     Fix what produced a bad outcome (a rule, a tool, a prompt), never just the

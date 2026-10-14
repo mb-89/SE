@@ -118,8 +118,7 @@ What earlier versions taught, and how this design answers it:
     for each issue they hold back), GitHub requests and time from claim to
     merge, each per landed issue (never per closed issue: closing issues
     for a person or duplicates must not make a metric read better), beside
-    the sizes, and the follow-ups: the share of the issues a box closed whose
-    box filed one ([issues.md](issues.md#a-boxs-follow-up)). `se retro collect` computes them and stores them in the
+    the sizes. `se retro collect` computes them and stores them in the
     report's machine-readable block, so the trend is a number, not an
     impression; the draft tabulates them against every earlier retro.
   - **Did the last retro's fixes help?** For each of its findings: did its
@@ -152,7 +151,6 @@ list:
 - `outside-pr`: no commit reached main outside a PR (every commit on main is some merged PR's merge commit); checked from the first commit.
 - `mark`: every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body; checked on what was created after PR #91 brought it.
 - `answers`: every landed issue (a leaf closed as completed, not a retro, an overhaul or a person's decision) has landing answers; checked on what closed after PR #74 brought it.
-- `followups`: at most `issues/config/followup-share` percent of the issues a box closed (by a land, a supersede or a close) filed a follow-up, each counted by the mark `<!-- se:followup #n -->` in its body; checked from the first commit.
 <!-- /se:manifest -->
 
 ## The commands

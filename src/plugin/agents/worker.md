@@ -51,21 +51,14 @@ tools or the API, and never a comment, a label or a push by hand.
    merge with main that conflicts, a failing check), fix it on the same
    branch (merge `origin/main` in, never rebase), commit, bring the answers up
    to date, run the same `issue land` again, and keep the PR again.
-5. A new issue is a last resort, not a report: most work lands whole. If
-   something truly belongs in a separate change, `<se> issue new` (its
-   `--blocked-by` is required: a list, or `none`; `--parent` files it into a
-   manifest, your issue's own where it belongs there; without it, it goes
-   into the open misc manifest) queues it, and your land files it. You file
-   at most one: fold what is left into it (`--replace`), and if it is too big
-   for one issue, make that one `--person`. Never file a decision you can
-   make yourself: decide, and name the decision in the landing answers.
+5. **Never open an issue**: a box opens none, and `<se> issue new` refuses
+   in one. What you cannot finish goes into a supersede (step 6), which
+   carries it. Decide what you can yourself, and name the decision in the
+   landing answers.
 6. **You close the issue you took, always**, in one of three ways and no
    other:
    - **a landing** of what you solved with `<se> issue land` (into your
      manifest's branch, or a PR with auto-merge on, kept until it merges),
-     with at most one queued issue (step 5) for what you could not
-     solve. Of the issues your take said yours blocks, name in `--blocks`
-     only those that need what you left over, so nothing waits that need not;
      or
    - **a supersede**, where you can land no PR at all:
      `<se> issue supersede <n> --body-file F`, F holding the open questions
