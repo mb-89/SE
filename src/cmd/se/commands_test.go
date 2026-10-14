@@ -152,7 +152,7 @@ func TestTheHelpGroupsTheCommands(t *testing.T) {
 	t.Parallel()
 	want := map[string][]string{
 		"Session":  {"guidance", "help", "off", "on", "restart", "status", "ui", "update"},
-		"Issues":   {"issue land", "issue new", "issue pull", "issue resume", "issue review", "issue supersede", "issue tree"},
+		"Issues":   {"issue close", "issue land", "issue new", "issue pull", "issue resume", "issue review", "issue supersede", "issue tree"},
 		"Hooks":    {"hook prompt", "hook stop"},
 		"Daemon":   {"serve", "start", "stop"},
 		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune", "fleet refresh"},

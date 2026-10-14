@@ -39,14 +39,15 @@ permission prompt, and no others. `<se>` below is the absolute path of
      in. Then pull again, so the box fills up to its cap.
 3. **Wait.** Subscribe to each PR a sub-agent answers
    (`subscribe_pr_activity`). When a sub-agent answers that its PR is up with
-   auto-merge on, or that its issue was superseded, go back to 2. A red CI
-   run or a review on a PR goes to that PR's sub-agent (`SendMessage`), with
+   auto-merge on, or that its issue was superseded or closed by a commit on
+   main, go back to 2. A red CI run or a review on a PR goes to that PR's sub-agent (`SendMessage`), with
    the failure or the review. When a PR merges, remove its worktree
    (`git worktree remove <path>`) and go back to 2.
 4. **You always end, and never stuck.** End when nothing is ready, no
    sub-agent of yours is running, and every tree you coordinate is done or
-   waits. Each issue you took is closed by its sub-agent with a PR or a
-   supersede, as **An issue** says; never end with only a comment.
+   waits. Each issue you took is closed by its sub-agent with a PR, a
+   supersede or a close naming the commit on main, as **An issue** says;
+   never end with only a comment.
 
 ## The sub-agent's prompt
 
@@ -86,7 +87,7 @@ Reader: the sub-agent that does one issue's work.
 4. Anything that belongs in a separate change becomes an issue through
    `<se> issue new` (its `--blocked-by` is required: a list, or `none`;
    `--parent` makes it a sub-issue).
-5. **You close the issue you took, always**, in one of two ways and no
+5. **You close the issue you took, always**, in one of three ways and no
    other:
    - **a PR** for what you solved, landed with `<se> issue land` (auto-merge
      on), and an issue through `<se> issue new` for everything you could not
@@ -98,6 +99,13 @@ Reader: the sub-agent that does one issue's work.
      you could not answer. It makes a final successor in your issue's place
      and closes yours. A final issue (`se-final`) cannot be superseded: its
      box lands a PR.
+   - **a close naming the commit**, where the issue's work is on main
+     already (another issue's PR did it before your take), so a PR would be
+     an empty commit: write the landing answers as in step 2, then
+     `<se> issue close <n> --fixed-by SHA --workspace <path> --answers <path>-landing.yaml`,
+     SHA the commit on main that did the work. It refuses a SHA main does
+     not hold, posts the answers, comments naming the commit and closes the
+     issue. Never land an empty commit to close an issue.
 
    An issue for a person (`--person`) is never a way to end, only a side
    issue, for access or a principle. The Stop hook refuses the box's stop
