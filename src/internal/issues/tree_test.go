@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -293,7 +292,7 @@ func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
 		t.Fatalf("%+v %v %v", took, ok, err)
 	}
 	shell(t, a, Worktree(a, 3))
-	if got := run(t, filepath.Join(filepath.Dir(a), "issue-3"), "rev-parse", "--abbrev-ref", "HEAD", "@{upstream}"); got != "issue-3\norigin/issue-3" {
+	if got := run(t, WorktreeDir(a, 3), "rev-parse", "--abbrev-ref", "HEAD", "@{upstream}"); got != "issue-3\norigin/issue-3" {
 		t.Fatalf("the worktree is on %s", got)
 	}
 	if _, _, _, err := s.TakeIn(a, 1, 9); err == nil || !strings.Contains(err.Error(), "not an open issue inside #1") {
@@ -341,7 +340,7 @@ func TestTheWorktreeCommandStartsFromTheNewestBranchAndMain(t *testing.T) {
 	if ok, err := (Source{Proc: machine, Worktrees: true}).Claim(a, 4); err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
-	wt := filepath.Join(filepath.Dir(a), "issue-4")
+	wt := WorktreeDir(a, 4)
 	shell(t, a, Worktree(a, 4))
 	// Another box pushes to issue-4 and to main while a's branch stands.
 	run(t, b, "fetch", "-q", "origin")
