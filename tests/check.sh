@@ -49,11 +49,32 @@ within() (
   "$@"
 )
 
+# dead fails on any function nothing reaches, the tests counted as callers:
+# such code is deleted, not argued about (spec/overhaul.md, pruning).
+dead() {
+  out=$(within src deadcode -test ./...)
+  [ -z "$out" ] && return
+  echo "$out"
+  echo "check: nothing reaches the functions above, not even a test: delete them" >&2
+  return 1
+}
+
+# plugin_test runs the plugin's tests and keeps what they print for the
+# report, which reads each test's duration from it: claude plugin test has
+# no reporter option. It fails as they failed.
+plugin_test() {
+  status=0
+  claude plugin test src/plugin >"$battery/plugintest.txt" 2>&1 || status=$?
+  cat "$battery/plugintest.txt"
+  return "$status"
+}
+
 step "se rules" go -C src run ./cmd/se rules --workspace "$PWD"
 step "golangci-lint" within src golangci-lint run ./...
 step "biome" within src/plugin biome check --error-on-warnings
+step "deadcode" dead
 step "go test" go -C src run ./cmd/battery gotest "$PWD" ./...
 step "plugin validate" claude plugin validate src/plugin
 step "marketplace validate" claude plugin validate .
-step "plugin test" go -C src run ./cmd/battery plugintest "$PWD" "$PWD/src/plugin"
+step "plugin test" plugin_test
 go -C src run ./cmd/battery report "$PWD"

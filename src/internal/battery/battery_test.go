@@ -15,12 +15,16 @@ const budgets = `total: {ms: 1000, hard: false}
 steps:
   go test: {ms: 500, hard: false}
   biome: {ms: 100, hard: false}
+commands:
+  interactive: {ms: 1000, requests: 3}
 `
 
 const events = `{"Action":"run","Package":"p","Test":"TestA"}
 {"Action":"output","Package":"p","Test":"TestA","Output":"=== RUN   TestA\n"}
 {"Action":"pass","Package":"p","Test":"TestA","Elapsed":0.25}
 {"Action":"pass","Package":"p","Test":"TestB","Elapsed":1.5}
+{"Action":"output","Package":"p","Test":"TestB/issue_pull","Output":"    b_test.go:9: battery-command: issue pull\t12\t3600\n"}
+{"Action":"output","Package":"p","Test":"TestB/help","Output":"    b_test.go:9: battery-command: help\t0\t0\n"}
 {"Action":"output","Package":"p","Test":"TestC","Output":"c.go:3: wrong\n"}
 {"Action":"fail","Package":"p","Test":"TestC","Elapsed":0.01}
 {"Action":"output","Package":"p","Output":"FAIL\tp\t1.8s\n"}
@@ -76,6 +80,9 @@ func TestTheReportListsEveryDurationAndTheSlowestTests(t *testing.T) {
 		"battery:   1500ms p TestB",
 		"battery:   250ms p TestA",
 		"battery:   10ms p TestC",
+		"battery: the 2 interactive commands (budget 1000ms and 3 requests each)",
+		"battery:   0ms 0 requests se help",
+		"battery:   3600ms 12 requests se issue pull",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the report lacks %q:\n%s", want, text)
@@ -95,6 +102,9 @@ func TestTheReportListsEveryDurationAndTheSlowestTests(t *testing.T) {
 	}
 	if !strings.Contains(summary.String(), "| go test | 420 | 500 |") {
 		t.Errorf("the summary lacks the go test step:\n%s", summary.String())
+	}
+	if !strings.Contains(summary.String(), "| se issue pull | 12 | 3600 |") {
+		t.Errorf("the summary lacks issue pull's run:\n%s", summary.String())
 	}
 	// What land reads back is what was reported.
 	loaded, ok, err := battery.Load(d, dir)

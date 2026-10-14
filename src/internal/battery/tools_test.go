@@ -17,7 +17,7 @@ import (
 // box is a checkout holding the real check.sh and tools.sh, with a HOME of its
 // own, on a PATH with the shell's tools and stubs of the tools it has, and a
 // curl that serves every release file from a fake download source. Every stub
-// logs its calls; the fake go installs a stub dlv.
+// logs its calls; the fake go installs a stub of the program it is asked for.
 type box struct {
 	dir, bin, home, src, log string
 }
@@ -90,7 +90,7 @@ func (b box) stub(t *testing.T, tool string) string {
 		return `#!/bin/sh
 [ "$1 $2" = "env GOPATH" ] && { echo ` + filepath.Join(b.home, "gopath") + `; exit 0; }
 echo "go $*" >>` + b.log + `
-[ "$1" = install ] && [ -n "${GOBIN:-}" ] && { printf '#!/bin/sh\n' >"$GOBIN/dlv"; chmod +x "$GOBIN/dlv"; }
+[ "$1" = install ] && [ -n "${GOBIN:-}" ] && { exe=$(basename "${2%@*}"); printf '#!/bin/sh\n' >"$GOBIN/$exe"; chmod +x "$GOBIN/$exe"; }
 exit 0
 `
 	}
@@ -234,6 +234,7 @@ func TestRUNMEsInstallStepInstallsEveryToolABoxLacks(t *testing.T) {
 		filepath.Join(seBin, "golangci-lint"),
 		filepath.Join(seBin, "biome"),
 		filepath.Join(seBin, "dlv"),
+		filepath.Join(seBin, "deadcode"),
 		filepath.Join(b.home, ".se", "go", "bin", "go"),
 		filepath.Join(b.home, ".local", "bin", "claude"),
 	} {
@@ -244,6 +245,9 @@ func TestRUNMEsInstallStepInstallsEveryToolABoxLacks(t *testing.T) {
 	}
 	if got := b.calls(t); !strings.Contains(got, "go install github.com/go-delve/delve/cmd/dlv@v"+pin(t, "DLV")) {
 		t.Errorf("dlv was not installed at its pin:\n%s", got)
+	}
+	if got := b.calls(t); !strings.Contains(got, "go install golang.org/x/tools/cmd/deadcode@v"+pin(t, "DEADCODE")) {
+		t.Errorf("deadcode was not installed at its pin:\n%s", got)
 	}
 	rc, err := os.ReadFile(filepath.Join(b.home, ".bashrc"))
 	if err != nil {
@@ -270,7 +274,7 @@ func TestRUNMEsInstallStepInstallsEveryToolABoxLacks(t *testing.T) {
 
 func TestADownloadThatMissesItsChecksumIsNotInstalled(t *testing.T) {
 	t.Parallel()
-	b := newBox(t, "go", "dlv", "claude", "golangci-lint", "biome")
+	b := newBox(t, "go", "dlv", "deadcode", "claude", "golangci-lint", "biome")
 	write(t, filepath.Join(b.src, asset(t, "gh")), "tampered", 0o644)
 	out, err := b.run(t, "tests/tools.sh", "install")
 	if err == nil || !strings.Contains(out, "does not match its checksum") {
@@ -283,7 +287,7 @@ func TestADownloadThatMissesItsChecksumIsNotInstalled(t *testing.T) {
 
 func TestTheBatteryInstallsThePinnedLintersABoxLacks(t *testing.T) {
 	t.Parallel()
-	b := newBox(t, "go", "gh", "dlv", "claude")
+	b := newBox(t, "go", "gh", "dlv", "deadcode", "claude")
 	if out, err := b.run(t, "tests/check.sh"); err != nil {
 		t.Fatalf("check.sh failed: %v\n%s", err, out)
 	}
@@ -292,6 +296,7 @@ func TestTheBatteryInstallsThePinnedLintersABoxLacks(t *testing.T) {
 		"curl https://github.com/golangci/golangci-lint/releases/download/v" + pin(t, "GOLANGCI_LINT") + "/" + asset(t, "golangci-lint"),
 		"curl https://github.com/biomejs/biome/releases/download/%40biomejs%2Fbiome%40" + pin(t, "BIOME") + "/" + asset(t, "biome"),
 		"go -C src run ./cmd/battery gotest " + b.dir + " ./...",
+		"deadcode -test ./...",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no %q among the calls:\n%s", want, got)
@@ -301,7 +306,7 @@ func TestTheBatteryInstallsThePinnedLintersABoxLacks(t *testing.T) {
 
 func TestTheBatteryInstallsNothingWhereTheToolsStand(t *testing.T) {
 	t.Parallel()
-	b := newBox(t, "go", "gh", "dlv", "claude", "golangci-lint", "biome")
+	b := newBox(t, "go", "gh", "dlv", "deadcode", "claude", "golangci-lint", "biome")
 	if out, err := b.run(t, "tests/check.sh"); err != nil {
 		t.Fatalf("check.sh failed: %v\n%s", err, out)
 	}
@@ -312,7 +317,7 @@ func TestTheBatteryInstallsNothingWhereTheToolsStand(t *testing.T) {
 
 func TestAFailedInstallStopsTheBattery(t *testing.T) {
 	t.Parallel()
-	b := newBox(t, "go", "gh", "dlv", "claude", "golangci-lint")
+	b := newBox(t, "go", "gh", "dlv", "deadcode", "claude", "golangci-lint")
 	if err := os.Remove(filepath.Join(b.src, asset(t, "biome"))); err != nil {
 		t.Fatal(err)
 	}
@@ -367,5 +372,18 @@ tools_path`, c.system, c.machine)
 	out, err := exec.Command("sh", "-c", `. ../../../tests/tools.sh; tools_platform SunOS x86_64`).CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "no release for the system SunOS") {
 		t.Errorf("SunOS: %v\n%s", err, out)
+	}
+}
+
+func TestCodeNothingReachesFailsTheBattery(t *testing.T) {
+	t.Parallel()
+	b := newBox(t, "go", "gh", "dlv", "claude", "golangci-lint", "biome")
+	write(t, filepath.Join(b.bin, "deadcode"), "#!/bin/sh\necho 'internal/x/x.go:3:6: unreachable func: Unused'\n", 0o755)
+	out, err := b.run(t, "tests/check.sh")
+	if err == nil || !strings.Contains(out, "unreachable func: Unused") || !strings.Contains(out, "delete them") {
+		t.Fatalf("check.sh passed with dead code: %v\n%s", err, out)
+	}
+	if strings.Contains(b.calls(t), "gotest") {
+		t.Errorf("the battery went on past dead code:\n%s", out)
 	}
 }

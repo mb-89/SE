@@ -10,6 +10,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "status",
+		Class:   interactive,
 		Usage:   "status",
 		Group:   "Session",
 		Summary: "say whether a daemon answers, and which commits SE came from",

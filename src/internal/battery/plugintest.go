@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // PluginTestFile is what `claude plugin test` printed for the battery, whole.
@@ -50,20 +49,4 @@ func ParsePluginTest(r io.Reader) ([]Test, error) {
 		tests = append(tests, Test{Package: file, Name: m[2], Ms: int64(took + 0.5)})
 	}
 	return tests, lines.Err()
-}
-
-// Locked is a writer that takes one write at a time, so a program's stdout
-// and stderr can both copy into it.
-type Locked struct {
-	mu sync.Mutex
-	w  io.Writer
-}
-
-// Lock makes w take one write at a time.
-func Lock(w io.Writer) *Locked { return &Locked{w: w} }
-
-func (l *Locked) Write(p []byte) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.w.Write(p)
 }
