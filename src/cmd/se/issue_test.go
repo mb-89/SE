@@ -357,7 +357,7 @@ func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
 	}
 	hubAt(t, answers)
 	code, out, errs := se(t, "issue", "pull", "--repo", "o/r")
-	if code != 0 || !strings.Contains(out, "#1 is a parent: it holds no work. Coordinate its tree: se issue pull --in 1 --take") {
+	if code != 0 || !strings.Contains(out, "#1 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 1 --take") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, errs = se(t, "issue", "pull", "--in", "1", "--repo", "o/r")
@@ -376,11 +376,11 @@ func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
 	ws := filepath.Join(t.TempDir(), "SE")
 	code, out, errs = se(t, "issue", "pull", "--in", "3", "--take", "--json", "--repo", "o/r", "--workspace", ws)
 	wt := "git fetch -q origin main \\u0026\\u0026 git worktree add --detach " + filepath.Join(filepath.Dir(ws), "review-3-1") + " origin/main"
-	if code != 0 || !strings.HasPrefix(out, `{"ready":false,"closed":false,"review":[{"number":3,`) || !strings.Contains(out, `"worktree":"`+wt+`"`) {
+	if code != 0 || !strings.HasPrefix(out, `{"ready":false,"closed":false,"review":[{"number":3,`) || !strings.Contains(out, `"worktree":"`+wt+`","agent":"se:reviewer"`) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, errs = se(t, "issue", "pull", "--in", "3", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || !strings.HasPrefix(out, "Nothing inside #3 is ready.\n\nReady for review: #3 three\nu3\nA reviewer that worked none of its tree works in a fresh worktree:\ngit fetch") {
+	if code != 0 || !strings.HasPrefix(out, "Nothing inside #3 is ready.\n\nReady for review: #3 three\nu3\nIts agent, se:reviewer, worked none of its tree and works in a fresh worktree:\ngit fetch") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 }
@@ -421,7 +421,7 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires", code, fires(t))
 	}
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
+	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIts agent: se:worker.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// The take is recorded for the Stop hook, which holds the box to closing #3.
@@ -502,7 +502,7 @@ func TestWhatABoxLeavesOverIsAnIssueForAPersonThatBlocksOnlyWhatNeedsIt(t *testi
 
 func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 	t.Parallel()
-	recordedIssues(t)
+	gh := recordedIssues(t)
 	root := t.TempDir()
 	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
 	for _, args := range [][]string{
@@ -519,8 +519,34 @@ func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 	// The routine's fires are spent: the refusal is reported, and the take stands.
 	worldOf(t).Net.(*sehttp.Fake).Routine(routineURL, "tok", 0)
 	code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"fanout":"Fan-out refused: 429 Too Many Requests`) {
+	if code != 0 || !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"fanout":"Fan-out refused: 429 Too Many Requests`) || !strings.Contains(out, "Kept on #") {
 		t.Fatalf("exit %d, %q", code, out)
+	}
+	// GitHub now lists #3's claim, and #6 is ready besides.
+	if err := gh.Seed(map[string]string{
+		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
+			{"number":6,"title":"six","body":"","state":"open","html_url":"u6"},
+			{"number":3,"title":"three","body":"do it","state":"open","html_url":"u3"},
+			{"number":1,"title":"one","body":"","state":"open","html_url":"u1"}]`,
+		"repos/o/r/git/matching-refs/heads/issue-":                `[{"ref":"refs/heads/issue-1"},{"ref":"refs/heads/issue-3"}]`,
+		"repos/o/r/issues/6/dependencies/blocked_by?per_page=100": `[]`,
+		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
+		"repos/o/r/activity?ref=refs/heads/issue-3&per_page=1":    `[{"timestamp":"` + testedAt.UTC().Format(time.RFC3339) + `"}]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The refusal is kept with the retry its 429 named: se fleet check fires
+	// nothing before it, and fires it once it has passed and the fires are back.
+	if code, out, _ := se(t, "fleet", "check", "--repo", "o/r"); code != 0 || !strings.Contains(out, "Fan-out waits") {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+	worldOf(t).Clock.(*clock.Fake).Advance(31 * time.Minute)
+	worldOf(t).Net.(*sehttp.Fake).Routine(routineURL, "tok", 1)
+	if code, out, _ := se(t, "fleet", "check", "--json", "--repo", "o/r"); code != 0 || !strings.Contains(out, `"fanout":"`+firedOnce) || fires(t) != 1 {
+		t.Fatalf("exit %d, %q, %d fires", code, out, fires(t))
+	}
+	if code, out, _ := se(t, "fleet", "check", "--repo", "o/r"); code != 0 || strings.Contains(out, "Fan-out") || fires(t) != 1 {
+		t.Fatalf("exit %d, %q, %d fires", code, out, fires(t))
 	}
 }
 

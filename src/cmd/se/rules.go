@@ -10,12 +10,14 @@ import (
 
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/rules"
 )
 
 func init() {
 	register(Command{
 		Name:    "rules",
+		Class:   batch,
 		Usage:   "rules [--fix]",
 		Group:   "Checks",
 		Summary: "check this checkout against every SE rule",
@@ -87,6 +89,7 @@ func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
 			return false
 		},
 		Commands: commandFlags(),
+		Agents:   issues.Agents(),
 		Manifest: func(name, at string) (string, error) { return manifest(d, root, paths, name, at) },
 	}, nil
 }
