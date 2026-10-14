@@ -44,7 +44,12 @@ for them where controversial, and closes the overhaul.
      world for the same thing twice, or item by item where one batched or
      server-side query would do), `mechanize` (what an agent or a person
      still does that could be a tested `se` command) and `removal` (what no
-     longer earns its place and could go).
+     longer earns its place and could go: **Pruning** below).
+   - The code's shape: hold the draft's code-shape facts and the code against
+     the second part of spec/principles.md, "How code is written". Each
+     finding names the principle or smell, the places, and the shape the code
+     should take ("one run engine; retro and overhaul become strategies"),
+     area `principle`, or `removal` where code goes.
    - `findings`: each a `title` (the fix, as an issue title), a `body` (what
      strays, with files and issue numbers, and the fix), its `area`
      (`principle`, `outside`, `consistency`, `principles`, `retro`, `speed`,
@@ -60,3 +65,31 @@ for them where controversial, and closes the overhaul.
    and run it again. It creates the issues, those for a person where
    controversial, and closes the overhaul. End: there is no PR to land, and
    nothing waits for the owner but the issues for them.
+
+## Pruning
+
+Every overhaul prunes. Pruning is not only dead code: it is also code that
+restates what another place holds, code that says in many lines what a few
+would, and near-duplicates that one generic piece with its variants as
+configuration could replace. Start from the draft's "Pruning and code shape"
+facts, then read the code.
+
+Prune when any of these holds:
+- nothing outside the tests calls it;
+- it serves a state that no longer occurs;
+- it duplicates what another owner holds (principle 2);
+- it is an abstraction with one user, and no open issue names a second;
+- it is a feature nobody used in the window;
+- it is a script whose job a command now does, or a one-off the retro has
+  read.
+
+Keep only what has a reason you name in `looked_at.removal`:
+- a test fake and its contract suite;
+- code an open issue's plan uses next (the index core before the migration
+  lands, #142);
+- an enforcement path that guards something even while it never fires.
+
+Pure, generic code that several modules share is a good sign, not a target.
+Each removal is a finding with area `removal`, in the normal queue, never
+controversial for being a removal; `se overhaul file` adds to its issue that
+the removal repeats until nothing more falls out.
