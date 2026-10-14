@@ -346,7 +346,7 @@ func TestLandMergesTheBranchAndMainInBeforeTheCheck(t *testing.T) {
 		}
 		return nil
 	}
-	if _, err := (Source{Repo: repo, GH: gh}).Land(a, "", qs, full, check); err != nil {
+	if _, err := (Source{Repo: repo, GH: gh, Clock: atNow()}).Land(a, "", qs, full, check); err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"work", "fix", "refreshed", "rule"}; !reflect.DeepEqual(saw, want) {
@@ -365,7 +365,7 @@ func TestLandStopsWhereMainConflicts(t *testing.T) {
 	head := run(t, a, "rev-parse", "HEAD")
 	gh, _ := landGH(t, map[string]string{}, nil)
 	checked := false
-	_, err := Source{Repo: repo, GH: gh}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
+	_, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
 	if err == nil || !strings.Contains(err.Error(), "merging origin/main into issue-6 conflicts") || checked {
 		t.Fatalf("%v, checked %v", err, checked)
 	}

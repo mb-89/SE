@@ -81,7 +81,7 @@ func (s Source) update(r *Refreshed) error {
 		return err
 	}
 	for k := 0; k < waits && r.Head == old; k++ {
-		pause()
+		s.Clock.Sleep(pause)
 		got, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, r.PR), false)
 		if err != nil {
 			return err

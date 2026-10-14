@@ -1,4 +1,4 @@
-// Internal test package: it uses the pause of the package's other internal tests.
+// Internal test package: it uses the fakes of the package's other internal tests.
 package issues
 
 import (
@@ -45,7 +45,7 @@ func refreshGH(t *testing.T, answers map[string][]string, fail map[string]string
 }
 
 func TestRefreshUpdatesTheAutoMergePRsBehindMain(t *testing.T) {
-	paused := noPause(t)
+	c := atNow()
 	gh, writes := refreshGH(t, map[string][]string{
 		openPullsPath: {"[" + strings.Join([]string{
 			refreshPull(10, "a1", "", true),      // behind: updated
@@ -60,7 +60,7 @@ func TestRefreshUpdatesTheAutoMergePRsBehindMain(t *testing.T) {
 		"repos/o/r/pulls/10": {refreshPull(10, "a1", "behind", true), refreshPull(10, "a1", "behind", true), refreshPull(10, "a2", "blocked", true)},
 		"repos/o/r/pulls/40": {refreshPull(40, "d1", "dirty", true)},
 	}, nil)
-	got, err := Source{Repo: repo, GH: gh}.Refresh()
+	got, err := Source{Repo: repo, GH: gh, Clock: c}.Refresh()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,13 +77,12 @@ func TestRefreshUpdatesTheAutoMergePRsBehindMain(t *testing.T) {
 	}; !reflect.DeepEqual(*writes, want) {
 		t.Fatalf("writes %q", *writes)
 	}
-	if *paused != 2 {
-		t.Fatalf("paused %d times", *paused)
+	if waited := c.Now().Sub(now); waited != 2*pause {
+		t.Fatalf("waited %s", waited)
 	}
 }
 
 func TestRefreshReportsAFailedUpdateAndGoesOn(t *testing.T) {
-	noPause(t)
 	gh, writes := refreshGH(t, map[string][]string{
 		openPullsPath:                            {"[" + refreshPull(10, "a1", "", true) + "," + refreshPull(20, "b1", "", true) + "]"},
 		"repos/o/r/compare/main...a1?per_page=1": {`{"behind_by":1}`},
@@ -91,7 +90,7 @@ func TestRefreshReportsAFailedUpdateAndGoesOn(t *testing.T) {
 		"repos/o/r/pulls/10":                     {refreshPull(10, "a1", "behind", true)},
 		"repos/o/r/pulls/20":                     {refreshPull(20, "b1", "behind", true), refreshPull(20, "b2", "blocked", true)},
 	}, map[string]string{"repos/o/r/pulls/10/update-branch": "gh: merge conflict between base and head (HTTP 422)"})
-	got, err := Source{Repo: repo, GH: gh}.Refresh()
+	got, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Refresh()
 	if err == nil || !strings.Contains(err.Error(), "could not bring PR #10 up to date with main") {
 		t.Fatalf("%v", err)
 	}
@@ -104,13 +103,12 @@ func TestRefreshReportsAFailedUpdateAndGoesOn(t *testing.T) {
 }
 
 func TestRefreshSaysWhenTheHeadNeverMoves(t *testing.T) {
-	noPause(t)
 	gh, writes := refreshGH(t, map[string][]string{
 		openPullsPath:                            {"[" + refreshPull(10, "a1", "", true) + "]"},
 		"repos/o/r/compare/main...a1?per_page=1": {`{"behind_by":1}`},
 		"repos/o/r/pulls/10":                     {refreshPull(10, "a1", "behind", true)},
 	}, nil)
-	got, err := Source{Repo: repo, GH: gh}.Refresh()
+	got, err := Source{Repo: repo, GH: gh, Clock: atNow()}.Refresh()
 	if err == nil || len(got) != 1 || !strings.Contains(got[0].Failed, "head is still a1") {
 		t.Fatalf("%+v %v", got, err)
 	}
