@@ -355,9 +355,9 @@ func (r OverhaulReport) facts() string {
 			b.WriteString("\n")
 		}
 		for _, k := range checkKinds {
-			fmt.Fprintf(&b, "| broken `%s` |", k.kind)
+			fmt.Fprintf(&b, "| broken `%s` |", k.Kind)
 			for _, run := range r.Retros {
-				fmt.Fprintf(&b, " %d |", run.Broken[k.kind])
+				fmt.Fprintf(&b, " %d |", run.Broken[k.Kind])
 			}
 			b.WriteString("\n")
 		}
