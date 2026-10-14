@@ -107,10 +107,14 @@ func TestWriteRefusesWhileTheIndexHoldsAConflict(t *testing.T) {
 		"README.md":      readme,
 		"spec/issues.md": "# Issues\n\nReader: whoever.\n",
 	})
+	// Each call names its committer: a runner without a global identity
+	// would refuse the merge before it reached the conflict.
+	gitOut := func(args ...string) ([]byte, error) {
+		return exec.Command("git", append([]string{"-C", ws, "-c", "user.name=se", "-c", "user.email=se@example.com"}, args...)...).CombinedOutput()
+	}
 	git := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", ws, "-c", "user.name=se", "-c", "user.email=se@example.com"}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
+		if out, err := gitOut(args...); err != nil {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
 	}
@@ -122,8 +126,8 @@ func TestWriteRefusesWhileTheIndexHoldsAConflict(t *testing.T) {
 	git("checkout", "-q", "-")
 	write(t, filepath.Join(ws, "spec", "issues.md"), "# Issues: ours\n\nReader: whoever.\n")
 	git("commit", "-q", "-am", "ours")
-	if err := exec.Command("git", "-C", ws, "merge", "-q", "other").Run(); err == nil {
-		t.Fatal("the merge did not conflict")
+	if out, err := gitOut("merge", "-q", "other"); err == nil || !strings.Contains(string(out), "CONFLICT") {
+		t.Fatalf("the merge did not conflict: %v %s", err, out)
 	}
 	code, out, errs := se(t, "--workspace", ws, "manifest", "--write")
 	if code != 1 || !strings.Contains(errs, "unmerged paths (spec/issues.md)") {
