@@ -62,7 +62,10 @@ What earlier versions taught, and how this design answers it:
   is what every later retro reads, so a stale se would count and store the
   window by rules main has replaced. Where it cannot tell, they go on. It holds:
   - the matrix: every closed issue × every landing question, from the
-    answers' machine-readable blocks; it stays in the draft and is not posted;
+    answers' machine-readable blocks, each answer headed by how its issue
+    closed (by a merged PR, into its manifest's branch, as a duplicate, as
+    fixed by a commit, or as a person's decision); it stays in the draft and
+    is not posted;
   - the [rule checks](#the-rule-checks), each broken one with what broke
     it;
   - **sizes:** the closed issues, the landed ones (those the `answers` check
@@ -71,7 +74,8 @@ What earlier versions taught, and how this design answers it:
     each its own count, so a sweep closing issues for a person reads as one;
   - **counts:** conflicts (conflict takeovers), takeovers, `se-person` flags,
     CI reruns, `by-hand` answers that are not "none", the GitHub requests the
-    landing facts counted, and the median time from claim to merge;
+    landing facts counted, their rate-limit refusals and the minutes waited
+    for the reset, and the median time from claim to merge;
   - **scripts:** every file added under `src/scripts/` in the window, grouped
     by the word its name starts with, each with the comment line that says why;
   - **the previous retro's findings:** did their issues close, and did their
@@ -121,8 +125,8 @@ What earlier versions taught, and how this design answers it:
   - **Metrics against the previous retros:** conflicts, takeovers, CI reruns,
     `se-person` flags, `by-hand` mentions, duplicates (issues closed as
     duplicate, and issues for a person made in the window beyond the first
-    for each issue they hold back), GitHub requests and time from claim to
-    merge, each per landed issue (never per closed issue: closing issues
+    for each issue they hold back), GitHub requests, rate-limit refusals and minutes waited for
+    the reset, and time from claim to merge, each per landed issue (never per closed issue: closing issues
     for a person or duplicates must not make a metric read better), beside
     the sizes. `se retro collect` computes them and stores them in the
     report's machine-readable block, so the trend is a number, not an
@@ -131,6 +135,11 @@ What earlier versions taught, and how this design answers it:
     issue close, did the rule check it named break again, did its metric
     drop. A metric's move counts for a finding only once its issue closed
     as completed: before its fix is on main, a drop is not the fix's.
+    Beside a finding its metric scores as recurred, the draft lists what in
+    the window moved that metric (`moved_by`): for `by-hand` each issue and
+    its answer, for a count each issue's share, largest first, so the judge
+    sees whether the class came back or a broad metric rose for other
+    reasons.
   - **Is the retro itself effective?** How many findings became issues, how
     many of those closed, and which findings recurred anyway.
   - **Should the retro change itself?** Proposals for the landing questions

@@ -25,7 +25,7 @@ func closedJSON(n int, reason, closed, body string, extra string) string {
 
 func landing(t *testing.T, n int, answers map[string]string, claimed time.Time) string {
 	t.Helper()
-	body, err := Landed{Issue: n, Answers: answers, Facts: Facts{Claimed: claimed, Landed: claimed.Add(time.Hour), Requests: 40}}.Comment(rqs)
+	body, err := Landed{Issue: n, Answers: answers, Facts: Facts{Claimed: claimed, Landed: claimed.Add(time.Hour), Requests: 40, RateLimits: 3, RateLimitWaitS: 90 * 60}}.Comment(rqs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,14 +251,15 @@ func TestTheCountsAndScripts(t *testing.T) {
 	t.Parallel()
 	c := collect(t, true)
 	want := Metrics{
-		"closed": 4, "landed": 2, "for_person": 0, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1, "duplicates": 2, "requests": 40,
-		"conflicts_per_issue": 0.5, "takeovers_per_issue": 0.5, "ci_reruns_per_issue": 0.5, "person_flags_per_issue": 0.5, "by_hand_per_issue": 0.5, "duplicates_per_issue": 1, "requests_per_issue": 20,
+		"closed": 4, "landed": 2, "for_person": 0, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1, "duplicates": 2, "requests": 40, "rate_limits": 3, "rate_limit_minutes": 90,
+		"conflicts_per_issue": 0.5, "takeovers_per_issue": 0.5, "ci_reruns_per_issue": 0.5, "person_flags_per_issue": 0.5, "by_hand_per_issue": 0.5, "duplicates_per_issue": 1, "requests_per_issue": 20, "rate_limits_per_issue": 1.5, "rate_limit_minutes_per_issue": 45,
 		"claim_to_merge_minutes": 90,
 	}
 	if !reflect.DeepEqual(c.Metrics, want) {
 		t.Fatalf("%v", c.Metrics)
 	}
-	// The draft shows the fleet's GitHub requests per landed issue, from the
+	// The draft shows the fleet's GitHub requests, and the rate-limit
+	// refusals and minutes waited for the reset, per landed issue, from the
 	// landing facts, and what the closed issues were.
 	draft, err := c.Draft(rqs)
 	if err != nil {
@@ -267,6 +268,8 @@ func TestTheCountsAndScripts(t *testing.T) {
 	for _, line := range []string{
 		"| requests | 40 | 20 |", "GitHub requests: 20 per landed issue, counted by the landing facts of 1 of the 4 closed issues.",
 		"Of the closed issues, 2 landed (the ones the answers check counts, which the per-issue metrics divide by) and 0 were for a person.",
+		"| rate_limits | 3 | 1.5 |", "| rate_limit_minutes | 90 | 45 |",
+		"GitHub rate limits: 1.5 refusals and 45 minutes waited for the reset per landed issue; 1 of the 4 closed issues met one.",
 	} {
 		if !strings.Contains(draft, line) {
 			t.Errorf("the draft does not say %q:\n%s", line, draft)
@@ -287,9 +290,9 @@ func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
 	_, matrix, _ := strings.Cut(draft, matrixMark)
 	for _, want := range []string{
 		"No landing answers: #24, #25, #26.",
-		"### `done`: What does it deliver?\n- #19 t19: old\n- #23 t23: it works\n",
+		"### `done`: What does it deliver?\n- #19 t19 (closed by merged PR #49): old\n- #23 t23 (closed by merged PR #50): it works\n",
 		// #19's by-hand answer is none, so it is left out.
-		"### `by-hand`: What did you do by hand?\n- #23 t23: wrote src/scripts/check-claims.sh\n",
+		"### `by-hand`: What did you do by hand?\n- #23 t23 (closed by merged PR #50): wrote src/scripts/check-claims.sh\n",
 	} {
 		if !strings.Contains(matrix, want) {
 			t.Errorf("the matrix lacks %q:\n%s", want, matrix)
@@ -298,6 +301,41 @@ func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
 	r, facts, err := ParseReport(draft)
 	if err != nil || r.Retro != 30 || len(r.Checks) != len(c.Checks) || !strings.HasPrefix(facts, "## The window") || strings.Contains(facts, "The matrix") {
 		t.Fatalf("%+v %q %v", r, facts, err)
+	}
+}
+
+// Each row says how its issue closed, so the matrix can head its answers
+// with it: an issue closed with no merged PR answered for a branch, not main.
+func TestARowSaysHowItsIssueClosed(t *testing.T) {
+	t.Parallel()
+	answered := landing(t, 0, map[string]string{"done": "on a branch", "by-hand": "none"}, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))
+	gh := recorded(t, map[string]string{
+		"repos/o/r/issues/1/comments?per_page=100": jsonComments(answered),
+		"repos/o/r/issues/2/comments?per_page=100": jsonComments(answered, fmt.Sprintf(fixedMark+"\nClosed.", "4957ced7aaaabbbbccccdddd")),
+		"repos/o/r/issues/3/comments?per_page=100": jsonComments(answered),
+		"repos/o/r/issues/4/comments?per_page=100": `[]`,
+	})
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	at := time.Date(2026, 10, 2, 11, 0, 0, 0, time.UTC)
+	fixedBy := map[int]merged{1: {Number: 9, MergedAt: &at}}
+	for n, want := range map[int]string{
+		1: "by merged PR #9",
+		2: "as fixed by 4957ced, no merged PR of its own",
+		3: "as a duplicate, no merged PR of its own",
+		4: "as a person's decision, no merged PR of its own",
+	} {
+		reason := map[int]string{3: "duplicate", 4: "not_planned"}[n]
+		if reason == "" {
+			reason = "completed"
+		}
+		r, _, err := s.row(past{issue: issue{Number: n, Title: "t", StateReason: reason}}, fixedBy)
+		if err != nil || r.Closed != want {
+			t.Errorf("#%d closed %q, want %q (%v)", n, r.Closed, want, err)
+		}
+	}
+	c := Collected{Rows: []Row{{Number: 2, Title: "t2", Closed: "as fixed by 4957ced, no merged PR of its own", Answers: map[string]string{"done": "on a branch"}}}}
+	if m := c.matrix(rqs); !strings.Contains(m, "- #2 t2 (closed as fixed by 4957ced, no merged PR of its own): on a branch\n") {
+		t.Errorf("the matrix does not head #2's answer with how it closed:\n%s", m)
 	}
 }
 
@@ -334,6 +372,33 @@ func TestAMetricIsCreditedOnceItsIssueClosedAsCompleted(t *testing.T) {
 	if it.State != "completed" || it.Dropped == nil || *it.Dropped || !it.Recurred || c.Score.Closed != 2 || c.Score.Recurred != 2 {
 		t.Fatalf("%+v", c.Score)
 	}
+	// Beside it, what moved its metric, so the judge sees whether its class came back.
+	if !reflect.DeepEqual(it.MovedBy, []string{"#23: 1 conflicts"}) {
+		t.Fatalf("moved by %q", it.MovedBy)
+	}
+	draft, err := c.Draft(rqs)
+	if err != nil || !strings.Contains(draft, "**Conflicts** recurred by conflicts_per_issue, which these moved in the window:\n- #23: 1 conflicts\n") {
+		t.Fatalf("%v\n%s", err, draft)
+	}
+}
+
+func TestMoversListWhatMovedAMetric(t *testing.T) {
+	t.Parallel()
+	c := Collected{Rows: []Row{
+		{Number: 126, Answers: map[string]string{"by-hand": "Retried\ngolangci-lint."}, Requests: 13},
+		{Number: 371, Answers: map[string]string{"by-hand": "none"}, Requests: 927},
+		{Number: 400, Requests: 13},
+	}, RerunsBy: map[int]int{7: 2}}
+	for metric, want := range map[string][]string{
+		"by_hand_per_issue":  {"#126: Retried golangci-lint."},
+		"requests_per_issue": {"#371: 927 requests", "#126: 13 requests", "#400: 13 requests"},
+		"ci_reruns":          {"PR #7: 2 CI reruns"},
+		"takeovers":          nil,
+	} {
+		if got := c.movers(metric); !reflect.DeepEqual(got, want) && len(got)+len(want) > 0 {
+			t.Errorf("%s: %q, want %q", metric, got, want)
+		}
+	}
 }
 
 func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
@@ -356,7 +421,7 @@ func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
 		"| takeovers | – | 1 | new |",
 		"| duplicates_per_issue | – | 1 | new |",
 		"| duplicates | 2 | 1 |",
-		"Duplicates: 1 closed as duplicate, 1 issues for a person minted again for an issue one already held back.",
+		"Duplicates: 1 closed as duplicate, 1 issue for a person minted again for an issue one already held back.",
 	} {
 		if !strings.Contains(draft, want) {
 			t.Errorf("the draft lacks %q", want)
@@ -543,6 +608,41 @@ func TestByHandCountsAnAnswerThatProposesACommand(t *testing.T) {
 	} {
 		if got := byHand(answer); got != want {
 			t.Errorf("byHand(%q) = %v, want %v", answer, got, want)
+		}
+	}
+}
+
+func TestTheMetricsTableRoundsEachChangeAsItsValues(t *testing.T) {
+	t.Parallel()
+	c := Collected{
+		Window:  RetroWindow{Until: prevClosed},
+		Metrics: Metrics{"landed": 3, "for_person": 1, "conflicts_per_issue": 0.29, "ci_reruns_per_issue": 0.25, "requests_per_issue": 20.07},
+		History: []Past{{Retro: 20, Metrics: Metrics{"landed": 3, "for_person": 2, "conflicts_per_issue": 0.33, "ci_reruns_per_issue": 0.3, "requests_per_issue": 20}}},
+		Reholds: 1,
+	}
+	text := c.facts()
+	// 0.29-0.33 is -0.040000000000000036 and 0.25-0.3 is -0.04999999999999999
+	// in floats; the table says what the judge reads in the values.
+	for _, line := range []string{
+		"| conflicts_per_issue | 0.33 | 0.29 | better (-0.04) |",
+		"| ci_reruns_per_issue | 0.3 | 0.25 | better (-0.05) |",
+		"| requests_per_issue | 20 | 20.07 | worse (+0.07) |",
+		"| for_person | 2 | 1 | -1 |",
+		"| landed | 3 | 3 | same |",
+		"and 1 was for a person.",
+		"1 issue for a person minted again",
+	} {
+		if !strings.Contains(text, line) {
+			t.Errorf("the draft does not say %q:\n%s", line, text)
+		}
+	}
+}
+
+func TestRound2RoundsHalfAwayFromZero(t *testing.T) {
+	t.Parallel()
+	for x, want := range map[float64]float64{-0.04999999999999999: -0.05, -0.040000000000000036: -0.04, 0.125: 0.13, -0.125: -0.13, 2.0 / 3: 0.67} {
+		if got := round2(x); got != want {
+			t.Errorf("round2(%v) = %v, want %v", x, got, want)
 		}
 	}
 }

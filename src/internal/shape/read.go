@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mb-89/SE/src/internal/gitpaths"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
@@ -60,11 +61,9 @@ func Read(d disk.Disk, p proc.Procs, dir string) (Input, error) {
 			in.Unrun = "deadcode is not installed: sh tests/tools.sh install installs it"
 		}
 	}
-	tracked, err := proc.Output(p, proc.Cmd{Name: "git", Args: []string{"ls-files"}, Dir: dir})
-	if err != nil {
+	if in.Tracked, err = gitpaths.Tracked(p, dir, false); err != nil {
 		return Input{}, err
 	}
-	in.Tracked = strings.Split(tracked, "\n")
 	if in.Log, err = proc.Output(p, proc.Cmd{Name: "git", Args: []string{"log", "--first-parent", "-m", "--name-only", logFormat, "HEAD"}, Dir: dir}); err != nil {
 		return Input{}, err
 	}
