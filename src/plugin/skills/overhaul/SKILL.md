@@ -24,10 +24,10 @@ for them where controversial, and closes the overhaul.
    issue (from before overhauls stopped waiting for the owner): read the
    owner's comments on the issue, apply what they moved between controversial
    and not, if anything, to `findings` in the draft's block, and go to 4.
-2. Read the draft's facts: the principles, the retro's last five runs, the
-   previous overhaul's findings, and where to look for principles 2 and 3
-   (the widest PRs since the last overhaul, code no caller reaches, the files
-   the longest untouched). Then read SE itself: `spec/`, the README,
+2. Read the draft's facts: the principles, the retro's last `OverhaulCadence`
+   runs, the previous overhaul's findings, and where to look for principles 2
+   and 3 (the widest PRs since the last overhaul, code no caller reaches, the
+   files the longest untouched). Then read SE itself: `spec/`, the README,
    CLAUDE.md, the skills, `se help`, and the code under `src/`.
 3. Judge, and write it into the draft's block (the YAML under
    `<!-- se:overhaul-yaml -->`); leave the facts as they are.
