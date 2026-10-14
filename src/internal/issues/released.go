@@ -50,7 +50,7 @@ type event struct {
 // when, come from the issue's events; where they cannot be read, the release
 // stands without them.
 func (s Source) Release(i Issue) *Released {
-	if !strings.HasPrefix(strings.TrimSpace(i.Body), PersonLine) {
+	if !strings.HasPrefix(Shown(i.Body), PersonLine) {
 		return nil
 	}
 	r := &Released{}
