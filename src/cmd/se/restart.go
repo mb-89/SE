@@ -11,6 +11,7 @@ import (
 func init() {
 	register(Command{
 		Name:      "restart",
+		Class:     batch,
 		Usage:     "restart",
 		Group:     "Session",
 		Summary:   "restart the daemon; in an SE checkout, rebuild se first",

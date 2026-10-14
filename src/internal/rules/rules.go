@@ -45,6 +45,9 @@ type Repo struct {
 	// Commands are se's commands by name, each with the flags it takes,
 	// without their dashes.
 	Commands map[string][]string
+	// Agents are the plugin's agents the registry of kinds names, each with
+	// the role it holds.
+	Agents map[string]string
 	// Manifest answers the manifest named, as it stands in the file at path.
 	Manifest func(name, path string) (string, error)
 	// Clock times each rule; nil times none.

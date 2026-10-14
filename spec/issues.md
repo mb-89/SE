@@ -18,6 +18,17 @@ choice is deterministic and no prompt restates it.
   its dependencies when it is made, even if that is `none`. Every body it
   writes ends in the mark `<!-- se:new -->`, which the retro checks
   ([retro.md](retro.md)).
+- **Agents**: what works an issue follows from its kind alone, in one place,
+  the registry of kinds (`src/internal/issues/kinds.go`): a leaf gets
+  `se:worker`, a parent `se:coordinator` (the box itself), a gate ready for
+  review `se:reviewer`, a retro `se:retro` and an overhaul `se:overhaul`. The
+  take names it (with `--json`: `agent`), and the box starts it. Each agent is
+  one file of the plugin, holding its role's whole procedure
+  ([The box](#the-box)).
+- **Skills**: an issue names the skills its work needs in one place, the
+  marked line `se issue new --skills` writes into its body. The take hands
+  each over in full in its answer, and the session's log records it; no label
+  picks a skill ([principle 22](principles.md)).
 - **Blockers**: an issue waits while any of its blockers is open. Blockers are
   GitHub's native "blocked by" links, and nothing else; a "Blocked by: #12"
   line in an issue's body does not block it. `se issue new --blocked-by` is
@@ -102,11 +113,11 @@ follows from its structure alone:
   separate PRs. `--in` reaches leaves at any depth, so the coordinator of the
   root hands out every leaf of the tree, and a sub-agent is only ever given a
   leaf.
-- **The coordinator** is the box that took the parent. It starts one sub-agent
-  per ready leaf inside its own box (no separate cloud sessions), each in the
-  leaf's worktree, and one reviewer per parent ready for review, and repeats
-  until the root has closed. When nothing inside is ready while the root is
-  open, it ends; a later box picks the tree up.
+- **The coordinator** is the box that took the parent. A tree is coordinated
+  by the box's one loop ([The box](#the-box)), limited to the tree: its leaves
+  go to sub-agents under the same cap as the box's other issues, and each
+  parent ready for review gets one reviewer. When nothing inside is ready
+  while the root is open, the box leaves the tree; a later take picks it up.
 
 ## Stuck work
 
@@ -119,7 +130,8 @@ person**, and leaves the agents' queue until the person has closed it.
 - **Stuck** is decided by a timer, not judgment. A claimed leaf (claimed at
   the top or with `--in`) is stuck when nothing has been pushed to its branch
   `issue-<n>` (or its PR), nor a takeover recorded, for longer than the lease,
-  `Lease` in `src/internal/issues/stuck.go`. It is under the routine's
+  `issues/config/lease` (the issues instance's config value, built-in in
+  `src/internal/issues/stuck.go`). It is under the routine's
   4-hour schedule, so a scheduled box always catches it. The last push is
   GitHub's activity on the branch (`/repos/{owner}/{repo}/activity`), its
   creation included; a branch GitHub keeps no push record of is stuck. A
@@ -175,8 +187,8 @@ person**, and leaves the agents' queue until the person has closed it.
 <!-- se:manifest usage issue review -->
 ```
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
-se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--json] [--repo OWNER/NAME]
-se issue pull [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
+se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
 se issue supersede N (--body B | --body-file PATH) [--json] [--repo OWNER/NAME]
@@ -218,9 +230,19 @@ no PR and no push for an hour; see [spec/coordination.md](../spec/coordination.m
 or where it is stuck past the lease, so every takeover remedy the check names
 runs; labelled `se-final`, it waits on an issue for a person instead. A claim whose work is moving
 is refused.
-Once it has claimed an issue, `--take` fires the routine once (the fan-out,
-below) and adds a line saying what the fire did; with `--json` that line is
-the field `fanout`. It also names the open issues the taken one blocks (with
+Every claim records the claiming box's session on the issue, a comment
+carrying `<!-- se:box <session> -->` (a takeover's comment carries it too).
+Once it has claimed an issue, `--take` runs the fan-out (below), which fires
+the routine only where the fleet needs another box, and adds a line saying
+what it did; with `--json` that line is the field `fanout`.
+`--take --worktree` is a box's take: it claims as `--take` does but checks
+nothing out (a takeover's branch is only fetched) and names the command that
+checks the issue's branch out in its own worktree beside the checkout, for
+its sub-agent (with `--json`: the field `worktree`; a parent gets none, as the
+box coordinates its tree itself), and every take names the agent of the
+issue's kind (with `--json`: the field `agent`). Where the box (its session) already runs
+its cap of sub-agents, `--worktree` and `--in ROOT --take` take nothing and
+say so (with `--json`: `{"ready":false,"full":true,"why"}`). It also names the open issues the taken one blocks (with
 `--json`: the issue's `blocks`), for `se issue new --blocks`.
 
 `se issue pull --in ROOT` names what is ready inside ROOT's tree: its stuck
@@ -234,10 +256,11 @@ another box claimed it first: it pushes `origin/main` as `issue-<n>` and
 fetches it, checking nothing out (a stuck leaf it takes over and fetches as
 it stands), and prints the leaf with the command that
 checks it out in its own worktree beside the checkout (with `--json`:
-`{"ready","closed","issue","branch","worktree","review"}`). It also names the
+`{"ready","closed","issue","branch","worktree","agent","review"}`). It also names the
 parents ready for review, each with the command that makes its reviewer's
-fresh worktree (`review`: a list of issues, each with its `worktree`). That claim fires nothing:
-the leaf is worked on by a sub-agent inside the coordinator's box.
+fresh worktree and its agent, `se:reviewer` (`review`: a list of issues, each
+with its `worktree` and `agent`). That claim fires nothing:
+the leaf is worked on by a sub-agent inside the coordinator's box, under its cap.
 
 `se issue land` runs on the checked-out `issue-<n>` branch. It refuses
 without an answer to each landing question (see [Landing
@@ -300,9 +323,9 @@ person: labelled `se-person` and assigned to the owner (it takes neither
 N,M` links each issue it names as blocked by the new one, checked before
 anything is written. Where nothing blocks the
 issue it created (every issue in `--blocked-by` is closed, or it is `none`),
-it fires the routine once, as the fan-out does, and adds a line saying what
-the fire did (with `--json`: the field `fanout`); otherwise a new ready issue
-would wait for the next merge or the schedule. A blocked issue fires nothing.
+it runs the fan-out (below) and adds a line saying what it did (with
+`--json`: the field `fanout`); otherwise a new ready issue could wait for the
+next merge or the schedule. A blocked issue fires nothing.
 A session has it as `/se issue new`.
 
 `se issue supersede N` is the second way a box closes the issue it took,
@@ -342,13 +365,39 @@ says that none waits on a person. `se issue resume N` is the person's, for an
 issue labelled `se-person` by hand or before issues for a person existed: it
 refuses an issue not labelled `se-person`; see [Stuck work](#stuck-work).
 
-`se issue tree` lists every se issue with sub-issues, open or closed, open
-first, one line each: number, state, how many of its sub-issues are closed,
-its labels and its title. `se issue tree ROOT` lists ROOT and every issue
-below it, open or closed, each indented under its parent (with `--json`: a
-list of `{"number","title","state","url","labels","depth","closed","total"}`).
-It changes nothing but the parents every command closes. A session has it as
-`/se issue tree`.
+`se issue tree` lists every open se issue, each indented under its parent,
+one line each: number, state, where it stands (ready, claimed, blocked and by
+what), how many of its sub-issues are closed, its labels and its title. `se
+issue tree ROOT` lists ROOT and every issue below it, open or closed. Then it
+estimates when the last open issue (of ROOT's tree, with ROOT) closes,
+mechanically, from what the fleet measured over the pace window
+(`PaceWindow`, 7 days, in `src/internal/issues/queue.go`), read by the same
+code the retro reads it with (the se issues closed in the window, the PR that
+fixed each, and the claim time in its landing answers):
+
+- **the work left**: every open leaf, and every open review gate, which is
+  reviewed once its tree is done;
+- **the pace**: the se issues merged an hour, and their claim-to-merge times,
+  p50 and p90;
+- **the parallelism**: how many run at once, the leaves in flight now that
+  are not stuck past the lease, or the merges an hour times the p50,
+  whichever is more, and at least one;
+- **the critical path**: the longest chain of work that must run in a row:
+  an issue waits for its blockers' and its ancestors' blockers' work (a
+  parent's being all of its tree), and a review gate for its tree.
+
+The estimate is the larger of the critical path run end to end and the work
+left spread over the parallelism, once at the p50 time and once at the p90
+time: the spread between them is its uncertainty. It names the critical path,
+and says beside it how long the work left takes at the window's merges an
+hour, idle hours and all. With `--json` it answers
+`{"issues":[...],"queue":{...}}`: each issue as
+`{"number","title","state","url","labels","depth","closed","total","why"}`,
+and the queue's numbers (`open`, `in_flight`, `stuck`, `pace`, `parallel`,
+`critical_path`, `p50_hours`, `p90_hours`, `p50_at`, `p90_at`, `pace_hours`,
+or `why` there is no estimate). The briefing gives its one line under Next. It changes
+nothing but what every `se issue` command and the sweep write. A session has
+it as `/se issue tree`.
 
 They read and write GitHub through `gh api` (the links through
 `/repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by`, the tree through
@@ -379,7 +428,7 @@ through `se`, with every verdict on the reviewed issue's thread.
   `se issue new --parent N --blocked-by none --final` would, its body the
   finding. N stays open: the fixes are work inside it, and once they have
   landed it is ready for review again, as a re-review.
-- **Either way**, the non-blocking findings (at most `MaxFiled`) become `se-final`
+- **Either way**, the non-blocking findings (at most `issues/config/max-filed`) become `se-final`
   issues in the normal queue.
 - **Who worked a leaf** is recorded by `se issue land`: a comment on the leaf,
   `Worked by session S in W.`, with the marker
@@ -405,9 +454,11 @@ through `se`, with every verdict on the reviewed issue's thread.
 Boxes are cloud sessions that work unattended. Every box is started by the
 routine `SE work`, whose whole prompt is
 
-    run the work skill
+    work as se:coordinator
 
-and the work skill is [src/plugin/skills/work/SKILL.md](../src/plugin/skills/work/SKILL.md), `se:work` in a session.
+A box is the agent `se:coordinator`: the plugin's session start hands a box
+(a cloud session no person attends) that agent's whole procedure, and the box
+runs it in its own session, since an agent cannot start agents of its own.
 The routine has two triggers:
 
 - a GitHub trigger on `pull_request.closed` with is-merged = true and base
@@ -417,21 +468,69 @@ The routine has two triggers:
 
 It also has an API trigger, which `se` fires for the fan-out.
 
+### The box
+
+The plugin's agents, one file each, holding each role's whole procedure:
+
+<!-- se:manifest agents -->
+- [`se:worker`](../src/plugin/agents/worker.md), for the kind leaf: an issue with no sub-issues: work, landed as one PR.
+- [`se:coordinator`](../src/plugin/agents/coordinator.md), for the kind parent: an issue with sub-issues: the box coordinates its tree, as it runs the queue and checks the fleet when nothing is ready.
+- [`se:reviewer`](../src/plugin/agents/reviewer.md), for the kind gate: an se-review parent ready for review: reviewed cold.
+- [`se:retro`](../src/plugin/agents/retro.md), for the kind retro: an issue labelled se-retro.
+- [`se:overhaul`](../src/plugin/agents/overhaul.md), for the kind overhaul: an issue labelled se-overhaul.
+<!-- /se:manifest -->
+
+One box is the fleet. A box never works an issue itself: it coordinates
+sub-agents, so one box can hold the whole queue, and each claim does not
+cost a fire of the routine (whose limit the fan-out ran into on 2026-10-14).
+
+- **The loop:** the box pulls each ready issue with
+  `se issue pull --take --worktree`, makes its worktree, and hands it to a
+  fresh sub-agent of the agent the take names, with a clean context, several
+  at once up to its cap. A parent it takes it coordinates the same way with
+  `--in ROOT --take`.
+- **The cap** is `fleet.box/config/parallel`, 4 (`Parallel` in
+  `src/internal/issues/box.go` until the fleet's rules move onto the index):
+  the box's disk allowance and CPU limit it, and the battery takes about
+  25s. `se` refuses a take that would pass it.
+- **When it pulls again:** when a sub-agent's PR is up with auto-merge on, or
+  its issue is superseded. A red CI or a review on a PR goes back to that PR's
+  sub-agent.
+- **Its context** keeps only issue, worktree and PR numbers, so it can run
+  for days. It ends when nothing is ready and no sub-agent is running.
+- **Alive:** a box is alive while one of its claims is: a claimed leaf whose
+  branch saw a push within the lease, the box named by its last
+  `<!-- se:box -->` comment. Its sub-agent counts against the cap until the
+  claim's PR has auto-merge on. A claim with no box comment counts as a box of
+  its own at its cap. A box that dies is left to the stuck sweep: its claims
+  are taken over once their lease runs out.
+
 ### Fan-out
 
-One merge starts one box, but there should be as many boxes as there is ready
-work. So boxes start boxes, mechanically, never by an agent's choice:
+The fan-out adds a box only when the boxes are full, mechanically, never by an
+agent's choice:
 
-- **Fan-out:** whenever `se issue pull --take` has claimed an issue, it fires
-  the routine `SE work` once, so another box starts and takes the next ready
-  issue. That box fires again after its own claim, and so on.
-- **A new ready issue** fires it too: `se issue new` fires once when nothing
-  blocks the issue it created.
+- **When it fires:** `se issue pull --take` after its claim, and `se issue new`
+  for an issue nothing blocks, count the alive boxes from the open claims and
+  fire the routine `SE work` once in two cases: issues are ready and no box is
+  alive (a restart), or every alive box runs its cap and another issue is
+  ready. While a box has room under its cap, it takes the issue itself and
+  nothing fires; the taking box counts as alive. The line says which.
 - **The end:** a box that finds nothing ready claims nothing and fires
-  nothing, so the fan-out ends by itself. Such a box leaves at once.
-- **No cap** on boxes in flight; the owner decided against one. The only limit
-  is the routine's own: 30 fires an hour. A fire refused for that is reported
+  nothing. It leaves once no sub-agent of its own is running.
+- **No cap** on boxes in flight; the owner decided against one. The routine's
+  own limit stands: 30 fires an hour. A fire refused for that is reported
   and the box goes on.
+- **A refused fire is kept:** where the routine refuses the fire after a take
+  with 429, `se` keeps it on the claim, in the fleet state it already keeps
+  there: a comment `<!-- se:fanout-retry T -->`, T the time its
+  `Retry-After` names (an hour where it names none). Until T nothing fires: a
+  take says the fan-out waits, and keeps the same mark on its own claim, so
+  the refusal outlives the claim that first kept it. Once T has passed, the
+  next take or `se fleet check` that finds the fleet needs another box (the
+  two cases above) fires it, once, and leaves `<!-- se:fanout-fired -->` on
+  every claim that kept it. A refusal kept only on claims that have since
+  closed is gone; the merge that closed them starts a box anyway.
 - **How it fires:** an HTTP POST of the body `{}` to the URL in
   `SE_ROUTINE_FIRE_URL`, with the headers
   `Authorization: Bearer $SE_ROUTINE_FIRE_TOKEN`,
@@ -440,9 +539,9 @@ work. So boxes start boxes, mechanically, never by an agent's choice:
   route is documented at <https://code.claude.com/docs/en/routines>. `se`
   prints the started session's link from the answer.
 - **Never fails a claim:** where either variable is unset (on a desk, say),
-  `se` says in one line that fan-out is off; a failed or refused fire is
-  reported the same way. The claim stands either way. The token is never
-  printed.
+  `se` says in one line that fan-out is off, and counts nothing; a failed or
+  refused fire is reported the same way, and a count that fails fires. The
+  claim stands either way. The token is never printed.
 
 The owner's one-time setup: add an API trigger to the routine `SE work`, and
 put its fire URL in `SE_ROUTINE_FIRE_URL` and its token in

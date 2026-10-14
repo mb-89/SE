@@ -11,9 +11,12 @@ labelled `se`, do them, and land each through one pull request.
 
     ./RUNME.sh
 
-It names anything it needs that is missing, and installs the plugin for your
-user, so every Claude session on this machine has one command, `/se`. Type
-`/se on` to switch SE on in a session.
+On Linux, macOS, or Windows under Git Bash, it installs every tool SE needs
+that is missing into `~/.se`, without admin rights, and installs the plugin
+for your user, so every Claude session on this machine has one command,
+`/se`. Type `/se on` to switch SE on in a session. The fleet's commands need
+a GitHub login; where gh has none, RUNME runs `gh auth login` for you, and
+finishes without it if you skip it.
 
 ## Where to go next
 
@@ -24,15 +27,21 @@ user, so every Claude session on this machine has one command, `/se`. Type
 - **Running SE on cloud boxes:** [spec/cloud.md](spec/cloud.md).
 - **Why SE is built the way it is:** [spec/principles.md](spec/principles.md).
 
+The agents, one per role, each reached as `@agent-se:<name>` in a session
+(or by asking Claude for its role):
+
+<!-- se:manifest agents -->
+- [`se:worker`](src/plugin/agents/worker.md), for the kind leaf: an issue with no sub-issues: work, landed as one PR.
+- [`se:coordinator`](src/plugin/agents/coordinator.md), for the kind parent: an issue with sub-issues: the box coordinates its tree, as it runs the queue and checks the fleet when nothing is ready.
+- [`se:reviewer`](src/plugin/agents/reviewer.md), for the kind gate: an se-review parent ready for review: reviewed cold.
+- [`se:retro`](src/plugin/agents/retro.md), for the kind retro: an issue labelled se-retro.
+- [`se:overhaul`](src/plugin/agents/overhaul.md), for the kind overhaul: an issue labelled se-overhaul.
+<!-- /se:manifest -->
+
 The skills, `se:<name>` in a session:
 
 <!-- se:manifest skills -->
 - [`se:briefing`](src/plugin/skills/briefing/SKILL.md): Brief the person on where SE stands, what waits on them first, then what is in flight, what happened and what is next, and ask what they want to work on. It presents; it does not act.
-- [`se:coordination`](src/plugin/skills/coordination/SKILL.md): When se issue pull --take takes nothing, check what is broken in the fleet and fix it before ending. The work skill hands over to it.
-- [`se:overhaul`](src/plugin/skills/overhaul/SKILL.md): Start an SE overhaul, or, as the box that took one, judge SE against every principle and the outside world and file its report. The work skill hands an issue labelled se-overhaul to it.
-- [`se:retro`](src/plugin/skills/retro/SKILL.md): Start an SE retro, or, as the box that took one, collect its window, judge it, and file its report. The work skill hands an issue labelled se-retro to it.
-- [`se:review`](src/plugin/skills/review/SKILL.md): Review an se-review gate whose sub-issues have closed, cold, as an agent that worked none of its tree. Find, then verify, then judge; block only on damage; end with se issue review pass|fail and its report. The work skill starts it as a fresh sub-agent on the reviewer model.
-- [`se:work`](src/plugin/skills/work/SKILL.md): Take the next ready se issue, do its work, and land it with se issue land. Every SE box runs this; the routine SE work starts it.
 <!-- /se:manifest -->
 
 The rules, each file owning one part:
