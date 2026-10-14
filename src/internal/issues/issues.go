@@ -137,9 +137,9 @@ func api[T any](s Source, path string, list bool) ([]T, error) {
 const PerPage = 100
 
 // pages reads a list path, which asks per_page=PerPage, page by page until
-// a page comes back short. It asks for page=k itself, where api's --paginate
-// follows GitHub's next links: for some lists, the repository-wide comments
-// among them, those name repositories/{id}, which the box proxy refuses.
+// a page comes back short, asking for page=k itself on the repos/ path, as
+// the real GitHub's List does for api: GitHub's next links name
+// repositories/{id} for some lists, which the box proxy refuses.
 func pages[T any](s Source, path string) ([]T, error) {
 	var all []T
 	for k := 1; ; k++ {
