@@ -37,6 +37,32 @@ func TestLandPostsTheBatterysStatusNamingTheTreeItPushed(t *testing.T) {
 	}
 }
 
+// noStatuses is GitHub behind a cloud box's proxy, which refuses commit statuses.
+type noStatuses struct{ github.GitHub }
+
+func (g noStatuses) Send(method, path string, fields ...github.Field) ([]byte, error) {
+	if strings.Contains(path, "/statuses/") {
+		return nil, &github.Error{Status: 403, Message: "Write access to this GitHub API path is not permitted through this proxy"}
+	}
+	return g.GitHub.Send(method, path, fields...)
+}
+
+// A refused status stops nothing: the land posts the answers, opens the PR
+// and turns on auto-merge, and names the refusal, since CI checks the commit.
+func TestARefusedStatusIsAWarningAndTheLandGoesOn(t *testing.T) {
+	t.Parallel()
+	_, a := claimed(t)
+	gh := landGH(t, map[string]string{pullsPath: `[]`})
+	d := disk.NewFake()
+	l, err := Source{Proc: machine, Repo: repo, GitHub: noStatuses{gh}, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	if err != nil || !l.Created || l.Number == 0 || !strings.Contains(l.Warning, "403") && !strings.Contains(l.Warning, "not permitted") {
+		t.Fatalf("%+v %v", l, err)
+	}
+	if len(commentsAt(t, gh, 6)) != 1 || pullOf(t, gh, l.Number)["auto_merge"] == nil {
+		t.Fatalf("the land stopped at the refused status: %+v", l)
+	}
+}
+
 func TestLandRefusesATreeTheBatteryDidNotPass(t *testing.T) {
 	t.Parallel()
 	origin, a := claimed(t)
