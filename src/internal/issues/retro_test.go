@@ -218,7 +218,7 @@ func TestTheAnswersCheckSkipsWhatLandsNoBranch(t *testing.T) {
 	a[key] = strings.TrimSuffix(a[key], "]") + "," + person + "," + overhaul + "]"
 	a["repos/o/r/issues/27/comments?per_page=100"] = `[]`
 	a["repos/o/r/issues/28/comments?per_page=100"] = `[]`
-	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	c, err := Source{Proc: machineOf(t), Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
 	if err != nil {
 		t.Fatal(err)
 	}
