@@ -144,7 +144,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: close, edit, land, new, pull, review, supersede, tree." {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -152,7 +152,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	t.Parallel()
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: close, edit, land, new, pull, review, supersede, tree." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -162,7 +162,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue pull, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: close, edit, land, new, pull, review, supersede, tree.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -604,7 +604,7 @@ func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
 	t.Parallel()
 	gh := recordedIssues(t)
 	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "b", "--blocked-by", "none", "--final")
-	if code != 0 || out != "Created #10 ten\n"+u10+"\nLabelled se-final: if it fails, it goes to a person.\n"+firedOnce+"\n" {
+	if code != 0 || out != "Created #10 ten\n"+u10+"\nLabelled se-final: its last attempt, never superseded again.\n"+firedOnce+"\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	if made := issueOf(t, gh, 10); !strings.Contains(made, `"body":"b\n\n<!-- se:new -->"`) || !strings.Contains(made, `"labels":[{"name":"se"},{"name":"se-final"}]`) {
@@ -612,7 +612,7 @@ func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
 	}
 }
 
-func TestIssuePullPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
+func TestIssuePullPersonListsWhatWaits(t *testing.T) {
 	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
@@ -632,18 +632,11 @@ func TestIssuePullPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
 	if code, _, errs := se(t, "issue", "pull", "--person", "--take", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "--person alone") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
-	if code, _, errs := se(t, "issue", "resume", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "one issue number") {
-		t.Fatalf("exit %d, %q", code, errs)
+	if _, ok := commands["issue resume"]; ok {
+		t.Fatal("se issue resume is gone: nothing holds an issue for a person to resume")
 	}
-	code, out, errs = se(t, "issue", "resume", "#7", "--repo", "o/r")
-	if code != 0 || out != "Resumed #7 seven: back in the queue, its takeover count reset.\nu7\n" {
-		t.Fatalf("exit %d, %q %q", code, out, errs)
-	}
-	if want := []string{"POST repos/o/r/issues/7/comments", "DELETE repos/o/r/issues/7/labels/se-person"}; !reflect.DeepEqual(gh.Writes(), want) {
-		t.Fatalf("writes %q", gh.Writes())
-	}
-	if strings.Contains(issueOf(t, gh, 7), "se-person") {
-		t.Fatal(issueOf(t, gh, 7))
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("listing wrote %q", w)
 	}
 }
 

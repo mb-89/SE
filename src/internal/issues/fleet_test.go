@@ -399,7 +399,7 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	if c := commentsAt(t, w, 7); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:takeover 1 -->") || !strings.Contains(c[0].Body, "<!-- se:takeover-head c7 -->") {
 		t.Fatalf("%+v", c)
 	}
-	// The takeover makes #7 final: stuck again, it goes to a person.
+	// The takeover makes #7 final: stuck again, it is taken over again.
 	if !labelled(t, w, 7, FinalLabel) {
 		t.Fatalf("writes %q", w.Writes())
 	}

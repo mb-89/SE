@@ -68,11 +68,10 @@ and only then leaves.**
      green PR auto-merge does not merge.
 4. **It never fixes the same thing twice.** A takeover is recorded with
    `<!-- se:takeover N -->`, every other fix with `<!-- se:fleet KEY M -->` on
-   the finding's issue (`M` is the issue it made, or 0). A finding that comes
-   back after its fix goes to a person: a takeover labels the issue
-   `se-final`, and a takeover of an `se-final` issue makes it wait on an
-   issue for a person instead, and any other finding becomes an `se-person`
-   issue. A finding
+   the finding's issue (`M` is the issue it made, or 0). A takeover labels
+   the issue `se-final`, and a stuck or conflicted `se-final` issue is taken
+   over again, never handed to a person. Any other finding that comes back
+   after its fix becomes an `se-person` issue. A finding
    already reported as an issue that is still open is left as it is.
 5. **The record.** The box lands nothing of its own, so each fix is a comment
    on the issue it acted on, saying what was found and what was done (the

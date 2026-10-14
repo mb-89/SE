@@ -66,7 +66,7 @@ func init() {
 		Usage:   "issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "show the next se issue, stuck work first; --take claims it",
-		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands. A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. A take names the agent that works the issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a parent, which is the box itself, se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issueConfig().OverhaulCadence, issueConfig().RetroCadence, issueConfig().Lease, issues.Parallel),
+		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands. A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it. A claim stuck a second time, or conflicting after a takeover, is taken over again; nothing mints an issue for a person on a box's behalf. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. A take names the agent that works the issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a parent, which is the box itself, se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issueConfig().OverhaulCadence, issueConfig().RetroCadence, issueConfig().Lease, issues.Parallel),
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -104,23 +104,18 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			var flagged []string
-			s.Flagged = func(i issues.Issue, reason string) {
-				flagged = append(flagged, fmt.Sprintf("Gave #%d %s to a person: %s", i.Number, i.Title, reason))
-			}
 			if *person {
 				waiting, err := s.Waiting()
 				if err != nil {
 					return Reply{}, err
 				}
-				return waitingReply(*asJSON, waiting, flagged)
+				return waitingReply(*asJSON, waiting)
 			}
 			if *in < 0 {
 				return Reply{}, fmt.Errorf("--in takes an issue number, not %d", *in)
 			}
 			if *in > 0 {
-				r, err := inReply(c, s, *asJSON, *in, take)
-				return sweptReply(r, err, *asJSON, flagged)
+				return inReply(c, s, *asJSON, *in, take)
 			}
 			if !take.set {
 				next, ok, err := s.Next()
@@ -135,8 +130,7 @@ func init() {
 					}
 					cads = append(cads, cad)
 				}
-				r, err := issueReply(*asJSON, next, ok, "", "", "", handed{}, cads...)
-				return sweptReply(r, err, *asJSON, flagged)
+				return issueReply(*asJSON, next, ok, "", "", "", handed{}, cads...)
 			}
 			// An overhaul, then a retro, the cadence has made due comes
 			// before all other work.
@@ -155,7 +149,7 @@ func init() {
 			}
 			if !ok {
 				if took, ok, err = s.Take(c.Workspace, take.n); issues.IsFull(err) {
-					return fullReply(*asJSON, err, flagged)
+					return fullReply(*asJSON, err)
 				} else if err != nil {
 					return Reply{}, err
 				}
@@ -186,60 +180,7 @@ func init() {
 			if ok {
 				h = c.handOver(took)
 			}
-			r, err := issueReply(*asJSON, took, ok, issues.Branch(took.Number), wt, fanout, h, started...)
-			return sweptReply(r, err, *asJSON, flagged)
-		},
-	})
-	register(Command{
-		Name:    "issue resume",
-		Class:   batch,
-		Usage:   "issue resume N [--json] [--repo OWNER/NAME]",
-		Group:   "Issues",
-		Summary: "for a person: put issue N back in the queue",
-		Details: "for a person: take issue N off se-person and put it back in the queue, its takeover count reset.",
-		Session: true,
-		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue resume")
-			var words []string
-			for rest := c.Args; ; {
-				if err := fs.Parse(rest); err != nil {
-					return Reply{}, err
-				}
-				if fs.NArg() == 0 {
-					break
-				}
-				words, rest = append(words, fs.Arg(0)), fs.Args()[1:]
-			}
-			c.Args = nil
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			n := 0
-			if len(words) == 1 {
-				n, _ = strconv.Atoi(strings.TrimPrefix(words[0], "#"))
-			}
-			if n <= 0 {
-				return Reply{}, fmt.Errorf("issue resume takes one issue number, not %q", strings.Join(words, " "))
-			}
-			s, err := src()
-			if err != nil {
-				return Reply{}, err
-			}
-			if err := s.CloseParents(); err != nil {
-				return Reply{}, err
-			}
-			i, err := s.Resume(n)
-			if err != nil {
-				return Reply{}, err
-			}
-			if *asJSON {
-				data, err := json.Marshal(struct {
-					Number  int  `json:"number"`
-					Resumed bool `json:"resumed"`
-				}{i.Number, true})
-				return Reply{Text: string(data)}, err
-			}
-			return Reply{Text: fmt.Sprintf("Resumed #%d %s: back in the queue, its takeover count reset.\n%s", i.Number, i.Title, i.URL)}, nil
+			return issueReply(*asJSON, took, ok, issues.Branch(took.Number), wt, fanout, h, started...)
 		},
 	})
 	register(Command{
@@ -320,7 +261,7 @@ func init() {
 		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "create an se issue, with its blockers and its parent",
-		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. A ready issue, one nothing open blocks, fires the routine once.",
+		Details: "create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), as a sub-issue of --parent, and name it. --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt: never superseded again. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. A ready issue, one nothing open blocks, fires the routine once.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -331,7 +272,7 @@ func init() {
 			parent := fs.Int("parent", 0, "the issue `N` it is a sub-issue of")
 			blocks := fs.String("blocks", "", "the issues it blocks, as `N,M`: those that need it")
 			review := fs.Bool("review", false, "label it se-review: it is reviewed once its sub-issues have closed")
-			final := fs.Bool("final", false, "label it se-final: if it fails, it goes to a person")
+			final := fs.Bool("final", false, "label it se-final: its last attempt, never superseded again")
 			person := fs.Bool("person", false, "make it an issue for a person: label it se-person and assign it to the owner")
 			skills := fs.String("skills", "", "the skills its work needs, as `NAME,NAME`: a take hands each over")
 			allowDuplicate := fs.Bool("allow-duplicate", false, "create it although an open se issue under the same parent has its title")
@@ -455,7 +396,7 @@ func init() {
 				text += "\nFor a person: labelled " + issues.PersonLabel + " and assigned to the owner."
 			}
 			if *final {
-				text += "\nLabelled " + issues.FinalLabel + ": if it fails, it goes to a person."
+				text += "\nLabelled " + issues.FinalLabel + ": its last attempt, never superseded again."
 			}
 			if len(blockers) > 0 {
 				names := make([]string, len(blockers))
@@ -535,7 +476,7 @@ func init() {
 		Usage:   "issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "pass or fail a gate whose sub-issues closed, by its report",
-		Details: fmt.Sprintf("review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree, with the report in the JSON file PATH (spec/review.md). It refuses a pass where a requirement lacks evidence, and a report without its checked-and-clean list. Every finding becomes an se-final issue: a blocking one a sub-issue of N, a non-blocking one in the queue (at most %d, issues/config/max-filed). pass posts the report and closes N; fail posts it, and N waits for its fixes. A re-review that finds an earlier blocker's problem again sends N to a person.", issueConfig().MaxFiled),
+		Details: fmt.Sprintf("review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree, with the report in the JSON file PATH (spec/review.md). It refuses a pass where a requirement lacks evidence, and a report without its checked-and-clean list. Every finding becomes an se-final issue: a blocking one a sub-issue of N, a non-blocking one in the queue (at most %d, issues/config/max-filed). pass posts the report and closes N; fail posts it, and N waits for its fixes. A re-review finding that repeats an earlier blocker is an accepted repeat: it files nothing, the report names it, and a fail whose blocking findings are all repeats closes N.", issueConfig().MaxFiled),
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue review")
@@ -605,15 +546,18 @@ func init() {
 			}
 			var lines []string
 			switch {
-			case r.Person:
-				lines = append(lines, fmt.Sprintf("#%d's re-review found an earlier blocker's problem again: the report is on it, and it waits on a person.", n))
 			case r.Passed:
 				lines = append(lines, fmt.Sprintf("Passed #%d: the report is on it, and it is closed.", n))
+			case r.Closed:
+				lines = append(lines, fmt.Sprintf("#%d's re-review found only earlier blockers' problems again (%s): the report names them as accepted repeats, and it is closed.", n, numbers(r.Accepted)))
 			default:
 				lines = append(lines, fmt.Sprintf("Failed #%d: the report is on it, and its blocking findings are sub-issues of it:", n))
 			}
 			for _, f := range r.Fixes {
 				lines = append(lines, fmt.Sprintf("#%d %s\n%s", f.Number, f.Title, f.URL))
+			}
+			if !r.Closed && len(r.Accepted) > 0 {
+				lines = append(lines, "Accepted repeats, blocking no more: "+numbers(r.Accepted)+".")
 			}
 			if len(r.Filed) > 0 {
 				lines = append(lines, "Filed, not blocking:")
@@ -842,7 +786,7 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 	}
 	took, ok, tr, err := s.TakeIn(c.Workspace, root, take.n)
 	if issues.IsFull(err) {
-		return fullReply(asJSON, err, nil)
+		return fullReply(asJSON, err)
 	}
 	if err != nil {
 		return Reply{}, err
@@ -921,12 +865,12 @@ func answersLine(t *issues.Takeover) string {
 
 // fullReply answers a box's take refused because it runs its cap of
 // sub-agents (with --json: {"ready":false,"full":true}).
-func fullReply(asJSON bool, err error, flagged []string) (Reply, error) {
+func fullReply(asJSON bool, err error) (Reply, error) {
 	if asJSON {
 		data, jerr := json.Marshal(map[string]any{"ready": false, "full": true, "why": err.Error()})
-		return sweptReply(Reply{Text: string(data)}, jerr, true, flagged)
+		return Reply{Text: string(data)}, jerr
 	}
-	return sweptReply(Reply{Text: "No take: " + err.Error() + "."}, nil, false, flagged)
+	return Reply{Text: "No take: " + err.Error() + "."}, nil
 }
 
 // treeText says where a tree stands.
@@ -980,33 +924,14 @@ func reviewText(c *Call, tr issues.Tree) string {
 	return text
 }
 
-// sweptReply adds to a reply of issue pull the issues its sweep gave to a
-// person: lines before the text, or with --json the field "flagged".
-func sweptReply(r Reply, err error, asJSON bool, flagged []string) (Reply, error) {
-	if err != nil || len(flagged) == 0 {
-		return r, err
-	}
-	if !asJSON {
-		r.Text = strings.Join(flagged, "\n") + "\n\n" + r.Text
-		return r, nil
-	}
-	var answer map[string]any
-	if err := json.Unmarshal([]byte(r.Text), &answer); err != nil {
-		return Reply{}, err
-	}
-	answer["flagged"] = flagged
-	data, err := json.Marshal(answer)
-	return Reply{Text: string(data)}, err
-}
-
 // waitingReply lists the issues waiting on a person.
-func waitingReply(asJSON bool, waiting []issues.Waiting, flagged []string) (Reply, error) {
+func waitingReply(asJSON bool, waiting []issues.Waiting) (Reply, error) {
 	if asJSON {
 		data, err := json.Marshal(waiting)
 		return Reply{Text: string(data)}, err
 	}
 	if len(waiting) == 0 {
-		return sweptReply(Reply{Text: "No se issue waits on a person."}, nil, false, flagged)
+		return Reply{Text: "No se issue waits on a person."}, nil
 	}
 	var b strings.Builder
 	for k, w := range waiting {
@@ -1015,5 +940,5 @@ func waitingReply(asJSON bool, waiting []issues.Waiting, flagged []string) (Repl
 		}
 		fmt.Fprintf(&b, "#%d %s\n%s\nBlocks %d open issue(s).\n%s", w.Number, w.Title, w.URL, w.Blocks, w.Reason)
 	}
-	return sweptReply(Reply{Text: b.String()}, nil, false, flagged)
+	return Reply{Text: b.String()}, nil
 }

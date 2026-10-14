@@ -58,30 +58,28 @@ follows them; `se review brief` and `se issue review` (in
 
    At most `issues/config/max-filed` non-blocking findings are filed; the rest are
    counted in the report, not filed.
-5. **Final is general: any second attempt is final, and a failing final
-   issue waits on an issue for a person (the owner's rule).** Labels combine: `se` marks
-   fleet work, and `se-final` is a separate label beside it. An issue becomes
-   `se-final` when:
+5. **Final is general: any second attempt is final, and agents decide
+   (the owner's rule).** Labels combine: `se` marks fleet work, and
+   `se-final` is a separate label beside it. An issue becomes `se-final`
+   when:
    - a review creates it to fix a finding;
    - `se issue pull --take` takes it over, stuck or with a conflicted PR
      ([Stuck work](issues.md#stuck-work), [The rules](issues.md#the-rules)).
 
-   If an `se-final` issue fails again, it is not given another round: `se`
-   mints an issue for a person that says what failed, and links the failing
-   issue as blocked by it ([Stuck work](issues.md#stuck-work)); closing it
-   gives the work back for a fresh attempt. Failing again is:
-   - stuck again: the issue itself waits (a conflict is no failure, [The rules](issues.md#the-rules));
+   A final issue is never superseded again: its box lands a PR. Nothing
+   mints an issue for a person on a box's behalf. If an `se-final` issue
+   fails again:
+   - stuck again: it is taken over again, like any other (a conflict is no
+     failure, [The rules](issues.md#the-rules));
    - its re-review finds the same problem: the finding says it `repeats` the
-     earlier blocker, and the gate, which holds that closed issue, waits (an
-     open issue is what leaves the queue).
+     earlier blocker. The repeat is accepted, the reviewer's decision, named
+     in the report: it files nothing and blocks no more, and where nothing
+     else blocks, the gate closes.
 
-   This bounds every loop at one retry. The label is the single record of a
-   takeover: a takeover sets it, and a takeover of an issue that is already
-   final makes it wait on an issue for a person instead. The
-   `<!-- se:takeover N -->` comment stays as the human-readable record, and
-   its round only settles two boxes racing for one takeover. Minting that
-   issue takes `se-final` off and resets the takeovers, so once the person
-   closes it the work gets one more attempt.
+   This bounds the review loop at one retry. The label is the single record
+   of a takeover: a takeover sets it. The `<!-- se:takeover N -->` comment
+   stays as the human-readable record, and its round only settles two boxes
+   racing for one takeover.
 6. **A re-review** is the review of a gate whose last review failed. It
    checks only the earlier blockers and the code that changed since (the
    brief names both: the blockers, and `git diff <then>..<now>`), and raises
@@ -93,7 +91,7 @@ follows them; `se review brief` and `se issue review` (in
    - PASS or FAIL;
    - what the ask requires, each item with its evidence;
    - the findings, each with evidence, its blocking judgment and the issue it
-     became;
+     became, or that it is an accepted repeat;
    - a **"checked and clean" list** of what was examined and found sound, so
      a rubber-stamp is visible.
 
@@ -147,4 +145,4 @@ se review brief N [--claims] [--json] [--repo OWNER/NAME]
 `se review brief` prints the brief as Markdown (with `--json`:
 `{"gate","tree","commit","ci","principles","rereview","claims"}`). It reads,
 and writes nothing. `se issue review` prints the verdict and the issues the
-findings became (with `--json`: `{"issue","passed","fixes","filed","unfiled","person"}`).
+findings became (with `--json`: `{"issue","passed","fixes","filed","unfiled","accepted","closed"}`).

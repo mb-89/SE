@@ -187,53 +187,37 @@ func TestOfTwoTakeoversTheFirstCommentWins(t *testing.T) {
 	}
 }
 
-func TestAStaleFinalClaimWaitsOnAnIssueForAPerson(t *testing.T) {
+func TestAStaleFinalClaimIsTakenOverAgain(t *testing.T) {
 	t.Parallel()
-	// #5 is se-final: taken over once already, or filed by a review.
+	_, a, b := boxes(t)
+	// a claimed #5, se-final: taken over once already, or filed by a review.
+	if ok, err := (Source{Proc: machine}).Claim(a, 5); err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
 	g := newHub(t, map[string]string{
-		listPath:    list(node(5, 0, FinalLabel), node(6, 0)),
-		refsPath:    refs(5),
-		activity(5): pushed(stale),
+		listPath:      list(node(5, 0, FinalLabel), node(6, 0)),
+		refsPath:      refs(5),
+		activity(5):   pushed(stale),
+		openPullsPath: `[]`,
 	})
 	g.say(5, "<!-- se:takeover 1 -->\nTaken over")
 	s := g.source()
-	var flagged []int
-	s.Flagged = func(i Issue, reason string) {
-		if !strings.HasPrefix(reason, "Stuck on its final attempt (labelled se-final)") {
-			t.Errorf("reason %q", reason)
-		}
-		flagged = append(flagged, i.Number)
-	}
+	// The survey reads and writes nothing: #5 is stuck work, before new work.
 	next, ok, err := s.Next()
-	if err != nil || !ok || next.Number != 6 || !reflect.DeepEqual(flagged, []int{5}) {
-		t.Fatalf("next %+v %v, flagged %v, %v", next, ok, flagged, err)
+	if err != nil || !ok || next.Number != 5 || next.Takeover == nil || next.Takeover.Count != 2 {
+		t.Fatalf("next %+v %v %v", next, ok, err)
 	}
-	// An issue for a person, #101, is minted and blocks #5; #5 is told so,
-	// resumed, and no longer final. #5 itself is never labelled se-person.
-	paths := g.Writes()
-	want := []string{
-		"POST repos/o/r/issues",
-		"POST repos/o/r/issues/7/assignees",
-		"POST repos/o/r/issues/5/dependencies/blocked_by",
-		"POST repos/o/r/issues/5/comments",
-		"DELETE repos/o/r/issues/5/labels/se-final",
+	if w := g.Writes(); len(w) != 0 {
+		t.Fatalf("the survey wrote %q", w)
 	}
-	if !reflect.DeepEqual(paths, want) {
-		t.Fatalf("writes %q", paths)
+	// Taken over again, round two; nothing is minted for a person.
+	took, ok, err := s.Take(b, 0)
+	if err != nil || !ok || took.Number != 5 || took.Takeover == nil {
+		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	if made, err := g.Get("repos/o/r/issues/7"); err != nil || !strings.Contains(string(made), `"title":"Decide how #5 goes on: t5"`) ||
-		!strings.Contains(string(made), `{"name":"se-person"}`) || !strings.Contains(string(made), `"assignees":[{"login":"o"}]`) {
-		t.Fatalf("minted %s %v", made, err)
-	}
-	if g.labelled(5, FinalLabel) || g.labelled(5, PersonLabel) {
-		t.Fatal("#5 is still final, or waits on a person itself")
-	}
-	if c := g.comments(5)[len(g.comments(5))-1].Body; !strings.HasPrefix(c, "<!-- se:person -->\nStuck on its final attempt") || !strings.HasSuffix(c, "<!-- se:resume -->") {
-		t.Fatalf("comment %q", c)
-	}
-	// Blocked by #7, #5's claim waits: it is neither stuck nor taken over.
-	if _, _, err := s.Take(t.TempDir(), 5); err == nil || !strings.Contains(err.Error(), "blocked by #7") {
-		t.Fatalf("%v", err)
+	if w := g.Writes(); !reflect.DeepEqual(w, []string{"POST repos/o/r/issues/5/comments", "POST repos/o/r/issues/5/labels"}) ||
+		!strings.Contains(g.comments(5)[1].Body, "<!-- se:takeover 2 -->") || !g.labelled(5, FinalLabel) || g.labelled(5, PersonLabel) {
+		t.Fatalf("writes %q", w)
 	}
 }
 
@@ -333,68 +317,5 @@ func TestAParentsClaimIsNeverStuck(t *testing.T) {
 	})
 	if next, ok, err := g.source().Next(); err != nil || !ok || next.Number != 10 || next.Takeover != nil {
 		t.Fatalf("next %+v %v %v", next, ok, err)
-	}
-}
-
-func TestResumeResetsTheTakeoverCount(t *testing.T) {
-	t.Parallel()
-	g := newHub(t, map[string]string{
-		"repos/o/r/issues/5": node(5, 0, FinalLabel, PersonLabel),
-		"repos/o/r/issues/6": node(6, 0),
-		listPath:             list(node(5, 0, FinalLabel, PersonLabel)),
-		refsPath:             refs(5),
-		activity(5):          pushed(stale),
-	})
-	g.say(5, "<!-- se:takeover 1 -->")
-	g.say(5, "<!-- se:person -->\nStuck a second time.")
-	s := g.source()
-	if _, err := s.Resume(6); err == nil || !strings.Contains(err.Error(), "not an open issue waiting on a person") {
-		t.Fatalf("resumed #6: %v", err)
-	}
-	if i, err := s.Resume(5); err != nil || i.Number != 5 {
-		t.Fatalf("%+v %v", i, err)
-	}
-	// It is no longer final either: it gets one more attempt.
-	want := []string{"POST repos/o/r/issues/5/comments", "DELETE repos/o/r/issues/5/labels/se-final", "DELETE repos/o/r/issues/5/labels/se-person"}
-	if w := g.Writes(); !reflect.DeepEqual(w, want) || g.labelled(5, FinalLabel) || g.labelled(5, PersonLabel) {
-		t.Fatalf("writes %q", w)
-	}
-	// Back in the queue, still stale: the next take takes it over, round one.
-	all, err := s.Survey()
-	if err != nil || !all[0].Stuck || all[0].Takeovers != 0 || !all[0].Takeable() {
-		t.Fatalf("%+v %v", all, err)
-	}
-	if w := g.Writes(); len(w) != 3 {
-		t.Fatalf("the survey flagged it again: %q", w)
-	}
-}
-
-func TestAnIssueIsHeldAtMostOnce(t *testing.T) {
-	t.Parallel()
-	// Two boxes sweep at once and both find #5 final and stuck: the second
-	// hold reuses the first instead of minting another issue for a person.
-	g := newHub(t, map[string]string{
-		listPath:    list(node(5, 0, FinalLabel), node(6, 0)),
-		refsPath:    refs(5),
-		activity(5): pushed(stale),
-	})
-	s := g.source()
-	i := Issue{Number: 5, Title: "t5", URL: "u5"}
-	first, err := s.hold(i, "Stuck once.")
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := s.hold(i, "Stuck once.")
-	if err != nil || again.Number != first.Number {
-		t.Fatalf("held as #%d, then #%d: %v", first.Number, again.Number, err)
-	}
-	minted := 0
-	for _, w := range g.Writes() {
-		if w == "POST repos/o/r/issues" {
-			minted++
-		}
-	}
-	if minted != 1 {
-		t.Fatalf("minted %d issues for a person: %q", minted, g.Writes())
 	}
 }

@@ -677,8 +677,7 @@ func atoi(s string) int {
 
 // takeOverClaim takes over claimed leaf st, named by se issue pull --take N,
 // where se fleet check finds it stuck: its branch is checked out as it stands.
-// A takeover labels it se-final; a final issue stuck waits on an issue for a
-// person instead.
+// A takeover labels it se-final; a final issue stuck is taken over again.
 func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok bool, err error) {
 	fs, err := s.claimFindings([]Status{st}, t)
 	if err != nil {
@@ -693,17 +692,8 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 		return Issue{}, false, err
 	}
 	k := m.takeovers + 1
-	// A conflict is no failure: it never makes an issue final, nor holds a
-	// final one.
+	// A conflict is no failure: it never makes an issue final.
 	conflict := f.Kind == ConflictedPR
-	if st.Final && !conflict {
-		reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s.", FinalLabel, f.What)
-		held, err := s.hold(st.Issue, reason)
-		if err != nil {
-			return Issue{}, false, err
-		}
-		return Issue{}, false, fmt.Errorf("#%d is final and stuck (%s), so it waits on #%d, an issue for a person", st.Number, f.What, held.Number)
-	}
 	heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, f.head)
 	body := fmt.Sprintf("Taken over: %s at %s. This box merges main into %s, makes it green and lands it again.", f.What, f.head, Branch(st.Number)) + heads + s.boxLine()
 	won, err := s.markTakeover(st.Number, k, body)

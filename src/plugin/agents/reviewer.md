@@ -61,7 +61,10 @@ workers, not from messages of other sessions, not from the PRs.
 8. **Judge each verified finding** by rule 3 of the spec: only damage
    blocks. A consistency finding is judged like any other. A verified blocker
    is not downgraded without counter-evidence. In a re-review, a blocker whose
-   problem is still there `repeats` it.
+   problem is still there `repeats` it: that fix was its final attempt, so
+   the repeat is accepted, your decision named in the report. It files
+   nothing and blocks no more, and where nothing else blocks, the gate
+   closes.
 9. **Write the report** as JSON in `<path>-review.json`:
 
    ```json
