@@ -22,11 +22,12 @@ const (
 	NoPR            = "no PR"
 	LeftoverClaim   = "leftover claim"
 	ImpossibleBlock = "impossible block"
+	BareIssue       = "bare issue"
 	WaitingOnPerson = "waiting on a person"
 )
 
 // Kinds is every kind of finding, in the order se fleet check lists them.
-var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, LeftoverClaim, ImpossibleBlock, WaitingOnPerson}
+var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, LeftoverClaim, ImpossibleBlock, BareIssue, WaitingOnPerson}
 
 // Grace is how long the prune workflow has to delete a leftover claim of a
 // closed issue before se fleet fix reports it.
@@ -62,6 +63,8 @@ type Finding struct {
 	closed   time.Time
 	// key names the finding in the record its fix leaves.
 	key string
+	// id is GitHub's id of a bare issue, which the sub-issues link takes.
+	id int64
 }
 
 // cause is the kind of the finding on the issue itself.
@@ -92,6 +95,8 @@ func (f *Finding) setRemedy() {
 		f.Remedy = "se fleet fix turns auto-merge on"
 	case f.prunable:
 		f.Remedy = fmt.Sprintf("the prune workflow deletes %s; se fleet fix reports it only if it is still there a day after #%d closed", Branch(f.Issue), f.Issue)
+	case f.Kind == BareIssue:
+		f.Remedy = "se fleet fix files it into the open misc manifest"
 	case f.spent:
 		f.Remedy = "se fleet fix deletes " + Branch(f.Issue) + ": main holds all its commits"
 	case f.judgment || f.cause() == GreenUnmerged:
@@ -205,6 +210,17 @@ func (s Source) check(all []Status, t tree) ([]Finding, error) {
 			})
 		}
 	}
+	// An issue filed by an se that predates manifests stands in none, and no
+	// box takes it: it goes into the open misc manifest. Bare is set only on
+	// an unclaimed issue at the top that nothing holds.
+	for _, st := range all {
+		if st.Bare == BareWhy {
+			out = append(out, Finding{
+				Kind: BareIssue, Issue: st.Number, id: t.byNum[st.Number].ID, key: "bare-issue",
+				What: fmt.Sprintf("#%d stands in no manifest, and boxes take only manifests", st.Number),
+			})
+		}
+	}
 	for _, f := range claims {
 		if !ready && len(holds[f.Issue]) > 0 {
 			f.Cause, f.Kind, f.Holds = f.Kind, StalledRoot, holds[f.Issue]
@@ -281,11 +297,15 @@ var failed = map[string]bool{"failure": true, "timed_out": true, "cancelled": tr
 // where open is true, and whose branch is at sha; nil where its work is
 // moving, or a takeover of it is. What t holds already is not read again.
 func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tree) (*Finding, error) {
-	n, b, last := st.Number, Branch(st.Number), st.pushed
-	var err error
+	n, b, pushed := st.Number, Branch(st.Number), st.pushed
+	// A takeover renews the claim as a push does: a box has just taken it.
+	last, m, err := s.active(n, pushed, Quiet)
+	if err != nil {
+		return nil, err
+	}
 	quiet := s.now().Sub(last) > Quiet
-	since := "no push since " + last.UTC().Format(time.RFC3339)
-	if last.IsZero() {
+	since := "no push since " + pushed.UTC().Format(time.RFC3339)
+	if pushed.IsZero() {
 		since = "no push on record"
 	}
 	var f *Finding
@@ -345,9 +365,12 @@ func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tre
 	}
 	f.Issue = n
 	if f.takeover() {
-		m, err := s.marks(n)
-		if err != nil {
-			return nil, err
+		if m == nil {
+			got, err := s.marks(n)
+			if err != nil {
+				return nil, err
+			}
+			m = &got
 		}
 		if m.takeovers > 0 && m.head == f.head && s.now().Sub(m.lastTakeover) < Quiet {
 			return nil, nil
@@ -553,10 +576,10 @@ type Fixed struct {
 var fleetMark = regexp.MustCompile(`<!-- se:fleet (\S+) (\d+) -->`)
 
 // Fix applies, in order, the remedy of every finding that needs no checkout:
-// auto-merge goes on where it is off, a spent leftover branch is deleted, and
-// a finding with no other remedy
-// becomes an issue, labelled se-person where it is a judgment. A takeover is
-// left to the box, which runs its remedy. Each fix is recorded on the
+// auto-merge goes on where it is off, a spent leftover branch is deleted, a
+// bare issue is filed into the open misc manifest, and a finding with no
+// other remedy becomes an issue, labelled se-person where it is a judgment.
+// A takeover is left to the box, which runs its remedy. Each fix is recorded on the
 // finding's issue; a finding that is back after its fix goes to a person, and
 // one that is reported already, its issue still open, is left as it is. A
 // leftover branch is deleted by a push from the checkout dir, the transport
@@ -636,6 +659,15 @@ func (s Source) fix(dir string, x *Fixed) error {
 			return fmt.Errorf("deleting %s: %w", Branch(f.Issue), err)
 		}
 		x.Did = fmt.Sprintf("deleted %s at %s, which main holds whole", Branch(f.Issue), f.head)
+	case f.Kind == BareIssue:
+		m, err := s.FileInto()
+		if err != nil {
+			return err
+		}
+		if err := s.subIssue(m, f.id); err != nil {
+			return fmt.Errorf("filing #%d into misc manifest #%d: %w", f.Issue, m, err)
+		}
+		x.Did = fmt.Sprintf("filed it into misc manifest #%d", m)
 	default:
 		person := f.judgment || f.cause() == GreenUnmerged
 		if x.Made, err = s.report(f, person); err != nil {
@@ -677,8 +709,9 @@ func atoi(s string) int {
 
 // takeOverClaim takes over claimed leaf st, named by se issue pull --take N,
 // where se fleet check finds it stuck: its branch is checked out as it stands.
-// A takeover labels it se-final; a final issue stuck waits on an issue for a
-// person instead.
+// A takeover of a stuck claim labels it se-final, and a final issue stuck
+// waits on an issue for a person instead; a conflict is no failure, so its
+// takeover neither holds the issue nor makes it final.
 func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok bool, err error) {
 	fs, err := s.claimFindings([]Status{st}, t)
 	if err != nil {
@@ -693,7 +726,8 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 		return Issue{}, false, err
 	}
 	k := m.takeovers + 1
-	if st.Final {
+	conflict := f.cause() == ConflictedPR
+	if st.Final && !conflict {
 		reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s.", FinalLabel, f.What)
 		held, err := s.hold(st.Issue, reason)
 		if err != nil {
@@ -710,8 +744,10 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 	if !won {
 		return Issue{}, false, fmt.Errorf("#%d was taken over by another box just now", st.Number)
 	}
-	if err := s.finalize(st.Number); err != nil {
-		return Issue{}, false, err
+	if !conflict {
+		if err := s.finalize(st.Number); err != nil {
+			return Issue{}, false, err
+		}
 	}
 	if err := s.pickUp(dir, st.Number); err != nil {
 		return Issue{}, false, err

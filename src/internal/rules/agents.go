@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/mb-89/SE/src/internal/index"
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/reuse"
 )
 
@@ -23,7 +23,7 @@ const (
 	ModelsConfig = "spec/models.yaml"
 	skillsDir    = "src/plugin/skills"
 	// WiringFile holds the reuse config, whose tier lists bound what an agent preloads.
-	WiringFile = "src/internal/index/wiring.yaml"
+	WiringFile = "src/index/wiring.yaml"
 )
 
 func init() {

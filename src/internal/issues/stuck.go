@@ -122,27 +122,42 @@ func (s Source) lastPush(n int) (time.Time, error) {
 	return last, nil
 }
 
+// active is when claimed leaf n last moved, its branch last pushed at pushed:
+// that push, or its last takeover where that is later, as a takeover records
+// a comment, not a push. Its comments are read only where the push is older
+// than within, and m is then what they say; nil otherwise. The lease and se
+// fleet check both read activity here, so they never disagree.
+func (s Source) active(n int, pushed time.Time, within time.Duration) (last time.Time, m *marks, err error) {
+	if s.now().Sub(pushed) <= within {
+		return pushed, nil, nil
+	}
+	got, err := s.marks(n)
+	if err != nil {
+		return time.Time{}, nil, err
+	}
+	if got.lastTakeover.After(pushed) {
+		return got.lastTakeover, &got, nil
+	}
+	return pushed, &got, nil
+}
+
 // lease reads whether a claimed leaf is stuck: nothing pushed to its branch,
-// nor a takeover recorded, for longer than the lease. Its comments are read
-// only where the last push is that old.
+// nor a takeover recorded, for longer than the lease.
 func (s Source) lease(st *Status) error {
 	pushed, err := s.lastPush(st.Number)
 	if err != nil {
 		return err
 	}
-	st.Since, st.pushed = pushed, pushed
-	if s.now().Sub(st.Since) <= s.config().Lease {
-		return nil
-	}
-	m, err := s.marks(st.Number)
+	st.pushed = pushed
+	since, m, err := s.active(st.Number, pushed, s.config().Lease)
 	if err != nil {
 		return err
 	}
-	st.Takeovers = m.takeovers
-	if m.lastTakeover.After(st.Since) {
-		st.Since = m.lastTakeover
+	st.Since = since
+	if m != nil {
+		st.Takeovers = m.takeovers
+		st.Stuck = s.now().Sub(since) > s.config().Lease
 	}
-	st.Stuck = s.now().Sub(st.Since) > s.config().Lease
 	return nil
 }
 
@@ -181,7 +196,7 @@ var holdOf = regexp.MustCompile(`^Decide how #(\d+) goes on: `)
 // already exists: no box is left to write it.
 func (s Source) hold(i Issue, reason string) (Issue, error) {
 	title := fmt.Sprintf(holdTitle, i.Number, i.Title)
-	body := fmt.Sprintf("%s\n\n#%d (%s) is blocked by this issue. Decide how it goes on, say so here, and close this issue: #%d is then back in the queue with a fresh attempt.", reason, i.Number, i.URL, i.Number)
+	body := fmt.Sprintf("%s\n\n#%d (%s) is blocked by this issue. Decide how it goes on, say so here, and close this issue: #%d is then back in the queue with a fresh attempt.\n\n<!-- se:holds %d -->", reason, i.Number, i.URL, i.Number, i.Number)
 	made, err := s.ForPerson(title, body, 0, nil)
 	if err != nil {
 		return Issue{}, fmt.Errorf("giving #%d to a person: %w", i.Number, err)
@@ -202,6 +217,36 @@ func (s Source) hold(i Issue, reason string) (Issue, error) {
 		s.Flagged(i, reason)
 	}
 	return made, nil
+}
+
+// holdsMark is the mark hold leaves in the body of the issue for a person it
+// mints, naming the issue it holds.
+var holdsMark = regexp.MustCompile(`<!-- se:holds ([0-9]+) -->`)
+
+// holds is the issue that issue for a person i holds, where hold minted it; 0 otherwise.
+func (i issue) holds() int {
+	if !i.labelled(PersonLabel) {
+		return 0
+	}
+	got := holdsMark.FindStringSubmatch(i.Body)
+	if got == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(got[1])
+	return n
+}
+
+// closeMoot closes issue for a person h, whose held issue n closed: nothing
+// is left for the person to decide.
+func (s Source) closeMoot(h, n int) error {
+	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, h)
+	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", fmt.Sprintf("#%d, which this issue held, is closed, so nothing is left to decide here, and it closes by itself.", n))); err != nil {
+		return fmt.Errorf("closing #%d, moot: %w", h, err)
+	}
+	if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "not_planned")); err != nil {
+		return fmt.Errorf("closing #%d, moot: %w", h, err)
+	}
+	return nil
 }
 
 // ForPerson creates an issue for a person, through the same code as se issue

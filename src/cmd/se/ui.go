@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/mb-89/SE/src/internal/index"
+	"github.com/mb-89/SE/src/index"
 )
 
 // columnsKey is the cli instance's config key for the most buttons a row of
