@@ -19,15 +19,25 @@ import (
 // and answers a line saying what happened.
 func (c *Call) fire() string { return issues.Fire(c.Getenv, c.Net) }
 
-// fanOut fires where the fleet needs another box: after a take (taking set)
-// or the creation of a ready issue, it counts the alive boxes on s and fires
-// only where none is alive or every one runs its cap. With fan-out off it
-// reads nothing.
-func (c *Call) fanOut(s issues.Source, taking bool) string {
-	if c.Getenv(issues.FireURLVar) == "" || c.Getenv(issues.FireTokenVar) == "" {
+// shoot is fire, answering also whether the routine refused it for its rate
+// limit and when it may fire again.
+func (c *Call) shoot() issues.Shot { return issues.Shoot(c.Getenv, c.Net) }
+
+// fanOutOn says whether fan-out is on: both of the routine's variables set.
+func (c *Call) fanOutOn() bool {
+	return c.Getenv(issues.FireURLVar) != "" && c.Getenv(issues.FireTokenVar) != ""
+}
+
+// fanOut fires where the fleet needs another box: after the take of claim,
+// or the creation of a ready issue (claim zero), it counts the alive boxes on
+// s and fires only where none is alive or every one runs its cap, and keeps a
+// fire the routine refused with 429 for the take or fleet check after its
+// retry time. With fan-out off it reads nothing.
+func (c *Call) fanOut(s issues.Source, claim int) string {
+	if !c.fanOutOn() {
 		return c.fire()
 	}
-	return s.FanOut(c.fire, taking)
+	return s.FanOut(c.shoot, claim)
 }
 
 // sessionID names the session se runs in, which land records as the leaf's
@@ -54,7 +64,7 @@ func init() {
 		Usage:   "issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "show the next se issue, stuck work first; --take claims it",
-		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (OverhaulCadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (RetroCadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (Lease) is stuck: it is taken over before new work, its branch checked out as it stands. A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out). --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issues.OverhaulCadence, issues.RetroCadence, issues.Lease, issues.Parallel),
+		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (OverhaulCadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (RetroCadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (Lease) is stuck: it is taken over before new work, its branch checked out as it stands. A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issues.OverhaulCadence, issues.RetroCadence, issues.Lease, issues.Parallel),
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -153,7 +163,7 @@ func init() {
 				if err := restoreAnswers(c, s, &took, *worktree); err != nil {
 					return Reply{}, err
 				}
-				fanout = c.fanOut(s, true)
+				fanout = c.fanOut(s, took.Number)
 				if *worktree && !took.Parent {
 					wt = issues.Worktree(c.Workspace, took.Number)
 				}
@@ -399,7 +409,7 @@ func init() {
 			}
 			fanout := ""
 			if ready {
-				fanout = c.fanOut(s, false)
+				fanout = c.fanOut(s, 0)
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
