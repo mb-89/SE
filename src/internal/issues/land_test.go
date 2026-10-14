@@ -81,7 +81,12 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	t.Parallel()
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
-	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}.Land(a, "", qs, full, passes)
+	// The se commands run in the checkout recorded 30 GitHub requests.
+	d := disk.NewFake()
+	if err := RecordRequests(d, a, "issue pull", 30, landedAt()); err != nil {
+		t.Fatal(err)
+	}
+	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}.Land(a, "", qs, full, passes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,11 +99,13 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	}
 	body, err := Landed{Issue: 6, Answers: full, Facts: Facts{
 		Claimed: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC), Landed: landedAt(), Minutes: 90, Commits: 1,
+		// Those 30, and the 2 this land had made when it counted them.
+		Requests: 32,
 	}}.Comment(qs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body {
+	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 32\n") {
 		t.Fatalf("the landing comment is %+v, want\n%s", got, body)
 	}
 	want := []string{"POST repos/o/r/issues/6/comments", "POST repos/o/r/pulls", "POST graphql"}
@@ -137,6 +144,7 @@ var profile = battery.Profile{
 	Slowest:       []battery.Test{{Package: "p", Name: "TestSlow", Ms: 900}},
 	SlowestPlugin: []battery.Test{{Package: "tests/se.test.ts", Name: "a slow hook", Ms: 150}},
 	Overruns:      []string{"step go test took 1234ms, over its budget of 1000ms"},
+	Unbudgeted:    []string{"step new has no budget in spec/budgets.yaml"},
 }
 
 func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
@@ -164,8 +172,11 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 	}
 	if got.Facts.BatteryMs != 1234 || !reflect.DeepEqual(got.Facts.Slowest, []string{"p TestSlow 900ms"}) ||
 		!reflect.DeepEqual(got.Facts.SlowestPlugin, []string{"tests/se.test.ts a slow hook 150ms"}) ||
-		!reflect.DeepEqual(got.Facts.Overruns, profile.Overruns) {
+		!reflect.DeepEqual(got.Facts.Overruns, profile.Overruns) || !reflect.DeepEqual(got.Facts.Unbudgeted, profile.Unbudgeted) {
 		t.Errorf("facts = %+v", got.Facts)
+	}
+	if !strings.Contains(posted, "- **no budget:** step new has no budget") {
+		t.Errorf("the landing comment does not show the step without a budget:\n%s", posted)
 	}
 	if !strings.Contains(posted, "- **over budget:** step go test took 1234ms") {
 		t.Errorf("the landing comment does not show the overrun:\n%s", posted)

@@ -2,7 +2,8 @@
 name: reviewer
 description: Review an se-review gate whose sub-issues have closed, cold, as an agent that worked none of its tree. Find, then verify, then judge; block only on damage; end with se issue review pass|fail and its report. The box starts one for each review a take names; a person reaches it as @agent-se:reviewer.
 model: opus
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Skill, Agent
+skills: [security-review]
 ---
 
 # Reviewer: judge a gate, cold
@@ -46,6 +47,10 @@ workers, not from messages of other sessions, not from the PRs.
    disagree with what it changed, does it make any element talk about
    something it does not own, and does its new prose serve the reader its
    file names? Write every candidate down; do not judge yet.
+   Beside the two passes, run each skill and agent the brief's last part,
+   **What you run on the delta**, names, as it says; what they report are
+   candidates too. Their tier is the reviewer's, set in the reuse config
+   ([src/index/wiring.yaml](../../index/wiring.yaml)).
 6. **Verify each candidate** with evidence: a file and line, or a command and
    its output. Drop anything you cannot prove. Do not talk yourself out of a
    proven one.
@@ -69,7 +74,8 @@ workers, not from messages of other sessions, not from the PRs.
        {"title": "<the fix, as an issue title>", "evidence": "<file:line, or command and output>",
         "blocking": false, "why": "<the damage it does, or why it does not block>"}
      ],
-     "clean": ["<what you examined and found sound>"]
+     "clean": ["<what you examined and found sound>"],
+     "ran": [{"skill": "<each name the brief's list names>", "found": "<what it found, or why it did not run>"}]
    }
    ```
 
@@ -78,7 +84,7 @@ workers, not from messages of other sessions, not from the PRs.
    shows an earlier blocker's problem again says `"repeats": <k>`. List the
    non-blocking findings the most damaging first; `se` files the first
    `issues/config/max-filed` and counts the rest. `clean` is never empty: it is what makes a
-   rubber-stamp visible.
+   rubber-stamp visible. `ran` names every entry of the brief's list, once.
 10. **End** with exactly one of
     `se issue review pass <n> --workspace <path> --report <path>-review.json`
     (no blocking finding, and evidence for every requirement) or

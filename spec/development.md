@@ -44,10 +44,13 @@ changes.
 
 `sh ./tests/check.sh` is the one definition of green; the pre-push hook and CI
 run it, and it names each step it runs. SE's own rules are one file each in
-`src/internal/rules`, run by `se rules`. Every tool SE needs is pinned in
-`tests/tools.sh` (gh, Go, dlv, deadcode and the linters, whose formatters are
-the ones SE uses), and each linter's config gives the reason for anything it switches
-off. RUNME.sh, CI and check.sh run `sh tests/tools.sh install`, which installs
+`src/internal/rules`, run by `se rules`; where a rule can apply the mechanical
+part of its finding (the `fast-test` rule's `t.Parallel()` as a test's first
+statement), `se rules --fix` applies it, so no agent does it by hand. Every
+tool SE needs is pinned in `tests/tools.sh` (gh, Go, dlv, deadcode and the
+linters, whose formatters are the ones SE uses), and each linter's config gives
+the reason for anything it switches off. RUNME.sh, CI and check.sh run
+`sh tests/tools.sh install`, which installs
 whatever is missing, and a linter at another version, into `~/.se` without
 admin rights: each from its release file for the platform, checked against
 the checksum its release publishes (biome publishes none, so tools.sh pins
@@ -66,6 +69,19 @@ and `biome --version` answer at the versions tools.sh pins, each from
 `src/internal/battery/tools_test.go` covers the names Windows' release files
 and binaries carry; this check covers the downloads, the unpacking and the
 PATH line.
+
+## The gate
+
+What keeps an unchecked change off main is CI, not the box. main's ruleset
+requires the `ci` workflow's `check` job, which runs `sh ./tests/check.sh`,
+and makes it strict: a PR merges only once that check passed on a head that is
+up to date with main ([spec/coordination.md](coordination.md#up-to-date-with-main)).
+
+The pre-push hook and `.claude/hooks/no-skip.sh` only save a round trip. The
+hook runs check.sh before a push leaves the box; `no-skip.sh` refuses a Bash
+call whose text names `--no-verify` or sets `core.hooksPath` inline. Neither
+is a refusal: a push from elsewhere, or one that turns the hooks off another
+way, passes both, and the required check still stops what it pushed.
 
 ## Debugging the daemon
 

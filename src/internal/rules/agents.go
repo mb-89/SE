@@ -3,10 +3,14 @@ package rules
 import (
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mb-89/SE/src/index"
+	"github.com/mb-89/SE/src/internal/reuse"
 )
 
 // The plugin's agents, one file per role, and the one config of the models
@@ -18,13 +22,16 @@ const (
 	// ModelsConfig sets the model each agent runs.
 	ModelsConfig = "spec/models.yaml"
 	skillsDir    = "src/plugin/skills"
+	// WiringFile holds the reuse config, whose tier lists bound what an agent preloads.
+	WiringFile = "src/index/wiring.yaml"
 )
 
 func init() {
 	register(Rule{
 		Name: "agents",
 		Doc: "every agent in " + AgentsDir + " is one the registry of kinds names, its front matter's name its file's and its model the one " +
-			ModelsConfig + " sets for it; every agent there has its file, and no skill holds an agent's role",
+			ModelsConfig + " sets for it, and what its front matter's skills preload is on its tier's list in the reuse config of " + WiringFile +
+			"; every agent there has its file, and no skill holds an agent's role",
 		Applies: func(p string) bool {
 			return p == ModelsConfig || (path.Dir(p) == AgentsDir && path.Ext(p) == ".md")
 		},
@@ -58,6 +65,9 @@ func agents(repo *Repo, p string, text []byte) []Finding {
 	case front["model"] != models[name]:
 		found = append(found, at("its model is %q, but %s sets %q", front["model"], ModelsConfig, models[name]))
 	}
+	if list, ok := front["skills"]; ok {
+		found = append(found, preloads(repo, name, list, at)...)
+	}
 	skills := []string{name}
 	if role != "" && role != name {
 		skills = append(skills, role)
@@ -65,6 +75,39 @@ func agents(repo *Repo, p string, text []byte) []Finding {
 	for _, skill := range skills {
 		if repo.Exists(skillsDir + "/" + skill) {
 			found = append(found, at("the skill %s/%s holds the role this agent holds: one role, one file", skillsDir, skill))
+		}
+	}
+	return found
+}
+
+// preloads finds each skill the agent name preloads (its front matter's
+// skills, as list) that its tier's list in the reuse config does not name,
+// so the tier's list stays the one place that says what a tier runs.
+func preloads(repo *Repo, name, list string, at func(string, ...any) Finding) []Finding {
+	var names []string
+	if err := yaml.Unmarshal([]byte(list), &names); err != nil {
+		return []Finding{at("its front matter's skills is no list of names: %v", err)}
+	}
+	text, ok, err := repo.Read(WiringFile)
+	if err != nil || !ok {
+		return []Finding{at("%s, whose reuse config bounds what it preloads, cannot be read", WiringFile)}
+	}
+	w, err := index.ParseWiring(text)
+	if err != nil {
+		return []Finding{at("%s cannot be read: %v", WiringFile, err)}
+	}
+	cfg, err := reuse.From(w)
+	if err != nil {
+		return []Finding{at("%s cannot be read: %v", WiringFile, err)}
+	}
+	tier, isTier := cfg.Tier[name]
+	if !isTier {
+		return []Finding{at("it preloads skills, but the reuse config of %s has no tier %s", WiringFile, name)}
+	}
+	var found []Finding
+	for _, n := range names {
+		if !slices.Contains(tier, n) {
+			found = append(found, at("it preloads %s, which the reuse config's %s list in %s does not name: preload only what the tier runs", n, name, WiringFile))
 		}
 	}
 	return found
