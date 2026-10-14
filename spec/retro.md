@@ -131,6 +131,11 @@ What earlier versions taught, and how this design answers it:
     issue close, did the rule check it named break again, did its metric
     drop. A metric's move counts for a finding only once its issue closed
     as completed: before its fix is on main, a drop is not the fix's.
+    Beside a finding its metric scores as recurred, the draft lists what in
+    the window moved that metric (`moved_by`): for `by-hand` each issue and
+    its answer, for a count each issue's share, largest first, so the judge
+    sees whether the class came back or a broad metric rose for other
+    reasons.
   - **Is the retro itself effective?** How many findings became issues, how
     many of those closed, and which findings recurred anyway.
   - **Should the retro change itself?** Proposals for the landing questions

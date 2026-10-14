@@ -334,6 +334,33 @@ func TestAMetricIsCreditedOnceItsIssueClosedAsCompleted(t *testing.T) {
 	if it.State != "completed" || it.Dropped == nil || *it.Dropped || !it.Recurred || c.Score.Closed != 2 || c.Score.Recurred != 2 {
 		t.Fatalf("%+v", c.Score)
 	}
+	// Beside it, what moved its metric, so the judge sees whether its class came back.
+	if !reflect.DeepEqual(it.MovedBy, []string{"#23: 1 conflicts"}) {
+		t.Fatalf("moved by %q", it.MovedBy)
+	}
+	draft, err := c.Draft(rqs)
+	if err != nil || !strings.Contains(draft, "**Conflicts** recurred by conflicts_per_issue, which these moved in the window:\n- #23: 1 conflicts\n") {
+		t.Fatalf("%v\n%s", err, draft)
+	}
+}
+
+func TestMoversListWhatMovedAMetric(t *testing.T) {
+	t.Parallel()
+	c := Collected{Rows: []Row{
+		{Number: 126, Answers: map[string]string{"by-hand": "Retried\ngolangci-lint."}, Requests: 13},
+		{Number: 371, Answers: map[string]string{"by-hand": "none"}, Requests: 927},
+		{Number: 400, Requests: 13},
+	}, RerunsBy: map[int]int{7: 2}}
+	for metric, want := range map[string][]string{
+		"by_hand_per_issue":  {"#126: Retried golangci-lint."},
+		"requests_per_issue": {"#371: 927 requests", "#126: 13 requests", "#400: 13 requests"},
+		"ci_reruns":          {"PR #7: 2 CI reruns"},
+		"takeovers":          nil,
+	} {
+		if got := c.movers(metric); !reflect.DeepEqual(got, want) && len(got)+len(want) > 0 {
+			t.Errorf("%s: %q, want %q", metric, got, want)
+		}
+	}
 }
 
 func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {

@@ -226,6 +226,8 @@ type Collected struct {
 	PRs      int
 	Commits  int
 	Reruns   int
+	// RerunsBy is Reruns by the PR whose checks ran again.
+	RerunsBy map[int]int
 	// Reholds counts the issues for a person made in the window beyond the
 	// first for each issue they hold back: one hold minted again.
 	Reholds int
@@ -339,6 +341,12 @@ func (s Source) Collect(n int) (Collected, error) {
 			return Collected{}, err
 		}
 		c.Reruns += reruns
+		if reruns > 0 {
+			if c.RerunsBy == nil {
+				c.RerunsBy = map[int]int{}
+			}
+			c.RerunsBy[p.Number] = reruns
+		}
 		if red != "" {
 			broke(Broken{"ci", fmt.Sprintf("PR #%d", p.Number), fmt.Sprintf("%s: %s", p.Title, red)}, *p.MergedAt)
 		}
@@ -386,6 +394,11 @@ func (s Source) Collect(n int) (Collected, error) {
 		score, err := s.score(*c.Previous, c.Checks, c.Metrics)
 		if err != nil {
 			return Collected{}, err
+		}
+		for k, it := range score.Items {
+			if it.Dropped != nil && !*it.Dropped {
+				score.Items[k].MovedBy = c.movers(it.Metric)
+			}
 		}
 		c.Score = &score
 	}
@@ -695,6 +708,70 @@ func (c Collected) measure() Metrics {
 	return m
 }
 
+// movers are what in the window moved a metric, largest first: for by_hand
+// each issue's by-hand answer, for a count each issue's share of it. A broad
+// metric rises for many reasons, and a finding is not blamed for each.
+func (c Collected) movers(metric string) []string {
+	type mover struct {
+		n    int
+		line string
+	}
+	var ms []mover
+	name := strings.TrimSuffix(metric, "_per_issue")
+	for _, r := range c.Rows {
+		n := 0
+		switch name {
+		case "by_hand":
+			if a := r.Answers["by-hand"]; byHand(a) {
+				ms = append(ms, mover{1, fmt.Sprintf("#%d: %s", r.Number, strings.Join(strings.Fields(a), " "))})
+			}
+			continue
+		case "duplicates":
+			if r.Reason == "duplicate" {
+				ms = append(ms, mover{1, fmt.Sprintf("#%d closed as duplicate", r.Number)})
+			}
+			continue
+		case "claim_to_merge_minutes":
+			if r.Minutes >= 0 {
+				ms = append(ms, mover{r.Minutes, fmt.Sprintf("#%d: %s", r.Number, span(r.Minutes))})
+			}
+			continue
+		case "conflicts":
+			n = r.Conflicts
+		case "takeovers":
+			n = r.Takeovers
+		case "person_flags":
+			n = r.Person
+		case "requests":
+			n = r.Requests
+		}
+		if n > 0 {
+			ms = append(ms, mover{n, fmt.Sprintf("#%d: %d %s", r.Number, n, strings.ReplaceAll(name, "_", " "))})
+		}
+	}
+	switch name {
+	case "ci_reruns":
+		for pr, n := range c.RerunsBy {
+			ms = append(ms, mover{n, fmt.Sprintf("PR #%d: %d CI reruns", pr, n)})
+		}
+	case "duplicates":
+		if c.Reholds > 0 {
+			ms = append(ms, mover{c.Reholds, fmt.Sprintf("%d issues for a person minted again", c.Reholds)})
+		}
+	}
+	sort.SliceStable(ms, func(a, b int) bool {
+		if ms[a].n != ms[b].n {
+			return ms[a].n > ms[b].n
+		}
+		return ms[a].line < ms[b].line
+	})
+	out := make([]string, len(ms))
+	for k, m := range ms {
+		out[k] = m.line
+	}
+	return out
+}
+
 // counted are the metrics counted in the window, each also per landed issue.
 var counted = []string{"conflicts", "takeovers", "person_flags", "ci_reruns", "by_hand", "duplicates", "requests"}
 
@@ -767,6 +844,9 @@ type ScoreItem struct {
 	// or where its issue has not closed as completed: a drop is credited to
 	// a fix only once it landed.
 	Dropped *bool `yaml:"dropped,omitempty"`
+	// MovedBy, where its metric scored it recurred, are what in the window
+	// moved that metric, so the judge sees whether its class came back.
+	MovedBy []string `yaml:"moved_by,omitempty"`
 }
 
 // score reads how each finding of the previous report fared: did its issue

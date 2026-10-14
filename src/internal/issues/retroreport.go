@@ -193,6 +193,18 @@ func (c Collected) facts() string {
 			}
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %v | %s |\n", it.Title, it.Class, issue, it.State, it.Recurred, metric)
 		}
+		for _, it := range sc.Items {
+			if it.Dropped == nil || *it.Dropped {
+				continue
+			}
+			fmt.Fprintf(&b, "\n**%s** recurred by %s, which these moved in the window:\n", it.Title, it.Metric)
+			if len(it.MovedBy) == 0 {
+				b.WriteString("- nothing in the window\n")
+			}
+			for _, m := range it.MovedBy {
+				fmt.Fprintf(&b, "- %s\n", m)
+			}
+		}
 	}
 
 	b.WriteString("\n## Scripts\n")
