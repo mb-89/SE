@@ -114,6 +114,7 @@ func rows(t *testing.T, p daemon.Paths, session string) []map[string]any {
 
 // Two posts alike are two events: each lands as the log module's input, and each is written.
 func TestTwoEventsAlikeAreBothWritten(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	post := served(t, p)
 	for range 2 {
@@ -127,6 +128,7 @@ func TestTwoEventsAlikeAreBothWritten(t *testing.T) {
 // The daemon answers a name's value on its index over the protocol: the
 // clock's start, and the number of the last event the log wrote.
 func TestTheDaemonAnswersValuesByName(t *testing.T) {
+	t.Parallel()
 	p := workspace(t)
 	at := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	n := sehttp.NewFake()
