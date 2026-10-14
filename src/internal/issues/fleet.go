@@ -32,7 +32,8 @@ var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, Left
 // closed issue before se fleet fix reports it.
 var Grace = 24 * time.Hour
 
-// Quiet is how long claimed work goes without a push before it is not moving.
+// Quiet is how long claimed work goes without a push or a takeover before se
+// fleet check finds it not moving, by the one rule Source.quiet.
 var Quiet = time.Hour
 
 // Finding is one thing se fleet check found broken.
@@ -282,8 +283,10 @@ var failed = map[string]bool{"failure": true, "timed_out": true, "cancelled": tr
 // moving, or a takeover of it is. What t holds already is not read again.
 func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tree) (*Finding, error) {
 	n, b, last := st.Number, Branch(st.Number), st.pushed
-	var err error
-	quiet := s.now().Sub(last) > Quiet
+	quiet, _, m, err := s.quiet(n, last, Quiet)
+	if err != nil {
+		return nil, err
+	}
 	since := "no push since " + last.UTC().Format(time.RFC3339)
 	if last.IsZero() {
 		since = "no push on record"
@@ -345,9 +348,12 @@ func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tre
 	}
 	f.Issue = n
 	if f.takeover() {
-		m, err := s.marks(n)
-		if err != nil {
-			return nil, err
+		if m == nil {
+			got, err := s.marks(n)
+			if err != nil {
+				return nil, err
+			}
+			m = &got
 		}
 		if m.takeovers > 0 && m.head == f.head && s.now().Sub(m.lastTakeover) < Quiet {
 			return nil, nil

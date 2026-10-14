@@ -122,27 +122,43 @@ func (s Source) lastPush(n int) (time.Time, error) {
 	return last, nil
 }
 
-// lease reads whether a claimed leaf is stuck: nothing pushed to its branch,
-// nor a takeover recorded, for longer than the lease. Its comments are read
-// only where the last push is that old.
+// quiet is the one rule for when a claim has stopped moving, which the lease
+// (stuck, with the lease as window) and se fleet check (with Quiet) both
+// read: nothing pushed to issue n's branch since pushed, nor a takeover of
+// it recorded, for longer than window. n's comments are read only where the
+// push is that old; moved is when the claim last moved, its push or its last
+// takeover, and m the marks read, nil where none were.
+func (s Source) quiet(n int, pushed time.Time, window time.Duration) (quiet bool, moved time.Time, m *marks, err error) {
+	if s.now().Sub(pushed) <= window {
+		return false, pushed, nil, nil
+	}
+	got, err := s.marks(n)
+	if err != nil {
+		return false, pushed, nil, err
+	}
+	moved = pushed
+	if got.lastTakeover.After(moved) {
+		moved = got.lastTakeover
+	}
+	return s.now().Sub(moved) > window, moved, &got, nil
+}
+
+// lease reads whether a claimed leaf is stuck: quiet for longer than the
+// lease.
 func (s Source) lease(st *Status) error {
 	pushed, err := s.lastPush(st.Number)
 	if err != nil {
 		return err
 	}
-	st.Since, st.pushed = pushed, pushed
-	if s.now().Sub(st.Since) <= s.config().Lease {
-		return nil
-	}
-	m, err := s.marks(st.Number)
+	st.pushed = pushed
+	stuck, moved, m, err := s.quiet(st.Number, pushed, s.config().Lease)
 	if err != nil {
 		return err
 	}
-	st.Takeovers = m.takeovers
-	if m.lastTakeover.After(st.Since) {
-		st.Since = m.lastTakeover
+	st.Since, st.Stuck = moved, stuck
+	if m != nil {
+		st.Takeovers = m.takeovers
 	}
-	st.Stuck = s.now().Sub(st.Since) > s.config().Lease
 	return nil
 }
 
