@@ -70,7 +70,7 @@ func checkout(t *testing.T, withDeadcode bool) (*disk.Fake, *proc.Fake) {
 	m.Install("git", func(c proc.Cmd) int {
 		switch c.Args[0] {
 		case "ls-files":
-			fmt.Fprintln(c.Stdout, "src/cmd/app/main.go\nsrc/internal/lib/lib.go\nsrc/scripts/once.sh")
+			_, _ = fmt.Fprint(c.Stdout, "src/cmd/app/main.go\x00src/internal/lib/lib.go\x00src/scripts/once.sh\x00")
 		case "log":
 			_, _ = fmt.Fprint(c.Stdout,
 				record(day(9), "Touch the program and the library", "src/cmd/app/main.go", "src/internal/lib/lib.go", "src/internal/lib/fake.go")+
