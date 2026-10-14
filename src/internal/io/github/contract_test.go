@@ -60,6 +60,15 @@ type pull struct {
 	} `json:"base"`
 }
 
+type status struct {
+	State       string `json:"state"`
+	Context     string `json:"context"`
+	Description string `json:"description"`
+	Creator     struct {
+		Login string `json:"login"`
+	} `json:"creator"`
+}
+
 type comment struct {
 	ID   int64  `json:"id"`
 	Body string `json:"body"`
@@ -192,6 +201,30 @@ func contract(t *testing.T, fresh func(t *testing.T) (github.GitHub, string)) {
 		refs := list[ref](t, gh, heads+branch)
 		if len(refs) != 1 || refs[0].Ref != "refs/heads/"+branch || refs[0].Object.SHA != wrote.Commit.SHA || wrote.Commit.SHA == main {
 			t.Fatalf("refs %+v after the commit %s", refs, wrote.Commit.SHA)
+		}
+
+		// A status on the commit is read back, newest first, with who posted
+		// it, and that account writes to the repository.
+		statuses := fmt.Sprintf("repos/%s/commits/%s/statuses?per_page=100", repo, wrote.Commit.SHA)
+		if got := list[status](t, gh, statuses); len(got) != 0 {
+			t.Fatalf("a new commit's statuses: %+v", got)
+		}
+		for _, state := range []string{"pending", "success"} {
+			send(t, gh, "POST", fmt.Sprintf("repos/%s/statuses/%s", repo, wrote.Commit.SHA),
+				github.F("state", state), github.F("context", label), github.F("description", "the contract's "+state))
+		}
+		if _, err := gh.Send("POST", fmt.Sprintf("repos/%s/statuses/%s", repo, wrote.Commit.SHA), github.F("state", "green")); github.Status(err) != 422 {
+			t.Fatalf("a status of no known state: %v", err)
+		}
+		got := list[status](t, gh, statuses)
+		if len(got) != 2 || got[0].State != "success" || got[0].Context != label || got[0].Description != "the contract's success" || got[1].State != "pending" || got[0].Creator.Login == "" {
+			t.Fatalf("statuses %+v", got)
+		}
+		perm := get[struct {
+			Permission string `json:"permission"`
+		}](t, gh, fmt.Sprintf("repos/%s/collaborators/%s/permission", repo, got[0].Creator.Login))
+		if perm.Permission != "admin" && perm.Permission != "write" {
+			t.Fatalf("%s, who posted the status, has %q access", got[0].Creator.Login, perm.Permission)
 		}
 
 		var p pull

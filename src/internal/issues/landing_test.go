@@ -117,7 +117,8 @@ func TestLandingFactsCountCommitsMergesAndTakeovers(t *testing.T) {
 		pullsPath: `[` + pr14 + `]`,
 		comments6: `[{"id":5,"body":"<!-- se:takeover 1 -->\nTaken over."}]`,
 	})
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}).Land(a, "", qs, full, passes); err != nil {
+	d := disk.NewFake()
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}).Land(a, "", qs, full, battered(d)); err != nil {
 		t.Fatal(err)
 	}
 	c := commentsAt(t, gh, 6)
@@ -139,7 +140,8 @@ func TestLandAgainUpdatesTheLandingComment(t *testing.T) {
 		pullsPath: `[` + pr14 + `]`,
 		comments6: `[{"id":5,"body":"Worked by someone."},{"id":77,"body":"<!-- se:landing -->\nolder answers"}]`,
 	})
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}).Land(a, "", qs, full, passes); err != nil {
+	d := disk.NewFake()
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered(d)); err != nil {
 		t.Fatal(err)
 	}
 	patched := 0

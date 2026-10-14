@@ -161,40 +161,38 @@ func init() {
 		},
 	})
 	register(Command{
-		Name:    "fleet refresh",
+		Name:    "fleet trust",
 		Class:   batch,
-		Usage:   "fleet refresh [--json] [--repo OWNER/NAME]",
+		Usage:   "fleet trust --sha SHA --tree TREE [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
-		Summary: "merge main into each auto-merge PR behind it and rerun its CI",
-		Details: "for every open PR against main with auto-merge on whose head main has moved past: merge main into it through GitHub's update-branch and start the ci workflow on its new head, since main's ruleset merges a PR only when it is up to date with main and the repository's token starts no CI by its pushes. A PR that conflicts with main is left to its takeover. A PR whose update fails is reported, and the others are still updated. The refresh workflow runs it with the repository's token on every push to main.",
-		Session: true,
+		Summary: "say whether CI may trust the battery a box ran on a commit",
+		Details: fmt.Sprintf("CI's check job asks it first: exit 0 and say why where commit SHA's latest %s status is a success naming TREE, the tree CI checked out, posted by an account with write access to the repository, as se issue land and se issue keep post it on the commit they pushed; else exit 1 and say why, and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}). A status not posted yet is asked for again a few times. It is trust in one's own boxes, not a proof.", issues.BatteryContext),
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "fleet refresh")
+			fs, src, asJSON := issueFlags(c, "fleet trust")
+			sha := fs.String("sha", "", "the `SHA` of the PR's head commit")
+			tree := fs.String("tree", "", "the `TREE` CI checked out, HEAD^{tree}")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
+			}
+			if *sha == "" || *tree == "" {
+				return Reply{}, fmt.Errorf("fleet trust takes --sha SHA and --tree TREE")
 			}
 			s, err := src()
 			if err != nil {
 				return Reply{}, err
 			}
-			done, refreshErr := s.Refresh()
-			lines := make([]string, len(done))
-			for k, r := range done {
-				lines[k] = fmt.Sprintf("PR #%d (%s): %s", r.PR, r.Branch, r.Did)
-			}
-			if refreshErr != nil {
-				return Reply{}, fmt.Errorf("%w\n%s", refreshErr, strings.Join(lines, "\n"))
+			why, err := s.Trusted(*sha, *tree)
+			if err != nil {
+				return Reply{}, fmt.Errorf("not trusted, so CI runs the battery: %w", err)
 			}
 			if *asJSON {
 				data, err := json.Marshal(struct {
-					Refreshed []issues.Refreshed `json:"refreshed"`
-				}{append([]issues.Refreshed{}, done...)})
+					Trusted bool   `json:"trusted"`
+					Why     string `json:"why"`
+				}{true, why})
 				return Reply{Text: string(data)}, err
 			}
-			if len(done) == 0 {
-				return Reply{Text: "no auto-merge PR is behind main"}, nil
-			}
-			return Reply{Text: strings.Join(lines, "\n")}, nil
+			return Reply{Text: "trusted: " + why}, nil
 		},
 	})
 	register(Command{

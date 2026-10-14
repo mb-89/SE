@@ -43,7 +43,11 @@ changes.
 ## Checks
 
 `sh ./tests/check.sh` is the one definition of green; the pre-push hook and CI
-run it, and it names each step it runs. SE's own rules are one file each in
+run it, and it names each step it runs. Once it passed, it records the tree
+it ran over (`HEAD^{tree}` of a clean worktree), which is the only tree
+`se issue land` pushes, and CI trusts a box's push for that tree instead of
+running it again (see
+[spec/coordination.md](coordination.md#up-to-date-with-main)). SE's own rules are one file each in
 `src/internal/rules`, run by `se rules`. Every tool SE needs is pinned in
 `tests/tools.sh` (gh, Go, dlv, deadcode and the linters, whose formatters are
 the ones SE uses), and each linter's config gives the reason for anything it switches

@@ -13,8 +13,8 @@
 // buttons, each labelled with its name and pressed as /se <words>, at most as
 // many to a row as se says (gridOf).
 // In a box, SE on or off, every Stop and SubagentStop goes to se hook stop,
-// which refuses the stop while the issue the box took is open with neither a
-// PR (auto-merge on) nor a supersede; a prompt from a person resets its count.
+// which refuses the stop while the issue the box took is open, its PR not
+// merged nor the issue superseded; a prompt from a person resets its count.
 // An interactive session runs none of it.
 // /se help draws as a layout: se answers the help as data beside its text, and
 // the command's output row draws that data, headings and two aligned columns.
