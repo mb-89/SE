@@ -14,10 +14,11 @@ import (
 func init() {
 	register(Command{
 		Name:    "retro new",
+		Class:   batch,
 		Usage:   "retro new (--field TEXT | --no-field | --unattended) [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "start a retro over everything closed since the last one",
-		Details: "create a retro: an se issue labelled se-retro, whose window is everything closed since the last retro closed, and fire the routine so a box takes it at once. A person starts it with --field TEXT, their field feedback, which goes into the issue (the retro skill asks for it), or --no-field. --unattended never asks. Either way its box creates the findings' issues, those for a person where controversial, and closes it: a retro never waits. spec/retro.md has the rules.",
+		Details: "create a retro: an se issue labelled se-retro, whose window is everything closed since the last retro closed, and fire the routine so a box takes it at once. A person starts it with --field TEXT, their field feedback, which goes into the issue (the agent se:retro passes it on), or --no-field. --unattended never asks. Either way its box creates the findings' issues, those for a person where controversial, and closes it: a retro never waits. spec/retro.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "retro new")
@@ -60,6 +61,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "retro collect",
+		Class:   batch,
 		Usage:   "retro collect N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "read a retro's window from GitHub and write its report draft",
@@ -104,6 +106,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "retro report",
+		Class:   batch,
 		Usage:   "retro report N [--draft FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "file a judged report: create its issues and close it",

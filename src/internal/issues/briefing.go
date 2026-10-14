@@ -150,7 +150,7 @@ func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 			in, b.Window = s.window(done, w)
 			told := in
 			for k := range done {
-				if done[k].labelled(RetroLabel) {
+				if done[k].labelled(RetroLabel) && done[k].StateReason != duplicate {
 					retro = &done[k]
 					told = append(append([]closedIssue{}, in...), *retro)
 					break
