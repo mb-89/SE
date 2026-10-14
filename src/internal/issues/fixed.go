@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // fixedMark opens the comment se issue close --fixed-by writes, naming the

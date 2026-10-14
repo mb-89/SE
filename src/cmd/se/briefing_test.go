@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/modules/io/clock"
 
 	"github.com/mb-89/SE/src/internal/issues"
 )

@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // The marks that cut a retro's report into its parts: the report itself, the

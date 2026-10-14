@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // statusesOf reads the statuses on commit sha back from the fake GitHub, newest first.
@@ -27,7 +27,7 @@ func TestLandPostsTheBatterysStatusNamingTheTreeItPushed(t *testing.T) {
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
 	d := disk.NewFake()
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered(d)); err != nil {
+	if _, err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered(d)); err != nil {
 		t.Fatal(err)
 	}
 	head := run(t, origin, "rev-parse", "issue-6")
@@ -54,7 +54,7 @@ func TestARefusedStatusIsAWarningAndTheLandGoesOn(t *testing.T) {
 	_, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
 	d := disk.NewFake()
-	l, err := Source{Proc: machine, Repo: repo, GitHub: noStatuses{gh}, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	l, err := Source{Git: machine, Repo: repo, GitHub: noStatuses{gh}, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
 	if err != nil || !l.Created || l.Number == 0 || !strings.Contains(l.Warning, "403") && !strings.Contains(l.Warning, "not permitted") {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -68,7 +68,7 @@ func TestLandRefusesATreeTheBatteryDidNotPass(t *testing.T) {
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
 	d := disk.NewFake()
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}
 	// The check passes, but the battery recorded no tree: a dirty worktree, say.
 	if _, err := s.Land(a, "", qs, full, passes); err == nil || !strings.Contains(err.Error(), "the battery has not passed issue-6's tree") {
 		t.Fatalf("%v", err)
@@ -100,7 +100,7 @@ func TestLandRefusesABranchMainMovedPastWhileTheBatteryRan(t *testing.T) {
 		run(t, b, "push", "-q", "origin", "main")
 		return battered(d)(dir)
 	}
-	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, check)
+	_, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, check)
 	if err == nil || !strings.Contains(err.Error(), "main moved past issue-6 while the battery ran") {
 		t.Fatalf("%v", err)
 	}
@@ -179,7 +179,7 @@ func landedPR(t *testing.T) (origin, a, b string, gh *github.Fake, c *clock.Fake
 	c = clock.NewFake(landedAt())
 	gh = recordedAt(t, c, map[string]string{issue6: leaf6, comments6: `[]`, created6: `[{"timestamp":"2026-01-02T10:00:00Z"}]`, pullsPath: `[]`})
 	d = disk.NewFake()
-	if l, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c, Disk: d}).Land(a, "", qs, full, battered(d)); err != nil || l.Number != 7 {
+	if l, err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: c, Disk: d}).Land(a, "", qs, full, battered(d)); err != nil || l.Number != 7 {
 		t.Fatalf("%+v %v", l, err)
 	}
 	return origin, a, b, gh, c, d
@@ -201,7 +201,7 @@ func TestTheBoxKeepsAPRThatFallsBehindMainUntilItMerges(t *testing.T) {
 		checks++
 		return battered(d)(dir)
 	}
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c, Disk: d}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: c, Disk: d}
 	s.Waits = func(string) {
 		// What GitHub does while the box waits: CI on the new head trusts the
 		// battery's status for its tree, and auto-merge merges it once it is up to date.
@@ -234,7 +234,7 @@ func TestTheBoxKeepsAPRThatFallsBehindMainUntilItMerges(t *testing.T) {
 func TestTheBoxKeepsAPRUpToDateUntilItsTimeRunsOutOrAnotherBoxTakesItOver(t *testing.T) {
 	t.Parallel()
 	_, a, _, gh, c, d := landedPR(t)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c, Disk: d}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: c, Disk: d}
 	head := run(t, a, "rev-parse", "HEAD")
 	k, err := s.Keep(a, 3*time.Minute, func(string) error { t.Error("an up-to-date PR was checked again"); return nil })
 	if err != nil || k.Merged || k.TakenOver || k.Updated != 0 || k.PR != 7 {
@@ -256,7 +256,7 @@ func TestTheBoxKeepsAPRUpToDateUntilItsTimeRunsOutOrAnotherBoxTakesItOver(t *tes
 func TestKeepRefusesABranchWithoutAnOpenPR(t *testing.T) {
 	t.Parallel()
 	_, a, _, gh, c, d := landedPR(t)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c, Disk: d}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: c, Disk: d}
 	if _, err := gh.Send("PATCH", "repos/o/r/pulls/7", github.F("state", "closed")); err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestKeepRefusesABranchWithoutAnOpenPR(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	_, fresh := claimed(t)
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: landGH(t, map[string]string{}), Clock: c, Disk: d}).Keep(fresh, time.Hour, passes); err == nil || !strings.Contains(err.Error(), "no PR to keep") {
+	if _, err := (Source{Git: machine, Repo: repo, GitHub: landGH(t, map[string]string{}), Clock: c, Disk: d}).Keep(fresh, time.Hour, passes); err == nil || !strings.Contains(err.Error(), "no PR to keep") {
 		t.Fatalf("%v", err)
 	}
 }

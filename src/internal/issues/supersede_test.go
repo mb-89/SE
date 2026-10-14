@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // superseding is GitHub as the box sees issue 5 it took: a sub-issue of 1,
@@ -31,7 +31,7 @@ func superseding(t *testing.T, labels string) *github.Fake {
 func TestSupersedeHandsTheIssueOnToAFinalSuccessor(t *testing.T) {
 	t.Parallel()
 	gh := superseding(t, `{"name":"se"}`)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	sup, err := s.Supersede(5, "Which API?\n")
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestSupersedeHandsTheIssueOnToAFinalSuccessor(t *testing.T) {
 func TestSupersedeRefusesAFinalIssue(t *testing.T) {
 	t.Parallel()
 	gh := superseding(t, `{"name":"se"},{"name":"se-final"}`)
-	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Supersede(5, "Which API?")
+	_, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Supersede(5, "Which API?")
 	if err == nil || !strings.Contains(err.Error(), "#5 is final") {
 		t.Fatalf("%v", err)
 	}
@@ -78,7 +78,7 @@ func TestSupersedeRefusesAFinalIssue(t *testing.T) {
 
 func TestSupersedeRefusesNoQuestionsAndAClosedIssue(t *testing.T) {
 	t.Parallel()
-	s := Source{Proc: machine, Repo: repo, GitHub: superseding(t, `{"name":"se"}`), Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: superseding(t, `{"name":"se"}`), Clock: atNow()}
 	if _, err := s.Supersede(5, " \n"); err == nil || !strings.Contains(err.Error(), "open questions") {
 		t.Fatalf("%v", err)
 	}
@@ -98,7 +98,7 @@ func TestUnclosedNamesWhatIsMissing(t *testing.T) {
 		for k, v := range more {
 			a[k] = v
 		}
-		return Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}
+		return Source{Git: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}
 	}
 	if why, err := at(nil).Unclosed(5, 0); err != nil || !strings.Contains(why, "neither a PR from issue-5 nor a supersede") {
 		t.Fatalf("%q %v", why, err)
@@ -156,7 +156,7 @@ func TestDuplicateClosesTheIssueAndMintsNothing(t *testing.T) {
 	})
 	origin, a, _ := boxes(t)
 	run(t, a, "push", "-q", "origin", "main:issue-5")
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	dup, err := s.CloseDuplicate(a, 5, 6)
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +202,7 @@ func TestDuplicateClosesTheIssueAndMintsNothing(t *testing.T) {
 func TestDuplicateRefusesAClosedOrMissingIssue(t *testing.T) {
 	t.Parallel()
 	gh := superseding(t, `{"name":"se"}`)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	for _, c := range []struct {
 		n, of int
 		want  string
@@ -232,7 +232,7 @@ func TestDuplicateRefusesAnOpenPullRequest(t *testing.T) {
 		"repos/o/r/issues/10": `{"id":1010,"number":10,"state":"closed","pull_request":{}}`,
 		"repos/o/r/pulls/10":  `{"number":10,"state":"closed","merged":false}`,
 	})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	for of, want := range map[int]string{9: "#9 is an open pull request", 10: "closed unmerged"} {
 		if _, err := s.CloseDuplicate(t.TempDir(), 5, of); err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("of %d: %v", of, err)
@@ -256,7 +256,7 @@ func TestDuplicateOfAMergedPullRequestNamesItsCommit(t *testing.T) {
 		"repos/o/r/pulls?head=o:issue-5&base=main&state=open&per_page=100": `[]`,
 	})
 	_, a, _ := boxes(t)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	dup, err := s.CloseDuplicate(a, 5, 9)
 	if err != nil {
 		t.Fatal(err)

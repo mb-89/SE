@@ -481,7 +481,7 @@ func (s *scan) unreachable() {
 	}
 }
 
-// module is the module a package belongs to: src/cmd/se, src/internal/io.
+// module is the module a package belongs to: src/cmd/se, src/modules/io.
 func module(dir string) string {
 	parts := strings.Split(dir, "/")
 	if len(parts) > 3 {

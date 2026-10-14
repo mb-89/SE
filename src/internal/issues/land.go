@@ -8,7 +8,7 @@ import (
 
 	"github.com/mb-89/SE/src/internal/battery"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // Landing is where an issue's PR stands once se issue land is done.

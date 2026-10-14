@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // RequestsFile is where each se command run in a workspace records the

@@ -9,17 +9,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/update"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/env"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // drive is the disk go build writes se to: a process writes it, so no fake stands in.
 var drive = disk.Real()
 
-// machine is the real machine the tests of a shallow clone still run git and
-// go on; #137 moves them onto the fake.
-var machine = proc.Real()
+// machine is the real machine the tests of a shallow clone still run go on,
+// and repos the real git they run; #137 moves them onto the fakes.
+var (
+	machine = proc.Real()
+	repos   = git.Real(machine, env.Real())
+)
 
 func repo(t *testing.T, branch string) string {
 	t.Helper()
@@ -74,7 +79,7 @@ func TestAShallowCloneIsPulledAndRebuilt(t *testing.T) {
 	t.Parallel()
 	origin, clone := shallow(t)
 	out := filepath.Join(clone, "src", "plugin", "bin", "se")
-	r, err := update.Run(drive, machine, clone, out)
+	r, err := update.Run(drive, machine, repos, clone, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +96,7 @@ func TestACurrentCheckoutIsNotRebuilt(t *testing.T) {
 	origin, clone := shallow(t)
 	run(t, clone, "pull", "-q", "--ff-only", "origin", "main")
 	out := filepath.Join(clone, "se")
-	r, err := update.Run(drive, machine, clone, out)
+	r, err := update.Run(drive, machine, repos, clone, out)
 	if err != nil || r.From != r.To || r.To != run(t, origin, "rev-parse", "--short", "HEAD") {
 		t.Fatalf("%+v %v", r, err)
 	}
@@ -107,7 +112,7 @@ func TestAFailedPullIsAnErrorThatTouchedNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := run(t, clone, "rev-parse", "HEAD")
-	_, err := update.Run(drive, machine, clone, filepath.Join(clone, "se"))
+	_, err := update.Run(drive, machine, repos, clone, filepath.Join(clone, "se"))
 	var untouched *update.Untouched
 	if err == nil || errors.As(err, &untouched) {
 		t.Fatalf("err = %v", err)
@@ -163,13 +168,15 @@ func (b *box) goTool(c proc.Cmd) int {
 	return 0
 }
 
-// on answers a fake machine with the box's git and go installed.
-func (b *box) on() *proc.Fake {
+// machine answers a fake machine with the box's go installed.
+func (b *box) machine() *proc.Fake {
 	m := proc.NewFake()
-	m.Install("git", b.git)
 	m.Install("go", b.goTool)
 	return m
 }
+
+// repos answers the box's git.
+func (b *box) repos() *git.Fake { return git.NewFake(b.git) }
 
 const (
 	older = "1111111111111111111111111111111111111111"
@@ -180,7 +187,7 @@ func TestAnUpdateThatBroughtSomethingBuildsSeFromTheNewHead(t *testing.T) {
 	t.Parallel()
 	b := &box{dir: t.TempDir(), branch: "main", head: older, pulled: newer}
 	out := filepath.Join(b.dir, "bin", "se")
-	r, err := update.Run(drive, b.on(), b.dir, out)
+	r, err := update.Run(drive, b.machine(), b.repos(), b.dir, out)
 	if err != nil || r.From != older[:7] || r.To != newer[:7] || r.Built != out {
 		t.Fatalf("%+v %v", r, err)
 	}
@@ -193,8 +200,8 @@ func TestAnUpdateThatBroughtSomethingBuildsSeFromTheNewHead(t *testing.T) {
 func TestAnUpdateThatBroughtNothingBuildsNothing(t *testing.T) {
 	t.Parallel()
 	b := &box{dir: t.TempDir(), branch: "main", head: older, pulled: older}
-	m := b.on()
-	r, err := update.Run(drive, m, b.dir, filepath.Join(b.dir, "se"))
+	m := b.machine()
+	r, err := update.Run(drive, m, b.repos(), b.dir, filepath.Join(b.dir, "se"))
 	if err != nil || r.From != r.To || r.Built != "" {
 		t.Fatalf("%+v %v", r, err)
 	}
@@ -209,7 +216,7 @@ func TestAFolderOutsideGitIsLeftAlone(t *testing.T) {
 	t.Parallel()
 	b := &box{dir: t.TempDir(), branch: "main", head: older, pulled: newer}
 	var untouched *update.Untouched
-	if _, err := update.Run(drive, b.on(), t.TempDir(), "se"); !errors.As(err, &untouched) {
+	if _, err := update.Run(drive, b.machine(), b.repos(), t.TempDir(), "se"); !errors.As(err, &untouched) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -217,7 +224,7 @@ func TestAFolderOutsideGitIsLeftAlone(t *testing.T) {
 func TestAnUpdateRefusesABranch(t *testing.T) {
 	t.Parallel()
 	b := &box{dir: t.TempDir(), branch: "feature", head: older, pulled: newer}
-	_, err := update.Run(drive, b.on(), b.dir, filepath.Join(b.dir, "se"))
+	_, err := update.Run(drive, b.machine(), b.repos(), b.dir, filepath.Join(b.dir, "se"))
 	var untouched *update.Untouched
 	if !errors.As(err, &untouched) || !strings.Contains(err.Error(), "not main") || b.head != older {
 		t.Fatalf("err = %v, at %s", err, b.head)
@@ -227,7 +234,7 @@ func TestAnUpdateRefusesABranch(t *testing.T) {
 func TestAnUpdateRefusesUncommittedWork(t *testing.T) {
 	t.Parallel()
 	b := &box{dir: t.TempDir(), branch: "main", head: older, pulled: newer, dirty: true}
-	_, err := update.Run(drive, b.on(), b.dir, filepath.Join(b.dir, "se"))
+	_, err := update.Run(drive, b.machine(), b.repos(), b.dir, filepath.Join(b.dir, "se"))
 	var untouched *update.Untouched
 	if !errors.As(err, &untouched) || !strings.Contains(err.Error(), "uncommitted") || b.head != older {
 		t.Fatalf("err = %v, at %s", err, b.head)

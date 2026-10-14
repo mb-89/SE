@@ -20,7 +20,7 @@ const Serial = "src/internal/rules/serial.txt"
 func init() {
 	register(Rule{
 		Name: "fast-test",
-		Doc: "every Go test calls t.Parallel first, and outside src/internal/io no test file reads the wall clock, " +
+		Doc: "every Go test calls t.Parallel first, and outside src/modules/io no test file reads the wall clock, " +
 			"sleeps or waits through time, or takes clock.Real, except as " + Serial + " names; an entry there that matches nothing is refused",
 		Applies: func(p string) bool { return p == Serial || strings.HasSuffix(p, "_test.go") },
 		Check:   fastTest,
@@ -202,10 +202,10 @@ func Slows(p string, text []byte) []Slow {
 			out = append(out, Slow{What: fn.Name.Name, Line: fset.Position(fn.Pos()).Line, Serial: true})
 		}
 	}
-	if strings.HasPrefix(p, "src/internal/io/") {
+	if strings.HasPrefix(p, "src/modules/io/") {
 		return out
 	}
-	clockPath := "github.com/mb-89/SE/src/internal/io/clock"
+	clockPath := "github.com/mb-89/SE/src/modules/io/clock"
 	walls := map[string][]string{"time": outsideCalls["time"], clockPath: {"Real"}}
 	local := map[string]string{}
 	for _, im := range f.Imports {

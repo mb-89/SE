@@ -2,16 +2,20 @@
 
 Reader: an agent writing, moving or testing an I/O module, or code that needs one.
 
-Processes, the disk, the clock, the network and GitHub are each reached
-through exactly one I/O module ([principles 6 to 8](principles.md)). The
-clock, `src/internal/io/clock`, is the first and the model for the rest.
-The disk, `src/internal/io/disk`, covers reading, writing, listing,
+Processes, git, the disk, the environment, the clock, the network, GitHub
+and the session's events are each reached through exactly one I/O module
+([principles 6 to 8](principles.md)), together the `io` cluster
+([index.md](index.md#where-the-code-lives)): each is one folder
+`src/modules/io/<name>`, declares itself to the index with the I/O flag
+(`index.IO()`), and the wiring runs it as the instance `io/<name>`. The
+clock, `src/modules/io/clock`, is the first and the model for the rest.
+The disk, `src/modules/io/disk`, covers reading, writing, listing,
 locking and atomically replacing files, its fake a filesystem in memory that
 fails as the real one does.
-The network, `src/internal/io/http`, serves and calls the daemon protocol
+The network, `src/modules/io/http`, serves and calls the daemon protocol
 (health, event, value, shutdown) and fires the routine; its fake is a network inside
 the process, and its real one is tested on loopback.
-`src/internal/io/proc` runs programs: git, go, the linters (golangci-lint, biome, deadcode), check.sh, the se a session
+`src/modules/io/proc` runs programs: git, go, the linters (golangci-lint, biome, deadcode), check.sh, the se a session
 hands over to and the detached daemon. It starts only the programs
 `proc.Programs` lists, the one place that list lives: `proc.Listed`, which se
 and the battery run on, refuses any other. gh is GitHub's, not proc's. Its fake
@@ -19,7 +23,17 @@ is a machine that holds only the programs a case installs, each a function
 that does what the real one would, and records every run. It also says which
 program is running now (`Self`): the real one asks the system, the fake
 answers what the case made it run as (`RunAs`).
-GitHub, `src/internal/io/github`, is read and written by REST path through
+Git, `src/modules/io/git`, runs git on a repository its folder names, on
+proc's machine. Every run finds its repository from that folder alone: git's
+repository variables (`git.Vars`, such as `GIT_DIR`, which a pre-push hook
+sets) are dropped from what it inherits, so a git run elsewhere never acts on
+the repository being pushed. A package whose tests start git past the
+module clears them in `TestMain` (`git.Clear`). Its fake, `git.NewFake(run)`,
+is git on a fake machine that holds git alone, `run` doing what the real git
+would in the case's repositories; the machine records every run.
+The environment, `src/modules/io/env`, reads and sets SE's process's
+variables; its fake, `env.NewFake(vars...)`, is an environment in memory.
+GitHub, `src/modules/io/github`, is read and written by REST path through
 gh. Its fake, `github.NewFake(clock)`, is seeded from recorded gh answers
 (`Seed`), each read for what it says about the repository, and keeps issues,
 comments, labels, links, sub-issues, branches and pull requests, so a write
@@ -34,7 +48,7 @@ scratch repository `SE_GITHUB_CONTRACT_REPO` names
 Every box and every person's session reach GitHub with the owner's one
 token, so the fleet shares one quota of requests an hour (15,000), and
 GitHub's secondary limits on creating content quickly. `se` hands every
-command its GitHub wrapped in `github.Limit` (`src/internal/io/github/limit.go`),
+command its GitHub wrapped in `github.Limit` (`src/modules/io/github/limit.go`),
 with the github instance's config ([index.md](index.md#the-wiring-file)):
 
 - **It backs off when GitHub says so.** Real reads `x-ratelimit-limit`,
@@ -45,11 +59,11 @@ with the github instance's config ([index.md](index.md#the-wiring-file)):
   long and until when (principle 9), waits for the reset (or the
   retry-after; a minute where GitHub says neither) and asks again. Each wait
   is at least a second and twice the one before, so it never asks in a tight
-  loop. A wait that would take the command past `github/config/wait-ceiling`
+  loop. A wait that would take the command past `io/github/config/wait-ceiling`
   all told fails the request at once, saying when the reset comes. A 403 for
   anything else, a permission, is no reason to wait.
 - **It paces writes.** Every write (`Send`, `GraphQL`) goes out one at a
-  time, at least `github/config/write-spacing` after the last ended, so a
+  time, at least `io/github/config/write-spacing` after the last ended, so a
   sweep that comments on or closes many issues stays under GitHub's limit on
   creating content. The spacing holds within one `se` command.
 - **It counts the fleet's requests.** Real and the fake each count their
@@ -58,7 +72,7 @@ with the github instance's config ([index.md](index.md#the-wiring-file)):
   `.se/.runtime/requests.log`; `se issue land` adds up its checkout's into
   the landing facts ([issues.md](issues.md#landing-answers)), the retro
   reports them per landed issue ([retro.md](retro.md)), and `se fleet check`
-  says when the quota left falls below `github/config/quota-floor` percent
+  says when the quota left falls below `io/github/config/quota-floor` percent
   of the hour's ([coordination.md](coordination.md)).
 - **It records each rate-limit refusal.** The module keeps each request
   GitHub refused for a rate limit, with its status and the wait it made for
@@ -71,7 +85,7 @@ with the github instance's config ([index.md](index.md#the-wiring-file)):
 
 ## The layout
 
-Each I/O module is one package, `src/internal/io/<name>`, holding four parts:
+Each I/O module is one package, `src/modules/io/<name>`, holding four parts:
 
 | part | what it is |
 |---|---|
@@ -81,8 +95,8 @@ Each I/O module is one package, `src/internal/io/<name>`, holding four parts:
 | the contract suite | one function in a `_test.go` file, called by both the fake's test and the real one's |
 
 Code takes the module as an argument: a struct field or a parameter, set
-once where the program starts (`cmd/se` hands every command `clock.Real()`
-and `github.Real()`).
+once where the program starts (`cmd/se` hands every command `clock.Real()`,
+`env.Real()`, `git.Real(procs, env)` and `github.Real()`).
 Nothing reaches for the real thing itself, so a test hands in the fake and a
 case replays.
 
@@ -104,7 +118,7 @@ The contract suite is what the module promises, written once. It takes a way
 to make a fresh instance and runs every case against it; the fake's test and
 the real one's test each call it. A fake that passes the suite stands in for
 the real thing; a fake without one drifts. The clock's suite is `contract` in
-`src/internal/io/clock/contract_test.go`.
+`src/modules/io/clock/contract_test.go`.
 
 ## The real GitHub contract
 
@@ -140,7 +154,7 @@ clock passes at once, before the daemon has removed it.
 ## The rules
 
 The `fake-contract` rule (`src/internal/rules/fakecontract.go`) refuses a fake,
-a type `Fake` or a `NewFake` under `src/internal/io/<name>`, whose package has
+a type `Fake` or a `NewFake` under `src/modules/io/<name>`, whose package has
 no contract suite: a function in one of its `_test.go` files that a test in
 `fake_test.go` and a test in `real_test.go` both call.
 
@@ -150,11 +164,12 @@ A test does not swap how code reaches the outside; it hands the code a fake,
 as an argument or a field, such as the `World` `cmd/se` hands every call.
 
 The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line: outside
-`src/internal/io/`, no Go file imports `os/exec` or `net/http`, runs `gh`, calls the
-clock through `time` (`Now`, `Sleep`, `After` and their kin), or opens, reads
-or writes files through `os`. Test files are held by the `fast-test` rule
+`src/modules/io/`, no Go file imports `os/exec` or `net/http`, runs `gh`, calls the
+clock through `time` (`Now`, `Sleep`, `After` and their kin), opens, reads
+or writes files through `os`, or reads or changes the environment through
+`os` (`Getenv`, `Environ`, `Setenv` and their kin). Test files are held by the `fast-test` rule
 (`src/internal/rules/fasttest.go`) instead: every test calls `t.Parallel`
-first, and outside `src/internal/io/` no test reads the clock through `time`
+first, and outside `src/modules/io/` no test reads the clock through `time`
 or takes `clock.Real`. What still breaks it is named in
 `src/internal/rules/serial.txt`, which only shrinks as the allowlist below does.
 
@@ -165,7 +180,7 @@ a `new Date` with no argument. The plugin's tests, which drive the mock clock,
 are aside.
 
 What broke it while the modules landed was named in one allowlist,
-`src/internal/io/allowlist.txt`, one file and what it reaches per line. Each
+`src/modules/io/allowlist.txt`, one file and what it reaches per line. Each
 I/O module removed its own entries as it landed, and GitHub's, the last,
 emptied it. It only shrinks: the rule refuses an entry that matches nothing.
 

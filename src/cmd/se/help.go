@@ -10,6 +10,7 @@ import (
 
 	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/issues"
+	"github.com/mb-89/SE/src/modules/io/env"
 )
 
 // The help reads at a glance: the overview gives each command one short line
@@ -288,10 +289,10 @@ func paint(s, code string, color bool) string {
 }
 
 // colors says whether what goes to w may be coloured: w is a terminal, and
-// NO_COLOR is unset.
-func colors(w io.Writer) bool {
+// NO_COLOR is unset in vars.
+func colors(vars env.Env, w io.Writer) bool {
 	f, ok := w.(*os.File)
-	if !ok || os.Getenv("NO_COLOR") != "" {
+	if !ok || vars.Getenv("NO_COLOR") != "" {
 		return false
 	}
 	info, err := f.Stat()

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 func TestBlockedByIsANumberListOrNone(t *testing.T) {
@@ -49,7 +49,7 @@ func TestBlockWritesNativeLinksByIssueID(t *testing.T) {
 		"repos/o/r/issues/8": `{"id":808,"number":8,"state":"open"}`,
 		"repos/o/r/issues/6": `{"id":606,"number":6,"state":"open"}`,
 	})
-	if err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Block(6, []int{8}); err != nil {
+	if err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Block(6, []int{8}); err != nil {
 		t.Fatal(err)
 	}
 	if w := gh.Writes(); !reflect.DeepEqual(w, []string{"POST repos/o/r/issues/6/dependencies/blocked_by"}) {
@@ -63,14 +63,14 @@ func TestBlockWritesNativeLinksByIssueID(t *testing.T) {
 func TestBlockRefusesAMissingBlockerBeforeWriting(t *testing.T) {
 	t.Parallel()
 	gh := recorded(t, map[string]string{"repos/o/r/issues/8": `{"id":808,"number":8}`, "repos/o/r/issues/6": `{"id":606,"number":6}`})
-	err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Block(6, []int{8, 99})
+	err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Block(6, []int{8, 99})
 	if err == nil || !strings.Contains(err.Error(), "#99 does not exist") {
 		t.Fatalf("%v", err)
 	}
 	if w := gh.Writes(); len(w) != 0 {
 		t.Fatalf("wrote %q", w)
 	}
-	if err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Block(8, []int{8}); err == nil || !strings.Contains(err.Error(), "block itself") {
+	if err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Block(8, []int{8}); err == nil || !strings.Contains(err.Error(), "block itself") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -83,7 +83,7 @@ func TestCreateNamesTheIssueWhoseLinkFailed(t *testing.T) {
 		"repos/o/r/issues/8":  `{"id":808,"number":8}`,
 		"repos/o/r/issues/10": `{"id":1010,"number":10}`,
 	})
-	s := Source{Proc: machine, Repo: repo, GitHub: refuseLinks{gh}, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: refuseLinks{gh}, Clock: atNow()}
 	made, _, err := s.Create("t", "b", 10, []int{8})
 	if made.Number != 11 || err == nil || !strings.Contains(err.Error(), "created #11 (https://github.com/o/r/issues/11), but linking #11 as blocked by #8") {
 		t.Fatalf("%+v %v", made, err)
@@ -103,7 +103,7 @@ func (r refuseLinks) Send(method, path string, fields ...github.Field) ([]byte, 
 func TestCreateMakesASubIssueOfItsParent(t *testing.T) {
 	t.Parallel()
 	gh := recorded(t, map[string]string{"repos/o/r/issues/1": `{"id":101,"number":1,"state":"open"}`})
-	made, _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Create("t", "b", 1, nil)
+	made, _, err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Create("t", "b", 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestCreateMakesASubIssueOfItsParent(t *testing.T) {
 		t.Fatalf("%s %v", out, err)
 	}
 	// A parent that does not exist creates nothing.
-	if _, _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Create("t", "b", 9, nil); err == nil || !strings.Contains(err.Error(), "#9 does not exist") {
+	if _, _, err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Create("t", "b", 9, nil); err == nil || !strings.Contains(err.Error(), "#9 does not exist") {
 		t.Fatalf("%v", err)
 	}
 	if w := gh.Writes(); len(w) != 2 {
@@ -136,7 +136,7 @@ func TestDuplicateIsAnOpenIssueOfTheSameTitleUnderTheSameParent(t *testing.T) {
 			{"number":3,"title":"leaf ","state":"open"}]`,
 		"repos/o/r/issues/1/sub_issues?per_page=100": `[{"number":3,"state":"open"},{"number":4,"title":"done","state":"closed"}]`,
 	})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	for _, c := range []struct {
 		title  string
 		parent int

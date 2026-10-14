@@ -32,7 +32,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			lines, err := reuse.Fetch(c.Proc, c.Disk, dir, cfg.Sources)
+			lines, err := reuse.Fetch(c.Git, c.Disk, dir, cfg.Sources)
 			if err != nil {
 				return Reply{}, err
 			}

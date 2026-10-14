@@ -16,12 +16,21 @@ import (
 	"path/filepath"
 
 	"github.com/mb-89/SE/src/internal/battery"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/env"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // machine is the disk the battery reads and writes.
 var machine = disk.Real()
+
+// The battery's environment, the programs it starts, and git, which it runs on them.
+var (
+	vars  = env.Real()
+	procs = proc.Listed(proc.Real())
+	repos = git.Real(procs, vars)
+)
 
 func main() {
 	// check.sh runs the battery in src/, where go.mod is, and names the
@@ -32,11 +41,11 @@ func main() {
 	top := os.Args[2]
 	switch os.Args[1] {
 	case "gotest":
-		fail(gotest(proc.Listed(proc.Real()), top, os.Args[3:]))
+		fail(gotest(top, os.Args[3:]))
 	case "report":
 		fail(report(top))
 	case "tree":
-		tree, err := battery.Tree(proc.Listed(proc.Real()), top)
+		tree, err := battery.Tree(repos, top)
 		fail(err)
 		fmt.Println(tree)
 	case "passed":
@@ -44,7 +53,7 @@ func main() {
 		if len(os.Args) > 3 {
 			started = os.Args[3]
 		}
-		said, err := battery.Pass(machine, proc.Listed(proc.Real()), top, started)
+		said, err := battery.Pass(machine, repos, top, started)
 		fail(err)
 		fmt.Println("battery:", said)
 	default:
@@ -55,14 +64,14 @@ func main() {
 // gotest runs go test -json on the packages, shows what go test shows a
 // person, keeps the events for report, and fails as go test failed. It runs
 // go test with GIT_DIR on a decoy repository, and fails if a test changed it.
-// It keeps the events under the checkout top, and runs git and go on procs.
-func gotest(procs proc.Procs, top string, packages []string) error {
+// It keeps the events under the checkout top.
+func gotest(top string, packages []string) error {
 	dir, err := machine.MkdirTemp("", "battery-decoy-")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = machine.RemoveAll(dir) }()
-	decoy, err := battery.NewDecoy(machine, procs, dir)
+	decoy, err := battery.NewDecoy(machine, repos, dir)
 	if err != nil {
 		return err
 	}
@@ -74,7 +83,7 @@ func gotest(procs proc.Procs, top string, packages []string) error {
 	events, written := io.Pipe()
 	run, err := procs.Start(proc.Cmd{
 		Name: "go", Args: append([]string{"test", "-json"}, packages...),
-		Env: decoy.Env(os.Environ()), Stdout: written, Stderr: os.Stderr,
+		Env: decoy.Env(vars.Environ()), Stdout: written, Stderr: os.Stderr,
 	})
 	if err != nil {
 		return err
@@ -102,7 +111,7 @@ func gotest(procs proc.Procs, top string, packages []string) error {
 // and adds it to the CI job's summary where there is one.
 func report(top string) error {
 	var summary io.Writer
-	if path := os.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
+	if path := vars.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
 		f, err := machine.Append(path)
 		if err != nil {
 			return err

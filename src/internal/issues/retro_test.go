@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // rqs are the landing questions the retro tests read.
@@ -142,7 +142,7 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 func collect(t *testing.T, later bool) Collected {
 	t.Helper()
 	gh := recorded(t, retroRepo(t, later, "<!-- se:retro attended -->"))
-	c, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Collect(30)
+	c, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Collect(30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestTheAnswersCheckSkipsWhatLandsNoBranch(t *testing.T) {
 	a[key] = strings.TrimSuffix(a[key], "]") + "," + person + "," + overhaul + "]"
 	a["repos/o/r/issues/27/comments?per_page=100"] = `[]`
 	a["repos/o/r/issues/28/comments?per_page=100"] = `[]`
-	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	c, err := Source{Git: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestAMetricIsCreditedOnceItsIssueClosedAsCompleted(t *testing.T) {
 	t.Parallel()
 	a := retroRepo(t, true, "<!-- se:retro attended -->")
 	a["repos/o/r/issues/22"] = `{"number":22,"state":"closed","state_reason":"completed"}`
-	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	c, err := Source{Git: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 		"a home that is no fix":    func(r *RetroReport) { r.Findings[0].Home = "hope" },
 		"a check that is no check": func(r *RetroReport) { r.Findings[0].Check = "vibes" },
 	} {
-		if _, err := (Source{Proc: machine, Repo: repo, GitHub: never{t}, Clock: atNow()}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+		if _, err := (Source{Git: machine, Repo: repo, GitHub: never{t}, Clock: atNow()}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -414,7 +414,7 @@ func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 func fileFindings(t *testing.T, answers map[string]string) (Filed, *github.Fake) {
 	t.Helper()
 	gh := recorded(t, answers)
-	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
+	f, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +502,7 @@ func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
 	// Behind a cloud session's proxy, deleting a branch is refused.
 	gh := recorded(t, answers)
 	gh.Proxy = true
-	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
+	f, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileReport(30, judged(t, nil))
 	if err != nil || !strings.HasPrefix(f.Left, "issue-30 stays (") || !strings.Contains(f.Left, "se fleet prune") {
 		t.Fatalf("%+v %v", f, err)
 	}
@@ -514,7 +514,7 @@ func TestARuleCheckWhosePRDidNotMergeIsRefused(t *testing.T) {
 	key := "repos/o/r/pulls?state=closed&base=main&per_page=100"
 	a[key] = strings.Replace(a[key], `"number":91`, `"number":92`, 1)
 	gh := recorded(t, a)
-	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Collect(30)
+	_, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Collect(30)
 	if err == nil || !strings.Contains(err.Error(), "the rule check mark started with PR #91, which is not a merged PR") {
 		t.Fatalf("%v", err)
 	}

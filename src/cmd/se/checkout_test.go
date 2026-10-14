@@ -12,14 +12,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	sehttp "github.com/mb-89/SE/src/modules/io/http"
+	"github.com/mb-89/SE/src/modules/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
-	"github.com/mb-89/SE/src/internal/gitenv"
 	"github.com/mb-89/SE/src/internal/update"
+	"github.com/mb-89/SE/src/modules/io/env"
+	"github.com/mb-89/SE/src/modules/io/git"
 )
 
 // repoRoot is the SE checkout these tests run in.
@@ -33,7 +34,9 @@ func repoRoot(t *testing.T) string {
 }
 
 func TestMain(m *testing.M) {
-	gitenv.Clear()
+	if err := git.Clear(env.Real()); err != nil {
+		panic(err)
+	}
 	code := m.Run()
 	if installedSE != "" {
 		os.RemoveAll(filepath.Dir(installedSE))
@@ -59,7 +62,7 @@ func installed(t *testing.T) string {
 			return
 		}
 		installedSE = filepath.Join(dir, filepath.Base(daemon.Paths{}.Bin()))
-		installedErr = update.Build(disk.Real(), proc.Real(), repoRoot(t), installedSE)
+		installedErr = update.Build(disk.Real(), proc.Real(), git.Real(proc.Real(), env.Real()), repoRoot(t), installedSE)
 	})
 	if installedErr != nil {
 		t.Fatal(installedErr)

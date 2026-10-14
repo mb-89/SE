@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // noon is the recorded fleet's clock: pushes at 11:30 are recent, at 9:00 quiet.
@@ -144,7 +144,7 @@ func get(t *testing.T, gh github.GitHub, path string) string {
 
 func (w *world) check() []Finding {
 	w.t.Helper()
-	got, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Check()
+	got, err := Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}.Check()
 	if err != nil {
 		w.t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestTheLeaseAndTheFleetCheckAgreeWhenAClaimIsQuiet(t *testing.T) {
 			if c.taken {
 				w.said(7, "<!-- se:takeover 1 -->", noon.Add(-time.Minute))
 			}
-			s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
+			s := Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}
 			st := Status{Issue: Issue{Number: 7}}
 			if err := s.lease(&st); err != nil {
 				t.Fatal(err)
@@ -303,7 +303,7 @@ func TestABranchOfAClosedIssueIsALeftoverClaim(t *testing.T) {
 	}
 	// Within a day of the close, se fleet fix leaves it to the prune
 	// workflow and writes nothing.
-	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}
 	done := s.Fix(t.TempDir(), []Finding{f})
 	if done[0].Did != "left to the prune workflow until a day after #19 closed" || len(w.Writes()) != 0 {
 		t.Fatalf("%+v, writes %q", done, w.Writes())
@@ -336,7 +336,7 @@ func TestFleetFixDeletesALeftoverBranchMainHoldsWhole(t *testing.T) {
 	// which the boxes' proxy refuses.
 	origin, a, _ := boxes(t)
 	run(t, a, "push", "-q", "origin", "main:issue-19")
-	done := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Fix(a, []Finding{f})
+	done := Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}.Fix(a, []Finding{f})
 	if done[0].Did != "deleted issue-19 at c19, which main holds whole" || done[0].Made != 0 || done[0].Failed != "" {
 		t.Fatalf("%+v", done)
 	}
@@ -359,7 +359,7 @@ func TestAFailedRemedyDoesNotStopTheOnesAfterIt(t *testing.T) {
 	w.ahead(19, 0)
 	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
 	// The workspace is no checkout, so the push that deletes issue-19 fails.
-	done := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Fix(t.TempDir(), w.check())
+	done := Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}.Fix(t.TempDir(), w.check())
 	var dids []string
 	for _, d := range done {
 		dids = append(dids, fmt.Sprintf("%s #%d: %s", d.Kind, d.Issue, d.Did))
@@ -432,7 +432,7 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 	}
 	// Its remedy, run: a conflict is no failure, so #17, final or not, is
 	// taken over again, and nothing waits on a person.
-	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(claimedAt(t, 17), 17)
+	took, ok, err := Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(claimedAt(t, 17), 17)
 	if err != nil || !ok || took.Takeover == nil || took.Takeover.Count != 2 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -461,7 +461,7 @@ func TestAFinalClaimTakenOverAMinuteAgoIsNotHeld(t *testing.T) {
 				t.Errorf("%s: se fleet check finds %+v", name, f)
 			}
 		}
-		_, _, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(t.TempDir(), 7)
+		_, _, err := Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(t.TempDir(), 7)
 		if err == nil || !strings.Contains(err.Error(), "nothing about it is stuck") {
 			t.Errorf("%s: %v", name, err)
 		}
@@ -477,7 +477,7 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	w := newWorld(t, []string{ready5, item(7, 0)}, 7)
 	w.closedPRs(7, `[]`)
 	w.pushed(7, quiet)
-	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(a, 7)
+	took, ok, err := Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(a, 7)
 	if err != nil || !ok || took.Takeover == nil || *took.Takeover != (Takeover{Count: 1, Stale: "issue-7 has no PR, and no push since 2026-10-13T09:00:00Z"}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -494,7 +494,7 @@ func TestAStuckClaimNamedWithTakeIsTakenOver(t *testing.T) {
 	// Moving work is no takeover.
 	w.pushed(7, recent)
 	w.set("repos/o/r/issues/7/comments", `[]`)
-	if _, _, err := (Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}).Take(t.TempDir(), 7); err == nil || !strings.Contains(err.Error(), "nothing about it is stuck") {
+	if _, _, err := (Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}).Take(t.TempDir(), 7); err == nil || !strings.Contains(err.Error(), "nothing about it is stuck") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -509,7 +509,7 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 	w.set("repos/o/r/issues/19", `{"number":19,"state":"closed","state_reason":"not_planned","closed_at":"2026-10-11T12:00:00Z"}`)
 	w.set(links(8), "["+dep(3, "closed", "not_planned", true)+"]")
 	w.set(links(9), "["+dep(4, "open", "", false)+"]")
-	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}
 	found := w.check()
 	done := s.Fix(t.TempDir(), found)
 	var dids []string
@@ -613,7 +613,7 @@ func TestTheTakeoverRemedyOfAStuckSubIssueLeafRuns(t *testing.T) {
 		if _, err := fmt.Sscanf(f.Remedy, "se issue pull --take %d,", &n); err != nil || n != 7 {
 			t.Fatalf("pushed at %s: remedy %q", at, f.Remedy)
 		}
-		took, ok, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(a, n)
+		took, ok, err := Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(a, n)
 		if err != nil || !ok || took.Number != 7 || took.Takeover == nil {
 			t.Fatalf("pushed at %s: took %+v %v %v", at, took, ok, err)
 		}
@@ -640,7 +640,7 @@ func TestABareIssueIsFiledIntoTheMiscManifest(t *testing.T) {
 		t.Fatalf("%+v", f)
 	}
 	// No misc manifest is open: the fix opens #101 and files #20 into it.
-	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: w, Clock: atNow()}
 	done := s.Fix(t.TempDir(), []Finding{f})
 	if len(done) != 1 || done[0].Did != "filed it into misc manifest #101" || done[0].Failed != "" || done[0].Made != 0 {
 		t.Fatalf("%+v", done)

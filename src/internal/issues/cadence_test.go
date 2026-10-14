@@ -46,7 +46,7 @@ func TestNineClosedStartNoRetro(t *testing.T) {
 	t.Parallel()
 	_, a, _ := boxes(t)
 	gh := recorded(t, cadenceRepo(9, 0))
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	took, ok, c, err := s.TakeRetro(a)
 	if err != nil || ok || c.Closed != 9 || c.Previous != 20 || c.Due() || len(gh.Writes()) != 0 {
 		t.Fatalf("took %+v %v, %+v %v, writes %q", took, ok, c, err, gh.Writes())
@@ -63,7 +63,7 @@ func TestTenClosedStartAnUnattendedRetroAndTakeItFirst(t *testing.T) {
 	t.Parallel()
 	_, a, _ := boxes(t)
 	gh := recorded(t, cadenceRepo(10, 0))
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	// The retro is the next issue: #100 to #109 closed before it.
 	took, ok, c, err := s.TakeRetro(a)
 	if err != nil || !ok || took.Number != 110 || !took.Retro || c.Closed != 10 {
@@ -82,7 +82,7 @@ func TestAnOpenRetroBlocksASecond(t *testing.T) {
 	t.Parallel()
 	for _, n := range []int{10, 25} {
 		gh := recorded(t, cadenceRepo(n, 31))
-		took, ok, c, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.TakeRetro(t.TempDir())
+		took, ok, c, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.TakeRetro(t.TempDir())
 		if err != nil || ok || c.Open != 31 || c.Due() || len(gh.Writes()) != 0 {
 			t.Fatalf("%d closed: took %+v %v, %+v %v, writes %q", n, took, ok, c, err, gh.Writes())
 		}
@@ -96,7 +96,7 @@ func TestARetroStartedInARaceClosesAsADuplicateOfTheLowerOne(t *testing.T) {
 	t.Parallel()
 	_, a, _ := boxes(t)
 	gh := recorded(t, cadenceRepo(10, 0))
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	// Another box read the cadence as due too and started #110 first.
 	took, ok, c, err := s.takeDue(retroRule, a, func() (Issue, error) {
 		if _, err := s.NewRetro("", true); err != nil {
@@ -131,7 +131,7 @@ func TestRetroIssuesAreNotCounted(t *testing.T) {
 	t.Parallel()
 	// cadenceRepo(9, …) holds a closed retro and a pull request inside the
 	// window, besides the nine: counted, they would make the cadence due.
-	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, cadenceRepo(9, 0)), Clock: atNow()}.Cadence()
+	c, err := Source{Git: machine, Repo: repo, GitHub: recorded(t, cadenceRepo(9, 0)), Clock: atNow()}.Cadence()
 	if err != nil || c.Closed != 9 {
 		t.Fatalf("%+v %v", c, err)
 	}
@@ -139,7 +139,7 @@ func TestRetroIssuesAreNotCounted(t *testing.T) {
 
 func TestTheFirstCadenceCountsTheWholeHistory(t *testing.T) {
 	t.Parallel()
-	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, map[string]string{
+	c, err := Source{Git: machine, Repo: repo, GitHub: recorded(t, map[string]string{
 		closedRetrosPath: `[]`,
 		openRetrosPath:   `[]`,
 		"repos/o/r/issues?labels=se&state=closed&per_page=100": `[{"number":1,"state":"closed","closed_at":"2026-01-01T00:00:00Z"}]`,
@@ -156,7 +156,7 @@ func TestASecondRetroStartedByARacingBoxClosesAsADuplicate(t *testing.T) {
 	t.Parallel()
 	origin, a, b := boxes(t)
 	gh := recorded(t, cadenceRepo(10, 0))
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	// Both boxes read the cadence before either starts its retro.
 	ca, err := s.Cadence()
 	if err != nil || !ca.Due() {
@@ -198,7 +198,7 @@ func TestASecondRetroStartedByARacingBoxClosesAsADuplicate(t *testing.T) {
 
 func TestADuplicateRetroIsNoRetroToTheOverhaul(t *testing.T) {
 	t.Parallel()
-	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, map[string]string{
+	c, err := Source{Git: machine, Repo: repo, GitHub: recorded(t, map[string]string{
 		"repos/o/r/issues?labels=se-overhaul&state=closed&per_page=100": `[]`,
 		"repos/o/r/issues?labels=se-overhaul&state=open&per_page=100":   `[]`,
 		"repos/o/r/issues?labels=se-retro&state=closed&per_page=100": `[{"number":1,"state":"closed","state_reason":"completed","closed_at":"2026-01-01T00:00:00Z","labels":[{"name":"se-retro"}]},` +

@@ -78,7 +78,7 @@ func commits(hooks, checkout, built string) string {
 func sessionCommits(w *World) string {
 	checkout := ""
 	if repo := pluginCheckout(w); repo != "" {
-		checkout, _ = update.Head(w.Proc, repo)
+		checkout, _ = update.Head(w.Git, repo)
 	}
 	return commits(w.Getenv(hooksCommitEnv), checkout, builtFrom(w))
 }

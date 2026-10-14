@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/modules/io/disk"
 )
 
 // CallsFile is where each se command records how long it took, one JSON line

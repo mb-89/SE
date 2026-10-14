@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	sehttp "github.com/mb-89/SE/src/modules/io/http"
 )
 
 // The environment variables that name the routine's API trigger: its fire URL

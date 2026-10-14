@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/mb-89/SE/src/index"
-	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/rules"
+	"github.com/mb-89/SE/src/modules/io/disk"
 )
 
 // A manifest is a map: it points at owners and says nothing of its own, so it
@@ -60,7 +60,7 @@ func init() {
 		Words: index.AnyWords,
 		Run: func(c *Call) (Reply, error) {
 			name := strings.Join(c.Args.Words, " ")
-			repo, err := repoOf(c.Disk, c.Proc, c.Workspace)
+			repo, err := repoOf(c.Disk, c.Git, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -71,7 +71,7 @@ func init() {
 				text, err := manifest(c.Disk, c.Workspace, repo.Paths, name, "README.md")
 				return Reply{Text: text}, err
 			}
-			if unmerged, err := unmergedPaths(c.Proc, c.Workspace); err != nil {
+			if unmerged, err := unmergedPaths(c.Git, c.Workspace); err != nil {
 				return Reply{}, err
 			} else if len(unmerged) > 0 {
 				return Reply{}, fmt.Errorf("manifest --write refuses while git's index holds unmerged paths (%s): resolve the merge first", strings.Join(unmerged, ", "))

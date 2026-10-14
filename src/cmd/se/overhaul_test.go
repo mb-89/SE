@@ -7,9 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 func TestOverhaulNewCreatesTheOverhaulAndFires(t *testing.T) {
@@ -67,9 +68,8 @@ func TestOverhaulReadWritesTheCodeFactsIntoTheDraft(t *testing.T) {
 	}
 	m := proc.NewFake()
 	m.Install("deadcode", func(c proc.Cmd) int { fmt.Fprintln(c.Stdout, "internal/x/x.go:4:6: unreachable func: Gone"); return 0 })
-	m.Install("git", func(proc.Cmd) int { return 0 })
 	w := worldOf(t)
-	w.Disk, w.Proc = d, m
+	w.Disk, w.Proc, w.Git = d, m, git.NewFake(func(proc.Cmd) int { return 0 })
 	code, out, errs := se(t, "overhaul", "read", "31", "--repo", "o/r", "--workspace", "/ws", "--out", "/draft.md")
 	if code != 0 {
 		t.Fatalf("exit %d, %q %q", code, out, errs)

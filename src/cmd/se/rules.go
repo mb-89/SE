@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/index"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/rules"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
 )
 
 func init() {
@@ -29,7 +29,7 @@ func init() {
 			"as a test's first statement, names each file it changed, and then checks.",
 		Flags: []index.Flag{{Name: "fix", Default: false, Help: "apply the mechanical part of each finding where the rule can, then check"}},
 		Run: func(c *Call) (Reply, error) {
-			repo, err := repoOf(c.Disk, c.Proc, c.Workspace)
+			repo, err := repoOf(c.Disk, c.Git, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -64,10 +64,10 @@ func init() {
 
 // repoOf is the checkout at root as the rules see it: the files git tracks or
 // would track (ignored ones, like .se/.runtime, are not SE's), the paths it
-// ignores, se's commands and its manifests. It reads on d and runs git on procs.
-func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
+// ignores, se's commands and its manifests. It reads on d and runs git on g.
+func repoOf(d disk.Disk, g git.Git, root string) (*rules.Repo, error) {
 	var out bytes.Buffer
-	if err := procs.Run(proc.Cmd{Name: "git", Args: []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}, Dir: root, Stdout: &out}); err != nil {
+	if err := g.Run(git.Cmd{Args: []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}, Dir: root, Stdout: &out}); err != nil {
 		return nil, fmt.Errorf("git ls-files: %w", err)
 	}
 	paths := strings.Split(strings.TrimRight(out.String(), "\x00"), "\x00")
@@ -79,7 +79,7 @@ func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
 		// folder, which a fresh checkout may not hold: so p/ is asked too.
 		Ignored: func(p string) bool {
 			for _, q := range []string{p, p + "/"} {
-				if procs.Run(proc.Cmd{Name: "git", Args: []string{"check-ignore", "-q", "--no-index", filepath.FromSlash(q)}, Dir: root}) == nil {
+				if g.Run(git.Cmd{Args: []string{"check-ignore", "-q", "--no-index", filepath.FromSlash(q)}, Dir: root}) == nil {
 					return true
 				}
 			}
@@ -93,10 +93,10 @@ func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
 
 // unmergedPaths is every path git's index at root holds unmerged, each once:
 // a conflicted file stands there once per stage, which would list it as often.
-// It runs git on procs.
-func unmergedPaths(procs proc.Procs, root string) ([]string, error) {
+// It runs git on g.
+func unmergedPaths(g git.Git, root string) ([]string, error) {
 	var out bytes.Buffer
-	if err := procs.Run(proc.Cmd{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U", "-z"}, Dir: root, Stdout: &out}); err != nil {
+	if err := g.Run(git.Cmd{Args: []string{"diff", "--name-only", "--diff-filter=U", "-z"}, Dir: root, Stdout: &out}); err != nil {
 		return nil, fmt.Errorf("git diff --diff-filter=U: %w", err)
 	}
 	var paths []string

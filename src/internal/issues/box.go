@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/github"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/modules/io/github"
+	sehttp "github.com/mb-89/SE/src/modules/io/http"
 )
 
 // Parallel is the built-in value of fleet.box/config/parallel: how many

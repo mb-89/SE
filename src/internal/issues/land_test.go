@@ -12,10 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/github"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/github"
+	"github.com/mb-89/SE/src/modules/io/proc"
 
 	"github.com/mb-89/SE/src/internal/battery"
 )
@@ -65,7 +66,7 @@ func pullOf(t *testing.T, gh github.GitHub, n int) map[string]any {
 func claimed(t *testing.T) (origin, a string) {
 	t.Helper()
 	origin, a, _ = boxes(t)
-	if ok, err := (Source{Proc: machine}).Claim(a, 6); err != nil || !ok {
+	if ok, err := (Source{Git: machine}).Claim(a, 6); err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "work")
@@ -104,7 +105,7 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	if err := RecordRefusals(d, a, "issue pull", []github.Refusal{{At: landedAt(), Status: 403, Wait: 10 * time.Minute}, {At: landedAt(), Status: 429, GaveUp: true}}); err != nil {
 		t.Fatal(err)
 	}
-	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}.Land(a, "", qs, full, battered(d))
+	l, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}.Land(a, "", qs, full, battered(d))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func TestThePRBodyAndTheLandingFactsShowTheBatteryProfile(t *testing.T) {
 	_, a := claimed(t)
 	d := disk.NewFake()
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}).Land(a, "", qs, full, profiles(t, d, profile)); err != nil {
+	if _, err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}).Land(a, "", qs, full, profiles(t, d, profile)); err != nil {
 		t.Fatal(err)
 	}
 	opened, _ := pullOf(t, gh, 7)["body"].(string)
@@ -213,7 +214,7 @@ func TestLandAgainUpdatesTheOpenPRsProfile(t *testing.T) {
 	_, a := claimed(t)
 	d := disk.NewFake()
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, profiles(t, d, profile)); err != nil {
+	if _, err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, profiles(t, d, profile)); err != nil {
 		t.Fatal(err)
 	}
 	if body := pullOf(t, gh, 14)["body"]; body != "Fixes #6\n\n"+profile.Markdown() {
@@ -228,7 +229,7 @@ func TestLandAgainPushesAndReportsTheOpenPR(t *testing.T) {
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "fix ci")
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
 	d := disk.NewFake()
-	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	l, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
 	if err != nil || l.Created || l.Number != 14 {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -248,7 +249,7 @@ func TestLandMergesAPRWithNothingToWaitFor(t *testing.T) {
 	// No check is pending on #14: GitHub calls it clean.
 	gh := landGH(t, map[string]string{pullsPath: `[` + clean14 + `]`})
 	d := disk.NewFake()
-	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	l, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
 	if err != nil || !l.Merged {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -263,7 +264,7 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
 	gh.Proxy = true
 	d := disk.NewFake()
-	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	l, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
 	if err != nil || l.Merged || l.Number != 14 {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -278,7 +279,7 @@ func TestLandSaysWhenAutoMergeFails(t *testing.T) {
 	gh := landGH(t, map[string]string{pullsPath: `[` + pr14 + `]`})
 	gh.NoAutoMerge = true
 	d := disk.NewFake()
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered(d)); err == nil || !strings.Contains(err.Error(), "PR #14") || !strings.Contains(err.Error(), "auto-merge is not on") {
+	if _, err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered(d)); err == nil || !strings.Contains(err.Error(), "PR #14") || !strings.Contains(err.Error(), "auto-merge is not on") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -310,10 +311,9 @@ func TestLandRefusesBeforePushing(t *testing.T) {
 	// It reads the issue, and writes nothing.
 	gh := landGH(t, map[string]string{})
 	w := &checkout{branch: "issue-6"}
-	m := proc.NewFake()
-	m.Install("git", w.git)
+	m := git.NewFake(w.git)
 	land := func(check func(string) error) error {
-		_, err := Source{Proc: m, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land("/a", "", qs, full, check)
+		_, err := Source{Git: m, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land("/a", "", qs, full, check)
 		return err
 	}
 	fails := func(string) error { return errors.New("go test: FAIL") }
@@ -329,7 +329,7 @@ func TestLandRefusesBeforePushing(t *testing.T) {
 	if err := land(passes); err == nil || !strings.Contains(err.Error(), "issue-<n> branch") {
 		t.Fatalf("%v", err)
 	}
-	for _, line := range m.Lines() {
+	for _, line := range m.Machine.Lines() {
 		if strings.HasPrefix(line, "git push") {
 			t.Fatalf("a refused land pushed: %s", line)
 		}
@@ -344,7 +344,7 @@ func TestLandRefusesAParent(t *testing.T) {
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{issue6: `{"number":6,"title":"the tree","sub_issues_summary":{"total":2,"completed":1}}`})
 	checked := false
-	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
+	_, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
 	if err == nil || !strings.Contains(err.Error(), "a parent holds no work") || checked {
 		t.Fatalf("%v, checked %v", err, checked)
 	}
@@ -365,7 +365,7 @@ func claimedBy(t *testing.T) (origin, a, b string) {
 		run(t, d, "config", "user.name", "t")
 		run(t, d, "config", "user.email", "t@t")
 	}
-	if ok, err := (Source{Proc: machine}).Claim(a, 6); err != nil || !ok {
+	if ok, err := (Source{Git: machine}).Claim(a, 6); err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
 	commitFile(t, a, "work", "a")
@@ -406,7 +406,7 @@ func TestLandMergesTheBranchAndMainInBeforeTheCheck(t *testing.T) {
 		}
 		return battered(d)(dir)
 	}
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, check); err != nil {
+	if _, err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, check); err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"work", "fix", "pushed", "rule"}; !reflect.DeepEqual(saw, want) {
@@ -426,7 +426,7 @@ func TestLandStopsWhereMainConflicts(t *testing.T) {
 	head := run(t, a, "rev-parse", "HEAD")
 	gh := landGH(t, map[string]string{})
 	checked := false
-	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
+	_, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, full, func(string) error { checked = true; return nil })
 	if err == nil || !strings.Contains(err.Error(), "merging origin/main into issue-6 conflicts") || checked {
 		t.Fatalf("%v, checked %v", err, checked)
 	}

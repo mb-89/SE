@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/github"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/env"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/github"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 const repo = "o/r"
@@ -153,7 +155,7 @@ func open(n int, body string) string {
 
 func survey(t *testing.T, answers map[string]string) map[int]string {
 	t.Helper()
-	all, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, answers), Clock: atNow()}.Survey()
+	all, err := Source{Git: machine, Repo: repo, GitHub: recorded(t, answers), Clock: atNow()}.Survey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +191,7 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 		"repos/mb-89/SE/issues/7/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/mb-89/SE/activity?ref=refs/heads/issue-5&per_page=1":    pushed(fresh),
 	})
-	s := Source{Proc: machine, Repo: "mb-89/SE", GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: "mb-89/SE", GitHub: gh, Clock: atNow()}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -230,7 +232,7 @@ func TestLowestReadyNumberComesFirst(t *testing.T) {
 		listPath: `[` + open(9, "") + `,` + open(3, "") + `]` + `[` + open(5, "") + `]`, // two pages
 		refsPath: `[]`,
 	}, 3, 5, 9), 3, 5, 9))
-	next, ok, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Next()
+	next, ok, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Next()
 	if err != nil || !ok || next.Number != 3 || next.Title != "t3" {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
@@ -286,7 +288,7 @@ func TestAStaleSummaryDoesNotMakeABlockedIssueReady(t *testing.T) {
 		links(8):      `[]`,
 		activity(8):   pushed(fresh),
 	})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if next, ok, err := s.Next(); err != nil || ok {
 		t.Fatalf("next = %+v %v %v", next, ok, err)
 	}
@@ -310,7 +312,7 @@ func TestNothingReady(t *testing.T) {
 			links(1):    `[]`,
 			activity(1): pushed(fresh),
 		})
-		if next, ok, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Next(); err != nil || ok {
+		if next, ok, err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Next(); err != nil || ok {
 			t.Errorf("%s: %+v %v %v", name, next, ok, err)
 		}
 	}
@@ -324,14 +326,12 @@ func TestRepoReadsOrigin(t *testing.T) {
 		"git@github.com:mb-89/SE.git":              "mb-89/SE",
 		"http://proxy@127.0.0.1:1234/git/mb-89/SE": "mb-89/SE",
 	} {
-		m := proc.NewFake()
-		m.Install("git", withOrigin("/w", url))
+		m := git.NewFake(withOrigin("/w", url))
 		if got, err := Repo(m, "/w"); err != nil || got != want {
 			t.Errorf("%s: %q %v", url, got, err)
 		}
 	}
-	m := proc.NewFake()
-	m.Install("git", withOrigin("/w", ""))
+	m := git.NewFake(withOrigin("/w", ""))
 	if _, err := Repo(m, "/w"); err == nil || !strings.Contains(err.Error(), "remote get-url origin") {
 		t.Fatalf("a checkout without origin answered %v", err)
 	}
@@ -357,9 +357,9 @@ func withOrigin(dir, url string) proc.Program {
 	}
 }
 
-// machine is the real machine the tests that build git repositories still
-// run git on; #137 moves them onto the fake.
-var machine = proc.Real()
+// machine is the real git the tests that build git repositories still run;
+// #137 moves them onto the fake.
+var machine = git.Real(proc.Real(), env.Real())
 
 func run(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -388,7 +388,7 @@ func boxes(t *testing.T) (origin, a, b string) {
 func TestTheSecondClaimIsRefused(t *testing.T) {
 	t.Parallel()
 	origin, a, b := boxes(t)
-	if ok, err := (Source{Proc: machine}).Claim(a, 5); err != nil || !ok {
+	if ok, err := (Source{Git: machine}).Claim(a, 5); err != nil || !ok {
 		t.Fatalf("first claim: %v %v", ok, err)
 	}
 	if got := run(t, a, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-5" {
@@ -401,7 +401,7 @@ func TestTheSecondClaimIsRefused(t *testing.T) {
 	// issue-5; the claim must still be refused.
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "more")
 	run(t, a, "push", "-q", "origin", "HEAD:main")
-	if ok, err := (Source{Proc: machine}).Claim(b, 5); err != nil || ok {
+	if ok, err := (Source{Git: machine}).Claim(b, 5); err != nil || ok {
 		t.Fatalf("second claim: %v %v", ok, err)
 	}
 	if got := run(t, b, "rev-parse", "--abbrev-ref", "HEAD"); got != "main" {
@@ -424,7 +424,7 @@ func TestATakeRefusedMovesToTheNextIssue(t *testing.T) {
 		listPath: `[` + retro(5) + `,` + retro(6) + `]`,
 		refsPath: `[]`,
 	}, 5, 6))
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if took, ok, err := s.Take(a, 0); err != nil || !ok || took.Number != 5 {
 		t.Fatalf("a took %+v %v %v", took, ok, err)
 	}
@@ -447,7 +447,7 @@ func TestTakeRefusesAnIssueThatIsNotReady(t *testing.T) {
 		links(1): `[]`,
 		links(2): `[{"number":1,"state":"open"}]`,
 	})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if _, _, err := s.Take(t.TempDir(), 2); err == nil || !strings.Contains(err.Error(), "blocked by #1") {
 		t.Fatalf("%v", err)
 	}

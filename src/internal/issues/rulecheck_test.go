@@ -54,7 +54,7 @@ func TestRulesNamesOnEachOpenPRTheRuleMainTookThatItBreaks(t *testing.T) {
 	gh := recorded(t, map[string]string{
 		openPullsPath: "[" + strings.Join([]string{rulesPull(10, "issue-1"), rulesPull(20, "issue-2"), rulesPull(30, "issue-3"), rulesPull(40, "claude/x")}, ",") + "]",
 	})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	got, err := s.Rules(a, banned)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestRulesReportsAFailedCheckAndChecksTheRest(t *testing.T) {
 		}
 		return "", nil
 	}
-	got, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Rules(a, check)
+	got, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Rules(a, check)
 	if err == nil || !strings.Contains(err.Error(), "PR #10") || len(got) != 2 || got[0].Failed != "no go" || got[1].Did != "passes se's checks merged with main" {
 		t.Fatalf("%+v %v", got, err)
 	}

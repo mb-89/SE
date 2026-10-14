@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
 )
 
 // TreeFile, in Dir, names the git tree the battery passed: HEAD^{tree} of a
@@ -23,23 +23,23 @@ var treeHash = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
 
 // Tree answers HEAD^{tree} of the worktree at top, or "" where it has changes
 // not committed: a dirty worktree is not the tree its HEAD names.
-func Tree(procs proc.Procs, top string) (string, error) {
-	dirty, err := proc.Output(procs, proc.Cmd{Name: "git", Args: []string{"status", "--porcelain"}, Dir: top})
+func Tree(g git.Git, top string) (string, error) {
+	dirty, err := git.Output(g, top, "status", "--porcelain")
 	if err != nil || dirty != "" {
 		return "", err
 	}
-	return proc.Output(procs, proc.Cmd{Name: "git", Args: []string{"rev-parse", "HEAD^{tree}"}, Dir: top})
+	return git.Output(g, top, "rev-parse", "HEAD^{tree}")
 }
 
 // Pass records started as the tree the battery passed at top, where the
 // worktree still holds it, clean: a commit made or a file changed while the
 // battery ran is not what it checked. It records nothing where started is ""
 // (the battery started on a dirty worktree), and says so.
-func Pass(d disk.Disk, procs proc.Procs, top, started string) (string, error) {
+func Pass(d disk.Disk, g git.Git, top, started string) (string, error) {
 	if started == "" {
 		return "the worktree had changes not committed when the battery started, so it records no tree", nil
 	}
-	now, err := Tree(procs, top)
+	now, err := Tree(g, top)
 	if err != nil {
 		return "", err
 	}

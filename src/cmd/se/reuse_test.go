@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/reuse"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // ranAll is a report's ran naming every entry of the reviewer's list, as JSON.
@@ -116,10 +117,8 @@ func TestFleetPluginsFetchesEverySourceAtItsPinAsAFolderOfPlugins(t *testing.T) 
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 	d := onFake(t)
-	m := proc.NewFake()
-	onMachine(t, m)
 	// git makes the repository it is asked for, and checks a tree out as one file.
-	m.Install("git", func(c proc.Cmd) int {
+	g := git.NewFake(func(c proc.Cmd) int {
 		switch {
 		case c.Args[2] == "init":
 			if err := d.MkdirAll(filepath.Join(c.Args[1], ".git")); err != nil {
@@ -132,6 +131,7 @@ func TestFleetPluginsFetchesEverySourceAtItsPinAsAFolderOfPlugins(t *testing.T) 
 		}
 		return 0
 	})
+	worldOf(t).Git = g
 	into := filepath.FromSlash("/opt/se-plugins")
 	put(t, d, filepath.Join(into, "gone/.claude-plugin/plugin.json"), "{}")
 	put(t, d, filepath.Join(into, reuse.Adopted, "skills/gone/SKILL.md"), "x")
@@ -148,7 +148,7 @@ func TestFleetPluginsFetchesEverySourceAtItsPinAsAFolderOfPlugins(t *testing.T) 
 			t.Errorf("no line for %s: %s", s.Name, out)
 		}
 	}
-	lines := strings.Join(m.Lines(), "\n")
+	lines := strings.Join(g.Machine.Lines(), "\n")
 	for _, want := range []string{
 		"git -C " + filepath.Join(into, reuse.Repos, "anthropics-claude-plugins-official") + " fetch -q --depth 1 https://github.com/anthropics/claude-plugins-official 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3",
 		"--work-tree=" + filepath.Join(into, "pr-review-toolkit") + " checkout -q 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3:plugins/pr-review-toolkit -- .",

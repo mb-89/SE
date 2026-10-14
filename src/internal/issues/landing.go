@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/battery"
-	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/modules/io/disk"
 	"gopkg.in/yaml.v3"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // QuestionsFile is where the landing questions are written, relative to the

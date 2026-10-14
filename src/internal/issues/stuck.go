@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // Lease is the built-in value of issues/config/lease: how long a claimed leaf may go without a push to its branch before

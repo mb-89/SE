@@ -10,8 +10,6 @@ src/cmd/se/checkout_test.go clock.Real
 # at once, before the daemon's goroutine has removed it.
 src/cmd/se/stop_test.go clock.Real
 
-# Both change the process's own environment, which t.Setenv refuses a
-# parallel test: gitenv.Clear empties git's variables, and the real GitHub
-# finds gh on PATH.
-src/internal/gitenv/gitenv_test.go TestClear
-src/internal/io/github/real_test.go TestTheRealGitHubSpeaksGh
+# It changes the process's own environment, which t.Setenv refuses a
+# parallel test: the real GitHub finds gh on PATH.
+src/modules/io/github/real_test.go TestTheRealGitHubSpeaksGh

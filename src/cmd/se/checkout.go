@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/update"
@@ -71,7 +71,7 @@ func daemonExe(w *World, p daemon.Paths) (exe, note string, err error) {
 	if err := daemon.Prepare(p); err != nil {
 		return "", "", err
 	}
-	if err := update.Build(p.Disk, w.Proc, p.Workspace, p.Bin()); err != nil {
+	if err := update.Build(p.Disk, w.Proc, w.Git, p.Workspace, p.Bin()); err != nil {
 		// A build left from before would answer the session's /se words.
 		withdraw(p.Disk, p.Bin())
 		return installed, fmt.Sprintf("This checkout's se does not build, so the daemon runs the installed se (%s):\n%v", installed, err), nil

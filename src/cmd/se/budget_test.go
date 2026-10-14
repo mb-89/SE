@@ -9,9 +9,10 @@ import (
 
 	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/battery"
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // commandBudgets are spec/budgets.yaml's budgets for the interactive commands.
@@ -29,8 +30,8 @@ func commandBudgets(t *testing.T) battery.CommandBudgets {
 	return c
 }
 
-// measured runs se name on a fake o/r whose every GitHub request and process
-// start takes the budgets' latency on the call's clock, and answers its
+// measured runs se name on a fake o/r whose every GitHub request, process
+// start and git run takes the budgets' latency on the call's clock, and answers its
 // outside requests and how long it took by that clock.
 func measured(t *testing.T, name string, b battery.CommandBudgets) battery.Command {
 	t.Helper()
@@ -43,7 +44,9 @@ func measured(t *testing.T, name string, b battery.CommandBudgets) battery.Comma
 		machine.Install(p, func(proc.Cmd) int { return 0 })
 	}
 	machine.Delay(clk, time.Duration(b.Latency.ProcessMs)*time.Millisecond)
-	w.Proc = machine
+	repos := git.NewFake(func(proc.Cmd) int { return 0 })
+	repos.Machine.Delay(clk, time.Duration(b.Latency.ProcessMs)*time.Millisecond)
+	w.Proc, w.Git = machine, repos
 	args := append([]string{"--workspace", t.TempDir()}, strings.Fields(name)...)
 	if slices.Contains(commandFlags()[name], "repo") {
 		args = append(args, "--repo", "o/r")
@@ -53,7 +56,7 @@ func measured(t *testing.T, name string, b battery.CommandBudgets) battery.Comma
 	if code != 0 {
 		t.Fatalf("se %s: exit %d, %q %q", name, code, out, errs)
 	}
-	return battery.Command{Name: name, Requests: gh.Requests() + len(machine.Ran()), Ms: clk.Now().Sub(start).Milliseconds()}
+	return battery.Command{Name: name, Requests: gh.Requests() + len(machine.Ran()) + len(repos.Machine.Ran()), Ms: clk.Now().Sub(start).Milliseconds()}
 }
 
 // TestEveryInteractiveCommandKeepsItsBudget holds principle 9: a person never

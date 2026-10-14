@@ -17,12 +17,14 @@ import (
 
 	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/guidance"
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/github"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/env"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/github"
+	sehttp "github.com/mb-89/SE/src/modules/io/http"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // se runs se with args in t's World. Where args name no workspace, it runs
@@ -43,43 +45,40 @@ var worlds sync.Map // *testing.T to *testWorld
 
 type testWorld struct {
 	World
-	env map[string]string
+	vars *env.Fake
 }
+
+// overlay is the environment of a test's calls: Getenv reads only what
+// setenv put there, and Environ is the process's own with that over it, for
+// the programs a call starts.
+type overlay struct{ *env.Fake }
+
+func (o overlay) Environ() []string { return append(os.Environ(), o.Fake.Environ()...) }
 
 // testedAt is where every test's clock stands until the test moves it.
 var testedAt = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 
 // worldOf is the World every se call of the test runs in, made on the first
 // call: a fake clock at testedAt, an environment holding only what setenv put
-// there, an empty fake GitHub, and the real disk, programs and
+// there, an empty fake GitHub, and the real disk, programs, git and
 // network, which a test replaces through the fields.
 func worldOf(t *testing.T) *World {
 	t.Helper()
 	if w, ok := worlds.Load(t); ok {
 		return &w.(*testWorld).World
 	}
-	w := &testWorld{env: map[string]string{}}
+	w := &testWorld{vars: env.NewFake()}
+	vars := overlay{w.vars}
 	w.World = World{
-		Clock: clock.NewFake(testedAt), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(),
-		GitHub:  github.NewFake(clock.NewFake(testedAt)),
-		Getenv:  func(k string) string { return w.env[k] },
-		Environ: func() []string { return w.environ() },
-		Check:   check,
-		Guided:  guidance.Configured,
+		Clock: clock.NewFake(testedAt), Disk: disk.Real(), Proc: proc.Real(), Git: git.Real(proc.Real(), vars), Net: sehttp.Real(),
+		GitHub: github.NewFake(clock.NewFake(testedAt)),
+		Env:    vars,
+		Check:  check,
+		Guided: guidance.Configured,
 	}
 	worlds.Store(t, w)
 	t.Cleanup(func() { worlds.Delete(t) })
 	return &w.World
-}
-
-// environ is the process's environment with what setenv put there over it,
-// for the programs a call starts.
-func (w *testWorld) environ() []string {
-	out := os.Environ()
-	for k, v := range w.env {
-		out = append(out, k+"="+v)
-	}
-	return out
 }
 
 // setenv sets a variable of the environment the test's calls run in.
@@ -87,7 +86,9 @@ func setenv(t *testing.T, key, value string) {
 	t.Helper()
 	worldOf(t)
 	w, _ := worlds.Load(t)
-	w.(*testWorld).env[key] = value
+	if err := w.(*testWorld).vars.Setenv(key, value); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // onFake hands every call of the test a fake disk in place of the real one.
@@ -250,7 +251,7 @@ func TestAPipeAndASessionGetNoColour(t *testing.T) {
 	if _, out, _ := se(t, "help"); strings.Contains(out, "\x1b[") {
 		t.Fatalf("%q", out)
 	}
-	if colors(os.Stdout) && os.Getenv("NO_COLOR") == "" {
+	if colors(env.Real(), os.Stdout) {
 		t.Skip("stdout is a terminal")
 	}
 	if r := session(t, "help"); strings.Contains(r.Text, "\x1b[") {

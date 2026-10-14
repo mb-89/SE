@@ -14,8 +14,8 @@ import (
 
 	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/daemon"
-	"github.com/mb-89/SE/src/internal/io/clock"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	sehttp "github.com/mb-89/SE/src/modules/io/http"
 )
 
 // The wiring se carries starts the modules se carries, as the daemon starts
@@ -34,7 +34,7 @@ func TestTheWiringSeCarriesStartsItsModules(t *testing.T) {
 	for _, in := range ix.Catalog().Instances {
 		instances = append(instances, in.Name)
 	}
-	if want := []string{"cli", "clock", "github", "guidance", "issues", "reuse", "session", "sessionlog"}; !slices.Equal(instances, want) {
+	if want := []string{"cli", "guidance", "io/clock", "io/disk", "io/env", "io/git", "io/github", "io/http", "io/proc", "io/session", "io/session-log", "issues", "reuse"}; !slices.Equal(instances, want) {
 		t.Fatalf("the index runs %v, want %v", instances, want)
 	}
 }
@@ -88,9 +88,9 @@ func TestServeLogsEachPostedEventThroughTheIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	v, err := n.Value(ep.Address, ep.Token, "clock/started")
+	v, err := n.Value(ep.Address, ep.Token, "io/clock/started")
 	if started, _ := time.Parse(time.RFC3339, fmt.Sprint(v.Value)); err != nil || !started.Equal(at) {
-		t.Errorf("clock/started reads %v, %v; want %v", v.Value, err, at)
+		t.Errorf("io/clock/started reads %v, %v; want %v", v.Value, err, at)
 	}
 	if err := n.Shutdown(ep.Address, ep.Token); err != nil {
 		t.Fatal(err)

@@ -12,10 +12,10 @@ import (
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/guidance"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/github"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/issues"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/github"
+	sehttp "github.com/mb-89/SE/src/modules/io/http"
 )
 
 // skillTexts are the two skills the tests hand over; neither is a role an agent holds.

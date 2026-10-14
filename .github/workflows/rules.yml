@@ -11,7 +11,7 @@ on:
       - tests/check.sh
       - src/internal/battery/**
       - spec/budgets.yaml
-      - src/internal/io/proc/**
+      - src/modules/io/proc/**
   workflow_dispatch:
 permissions:
   contents: read

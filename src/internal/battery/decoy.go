@@ -3,14 +3,12 @@ package battery
 import (
 	"crypto/sha256"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/mb-89/SE/src/internal/gitenv"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
 )
 
 // Decoy is a throwaway repository go test runs under: GIT_DIR points at it,
@@ -23,29 +21,26 @@ type Decoy struct {
 }
 
 // NewDecoy makes the decoy in dir on d, a repository with one commit, and
-// records what it holds. It runs git on procs.
-func NewDecoy(d disk.Disk, procs proc.Procs, dir string) (*Decoy, error) {
-	git := func(args ...string) error {
-		cmd := proc.Cmd{
-			Name: "git", Args: append([]string{"-c", "user.name=battery", "-c", "user.email=battery@se", "-c", "commit.gpgsign=false"}, args...),
-			Dir: dir, Env: Isolated(os.Environ()),
-		}
-		if out, err := proc.Combined(procs, cmd); err != nil {
+// records what it holds. It runs git on g.
+func NewDecoy(d disk.Disk, g git.Git, dir string) (*Decoy, error) {
+	run := func(args ...string) error {
+		args = append([]string{"-c", "user.name=battery", "-c", "user.email=battery@se", "-c", "commit.gpgsign=false"}, args...)
+		if out, err := git.Combined(g, dir, args...); err != nil {
 			return fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, out)
 		}
 		return nil
 	}
-	if err := git("init", "-q", "-b", "decoy"); err != nil {
+	if err := run("init", "-q", "-b", "decoy"); err != nil {
 		return nil, err
 	}
 	// Git's automatic maintenance runs in the background after a commit and
 	// would change the decoy after its snapshot.
 	for _, kv := range [][2]string{{"maintenance.auto", "false"}, {"gc.auto", "0"}} {
-		if err := git("config", kv[0], kv[1]); err != nil {
+		if err := run("config", kv[0], kv[1]); err != nil {
 			return nil, err
 		}
 	}
-	if err := git("commit", "-q", "--allow-empty", "-m", "decoy"); err != nil {
+	if err := run("commit", "-q", "--allow-empty", "-m", "decoy"); err != nil {
 		return nil, err
 	}
 	decoy := &Decoy{GitDir: filepath.Join(dir, ".git"), disk: d}
@@ -56,7 +51,7 @@ func NewDecoy(d disk.Disk, procs proc.Procs, dir string) (*Decoy, error) {
 
 // Env is env with git's repository variables replaced by GIT_DIR, the decoy.
 func (d *Decoy) Env(env []string) []string {
-	return append(Isolated(env), "GIT_DIR="+d.GitDir)
+	return append(git.Isolated(env), "GIT_DIR="+d.GitDir)
 }
 
 // Check fails if anything in the decoy changed since NewDecoy, naming what.
@@ -83,7 +78,7 @@ func (d *Decoy) Check() error {
 	if len(changed) > 5 {
 		changed = append(changed[:5], fmt.Sprintf("and %d more", len(changed)-5))
 	}
-	return fmt.Errorf("a test ran git on the repository GIT_DIR names; it changed %s; clear git's variables in the package's TestMain (src/internal/gitenv)", strings.Join(changed, ", "))
+	return fmt.Errorf("a test ran git on the repository GIT_DIR names; it changed %s; run git through io/git (src/modules/io/git), or clear git's variables in the package's TestMain (git.Clear)", strings.Join(changed, ", "))
 }
 
 // snapshot is every file in the decoy's git folder, by path, with its hash.
@@ -105,22 +100,4 @@ func (d *Decoy) snapshot() (map[string][32]byte, error) {
 		files[filepath.ToSlash(rel)] = sha256.Sum256(text)
 	}
 	return files, nil
-}
-
-// Isolated is env without git's repository variables.
-func Isolated(env []string) []string {
-	var kept []string
-	for _, kv := range env {
-		name, _, _ := strings.Cut(kv, "=")
-		drop := false
-		for _, v := range gitenv.Vars {
-			if name == v {
-				drop = true
-			}
-		}
-		if !drop {
-			kept = append(kept, kv)
-		}
-	}
-	return kept
 }

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/rules"
+	"github.com/mb-89/SE/src/modules/io/disk"
 )
 
 // check writes files into a fresh folder and answers what the rule named found there.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // closeIssue closes issue n on the fake GitHub, as a merged PR would.
@@ -45,7 +45,7 @@ func TestRecordWritesTheWorkerOnce(t *testing.T) {
 	t.Parallel()
 	w := Worker{Session: "s1", Workspace: "/b/issue-2"}
 	gh := recorded(t, map[string]string{"repos/o/r/issues/2": `{"number":2}`, "repos/o/r/issues/3": `{"number":3}`})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if err := s.record(2, w); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestAReviewIsDoneByAnAgentThatWorkedNoneOfTheTree(t *testing.T) {
 		subsPath(1): subs(2),
 	}
 	gh := recorded(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 
 	// Before the leaf lands, #1 is not ready for review.
 	if tr, err := s.In(1); err != nil || !reflect.DeepEqual(numbers(tr.Ready), []int{2}) || len(tr.Review) != 0 {
@@ -195,7 +195,7 @@ func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
 		commentsPath(4): workedBy(Worker{Session: "w", Workspace: "/w"}),
 	}
 	gh := recorded(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	r := Worker{Session: "r", Workspace: "/r"}
 	for _, c := range []struct {
 		n    int

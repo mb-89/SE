@@ -48,7 +48,7 @@ Whether they agree is unknown.`},
 func TestStatusSaysTheCommitsThePluginNames(t *testing.T) {
 	t.Parallel()
 	repo := checkout(t, "main")
-	head, err := update.Head(worldOf(t).Proc, repo)
+	head, err := update.Head(worldOf(t).Git, repo)
 	if err != nil {
 		t.Fatal(err)
 	}

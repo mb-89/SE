@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // moot is box a on issue-6, whose work main got from commit fix before the
@@ -23,7 +23,7 @@ func moot(t *testing.T, answers map[string]string) (s Source, gh *github.Fake, a
 	run(t, a, "push", "-q", "origin", "main")
 	run(t, a, "checkout", "-q", "issue-6")
 	gh = landGH(t, answers)
-	return Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}, gh, a, fix
+	return Source{Git: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: disk.NewFake()}, gh, a, fix
 }
 
 func TestFixedByClosesTheIssueNamingTheCommitOnMain(t *testing.T) {

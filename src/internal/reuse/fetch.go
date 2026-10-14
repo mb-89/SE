@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
 )
 
 // Repos is the folder under a fetch's target that keeps the repositories it
@@ -19,13 +19,13 @@ const Repos = ".repos"
 // into/<name>, each lone skill as into/adopted/skills/<name> beside the
 // adopted plugin's manifest. A folder there that no source names any more is
 // removed. It answers one line per source.
-func Fetch(p proc.Procs, d disk.Disk, into string, sources []Source) ([]string, error) {
+func Fetch(g git.Git, d disk.Disk, into string, sources []Source) ([]string, error) {
 	repos := filepath.Join(into, Repos)
 	if err := d.MkdirAll(repos); err != nil {
 		return nil, err
 	}
-	git := func(dir string, args ...string) error {
-		out, err := proc.Combined(p, proc.Cmd{Name: "git", Args: append([]string{"-C", dir}, args...)})
+	run := func(dir string, args ...string) error {
+		out, err := git.Combined(g, "", append([]string{"-C", dir}, args...)...)
 		if err != nil {
 			return fmt.Errorf("git %s: %v %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 		}
@@ -46,11 +46,11 @@ func Fetch(p proc.Procs, d disk.Disk, into string, sources []Source) ([]string, 
 			if err := d.MkdirAll(repo); err != nil {
 				return lines, err
 			}
-			if err := git(repo, "init", "-q"); err != nil {
+			if err := run(repo, "init", "-q"); err != nil {
 				return lines, err
 			}
 		}
-		if err := git(repo, "fetch", "-q", "--depth", "1", "https://github.com/"+s.Repo, s.Commit); err != nil {
+		if err := run(repo, "fetch", "-q", "--depth", "1", "https://github.com/"+s.Repo, s.Commit); err != nil {
 			return lines, fmt.Errorf("%s: %w", s.Name, err)
 		}
 		target := filepath.Join(into, s.Name)
@@ -70,7 +70,7 @@ func Fetch(p proc.Procs, d disk.Disk, into string, sources []Source) ([]string, 
 			tree += ":" + clean
 		}
 		// A tree checked out into its own work tree lands at target's root.
-		if err := git(repo, "--work-tree="+target, "checkout", "-q", tree, "--", "."); err != nil {
+		if err := run(repo, "--work-tree="+target, "checkout", "-q", tree, "--", "."); err != nil {
 			return lines, fmt.Errorf("%s: %w", s.Name, err)
 		}
 		lines = append(lines, fmt.Sprintf("%s: %s %s at %s (%s), as the plugin %s", s.Name, s.Repo, s.Path, s.Commit[:12], s.Licence, s.Plugin()))

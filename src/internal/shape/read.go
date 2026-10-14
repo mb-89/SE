@@ -5,8 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // ScriptsDir is where ad hoc scripts live, relative to a checkout.
@@ -20,7 +21,7 @@ const logFormat = "--format=\x1e%H\x1f%ct\x1f%s"
 // (testdata left out), the scripts, the module's path, what deadcode reaches
 // in production alone, the tracked files and the history of main. A missing
 // deadcode is said, not failed on: the facts are advice.
-func Read(d disk.Disk, p proc.Procs, dir string) (Input, error) {
+func Read(d disk.Disk, p proc.Procs, g git.Git, dir string) (Input, error) {
 	in := Input{Files: map[string][]byte{}, Scripts: map[string][]byte{}}
 	mod, err := d.ReadFile(filepath.Join(dir, "src", "go.mod"))
 	if err != nil {
@@ -60,12 +61,12 @@ func Read(d disk.Disk, p proc.Procs, dir string) (Input, error) {
 			in.Unrun = "deadcode is not installed: sh tests/tools.sh install installs it"
 		}
 	}
-	tracked, err := proc.Output(p, proc.Cmd{Name: "git", Args: []string{"ls-files"}, Dir: dir})
+	tracked, err := git.Output(g, dir, "ls-files")
 	if err != nil {
 		return Input{}, err
 	}
 	in.Tracked = strings.Split(tracked, "\n")
-	if in.Log, err = proc.Output(p, proc.Cmd{Name: "git", Args: []string{"log", "--first-parent", "-m", "--name-only", logFormat, "HEAD"}, Dir: dir}); err != nil {
+	if in.Log, err = git.Output(g, dir, "log", "--first-parent", "-m", "--name-only", logFormat, "HEAD"); err != nil {
 		return Input{}, err
 	}
 	return in, nil

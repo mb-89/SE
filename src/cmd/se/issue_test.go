@@ -16,11 +16,11 @@ import (
 
 	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/battery"
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/github"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/github"
+	sehttp "github.com/mb-89/SE/src/modules/io/http"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // hubAt hands every call a fake GitHub, seeded from recorded answers, until
@@ -343,11 +343,12 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	put(t, d, answers, "done: one\ntimeline: two\n")
 	checked := ""
 	// The check records the tree it passed, as tests/check.sh does.
-	worldOf(t).Check = func(procs proc.Procs, dir string) error {
+	repos := worldOf(t).Git
+	worldOf(t).Check = func(_ proc.Procs, dir string) error {
 		checked = dir
-		tree, err := battery.Tree(procs, dir)
+		tree, err := battery.Tree(repos, dir)
 		if err == nil {
-			_, err = battery.Pass(d, procs, dir, tree)
+			_, err = battery.Pass(d, repos, dir, tree)
 		}
 		return err
 	}

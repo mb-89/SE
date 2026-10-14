@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // node is an open se issue with subs sub-issues; labels are its labels beyond se.
@@ -59,7 +59,7 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 		subsPath(1): subs(2, 3),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	next, ok, err := s.Next()
 	if err != nil || !ok || next.Number != 1 || !next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
@@ -113,7 +113,7 @@ func TestInOffersTheReadyLeavesAtAnyDepth(t *testing.T) {
 		activity(15):    pushed(fresh),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +167,7 @@ func TestParentsCloseByThemselvesDeepestFirst(t *testing.T) {
 		subsPath(2): subs(-4, -5),
 		subsPath(6): subs(7, -8),
 	})
-	if err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).CloseParents(); err != nil {
+	if err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}).CloseParents(); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"POST repos/o/r/issues/2/comments", "PATCH repos/o/r/issues/2", "POST repos/o/r/issues/1/comments", "PATCH repos/o/r/issues/1"}
@@ -197,7 +197,7 @@ func TestAReviewParentNeverClosesByItself(t *testing.T) {
 		blockedPath(5): subs(2),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()} // a write would not be recorded
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()} // a write would not be recorded
 	tr, err := s.In(1)
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestAReviewAtTheTopIsTakenByAnyBox(t *testing.T) {
 		subsPath(2): subs(-3),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if next, ok, err := s.Next(); err != nil || !ok || next.Number != 2 || !next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
@@ -262,12 +262,12 @@ func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
 		subsPath(1): subs(2, 3),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
-	if ok, err := (Source{Proc: machine}).claimTree(a, 1); err != nil || !ok {
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	if ok, err := (Source{Git: machine}).claimTree(a, 1); err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
 	// Another box picks the tree up from its claim.
-	if ok, err := (Source{Proc: machine}).claimTree(b, 1); err != nil || !ok {
+	if ok, err := (Source{Git: machine}).claimTree(b, 1); err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
 	if got := run(t, b, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-1" {
@@ -305,7 +305,7 @@ func TestInSaysWhenTheRootHasClosed(t *testing.T) {
 		subsPath(1): subs(-2),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	if tr, err := s.In(1); err != nil || !tr.Closed {
 		t.Fatalf("%+v %v", tr, err)
 	}
@@ -334,7 +334,7 @@ func shell(t *testing.T, dir, line string) {
 func TestTheWorktreeCommandStartsFromTheNewestBranchAndMain(t *testing.T) {
 	t.Parallel()
 	origin, a, b := boxes(t)
-	if ok, err := (Source{Proc: machine, Worktrees: true}).Claim(a, 4); err != nil || !ok {
+	if ok, err := (Source{Git: machine, Worktrees: true}).Claim(a, 4); err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
 	wt := WorktreeDir(a, 4)
@@ -390,7 +390,7 @@ func TestAHoldWhoseIssueClosedClosesItself(t *testing.T) {
 		"repos/o/r/issues/95": `{"number":95,"state":"closed"}`,
 		"repos/o/r/issues/96": `{"number":96,"state":"open"}`,
 	})
-	if err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).CloseParents(); err != nil {
+	if err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}).CloseParents(); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"POST repos/o/r/issues/134/comments", "PATCH repos/o/r/issues/134"}
@@ -401,7 +401,7 @@ func TestAHoldWhoseIssueClosedClosesItself(t *testing.T) {
 		t.Fatalf("#134: %+v %+v", i, c)
 	}
 	// hold marks the issue it mints with the issue it holds.
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	made, err := s.hold(Issue{Number: 5, Title: "t5", URL: "u5"}, "Stuck.")
 	if err != nil {
 		t.Fatal(err)

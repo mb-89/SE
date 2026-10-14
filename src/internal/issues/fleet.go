@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // The kinds of finding se fleet check lists, in the order it lists them and

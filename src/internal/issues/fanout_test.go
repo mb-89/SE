@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/issues"
+	"github.com/mb-89/SE/src/modules/io/http"
 )
 
 const trigger = "https://api.example/v1/routines/r1/fire"

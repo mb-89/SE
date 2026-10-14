@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/daemon"
-	"github.com/mb-89/SE/src/internal/io/clock"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	sehttp "github.com/mb-89/SE/src/modules/io/http"
 )
 
 // TestStatusAndStopReachTheDaemonOverTheNetwork serves a daemon on a fake

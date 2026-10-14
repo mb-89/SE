@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/modules/io/clock"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 const (
@@ -100,7 +100,7 @@ func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 	a := claimed7(t)
 	// Nothing was pushed to issue-7 within the lease: no box works it.
 	g := newPulls(t, atNow(), stale, pr70("false", "dirty"))
-	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
+	took, ok, err := Source{Git: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || *took.Takeover != (Takeover{PR: 70, URL: "p70", Count: 1}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -120,7 +120,7 @@ func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 	// Named with --take N, the issue named is taken, and no PR is asked.
 	g = newPulls(t, atNow(), stale)
 	_, b, _ := boxes(t)
-	if took, ok, err := (Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}).Take(b, 5); err != nil || !ok || took.Number != 5 || took.Takeover != nil {
+	if took, ok, err := (Source{Git: machine, Repo: repo, GitHub: g, Clock: atNow()}).Take(b, 5); err != nil || !ok || took.Number != 5 || took.Takeover != nil {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 }
@@ -144,7 +144,7 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 			}
 			told = append(told, note)
 		}
-		took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: c, Waits: waits}.Take(a, 0)
+		took, ok, err := Source{Git: machine, Repo: repo, GitHub: g, Clock: c, Waits: waits}.Take(a, 0)
 		paused := int(c.Now().Sub(now) / pause)
 		if len(told) != paused || paused > 0 && !strings.Contains(told[0], "PR #70") {
 			t.Errorf("%s: paused %d times, told %q", name, paused, told)
@@ -164,7 +164,7 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 	a := claimed7(t)
 	c := atNow()
 	g := newPulls(t, c, stale, pr70("null", "unknown"), pr70("false", "dirty"))
-	if took, ok, err := (Source{Proc: machine, Repo: repo, GitHub: g, Clock: c}).Take(a, 0); err != nil || !ok || took.Number != 7 {
+	if took, ok, err := (Source{Git: machine, Repo: repo, GitHub: g, Clock: c}).Take(a, 0); err != nil || !ok || took.Number != 7 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 }
@@ -185,7 +185,7 @@ func TestASecondConflictAtANewHeadIsTakenOverAgain(t *testing.T) {
 	g := newPulls(t, atNow(), "", pr70("false", "dirty"))
 	// The first takeover found head 0ld; the PR conflicts again at abc.
 	lately(t, g, "Taken over.\n<!-- se:takeover 1 -->\n<!-- se:takeover-head 0ld -->")
-	s := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: g, Clock: atNow()}
 	took, ok, err := s.Take(a, 0)
 	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || *took.Takeover != (Takeover{PR: 70, URL: "p70", Count: 2}) {
 		t.Fatalf("took %+v %v %v", took, ok, err)
@@ -206,7 +206,7 @@ func TestATakeoverInFlightIsLeftToItsBox(t *testing.T) {
 	g := newPulls(t, atNow(), "", pr70("false", "dirty"))
 	// A box took #7 over at this very head and has not landed the merge yet.
 	lately(t, g, "<!-- se:takeover 1 -->\n<!-- se:takeover-head abc -->")
-	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
+	took, ok, err := Source{Git: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 || len(g.Writes()) != 0 {
 		t.Fatalf("took %+v %v %v, writes %q", took, ok, err, g.Writes())
 	}
@@ -219,7 +219,7 @@ func TestOfTwoBoxesTakingOverAtOnceTheFirstMarkerWins(t *testing.T) {
 	// A takeover of #7 at an older head, within the lease, keeps it from being stuck.
 	lately(t, g, "<!-- se:takeover 1 -->\n<!-- se:takeover-head 0ld -->")
 	other := "<!-- se:takeover 2 -->\n<!-- se:takeover-head abc -->"
-	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: &racer{g, other}, Clock: atNow()}.Take(a, 0)
+	took, ok, err := Source{Git: machine, Repo: repo, GitHub: &racer{g, other}, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -236,7 +236,7 @@ func TestAConflictAfterAStuckTakeoverIsTakenOverAndStaysFinal(t *testing.T) {
 	// #7 was taken over once already, stuck, so it is final; its PR now conflicts.
 	finalSeven(t, g)
 	lately(t, g, "<!-- se:takeover 1 -->\nTaken over: nothing was pushed.")
-	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
+	took, ok, err := Source{Git: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || took.Takeover.Count != 2 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -251,7 +251,7 @@ func TestAConflictPushedToWithinTheLeaseIsRefused(t *testing.T) {
 	_, a, _ := boxes(t)
 	// A live box pushed to issue-7 an hour ago: its conflict is its own.
 	g := newPulls(t, atNow(), fresh, pr70("false", "dirty"))
-	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
+	took, ok, err := Source{Git: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
 	if err != nil || !ok || took.Number != 5 || took.Takeover != nil {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}

@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // ProgramsAllowlist names the places that still start a program proc.Programs
@@ -18,12 +18,12 @@ import (
 const ProgramsAllowlist = "src/internal/rules/programs.txt"
 
 // procPackage is the proc I/O module's import path, whose Cmd names a program.
-const procPackage = "github.com/mb-89/SE/src/internal/io/proc"
+const procPackage = "github.com/mb-89/SE/src/modules/io/proc"
 
 func init() {
 	register(Rule{
 		Name: "programs",
-		Doc: "no Go file starts a program but those proc.Programs lists (src/internal/io/proc), " +
+		Doc: "no Go file starts a program but those proc.Programs lists (src/modules/io/proc), " +
 			"and none but the proc I/O module calls os/exec, except as " + ProgramsAllowlist + " names; an entry there that matches nothing is refused",
 		Applies: func(p string) bool {
 			return p == ProgramsAllowlist || (path.Ext(p) == ".go" && !strings.HasSuffix(p, "_test.go"))
@@ -68,7 +68,7 @@ func Starts(p string, text []byte) []Reach {
 	if err != nil {
 		return nil
 	}
-	inProc := strings.HasPrefix(p, "src/internal/io/proc/")
+	inProc := strings.HasPrefix(p, "src/modules/io/proc/")
 	procName, execName := "", ""
 	for _, im := range f.Imports {
 		ip, _ := strconv.Unquote(im.Path.Value)

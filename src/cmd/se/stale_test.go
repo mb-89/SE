@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/update"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // sePlugin is a fake git's SE checkout, whose origin/main stands at main and
@@ -46,7 +47,7 @@ func onPlugin(t *testing.T, built, main string, contains map[string]bool) *sePlu
 	p := &sePlugin{dir: t.TempDir(), main: main, contains: contains}
 	put(t, worldOf(t).Disk, filepath.Join(p.dir, update.ModuleDir, "go.mod"), "module "+update.Module+"\n")
 	m := proc.NewFake()
-	m.Install("git", p.git)
+	worldOf(t).Git = git.NewFake(p.git)
 	m.RunAs(filepath.Join(p.dir, "src", "plugin", "bin", "se"))
 	onMachine(t, m)
 	worldOf(t).Commit = built
@@ -89,7 +90,7 @@ func TestStaleSeLetsATakeGoWhereMainIsInTheBuildOrNobodyKnows(t *testing.T) {
 func TestStaleSeLetsATakeGoOutsideAnSECheckout(t *testing.T) {
 	t.Parallel()
 	m := proc.NewFake()
-	m.Install("git", func(proc.Cmd) int { t.Error("git ran outside an SE checkout"); return 1 })
+	worldOf(t).Git = git.NewFake(func(proc.Cmd) int { t.Error("git ran outside an SE checkout"); return 1 })
 	m.RunAs(filepath.Join(t.TempDir(), "src", "plugin", "bin", "se"))
 	onMachine(t, m)
 	worldOf(t).Commit = aaa

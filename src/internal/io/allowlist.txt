@@ -1,6 +1,0 @@
-# The io-module rule's allowlist (src/internal/rules/iomodule.go, spec/io.md):
-# each line is a Go file outside src/internal/io and one way it still reaches
-# the outside directly. The list only shrinks: each I/O module removes its own
-# entries as it lands, and the rule refuses an entry that matches nothing.
-# Adding an entry is no way to pass the check.
-

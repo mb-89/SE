@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/modules/io/disk"
 )
 
 // RetroLabel and OverhaulLabel mark the issues that run a retro and an overhaul.

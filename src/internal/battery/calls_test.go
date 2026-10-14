@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/battery"
-	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/modules/io/disk"
 )
 
 const classes = `classes:

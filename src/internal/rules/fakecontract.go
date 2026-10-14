@@ -10,7 +10,7 @@ import (
 )
 
 // ioRoot is the folder every I/O module is a package under.
-const ioRoot = "src/internal/io/"
+const ioRoot = "src/modules/io/"
 
 func init() {
 	register(Rule{

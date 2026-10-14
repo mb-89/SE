@@ -47,7 +47,7 @@ func queueRepo(t *testing.T) map[string]string {
 func TestTheQueueEstimateFollowsThePaceAndNamesTheChain(t *testing.T) {
 	t.Parallel()
 	gh := recorded(t, queueRepo(t))
-	q, nodes, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Queue(0, PaceWindow)
+	q, nodes, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Queue(0, PaceWindow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestAStuckClaimDoesNotCountAsRunning(t *testing.T) {
 	t.Parallel()
 	a := queueRepo(t)
 	a[activity(4)] = pushed(stale)
-	q, _, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Queue(0, PaceWindow)
+	q, _, err := Source{Git: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Queue(0, PaceWindow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestWideWorkOutlastsTheChainWithFewRunning(t *testing.T) {
 	a := queueRepo(t)
 	a[refsPath] = `[]`
 	gh := recorded(t, a)
-	q, _, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Queue(0, PaceWindow)
+	q, _, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Queue(0, PaceWindow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestATreesChainCountsItsParentsBlockersAndItsReview(t *testing.T) {
 		blockedPath(20): subs(23),
 		blockedPath(22): subs(21),
 	})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	q, _, err := s.Queue(0, PaceWindow)
 	if err != nil {
 		t.Fatal(err)

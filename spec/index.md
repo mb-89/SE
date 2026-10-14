@@ -138,11 +138,11 @@ embedded from there.
 | an instance | its name and its module, such as `issues: { module: issues }`, or nested, such as `issues/pull: { module: issues/pull }`. One module can run as two instances with different config |
 | a wire to a name | `issues.open: issues/open`. Ports bound to one name meet there, and neither side knows the other |
 | a wire port to port | `briefing.open: issues.open` |
-| a wire to a family | `session.events: session/<id>/events`: a family output to a name with one key segment, read at a key as `session/s1/events`. A plain output to a family, a family output to a plain name, two families holding the same names, or a name inside a family, the start refuses |
+| a wire to a family | `io/session.events: session/<id>/events`: a family output to a name with one key segment, read at a key as `session/s1/events`. A plain output to a family, a family output to a plain name, two families holding the same names, or a name inside a family, the start refuses |
 | an output with no wire | readable as `<instance>/<port>`, a family output as `<instance>/<key>/<port>` |
 | an input with no wire | the start refuses, unless the wiring marks it `built-in` |
 | a config value | `issues: { config: { lease: 3h } }`, under `<instance>/config/<key>` |
-| a request port | bound to an I/O module's verb, such as `issues.create: github.create-issue` |
+| a request port | bound to an I/O module's verb, such as `issues.create: io/github.create-issue` |
 
 The file is embedded in the `se` binary, so an installed `se` carries the
 wiring it was built with, and the daemon reads it at start. A change to the

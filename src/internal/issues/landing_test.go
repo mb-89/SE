@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
 )
 
 func TestTheLandingQuestionsAreTheSpecsList(t *testing.T) {
@@ -46,7 +46,7 @@ func TestLandRefusesAnswersMissingEmptyOrUnknown(t *testing.T) {
 		{map[string]string{"done": "x", "left": "none", "extra": "y", "also": "z"}, "not in spec/landing.yaml: also, extra"},
 	} {
 		checked := false
-		_, err := Source{Proc: machine, Repo: repo, GitHub: never{t}, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, c.answers, func(string) error { checked = true; return nil })
+		_, err := Source{Git: machine, Repo: repo, GitHub: never{t}, Clock: atNow(), Disk: disk.NewFake()}.Land(a, "", qs, c.answers, func(string) error { checked = true; return nil })
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "nothing was pushed") || checked {
 			t.Errorf("%v: %v, checked %v", c.answers, err, checked)
 		}
@@ -119,7 +119,7 @@ func TestLandingFactsCountCommitsMergesAndTakeovers(t *testing.T) {
 		comments6: `[{"id":5,"body":"<!-- se:takeover 1 -->\nTaken over."}]`,
 	})
 	d := disk.NewFake()
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}).Land(a, "", qs, full, battered(d)); err != nil {
+	if _, err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}).Land(a, "", qs, full, battered(d)); err != nil {
 		t.Fatal(err)
 	}
 	c := commentsAt(t, gh, 6)
@@ -142,7 +142,7 @@ func TestLandAgainUpdatesTheLandingComment(t *testing.T) {
 		comments6: `[{"id":5,"body":"Worked by someone."},{"id":77,"body":"<!-- se:landing -->\nolder answers"}]`,
 	})
 	d := disk.NewFake()
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered(d)); err != nil {
+	if _, err := (Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered(d)); err != nil {
 		t.Fatal(err)
 	}
 	patched := 0

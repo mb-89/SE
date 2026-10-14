@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/mb-89/SE/src/index"
-	"github.com/mb-89/SE/src/internal/io/github"
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
+	"github.com/mb-89/SE/src/modules/io/github"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 func init() {
@@ -19,7 +19,7 @@ func init() {
 		Usage:   "fleet check [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Summary: "list what is broken in the fleet, each with its remedy",
-		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, a bare issue (in no manifest), an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says healthy. Where GitHub's answers say the hour's quota of requests has fallen below the github instance's quota-floor share (github/config/quota-floor), a last line says how many are left and when it resets. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
+		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, a bare issue (in no manifest), an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says healthy. Where GitHub's answers say the hour's quota of requests has fallen below the io/github instance's quota-floor share (io/github/config/quota-floor), a last line says how many are left and when it resets. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
 		Session: true,
 		Flags:   []index.Flag{repoFlag},
 		JSON:    true,
@@ -232,11 +232,11 @@ func init() {
 // spec/budgets.yaml's budgets and proc.Programs, which a PR opened before
 // main changed them breaks without breaking a rule. The rules workflow
 // triggers on each of their sources (rulesWorkflowPaths).
-var mergeTests = []string{"./cmd/se", "./internal/battery/...", "./internal/io/proc/..."}
+var mergeTests = []string{"./cmd/se", "./internal/battery/...", "./modules/io/proc/..."}
 
 // rulesWorkflowPaths are the paths whose change on main runs se fleet rules:
 // se's rules, and what mergeTests check.
-var rulesWorkflowPaths = []string{"src/internal/rules/**", "tests/check.sh", "src/internal/battery/**", "spec/budgets.yaml", "src/internal/io/proc/**"}
+var rulesWorkflowPaths = []string{"src/internal/rules/**", "tests/check.sh", "src/internal/battery/**", "spec/budgets.yaml", "src/modules/io/proc/**"}
 
 // rulesOn builds se from the checkout at dir and runs its se rules and the
 // tests of mergeTests there, answering the findings without their timings;

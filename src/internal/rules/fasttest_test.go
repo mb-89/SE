@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/rules"
+	"github.com/mb-89/SE/src/modules/io/disk"
 )
 
 func TestEveryTestRunsInParallelOffTheWallClock(t *testing.T) {
@@ -16,9 +16,9 @@ func TestEveryTestRunsInParallelOffTheWallClock(t *testing.T) {
 		"src/a/a_test.go": "package a_test\n\nimport \"testing\"\n\nfunc TestFast(t *testing.T) {\n\tt.Parallel()\n}\n\n" +
 			"func TestSerial(t *testing.T) {\n\tt.Log()\n\tt.Parallel()\n}\n\nfunc TestEmpty(t *testing.T) {}\n\n" +
 			"func TestMain(m *testing.M) {}\n\nfunc Testing(t *testing.T) {}\n\nfunc helper(t *testing.T) {}\n\nfunc BenchmarkX(b *testing.B) {}\n",
-		"src/a/clock_test.go": "package a_test\n\nimport (\n\t\"testing\"\n\ttm \"time\"\n\n\t\"github.com/mb-89/SE/src/internal/io/clock\"\n)\n\n" +
+		"src/a/clock_test.go": "package a_test\n\nimport (\n\t\"testing\"\n\ttm \"time\"\n\n\t\"github.com/mb-89/SE/src/modules/io/clock\"\n)\n\n" +
 			"func TestClock(q *testing.T) {\n\tq.Parallel()\n\t_ = tm.Now()\n\ttm.Sleep(tm.Second)\n\t_ = clock.Real()\n\t_ = tm.Now()\n}\n",
-		"src/internal/io/clock/real_test.go": "package clock_test\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\n" +
+		"src/modules/io/clock/real_test.go": "package clock_test\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\n" +
 			"func TestReal(t *testing.T) {\n\tt.Parallel()\n\t_ = time.Now()\n}\n\nfunc TestSlow(t *testing.T) {}\n",
 		"src/a/kept_test.go":            "package a_test\n\nimport \"testing\"\n\nfunc TestKept(t *testing.T) {}\n",
 		"src/a/a.go":                    "package a\n\nimport \"testing\"\n\nfunc TestNotATestFile(t *testing.T) {}\n",
@@ -31,7 +31,7 @@ func TestEveryTestRunsInParallelOffTheWallClock(t *testing.T) {
 		"src/a/clock_test.go:12: fast-test: time.Now reaches the wall clock in a test",
 		"src/a/clock_test.go:13: fast-test: time.Sleep reaches the wall clock in a test",
 		"src/a/clock_test.go:14: fast-test: clock.Real reaches the wall clock in a test",
-		"src/internal/io/clock/real_test.go:13: fast-test: TestSlow does not call t.Parallel first",
+		"src/modules/io/clock/real_test.go:13: fast-test: TestSlow does not call t.Parallel first",
 	})
 }
 

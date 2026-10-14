@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // briefAnswers is gate #1 holding #2, a parent of #3, and #5; main is at
@@ -66,7 +66,7 @@ func asked(t *testing.T, answers map[string]string) (github.GitHub, *[]string) {
 func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 	t.Parallel()
 	gh, paths := asked(t, briefAnswers())
-	b, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Brief(1, false)
+	b, err := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Brief(1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestTheBriefWithholdsTheWorkersAccounts(t *testing.T) {
 
 	// Once the findings are verified, --claims shows them, as claims.
 	gh, _ = asked(t, briefAnswers())
-	b, err = Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Brief(1, true)
+	b, err = Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Brief(1, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestTheBriefOfAReReviewNamesTheEarlierBlockersAndTheDiff(t *testing.T) {
 	answers[commentsPath(1)] = fmt.Sprintf(`[{"body":%q}]`, earlier.render(Worker{Session: "r", Workspace: "/r"}, MaxFiled))
 	// Without a principles file, the brief says so.
 	delete(answers, "repos/o/r/contents/spec/principles.md?ref=abc")
-	s := Source{Proc: machine, Repo: repo, GitHub: recorded(t, answers), Clock: atNow()}
+	s := Source{Git: machine, Repo: repo, GitHub: recorded(t, answers), Clock: atNow()}
 	b, err := s.Brief(1, false)
 	if err != nil {
 		t.Fatal(err)

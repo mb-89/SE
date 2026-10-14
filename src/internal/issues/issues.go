@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/github"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // Label marks an issue as the fleet's work.
@@ -74,8 +74,8 @@ type Source struct {
 	Clock clock.Clock
 	// Disk is what checkouts' files are read from.
 	Disk disk.Disk
-	// Proc runs git in the checkouts the source claims, picks up and lands from.
-	Proc proc.Procs
+	// Git runs git in the checkouts the source claims, picks up and lands from.
+	Git git.Git
 	// Flagged hears of each issue the sweep gave to a person, and why.
 	Flagged func(i Issue, reason string)
 	// Waits hears what the source waits on, and for how long, before each
@@ -1075,9 +1075,9 @@ func (s Source) stakeFrom(dir string, n int, base string) (claimed bool, err err
 
 // Repo reads OWNER/NAME from the checkout's origin URL, whatever its form:
 // https://github.com/o/n.git, git@github.com:o/n, or a proxy's …/o/n. It
-// runs git on p.
-func Repo(p proc.Procs, dir string) (string, error) {
-	url, err := Source{Proc: p}.git(dir, "remote", "get-url", "origin")
+// runs git on g.
+func Repo(g git.Git, dir string) (string, error) {
+	url, err := git.Output(g, dir, "remote", "get-url", "origin")
 	if err != nil {
 		return "", err
 	}
@@ -1091,5 +1091,5 @@ func Repo(p proc.Procs, dir string) (string, error) {
 
 // git runs git in the checkout dir and answers what it printed, trimmed.
 func (s Source) git(dir string, args ...string) (string, error) {
-	return proc.Output(s.Proc, proc.Cmd{Name: "git", Args: args, Dir: dir})
+	return git.Output(s.Git, dir, args...)
 }

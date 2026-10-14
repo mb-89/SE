@@ -3,8 +3,9 @@ package main
 import (
 	"fmt"
 
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/update"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // staleSE refuses a take by an se built from a commit main has moved past,
@@ -17,19 +18,17 @@ func staleSE(w *World) error {
 	if built == "" || repo == "" || !update.IsCheckout(w.Disk, repo) {
 		return nil
 	}
-	git := func(args ...string) (string, error) {
-		return proc.Output(w.Proc, proc.Cmd{Name: "git", Args: args, Dir: repo})
-	}
-	if _, err := git("fetch", "-q", "origin", "main"); err != nil {
+	run := func(args ...string) (string, error) { return git.Output(w.Git, repo, args...) }
+	if _, err := run("fetch", "-q", "origin", "main"); err != nil {
 		return nil
 	}
-	main, err := git("rev-parse", "origin/main")
+	main, err := run("rev-parse", "origin/main")
 	if err != nil || main == built {
 		return nil
 	}
 	// --is-ancestor exits 1 where main is not in the build, and 128 where
 	// it cannot tell, such as a build from a commit this checkout lacks.
-	_, err = git("merge-base", "--is-ancestor", main, built)
+	_, err = run("merge-base", "--is-ancestor", main, built)
 	if code, _ := proc.ExitCode(err); code != 1 {
 		return nil
 	}

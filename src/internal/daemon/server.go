@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/index"
-	"github.com/mb-89/SE/src/internal/io/clock"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
-	"github.com/mb-89/SE/src/internal/io/session"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	sehttp "github.com/mb-89/SE/src/modules/io/http"
+	"github.com/mb-89/SE/src/modules/io/session"
 )
 
 // Event is one post of the bridgehead: a session event as the engine raised it.

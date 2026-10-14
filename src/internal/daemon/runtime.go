@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/modules/io/disk"
 )
 
 // ProtocolVersion is what the bridgehead and the daemon agree on.

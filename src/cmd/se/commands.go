@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,12 +14,14 @@ import (
 	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/guidance"
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/github"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/env"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/github"
+	sehttp "github.com/mb-89/SE/src/modules/io/http"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // Command is one word se answers. A command is one file that calls register
@@ -128,16 +129,17 @@ type World struct {
 	Clock clock.Clock
 	// Disk is what the command reads and writes files on.
 	Disk disk.Disk
-	// Proc runs the programs the command starts: git, go, check.sh, the daemon.
+	// Proc runs the programs the command starts: go, check.sh, the daemon.
 	Proc proc.Procs
+	// Git runs git on the checkouts the command reads and changes.
+	Git git.Git
 	// Net is the network the command serves and calls on.
 	Net sehttp.Net
 	// GitHub is where the command reads and writes issues and pull requests.
 	GitHub github.GitHub
-	// Getenv reads one variable of the environment se runs in; Environ
-	// answers all of it, for the programs se starts.
-	Getenv  func(key string) string
-	Environ func() []string
+	// Env is the environment se runs in: Getenv reads one variable, Environ
+	// all of it, for the programs se starts.
+	env.Env
 	// Commit is the SE commit this se was built from, "" where the build did not say.
 	Commit string
 	// Check is what issue land runs before it pushes, on procs: the repo's one
@@ -149,9 +151,10 @@ type World struct {
 
 // realWorld is what se reaches when it runs for real.
 func realWorld() *World {
+	vars, procs := env.Real(), proc.Listed(proc.Real())
 	return &World{
-		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Listed(proc.Real()), Net: sehttp.Real(), GitHub: github.Real(),
-		Getenv: os.Getenv, Environ: os.Environ, Commit: commit, Check: check,
+		Clock: clock.Real(), Disk: disk.Real(), Proc: procs, Git: git.Real(procs, vars), Net: sehttp.Real(), GitHub: github.Real(),
+		Env: vars, Commit: commit, Check: check,
 		Guided: guidance.Configured,
 	}
 }
@@ -214,11 +217,11 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	session := fs.Bool("session", false, "called by the plugin from a session: answer JSON")
 	workspace := fs.String("workspace", ".", "the workspace the daemon serves")
 	if err := fs.Parse(args); err != nil {
-		fmt.Fprintf(stderr, "se: %v\n%s\n", err, help(false, colors(stderr)))
+		fmt.Fprintf(stderr, "se: %v\n%s\n", err, help(false, colors(w, stderr)))
 		return 2
 	}
 	// The help is coloured on a terminal alone, never in a session's answer.
-	color, errColor := !*session && colors(stdout), !*session && colors(stderr)
+	color, errColor := !*session && colors(w, stdout), !*session && colors(w, stderr)
 	call := &Call{Workspace: *workspace, Session: *session, Color: color, World: *w}
 	name, words := "", []string(nil)
 	if fs.NArg() > 0 {
@@ -304,7 +307,7 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// githubSettings is the github instance's config, as the wiring file se
+// githubSettings is the io/github instance's config, as the wiring file se
 // carries gives it; a wiring that does not give it is a broken se, which the
 // battery's tests catch before a merge.
 func githubSettings() github.Settings {

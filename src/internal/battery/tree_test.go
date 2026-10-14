@@ -6,8 +6,9 @@ import (
 	"testing"
 
 	"github.com/mb-89/SE/src/internal/battery"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // worktree is a fake git's checkout at /w: what git status says of it, and the tree its HEAD names.
@@ -34,8 +35,7 @@ const (
 func TestTheBatteryRecordsTheCleanTreeItPassed(t *testing.T) {
 	t.Parallel()
 	w := &worktree{tree: treeA}
-	m := proc.NewFake()
-	m.Install("git", w.git)
+	m := git.NewFake(w.git)
 	d := disk.NewFake()
 	started, err := battery.Tree(m, "/w")
 	if err != nil || started != treeA {
@@ -52,8 +52,7 @@ func TestTheBatteryRecordsTheCleanTreeItPassed(t *testing.T) {
 func TestTheBatteryRecordsNoTreeItDidNotRunOverWhole(t *testing.T) {
 	t.Parallel()
 	w := &worktree{tree: treeA, dirty: " M x\n"}
-	m := proc.NewFake()
-	m.Install("git", w.git)
+	m := git.NewFake(w.git)
 	d := disk.NewFake()
 	// A dirty worktree is no tree.
 	if started, err := battery.Tree(m, "/w"); err != nil || started != "" {

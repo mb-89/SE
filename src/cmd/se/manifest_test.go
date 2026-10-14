@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // prose makes a git workspace holding files, and answers its folder.
@@ -205,8 +206,7 @@ func TestAManifestReadsItsOwnersFromTheDisk(t *testing.T) {
 
 func TestTheRulesSeeWhatGitTracksAndIgnores(t *testing.T) {
 	t.Parallel()
-	m := proc.NewFake()
-	m.Install("git", func(c proc.Cmd) int {
+	g := git.NewFake(func(c proc.Cmd) int {
 		args := strings.Join(c.Args, " ")
 		switch {
 		case c.Dir != "/ws":
@@ -219,7 +219,7 @@ func TestTheRulesSeeWhatGitTracksAndIgnores(t *testing.T) {
 		}
 		return 1
 	})
-	repo, err := repoOf(disk.NewFake(), m, "/ws")
+	repo, err := repoOf(disk.NewFake(), g, "/ws")
 	if err != nil || strings.Join(repo.Paths, " ") != "README.md a/x.md" {
 		t.Fatalf("%v %v", repo, err)
 	}

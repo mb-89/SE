@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // hub is a fake GitHub seeded from recorded answers, which keeps what it is
@@ -66,7 +66,7 @@ func (h *hub) labelled(n int, l string) bool {
 	return i.labelled(l)
 }
 
-func (h *hub) source() Source { return Source{Proc: machine, Repo: repo, GitHub: h, Clock: atNow()} }
+func (h *hub) source() Source { return Source{Git: machine, Repo: repo, GitHub: h, Clock: atNow()} }
 
 func refs(ns ...int) string {
 	var out []string
@@ -115,7 +115,7 @@ func TestATakeoverComesBeforeNewWorkAndContinuesTheBranch(t *testing.T) {
 	t.Parallel()
 	origin, a, b := boxes(t)
 	// a claimed #5, pushed some work, and stalled.
-	if ok, err := (Source{Proc: machine}).Claim(a, 5); err != nil || !ok {
+	if ok, err := (Source{Git: machine}).Claim(a, 5); err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "half done")
@@ -281,7 +281,7 @@ func TestAStuckLeafInATreeIsTakenOverFirst(t *testing.T) {
 	t.Parallel()
 	origin, a, b := boxes(t)
 	// A sub-agent claimed leaf #11 of #10, pushed some work, and stalled.
-	if ok, err := (Source{Proc: machine}).stake(a, 11); err != nil || !ok {
+	if ok, err := (Source{Git: machine}).stake(a, 11); err != nil || !ok {
 		t.Fatalf("stake: %v %v", ok, err)
 	}
 	run(t, a, "push", "-q", "origin", "main:issue-10")

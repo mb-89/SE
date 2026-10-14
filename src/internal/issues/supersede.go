@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // Superseded is what Supersede did: the issue it closed and the successor

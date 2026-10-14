@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/battery"
-	"github.com/mb-89/SE/src/internal/io/github"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/github"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // The owner's rule, 2026-10-14: a box stays with its PR until it merges, it

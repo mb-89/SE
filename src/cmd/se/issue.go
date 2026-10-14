@@ -11,9 +11,9 @@ import (
 
 	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/guidance"
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/reuse"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // fire is the fan-out after a claim, and after the creation of a ready issue:
@@ -686,7 +686,7 @@ var repoFlag = index.Flag{Name: "repo", Default: "", Help: "the repository as `O
 func (c *Call) source() (issues.Source, error) {
 	repo := c.Args.String(repoFlag.Name)
 	if repo == "" {
-		r, err := issues.Repo(c.Proc, c.Workspace)
+		r, err := issues.Repo(c.Git, c.Workspace)
 		if err != nil {
 			return issues.Source{}, err
 		}
@@ -698,7 +698,7 @@ func (c *Call) source() (issues.Source, error) {
 	if err != nil {
 		return issues.Source{}, err
 	}
-	return issues.Source{Repo: repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Waits: waits, Box: c.sessionID(), Config: &cfg}, nil
+	return issues.Source{Repo: repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Git: c.Git, Waits: waits, Box: c.sessionID(), Config: &cfg}, nil
 }
 
 // handed is what a take handed over: the skills its issue names, and the

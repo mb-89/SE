@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/github"
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/github"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // recordedFleet answers the fleet commands' gh calls for o/r: #3 is a manifest,
@@ -43,7 +43,7 @@ func TestFleetCheckSaysWhenTheQuotaRunsLow(t *testing.T) {
 		}
 	}
 	code, out, errs := se(t, "fleet", "check", "--repo", "o/r")
-	if code != 0 || !strings.HasPrefix(out, "healthy\nGitHub's quota runs low: ") || !strings.Contains(out, " of the hour's 1000 requests left, under the 20% floor (github/config/quota-floor)") {
+	if code != 0 || !strings.HasPrefix(out, "healthy\nGitHub's quota runs low: ") || !strings.Contains(out, " of the hour's 1000 requests left, under the 20% floor (io/github/config/quota-floor)") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	_, out, _ = se(t, "fleet", "check", "--json", "--repo", "o/r")

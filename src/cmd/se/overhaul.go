@@ -138,7 +138,7 @@ var flagNamed = regexp.MustCompile(`--([a-z][a-z-]*)`)
 // with the commands and flags registered and what GitHub said in w. They are
 // advice: what cannot be read is said in their place.
 func codeFacts(c *Call, w issues.OverhaulWindow) string {
-	in, err := shape.Read(c.Disk, c.Proc, c.Workspace)
+	in, err := shape.Read(c.Disk, c.Proc, c.Git, c.Workspace)
 	if err != nil {
 		return "## Pruning and code shape\nNot read: " + err.Error() + ".\n"
 	}

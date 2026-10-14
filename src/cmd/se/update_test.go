@@ -7,7 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // gitCheckout is a fake git's one checkout: the branch it is on, at head,
@@ -45,7 +46,7 @@ func checkout(t *testing.T, branch string) string {
 	t.Helper()
 	w := gitCheckout{dir: t.TempDir(), branch: branch, head: strings.Repeat("c", 40)}
 	m := proc.NewFake()
-	m.Install("git", w.git)
+	worldOf(t).Git = git.NewFake(w.git)
 	// The se running is the one built into the checkout.
 	m.RunAs(filepath.Join(w.dir, "src", "plugin", "bin", "se"))
 	onMachine(t, m)

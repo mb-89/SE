@@ -11,14 +11,15 @@ import (
 	"strings"
 )
 
-// Allowlist names the places outside src/internal/io that still reach the
+// Allowlist names the places outside src/modules/io that still reach the
 // outside directly, one per line: a Go file and what it reaches. It only
 // shrinks: each I/O module removes its own entries, and an entry that matches
 // nothing is refused.
-const Allowlist = "src/internal/io/allowlist.txt"
+const Allowlist = "src/modules/io/allowlist.txt"
 
 // outside is what reaches the outside past an I/O module: the imports, and
-// the calls of time, os and path/filepath, by package path.
+// the calls of time, os (the disk and the environment) and path/filepath, by
+// package path.
 var (
 	outsideImports = []string{"os/exec", "net/http"}
 	outsideCalls   = map[string][]string{
@@ -27,6 +28,7 @@ var (
 			"Open", "OpenFile", "Create", "CreateTemp", "ReadFile", "WriteFile", "ReadDir",
 			"Mkdir", "MkdirAll", "MkdirTemp", "Remove", "RemoveAll", "Rename", "Stat", "Lstat",
 			"Truncate", "Chmod", "Chown", "Chtimes", "Link", "Symlink", "Readlink", "DirFS", "CopyFS",
+			"Getenv", "LookupEnv", "Environ", "Setenv", "Unsetenv", "Clearenv", "ExpandEnv",
 		},
 		"path/filepath": {"Walk", "WalkDir", "Glob"},
 	}
@@ -35,10 +37,10 @@ var (
 func init() {
 	register(Rule{
 		Name: "io-module",
-		Doc: "outside src/internal/io, no Go file imports os/exec or net/http, runs gh, reads the clock, sleeps or waits through time, " +
-			"opens, reads or writes files through os, or walks or globs the disk through path/filepath, except as " + Allowlist + " names; an entry there that matches nothing is refused",
+		Doc: "outside src/modules/io, no Go file imports os/exec or net/http, runs gh, reads the clock, sleeps or waits through time, " +
+			"opens, reads or writes files or reads or changes the environment through os, or walks or globs the disk through path/filepath, except as " + Allowlist + " names; an entry there that matches nothing is refused",
 		Applies: func(p string) bool {
-			return p == Allowlist || (path.Ext(p) == ".go" && !strings.HasSuffix(p, "_test.go") && !strings.HasPrefix(p, "src/internal/io/"))
+			return p == Allowlist || (path.Ext(p) == ".go" && !strings.HasSuffix(p, "_test.go") && !strings.HasPrefix(p, "src/modules/io/"))
 		},
 		Check: ioModule,
 	})
@@ -56,7 +58,7 @@ func ioModule(repo *Repo, p string, text []byte) []Finding {
 	var found []Finding
 	for _, r := range Reaches(p, text) {
 		if !allowed[p+" "+r.What] {
-			found = append(found, Finding{Path: p, Line: r.Line, Rule: "io-module", Message: r.What + " reaches the outside past an I/O module; go through one under src/internal/io (spec/io.md)"})
+			found = append(found, Finding{Path: p, Line: r.Line, Rule: "io-module", Message: r.What + " reaches the outside past an I/O module; go through one under src/modules/io (spec/io.md)"})
 		}
 	}
 	return found

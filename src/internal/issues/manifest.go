@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/index"
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // All work moves in manifests (the owner, 2026-10-14). A manifest is an

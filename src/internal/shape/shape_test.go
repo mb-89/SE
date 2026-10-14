@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
-	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/shape"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	"github.com/mb-89/SE/src/modules/io/git"
+	"github.com/mb-89/SE/src/modules/io/proc"
 )
 
 // fixture is a checkout holding one program, a library with every fact in
@@ -29,9 +30,9 @@ internal/libtest/libtest.go:5:6: unreachable func: Seven`
 // day is a day of the fixture's history.
 func day(d int) time.Time { return time.Date(2026, 10, d, 12, 0, 0, 0, time.UTC) }
 
-// checkout seeds a fake disk with the fixture at /co, and a fake machine
-// whose deadcode and git answer for it; withDeadcode false leaves deadcode off.
-func checkout(t *testing.T, withDeadcode bool) (*disk.Fake, *proc.Fake) {
+// checkout seeds a fake disk with the fixture at /co, a fake machine whose
+// deadcode answers for it, and a git that does; withDeadcode false leaves deadcode off.
+func checkout(t *testing.T, withDeadcode bool) (*disk.Fake, *proc.Fake, *git.Fake) {
 	t.Helper()
 	d := disk.NewFake()
 	err := fs.WalkDir(fixture, "testdata/checkout", func(p string, e fs.DirEntry, err error) error {
@@ -67,7 +68,7 @@ func checkout(t *testing.T, withDeadcode bool) (*disk.Fake, *proc.Fake) {
 	record := func(at time.Time, subject string, files ...string) string {
 		return fmt.Sprintf("\x1e%s\x1f%d\x1f%s\n\n%s\n", strings.Repeat("a", 40), at.Unix(), subject, strings.Join(files, "\n"))
 	}
-	m.Install("git", func(c proc.Cmd) int {
+	g := git.NewFake(func(c proc.Cmd) int {
 		switch c.Args[0] {
 		case "ls-files":
 			fmt.Fprintln(c.Stdout, "src/cmd/app/main.go\nsrc/internal/lib/lib.go\nsrc/scripts/once.sh")
@@ -81,13 +82,13 @@ func checkout(t *testing.T, withDeadcode bool) (*disk.Fake, *proc.Fake) {
 		}
 		return 0
 	})
-	return d, m
+	return d, m, g
 }
 
 func TestTheFixtureShowsEveryFact(t *testing.T) {
 	t.Parallel()
-	d, m := checkout(t, true)
-	in, err := shape.Read(d, m, "/co")
+	d, m, g := checkout(t, true)
+	in, err := shape.Read(d, m, g, "/co")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,8 +138,8 @@ func TestTheFixtureShowsEveryFact(t *testing.T) {
 
 func TestTheFactsSayWhenDeadcodeIsMissing(t *testing.T) {
 	t.Parallel()
-	d, m := checkout(t, false)
-	in, err := shape.Read(d, m, "/co")
+	d, m, g := checkout(t, false)
+	in, err := shape.Read(d, m, g, "/co")
 	if err != nil {
 		t.Fatal(err)
 	}

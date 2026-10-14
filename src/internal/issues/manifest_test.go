@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/index"
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
 )
 
 // branchCreated is GitHub's record that issue n's branch was created at.
@@ -48,7 +48,7 @@ func TestAManifestOfThreeLeavesLandsAsOnePR(t *testing.T) {
 		answers[path] = at
 	}
 	gh := recordedAt(t, c, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c, Disk: disk.NewFake()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: c, Disk: disk.NewFake()}
 	// The coordinator took #1 at the top: its branch claims the tree.
 	if took, ok, err := s.Take(a, 0); err != nil || !ok || took.Number != 1 || !took.Parent {
 		t.Fatalf("took %+v %v %v", took, ok, err)
@@ -137,7 +137,7 @@ func TestAnEmptyManifestClosesWithNoPR(t *testing.T) {
 		listPath:    list(node(1, 1, ManifestLabel)),
 		subsPath(1): subs(-2),
 	})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}
 	if ok, err := s.Claim(a, 1); err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
@@ -153,7 +153,7 @@ func TestAnIssueInNoManifestGoesIntoTheMiscManifest(t *testing.T) {
 	t.Parallel()
 	c := atNow()
 	gh := recordedAt(t, c, map[string]string{"repos/o/r/issues/9": `{"number":9,"state":"closed"}`})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: c}
 	in := func(want int, title string) int {
 		t.Helper()
 		made, _, err := s.Create(title, "b", 0, nil)
@@ -198,7 +198,7 @@ func TestAnIssueInNoManifestGoesIntoTheMiscManifest(t *testing.T) {
 func TestThePauseSwitchIsReadFromMain(t *testing.T) {
 	t.Parallel()
 	_, a, b := boxes(t)
-	s := Source{Proc: machine, Repo: repo}
+	s := Source{Git: machine, Repo: repo}
 	if paused, err := s.Paused(b); err != nil || paused {
 		t.Fatalf("a main without the wiring file: %v %v", paused, err)
 	}
@@ -216,7 +216,7 @@ func TestThePauseSwitchIsReadFromMain(t *testing.T) {
 	if paused, err := s.Paused(b); err != nil || !paused {
 		t.Fatalf("paused on main: %v %v", paused, err)
 	}
-	if paused, err := (Source{Proc: machine}).Paused(b); err != nil || !paused {
+	if paused, err := (Source{Git: machine}).Paused(b); err != nil || !paused {
 		t.Fatal(err)
 	}
 }
@@ -237,7 +237,7 @@ func TestAPriorityLeafPutsItsManifestFirst(t *testing.T) {
 		refsPath:      `[]`,
 		openPullsPath: `[]`,
 	}, 1, 2, 3, 4, 5, 6))
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}
+	s := Source{Git: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}
 	// With no priority, the lowest manifest comes first, and the box takes it.
 	if took, ok, err := s.Take(a, 0); err != nil || !ok || took.Number != 1 {
 		t.Fatalf("took %+v %v %v", took, ok, err)

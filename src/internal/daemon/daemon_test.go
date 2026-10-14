@@ -14,26 +14,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
-	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
+	sehttp "github.com/mb-89/SE/src/modules/io/http"
+	"github.com/mb-89/SE/src/modules/io/proc"
 
 	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/daemon"
-	"github.com/mb-89/SE/src/internal/io/session"
+	"github.com/mb-89/SE/src/modules/io/session"
 )
 
 // wiring binds the session's modules and the clock as se's wiring file does;
 // the daemon's tests start the index on it without the se command's own module.
 const wiring = `
 instances:
-  clock: {module: clock}
-  session: {module: session}
-  sessionlog: {module: sessionlog}
+  io/clock: {module: io/clock}
+  io/session: {module: io/session}
+  io/session-log: {module: io/session-log}
 wires:
-  session.events: session/<id>/events
-  sessionlog.events: session/<id>/events
+  io/session.events: session/<id>/events
+  io/session-log.events: session/<id>/events
 `
 
 // indexed are o with the index's modules, the log kept in p's log folder.
@@ -147,19 +147,19 @@ func TestTheDaemonAnswersValuesByName(t *testing.T) {
 		}
 		return v
 	}
-	if v := value("clock/started"); v.Value != at.Format(time.RFC3339) || !v.Provided {
-		t.Fatalf("clock/started = %+v", v)
+	if v := value("io/clock/started"); v.Value != at.Format(time.RFC3339) || !v.Provided {
+		t.Fatalf("io/clock/started = %+v", v)
 	}
-	if v := value("sessionlog/written"); v.Value != float64(0) {
-		t.Fatalf("sessionlog/written before any event = %+v", v)
+	if v := value("io/session-log/written"); v.Value != float64(0) {
+		t.Fatalf("io/session-log/written before any event = %+v", v)
 	}
 	for _, s := range []string{"s1", "s2"} {
 		if err := n.Event(addr, "tok", daemon.Event{Session: s, Event: "x"}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if v := value("sessionlog/written"); v.Value != float64(2) || !v.Provided {
-		t.Fatalf("sessionlog/written after two events = %+v", v)
+	if v := value("io/session-log/written"); v.Value != float64(2) || !v.Provided {
+		t.Fatalf("io/session-log/written after two events = %+v", v)
 	}
 	for _, s := range []string{"s1", "s2"} {
 		v := value("session/" + s + "/events")
@@ -174,7 +174,7 @@ func TestTheDaemonAnswersValuesByName(t *testing.T) {
 	if _, err := n.Value(addr, "tok", "no/such"); err == nil {
 		t.Fatal("a name nothing declares reads")
 	}
-	if _, err := n.Value(addr, "nope", "clock/started"); err == nil {
+	if _, err := n.Value(addr, "nope", "io/clock/started"); err == nil {
 		t.Fatal("a wrong token reads")
 	}
 }

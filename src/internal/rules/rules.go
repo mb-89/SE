@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/clock"
-	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/modules/io/clock"
+	"github.com/mb-89/SE/src/modules/io/disk"
 )
 
 // Rule is one of SE's rules, checked file by file.

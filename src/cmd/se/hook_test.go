@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/modules/io/disk"
 )
 
 // asBox makes the test's session a box: a cloud session no person attends.

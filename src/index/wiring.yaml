@@ -2,12 +2,17 @@
 # It is the only place that knows the global layout; spec/index.md says what
 # an entry may say. The se binary embeds it, and reads config values from it.
 instances:
-  clock: {module: clock}
-  session: {module: session}
-  sessionlog: {module: sessionlog}
+  io/clock: {module: io/clock}
+  io/disk: {module: io/disk}
+  io/env: {module: io/env}
+  io/git: {module: io/git}
+  io/github: {module: io/github}
+  io/http: {module: io/http}
+  io/proc: {module: io/proc}
+  io/session: {module: io/session}
+  io/session-log: {module: io/session-log}
   cli: {module: cli, config: {columns: 3}}
   guidance: {module: guidance, config: {inline: true, principles: true}}
-  github: {module: github}
   issues: {module: issues}
   # What SE runs that others built (src/internal/reuse): each source pinned
   # to a commit, with its licence, and each tier's list, staggered by cost.
@@ -42,5 +47,5 @@ instances:
         - https://skillselion.com/
         - https://www.claudemarket.ai/
 wires:
-  session.events: session/<id>/events
-  sessionlog.events: session/<id>/events
+  io/session.events: session/<id>/events
+  io/session-log.events: session/<id>/events

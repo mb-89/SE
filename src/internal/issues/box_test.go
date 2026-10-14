@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/io/github"
+	"github.com/mb-89/SE/src/modules/io/github"
 )
 
 // fired counts the fires a fan-out made.
