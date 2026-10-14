@@ -1,6 +1,6 @@
 // Package http is the I/O module for the network: the one place SE serves or
 // calls over HTTP. It speaks two things and nothing more: the daemon protocol
-// the plugin's bridgehead posts to (health, event, shutdown), served and
+// the plugin's bridgehead posts to (health, event, value, shutdown), served and
 // called from Go, and the routine's API trigger, the fire. Code that needs the
 // network takes a Net as an argument; the se binary hands it Real, a test
 // hands it a Fake, so a case replays.
@@ -23,6 +23,8 @@ type Net interface {
 	Health(address, token string) (Health, error)
 	// Event posts one session event to the daemon at address.
 	Event(address, token string, ev Event) error
+	// Value asks the daemon at address for name's value on its index.
+	Value(address, token, name string) (Value, error)
 	// Shutdown asks the daemon at address to end.
 	Shutdown(address, token string) error
 	// Fire posts once to the routine's API trigger at url and answers what it said.
@@ -37,6 +39,9 @@ type Daemon interface {
 	// Event takes one session event. An error that wraps ErrBad refuses the
 	// event as malformed; any other says the daemon failed to keep it.
 	Event(Event) error
+	// Value answers name's value. An error that wraps ErrUnknown says
+	// nothing declares the name.
+	Value(name string) (Value, error)
 	// Shutdown asks the daemon to end; it is called once /shutdown is answered.
 	Shutdown()
 }
@@ -56,6 +61,12 @@ type Event struct {
 	E       json.RawMessage `json:"e"`
 }
 
+// Value is a name's value on a daemon's index, and whether anything provided it.
+type Value struct {
+	Value    any  `json:"value"`
+	Provided bool `json:"provided"`
+}
+
 // Answer is what the routine's trigger said to a fire.
 type Answer struct {
 	// Status is the HTTP status code.
@@ -69,6 +80,9 @@ func (a Answer) OK() bool { return a.Status/100 == 2 }
 
 // ErrBad marks a post the daemon refuses as malformed.
 var ErrBad = errors.New("bad request")
+
+// ErrUnknown marks a name the daemon's index does not declare.
+var ErrUnknown = errors.New("unknown name")
 
 // StatusError is a daemon's refusal: a post it answered with a status other than 200.
 type StatusError struct {
@@ -94,6 +108,7 @@ const (
 	StatusOK           = 200
 	StatusBadRequest   = 400
 	StatusUnauthorized = 401
+	StatusNotFound     = 404
 	StatusInternal     = 500
 	StatusTooMany      = 429
 )
