@@ -43,14 +43,15 @@ permission prompt, and no others. `<se>` below is the absolute path of
      prompt**, filled in. Then pull again, so the box fills up to its cap.
 3. **Wait.** Subscribe to each PR a sub-agent answers
    (`subscribe_pr_activity`). When a sub-agent answers that its PR is up with
-   auto-merge on, or that its issue was superseded, go back to 2. A red CI
-   run or a review on a PR goes to that PR's sub-agent (`SendMessage`), with
+   auto-merge on, or that its issue was superseded or closed by a commit on
+   main, go back to 2. A red CI run or a review on a PR goes to that PR's sub-agent (`SendMessage`), with
    the failure or the review. When a PR merges, remove its worktree
    (`git worktree remove <path>`) and go back to 2.
 4. **You always end, and never stuck.** End when nothing is ready, no
    sub-agent of yours is running, and every tree you coordinate is done or
-   waits. Each issue you took is closed by its sub-agent with a PR or a
-   supersede, as its agent says; never end with only a comment.
+   waits. Each issue you took is closed by its sub-agent with a PR, a
+   supersede or a close naming the commit on main, as its agent says; never
+   end with only a comment.
 
 ## The sub-agent's prompt
 

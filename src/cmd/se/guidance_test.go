@@ -111,7 +111,7 @@ func TestATakeOfAnIssueWhoseSkillsLineNamesARoleHandsOverNoDeletedSkill(t *testi
 	}
 	// A line naming roles alone hands over nothing, and says nothing.
 	c := &Call{Workspace: ws, World: *worldOf(t)}
-	if h := c.handOver(issues.Issue{Number: 3, Body: guidance.With("do it", []string{"overhaul", "coordination"})}); h.Text != "" || len(h.Skills) != 0 {
+	if h := c.handOverSkills(issues.Issue{Number: 3, Body: guidance.With("do it", []string{"overhaul", "coordination"})}); h.Text != "" || len(h.Skills) != 0 {
 		t.Fatalf("%+v", h)
 	}
 }
