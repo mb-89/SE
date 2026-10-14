@@ -71,22 +71,18 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 	if person {
 		answers["repos/o/r/issues/2/dependencies/blocked_by?per_page=100"] = `[{"number":6,"state":"open"}]`
 	}
-	old, oldClock := gh, wall
-	wall = clock.NewFake(briefedAt)
-	gh = func(args ...string) ([]byte, error) {
-		path := strings.Replace(args[len(args)-1], "repos/o/probe/", "repos/o/r/", 1)
-		if a, ok := answers[path]; ok {
-			return []byte(a), nil
-		}
-		// What the record leaves out has nothing: no blockers, no comments, no PR.
-		for _, empty := range []string{"/dependencies/blocked_by?", "/comments?", "pulls?head="} {
-			if strings.Contains(path, empty) {
-				return []byte(`[]`), nil
-			}
-		}
-		return nil, fmt.Errorf("not recorded: %v", args)
+	// o/probe holds what o/r does.
+	probed := map[string]string{}
+	for path, a := range answers {
+		probed[strings.Replace(path, "repos/o/r/", "repos/o/probe/", 1)] = a
 	}
-	t.Cleanup(func() { gh, wall = old, oldClock })
+	for path, a := range probed {
+		answers[path] = a
+	}
+	oldClock := wall
+	wall = clock.NewFake(briefedAt)
+	t.Cleanup(func() { wall = oldClock })
+	hubAt(t, answers)
 }
 
 // briefed runs se briefing in a workspace with a README and answers its text.

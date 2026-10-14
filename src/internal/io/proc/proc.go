@@ -3,7 +3,7 @@
 // runs a program takes a Procs as an argument; the se binary hands it Real, a
 // test hands it a Fake with the programs its case needs installed.
 //
-// gh is not run through here: GitHub is its own module (#63).
+// gh is not run through here: GitHub is its own module, src/internal/io/github.
 package proc
 
 import (

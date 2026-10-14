@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // The kinds of finding se fleet check lists, in the order it lists them and
@@ -616,7 +618,7 @@ func (s Source) fix(dir string, x *Fixed) error {
 		}
 	}
 	body := fmt.Sprintf("se fleet check found: %s.\n\nse fleet fix %s.\n\n<!-- se:fleet %s %d -->", f.What, x.Did, f.key, x.Made)
-	if _, err := s.GH("api", "-X", "POST", "-f", "body="+body, fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, f.Issue)); err != nil {
+	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, f.Issue), github.F("body", body)); err != nil {
 		return fmt.Errorf("recording the fix on #%d: %w", f.Issue, err)
 	}
 	return nil
