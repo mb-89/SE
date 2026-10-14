@@ -100,7 +100,10 @@ the owner's account for an hour.
   closed, its auto-merge with it, with a comment naming the manifest. When every leaf is closed, the coordinator lands the
   manifest: one PR from `issue-<manifest>` to main, `Fixes #<manifest>`,
   auto-merge on, and it stays with that PR until it merges. A manifest whose
-  branch holds nothing main does not closes with no PR.
+  branch holds nothing main does not closes with no PR. Main's moves reach
+  the leaves through the manifest's branch: `se fleet refresh` merges
+  `origin/main` into it on every push to main
+  ([coordination.md](coordination.md#manifests-take-main)).
 - **No bare issues.** `se issue new` files every issue into a manifest:
   `--parent N` names it, or `--manifest` makes the issue a new manifest.
   Without either it goes into the open **misc manifest**, labelled

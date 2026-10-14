@@ -21,7 +21,7 @@ func init() {
 		Group:   "Fleet",
 		Summary: "list what is broken in the fleet, each with its remedy",
 		Details: []string{
-			"read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, a bare issue (in no manifest), an issue waiting on a person.",
+			"read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a manifest whose branch lacks main's commits (stale), a leftover claim, an impossible block, a bare issue (in no manifest), an issue waiting on a person.",
 			"Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them.",
 			"Nothing found, it says healthy.",
 			"Where GitHub's answers say the hour's quota of requests has fallen below the github instance's quota-floor share (github/config/quota-floor), a last line says how many are left and when it resets.",
@@ -85,7 +85,7 @@ func init() {
 		Group:   "Fleet",
 		Summary: "fix what fleet check finds that needs no checkout",
 		Details: []string{
-			"run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, and a bare issue is filed into the open misc manifest (opening the next where none is open) by a sub-issue link.",
+			"run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a stale manifest's branch takes main in as se fleet refresh does, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, and a bare issue is filed into the open misc manifest (opening the next where none is open) by a sub-issue link.",
 			"Every other finding is reported, never filed: it writes no issue and no comment (an issue is work, not a report).",
 			"A takeover is named for the next take.",
 			"A remedy that fails is reported, and the ones after it are still applied.",
@@ -247,6 +247,48 @@ func init() {
 			}
 			if len(done) == 0 {
 				return Reply{Text: "no open se PR"}, nil
+			}
+			return Reply{Text: strings.Join(lines, "\n")}, nil
+		},
+	})
+	register(Command{
+		Name:    "fleet refresh",
+		Usage:   "fleet refresh [--json] [--repo OWNER/NAME]",
+		Group:   "Fleet",
+		Class:   batch,
+		Summary: "merge main into each open manifest's branch",
+		Details: []string{
+			"for every open manifest whose branch issue-<m> is on origin with no open PR into main (se issue keep keeps that one): where main has moved past it, merge origin/main in (never a rebase) in a worktree under .se/.runtime/refresh and push, so main's moves reach its leaves once, through the manifest, not as each leaf's conflict.",
+			"A merge that conflicts pushes nothing and is named: se fleet check lists it as a stale manifest, to merge by hand.",
+			"A refresh that fails is reported, and the others are still refreshed.",
+			"The refresh workflow runs it on every push to main (with --json: {\"refreshed\":[{\"issue\",\"branch\",\"merged\",\"conflict\",\"did\"}]}).",
+		},
+		Session: true,
+		Run: func(c *Call) (Reply, error) {
+			fs, src, asJSON := issueFlags(c, "fleet refresh")
+			if err := c.Parse(fs); err != nil {
+				return Reply{}, err
+			}
+			s, err := src()
+			if err != nil {
+				return Reply{}, err
+			}
+			done, refreshErr := s.Refresh(c.Workspace)
+			lines := make([]string, len(done))
+			for k, r := range done {
+				lines[k] = fmt.Sprintf("manifest #%d (%s): %s", r.Issue, r.Branch, r.Did)
+			}
+			if refreshErr != nil {
+				return Reply{}, fmt.Errorf("%w\n%s", refreshErr, strings.Join(lines, "\n"))
+			}
+			if *asJSON {
+				data, err := json.Marshal(struct {
+					Refreshed []issues.Refreshed `json:"refreshed"`
+				}{append([]issues.Refreshed{}, done...)})
+				return Reply{Text: string(data)}, err
+			}
+			if len(done) == 0 {
+				return Reply{Text: "no open manifest has a branch to refresh"}, nil
 			}
 			return Reply{Text: strings.Join(lines, "\n")}, nil
 		},
