@@ -145,10 +145,16 @@ each of their boxes used to find out only from its own red CI or its next
 merge. So `se fleet rules` merges the head of every open se PR (an
 `issue-<n>` branch) with `origin/main` in a worktree under
 `.se/.runtime/rules`, builds `se` there, runs `se rules` on the merge, and
-comments on each PR it breaks the findings (a merge that does not build is
-one) and what to do: merge main in, fix them, land again. The comment carries
+the Go tests that read what the battery checks against beside the rules:
+`./cmd/se`, `./internal/battery/...` and `./internal/io/proc/...`, which hold
+the budget test, the step-budget test and the programs list. A PR opened
+before main added a battery step, a budget or a program breaks those without
+breaking a rule. It comments on each PR it breaks the findings (a merge that
+does not build is one; go test's timings are left out) and what to do: merge
+main in, fix them, land again. The comment carries
 `<!-- se:rules KEY -->`, the findings' hash, so the same findings are told
 once. A PR that conflicts with main is left to its takeover; one whose check
 fails is reported, and the others are still checked. The workflow
 `.github/workflows/rules.yml` runs it on every push to main that changes
-`src/internal/rules`, and on demand.
+`src/internal/rules`, `tests/check.sh`, `src/internal/battery`,
+`spec/budgets.yaml` or `src/internal/io/proc`, and on demand.
