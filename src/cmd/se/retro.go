@@ -14,6 +14,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "retro new",
+		Class:   batch,
 		Usage:   "retro new (--field TEXT | --no-field | --unattended) [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "start a retro over everything closed since the last one",
@@ -60,6 +61,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "retro collect",
+		Class:   batch,
 		Usage:   "retro collect N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "read a retro's window from GitHub and write its report draft",
@@ -112,6 +114,7 @@ func init() {
 	})
 	register(Command{
 		Name:    "retro report",
+		Class:   batch,
 		Usage:   "retro report N [--draft FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "file a judged report: create its issues and close it",

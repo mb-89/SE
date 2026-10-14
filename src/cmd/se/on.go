@@ -11,6 +11,7 @@ const startWait = 10 * time.Second
 func init() {
 	register(Command{
 		Name:      "on",
+		Class:     batch,
 		Usage:     "on",
 		Group:     "Session",
 		Summary:   "switch SE on: start the daemon, forward this session's events",
