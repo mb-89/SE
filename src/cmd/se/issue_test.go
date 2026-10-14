@@ -369,6 +369,10 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	if code != 0 || out != "Pushed issue-6 and opened PR #7, auto-merge (squash) on.\nhttps://github.com/o/r/pull/7\n" || checked != ws {
 		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
 	}
+	// It records the PR for the Stop hook, which trusts it before GitHub.
+	if box, err := d.ReadFile(filepath.Join(ws, ".se", ".runtime", "box.json")); err != nil || !strings.Contains(string(box), `"landed":{"6":{"pr":7,"auto_merge":true}}`) {
+		t.Fatalf("%s %v", box, err)
+	}
 	// Landed again, the PR is open already.
 	code, out, _ = se(t, "issue", "land", "--json", "--answers", answers, "--workspace", ws, "--repo", "o/r")
 	if code != 0 || out != `{"issue":6,"number":7,"url":"https://github.com/o/r/pull/7","created":false,"merged":false}`+"\n" {
