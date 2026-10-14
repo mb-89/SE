@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
@@ -29,6 +30,10 @@ type Options struct {
 	TakeOver time.Duration
 	// Clock is the time the daemon stamps, idles and waits by.
 	Clock clock.Clock
+	// Modules are the modules the daemon starts the index with, as the wiring binds them.
+	Modules []*index.Module
+	// Wiring, when set, binds them in place of the wiring file se carries.
+	Wiring *index.Wiring
 }
 
 // Serve runs the workspace's daemon until ctx ends, /shutdown is posted, or it idles out.
@@ -41,6 +46,10 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 		return err
 	}
 	defer held.Close()
+	ix, err := startIndex(opts)
+	if err != nil {
+		return err
+	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -56,7 +65,7 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 		ProtocolVersion: ProtocolVersion,
 		StartedAt:       opts.Clock.Now().UTC(),
 	}
-	srv := NewServer(paths, ep.Token, ep.InstanceID, cancel, opts.Clock)
+	srv := NewServer(ix, ep.Token, ep.InstanceID, cancel, opts.Clock)
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := WriteEndpoint(paths.Endpoint(), ep); err != nil {
 		ln.Close()
@@ -80,6 +89,20 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 	quit, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stop()
 	return httpSrv.Shutdown(quit)
+}
+
+// startIndex starts the index the daemon hosts: the wiring se carries, or the
+// one the options give, over the options' modules.
+func startIndex(opts Options) (*index.Index, error) {
+	w := opts.Wiring
+	if w == nil {
+		wired, err := index.Wired()
+		if err != nil {
+			return nil, err
+		}
+		w = &wired
+	}
+	return index.Start(*w, opts.Modules...)
 }
 
 // acquire takes the lifetime lock, stepping a running daemon aside for up to takeOver.

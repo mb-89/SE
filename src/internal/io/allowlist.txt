@@ -44,7 +44,6 @@ src/internal/daemon/runtime.go os.Rename
 src/internal/daemon/runtime.go os.Stat
 src/internal/daemon/runtime.go os.WriteFile
 src/internal/daemon/serve.go os.Remove
-src/internal/daemon/server.go os.OpenFile
 src/internal/issues/briefing.go os.ReadFile
 src/internal/issues/landing.go os.ReadFile
 src/internal/issues/overhaul.go os.ReadFile

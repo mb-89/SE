@@ -3,49 +3,42 @@ package daemon
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/session"
 )
-
-// PayloadCap is the longest event input a row carries whole; a longer one lands cut.
-const PayloadCap = 4000
 
 // bodyCap bounds one post.
 const bodyCap = 16 << 20
 
-var sessionName = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$`)
-
-// Event is one post of the bridgehead: a session event as the engine raised it.
-type Event struct {
-	Session string          `json:"session"`
-	Event   string          `json:"event"`
-	At      string          `json:"at"`
-	E       json.RawMessage `json:"e"`
-}
-
 // Server answers the bridgehead's posts for one workspace.
 type Server struct {
-	paths    Paths
+	ix       *index.Index
+	posts    string
 	token    string
 	instance string
 	shutdown func()
 	clock    clock.Clock
-	mu       sync.Mutex
+	seq      atomic.Uint64
 	last     atomic.Int64
 }
 
-// NewServer makes the handler side of a daemon; shutdown runs when /shutdown
-// is posted, and clk says how long it has idled.
-func NewServer(paths Paths, token, instance string, shutdown func(), clk clock.Clock) *Server {
-	s := &Server{paths: paths, token: token, instance: instance, shutdown: shutdown, clock: clk}
+// NewServer makes the handler side of a daemon on the started index ix: each
+// post is committed to the instance of the session posts module the wiring
+// names. shutdown runs when /shutdown is posted, and clk says how long it has idled.
+func NewServer(ix *index.Index, token, instance string, shutdown func(), clk clock.Clock) *Server {
+	s := &Server{ix: ix, token: token, instance: instance, shutdown: shutdown, clock: clk}
+	for _, in := range ix.Catalog().Instances {
+		if in.Module == session.Posts.Name() {
+			s.posts = in.Name
+		}
+	}
 	s.touch()
 	return s
 }
@@ -55,11 +48,12 @@ func (s *Server) touch() { s.last.Store(s.clock.Now().UnixNano()) }
 // Idle is how long the server has gone without a post.
 func (s *Server) Idle() time.Duration { return s.clock.Now().Sub(time.Unix(0, s.last.Load())) }
 
-// Handler routes /health, /event and /shutdown, each behind the token.
+// Handler routes /health, /event, /value/<name> and /shutdown, each behind the token.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /event", s.event)
+	mux.HandleFunc("GET /value/{name...}", s.value)
 	mux.HandleFunc("POST /shutdown", s.stop)
 	return s.authorized(mux)
 }
@@ -89,50 +83,40 @@ func (s *Server) stop(w http.ResponseWriter, _ *http.Request) {
 // event is where every forwarded session event arrives: a breakpoint here holds the session.
 func (s *Server) event(w http.ResponseWriter, r *http.Request) {
 	s.touch()
-	var ev Event
+	var ev session.Event
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, bodyCap)).Decode(&ev); err != nil {
 		http.Error(w, "bad event: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if !sessionName.MatchString(ev.Session) || ev.Event == "" {
+	if !session.Named(ev.Session) || ev.Event == "" {
 		http.Error(w, "bad event: session and event are required", http.StatusBadRequest)
 		return
 	}
-	if err := s.Append(ev); err != nil {
+	if err := s.Post(ev); err != nil {
 		http.Error(w, "append: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	answer(w, map[string]any{})
 }
 
-// Append adds the event as one line to its session's log.
-func (s *Server) Append(ev Event) error {
-	line, err := json.Marshal(map[string]any{"at": ev.At, "event": ev.Event, "e": payloadOf(ev.E)})
-	if err != nil {
-		return err
+// Post commits the event as the session posts module's next one; the
+// modules that read it, the session log among them, run before it returns.
+func (s *Server) Post(ev session.Event) error {
+	if s.posts == "" {
+		return errors.New("the wiring names no instance of the session posts module")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	f, err := os.OpenFile(filepath.Join(s.paths.Logs(), ev.Session+".jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
+	ev.Seq = s.seq.Add(1)
+	return s.ix.Commit(s.posts, session.Events.Set(ev))
 }
 
-// payloadOf is the event input as a row carries it: whole while short, else its head and length.
-func payloadOf(raw json.RawMessage) any {
-	if len(raw) == 0 {
-		return nil
+// value answers a name's value on the index, and whether anything provided it.
+func (s *Server) value(w http.ResponseWriter, r *http.Request) {
+	v, err := s.ix.Read(r.PathValue("name"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
 	}
-	if len(raw) <= PayloadCap {
-		return raw
-	}
-	return map[string]any{"cut": true, "length": len(raw), "head": strings.ToValidUTF8(string(raw[:PayloadCap]), "")}
+	answer(w, map[string]any{"value": v.V, "provided": v.Provided})
 }
 
 func answer(w http.ResponseWriter, v any) {

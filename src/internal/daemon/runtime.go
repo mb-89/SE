@@ -1,5 +1,5 @@
 // Package daemon is SE's workspace program: one process per workspace that the
-// plugin's bridgehead forwards session events to, and that writes the log.
+// plugin's bridgehead forwards session events to, and that hosts the index.
 package daemon
 
 import (
