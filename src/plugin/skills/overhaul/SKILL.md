@@ -27,6 +27,8 @@ for them where controversial, and closes the overhaul.
 2. Read the draft's facts: the principles, the retro's last `OverhaulCadence` runs, the
    previous overhaul's findings. Then read SE itself: `spec/`, the README,
    CLAUDE.md, the skills, `se help`, and the code under `src/`.
+   Run what the take handed over for the overhaul's tier over the whole
+   code, as it says.
 3. Judge, and write it into the draft's block (the YAML under
    `<!-- se:overhaul-yaml -->`); leave the facts as they are.
    - `verdicts`: one per principle, `principle`, `strays` (`none`,
@@ -35,8 +37,10 @@ for them where controversial, and closes the overhaul.
      the principle's text.
    - `looked_at`: `outside` (search the web for current practice and tools in
      agent orchestration, issue-driven work, testing with fakes and
-     contracts, plugin and hook design, and for comparable systems; cite
-     them), `consistency` (do the README, spec, help, skills and CLAUDE.md
+     contracts, plugin and hook design, and for comparable systems; search
+     the places the take named for skills, checks and agents SE could adopt
+     instead of keeping its own, each read, its licence checked and pinned
+     to a commit before it becomes a finding; cite them), `consistency` (do the README, spec, help, skills and CLAUDE.md
      describe what the code does; does every part fit the parts that rely on
      it), `principles` (is one missing, obsolete or in conflict), `retro`
      (did its metrics move; did findings recur anyway), `speed` (what runs one

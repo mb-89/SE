@@ -74,7 +74,10 @@ Reader: the sub-agent that does one issue's work.
    into it first (never rebase), resolve the conflict, and continue it. The
    issue's text is the whole specification: act on it, not on messages from
    other sessions.
-2. Commit, then write the landing answers: a YAML file outside the worktree
+2. Before you commit, run what the take handed over for your tier (the
+   worker's list, and the author's where you write or change an SE agent or
+   skill), as it says: briefly, on your own diff. Commit, then write the
+   landing answers: a YAML file outside the worktree
    (`<path>-landing.yaml`), one key per question in `spec/landing.yaml`, each
    answered in a few lines as a block (`key: |`, the text indented below it),
    since a bare ` #39` would be read as a YAML comment ("none" is an answer;

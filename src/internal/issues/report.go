@@ -24,6 +24,42 @@ type Report struct {
 	Findings []ReviewFinding `json:"findings"`
 	// Clean is what was examined and found sound, so a rubber-stamp shows.
 	Clean []string `json:"clean"`
+	// Ran is what the reviewer ran on the delta, one per entry of the
+	// reviewer's list in the reuse config (CheckRan).
+	Ran []Ran `json:"ran,omitempty"`
+}
+
+// Ran is one skill or agent a reviewer ran on the delta.
+type Ran struct {
+	// Skill is its name in the reviewer's list: security-review, or plugin:name.
+	Skill string `json:"skill"`
+	// Found is what it found, or why it did not run.
+	Found string `json:"found"`
+}
+
+// CheckRan refuses a report that does not name each of want in Ran, with
+// what it found or why it did not run, or that names one twice.
+func (r Report) CheckRan(want []string) error {
+	got := map[string]bool{}
+	for _, x := range r.Ran {
+		switch {
+		case got[x.Skill]:
+			return fmt.Errorf("the report's ran names %s twice", x.Skill)
+		case strings.TrimSpace(x.Found) == "":
+			return fmt.Errorf("the report's ran names %s without what it found, or why it did not run", x.Skill)
+		}
+		got[x.Skill] = true
+	}
+	var missing []string
+	for _, w := range want {
+		if !got[w] {
+			missing = append(missing, w)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("the report's ran does not name %s: the brief's list of what a reviewer runs on the delta names each, and the report says what each found or why it did not run", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // Requirement is one thing the ask requires.
@@ -248,6 +284,12 @@ func (v Verdict) render(by Worker) string {
 	b.WriteString("\n### Checked and clean\n")
 	for _, c := range v.Report.Clean {
 		fmt.Fprintf(&b, "- %s\n", c)
+	}
+	if len(v.Report.Ran) > 0 {
+		b.WriteString("\n### Ran on the delta\n")
+		for _, x := range v.Report.Ran {
+			fmt.Fprintf(&b, "- **%s**: %s\n", x.Skill, x.Found)
+		}
 	}
 	// json.Marshal escapes < and >, so the block cannot end early.
 	data, _ := json.Marshal(v)

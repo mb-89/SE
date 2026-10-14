@@ -155,7 +155,7 @@ func TestTheHelpGroupsTheCommands(t *testing.T) {
 		"Issues":   {"issue land", "issue new", "issue pull", "issue resume", "issue review", "issue supersede", "issue tree"},
 		"Hooks":    {"hook prompt", "hook stop"},
 		"Daemon":   {"serve", "start", "stop"},
-		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune", "fleet refresh"},
+		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet plugins", "fleet prune", "fleet refresh"},
 		"Retro":    {"retro collect", "retro new", "retro report"},
 		"Overhaul": {"overhaul file", "overhaul new", "overhaul read"},
 	}
