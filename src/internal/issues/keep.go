@@ -63,7 +63,7 @@ func (s Source) ship(dir, branch string, check func(dir string) error) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
+	if _, err := s.push(dir, "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
 		return err
 	}
 	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/statuses/%s", s.Repo, sha),

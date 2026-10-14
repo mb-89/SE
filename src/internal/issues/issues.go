@@ -993,7 +993,7 @@ func (s Source) stakeFrom(dir string, n int, base string) (claimed bool, err err
 	// An empty lease: the ref must not exist on origin yet. Where it already
 	// points at this very commit the push is no update at all and succeeds,
 	// so the claim is the push's own word that it created the ref ("*").
-	said, pushErr := s.git(dir, "push", "--porcelain", "--force-with-lease="+ref+":", "origin", "refs/remotes/origin/"+base+":"+ref)
+	said, pushErr := s.push(dir, "--porcelain", "--force-with-lease="+ref+":", "origin", "refs/remotes/origin/"+base+":"+ref)
 	if pushErr != nil {
 		if _, err := s.git(dir, "ls-remote", "--exit-code", "origin", ref); err == nil {
 			return false, nil
@@ -1028,4 +1028,11 @@ func Repo(p proc.Procs, dir string) (string, error) {
 // git runs git in the checkout dir and answers what it printed, trimmed.
 func (s Source) git(dir string, args ...string) (string, error) {
 	return proc.Output(s.Proc, proc.Cmd{Name: "git", Args: args, Dir: dir})
+}
+
+// push runs git push with args in dir, with no hooks. The pre-push hook only
+// reruns the battery: ship has just run it on this very tree, and a claim
+// pushes a branch of origin as it stands. A person's own git push still runs it.
+func (s Source) push(dir string, args ...string) (string, error) {
+	return s.git(dir, append([]string{"-c", "core.hooksPath=", "push"}, args...)...)
 }
