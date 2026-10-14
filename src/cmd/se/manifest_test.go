@@ -40,6 +40,14 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 	if want := "- [`se:work`](src/plugin/skills/work/SKILL.md): Take the next issue.\n"; out != want {
 		t.Fatalf("skills: %q", out)
 	}
+	// The agents come from the registry of kinds, and each must have its file.
+	if code, _, errs := se(t, "--workspace", ws, "manifest", "agents"); code != 1 || !strings.Contains(errs, "the leaf kind's agent has no file src/plugin/agents/worker.md") {
+		t.Fatalf("agents without their files (exit %d): %s", code, errs)
+	}
+	_, out, _ = se(t, "--workspace", "../../..", "manifest", "agents")
+	if !strings.HasPrefix(out, "- [`se:worker`](src/plugin/agents/worker.md), for the kind leaf: ") || strings.Count(out, "\n") != 5 {
+		t.Fatalf("agents: %q", out)
+	}
 	_, out, _ = se(t, "--workspace", ws, "manifest", "checks")
 	if !strings.Contains(out, "- `ci`: every merged PR had green CI (the last run of each check on its head); checked from the first commit.\n") ||
 		!strings.Contains(out, "; checked on what was created after PR #91 brought it.\n") ||
@@ -47,7 +55,7 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 		t.Fatalf("checks: %q", out)
 	}
 	_, out, _ = se(t, "--workspace", ws, "manifest", "usage", "fleet", "rules")
-	if want := "```\nse fleet check [--json] [--repo OWNER/NAME]\nse fleet fix [--json] [--repo OWNER/NAME]\nse fleet prune [--apply] [--json] [--repo OWNER/NAME]\nse fleet refresh [--json] [--repo OWNER/NAME]\nse rules\n```\n"; out != want {
+	if want := "```\nse fleet check [--json] [--repo OWNER/NAME]\nse fleet fix [--json] [--repo OWNER/NAME]\nse fleet prune [--apply] [--json] [--repo OWNER/NAME]\nse fleet refresh [--json] [--repo OWNER/NAME]\nse fleet rules [--json] [--repo OWNER/NAME]\nse rules\n```\n"; out != want {
 		t.Fatalf("usage: %q", out)
 	}
 	if code, _, errs := se(t, "--workspace", ws, "manifest", "frob"); code != 1 || !strings.Contains(errs, `no manifest "frob"`) {
