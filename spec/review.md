@@ -4,9 +4,9 @@ Reader: whoever changes how a gate is reviewed, and the reviewer checking a rule
 
 A gate is an issue labelled `se-review` (see [Reviews](issues.md#reviews)): it
 is reviewed once its sub-issues have closed, by an agent that worked none of
-them. These rules say **how** that agent works. The skill `se:review`
-([src/plugin/skills/review/SKILL.md](../src/plugin/skills/review/SKILL.md)) is
-how a reviewer follows them; `se review brief` and `se issue review` (in
+them. These rules say **how** that agent works. The agent `se:reviewer`
+(see the agents in [spec/issues.md](issues.md#the-box)) is how a reviewer
+follows them; `se review brief` and `se issue review` (in
 `src/internal/issues`) enforce what can be enforced.
 
 ## What it is built on
@@ -38,7 +38,7 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
      The default brief does not even read them. After that,
      `se review brief <n> --claims` shows them as claims to check, never as
      evidence.
-2. **The steps are the review skill's:** finding, verifying and judging are
+2. **The steps are the reviewer agent's:** finding, verifying and judging are
    separate steps, and the riskiest part comes first, so a reviewer that
    finds damage can stop early. A verified blocker is judged by rule 3.
 3. **What blocks (the owner's rule): only damage.** A finding blocks only if
@@ -56,7 +56,7 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
    - a blocking one becomes a sub-issue of the gate, so the gate is reviewed
      again after it lands.
 
-   At most `MaxFiled` non-blocking findings are filed; the rest are
+   At most `issues/config/max-filed` non-blocking findings are filed; the rest are
    counted in the report, not filed.
 5. **Final is general: any second attempt is final, and a failing final
    issue waits on an issue for a person (the owner's rule).** Labels combine: `se` marks
@@ -104,20 +104,33 @@ how a reviewer follows them; `se review brief` and `se issue review` (in
    review writes nothing.
 8. **The reviewer's model:** a stronger model than the boxes run, where one
    is available. The choice is one line, `reviewer:` in
-   [spec/models.yaml](models.yaml). `se issue pull --in ROOT --take --json`
-   names it as each review's `model`, and the work skill starts the reviewer
-   sub-agent on it. Today's box model is the floor; the reviewer is never
-   weaker.
+   [spec/models.yaml](models.yaml), which the agent's front matter names
+   too (the rule `agents` holds them equal). `se issue pull --in ROOT --take
+   --json` names each review's `agent`, and the box starts it. Today's box
+   model is the floor; the reviewer is never weaker.
 9. **The retro** ([#40](https://github.com/mb-89/SE/issues/40)) counts
    reviews in its window: how many ran; passed or blocked; findings filed;
    `se-final` issues that failed; findings later confirmed (their issue
    closed with a change) versus dropped. The reports' machine-readable blocks
    are what it counts from.
 
+10. **What others built runs on the delta:** the brief ends with the
+   reviewer's list from the reuse config of
+   [src/internal/index/wiring.yaml](../src/internal/index/wiring.yaml)
+   (the simplifier, `/security-review` and the pr-review-toolkit agents),
+   each resolved against the plugins the box loaded. What they report are
+   candidates, verified like any other. The report's `ran` names each entry
+   once, with what it found or why it did not run, and `se issue review`
+   refuses a report that leaves one out; the verdict shows them under "Ran
+   on the delta". The worker runs its light list before it commits, the
+   overhaul its heavy one over everything, each handed over by the take;
+   an agent's front matter preloads (`skills`) only what its tier's list
+   names (the rule `agents`).
+
 ## The report
 
 `se issue review pass|fail N --report PATH` reads the report as JSON, in the
-shape the review skill's step 9 gives; an unknown field is refused, so a typo
+shape the reviewer agent's step 9 gives; an unknown field is refused, so a typo
 never drops a section.
 
 ## The commands

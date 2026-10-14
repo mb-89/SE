@@ -11,7 +11,7 @@ import (
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
-// Lease is how long a claimed leaf may go without a push to its branch before
+// Lease is the built-in value of issues/config/lease: how long a claimed leaf may go without a push to its branch before
 // it is stuck. It is under the routine's 4-hour schedule, so a scheduled box
 // always finds a stuck issue.
 const Lease = 3 * time.Hour
@@ -131,7 +131,7 @@ func (s Source) lease(st *Status) error {
 		return err
 	}
 	st.Since, st.pushed = pushed, pushed
-	if s.now().Sub(st.Since) <= Lease {
+	if s.now().Sub(st.Since) <= s.config().Lease {
 		return nil
 	}
 	m, err := s.marks(st.Number)
@@ -142,7 +142,7 @@ func (s Source) lease(st *Status) error {
 	if m.lastTakeover.After(st.Since) {
 		st.Since = m.lastTakeover
 	}
-	st.Stuck = s.now().Sub(st.Since) > Lease
+	st.Stuck = s.now().Sub(st.Since) > s.config().Lease
 	return nil
 }
 
@@ -156,7 +156,7 @@ func (s Status) since() string {
 // toPerson gives a final issue that is stuck to a person: an issue for a
 // person holds it, and it waits on that one.
 func (s Source) toPerson(st *Status) error {
-	reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s, longer than the %s lease.", FinalLabel, st.since(), Lease)
+	reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s, longer than the %s lease.", FinalLabel, st.since(), s.config().Lease)
 	held, err := s.hold(st.Issue, reason)
 	if err != nil {
 		return err
@@ -229,7 +229,7 @@ func (s Source) finalize(n int) error {
 // wins; the other answers false and changes nothing in dir.
 func (s Source) takeOverStuck(dir string, st Status, checkout bool) (took bool, err error) {
 	body := fmt.Sprintf("<!-- se:takeover %d -->\nTaken over: %s, longer than the %s lease. A new box continues the branch and its PR.",
-		st.Takeover.Count, st.since(), Lease) + s.boxLine()
+		st.Takeover.Count, st.since(), s.config().Lease) + s.boxLine()
 	if won, err := s.markTakeover(st.Number, st.Takeover.Count, body); err != nil || !won {
 		return false, err
 	}

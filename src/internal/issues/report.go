@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// MaxFiled is how many non-blocking findings one review files as issues; the
+// MaxFiled is the built-in value of issues/config/max-filed: how many non-blocking findings one review files as issues; the
 // rest are counted, not filed, since more findings means more noise.
 const MaxFiled = 5
 
@@ -190,7 +190,7 @@ type Verdict struct {
 	Passed bool `json:"passed"`
 	// Rereview is set where the review before had failed.
 	Rereview bool `json:"rereview"`
-	// Unfiled counts the non-blocking findings past MaxFiled.
+	// Unfiled counts the non-blocking findings past the cap, issues/config/max-filed.
 	Unfiled int    `json:"unfiled"`
 	Report  Report `json:"report"`
 }
@@ -238,7 +238,7 @@ func (s Source) lastVerdict(n int) (*Verdict, error) {
 
 // render is the report as it is posted on the gate: what a person reads,
 // then the machine-readable block.
-func (v Verdict) render(by Worker) string {
+func (v Verdict) render(by Worker, maxFiled int) string {
 	var b strings.Builder
 	word := "FAIL"
 	if v.Passed {
@@ -269,7 +269,7 @@ func (v Verdict) render(by Worker) string {
 		if f.Blocking {
 			judged = "blocking"
 		}
-		became := fmt.Sprintf("not filed (past the first %d)", MaxFiled)
+		became := fmt.Sprintf("not filed (past the first %d)", maxFiled)
 		switch {
 		case f.Repeats != 0:
 			became = fmt.Sprintf("repeats #%d, so this goes to a person", f.Repeats)
