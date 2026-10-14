@@ -36,6 +36,9 @@ type Fake struct {
 	Proxy bool
 	// NoAutoMerge is a repository that does not allow auto-merge.
 	NoAutoMerge bool
+	// NoStatuses refuses posting a commit status with 403, as the cloud
+	// session's proxy has (#449).
+	NoStatuses bool
 	// Login is who the fake is logged in as: the author of what it writes.
 	Login string
 
@@ -836,6 +839,9 @@ func (f *Fake) write(method, path string, v map[string]any) (any, error) {
 		p["state"], p["merged"], p["merged_at"], p["closed_at"] = "closed", true, at, at
 		return obj{"merged": true, "message": "Pull Request successfully merged"}, nil
 	case method == "POST" && len(w) == 2 && w[0] == "statuses":
+		if f.NoStatuses {
+			return nil, refuse(403, "Write access to this GitHub API path is not permitted through this proxy.")
+		}
 		state, _ := str(v, "state")
 		if !containsString([]string{"error", "failure", "pending", "success"}, state) {
 			return nil, refuse(422, "Validation Failed: state is not included in the list")

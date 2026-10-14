@@ -46,9 +46,10 @@ func (e behindMain) Error() string {
 // ship brings the branch checked out in dir to origin, checked, as se issue
 // land and se issue keep do: it merges origin's copy of the branch and then
 // origin/main in, runs check, refuses a tree the battery did not pass and a
-// branch main has moved past since, pushes, and posts BatteryContext on the
-// pushed commit, naming its tree.
-func (s Source) ship(dir, branch string, check func(dir string) error) error {
+// branch main has moved past since, runs before (where set), pushes, and
+// posts BatteryContext on the pushed commit, naming its tree. before writes
+// what must survive a stop after it: se issue land's landing answers.
+func (s Source) ship(dir, branch string, check func(dir string) error, before func() error) error {
 	if err := s.takeIn(dir, branch); err != nil {
 		return err
 	}
@@ -62,6 +63,11 @@ func (s Source) ship(dir, branch string, check func(dir string) error) error {
 	sha, err := s.git(dir, "rev-parse", "HEAD")
 	if err != nil {
 		return err
+	}
+	if before != nil {
+		if err := before(); err != nil {
+			return err
+		}
 	}
 	if _, err := s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
 		return err
@@ -267,5 +273,5 @@ func (s Source) keepUp(dir, branch string, check func(dir string) error) error {
 	} else if dirty != "" {
 		return fmt.Errorf("%s has changes not committed, so nothing was merged or pushed:\n%s", dir, dirty)
 	}
-	return s.ship(dir, branch, check)
+	return s.ship(dir, branch, check, nil)
 }

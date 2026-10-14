@@ -357,19 +357,20 @@ issue with open sub-issues ("a parent holds no work") and a tree with
 uncommitted changes. A leaf inside a manifest (an issue with a parent) lands
 into the manifest's branch: it merges origin's `issue-<n>` and then
 `issue-<manifest>` into the checkout (never a rebase; a conflict is undone
-and left to the worker), runs `tests/check.sh`, pushes the result to both
+and left to the worker), runs `tests/check.sh`, records the worker, posts
+the landing answers on the leaf, pushes the result to both
 branches at once (where another leaf landed in between, it merges again and
-pushes again), records the worker, posts the landing answers on the leaf and
-closes it, with no PR (with `--json`: `{"issue","manifest","into","closed"}`).
+pushes again) and closes the leaf, with no PR (with `--json`: `{"issue","manifest","into","closed"}`).
 An issue at the top (a manifest whose leaves are all closed, a retro, an
 overhaul) lands to main: it merges origin's copy of the branch and
 `origin/main` in, runs `tests/check.sh` and goes on only if it passes,
 refuses a tree the battery did not record as passed and a branch main moved
-past meanwhile, pushes the branch, posts the commit status `se/battery`
+past meanwhile, records on the issue who worked it (see
+[Reviews](#reviews)) and posts the landing answers on it before anything is
+pushed, so a land stopped later (a refused status post, say) still leaves its
+record, then pushes the branch, posts the commit status `se/battery`
 naming its tree on the pushed commit, which CI trusts (see
-[spec/coordination.md](coordination.md#up-to-date-with-main)), records on
-the leaf who worked it (see
-[Reviews](#reviews)), posts the landing answers on the issue, opens one PR against main titled after the issue with the
+[spec/coordination.md](coordination.md#up-to-date-with-main)), opens one PR against main titled after the issue with the
 body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left
 to wait for is squash-merged at once. It prints the PR's number and link (with
 `--json`: `{"issue","number","url","created","merged"}`). Where the branch's PR
