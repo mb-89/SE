@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -54,7 +53,7 @@ func init() {
 			if *start && r.From == r.To {
 				return Reply{}, nil
 			}
-			reply := Reply{Text: fmt.Sprintf("SE updated %s → %s.", r.From, r.To), Reload: reloads(c.Session)}
+			reply := Reply{Text: fmt.Sprintf("SE updated %s → %s.", r.From, r.To), Reload: reloads(c)}
 			if r.From == r.To {
 				return Reply{Text: fmt.Sprintf("SE is at the newest main already (%s).", r.To)}, nil
 			}
@@ -65,7 +64,7 @@ func init() {
 			if err := daemon.Stop(c.Paths(), 5*time.Second, c.Clock, c.Net); err != nil {
 				return reply, fmt.Errorf("updated %s → %s, but the old daemon did not stop: %w", r.From, r.To, err)
 			}
-			ep, note, err := startDaemon(c.Proc, c.Paths(), c.Clock, c.Net)
+			ep, note, err := startDaemon(&c.World, c.Paths())
 			if err != nil {
 				reply.Text = joined(reply.Text+fmt.Sprintf(" The daemon did not start again: %v.", err), note)
 				return reply, nil
@@ -84,7 +83,7 @@ const remoteEnv = "CLAUDE_CODE_REMOTE"
 // reloads says whether an update asks the plugin to reload: only in a
 // session, and never over a remote connection, which refuses the reload and
 // says so in the transcript. The new se runs at once there anyway.
-func reloads(session bool) bool { return session && os.Getenv(remoteEnv) != "true" }
+func reloads(c *Call) bool { return c.Session && c.Getenv(remoteEnv) != "true" }
 
 // oneLine folds an error's lines into one.
 func oneLine(err error) string { return strings.Join(strings.Fields(err.Error()), " ") }

@@ -3,6 +3,7 @@ package rules_test
 import "testing"
 
 func TestATestSwappingAPackageFuncVariableIsRefused(t *testing.T) {
+	t.Parallel()
 	found := check(t, "test-swap", map[string]string{
 		"go.mod": "module example.com/m\n\ngo 1.24\n",
 		"a/a.go": "package a\n\nimport \"os\"\n\n" +

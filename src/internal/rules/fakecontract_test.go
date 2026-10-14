@@ -3,6 +3,7 @@ package rules_test
 import "testing"
 
 func TestAFakeWithoutAContractSuiteIsRefused(t *testing.T) {
+	t.Parallel()
 	suite := "package kept_test\n\nimport \"testing\"\n\nfunc contract(t *testing.T, fresh func() int) {}\n"
 	found := check(t, "fake-contract", map[string]string{
 		// Kept: the suite is called by the fake's test and the real one's.

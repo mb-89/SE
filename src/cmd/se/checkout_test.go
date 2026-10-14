@@ -26,7 +26,7 @@ import (
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("../../..")
-	if err != nil || !update.IsCheckout(drive, root) {
+	if err != nil || !update.IsCheckout(disk.Real(), root) {
 		t.Fatalf("the tests do not run in an SE checkout: %s %v", root, err)
 	}
 	return root
@@ -59,11 +59,13 @@ func installed(t *testing.T) string {
 			return
 		}
 		installedSE = filepath.Join(dir, filepath.Base(daemon.Paths{}.Bin()))
-		installedErr = update.Build(drive, proc.Real(), repoRoot(t), installedSE)
+		installedErr = update.Build(disk.Real(), proc.Real(), repoRoot(t), installedSE)
 	})
 	if installedErr != nil {
 		t.Fatal(installedErr)
 	}
+	w := worldOf(t)
+	w.Proc = runningAs{w.Proc, installedSE}
 	return installedSE
 }
 
@@ -124,7 +126,7 @@ func runs(t *testing.T, ep *Endpoint, ws string) string {
 	if runtime.GOOS != "linux" {
 		return ""
 	}
-	got, ok := daemon.Healthy(daemon.Paths{Workspace: ws, Disk: drive}, sehttp.Real())
+	got, ok := daemon.Healthy(daemon.Paths{Workspace: ws, Disk: disk.Real()}, sehttp.Real())
 	if !ok || ep == nil || got.Address != ep.Address {
 		t.Fatalf("no daemon answers at %+v (healthy %v at %s)", ep, ok, got.Address)
 	}
@@ -136,6 +138,7 @@ func runs(t *testing.T, ep *Endpoint, ws string) string {
 }
 
 func TestTheLifecycleStaysWithTheInstalledSe(t *testing.T) {
+	t.Parallel()
 	for name, c := range commands {
 		want := name == "on" || name == "restart" || name == "update"
 		if c.Installed != want {
@@ -145,27 +148,30 @@ func TestTheLifecycleStaysWithTheInstalledSe(t *testing.T) {
 }
 
 func TestAnyOtherWorkspaceRunsTheInstalledSe(t *testing.T) {
+	t.Parallel()
 	se := installed(t)
 	ws := t.TempDir()
 	write(t, filepath.Join(ws, "go.mod"), "module example.com/other\n")
-	m := proc.NewFake()
+	m, w := proc.NewFake(), worldOf(t)
 	m.RunAs(se)
-	exe, note, err := daemonExe(m, daemon.Paths{Workspace: ws, Disk: drive})
+	w.Proc = m
+	exe, note, err := daemonExe(w, daemon.Paths{Workspace: ws, Disk: disk.Real()})
 	if err != nil || exe != se || note != "" || len(m.Ran()) != 0 {
 		t.Fatalf("exe %q, note %q, err %v, ran %q", exe, note, err, m.Lines())
 	}
-	if _, err := os.Stat(daemon.Paths{Workspace: ws, Disk: drive}.Bin()); err == nil {
+	if _, err := os.Stat(daemon.Paths{Workspace: ws, Disk: disk.Real()}.Bin()); err == nil {
 		t.Fatal("se was built in a workspace that is no SE checkout")
 	}
 }
 
 func TestOnlySessionWordsGoToTheCheckoutsSe(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in se is a shell script")
 	}
 	ws := t.TempDir()
 	write(t, filepath.Join(ws, "go.mod"), "module github.com/mb-89/SE\n")
-	bin := daemon.Paths{Workspace: ws, Disk: drive}.Bin()
+	bin := daemon.Paths{Workspace: ws, Disk: disk.Real()}.Bin()
 	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -183,20 +189,22 @@ func TestOnlySessionWordsGoToTheCheckoutsSe(t *testing.T) {
 		t.Errorf("terminal help: exit %d, %q", code, out)
 	}
 	// An se the installed one handed the words to answers them itself.
-	t.Setenv(handedOver, "1")
+	setenv(t, handedOver, "1")
 	if r := in(t, ws, "help"); r.Text != help(true, false) {
 		t.Errorf("handed over: %q", r.Text)
 	}
 }
 
 func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("builds se twice")
 	}
 	se := installed(t)
-	onMachine(t, runningAs{proc.Real(), se})
 	ws := scratch(t)
-	paths := daemon.Paths{Workspace: ws, Disk: drive}
+	// Real daemons start and stop here, on the real clock they wait by.
+	worldOf(t).Clock = clock.Real()
+	paths := daemon.Paths{Workspace: ws, Disk: disk.Real()}
 	t.Cleanup(func() { _ = daemon.Stop(paths, 5*time.Second, clock.Real(), sehttp.Real()) })
 
 	// The checkout changes a summary and adds a command.
@@ -269,6 +277,7 @@ func init() {
 // The debugger builds se serve from the source open in VS Code; serve is never
 // handed to another se, so a breakpoint there is the code that runs.
 func TestTheDebuggerServesTheSourceItDebugs(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), ".vscode", "launch.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -297,6 +306,7 @@ func TestTheDebuggerServesTheSourceItDebugs(t *testing.T) {
 }
 
 func TestWithdrawRemovesABuildOrMovesItAway(t *testing.T) {
+	t.Parallel()
 	d := disk.NewFake()
 	bin := daemon.Paths{Workspace: filepath.FromSlash("/ws"), Disk: d}.Bin()
 	put(t, d, bin, "se")
@@ -311,12 +321,14 @@ func TestWithdrawRemovesABuildOrMovesItAway(t *testing.T) {
 }
 
 func TestOnlyACheckoutWithABuildHandsOver(t *testing.T) {
-	d, ws := disk.NewFake(), filepath.FromSlash("/ws")
-	if _, handed := handsOver(d, proc.NewFake(), ws, []string{"status"}, nil, nil); handed {
+	t.Parallel()
+	d, ws := onFake(t), filepath.FromSlash("/ws")
+	worldOf(t).Proc = proc.NewFake()
+	if _, handed := handsOver(worldOf(t), ws, []string{"status"}, nil, nil); handed {
 		t.Fatal("a folder that is no checkout handed over")
 	}
 	put(t, d, filepath.Join(ws, "go.mod"), "module "+update.Module+"\n")
-	if _, handed := handsOver(d, proc.NewFake(), ws, []string{"status"}, nil, nil); handed {
+	if _, handed := handsOver(worldOf(t), ws, []string{"status"}, nil, nil); handed {
 		t.Fatal("a checkout with nothing built handed over")
 	}
 }

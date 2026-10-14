@@ -81,11 +81,14 @@ branch and allows issues; nothing else is asked of it.
 Every other test runs on fakes: no wall clock, no sleeping, no network. The
 real implementation runs in its contract test alone, kept short.
 
-One test is the exception, named here: `TestRestartRunsTheCheckoutsOwnSource`
-in `src/cmd/se/checkout_test.go` builds se and stops the real daemon
+Two tests are the exceptions, named here. The first,
+`TestRestartRunsTheCheckoutsOwnSource` in `src/cmd/se/checkout_test.go`, builds se and stops the real daemon
 processes it starts, over the real network, by `clock.Real()`. It is what
 shows a restart runs the checkout's own source, which no fake can, and
-`go test -short` skips it.
+`go test -short` skips it. The second,
+`TestStatusAndStopReachTheDaemonOverTheNetwork` in `src/cmd/se/stop_test.go`
+hands se stop the real clock: it polls for the daemon's endpoint to go, which a fake
+clock passes at once, before the daemon has removed it.
 
 ## The rules
 
@@ -97,13 +100,16 @@ no contract suite: a function in one of its `_test.go` files that a test in
 The `test-swap` rule (`src/internal/rules/testswap.go`) refuses a test that
 assigns a package-level func variable, its own package's or an imported one's.
 A test does not swap how code reaches the outside; it hands the code a fake,
-as an argument or a field. The `cmd/se` handles every call is given (`wall`,
-`drive`, `machine`, `network`, `hub`) are the one place a test sets.
+as an argument or a field, such as the `World` `cmd/se` hands every call.
 
 The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line: outside
 `src/internal/io/`, no Go file imports `os/exec` or `net/http`, runs `gh`, calls the
 clock through `time` (`Now`, `Sleep`, `After` and their kin), or opens, reads
-or writes files through `os`. Test files are left to principle 8.
+or writes files through `os`. Test files are held by the `fast-test` rule
+(`src/internal/rules/fasttest.go`) instead: every test calls `t.Parallel`
+first, and outside `src/internal/io/` no test reads the clock through `time`
+or takes `clock.Real`. What still breaks it is named in
+`src/internal/rules/serial.txt`, which only shrinks as the allowlist below does.
 
 What broke it while the modules landed was named in one allowlist,
 `src/internal/io/allowlist.txt`, one file and what it reaches per line. Each

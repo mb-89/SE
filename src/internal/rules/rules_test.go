@@ -53,6 +53,7 @@ func checkIn(t *testing.T, repo *rules.Repo, rule string, files map[string]strin
 }
 
 func TestEveryRuleIsRegisteredWithItsParts(t *testing.T) {
+	t.Parallel()
 	var names []string
 	for _, r := range rules.Rules() {
 		if r.Doc == "" || r.Applies == nil || r.Check == nil {
@@ -60,7 +61,7 @@ func TestEveryRuleIsRegisteredWithItsParts(t *testing.T) {
 		}
 		names = append(names, r.Name)
 	}
-	if got := strings.Join(names, " "); got != "fake-contract io-module manifest reader repo-path se-command test-package test-swap todo-issue" {
+	if got := strings.Join(names, " "); got != "fake-contract fast-test io-module manifest reader repo-path se-command test-package test-swap todo-issue" {
 		t.Fatalf("rules = %s", got)
 	}
 }
