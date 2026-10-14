@@ -64,10 +64,10 @@ func init() {
 	register(Command{
 		Name:    "issue pull",
 		Class:   interactive,
-		Usage:   "issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]",
+		Usage:   "issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "show the next se issue, stuck work first; --take claims it",
-		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link and body), or says that none is ready, and takes nothing. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands. A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. A take names the agent that works the issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a parent, which is the box itself, se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issueConfig().OverhaulCadence, issueConfig().RetroCadence, issueConfig().Lease, issues.Parallel),
+		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work: without --take it only shows it (number, title, link, why it is at the top, and where the cadences stand; --full adds the body), or says that none is ready, and takes nothing; a press of its /se ui button shows the short form, the cadences in one line. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands. A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. A take names the agent that works the issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a parent, which is the box itself, se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. --person lists the issues waiting on a person.", issueConfig().OverhaulCadence, issueConfig().RetroCadence, issueConfig().Lease, issues.Parallel),
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -77,6 +77,7 @@ func init() {
 			in := fs.Int("in", 0, "look inside the tree of issue `ROOT` for its ready leaves")
 			person := fs.Bool("person", false, "list the issues waiting on a person")
 			worktree := fs.Bool("worktree", false, "with --take: claim for a sub-agent's worktree, checking nothing out")
+			full := fs.Bool("full", false, "without --take: show the issue's body too")
 			// --take N: the number may stand after --take, between or after the other flags.
 			for rest := c.Args; ; {
 				if err := fs.Parse(rest); err != nil {
@@ -136,7 +137,7 @@ func init() {
 					}
 					cads = append(cads, cad)
 				}
-				r, err := issueReply(*asJSON, next, ok, "", "", "", handed{}, cads...)
+				r, err := issueReply(*asJSON, *full, next, ok, "", "", "", handed{}, cads...)
 				return sweptReply(r, err, *asJSON, flagged)
 			}
 			// An overhaul, then a retro, the cadence has made due comes
@@ -187,7 +188,7 @@ func init() {
 			if ok {
 				h = c.handOver(took)
 			}
-			r, err := issueReply(*asJSON, took, ok, issues.Branch(took.Number), wt, fanout, h, started...)
+			r, err := issueReply(*asJSON, false, took, ok, issues.Branch(took.Number), wt, fanout, h, started...)
 			return sweptReply(r, err, *asJSON, flagged)
 		},
 	})
@@ -789,8 +790,10 @@ type handed struct {
 // a take claimed, worktree the command that makes its worktree where the take
 // checked nothing out, fanout what its fan-out did, h the skills it handed
 // over, and cads where the retro and overhaul cadences stand. A take passes
-// the one cadence that started its issue, if any.
-func issueReply(asJSON bool, i issues.Issue, ok bool, branch, worktree, fanout string, h handed, cads ...issues.Cadence) (Reply, error) {
+// the one cadence that started its issue, if any; full shows a plain pull's
+// body, which a take always shows. Every body it shows is issues.Shown.
+func issueReply(asJSON, full bool, i issues.Issue, ok bool, branch, worktree, fanout string, h handed, cads ...issues.Cadence) (Reply, error) {
+	i.Body = issues.Shown(i.Body)
 	if asJSON {
 		answer := struct {
 			Ready     bool             `json:"ready"`
@@ -817,34 +820,27 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, worktree, fanout s
 		data, err := json.Marshal(answer)
 		return Reply{Text: string(data)}, err
 	}
-	tail := ""
-	for _, cad := range cads {
-		tail += "\n\n" + cad.Line()
+	if branch == "" {
+		return pulled(i, ok, full, cads), nil
 	}
-	if !ok {
-		return Reply{Text: "No se issue is ready." + tail}, nil
-	}
-	head := fmt.Sprintf("#%d %s\n%s", i.Number, i.Title, i.URL)
+	var head string
 	t := i.Takeover
 	switch {
-	case branch != "" && t != nil && t.PR != 0 && t.Stale == "":
+	case t != nil && t.PR != 0 && t.Stale == "":
 		head = fmt.Sprintf("Took over #%d %s, on branch %s: its PR #%d conflicts with main (takeover %d).\n%s\n%s\nMerge origin/main into %s (never rebase, never force-push), resolve the conflict, and land it again with se issue land.",
 			i.Number, i.Title, branch, t.PR, t.Count, i.URL, t.URL, branch)
-	case branch != "" && t != nil:
+	case t != nil:
 		head = fmt.Sprintf("Took over #%d %s, on branch %s as it stands: it was stuck, %s (takeover %d).\n%s", i.Number, i.Title, branch, t.Stale, t.Count, i.URL)
 		if t.URL != "" {
 			head += "\n" + t.URL
 		}
 		head += fmt.Sprintf("\nMerge origin/main into %s (never rebase, never force-push), continue the branch and its PR, make it green, and land it again with se issue land.", branch)
-	case branch != "" && len(cads) > 0:
+	case len(cads) > 0:
 		cad := cads[0]
 		head = fmt.Sprintf("Started the unattended %s #%d %s, as %d %s closed since the last one (the cadence is %d), and took it, on branch %s.\n%s",
 			cad.Kind, i.Number, i.Title, cad.Closed, cad.Counts(), cad.Every, branch, i.URL)
-		tail = ""
-	case branch != "":
+	default:
 		head = fmt.Sprintf("Took #%d %s, on branch %s.\n%s", i.Number, i.Title, branch, i.URL)
-	case t != nil:
-		head += fmt.Sprintf("\nIt is stuck: a take takes it over and continues its branch %s.", issues.Branch(i.Number))
 	}
 	if branch != "" {
 		head += fmt.Sprintf("\nIts agent: %s.", issues.KindOf(i).Type())
@@ -866,7 +862,40 @@ func issueReply(asJSON bool, i issues.Issue, ok bool, branch, worktree, fanout s
 	if h.Text != "" {
 		text += "\n\n" + h.Text
 	}
-	return Reply{Text: text + tail}, nil
+	return Reply{Text: text}, nil
+}
+
+// pulled answers a plain issue pull, which takes nothing. Typed, it names the
+// issue, its link, why it is at the top and where each cadence stands, a line
+// each, and the body under them where full asks for it. Pressed, it is short:
+// the same lines but the body, and the cadences in one line.
+func pulled(i issues.Issue, ok, full bool, cads []issues.Cadence) Reply {
+	var cadences []string
+	for _, cad := range cads {
+		cadences = append(cadences, cad.Line())
+	}
+	head := []string{"No se issue is ready."}
+	if ok {
+		head = []string{fmt.Sprintf("#%d %s", i.Number, i.Title), i.URL}
+		if i.Picked != "" {
+			head = append(head, i.Picked)
+		}
+	}
+	short := head
+	if line := issues.Briefly(cads); line != "" {
+		short = append(short[:len(short):len(short)], line)
+	}
+	text := strings.Join(head, "\n")
+	if ok && i.Parent {
+		text += fmt.Sprintf("\n#%d is a parent: it holds no work. Its agent, %s, is the box itself: coordinate its tree with se issue pull --in %d --take", i.Number, issues.KindOf(i).Type(), i.Number)
+	}
+	if ok && full && i.Body != "" {
+		text += "\n\n" + i.Body + "\n"
+	}
+	if len(cadences) > 0 {
+		text += "\n" + strings.Join(cadences, "\n")
+	}
+	return Reply{Text: text, Short: strings.Join(short, "\n")}
 }
 
 // inReply answers issue pull --in: what is ready inside root's tree, or, with
@@ -899,6 +928,7 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 		worktree = issues.Worktree(c.Workspace, took.Number)
 		h = c.handOver(took)
 	}
+	took.Body = issues.Shown(took.Body)
 	if asJSON {
 		answer := struct {
 			Ready    bool             `json:"ready"`
@@ -1031,6 +1061,9 @@ func sweptReply(r Reply, err error, asJSON bool, flagged []string) (Reply, error
 	}
 	if !asJSON {
 		r.Text = strings.Join(flagged, "\n") + "\n\n" + r.Text
+		if r.Short != "" {
+			r.Short = strings.Join(flagged, "\n") + "\n" + r.Short
+		}
 		return r, nil
 	}
 	var answer map[string]any

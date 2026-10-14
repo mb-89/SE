@@ -195,7 +195,7 @@ se issue edit N [--title T] [--body B | --body-file PATH] [--json] [--repo OWNER
 se issue keep [--for D] [--json] [--repo OWNER/NAME]
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
 se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
-se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--json] [--repo OWNER/NAME]
+se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
 se issue supersede N (--body B | --body-file PATH) [--json] [--repo OWNER/NAME]
@@ -207,8 +207,13 @@ se review brief N [--claims] [--json] [--repo OWNER/NAME]
 Every one of them first closes the parents whose sub-issues are all closed.
 
 `se issue pull` prints the next issue at the top a take would have (number,
-title, link and body): stuck work first, then the lowest ready one; or it
-says that none is ready; it exits 0 either way. Without `--take` it takes
+title, link, and one line on why it is at the top): stuck work first, then
+the lowest ready one; or it says that none is ready; then where each cadence
+stands, a line each; it exits 0 either way. `--full` adds the issue's body.
+A press of its button in `/se ui` shows its short form: the same lines, the
+cadences in one. Every issue text `se` prints, a take's body and `--json`'s
+among them, leaves out `se`'s machine marks (`<!-- … -->`) and the
+attribution footer (`issues.Shown`). Without `--take` it takes
 nothing, so a person can pull the next issue to read it: it pushes no branch,
 fires no routine, and writes only what every `se issue` command and the sweep
 write. A stuck leaf is marked as one
@@ -324,7 +329,9 @@ the only place they are written; `se issue land` and the retro both read it.
 - The facts: when the branch was created (the claim, from GitHub's activity
   record) and the minutes from it to landing; the branch's commits, merges
   excluded; its takeovers, from their markers; and its merges of main, all
-  counted against `origin/main`.
+  counted against `origin/main`; and the GitHub requests the `se` commands
+  run in the checkout made, from its ledger, this land's so far included
+  ([io.md](io.md#living-within-githubs-rate-limits)).
 - Landing again (after a CI fix, say) updates that comment rather than
   adding a second.
 - The comment is where the answers outlive the box that wrote them: its

@@ -94,7 +94,11 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	t.Parallel()
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
+	// The se commands run in the checkout recorded 30 GitHub requests.
 	d := disk.NewFake()
+	if err := RecordRequests(d, a, "issue pull", 30, landedAt()); err != nil {
+		t.Fatal(err)
+	}
 	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}.Land(a, "", qs, full, battered(d))
 	if err != nil {
 		t.Fatal(err)
@@ -108,11 +112,13 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	}
 	body, err := Landed{Issue: 6, Answers: full, Facts: Facts{
 		Claimed: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC), Landed: landedAt(), Minutes: 90, Commits: 1,
+		// Those 30, and the 3 this land had made when it counted them (the battery status among them).
+		Requests: 33,
 	}}.Comment(qs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body {
+	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 33\n") {
 		t.Fatalf("the landing comment is %+v, want\n%s", got, body)
 	}
 	want := []string{"POST repos/o/r/statuses/" + run(t, a, "rev-parse", "HEAD"), "POST repos/o/r/issues/6/comments", "POST repos/o/r/pulls", "POST graphql"}

@@ -11,7 +11,9 @@
 // clear and compact, since a plugin can ship no rules and no CLAUDE.md. /se ui
 // opens a grid of buttons: the on/off toggle and the commands se offers as
 // buttons, each labelled with its name and pressed as /se <words>, at most as
-// many to a row as se says (gridOf).
+// many to a row as se says (gridOf);
+// a press shows the short form se answers, where it has one, a transcript row
+// per line.
 // In a box, SE on or off, every Stop and SubagentStop goes to se hook stop,
 // which refuses the stop while the issue the box took is open, its PR not
 // merged nor the issue superseded; a prompt from a person resets its count.
@@ -58,6 +60,8 @@ const PLUGIN_CHECKOUT = 'SE_PLUGIN_CHECKOUT'
 // What se --session answers: the text to show and the effects to apply.
 export type Reply = {
   text: string
+  // What a press of the command's button shows instead of text, where se has a short form.
+  short?: string
   active?: boolean
   endpoint?: Endpoint
   reload?: boolean
@@ -471,19 +475,19 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
 // /se <words>: hands the words to se and applies its reply; answers the text
 // to show. One se does not answer within FEEDBACK answers that it is working,
 // and its answer follows as a line of the transcript.
-async function runs($: EngineInterface, args: string): Promise<string> {
+async function runs($: EngineInterface, args: string, pressed = false): Promise<string> {
   const words = wordsOf(args)
   const typed = ['/se', ...words].join(' ')
-  const ran = await within($, typed, answers($, words))
+  const ran = await within($, typed, answers($, words, pressed))
   if (ran.done) return ran.value
-  void ran.later.then(text => $.ui.log(text))
+  void ran.later.then(text => logs($, text))
   return `${typed} is still working; its answer follows here.`
 }
 
-// Hands the words to se and applies its reply; answers the text to show.
-// Help se answered is kept for the output row to draw; a line that no longer
-// answers help draws as its text.
-async function answers($: EngineInterface, words: string[]): Promise<string> {
+// Hands the words to se and applies its reply; answers the text to show, the
+// short form se answered where a button was pressed. Help se answered is kept
+// for the output row to draw; a line that no longer answers help draws as its text.
+async function answers($: EngineInterface, words: string[], pressed: boolean): Promise<string> {
   const asked = await asks($, words)
   if (typeof asked === 'string') return asked
   const key = words.join(' ')
@@ -493,7 +497,7 @@ async function answers($: EngineInterface, words: string[]): Promise<string> {
     const { [key]: _, ...rest } = helps
     await $.state.set(HELPS, rest)
   }
-  return applies($, asked)
+  return applies($, pressed && asked.short ? { ...asked, text: asked.short } : asked)
 }
 
 // The cells between two cells of the pane's grid, across and down.
@@ -520,11 +524,20 @@ function wordsOf(args: string): string[] {
   return args.split(/\s+/).filter(Boolean)
 }
 
-// A press runs what typing /se <words> runs; its answer is a line of the
-// transcript, where a command's answer shows. (A plugin's $.command.run skips
-// the plugin's own hooks, so it cannot reach /se.)
+// A press runs what typing /se <words> runs, and shows se's short form where
+// it has one; its answer goes to the transcript, where a command's answer
+// shows. (A plugin's $.command.run skips the plugin's own hooks, so it cannot
+// reach /se.)
 async function presses($: EngineInterface, words: string): Promise<void> {
-  $.ui.log(await runs($, words))
+  logs($, await runs($, words, true))
+}
+
+// Writes an answer to the transcript, a row per line. $.ui.log is the one call
+// every surface draws as a transcript row, the terminal, the desktop app and
+// the phone alike, and it draws one line: the terminal flattens a newline in
+// it (to ◆ on Windows). So each line is its own call, and a blank line none.
+function logs($: EngineInterface, text: string): void {
+  for (const line of text.split(/\r?\n/)) if (line.trim()) $.ui.log(line)
 }
 
 // Switches SE on and starts the daemon; answers why the daemon did not start, or ''.

@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
@@ -16,7 +17,7 @@ import (
 
 // recordedFleet answers the fleet commands' gh calls for o/r: #3 is ready,
 // nothing is claimed, and nothing is broken.
-func recordedFleet(t *testing.T) {
+func recordedFleet(t *testing.T) *github.Fake {
 	t.Helper()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100":      `[{"number":3,"title":"three","state":"open","html_url":"u3"}]`,
@@ -24,7 +25,29 @@ func recordedFleet(t *testing.T) {
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
 	}
-	hubAt(t, answers)
+	return hubAt(t, answers)
+}
+
+// Where GitHub's answers say the hour's quota has fallen below the floor,
+// fleet check says so on a last line, and in its JSON.
+func TestFleetCheckSaysWhenTheQuotaRunsLow(t *testing.T) {
+	t.Parallel()
+	gh := recordedFleet(t)
+	gh.Quota(1000, time.Hour)
+	for range 850 {
+		if _, err := gh.Get("repos/o/r/issues/3"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, out, errs := se(t, "fleet", "check", "--repo", "o/r")
+	if code != 0 || !strings.HasPrefix(out, "healthy\nGitHub's quota runs low: ") || !strings.Contains(out, " of the hour's 1000 requests left, under the 20% floor (github/config/quota-floor)") {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	_, out, _ = se(t, "fleet", "check", "--json", "--repo", "o/r")
+	var answer struct{ Quota string }
+	if err := json.Unmarshal([]byte(out), &answer); err != nil || !strings.HasPrefix(answer.Quota, "GitHub's quota runs low: ") {
+		t.Fatalf("%q %v", out, err)
+	}
 }
 
 func TestAHealthyFleetSaysSo(t *testing.T) {
