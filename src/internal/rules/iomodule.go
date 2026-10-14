@@ -20,7 +20,7 @@ const Allowlist = "src/internal/io/allowlist.txt"
 // outside is what reaches the outside past an I/O module: the imports, and
 // the calls of time and os, by package path.
 var (
-	outsideImports = []string{"os/exec", "net/http"}
+	outsideImports = []string{"os/exec", "net", "net/http", "io/ioutil"}
 	outsideCalls   = map[string][]string{
 		"time": {"Now", "Sleep", "After", "Since", "Until", "Tick", "NewTicker", "NewTimer", "AfterFunc"},
 		"os": {
@@ -34,7 +34,7 @@ var (
 func init() {
 	register(Rule{
 		Name: "io-module",
-		Doc: "outside src/internal/io, no Go file imports os/exec or net/http, runs gh, reads the clock, sleeps or waits through time, " +
+		Doc: "outside src/internal/io, no Go file imports os/exec, net, net/http or io/ioutil, runs gh, reads the clock, sleeps or waits through time, " +
 			"or opens, reads or writes files through os, except as " + Allowlist + " names; an entry there that matches nothing is refused",
 		Applies: func(p string) bool {
 			return p == Allowlist || (path.Ext(p) == ".go" && !strings.HasSuffix(p, "_test.go") && !strings.HasPrefix(p, "src/internal/io/"))
@@ -163,8 +163,9 @@ func Reaches(p string, text []byte) []Reach {
 			first[what] = fset.Position(pos).Line
 		}
 	}
-	local := map[string]string{} // the name a package goes by in the file, to its path
-	execName := ""               // the name os/exec goes by in the file
+	local := map[string]string{}  // the name a package goes by in the file, to its path
+	dotted := map[string]string{} // a call of a package imported with ".", to that path
+	execName := ""                // the name os/exec goes by in the file
 	for _, im := range f.Imports {
 		ip, _ := strconv.Unquote(im.Path.Value)
 		for _, o := range outsideImports {
@@ -183,17 +184,30 @@ func Reaches(p string, text []byte) []Reach {
 			if im.Name != nil {
 				name = im.Name.Name
 			}
+			if name == "." {
+				for _, c := range outsideCalls[ip] {
+					dotted[c] = ip
+				}
+				continue
+			}
 			local[name] = ip
 		}
 	}
+	field := map[*ast.Ident]bool{} // a name after a dot, which names no package's call
 	ast.Inspect(f, func(n ast.Node) bool {
 		if call, ok := n.(*ast.CallExpr); ok && execName != "" && runsGh(call, execName) {
 			note("gh", call.Pos())
+		}
+		if id, ok := n.(*ast.Ident); ok {
+			if ip, ok := dotted[id.Name]; ok && !field[id] {
+				note(ip+"."+id.Name, id.Pos())
+			}
 		}
 		sel, ok := n.(*ast.SelectorExpr)
 		if !ok {
 			return true
 		}
+		field[sel.Sel] = true // x.Now is no call of a dot-imported time's
 		id, ok := sel.X.(*ast.Ident)
 		if !ok {
 			return true

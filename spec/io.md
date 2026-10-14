@@ -64,9 +64,10 @@ real implementation runs in its contract test alone, kept short.
 ## The rule
 
 The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line: outside
-`src/internal/io/`, no Go file imports `os/exec` or `net/http`, runs `gh`, calls the
-clock through `time` (`Now`, `Sleep`, `After` and their kin), or opens, reads
-or writes files through `os`. Test files are left to principle 8.
+`src/internal/io/`, no Go file imports `os/exec`, `net`, `net/http` or
+`io/ioutil`, runs `gh`, calls the clock through `time` (`Now`, `Sleep`, `After`
+and their kin, dot-imported or not), or opens, reads or writes files through
+`os`. Test files are left to principle 8.
 
 What broke it while the modules landed was named in one allowlist,
 `src/internal/io/allowlist.txt`, one file and what it reaches per line. Each

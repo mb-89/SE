@@ -19,12 +19,19 @@ func TestOnlyIOModulesReachTheOutside(t *testing.T) {
 		"src/internal/io/clock/clock.go": "package clock\n\nimport \"time\"\n\nvar now = time.Now\n",
 		"src/internal/io/allowlist.txt":  "# kept until proc lands\nsrc/a/kept.go os/exec\nsrc/a/hub.go os/exec\n",
 		"src/a/broken.go":                "not go",
+		"src/a/dial.go":                  "package a\n\nimport \"net\"\n\nvar _, _ = net.Dial(\"tcp\", \"x\")\n",
+		"src/a/old.go":                   "package a\n\nimport \"io/ioutil\"\n\nvar _, _ = ioutil.ReadFile(\"x\")\n",
+		"src/a/dot.go":                   "package a\n\nimport . \"time\"\n\nvar d = Second\n\nfunc f(x struct{ Now int }) { _ = x.Now; _ = Now() }\n",
 	})
 	want := []string{
 		"src/a/clock.go:5: io-module: time.Now reaches the outside",
 		"src/a/clock.go:7: io-module: time.Sleep reaches the outside",
 		"src/a/clock.go:7: io-module: time.After reaches the outside",
+		"src/a/dial.go:3: io-module: net reaches the outside",
 		"src/a/disk.go:5: io-module: os.ReadFile reaches the outside",
+		// A dot import's bare call reaches it too; x.Now is a field.
+		"src/a/dot.go:7: io-module: time.Now reaches the outside",
+		"src/a/old.go:3: io-module: io/ioutil reaches the outside",
 		// Its os/exec is allowed for now; gh is GitHub's I/O module's alone.
 		"src/a/hub.go:5: io-module: gh reaches the outside",
 		"src/a/net.go:3: io-module: net/http reaches the outside",
