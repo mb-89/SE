@@ -319,3 +319,41 @@ func TestInSaysWhenTheRootHasClosed(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// held is an open issue for a person that hold minted, holding #n.
+func held(h, n int) string {
+	return fmt.Sprintf(`{"id":%d,"number":%d,"title":"Decide how #%d goes on","state":"open","html_url":"u%d","body":"Stuck.\n\n<!-- se:holds %d -->","labels":[{"name":"se"},{"name":"se-person"}]}`,
+		1000+h, h, n, h, n)
+}
+
+// Recorded from mb-89/SE on 14 October: #134, for a person, held #95, and
+// stayed open after #95 closed. An issue for a person whose held issue is
+// closed closes by itself; one whose held issue is open, or one a person
+// made by hand, stays.
+func TestAHoldWhoseIssueClosedClosesItself(t *testing.T) {
+	t.Parallel()
+	gh := recorded(t, map[string]string{
+		listPath:              list(node(5, 0), held(134, 95), held(135, 5), held(136, 96), node(137, 0, PersonLabel)),
+		"repos/o/r/issues/95": `{"number":95,"state":"closed"}`,
+		"repos/o/r/issues/96": `{"number":96,"state":"open"}`,
+	})
+	if err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).CloseParents(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"POST repos/o/r/issues/134/comments", "PATCH repos/o/r/issues/134"}
+	if w := gh.Writes(); !reflect.DeepEqual(w, want) {
+		t.Fatalf("%q\nwant %q", w, want)
+	}
+	if i, c := issueAt(t, gh, 134), commentsAt(t, gh, 134); i.State != "closed" || len(c) != 1 || !strings.HasPrefix(c[0].Body, "#95, which this issue held, is closed") {
+		t.Fatalf("#134: %+v %+v", i, c)
+	}
+	// hold marks the issue it mints with the issue it holds.
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	made, err := s.hold(Issue{Number: 5, Title: "t5", URL: "u5"}, "Stuck.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issueAt(t, gh, made.Number); got.holds() != 5 {
+		t.Fatalf("#%d holds %d: %q", made.Number, got.holds(), got.Body)
+	}
+}

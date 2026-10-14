@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/index/indextest"
+	"github.com/mb-89/SE/src/index/indextest"
 	"github.com/mb-89/SE/src/internal/io/clock"
 )
 
