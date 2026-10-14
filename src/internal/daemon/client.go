@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
@@ -61,7 +63,10 @@ func Start(procs proc.Procs, paths Paths, exe string, wait time.Duration, clk cl
 	return Endpoint{}, fmt.Errorf("the daemon did not answer within %s; see %s", wait, paths.DaemonLog())
 }
 
-// Stop asks the workspace's daemon to end and waits by clk until it has withdrawn.
+// Stop asks the workspace's daemon to end and waits by clk until it has ended:
+// until its lifetime lock is free. A daemon served with Options.HoldLock lets
+// the lock go only as its process exits, so Stop returns after the daemon's
+// last write into the runtime folder, not when it withdraws daemon.json.
 func Stop(paths Paths, wait time.Duration, clk clock.Clock, net sehttp.Net) error {
 	ep, ok := Healthy(paths, net)
 	if !ok {
@@ -72,8 +77,12 @@ func Stop(paths Paths, wait time.Duration, clk clock.Clock, net sehttp.Net) erro
 	}
 	deadline := clk.Now().Add(wait)
 	for clk.Now().Before(deadline) {
-		if there, err := paths.Disk.Exists(paths.Endpoint()); err == nil && !there {
-			return nil
+		held, err := paths.Disk.Lock(paths.Lock())
+		if err == nil {
+			return held.Close()
+		}
+		if !errors.Is(err, disk.ErrLocked) {
+			return err
 		}
 		clk.Sleep(50 * time.Millisecond)
 	}
