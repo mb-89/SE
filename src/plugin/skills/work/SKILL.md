@@ -22,13 +22,9 @@ those.
    follow the coordination skill,
    [src/plugin/skills/coordination/SKILL.md](../coordination/SKILL.md), which
    checks what is broken and fixes it before the session ends. If it says the issue is a parent, follow **A parent**
-   below instead of steps 3 to 5. If it says the issue is a retro (labelled
-   `se-retro`), follow the retro skill,
-   [src/plugin/skills/retro/SKILL.md](../retro/SKILL.md), instead of steps 3
-   to 5. If it says the issue is an overhaul (labelled `se-overhaul`), follow
-   the overhaul skill,
-   [src/plugin/skills/overhaul/SKILL.md](../overhaul/SKILL.md), instead of
-   steps 3 to 5.
+   below instead of steps 3 to 5. The take's answer ends with every skill the
+   issue names, in full: follow them. Where one of them (a retro's, an
+   overhaul's) takes the issue to its end, it stands instead of steps 3 to 5.
 2. If `set_session_title` is available, rename this session to
    `SE #<n> · <issue title>`.
 3. Do the issue's work on its branch `issue-<n>`, following CLAUDE.md. If it
@@ -86,7 +82,8 @@ took. `se` is the absolute path of `./src/plugin/bin/se` in this checkout.
      is an answer; an empty field is not), then run
      <se> issue land --workspace <path> --answers <path>-landing.yaml.
      Answer only the PR number and link.
-     <the issue's body>`
+     <the issue's body>
+     <the answer's guidance, the skills the issue names>`
      Then go back to 1, so every ready leaf gets its sub-agent.
 2. Subscribe to each PR a sub-agent answers. When a PR merges, or a
    reviewer answers, go back to 1.

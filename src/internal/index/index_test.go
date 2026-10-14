@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	_ "github.com/mb-89/SE/src/internal/guidance" // the wiring se carries instances it
 	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/index/fixture"
 	"github.com/mb-89/SE/src/internal/index/indextest"
