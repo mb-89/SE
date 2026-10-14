@@ -915,11 +915,14 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 }
 
 // Worktree is the command that checks a leaf's claimed branch out in its own
-// worktree, beside the checkout dir.
+// worktree, WorktreeDir beside the checkout dir.
 func Worktree(dir string, n int) string {
 	b := Branch(n)
-	return fmt.Sprintf("git worktree add --track -b %s %s origin/%s", b, filepath.Join(filepath.Dir(dir), b), b)
+	return fmt.Sprintf("git worktree add --track -b %s %s origin/%s", b, WorktreeDir(dir, n), b)
 }
+
+// WorktreeDir is where Worktree checks issue n out, beside the checkout dir.
+func WorktreeDir(dir string, n int) string { return filepath.Join(filepath.Dir(dir), Branch(n)) }
 
 // claimTree claims a parent's tree with its branch, as Claim does; where the
 // branch exists already, the tree is picked up from that claim and the
