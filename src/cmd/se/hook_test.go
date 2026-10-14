@@ -4,6 +4,7 @@ package main
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func stopWorld(t *testing.T, a map[string]string) *disk.Fake {
 	t.Helper()
 	asBox(t)
 	d := onFake(t)
-	put(t, d, "/ws/.se/.runtime/box.json", `{"issue":3}`)
+	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[3]}`)
 	put(t, d, "/ws/"+StopPath, "refusals: 2\n")
 	hubAt(t, a)
 	return d
@@ -142,8 +143,32 @@ func TestATakeRecordsTheIssueForTheStopHook(t *testing.T) {
 	if err := recordTake(c, 3); err != nil {
 		t.Fatal(err)
 	}
-	if b := readBox(c); b.Issue != 3 || len(b.Refused) != 0 {
+	if b := readBox(c); !slices.Equal(b.Issues, []int{3}) || len(b.Refused) != 0 {
 		t.Fatalf("%+v", b)
+	}
+	// A box takes several issues; it keeps every one, each once.
+	for _, n := range []int{4, 3} {
+		if err := recordTake(c, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if b := readBox(c); !slices.Equal(b.Issues, []int{3, 4}) {
+		t.Fatalf("%+v", b)
+	}
+}
+
+func TestABoxIsHeldToEveryIssueItTook(t *testing.T) {
+	t.Parallel()
+	d := stopWorld(t, map[string]string{
+		"repos/o/r/issues/1": `{"number":1,"state":"open"}`,
+		"repos/o/r/pulls?head=o:issue-1&base=main&state=open&per_page=100": `[]`,
+		"repos/o/r/issues/2": `{"number":2,"state":"open"}`,
+		"repos/o/r/pulls?head=o:issue-2&base=main&state=open&per_page=100": `[{"number":9,"html_url":"p9","auto_merge":{"merge_method":"squash"}}]`,
+	})
+	put(t, d, "/ws/.se/.runtime/box.json", `{"issues":[1,2]}`)
+	v := stops(t)
+	if !strings.Contains(v.Block, "#1 is open with neither a PR from issue-1 nor a supersede") || strings.Contains(v.Block, "#2") {
+		t.Fatalf("%+v", v)
 	}
 }
 
