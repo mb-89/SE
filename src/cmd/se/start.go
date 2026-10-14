@@ -9,6 +9,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "start",
+		Class:   batch,
 		Usage:   "start",
 		Group:   "Daemon",
 		Summary: "start the daemon in the background, or find it running",

@@ -100,12 +100,9 @@ func (r *rest) Get(path string) ([]byte, error) { return r.do("GET", path, nil) 
 // does not say) is the last; so is one that repeats the page before it, where
 // a list takes no page.
 func (r *rest) List(path string) ([]byte, error) {
-	sep, size := "?", 30
+	sep, size := "?", pageSize(path)
 	if u, err := url.Parse(path); err == nil && u.RawQuery != "" {
 		sep = "&"
-		if n, err := strconv.Atoi(u.Query().Get("per_page")); err == nil && n > 0 {
-			size = n
-		}
 	}
 	all := []json.RawMessage{}
 	var last []byte
@@ -127,6 +124,17 @@ func (r *rest) List(path string) ([]byte, error) {
 			return json.Marshal(all)
 		}
 	}
+}
+
+// pageSize is how many items a page of the list at path holds: its per_page,
+// or GitHub's 30 where path does not say.
+func pageSize(path string) int {
+	if u, err := url.Parse(path); err == nil {
+		if n, err := strconv.Atoi(u.Query().Get("per_page")); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 30
 }
 
 func (r *rest) Send(method, path string, fields ...Field) ([]byte, error) {
