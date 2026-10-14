@@ -193,7 +193,8 @@ func TestNothingPendingIsSaidPlainly(t *testing.T) {
 	t.Parallel()
 	recordedBriefing(t, false, nil)
 	out := briefed(t, "--repo", "o/r")
-	inOrder(t, out, "## Waits on you\nNothing waits on you.\n", "## In flight", "fleet check: healthy", "1 ready, 1 claimed, 0 blocked, 1 in trees, 1 in no manifest")
+	// #2 stands in no manifest: fleet check finds it, for fleet fix to file.
+	inOrder(t, out, "## Waits on you\nNothing waits on you.\n", "## In flight", "fleet check:\n  bare issue #2: ", "1 ready, 1 claimed, 0 blocked, 1 in trees, 1 in no manifest")
 }
 
 func TestTheWindowIsTheLastDayOrTheLastTenWhicheverAreMore(t *testing.T) {

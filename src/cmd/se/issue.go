@@ -517,7 +517,7 @@ func init() {
 		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "check and land issue-N: a leaf into its manifest, else one PR",
-		Details: "on an issue-N branch: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), and refuse an issue with open sub-issues. A leaf inside a manifest (an issue with a parent) lands into the manifest's branch: merge origin's issue-N and the manifest's issue-M into it (never a rebase), pass tests/check.sh, push it to both, post the answers on the leaf with its facts (its time from claim to land among them) and close it; a leaf gets no PR of its own. An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul, a bare leaf from before) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash); a manifest whose branch holds nothing main does not closes with no PR. It records the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub.",
+		Details: "on an issue-N branch: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), and refuse an issue with open sub-issues. A leaf inside a manifest (an issue with a parent) lands into the manifest's branch: merge origin's issue-N and the manifest's issue-M into it (never a rebase), pass tests/check.sh, push it to both, post the answers on the leaf with its facts (its time from claim to land among them) and close it; a leaf gets no PR of its own. An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit (where GitHub refuses it with 403, as a cloud box's proxy does, it goes on and warns, since CI then runs the battery itself), post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a manifest whose branch holds nothing main does not closes with no PR.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue land")
@@ -1026,16 +1026,6 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 	return Reply{Text: text}, nil
 }
 
-// pausedReply answers a take while the fleet is paused (with --json:
-// {"ready":false,"paused":true,"why"}): the box takes nothing and ends.
-func pausedReply(asJSON bool) (Reply, error) {
-	if asJSON {
-		data, err := json.Marshal(map[string]any{"ready": false, "paused": true, "why": issues.PausedWhy})
-		return Reply{Text: string(data)}, err
-	}
-	return Reply{Text: "No take: " + issues.PausedWhy + "."}, nil
-}
-
 // restoreAnswers writes the landing answers a takeover's issue has on it back
 // to the answers file beside the leaf's checkout (its own worktree where
 // worktree is set), and names that file in took's takeover.
@@ -1062,6 +1052,16 @@ func answersLine(t *issues.Takeover) string {
 		return ""
 	}
 	return "\nIts landing answers, as its last land posted them, are in " + t.Answers + ": bring them up to date, and land with --answers " + t.Answers + "."
+}
+
+// pausedReply answers a take while the fleet is paused (with --json:
+// {"ready":false,"paused":true,"why"}): the box takes nothing and ends.
+func pausedReply(asJSON bool) (Reply, error) {
+	if asJSON {
+		data, err := json.Marshal(map[string]any{"ready": false, "paused": true, "why": issues.PausedWhy})
+		return Reply{Text: string(data)}, err
+	}
+	return Reply{Text: "No take: " + issues.PausedWhy + "."}, nil
 }
 
 // fullReply answers a box's take refused because it runs its cap of

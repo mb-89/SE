@@ -32,17 +32,16 @@ command in `<path>`.
    what is missing, and lands the rest (`se help issue land`). A leaf inside
    a manifest lands into the manifest's branch, `issue-<manifest>`: `land`
    runs the battery, merges the leaf in (never a rebase), posts your answers
-   and closes your issue, with no PR of its own, so step 3 is not yours; the
-   manifest lands as one PR. A merge that conflicts is yours: merge
-   `origin/issue-<manifest>` into your branch by hand, resolve it, commit and
-   land again.
-3. **Keep your PR until it merges.** Run `<se> issue keep --workspace <path>`
-   (in the foreground: it answers within its `--for`, 8 minutes), and run it
-   again while it says the PR is still open. Whenever main moves past your
-   branch, it merges `origin/main` in, runs the battery, pushes and posts the
-   battery's status, so CI passes in seconds and auto-merge merges it. You
-   are done with it once it says the PR merged, or that another box took the
-   issue over.
+   and closes your issue, with no PR of its own; the manifest lands as one
+   PR. A merge that conflicts is yours: merge `origin/issue-<manifest>` into
+   your branch by hand, resolve it, commit and land again.
+3. **Keep your PR until it merges**, where `land` opened one. Run
+   `<se> issue keep --workspace <path>` (in the foreground: it answers within
+   its `--for`, 8 minutes), and run it again while it says the PR is still
+   open. Whenever main moves past your branch, it merges `origin/main` in,
+   runs the battery, pushes and posts the battery's status, so CI passes in
+   seconds and auto-merge merges it. You are done with it once it says the
+   PR merged, or that another box took the issue over.
 4. On red CI, a review the box sends you, or an error from `issue keep` (a
    merge with main that conflicts, a failing check), fix it on the same
    branch (merge `origin/main` in, never rebase), commit, bring the answers up
@@ -53,8 +52,8 @@ command in `<path>`.
    there; without it, it goes into the open misc manifest).
 6. **You close the issue you took, always**, in one of three ways and no
    other:
-   - **a landing** of what you solved with `<se> issue land`: into your
-     manifest's branch, or a PR with auto-merge on, kept until it merges;
+   - **a landing** of what you solved with `<se> issue land` (into your
+     manifest's branch, or a PR with auto-merge on, kept until it merges),
      and an issue through `<se> issue new` for everything you could not
      solve. Of the issues your take said yours blocks, name in `--blocks`
      only those that need what you left over, so nothing waits that need not;
@@ -63,7 +62,10 @@ command in `<path>`.
      `<se> issue supersede <n> --body-file F`, F holding the open questions
      you could not answer. It makes a final successor in your issue's place
      and closes yours. A final issue (`se-final`) cannot be superseded: its
-     box lands a PR.
+     box lands a PR. Where another open issue's PR already covers your
+     issue's work, final or not, close it as that issue's duplicate instead:
+     `<se> issue supersede <n> --duplicate-of <m>` mints nothing, and
+     closes your open PR and deletes your branch with it.
    - **a close naming the commit**, where the issue's work is on main
      already (another issue's PR did it before your take), so a PR would be
      an empty commit: write the landing answers as in step 2, then

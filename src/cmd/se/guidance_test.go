@@ -133,6 +133,7 @@ func TestIssueNewNamesTheSkillsAndRefusesOneThatDoesNotExist(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	var made struct{ Body string }
+	// The first goes into a new misc manifest, #10.
 	if err := json.Unmarshal([]byte(issueOf(t, gh, 11)), &made); err != nil || !strings.Contains(made.Body, "b\n\nSkills: triage "+guidance.Mark+"\n\n"+issues.NewMark) {
 		t.Fatalf("%q %v", made.Body, err)
 	}

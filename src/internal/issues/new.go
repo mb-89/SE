@@ -181,8 +181,7 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 	}
 	created := Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, id: i.ID, in: parent}
 	if parent > 0 {
-		path := fmt.Sprintf("repos/%s/issues/%d/sub_issues", s.Repo, parent)
-		if _, err := s.GitHub.Send("POST", path, github.Int("sub_issue_id", i.ID)); err != nil {
+		if err := s.subIssue(parent, i.ID); err != nil {
 			return created, false, fmt.Errorf("created #%d (%s), but making it a sub-issue of #%d: %w", i.Number, i.URL, parent, err)
 		}
 	}
@@ -190,6 +189,12 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 		return created, false, fmt.Errorf("created #%d (%s), but %w", i.Number, i.URL, err)
 	}
 	return created, ready, nil
+}
+
+// subIssue makes the issue GitHub knows by id a sub-issue of parent.
+func (s Source) subIssue(parent int, id int64) error {
+	_, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/sub_issues", s.Repo, parent), github.Int("sub_issue_id", id))
+	return err
 }
 
 // titled refuses a title that is empty or only spaces.

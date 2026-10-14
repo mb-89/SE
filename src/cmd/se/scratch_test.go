@@ -114,9 +114,9 @@ func TestAProjectHoldingNoSEFileGetsTheHelpTheGuidanceAndATake(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &took); err != nil || code != 0 || !took.Ready || took.Agent != "se:worker" || took.Worktree == "" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	// The repository holds nothing of SE's but the install's settings and what
-	// a take keeps at runtime (its ledger of GitHub requests); the box's takes
-	// were a manifest's, which records nothing for the Stop hook.
+	// The repository holds nothing of SE's but the install's settings and
+	// the ledger of its GitHub requests: the box's takes were a manifest's,
+	// which records nothing for the Stop hook.
 	entries, _ := os.ReadDir(ws)
 	var names []string
 	for _, e := range entries {

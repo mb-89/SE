@@ -58,20 +58,20 @@ permission prompt, and no others. `<se>` below is the absolute path of
      prompt**, filled in. Then pull again, so the box fills up to its cap.
 3. **Wait.** Each sub-agent keeps the PR it opened until it merges
    (`se issue keep`: whenever main moves past it, it merges main in, checks
-   and pushes), so a box stays with its PRs; a leaf landed into its manifest
-   has no PR. Subscribe to each PR a sub-agent names, and to each manifest's
-   PR you open (`subscribe_pr_activity`). A red CI run or a review on a PR
-   goes to that PR's sub-agent (`SendMessage`), with the failure or the
-   review. When a sub-agent answers that its PR merged, that its leaf landed
-   into its manifest, that another box took its issue over, or that its
-   issue was superseded or closed by a commit on main, remove its worktree
+   and pushes), so a box stays with its PRs. Subscribe to each PR a
+   sub-agent names, and to each manifest's PR you open
+   (`subscribe_pr_activity`). A red CI run or a review on a PR goes to that
+   PR's sub-agent (`SendMessage`), with the failure or the review. When a
+   sub-agent answers that its PR merged, that its leaf landed into its
+   manifest, that another box took its issue over, or that its issue was
+   superseded or closed by a commit on main, remove its worktree
    (`git worktree remove <path>`) and go back to 2.
 4. **You always end, and never stuck.** End when nothing is ready, no
    sub-agent of yours is running (none keeps an open PR), every tree you
    coordinate is done or waits, and every manifest you landed has merged.
-   Each leaf is closed by its sub-agent's landing, a supersede or a close
-   naming the commit on main, as its agent says, and each manifest by its
-   merged PR; never end with only a comment.
+   Each leaf is closed by its sub-agent's landing (into its manifest, or a
+   merged PR), a supersede or a close naming the commit on main, as its
+   agent says, and each manifest by its PR; never end with only a comment.
 
 ## The sub-agent's prompt
 

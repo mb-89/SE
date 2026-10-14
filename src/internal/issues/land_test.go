@@ -112,7 +112,8 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	}
 	body, err := Landed{Issue: 6, Answers: full, Facts: Facts{
 		Claimed: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC), Landed: landedAt(), Minutes: 90, Commits: 1,
-		// Those 30, and the 4 this land had made when it counted them (the manifest lookup and the battery status among them).
+		// Those 30, and the 4 this land had made when it counted them (the
+		// battery status and the manifest lookup among them).
 		Requests: 34,
 	}}.Comment(qs)
 	if err != nil {
