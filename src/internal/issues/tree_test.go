@@ -57,7 +57,7 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 		subsPath(1): subs(2, 3),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}
 	next, ok, err := s.Next()
 	if err != nil || !ok || next.Number != 1 || !next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
@@ -114,7 +114,7 @@ func TestInOffersTheReadyLeavesAtAnyDepth(t *testing.T) {
 		activity(15):    pushed(fresh),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestParentsCloseByThemselvesDeepestFirst(t *testing.T) {
 		subsPath(2): subs(-4, -5),
 		subsPath(6): subs(7, -8),
 	})
-	if err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).CloseParents(); err != nil {
+	if err := (Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}).CloseParents(); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"POST repos/o/r/issues/2/comments", "PATCH repos/o/r/issues/2", "POST repos/o/r/issues/1/comments", "PATCH repos/o/r/issues/1"}
@@ -198,7 +198,7 @@ func TestAReviewParentNeverClosesByItself(t *testing.T) {
 		blockedPath(5): subs(2),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()} // a write would not be recorded
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()} // a write would not be recorded
 	tr, err := s.In(1)
 	if err != nil {
 		t.Fatal(err)
@@ -232,7 +232,7 @@ func TestAReviewAtTheTopIsTakenByAnyBox(t *testing.T) {
 		subsPath(2): subs(-3),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}
 	if next, ok, err := s.Next(); err != nil || !ok || next.Number != 2 || !next.Parent {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
@@ -263,12 +263,12 @@ func TestTakeInClaimsALeafForAWorktree(t *testing.T) {
 		subsPath(1): subs(2, 3),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
-	if ok, err := (Source{Proc: machine}).claimTree(a, 1); err != nil || !ok {
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}
+	if ok, err := (Source{Proc: machineOf(t)}).claimTree(a, 1); err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
 	// Another box picks the tree up from its claim.
-	if ok, err := (Source{Proc: machine}).claimTree(b, 1); err != nil || !ok {
+	if ok, err := (Source{Proc: machineOf(t)}).claimTree(b, 1); err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
 	if got := run(t, b, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-1" {
@@ -308,7 +308,7 @@ func TestInSaysWhenTheRootHasClosed(t *testing.T) {
 		subsPath(1): subs(-2),
 	}
 	gh := inTree(t, answers)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}
 	if tr, err := s.In(1); err != nil || !tr.Closed {
 		t.Fatalf("%+v %v", tr, err)
 	}

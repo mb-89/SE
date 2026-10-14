@@ -69,7 +69,7 @@ func reviewWorld(t *testing.T) (Source, *github.Fake) {
 		commentsPath(2):      workedBy(Worker{Session: "w", Workspace: "/w"}),
 		"repos/o/r/issues/9": `{"number":9,"state":"closed"}`,
 	})
-	return Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}, gh
+	return Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}, gh
 }
 
 func TestFindingsBecomeFinalIssuesBlockingOnesUnderTheGate(t *testing.T) {

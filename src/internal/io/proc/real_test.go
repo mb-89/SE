@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/mb-89/SE/src/internal/gitenv"
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
@@ -12,7 +14,9 @@ const asTool = "se-proc-contract-tool"
 
 // TestMain runs the test binary as tool when the contract starts it so: the
 // real machine's tool is this very binary, on every system the tests run on.
+// It keeps the git the git contract runs in its own temp repositories.
 func TestMain(m *testing.M) {
+	gitenv.Clear()
 	if len(os.Args) > 1 && os.Args[1] == asTool {
 		dir, _ := os.Getwd()
 		os.Exit(tool(os.Args[2:], dir, os.Getenv, os.Stdin, os.Stdout, os.Stderr))
@@ -30,5 +34,12 @@ func TestTheRealMachineKeepsTheContract(t *testing.T) {
 		return toolOn{procs: proc.Real(), run: func(words ...string) proc.Cmd {
 			return proc.Cmd{Name: self, Args: append([]string{asTool}, words...), Env: os.Environ()}
 		}}
+	})
+}
+
+func TestTheRealGitKeepsTheContract(t *testing.T) {
+	t.Parallel()
+	gitContract(t, func(t *testing.T) gitOn {
+		return gitOn{procs: proc.Real(), disk: disk.Real(), root: t.TempDir()}
 	})
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/io/clock"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
 )
 
 // TestStatusAndStopReachTheDaemonOverTheNetwork serves a daemon on a fake
@@ -19,7 +18,7 @@ func TestStatusAndStopReachTheDaemonOverTheNetwork(t *testing.T) {
 	// se stop polls for the daemon's endpoint to go, which only the real clock
 	// waits out while the daemon's goroutine removes it.
 	w := worldOf(t)
-	w.Net, w.Clock = sehttp.NewFake(), clock.Real()
+	w.Clock = clock.Real()
 	d, ws := onFake(t), "/ws"
 	fake := clock.NewFake(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
 	done := make(chan error, 1)

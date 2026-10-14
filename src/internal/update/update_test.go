@@ -3,8 +3,6 @@ package update_test
 import (
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,223 +12,164 @@ import (
 	"github.com/mb-89/SE/src/internal/update"
 )
 
-// drive is the disk go build writes se to: a process writes it, so no fake stands in.
-var drive = disk.Real()
-
-// machine is the real machine the tests of a shallow clone still run git and
-// go on; #137 moves them onto the fake.
-var machine = proc.Real()
-
-func repo(t *testing.T, branch string) string {
-	t.Helper()
-	dir := t.TempDir()
-	run(t, dir, "init", "-q", "-b", branch)
-	commit(t, dir, "start")
-	return dir
+// box is a fake machine with git and go on it, both working on its disk. Its
+// go builds se as the file -o names, holding the words it was run with.
+type box struct {
+	disk *disk.Fake
+	proc *proc.Fake
+	t    *testing.T
 }
 
-func run(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+func newBox(t *testing.T) *box {
+	b := &box{disk: disk.NewFake(), proc: proc.NewFake(), t: t}
+	b.proc.InstallGit(b.disk)
+	b.proc.Install("go", func(c proc.Cmd) int {
+		if len(c.Args) < 3 || c.Args[0] != "build" || c.Args[1] != "-o" {
+			return 2
+		}
+		if there, _ := b.disk.Exists(filepath.Join(c.Dir, "go.mod")); !there {
+			fmt.Fprintln(c.Stderr, "go: cannot find main module")
+			return 1
+		}
+		if err := b.disk.WriteFile(c.Args[2], []byte("se "+strings.Join(c.Args, " "))); err != nil {
+			fmt.Fprintln(c.Stderr, err)
+			return 1
+		}
+		return 0
+	})
+	return b
+}
+
+// git runs git in dir on the box, and answers what it printed, trimmed.
+func (b *box) git(dir string, args ...string) string {
+	b.t.Helper()
+	out, err := proc.Output(b.proc, proc.Cmd{Name: "git", Args: args, Dir: dir})
 	if err != nil {
-		t.Fatalf("git %v: %v %s", args, err, out)
+		b.t.Fatal(err)
 	}
-	return strings.TrimSpace(string(out))
+	return out
 }
 
-func commit(t *testing.T, dir, msg string) {
-	t.Helper()
-	run(t, dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", msg)
+// write puts text at the file name in dir.
+func (b *box) write(dir, name, text string) {
+	b.t.Helper()
+	p := filepath.Join(dir, filepath.FromSlash(name))
+	if err := b.disk.MkdirAll(filepath.Dir(p)); err != nil {
+		b.t.Fatal(err)
+	}
+	if err := b.disk.WriteFile(p, []byte(text)); err != nil {
+		b.t.Fatal(err)
+	}
 }
 
-// shallow is a clone at depth 1, as a cloud box's setup script makes it, of an
-// origin whose main builds a se and has moved on since.
-func shallow(t *testing.T) (origin, clone string) {
-	t.Helper()
-	origin = repo(t, "main")
-	for name, text := range map[string]string{
-		"src/go.mod":         "module github.com/mb-89/SE/src\n\ngo 1.21\n",
-		"src/cmd/se/main.go": "package main\n\nfunc main() {}\n",
-	} {
-		path := filepath.Join(origin, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
+func (b *box) commit(dir, msg string) { b.git(dir, "commit", "-q", "--allow-empty", "-m", msg) }
+
+// shallow is a clone at depth 1 on branch, as a cloud box's setup script makes
+// it, of an origin whose main builds a se and has moved on since.
+func (b *box) shallow(branch string) (origin, clone string) {
+	b.t.Helper()
+	origin, clone = filepath.FromSlash("/origin"), filepath.FromSlash("/se")
+	b.git("/", "init", "-q", "-b", "main", origin)
+	b.write(origin, "src/go.mod", "module github.com/mb-89/SE/src\n\ngo 1.21\n")
+	b.write(origin, "src/cmd/se/main.go", "package main\n\nfunc main() {}\n")
+	b.git(origin, "add", ".")
+	b.commit(origin, "a se that builds")
+	b.git("/", "clone", "-q", "--depth", "1", "file://"+origin, clone)
+	if branch != "main" {
+		b.git(clone, "checkout", "-q", "-b", branch)
 	}
-	run(t, origin, "add", ".")
-	commit(t, origin, "a se that builds")
-	clone = filepath.Join(t.TempDir(), "se")
-	if out, err := exec.Command("git", "clone", "-q", "--depth", "1", "file://"+origin, clone).CombinedOutput(); err != nil {
-		t.Fatalf("clone: %v %s", err, out)
-	}
-	commit(t, origin, "newer")
+	b.commit(origin, "newer")
 	return origin, clone
 }
 
-func TestAShallowCloneIsPulledAndRebuilt(t *testing.T) {
+func TestAShallowCloneIsPulledAndRebuiltFromTheNewHead(t *testing.T) {
 	t.Parallel()
-	origin, clone := shallow(t)
+	b := newBox(t)
+	origin, clone := b.shallow("main")
 	out := filepath.Join(clone, "src", "plugin", "bin", "se")
-	r, err := update.Run(drive, machine, clone, out)
+	r, err := update.Run(b.disk, b.proc, clone, out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := run(t, origin, "rev-parse", "--short", "HEAD"); r.To != want || r.From == r.To {
+	if want := b.git(origin, "rev-parse", "--short", "HEAD"); r.To != want || r.From == r.To || r.Built != out {
 		t.Fatalf("%+v, want To %s", r, want)
 	}
-	if _, err := os.Stat(out); err != nil || r.Built != out {
-		t.Fatalf("se was not rebuilt: %+v %v", r, err)
+	built, err := b.disk.ReadFile(out)
+	if err != nil || !strings.Contains(string(built), update.Ldflags(b.git(origin, "rev-parse", "HEAD"))) || !strings.HasSuffix(string(built), "./cmd/se") {
+		t.Fatalf("se was built as %q (%v)", built, err)
 	}
 }
 
 func TestACurrentCheckoutIsNotRebuilt(t *testing.T) {
 	t.Parallel()
-	origin, clone := shallow(t)
-	run(t, clone, "pull", "-q", "--ff-only", "origin", "main")
+	b := newBox(t)
+	origin, clone := b.shallow("main")
+	b.git(clone, "pull", "-q", "--ff-only", "origin", "main")
 	out := filepath.Join(clone, "se")
-	r, err := update.Run(drive, machine, clone, out)
-	if err != nil || r.From != r.To || r.To != run(t, origin, "rev-parse", "--short", "HEAD") {
+	r, err := update.Run(b.disk, b.proc, clone, out)
+	if err != nil || r.From != r.To || r.To != b.git(origin, "rev-parse", "--short", "HEAD") || r.Built != "" {
 		t.Fatalf("%+v %v", r, err)
 	}
-	if _, err := os.Stat(out); !os.IsNotExist(err) || r.Built != "" {
-		t.Fatalf("se was built though nothing changed: %+v %v", r, err)
-	}
-}
-
-func TestAFailedPullIsAnErrorThatTouchedNothing(t *testing.T) {
-	t.Parallel()
-	origin, clone := shallow(t)
-	if err := os.RemoveAll(origin); err != nil {
-		t.Fatal(err)
-	}
-	before := run(t, clone, "rev-parse", "HEAD")
-	_, err := update.Run(drive, machine, clone, filepath.Join(clone, "se"))
-	var untouched *update.Untouched
-	if err == nil || errors.As(err, &untouched) {
-		t.Fatalf("err = %v", err)
-	}
-	if run(t, clone, "rev-parse", "HEAD") != before {
-		t.Fatal("the checkout moved")
-	}
-}
-
-// box is a fake machine with git and go on it. Its git holds one checkout,
-// dir: on branch, at head, dirty or not, and a pull brings it to pulled. Its
-// go builds se as the file -o names.
-type box struct {
-	dir, branch, head, pulled string
-	dirty                     bool
-}
-
-func (b *box) git(c proc.Cmd) int {
-	if c.Dir != b.dir {
-		fmt.Fprintf(c.Stderr, "fatal: not a git repository: %s\n", c.Dir)
-		return 128
-	}
-	switch strings.Join(c.Args, " ") {
-	case "rev-parse --is-inside-work-tree":
-		fmt.Fprintln(c.Stdout, "true")
-	case "rev-parse --abbrev-ref HEAD":
-		fmt.Fprintln(c.Stdout, b.branch)
-	case "status --porcelain --untracked-files=no":
-		if b.dirty {
-			fmt.Fprintln(c.Stdout, "M  f")
-		}
-	case "rev-parse HEAD":
-		fmt.Fprintln(c.Stdout, b.head)
-	case "rev-parse --short HEAD":
-		fmt.Fprintln(c.Stdout, b.head[:7])
-	case "pull --ff-only origin main":
-		b.head = b.pulled
-	default:
-		fmt.Fprintf(c.Stderr, "git: this box does not do %s\n", c.Args)
-		return 1
-	}
-	return 0
-}
-
-func (b *box) goTool(c proc.Cmd) int {
-	if c.Dir != filepath.Join(b.dir, update.ModuleDir) || len(c.Args) < 3 || c.Args[0] != "build" || c.Args[1] != "-o" {
-		return 2
-	}
-	if err := os.WriteFile(c.Args[2], []byte("se "+strings.Join(c.Args, " ")), 0o755); err != nil {
-		fmt.Fprintln(c.Stderr, err)
-		return 1
-	}
-	return 0
-}
-
-// on answers a fake machine with the box's git and go installed.
-func (b *box) on() *proc.Fake {
-	m := proc.NewFake()
-	m.Install("git", b.git)
-	m.Install("go", b.goTool)
-	return m
-}
-
-const (
-	older = "1111111111111111111111111111111111111111"
-	newer = "2222222222222222222222222222222222222222"
-)
-
-func TestAnUpdateThatBroughtSomethingBuildsSeFromTheNewHead(t *testing.T) {
-	t.Parallel()
-	b := &box{dir: t.TempDir(), branch: "main", head: older, pulled: newer}
-	out := filepath.Join(b.dir, "bin", "se")
-	r, err := update.Run(drive, b.on(), b.dir, out)
-	if err != nil || r.From != older[:7] || r.To != newer[:7] || r.Built != out {
-		t.Fatalf("%+v %v", r, err)
-	}
-	built, err := os.ReadFile(out)
-	if err != nil || !strings.Contains(string(built), update.Ldflags(newer)) || !strings.HasSuffix(string(built), "./cmd/se") {
-		t.Fatalf("se was built as %q (%v)", built, err)
-	}
-}
-
-func TestAnUpdateThatBroughtNothingBuildsNothing(t *testing.T) {
-	t.Parallel()
-	b := &box{dir: t.TempDir(), branch: "main", head: older, pulled: older}
-	m := b.on()
-	r, err := update.Run(drive, m, b.dir, filepath.Join(b.dir, "se"))
-	if err != nil || r.From != r.To || r.Built != "" {
-		t.Fatalf("%+v %v", r, err)
-	}
-	for _, line := range m.Lines() {
+	for _, line := range b.proc.Lines() {
 		if strings.HasPrefix(line, "go ") {
 			t.Fatalf("se was built though nothing changed: %s", line)
 		}
 	}
 }
 
+func TestAFailedPullIsAnErrorThatTouchedNothing(t *testing.T) {
+	t.Parallel()
+	b := newBox(t)
+	origin, clone := b.shallow("main")
+	if err := b.disk.RemoveAll(origin); err != nil {
+		t.Fatal(err)
+	}
+	before := b.git(clone, "rev-parse", "HEAD")
+	_, err := update.Run(b.disk, b.proc, clone, filepath.Join(clone, "se"))
+	var untouched *update.Untouched
+	if err == nil || errors.As(err, &untouched) {
+		t.Fatalf("err = %v", err)
+	}
+	if b.git(clone, "rev-parse", "HEAD") != before {
+		t.Fatal("the checkout moved")
+	}
+}
+
 func TestAFolderOutsideGitIsLeftAlone(t *testing.T) {
 	t.Parallel()
-	b := &box{dir: t.TempDir(), branch: "main", head: older, pulled: newer}
+	b := newBox(t)
+	b.shallow("main")
+	if err := b.disk.MkdirAll(filepath.FromSlash("/plain")); err != nil {
+		t.Fatal(err)
+	}
 	var untouched *update.Untouched
-	if _, err := update.Run(drive, b.on(), t.TempDir(), "se"); !errors.As(err, &untouched) {
+	if _, err := update.Run(b.disk, b.proc, filepath.FromSlash("/plain"), "se"); !errors.As(err, &untouched) {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestAnUpdateRefusesABranch(t *testing.T) {
 	t.Parallel()
-	b := &box{dir: t.TempDir(), branch: "feature", head: older, pulled: newer}
-	_, err := update.Run(drive, b.on(), b.dir, filepath.Join(b.dir, "se"))
+	b := newBox(t)
+	_, clone := b.shallow("feature")
+	head := b.git(clone, "rev-parse", "HEAD")
+	_, err := update.Run(b.disk, b.proc, clone, filepath.Join(clone, "se"))
 	var untouched *update.Untouched
-	if !errors.As(err, &untouched) || !strings.Contains(err.Error(), "not main") || b.head != older {
-		t.Fatalf("err = %v, at %s", err, b.head)
+	if !errors.As(err, &untouched) || !strings.Contains(err.Error(), "not main") || b.git(clone, "rev-parse", "HEAD") != head {
+		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestAnUpdateRefusesUncommittedWork(t *testing.T) {
 	t.Parallel()
-	b := &box{dir: t.TempDir(), branch: "main", head: older, pulled: newer, dirty: true}
-	_, err := update.Run(drive, b.on(), b.dir, filepath.Join(b.dir, "se"))
+	b := newBox(t)
+	_, clone := b.shallow("main")
+	b.write(clone, "src/go.mod", "module changed\n")
+	head := b.git(clone, "rev-parse", "HEAD")
+	_, err := update.Run(b.disk, b.proc, clone, filepath.Join(clone, "se"))
 	var untouched *update.Untouched
-	if !errors.As(err, &untouched) || !strings.Contains(err.Error(), "uncommitted") || b.head != older {
-		t.Fatalf("err = %v, at %s", err, b.head)
+	if !errors.As(err, &untouched) || !strings.Contains(err.Error(), "uncommitted") || b.git(clone, "rev-parse", "HEAD") != head {
+		t.Fatalf("err = %v", err)
 	}
 }
 

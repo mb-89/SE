@@ -4,8 +4,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,29 +32,13 @@ func TestATakeHandsOverEverySkillItsIssueNamesInFull(t *testing.T) {
 	if _, err := gh.Send("PATCH", "repos/o/r/issues/3", github.Field{Name: "body", Value: guidance.With("do it", []string{"work", "retro"})}); err != nil {
 		t.Fatal(err)
 	}
-	root := t.TempDir()
-	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
-	gitIn := func(dir string, args ...string) {
-		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, out)
-		}
-	}
-	gitIn(root, "init", "-q", "--bare", "-b", "main", origin)
-	gitIn(root, "clone", "-q", origin, ws)
-	gitIn(ws, "checkout", "-q", "-b", "main")
+	ws := clone(t)
 	for name, text := range skillTexts {
-		path := filepath.Join(ws, guidance.PathOf(name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		put(t, onFake(t), filepath.Join(ws, guidance.PathOf(name)), text)
 	}
-	gitIn(ws, "add", ".")
-	gitIn(ws, "commit", "-q", "-m", "skills")
-	gitIn(ws, "push", "-q", "origin", "main")
+	git(t, ws, "add", ".")
+	git(t, ws, "commit", "-q", "-m", "skills")
+	git(t, ws, "push", "-q", "origin", "main")
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
 	if code != 0 {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
@@ -78,13 +60,8 @@ func TestATakeHandsOverEverySkillItsIssueNamesInFull(t *testing.T) {
 func TestIssueNewNamesTheSkillsAndRefusesOneThatDoesNotExist(t *testing.T) {
 	t.Parallel()
 	gh := recordedIssues(t)
-	ws := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(ws, "src/plugin/skills/work"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(ws, guidance.PathOf("work")), []byte("w"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	ws := filepath.FromSlash("/ws")
+	put(t, onFake(t), filepath.Join(ws, guidance.PathOf("work")), "w")
 	if code, _, errs := se(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--skills", "work,nope", "--repo", "o/r", "--workspace", ws); code == 0 || !strings.Contains(errs, "no skill nope") || len(gh.Writes()) != 0 {
 		t.Fatalf("exit %d, %q, wrote %q", code, errs, gh.Writes())
 	}

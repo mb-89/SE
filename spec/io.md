@@ -16,7 +16,11 @@ hands over to and the detached daemon. gh is GitHub's, not proc's. Its fake
 is a machine that holds only the programs a case installs, each a function
 that does what the real one would, and records every run. It also says which
 program is running now (`Self`): the real one asks the system, the fake
-answers what the case made it run as (`RunAs`).
+answers what the case made it run as (`RunAs`). Its git is a fake too
+(`InstallGit`, in `src/internal/io/proc/git.go`): it keeps each repository's
+commits, refs, remotes and upstreams in memory and each checkout's files on a
+disk, a fake one in a test, and does every git verb SE and its tests run. Its
+contract suite, `gitContract`, runs the same cases against the real git.
 GitHub, `src/internal/io/github`, is read and written by REST path through
 gh. Its fake, `github.NewFake(clock)`, is seeded from recorded gh answers
 (`Seed`), each read for what it says about the repository, and keeps issues,
@@ -78,11 +82,14 @@ branch and allows issues; nothing else is asked of it.
 
 ## Test on fakes, real only in contract tests
 
-Every other test runs on fakes: no wall clock, no sleeping, no network. The
-real implementation runs in its contract test alone, kept short.
+Every other test runs on fakes: no wall clock, no sleeping, no network, no
+real git. The real implementation runs in its contract test alone, kept
+short. `cmd/se`'s tests hand every call a `World` of fakes: a fake clock,
+disk, network and GitHub, and a fake machine holding only git, its work trees
+on that disk.
 
 Two tests are the exceptions, named here. The first,
-`TestRestartRunsTheCheckoutsOwnSource` in `src/cmd/se/checkout_test.go`, builds se and stops the real daemon
+`TestRestartRunsTheCheckoutsOwnSource` in `src/cmd/se/checkout_test.go`, builds se with the real go on the real disk and stops the real daemon
 processes it starts, over the real network, by `clock.Real()`. It is what
 shows a restart runs the checkout's own source, which no fake can, and
 `go test -short` skips it. The second,

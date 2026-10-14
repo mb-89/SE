@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -152,36 +153,32 @@ func TestTheLifecycleStaysWithTheInstalledSe(t *testing.T) {
 
 func TestAnyOtherWorkspaceRunsTheInstalledSe(t *testing.T) {
 	t.Parallel()
-	se := installed(t)
-	ws := t.TempDir()
-	write(t, filepath.Join(ws, "src", "go.mod"), "module example.com/other\n")
-	m, w := proc.NewFake(), worldOf(t)
+	se, ws := filepath.FromSlash("/installed/se"), filepath.FromSlash("/ws")
+	w := worldOf(t)
+	put(t, onFake(t), filepath.Join(ws, "src", "go.mod"), "module example.com/other\n")
+	m := proc.NewFake()
 	m.RunAs(se)
 	w.Proc = m
-	exe, note, err := daemonExe(w, daemon.Paths{Workspace: ws, Disk: disk.Real()})
+	exe, note, err := daemonExe(w, daemon.Paths{Workspace: ws, Disk: w.Disk})
 	if err != nil || exe != se || note != "" || len(m.Ran()) != 0 {
 		t.Fatalf("exe %q, note %q, err %v, ran %q", exe, note, err, m.Lines())
 	}
-	if _, err := os.Stat(daemon.Paths{Workspace: ws, Disk: disk.Real()}.Bin()); err == nil {
+	if there, _ := w.Disk.Exists(daemon.Paths{Workspace: ws, Disk: w.Disk}.Bin()); there {
 		t.Fatal("se was built in a workspace that is no SE checkout")
 	}
 }
 
 func TestOnlySessionWordsGoToTheCheckoutsSe(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("the stand-in se is a shell script")
-	}
-	ws := t.TempDir()
-	write(t, filepath.Join(ws, "src", "go.mod"), "module "+update.Module+"\n")
-	bin := daemon.Paths{Workspace: ws, Disk: disk.Real()}.Bin()
-	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	write(t, bin, "#!/bin/sh\necho '{\"text\":\"the checkout answers\"}'\n")
-	if err := os.Chmod(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	d, ws := onFake(t), filepath.FromSlash("/ws")
+	put(t, d, filepath.Join(ws, "src", "go.mod"), "module "+update.Module+"\n")
+	bin := daemon.Paths{Workspace: ws, Disk: d}.Bin()
+	put(t, d, bin, "the checkout's se")
+	// The checkout's build answers every word it is handed.
+	worldOf(t).Proc.(*proc.Fake).Install(bin, func(c proc.Cmd) int {
+		fmt.Fprintln(c.Stdout, `{"text":"the checkout answers"}`)
+		return 0
+	})
 	for _, words := range [][]string{{}, {"help"}, {"status"}, {"frob"}} {
 		if r := in(t, ws, words...); r.Text != "the checkout answers" {
 			t.Errorf("/se %v: %q", words, r.Text)
@@ -203,10 +200,13 @@ func TestRestartRunsTheCheckoutsOwnSource(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds se twice")
 	}
+	// Real daemons start and stop here, built by the real go on the real
+	// disk, over the real network, on the real clock they wait by: the one
+	// test spec/io.md names that runs on them.
+	w := worldOf(t)
+	w.Clock, w.Disk, w.Proc, w.Net = clock.Real(), disk.Real(), proc.Real(), sehttp.Real()
 	se := installed(t)
 	ws := scratch(t)
-	// Real daemons start and stop here, on the real clock they wait by.
-	worldOf(t).Clock = clock.Real()
 	paths := daemon.Paths{Workspace: ws, Disk: disk.Real()}
 	t.Cleanup(func() { _ = daemon.Stop(paths, 5*time.Second, clock.Real(), sehttp.Real()) })
 

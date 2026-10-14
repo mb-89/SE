@@ -2,10 +2,12 @@ package proc_test
 
 import (
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
@@ -53,4 +55,17 @@ func TestTheFakeMachineRecordsEveryRunInOrder(t *testing.T) {
 	if f.Ran()[0].Dir != "/w" {
 		t.Fatalf("the run lost its folder: %+v", f.Ran()[0])
 	}
+}
+
+func TestTheFakeGitKeepsTheContract(t *testing.T) {
+	t.Parallel()
+	gitContract(t, func(t *testing.T) gitOn {
+		d, m := disk.NewFake(), proc.NewFake()
+		m.InstallGit(d)
+		root := filepath.FromSlash("/work")
+		if err := d.MkdirAll(root); err != nil {
+			t.Fatal(err)
+		}
+		return gitOn{procs: m, disk: d, root: root}
+	})
 }

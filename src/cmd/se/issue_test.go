@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -109,7 +108,10 @@ func fires(t *testing.T) int { return worldOf(t).Net.(*sehttp.Fake).Fired(routin
 func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 	t.Parallel()
 	gh := recordedIssues(t)
-	ws := t.TempDir()
+	ws := filepath.FromSlash("/ws")
+	if err := onFake(t).MkdirAll(ws); err != nil {
+		t.Fatal(err)
+	}
 	code, out, errs := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || out != "#3 three\nu3\n\ndo it\n\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n\n0 retros closed and no overhaul has closed yet; an overhaul is due at 5.\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
@@ -119,7 +121,7 @@ func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 	if w := gh.Writes(); len(w) != 0 {
 		t.Errorf("pull without --take wrote to GitHub: %q", w)
 	}
-	if entries, _ := os.ReadDir(ws); fires(t) != 0 || len(entries) != 0 {
+	if entries, _ := onFake(t).List(ws); fires(t) != 0 || len(entries) != 0 {
 		t.Errorf("pull without --take fired %d times, left %v in the workspace", fires(t), entries)
 	}
 	code, out, _ = se(t, "issue", "pull", "--json", "--repo", "o/r")
@@ -260,29 +262,16 @@ func TestIssueNewRefusesAnOpenIssuesTitleUnderTheSameParent(t *testing.T) {
 
 func TestIssueLandNamesThePR(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
-	git := func(dir string, args ...string) {
-		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, out)
-		}
-	}
-	git(root, "init", "-q", "--bare", "-b", "main", origin)
-	git(root, "clone", "-q", origin, ws)
-	git(ws, "checkout", "-q", "-b", "main")
-	git(ws, "commit", "-q", "--allow-empty", "-m", "start")
-	git(ws, "push", "-q", "origin", "main")
-	git(ws, "checkout", "-q", "-b", "issue-6")
-	git(ws, "commit", "-q", "--allow-empty", "-m", "work")
-	// git keeps the checkout on the real disk; se reads its files from a fake.
 	spec, err := os.ReadFile(filepath.Join("..", "..", "..", issues.QuestionsFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := onFake(t)
+	ws, d := clone(t), onFake(t)
+	git(t, ws, "checkout", "-q", "-b", "issue-6")
 	put(t, d, filepath.Join(ws, issues.QuestionsFile), string(spec))
-	answers := filepath.Join(root, "answers.yaml")
+	git(t, ws, "add", issues.QuestionsFile)
+	git(t, ws, "commit", "-q", "-m", "work")
+	answers := filepath.FromSlash("/answers.yaml")
 	put(t, d, answers, "done: one\ntimeline: two\n")
 	checked := ""
 	worldOf(t).Check = func(_ proc.Procs, dir string) error { checked = dir; return nil }
@@ -400,19 +389,7 @@ func TestIssueNewTakesAParent(t *testing.T) {
 func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 	t.Parallel()
 	recordedIssues(t)
-	root := t.TempDir()
-	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
-	git := func(dir string, args ...string) {
-		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, out)
-		}
-	}
-	git(root, "init", "-q", "--bare", "-b", "main", origin)
-	git(root, "clone", "-q", origin, ws)
-	git(ws, "checkout", "-q", "-b", "main")
-	git(ws, "commit", "-q", "--allow-empty", "-m", "start")
-	git(ws, "push", "-q", "origin", "main")
+	ws := clone(t)
 	// Naming an issue and failing to take one fire nothing.
 	if code, _, _ := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws); code != 0 || fires(t) != 0 {
 		t.Fatalf("exit %d, %d fires", code, fires(t))
@@ -425,12 +402,12 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// The take is recorded for the Stop hook, which holds the box to closing #3.
-	if data, err := os.ReadFile(filepath.Join(ws, ".se", ".runtime", "box.json")); err != nil || string(data) != `{"issue":3}` {
+	if data, err := onFake(t).ReadFile(filepath.Join(ws, ".se", ".runtime", "box.json")); err != nil || string(data) != `{"issue":3}` {
 		t.Fatalf("%q %v", data, err)
 	}
 	// #3 is now claimed on origin, but the recorded refs do not say so: the
 	// take is refused, moves on, finds nothing else and fires nothing.
-	git(ws, "checkout", "-q", "main")
+	git(t, ws, "checkout", "-q", "main")
 	if code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws); code != 0 || fires(t) != 1 || out != `{"ready":false}`+"\n" {
 		t.Fatalf("exit %d, %d fires, %q", code, fires(t), out)
 	}
@@ -458,19 +435,7 @@ func TestANewIssueFiresTheRoutineOnlyWhenNothingBlocksIt(t *testing.T) {
 func TestATakeNamesWhatTheIssueBlocks(t *testing.T) {
 	t.Parallel()
 	recordedIssues(t)
-	root := t.TempDir()
-	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
-	for _, args := range [][]string{
-		{root, "init", "-q", "--bare", "-b", "main", origin},
-		{root, "clone", "-q", origin, ws},
-		{ws, "checkout", "-q", "-b", "main"},
-		{ws, "commit", "-q", "--allow-empty", "-m", "start"},
-		{ws, "push", "-q", "origin", "main"},
-	} {
-		if out, err := exec.Command("git", append([]string{"-C", args[0], "-c", "user.name=t", "-c", "user.email=t@t"}, args[1:]...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, out)
-		}
-	}
+	ws := clone(t)
 	// #3 blocks #7, open, and #8, closed: only #7 still waits for it.
 	code, out, _ := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || !strings.Contains(out, "It blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.") {
@@ -503,19 +468,7 @@ func TestWhatABoxLeavesOverIsAnIssueForAPersonThatBlocksOnlyWhatNeedsIt(t *testi
 func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 	t.Parallel()
 	recordedIssues(t)
-	root := t.TempDir()
-	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
-	for _, args := range [][]string{
-		{root, "init", "-q", "--bare", "-b", "main", origin},
-		{root, "clone", "-q", origin, ws},
-		{ws, "checkout", "-q", "-b", "main"},
-		{ws, "commit", "-q", "--allow-empty", "-m", "start"},
-		{ws, "push", "-q", "origin", "main"},
-	} {
-		if out, err := exec.Command("git", append([]string{"-C", args[0], "-c", "user.name=t", "-c", "user.email=t@t"}, args[1:]...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, out)
-		}
-	}
+	ws := clone(t)
 	// The routine's fires are spent: the refusal is reported, and the take stands.
 	worldOf(t).Net.(*sehttp.Fake).Routine(routineURL, "tok", 0)
 	code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws)

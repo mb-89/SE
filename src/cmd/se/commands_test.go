@@ -43,16 +43,19 @@ var testedAt = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 
 // worldOf is the World every se call of the test runs in, made on the first
 // call: a fake clock at testedAt, an environment holding only what setenv put
-// there, an empty fake GitHub, and the real disk, programs and
-// network, which a test replaces through the fields.
+// there, an empty fake GitHub, an empty fake disk, a fake machine holding
+// only git, its work trees on that disk, and a fake network. A test replaces
+// any of them through the fields.
 func worldOf(t *testing.T) *World {
 	t.Helper()
 	if w, ok := worlds.Load(t); ok {
 		return &w.(*testWorld).World
 	}
 	w := &testWorld{env: map[string]string{}}
+	d, m := disk.NewFake(), proc.NewFake()
+	m.InstallGit(d)
 	w.World = World{
-		Clock: clock.NewFake(testedAt), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(),
+		Clock: clock.NewFake(testedAt), Disk: d, Proc: m, Net: sehttp.NewFake(),
 		GitHub:  github.NewFake(clock.NewFake(testedAt)),
 		Getenv:  func(k string) string { return w.env[k] },
 		Environ: func() []string { return w.environ() },
@@ -82,12 +85,36 @@ func setenv(t *testing.T, key, value string) {
 	w.(*testWorld).env[key] = value
 }
 
-// onFake hands every call of the test a fake disk in place of the real one.
+// onFake answers the fake disk every call of the test is handed, the one its
+// git keeps its work trees on.
 func onFake(t *testing.T) *disk.Fake {
 	t.Helper()
-	d := disk.NewFake()
-	worldOf(t).Disk = d
-	return d
+	return worldOf(t).Disk.(*disk.Fake)
+}
+
+// git runs git in dir on the machine every call of the test is handed, and
+// answers what it printed, trimmed.
+func git(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := proc.Output(worldOf(t).Proc, proc.Cmd{Name: "git", Args: args, Dir: dir})
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return out
+}
+
+// clone makes a bare origin whose main holds one commit, and answers a clone
+// of it on main: a box's checkout, on the test's machine and disk.
+func clone(t *testing.T) string {
+	t.Helper()
+	root := filepath.FromSlash("/fleet")
+	origin, ws := filepath.Join(root, "origin.git"), filepath.Join(root, "ws")
+	git(t, root, "init", "-q", "--bare", "-b", "main", origin)
+	git(t, root, "clone", "-q", origin, ws)
+	git(t, ws, "checkout", "-q", "-b", "main")
+	git(t, ws, "commit", "-q", "--allow-empty", "-m", "start")
+	git(t, ws, "push", "-q", "origin", "main")
+	return ws
 }
 
 // put writes a file on the fake, making its folder.

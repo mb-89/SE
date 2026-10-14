@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,52 +9,20 @@ import (
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
-// gitCheckout is a fake git's one checkout: the branch it is on, at head,
-// with an origin that is gone, so a pull fails.
-type gitCheckout struct{ dir, branch, head string }
-
-func (w gitCheckout) git(c proc.Cmd) int {
-	if c.Dir != w.dir {
-		fmt.Fprintf(c.Stderr, "fatal: not a git repository: %s\n", c.Dir)
-		return 128
-	}
-	switch args := strings.Join(c.Args, " "); {
-	case args == "rev-parse --is-inside-work-tree":
-		fmt.Fprintln(c.Stdout, "true")
-	case args == "rev-parse --abbrev-ref HEAD":
-		fmt.Fprintln(c.Stdout, w.branch)
-	case strings.HasPrefix(args, "status --porcelain"):
-	case args == "rev-parse HEAD":
-		fmt.Fprintln(c.Stdout, w.head)
-	case args == "rev-parse --short HEAD":
-		fmt.Fprintln(c.Stdout, short(w.head))
-	case strings.HasPrefix(args, "pull "):
-		fmt.Fprintln(c.Stderr, "fatal: '/gone' does not appear to be a git repository")
-		return 1
-	default:
-		fmt.Fprintf(c.Stderr, "git: this checkout does not do %s\n", args)
-		return 1
-	}
-	return 0
-}
-
-// checkout puts a fake git with one checkout on branch on the machine every
-// call is handed, for this test, and answers the checkout's folder.
+// checkout answers a box's checkout on branch, on the machine every call of
+// the test is handed, with an origin that is gone, so a pull fails.
 func checkout(t *testing.T, branch string) string {
 	t.Helper()
-	w := gitCheckout{dir: t.TempDir(), branch: branch, head: strings.Repeat("c", 40)}
-	m := proc.NewFake()
-	m.Install("git", w.git)
+	ws := clone(t)
+	if branch != "main" {
+		git(t, ws, "checkout", "-q", "-b", branch)
+	}
+	if err := onFake(t).RemoveAll(filepath.Join(filepath.Dir(ws), "origin.git")); err != nil {
+		t.Fatal(err)
+	}
 	// The se running is the one built into the checkout.
-	m.RunAs(filepath.Join(w.dir, "src", "plugin", "bin", "se"))
-	onMachine(t, m)
-	return w.dir
-}
-
-// onMachine hands every call m, for this test.
-func onMachine(t *testing.T, m proc.Procs) {
-	t.Helper()
-	worldOf(t).Proc = m
+	worldOf(t).Proc.(*proc.Fake).RunAs(filepath.Join(ws, "src", "plugin", "bin", "se"))
+	return ws
 }
 
 func TestAtSessionStartACheckoutOffMainIsLeftAloneInOneLine(t *testing.T) {

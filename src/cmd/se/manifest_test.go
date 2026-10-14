@@ -3,8 +3,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,17 +14,11 @@ import (
 // prose makes a git workspace holding files, and answers its folder.
 func prose(t *testing.T, files map[string]string) string {
 	t.Helper()
-	ws := t.TempDir()
+	ws := filepath.FromSlash("/ws")
 	for p, text := range files {
-		full := filepath.Join(ws, filepath.FromSlash(p))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		write(t, full, text)
+		put(t, onFake(t), filepath.Join(ws, filepath.FromSlash(p)), text)
 	}
-	if out, err := exec.Command("git", "-C", ws, "init", "-q").CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v %s", err, out)
-	}
+	git(t, ws, "init", "-q")
 	return ws
 }
 
@@ -77,7 +69,7 @@ func TestWriteFillsEveryManifestAndTheRulesHoldItThere(t *testing.T) {
 	if code, out, errs := se(t, "--workspace", ws, "manifest", "--write"); code != 0 || out != "rewrote README.md, spec/a.md\n" {
 		t.Fatalf("write (exit %d): %q %s", code, out, errs)
 	}
-	data, _ := os.ReadFile(filepath.Join(ws, "spec", "a.md"))
+	data, _ := onFake(t).ReadFile(filepath.Join(ws, "spec", "a.md"))
 	if !strings.Contains(string(data), "- [`se:work`](../src/plugin/skills/work/SKILL.md): Take the next issue.\n<!-- /se:manifest -->") {
 		t.Fatalf("spec/a.md links from its own folder:\n%s", data)
 	}

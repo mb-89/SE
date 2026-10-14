@@ -31,7 +31,7 @@ func superseding(t *testing.T, labels string) *github.Fake {
 func TestSupersedeHandsTheIssueOnToAFinalSuccessor(t *testing.T) {
 	t.Parallel()
 	gh := superseding(t, `{"name":"se"}`)
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}
 	sup, err := s.Supersede(5, "Which API?\n")
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestSupersedeHandsTheIssueOnToAFinalSuccessor(t *testing.T) {
 func TestSupersedeRefusesAFinalIssue(t *testing.T) {
 	t.Parallel()
 	gh := superseding(t, `{"name":"se"},{"name":"se-final"}`)
-	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Supersede(5, "Which API?")
+	_, err := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}.Supersede(5, "Which API?")
 	if err == nil || !strings.Contains(err.Error(), "#5 is final") {
 		t.Fatalf("%v", err)
 	}
@@ -78,7 +78,7 @@ func TestSupersedeRefusesAFinalIssue(t *testing.T) {
 
 func TestSupersedeRefusesNoQuestionsAndAClosedIssue(t *testing.T) {
 	t.Parallel()
-	s := Source{Proc: machine, Repo: repo, GitHub: superseding(t, `{"name":"se"}`), Clock: atNow()}
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: superseding(t, `{"name":"se"}`), Clock: atNow()}
 	if _, err := s.Supersede(5, " \n"); err == nil || !strings.Contains(err.Error(), "open questions") {
 		t.Fatalf("%v", err)
 	}
@@ -98,7 +98,7 @@ func TestUnclosedNamesWhatIsMissing(t *testing.T) {
 		for k, v := range more {
 			a[k] = v
 		}
-		return Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}
+		return Source{Proc: machineOf(t), Repo: repo, GitHub: recorded(t, a), Clock: atNow()}
 	}
 	if why, err := at(nil).Unclosed(5); err != nil || !strings.Contains(why, "neither a PR from issue-5 nor a supersede") {
 		t.Fatalf("%q %v", why, err)

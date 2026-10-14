@@ -71,7 +71,7 @@ func TestRefreshUpdatesTheAutoMergePRsBehindMain(t *testing.T) {
 		"repos/o/r/pulls/10": {refreshPull(10, "a1", "behind", true), refreshPull(10, "a1", "behind", true), refreshPull(10, "a2", "blocked", true)},
 		"repos/o/r/pulls/40": {refreshPull(40, "d1", "dirty", true)},
 	})
-	got, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c}.Refresh()
+	got, err := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: c}.Refresh()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestRefreshReportsAFailedUpdateAndGoesOn(t *testing.T) {
 		"repos/o/r/pulls/10":                     {refreshPull(10, "a1", "behind", true)},
 		"repos/o/r/pulls/20":                     {refreshPull(20, "b1", "behind", true), refreshPull(20, "b2", "blocked", true)},
 	})
-	got, err := Source{Proc: machine, Repo: repo, GitHub: conflicted{gh}, Clock: c}.Refresh()
+	got, err := Source{Proc: machineOf(t), Repo: repo, GitHub: conflicted{gh}, Clock: c}.Refresh()
 	if err == nil || !strings.Contains(err.Error(), "could not bring PR #10 up to date with main") {
 		t.Fatalf("%v", err)
 	}
@@ -123,7 +123,7 @@ func TestRefreshSaysWhenTheHeadNeverMoves(t *testing.T) {
 		"repos/o/r/compare/main...a1?per_page=1": {`{"behind_by":1}`},
 		"repos/o/r/pulls/10":                     {refreshPull(10, "a1", "behind", true)},
 	})
-	got, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c}.Refresh()
+	got, err := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: c}.Refresh()
 	if err == nil || len(got) != 1 || !strings.Contains(got[0].Failed, "head is still a1") {
 		t.Fatalf("%+v %v", got, err)
 	}

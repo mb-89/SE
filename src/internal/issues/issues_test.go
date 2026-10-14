@@ -4,14 +4,15 @@ package issues
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
@@ -133,7 +134,7 @@ func open(n int, body string) string {
 
 func survey(t *testing.T, answers map[string]string) map[int]string {
 	t.Helper()
-	all, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, answers), Clock: atNow()}.Survey()
+	all, err := Source{Proc: machineOf(t), Repo: repo, GitHub: recorded(t, answers), Clock: atNow()}.Survey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +170,7 @@ func TestTheRecordedRepositoryNamesTheNextIssue(t *testing.T) {
 		"repos/mb-89/SE/issues/7/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/mb-89/SE/activity?ref=refs/heads/issue-5&per_page=1":    pushed(fresh),
 	})
-	s := Source{Proc: machine, Repo: "mb-89/SE", GitHub: gh, Clock: atNow()}
+	s := Source{Proc: machineOf(t), Repo: "mb-89/SE", GitHub: gh, Clock: atNow()}
 	all, err := s.Survey()
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +205,7 @@ func TestLowestReadyNumberComesFirst(t *testing.T) {
 		listPath: `[` + open(9, "") + `,` + open(3, "") + `]` + `[` + open(5, "") + `]`, // two pages
 		refsPath: `[]`,
 	}, 3, 5, 9))
-	next, ok, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Next()
+	next, ok, err := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}.Next()
 	if err != nil || !ok || next.Number != 3 || next.Title != "t3" {
 		t.Fatalf("%+v %v %v", next, ok, err)
 	}
@@ -260,7 +261,7 @@ func TestAStaleSummaryDoesNotMakeABlockedIssueReady(t *testing.T) {
 		links(8):      `[]`,
 		activity(8):   pushed(fresh),
 	})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}
 	if next, ok, err := s.Next(); err != nil || ok {
 		t.Fatalf("next = %+v %v %v", next, ok, err)
 	}
@@ -284,7 +285,7 @@ func TestNothingReady(t *testing.T) {
 			links(1):    `[]`,
 			activity(1): pushed(fresh),
 		})
-		if next, ok, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).Next(); err != nil || ok {
+		if next, ok, err := (Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}).Next(); err != nil || ok {
 			t.Errorf("%s: %+v %v %v", name, next, ok, err)
 		}
 	}
@@ -299,56 +300,72 @@ func TestRepoReadsOrigin(t *testing.T) {
 		"http://proxy@127.0.0.1:1234/git/mb-89/SE": "mb-89/SE",
 	} {
 		m := proc.NewFake()
-		m.Install("git", withOrigin("/w", url))
+		m.InstallGit(disk.NewFake())
+		for _, args := range [][]string{{"init", "-q", "/w"}, {"-C", "/w", "remote", "add", "origin", url}} {
+			if err := m.Run(proc.Cmd{Name: "git", Args: args, Dir: "/"}); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if got, err := Repo(m, "/w"); err != nil || got != want {
 			t.Errorf("%s: %q %v", url, got, err)
 		}
 	}
 	m := proc.NewFake()
-	m.Install("git", withOrigin("/w", ""))
+	m.InstallGit(disk.NewFake())
+	if err := m.Run(proc.Cmd{Name: "git", Args: []string{"init", "-q", "/w"}, Dir: "/"}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := Repo(m, "/w"); err == nil || !strings.Contains(err.Error(), "remote get-url origin") {
 		t.Fatalf("a checkout without origin answered %v", err)
 	}
 }
 
-// withOrigin is a git whose one checkout, dir, has origin at url; an empty url
-// is no origin at all.
-func withOrigin(dir, url string) proc.Program {
-	return func(c proc.Cmd) int {
-		switch {
-		case c.Dir != dir:
-			fmt.Fprintf(c.Stderr, "fatal: not a git repository: %s\n", c.Dir)
-			return 128
-		case strings.Join(c.Args, " ") != "remote get-url origin":
-			fmt.Fprintf(c.Stderr, "git: %s is not what this git does\n", c.Args)
-			return 1
-		case url == "":
-			fmt.Fprintln(c.Stderr, "error: No such remote 'origin'")
-			return 2
-		}
-		fmt.Fprintln(c.Stdout, url)
-		return 0
-	}
+// machines holds each test's fake machine: git on it, and the disk its work
+// trees stand on.
+var machines sync.Map // *testing.T to *machine
+
+type machine struct {
+	proc  *proc.Fake
+	disk  *disk.Fake
+	boxes int // how many times boxes made a fleet on it
 }
 
-// machine is the real machine the tests that build git repositories still
-// run git on; #137 moves them onto the fake.
-var machine = proc.Real()
+// machineOf is the test's fake machine, made on the first call, with git on
+// it keeping its work trees on diskOf(t).
+func machineOf(t *testing.T) *proc.Fake { return machineFor(t).proc }
 
+// diskOf is the disk the work trees of the test's git stand on.
+func diskOf(t *testing.T) *disk.Fake { return machineFor(t).disk }
+
+func machineFor(t *testing.T) *machine {
+	t.Helper()
+	if m, ok := machines.Load(t); ok {
+		return m.(*machine)
+	}
+	m := &machine{proc: proc.NewFake(), disk: disk.NewFake()}
+	m.proc.InstallGit(m.disk)
+	machines.Store(t, m)
+	t.Cleanup(func() { machines.Delete(t) })
+	return m
+}
+
+// run runs git in dir on the test's machine, and answers what it printed, trimmed.
 func run(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
-	out, err := cmd.CombinedOutput()
+	out, err := proc.Output(machineOf(t), proc.Cmd{Name: "git", Args: append([]string{"-c", "user.name=t", "-c", "user.email=t@t"}, args...), Dir: dir})
 	if err != nil {
-		t.Fatalf("git %v: %v %s", args, err, out)
+		t.Fatalf("git %v: %v", args, err)
 	}
-	return strings.TrimSpace(string(out))
+	return out
 }
 
-// boxes makes a bare origin with a main and two clones of it, two boxes.
+// boxes makes a bare origin with a main and two clones of it, two boxes, in
+// a folder of their own on the test's machine.
 func boxes(t *testing.T) (origin, a, b string) {
 	t.Helper()
-	root := t.TempDir()
+	m := machineFor(t)
+	m.boxes++
+	root := filepath.Join(string(filepath.Separator)+"boxes", fmt.Sprint(m.boxes))
 	origin, a, b = filepath.Join(root, "origin.git"), filepath.Join(root, "a"), filepath.Join(root, "b")
 	run(t, root, "init", "-q", "--bare", "-b", "main", origin)
 	run(t, root, "clone", "-q", origin, a)
@@ -362,7 +379,7 @@ func boxes(t *testing.T) (origin, a, b string) {
 func TestTheSecondClaimIsRefused(t *testing.T) {
 	t.Parallel()
 	origin, a, b := boxes(t)
-	if ok, err := (Source{Proc: machine}).Claim(a, 5); err != nil || !ok {
+	if ok, err := (Source{Proc: machineOf(t)}).Claim(a, 5); err != nil || !ok {
 		t.Fatalf("first claim: %v %v", ok, err)
 	}
 	if got := run(t, a, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-5" {
@@ -375,7 +392,7 @@ func TestTheSecondClaimIsRefused(t *testing.T) {
 	// issue-5; the claim must still be refused.
 	run(t, a, "commit", "-q", "--allow-empty", "-m", "more")
 	run(t, a, "push", "-q", "origin", "HEAD:main")
-	if ok, err := (Source{Proc: machine}).Claim(b, 5); err != nil || ok {
+	if ok, err := (Source{Proc: machineOf(t)}).Claim(b, 5); err != nil || ok {
 		t.Fatalf("second claim: %v %v", ok, err)
 	}
 	if got := run(t, b, "rev-parse", "--abbrev-ref", "HEAD"); got != "main" {
@@ -394,7 +411,7 @@ func TestATakeRefusedMovesToTheNextIssue(t *testing.T) {
 		listPath: `[` + open(5, "") + `,` + open(6, "") + `]`,
 		refsPath: `[]`,
 	}, 5, 6))
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}
 	if took, ok, err := s.Take(a, 0); err != nil || !ok || took.Number != 5 {
 		t.Fatalf("a took %+v %v %v", took, ok, err)
 	}
@@ -417,7 +434,7 @@ func TestTakeRefusesAnIssueThatIsNotReady(t *testing.T) {
 		links(1): `[]`,
 		links(2): `[{"number":1,"state":"open"}]`,
 	})
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}
 	if _, _, err := s.Take(t.TempDir(), 2); err == nil || !strings.Contains(err.Error(), "blocked by #1") {
 		t.Fatalf("%v", err)
 	}
