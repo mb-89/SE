@@ -622,27 +622,18 @@ func (s Source) fix(dir string, x *Fixed) error {
 	return nil
 }
 
-// report creates the issue a finding becomes; for a person, it is labelled
-// se-person and assigned to the repository's owner.
+// report creates the issue a finding becomes; for a person, through ForPerson.
 func (s Source) report(f Finding, person bool) (int, error) {
-	labels := []string{Label}
-	if person {
-		labels = append(labels, PersonLabel)
-	}
 	title := strings.ToUpper(f.cause()[:1]) + f.cause()[1:] + ": " + f.What
-	body := fmt.Sprintf("se fleet check found, on #%d: %s.\n\nIt has no remedy a box applies by itself, so it is this issue.", f.Issue, f.What)
 	if person {
-		body = fmt.Sprintf("se fleet check found, on #%d: %s.\n\nOnly a person can decide this one: it was fixed once and is back, or the fix is a judgment.", f.Issue, f.What)
+		body := fmt.Sprintf("Only a person can decide this one: it was fixed once and is back, or the fix is a judgment.\n\nse fleet check found, on #%d: %s.", f.Issue, f.What)
+		made, err := s.ForPerson(title, body, 0, nil)
+		return made.Number, err
 	}
-	made, _, err := s.create(title, body, 0, nil, labels)
+	body := fmt.Sprintf("se fleet check found, on #%d: %s.\n\nIt has no remedy a box applies by itself, so it is this issue.", f.Issue, f.What)
+	made, _, err := s.create(title, body, 0, nil, []string{Label})
 	if err != nil {
 		return 0, err
-	}
-	if person {
-		owner, _, _ := strings.Cut(s.Repo, "/")
-		if _, err := s.GH("api", "-X", "POST", "-f", "assignees[]="+owner, fmt.Sprintf("repos/%s/issues/%d/assignees", s.Repo, made.Number)); err != nil {
-			return made.Number, fmt.Errorf("created #%d, but assigning it to @%s: %w", made.Number, owner, err)
-		}
 	}
 	return made.Number, nil
 }
@@ -654,7 +645,8 @@ func atoi(s string) int {
 
 // takeOverClaim takes over claimed leaf st, named by se issue next --take N,
 // where se fleet check finds it stuck: its branch is checked out as it stands.
-// A takeover labels it se-final; a final issue stuck goes to a person instead.
+// A takeover labels it se-final; a final issue stuck waits on an issue for a
+// person instead.
 func (s Source) takeOverClaim(dir string, st Status) (took Issue, ok bool, err error) {
 	refs, err := api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/%s", s.Repo, Branch(st.Number)), true)
 	if err != nil {
@@ -673,15 +665,15 @@ func (s Source) takeOverClaim(dir string, st Status) (took Issue, ok bool, err e
 		return Issue{}, false, err
 	}
 	k := m.takeovers + 1
-	heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, f.head)
 	if st.Final {
-		reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s, so it waits for a person. "+
-			"`se issue resume %d` puts it back in the queue.", FinalLabel, f.What, st.Number)
-		if err := s.flag(st.Issue, reason, heads); err != nil {
+		reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s.", FinalLabel, f.What)
+		held, err := s.hold(st.Issue, reason)
+		if err != nil {
 			return Issue{}, false, err
 		}
-		return Issue{}, false, fmt.Errorf("#%d is final and stuck (%s), so it went to a person: labelled %s", st.Number, f.What, PersonLabel)
+		return Issue{}, false, fmt.Errorf("#%d is final and stuck (%s), so it waits on #%d, an issue for a person", st.Number, f.What, held.Number)
 	}
+	heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, f.head)
 	body := fmt.Sprintf("Taken over: %s at %s. This box merges main into %s, makes it green and lands it again.", f.What, f.head, Branch(st.Number)) + heads
 	won, err := s.markTakeover(st.Number, k, body)
 	if err != nil {

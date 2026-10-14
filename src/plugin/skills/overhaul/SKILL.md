@@ -14,15 +14,16 @@ one command per call.
 ## Starting one, with a person
 
 Run `./src/plugin/bin/se overhaul new` and tell the person the issue it
-created. A box takes it from there and stops with its report for them.
+created. A box takes it from there: it files the findings as issues, those
+for them where controversial, and closes the overhaul.
 
 ## The box that took overhaul N
 
 1. `./src/plugin/bin/se overhaul read <n>`. It writes the draft to
    `../overhaul-<n>.md`. If it says it wrote the report already posted on the
-   issue, the owner has decided: read their comments on the issue, apply what
-   they moved between controversial and not to `findings` in the draft's
-   block, and go to 4.
+   issue (from before overhauls stopped waiting for the owner): read the
+   owner's comments on the issue, apply what they moved between controversial
+   and not, if anything, to `findings` in the draft's block, and go to 4.
 2. Read the draft's facts: the principles, the retro's last five runs, the
    previous overhaul's findings. Then read SE itself: `spec/`, the README,
    CLAUDE.md, the skills, `se help`, and the code under `src/`.
@@ -38,10 +39,16 @@ created. A box takes it from there and stops with its report for them.
      them), `consistency` (do the README, spec, help, skills and CLAUDE.md
      describe what the code does; does every part fit the parts that rely on
      it), `principles` (is one missing, obsolete or in conflict), `retro`
-     (did its metrics move; did findings recur anyway).
+     (did its metrics move; did findings recur anyway), `speed` (what runs one
+     after another that could run in parallel; where a run asks the outside
+     world for the same thing twice, or item by item where one batched or
+     server-side query would do), `mechanize` (what an agent or a person
+     still does that could be a tested `se` command) and `removal` (what no
+     longer earns its place and could go).
    - `findings`: each a `title` (the fix, as an issue title), a `body` (what
      strays, with files and issue numbers, and the fix), its `area`
-     (`principle`, `outside`, `consistency`, `principles`, `retro`), the
+     (`principle`, `outside`, `consistency`, `principles`, `retro`, `speed`,
+     `mechanize`, `removal`), the
      `principle` it names (0 only for a missing one), the `place`, how far
      it `strays` (`slightly`, `far`), `sources` for an outside idea (one
      becomes a finding only with a concrete place in SE it would change),
@@ -50,6 +57,6 @@ created. A box takes it from there and stops with its report for them.
      change to a principle is always controversial.
    - `went_well`: what holds and should stay.
 4. `./src/plugin/bin/se overhaul file <n>`. If it refuses, fix what it names
-   and run it again. It either posts the report and gives the overhaul to the
-   owner, or creates the issues and closes it. Either way, end: there is no
-   PR to land.
+   and run it again. It creates the issues, those for a person where
+   controversial, and closes the overhaul. End: there is no PR to land, and
+   nothing waits for the owner but the issues for them.

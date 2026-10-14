@@ -91,8 +91,8 @@ What earlier versions taught, and how this design answers it:
 - **Who decides (the owner's rule for retros and overhauls alike):** every
   finding becomes an issue through the same code as `se issue new`.
   - A **non-controversial** finding goes into the normal queue.
-  - A **controversial** one is created with the label `se-person` and
-    assigned to the owner, so it waits for a person.
+  - A **controversial** one is an issue for a person: labelled `se-person`
+    and assigned to the owner, it waits for them. The retro does not.
 
   Controversial means any of:
   - it changes a design principle ([principles.md](principles.md));
@@ -108,19 +108,14 @@ What earlier versions taught, and how this design answers it:
   judgment that is not complete: a finding without a title, a body, a class
   the classes name, a known home, or a `why` where it is controversial; a
   class without a fix; an unknown check or metric; nothing that went well.
-  When the issues are created depends on who is there:
-  - **A person is present (the default):** `se retro report` posts the report
-    on the retro issue and stops: the issue is labelled `se-person` and
-    assigned to the owner. The person may move findings between the two kinds
-    in a comment, then runs `se issue resume`. The next box takes the retro
-    again, `se retro collect` hands it the posted report, it applies what the
-    person decided to the block, and `se retro report` creates the issues as
-    decided and closes the retro.
-  - **Unattended:** `se retro report` creates the issues at once, by the rule
-    above, and closes the retro.
+  **A retro never waits**, whoever started it: `se retro report` creates the
+  issues at once, by the rule above, posts the report as the retro's closing
+  comment, and closes it. What needs the person is in the issues for them;
+  they decide there. (A report posted for the owner before retros stopped
+  waiting is handed back by `se retro collect`, and filed as it stands, with
+  whatever the owner said in its comments applied.)
 
-  Either way it deletes the retro's claim, `issue-N`: a retro lands no
-  branch. Where the box's token may not delete branches, it says so and goes
+  It deletes the retro's claim, `issue-N`: a retro lands no branch. Where the box's token may not delete branches, it says so and goes
   on: `se fleet prune` removes the branch once the retro is closed, and a
   resumed retro's stale claim is taken over like any stuck claim.
 - **The retro reviews itself**, every time, as a fixed part of the report:

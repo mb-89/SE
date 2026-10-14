@@ -95,6 +95,43 @@ func (s Source) link(n int, blockers []int, ids map[int]int64) error {
 	return nil
 }
 
+// Exist refuses, naming it, any of numbers that is no issue of the
+// repository, or a pull request; it writes nothing.
+func (s Source) Exist(numbers []int) error {
+	_, err := s.ids(numbers)
+	return err
+}
+
+// Blocking links each of dependents as blocked by made, an issue se just
+// created, through GitHub's native links: what is left of a box's issue holds
+// up only those of its dependents that need it. Call Exist on dependents
+// before creating made, so a wrong number creates nothing.
+func (s Source) Blocking(made Issue, dependents []int) error {
+	for _, n := range dependents {
+		if err := s.link(n, []int{made.Number}, map[int]int64{made.Number: made.id}); err != nil {
+			return fmt.Errorf("created #%d (%s), but %w", made.Number, made.URL, err)
+		}
+	}
+	return nil
+}
+
+// Dependents names the open issues issue n blocks, GitHub's "blocking"
+// links, lowest first: what waits for n to close.
+func (s Source) Dependents(n int) ([]int, error) {
+	native, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d/dependencies/blocking?per_page=100", s.Repo, n), true)
+	if err != nil {
+		return nil, err
+	}
+	out := []int{}
+	for _, d := range native {
+		if d.State == "open" {
+			out = append(out, d.Number)
+		}
+	}
+	sort.Ints(out)
+	return out, nil
+}
+
 // Create opens a fleet issue, labelled se and each of labels (se-review,
 // se-final), makes it a sub-issue of parent where that is above zero, and
 // links it as blocked by each of blockedBy. The
@@ -134,7 +171,7 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 	if err := json.Unmarshal(out, &i); err != nil || i.Number == 0 {
 		return Issue{}, false, fmt.Errorf("gh api %s answered no issue: %v", path, err)
 	}
-	created := Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL}
+	created := Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, id: i.ID}
 	if parent > 0 {
 		path := fmt.Sprintf("repos/%s/issues/%d/sub_issues", s.Repo, parent)
 		if _, err := s.GH("api", "-X", "POST", "-F", fmt.Sprintf("sub_issue_id=%d", i.ID), path); err != nil {

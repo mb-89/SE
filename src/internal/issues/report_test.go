@@ -148,10 +148,14 @@ func TestAReReviewIsLimitedToTheEarlierBlockers(t *testing.T) {
 	if len(*wrote) != 0 {
 		t.Fatalf("a refused review wrote %q", *wrote)
 	}
-	// The re-review finds #3's problem again: #3 was final, so #1 goes to a person.
+	// The re-review finds #3's problem again: #3 was final, so #1 waits on
+	// an issue for a person, #10.
 	again := failing("three, again")
 	again.Requirements = []Requirement{{Item: "three is fixed", Evidence: "x.go:3 still breaks", Blocker: 3}}
 	again.Findings[0].Repeats = 3
+	answers["repos/o/r/issues/10/assignees"] = `{}`
+	answers["repos/o/r/issues/1/dependencies/blocked_by"] = `{}`
+	answers["repos/o/r/issues/1/labels/se-final"] = `{}`
 	got, err := s.Review(1, r, false, again)
 	if err != nil || !got.Person || len(got.Fixes)+len(got.Filed) != 0 {
 		t.Fatalf("%+v %v", got, err)
@@ -160,9 +164,10 @@ func TestAReReviewIsLimitedToTheEarlierBlockers(t *testing.T) {
 	for _, w := range *wrote {
 		paths = append(paths, w[len(w)-2]+" "+w[len(w)-1])
 	}
-	if len(paths) != 4 || !strings.HasPrefix(paths[0], "body=## Re-review: FAIL") || !strings.Contains(paths[0], "repeats #3, so this goes to a person") ||
-		paths[1] != "labels[]=se-person repos/o/r/issues/1/labels" || paths[2] != "assignees[]=o repos/o/r/issues/1/assignees" ||
-		!strings.Contains(paths[3], "Its re-review finds the problem of #3 (three, again) again") {
+	if len(paths) != 6 || !strings.HasPrefix(paths[0], "body=## Re-review: FAIL") || !strings.Contains(paths[0], "repeats #3, so this goes to a person") ||
+		paths[1] != "labels[]=se-person repos/o/r/issues" || paths[2] != "assignees[]=o repos/o/r/issues/10/assignees" ||
+		paths[3] != "issue_id=1010 repos/o/r/issues/1/dependencies/blocked_by" ||
+		!strings.Contains(paths[4], "Its re-review finds the problem of #3 (three, again) again") {
 		t.Fatalf("%q", paths)
 	}
 }
