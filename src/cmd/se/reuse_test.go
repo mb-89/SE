@@ -117,7 +117,7 @@ func TestFleetPluginsFetchesEverySourceAtItsPinAsAFolderOfPlugins(t *testing.T) 
 	}
 	d := onFake(t)
 	m := proc.NewFake()
-	onMachine(t, m)
+	worldOf(t).Proc = m
 	// git makes the repository it is asked for, and checks a tree out as one file.
 	m.Install("git", func(c proc.Cmd) int {
 		switch {

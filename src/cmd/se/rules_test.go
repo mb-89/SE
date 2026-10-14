@@ -2,7 +2,6 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,7 +19,7 @@ func TestRulesFixWritesTheMechanicalPartAndChecksTheRest(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "fixed: src/a/a_test.go: fast-test\n") {
 		t.Fatalf("rules --fix (exit %d): %s %s", code, out, errs)
 	}
-	data, _ := os.ReadFile(filepath.Join(ws, "src", "a", "a_test.go"))
+	data, _ := onFake(t).ReadFile(filepath.Join(ws, "src", "a", "a_test.go"))
 	if !strings.Contains(string(data), "func TestA(t *testing.T) {\n\tt.Parallel()\n\tt.Log()\n}\n") {
 		t.Fatalf("a_test.go:\n%s", data)
 	}
