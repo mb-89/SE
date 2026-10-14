@@ -115,8 +115,6 @@ type World struct {
 	// answers all of it, for the programs se starts.
 	Getenv  func(key string) string
 	Environ func() []string
-	// Executable is this se, the installed one when it runs from the plugin.
-	Executable func() (string, error)
 	// Commit is the SE commit this se was built from, "" where the build did not say.
 	Commit string
 	// Check is what issue land runs before it pushes, on procs: the repo's one
@@ -128,7 +126,7 @@ type World struct {
 func realWorld() *World {
 	return &World{
 		Clock: clock.Real(), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(), GitHub: github.Real(),
-		Getenv: os.Getenv, Environ: os.Environ, Executable: os.Executable, Commit: commit, Check: check,
+		Getenv: os.Getenv, Environ: os.Environ, Commit: commit, Check: check,
 	}
 }
 

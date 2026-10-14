@@ -50,10 +50,10 @@ func worldOf(t *testing.T) *World {
 	w := &testWorld{env: map[string]string{}}
 	w.World = World{
 		Clock: clock.NewFake(testedAt), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(),
-		GitHub:     github.NewFake(clock.NewFake(testedAt)),
-		Getenv:     func(k string) string { return w.env[k] },
-		Environ:    func() []string { return w.environ() },
-		Executable: os.Executable, Check: check,
+		GitHub:  github.NewFake(clock.NewFake(testedAt)),
+		Getenv:  func(k string) string { return w.env[k] },
+		Environ: func() []string { return w.environ() },
+		Check:   check,
 	}
 	worlds.Store(t, w)
 	t.Cleanup(func() { worlds.Delete(t) })
