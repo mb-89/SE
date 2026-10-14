@@ -18,7 +18,7 @@ import (
 const Allowlist = "src/internal/io/allowlist.txt"
 
 // outside is what reaches the outside past an I/O module: the imports, and
-// the calls of time and os, by package path.
+// the calls of time, os and path/filepath, by package path.
 var (
 	outsideImports = []string{"os/exec", "net/http"}
 	outsideCalls   = map[string][]string{
@@ -28,6 +28,7 @@ var (
 			"Mkdir", "MkdirAll", "MkdirTemp", "Remove", "RemoveAll", "Rename", "Stat", "Lstat",
 			"Truncate", "Chmod", "Chown", "Chtimes", "Link", "Symlink", "Readlink", "DirFS", "CopyFS",
 		},
+		"path/filepath": {"Walk", "WalkDir", "Glob"},
 	}
 )
 
@@ -35,7 +36,7 @@ func init() {
 	register(Rule{
 		Name: "io-module",
 		Doc: "outside src/internal/io, no Go file imports os/exec or net/http, runs gh, reads the clock, sleeps or waits through time, " +
-			"or opens, reads or writes files through os, except as " + Allowlist + " names; an entry there that matches nothing is refused",
+			"opens, reads or writes files through os, or walks or globs the disk through path/filepath, except as " + Allowlist + " names; an entry there that matches nothing is refused",
 		Applies: func(p string) bool {
 			return p == Allowlist || (path.Ext(p) == ".go" && !strings.HasSuffix(p, "_test.go") && !strings.HasPrefix(p, "src/internal/io/"))
 		},
