@@ -151,4 +151,5 @@ The `programs` rule (`src/internal/rules/programs.go`) holds principle 6's
 "no process does what a library call can do": no Go file names a program
 `proc.Programs` does not list, and none but proc calls `os/exec`. What still
 breaks it is named in `src/internal/rules/programs.txt`, which only shrinks:
-today gh, until the GitHub module speaks HTTP itself (#186).
+today gh, which the GitHub module asks once for its token (`gh auth token`)
+where the environment holds none; every request goes over HTTP itself.
