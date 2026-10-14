@@ -65,18 +65,15 @@ func TestASubIssueIsNeverOfferedAtTheTop(t *testing.T) {
 	if _, _, err := s.Take(t.TempDir(), 2); err == nil || !strings.Contains(err.Error(), "#2 is a sub-issue of #1") {
 		t.Fatalf("%v", err)
 	}
-	// With the parent blocked, its sub-issues are still not offered.
+	// With the parent blocked, its sub-issues are still not offered, nor #4,
+	// a bare leaf: boxes take only manifests.
 	seed(t, gh, map[string]string{listPath: list(node(3, 0), node(2, 0), node(1, 2), node(4, 0))})
 	seed(t, gh, map[string]string{blockedPath(1): subs(9)})
-	next, ok, err = s.Next()
-	if err != nil || !ok || next.Number != 4 || next.Parent {
-		t.Fatalf("%+v %v %v", next, ok, err)
-	}
-	// Nor with every leaf at the top claimed.
-	seed(t, gh, map[string]string{refsPath: `[{"ref":"refs/heads/issue-4"}]`})
-	seed(t, gh, map[string]string{activity(4): pushed(fresh)})
 	if next, ok, err := s.Next(); err != nil || ok {
 		t.Fatalf("%+v %v %v", next, ok, err)
+	}
+	if _, _, err := s.Take(t.TempDir(), 4); err == nil || !strings.Contains(err.Error(), "#4 is not ready: "+BareWhy) {
+		t.Fatalf("%v", err)
 	}
 }
 

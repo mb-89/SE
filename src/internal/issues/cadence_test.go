@@ -30,13 +30,14 @@ func cadenceRepo(n, openRetro int) map[string]string {
 	if openRetro != 0 {
 		open = fmt.Sprintf(`[{"number":%d,"state":"open","labels":[{"name":"se"},{"name":"se-retro"}]}]`, openRetro)
 	}
-	return unblocked(map[string]string{
+	// #5 is other work: a manifest, with the leaf #6 inside it.
+	return withLeaf(unblocked(map[string]string{
 		closedRetrosPath: `[{"number":10,"state":"closed","closed_at":"2026-09-01T00:00:00Z"},{"number":20,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`,
 		openRetrosPath:   open,
 		closedSincePath:  "[" + strings.Join(closed, ",") + "]",
 		listPath:         `[` + open5 + `]`,
 		refsPath:         `[]`,
-	}, 5)
+	}, 5), 5, 6)
 }
 
 var open5 = `{"number":5,"title":"t5","body":"work","state":"open","html_url":"u5"}`

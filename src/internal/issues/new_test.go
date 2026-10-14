@@ -84,7 +84,7 @@ func TestCreateNamesTheIssueWhoseLinkFailed(t *testing.T) {
 		"repos/o/r/issues/10": `{"id":1010,"number":10}`,
 	})
 	s := Source{Proc: machine, Repo: repo, GitHub: refuseLinks{gh}, Clock: atNow()}
-	made, _, err := s.Create("t", "b", 0, []int{8})
+	made, _, err := s.Create("t", "b", 10, []int{8})
 	if made.Number != 11 || err == nil || !strings.Contains(err.Error(), "created #11 (https://github.com/o/r/issues/11), but linking #11 as blocked by #8") {
 		t.Fatalf("%+v %v", made, err)
 	}
