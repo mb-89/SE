@@ -103,7 +103,7 @@ func init() {
 				return Reply{}, fmt.Errorf("issue pull takes --worktree with --take at the top, without --in: --in always takes for a worktree")
 			}
 			if take.set {
-				if err := staleSE(&c.World); err != nil {
+				if err := staleSE(&c.World, "a take would hand over stale agents and guidance"); err != nil {
 					return Reply{}, err
 				}
 			}

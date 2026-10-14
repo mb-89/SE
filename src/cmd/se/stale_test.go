@@ -79,7 +79,7 @@ func TestStaleSeLetsATakeGoWhereMainIsInTheBuildOrNobodyKnows(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			onPlugin(t, c.built, c.main, c.contains)
-			if err := staleSE(worldOf(t)); err != nil {
+			if err := staleSE(worldOf(t), "why"); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -93,7 +93,21 @@ func TestStaleSeLetsATakeGoOutsideAnSECheckout(t *testing.T) {
 	m.RunAs(filepath.Join(t.TempDir(), "src", "plugin", "bin", "se"))
 	onMachine(t, m)
 	worldOf(t).Commit = aaa
-	if err := staleSE(worldOf(t)); err != nil {
+	if err := staleSE(worldOf(t), "why"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestARetroCollectOrReportBySeBuiltBeforeMainMovedIsRefusedNamingTheUpdate(t *testing.T) {
+	t.Parallel()
+	for _, verb := range []string{"collect", "report"} {
+		t.Run(verb, func(t *testing.T) {
+			t.Parallel()
+			p := onPlugin(t, aaa, bbb, map[string]bool{aaa: false})
+			code, _, errs := se(t, "retro", verb, "7", "--repo", "o/r")
+			if code != 1 || !p.fetched || !strings.Contains(errs, "se was built from aaaaaaa, but main has moved on to bbbbbbb") || !strings.Contains(errs, "Run se update") {
+				t.Fatalf("exit %d, %q", code, errs)
+			}
+		})
 	}
 }
