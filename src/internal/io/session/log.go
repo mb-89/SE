@@ -3,9 +3,11 @@ package session
 import (
 	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"sync"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // Log is what SE asks of the session log folder: one log per session, which
@@ -18,12 +20,13 @@ type Log interface {
 	Read(session string) ([]byte, error)
 }
 
-// Folder answers the log folder dir: each session's log is <session>.jsonl in it.
-func Folder(dir string) Log { return &folder{dir: dir} }
+// Folder answers the log folder dir on d: each session's log is <session>.jsonl in it.
+func Folder(d disk.Disk, dir string) Log { return &folder{disk: d, dir: dir} }
 
 type folder struct {
-	dir string
-	mu  sync.Mutex
+	disk disk.Disk
+	dir  string
+	mu   sync.Mutex
 }
 
 func (f *folder) Append(session string, line []byte) error {
@@ -32,15 +35,15 @@ func (f *folder) Append(session string, line []byte) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	file, err := os.OpenFile(f.path(session), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	w, err := f.disk.Append(f.path(session))
 	if err != nil {
 		return err
 	}
-	if _, err := file.Write(append(append([]byte{}, line...), '\n')); err != nil {
-		file.Close()
+	if _, err := w.Write(append(append([]byte{}, line...), '\n')); err != nil {
+		w.Close()
 		return err
 	}
-	return file.Close()
+	return w.Close()
 }
 
 func (f *folder) Read(session string) ([]byte, error) {
@@ -49,8 +52,8 @@ func (f *folder) Read(session string) ([]byte, error) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	b, err := os.ReadFile(f.path(session))
-	if errors.Is(err, os.ErrNotExist) {
+	b, err := f.disk.ReadFile(f.path(session))
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	return b, err

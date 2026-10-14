@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mb-89/SE/src/internal/battery"
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 const budgets = `total: {ms: 1000, hard: false}
@@ -26,31 +27,31 @@ const events = `{"Action":"run","Package":"p","Test":"TestA"}
 {"Action":"fail","Package":"p","Elapsed":1.8}
 `
 
-// workspace writes a battery run into a fresh workspace: the steps, go
-// test's events and the budgets.
-func workspace(t *testing.T, steps, budgetsYAML string) string {
+// workspace writes a battery run into a fresh workspace on a fake disk: the
+// steps, go test's events and the budgets.
+func workspace(t *testing.T, steps, budgetsYAML string) (disk.Disk, string) {
 	t.Helper()
-	dir := t.TempDir()
+	d, dir := disk.NewFake(), filepath.FromSlash("/ws")
 	at := filepath.Join(dir, battery.Dir)
 	for path, text := range map[string]string{
 		filepath.Join(at, battery.StepsFile):    steps,
 		filepath.Join(at, battery.GoTestFile):   events,
 		filepath.Join(dir, battery.BudgetsFile): budgetsYAML,
 	} {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := d.MkdirAll(filepath.Dir(path)); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		if err := d.WriteFile(path, []byte(text)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return dir
+	return d, dir
 }
 
 func TestTheReportListsEveryDurationAndTheSlowestTests(t *testing.T) {
-	dir := workspace(t, "biome\t40\ngo test\t420\n", budgets)
+	d, dir := workspace(t, "biome\t40\ngo test\t420\n", budgets)
 	var summary bytes.Buffer
-	p, err := battery.Report(dir, &summary)
+	p, err := battery.Report(d, dir, &summary)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,16 +81,16 @@ func TestTheReportListsEveryDurationAndTheSlowestTests(t *testing.T) {
 		t.Errorf("the summary lacks the go test step:\n%s", summary.String())
 	}
 	// What land reads back is what was reported.
-	loaded, ok, err := battery.Load(dir)
+	loaded, ok, err := battery.Load(d, dir)
 	if err != nil || !ok || loaded.TotalMs != 460 || len(loaded.Slowest) != 3 {
 		t.Errorf("Load = %+v, %v, %v", loaded, ok, err)
 	}
 }
 
 func TestASoftBudgetOverrunIsReportedButPasses(t *testing.T) {
-	dir := workspace(t, "biome\t40\ngo test\t1200\n", budgets)
+	d, dir := workspace(t, "biome\t40\ngo test\t1200\n", budgets)
 	var summary bytes.Buffer
-	p, err := battery.Report(dir, &summary)
+	p, err := battery.Report(d, dir, &summary)
 	if err != nil {
 		t.Fatalf("a soft overrun failed the battery: %v", err)
 	}
@@ -106,8 +107,8 @@ func TestASoftBudgetOverrunIsReportedButPasses(t *testing.T) {
 }
 
 func TestAHardBudgetOverrunFails(t *testing.T) {
-	dir := workspace(t, "go test\t1200\n", strings.Replace(budgets, "go test: {ms: 500, hard: false}", "go test: {ms: 500, hard: true}", 1))
-	p, err := battery.Report(dir, nil)
+	d, dir := workspace(t, "go test\t1200\n", strings.Replace(budgets, "go test: {ms: 500, hard: false}", "go test: {ms: 500, hard: true}", 1))
+	p, err := battery.Report(d, dir, nil)
 	if err == nil || !strings.Contains(err.Error(), "step go test took 1200ms") {
 		t.Fatalf("a hard overrun answered %v", err)
 	}
@@ -117,7 +118,7 @@ func TestAHardBudgetOverrunFails(t *testing.T) {
 }
 
 func TestNoProfileIsNoError(t *testing.T) {
-	if _, ok, err := battery.Load(t.TempDir()); ok || err != nil {
+	if _, ok, err := battery.Load(disk.NewFake(), filepath.FromSlash("/ws")); ok || err != nil {
 		t.Errorf("Load of an empty workspace = %v, %v", ok, err)
 	}
 }
@@ -142,7 +143,8 @@ func TestRelayShowsPackagesAndFailuresAndKeepsEveryEvent(t *testing.T) {
 }
 
 func TestTheBudgetsFileBudgetsEveryStepOfTheBattery(t *testing.T) {
-	b, err := battery.ReadBudgets("../../..")
+	// This reads the checkout's own files, so it reads the real disk.
+	b, err := battery.ReadBudgets(disk.Real(), "../../..")
 	if err != nil {
 		t.Fatal(err)
 	}

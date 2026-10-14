@@ -4,7 +4,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -67,8 +66,8 @@ func TestServeLogsEachPostedEventThroughTheIndex(t *testing.T) {
 	n := sehttp.NewFake()
 	network = n
 	t.Cleanup(func() { network = oldNet })
-	ws := t.TempDir()
-	paths := daemon.Paths{Workspace: ws}
+	d, ws := onFake(t), "/ws"
+	paths := daemon.Paths{Workspace: ws, Disk: d}
 	served := make(chan int, 1)
 	go func() {
 		code, _, _ := se(t, "serve", "--workspace", ws, "--idle", "0")
@@ -99,7 +98,7 @@ func TestServeLogsEachPostedEventThroughTheIndex(t *testing.T) {
 	if code := <-served; code != 0 {
 		t.Fatalf("se serve: exit %d", code)
 	}
-	log, err := os.ReadFile(filepath.Join(paths.Logs(), "s1.jsonl"))
+	log, err := d.ReadFile(filepath.Join(paths.Logs(), "s1.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,7 +17,7 @@ func modules(p daemon.Paths, clk clock.Clock) []*index.Module {
 	return []*index.Module{
 		clock.Module(clk),
 		sessions.Posts,
-		sessions.LogModule(sessions.Folder(p.Logs())),
+		sessions.LogModule(sessions.Folder(p.Disk, p.Logs())),
 		cliModule(),
 	}
 }

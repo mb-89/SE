@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
@@ -109,6 +110,27 @@ func TestAFolderGitIgnoresCountsThoughNoCheckoutHoldsIt(t *testing.T) {
 	}
 }
 
+func TestAManifestReadsItsOwnersFromTheDisk(t *testing.T) {
+	d, root := disk.NewFake(), filepath.FromSlash("/checkout")
+	put(t, d, filepath.Join(root, "spec", "issues.md"), "# Issues: how the fleet works\n")
+	put(t, d, filepath.Join(root, "src", "plugin", "skills", "work", "SKILL.md"), skill)
+	paths := []string{"spec/issues.md", "spec/models.yaml", "src/plugin/skills/work/SKILL.md"}
+	got, err := manifest(d, root, paths, "spec", "README.md")
+	if want := "- [spec/issues.md](spec/issues.md): Issues: how the fleet works\n- [spec/models.yaml](spec/models.yaml)"; err != nil || got != want {
+		t.Fatalf("spec: %q %v", got, err)
+	}
+	got, err = manifest(d, root, paths, "skills", "spec/a.md")
+	if want := "- [`se:work`](../src/plugin/skills/work/SKILL.md): Take the next issue."; err != nil || got != want {
+		t.Fatalf("skills: %q %v", got, err)
+	}
+	if err := d.Remove(filepath.Join(root, "src", "plugin", "skills", "work", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manifest(d, root, paths, "skills", "README.md"); err == nil {
+		t.Fatal("a skill gone from the disk was listed")
+	}
+}
+
 func TestTheRulesSeeWhatGitTracksAndIgnores(t *testing.T) {
 	m := proc.NewFake()
 	m.Install("git", func(c proc.Cmd) int {
@@ -124,7 +146,7 @@ func TestTheRulesSeeWhatGitTracksAndIgnores(t *testing.T) {
 		}
 		return 1
 	})
-	repo, err := repoOf(m, "/ws")
+	repo, err := repoOf(disk.NewFake(), m, "/ws")
 	if err != nil || strings.Join(repo.Paths, " ") != "README.md a/x.md" {
 		t.Fatalf("%v %v", repo, err)
 	}

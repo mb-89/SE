@@ -12,18 +12,17 @@ import (
 )
 
 // TestStatusAndStopReachTheDaemonOverTheNetwork serves a daemon on a fake
-// network and has se status find it and se stop end it there.
+// network and a fake disk and has se status find it and se stop end it there.
 func TestStatusAndStopReachTheDaemonOverTheNetwork(t *testing.T) {
 	old := network
 	network = sehttp.NewFake()
 	t.Cleanup(func() { network = old })
-	ws := t.TempDir()
-	paths := daemon.Paths{Workspace: ws}
+	d, ws := onFake(t), "/ws"
 	done := make(chan error, 1)
 	ready := make(chan daemon.Endpoint, 1)
 	go func() {
-		done <- daemon.Serve(context.Background(), paths, daemon.Options{
-			Clock: clock.Real(), Net: network, Modules: modules(paths, clock.Real()), Ready: func(ep daemon.Endpoint) { ready <- ep },
+		done <- daemon.Serve(context.Background(), daemon.Paths{Workspace: ws, Disk: d}, daemon.Options{
+			Clock: clock.Real(), Net: network, Modules: modules(daemon.Paths{Workspace: ws, Disk: d}, clock.Real()), Ready: func(ep daemon.Endpoint) { ready <- ep },
 		})
 	}()
 	ep := <-ready

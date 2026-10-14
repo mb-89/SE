@@ -82,7 +82,7 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		return Landing{}, fmt.Errorf("the check failed, so nothing was pushed: %w", err)
 	}
 	body := fmt.Sprintf("Fixes #%d", n)
-	profile, profiled, err := battery.Load(dir)
+	profile, profiled, err := battery.Load(s.Disk, dir)
 	if err != nil {
 		return Landing{}, err
 	}
