@@ -1,6 +1,6 @@
 package session
 
-import "github.com/mb-89/SE/src/internal/index"
+import "github.com/mb-89/SE/src/index"
 
 type logIn struct {
 	Events Event `index:"events"`

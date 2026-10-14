@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/guidance"
-	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sessions "github.com/mb-89/SE/src/internal/io/session"
