@@ -697,11 +697,24 @@ func takeOrder(all []Status, want int) []Status {
 // tree; where it exists already, Take picks the tree up from that claim. A
 // claimed leaf named as want, at any depth, is taken over where se fleet
 // check finds it stuck (see takeOverClaim), or where it is stuck past the
-// lease. ok is false when nothing was left to take.
+// lease. Without want, a bare leaf, at the top in no manifest and unclaimed,
+// is filed into the open misc manifest first (fileBare). ok is false when
+// nothing was left to take.
 func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 	all, t, err := s.survey()
 	if err != nil {
 		return Issue{}, false, err
+	}
+	// The sweep: a take at the top files each bare leaf into the misc
+	// manifest first, and reads where everything stands after it.
+	if want == 0 {
+		if filed, err := s.fileBare(all, t); err != nil {
+			return Issue{}, false, err
+		} else if filed {
+			if all, t, err = s.survey(); err != nil {
+				return Issue{}, false, err
+			}
+		}
 	}
 	if s.Worktrees {
 		if err := s.room(all, t.pulls); err != nil {

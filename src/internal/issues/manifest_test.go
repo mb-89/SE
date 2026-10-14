@@ -193,6 +193,27 @@ func TestAnIssueInNoManifestGoesIntoTheMiscManifest(t *testing.T) {
 	}
 }
 
+// A bare leaf, filed by an se built before manifests, is never offered at
+// the top: a take files it into the misc manifest, as se issue new would
+// have, and takes that. A claimed bare leaf is left where it is.
+func TestATakeFilesABareLeafIntoTheMiscManifest(t *testing.T) {
+	t.Parallel()
+	a := claimed7(t)
+	w := newWorld(t, []string{item(7, 0), item(20, 0)}, 7)
+	w.pushed(7, recent)
+	s := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}
+	took, ok, err := s.Take(a, 0)
+	if err != nil || !ok || took.Number != 101 || !took.Parent || !labelled(t, w, 101, MiscLabel) {
+		t.Fatalf("took %+v %v %v; writes %q", took, ok, err, w.Writes())
+	}
+	if top, err := s.manifestOf(20); err != nil || top != 101 {
+		t.Fatalf("#20 is in #%d (%v), want #101", top, err)
+	}
+	if top, err := s.manifestOf(7); err != nil || top != 0 {
+		t.Fatalf("the claimed #7 was filed into #%d (%v)", top, err)
+	}
+}
+
 // The pause switch is a config value on main: set there, a box's take
 // reads it before it takes anything.
 func TestThePauseSwitchIsReadFromMain(t *testing.T) {

@@ -110,8 +110,11 @@ the owner's account for an hour.
   retro and an overhaul stand at the top by themselves.
 - **Boxes take only manifests.** At the top, `se issue pull --take` offers a
   manifest (a parent), a retro or an overhaul, never a bare leaf (with
-  `--json`: its `bare`); a claimed bare leaf from before is still taken over
-  when it is stuck or conflicted. A manifest can be extended while it runs
+  `--json`: its `bare`). A plain take first files each unclaimed bare leaf,
+  which an `se` built before manifests may still file, into the open misc
+  manifest as a sub-issue, as `se issue new` would have, so none is
+  stranded; a claimed bare leaf from before is left where it is, and taken
+  over when it is stuck or conflicted. A manifest can be extended while it runs
   (`se issue new --parent`): its coordinator pulls inside its tree each
   round. Once its PR is open, a new leaf goes in with the next push, or waits
   for the next manifest.

@@ -110,6 +110,30 @@ func (s Source) FileInto() (int, error) {
 	return made.Number, nil
 }
 
+// fileBare files each bare leaf in all, one at the top in no manifest that
+// nothing claims or holds (Status.Bare is BareWhy), into the open misc
+// manifest as a sub-issue, as se issue new would have filed it: an se built
+// before manifests still files bare issues, and no box takes one. filed says
+// whether it filed any.
+func (s Source) fileBare(all []Status, t tree) (filed bool, err error) {
+	misc := 0
+	for _, st := range all {
+		if st.Bare != BareWhy {
+			continue
+		}
+		if misc == 0 {
+			if misc, err = s.FileInto(); err != nil {
+				return filed, err
+			}
+		}
+		if err := s.subIssue(misc, t.byNum[st.Number].ID); err != nil {
+			return filed, fmt.Errorf("filing #%d into misc manifest #%d: %w", st.Number, misc, err)
+		}
+		filed = true
+	}
+	return filed, nil
+}
+
 // Paused reads fleet.box/config/paused (issues/config/paused on the index)
 // from the wiring file on origin/main, fetched into the checkout dir: the
 // owner stops the fleet with one change on main, and it reaches every running
