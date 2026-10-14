@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -110,20 +111,70 @@ func (s Source) settle() time.Duration {
 }
 
 // linked says whether survey reads the blocked-by links of issue i: GitHub's
-// summary counts an open blocker, or i changed too lately for its summary to
-// be trusted, or it says nothing of the open ones. A settled summary that
-// counts no open blocker stands for the links, however many closed ones it
-// counts, except where closed asks for those too (se fleet check, which
-// judges a blocker closed as not planned).
-func (s Source) linked(i issue, closed bool) bool {
+// summary counts an open blocker, or says nothing of the open ones. A settled
+// summary that counts no open blocker stands for the links, however many
+// closed ones it counts, except where closed asks for those too (se fleet
+// check, which judges a blocker closed as not planned). Of an issue that
+// changed too lately for its summary to be trusted, lately is set where the
+// summary counts no open blocker: its links are read only where a link was
+// written or removed on it within the settle time (relinked), not for the
+// comments and labels a busy fleet touches it with.
+func (s Source) linked(i issue, closed bool) (read, lately bool) {
 	d := i.Dependencies
 	switch {
-	case d == nil || d.BlockedBy == nil || s.now().Sub(i.Updated) < s.settle():
-		return true
+	case d == nil || d.BlockedBy == nil:
+		return true, false
+	case *d.BlockedBy > 0:
+		return true, false
+	case s.now().Sub(i.Updated) < s.settle():
+		return closed, !closed
 	case closed:
-		return d.TotalBlockedBy > 0
+		return d.TotalBlockedBy > 0, false
 	}
-	return *d.BlockedBy > 0
+	return false, false
+}
+
+// EventPage and EventPages are how the repository's issue events are read
+// for the links written lately: EventPages pages of EventPage events at
+// once, newest first, until one is older than the settle time.
+const (
+	EventPage  = 100
+	EventPages = 2
+)
+
+// event is the part of GitHub's issue event object relinked reads.
+type event struct {
+	Event   string    `json:"event"`
+	Created time.Time `json:"created_at"`
+	Issue   struct {
+		Number int `json:"number"`
+	} `json:"issue"`
+}
+
+// relinked reads the repository's issue events back to the settle time and
+// names each issue a blocked-by link was written on or removed from since:
+// the issues whose summary may lag their links. ok is false where GitHub
+// does not answer them (404): every issue may then.
+func (s Source) relinked() (got map[int]bool, ok bool, err error) {
+	since := s.now().Add(-s.settle())
+	got = map[int]bool{}
+	err = pagesAtOnce(s, fmt.Sprintf("repos/%s/issues/events?per_page=%d", s.Repo, EventPage), EventPages, func(_ int, page []event) bool {
+		more := true
+		for _, e := range page {
+			if !e.Created.After(since) {
+				more = false
+				continue
+			}
+			if strings.HasPrefix(e.Event, "blocked_by_") {
+				got[e.Issue.Number] = true
+			}
+		}
+		return more
+	})
+	if github.Status(err) == 404 {
+		return nil, false, nil
+	}
+	return got, err == nil, err
 }
 
 func (s Source) now() time.Time { return s.Clock.Now() }
@@ -501,18 +552,72 @@ func (s Source) surveyLinks(closed bool) ([]Status, tree, error) {
 	var refs []ref
 	var pulls []openPull
 	g := newGroup()
-	// A claimed leaf's lease needs the branches: a leaf the list names
-	// before they are read waits in leaves, one named after starts at once.
 	var mu sync.Mutex
-	var leaves []*Status
-	branched := false
-	lease := func(l *Status) {
-		if claimed[Branch(l.Number)] {
-			g.Go(func() error { return s.lease(l) })
+	// A claimed leaf's lease needs the branches and the repository's latest
+	// activity, which names the last push to most of them at once: a leaf
+	// the list names before both are read waits in leaves, one named after
+	// starts at once. A leaf whose summary counts an open blocker is gated:
+	// its lease waits on its links and is read only where none is open, as a
+	// claim that waits on its blockers has no lease to judge.
+	type leaf struct {
+		st             *Status
+		gated, started bool
+	}
+	var leaves []*leaf
+	var known pushes
+	branched, active := false, false
+	lease := func(l *leaf) {
+		if branched && active && !l.gated && !l.started && claimed[Branch(l.st.Number)] {
+			l.started = true
+			g.Go(func() error { return s.lease(l.st, known) })
 		}
 	}
-	// The branches and the open PRs need nothing else, so they are read
-	// beside the issue list.
+	flush := func() {
+		for _, l := range leaves {
+			lease(l)
+		}
+	}
+	// links reads the blocked-by links of n into d, and opens the gate of
+	// its leaf, if it has one, where none of them is open.
+	links := func(n int, d *[]issue, l *leaf) {
+		g.Go(func() error {
+			got, err := s.blockedBy(n)
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			*d = got
+			if l != nil && l.gated && !slices.ContainsFunc(got, func(b issue) bool { return b.State == "open" }) {
+				l.gated = false
+				lease(l)
+			}
+			return nil
+		})
+	}
+	// The issues changed too lately for their summary wait in lately for
+	// the issue events, which say which of them had a link written.
+	var relinked map[int]bool
+	evented, eventsOK := closed, false
+	var lately []func()
+	if !closed {
+		g.Go(func() error {
+			got, ok, err := s.relinked()
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			relinked, eventsOK, evented = got, ok, true
+			for _, f := range lately {
+				f()
+			}
+			lately = nil
+			return nil
+		})
+	}
+	// The branches, the activity and the open PRs need nothing else, so they
+	// are read beside the issue list.
 	g.Go(func() (err error) {
 		got, err := api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/issue-?per_page=100", s.Repo), true)
 		if err != nil {
@@ -525,9 +630,18 @@ func (s Source) surveyLinks(closed bool) ([]Status, tree, error) {
 			claimed[strings.TrimPrefix(r.Ref, "refs/heads/")] = true
 		}
 		branched = true
-		for _, l := range leaves {
-			lease(l)
+		flush()
+		return nil
+	})
+	g.Go(func() error {
+		got, err := s.recentPushes()
+		if err != nil {
+			return err
 		}
+		mu.Lock()
+		defer mu.Unlock()
+		known, active = got, true
+		flush()
 		return nil
 	})
 	g.Go(func() (err error) {
@@ -536,16 +650,11 @@ func (s Source) surveyLinks(closed bool) ([]Status, tree, error) {
 	})
 	t, err := s.load(g, func(i issue) {
 		n := i.Number
-		d, m, l := &[]issue{}, &marks{}, &Status{Issue: Issue{Number: n}}
+		d, m, st := &[]issue{}, &marks{}, &Status{Issue: Issue{Number: n}}
 		mu.Lock()
 		defer mu.Unlock()
-		deps[n], marked[n], leased[n] = d, m, l
-		if s.linked(i, closed) {
-			g.Go(func() (err error) {
-				*d, err = s.blockedBy(n)
-				return err
-			})
-		}
+		deps[n], marked[n], leased[n] = d, m, st
+		var l *leaf
 		switch {
 		case i.labelled(PersonLabel):
 			g.Go(func() (err error) {
@@ -553,10 +662,29 @@ func (s Source) surveyLinks(closed bool) ([]Status, tree, error) {
 				return err
 			})
 		case i.SubIssues != nil && i.SubIssues.Total > 0:
-		case branched:
-			lease(l)
 		default:
+			dep := i.Dependencies
+			l = &leaf{st: st, gated: dep != nil && dep.BlockedBy != nil && *dep.BlockedBy > 0}
 			leaves = append(leaves, l)
+		}
+		read, late := s.linked(i, closed)
+		switch {
+		case read:
+			links(n, d, l)
+		case late:
+			check := func() {
+				if !eventsOK || relinked[n] {
+					links(n, d, l)
+				}
+			}
+			if evented {
+				check()
+			} else {
+				lately = append(lately, check)
+			}
+		}
+		if l != nil {
+			lease(l)
 		}
 	})
 	if err != nil {

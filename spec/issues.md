@@ -135,7 +135,12 @@ person**, and leaves the agents' queue until the person has closed it.
   4-hour schedule, so a scheduled box always catches it. The last push is
   GitHub's activity on the branch (`/repos/{owner}/{repo}/activity`), its
   creation included; a branch GitHub keeps no push record of is stuck. A
-  parent's claim is never stuck: it does not hold its tree anyway.
+  survey reads the repository's latest 100 activities once, which name the
+  last push of every branch pushed to lately, and reads a branch's own
+  activity only where they do not name it, or name its deletion last. A
+  claim whose summary counts an open blocker has its lease read only where
+  its links show none open: a claim that waits on its blockers is not stuck.
+  A parent's claim is never stuck: it does not hold its tree anyway.
 - **First stuck: taken over.** A stuck leaf goes before new work: at the top,
   `se issue pull --take` takes it over before any ready issue, and a parent
   with a stuck leaf inside before any other parent or leaf; inside a tree,
@@ -446,9 +451,15 @@ They read and write GitHub's REST API through the GitHub I/O module
 `/repos/{owner}/{repo}/issues/{n}/sub_issues`), and work on the repository of
 the workspace's `origin` unless `--repo` names another. The links of an issue
 are read only where the issue list's `issue_dependencies_summary` counts an
-open blocker (`blocked_by`), or says nothing of them, or the issue changed
-within the settle time (`github/config/settle`, 5 minutes): the summary can
-lag a link just written, and writing a link changes the issue. A settled
+open blocker (`blocked_by`), or says nothing of them, or a blocked-by link
+was written on or removed from the issue within the settle time
+(`github/config/settle`, 5 minutes): the summary can lag a link just written.
+Which issues those are, the repository's issue events say
+(`/repos/{owner}/{repo}/issues/events`, newest first, `blocked_by_added` and
+`blocked_by_removed`), read beside the issue list back to the settle time; an
+issue changed within it for anything else, a comment or a label, keeps its
+summary, and where GitHub does not answer the events, every issue changed
+within it has its links read. A settled
 summary with no open blocker stands for the links however many closed ones it
 counts; only `se fleet check`, which judges a blocker closed as not planned,
 reads the links of every issue whose summary counts any.

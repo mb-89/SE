@@ -122,13 +122,59 @@ func (s Source) lastPush(n int) (time.Time, error) {
 	return last, nil
 }
 
-// lease reads whether a claimed leaf is stuck: nothing pushed to its branch,
-// nor a takeover recorded, for longer than the lease. Its comments are read
-// only where the last push is that old.
-func (s Source) lease(st *Status) error {
-	pushed, err := s.lastPush(st.Number)
+// pushes is the last push to each branch the repository's activity names on
+// its first page, by ref: what the leases of most claimed leaves are read
+// from at once, one request for every branch pushed to lately.
+type pushes map[string]time.Time
+
+// ActivityPage is how many of the repository's latest activities a survey
+// reads, in one request, for the leases of the claimed leaves: a branch
+// pushed to among them needs no read of its own.
+const ActivityPage = 100
+
+// recentPushes reads the repository's latest activities, newest first, for
+// the last push to each branch among them. A branch whose latest activity
+// there is its deletion is left out: a branch on origin was made after it,
+// and its own read says when. A repository whose activity GitHub does not
+// answer (404) names none.
+func (s Source) recentPushes() (pushes, error) {
+	got, err := api[[]struct {
+		Ref       string    `json:"ref"`
+		Timestamp time.Time `json:"timestamp"`
+		Type      string    `json:"activity_type"`
+	}](s, fmt.Sprintf("repos/%s/activity?per_page=%d", s.Repo, ActivityPage), false)
+	if github.Status(err) == 404 {
+		return pushes{}, nil
+	}
 	if err != nil {
-		return err
+		return nil, err
+	}
+	out, gone := pushes{}, map[string]bool{}
+	for _, a := range got[0] {
+		switch {
+		case a.Ref == "" || gone[a.Ref]:
+		case a.Type == "branch_deletion":
+			if _, ok := out[a.Ref]; !ok {
+				gone[a.Ref] = true
+			}
+		case a.Timestamp.After(out[a.Ref]):
+			out[a.Ref] = a.Timestamp
+		}
+	}
+	return out, nil
+}
+
+// lease reads whether a claimed leaf is stuck: nothing pushed to its branch,
+// nor a takeover recorded, for longer than the lease. Its last push is
+// read from known where that names its branch, else on its own; its
+// comments are read only where the last push is that old.
+func (s Source) lease(st *Status, known pushes) error {
+	pushed, ok := known["refs/heads/"+Branch(st.Number)]
+	if !ok {
+		var err error
+		if pushed, err = s.lastPush(st.Number); err != nil {
+			return err
+		}
 	}
 	st.Since, st.pushed = pushed, pushed
 	if s.now().Sub(st.Since) <= s.config().Lease {

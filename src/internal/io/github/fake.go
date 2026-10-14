@@ -316,6 +316,10 @@ func (f *Fake) whole(path string) (any, error) {
 			out = append(out, r.refs[ref])
 		}
 		return out, nil
+	case match(w, "activity") && q.Get("ref") == "" && r.docs[path] == nil:
+		return r.activity(), nil
+	case match(w, "issues", "events") && r.docs[path] == nil:
+		return r.events(), nil
 	case match(w, "pulls"):
 		return r.listPulls(q), nil
 	case match(w, "pulls", "#"):
@@ -468,6 +472,75 @@ func (r *repo) allComments(since string) []any {
 	out := []any{}
 	for _, c := range all {
 		out = append(out, c)
+	}
+	return out
+}
+
+// activity is the repository's activity, newest first, as GitHub lists it
+// for no one ref: every activity seeded for a ref of its own, each naming its
+// ref, once.
+func (r *repo) activity() []any {
+	prefix := "repos/" + r.name + "/activity?"
+	seen := map[string]bool{}
+	var all []obj
+	for path, doc := range r.docs {
+		u, err := url.Parse(path)
+		if !strings.HasPrefix(path, prefix) || err != nil || u.Query().Get("ref") == "" {
+			continue
+		}
+		var list []obj
+		if json.Unmarshal(doc, &list) != nil {
+			continue
+		}
+		for _, a := range list {
+			if _, ok := a["ref"]; !ok {
+				a["ref"] = u.Query().Get("ref")
+			}
+			key := fmt.Sprint(a["ref"], a["timestamp"], a["activity_type"])
+			if !seen[key] {
+				seen[key] = true
+				all = append(all, a)
+			}
+		}
+	}
+	at := func(a obj) string { s, _ := a["timestamp"].(string); return s }
+	sort.SliceStable(all, func(i, j int) bool {
+		if at(all[i]) != at(all[j]) {
+			return at(all[i]) > at(all[j])
+		}
+		return fmt.Sprint(all[i]["ref"]) < fmt.Sprint(all[j]["ref"])
+	})
+	out := []any{}
+	for _, a := range all {
+		out = append(out, a)
+	}
+	return out
+}
+
+// events is the repository's issue events, newest first, as GitHub lists
+// them: the fake keeps one for each blocked-by link written, on the issue it
+// blocks; a seeded link has none.
+func (r *repo) events() []any {
+	type link struct {
+		blocked int
+		at      time.Time
+	}
+	var all []link
+	for k, at := range r.linked {
+		all = append(all, link{k[0], at})
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		if !all[i].at.Equal(all[j].at) {
+			return all[i].at.After(all[j].at)
+		}
+		return all[i].blocked < all[j].blocked
+	})
+	out := []any{}
+	for k, l := range all {
+		out = append(out, obj{
+			"id": len(all) - k, "event": "blocked_by_added", "created_at": l.at.UTC().Format(time.RFC3339),
+			"issue": obj{"number": l.blocked},
+		})
 	}
 	return out
 }

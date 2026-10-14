@@ -4,6 +4,7 @@ package issues
 
 import (
 	"fmt"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -184,5 +185,111 @@ func TestTheCadenceCountsBesideTheLastRun(t *testing.T) {
 		if read != tc.window {
 			t.Fatalf("%d after: the window read: %v", tc.after, read)
 		}
+	}
+}
+
+// read lists the paths read through l so far, in no order.
+func (l listing) read() []string {
+	var out []string
+	for {
+		select {
+		case p := <-l.paths:
+			out = append(out, p)
+		default:
+			return out
+		}
+	}
+}
+
+// The leases of the claimed leaves are read from one page of the
+// repository's activity: a branch it names needs no read of its own, and one
+// it leaves out, or names last as deleted, is read on its own.
+func TestOneActivityPageNamesTheLastPushOfEachBranch(t *testing.T) {
+	t.Parallel()
+	gh := recorded(t, map[string]string{
+		listPath: list(node(1, 0), node(2, 0), node(3, 0), node(4, 0)),
+		refsPath: refs(1, 2, 3, 4),
+		fmt.Sprintf("repos/o/r/activity?per_page=%d", ActivityPage): `[` +
+			`{"ref":"refs/heads/issue-1","timestamp":"` + fresh + `","activity_type":"push"},` +
+			`{"ref":"refs/heads/issue-2","timestamp":"` + fresh + `","activity_type":"branch_deletion"},` +
+			`{"ref":"refs/heads/issue-3","timestamp":"` + stale + `","activity_type":"push"},` +
+			`{"ref":"refs/heads/issue-1","timestamp":"` + stale + `","activity_type":"branch_creation"}]`,
+		activity(2): pushed(fresh),
+		activity(4): pushed(stale),
+	})
+	l := listing{GitHub: gh, paths: make(chan string, 1000)}
+	all, err := Source{Proc: machine, Repo: repo, GitHub: l, Clock: atNow()}.Survey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stuck := map[int]bool{}
+	for _, st := range all {
+		stuck[st.Number] = st.Stuck
+	}
+	if want := map[int]bool{1: false, 2: false, 3: true, 4: true}; !reflect.DeepEqual(stuck, want) {
+		t.Fatalf("stuck %v, want %v", stuck, want)
+	}
+	var own []string
+	for _, p := range l.read() {
+		if strings.Contains(p, "activity?ref=") {
+			own = append(own, p)
+		}
+	}
+	slices.Sort(own)
+	if want := []string{activity(2), activity(4)}; !slices.Equal(own, want) {
+		t.Fatalf("read the activity of %v, want %v", own, want)
+	}
+}
+
+// A claim whose summary counts an open blocker has its lease read only where
+// its links show none open: one that waits on its blockers is never stuck.
+func TestAClaimThatWaitsOnItsBlockerHasNoLeaseRead(t *testing.T) {
+	t.Parallel()
+	gh := recorded(t, map[string]string{
+		listPath: list(node(4, 0), node(5, 0)),
+		refsPath: refs(4),
+		links(4): `[{"id":1005,"number":5,"state":"open"}]`,
+	})
+	l := listing{GitHub: gh, paths: make(chan string, 1000)}
+	all, err := Source{Proc: machine, Repo: repo, GitHub: l, Clock: atNow()}.Survey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all[0].Why != "issue-4 waits: blocked by #5" {
+		t.Fatalf("#4: %q", all[0].Why)
+	}
+	for _, p := range l.read() {
+		if strings.Contains(p, "/activity") && strings.Contains(p, "issue-4") {
+			t.Fatalf("read the lease of a claim that waits: %s", p)
+		}
+	}
+}
+
+// Of the issues changed within the settle time, only one a blocked-by link
+// was written on, as the issue events say, has its links read: a comment
+// changes an issue too, but leaves its summary right.
+func TestOnlyAnIssueLinkedLatelyHasItsLinksRead(t *testing.T) {
+	t.Parallel()
+	clk := atNow()
+	gh := recordedAt(t, clk, map[string]string{
+		listPath: list(node(7, 0), node(8, 0), node(9, 0)),
+		refsPath: `[]`,
+	})
+	if _, err := gh.Send("POST", "repos/o/r/issues/7/comments", github.F("body", "a box was here")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gh.Send("POST", "repos/o/r/issues/8/dependencies/blocked_by", github.Int("issue_id", 1009)); err != nil {
+		t.Fatal(err)
+	}
+	c := &counting{GitHub: gh}
+	all, err := Source{Proc: machine, Repo: repo, GitHub: c, Clock: clk}.Survey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all[0].Why != "" || all[1].Why != "blocked by #9" {
+		t.Fatalf("#7 %q, #8 %q", all[0].Why, all[1].Why)
+	}
+	if got := c.read(); !slices.Equal(got, []string{links(8)}) {
+		t.Fatalf("read the links of %v", got)
 	}
 }
