@@ -4,12 +4,10 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
@@ -223,26 +221,5 @@ func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
 	seed(t, gh, map[string]string{commentsPath(3): workedBy(Worker{Session: "w", Workspace: "/w3"})})
 	if _, err := s.Review(1, Worker{Session: "other", Workspace: "/w"}, true, passing); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestTheReviewerModelIsOneLineOfSpecModels(t *testing.T) {
-	t.Parallel()
-	d, dir := disk.NewFake(), filepath.FromSlash("/checkout")
-	if got := ReviewerModel(d, dir); got != "" {
-		t.Fatalf("without the file: %q", got)
-	}
-	if err := d.MkdirAll(filepath.Join(dir, "spec")); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.WriteFile(filepath.Join(dir, ModelsPath), []byte("# models\nbox: opus\nreviewer: \"fable\" # stronger\n")); err != nil {
-		t.Fatal(err)
-	}
-	if got := ReviewerModel(d, dir); got != "fable" {
-		t.Fatalf("%q", got)
-	}
-	// The repository's own setting is never empty: it is the checkout's file, on the real disk.
-	if got := ReviewerModel(disk.Real(), "../../.."); got == "" {
-		t.Fatal("spec/models.yaml sets no reviewer")
 	}
 }

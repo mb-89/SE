@@ -33,12 +33,19 @@ type Port struct {
 	Help string
 	// Derived is set on an output a derivation writes rather than a command.
 	Derived bool
+	// Family is set on an output written at a key: the wiring binds it to a
+	// family, a name with one key segment, and each write names its key.
+	Family bool
 }
 
 // Write is one value a run commits to one of its module's outputs.
 type Write struct {
 	Port  string
 	Value any
+	// Key is the key a write to a family output stands at; a plain output's has none.
+	Key string
+	// Gone drops the key from the family: its name reads the built-in value again.
+	Gone bool
 }
 
 // Result is what a command answers: what to show, and what it commits.
@@ -66,7 +73,22 @@ type CommandDecl struct {
 	// Installed has the installed se answer it even when the session works
 	// in an SE checkout, whose own se answers every other /se word.
 	Installed bool
+	// Class is Interactive or Batch: whether a person waits on its answer.
+	Class Class
 }
+
+// Class says who waits on a command (principle 9). The battery runs every
+// interactive command against the fake GitHub and holds it to its budgets.
+type Class string
+
+const (
+	// Interactive is a command a person types or presses and waits on: it
+	// answers from what the snapshot holds, within its time and request budget.
+	Interactive Class = "interactive"
+	// Batch is a command that must write, or that the fleet, a hook or the
+	// battery runs: it goes out at once.
+	Batch Class = "batch"
+)
 
 // Reader answers the value of a local input port.
 type Reader func(port string) any
@@ -236,8 +258,14 @@ func (m *Module) CheckWrites(writes []Write) error {
 			return fmt.Errorf("module %s writes no output %q", m.name, w.Port)
 		case o.Derived:
 			return fmt.Errorf("module %s: output %s is written by its derivation alone", m.name, w.Port)
-		case !Fits(w.Value, o.Type):
+		case w.Gone && !o.Family:
+			return fmt.Errorf("module %s: output %s is no family, and drops no key", m.name, w.Port)
+		case !w.Gone && !Fits(w.Value, o.Type):
 			return fmt.Errorf("module %s: output %s takes %s, not %T", m.name, w.Port, o.Type, w.Value)
+		case o.Family && !Key(w.Key):
+			return fmt.Errorf("module %s: output %s is a family, and %q is no key: letters, digits, dots, dashes and underscores", m.name, w.Port, w.Key)
+		case !o.Family && w.Key != "":
+			return fmt.Errorf("module %s: output %s is no family, and takes no key", m.name, w.Port)
 		}
 	}
 	return nil
@@ -269,6 +297,28 @@ func (m *Module) addOutput(p Port) {
 	}
 	m.outputs[p.Port] = &p
 }
+
+// FamilyPort is a family output a command writes: each write stands at a key,
+// such as a session's id. At makes the write.
+type FamilyPort[T any] struct{ port Port }
+
+// Family declares an output port written at keys, with the built-in value
+// every key reads while nothing stands at it, and its help line. The wiring
+// binds it to a family, a name with one key segment such as session/<id>/events;
+// keys come and go inside it, and no name is added at runtime.
+func Family[T any](port string, builtin T, help string) *FamilyPort[T] {
+	return &FamilyPort[T]{Port{Port: port, Type: reflect.TypeFor[T](), Builtin: builtin, Help: help, Family: true}}
+}
+
+// At is a write of v at key.
+func (o *FamilyPort[T]) At(key string, v T) Write {
+	return Write{Port: o.port.Port, Value: v, Key: key}
+}
+
+// Drop is a write that takes key out of the family.
+func (o *FamilyPort[T]) Drop(key string) Write { return Write{Port: o.port.Port, Key: key, Gone: true} }
+
+func (o *FamilyPort[T]) declare(m *Module) { m.addOutput(o.port) }
 
 type derivedPart struct {
 	port Port
@@ -357,6 +407,9 @@ func (p commandPart) declare(m *Module) {
 	if d.Button && !d.Session {
 		m.fail("command %q is a button but not offered in a session", d.Name)
 	}
+	if d.Class != Interactive && d.Class != Batch {
+		m.fail("command %q has no class: %s or %s", d.Name, Interactive, Batch)
+	}
 	if _, taken := m.commands[d.Name]; taken {
 		m.fail("command %q is declared twice", d.Name)
 	}
@@ -423,6 +476,22 @@ func Fits(v any, t reflect.Type) bool {
 		return false
 	}
 	return reflect.TypeOf(v).AssignableTo(t)
+}
+
+// Key says whether s can be a key in a family: letters, digits, dots, dashes
+// and underscores, and neither "." nor "..".
+func Key(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r == '-', r == '.', r == '_', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // portName says whether s is a local name: letters, digits and dashes.
