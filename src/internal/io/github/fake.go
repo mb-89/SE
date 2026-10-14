@@ -48,6 +48,26 @@ type Fake struct {
 	requests int
 	delay    time.Duration
 	delayOn  clock.Clock
+	// quota is GitHub's hourly limit on requests, content its limit on
+	// creating content; rate is what the last answer said of the quota.
+	quota   quota
+	content content
+	rate    Rate
+}
+
+// quota is a limit of requests a window, counted from the window's start.
+type quota struct {
+	limit  int
+	window time.Duration
+	start  time.Time
+	used   int
+}
+
+// content is a limit of writes in any span of per, and when each was made.
+type content struct {
+	n     int
+	per   time.Duration
+	stamp []time.Time
 }
 
 // timed is recorded answers the repository holds from at on.
@@ -80,7 +100,81 @@ type repo struct {
 
 // NewFake answers an empty fake GitHub whose stamps are read from c.
 func NewFake(c clock.Clock) *Fake {
-	return &Fake{Login: "se-fake", clock: c, repos: map[string]*repo{}}
+	return &Fake{Login: "se-fake", clock: c, repos: map[string]*repo{}, quota: quota{limit: Quota, window: time.Hour}}
+}
+
+// Quota is the fake's built-in limit of requests an hour: the owner's
+// token's, which the whole fleet shares.
+const Quota = 15000
+
+// Quota limits the fake to limit requests a window, as GitHub limits a token
+// to its requests an hour: the window opens at the first request, and a
+// request past the limit is refused with 403 and the quota's headers until
+// the window resets on the fake's clock.
+func (f *Fake) Quota(limit int, window time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.quota = quota{limit: limit, window: window}
+}
+
+// ContentLimit limits the fake to n writes in any span of per, as GitHub's
+// secondary limit does content creation: a write past it is refused with
+// 403, a secondary rate limit, and a retry-after until the oldest leaves the
+// span.
+func (f *Fake) ContentLimit(n int, per time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.content = content{n: n, per: per}
+}
+
+// Rate answers the quota as the fake's last answer gave it.
+func (f *Fake) Rate() Rate {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.rate
+}
+
+// admit counts a request against the quota, and a write against the
+// content limit, with f.mu held; it refuses one past either as GitHub does.
+func (f *Fake) admit(write bool) error {
+	now := f.clock.Now()
+	q := &f.quota
+	if q.limit > 0 {
+		if q.start.IsZero() || !now.Before(q.start.Add(q.window)) {
+			q.start, q.used = now, 0
+		}
+		f.rate = Rate{Known: true, Limit: q.limit, Remaining: max(q.limit-q.used-1, 0), Reset: q.start.Add(q.window)}
+		if q.used >= q.limit {
+			f.rate.Remaining = 0
+			return &Error{Status: 403, Message: "gh: API rate limit exceeded for user ID 1.", Rate: f.rate}
+		}
+		q.used++
+	}
+	if c := &f.content; write && c.n > 0 {
+		kept := c.stamp[:0]
+		for _, at := range c.stamp {
+			if now.Sub(at) < c.per {
+				kept = append(kept, at)
+			}
+		}
+		c.stamp = kept
+		if len(c.stamp) >= c.n {
+			r := f.rate
+			r.RetryAfter = max(c.stamp[0].Add(c.per).Sub(now).Round(time.Second), time.Second)
+			return &Error{Status: 403, Message: "gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.", Rate: r}
+		}
+		c.stamp = append(c.stamp, now)
+	}
+	return nil
+}
+
+// used counts n more requests against the quota, with f.mu held: the pages
+// of a List past its first.
+func (f *Fake) used(n int) {
+	if f.quota.limit > 0 && n > 0 {
+		f.quota.used += n
+		f.rate.Remaining = max(f.rate.Remaining-n, 0)
+	}
 }
 
 // Delay makes each request the fake takes pass d on c, as a request to
@@ -171,6 +265,9 @@ func (f *Fake) Get(path string) ([]byte, error) {
 	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.admit(false); err != nil {
+		return nil, err
+	}
 	f.catchUp()
 	v, err := f.read(path)
 	if err != nil {
@@ -185,6 +282,10 @@ func (f *Fake) List(path string) ([]byte, error) {
 	defer func() { f.spend(pages) }()
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.admit(false); err != nil {
+		return nil, err
+	}
+	defer func() { f.used(pages - 1) }()
 	f.catchUp()
 	v, err := f.read(path)
 	if err != nil {
@@ -538,8 +639,11 @@ func (f *Fake) Send(method, path string, fields ...Field) ([]byte, error) {
 	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.catchUp()
 	f.writes = append(f.writes, method+" "+path)
+	if err := f.admit(true); err != nil {
+		return nil, err
+	}
+	f.catchUp()
 	v, err := f.write(method, path, values(fields))
 	if err != nil {
 		return nil, err
@@ -978,8 +1082,11 @@ func (f *Fake) GraphQL(query string, vars ...Field) ([]byte, error) {
 	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.catchUp()
 	f.writes = append(f.writes, "POST graphql")
+	if err := f.admit(true); err != nil {
+		return nil, err
+	}
+	f.catchUp()
 	if f.Proxy {
 		return nil, refuse(403, "GitHub GraphQL is not available from Claude Code sessions; use the REST API")
 	}
