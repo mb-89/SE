@@ -144,7 +144,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, pull, resume, review, supersede, tree." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -152,7 +152,7 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	t.Parallel()
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, pull, resume, review, supersede, tree." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -162,7 +162,7 @@ func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
 		t.Fatal("take is a flag of issue pull, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, pull, resume, review, supersede, tree.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: close, edit, land, new, pull, resume, review, supersede, tree.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
@@ -421,7 +421,7 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires", code, fires(t))
 	}
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIts agent: se:worker.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
+	if code != 0 || fires(t) != 1 || !strings.HasPrefix(out, "Took #3 three, on branch issue-3.\nu3\nIts agent: se:worker.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n\n"+workerIntro) {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// The take is recorded for the Stop hook, which holds the box to closing #3.
@@ -567,7 +567,7 @@ func TestIssueReviewReadsItsWords(t *testing.T) {
 	gh := recordedIssues(t)
 	d, dir := onFake(t), filepath.FromSlash("/reports")
 	good, bad := filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json")
-	put(t, d, good, `{"commit":"c","requirements":[{"item":"i","evidence":"e"}],"clean":["x"]}`)
+	put(t, d, good, `{"commit":"c","requirements":[{"item":"i","evidence":"e"}],"clean":["x"],"ran":`+ranAll(t)+`}`)
 	put(t, d, bad, `{"verdict":"pass"}`)
 	for args, want := range map[string]string{
 		"pass":                          "pass or fail, then an issue number",
@@ -674,7 +674,7 @@ func TestTheCheckRunsCheckShInTheCheckoutAndAnswersTheTailOfAFailure(t *testing.
 	}
 }
 
-func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
+func TestIssueTreeListsTheQueueAndATree(t *testing.T) {
 	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
@@ -694,20 +694,24 @@ func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
 	}
 	hubAt(t, answers)
 	code, out, errs := se(t, "issue", "tree", "--repo", "o/r")
-	want := "#1  open  1/2 closed  se  root\n#3  open  1/1 closed  se,se-review  three\n#7  closed  2/2 closed  se  old\n"
+	// The open queue: #3, a review gate whose tree is done, is the work left.
+	want := "#1  open  ready  1/2 closed  se  root\n  #3  open  ready  1/1 closed  se,se-review  three\n\n" +
+		"Estimate: 1 open, 0 in flight; no estimate: no se issue merged with a claim time since 2026-10-07T12:00:00Z.\n" +
+		"Pace since 2026-10-07 12:00Z (7d, PaceWindow): 0 merged, 0.00 an hour; no claim-to-merge time measured.\n" +
+		"Critical path, 1 in a row: #3.\n"
 	if code != 0 || out != want {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, errs = se(t, "issue", "tree", "#1", "--repo", "o/r")
-	want = "#1  open  1/2 closed  se  root\n  #2  closed  se  two\n  #3  open  1/1 closed  se,se-review  three\n    #4  closed  se  four\n"
-	if code != 0 || out != want {
+	want = "#1  open  ready  1/2 closed  se  root\n  #2  closed  se  two\n  #3  open  ready  1/1 closed  se,se-review  three\n    #4  closed  se  four\n\n"
+	if code != 0 || !strings.HasPrefix(out, want) || !strings.Contains(out, "Critical path, 1 in a row: #3.") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, _ = se(t, "issue", "tree", "--json", "1", "--repo", "o/r")
 	if code != 0 || !strings.Contains(out, `{"number":4,"title":"four","state":"closed","url":"","labels":["se"],"depth":2,"closed":0,"total":0}`) {
 		t.Fatalf("exit %d, %q", code, out)
 	}
-	if code, out, _ = se(t, "issue", "tree", "2", "--repo", "o/r"); code != 0 || out != "#2  closed  se  two\n" {
+	if code, out, _ = se(t, "issue", "tree", "2", "--repo", "o/r"); code != 0 || !strings.HasPrefix(out, "#2  closed  se  two\n\nEstimate: 0 open, 0 in flight; no estimate: #2's tree holds no open work.") {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 	for _, args := range [][]string{{"5"}, {"x"}, {"1", "2"}} {
@@ -763,5 +767,19 @@ func TestATakeoverWritesBackTheLandingAnswersBesideItsWorktree(t *testing.T) {
 	fresh := issues.Issue{Number: 7}
 	if err := restoreAnswers(c, s, &fresh, true); err != nil || fresh.Takeover != nil {
 		t.Fatalf("%v %+v", err, fresh)
+	}
+}
+
+func TestIssueCloseTakesANumberACommitAndAnswers(t *testing.T) {
+	t.Parallel()
+	for args, why := range map[string]string{
+		"issue close --fixed-by abc --answers a.yaml":     "takes one issue number",
+		"issue close 5 --answers a.yaml":                  "takes --fixed-by SHA",
+		"issue close 5 --fixed-by abc":                    "takes --answers FILE",
+		"issue close 5 6 --fixed-by abc --answers a.yaml": "takes one issue number",
+	} {
+		if code, _, errs := se(t, strings.Fields(args)...); code == 0 || !strings.Contains(errs, why) {
+			t.Errorf("%s: exit %d, %q", args, code, errs)
+		}
 	}
 }
