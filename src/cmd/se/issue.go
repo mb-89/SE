@@ -70,6 +70,7 @@ func init() {
 		Summary: "show the next se issue, stuck work first; --take claims it",
 		Details: []string{
 			"pull the next ready se issue at the top, stuck work before new work; boxes take only manifests, so at the top it offers a manifest (a parent), a retro or an overhaul, never a leaf in no manifest, and a manifest whose leaves are all closed is offered to be landed as one PR.",
+			"After stuck and conflicted work, it offers the priority manifests first, lowest number first: those labelled se-priority or holding an open leaf so labelled, and an open retro or overhaul; inside a manifest, its se-priority leaves come before the rest.",
 			"Every --take first reads fleet.box/config/paused (issues/config/paused) in the wiring file on origin/main, and while it is set takes nothing and says the fleet is paused, so the box ends.",
 			"Without --take it only shows it (number, title, link, why it is at the top, and where the cadences stand; --full adds the body), or says that none is ready, and takes nothing; a press of its /se ui button shows the short form, the cadences in one line.",
 			"--take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out.",
@@ -647,6 +648,9 @@ func init() {
 				text += "; nothing was left to wait for, so it is merged (squash)."
 			} else {
 				text += ", auto-merge (squash) on."
+			}
+			if l.Warning != "" {
+				text += "\nWarning: " + l.Warning
 			}
 			return Reply{Text: text + "\n" + l.URL}, nil
 		},

@@ -25,7 +25,7 @@ const Label = "se"
 const ReviewLabel = "se-review"
 
 // FinalLabel marks an issue on its last attempt: one a review filed for a
-// finding, or one taken over once already. A final issue that fails again goes
+// finding, or one taken over stuck once already. A final issue that fails again goes
 // to a person instead of another round.
 const FinalLabel = "se-final"
 
@@ -224,6 +224,10 @@ type Status struct {
 	// Land is true for a manifest at the top whose leaves are all closed:
 	// its coordinator lands it, as one PR from its branch.
 	Land bool `json:"land,omitempty"`
+	// Priority is set for an issue labelled se-priority, a retro, an
+	// overhaul, and a parent with one of them open in its tree: a take has
+	// it before the rest (PriorityLabel).
+	Priority bool `json:"priority,omitempty"`
 	// Final is set for an issue labelled se-final: on its last attempt.
 	Final bool `json:"final,omitempty"`
 	// Person is set for an issue labelled se-person; Reason says why.
@@ -306,6 +310,7 @@ func (t tree) depth(n int) int {
 }
 
 // load reads the open fleet issues with their sub-issues, then closes every
+// issue for a person that hold minted whose held issue is closed, and every
 // parent whose sub-issues are all closed, deepest first, so a parent its
 // closing completes closes too. A parent labelled se-review never closes here.
 // The reads more makes from the list run beside the sub-issues' reads.
@@ -334,11 +339,43 @@ func (s Source) load(more func(t tree) []func() error) (tree, error) {
 			return err
 		})
 	}
+	// An issue for a person whose held issue is not open in the list is
+	// moot where that issue is closed; it is read to be sure.
+	moot := map[int]*bool{}
+	for _, h := range t.numbers() {
+		n := t.byNum[h].holds()
+		if _, open := t.byNum[n]; n == 0 || open {
+			continue
+		}
+		shut := false
+		moot[h] = &shut
+		reads = append(reads, func() error {
+			got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
+			// A 404 is an issue gone, which holds nothing either.
+			if github.Status(err) == 404 {
+				shut = true
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			shut = got[0].State == "closed"
+			return nil
+		})
+	}
 	if more != nil {
 		reads = append(reads, more(t)...)
 	}
 	if err := parallel(reads); err != nil {
 		return tree{}, err
+	}
+	for _, h := range t.numbers() {
+		if shut, ok := moot[h]; ok && *shut {
+			if err := s.closeMoot(h, t.byNum[h].holds()); err != nil {
+				return tree{}, err
+			}
+			delete(t.byNum, h)
+		}
 	}
 	for k, n := range parents {
 		t.subs[n] = subs[k]
@@ -399,8 +436,9 @@ func (s Source) closeParent(n int) error {
 }
 
 // CloseParents closes every open parent whose sub-issues are all closed,
-// deepest first, except those labelled se-review. Every se issue command does
-// this first.
+// deepest first, except those labelled se-review, and every moot issue for a
+// person: one hold minted whose held issue is closed. Every se issue command
+// does this first.
 func (s Source) CloseParents() error {
 	_, err := s.load(nil)
 	return err
@@ -552,6 +590,7 @@ func (s Source) survey() ([]Status, tree, error) {
 		byNum[n] = st
 		out = append(out, st)
 	}
+	prioritize(out, t)
 	// A tree holding an issue that waits on a person is never offered.
 	var waits func(n int) int
 	waits = func(n int) int {
@@ -661,6 +700,10 @@ func picked(st Status) string {
 		return "Stuck work inside its tree comes first: a take coordinates the tree."
 	case st.Parent && st.Review:
 		return "Its sub-issues are all closed: a take starts its review."
+	case st.Parent && st.Priority:
+		return "A priority manifest (se-priority on it or a leaf inside) comes before the rest: a take coordinates its tree."
+	case st.Priority:
+		return "Priority work (se-priority, a retro or an overhaul) comes before the rest."
 	case st.Parent:
 		return "The lowest ready issue at the top, a parent: a take coordinates its tree."
 	default:
@@ -670,7 +713,7 @@ func picked(st Status) string {
 
 // takeOrder lists the issues at the top a take may have, in the order it
 // tries them: want first, when it is above zero, then the urgent ones, then
-// the rest, each lowest number first.
+// the priority ones, then the rest, each lowest number first.
 func takeOrder(all []Status, want int) []Status {
 	var order []Status
 	for _, st := range all {
@@ -678,9 +721,18 @@ func takeOrder(all []Status, want int) []Status {
 			order = append(order, st)
 		}
 	}
-	for _, urgent := range []bool{true, false} {
+	rank := func(st Status) int {
+		switch {
+		case st.urgent:
+			return 0
+		case st.Priority:
+			return 1
+		}
+		return 2
+	}
+	for r := 0; r < 3; r++ {
 		for _, st := range all {
-			if st.Above == 0 && st.Takeable() && st.urgent == urgent && st.Number != want {
+			if st.Above == 0 && st.Takeable() && rank(st) == r && st.Number != want {
 				order = append(order, st)
 			}
 		}
@@ -762,7 +814,8 @@ type Tree struct {
 	// Closed is true once the root has closed: the tree is done.
 	Closed bool `json:"closed"`
 	// Ready is the leaves that may be taken: those to take over first, then
-	// the new work, each lowest number first.
+	// the new work, its priority leaves (se-priority) before the rest, each
+	// lowest number first.
 	Ready []Issue `json:"ready"`
 	// Review is the se-review parents whose sub-issues are all closed.
 	Review []Issue `json:"review"`
@@ -832,7 +885,7 @@ func (s Source) in(root int) (Tree, []Status, surveyed, error) {
 	if tr.Why != "" {
 		return tr, nil, surveyed{all, t}, nil
 	}
-	var fresh []Issue
+	var first, rest []Issue
 	for _, st := range inside {
 		switch {
 		case st.Land:
@@ -842,11 +895,13 @@ func (s Source) in(root int) (Tree, []Status, surveyed, error) {
 			tr.rounds[st.Number] = len(t.subs[st.Number])
 		case st.Takeover != nil:
 			tr.Ready = append(tr.Ready, st.Issue)
+		case st.Ready() && !st.Parent && st.Priority:
+			first = append(first, st.Issue)
 		case st.Ready() && !st.Parent:
-			fresh = append(fresh, st.Issue)
+			rest = append(rest, st.Issue)
 		}
 	}
-	tr.Ready = append(tr.Ready, fresh...)
+	tr.Ready = append(append(tr.Ready, first...), rest...)
 	return tr, inside, surveyed{all, t}, nil
 }
 

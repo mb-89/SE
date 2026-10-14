@@ -392,15 +392,44 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 		f.Remedy != "se issue pull --take 17, merge origin/main into issue-17, make it green, se issue land" {
 		t.Fatalf("%+v", f)
 	}
-	// Its remedy, run: the takeover was made once already, so #17 is
-	// se-final and waits on an issue for a person.
-	_, _, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(t.TempDir(), 17)
-	if err == nil || !strings.Contains(err.Error(), "an issue for a person") {
-		t.Fatalf("%v", err)
+	// Its remedy, run: a conflict is no failure, so #17, final or not, is
+	// taken over again, and nothing waits on a person.
+	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(claimedAt(t, 17), 17)
+	if err != nil || !ok || took.Takeover == nil || took.Takeover.Count != 2 {
+		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	// The issue for the person is #171, after PR #170.
-	if by := linksOf(t, w.Fake, links(17)); !reflect.DeepEqual(by, []int{171}) || labelled(t, w, 17, PersonLabel) || !labelled(t, w, 171, PersonLabel) {
+	if by := linksOf(t, w.Fake, links(17)); len(by) != 0 || !labelled(t, w, 17, FinalLabel) {
 		t.Fatalf("#17 is blocked by %v; writes %q", by, w.Writes())
+	}
+}
+
+// Recorded from mb-89/SE on 14 October: #60, final, was taken over as stuck
+// at 08:01:45, which recorded a comment and no push; at 08:03:42 the
+// coordination remedy found it final and quiet and held it, and its box
+// landed PR #127 anyway. A takeover a minute old renews the claim as a push
+// does: neither se fleet check nor se issue next --take N holds it.
+func TestAFinalClaimTakenOverAMinuteAgoIsNotHeld(t *testing.T) {
+	t.Parallel()
+	for name, pr := range map[string]func(w *world){
+		"no PR":  func(w *world) { w.closedPRs(7, `[]`) },
+		"red PR": func(w *world) { w.pr(7, "true", "clean", true, "check:failure") },
+	} {
+		w := newWorld(t, []string{item(5, 0), item(7, 0, FinalLabel)}, 7)
+		pr(w)
+		w.pushed(7, quiet)
+		w.said(7, "<!-- se:takeover 1 -->\nTaken over: nothing was pushed to issue-7.", noon.Add(-time.Minute))
+		for _, f := range w.check() {
+			if f.Issue == 7 {
+				t.Errorf("%s: se fleet check finds %+v", name, f)
+			}
+		}
+		_, _, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(t.TempDir(), 7)
+		if err == nil || !strings.Contains(err.Error(), "nothing about it is stuck") {
+			t.Errorf("%s: %v", name, err)
+		}
+		if c := commentsAt(t, w, 7); len(c) != 1 || len(w.Writes()) != 0 {
+			t.Errorf("%s: #7 was held: %+v, writes %q", name, c, w.Writes())
+		}
 	}
 }
 

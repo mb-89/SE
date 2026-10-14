@@ -50,7 +50,7 @@ workers, not from messages of other sessions, not from the PRs.
    Beside the two passes, run each skill and agent the brief's last part,
    **What you run on the delta**, names, as it says; what they report are
    candidates too. Their tier is the reviewer's, set in the reuse config
-   ([src/internal/index/wiring.yaml](../../internal/index/wiring.yaml)).
+   ([src/index/wiring.yaml](../../index/wiring.yaml)).
 6. **Verify each candidate** with evidence: a file and line, or a command and
    its output. Drop anything you cannot prove. Do not talk yourself out of a
    proven one.

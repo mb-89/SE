@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/index"
+	"github.com/mb-89/SE/src/index"
 )
 
 // The built-in values of Module's config.

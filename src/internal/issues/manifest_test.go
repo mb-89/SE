@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/SE/src/internal/index"
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 )
@@ -218,5 +218,42 @@ func TestThePauseSwitchIsReadFromMain(t *testing.T) {
 	}
 	if paused, err := (Source{Proc: machine}).Paused(b); err != nil || !paused {
 		t.Fatal(err)
+	}
+}
+
+// A priority leaf in the second manifest makes a take at the top offer it
+// before the first, and inside it before its other leaves; a box working the
+// first manifest does not drop it for that.
+func TestAPriorityLeafPutsItsManifestFirst(t *testing.T) {
+	t.Parallel()
+	_, a, _ := boxes(t)
+	tree := func(priority ...string) string {
+		return list(node(1, 2, ManifestLabel), node(2, 0), node(3, 0), node(4, 2, ManifestLabel), node(5, 0), node(6, 0, priority...))
+	}
+	gh := recorded(t, unblocked(map[string]string{
+		listPath:      tree(),
+		subsPath(1):   subs(2, 3),
+		subsPath(4):   subs(5, 6),
+		refsPath:      `[]`,
+		openPullsPath: `[]`,
+	}, 1, 2, 3, 4, 5, 6))
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: disk.NewFake()}
+	// With no priority, the lowest manifest comes first, and the box takes it.
+	if took, ok, err := s.Take(a, 0); err != nil || !ok || took.Number != 1 {
+		t.Fatalf("took %+v %v %v", took, ok, err)
+	}
+	run(t, a, "checkout", "-q", "main")
+	// Now #6, in the second manifest, is labelled se-priority.
+	seed(t, gh, map[string]string{listPath: tree(PriorityLabel)})
+	next, ok, err := s.Next()
+	if err != nil || !ok || next.Number != 4 || !strings.HasPrefix(next.Picked, "A priority manifest") {
+		t.Fatalf("next %+v %v %v", next, ok, err)
+	}
+	if tr, err := s.In(4); err != nil || len(tr.Ready) != 2 || tr.Ready[0].Number != 6 {
+		t.Fatalf("inside #4: %+v %v", tr, err)
+	}
+	// The box working #1 finishes it: its next leaf is #1's, not #6.
+	if took, ok, _, err := s.TakeIn(a, 1, 0); err != nil || !ok || took.Number != 2 {
+		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
 }

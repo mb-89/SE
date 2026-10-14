@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mb-89/SE/src/index"
+	"github.com/mb-89/SE/src/index/fixture"
+	"github.com/mb-89/SE/src/index/indextest"
 	_ "github.com/mb-89/SE/src/internal/guidance" // the wiring se carries instances it
-	"github.com/mb-89/SE/src/internal/index"
-	"github.com/mb-89/SE/src/internal/index/fixture"
-	"github.com/mb-89/SE/src/internal/index/indextest"
 )
 
 // source is a fixture module whose outputs a test commits, as an I/O module commits what comes in.
@@ -110,6 +110,39 @@ func TestAModuleRegistersAndCommitsItsOutputs(t *testing.T) {
 	must(t, err)
 	if r.Text != `noted "hi" beside 2 numbers` || read(t, ix, "tally/note").V != "hi" {
 		t.Fatalf("the note answered %q and committed %+v", r.Text, read(t, ix, "tally/note"))
+	}
+}
+
+func TestANestedInstanceOwnsTheNamesUnderIt(t *testing.T) {
+	t.Parallel()
+	ix := start(t, `
+instances:
+  issues: {module: source}
+  issues/numbers: {module: source}
+  issues/pull: {module: tally, config: {scale: 2}}
+wires:
+  issues/pull.numbers: issues/numbers.list
+`, fixture.Module, source)
+	must(t, ix.Commit("issues/numbers", index.Write{Port: "list", Value: []int{2, 3}}))
+	for name, want := range map[string]index.Value{
+		"issues/n":                 {V: 7},
+		"issues/numbers/list":      {V: []int{2, 3}, Provided: true},
+		"issues/pull/total":        {V: 10, Provided: true},
+		"issues/pull/config/scale": {V: 2, Provided: true},
+	} {
+		if got := read(t, ix, name); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s reads %+v, want %+v", name, got, want)
+		}
+	}
+	for _, c := range []struct{ wiring, want string }{
+		{"instances: {issues: {module: source}, issues/pull: {module: source}}\nwires: {issues.n: issues/pull/n}", "name issues/pull/n lies under instance issues/pull, which owns the names issues/pull/...: issues.n may not write it"},
+		{"instances: {a: {module: source}, a/n: {module: source}}", "name a/n lies under instance a/n, which owns the names a/n/...: a.n may not write it"},
+		{"instances: {t: {module: tally}, t/config: {module: source}}\nwires: {t.numbers: built-in}", "name t/config/scale lies under instance t/config, which owns the names t/config/...: the config of t may not write it"},
+		{"instances: {issues//pull: {module: source}}", `instance "issues//pull" needs a name`},
+		{"instances: {issues/<id>: {module: source}}", `instance "issues/<id>" needs a name`},
+		{"instances: {/pull: {module: source}}", `instance "/pull" needs a name`},
+	} {
+		refused(t, c.wiring, c.want, fixture.Module, source)
 	}
 }
 

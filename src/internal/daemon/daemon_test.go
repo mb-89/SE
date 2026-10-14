@@ -19,8 +19,8 @@ import (
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/daemon"
-	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/session"
 )
 
