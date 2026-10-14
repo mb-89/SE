@@ -11,12 +11,14 @@ import (
 )
 
 // overhaulRepo records o/r as cadenceRepo(10, 0) does, a retro due, with
-// overhaul #15 closed on September 15th and n retros closed after it;
-// openOverhaul, where it is not 0, is an open overhaul.
+// overhaul #15 closed on September 15th and n retros closed after it, retro
+// #20 the last of them; openOverhaul, where it is not 0, is an open overhaul.
+// #21 is no overhaul here: #15 is the last.
 func overhaulRepo(n, openOverhaul int) map[string]string {
 	a := cadenceRepo(10, 0)
+	a[closedSincePath] = strings.Replace(a[closedSincePath], `,{"name":"se-overhaul"}`, "", 1)
 	var retros []string
-	for k := 0; k < n; k++ {
+	for k := 0; k < n-1; k++ {
 		retros = append(retros, fmt.Sprintf(`{"number":%d,"state":"closed","closed_at":"2026-09-2%dT00:00:00Z","labels":[{"name":"se-retro"}]}`, 200+k, k))
 	}
 	// Before the window, touched inside it: the list holds it, the count does not.
@@ -33,12 +35,12 @@ func overhaulRepo(n, openOverhaul int) map[string]string {
 
 func TestFourRetrosStartNoOverhaulAndTheDueRetroIsTaken(t *testing.T) {
 	_, a, _ := boxes(t)
-	gh, w := writing(t, overhaulRepo(4, 0))
-	took, ok, c, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.TakeDue(a)
-	if err != nil || !ok || !took.Retro || took.Overhaul || c.Kind != "retro" || len(*w) != 1 || !strings.Contains(strings.Join((*w)[0], " "), "labels[]=se-retro") {
-		t.Fatalf("took %+v %v, %+v %v, writes %q", took, ok, c, err, *w)
+	gh := recorded(t, overhaulRepo(4, 0))
+	took, ok, c, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.TakeDue(a)
+	if err != nil || !ok || !took.Retro || took.Overhaul || c.Kind != "retro" || len(gh.Writes()) != 1 || !labelled(t, gh, took.Number, RetroLabel) {
+		t.Fatalf("took %+v %v, %+v %v, writes %q", took, ok, c, err, gh.Writes())
 	}
-	o, err := Source{Proc: machine, Repo: repo, GH: recorded(t, overhaulRepo(4, 0)), Clock: atNow()}.OverhaulCadence()
+	o, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, overhaulRepo(4, 0)), Clock: atNow()}.OverhaulCadence()
 	if err != nil || o.Closed != 4 || o.Due() || o.Line() != "4 retros closed since the overhaul #15 closed; an overhaul is due at 5." {
 		t.Fatalf("%+v %v %q", o, err, o.Line())
 	}
@@ -46,22 +48,25 @@ func TestFourRetrosStartNoOverhaulAndTheDueRetroIsTaken(t *testing.T) {
 
 func TestFiveRetrosStartAnUnattendedOverhaulAndTakeItFirst(t *testing.T) {
 	_, a, _ := boxes(t)
-	gh, w := writing(t, overhaulRepo(5, 0))
-	took, ok, c, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.TakeDue(a)
+	gh := recorded(t, overhaulRepo(5, 0))
+	took, ok, c, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.TakeDue(a)
 	if err != nil || !ok || !took.Overhaul || took.Retro || c.Kind != "overhaul" || c.Closed != 5 || c.Every != OverhaulCadence {
 		t.Fatalf("took %+v %v, %+v %v", took, ok, c, err)
 	}
-	made := strings.Join((*w)[0], " ")
-	if len(*w) != 1 || !strings.Contains(made, overhaulUnattendedMark) || !strings.Contains(made, "labels[]=se-overhaul") || !strings.Contains(made, "title=SE overhaul 2026-10-13") || !strings.Contains(made, "The last overhaul was #15") {
-		t.Fatalf("writes %q", *w)
+	// The overhaul is the next issue: retros #200 to #203 closed before it.
+	got, err := gh.Get("repos/o/r/issues/204")
+	made := string(got)
+	if len(gh.Writes()) != 1 || err != nil || took.Number != 204 || !strings.Contains(made, overhaulUnattendedMark) || !labelled(t, gh, 204, OverhaulLabel) ||
+		!strings.Contains(made, `"title":"SE overhaul 2026-10-13"`) || !strings.Contains(made, "The last overhaul was #15") {
+		t.Fatalf("writes %q, made %s %v", gh.Writes(), made, err)
 	}
-	if got := run(t, a, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-30" {
+	if got := run(t, a, "rev-parse", "--abbrev-ref", "HEAD"); got != "issue-204" {
 		t.Fatalf("a is on %s", got)
 	}
 }
 
 func TestAnOpenOverhaulBlocksASecond(t *testing.T) {
-	c, err := Source{Proc: machine, Repo: repo, GH: recorded(t, overhaulRepo(7, 31)), Clock: atNow()}.OverhaulCadence()
+	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, overhaulRepo(7, 31)), Clock: atNow()}.OverhaulCadence()
 	if err != nil || c.Open != 31 || c.Due() || !strings.HasSuffix(c.Line(), "; the overhaul #31 is open.") {
 		t.Fatalf("%+v %v %q", c, err, c.Line())
 	}
@@ -130,7 +135,7 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 		"repos/o/r/issues/15/comments?per_page=100":                     jsonComments(prev),
 		"repos/o/r/issues/16":                                           `{"number":16,"state":"closed","state_reason":"completed"}`,
 	})
-	r, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.CollectOverhaul(31, []Principle{{Number: 1, Name: "Mechanize first"}})
+	r, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.CollectOverhaul(31, []Principle{{Number: 1, Name: "Mechanize first"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,43 +199,37 @@ func overhaulAnswers(body string) map[string]string {
 	return map[string]string{
 		"repos/o/r/issues/30":                       fmt.Sprintf(`{"number":30,"title":"SE overhaul","state":"open","html_url":"u30","body":%q,"labels":[{"name":"se"},{"name":"se-overhaul"}]}`, body),
 		"repos/o/r/issues/30/comments?per_page=100": `[]`,
-		"repos/o/r/issues/30/comments":              `{"id":1}`,
-		"repos/o/r/issues/30/labels":                `[]`,
-		"repos/o/r/issues/30/assignees":             `{}`,
-		"repos/o/r/issues":                          `{"number":40,"id":4000,"html_url":"u40"}`,
-		"repos/o/r/issues/40/assignees":             `{}`,
 	}
 }
 
 func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
-	gh, calls := writes(t, overhaulAnswers(overhaulUnattendedMark))
-	f, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
+	gh := recorded(t, overhaulAnswers(overhaulUnattendedMark))
+	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
 	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
 		t.Fatalf("%+v %v", f, err)
 	}
-	var created, writes []string
-	var report string
-	for _, c := range *calls {
-		if c[len(c)-1] == "repos/o/r/issues" {
-			created = append(created, strings.Join(c, " "))
+	// The findings are the next issues, #31 to #33.
+	var created []string
+	for n := 31; n <= 33; n++ {
+		out, err := gh.Get(fmt.Sprintf("repos/o/r/issues/%d", n))
+		if err != nil {
+			t.Fatal(err)
 		}
-		if c[1] == "-X" {
-			writes = append(writes, c[2]+" "+c[len(c)-1])
-		}
-		if c[len(c)-1] == "repos/o/r/issues/30/comments" {
-			report = c[4]
-		}
+		created = append(created, string(out))
 	}
+	person := `{"name":"` + PersonLabel + `"}`
+	report := "body=" + commentsAt(t, gh, 30)[0].Body
 	// The normal finding is labelled se alone; the principle change, made
 	// controversial, and the unsure one se-person too.
-	if strings.Contains(created[0], PersonLabel) || !strings.Contains(created[0], "it strays slightly from principle 1, at spec/landing.yaml") ||
-		!strings.Contains(created[1], "labels[]="+PersonLabel) || !strings.Contains(created[1], "waits for a person: it changes a design principle") ||
-		!strings.Contains(created[2], "labels[]="+PersonLabel) || !strings.Contains(created[2], "Sources: https://example.com/pact") {
+	if strings.Contains(created[0], person) || !strings.Contains(created[0], "it strays slightly from principle 1, at spec/landing.yaml") ||
+		!strings.Contains(created[1], person) || !strings.Contains(created[1], "waits for a person: it changes a design principle") ||
+		!strings.Contains(created[2], person) || !strings.Contains(created[2], "Sources: https://example.com/pact") {
 		t.Fatalf("%q", created)
 	}
+	writes := gh.Writes()
 	want := []string{
-		"POST repos/o/r/issues", "POST repos/o/r/issues", "POST repos/o/r/issues/40/assignees",
-		"POST repos/o/r/issues", "POST repos/o/r/issues/40/assignees",
+		"POST repos/o/r/issues", "POST repos/o/r/issues", "POST repos/o/r/issues/32/assignees",
+		"POST repos/o/r/issues", "POST repos/o/r/issues/33/assignees",
 		"POST repos/o/r/issues/30/comments", "PATCH repos/o/r/issues/30", "DELETE repos/o/r/git/refs/heads/issue-30",
 	}
 	if !reflect.DeepEqual(writes, want) {
@@ -238,10 +237,10 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	}
 	// The closing comment is the report, its block naming the issues, for the next overhaul.
 	back, _, err := ParseOverhaul(strings.TrimPrefix(report, "body="))
-	if err != nil || back.Findings[0].Issue != 40 || !back.Findings[1].Controversial || back.Verdicts[0].Strays != "slightly" {
+	if err != nil || back.Findings[0].Issue != 31 || !back.Findings[1].Controversial || back.Verdicts[0].Strays != "slightly" {
 		t.Fatalf("%+v %v", back, err)
 	}
-	for _, part := range []string{"| 1 | Mechanize first | slightly |", "**Add a principle on cost** (principles, principle 0, strays far, at spec/principles.md; for a person: it changes a design principle): #40", "- **The outside world:** agent tools converge on hooks", "**Speed (what could run in parallel, or ask the server for more at once):** the survey runs one call at a time"} {
+	for _, part := range []string{"| 1 | Mechanize first | slightly |", "**Add a principle on cost** (principles, principle 0, strays far, at spec/principles.md; for a person: it changes a design principle): #32", "- **The outside world:** agent tools converge on hooks", "**Speed (what could run in parallel, or ask the server for more at once):** the survey runs one call at a time"} {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
 		}
@@ -251,28 +250,20 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 func TestAnAttendedOverhaulClosesToo(t *testing.T) {
 	// A person started it, and still nobody waits: its controversial
 	// findings are the issues for the person.
-	gh, calls := writes(t, overhaulAnswers("<!-- se:overhaul attended -->"))
-	f, err := Source{Proc: machine, Repo: repo, GH: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
+	gh := recorded(t, overhaulAnswers("<!-- se:overhaul attended -->"))
+	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
 	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
 		t.Fatalf("%+v %v", f, err)
 	}
-	closed := false
-	for _, c := range *calls {
-		if c[len(c)-1] == "repos/o/r/issues/30/labels" {
-			t.Fatalf("the overhaul was given to a person: %q", c)
-		}
-		closed = closed || c[len(c)-1] == "repos/o/r/issues/30" && c[1] == "-X"
+	if labelled(t, gh, 30, PersonLabel) {
+		t.Fatal("the overhaul was given to a person")
 	}
-	if !closed {
-		t.Fatalf("the attended overhaul did not close: %q", *calls)
+	if i := issueAt(t, gh, 30); i.State != "closed" {
+		t.Fatalf("the attended overhaul did not close: %q", gh.Writes())
 	}
 }
 
 func TestAnOverhaulWithoutJudgmentIsRefused(t *testing.T) {
-	never := func(args ...string) ([]byte, error) {
-		t.Fatalf("gh %v for a refused overhaul", args)
-		return nil, nil
-	}
 	for name, edit := range map[string]func(*OverhaulReport){
 		"a principle without verdict": func(r *OverhaulReport) { r.Verdicts = r.Verdicts[:1] },
 		"an outside idea, no source":  func(r *OverhaulReport) { r.Findings[2].Sources = nil },
@@ -283,7 +274,7 @@ func TestAnOverhaulWithoutJudgmentIsRefused(t *testing.T) {
 		"strays none":                 func(r *OverhaulReport) { r.Findings[0].Strays = "none" },
 		"nothing went well":           func(r *OverhaulReport) { r.WentWell = nil },
 	} {
-		if _, err := (Source{Proc: machine, Repo: repo, GH: never, Clock: atNow()}).FileOverhaul(30, overhauled(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+		if _, err := (Source{Proc: machine, Repo: repo, GitHub: never{t}, Clock: atNow()}).FileOverhaul(30, overhauled(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
