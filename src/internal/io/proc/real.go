@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"syscall"
 )
 
 // Real runs the programs on this machine.
@@ -31,6 +32,9 @@ func (machine) Start(c Cmd) (Running, error) {
 		var path *fs.PathError
 		if errors.As(err, &path) && path.Path == cmd.Path && errors.Is(err, fs.ErrNotExist) {
 			return nil, &notFound{c.Name, err}
+		}
+		if errors.Is(err, syscall.ETXTBSY) {
+			return nil, &busy{c.Name, err}
 		}
 		return nil, ended(c, err)
 	}
@@ -72,3 +76,15 @@ func (n *notFound) Error() string {
 }
 func (n *notFound) Is(target error) bool { return target == ErrNotFound }
 func (n *notFound) Unwrap() error        { return n.err }
+
+// busy is ErrBusy for one program, keeping what the system said.
+type busy struct {
+	name string
+	err  error
+}
+
+func (b *busy) Error() string {
+	return b.name + ": " + ErrBusy.Error() + " (" + b.err.Error() + ")"
+}
+func (b *busy) Is(target error) bool { return target == ErrBusy }
+func (b *busy) Unwrap() error        { return b.err }
