@@ -1,20 +1,23 @@
-# Coordination: a box that finds nothing to take
+# Coordination: finding and repairing what is broken
 
-Reader: whoever changes what a box does when it finds nothing to take.
+Reader: whoever changes how the fleet finds and repairs what is broken.
 
 On 13 October the fleet stopped twice while open issues remained. Every box
 found "No se issue is ready" and left, and nobody looked at why nothing was
 ready. Both times the cause was visible on GitHub in a minute: one claimed
-issue's PR in conflict, everything else blocked behind it. So: **a box that
-finds nothing to take checks whether something is broken, fixes what it can,
-and only then leaves.**
+issue's PR in conflict, everything else blocked behind it. So **the take
+repairs what is stuck, and `se fleet check` says what else is broken.** A box
+does not sweep the fleet when it finds nothing to take: every idle box
+sweeping at once wrote the same issues and comments many times over
+(14 October). It ends, and the next take takes over what is stuck.
 
 ## The rules
 
-1. **The box checks before it ends.** When `se issue pull --take` takes
-   nothing, the box, the agent `se:coordinator`, checks the fleet and fixes
-   it before it ends; its agent file says how (see the agents in
-   [spec/issues.md](issues.md#the-box)).
+1. **The take repairs, the box does not sweep.** `se issue pull --take`
+   offers a stuck claim as a takeover, so the next box takes it over at its
+   take, its input. A box that takes nothing ends
+   ([spec/issues.md](issues.md#the-box)); it runs neither `se fleet check`
+   nor `se fleet fix`.
 2. **The diagnosis is a command, not judgment.** `se fleet check` reads
    GitHub and lists every finding, each with its kind, its issue, its PR where
    there is one, and the remedy it names. It exits 0 and says `healthy` when it
@@ -51,16 +54,16 @@ and only then leaves.**
    creation included, or the last takeover marker: the lease reads it the
    same way), while its CI runs, or while a takeover of it is in flight: the
    last takeover marker names the same head and is less than an hour old.
-3. **The box fixes what has a known remedy,** in the order
+3. **What has a known remedy is fixed,** in the order
    the command lists, each with the mechanism that already exists:
    - a conflicted, red or stalled claim, or a claim with no PR, is taken
-     over: `se issue pull --take <n> --worktree` fetches its branch as it
+     over at a take: `se issue pull --take` fetches its branch as it
      stands, and the box hands it to the agent the take names, which lands it;
    - a green PR with auto-merge off gets auto-merge turned on (`se fleet fix`);
    - a leftover claim whose issue is closed and whose branch has no open PR
      is left to the prune workflow, which deletes the branch (see **Pruning**
-     below); `se fleet fix` reports it as an issue only if the branch is
-     still there a day after the issue closed (the workflow failed);
+     below); `se fleet check` reports it if the branch is still there a day
+     after the issue closed (the workflow failed);
    - any other leftover claim whose issue is no open `se` issue and whose
      branch main holds whole (no commit main lacks) has its branch deleted
      (`se fleet fix`, by `git push origin --delete` from the workspace, the
@@ -68,24 +71,19 @@ and only then leaves.**
      else could clear it;
    - a bare issue is filed into the open misc manifest (`se fleet fix`, the
      manifest `se issue new` files into, opening the next one where none is
-     open, then GitHub's sub-issues link);
-   - an impossible block, any other leftover claim, or anything else with no remedy is
-     reported as an issue (`se fleet fix`, through the same code as
-     `se issue new`), labelled `se-person` and assigned to the repository's
-     owner where it is a judgment: a cycle, a blocker outside the fleet, a
-     green PR auto-merge does not merge.
-4. **It never fixes the same thing twice.** A takeover is recorded with
-   `<!-- se:takeover N -->`, every other fix with `<!-- se:fleet KEY M -->` on
-   the finding's issue (`M` is the issue it made, or 0). A finding that comes
-   back after its fix goes to a person: a takeover of stuck work labels the
-   issue `se-final`, and such a takeover of an `se-final` issue makes it wait
-   on an issue for a person instead (a conflict is no failure: its takeover
-   does neither), and any other finding becomes an `se-person` issue. A finding
-   already reported as an issue that is still open is left as it is.
-5. **The record.** The box lands nothing of its own, so each fix is a comment
-   on the issue it acted on, saying what was found and what was done (the
-   takeover's comment, or the `se fleet fix` record). When it found nothing, it
-   says nothing.
+     open, then GitHub's sub-issues link): it moves work there is already,
+     and files no issue of its own;
+   - an impossible block, any other leftover claim, or anything else with no
+     remedy is reported by `se fleet check` (and the briefing), never filed:
+     an issue is work, not a report ([principle 12](principles.md)).
+4. **A takeover is recorded once.** A takeover is recorded with
+   `<!-- se:takeover N -->` on its issue, part of the take's own write. It
+   labels the issue `se-final`, and a stuck or conflicted `se-final` issue
+   is taken over again, never handed to a person.
+5. **`se fleet fix` writes no record.** Turning auto-merge on, deleting a
+   spent branch and filing a bare issue into the misc manifest are their own
+   record on GitHub; it writes no comment, and no issue but the next misc
+   manifest, where a bare issue finds none open.
 
 ## The commands
 
@@ -107,9 +105,9 @@ resets (`quota` in its JSON): the boxes and every person's session share the
 owner's one token ([io.md](io.md#living-within-githubs-rate-limits)). It is
 no finding, so `se fleet fix` files nothing for it. `se fleet fix` runs the
 same check and applies every remedy that needs no checkout, in order, and
-names the takeovers it leaves to the box; a remedy that fails is reported and
-the remedies after it are still applied; an issue it made that a box may
-take fires the routine once. `se issue pull --take <n>` on a claimed leaf
+names the takeovers it leaves to the next take; a remedy that fails is
+reported and the remedies after it are still applied; everything else is
+reported, never filed. `se issue pull --take <n>` on a claimed leaf
 takes it over where the check finds it stuck, and refuses a claim whose work
 is moving.
 

@@ -436,6 +436,10 @@ func (s Source) closedIn(w RetroWindow, skip int) ([]past, error) {
 	return out, nil
 }
 
+// holdOf reads the issue a hold, an issue for a person an older se minted,
+// holds back from its title; no se mints one now, but the window may hold them.
+var holdOf = regexp.MustCompile(`^Decide how #(\d+) goes on: `)
+
 // reholds counts the issues for a person created in w beyond the first for
 // each issue they hold back, open or closed: a hold minted more than once.
 func (s Source) reholds(w RetroWindow) (int, error) {

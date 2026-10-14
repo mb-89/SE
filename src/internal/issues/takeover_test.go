@@ -113,8 +113,8 @@ func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 	if c := commentsAt(t, g, 7); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:takeover 1 -->") || !strings.Contains(c[0].Body, "<!-- se:takeover-head abc -->") {
 		t.Fatalf("comments %+v", c)
 	}
-	// A conflict is no failure: the takeover leaves #7 as it was, not final.
-	if w := g.Writes(); w[len(w)-1] != "POST repos/o/r/issues/7/comments" || labelled(t, g, 7, FinalLabel) {
+	// A conflict is no failure: the takeover does not make #7 final.
+	if w := g.Writes(); contains(w, "POST repos/o/r/issues/7/labels") || labelled(t, g, 7, FinalLabel) {
 		t.Fatalf("writes %q", w)
 	}
 	// Named with --take N, the issue named is taken, and no PR is asked.
@@ -175,6 +175,23 @@ func finalSeven(t *testing.T, g *github.Fake) {
 	seed(t, g, map[string]string{listPath: `[` + openRetro(5, "new work") + `,{"number":7,"title":"old work","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-final"}]}]`})
 }
 
+func TestAFinalIssueInConflictIsTakenOverAgain(t *testing.T) {
+	t.Parallel()
+	a := claimed7(t)
+	g := newPulls(t, atNow(), "", pr70("false", "dirty"))
+	finalSeven(t, g)
+	// The first takeover found head 0ld; the PR conflicts again at abc. Main
+	// moved, which is no failure: #7 is taken over again, not held.
+	lately(t, g, "Taken over.\n<!-- se:takeover 1 -->\n<!-- se:takeover-head 0ld -->")
+	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
+	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || took.Takeover.Count != 2 {
+		t.Fatalf("took %+v %v %v", took, ok, err)
+	}
+	if w := g.Writes(); contains(w, "POST repos/o/r/issues") || contains(w, "POST repos/o/r/issues/7/dependencies/blocked_by") {
+		t.Fatalf("a conflict minted a hold: %q", w)
+	}
+}
+
 // Recorded from mb-89/SE on 14 October: #116's PR #118 and #122's PR #140
 // each conflicted again within 10 minutes of a conflict takeover, as main
 // merged fast, and each went to a person. A conflict at a new head is taken
@@ -229,7 +246,7 @@ func TestOfTwoBoxesTakingOverAtOnceTheFirstMarkerWins(t *testing.T) {
 	}
 }
 
-func TestAConflictAfterAStuckTakeoverIsTakenOverAndStaysFinal(t *testing.T) {
+func TestAConflictAfterAStuckTakeoverIsTakenOver(t *testing.T) {
 	t.Parallel()
 	a := claimed7(t)
 	g := newPulls(t, atNow(), "", pr70("false", "dirty"))
@@ -240,7 +257,7 @@ func TestAConflictAfterAStuckTakeoverIsTakenOverAndStaysFinal(t *testing.T) {
 	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || took.Takeover.Count != 2 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	// Stuck again, it still goes to a person: the conflict changed nothing.
+	// The conflict changed nothing: #7 stays final, and nothing is held.
 	if c := commentsAt(t, g, 7); len(c) != 2 || strings.Contains(c[1].Body, "se:person") || !labelled(t, g, 7, FinalLabel) {
 		t.Fatalf("comments %+v, writes %q", c, g.Writes())
 	}
