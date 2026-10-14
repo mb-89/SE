@@ -28,15 +28,16 @@ func branchWith(t *testing.T, a, branch, file, text string) {
 	run(t, a, "checkout", "-q", "main")
 }
 
-// banned is the check of a rule main takes after the PRs opened: no file
-// named bad, where the merge holds the rule, on the test's disk.
+// banned is the check, on the test's disk, of a rule main takes after the
+// PRs opened: no file named bad, where the merge holds the rule.
 func banned(t *testing.T) func(dir string) (string, error) {
+	d := diskOf(t)
 	return func(dir string) (string, error) {
-		if ok, err := diskOf(t).Exists(filepath.Join(dir, "rule")); err != nil || !ok {
-			return "", err
+		if there, _ := d.Exists(filepath.Join(dir, "rule")); !there {
+			return "", nil
 		}
-		if ok, err := diskOf(t).Exists(filepath.Join(dir, "bad")); err != nil || ok {
-			return "bad:1: no-bad: no file is named bad", err
+		if there, _ := d.Exists(filepath.Join(dir, "bad")); there {
+			return "bad:1: no-bad: no file is named bad", nil
 		}
 		return "", nil
 	}
@@ -80,8 +81,8 @@ func TestRulesNamesOnEachOpenPRTheRuleMainTookThatItBreaks(t *testing.T) {
 		t.Fatalf("%s %v", notes, err)
 	}
 	// Each merge's worktree is gone, and the clone is as it was.
-	if left, err := diskOf(t).Exists(filepath.Join(a, filepath.FromSlash(RulesDir), "issue-2")); err != nil || left {
-		t.Fatalf("worktree left: %v %v", left, err)
+	if there, err := diskOf(t).Exists(filepath.Join(a, filepath.FromSlash(RulesDir), "issue-2")); there || err != nil {
+		t.Fatalf("worktree left: %v", err)
 	}
 	if st := run(t, a, "status", "--porcelain"); st != "" {
 		t.Fatalf("the clone changed: %s", st)

@@ -95,14 +95,17 @@ short. `cmd/se`'s tests hand every call a `World` of fakes: a fake clock,
 disk, network and GitHub, and a fake machine holding only git, its work trees
 on that disk.
 
-Two tests are the exceptions, named here. The first,
+Three tests are the exceptions, named here. The first,
 `TestRestartRunsTheCheckoutsOwnSource` in `src/cmd/se/checkout_test.go`, builds se with the real go on the real disk and stops the real daemon
 processes it starts, over the real network, by `clock.Real()`. It is what
 shows a restart runs the checkout's own source, which no fake can, and
 `go test -short` skips it. The second,
 `TestStatusAndStopReachTheDaemonOverTheNetwork` in `src/cmd/se/stop_test.go`
 hands se stop the real clock: it polls for the daemon's endpoint to go, which a fake
-clock passes at once, before the daemon has removed it.
+clock passes at once, before the daemon has removed it. A third,
+`TestAProjectHoldingNoSEFileGetsTheHelpTheGuidanceAndATake` in
+`src/cmd/se/scratch_test.go`, installs the plugin with the real claude, which
+writes the real disk, so se runs there on the real disk and programs.
 
 ## The rules
 

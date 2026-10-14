@@ -25,8 +25,8 @@ import (
 func TestAProjectHoldingNoSEFileGetsTheHelpTheGuidanceAndATake(t *testing.T) {
 	t.Parallel()
 	recordedIssues(t)
-	// The real claude installs the plugin on the real disk and runs the real
-	// git: this test runs on them, as the restart's does.
+	// The install runs the real claude, which reads and writes the real
+	// disk and runs the real git, and se reads what it wrote there.
 	w := worldOf(t)
 	w.Disk, w.Proc = disk.Real(), proc.Real()
 	checkout, err := filepath.Abs(filepath.Join("..", "..", ".."))
