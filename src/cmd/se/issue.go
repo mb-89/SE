@@ -252,8 +252,8 @@ func init() {
 		Class:   interactive,
 		Usage:   "issue tree [ROOT] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "list the se trees and how many of their sub-issues are closed",
-		Details: "list every se issue with sub-issues, open or closed, open first: its number, state, how many of its sub-issues are closed, its labels and its title. With ROOT, list ROOT and every issue below it, open or closed, each indented under its parent.",
+		Summary: "list the open queue and estimate when its last issue closes",
+		Details: fmt.Sprintf("list every open se issue, each indented under its parent: its number, where it stands (ready, claimed, blocked and by what), how many of its sub-issues are closed, its labels and its title. With ROOT, list ROOT and every issue below it, open or closed. Then estimate when the last open one closes, from what the fleet measured over the last %s (PaceWindow), read as the retro reads it: the se issues merged an hour, and their claim-to-merge times (p50, p90) from the landing answers; how many run at once (the leaves in flight now that are not stuck, or the merges an hour times the p50, whichever is more); and the critical path, the longest chain of open work that must run in a row (blocked-by links, an ancestor's counting for its whole tree, and a review gate after its tree). The estimate is the larger of the critical path end to end and the open work spread over those running at once, at the p50 and at the p90 time; it names the critical path, and how long the work takes at the window's pace, idle hours and all. --json answers {\"issues\":[...],\"queue\":{...}} with the numbers.", issues.Span(issues.PaceWindow.Minutes())),
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue tree")
@@ -285,27 +285,38 @@ func init() {
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			var nodes []issues.Node
-			if root > 0 {
-				nodes, err = s.TreeOf(root)
-			} else {
-				nodes, err = s.Trees()
-			}
+			q, open, err := s.Queue(root, issues.PaceWindow)
 			if err != nil {
 				return Reply{}, err
 			}
-			if *asJSON {
-				data, err := json.Marshal(nodes)
-				return Reply{Text: string(data)}, err
+			nodes := open
+			if root > 0 {
+				if nodes, err = s.TreeOf(root); err != nil {
+					return Reply{}, err
+				}
+				why := map[int]string{}
+				for _, n := range open {
+					why[n.Number] = n.Why
+				}
+				for k := range nodes {
+					nodes[k].Why = why[nodes[k].Number]
+				}
 			}
-			if len(nodes) == 0 {
-				return Reply{Text: "No se issue has sub-issues."}, nil
+			if *asJSON {
+				data, err := json.Marshal(struct {
+					Issues []issues.Node `json:"issues"`
+					Queue  issues.Queue  `json:"queue"`
+				}{nodes, q})
+				return Reply{Text: string(data)}, err
 			}
 			lines := make([]string, len(nodes))
 			for k, n := range nodes {
 				lines[k] = n.Line()
 			}
-			return Reply{Text: strings.Join(lines, "\n")}, nil
+			if len(nodes) == 0 {
+				lines = []string{"No se issue is open."}
+			}
+			return Reply{Text: strings.Join(lines, "\n") + "\n\n" + q.Text()}, nil
 		},
 	})
 	register(Command{
