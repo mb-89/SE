@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/mb-89/SE/src/internal/guidance"
 )
 
 // NewMark is what se issue new leaves at the end of every body it writes, so
@@ -87,8 +85,8 @@ func (s Source) NewRetro(field string, unattended bool) (RetroIssue, error) {
 	case feedback == "":
 		feedback = "None given."
 	}
-	body := fmt.Sprintf("A retro over %s. The rules are spec/retro.md; a box takes it with the retro skill, which its take hands over, and starts with `se retro collect`.\n\n%s\n\n## Field feedback\n%s\n\n<!-- se:retro %s -->\n\n%s",
-		window, who, feedback, mode, guidance.Line([]string{"retro"}))
+	body := fmt.Sprintf("A retro over %s. The rules are spec/retro.md; a box takes it and starts its agent, se:retro, which starts with `se retro collect`.\n\n%s\n\n## Field feedback\n%s\n\n<!-- se:retro %s -->",
+		window, who, feedback, mode)
 	title := "SE retro " + s.now().UTC().Format("2006-01-02")
 	made, _, err := s.create(title, body, 0, nil, []string{Label, RetroLabel})
 	if err != nil {
@@ -287,31 +285,20 @@ func (s Source) Collect(n int) (Collected, error) {
 		}
 	}
 
-	closed, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100%s", s.Repo, Label, c.Window.since()), true)
+	closed, err := s.closedIn(c.Window, n)
 	if err != nil {
 		return Collected{}, err
 	}
-	pulls, err := api[merged](s, fmt.Sprintf("repos/%s/pulls?state=closed&base=main&per_page=100", s.Repo), true)
+	pulls, inWindow, fixedBy, err := s.merges(c.Window)
 	if err != nil {
 		return Collected{}, err
 	}
 	viaPR := map[string]bool{}
-	fixedBy := map[int]merged{}
-	var inWindow []merged
 	for _, p := range pulls {
-		if p.MergedAt == nil {
-			continue
-		}
-		viaPR[p.SHA] = true
-		if !c.Window.holds(*p.MergedAt) {
-			continue
-		}
-		inWindow = append(inWindow, p)
-		for _, m := range fixesLine.FindAllStringSubmatch(p.Body, -1) {
-			fixedBy[atoi(m[1])] = p
+		if p.MergedAt != nil {
+			viaPR[p.SHA] = true
 		}
 	}
-	sort.Slice(inWindow, func(a, b int) bool { return inWindow[a].Number < inWindow[b].Number })
 	c.PRs = len(inWindow)
 	started, err := ruleStarts(pulls)
 	if err != nil {
@@ -365,11 +352,7 @@ func (s Source) Collect(n int) (Collected, error) {
 		}
 	}
 
-	sort.Slice(closed, func(a, b int) bool { return closed[a].Number < closed[b].Number })
 	for _, x := range closed {
-		if x.PullRequest != nil || x.Number == n || !c.Window.holds(x.ClosedAt) {
-			continue
-		}
 		row, checks, err := s.row(x, fixedBy)
 		if err != nil {
 			return Collected{}, err
@@ -389,6 +372,45 @@ func (s Source) Collect(n int) (Collected, error) {
 		c.Score = &score
 	}
 	return c, nil
+}
+
+// merges reads the PRs into main: every one, merged or not, those merged in
+// w, lowest number first, and the PR of w that fixed each issue, by its
+// Fixes line. The retro and the queue's pace both read them here.
+func (s Source) merges(w RetroWindow) (pulls, in []merged, fixedBy map[int]merged, err error) {
+	pulls, err = api[merged](s, fmt.Sprintf("repos/%s/pulls?state=closed&base=main&per_page=100", s.Repo), true)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	fixedBy = map[int]merged{}
+	for _, p := range pulls {
+		if p.MergedAt == nil || !w.holds(*p.MergedAt) {
+			continue
+		}
+		in = append(in, p)
+		for _, m := range fixesLine.FindAllStringSubmatch(p.Body, -1) {
+			fixedBy[atoi(m[1])] = p
+		}
+	}
+	sort.Slice(in, func(a, b int) bool { return in[a].Number < in[b].Number })
+	return pulls, in, fixedBy, nil
+}
+
+// closedIn reads the se issues closed in w, lowest number first, skip left
+// out. The retro and the queue's pace both read them here.
+func (s Source) closedIn(w RetroWindow, skip int) ([]past, error) {
+	list, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100%s", s.Repo, Label, w.since()), true)
+	if err != nil {
+		return nil, err
+	}
+	var out []past
+	for _, x := range list {
+		if x.PullRequest == nil && x.Number != skip && w.holds(x.ClosedAt) {
+			out = append(out, x)
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].Number < out[b].Number })
+	return out, nil
 }
 
 // ruleStarts are the times the rule checks started: when the PR that brought
@@ -609,12 +631,16 @@ func (c Collected) measure() Metrics {
 
 func round2(x float64) float64 { return float64(int(x*100+0.5)) / 100 }
 
-func median(xs []int) int {
+func median(xs []int) int { return percentile(xs, 0.5) }
+
+// percentile is the value q of the way up xs, sorted (0.5 the median, 0.9
+// the p90); 0 for none.
+func percentile(xs []int, q float64) int {
 	if len(xs) == 0 {
 		return 0
 	}
 	sort.Ints(xs)
-	return xs[len(xs)/2]
+	return xs[min(int(q*float64(len(xs))), len(xs)-1)]
 }
 
 // commandNamed is an answer naming a command: an se command or a script.

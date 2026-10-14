@@ -346,7 +346,7 @@ func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
 	}
 	hubAt(t, answers)
 	code, out, errs := se(t, "issue", "pull", "--repo", "o/r")
-	if code != 0 || !strings.Contains(out, "#1 is a parent: it holds no work. Coordinate its tree: se issue pull --in 1 --take") {
+	if code != 0 || !strings.Contains(out, "#1 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 1 --take") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, errs = se(t, "issue", "pull", "--in", "1", "--repo", "o/r")
@@ -365,11 +365,11 @@ func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
 	ws := filepath.Join(t.TempDir(), "SE")
 	code, out, errs = se(t, "issue", "pull", "--in", "3", "--take", "--json", "--repo", "o/r", "--workspace", ws)
 	wt := "git fetch -q origin main \\u0026\\u0026 git worktree add --detach " + filepath.Join(filepath.Dir(ws), "review-3-1") + " origin/main"
-	if code != 0 || !strings.HasPrefix(out, `{"ready":false,"closed":false,"review":[{"number":3,`) || !strings.Contains(out, `"worktree":"`+wt+`"`) {
+	if code != 0 || !strings.HasPrefix(out, `{"ready":false,"closed":false,"review":[{"number":3,`) || !strings.Contains(out, `"worktree":"`+wt+`","agent":"se:reviewer"`) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, errs = se(t, "issue", "pull", "--in", "3", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || !strings.HasPrefix(out, "Nothing inside #3 is ready.\n\nReady for review: #3 three\nu3\nA reviewer that worked none of its tree works in a fresh worktree:\ngit fetch") {
+	if code != 0 || !strings.HasPrefix(out, "Nothing inside #3 is ready.\n\nReady for review: #3 three\nu3\nIts agent, se:reviewer, worked none of its tree and works in a fresh worktree:\ngit fetch") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 }
@@ -398,7 +398,7 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires", code, fires(t))
 	}
 	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
-	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
+	if code != 0 || fires(t) != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIts agent: se:worker.\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// The take is recorded for the Stop hook, which holds the box to closing #3.
@@ -627,7 +627,7 @@ func TestTheCheckRunsCheckShInTheCheckoutAndAnswersTheTailOfAFailure(t *testing.
 	}
 }
 
-func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
+func TestIssueTreeListsTheQueueAndATree(t *testing.T) {
 	t.Parallel()
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
@@ -647,20 +647,24 @@ func TestIssueTreeListsTheTreesAndTheirCounts(t *testing.T) {
 	}
 	hubAt(t, answers)
 	code, out, errs := se(t, "issue", "tree", "--repo", "o/r")
-	want := "#1  open  1/2 closed  se  root\n#3  open  1/1 closed  se,se-review  three\n#7  closed  2/2 closed  se  old\n"
+	// The open queue: #3, a review gate whose tree is done, is the work left.
+	want := "#1  open  ready  1/2 closed  se  root\n  #3  open  ready  1/1 closed  se,se-review  three\n\n" +
+		"Estimate: 1 open, 0 in flight; no estimate: no se issue merged with a claim time since 2026-10-07T12:00:00Z.\n" +
+		"Pace since 2026-10-07 12:00Z (7d, PaceWindow): 0 merged, 0.00 an hour; no claim-to-merge time measured.\n" +
+		"Critical path, 1 in a row: #3.\n"
 	if code != 0 || out != want {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, errs = se(t, "issue", "tree", "#1", "--repo", "o/r")
-	want = "#1  open  1/2 closed  se  root\n  #2  closed  se  two\n  #3  open  1/1 closed  se,se-review  three\n    #4  closed  se  four\n"
-	if code != 0 || out != want {
+	want = "#1  open  ready  1/2 closed  se  root\n  #2  closed  se  two\n  #3  open  ready  1/1 closed  se,se-review  three\n    #4  closed  se  four\n\n"
+	if code != 0 || !strings.HasPrefix(out, want) || !strings.Contains(out, "Critical path, 1 in a row: #3.") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	code, out, _ = se(t, "issue", "tree", "--json", "1", "--repo", "o/r")
 	if code != 0 || !strings.Contains(out, `{"number":4,"title":"four","state":"closed","url":"","labels":["se"],"depth":2,"closed":0,"total":0}`) {
 		t.Fatalf("exit %d, %q", code, out)
 	}
-	if code, out, _ = se(t, "issue", "tree", "2", "--repo", "o/r"); code != 0 || out != "#2  closed  se  two\n" {
+	if code, out, _ = se(t, "issue", "tree", "2", "--repo", "o/r"); code != 0 || !strings.HasPrefix(out, "#2  closed  se  two\n\nEstimate: 0 open, 0 in flight; no estimate: #2's tree holds no open work.") {
 		t.Fatalf("exit %d, %q", code, out)
 	}
 	for _, args := range [][]string{{"5"}, {"x"}, {"1", "2"}} {
