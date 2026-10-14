@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,9 +34,10 @@ func recordedIssues(t *testing.T) *[][]string {
 			{"number":2,"title":"two","body":"","state":"open","html_url":"u2","issue_dependencies_summary":{"total_blocked_by":1}},
 			{"number":1,"title":"one","body":"","state":"open","html_url":"u1"}]`,
 		"repos/o/r/git/matching-refs/heads/issue-":                `[{"ref":"refs/heads/issue-1"}]`,
+		"repos/o/r/issues/1/dependencies/blocked_by?per_page=100": `[]`,
 		"repos/o/r/issues/2/dependencies/blocked_by?per_page=100": `[{"number":1,"state":"open"}]`,
 		"repos/o/r/issues/3/dependencies/blocked_by?per_page=100": `[]`,
-		"repos/o/r/pulls?base=main&state=open&per_page=100":       `[]`,
+		"repos/o/r/pulls?state=open&per_page=100":                 `[]`,
 		"repos/o/r/issues/1": `{"id":101,"number":1,"state":"open"}`,
 		"repos/o/r/issues/3": `{"id":103,"number":3,"state":"open"}`,
 		"repos/o/r/issues/5": `{"id":105,"number":5,"state":"closed"}`,
@@ -48,12 +50,12 @@ func recordedIssues(t *testing.T) *[][]string {
 		"repos/o/r/issues?labels=se&state=closed&per_page=100":          `[{"number":5,"state":"closed","closed_at":"2026-10-01T00:00:00Z"}]`,
 		"repos/o/r/issues/10/dependencies/blocked_by":                   `{"id":101}`,
 		"repos/o/r/activity?ref=refs/heads/issue-1&per_page=1":          `[{"timestamp":"` + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}]`,
-		"repos/o/r/issues/1/dependencies/blocked_by?per_page=100":       `[]`,
 		"repos/o/r/issues/3/dependencies/blocking?per_page=100":         `[{"number":7,"state":"open"},{"number":8,"state":"closed"}]`,
 		"repos/o/r/issues/10/assignees":                                 `{}`,
 		"repos/o/r/issues/3/dependencies/blocked_by":                    `{}`,
 	}
 	var calls [][]string
+	var mu sync.Mutex
 	old, oldNet := gh, network
 	f := sehttp.NewFake()
 	f.Routine(routineURL, "tok", 100)
@@ -61,7 +63,10 @@ func recordedIssues(t *testing.T) *[][]string {
 	t.Setenv(issues.FireURLVar, routineURL)
 	t.Setenv(issues.FireTokenVar, "tok")
 	gh = func(args ...string) ([]byte, error) {
+		// Reads run in parallel; the calls are recorded one at a time.
+		mu.Lock()
 		calls = append(calls, args)
+		mu.Unlock()
 		path := args[len(args)-1]
 		if path == "repos/o/r/issues/9" {
 			return nil, errors.New("gh api repos/o/r/issues/9: exit status 1: gh: Not Found (HTTP 404)")
