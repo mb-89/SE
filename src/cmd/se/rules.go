@@ -10,12 +10,14 @@ import (
 
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
+	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/rules"
 )
 
 func init() {
 	register(Command{
 		Name:    "rules",
+		Class:   batch,
 		Usage:   "rules",
 		Group:   "Checks",
 		Summary: "check this checkout against every SE rule",
@@ -74,6 +76,7 @@ func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
 			return false
 		},
 		Commands: commandFlags(),
+		Agents:   issues.Agents(),
 		Manifest: func(name, at string) (string, error) { return manifest(d, root, paths, name, at) },
 	}, nil
 }
@@ -81,9 +84,9 @@ func repoOf(d disk.Disk, procs proc.Procs, root string) (*rules.Repo, error) {
 // commandFlags is every command by name, with the flags it takes.
 func commandFlags() map[string][]string {
 	out := map[string][]string{}
-	for name, c := range commands {
-		flags := []string{}
-		if fs := flagsOf(c, false); fs != nil {
+	for _, c := range catalog().Commands {
+		name, flags := c.Name, []string{}
+		if fs := flagsOf(name, false); fs != nil {
 			fs.VisitAll(func(f *flag.Flag) { flags = append(flags, f.Name) })
 		}
 		out[name] = flags

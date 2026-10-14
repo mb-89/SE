@@ -9,8 +9,6 @@ import (
 
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
-	sehttp "github.com/mb-89/SE/src/internal/io/http"
-	"github.com/mb-89/SE/src/internal/io/proc"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 )
@@ -33,6 +31,7 @@ type Ensured struct {
 func init() {
 	register(Command{
 		Name:    "ensure",
+		Class:   batch,
 		Usage:   "ensure",
 		Group:   "Daemon",
 		Summary: "find the daemon, or start it again at most once a minute",
@@ -41,7 +40,7 @@ func init() {
 			if err := c.Parse(c.Flags("ensure")); err != nil {
 				return Reply{}, err
 			}
-			said, err := json.Marshal(ensure(c.Proc, c.Paths(), c.Clock, c.Net))
+			said, err := json.Marshal(ensure(&c.World, c.Paths()))
 			return Reply{Text: string(said)}, err
 		},
 	})
@@ -49,23 +48,23 @@ func init() {
 
 // ensure answers the running daemon, or starts one where no start was tried
 // within restartEvery.
-func ensure(procs proc.Procs, p daemon.Paths, clk clock.Clock, net sehttp.Net) Ensured {
-	if ep, ok := daemon.Healthy(p, net); ok {
+func ensure(w *World, p daemon.Paths) Ensured {
+	if ep, ok := daemon.Healthy(p, w.Net); ok {
 		return Ensured{Address: ep.Address, Token: ep.Token}
 	}
-	held, err := starting(p, clk)
+	held, err := starting(p, w.Clock)
 	if err != nil {
 		return Ensured{RetryInMs: restartEvery.Milliseconds(), Error: err.Error()}
 	}
 	defer held.Close()
 	// Another start may have answered while this one waited for the lock.
-	if ep, ok := daemon.Healthy(p, net); ok {
+	if ep, ok := daemon.Healthy(p, w.Net); ok {
 		return Ensured{Address: ep.Address, Token: ep.Token}
 	}
-	if wait := restartEvery - clk.Now().Sub(tried(p)); wait > 0 {
+	if wait := restartEvery - w.Clock.Now().Sub(tried(p)); wait > 0 {
 		return Ensured{RetryInMs: wait.Milliseconds()}
 	}
-	ep, _, err := startsDaemon(procs, p, clk, net)
+	ep, _, err := startsDaemon(w, p)
 	if err != nil {
 		return Ensured{RetryInMs: restartEvery.Milliseconds(), Error: err.Error()}
 	}

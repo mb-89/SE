@@ -16,6 +16,7 @@ import (
 // them again. Without one it is skipped, since no repository SE works in is
 // written to by a test.
 func TestTheRealGitHubKeepsTheContract(t *testing.T) {
+	t.Parallel()
 	repo := os.Getenv("SE_GITHUB_CONTRACT_REPO")
 	if repo == "" {
 		t.Skip("SE_GITHUB_CONTRACT_REPO names no repository to write to")
@@ -34,6 +35,7 @@ func TestTheRealGitHubSpeaksGh(t *testing.T) {
 	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >>" + said + "\n" +
 		"case \"$*\" in\n" +
 		"*missing*) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;\n" +
+		"*login*) echo 'To get started with GitHub CLI, please run:  gh auth login' >&2; exit 4 ;;\n" +
 		"*per_page=2\\&page=1*) echo '[1,2]' ;;\n" +
 		"*per_page=2\\&page=2*) echo '[3]' ;;\n" +
 		"*refs*) echo '[9]' ;;\n" +
@@ -63,6 +65,9 @@ func TestTheRealGitHubSpeaksGh(t *testing.T) {
 	if github.Status(err) != 404 || !strings.Contains(err.Error(), "HTTP 404") {
 		t.Fatalf("%v", err)
 	}
+	if _, err := gh.Get("repos/o/r/login"); err == nil || err.Error() != "gh cannot reach GitHub without a login; run gh auth login, then this command again" {
+		t.Fatalf("without a login: %v", err)
+	}
 	got, err := os.ReadFile(said)
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +81,7 @@ func TestTheRealGitHubSpeaksGh(t *testing.T) {
 		"api", "-X", "POST", "-F", "sub_issue_id=7", "-f", "labels[]=se", "repos/o/r/issues/5/sub_issues",
 		"api", "-f", "query=mutation", "-f", "id=PR_1", "graphql",
 		"api", "repos/o/r/issues/missing",
+		"api", "repos/o/r/login",
 	}, "\n") + "\n"
 	if string(got) != want {
 		t.Fatalf("gh was passed\n%s\nwant\n%s", got, want)

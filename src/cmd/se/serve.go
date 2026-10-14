@@ -15,6 +15,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "serve",
+		Class:   batch,
 		Usage:   "serve [--idle D] [--takeover]",
 		Group:   "Daemon",
 		Summary: "run this workspace's daemon in the foreground",
@@ -28,7 +29,7 @@ func init() {
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			opts := daemon.Options{Idle: *idle, Clock: c.Clock, Net: c.Net, Ready: func(ep daemon.Endpoint) {
+			opts := daemon.Options{Idle: *idle, Clock: c.Clock, Net: c.Net, Modules: modules(c.Paths(), c.Clock), Ready: func(ep daemon.Endpoint) {
 				fmt.Fprintf(os.Stderr, "se: serving %s at %s\n", c.Workspace, ep.Address)
 			}}
 			if *takeover {

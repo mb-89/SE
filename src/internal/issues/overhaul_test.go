@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mb-89/SE/src/internal/io/disk"
 )
@@ -34,6 +35,7 @@ func overhaulRepo(n, openOverhaul int) map[string]string {
 }
 
 func TestFourRetrosStartNoOverhaulAndTheDueRetroIsTaken(t *testing.T) {
+	t.Parallel()
 	_, a, _ := boxes(t)
 	gh := recorded(t, overhaulRepo(4, 0))
 	took, ok, c, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.TakeDue(a)
@@ -47,6 +49,7 @@ func TestFourRetrosStartNoOverhaulAndTheDueRetroIsTaken(t *testing.T) {
 }
 
 func TestFiveRetrosStartAnUnattendedOverhaulAndTakeItFirst(t *testing.T) {
+	t.Parallel()
 	_, a, _ := boxes(t)
 	gh := recorded(t, overhaulRepo(5, 0))
 	took, ok, c, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.TakeDue(a)
@@ -66,6 +69,7 @@ func TestFiveRetrosStartAnUnattendedOverhaulAndTakeItFirst(t *testing.T) {
 }
 
 func TestAnOpenOverhaulBlocksASecond(t *testing.T) {
+	t.Parallel()
 	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, overhaulRepo(7, 31)), Clock: atNow()}.OverhaulCadence()
 	if err != nil || c.Open != 31 || c.Due() || !strings.HasSuffix(c.Line(), "; the overhaul #31 is open.") {
 		t.Fatalf("%+v %v %q", c, err, c.Line())
@@ -73,6 +77,7 @@ func TestAnOpenOverhaulBlocksASecond(t *testing.T) {
 }
 
 func TestThePrinciplesAreReadFromTheSpec(t *testing.T) {
+	t.Parallel()
 	// The principles are the checkout's own file, so they are read from the real disk.
 	ps, err := Principles(disk.Real(), "../../..")
 	if err != nil || len(ps) < 16 {
@@ -86,6 +91,10 @@ func TestThePrinciplesAreReadFromTheSpec(t *testing.T) {
 	}
 	// A "Checked by:" text that runs over several lines is read whole.
 	if p := ps[16]; p.Name != "Consistency" || !strings.HasPrefix(p.CheckedBy, "the battery (mechanical checks, generated manifests); the reviewer") || !strings.HasSuffix(p.CheckedBy, "the overhaul (the whole system).") {
+		t.Fatalf("%+v", p)
+	}
+	// The second part, how code is written, holds no principle of the list.
+	if p := ps[len(ps)-1]; p.Name != "Steer before, check at the push" || strings.Contains(p.CheckedBy, "overhaul read") {
 		t.Fatalf("%+v", p)
 	}
 }
@@ -110,6 +119,7 @@ func retroWithClasses(t *testing.T, n int, prevRecurred int, classes ...string) 
 }
 
 func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
+	t.Parallel()
 	prev, err := OverhaulReport{Overhaul: 15, Findings: []Straying{{Title: "Split the engine", Principle: 4, Issue: 16}}}.assemble("old")
 	if err != nil {
 		t.Fatal(err)
@@ -134,6 +144,7 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 		"repos/o/r/issues?labels=se-overhaul&state=closed&per_page=100": `[{"number":15,"state":"closed","closed_at":"2026-09-01T00:00:00Z"}]`,
 		"repos/o/r/issues/15/comments?per_page=100":                     jsonComments(prev),
 		"repos/o/r/issues/16":                                           `{"number":16,"state":"closed","state_reason":"completed"}`,
+		"repos/o/r/issues/40/comments?per_page=100":                     jsonComments(landing(t, 40, map[string]string{"by-hand": "ran se fleet prune"}, atNow().Now())),
 	})
 	r, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.CollectOverhaul(31, []Principle{{Number: 1, Name: "Mechanize first"}})
 	if err != nil {
@@ -152,6 +163,10 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 	}
 	if !reflect.DeepEqual(r.Recurring, []string{"landing", "merging"}) || !reflect.DeepEqual(r.Earlier, []Overhauled{{Title: "Split the engine", Principle: 4, Issue: 16, State: "completed"}}) {
 		t.Fatalf("%v %+v", r.Recurring, r.Earlier)
+	}
+	// The code facts' window: since #15 closed, with the landing answers given since.
+	if !r.Window.Since.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) || !strings.Contains(strings.Join(r.Window.Answers, "\n"), "ran se fleet prune") {
+		t.Fatalf("%+v", r.Window)
 	}
 	draft, err := r.OverhaulDraft()
 	if err != nil {
@@ -203,6 +218,7 @@ func overhaulAnswers(body string) map[string]string {
 }
 
 func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
+	t.Parallel()
 	gh := recorded(t, overhaulAnswers(overhaulUnattendedMark))
 	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
 	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
@@ -247,7 +263,25 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	}
 }
 
+func TestARemovalsIssueSaysToRepeatTheCascade(t *testing.T) {
+	t.Parallel()
+	gh := recorded(t, overhaulAnswers(overhaulUnattendedMark))
+	draft := overhauled(t, func(r *OverhaulReport) { r.Findings[0].Area = "removal" })
+	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).FileOverhaul(30, draft); err != nil {
+		t.Fatal(err)
+	}
+	removal, err := gh.Get("repos/o/r/issues/31")
+	if err != nil || !strings.Contains(string(removal), "Repeat the removal until nothing more falls out") {
+		t.Fatalf("%s %v", removal, err)
+	}
+	other, err := gh.Get("repos/o/r/issues/32")
+	if err != nil || strings.Contains(string(other), "Repeat the removal") {
+		t.Fatalf("%s %v", other, err)
+	}
+}
+
 func TestAnAttendedOverhaulClosesToo(t *testing.T) {
+	t.Parallel()
 	// A person started it, and still nobody waits: its controversial
 	// findings are the issues for the person.
 	gh := recorded(t, overhaulAnswers("<!-- se:overhaul attended -->"))
@@ -264,6 +298,7 @@ func TestAnAttendedOverhaulClosesToo(t *testing.T) {
 }
 
 func TestAnOverhaulWithoutJudgmentIsRefused(t *testing.T) {
+	t.Parallel()
 	for name, edit := range map[string]func(*OverhaulReport){
 		"a principle without verdict": func(r *OverhaulReport) { r.Verdicts = r.Verdicts[:1] },
 		"an outside idea, no source":  func(r *OverhaulReport) { r.Findings[2].Sources = nil },

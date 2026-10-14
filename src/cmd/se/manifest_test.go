@@ -33,6 +33,7 @@ func prose(t *testing.T, files map[string]string) string {
 const skill = "---\nname: work\ndescription: Take the next issue.\n---\n\n# Work\n\nReader: the agent running it.\n"
 
 func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
+	t.Parallel()
 	ws := prose(t, map[string]string{
 		"src/plugin/skills/work/SKILL.md": skill,
 		"spec/issues.md":                  "# Issues: how the fleet works\n\nReader: whoever changes it.\n",
@@ -47,13 +48,22 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 	if want := "- [`se:work`](src/plugin/skills/work/SKILL.md): Take the next issue.\n"; out != want {
 		t.Fatalf("skills: %q", out)
 	}
+	// The agents come from the registry of kinds, and each must have its file.
+	if code, _, errs := se(t, "--workspace", ws, "manifest", "agents"); code != 1 || !strings.Contains(errs, "the leaf kind's agent has no file src/plugin/agents/worker.md") {
+		t.Fatalf("agents without their files (exit %d): %s", code, errs)
+	}
+	_, out, _ = se(t, "--workspace", "../../..", "manifest", "agents")
+	if !strings.HasPrefix(out, "- [`se:worker`](src/plugin/agents/worker.md), for the kind leaf: ") || strings.Count(out, "\n") != 5 {
+		t.Fatalf("agents: %q", out)
+	}
 	_, out, _ = se(t, "--workspace", ws, "manifest", "checks")
 	if !strings.Contains(out, "- `ci`: every merged PR had green CI (the last run of each check on its head); checked from the first commit.\n") ||
-		!strings.Contains(out, "; checked on what closed after PR #91 brought it.\n") {
+		!strings.Contains(out, "; checked on what was created after PR #91 brought it.\n") ||
+		!strings.Contains(out, "; checked on what closed after PR #74 brought it.\n") {
 		t.Fatalf("checks: %q", out)
 	}
 	_, out, _ = se(t, "--workspace", ws, "manifest", "usage", "fleet", "rules")
-	if want := "```\nse fleet check [--json] [--repo OWNER/NAME]\nse fleet fix [--json] [--repo OWNER/NAME]\nse fleet prune [--apply] [--json] [--repo OWNER/NAME]\nse fleet refresh [--json] [--repo OWNER/NAME]\nse rules\n```\n"; out != want {
+	if want := "```\nse fleet check [--json] [--repo OWNER/NAME]\nse fleet fix [--json] [--repo OWNER/NAME]\nse fleet prune [--apply] [--json] [--repo OWNER/NAME]\nse fleet refresh [--json] [--repo OWNER/NAME]\nse fleet rules [--json] [--repo OWNER/NAME]\nse rules\n```\n"; out != want {
 		t.Fatalf("usage: %q", out)
 	}
 	if code, _, errs := se(t, "--workspace", ws, "manifest", "frob"); code != 1 || !strings.Contains(errs, `no manifest "frob"`) {
@@ -62,6 +72,7 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 }
 
 func TestWriteFillsEveryManifestAndTheRulesHoldItThere(t *testing.T) {
+	t.Parallel()
 	readme := "# SE\n\nReader: a person meeting SE.\n\n<!-- se:manifest skills -->\n<!-- /se:manifest -->\n"
 	ws := prose(t, map[string]string{
 		"README.md":                       readme,
@@ -88,6 +99,7 @@ func TestWriteFillsEveryManifestAndTheRulesHoldItThere(t *testing.T) {
 }
 
 func TestTheRulesKnowSesCommands(t *testing.T) {
+	t.Parallel()
 	ws := prose(t, map[string]string{
 		"README.md": "# SE\n\nReader: a person meeting SE.\n\nRun `se issue pull --take`, not `se issue pull --tak` or `se issue take`.\n",
 	})
@@ -99,6 +111,7 @@ func TestTheRulesKnowSesCommands(t *testing.T) {
 }
 
 func TestAFolderGitIgnoresCountsThoughNoCheckoutHoldsIt(t *testing.T) {
+	t.Parallel()
 	ws := prose(t, map[string]string{
 		".gitignore": "a/bin/\n",
 		"a/x.md":     "# X\n\nReader: anyone.\n",
@@ -111,6 +124,7 @@ func TestAFolderGitIgnoresCountsThoughNoCheckoutHoldsIt(t *testing.T) {
 }
 
 func TestAManifestReadsItsOwnersFromTheDisk(t *testing.T) {
+	t.Parallel()
 	d, root := disk.NewFake(), filepath.FromSlash("/checkout")
 	put(t, d, filepath.Join(root, "spec", "issues.md"), "# Issues: how the fleet works\n")
 	put(t, d, filepath.Join(root, "src", "plugin", "skills", "work", "SKILL.md"), skill)
@@ -132,6 +146,7 @@ func TestAManifestReadsItsOwnersFromTheDisk(t *testing.T) {
 }
 
 func TestTheRulesSeeWhatGitTracksAndIgnores(t *testing.T) {
+	t.Parallel()
 	m := proc.NewFake()
 	m.Install("git", func(c proc.Cmd) int {
 		args := strings.Join(c.Args, " ")

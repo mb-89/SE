@@ -96,9 +96,11 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 	}
 	closed := []string{
 		closedJSON(23, "completed", at(2, 12), "work\n\n"+NewMark, ""),
-		closedJSON(24, "completed", at(3, 10), "by hand", ""),
-		closedJSON(25, "not_planned", at(3, 11), NewMark, ""),
-		closedJSON(26, "completed", at(3, 12), NewMark, `,"sub_issues_summary":{"total":2,"completed":2}`),
+		// The mark is bounded by creation, #91 brought it at 10:30 on the 3rd:
+		// #24 and #26 lack it but were made before, #25 lacks it and was made after.
+		closedJSON(24, "completed", at(3, 10), "by hand", `,"created_at":"`+at(2, 0)+`"`),
+		closedJSON(25, "not_planned", at(3, 11), "by hand", `,"created_at":"2026-10-03T10:45:00Z"`),
+		closedJSON(26, "completed", at(3, 12), "by hand", `,"created_at":"`+at(2, 0)+`","sub_issues_summary":{"total":2,"completed":2}`),
 	}
 	commits := `[{"sha":"x99","commit":{"message":"pushed straight\n\nto main"}},{"sha":"m51","commit":{"message":"m"}},{"sha":"m50","commit":{"message":"m"}}]`
 	if !later {
@@ -146,6 +148,7 @@ func rows(c Collected) []int {
 }
 
 func TestTheFirstRetroCoversTheWholeHistory(t *testing.T) {
+	t.Parallel()
 	c := collect(t, false)
 	if c.Window.Previous != 0 || !c.Window.Since.IsZero() || !c.Window.Until.Equal(now) || !c.Attended {
 		t.Fatalf("%+v", c.Window)
@@ -159,6 +162,7 @@ func TestTheFirstRetroCoversTheWholeHistory(t *testing.T) {
 }
 
 func TestALaterRetroCoversWhatClosedSinceTheLastOne(t *testing.T) {
+	t.Parallel()
 	c := collect(t, true)
 	if c.Window.Previous != 20 || !c.Window.Since.Equal(prevClosed) {
 		t.Fatalf("%+v", c.Window)
@@ -169,6 +173,7 @@ func TestALaterRetroCoversWhatClosedSinceTheLastOne(t *testing.T) {
 }
 
 func TestEachRuleCheck(t *testing.T) {
+	t.Parallel()
 	c := collect(t, true)
 	var got []string
 	for _, x := range c.Checks {
@@ -178,20 +183,22 @@ func TestEachRuleCheck(t *testing.T) {
 		"fixes PR #51",          // its body names no Fixes #n
 		"ci PR #51",             // its last run failed; #50's rerun passed
 		"outside-pr commit x99", // no merged PR made it
+		"mark #25",              // made after #91 brought the mark, and lacks it
 		"answers #24",           // completed leaf, no answers; #25 not planned, #26 a parent
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%q", got)
 	}
-	// #24 lacks the mark, but closed before #91 brought it: a count, not a check.
-	if want := map[string]int{"mark": 1}; !reflect.DeepEqual(c.Before, want) {
+	// #24 and #26 lack the mark, but were made before #91 brought it: a count,
+	// not a check, though #26 closed after it.
+	if want := map[string]int{"mark": 2}; !reflect.DeepEqual(c.Before, want) {
 		t.Fatalf("before %v", c.Before)
 	}
 	draft, err := c.Draft(rqs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(draft, "(`mark`): held. Before the rule came with PR #91: broken once, not counted.\n") {
+	if !strings.Contains(draft, "(`mark`): broken once. Before the rule came with PR #91: broken 2 times, not counted.\n") {
 		t.Fatalf("the draft lacks the count before the mark:\n%s", draft)
 	}
 	if !strings.Contains(c.Checks[1].What, "check failure") || !strings.Contains(c.Checks[2].What, "pushed straight:") {
@@ -199,7 +206,34 @@ func TestEachRuleCheck(t *testing.T) {
 	}
 }
 
+func TestTheAnswersCheckSkipsWhatLandsNoBranch(t *testing.T) {
+	t.Parallel()
+	a := retroRepo(t, true, "<!-- se:retro attended -->")
+	key := "repos/o/r/issues?labels=se&state=closed&per_page=100" + since
+	at := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	person := closedJSON(27, "completed", at, NewMark, "")
+	person = strings.Replace(person, `[{"name":"se"}]`, `[{"name":"se"},{"name":"se-person"}]`, 1)
+	overhaul := closedJSON(28, "completed", at, NewMark, "")
+	overhaul = strings.Replace(overhaul, `[{"name":"se"}]`, `[{"name":"se"},{"name":"se-overhaul"}]`, 1)
+	a[key] = strings.TrimSuffix(a[key], "]") + "," + person + "," + overhaul + "]"
+	a["repos/o/r/issues/27/comments?per_page=100"] = `[]`
+	a["repos/o/r/issues/28/comments?per_page=100"] = `[]`
+	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rows(c); !reflect.DeepEqual(got, []int{23, 24, 25, 26, 27, 28}) {
+		t.Fatalf("rows %v", got)
+	}
+	for _, x := range c.Checks {
+		if x.Kind == "answers" && x.Subject != "#24" {
+			t.Fatalf("a person's decision or an overhaul broke the answers check: %+v", x)
+		}
+	}
+}
+
 func TestTheCountsAndScripts(t *testing.T) {
+	t.Parallel()
 	c := collect(t, true)
 	want := Metrics{
 		"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1,
@@ -215,6 +249,7 @@ func TestTheCountsAndScripts(t *testing.T) {
 }
 
 func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
+	t.Parallel()
 	c := collect(t, false)
 	draft, err := c.Draft(rqs)
 	if err != nil {
@@ -238,6 +273,7 @@ func TestTheMatrixReadsEveryLandingAnswer(t *testing.T) {
 }
 
 func TestThePreviousRetroIsScored(t *testing.T) {
+	t.Parallel()
 	c := collect(t, true)
 	dropped := true
 	want := &Score{Retro: 20, Findings: 3, Issues: 2, Closed: 1, Recurred: 1, Items: []ScoreItem{
@@ -252,6 +288,7 @@ func TestThePreviousRetroIsScored(t *testing.T) {
 }
 
 func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
+	t.Parallel()
 	c := collect(t, true)
 	if len(c.History) != 1 || c.History[0].Retro != 20 {
 		t.Fatalf("history %+v: #10 posted no report, #20 did", c.History)
@@ -301,6 +338,7 @@ func judged(t *testing.T, edit func(*RetroReport)) string {
 }
 
 func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
+	t.Parallel()
 	for name, edit := range map[string]func(*RetroReport){
 		"nothing went well":        func(r *RetroReport) { r.WentWell = nil },
 		"an unknown class":         func(r *RetroReport) { r.Findings[0].Class = "nope" },
@@ -327,6 +365,7 @@ func fileFindings(t *testing.T, answers map[string]string) (Filed, *github.Fake)
 }
 
 func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
+	t.Parallel()
 	f, gh := fileFindings(t, retroRepo(t, true, "<!-- se:retro unattended -->"))
 	if !reflect.DeepEqual(f.Issues, []int{92, 93}) || !reflect.DeepEqual(f.Person, []int{93}) || !f.Ready {
 		t.Fatalf("%+v", f)
@@ -356,6 +395,7 @@ func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
 }
 
 func TestAnAttendedRetroClosesToo(t *testing.T) {
+	t.Parallel()
 	// A person started it, and still nobody waits: the report is its closing
 	// comment, and the controversial finding is the issue for the person.
 	f, gh := fileFindings(t, retroRepo(t, true, "<!-- se:retro attended -->"))
@@ -383,6 +423,7 @@ func TestAnAttendedRetroClosesToo(t *testing.T) {
 // A retro posted for the owner before retros stopped waiting is filed as it
 // stands, with what the owner moved.
 func TestAResumedRetroCreatesTheIssuesAsDecided(t *testing.T) {
+	t.Parallel()
 	answers := retroRepo(t, true, "<!-- se:retro attended -->")
 	answers["repos/o/r/issues/30/comments?per_page=100"] = jsonComments(judged(t, nil), "<!-- se:person -->\nwaits", "move finding 2 to normal", "<!-- se:resume -->\nResumed.")
 	f, _ := fileFindings(t, answers)
@@ -392,6 +433,7 @@ func TestAResumedRetroCreatesTheIssuesAsDecided(t *testing.T) {
 }
 
 func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
+	t.Parallel()
 	answers := retroRepo(t, true, "<!-- se:retro attended -->")
 	// Behind a cloud session's proxy, deleting a branch is refused.
 	gh := recorded(t, answers)
@@ -403,6 +445,7 @@ func TestARefusedBranchDeletionDoesNotFailTheReport(t *testing.T) {
 }
 
 func TestARuleCheckWhosePRDidNotMergeIsRefused(t *testing.T) {
+	t.Parallel()
 	a := retroRepo(t, true, "")
 	key := "repos/o/r/pulls?state=closed&base=main&per_page=100"
 	a[key] = strings.Replace(a[key], `"number":91`, `"number":92`, 1)
@@ -410,5 +453,24 @@ func TestARuleCheckWhosePRDidNotMergeIsRefused(t *testing.T) {
 	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Collect(30)
 	if err == nil || !strings.Contains(err.Error(), "the rule check mark started with PR #91, which is not a merged PR") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestByHandCountsAnAnswerThatProposesACommand(t *testing.T) {
+	t.Parallel()
+	for answer, want := range map[string]bool{
+		// #88's answer: nothing scripted, yet it names the command it wants.
+		`Nothing scripted. No se command reports "main fails its own check"; se fleet check could run check.sh on origin/main and name that as a finding.`: true,
+		"wrote src/scripts/check-claims.sh":    true,
+		"merged main by hand twice":            true,
+		"none":                                 false,
+		"Nothing.":                             false,
+		"nothing: se issue land did all of it": false,
+		"None. Everything went through the se commands as written": false,
+		"": false,
+	} {
+		if got := byHand(answer); got != want {
+			t.Errorf("byHand(%q) = %v, want %v", answer, got, want)
+		}
 	}
 }

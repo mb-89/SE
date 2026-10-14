@@ -9,6 +9,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "start",
+		Class:   batch,
 		Usage:   "start",
 		Group:   "Daemon",
 		Summary: "start the daemon in the background, or find it running",
@@ -17,7 +18,7 @@ func init() {
 			if err := c.Parse(c.Flags("start")); err != nil {
 				return Reply{}, err
 			}
-			ep, note, err := startDaemon(c.Proc, c.Paths(), c.Clock, c.Net)
+			ep, note, err := startDaemon(&c.World, c.Paths())
 			if err != nil {
 				return Reply{}, err
 			}

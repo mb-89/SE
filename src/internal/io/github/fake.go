@@ -20,9 +20,10 @@ import (
 // them as GitHub would: an issue it creates is listed, a comment it is sent is
 // read back, a closed issue leaves the open list, a merged PR the open ones.
 // It knows the routes SE uses: issues with their comments, labels,
-// assignees, sub-issues and blocked-by links, branches (git refs), pull
-// requests with their merge, auto-merge and update-branch, and workflow
-// dispatches. Any other path it answers from
+// assignees, sub-issues and blocked-by links, branches (git refs: each
+// repository starts with main, and a file written to a branch through
+// contents is a new commit on it), pull requests with their merge, auto-merge
+// and update-branch, and workflow dispatches. Any other path it answers from
 // what was seeded at that path, read-only.
 //
 // Seed fills it from recorded gh answers, each read for what it says about
@@ -43,6 +44,10 @@ type Fake struct {
 	writes []string
 	// later is what the repository comes to hold at a time, earliest first.
 	later []timed
+	// requests counts what gh would have asked GitHub; each passes delay on delayOn.
+	requests int
+	delay    time.Duration
+	delayOn  clock.Clock
 }
 
 // timed is recorded answers the repository holds from at on.
@@ -66,6 +71,8 @@ type repo struct {
 	subs      map[int][]int
 	blockedBy map[int][]int
 	refs      map[string]obj
+	// commits counts the commits written, each a new sha.
+	commits   int
 	pulls     map[int]obj
 	pullOrder []int
 	docs      map[string][]byte
@@ -74,6 +81,34 @@ type repo struct {
 // NewFake answers an empty fake GitHub whose stamps are read from c.
 func NewFake(c clock.Clock) *Fake {
 	return &Fake{Login: "se-fake", clock: c, repos: map[string]*repo{}}
+}
+
+// Delay makes each request the fake takes pass d on c, as a request to
+// GitHub takes time: the battery runs the interactive commands so, against
+// their budgets (spec/budgets.yaml).
+func (f *Fake) Delay(c clock.Clock, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delayOn, f.delay = c, d
+}
+
+// Requests answers how many requests the fake took, as gh would make them:
+// one for each Get, Send and GraphQL, and one for each page of a List.
+func (f *Fake) Requests() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.requests
+}
+
+// spend counts n requests and passes their delay, with the fake unlocked.
+func (f *Fake) spend(n int) {
+	f.mu.Lock()
+	f.requests += n
+	c, d := f.delayOn, f.delay
+	f.mu.Unlock()
+	if c != nil && d > 0 {
+		c.Sleep(time.Duration(n) * d)
+	}
 }
 
 // Writes lists every write the fake took, oldest first, as "METHOD path"
@@ -108,15 +143,32 @@ func (f *Fake) repo(name string) *repo {
 			name: name, issues: map[int]obj{}, seen: map[int]bool{}, deleted: map[int]bool{}, comments: map[int][]obj{},
 			subs: map[int][]int{}, blockedBy: map[int][]int{}, refs: map[string]obj{}, pulls: map[int]obj{}, docs: map[string][]byte{},
 		}
+		// A repository has its default branch from the start, as GitHub's do.
+		r.refs[mainRef] = r.ref(mainRef, r.commit())
 		f.repos[name] = r
 	}
 	return r
+}
+
+// mainRef is the default branch every fake repository starts with.
+const mainRef = "refs/heads/main"
+
+// commit answers the sha of a new commit in the repository.
+func (r *repo) commit() string {
+	r.commits++
+	return fmt.Sprintf("%040x", r.commits)
+}
+
+// ref is a git ref as GitHub answers it, pointing at sha.
+func (r *repo) ref(name, sha string) obj {
+	return obj{"ref": name, "object": obj{"sha": sha, "type": "commit"}}
 }
 
 func (f *Fake) now() string { return f.clock.Now().UTC().Format(time.RFC3339) }
 
 // Get answers the value at path.
 func (f *Fake) Get(path string) ([]byte, error) {
+	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.catchUp()
@@ -127,8 +179,10 @@ func (f *Fake) Get(path string) ([]byte, error) {
 	return encode(v)
 }
 
-// List answers the list at path, whole.
+// List answers the list at path, whole, as the pages gh would ask for.
 func (f *Fake) List(path string) ([]byte, error) {
+	pages := 1
+	defer func() { f.spend(pages) }()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.catchUp()
@@ -141,11 +195,14 @@ func (f *Fake) List(path string) ([]byte, error) {
 		if json.Unmarshal(raw, &list) != nil {
 			return nil, fmt.Errorf("gh api --paginate %s: not a list", path)
 		}
+		pages = len(list)/pageSize(path) + 1
 		return raw, nil
 	}
-	if _, ok := v.([]any); !ok {
+	list, ok := v.([]any)
+	if !ok {
 		return nil, fmt.Errorf("gh api --paginate %s: not a list", path)
 	}
+	pages = len(list)/pageSize(path) + 1
 	return encode(v)
 }
 
@@ -217,6 +274,14 @@ func (f *Fake) whole(path string) (any, error) {
 		return i.(obj)["labels"], nil
 	case match(w, "issues", "#", "sub_issues"):
 		return r.issuesOf(num(w[1]), r.subs)
+	case match(w, "issues", "#", "parent"):
+		n := num(w[1])
+		for _, p := range r.order {
+			if contains(r.subs[p], n) {
+				return r.issue(p)
+			}
+		}
+		return nil, notFound()
 	case match(w, "issues", "#", "dependencies", "blocked_by"):
 		return r.issuesOf(num(w[1]), r.blockedBy)
 	case match(w, "issues", "#", "dependencies", "blocking"):
@@ -470,6 +535,7 @@ func (r *repo) listPulls(q url.Values) []any {
 
 // Send takes a write and changes the repository as GitHub would.
 func (f *Fake) Send(method, path string, fields ...Field) ([]byte, error) {
+	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.catchUp()
@@ -588,6 +654,33 @@ func (f *Fake) write(method, path string, v map[string]any) (any, error) {
 		return f.link(r, num(w[1]), v, "sub_issue_id", r.subs)
 	case method == "POST" && match(w, "issues", "#", "dependencies", "blocked_by"):
 		return f.link(r, num(w[1]), v, "issue_id", r.blockedBy)
+	case method == "POST" && match(w, "git", "refs"):
+		ref, _ := str(v, "ref")
+		sha, _ := str(v, "sha")
+		if !strings.HasPrefix(ref, "refs/") || strings.Count(ref, "/") < 2 || sha == "" {
+			return nil, refuse(422, "Validation Failed: a ref takes a fully qualified name and a sha")
+		}
+		if _, ok := r.refs[ref]; ok {
+			return nil, refuse(422, "Reference already exists")
+		}
+		r.refs[ref] = r.ref(ref, sha)
+		return r.refs[ref], nil
+	case method == "PUT" && len(w) > 1 && w[0] == "contents":
+		// A file written to a branch is a new commit on it.
+		branch, _ := str(v, "branch")
+		if branch == "" {
+			branch = strings.TrimPrefix(mainRef, "refs/heads/")
+		}
+		if msg, _ := str(v, "message"); msg == "" {
+			return nil, refuse(422, "Validation Failed: a commit takes a message")
+		}
+		ref, ok := r.refs["refs/heads/"+branch]
+		if !ok {
+			return nil, refuse(404, "Branch "+branch+" not found")
+		}
+		sha := r.commit()
+		ref["object"] = obj{"sha": sha, "type": "commit"}
+		return obj{"content": obj{"path": strings.Join(w[1:], "/")}, "commit": obj{"sha": sha}}, nil
 	case method == "DELETE" && len(w) > 3 && w[0] == "git" && w[1] == "refs":
 		if f.Proxy {
 			return nil, refuse(403, "Write access to this GitHub API path is not permitted through this proxy.")
@@ -879,6 +972,7 @@ func (f *Fake) enableAutoMerge(p obj) error {
 
 // GraphQL answers the one mutation SE sends, turning on auto-merge.
 func (f *Fake) GraphQL(query string, vars ...Field) ([]byte, error) {
+	defer f.spend(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.catchUp()

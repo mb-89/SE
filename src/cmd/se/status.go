@@ -10,6 +10,7 @@ import (
 func init() {
 	register(Command{
 		Name:    "status",
+		Class:   interactive,
 		Usage:   "status",
 		Group:   "Session",
 		Summary: "say whether a daemon answers, and which commits SE came from",
@@ -25,7 +26,7 @@ func init() {
 				said = fmt.Sprintf("SE's daemon answers for %s at %s (pid %d, up since %s).",
 					c.Workspace, ep.Address, ep.PID, ep.StartedAt.Local().Format(time.DateTime))
 			}
-			return Reply{Text: said + "\n" + sessionCommits(c.Proc)}, nil
+			return Reply{Text: said + "\n" + sessionCommits(&c.World)}, nil
 		},
 	})
 }
