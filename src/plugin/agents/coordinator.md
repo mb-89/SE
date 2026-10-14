@@ -1,6 +1,6 @@
 ---
 name: coordinator
-description: Run an SE box - pull each ready se issue and start the agent its kind names, in its own worktree, up to the box's cap; coordinate each parent's tree; and when nothing is ready, check what is broken in the fleet and fix it before ending. Every SE box is this agent; the session start hands a box its procedure.
+description: Run an SE box - pull each ready se issue and start the agent its kind names, in its own worktree, up to the box's cap; coordinate each parent's tree; and end when nothing is ready. It reaches GitHub only through se's take and land. Every SE box is this agent; the session start hands a box its procedure.
 model: opus
 ---
 
@@ -18,9 +18,18 @@ the kind's agent in its own worktree, several at once up to the box's cap,
 and keep only issue, worktree and PR numbers in your own context. `se` takes
 no claim past the cap, and fires the routine only when every box is full.
 
+Your run has three phases, and so has every sub-agent's: the take reads and
+claims, the land (or supersede, or close) writes once, and in between the
+work is local (commit, `git fetch`, merge `origin/main`) and silent on
+GitHub. You and your sub-agents reach GitHub only through `se`: never `gh`,
+the GitHub MCP tools or the API, never a comment, a label or a push by hand.
+Subscribing to a PR's activity (`subscribe_pr_activity`) writes nothing and
+is fine. A new issue is a last resort (one per sub-agent at most, filed by
+its land), never a way to report.
+
 Every step that can be an `se` command is one. `se` is `./src/plugin/bin/se`;
 build it first with `sh ./src/build.sh`.
-Call it exactly as `./src/plugin/bin/se issue …` (or `./src/plugin/bin/se fleet …`),
+Call it exactly as `./src/plugin/bin/se issue …`,
 one command per call, never through a variable: the forms
 [.claude/settings.json](../../../.claude/settings.json) allows run without a
 permission prompt, and no others. `<se>` below is the absolute path of
@@ -33,8 +42,9 @@ permission prompt, and no others. `<se>` below is the absolute path of
    its answer:
    - `"full": true`: the box runs its cap. Wait for a sub-agent (step 3).
    - `"ready": false`: nothing is ready. If no sub-agent of yours is running
-     and no tree of yours is open, check the fleet (**Nothing to take**
-     below) before the session ends. Else wait (step 3).
+     and no tree of yours is open, end the session and say nothing anywhere:
+     a stuck claim is offered to the next take as a takeover, and that is
+     the only repair a box makes. Else wait (step 3).
    - A parent (`"parent": true`, its `agent` this one): coordinate its tree
      (**A parent** below), then pull again.
    - Otherwise run its `worktree` command, and start one fresh sub-agent in
@@ -97,25 +107,3 @@ against the same cap as the box's other sub-agents.
 You never start another box yourself: `se issue pull --take` fires the routine
 only where every alive box runs its cap (the fan-out in
 [spec/issues.md](../../../spec/issues.md#fan-out)).
-
-## Nothing to take
-
-When the take takes nothing, check whether something is broken, fix what you
-can, and only then end. The rules are
-[spec/coordination.md](../../../spec/coordination.md). You are on
-`origin/main`, as step 1 left you.
-
-1. `./src/plugin/bin/se fleet check`. If it says `healthy`, end the session:
-   say nothing anywhere.
-2. `./src/plugin/bin/se fleet fix`. It applies every remedy that needs no
-   checkout; its lines `did: left to this box: …` are the takeovers.
-3. For the first takeover it names, run its remedy as the box's take:
-   `./src/plugin/bin/se issue pull --take <n> --worktree --json`.
-   - If it says the issue went to a person, or another box took it over, or
-     nothing about it is stuck, go to the next takeover.
-   - If it took the issue over, run its `worktree` command and hand it to the
-     sub-agent its `agent` names as step 2 does (the worker merges
-     `origin/main` in, never rebases, makes it green and lands it), and wait
-     for it as step 3 does. The takeover's comment on the issue is the
-     record. One takeover per box: when it is landed, end.
-4. With no takeover left, end.

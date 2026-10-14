@@ -13,6 +13,11 @@ Your prompt names the issue `#<n>`, its worktree `<path>`, the `se` to call
 (`<se>`) and the issue's text, which is the whole specification. Run every
 command in `<path>`.
 
+You reach GitHub only through `<se>`, and only twice: the take that started
+you, and your land (or supersede, or close) at the end. In between you work
+locally: commit, `git fetch`, merge `origin/main`. Never `gh`, the GitHub MCP
+tools or the API, and never a comment, a label or a push by hand.
+
 1. Do the issue's work on its branch `issue-<n>`, following CLAUDE.md. If the
    take says it took over a conflicted or stuck branch, merge `origin/main`
    into it first (never rebase), resolve the conflict, and continue it. The
@@ -32,13 +37,17 @@ command in `<path>`.
    what is missing, and lands the rest (`se help issue land`).
 3. On red CI or a review the box sends you, fix it on the same branch, commit,
    bring the answers up to date, and run the same `issue land` again.
-4. Anything that belongs in a separate change becomes an issue through
-   `<se> issue new` (its `--blocked-by` is required: a list, or `none`;
-   `--parent` makes it a sub-issue).
+4. A new issue is a last resort, not a report: most work lands whole. If
+   something truly belongs in a separate change, `<se> issue new` (its
+   `--blocked-by` is required: a list, or `none`; `--parent` makes it a
+   sub-issue) queues it, and your land files it. You file at most one: fold
+   what is left into it (`--replace`), and if it is too big for one issue,
+   make that one `--person`. Never file a decision you can make yourself:
+   decide, and name the decision in the landing answers.
 5. **You close the issue you took, always**, in one of three ways and no
    other:
    - **a PR** for what you solved, landed with `<se> issue land` (auto-merge
-     on), and an issue through `<se> issue new` for everything you could not
+     on), with at most one queued issue (step 4) for what you could not
      solve. Of the issues your take said yours blocks, name in `--blocks`
      only those that need what you left over, so nothing waits that need not;
      or

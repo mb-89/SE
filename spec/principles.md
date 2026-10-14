@@ -50,7 +50,12 @@ principles of code once.
    can do: the proc I/O module starts only programs that are themselves the
    work (`go`, the battery's linters, `git` where Go has no library for it),
    one listed value, `proc.Programs`; GitHub is reached through its own
-   module's HTTP client, never `gh`.
+   module's HTTP client, never `gh`. An I/O module is a door: it declares
+   the resource it guards and what going around it looks like, and nothing
+   goes around it, neither code nor an agent; an agent reaches GitHub only
+   through `se`. A box's run has the same three phases: its take reads and
+   claims, its land (or supersede, or close) writes once, and in between it
+   works locally (commits, fetches and merges main) and is silent on GitHub.
    Checked by: the battery (the `io-module` and `programs` rules of
    `se rules`); overhaul, by judgment (`looked_at.speed`).
 
@@ -112,10 +117,17 @@ principles of code once.
 15. **Persons decide, agents execute.**
     Anything controversial goes to a person; everything else flows without
     one. It goes as an issue minted for the person, and only such an issue
-    waits on one: every run ends, a box landing what it could and filing
-    the rest, a retro or an overhaul closing once its issues exist. What
-    needs the person's answer is blocked by their issue, and nothing else is.
-    Checked by: retro, mechanically (`se-person` counts); overhaul, by judgment.
+    waits on one: every run ends, a box landing what it could, a retro or an
+    overhaul closing once its issues exist. What needs the person's answer is
+    blocked by their issue, and nothing else is. Nothing mints an issue for
+    a person on a box's behalf. A worker's output is a PR, and a new issue is
+    its safety valve: at most one, filed at its land; if what is left is too
+    big for one issue, that one issue is for a person, and more than one
+    worker in twenty filing one means something is wrong. A review, a retro
+    or an overhaul exists to file issues: it files them in one go at its
+    end, as one group, one issue holding the rest as sub-issues.
+    Checked by: retro, mechanically (`se-person` counts, the share of boxes
+    that filed an issue); overhaul, by judgment.
 
 16. **Blameless.**
     Fix what produced a bad outcome (a rule, a tool, a prompt), never just the
