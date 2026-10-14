@@ -75,7 +75,7 @@ func Build(d disk.Disk, p proc.Procs, repo, out string) error {
 	if head, err := Head(p, repo); err == nil {
 		args = append(args, "-ldflags", Ldflags(head))
 	}
-	if said, err := proc.Combined(p, proc.Cmd{Name: "go", Args: append(args, "./src/cmd/se"), Dir: repo}); err != nil {
+	if said, err := proc.Combined(p, proc.Cmd{Name: "go", Args: append(args, "./cmd/se"), Dir: filepath.Join(repo, ModuleDir)}); err != nil {
 		_ = d.Remove(fresh)
 		return fmt.Errorf("go build: %v\n%s", err, said)
 	}
@@ -97,12 +97,16 @@ func Head(p proc.Procs, repo string) (string, error) { return git(p, repo, "rev-
 // se passes them (see main.commit).
 func Ldflags(commit string) string { return "-X main.commit=" + commit }
 
+// ModuleDir is the folder of an SE checkout that holds its go.mod: every Go
+// command runs there, and src/build.sh is the build recipe for the shell.
+const ModuleDir = "src"
+
 // Module is the module path an SE checkout's go.mod declares.
-const Module = "github.com/mb-89/SE"
+const Module = "github.com/mb-89/SE/src"
 
 // IsCheckout says whether dir on d is an SE checkout: its go.mod declares SE's module.
 func IsCheckout(d disk.Disk, dir string) bool {
-	data, err := d.ReadFile(filepath.Join(dir, "go.mod"))
+	data, err := d.ReadFile(filepath.Join(dir, ModuleDir, "go.mod"))
 	if err != nil {
 		return false
 	}
