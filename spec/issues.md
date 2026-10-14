@@ -162,10 +162,13 @@ person**, and leaves the agents' queue until the person has closed it.
   containing one (at the top, nor with `--in`). #n's dependents stay blocked
   through their native links.
 - **A box that takes an issue closes it, always** (the owner's rule,
-  2026-10-14). It ends in one of two ways and no other: a PR for what it
+  2026-10-14). It ends in one of three ways and no other: a PR for what it
   solved, auto-merge on (`se issue land`), with an issue (`se issue new`) for
-  everything it could not solve; or a supersede (`se issue supersede <n>`),
-  where it cannot land a PR at all. `se issue pull --take` names the open
+  everything it could not solve; a supersede (`se issue supersede <n>`),
+  where it cannot land a PR at all; or, where the issue's work reached main
+  before the take, a close naming that commit
+  (`se issue close <n> --fixed-by SHA`), so a moot issue ends without an
+  empty PR. `se issue pull --take` names the open
   issues the taken one blocks; the box names in `--blocks` those of them that
   need what it left over, and only those, so nothing waits that need not. An
   issue for a person (`se issue new --person`) is never a way for a box to
@@ -186,6 +189,7 @@ person**, and leaves the agents' queue until the person has closed it.
 
 <!-- se:manifest usage issue review -->
 ```
+se issue close N --fixed-by SHA --answers FILE [--json] [--repo OWNER/NAME]
 se issue edit N [--title T] [--body B | --body-file PATH] [--json] [--repo OWNER/NAME]
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
 se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
@@ -355,12 +359,25 @@ naming the successor. A final issue is refused: its box lands a PR. A ready
 successor fires the routine once (with `--json`:
 `{"issue","successor","parent","blocked_by","blocks","ready","fanout"}`).
 
+`se issue close N --fixed-by SHA --answers FILE` is the third way, for an
+issue whose work reached main before its box took it (another issue's PR did
+it): landing would take an empty commit. It fetches `origin/main` and refuses
+unless SHA names a commit that `origin/main` holds, refuses a pull request, a
+closed issue and a parent ("a parent holds no work"), and reads FILE as
+`se issue land` does, refusing a missing, empty or unknown answer, all before
+it writes anything. Then it records the worker, posts the landing answers on N
+as `land` does (see [Landing answers](#landing-answers)), comments naming the
+commit and its link under the marker `<!-- se:fixed-by SHA -->`, and closes N
+as completed (with `--json`: `{"issue","commit","subject","url"}`). N's
+dependents become ready as when a PR closes it.
+
 ### The Stop hook
 
 In a box (a cloud session no person attends, as the routine starts it), the
 plugin hands every Stop and SubagentStop to `se hook stop`, which refuses the
 stop while the box's issue is open with neither an open PR from its branch,
-auto-merge on, nor a supersede, and says which is missing. The box's issue is
+auto-merge on, nor a supersede, and says which is missing (a close by
+`se issue close --fixed-by` closes the issue, so the box ends). The box's issue is
 the one `se issue pull --take` took (a parent's box coordinates and closes
 nothing itself); a leaf's sub-agent is held to the leaf its prompt names. It
 is enforcement, so it fails closed: only what GitHub shows lets the box end.
