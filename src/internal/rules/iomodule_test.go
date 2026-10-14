@@ -6,6 +6,7 @@ import (
 )
 
 func TestOnlyIOModulesReachTheOutside(t *testing.T) {
+	t.Parallel()
 	found := check(t, "io-module", map[string]string{
 		"src/a/proc.go":                  "package a\n\nimport \"os/exec\"\n\nvar _ = exec.Command\n",
 		"src/a/net.go":                   "package a\n\nimport _ \"net/http\"\n",
@@ -34,6 +35,7 @@ func TestOnlyIOModulesReachTheOutside(t *testing.T) {
 }
 
 func TestTheIOAllowlistOnlyShrinks(t *testing.T) {
+	t.Parallel()
 	found := check(t, "io-module", map[string]string{
 		"src/a/kept.go":                 "package a\n\nimport \"os/exec\"\n\nvar _ = exec.Command\n",
 		"src/a/done.go":                 "package a\n\nimport \"time\"\n\nvar d = time.Second\n",

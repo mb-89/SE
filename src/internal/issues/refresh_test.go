@@ -55,6 +55,7 @@ func (c conflicted) Send(method, path string, fields ...github.Field) ([]byte, e
 }
 
 func TestRefreshUpdatesTheAutoMergePRsBehindMain(t *testing.T) {
+	t.Parallel()
 	c := atNow()
 	gh := refreshGH(t, c, map[string][]string{
 		openPullsPath: {"[" + strings.Join([]string{
@@ -93,6 +94,7 @@ func TestRefreshUpdatesTheAutoMergePRsBehindMain(t *testing.T) {
 }
 
 func TestRefreshReportsAFailedUpdateAndGoesOn(t *testing.T) {
+	t.Parallel()
 	c := atNow()
 	gh := refreshGH(t, c, map[string][]string{
 		openPullsPath:                            {"[" + refreshPull(10, "a1", "", true) + "," + refreshPull(20, "b1", "", true) + "]"},
@@ -114,6 +116,7 @@ func TestRefreshReportsAFailedUpdateAndGoesOn(t *testing.T) {
 }
 
 func TestRefreshSaysWhenTheHeadNeverMoves(t *testing.T) {
+	t.Parallel()
 	c := atNow()
 	gh := refreshGH(t, c, map[string][]string{
 		openPullsPath:                            {"[" + refreshPull(10, "a1", "", true) + "]"},
