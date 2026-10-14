@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/index"
+	"github.com/mb-89/SE/src/internal/issues"
 )
 
 // The help reads at a glance: the overview gives each command one short line
@@ -59,6 +60,7 @@ type HelpFlag struct {
 func init() {
 	register(Command{
 		Name:    "help",
+		Class:   interactive,
 		Usage:   "help [<command>]",
 		Group:   "Session",
 		Summary: "list the commands, or show one: help <command>",
@@ -103,11 +105,21 @@ func help(session, color bool) string {
 // overview is the overview as data.
 func overview(session bool) Help {
 	prog := prog(session)
-	note := prog + " help <command> shows its usage and flags."
+	note := prog + " help <command> shows its usage and flags.\n" + agentsNote()
 	if !session {
 		note += "\nEvery command takes --workspace DIR (default: here)."
 	}
 	return Help{Usage: prog + " <command> [flags]", Groups: groupsOf(offered(session), session), Note: note}
+}
+
+// agentsNote names the plugin's agents, from the registry of kinds, and how
+// a person reaches one.
+func agentsNote() string {
+	var types []string
+	for _, k := range issues.IssueKinds {
+		types = append(types, k.Type())
+	}
+	return "The agents, each reached as @agent-<name> or by asking for its role:\n" + strings.Join(types, ", ") + "."
 }
 
 // groupsOf puts the commands under their groups' headings, the groups in

@@ -5,10 +5,13 @@
 // event the engine raises is posted to the workspace's se daemon before it
 // goes on, unchanged. The daemon owns what happens to it: today it appends
 // the event to the session's log. While SE is off, every hook hands the event
-// straight on and contacts nothing, but one: the context carries the guidance
-// se answers (the principles, the skills a take handed over), on or off, made
-// again after each compaction. /se ui opens a pane of buttons: the on/off
-// toggle and the commands se offers as buttons, each pressed as /se <words>.
+// straight on and contacts nothing, but one: the plugin's SessionStart hook
+// puts the guidance se answers into the context (the principles; in a box, the
+// box's agent; the skills a take handed over), on or off, at startup, resume,
+// clear and compact, since a plugin can ship no rules and no CLAUDE.md. /se ui
+// opens a grid of buttons: the on/off toggle and the commands se offers as
+// buttons, each labelled with its name and pressed as /se <words>, at most as
+// many to a row as se says (gridOf).
 // In a box, SE on or off, every Stop and SubagentStop goes to se hook stop,
 // which refuses the stop while the issue the box took is open with neither a
 // PR (auto-merge on) nor a supersede; a prompt from a person resets its count.
@@ -22,11 +25,13 @@
 
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { SeActive, SeButtons, SeHelp } from '../types'
+import type { SeActive, SeButtons, SeColumns, SeHelp } from '../types'
 
 const ACTIVE = { plugin: 'se', key: 'active' } as const
 // The commands se offered as buttons when /se ui last opened the pane.
 const BUTTONS = { plugin: 'se', key: 'buttons' } as const
+// The most buttons a row of the pane holds, as se answered it with the buttons.
+const COLUMNS = { plugin: 'se', key: 'columns' } as const
 const PANE = 'se-ui'
 // The help se answered for each /se line that asked for it, by its words.
 const HELPS = { plugin: 'se', key: 'helps' } as const
@@ -56,7 +61,7 @@ export type Reply = {
   active?: boolean
   endpoint?: Endpoint
   reload?: boolean
-  panel?: { buttons: SeButtons }
+  panel?: { buttons: SeButtons; columns: SeColumns }
   help?: SeHelp
 }
 
@@ -79,11 +84,12 @@ const WAITING_CAP = 1000
 let settingUp: Promise<void> | null = null
 // What the status line says is working, one line per call still running past FEEDBACK.
 const working: string[] = []
-// The context block se's guidance goes under.
-const GUIDANCE = 'se-guidance'
-// The guidance se answered for this session's context; null until it answers,
-// and again after a compaction, so the next context asks anew.
-let guidance: string | null = null
+// The sources of a session start whose context the guidance goes into: each
+// starts a context that holds none of it yet.
+const GUIDED = ['startup', 'resume', 'clear', 'compact']
+// How long a session start waits for the guidance: it shows it is working
+// after FEEDBACK, and the first prompt goes on without it after this long.
+const GUIDING = 30_000
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -104,36 +110,47 @@ export const register: Register = on => {
 
   on('command.run', { command: 'se' }, async ($, e) => ({ text: await runs($, e.args) }))
 
-  // The guidance goes into the context, which the engine sends once while the
-  // conversation holds none: at its first request, and after each compaction.
-  on('prompt.context', async ($, e, next) => {
-    const said = await next(e)
+  // Always-on guidance: the documented way a plugin puts text into every
+  // session, the SessionStart hook's additionalContext, on each source that
+  // starts a context without it (a compaction keeps only a summary of it).
+  on('classic.SessionStart', async ($, e, next) => {
+    const result = await next(e)
+    if (!GUIDED.includes(e.source)) return result
     const text = await guided($)
-    return text ? { ...said, blocks: [...said.blocks, { name: GUIDANCE, text }] } : said
-  })
-
-  on('session.compact', async ($, e, next) => {
-    const compacted = await next(e)
-    if (e.trigger !== 'precompute' && !compacted.skip) guidance = null
-    return compacted
+    return text ? { ...result, additionalContext: [...(result.additionalContext ?? []), text] } : result
   })
 
   // Every surface draws Box, Text and Button, the phone too, so the pane uses no other.
+  // The pane is a grid: rows of at most `columns` cells, every cell as wide as
+  // every other, so the columns align and a short last row stays to the left.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button } = $.ui.resolve(e)
     const { value: isOn = false } = await $.state.get(ACTIVE)
     const { value: buttons = [] } = await $.state.get(BUTTONS)
+    const { value: columns = 0 } = await $.state.get(COLUMNS)
+    const toggle = isOn ? 'SE on' : 'SE off'
+    const cells = [
+      <Button
+        key="toggle"
+        label={toggle}
+        variant={isOn ? 'primary' : undefined}
+        dimColor={!isOn}
+        onPress={() => presses($, isOn ? 'off' : 'on')}
+      />,
+      ...buttons.map(name => <Button key={`run ${name}`} label={name} onPress={() => presses($, name)} />),
+    ]
+    const grid = gridOf([toggle, ...buttons], columns, e.props.bodyColumns)
     return (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={1} width={e.props.bodyColumns}>
-        <Button
-          key="toggle"
-          label={isOn ? 'SE on' : 'SE off'}
-          variant={isOn ? 'primary' : undefined}
-          dimColor={!isOn}
-          onPress={() => presses($, isOn ? 'off' : 'on')}
-        />
-        {buttons.map(name => (
-          <Button key={`run ${name}`} label={name} onPress={() => presses($, name)} />
+      <Box flexDirection="column" rowGap={GAP} width={e.props.bodyColumns}>
+        {grid.rows.map(row => (
+          // A row is named by its first cell, the same cell each time it is drawn.
+          <Box key={`row ${row[0]}`} flexDirection="row" columnGap={GAP}>
+            {row.map(i => (
+              <Box key={`cell ${i}`} width={grid.width} flexShrink={0}>
+                {cells[i]}
+              </Box>
+            ))}
+          </Box>
         ))}
       </Box>
     )
@@ -313,16 +330,21 @@ async function updatesItself($: EngineInterface): Promise<void> {
   if (said) $.ui.toast(said.split('\n')[0])
 }
 
-// The guidance se answers for this session, asked once and again after a
-// compaction; '' while se has not answered within FEEDBACK, or failed.
+// The guidance se answers for this session; '' where se failed, or did not
+// answer within GUIDING. Past FEEDBACK the status line says it is working.
 async function guided($: EngineInterface): Promise<string> {
-  if (guidance !== null) return guidance
-  const asking = asks($, ['guidance', '--session-id', await $.session.id()]).then(said => {
-    if (typeof said !== 'string') guidance = said.text
-    return guidance ?? ''
-  })
+  const asking = asks($, ['guidance', '--session-id', await $.session.id()]).then(said =>
+    typeof said === 'string' ? '' : said.text,
+  )
   const ran = await within($, 'reading its guidance', asking)
-  return ran.done ? ran.value : ''
+  if (ran.done) return ran.value
+  let timer: Timer | undefined
+  const late = new Promise<string>(resolve => {
+    timer = $.clock.after(GUIDING, () => resolve(''))
+  })
+  const text = await Promise.race([ran.later, late])
+  timer?.cancel()
+  return text
 }
 
 // Hands the words to se as a session call; answers its reply, or why there is none.
@@ -395,6 +417,7 @@ async function applies($: EngineInterface, reply: Reply): Promise<string> {
   }
   if (reply.panel) {
     await $.state.set(BUTTONS, reply.panel.buttons)
+    await $.state.set(COLUMNS, reply.panel.columns)
     await $.ui.open({ id: PANE, title: 'SE' })
   }
   if (!reply.reload) return reply.text
@@ -435,6 +458,26 @@ async function answers($: EngineInterface, words: string[]): Promise<string> {
     await $.state.set(HELPS, rest)
   }
   return applies($, asked)
+}
+
+// The cells between two cells of the pane's grid, across and down.
+const GAP = 1
+
+// What the terminal draws around a Button's label: `[ label ]`.
+const CHROME = 4
+
+// The pane's grid, the one place its shape is drawn: the cells, by their
+// labels, in rows of at most `columns` (se's config value; one row where se
+// named none), every cell the same width: the row's share of the pane less
+// its gaps, or the longest label's button where that is wider.
+export function gridOf(labels: string[], columns: number, paneWidth: number): { rows: number[][]; width: number } {
+  const count = labels.length
+  const across = Math.max(1, Math.min(columns > 0 ? columns : count, count))
+  const rows: number[][] = []
+  for (let i = 0; i < count; i += across)
+    rows.push(Array.from({ length: Math.min(across, count - i) }, (_, j) => i + j))
+  const share = Math.floor((paneWidth - GAP * (across - 1)) / across)
+  return { rows, width: Math.max(share, CHROME + Math.max(0, ...labels.map(l => l.length))) }
 }
 
 function wordsOf(args: string): string[] {

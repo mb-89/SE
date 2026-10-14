@@ -1,8 +1,6 @@
 package battery_test
 
 import (
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,79 +9,62 @@ import (
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
-// linters puts stubs of the pinned linters on bin, at the versions tools.sh
-// pins, which log each call but their version's.
-func linters(t *testing.T, bin, log string) {
-	t.Helper()
-	stub(t, bin, "golangci-lint", `[ "$1" = --version ] && { echo "golangci-lint has version `+pin(t, "GOLANGCI_LINT")+` built with go"; exit 0; }
-echo "golangci-lint $*" >>`+log)
-	stub(t, bin, "biome", `[ "$1" = --version ] && { echo "Version: `+pin(t, "BIOME")+`"; exit 0; }
-echo "biome $*" >>`+log)
-}
-
-// onPath runs every program on a PATH of bin alone, as check does.
-type onPath struct {
+// inBox runs every program in the box's environment: its PATH, HOME and SE_HOME.
+type inBox struct {
 	proc.Procs
-	bin string
+	b box
 }
 
-func (p onPath) Run(c proc.Cmd) error {
-	c.Env = []string{"PATH=" + p.bin}
-	for _, v := range os.Environ() {
-		if !strings.HasPrefix(v, "PATH=") {
-			c.Env = append(c.Env, v)
-		}
-	}
+func (p inBox) Run(c proc.Cmd) error {
+	c.Env = p.b.env()
 	return p.Procs.Run(c)
 }
 
-func TestFmtRunsEveryFormatterTheBatteryChecks(t *testing.T) {
+func TestFmtRunsEveryFormatterTheBatteryChecksWhereItChecksIt(t *testing.T) {
 	t.Parallel()
-	dir, bin, log := freshBox(t)
-	linters(t, bin, log)
-	if _, err := battery.Format(onPath{proc.Real(), bin}, dir); err != nil {
+	b := newBox(t, "go", "gh", "dlv", "deadcode", "claude")
+	// The linters log the folder they run in, as well as their call.
+	write(t, filepath.Join(b.bin, "golangci-lint"), `#!/bin/sh
+[ "$1" = --version ] && { echo "golangci-lint has version `+pin(t, "GOLANGCI_LINT")+` built with go"; exit 0; }
+echo "golangci-lint $* in ${PWD#`+b.dir+`/}" >>`+b.log+"\n", 0o755)
+	write(t, filepath.Join(b.bin, "biome"), `#!/bin/sh
+[ "$1" = --version ] && { echo "Version: `+pin(t, "BIOME")+`"; exit 0; }
+echo "biome $* in ${PWD#`+b.dir+`/}" >>`+b.log+"\n", 0o755)
+	if _, err := battery.Format(inBox{proc.Real(), b}, b.dir); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := calls(t, log), "golangci-lint fmt ./...\nbiome check --write\n"; got != want {
+	if got, want := b.calls(t), "golangci-lint fmt ./... in src\nbiome check --write in src/plugin\n"; got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}
 }
 
 func TestFmtInstallsAMissingFormatterFirst(t *testing.T) {
 	t.Parallel()
-	ln, err := exec.LookPath("ln")
-	if err != nil {
-		t.Skipf("ln is missing: %v", err)
-	}
-	dir, bin, log := freshBox(t)
-	stand := t.TempDir()
-	linters(t, stand, log)
-	// The installs log their call and put the linter on the PATH.
-	stub(t, bin, "go", `[ "$1 $2" = "env GOPATH" ] && { echo `+filepath.Join(bin, "gopath")+`; exit 0; }
-echo "go $*" >>`+log+`; `+ln+` -s `+filepath.Join(stand, "golangci-lint")+` `+filepath.Join(bin, "golangci-lint"))
-	stub(t, bin, "npm", `echo "npm $*" >>`+log+`; `+ln+` -s `+filepath.Join(stand, "biome")+` `+filepath.Join(bin, "biome"))
-	if _, err := battery.Format(onPath{proc.Real(), bin}, dir); err != nil {
+	b := newBox(t, "go", "gh", "dlv", "deadcode", "claude")
+	if _, err := battery.Format(inBox{proc.Real(), b}, b.dir); err != nil {
 		t.Fatal(err)
 	}
-	got := strings.Split(strings.TrimSpace(calls(t, log)), "\n")
-	want := []string{"go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v", "npm install -g @biomejs/biome@", "golangci-lint fmt ./...", "biome check --write"}
-	if len(got) != len(want) {
-		t.Fatalf("calls = %q, want %q in turn", got, want)
+	got := strings.Split(strings.TrimSpace(b.calls(t)), "\n")
+	want := []string{
+		"curl https://github.com/golangci/golangci-lint/releases/download/v" + pin(t, "GOLANGCI_LINT") + "/" + asset(t, "golangci-lint"),
+		"curl https://github.com/golangci/golangci-lint/releases/download/v" + pin(t, "GOLANGCI_LINT") + "/golangci-lint-" + pin(t, "GOLANGCI_LINT") + "-checksums.txt",
+		"curl https://github.com/biomejs/biome/releases/download/%40biomejs%2Fbiome%40" + pin(t, "BIOME") + "/" + asset(t, "biome"),
+		"golangci-lint fmt ./...",
+		"biome check --write",
 	}
-	for i := range want {
-		if !strings.HasPrefix(got[i], want[i]) {
-			t.Errorf("call %d = %q, want %q", i, got[i], want[i])
-		}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("calls =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 
 func TestAFailedFormatterFailsFmt(t *testing.T) {
 	t.Parallel()
-	dir, bin, log := freshBox(t)
-	linters(t, bin, log)
-	stub(t, bin, "biome", `[ "$1" = --version ] && { echo "Version: `+pin(t, "BIOME")+`"; exit 0; }
-echo "biome: 1 error left"; exit 1`)
-	if _, err := battery.Format(onPath{proc.Real(), bin}, dir); err == nil || !strings.Contains(err.Error(), "1 error left") {
+	b := newBox(t, "go", "gh", "dlv", "deadcode", "claude", "golangci-lint")
+	write(t, filepath.Join(b.bin, "biome"), `#!/bin/sh
+[ "$1" = --version ] && { echo "Version: `+pin(t, "BIOME")+`"; exit 0; }
+echo "biome: 1 error left"; exit 1
+`, 0o755)
+	if _, err := battery.Format(inBox{proc.Real(), b}, b.dir); err == nil || !strings.Contains(err.Error(), "1 error left") {
 		t.Errorf("err = %v, want biome's finding", err)
 	}
 }

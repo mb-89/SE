@@ -50,6 +50,9 @@ type Briefing struct {
 	// Next is what se issue pull would take; nil where nothing is ready.
 	Next   *Issue `json:"next,omitempty"`
 	Counts Counts `json:"counts"`
+	// Queue is the open queue's size and when its last issue is estimated
+	// to close; se issue tree tells the detail.
+	Queue Queue `json:"queue"`
 }
 
 // About is what SE is.
@@ -125,9 +128,11 @@ func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 		retro   *closedIssue
 		pulls   []closedPull
 		history []comment
+		pace    Pace
 	)
 	if err := parallel([]func() error{
 		func() (err error) { all, t, err = s.survey(); return err },
+		func() (err error) { pace, err = s.Pace(PaceWindow); return err },
 		// The closed issues, the window, and the comments of every issue
 		// told of, read at once: every one was written after the oldest of
 		// those issues was created.
@@ -150,7 +155,7 @@ func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 			in, b.Window = s.window(done, w)
 			told := in
 			for k := range done {
-				if done[k].labelled(RetroLabel) {
+				if done[k].labelled(RetroLabel) && done[k].StateReason != duplicate {
 					retro = &done[k]
 					told = append(append([]closedIssue{}, in...), *retro)
 					break
@@ -204,6 +209,7 @@ func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 	if order := takeOrder(all, 0); len(order) > 0 {
 		b.Next = &order[0].Issue
 	}
+	b.Queue = estimate(all, t, 0, pace, s.now())
 	for _, st := range all {
 		switch {
 		case st.Above != 0:
