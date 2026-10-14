@@ -28,6 +28,9 @@ type Landing struct {
 	// Closed is true where the land closed the issue itself: a leaf landed
 	// into its manifest, or a manifest with nothing left to land.
 	Closed bool `json:"closed,omitempty"`
+	// Warning is what went wrong without stopping the land: the battery's
+	// status refused on the pushed commit, which CI then checks itself.
+	Warning string `json:"warning,omitempty"`
 }
 
 // pull is the part of GitHub's pull request object land reads.
@@ -98,11 +101,11 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		return s.landInto(dir, n, root, session, qs, answers, check)
 	}
 	branch := Branch(n)
+	if err := s.takeIn(dir, branch); err != nil {
+		return Landing{}, err
+	}
 	if subs != nil && subs.Total > 0 {
 		// A manifest whose leaves landed nothing has nothing to land.
-		if err := s.takeIn(dir, branch); err != nil {
-			return Landing{}, err
-		}
 		if ahead, err := s.git(dir, "rev-list", "--count", "origin/main..HEAD"); err != nil {
 			return Landing{}, err
 		} else if ahead == "0" {
@@ -111,12 +114,13 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	}
 	// The answers go on the issue before the push, so a land stopped after
 	// it (a refused status post, a PR it could not open) leaves its record.
-	if err := s.ship(dir, branch, check, func() error {
+	warning, err := refused(s.push(dir, branch, check, func() error {
 		if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
 			return err
 		}
 		return s.postLanding(dir, n, qs, answers)
-	}); err != nil {
+	}))
+	if err != nil {
 		return Landing{}, err
 	}
 	body := fmt.Sprintf("Fixes #%d", n)
@@ -127,7 +131,7 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	if profiled {
 		body += "\n\n" + profile.Markdown()
 	}
-	l := Landing{Issue: n}
+	l := Landing{Issue: n, Warning: warning}
 	pr, open, err := s.openPR(n)
 	if err != nil {
 		return Landing{}, err

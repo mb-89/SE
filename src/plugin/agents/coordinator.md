@@ -49,6 +49,9 @@ permission prompt, and no others. `<se>` below is the absolute path of
      below) before the session ends. Else wait (step 3).
    - A parent (`"parent": true`, its `agent` this one), a manifest:
      coordinate its tree and land it (**A manifest** below), then pull again.
+     The take offers priority manifests (`se-priority`) first; never drop a
+     manifest you have started for one: finish it, and your next take sees
+     the priority.
    - Otherwise run its `worktree` command, and start one fresh sub-agent in
      the background, of the type its `agent` names (`se:worker` for a leaf,
      `se:retro`, `se:overhaul`), with the prompt in **The sub-agent's

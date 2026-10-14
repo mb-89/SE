@@ -18,6 +18,7 @@ const BuiltIn = "built-in"
 //	instances:
 //	  counter: {module: counter, config: {step: 2}}
 //	  report: {module: report}
+//	  issues/pull: {module: issues/pull}  # nested: it owns the names issues/pull/...
 //	wires:
 //	  counter.count: numbers/count   # an output to a name
 //	  report.total: counter.count    # an input to another instance's port
@@ -27,7 +28,7 @@ type Wiring struct {
 	Wires     []Wire
 }
 
-// Instance is one module instance: its name, its module, and the config values the wiring gives it.
+// Instance is one module instance: its name, plain or nested as <cluster>/<module>, its module, and the config values the wiring gives it.
 type Instance struct {
 	Name, Module string
 	Config       map[string]*yaml.Node
@@ -43,7 +44,7 @@ type Wire struct {
 // WiringFile is where the wiring file stands, relative to a checkout: a
 // value set there on main reaches a running box, which reads it from
 // origin/main before it takes anything.
-const WiringFile = "src/internal/index/wiring.yaml"
+const WiringFile = "src/index/wiring.yaml"
 
 // wired is the wiring file the se binary carries.
 //

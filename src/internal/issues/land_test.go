@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -264,17 +265,21 @@ func TestLandTurnsOnAutoMergeWhereGraphQLIsRefused(t *testing.T) {
 	}
 }
 
-// A land stopped after the push, here by a refused status post (#449), has
-// already written its answers on the issue (#491).
+// A land writes its answers on the issue before it pushes (#491), so one
+// stopped after the push still leaves its record: here the status post after
+// the push is refused (#449), a warning the land goes on past.
 func TestLandPostsTheAnswersBeforeItPushes(t *testing.T) {
 	t.Parallel()
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
 	gh.NoStatuses = true
 	d := disk.NewFake()
-	_, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
-	if err == nil || !strings.Contains(err.Error(), "status failed") {
-		t.Fatalf("%v", err)
+	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}.Land(a, "", qs, full, battered(d))
+	if err != nil || !strings.Contains(l.Warning, "status failed") {
+		t.Fatalf("%+v %v", l, err)
+	}
+	if w := gh.Writes(); slices.Index(w, "POST repos/o/r/issues/6/comments") > slices.IndexFunc(w, func(s string) bool { return strings.Contains(s, "/statuses/") }) {
+		t.Fatalf("the answers were posted after the status: %q", w)
 	}
 	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
 		t.Fatalf("origin's issue-6 is %s, want %s", got, want)

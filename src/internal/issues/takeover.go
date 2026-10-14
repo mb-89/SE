@@ -202,10 +202,10 @@ func (p openPull) dirty() bool { return p.Mergeable != nil && !*p.Mergeable && p
 
 // takeOverConflict takes over the first conflict it can, lowest number
 // first, and checks its branch out in dir. A conflict whose last takeover
-// found the same PR head is still in flight and is left to its box; a
-// conflict on a final issue (one taken over before, or filed by a review)
-// waits on an issue for a person. A takeover labels the issue se-final. ok is false when none was
-// taken over.
+// found the same PR head is still in flight and is left to its box. A
+// conflict is no failure of its box, as main moves on under it: a conflict
+// at a new head is taken over again, final or not, and the takeover leaves
+// the issue as final as it was. ok is false when none was taken over.
 func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (took Issue, ok bool, err error) {
 	cs, err := s.conflicts(all, pulls)
 	if err != nil {
@@ -221,13 +221,6 @@ func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (to
 		}
 		k := m.takeovers + 1
 		heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, c.pr.Head.SHA)
-		if c.Final {
-			reason := fmt.Sprintf("PR #%d conflicts with main on its final attempt (labelled %s).", c.pr.Number, FinalLabel)
-			if _, err := s.hold(c.Issue, reason); err != nil {
-				return Issue{}, false, err
-			}
-			continue
-		}
 		body := fmt.Sprintf("Taken over: PR #%d conflicts with main at %s. This box merges main into %s and lands it again.",
 			c.pr.Number, c.pr.Head.SHA, Branch(c.Number)) + heads + s.boxLine()
 		won, err := s.markTakeover(c.Number, k, body)
@@ -236,9 +229,6 @@ func (s Source) takeOverConflict(dir string, all []Status, pulls []openPull) (to
 		}
 		if !won {
 			continue
-		}
-		if err := s.finalize(c.Number); err != nil {
-			return Issue{}, false, err
 		}
 		if err := s.pickUp(dir, c.Number); err != nil {
 			return Issue{}, false, err
