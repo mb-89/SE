@@ -24,9 +24,9 @@ type Superseded struct {
 	Ready bool `json:"ready"`
 }
 
-// Supersede is the second of the two ways a box closes the issue it took (the
-// first is a PR): issue n's successor, made through the same code as se issue
-// new, carries n's title and text and the open questions the box could not
+// Supersede is the second of the three ways a box closes the issue it took
+// (the first is a PR, the third se issue close --fixed-by): issue n's
+// successor, made through the same code as se issue new, carries n's title and text and the open questions the box could not
 // answer, labelled se-final. It has n's parent and n's open blockers, and n's
 // open dependents are linked as blocked by it. Then n closes, its comment
 // naming the successor. A final issue is refused: its box lands a PR.
