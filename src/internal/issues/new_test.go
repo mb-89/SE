@@ -128,6 +128,7 @@ func TestCreateMakesASubIssueOfItsParent(t *testing.T) {
 }
 
 func TestDuplicateIsAnOpenIssueOfTheSameTitleUnderTheSameParent(t *testing.T) {
+	t.Parallel()
 	gh := recorded(t, map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
 			{"number":1,"title":"root","state":"open","sub_issues_summary":{"total":2}},
