@@ -25,8 +25,14 @@ import (
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
+// se runs se with args in t's World. Where args name no workspace, it runs
+// in a fresh one, so what a command keeps in its workspace, such as the
+// ledger of its GitHub requests, never lands in the source tree.
 func se(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
+	if !slices.ContainsFunc(args, func(a string) bool { return a == "--workspace" || strings.HasPrefix(a, "--workspace=") }) {
+		args = append([]string{"--workspace", t.TempDir()}, args...)
+	}
 	var out, errs bytes.Buffer
 	code := run(worldOf(t), args, &out, &errs)
 	return code, out.String(), errs.String()

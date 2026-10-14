@@ -91,7 +91,12 @@ se fleet rules [--json] [--repo OWNER/NAME]
 ```
 <!-- /se:manifest -->
 
-`se fleet check` lists the findings. `se fleet fix` runs the
+`se fleet check` lists the findings. Where GitHub's answers to its reads
+say the hour's quota of requests has fallen below `github/config/quota-floor`
+percent of its limit, a last line says how many are left and when the hour
+resets (`quota` in its JSON): the boxes and every person's session share the
+owner's one token ([io.md](io.md#living-within-githubs-rate-limits)). It is
+no finding, so `se fleet fix` files nothing for it. `se fleet fix` runs the
 same check and applies every remedy that needs no checkout, in order, and
 names the takeovers it leaves to the box; a remedy that fails is reported and
 the remedies after it are still applied; an issue it made that a box may

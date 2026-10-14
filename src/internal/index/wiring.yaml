@@ -7,6 +7,7 @@ instances:
   sessionlog: {module: sessionlog}
   cli: {module: cli, config: {columns: 3}}
   guidance: {module: guidance, config: {inline: true, principles: true}}
+  github: {module: github}
   issues: {module: issues}
 wires:
   session.events: session/<id>/events

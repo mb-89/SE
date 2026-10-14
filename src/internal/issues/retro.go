@@ -183,6 +183,8 @@ type Row struct {
 	Person    int `json:"person"`
 	// Minutes is the time from its claim to its PR's merge; -1 unknown.
 	Minutes int `json:"minutes"`
+	// Requests is the GitHub requests its landing facts counted; 0 unknown.
+	Requests int `json:"requests,omitempty"`
 }
 
 // Script is a file added under src/scripts/ in the window.
@@ -482,6 +484,9 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 		}
 	}
 	r.Takeovers = len(rounds)
+	if landed != nil {
+		r.Requests = landed.Facts.Requests
+	}
 	if p, ok := fixedBy[x.Number]; ok {
 		r.PR = p.Number
 		if landed != nil && !landed.Facts.Claimed.IsZero() {
@@ -599,7 +604,7 @@ type Metrics map[string]float64
 var metricNames = []string{
 	"closed", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand",
 	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue",
-	"claim_to_merge_minutes",
+	"claim_to_merge_minutes", "requests", "requests_per_issue",
 }
 
 // lowerIsBetter says which way a metric should move; closed is a size.
@@ -612,6 +617,7 @@ func (c Collected) measure() Metrics {
 		m["conflicts"] += float64(r.Conflicts)
 		m["takeovers"] += float64(r.Takeovers)
 		m["person_flags"] += float64(r.Person)
+		m["requests"] += float64(r.Requests)
 		if r.Answers != nil && byHand(r.Answers["by-hand"]) {
 			m["by_hand"]++
 		}
@@ -619,7 +625,7 @@ func (c Collected) measure() Metrics {
 			minutes = append(minutes, r.Minutes)
 		}
 	}
-	for _, name := range []string{"conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand"} {
+	for _, name := range []string{"conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand", "requests"} {
 		m[name+"_per_issue"] = 0
 		if len(c.Rows) > 0 {
 			m[name+"_per_issue"] = round2(m[name] / float64(len(c.Rows)))
