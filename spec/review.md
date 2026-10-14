@@ -124,8 +124,11 @@ follows them; `se review brief` and `se issue review` (in
    refuses a report that leaves one out; the verdict shows them under "Ran
    on the delta". The worker runs its light list before it commits, the
    overhaul its heavy one over everything, each handed over by the take;
-   an agent's front matter preloads (`skills`) only what its tier's list
-   names (the rule `agents`).
+   each agent's front matter preloads (`skills`) its tiers' lists (the
+   worker's and the author's for the worker), less the plugins' agents,
+   which no `skills` field can preload and which a source names under its
+   `agents`; built-in skills Claude may invoke preload like any other. The
+   rule `agents` fails where a field and its lists differ.
 
 ## The report
 

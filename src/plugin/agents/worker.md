@@ -2,7 +2,7 @@
 name: worker
 description: Work one leaf se issue in its own worktree, on its branch issue-<n>, and close it with a PR landed by se issue land (auto-merge on) or a supersede. The box starts one for each leaf a take names se:worker.
 model: opus
-skills: [simplify]
+skills: [simplify, skill-creator:skill-creator, plugin-dev:agent-development]
 ---
 
 # Worker: one issue, landed

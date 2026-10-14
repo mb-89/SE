@@ -22,7 +22,7 @@ const (
 	// ModelsConfig sets the model each agent runs.
 	ModelsConfig = "spec/models.yaml"
 	skillsDir    = "src/plugin/skills"
-	// WiringFile holds the reuse config, whose tier lists bound what an agent preloads.
+	// WiringFile holds the reuse config, whose tier lists say what an agent preloads.
 	WiringFile = "src/internal/index/wiring.yaml"
 )
 
@@ -30,7 +30,7 @@ func init() {
 	register(Rule{
 		Name: "agents",
 		Doc: "every agent in " + AgentsDir + " is one the registry of kinds names, its front matter's name its file's and its model the one " +
-			ModelsConfig + " sets for it, and what its front matter's skills preload is on its tier's list in the reuse config of " + WiringFile +
+			ModelsConfig + " sets for it, and its front matter's skills preload its tiers' lists in the reuse config of " + WiringFile + ", less their agents" +
 			"; every agent there has its file, and no skill holds an agent's role",
 		Applies: func(p string) bool {
 			return p == ModelsConfig || (path.Dir(p) == AgentsDir && path.Ext(p) == ".md")
@@ -65,9 +65,7 @@ func agents(repo *Repo, p string, text []byte) []Finding {
 	case front["model"] != models[name]:
 		found = append(found, at("its model is %q, but %s sets %q", front["model"], ModelsConfig, models[name]))
 	}
-	if list, ok := front["skills"]; ok {
-		found = append(found, preloads(repo, name, list, at)...)
-	}
+	found = append(found, preloads(repo, name, text, at)...)
 	skills := []string{name}
 	if role != "" && role != name {
 		skills = append(skills, role)
@@ -80,19 +78,24 @@ func agents(repo *Repo, p string, text []byte) []Finding {
 	return found
 }
 
-// preloads finds each skill the agent name preloads (its front matter's
-// skills, as list) that its tier's list in the reuse config does not name,
-// so the tier's list stays the one place that says what a tier runs.
-func preloads(repo *Repo, name, list string, at func(string, ...any) Finding) []Finding {
-	var names []string
-	if err := yaml.Unmarshal([]byte(list), &names); err != nil {
+// preloads finds where the skills the agent name preloads (its front
+// matter's skills, in text) differ from what the reuse config of WiringFile
+// says it preloads: its tiers' lists less their agents (reuse.Preloads), in
+// their order. The tiers' lists are the one place that says what a tier
+// runs; the field is checked against them, never written a second time.
+func preloads(repo *Repo, name string, text []byte, at func(string, ...any) Finding) []Finding {
+	var front struct {
+		Skills []string `yaml:"skills"`
+	}
+	if err := yaml.Unmarshal([]byte(frontBlock(text)), &front); err != nil {
 		return []Finding{at("its front matter's skills is no list of names: %v", err)}
 	}
-	text, ok, err := repo.Read(WiringFile)
+	got := front.Skills
+	wiring, ok, err := repo.Read(WiringFile)
 	if err != nil || !ok {
-		return []Finding{at("%s, whose reuse config bounds what it preloads, cannot be read", WiringFile)}
+		return []Finding{at("%s, whose reuse config says what it preloads, cannot be read", WiringFile)}
 	}
-	w, err := index.ParseWiring(text)
+	w, err := index.ParseWiring(wiring)
 	if err != nil {
 		return []Finding{at("%s cannot be read: %v", WiringFile, err)}
 	}
@@ -100,18 +103,20 @@ func preloads(repo *Repo, name, list string, at func(string, ...any) Finding) []
 	if err != nil {
 		return []Finding{at("%s cannot be read: %v", WiringFile, err)}
 	}
-	tier, isTier := cfg.Tier[name]
-	if !isTier {
-		return []Finding{at("it preloads skills, but the reuse config of %s has no tier %s", WiringFile, name)}
+	want := cfg.Preload(name)
+	if slices.Equal(got, want) {
+		return nil
 	}
-	var found []Finding
-	for _, n := range names {
-		if !slices.Contains(tier, n) {
-			found = append(found, at("it preloads %s, which the reuse config's %s list in %s does not name: preload only what the tier runs", n, name, WiringFile))
-		}
+	tiers := "no tier's list"
+	if t := reuse.Preloads[name]; len(t) > 0 {
+		tiers = "the " + strings.Join(t, " and the ") + " list"
 	}
-	return found
+	return []Finding{at("its front matter's skills are %s, but %s in the reuse config of %s, less its agents, is %s: preload what the tier runs, as its list says",
+		flow(got), tiers, WiringFile, flow(want))}
 }
+
+// flow writes names as a skills field's flow list does.
+func flow(names []string) string { return "[" + strings.Join(names, ", ") + "]" }
 
 // modelsConfig finds each agent of the registry the config sets no model for,
 // and each model it sets for no agent's file.
@@ -154,6 +159,16 @@ func readModels(repo *Repo) (map[string]string, error) {
 	}
 	var models map[string]string
 	return models, yaml.Unmarshal(text, &models)
+}
+
+// frontBlock answers a file's front matter as written, between its --- lines.
+func frontBlock(text []byte) string {
+	rest, ok := strings.CutPrefix(string(text), "---\n")
+	if !ok {
+		return ""
+	}
+	block, _, _ := strings.Cut(rest, "\n---")
+	return block
 }
 
 // frontOf answers the keys of a file's front matter, each with its value as written.

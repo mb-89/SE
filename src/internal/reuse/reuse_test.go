@@ -42,14 +42,16 @@ func TestAConfigThatIsNotPinnedOrNamesWhatNoSourceProvidesIsRefused(t *testing.T
 		return "      sources: [{name: " + name + ", repo: o/r, path: '" + path + "', commit: '" + commit + "', licence: '" + licence + "'}]\n"
 	}
 	for config, want := range map[string]string{
-		src("p", "main", "MIT", "."):                                                           "pinned to no full commit",
-		src("p", pin, "", "."):                                                                 "names no licence",
-		src("p", pin, "MIT", "../x"):                                                           "needs a path inside its repository",
-		src("adopted", pin, "MIT", "."):                                                        "no plugin source may be named adopted",
-		src("p", pin, "MIT", ".") + "      worker: [q:x]\n":                                    "no source provides the plugin q",
-		src("p", pin, "MIT", ".") + "      reviewer: [adopted:x]\n":                            "no source provides the plugin adopted",
-		src("p", pin, "MIT", ".") + "      overhaul: ['Not A Name']\n":                         "neither a built-in skill nor plugin:name",
-		"      sources: [{name: p, repo: nope, path: ., commit: " + pin + ", licence: MIT}]\n": "names no repository",
+		src("p", "main", "MIT", "."):                                                                                    "pinned to no full commit",
+		src("p", pin, "", "."):                                                                                          "names no licence",
+		src("p", pin, "MIT", "../x"):                                                                                    "needs a path inside its repository",
+		src("adopted", pin, "MIT", "."):                                                                                 "no plugin source may be named adopted",
+		src("p", pin, "MIT", ".") + "      worker: [q:x]\n":                                                             "no source provides the plugin q",
+		src("p", pin, "MIT", ".") + "      reviewer: [adopted:x]\n":                                                     "no source provides the plugin adopted",
+		src("p", pin, "MIT", ".") + "      overhaul: ['Not A Name']\n":                                                  "neither a built-in skill nor plugin:name",
+		"      sources: [{name: p, repo: nope, path: ., commit: " + pin + ", licence: MIT}]\n":                          "names no repository",
+		"      sources: [{name: p, repo: o/r, path: ., commit: " + pin + ", licence: MIT, agents: [Bad]}]\n":            "names the agent \"Bad\"",
+		"      sources: [{name: s, repo: o/r, path: ., commit: " + pin + ", licence: MIT, skill: true, agents: [a]}]\n": "is a lone skill, which holds no agents",
 	} {
 		if _, err := wired(t, config); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", config, err, want)
@@ -58,5 +60,22 @@ func TestAConfigThatIsNotPinnedOrNamesWhatNoSourceProvidesIsRefused(t *testing.T
 	c, err := wired(t, "      sources: [{name: s, repo: o/r, path: ., commit: "+pin+", licence: MIT, skill: true}]\n      author: [adopted:s, simplify]\n")
 	if err != nil || len(c.Tier[reuse.Author]) != 2 || c.Sources[0].Plugin() != reuse.Adopted {
 		t.Fatalf("%+v %v", c, err)
+	}
+}
+
+func TestAnAgentPreloadsItsTiersListsOnceEachLessThePluginsAgents(t *testing.T) {
+	t.Parallel()
+	c, err := wired(t, "      sources: [{name: kit, repo: o/r, path: ., commit: "+pin+", licence: MIT, agents: [hunter]}]\n"+
+		"      worker: [simplify]\n      author: [kit:writer, simplify, kit:hunter]\n      reviewer: [kit:hunter]\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Agent("kit:hunter") || c.Agent("kit:writer") || c.Agent("simplify") {
+		t.Error("the source's agents are not told from its skills")
+	}
+	for agent, want := range map[string]string{"worker": "simplify,kit:writer", "reviewer": "", "overhaul": "", "coordinator": ""} {
+		if got := strings.Join(c.Preload(agent), ","); got != want {
+			t.Errorf("%s preloads %q, want %q", agent, got, want)
+		}
 	}
 }

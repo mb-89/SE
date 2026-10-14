@@ -10,15 +10,18 @@ instances:
   issues: {module: issues}
   # What SE runs that others built (src/internal/reuse): each source pinned
   # to a commit, with its licence, and each tier's list, staggered by cost.
-  # Moving a skill between tiers is a change of one list here.
+  # Moving a skill between tiers is a change of one list here. A source's
+  # agents are those a tier may name: the agents' skills fields preload the
+  # rest of their tiers' lists (reuse.Preloads), and the rule agents holds
+  # each field to them.
   reuse:
     module: reuse
     config:
       sources:
-        - {name: code-simplifier, repo: anthropics/claude-plugins-official, path: plugins/code-simplifier, commit: 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3, licence: Apache-2.0}
-        - {name: pr-review-toolkit, repo: anthropics/claude-plugins-official, path: plugins/pr-review-toolkit, commit: 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3, licence: Apache-2.0}
+        - {name: code-simplifier, repo: anthropics/claude-plugins-official, path: plugins/code-simplifier, commit: 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3, licence: Apache-2.0, agents: [code-simplifier]}
+        - {name: pr-review-toolkit, repo: anthropics/claude-plugins-official, path: plugins/pr-review-toolkit, commit: 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3, licence: Apache-2.0, agents: [code-reviewer, code-simplifier, comment-analyzer, pr-test-analyzer, silent-failure-hunter, type-design-analyzer]}
         - {name: skill-creator, repo: anthropics/claude-plugins-official, path: plugins/skill-creator, commit: 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3, licence: Apache-2.0}
-        - {name: plugin-dev, repo: anthropics/claude-plugins-official, path: plugins/plugin-dev, commit: 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3, licence: Apache-2.0}
+        - {name: plugin-dev, repo: anthropics/claude-plugins-official, path: plugins/plugin-dev, commit: 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3, licence: Apache-2.0, agents: [agent-creator, plugin-validator, skill-reviewer]}
         - {name: clean-code, repo: cskwork/clean-code-skill, path: ., commit: 8476ba6f4f6146095d653d9ee09c53fe970f599e, licence: MIT, skill: true}
       worker: [simplify]
       reviewer:

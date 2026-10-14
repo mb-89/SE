@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/index"
@@ -53,6 +54,9 @@ type Source struct {
 	Licence string `yaml:"licence" json:"licence"`
 	// Skill marks a lone skill, which the Adopted plugin serves.
 	Skill bool `yaml:"skill,omitempty" json:"skill,omitempty"`
+	// Agents are the plugin's agents a tier may name, as plugin:agent: an
+	// agent's skills field cannot preload them, so they stay in the hand-over.
+	Agents []string `yaml:"agents,omitempty" json:"agents,omitempty"`
 }
 
 // Plugin is the plugin a session loads the source as.
@@ -77,7 +81,7 @@ type Config struct {
 
 // Module declares the sources, the tiers and the places, read like any config value.
 var Module = index.Declare("reuse", "What SE runs that others built: the outside plugins and skills, pinned, and which of them each tier of agent runs.",
-	index.Config("sources", []Source(nil), "Every outside plugin and lone skill SE runs, each pinned to a commit with its licence; se fleet plugins fetches them."),
+	index.Config("sources", []Source(nil), "Every outside plugin and lone skill SE runs, each pinned to a commit with its licence, and a plugin with the agents a tier may name of it; se fleet plugins fetches them."),
 	index.Config(Worker, []string(nil), "What a worker runs on its own diff before it commits: light, inside the battery's time budget."),
 	index.Config(Reviewer, []string(nil), "What a gate's reviewer runs on its delta, once per gate; its report names each (ran)."),
 	index.Config(Overhaul, []string(nil), "What an overhaul runs over the whole code, taking as long as it needs."),
@@ -160,6 +164,13 @@ func (c Config) Check() error {
 			return fmt.Errorf("reuse: source %s names no licence: read it, and adopt nothing without one", s.Name)
 		case s.Path == "" || filepath.IsAbs(s.Path) || strings.Contains(s.Path, ".."):
 			return fmt.Errorf("reuse: source %s needs a path inside its repository, \".\" for the root: %q", s.Name, s.Path)
+		case s.Skill && len(s.Agents) > 0:
+			return fmt.Errorf("reuse: source %s is a lone skill, which holds no agents", s.Name)
+		}
+		for _, a := range s.Agents {
+			if !itemName.MatchString(a) {
+				return fmt.Errorf("reuse: source %s names the agent %q, which is no name of lowercase letters, digits and dashes", s.Name, a)
+			}
 		}
 		if s.Skill {
 			plugins["skill:"+s.Name] = true
@@ -185,6 +196,44 @@ func (c Config) Check() error {
 		}
 	}
 	return nil
+}
+
+// Preloads are the tiers whose lists each of SE's agents preloads in its
+// front matter's skills: the worker runs the author's list too, where it
+// writes an SE agent or skill. An agent not named here preloads nothing.
+var Preloads = map[string][]string{
+	"worker":   {Worker, Author},
+	"reviewer": {Reviewer},
+	"overhaul": {Overhaul},
+}
+
+// Agent says whether a tier's entry names a plugin's agent, by the agents its source names.
+func (c Config) Agent(entry string) bool {
+	plugin, item, scoped := strings.Cut(entry, ":")
+	if !scoped {
+		return false
+	}
+	for _, s := range c.Sources {
+		if s.Plugin() == plugin && slices.Contains(s.Agents, item) {
+			return true
+		}
+	}
+	return false
+}
+
+// Preload answers what the agent named preloads: the entries of its tiers'
+// lists (Preloads), in order and once each, less the agents, which no
+// skills field can preload.
+func (c Config) Preload(agent string) []string {
+	out := []string{}
+	for _, tier := range Preloads[agent] {
+		for _, e := range c.Tier[tier] {
+			if !c.Agent(e) && !slices.Contains(out, e) {
+				out = append(out, e)
+			}
+		}
+	}
+	return out
 }
 
 // Entry is one name of a tier, as this box can run it.
