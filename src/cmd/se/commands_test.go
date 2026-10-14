@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -148,18 +150,33 @@ func TestTheHelpIsMadeFromTheRegistry(t *testing.T) {
 	}
 }
 
+// TestTheHelpGroupsTheCommands reads its want from the registered commands,
+// so a new command edits no list here: each group stands under its heading,
+// the headings in order, and lists its commands by name.
 func TestTheHelpGroupsTheCommands(t *testing.T) {
 	t.Parallel()
-	want := map[string][]string{
-		"Session":  {"guidance", "help", "off", "on", "restart", "status", "ui", "update"},
-		"Issues":   {"issue edit", "issue land", "issue new", "issue pull", "issue resume", "issue review", "issue supersede", "issue tree"},
-		"Hooks":    {"hook prompt", "hook stop"},
-		"Daemon":   {"ensure", "serve", "start", "stop"},
-		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune", "fleet refresh", "fleet rules"},
-		"Retro":    {"retro collect", "retro new", "retro report"},
-		"Overhaul": {"overhaul file", "overhaul new", "overhaul read"},
+	want := map[string][]string{}
+	for name, c := range commands {
+		if c.Group == "" {
+			t.Errorf("command %q stands under no group", name)
+		}
+		want[c.Group] = append(want[c.Group], name)
 	}
+	var groups []string
+	for group, names := range want {
+		sort.Strings(names)
+		groups = append(groups, group)
+	}
+	sort.Strings(groups)
 	terminal := help(false, false)
+	headings := regexp.MustCompile(`(?m)^(\w+):\n  `).FindAllStringSubmatch(terminal, -1)
+	var got []string
+	for _, h := range headings {
+		got = append(got, h[1])
+	}
+	if strings.Join(got, ",") != strings.Join(groups, ",") || !slices.Contains(groups, "Session") {
+		t.Errorf("the help's groups are %q, want %q:\n%s", got, groups, terminal)
+	}
 	for group, names := range want {
 		block := regexp.MustCompile(`(?m)^` + group + `:\n((?:  .*\n?)+)`).FindStringSubmatch(terminal)
 		if block == nil {
