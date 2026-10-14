@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -84,13 +85,24 @@ const firedOnce = "Fan-out fired the routine: https://claude.ai/code/session_fak
 // fires answers how many fires the routine recordedIssues stood up has taken.
 func fires() int { return network.(*sehttp.Fake).Fired(routineURL) }
 
-func TestIssueNextNamesTheNextReadyIssue(t *testing.T) {
-	recordedIssues(t)
-	code, out, errs := se(t, "issue", "next", "--repo", "o/r")
+func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
+	calls := recordedIssues(t)
+	ws := t.TempDir()
+	code, out, errs := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || out != "#3 three\nu3\n\ndo it\n\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n\n0 retros closed and no overhaul has closed yet; an overhaul is due at 5.\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	code, out, _ = se(t, "issue", "next", "--json", "--repo", "o/r")
+	// Without --take, pull only shows the issue: it writes nothing to GitHub,
+	// fires nothing and leaves the workspace as it was.
+	for _, c := range *calls {
+		if slices.Contains(c, "-X") || slices.Contains(c, "-f") {
+			t.Errorf("pull without --take wrote to GitHub: %v", c)
+		}
+	}
+	if entries, _ := os.ReadDir(ws); fires() != 0 || len(entries) != 0 {
+		t.Errorf("pull without --take fired %d times, left %v in the workspace", fires(), entries)
+	}
+	code, out, _ = se(t, "issue", "pull", "--json", "--repo", "o/r")
 	var answer struct {
 		Ready bool
 		Issue struct{ Number int }
@@ -102,7 +114,7 @@ func TestIssueNextNamesTheNextReadyIssue(t *testing.T) {
 
 func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	recordedIssues(t)
-	if r := session(t, "issue", "next", "--repo", "o/r"); !strings.HasPrefix(r.Text, "#3 three") {
+	if r := session(t, "issue", "pull", "--repo", "o/r"); !strings.HasPrefix(r.Text, "#3 three") {
 		t.Fatalf("%+v", r)
 	}
 	if r := session(t, "issue", "new", "--title", "t", "--body", "b", "--blocked-by", "none", "--repo", "o/r"); r.Text != "Created #10 ten\nu10\n"+firedOnce {
@@ -111,41 +123,41 @@ func TestIssueCommandsAreOfferedInASession(t *testing.T) {
 	if r := session(t, "help", "issue", "new"); !strings.Contains(r.Text, "/se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none") {
 		t.Fatalf("%+v", r)
 	}
-	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, next, resume, review, tree." {
+	if r := session(t, "issue"); r.Text != "/se issue takes a word: land, new, pull, resume, review, tree." {
 		t.Fatalf("%+v", r)
 	}
 }
 
 func TestIssueWithoutASubWordNamesThem(t *testing.T) {
 	code, _, errs := se(t, "issue")
-	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, next, resume, review, tree." {
+	if code != 2 || strings.TrimSpace(errs) != "se issue takes a word: land, new, pull, resume, review, tree." {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
 
 func TestThereIsNoTakeCommand(t *testing.T) {
 	if _, ok := commands["issue take"]; ok {
-		t.Fatal("take is a flag of issue next, not a command")
+		t.Fatal("take is a flag of issue pull, not a command")
 	}
-	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, next, resume, review, tree.") {
+	if code, _, errs := se(t, "issue", "take"); code != 2 || !strings.Contains(errs, "se issue takes a word: land, new, pull, resume, review, tree.") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }
 
-func TestIssueNextTakeRefusesABadNumber(t *testing.T) {
+func TestIssuePullTakeRefusesABadNumber(t *testing.T) {
 	recordedIssues(t)
 	for _, args := range [][]string{{"3"}, {"--take", "x"}, {"--take", "3", "4"}, {"--take=3", "4"}, {"--take", "0"}} {
-		code, _, errs := se(t, append([]string{"issue", "next", "--repo", "o/r"}, args...)...)
+		code, _, errs := se(t, append([]string{"issue", "pull", "--repo", "o/r"}, args...)...)
 		if code != 1 || !strings.Contains(errs, "issue number") {
 			t.Errorf("%v: exit %d, %q", args, code, errs)
 		}
 	}
-	if code, _, errs := se(t, "issue", "next", "--take=x", "--repo", "o/r"); code != 1 || !strings.Contains(errs, `--take takes an issue number, not "x"`) {
+	if code, _, errs := se(t, "issue", "pull", "--take=x", "--repo", "o/r"); code != 1 || !strings.Contains(errs, `--take takes an issue number, not "x"`) {
 		t.Errorf("exit %d, %q", code, errs)
 	}
 	// Each spelling of --take N reaches the claim of issue 2, which is blocked.
 	for _, args := range [][]string{{"--take", "2"}, {"--take=2"}, {"--take", "#2"}, {"--take", "--json", "2"}} {
-		code, _, errs := se(t, append([]string{"issue", "next", "--repo", "o/r", "--workspace", t.TempDir()}, args...)...)
+		code, _, errs := se(t, append([]string{"issue", "pull", "--repo", "o/r", "--workspace", t.TempDir()}, args...)...)
 		if code != 1 || !strings.Contains(errs, "#2 is not ready: blocked by #1") {
 			t.Errorf("%v: exit %d, %q", args, code, errs)
 		}
@@ -297,7 +309,7 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	}
 }
 
-func TestIssueNextInNamesTheTreesReadyLeaves(t *testing.T) {
+func TestIssuePullInNamesTheTreesReadyLeaves(t *testing.T) {
 	old := gh
 	t.Cleanup(func() { gh = old })
 	answers := map[string]string{
@@ -323,30 +335,30 @@ func TestIssueNextInNamesTheTreesReadyLeaves(t *testing.T) {
 		}
 		return nil, fmt.Errorf("not recorded: %v", args)
 	}
-	code, out, errs := se(t, "issue", "next", "--repo", "o/r")
-	if code != 0 || !strings.Contains(out, "#1 is a parent: it holds no work. Coordinate its tree: se issue next --in 1 --take") {
+	code, out, errs := se(t, "issue", "pull", "--repo", "o/r")
+	if code != 0 || !strings.Contains(out, "#1 is a parent: it holds no work. Coordinate its tree: se issue pull --in 1 --take") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	code, out, errs = se(t, "issue", "next", "--in", "1", "--repo", "o/r")
+	code, out, errs = se(t, "issue", "pull", "--in", "1", "--repo", "o/r")
 	if code != 0 || out != "Ready: #2 two\nu2\nReady for review: #3 three\nu3\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	code, out, _ = se(t, "issue", "next", "--in", "1", "--json", "--repo", "o/r")
+	code, out, _ = se(t, "issue", "pull", "--in", "1", "--json", "--repo", "o/r")
 	if code != 0 || !strings.Contains(out, `"root":1,"closed":false,"ready":[{"number":2`) {
 		t.Fatalf("exit %d, %q", code, out)
 	}
-	code, out, errs = se(t, "issue", "next", "--in", "3", "--repo", "o/r")
+	code, out, errs = se(t, "issue", "pull", "--in", "3", "--repo", "o/r")
 	if code != 0 || out != "Ready for review: #3 three\nu3\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	// A take inside finds no leaf, and names the review and its reviewer's worktree.
 	ws := filepath.Join(t.TempDir(), "SE")
-	code, out, errs = se(t, "issue", "next", "--in", "3", "--take", "--json", "--repo", "o/r", "--workspace", ws)
+	code, out, errs = se(t, "issue", "pull", "--in", "3", "--take", "--json", "--repo", "o/r", "--workspace", ws)
 	wt := "git fetch -q origin main \\u0026\\u0026 git worktree add --detach " + filepath.Join(filepath.Dir(ws), "review-3-1") + " origin/main"
 	if code != 0 || !strings.HasPrefix(out, `{"ready":false,"closed":false,"review":[{"number":3,`) || !strings.Contains(out, `"worktree":"`+wt+`"`) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	code, out, errs = se(t, "issue", "next", "--in", "3", "--take", "--repo", "o/r", "--workspace", ws)
+	code, out, errs = se(t, "issue", "pull", "--in", "3", "--take", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || !strings.HasPrefix(out, "Nothing inside #3 is ready.\n\nReady for review: #3 three\nu3\nA reviewer that worked none of its tree works in a fresh worktree:\ngit fetch") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
@@ -381,20 +393,20 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 	git(ws, "commit", "-q", "--allow-empty", "-m", "start")
 	git(ws, "push", "-q", "origin", "main")
 	// Naming an issue and failing to take one fire nothing.
-	if code, _, _ := se(t, "issue", "next", "--repo", "o/r", "--workspace", ws); code != 0 || fires() != 0 {
+	if code, _, _ := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws); code != 0 || fires() != 0 {
 		t.Fatalf("exit %d, %d fires", code, fires())
 	}
-	if code, _, _ := se(t, "issue", "next", "--take", "2", "--repo", "o/r", "--workspace", ws); code != 1 || fires() != 0 {
+	if code, _, _ := se(t, "issue", "pull", "--take", "2", "--repo", "o/r", "--workspace", ws); code != 1 || fires() != 0 {
 		t.Fatalf("exit %d, %d fires", code, fires())
 	}
-	code, out, errs := se(t, "issue", "next", "--take", "--repo", "o/r", "--workspace", ws)
+	code, out, errs := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || fires() != 1 || out != "Took #3 three, on branch issue-3.\nu3\nIt blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.\nFan-out fired the routine: https://claude.ai/code/session_fake1\n\ndo it\n" {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(), out, errs)
 	}
 	// #3 is now claimed on origin, but the recorded refs do not say so: the
 	// take is refused, moves on, finds nothing else and fires nothing.
 	git(ws, "checkout", "-q", "main")
-	if code, out, _ := se(t, "issue", "next", "--take", "--json", "--repo", "o/r", "--workspace", ws); code != 0 || fires() != 1 || out != `{"ready":false}`+"\n" {
+	if code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws); code != 0 || fires() != 1 || out != `{"ready":false}`+"\n" {
 		t.Fatalf("exit %d, %d fires, %q", code, fires(), out)
 	}
 }
@@ -433,7 +445,7 @@ func TestATakeNamesWhatTheIssueBlocks(t *testing.T) {
 		}
 	}
 	// #3 blocks #7, open, and #8, closed: only #7 still waits for it.
-	code, out, _ := se(t, "issue", "next", "--take", "--repo", "o/r", "--workspace", ws)
+	code, out, _ := se(t, "issue", "pull", "--take", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || !strings.Contains(out, "It blocks #7. What you leave over, filed with se issue new, names in --blocks those of them that need it.") {
 		t.Fatalf("exit %d, %q", code, out)
 	}
@@ -494,7 +506,7 @@ func TestAFailedFireDoesNotFailTheClaim(t *testing.T) {
 	}
 	// The routine's fires are spent: the refusal is reported, and the take stands.
 	network.(*sehttp.Fake).Routine(routineURL, "tok", 0)
-	code, out, _ := se(t, "issue", "next", "--take", "--json", "--repo", "o/r", "--workspace", ws)
+	code, out, _ := se(t, "issue", "pull", "--take", "--json", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"fanout":"Fan-out refused: 429 Too Many Requests`) {
 		t.Fatalf("exit %d, %q", code, out)
 	}
@@ -565,7 +577,7 @@ func TestIssueNewFinalLabelsItSeFinal(t *testing.T) {
 	}
 }
 
-func TestIssueNextPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
+func TestIssuePullPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
 	answers := map[string]string{
 		"repos/o/r/issues?labels=se&state=open&per_page=100": `[
 			{"number":7,"title":"seven","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-person"}]},
@@ -591,11 +603,11 @@ func TestIssueNextPersonListsWhatWaitsAndResumePutsItBack(t *testing.T) {
 		return []byte(a), nil
 	}
 	t.Cleanup(func() { gh = old })
-	code, out, errs := se(t, "issue", "next", "--person", "--repo", "o/r")
+	code, out, errs := se(t, "issue", "pull", "--person", "--repo", "o/r")
 	if code != 0 || out != "#7 seven\nu7\nBlocks 1 open issue(s).\nStuck a second time.\n" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	if code, _, errs := se(t, "issue", "next", "--person", "--take", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "--person alone") {
+	if code, _, errs := se(t, "issue", "pull", "--person", "--take", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "--person alone") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 	if code, _, errs := se(t, "issue", "resume", "--repo", "o/r"); code != 1 || !strings.Contains(errs, "one issue number") {

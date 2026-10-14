@@ -47,7 +47,7 @@ type Briefing struct {
 	// check reports.
 	InFlight []Flight  `json:"in_flight"`
 	Findings []Finding `json:"findings"`
-	// Next is what se issue next would take; nil where nothing is ready.
+	// Next is what se issue pull would take; nil where nothing is ready.
 	Next   *Issue `json:"next,omitempty"`
 	Counts Counts `json:"counts"`
 }
