@@ -15,8 +15,10 @@ func freshBox(t *testing.T) (dir, bin, log string) {
 	t.Helper()
 	dir, bin = t.TempDir(), t.TempDir()
 	log = filepath.Join(bin, "calls")
-	if err := os.MkdirAll(filepath.Join(dir, "tests"), 0o755); err != nil {
-		t.Fatal(err)
+	for _, sub := range []string{"tests", "src/plugin"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, name := range []string{"check.sh", "tools.sh"} {
 		script, err := os.ReadFile("../../../tests/" + name)
@@ -94,7 +96,7 @@ func TestTheBatteryInstallsThePinnedLintersABoxLacks(t *testing.T) {
 	for _, want := range []string{
 		"go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v" + pin(t, "GOLANGCI_LINT"),
 		"npm install -g @biomejs/biome@" + pin(t, "BIOME"),
-		"go run ./src/cmd/battery gotest ./...",
+		"go -C src run ./cmd/battery gotest " + dir + " ./...",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no %q among the calls:\n%s", want, got)
