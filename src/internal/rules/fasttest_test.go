@@ -20,10 +20,11 @@ func TestEveryTestRunsInParallelOffTheWallClock(t *testing.T) {
 			"func TestClock(q *testing.T) {\n\tq.Parallel()\n\t_ = tm.Now()\n\ttm.Sleep(tm.Second)\n\t_ = clock.Real()\n\t_ = tm.Now()\n}\n",
 		"src/internal/io/clock/real_test.go": "package clock_test\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\n" +
 			"func TestReal(t *testing.T) {\n\tt.Parallel()\n\t_ = time.Now()\n}\n\nfunc TestSlow(t *testing.T) {}\n",
-		"src/a/kept_test.go":            "package a_test\n\nimport \"testing\"\n\nfunc TestKept(t *testing.T) {}\n",
-		"src/a/a.go":                    "package a\n\nimport \"testing\"\n\nfunc TestNotATestFile(t *testing.T) {}\n",
-		"src/a/broken_test.go":          "not go",
-		"src/internal/rules/serial.txt": "# kept until it can run in parallel\nsrc/a/kept_test.go TestKept\n",
+		"src/a/kept_test.go":              "package a_test\n\nimport \"testing\"\n\nfunc TestKept(t *testing.T) {}\n",
+		"src/a/a.go":                      "package a\n\nimport \"testing\"\n\nfunc TestNotATestFile(t *testing.T) {}\n",
+		"src/a/broken_test.go":            "not go",
+		"src/internal/rules/serial.txt":   "# kept until it can run in parallel\nsrc/a/kept_test.go TestKept\n",
+		"src/internal/io/clock/owns.yaml": clockDoor,
 	})
 	same(t, found, []string{
 		"src/a/a_test.go:9: fast-test: TestSerial does not call t.Parallel first",
@@ -42,6 +43,7 @@ func TestTheSerialListOnlyShrinks(t *testing.T) {
 		"src/a/done_test.go": "package a_test\n\nimport \"testing\"\n\nfunc TestDone(t *testing.T) {\n\tt.Parallel()\n}\n",
 		"src/internal/rules/serial.txt": "# a comment\n\nsrc/a/kept_test.go TestKept\nsrc/a/kept_test.go time.Now\nsrc/a/kept_test.go TestKept\n" +
 			"src/a/done_test.go TestDone\nsrc/a/gone_test.go TestGone\njust-one-word\n",
+		"src/internal/io/clock/owns.yaml": clockDoor,
 	})
 	same(t, found, []string{
 		"src/internal/rules/serial.txt:5: fast-test: the entry is named twice",
