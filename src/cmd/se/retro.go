@@ -74,6 +74,9 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
+			if err := staleSE(&c.World, "its draft would count the window by the rules of an se main has moved past"); err != nil {
+				return Reply{}, err
+			}
 			path := draftPath(c, *out, "retro", n)
 			s, err := src()
 			if err != nil {
@@ -125,6 +128,9 @@ func init() {
 			file := fs.String("draft", "", "the judged draft, a `FILE` (default: ../retro-N.md beside the workspace)")
 			n, err := numbered(c, fs, "retro report")
 			if err != nil {
+				return Reply{}, err
+			}
+			if err := staleSE(&c.World, "it would file and store the window's numbers by the rules of an se main has moved past"); err != nil {
 				return Reply{}, err
 			}
 			data, err := c.Disk.ReadFile(draftPath(c, *file, "retro", n))
