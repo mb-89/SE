@@ -33,7 +33,7 @@ func TestTheWiringSeCarriesStartsItsModules(t *testing.T) {
 	for _, in := range ix.Catalog().Instances {
 		instances = append(instances, in.Name)
 	}
-	if want := []string{"cli", "clock", "guidance", "issues", "session", "sessionlog"}; !slices.Equal(instances, want) {
+	if want := []string{"cli", "clock", "github", "guidance", "issues", "reuse", "session", "sessionlog"}; !slices.Equal(instances, want) {
 		t.Fatalf("the index runs %v, want %v", instances, want)
 	}
 }

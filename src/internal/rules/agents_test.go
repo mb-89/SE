@@ -44,3 +44,22 @@ func TestAnAgentOutOfStepWithTheRegistryTheConfigOrTheSkillsIsFound(t *testing.T
 		rules.AgentsDir + "/stray.md:1: agents: " + rules.ModelsConfig + " sets no model for stray",
 	})
 }
+
+func TestAnAgentPreloadsOnlyWhatItsTierRuns(t *testing.T) {
+	t.Parallel()
+	preloading := func(name, skills string) string {
+		return "---\nname: " + name + "\ndescription: d\nmodel: opus\nskills: " + skills + "\n---\n\n# A\n\nReader: r.\n"
+	}
+	found := checkIn(t, &rules.Repo{Agents: map[string]string{"worker": "work", "reviewer": "review", "boxer": "box"}}, "agents", map[string]string{
+		rules.ModelsConfig: "worker: opus\nreviewer: opus\nboxer: opus\n",
+		rules.WiringFile:   "instances:\n  reuse:\n    module: reuse\n    config:\n      worker: [simplify]\n      reviewer: [security-review]\n",
+		// On its tier's list: sound. Off it, or of no tier: found.
+		rules.AgentsDir + "/worker.md":   preloading("worker", "[simplify]"),
+		rules.AgentsDir + "/reviewer.md": preloading("reviewer", "[security-review, simplify]"),
+		rules.AgentsDir + "/boxer.md":    preloading("boxer", "[simplify]"),
+	})
+	same(t, found, []string{
+		rules.AgentsDir + "/reviewer.md:1: agents: it preloads simplify, which the reuse config's reviewer list in " + rules.WiringFile + " does not name: preload only what the tier runs",
+		rules.AgentsDir + "/boxer.md:1: agents: it preloads skills, but the reuse config of " + rules.WiringFile + " has no tier boxer",
+	})
+}

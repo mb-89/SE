@@ -7,7 +7,40 @@ instances:
   sessionlog: {module: sessionlog}
   cli: {module: cli, config: {columns: 3}}
   guidance: {module: guidance, config: {inline: true, principles: true}}
+  github: {module: github}
   issues: {module: issues}
+  # What SE runs that others built (src/internal/reuse): each source pinned
+  # to a commit, with its licence, and each tier's list, staggered by cost.
+  # Moving a skill between tiers is a change of one list here.
+  reuse:
+    module: reuse
+    config:
+      sources:
+        - {name: code-simplifier, repo: anthropics/claude-plugins-official, path: plugins/code-simplifier, commit: 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3, licence: Apache-2.0}
+        - {name: pr-review-toolkit, repo: anthropics/claude-plugins-official, path: plugins/pr-review-toolkit, commit: 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3, licence: Apache-2.0}
+        - {name: skill-creator, repo: anthropics/claude-plugins-official, path: plugins/skill-creator, commit: 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3, licence: Apache-2.0}
+        - {name: plugin-dev, repo: anthropics/claude-plugins-official, path: plugins/plugin-dev, commit: 8bd00f08f0b04705e610cf132fbe2cf5ec44cfe3, licence: Apache-2.0}
+        - {name: clean-code, repo: cskwork/clean-code-skill, path: ., commit: 8476ba6f4f6146095d653d9ee09c53fe970f599e, licence: MIT, skill: true}
+      worker: [simplify]
+      reviewer:
+        - code-simplifier:code-simplifier
+        - security-review
+        - pr-review-toolkit:code-reviewer
+        - pr-review-toolkit:silent-failure-hunter
+        - pr-review-toolkit:pr-test-analyzer
+        - pr-review-toolkit:comment-analyzer
+        - pr-review-toolkit:type-design-analyzer
+      overhaul: [adopted:clean-code, code-simplifier:code-simplifier]
+      author: [skill-creator:skill-creator, plugin-dev:agent-development]
+      places:
+        - https://github.com/anthropics/claude-plugins-official
+        - https://github.com/anthropics/skills
+        - https://github.com/obra/superpowers
+        - https://github.com/hesreallyhim/awesome-claude-code
+        - https://github.com/ComposioHQ/awesome-claude-skills
+        - https://claudemarketplaces.com/
+        - https://skillselion.com/
+        - https://www.claudemarket.ai/
 wires:
   session.events: session/<id>/events
   sessionlog.events: session/<id>/events

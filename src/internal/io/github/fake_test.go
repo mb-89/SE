@@ -167,20 +167,29 @@ func TestADeletedIssueIsGoneAndItsNumberIsNeverGivenAgain(t *testing.T) {
 	}
 }
 
-func TestTheFakeTakesABranchUpdateAndAWorkflowDispatch(t *testing.T) {
+func TestTheFakeKeepsACommitsStatusesNewestFirstAndRefusesAnUnknownState(t *testing.T) {
 	t.Parallel()
-	f := seeded(t, map[string]string{"repos/o/r/pulls/10": `{"number":10,"state":"open","head":{"ref":"issue-1","sha":"a1"}}`})
-	if _, err := f.Send("PUT", "repos/o/r/pulls/10/update-branch", github.F("expected_head_sha", "a0")); github.Status(err) != 422 {
-		t.Fatalf("an update from an old head: %v", err)
+	f := seeded(t, map[string]string{})
+	if out, _ := f.List("repos/o/r/commits/a1/statuses?per_page=100"); string(out) != "[]" {
+		t.Fatalf("a commit without statuses: %s", out)
 	}
-	if _, err := f.Send("PUT", "repos/o/r/pulls/10/update-branch", github.F("expected_head_sha", "a1")); err != nil {
-		t.Fatal(err)
+	if _, err := f.Send("POST", "repos/o/r/statuses/a1", github.F("state", "green")); github.Status(err) != 422 {
+		t.Fatalf("an unknown state: %v", err)
 	}
-	if _, err := f.Send("POST", "repos/o/r/actions/workflows/ci.yml/dispatches", github.F("ref", "issue-1")); err != nil {
-		t.Fatal(err)
+	for _, state := range []string{"pending", "success"} {
+		if _, err := f.Send("POST", "repos/o/r/statuses/a1", github.F("state", state), github.F("context", "se/battery"), github.F("description", "d")); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := f.Send("POST", "repos/o/r/actions/workflows/ci.yml/dispatches"); github.Status(err) != 422 {
-		t.Fatalf("a dispatch without a ref: %v", err)
+	out, err := f.List("repos/o/r/commits/a1/statuses?per_page=100")
+	if err != nil || !strings.HasPrefix(string(out), `[{`) || strings.Index(string(out), `"success"`) > strings.Index(string(out), `"pending"`) || !strings.Contains(string(out), `"creator":{"login":"se-fake"}`) {
+		t.Fatalf("%s %v", out, err)
+	}
+	if out, err := f.Get("repos/o/r/collaborators/se-fake/permission"); err != nil || !strings.Contains(string(out), `"permission":"admin"`) {
+		t.Fatalf("%s %v", out, err)
+	}
+	if _, err := f.Get("repos/o/r/collaborators/someone/permission"); github.Status(err) != 404 {
+		t.Fatalf("an account the fake does not know: %v", err)
 	}
 }
 

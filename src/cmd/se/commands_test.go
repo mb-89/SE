@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -23,8 +25,14 @@ import (
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
+// se runs se with args in t's World. Where args name no workspace, it runs
+// in a fresh one, so what a command keeps in its workspace, such as the
+// ledger of its GitHub requests, never lands in the source tree.
 func se(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
+	if !slices.ContainsFunc(args, func(a string) bool { return a == "--workspace" || strings.HasPrefix(a, "--workspace=") }) {
+		args = append([]string{"--workspace", t.TempDir()}, args...)
+	}
 	var out, errs bytes.Buffer
 	code := run(worldOf(t), args, &out, &errs)
 	return code, out.String(), errs.String()
@@ -148,18 +156,33 @@ func TestTheHelpIsMadeFromTheRegistry(t *testing.T) {
 	}
 }
 
+// TestTheHelpGroupsTheCommands reads its want from the registered commands,
+// so a new command edits no list here: each group stands under its heading,
+// the headings in order, and lists its commands by name.
 func TestTheHelpGroupsTheCommands(t *testing.T) {
 	t.Parallel()
-	want := map[string][]string{
-		"Session":  {"guidance", "help", "off", "on", "restart", "status", "ui", "update"},
-		"Issues":   {"issue edit", "issue land", "issue new", "issue pull", "issue resume", "issue review", "issue supersede", "issue tree"},
-		"Hooks":    {"hook prompt", "hook stop"},
-		"Daemon":   {"serve", "start", "stop"},
-		"Fleet":    {"briefing", "fleet check", "fleet fix", "fleet prune", "fleet refresh", "fleet rules"},
-		"Retro":    {"retro collect", "retro new", "retro report"},
-		"Overhaul": {"overhaul file", "overhaul new", "overhaul read"},
+	want := map[string][]string{}
+	for name, c := range commands {
+		if c.Group == "" {
+			t.Errorf("command %q stands under no group", name)
+		}
+		want[c.Group] = append(want[c.Group], name)
 	}
+	var groups []string
+	for group, names := range want {
+		sort.Strings(names)
+		groups = append(groups, group)
+	}
+	sort.Strings(groups)
 	terminal := help(false, false)
+	headings := regexp.MustCompile(`(?m)^(\w+):\n  `).FindAllStringSubmatch(terminal, -1)
+	var got []string
+	for _, h := range headings {
+		got = append(got, h[1])
+	}
+	if strings.Join(got, ",") != strings.Join(groups, ",") || !slices.Contains(groups, "Session") {
+		t.Errorf("the help's groups are %q, want %q:\n%s", got, groups, terminal)
+	}
 	for group, names := range want {
 		block := regexp.MustCompile(`(?m)^` + group + `:\n((?:  .*\n?)+)`).FindStringSubmatch(terminal)
 		if block == nil {
@@ -469,6 +492,40 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 	if r := session(t, "status"); r.Help != nil {
 		t.Fatalf("/se status carries help: %+v", r.Help)
 	}
+}
+
+func TestEveryCommandRecordsItsDurationAndATerminalOneSaysItsOverrun(t *testing.T) {
+	t.Parallel()
+	d := onFake(t)
+	worldOf(t).Clock = slow{clock.NewFake(time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC))}
+	ws := filepath.FromSlash("/ws")
+	put(t, d, filepath.Join(ws, "spec", "budgets.yaml"), "classes:\n  instant: {ms: 1000, hard: false}\ncommand_classes:\n  help: instant\n")
+	if err := d.MkdirAll(filepath.Join(ws, ".se", ".runtime")); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := se(t, "--workspace", ws, "help"); code != 0 ||
+		!strings.Contains(errs, "se: help took 2000ms, over its budget of 1000ms (spec/budgets.yaml)") {
+		t.Fatalf("code %d, stderr %q", code, errs)
+	}
+	if code, _, errs := se(t, "--session", "--workspace", ws, "help"); code != 0 || errs != "" {
+		t.Fatalf("a session call: code %d, stderr %q", code, errs)
+	}
+	data, err := d.ReadFile(filepath.Join(ws, ".se", ".runtime", "calls.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(strings.TrimSpace(string(data)), "\n"); len(lines) != 2 || !strings.Contains(lines[1], `"name":"help","ms":2000`) {
+		t.Fatalf("calls.jsonl:\n%s", data)
+	}
+}
+
+// slow is a fake clock two seconds later each time it is read, so every
+// command it times takes two seconds.
+type slow struct{ *clock.Fake }
+
+func (s slow) Now() time.Time {
+	s.Advance(2 * time.Second)
+	return s.Fake.Now()
 }
 
 func TestTheHelpRendersTheConfigValues(t *testing.T) {
