@@ -46,6 +46,8 @@ type marks struct {
 	reason string
 	// winners maps each takeover round to its first comment's id.
 	winners map[int]int64
+	// box is the session of the box whose claim it is, from the last box mark.
+	box string
 }
 
 func (s Source) marks(n int) (marks, error) {
@@ -60,6 +62,9 @@ func (s Source) marks(n int) (marks, error) {
 func marksOf(all []comment) marks {
 	m := marks{winners: map[int]int64{}}
 	for _, c := range all {
+		for _, got := range boxMark.FindAllStringSubmatch(c.Body, -1) {
+			m.box = got[1]
+		}
 		round := 0
 		for _, got := range mark.FindAllStringSubmatch(c.Body, -1) {
 			switch got[1] {
@@ -213,7 +218,7 @@ func (s Source) finalize(n int) error {
 // wins; the other answers false and changes nothing in dir.
 func (s Source) takeOverStuck(dir string, st Status, checkout bool) (took bool, err error) {
 	body := fmt.Sprintf("<!-- se:takeover %d -->\nTaken over: %s, longer than the %s lease. A new box continues the branch and its PR.",
-		st.Takeover.Count, st.since(), Lease)
+		st.Takeover.Count, st.since(), Lease) + s.boxLine()
 	if won, err := s.markTakeover(st.Number, st.Takeover.Count, body); err != nil || !won {
 		return false, err
 	}

@@ -49,8 +49,8 @@ and only then leaves.**
 3. **The coordination skill fixes what has a known remedy,** in the order
    the command lists, each with the mechanism that already exists:
    - a conflicted, red or stalled claim, or a claim with no PR, is taken
-     over: `se issue pull --take <n>` checks its branch out as it stands, and
-     the box lands it as the coordination skill says;
+     over: `se issue pull --take <n> --worktree` fetches its branch as it
+     stands, and the box lands it as the coordination skill says;
    - a green PR with auto-merge off gets auto-merge turned on (`se fleet fix`);
    - a leftover claim whose issue is closed and whose branch has no open PR
      is left to the prune workflow, which deletes the branch (see **Pruning**
