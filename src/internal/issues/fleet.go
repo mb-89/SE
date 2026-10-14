@@ -686,7 +686,7 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 		return Issue{}, false, fmt.Errorf("#%d is final and stuck (%s), so it waits on #%d, an issue for a person", st.Number, f.What, held.Number)
 	}
 	heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, f.head)
-	body := fmt.Sprintf("Taken over: %s at %s. This box merges main into %s, makes it green and lands it again.", f.What, f.head, Branch(st.Number)) + heads
+	body := fmt.Sprintf("Taken over: %s at %s. This box merges main into %s, makes it green and lands it again.", f.What, f.head, Branch(st.Number)) + heads + s.boxLine()
 	won, err := s.markTakeover(st.Number, k, body)
 	if err != nil {
 		return Issue{}, false, err
