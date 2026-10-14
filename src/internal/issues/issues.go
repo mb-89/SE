@@ -532,8 +532,8 @@ func takeOrder(all []Status, want int) []Status {
 // stands. A parent's branch claims its whole
 // tree; where it exists already, Take picks the tree up from that claim. A
 // claimed leaf named as want, at any depth, is taken over where se fleet
-// check finds it stuck (see takeOverClaim). ok is false when nothing was left
-// to take.
+// check finds it stuck (see takeOverClaim), or where it is stuck past the
+// lease. ok is false when nothing was left to take.
 func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 	all, err := s.Survey()
 	if err != nil {
@@ -554,7 +554,9 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 			if st.claimed && st.Takeover == nil {
 				return s.takeOverClaim(dir, st)
 			}
-			if st.Above != 0 {
+			// A stuck leaf is taken over at any depth, as se fleet check's
+			// remedy names it; other work inside a tree is taken with --in.
+			if st.Above != 0 && st.Takeover == nil {
 				return Issue{}, false, fmt.Errorf("#%d is a sub-issue of #%d; it is taken with --in", want, st.Above)
 			}
 			if !st.Takeable() {
