@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mb-89/SE/src/internal/io/github"
 )
@@ -40,7 +41,14 @@ func TestTheRealGitHubSpeaksRest(t *testing.T) {
 		mu.Lock()
 		said = append(said, strings.TrimSpace(fmt.Sprintf("%s %s %s %s", r.Header.Get("Authorization"), r.Method, r.URL.RequestURI(), body)))
 		mu.Unlock()
+		w.Header().Set("X-Ratelimit-Limit", "15000")
+		w.Header().Set("X-Ratelimit-Remaining", "14995")
+		w.Header().Set("X-Ratelimit-Reset", "1791988287")
 		switch q := r.URL.RequestURI(); {
+		case strings.Contains(q, "spent"):
+			w.Header().Set("X-Ratelimit-Remaining", "0")
+			w.WriteHeader(403)
+			_, _ = fmt.Fprint(w, `{"message":"API rate limit exceeded for user ID 1."}`)
 		case strings.Contains(q, "missing"):
 			w.WriteHeader(404)
 			_, _ = fmt.Fprint(w, `{"message":"Not Found"}`)
@@ -92,9 +100,19 @@ func TestTheRealGitHubSpeaksRest(t *testing.T) {
 	if _, err := gh.GraphQL("clean", github.F("id", "PR_1")); err == nil || !strings.Contains(err.Error(), "clean status") {
 		t.Fatalf("a GraphQL error: %v", err)
 	}
+	if n, r := github.Metered(gh); n != 10 || r != (github.Rate{Known: true, Limit: 15000, Remaining: 14995, Reset: time.Unix(1791988287, 0).UTC()}) {
+		t.Fatalf("after 10 requests Real counts %d and reads the quota %+v", n, r)
+	}
 	_, err := gh.Get("repos/o/r/issues/missing")
 	if github.Status(err) != 404 || !strings.Contains(err.Error(), "Not Found (HTTP 404)") {
 		t.Fatalf("%v", err)
+	}
+	if _, limited := github.RateLimited(err); limited {
+		t.Fatalf("a 404 is no rate limit: %v", err)
+	}
+	_, err = gh.Get("repos/o/r/spent")
+	if r, limited := github.RateLimited(err); !limited || github.Status(err) != 403 || r.Remaining != 0 || !r.Reset.Equal(time.Unix(1791988287, 0)) {
+		t.Fatalf("a spent quota: %+v %v", r, err)
 	}
 	_, err = gh.Send("POST", "repos/o/r/issues/invalid", github.F("body", "b"))
 	if github.Status(err) != 422 || !strings.Contains(err.Error(), "Validation Failed: already linked") {
@@ -115,6 +133,7 @@ func TestTheRealGitHubSpeaksRest(t *testing.T) {
 		`token tok POST /graphql {"query":"mutation","variables":{"id":"PR_1"}}`,
 		`token tok POST /graphql {"query":"clean","variables":{"id":"PR_1"}}`,
 		"token tok GET /repos/o/r/issues/missing",
+		"token tok GET /repos/o/r/spent",
 		`token tok POST /repos/o/r/issues/invalid {"body":"b"}`,
 		"token tok GET /repos/o/r/login",
 	}

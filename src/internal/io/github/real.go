@@ -87,6 +87,24 @@ type rest struct {
 	seen   map[string]cached
 	// slots holds a token per request open, InFlight at most.
 	slots chan struct{}
+	// requests counts the requests made; rate is the quota GitHub's last
+	// answer gave (Meter).
+	requests int
+	rate     Rate
+}
+
+// Requests answers how many requests went to GitHub, a List's pages each one.
+func (r *rest) Requests() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.requests
+}
+
+// Rate answers the quota as GitHub's last answer gave it.
+func (r *rest) Rate() Rate {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rate
 }
 
 type cached struct {
@@ -225,10 +243,23 @@ func (r *rest) do(method, path string, body []byte) ([]byte, error) {
 	r.slots <- struct{}{}
 	defer func() { <-r.slots }()
 	resp, err := r.client.Do(req)
+	r.mu.Lock()
+	r.requests++
+	r.mu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
+	h := map[string]string{}
+	for k := range resp.Header {
+		h[strings.ToLower(k)] = resp.Header.Get(k)
+	}
+	rate := rateOf(h)
+	if rate.Known {
+		r.mu.Lock()
+		r.rate = rate
+		r.mu.Unlock()
+	}
 	out, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", method, path, err)
@@ -237,9 +268,9 @@ func (r *rest) do(method, path string, body []byte) ([]byte, error) {
 	case resp.StatusCode == http.StatusNotModified && had.etag != "":
 		return had.body, nil
 	case resp.StatusCode == http.StatusUnauthorized:
-		return nil, &Error{Status: resp.StatusCode, Message: notSignedIn}
+		return nil, &Error{Status: resp.StatusCode, Message: notSignedIn, Rate: rate}
 	case resp.StatusCode/100 != 2:
-		return nil, &Error{Status: resp.StatusCode, Message: fmt.Sprintf("%s %s: %s", method, path, refusal(out))}
+		return nil, &Error{Status: resp.StatusCode, Message: fmt.Sprintf("%s %s: %s", method, path, refusal(out)), Rate: rate}
 	}
 	if etag := resp.Header.Get("ETag"); method == "GET" && etag != "" {
 		r.mu.Lock()

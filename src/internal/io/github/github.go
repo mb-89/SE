@@ -52,6 +52,8 @@ type Error struct {
 	Status int
 	// Message is what GitHub said, after the request it refused.
 	Message string
+	// Rate is what GitHub said of the quota with the refusal.
+	Rate Rate
 }
 
 func (e *Error) Error() string {

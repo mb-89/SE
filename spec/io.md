@@ -47,6 +47,38 @@ verb) as it ends. A snapshot is the answers of a recording
 (`github.Replay`) answers each read the snapshot holds and sends the rest,
 and every write, to GitHub itself.
 
+## Living within GitHub's rate limits
+
+Every box and every person's session reach GitHub with the owner's one
+token, so the fleet shares one quota of requests an hour (15,000), and
+GitHub's secondary limits on creating content quickly. `se` hands every
+command its GitHub wrapped in `github.Limit` (`src/internal/io/github/limit.go`),
+with the github instance's config ([index.md](index.md#the-wiring-file)):
+
+- **It backs off when GitHub says so.** Real reads `x-ratelimit-limit`,
+  `x-ratelimit-remaining`, `x-ratelimit-reset` and `retry-after` from every
+  answer, and the fake keeps a quota of its own (`Quota`,
+  15,000 an hour unless a case sets one, and `ContentLimit`). On a 403 or 429
+  that names a rate limit, the module says so on stderr at once, with how
+  long and until when (principle 9), waits for the reset (or the
+  retry-after; a minute where GitHub says neither) and asks again. Each wait
+  is at least a second and twice the one before, so it never asks in a tight
+  loop. A wait that would take the command past `github/config/wait-ceiling`
+  all told fails the request at once, saying when the reset comes. A 403 for
+  anything else, a permission, is no reason to wait.
+- **It paces writes.** Every write (`Send`, `GraphQL`) goes out one at a
+  time, at least `github/config/write-spacing` after the last ended, so a
+  sweep that comments on or closes many issues stays under GitHub's limit on
+  creating content. The spacing holds within one `se` command.
+- **It counts the fleet's requests.** Real and the fake each count their
+  requests and keep the quota GitHub's last answer gave (`github.Meter`).
+  Each command appends the requests it made to its workspace's ledger,
+  `.se/.runtime/requests.log`; `se issue land` adds up its checkout's into
+  the landing facts ([issues.md](issues.md#landing-answers)), the retro
+  reports them per closed issue ([retro.md](retro.md)), and `se fleet check`
+  says when the quota left falls below `github/config/quota-floor` percent
+  of the hour's ([coordination.md](coordination.md)).
+
 ## The layout
 
 Each I/O module is one package, `src/internal/io/<name>`, holding four parts:

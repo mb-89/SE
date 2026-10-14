@@ -30,6 +30,11 @@ func (n *noting) GraphQL(query string, vars ...github.Field) ([]byte, error) {
 	return n.GitHub.GraphQL(query, vars...)
 }
 
+// Requests and Rate answer what the GitHub it wraps counted (github.Meter).
+func (n *noting) Requests() int { r, _ := github.Metered(n.GitHub); return r }
+
+func (n *noting) Rate() github.Rate { _, r := github.Metered(n.GitHub); return r }
+
 // wrote marks the command as one that changed GitHub without a write through
 // it, such as a claim's push of its branch.
 func (c *Call) wrote() {
