@@ -52,12 +52,11 @@ func checkout(t *testing.T, branch string) string {
 // onMachine hands every call m, for this test.
 func onMachine(t *testing.T, m proc.Procs) {
 	t.Helper()
-	was := machine
-	machine = m
-	t.Cleanup(func() { machine = was })
+	worldOf(t).Proc = m
 }
 
 func TestAtSessionStartACheckoutOffMainIsLeftAloneInOneLine(t *testing.T) {
+	t.Parallel()
 	r := session(t, "update", "--session-start", "--repo", checkout(t, "feature"))
 	if !strings.HasPrefix(r.Text, "SE left its checkout as it is") || strings.Contains(r.Text, "\n") || r.Reload {
 		t.Fatalf("%+v", r)
@@ -65,6 +64,7 @@ func TestAtSessionStartACheckoutOffMainIsLeftAloneInOneLine(t *testing.T) {
 }
 
 func TestAtSessionStartAFailedPullDoesNotFail(t *testing.T) {
+	t.Parallel()
 	code, out, _ := se(t, "--session", "--workspace", t.TempDir(), "update", "--session-start", "--repo", checkout(t, "main"))
 	if code != 0 || !strings.Contains(out, "the session goes on with the SE it has") || strings.Contains(out, `"reload"`) {
 		t.Fatalf("exit %d, %q", code, out)
@@ -72,6 +72,7 @@ func TestAtSessionStartAFailedPullDoesNotFail(t *testing.T) {
 }
 
 func TestOutsideSessionStartAFailedPullFails(t *testing.T) {
+	t.Parallel()
 	code, out, _ := se(t, "--session", "--workspace", t.TempDir(), "update", "--repo", checkout(t, "main"))
 	if code != 1 || !strings.Contains(out, "se update: git pull") {
 		t.Fatalf("exit %d, %q", code, out)
@@ -79,12 +80,13 @@ func TestOutsideSessionStartAFailedPullFails(t *testing.T) {
 }
 
 func TestAnUpdateOverARemoteConnectionDoesNotReload(t *testing.T) {
-	t.Setenv(remoteEnv, "true")
-	if reloads(true) {
+	t.Parallel()
+	setenv(t, remoteEnv, "true")
+	if reloads(&Call{Session: true, World: *worldOf(t)}) {
 		t.Fatal("a remote session was asked to reload")
 	}
-	t.Setenv(remoteEnv, "")
-	if !reloads(true) || reloads(false) {
+	setenv(t, remoteEnv, "")
+	if !reloads(&Call{Session: true, World: *worldOf(t)}) || reloads(&Call{World: *worldOf(t)}) {
 		t.Fatal("only a local session reloads")
 	}
 }

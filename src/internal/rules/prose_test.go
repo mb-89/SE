@@ -23,6 +23,7 @@ func sorted(found []string) string {
 }
 
 func TestEverySeCommandProseNamesExists(t *testing.T) {
+	t.Parallel()
 	found := checkIn(t, &rules.Repo{Commands: registry}, "se-command", map[string]string{
 		"README.md": "Run `se issue pull --take` or `/se issue land --answers F`.\n" +
 			"Not `se issue take`, nor `./src/plugin/bin/se issue pull --tak=5`.\n" +
@@ -47,6 +48,7 @@ func TestEverySeCommandProseNamesExists(t *testing.T) {
 }
 
 func TestEveryPathAndLinkProseNamesExists(t *testing.T) {
+	t.Parallel()
 	found := checkIn(t, &rules.Repo{Ignored: func(p string) bool { return p == "src/bin/se" }}, "repo-path", map[string]string{
 		"README.md": "See `src/a/b.go`, `./src/a/`, `src/bin/se` and `src/a/gone.go`.\n" +
 			"Not paths: `origin/main`, `src/<name>/x.md`, `/opt/se`, `git diff a..b`, `issue-<n>`.\n" +
@@ -68,6 +70,7 @@ func TestEveryPathAndLinkProseNamesExists(t *testing.T) {
 }
 
 func TestAManifestIsWhatItsOwnersMake(t *testing.T) {
+	t.Parallel()
 	gen := func(name, at string) (string, error) {
 		if name != "list" {
 			return "", errors.New("no such manifest")
@@ -90,6 +93,7 @@ func TestAManifestIsWhatItsOwnersMake(t *testing.T) {
 }
 
 func TestManifestsRewritesEverySection(t *testing.T) {
+	t.Parallel()
 	text := "# A\n<!-- se:manifest x -->\nstale\n<!-- /se:manifest -->\nkept\n<!-- se:manifest x -->\n<!-- /se:manifest -->\n"
 	out, found := rules.Manifests("a.md", []byte(text), func(string) (string, error) { return "made\n", nil })
 	want := "# A\n<!-- se:manifest x -->\nmade\n<!-- /se:manifest -->\nkept\n<!-- se:manifest x -->\nmade\n<!-- /se:manifest -->\n"
@@ -99,6 +103,7 @@ func TestManifestsRewritesEverySection(t *testing.T) {
 }
 
 func TestEveryMarkdownFileNamesItsReader(t *testing.T) {
+	t.Parallel()
 	found := check(t, "reader", map[string]string{
 		"a.md":       "# A\n\nReader: a person meeting SE.\n\nText.\n",
 		"b.md":       "---\nname: b\n---\n\n# B\n\nReaders: the agent running it.\n",

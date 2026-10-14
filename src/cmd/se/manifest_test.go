@@ -33,6 +33,7 @@ func prose(t *testing.T, files map[string]string) string {
 const skill = "---\nname: work\ndescription: Take the next issue.\n---\n\n# Work\n\nReader: the agent running it.\n"
 
 func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
+	t.Parallel()
 	ws := prose(t, map[string]string{
 		"src/plugin/skills/work/SKILL.md": skill,
 		"spec/issues.md":                  "# Issues: how the fleet works\n\nReader: whoever changes it.\n",
@@ -62,6 +63,7 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 }
 
 func TestWriteFillsEveryManifestAndTheRulesHoldItThere(t *testing.T) {
+	t.Parallel()
 	readme := "# SE\n\nReader: a person meeting SE.\n\n<!-- se:manifest skills -->\n<!-- /se:manifest -->\n"
 	ws := prose(t, map[string]string{
 		"README.md":                       readme,
@@ -88,6 +90,7 @@ func TestWriteFillsEveryManifestAndTheRulesHoldItThere(t *testing.T) {
 }
 
 func TestTheRulesKnowSesCommands(t *testing.T) {
+	t.Parallel()
 	ws := prose(t, map[string]string{
 		"README.md": "# SE\n\nReader: a person meeting SE.\n\nRun `se issue pull --take`, not `se issue pull --tak` or `se issue take`.\n",
 	})
@@ -99,6 +102,7 @@ func TestTheRulesKnowSesCommands(t *testing.T) {
 }
 
 func TestAFolderGitIgnoresCountsThoughNoCheckoutHoldsIt(t *testing.T) {
+	t.Parallel()
 	ws := prose(t, map[string]string{
 		".gitignore": "a/bin/\n",
 		"a/x.md":     "# X\n\nReader: anyone.\n",
@@ -111,6 +115,7 @@ func TestAFolderGitIgnoresCountsThoughNoCheckoutHoldsIt(t *testing.T) {
 }
 
 func TestAManifestReadsItsOwnersFromTheDisk(t *testing.T) {
+	t.Parallel()
 	d, root := disk.NewFake(), filepath.FromSlash("/checkout")
 	put(t, d, filepath.Join(root, "spec", "issues.md"), "# Issues: how the fleet works\n")
 	put(t, d, filepath.Join(root, "src", "plugin", "skills", "work", "SKILL.md"), skill)
@@ -132,6 +137,7 @@ func TestAManifestReadsItsOwnersFromTheDisk(t *testing.T) {
 }
 
 func TestTheRulesSeeWhatGitTracksAndIgnores(t *testing.T) {
+	t.Parallel()
 	m := proc.NewFake()
 	m.Install("git", func(c proc.Cmd) int {
 		args := strings.Join(c.Args, " ")
