@@ -3,9 +3,11 @@ package rules
 import (
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"path"
+	"sort"
 	"strings"
 )
 
@@ -22,6 +24,7 @@ func init() {
 			"sleeps or waits through time, or takes clock.Real, except as " + Serial + " names; an entry there that matches nothing is refused",
 		Applies: func(p string) bool { return p == Serial || strings.HasSuffix(p, "_test.go") },
 		Check:   fastTest,
+		Fix:     parallelize,
 	})
 }
 
@@ -29,11 +32,7 @@ func fastTest(repo *Repo, p string, text []byte) []Finding {
 	if p == Serial {
 		return staleSlow(repo, text)
 	}
-	list, _, _ := repo.Read(Serial)
-	allowed := map[string]bool{}
-	for _, e := range entriesOf(list) {
-		allowed[e.file+" "+e.reach] = true
-	}
+	allowed := serialOf(repo)
 	var found []Finding
 	for _, s := range Slows(p, text) {
 		if !allowed[p+" "+s.What] {
@@ -41,6 +40,99 @@ func fastTest(repo *Repo, p string, text []byte) []Finding {
 		}
 	}
 	return found
+}
+
+// serialOf answers the entries of Serial, each "file reach".
+func serialOf(repo *Repo) map[string]bool {
+	list, _, _ := repo.Read(Serial)
+	allowed := map[string]bool{}
+	for _, e := range entriesOf(list) {
+		allowed[e.file+" "+e.reach] = true
+	}
+	return allowed
+}
+
+// parallelize makes t.Parallel() the first statement of every test in the
+// file that lacks it and Serial does not name, moving a later t.Parallel()
+// of the test's body up rather than calling it twice. A test whose *testing.T
+// has no name is left to a person, as is a file that does not parse.
+func parallelize(repo *Repo, p string, text []byte) ([]byte, bool) {
+	if p == Serial {
+		return text, false
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, p, text, parser.ParseComments|parser.SkipObjectResolution)
+	if err != nil {
+		return text, false
+	}
+	allowed := serialOf(repo)
+	type edit struct {
+		at, end int
+		with    string
+	}
+	var edits []edit
+	for _, d := range f.Decls {
+		fn, ok := d.(*ast.FuncDecl)
+		if !ok || !isTest(fn) || fn.Body == nil || parallelFirst(fn) || allowed[p+" "+fn.Name.Name] {
+			continue
+		}
+		names := fn.Type.Params.List[0].Names
+		if len(names) == 0 || names[0].Name == "_" {
+			continue
+		}
+		t := names[0].Name
+		for i, st := range fn.Body.List {
+			if i > 0 && isParallel(st, t) {
+				at, end := fset.Position(st.Pos()).Offset, fset.Position(st.End()).Offset
+				edits = append(edits, edit{lineStart(text, at), lineEnd(text, end), ""})
+			}
+		}
+		at := fset.Position(fn.Body.Lbrace).Offset + 1
+		with := "\n\t" + t + ".Parallel()"
+		if at >= len(text) || text[at] != '\n' {
+			with += "\n"
+		}
+		edits = append(edits, edit{at, at, with})
+	}
+	if len(edits) == 0 {
+		return text, false
+	}
+	sort.Slice(edits, func(i, j int) bool { return edits[i].at > edits[j].at })
+	out := append([]byte(nil), text...)
+	for _, e := range edits {
+		out = append(out[:e.at], append([]byte(e.with), out[e.end:]...)...)
+	}
+	formatted, err := format.Source(out)
+	if err != nil {
+		return text, false
+	}
+	return formatted, true
+}
+
+// lineStart is where the line holding at begins, when only blanks stand
+// before at on it; otherwise at.
+func lineStart(text []byte, at int) int {
+	i := at
+	for i > 0 && (text[i-1] == ' ' || text[i-1] == '\t') {
+		i--
+	}
+	if i == 0 || text[i-1] == '\n' {
+		return i
+	}
+	return at
+}
+
+// lineEnd is past the newline that ends the line holding end, when only
+// blanks follow end on it; otherwise end.
+func lineEnd(text []byte, end int) int {
+	i := end
+	for i < len(text) && (text[i] == ' ' || text[i] == '\t' || text[i] == '\r') {
+		i++
+	}
+	if i < len(text) && text[i] == '\n' {
+		return i + 1
+	}
+	return end
 }
 
 // staleSlow refuses an entry of Serial that is malformed, named twice, or
@@ -90,7 +182,7 @@ type Slow struct {
 // Message says what the finding asks for.
 func (s Slow) Message() string {
 	if s.Serial {
-		return s.What + " does not call t.Parallel first; every test runs in parallel (principle 8)"
+		return s.What + " does not call t.Parallel first; every test runs in parallel (principle 8), and se rules --fix makes it the first statement"
 	}
 	return s.What + " reaches the wall clock in a test; hand in clock.NewFake (principle 8, spec/io.md)"
 }
@@ -178,8 +270,12 @@ func parallelFirst(fn *ast.FuncDecl) bool {
 	if fn.Body == nil || len(fn.Body.List) == 0 || len(fn.Type.Params.List[0].Names) == 0 {
 		return false
 	}
-	t := fn.Type.Params.List[0].Names[0].Name
-	st, ok := fn.Body.List[0].(*ast.ExprStmt)
+	return isParallel(fn.Body.List[0], fn.Type.Params.List[0].Names[0].Name)
+}
+
+// isParallel says whether the statement is <t>.Parallel().
+func isParallel(stmt ast.Stmt, t string) bool {
+	st, ok := stmt.(*ast.ExprStmt)
 	if !ok {
 		return false
 	}

@@ -61,8 +61,8 @@ What earlier versions taught, and how this design answers it:
   - the [rule checks](#the-rule-checks), each broken one with what broke
     it;
   - **counts:** conflicts (conflict takeovers), takeovers, `se-person` flags,
-    CI reruns, `by-hand` answers that are not "none", and the median time from
-    claim to merge;
+    CI reruns, `by-hand` answers that are not "none", the GitHub requests the
+    landing facts counted, and the median time from claim to merge;
   - **scripts:** every file added under `src/scripts/` in the window, grouped
     by the word its name starts with, each with the comment line that says why;
   - **the previous retro's findings:** did their issues close, and did their
@@ -109,8 +109,10 @@ What earlier versions taught, and how this design answers it:
   resumed retro's stale claim is taken over like any stuck claim.
 - **The retro reviews itself**, every time, as a fixed part of the report:
   - **Metrics against the previous retros:** conflicts, takeovers, CI reruns,
-    `se-person` flags, `by-hand` mentions and time from claim to merge, each
-    per closed issue. `se retro collect` computes them and stores them in the
+    `se-person` flags, `by-hand` mentions, duplicates (issues closed as
+    duplicate, and issues for a person made in the window beyond the first
+    for each issue they hold back), GitHub requests and time from claim to
+    merge, each per closed issue. `se retro collect` computes them and stores them in the
     report's machine-readable block, so the trend is a number, not an
     impression; the draft tabulates them against every earlier retro.
   - **Did the last retro's fixes help?** For each of its findings: did its

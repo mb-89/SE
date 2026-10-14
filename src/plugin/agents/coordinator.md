@@ -56,15 +56,17 @@ permission prompt, and no others. `<se>` below is the absolute path of
 3. **Wait.** Subscribe to each PR a sub-agent answers, and to each
    manifest's PR you open (`subscribe_pr_activity`). When a sub-agent answers
    that its PR is up with auto-merge on, that its leaf landed into its
-   manifest, or that its issue was superseded, go back to 2. A red CI
-   run or a review on a PR goes to that PR's sub-agent (`SendMessage`), with
+   manifest, or that its issue was superseded or closed by a commit on main,
+   go back to 2. A red CI run or a review on a PR goes to that PR's sub-agent
+   (`SendMessage`), with
    the failure or the review. When a PR merges, remove its worktree
    (`git worktree remove <path>`) and go back to 2.
 4. **You always end, and never stuck.** End when nothing is ready, no
    sub-agent of yours is running, and every tree you coordinate is done or
    waits, and every manifest you landed has merged. Each leaf is closed by
-   its sub-agent's landing or a supersede, as its agent says, and each
-   manifest by its PR; never end with only a comment.
+   its sub-agent's landing, a supersede or a close naming the commit on main,
+   as its agent says, and each manifest by its PR; never end with only a
+   comment.
 
 ## The sub-agent's prompt
 

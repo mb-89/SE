@@ -25,7 +25,7 @@ func closedJSON(n int, reason, closed, body string, extra string) string {
 
 func landing(t *testing.T, n int, answers map[string]string, claimed time.Time) string {
 	t.Helper()
-	body, err := Landed{Issue: n, Answers: answers, Facts: Facts{Claimed: claimed, Landed: claimed.Add(time.Hour)}}.Comment(rqs)
+	body, err := Landed{Issue: n, Answers: answers, Facts: Facts{Claimed: claimed, Landed: claimed.Add(time.Hour), Requests: 40}}.Comment(rqs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,12 +94,20 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 		"repos/o/r/issues/25/comments?per_page=100": `[]`,
 		"repos/o/r/issues/26/comments?per_page=100": `[]`,
 	}
+	// #31 and #32 hold #24 back, #33 holds #23 back; #34 holds #24 too, but
+	// before the window, and #35 is no hold: one hold minted again.
+	person := `[` +
+		`{"number":31,"title":"Decide how #24 goes on: t24","created_at":"` + at(2, 1) + `"},` +
+		`{"number":32,"title":"Decide how #24 goes on: t24","created_at":"` + at(2, 2) + `"},` +
+		`{"number":33,"title":"Decide how #23 goes on: t23","created_at":"` + at(2, 3) + `"},` +
+		`{"number":34,"title":"Decide how #24 goes on: t24","created_at":"2026-09-20T00:00:00Z"},` +
+		`{"number":35,"title":"Set up a token","created_at":"` + at(2, 4) + `"}]`
 	closed := []string{
 		closedJSON(23, "completed", at(2, 12), "work\n\n"+NewMark, ""),
 		// The mark is bounded by creation, #91 brought it at 10:30 on the 3rd:
 		// #24 and #26 lack it but were made before, #25 lacks it and was made after.
 		closedJSON(24, "completed", at(3, 10), "by hand", `,"created_at":"`+at(2, 0)+`"`),
-		closedJSON(25, "not_planned", at(3, 11), "by hand", `,"created_at":"2026-10-03T10:45:00Z"`),
+		closedJSON(25, "duplicate", at(3, 11), "by hand", `,"created_at":"2026-10-03T10:45:00Z"`),
 		closedJSON(26, "completed", at(3, 12), "by hand", `,"created_at":"`+at(2, 0)+`","sub_issues_summary":{"total":2,"completed":2}`),
 	}
 	commits := `[{"sha":"x99","commit":{"message":"pushed straight\n\nto main"}},{"sha":"m51","commit":{"message":"m"}},{"sha":"m50","commit":{"message":"m"}}]`
@@ -113,6 +121,7 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 			a[fmt.Sprintf("repos/o/r/pulls/%d/files?per_page=100", n)] = `[]`
 		}
 		a["repos/o/r/issues?labels=se&state=closed&per_page=100"] = "[" + strings.Join(closed, ",") + "]"
+		a["repos/o/r/issues?labels=se-person&state=all&per_page=100"] = person
 		a["repos/o/r/commits?sha=main&per_page=100&until=2026-10-13T12:00:00Z"] = commits[:len(commits)-1] + `,{"sha":"m49","commit":{"message":"m"}},{"sha":"first","commit":{"message":"the first commit"}}]`
 		return a
 	}
@@ -125,6 +134,7 @@ func retroRepo(t *testing.T, later bool, body string) map[string]string {
 	a["repos/o/r/issues/21"] = `{"number":21,"state":"closed","state_reason":"completed"}`
 	a["repos/o/r/issues/22"] = `{"number":22,"state":"open"}`
 	a["repos/o/r/issues?labels=se&state=closed&per_page=100"+since] = "[" + strings.Join(closed, ",") + "]"
+	a["repos/o/r/issues?labels=se-person&state=all&per_page=100"+since] = person
 	a["repos/o/r/commits?sha=main&per_page=100"+since+"&until=2026-10-13T12:00:00Z"] = commits
 	return a
 }
@@ -184,7 +194,7 @@ func TestEachRuleCheck(t *testing.T) {
 		"ci PR #51",             // its last run failed; #50's rerun passed
 		"outside-pr commit x99", // no merged PR made it
 		"mark #25",              // made after #91 brought the mark, and lacks it
-		"answers #24",           // completed leaf, no answers; #25 not planned, #26 a parent
+		"answers #24",           // completed leaf, no answers; #25 a duplicate, #26 a parent
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%q", got)
@@ -236,12 +246,23 @@ func TestTheCountsAndScripts(t *testing.T) {
 	t.Parallel()
 	c := collect(t, true)
 	want := Metrics{
-		"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1,
-		"conflicts_per_issue": 0.25, "takeovers_per_issue": 0.25, "ci_reruns_per_issue": 0.25, "person_flags_per_issue": 0.25, "by_hand_per_issue": 0.25,
+		"closed": 4, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1, "duplicates": 2, "requests": 40,
+		"conflicts_per_issue": 0.25, "takeovers_per_issue": 0.25, "ci_reruns_per_issue": 0.25, "person_flags_per_issue": 0.25, "by_hand_per_issue": 0.25, "duplicates_per_issue": 0.5, "requests_per_issue": 10,
 		"claim_to_merge_minutes": 90,
 	}
 	if !reflect.DeepEqual(c.Metrics, want) {
 		t.Fatalf("%v", c.Metrics)
+	}
+	// The draft shows the fleet's GitHub requests per closed issue, from the
+	// landing facts.
+	draft, err := c.Draft(rqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"| requests | 40 | 10 |", "GitHub requests: 10 per closed issue, counted by the landing facts of 1 of the 4 closed issues."} {
+		if !strings.Contains(draft, line) {
+			t.Errorf("the draft does not say %q:\n%s", line, draft)
+		}
 	}
 	if want := []Script{{"src/scripts/check-claims.sh", 50, "Lists claims with no PR, since fleet check had no such view.", "check"}}; !reflect.DeepEqual(c.Scripts, want) {
 		t.Fatalf("%+v", c.Scripts)
@@ -303,6 +324,9 @@ func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
 		"| closed | 2 | 4 | better (+2) |",
 		"| ci_reruns_per_issue | 0 | 0.25 | worse (+0.25) |",
 		"| takeovers | – | 1 | new |",
+		"| duplicates_per_issue | – | 0.5 | new |",
+		"| duplicates | 2 | 0.5 |",
+		"Duplicates: 1 closed as duplicate, 1 issues for a person minted again for an issue one already held back.",
 	} {
 		if !strings.Contains(draft, want) {
 			t.Errorf("the draft lacks %q", want)
