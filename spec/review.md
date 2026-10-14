@@ -70,7 +70,7 @@ follows them; `se review brief` and `se issue review` (in
    mints an issue for a person that says what failed, and links the failing
    issue as blocked by it ([Stuck work](issues.md#stuck-work)); closing it
    gives the work back for a fresh attempt. Failing again is:
-   - stuck, or its PR conflicted, again: the issue itself waits;
+   - stuck again: the issue itself waits (a conflict is no failure, [The rules](issues.md#the-rules));
    - its re-review finds the same problem: the finding says it `repeats` the
      earlier blocker, and the gate, which holds that closed issue, waits (an
      open issue is what leaves the queue).

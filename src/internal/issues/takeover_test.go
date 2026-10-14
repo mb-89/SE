@@ -95,8 +95,8 @@ func TestADirtyPRIsTakenOverBeforeNewWork(t *testing.T) {
 	if c := commentsAt(t, g, 7); len(c) != 1 || !strings.Contains(c[0].Body, "<!-- se:takeover 1 -->") || !strings.Contains(c[0].Body, "<!-- se:takeover-head abc -->") {
 		t.Fatalf("comments %+v", c)
 	}
-	// The takeover makes #7 final.
-	if w := g.Writes(); w[len(w)-1] != "POST repos/o/r/issues/7/labels" || !labelled(t, g, 7, FinalLabel) {
+	// A conflict is no failure: the takeover does not make #7 final.
+	if w := g.Writes(); contains(w, "POST repos/o/r/issues/7/labels") || labelled(t, g, 7, FinalLabel) {
 		t.Fatalf("writes %q", w)
 	}
 	// Named with --take N, the issue named is taken, and no PR is asked.
@@ -156,44 +156,20 @@ func finalSeven(t *testing.T, g *github.Fake) {
 	seed(t, g, map[string]string{listPath: `[` + open(5, "new work") + `,{"number":7,"title":"old work","state":"open","html_url":"u7","labels":[{"name":"se"},{"name":"se-final"}]}]`})
 }
 
-func TestASecondConflictTakeoverWaitsOnAnIssueForAPerson(t *testing.T) {
+func TestAFinalIssueInConflictIsTakenOverAgain(t *testing.T) {
 	t.Parallel()
-	_, a, _ := boxes(t)
+	a := claimed7(t)
 	g := newPulls(t, atNow(), pr70("false", "dirty"))
 	finalSeven(t, g)
-	// The first takeover found head 0ld; the PR conflicts again at abc.
+	// The first takeover found head 0ld; the PR conflicts again at abc. Main
+	// moved, which is no failure: #7 is taken over again, not held.
 	said(t, g, "Taken over.\n<!-- se:takeover 1 -->\n<!-- se:takeover-head 0ld -->")
-	s := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}
-	took, ok, err := s.Take(a, 0)
-	if err != nil || !ok || took.Number != 5 {
+	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
+	if err != nil || !ok || took.Number != 7 || took.Takeover == nil || took.Takeover.Count != 2 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	// #7 itself is not given to a person: an issue for one, #72 after PR #71, blocks it.
-	writes := g.Writes()
-	for _, want := range []string{
-		"POST repos/o/r/issues/72/assignees",
-		"POST repos/o/r/issues/7/dependencies/blocked_by",
-		"DELETE repos/o/r/issues/7/labels/se-final",
-	} {
-		if !contains(writes, want) {
-			t.Errorf("not written: %s (writes %q)", want, writes)
-		}
-	}
-	if labelled(t, g, 7, PersonLabel) || labelled(t, g, 7, FinalLabel) || !labelled(t, g, 72, PersonLabel) {
-		t.Fatalf("#7 was labelled for a person, or is still final: %q", writes)
-	}
-	if c := commentsAt(t, g, 7); len(c) != 2 || !strings.Contains(c[1].Body, "blocked by #72") || !strings.HasSuffix(c[1].Body, "<!-- se:resume -->") {
-		t.Fatalf("comments %+v", c)
-	}
-	// Blocked by #72, #7's claim waits, and is not stuck.
-	all, err := s.Survey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, st := range all {
-		if st.Number == 7 && st.Why != "issue-7 waits: blocked by #72" {
-			t.Fatalf("%+v", st)
-		}
+	if w := g.Writes(); contains(w, "POST repos/o/r/issues") || contains(w, "POST repos/o/r/issues/7/dependencies/blocked_by") {
+		t.Fatalf("a conflict minted a hold: %q", w)
 	}
 }
 
@@ -224,18 +200,19 @@ func TestOfTwoBoxesTakingOverAtOnceTheFirstMarkerWins(t *testing.T) {
 	}
 }
 
-func TestAConflictAfterAStuckTakeoverGoesToAPerson(t *testing.T) {
+func TestAConflictAfterAStuckTakeoverIsTakenOver(t *testing.T) {
 	t.Parallel()
-	_, a, _ := boxes(t)
+	a := claimed7(t)
 	g := newPulls(t, atNow(), pr70("false", "dirty"))
-	// #7 was taken over once already, stuck, so it is final; its PR now conflicts.
+	// #7 was taken over once already, stuck, so it is final; its PR now
+	// conflicts, which is no failure.
 	finalSeven(t, g)
 	said(t, g, "<!-- se:takeover 1 -->\nTaken over: nothing was pushed.")
 	took, ok, err := Source{Proc: machine, Repo: repo, GitHub: g, Clock: atNow()}.Take(a, 0)
-	if err != nil || !ok || took.Number != 5 {
+	if err != nil || !ok || took.Number != 7 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
-	if c := commentsAt(t, g, 7); len(c) != 2 || !strings.HasPrefix(c[1].Body, "<!-- se:person -->\nPR #70 conflicts with main on its final attempt") {
+	if c := commentsAt(t, g, 7); len(c) != 2 || strings.Contains(c[1].Body, "<!-- se:person -->") {
 		t.Fatalf("comments %+v", c)
 	}
 }

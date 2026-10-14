@@ -368,3 +368,33 @@ func TestResumeResetsTheTakeoverCount(t *testing.T) {
 		t.Fatalf("the survey flagged it again: %q", w)
 	}
 }
+
+func TestAnIssueIsHeldAtMostOnce(t *testing.T) {
+	t.Parallel()
+	// Two boxes sweep at once and both find #5 final and stuck: the second
+	// hold reuses the first instead of minting another issue for a person.
+	g := newHub(t, map[string]string{
+		listPath:    list(node(5, 0, FinalLabel), node(6, 0)),
+		refsPath:    refs(5),
+		activity(5): pushed(stale),
+	})
+	s := g.source()
+	i := Issue{Number: 5, Title: "t5", URL: "u5"}
+	first, err := s.hold(i, "Stuck once.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.hold(i, "Stuck once.")
+	if err != nil || again.Number != first.Number {
+		t.Fatalf("held as #%d, then #%d: %v", first.Number, again.Number, err)
+	}
+	minted := 0
+	for _, w := range g.Writes() {
+		if w == "POST repos/o/r/issues" {
+			minted++
+		}
+	}
+	if minted != 1 {
+		t.Fatalf("minted %d issues for a person: %q", minted, g.Writes())
+	}
+}

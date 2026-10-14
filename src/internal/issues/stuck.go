@@ -174,11 +174,23 @@ func (s Source) toPerson(st *Status) error {
 // with a fresh attempt. This is the one link se writes on an issue that
 // already exists: no box is left to write it.
 func (s Source) hold(i Issue, reason string) (Issue, error) {
-	title := fmt.Sprintf("Decide how #%d goes on: %s", i.Number, i.Title)
+	// Boxes sweep at the same moment, so one issue is held at most once: an
+	// open hold for it is reused, and of two minted at once the lower stays.
+	prefix := fmt.Sprintf("Decide how #%d goes on", i.Number)
+	if held, ok, err := s.openHold(prefix, 0); err != nil || ok {
+		return held, err
+	}
+	title := fmt.Sprintf("%s: %s", prefix, i.Title)
 	body := fmt.Sprintf("%s\n\n#%d (%s) is blocked by this issue. Decide how it goes on, say so here, and close this issue: #%d is then back in the queue with a fresh attempt.", reason, i.Number, i.URL, i.Number)
 	made, err := s.ForPerson(title, body, 0, nil)
 	if err != nil {
 		return Issue{}, fmt.Errorf("giving #%d to a person: %w", i.Number, err)
+	}
+	if first, ok, err := s.openHold(prefix, made.Number); err != nil || ok {
+		if err == nil {
+			_, err = s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/issues/%d", s.Repo, made.Number), github.F("state", "closed"), github.F("state_reason", "duplicate"))
+		}
+		return first, err
 	}
 	if err := s.Blocking(made, []int{i.Number}); err != nil {
 		return made, err
@@ -196,6 +208,26 @@ func (s Source) hold(i Issue, reason string) (Issue, error) {
 		s.Flagged(i, reason)
 	}
 	return made, nil
+}
+
+// openHold finds the lowest open issue for a person whose title starts with
+// prefix and whose number is below before (0: any number).
+func (s Source) openHold(prefix string, before int) (Issue, bool, error) {
+	open, err := api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=100", s.Repo, PersonLabel), true)
+	if err != nil {
+		return Issue{}, false, err
+	}
+	var found *issue
+	for k := range open {
+		o := &open[k]
+		if o.PullRequest == nil && strings.HasPrefix(o.Title, prefix) && (before == 0 || o.Number < before) && (found == nil || o.Number < found.Number) {
+			found = o
+		}
+	}
+	if found == nil {
+		return Issue{}, false, nil
+	}
+	return Issue{Number: found.Number, Title: found.Title, URL: found.URL}, true, nil
 }
 
 // ForPerson creates an issue for a person, through the same code as se issue

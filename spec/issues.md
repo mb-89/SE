@@ -51,17 +51,14 @@ choice is deterministic and no prompt restates it.
   conflict. The box taking it checks out `issue-<n>` as it stands, merges
   `origin/main` into it (never a rebase, never a force-push), resolves the
   conflict and lands it again with `se issue land`.
-- **A takeover makes the issue final**: it labels it `se-final`, the single
-  record that it was taken over (see [spec/review.md](review.md), rule 5),
-  and records it as a comment carrying the marker `<!-- se:takeover N -->`
-  (stuck work writes the same marker), the human-readable record; a conflict
-  takeover also records the PR head it found, `<!-- se:takeover-head SHA -->`.
-  A PR still conflicted at that same head is a takeover in flight and is left
-  to its box. Of two boxes writing the same `N` at once, the earlier comment
-  wins and the other box deletes its own. A conflict on an issue that is
-  already `se-final` (taken over before, for a conflict or stuck, or filed by
-  a review) instead waits on an issue for a person, as a final stuck claim
-  does (below).
+- **A conflict is no failure.** Main moves while a PR waits, so a conflict
+  takeover never makes an issue final, and a final issue in conflict is taken
+  over like any other. A conflict takeover records itself as a comment
+  carrying the marker `<!-- se:takeover N -->` (stuck work writes the same
+  marker) and the PR head it found, `<!-- se:takeover-head SHA -->`. A PR
+  still conflicted at that same head is a takeover in flight and is left to
+  its box. Of two boxes writing the same `N` at once, the earlier comment
+  wins and the other box deletes its own.
 - **Waits on a person**: an issue labelled `se-person` is never ready. Only
   issues minted for a person carry it (`se issue new --person`, and the issues
   se mints below and in [retro.md](retro.md)); every other issue that needs a
@@ -143,8 +140,8 @@ person**, and leaves the agents' queue until the person has closed it.
   continues the existing branch and PR: at the top it checks `issue-<n>` out
   as it stands, inside a tree its worktree command checks it out. `se`
   records the takeover on the issue as a comment carrying the marker
-  `<!-- se:takeover <round> -->`, and labels it `se-final`, as a conflict
-  takeover does. Of two boxes taking over one issue, the first comment of the
+  `<!-- se:takeover <round> -->`, and labels it `se-final`, the single record
+  that it was taken over stuck (see [spec/review.md](review.md), rule 5). Of two boxes taking over one issue, the first comment of the
   round wins; the other deletes its own and moves on. A takeover renews the
   lease.
 - **Final and stuck: an issue for a person.** A leaf labelled `se-final`
@@ -156,7 +153,9 @@ person**, and leaves the agents' queue until the person has closed it.
   #n gets a comment saying why, with the markers `<!-- se:person -->` and
   `<!-- se:resume -->`, and loses `se-final`: once the person closes their
   issue, #n is back in the queue for a fresh attempt. This sweep runs inside
-  every `se issue pull`. A claim waiting on its blockers is not stuck; once
+  every `se issue pull`. Boxes sweep at the same moment, so #n is held at most
+  once: an open hold for it is reused, and of two minted at once the lower
+  stays and the other closes as its duplicate. A claim waiting on its blockers is not stuck; once
   they close, its old push makes it stuck at once, and the next box takes it
   over. `se issue pull` never offers an `se-person` issue, or a tree
   containing one (at the top, nor with `--in`). #n's dependents stay blocked

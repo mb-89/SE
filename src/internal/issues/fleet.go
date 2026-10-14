@@ -693,7 +693,10 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 		return Issue{}, false, err
 	}
 	k := m.takeovers + 1
-	if st.Final {
+	// A conflict is no failure: it never makes an issue final, nor holds a
+	// final one.
+	conflict := f.Kind == ConflictedPR
+	if st.Final && !conflict {
 		reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s.", FinalLabel, f.What)
 		held, err := s.hold(st.Issue, reason)
 		if err != nil {
@@ -710,8 +713,10 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 	if !won {
 		return Issue{}, false, fmt.Errorf("#%d was taken over by another box just now", st.Number)
 	}
-	if err := s.finalize(st.Number); err != nil {
-		return Issue{}, false, err
+	if !conflict {
+		if err := s.finalize(st.Number); err != nil {
+			return Issue{}, false, err
+		}
 	}
 	if err := s.pickUp(dir, st.Number); err != nil {
 		return Issue{}, false, err

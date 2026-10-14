@@ -372,14 +372,13 @@ func TestThirteenOctoberTheGuardBlockedByWhatItGuardsIsTheStalledRoot(t *testing
 		f.Remedy != "se issue pull --take 17, merge origin/main into issue-17, make it green, se issue land" {
 		t.Fatalf("%+v", f)
 	}
-	// Its remedy, run: the takeover was made once already, so #17 is
-	// se-final and waits on an issue for a person.
+	// Its remedy, run: #17 is final, but a conflict is no failure, so it is
+	// taken over again (the checkout fails in this bare folder), never held.
 	_, _, err := Source{Proc: machine, Repo: repo, GitHub: w, Clock: atNow()}.Take(t.TempDir(), 17)
-	if err == nil || !strings.Contains(err.Error(), "an issue for a person") {
+	if err != nil && strings.Contains(err.Error(), "for a person") {
 		t.Fatalf("%v", err)
 	}
-	// The issue for the person is #171, after PR #170.
-	if by := linksOf(t, w.Fake, links(17)); !reflect.DeepEqual(by, []int{171}) || labelled(t, w, 17, PersonLabel) || !labelled(t, w, 171, PersonLabel) {
+	if by := linksOf(t, w.Fake, links(17)); len(by) != 0 || labelled(t, w, 17, PersonLabel) {
 		t.Fatalf("#17 is blocked by %v; writes %q", by, w.Writes())
 	}
 }
