@@ -19,6 +19,9 @@ type Takeover struct {
 	Count int `json:"count"`
 	// Stale says what made the claim stuck: nothing pushed for how long.
 	Stale string `json:"stale,omitempty"`
+	// Answers is the answers file the take wrote back from the issue's last
+	// landing comment (see RestoreAnswers); empty where it wrote none.
+	Answers string `json:"answers,omitempty"`
 }
 
 // pause is the wait before asking GitHub again for a mergeability it has not
