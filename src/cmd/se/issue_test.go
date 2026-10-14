@@ -905,6 +905,9 @@ func TestATakeoverWritesBackTheLandingAnswersBesideItsWorktree(t *testing.T) {
 		"repos/o/r/pulls?head=o:issue-6&base=main&state=open&per_page=100": `[{"number":90,"html_url":"p90","head":{"ref":"issue-6","sha":"abc"},"base":{"ref":"main"}}]`,
 		"repos/o/r/pulls/90":                            `{"number":90,"html_url":"p90","mergeable":false,"mergeable_state":"dirty","head":{"ref":"issue-6","sha":"abc"},"base":{"ref":"main"}}`,
 		"repos/o/r/commits/abc/check-runs?per_page=100": `{"check_runs":[{"name":"rules","status":"completed","conclusion":"failure"},{"name":"check","status":"in_progress"}]}`,
+		"repos/o/r/compare/main...issue-6?per_page=100": `{"commits":[{"sha":"0123456789ab","commit":{"message":"Merge origin/issue-4 into issue-6"}}]}`,
+		"repos/o/r/issues/4":                            `{"number":4,"state":"closed"}`,
+		"repos/o/r/commits/0123456789ab":                `{"files":[{"filename":"spec/a.md"},{"filename":"src/b.go"}]}`,
 	})
 	ws := filepath.Join(t.TempDir(), "SE")
 	c := &Call{Workspace: ws, World: *worldOf(t)}
@@ -921,6 +924,10 @@ func TestATakeoverWritesBackTheLandingAnswersBesideItsWorktree(t *testing.T) {
 	r, err := issueReply(false, false, took, true, "issue-6", "git worktree add …", "", handed{})
 	// The take says where the PR stands, from the REST API, so no box reaches for gh.
 	if err != nil || !strings.Contains(r.Text, "Where it stands: PR #90 is dirty at abc; its checks' last runs: check in_progress, rules failure; last pushed to issue-6 at 2026-01-02T03:04:05Z.") {
+		t.Fatalf("%v\n%s", err, r.Text)
+	}
+	// It names the branch's commits of another closed issue, and says to take main's side of their files.
+	if err != nil || !strings.Contains(r.Text, "Its branch holds 1 commit(s) naming another closed issue, not on main: that work closed in its own form, so where merging main conflicts in their files, take main's side.\n- 01234567 Merge origin/issue-4 into issue-6 (#4 closed): spec/a.md, src/b.go") {
 		t.Fatalf("%v\n%s", err, r.Text)
 	}
 	if err != nil || !strings.Contains(r.Text, "Its landing answers, as its last land posted them, are in "+path+": bring them up to date, and land with --answers "+path+".") {
