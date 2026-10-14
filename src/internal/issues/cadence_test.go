@@ -42,6 +42,7 @@ func cadenceRepo(n, openRetro int) map[string]string {
 var open5 = `{"number":5,"title":"t5","body":"work","state":"open","html_url":"u5"}`
 
 func TestNineClosedStartNoRetro(t *testing.T) {
+	t.Parallel()
 	_, a, _ := boxes(t)
 	gh := recorded(t, cadenceRepo(9, 0))
 	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
@@ -58,6 +59,7 @@ func TestNineClosedStartNoRetro(t *testing.T) {
 }
 
 func TestTenClosedStartAnUnattendedRetroAndTakeItFirst(t *testing.T) {
+	t.Parallel()
 	_, a, _ := boxes(t)
 	gh := recorded(t, cadenceRepo(10, 0))
 	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
@@ -76,6 +78,7 @@ func TestTenClosedStartAnUnattendedRetroAndTakeItFirst(t *testing.T) {
 }
 
 func TestAnOpenRetroBlocksASecond(t *testing.T) {
+	t.Parallel()
 	for _, n := range []int{10, 25} {
 		gh := recorded(t, cadenceRepo(n, 31))
 		took, ok, c, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.TakeRetro(t.TempDir())
@@ -89,6 +92,7 @@ func TestAnOpenRetroBlocksASecond(t *testing.T) {
 }
 
 func TestRetroIssuesAreNotCounted(t *testing.T) {
+	t.Parallel()
 	// cadenceRepo(9, …) holds a closed retro and a pull request inside the
 	// window, besides the nine: counted, they would make the cadence due.
 	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, cadenceRepo(9, 0)), Clock: atNow()}.Cadence()
@@ -98,6 +102,7 @@ func TestRetroIssuesAreNotCounted(t *testing.T) {
 }
 
 func TestTheFirstCadenceCountsTheWholeHistory(t *testing.T) {
+	t.Parallel()
 	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, map[string]string{
 		closedRetrosPath: `[]`,
 		openRetrosPath:   `[]`,
