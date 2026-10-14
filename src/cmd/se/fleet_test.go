@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
@@ -93,7 +95,7 @@ func TestFleetPruneDeletesOnlyWithApply(t *testing.T) {
 	}
 }
 
-func TestRulesOnBuildsTheMergesSeAndAnswersItsFindingsWithoutTimings(t *testing.T) {
+func TestRulesOnBuildsTheMergesSeAndAnswersItsRuleAndTestFindingsWithoutTimings(t *testing.T) {
 	t.Parallel()
 	m := proc.NewFake()
 	bin := filepath.Join("/wt", ".se", ".runtime", "se-rules")
@@ -106,11 +108,26 @@ func TestRulesOnBuildsTheMergesSeAndAnswersItsFindingsWithoutTimings(t *testing.
 	if err != nil || got != "se: 1 findings:\nx_test.go:3: fast-test: TestX does not call t.Parallel first" {
 		t.Fatalf("%q %v", got, err)
 	}
-	if want := []string{"go -C " + filepath.Join("/wt", "src") + " build -o " + bin + " ./cmd/se", bin + " rules --workspace /wt"}; !reflect.DeepEqual(m.Lines(), want) {
+	src := filepath.Join("/wt", "src")
+	tests := "go -C " + src + " test " + strings.Join(mergeTests, " ")
+	if want := []string{"go -C " + src + " build -o " + bin + " ./cmd/se", bin + " rules --workspace /wt", tests}; !reflect.DeepEqual(m.Lines(), want) {
 		t.Fatalf("ran %q", m.Lines())
 	}
 	m.Install(bin, func(proc.Cmd) int { return 0 })
 	if got, err := rulesOn(m, "/wt"); got != "" || err != nil {
+		t.Fatalf("%q %v", got, err)
+	}
+	m.Install("go", func(c proc.Cmd) int {
+		if c.Args[2] != "test" {
+			return 0
+		}
+		_, _ = fmt.Fprint(c.Stdout, "--- FAIL: TestEveryInteractiveCommandKeepsItsBudget (0.31s)\n    --- FAIL: TestEveryInteractiveCommandKeepsItsBudget/briefing (1.20s)\n"+
+			"        budget_test.go:91: se briefing took 1300ms\nFAIL\nFAIL\tgithub.com/mb-89/SE/src/cmd/se\t6.012s\nok  \tgithub.com/mb-89/SE/src/internal/battery\t(cached)\nFAIL\n")
+		return 1
+	})
+	want := "go test " + strings.Join(mergeTests, " ") + ":\n--- FAIL: TestEveryInteractiveCommandKeepsItsBudget\n    --- FAIL: TestEveryInteractiveCommandKeepsItsBudget/briefing\n" +
+		"        budget_test.go:91: se briefing took 1300ms\nFAIL\nFAIL\tgithub.com/mb-89/SE/src/cmd/se\nFAIL"
+	if got, err := rulesOn(m, "/wt"); got != want || err != nil {
 		t.Fatalf("%q %v", got, err)
 	}
 	m.Install("go", func(c proc.Cmd) int {
@@ -142,5 +159,29 @@ func TestFleetTrustPassesOnlyAHeadCarryingTheBatterysStatusForItsTree(t *testing
 	}
 	if code, _, errs := se(t, "fleet", "trust", "--repo", "o/r", "--sha", sha); code == 0 || !strings.Contains(errs, "--tree TREE") {
 		t.Fatalf("exit %d, %q", code, errs)
+	}
+}
+
+// TestTheRulesWorkflowRunsOnWhatTheMergeChecks holds that main's change to a
+// rule, a battery step, a budget or the programs list reaches the open PRs it
+// breaks before their CI does.
+func TestTheRulesWorkflowRunsOnWhatTheMergeChecks(t *testing.T) {
+	t.Parallel()
+	// This reads the checkout's own workflow, so it reads the real disk.
+	flow, err := disk.Real().ReadFile("../../../.github/workflows/rules.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range rulesWorkflowPaths {
+		if !strings.Contains(string(flow), "\n      - "+p+"\n") {
+			t.Errorf(".github/workflows/rules.yml does not run on changes to %s", p)
+		}
+	}
+	for _, pkg := range mergeTests {
+		dir := "src/" + strings.TrimSuffix(strings.TrimPrefix(pkg, "./"), "/...")
+		// cmd/se's tests run on spec/budgets.yaml, not on se's every change.
+		if dir != "src/cmd/se" && !slices.Contains(rulesWorkflowPaths, dir+"/**") {
+			t.Errorf("se fleet rules tests %s, but the rules workflow does not run on its changes", pkg)
+		}
 	}
 }

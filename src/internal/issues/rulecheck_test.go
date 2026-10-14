@@ -64,8 +64,8 @@ func TestRulesNamesOnEachOpenPRTheRuleMainTookThatItBreaks(t *testing.T) {
 		dids[r.PR] = r.Did
 	}
 	want := map[int]string{
-		10: "passes se rules merged with main",
-		20: "breaks se rules merged with main: told on the PR what to fix",
+		10: "passes se's checks merged with main",
+		20: "breaks se's checks merged with main: told on the PR what to fix",
 		30: "left to its takeover: it conflicts with main",
 	}
 	if !reflect.DeepEqual(dids, want) {
@@ -109,7 +109,7 @@ func TestRulesReportsAFailedCheckAndChecksTheRest(t *testing.T) {
 		return "", nil
 	}
 	got, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.Rules(a, check)
-	if err == nil || !strings.Contains(err.Error(), "PR #10") || len(got) != 2 || got[0].Failed != "no go" || got[1].Did != "passes se rules merged with main" {
+	if err == nil || !strings.Contains(err.Error(), "PR #10") || len(got) != 2 || got[0].Failed != "no go" || got[1].Did != "passes se's checks merged with main" {
 		t.Fatalf("%+v %v", got, err)
 	}
 }

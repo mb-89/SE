@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/io/github"
@@ -208,8 +209,8 @@ func init() {
 		Usage:   "fleet rules [--json] [--repo OWNER/NAME]",
 		Group:   "Fleet",
 		Class:   batch,
-		Summary: "tell each open se PR the se rules it breaks merged with main",
-		Details: "for every open se PR against main: merge its head with origin's main in a worktree under .se/.runtime/rules, build se there and run se rules on the merge, and comment on each PR it breaks the findings and what to do, once for the same findings, so the box that owns it acts before its CI goes red. A PR that conflicts with main is left to its takeover; one whose check fails is reported, and the others are still checked. The rules workflow runs it when main takes a change to se's rules.",
+		Summary: "tell each open se PR the se checks it breaks merged with main",
+		Details: "for every open se PR against main: merge its head with origin's main in a worktree under .se/.runtime/rules, build se there and run se rules and the tests of the battery, the budgets and the programs list on the merge, and comment on each PR it breaks the findings and what to do, once for the same findings, so the box that owns it acts before its CI goes red. A PR that conflicts with main is left to its takeover; one whose check fails is reported, and the others are still checked. The rules workflow runs it when main takes a change to se's rules, tests/check.sh, the battery, spec/budgets.yaml or proc.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "fleet rules")
@@ -245,9 +246,21 @@ func init() {
 	})
 }
 
-// rulesOn builds se from the checkout at dir and runs its se rules there,
-// answering the findings, one per line, without the rules' timings; empty
-// where it passes. A checkout that does not build answers that as its finding.
+// MergeTests are the Go packages whose tests se fleet rules runs on each
+// merge beside se rules: those that read tests/check.sh's steps,
+// spec/budgets.yaml's budgets and proc.Programs, which a PR opened before
+// main changed them breaks without breaking a rule. The rules workflow
+// triggers on each of their sources (rulesWorkflowPaths).
+var mergeTests = []string{"./cmd/se", "./internal/battery/...", "./internal/io/proc/..."}
+
+// rulesWorkflowPaths are the paths whose change on main runs se fleet rules:
+// se's rules, and what mergeTests check.
+var rulesWorkflowPaths = []string{"src/internal/rules/**", "tests/check.sh", "src/internal/battery/**", "spec/budgets.yaml", "src/internal/io/proc/**"}
+
+// rulesOn builds se from the checkout at dir and runs its se rules and the
+// tests of mergeTests there, answering the findings without their timings;
+// empty where both pass. A checkout that does not build answers that as its
+// finding.
 func rulesOn(procs proc.Procs, dir string) (string, error) {
 	bin := filepath.Join(dir, ".se", ".runtime", "se-rules")
 	if out, err := proc.Combined(procs, proc.Cmd{Name: "go", Args: []string{"-C", filepath.Join(dir, "src"), "build", "-o", bin, "./cmd/se"}}); err != nil {
@@ -256,14 +269,22 @@ func rulesOn(procs proc.Procs, dir string) (string, error) {
 		}
 		return "it does not build:\n" + strings.TrimSpace(string(out)), nil
 	}
+	var found []string
 	out, err := proc.Combined(procs, proc.Cmd{Name: bin, Args: []string{"rules", "--workspace", dir}, Dir: dir})
-	if err == nil {
-		return "", nil
+	if err != nil {
+		if _, ok := proc.ExitCode(err); !ok {
+			return "", fmt.Errorf("se rules: %w", err)
+		}
+		found = append(found, rulesFindings(string(out)))
 	}
-	if _, ok := proc.ExitCode(err); !ok {
-		return "", fmt.Errorf("se rules: %w", err)
+	out, err = proc.Combined(procs, proc.Cmd{Name: "go", Args: append([]string{"-C", filepath.Join(dir, "src"), "test"}, mergeTests...)})
+	if err != nil {
+		if _, ok := proc.ExitCode(err); !ok {
+			return "", fmt.Errorf("go test: %w", err)
+		}
+		found = append(found, testFindings(string(out)))
 	}
-	return rulesFindings(string(out)), nil
+	return strings.Join(found, "\n"), nil
 }
 
 // rulesFindings is se rules' failing output without its timings, which
@@ -276,6 +297,21 @@ func rulesFindings(out string) string {
 		}
 	}
 	return strings.Join(kept, "\n")
+}
+
+// testTiming is a duration go test prints after a test or a package.
+var testTiming = regexp.MustCompile(`(\s+\(\d+(\.\d+)?s\)|\t\d+(\.\d+)?s|\t\(cached\))$`)
+
+// testFindings is go test's failing output without its passing packages and
+// its timings, which change from run to run while the failures stay.
+func testFindings(out string) string {
+	var kept []string
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		if !strings.HasPrefix(l, "ok ") {
+			kept = append(kept, testTiming.ReplaceAllString(l, ""))
+		}
+	}
+	return "go test " + strings.Join(mergeTests, " ") + ":\n" + strings.Join(kept, "\n")
 }
 
 // findingText is one finding: its kind and issue, what is wrong, and its remedy.
