@@ -13,9 +13,6 @@ import (
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
-// gh is how the issue commands reach GitHub; tests put recorded answers here.
-var gh issues.GH = issues.Gh
-
 // fire is the fan-out after a claim, and after the creation of a ready issue:
 // it fires the routine named in the environment once, on the call's network,
 // and answers a line saying what happened.
@@ -634,7 +631,7 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 			}
 			*repo = r
 		}
-		return issues.Source{Repo: *repo, GH: gh, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc}, nil
+		return issues.Source{Repo: *repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc}, nil
 	}, asJSON
 }
 
