@@ -165,6 +165,8 @@ func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
 		"## Last retro", "#18 a retro, closed 2026-10-10T12:00:00Z", "u18", "- finding one", "- finding two",
 		"## Next", "se issue pull would take #3 three", "u3",
 		"1 ready, 1 claimed, 3 blocked, 0 in trees",
+		"Queue: 5 open, 1 in flight; no estimate: no se issue merged with a claim time since",
+		"se issue tree tells the detail.",
 		"## What SE is", "SE is a test.\nIt has parts.\nThey talk.\nIt is small.\n",
 		"- spec/principles.md: https://github.com/o/r/blob/main/spec/principles.md",
 		"- spec/issues.md:", "- CLAUDE.md:")
