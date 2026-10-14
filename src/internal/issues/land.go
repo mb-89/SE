@@ -24,6 +24,13 @@ type Landing struct {
 	// Warning is the refusal of the battery's status on the push (ship),
 	// which the land went on past.
 	Warning string `json:"warning,omitempty"`
+	// Manifest and Into are, for a leaf, the manifest it landed into and
+	// that manifest's branch: a leaf gets no PR, so Number is 0.
+	Manifest int    `json:"manifest,omitempty"`
+	Into     string `json:"into,omitempty"`
+	// Closed is true where the land closed the issue itself: a leaf landed
+	// into its manifest, or a manifest with nothing left to land.
+	Closed bool `json:"closed,omitempty"`
 }
 
 // pull is the part of GitHub's pull request object land reads.
@@ -49,7 +56,10 @@ func (s Source) issued(dir string) (int, error) {
 	return n, nil
 }
 
-// Land brings the issue branch checked out in dir to main: answers must
+// Land brings the issue branch checked out in dir to where it lands. A leaf
+// inside a manifest (an issue with a parent) lands into the manifest's branch
+// and closes, with no PR of its own (landInto). An issue at the top, a
+// manifest whose leaves are all closed or a retro, lands to main: answers must
 // answer every question in qs, and check must pass on a clean tree of an
 // issue with no open sub-issues, after origin's branch and main are merged
 // in, so the check runs on what lands; the battery must have recorded that
@@ -78,10 +88,29 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	if err != nil {
 		return Landing{}, err
 	}
-	if subs := got[0].SubIssues; subs != nil && subs.Total > subs.Completed {
-		return Landing{}, fmt.Errorf("#%d has open sub-issues, and a parent holds no work: its sub-issues land, and it closes by itself", n)
+	subs := got[0].SubIssues
+	if subs != nil && subs.Total > subs.Completed {
+		return Landing{}, fmt.Errorf("#%d has open sub-issues, and a parent holds no work: its sub-issues land, and it lands once they are closed", n)
+	}
+	root, err := s.manifestOf(n)
+	if err != nil {
+		return Landing{}, err
+	}
+	if root != 0 {
+		return s.landInto(dir, n, root, session, qs, answers, check)
 	}
 	branch := Branch(n)
+	if subs != nil && subs.Total > 0 {
+		// A manifest whose leaves landed nothing has nothing to land.
+		if err := s.takeIn(dir, branch); err != nil {
+			return Landing{}, err
+		}
+		if ahead, err := s.git(dir, "rev-list", "--count", "origin/main..HEAD"); err != nil {
+			return Landing{}, err
+		} else if ahead == "0" {
+			return s.closeEmpty(n)
+		}
+	}
 	warning, err := s.ship(dir, branch, check)
 	if err != nil {
 		return Landing{}, err
@@ -101,14 +130,11 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		return Landing{}, err
 	}
 	l := Landing{Issue: n, Warning: warning}
-	owner, _, _ := strings.Cut(s.Repo, "/")
-	open, err := api[pull](s, fmt.Sprintf("repos/%s/pulls?head=%s:%s&base=main&state=open&per_page=100", s.Repo, owner, branch), true)
+	pr, open, err := s.openPR(n)
 	if err != nil {
 		return Landing{}, err
 	}
-	var pr pull
-	if len(open) > 0 {
-		pr = open[0]
+	if open {
 		// The body shows the profile of the battery this land ran.
 		if profiled {
 			if _, err := s.GitHub.Send("PATCH", fmt.Sprintf("repos/%s/pulls/%d", s.Repo, pr.Number), github.F("body", body)); err != nil {
@@ -129,6 +155,19 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	l.Number, l.URL = pr.Number, pr.URL
 	l.Merged, err = s.autoMerge(pr)
 	return l, err
+}
+
+// closeEmpty closes manifest n, whose leaves are all closed and landed
+// nothing on its branch: there is no PR to open.
+func (s Source) closeEmpty(n int) (Landing, error) {
+	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, n)
+	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", fmt.Sprintf("Every leaf of #%d is closed and its branch holds nothing main does not, so it closes with no PR.", n))); err != nil {
+		return Landing{}, err
+	}
+	if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
+		return Landing{}, err
+	}
+	return Landing{Issue: n, Closed: true}, nil
 }
 
 // takeIn merges into the branch checked out in dir what origin's copy of it

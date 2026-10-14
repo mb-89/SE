@@ -22,11 +22,12 @@ const (
 	NoPR            = "no PR"
 	LeftoverClaim   = "leftover claim"
 	ImpossibleBlock = "impossible block"
+	BareIssue       = "bare issue"
 	WaitingOnPerson = "waiting on a person"
 )
 
 // Kinds is every kind of finding, in the order se fleet check lists them.
-var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, LeftoverClaim, ImpossibleBlock, WaitingOnPerson}
+var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, LeftoverClaim, ImpossibleBlock, BareIssue, WaitingOnPerson}
 
 // Grace is how long the prune workflow has to delete a leftover claim of a
 // closed issue before se fleet fix reports it.
@@ -62,6 +63,8 @@ type Finding struct {
 	closed   time.Time
 	// key names the finding in the record its fix leaves.
 	key string
+	// id is GitHub's id of a bare issue, which the sub-issues link takes.
+	id int64
 }
 
 // cause is the kind of the finding on the issue itself.
@@ -92,6 +95,8 @@ func (f *Finding) setRemedy() {
 		f.Remedy = "se fleet fix turns auto-merge on"
 	case f.prunable:
 		f.Remedy = fmt.Sprintf("the prune workflow deletes %s; se fleet fix reports it only if it is still there a day after #%d closed", Branch(f.Issue), f.Issue)
+	case f.Kind == BareIssue:
+		f.Remedy = "se fleet fix files it into the open misc manifest"
 	case f.spent:
 		f.Remedy = "se fleet fix deletes " + Branch(f.Issue) + ": main holds all its commits"
 	case f.judgment || f.cause() == GreenUnmerged:
@@ -202,6 +207,17 @@ func (s Source) check(all []Status, t tree) ([]Finding, error) {
 			out = append(out, Finding{
 				Kind: WaitingOnPerson, Issue: n, Holds: holds[n],
 				What: fmt.Sprintf("#%d waits for a person (%s)%s", n, PersonLabel, holding(holds[n])),
+			})
+		}
+	}
+	// An issue filed by an se that predates manifests stands in none, and no
+	// box takes it: it goes into the open misc manifest. Bare is set only on
+	// an unclaimed issue at the top that nothing holds.
+	for _, st := range all {
+		if st.Bare == BareWhy {
+			out = append(out, Finding{
+				Kind: BareIssue, Issue: st.Number, id: t.byNum[st.Number].ID, key: "bare-issue",
+				What: fmt.Sprintf("#%d stands in no manifest, and boxes take only manifests", st.Number),
 			})
 		}
 	}
@@ -553,10 +569,10 @@ type Fixed struct {
 var fleetMark = regexp.MustCompile(`<!-- se:fleet (\S+) (\d+) -->`)
 
 // Fix applies, in order, the remedy of every finding that needs no checkout:
-// auto-merge goes on where it is off, a spent leftover branch is deleted, and
-// a finding with no other remedy
-// becomes an issue, labelled se-person where it is a judgment. A takeover is
-// left to the box, which runs its remedy. Each fix is recorded on the
+// auto-merge goes on where it is off, a spent leftover branch is deleted, a
+// bare issue is filed into the open misc manifest, and a finding with no
+// other remedy becomes an issue, labelled se-person where it is a judgment.
+// A takeover is left to the box, which runs its remedy. Each fix is recorded on the
 // finding's issue; a finding that is back after its fix goes to a person, and
 // one that is reported already, its issue still open, is left as it is. A
 // leftover branch is deleted by a push from the checkout dir, the transport
@@ -636,6 +652,15 @@ func (s Source) fix(dir string, x *Fixed) error {
 			return fmt.Errorf("deleting %s: %w", Branch(f.Issue), err)
 		}
 		x.Did = fmt.Sprintf("deleted %s at %s, which main holds whole", Branch(f.Issue), f.head)
+	case f.Kind == BareIssue:
+		m, err := s.FileInto()
+		if err != nil {
+			return err
+		}
+		if err := s.subIssue(m, f.id); err != nil {
+			return fmt.Errorf("filing #%d into misc manifest #%d: %w", f.Issue, m, err)
+		}
+		x.Did = fmt.Sprintf("filed it into misc manifest #%d", m)
 	default:
 		person := f.judgment || f.cause() == GreenUnmerged
 		if x.Made, err = s.report(f, person); err != nil {
