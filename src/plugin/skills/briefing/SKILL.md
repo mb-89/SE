@@ -25,7 +25,8 @@ with `sh ./src/build.sh`.
       what fleet check reports.
    3. **What happened:** the closed issues, each with its `done` line, then
       the last retro and its headline findings.
-   4. **Next:** what `se issue pull` would take, and the counts.
+   4. **Next:** what `se issue pull` would take, the counts, and the
+      queue's estimate line as it stands (`se issue tree` has the detail).
    Keep each item to its facts; add no judgment of your own.
 4. Ask the person what they want to discuss. This session is for design;
    what comes out of it that is clear becomes an `se` issue for the fleet
