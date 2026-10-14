@@ -230,10 +230,15 @@ type Straying struct {
 	// Strays is how far: slightly or far.
 	Strays string `yaml:"strays"`
 	// Sources are the outside sources it cites; an outside finding needs one.
-	Sources       []string `yaml:"sources,omitempty"`
-	Controversial bool     `yaml:"controversial"`
-	Why           string   `yaml:"why,omitempty"`
-	Issue         int      `yaml:"issue,omitempty"`
+	Sources []string `yaml:"sources,omitempty"`
+	// Controversial sends its issue to a person, only for access or a
+	// principle (Kind); Why says what only the person can do. Decision is the
+	// decision the box made, named in a normal finding's issue.
+	Controversial bool   `yaml:"controversial"`
+	Kind          string `yaml:"kind,omitempty"`
+	Why           string `yaml:"why,omitempty"`
+	Decision      string `yaml:"decision,omitempty"`
+	Issue         int    `yaml:"issue,omitempty"`
 }
 
 // cascade is what every removal's issue says: removing one piece exposes
@@ -243,7 +248,7 @@ const cascade = "Repeat the removal until nothing more falls out: each piece rem
 var (
 	areas      = []string{"principle", "outside", "consistency", "principles", "retro", "speed", "mechanize", "removal"}
 	verdicts   = []string{"none", "slightly", "far"}
-	principled = "it changes a design principle"
+	principled = "Decide whether the design principle changes as the finding proposes."
 )
 
 // overhaulIssue reads overhaul n: it must be an open issue labelled se-overhaul.
@@ -520,7 +525,7 @@ func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 func (f Straying) line() string {
 	who := "normal queue"
 	if f.Controversial {
-		who = "for a person: " + f.Why
+		who = "for a person (" + f.Kind + "): " + f.Why
 	}
 	s := fmt.Sprintf("- **%s** (%s, principle %d, strays %s, at %s; %s)", f.Title, f.Area, f.Principle, f.Strays, f.Place, who)
 	if f.Issue > 0 {
@@ -531,6 +536,14 @@ func (f Straying) line() string {
 		s += "  - source: " + src + "\n"
 	}
 	return s
+}
+
+// person is why the finding goes to a person, nil where it does not.
+func (f Straying) person() *Why {
+	if !f.Controversial {
+		return nil
+	}
+	return &Why{Kind: f.Kind, What: f.Why}
 }
 
 // ParseOverhaul reads an overhaul's report, a draft or a posted one, back:
@@ -560,8 +573,9 @@ func ParseOverhaul(text string) (r OverhaulReport, facts string, err error) {
 // every principle, each how far it strays and how; something said on each
 // thing beyond the principles; every finding a title, a body, a known area,
 // the principle it names, its place, how far it strays, a source where it
-// comes from outside, and a reason where it is controversial; and something
-// that went well. A change to a principle is made controversial.
+// comes from outside, and, where it is controversial, a kind (access or
+// principle) and what only the person can do; and something that went well.
+// A change to a principle is made controversial, of kind principle.
 func (r *OverhaulReport) judged() error {
 	var why []string
 	known := map[int]bool{}
@@ -594,7 +608,7 @@ func (r *OverhaulReport) judged() error {
 	for k := range r.Findings {
 		f := &r.Findings[k]
 		if f.Area == "principles" {
-			f.Controversial = true
+			f.Controversial, f.Kind = true, WhyPrinciple
 			if strings.TrimSpace(f.Why) == "" {
 				f.Why = principled
 			}
@@ -613,8 +627,8 @@ func (r *OverhaulReport) judged() error {
 			why = append(why, name+" needs strays: slightly or far")
 		case f.Area == "outside" && len(f.Sources) == 0:
 			why = append(why, name+" comes from outside without a source")
-		case f.Controversial && strings.TrimSpace(f.Why) == "":
-			why = append(why, name+" is controversial without a why")
+		case f.Controversial && f.person().Check() != nil:
+			why = append(why, controversialWithout(name, f.person().Check()))
 		}
 	}
 	if len(r.WentWell) == 0 {
@@ -670,8 +684,9 @@ func (s Source) FileOverhaul(n int, draft string) (Filed, error) {
 			if f.Area == "removal" {
 				body += "\n\n" + cascade
 			}
+			body += decided(f.Decision)
 			var err error
-			if f.Issue, err = s.mint(f.Title, body, f.Controversial, f.Why, out); err != nil {
+			if f.Issue, err = s.mint(f.Title, body, f.person(), out); err != nil {
 				return err
 			}
 		}

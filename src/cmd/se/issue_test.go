@@ -396,7 +396,7 @@ func TestIssueLandNamesThePR(t *testing.T) {
 		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
 	}
 	code, out, errs = se(t, "issue", "land", "--answers", answers, "--workspace", ws, "--repo", "o/r")
-	if code == 0 || !strings.Contains(errs, "missing: decided, well,") || checked != "" {
+	if code == 0 || !strings.Contains(errs, "missing: decisions, well,") || checked != "" {
 		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
 	}
 	all := ""
@@ -620,15 +620,32 @@ func TestATakeNamesWhatTheIssueBlocks(t *testing.T) {
 	}
 }
 
-func TestWhatABoxLeavesOverIsAnIssueForAPersonThatBlocksOnlyWhatNeedsIt(t *testing.T) {
+func TestAnIssueForAPersonIsOnlyForAccessOrAPrincipleAndBlocksOnlyWhatNeedsIt(t *testing.T) {
 	t.Parallel()
 	gh := recordedIssues(t)
-	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "decide the last 5%", "--blocked-by", "none", "--person", "--blocks", "3")
+	// Needing a decision, or being unsure, is no reason for a person: refused,
+	// writing nothing.
+	for _, refused := range [][]string{
+		{"--person"},
+		{"--person", "--why", "unsure", "--what", "pick a name"},
+		{"--person", "--why", "access"},
+		{"--why", "access", "--what", "x"},
+	} {
+		args := append([]string{"issue", "new", "--repo", "o/r", "--title", "nine", "--body", "b", "--blocked-by", "none"}, refused...)
+		if code, _, errs := se(t, args...); code == 0 || errs == "" {
+			t.Fatalf("%v: exit %d, %q", refused, code, errs)
+		}
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("a refused --person wrote %q", w)
+	}
+	code, out, errs := se(t, "issue", "new", "--repo", "o/r", "--title", "ten", "--body", "the ruleset", "--blocked-by", "none", "--person", "--why", "access", "--what", "Turn off the ruleset only the owner may change.", "--blocks", "3")
 	if code != 0 || !strings.Contains(out, "It blocks #3.") || !strings.Contains(out, "For a person: labelled se-person") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	made := issueOf(t, gh, 10)
 	if !strings.Contains(made, `{"name":"se-person"}`) || !strings.Contains(made, `"assignees":[{"login":"o"}]`) ||
+		!strings.Contains(made, "For a person (access):** Turn off the ruleset") ||
 		!reflect.DeepEqual(linked(t, gh, "repos/o/r/issues/3/dependencies/blocked_by"), []int{10}) {
 		t.Fatalf("%s; #3 is blocked by %v", made, linked(t, gh, "repos/o/r/issues/3/dependencies/blocked_by"))
 	}

@@ -664,8 +664,13 @@ type Metrics map[string]float64
 var metricNames = []string{
 	"closed", "landed", "for_person", "conflicts", "takeovers", "ci_reruns", "person_flags", "by_hand", "duplicates", "requests", "rate_limits", "rate_limit_minutes",
 	"conflicts_per_issue", "takeovers_per_issue", "ci_reruns_per_issue", "person_flags_per_issue", "by_hand_per_issue", "duplicates_per_issue", "requests_per_issue", "rate_limits_per_issue", "rate_limit_minutes_per_issue",
-	"claim_to_merge_minutes",
+	"for_person_per_issue", "claim_to_merge_minutes",
 }
+
+// PersonBudget is the soft budget of issues for a person per closed issue: an
+// issue for a person is the last resort (spec/principles.md, principle 15).
+// Over it, the report says so; it refuses nothing.
+const PersonBudget = 0.1
 
 // size says a metric is a size of the window, which moves neither way for
 // the better.
@@ -702,6 +707,10 @@ func (c Collected) measure() Metrics {
 		if m["landed"] > 0 {
 			m[name+"_per_issue"] = round2(m[name] / m["landed"])
 		}
+	}
+	m["for_person_per_issue"] = 0
+	if len(c.Rows) > 0 {
+		m["for_person_per_issue"] = round2(m["for_person"] / float64(len(c.Rows)))
 	}
 	m["claim_to_merge_minutes"] = float64(median(minutes))
 	return m

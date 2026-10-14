@@ -59,8 +59,8 @@ tools or the API, and never a comment, a label or a push by hand.
    box opens no issue, and `<se> issue new` refuses in one; any issue a box
    opens is a defect. Your open points, what the work leaves beside it, go
    into the landing answers' `open`: the retro reads them and turns them
-   into work. Decide what you can yourself, and name the decision in the
-   landing answers.
+   into work. If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../spec/principles.md), the one place this rule lives). Name
+   each decision in the landing answers' `decisions`.
 6. **You close the issue you took, always**, in one of three ways and no
    other:
    - **a landing** of what you solved with `<se> issue land` (into your

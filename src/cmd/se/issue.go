@@ -275,10 +275,10 @@ func init() {
 	register(Command{
 		Name:    "issue new",
 		Class:   batch,
-		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
+		Usage:   "issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person --why access|principle --what TEXT] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "create an se issue in a manifest, with its blockers",
-		Details: fmt.Sprintf("create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), and name it. All work moves in manifests: a manifest is an issue at the top on one topic whose sub-issues are its work, landing as one PR, its leaves together about %s (issues.manifest/config/target), and boxes take only manifests. --parent N files it into a manifest (a sub-issue of N); --manifest makes it a new manifest itself, labelled se-manifest, whose leaves follow with --parent; without either it goes into the open misc manifest (labelled se-misc), which takes new issues for that time from its creation, after which the next one opens.", issues.Span(issueConfig().ManifestTarget.Minutes())) + " --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt: never superseded again. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). A name that is an agent's role (work, coordination, review, retro, overhaul, or the agent's own name) is left out of that line, since the take names the agent that holds it. It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. An issue for a person stands at the top, in no manifest. A ready issue, one nothing open blocks, fires the routine once. In a box it refuses, writing nothing: a box opens no issue, its work ends in a PR (se issue land) or a supersede (se issue supersede); retros, reviews and overhauls file theirs through their own commands.",
+		Details: fmt.Sprintf("create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), and name it. All work moves in manifests: a manifest is an issue at the top on one topic whose sub-issues are its work, landing as one PR, its leaves together about %s (issues.manifest/config/target), and boxes take only manifests. --parent N files it into a manifest (a sub-issue of N); --manifest makes it a new manifest itself, labelled se-manifest, whose leaves follow with --parent; without either it goes into the open misc manifest (labelled se-misc), which takes new issues for that time from its creation, after which the next one opens.", issues.Span(issueConfig().ManifestTarget.Minutes())) + " --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt: never superseded again. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what only they can do. It is the last resort: --why access (a setting, an account, a secret, a permission or a payment only the owner has) or --why principle (a change to a design principle), and --what says in a sentence what only the person can do; it refuses anything else, since a decision an agent can make is its own (spec/principles.md, principle 15). --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). A name that is an agent's role (work, coordination, review, retro, overhaul, or the agent's own name) is left out of that line, since the take names the agent that holds it. It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. An issue for a person stands at the top, in no manifest. A ready issue, one nothing open blocks, fires the routine once. In a box it refuses, writing nothing: a box opens no issue, its work ends in a PR (se issue land) or a supersede (se issue supersede); retros, reviews and overhauls file theirs through their own commands.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue new")
@@ -293,6 +293,8 @@ func init() {
 			person := fs.Bool("person", false, "make it an issue for a person: label it se-person and assign it to the owner")
 			manifest := fs.Bool("manifest", false, "make it a new manifest, labelled se-manifest: its leaves follow with --parent")
 			skills := fs.String("skills", "", "the skills its work needs, as `NAME,NAME`: a take hands each over")
+			why := fs.String("why", "", "with --person, what only a person can do here: `access` or principle")
+			what := fs.String("what", "", "with --person, the sentence `TEXT` saying what only the person can do")
 			allowDuplicate := fs.Bool("allow-duplicate", false, "create it although an open se issue under the same parent has its title")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
@@ -303,6 +305,15 @@ func init() {
 			}
 			given := map[string]bool{}
 			fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+			forPerson := issues.Why{Kind: *why, What: *what}
+			if !*person && (given["why"] || given["what"]) {
+				return Reply{}, fmt.Errorf("--why and --what go with --person only")
+			}
+			if *person {
+				if err := forPerson.Check(); err != nil {
+					return Reply{}, err
+				}
+			}
 			if !given["blocked-by"] {
 				return Reply{}, fmt.Errorf("issue new needs --blocked-by: the issues that block it, as N,M, or none")
 			}
@@ -393,7 +404,7 @@ func init() {
 				if len(labels) > 0 {
 					return Reply{}, fmt.Errorf("--person takes neither --review nor --final: an issue for a person is no box's work")
 				}
-				made, err = s.ForPerson(*title, *body, *parent, blockers)
+				made, err = s.ForPerson(*title, *body, forPerson, *parent, blockers)
 			} else {
 				made, ready, err = s.Create(*title, *body, *parent, blockers, labels...)
 			}

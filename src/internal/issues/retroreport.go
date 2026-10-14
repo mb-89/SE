@@ -49,9 +49,15 @@ type Lesson struct {
 	// field (a prefilled one), command (an se command for a step done by
 	// hand), guidance, or removal.
 	Home string `yaml:"home"`
-	// Controversial sends its issue to a person; Why says which rule makes it so.
+	// Controversial sends its issue to a person, only for access or a
+	// principle (Kind, one of WhyKinds); Why says what only the person can do.
 	Controversial bool   `yaml:"controversial"`
+	Kind          string `yaml:"kind,omitempty"`
 	Why           string `yaml:"why,omitempty"`
+	// Decision is the decision the box made where the finding needed one (a
+	// trade-off, a doubt, a recurrence): named in its issue, it stays in the
+	// normal queue, and the owner reviews it afterwards.
+	Decision string `yaml:"decision,omitempty"`
 	// Check is the rule check it answers, Metric the metric it should move;
 	// the next retro scores it by them.
 	Check  string `yaml:"check,omitempty"`
@@ -149,7 +155,13 @@ func (c Collected) facts() string {
 	fmt.Fprintf(&b, "\nGitHub rate limits: %g refusals and %g minutes waited for the reset per landed issue; %d of the %d closed issues met one.\n", c.Metrics["rate_limits_per_issue"], c.Metrics["rate_limit_minutes_per_issue"], withWaits, len(c.Rows))
 	fmt.Fprintf(&b, "\nDuplicates: %g closed as duplicate, %d issues for a person minted again for an issue one already held back.\n", c.Metrics["duplicates"]-float64(c.Reholds), c.Reholds)
 	fmt.Fprintf(&b, "\nClaim to merge: median %s over the %d issues whose claim and merge are both on record.\n", span(int(c.Metrics["claim_to_merge_minutes"])), known)
-	b.WriteString(c.openPoints())
+	within := "within it"
+	if c.Metrics["for_person_per_issue"] > PersonBudget {
+		within = "over it: find which of them an agent could have decided"
+	}
+	fmt.Fprintf(&b, "\nIssues for a person: %g per closed issue, against a soft budget of %g, %s.\n", c.Metrics["for_person_per_issue"], PersonBudget, within)
+	b.WriteString(c.answered(OpenKey, "Open points", "What the closed issues' landing answers left open (`"+OpenKey+"`): the retro turns them into work, as findings."))
+	b.WriteString(c.answered(DecisionsKey, "Decisions", "The decisions the boxes made themselves, from their landing answers (`"+DecisionsKey+"`), for the owner to look at: say on the issue where one was wrong."))
 
 	b.WriteString("\n## Metrics against the previous retros\n")
 	if len(c.History) == 0 {
@@ -287,14 +299,19 @@ func (c Collected) matrix(qs []Question) string {
 // and the retro, which reads them here, turns them into work.
 const OpenKey = "open"
 
-// openPoints lists the open points the window's landing answers name, by
-// issue; those that say "none" are left out.
-func (c Collected) openPoints() string {
+// DecisionsKey is the landing question that asks for the decisions a box made
+// itself (spec/principles.md, principle 15): the retro lists them for the
+// owner to review.
+const DecisionsKey = "decisions"
+
+// answered lists, under heading, what the window's landing answers say to
+// question key, by issue; those that say "none" are left out.
+func (c Collected) answered(key, heading, intro string) string {
 	var b strings.Builder
-	b.WriteString("\n## Open points\nWhat the closed issues' landing answers left open (`" + OpenKey + "`): the retro turns them into work, as findings.\n")
+	fmt.Fprintf(&b, "\n## %s\n%s\n", heading, intro)
 	said := 0
 	for _, r := range c.Rows {
-		a, ok := r.Answers[OpenKey]
+		a, ok := r.Answers[key]
 		if !ok || nothing(a) {
 			continue
 		}
@@ -369,7 +386,7 @@ func (r RetroReport) judgment() string {
 func (f Lesson) line() string {
 	who := "normal queue"
 	if f.Controversial {
-		who = "for a person: " + f.Why
+		who = "for a person (" + f.Kind + "): " + f.Why
 	}
 	s := fmt.Sprintf("- **%s** (%s; %s)", f.Title, f.Home, who)
 	if f.Issue > 0 {
@@ -405,8 +422,9 @@ func ParseReport(text string) (r RetroReport, facts string, err error) {
 }
 
 // judged refuses a report whose judgment is not complete: every finding
-// needs a title, a class the classes name, a body and a home, and a reason
-// where it is controversial; every class a fix; and something went well.
+// needs a title, a class the classes name, a body and a home, and, where it is
+// controversial, a kind (access or principle) and what only the person can
+// do; every class a fix; and something went well.
 func (r RetroReport) judged() error {
 	var why []string
 	classes := map[string]bool{}
@@ -425,8 +443,8 @@ func (r RetroReport) judged() error {
 			why = append(why, fmt.Sprintf("%s names class %q, which classes does not", name, f.Class))
 		case !contains(homes, f.Home):
 			why = append(why, fmt.Sprintf("%s has home %q, not one of %s", name, f.Home, strings.Join(homes, ", ")))
-		case f.Controversial && strings.TrimSpace(f.Why) == "":
-			why = append(why, name+" is controversial without a why")
+		case f.Controversial && f.person().Check() != nil:
+			why = append(why, controversialWithout(name, f.person().Check()))
 		case f.Check != "" && kindOrder(f.Check) == len(checkKinds):
 			why = append(why, fmt.Sprintf("%s names check %q, which is no rule check", name, f.Check))
 		case f.Metric != "" && !contains(metricNames, f.Metric):
@@ -540,9 +558,9 @@ func (s Source) FileReport(n int, draft string) (Filed, error) {
 			if f.Issue > 0 {
 				continue
 			}
-			body := fmt.Sprintf("%s\n\nFound by the retro #%d, class **%s**; the fix it asks for is a %s.", strings.TrimSpace(f.Body), n, f.Class, f.Home)
+			body := fmt.Sprintf("%s\n\nFound by the retro #%d, class **%s**; the fix it asks for is a %s.", strings.TrimSpace(f.Body), n, f.Class, f.Home) + decided(f.Decision)
 			var err error
-			if f.Issue, err = s.mint(f.Title, body, f.Controversial, f.Why, out); err != nil {
+			if f.Issue, err = s.mint(f.Title, body, f.person(), out); err != nil {
 				return err
 			}
 		}
@@ -584,14 +602,37 @@ func (s Source) fileRun(i issue, run filing) (Filed, error) {
 	return out, nil
 }
 
-// mint creates one finding's issue through the same code as se issue new: a
-// controversial one for a person (ForPerson), at the top; the rest as
+// person is why the finding goes to a person, nil where it does not.
+func (f Lesson) person() *Why {
+	if !f.Controversial {
+		return nil
+	}
+	return &Why{Kind: f.Kind, What: f.Why}
+}
+
+// controversialWithout is why a controversial finding called name is refused:
+// err, from Why.Check, and what it is instead.
+func controversialWithout(name string, err error) string {
+	return fmt.Sprintf("%s is controversial, but %v; anything else is a normal finding whose decision names what the box chose", name, err)
+}
+
+// decided is the paragraph that names a finding's decision in its issue, ""
+// where it names none.
+func decided(decision string) string {
+	if strings.TrimSpace(decision) == "" {
+		return ""
+	}
+	return "\n\n**Decision taken:** " + strings.TrimSpace(decision) + " The owner reviews it afterwards; a box goes on with it."
+}
+
+// mint creates one finding's issue through the same code as se issue new: one
+// for a person (ForPerson) where why is set, at the top; the rest as
 // sub-issues of the run's one manifest, which the first of them creates. Each
 // is labelled se-final, the manifest too: what a run files is its output, so
 // the retro's cadence does not count it. It records the issue in out.
-func (s Source) mint(title, body string, controversial bool, why string, out *Filed) (int, error) {
-	if controversial {
-		made, err := s.ForPerson(title, "Controversial, so it waits for a person: "+why+"\n\n"+body, 0, nil, FinalLabel)
+func (s Source) mint(title, body string, why *Why, out *Filed) (int, error) {
+	if why != nil {
+		made, err := s.ForPerson(title, body, *why, 0, nil, FinalLabel)
 		if made.Number > 0 {
 			out.Issues = append(out.Issues, made.Number)
 			out.Person = append(out.Person, made.Number)

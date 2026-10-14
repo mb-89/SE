@@ -37,7 +37,8 @@ follows them; `se review brief` and `se issue review` (in
      descriptions and landing answers (every comment on the tree's leaves).
      The default brief does not even read them. After that,
      `se review brief <n> --claims` shows them as claims to check, never as
-     evidence.
+     evidence; the reviewer reviews each leaf's named `decisions` there, and a
+     wrong one is a finding ([principle 15](principles.md)).
 2. **The steps are the reviewer agent's:** finding, verifying and judging are
    separate steps, and the riskiest part comes first, so a reviewer that
    finds damage can stop early. A verified blocker is judged by rule 3.

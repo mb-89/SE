@@ -30,7 +30,7 @@ created. A box takes it from there.
    `../retro-<n>.md`. If it says it wrote the report already posted on the
    issue (from before retros stopped waiting for the owner): read the
    owner's comments on the issue, apply what they moved between controversial
-   and not, if anything, to `findings` in the draft's block, and go to 4.
+   (access or principle) and not, if anything, to `findings` in the draft's block, and go to 4.
 2. Read the draft: the issue's field feedback, the rule checks, the counts,
    the metrics against the previous retros, the previous retro's score, the
    scripts, the open points and the matrix of landing answers. The open
@@ -46,7 +46,10 @@ created. A box takes it from there.
      `class`, a `body` (what happened, with issue and PR numbers, and the fix),
      a `home` (`check`, `refusal`, `gate`, `field`, `command`, `guidance` or `removal`:
      the cheapest durable one, guidance last), and `controversial` with its
-     `why` where the spec's rule calls it controversial. Name the rule
+     `kind` (`access` or `principle`) and `why` only where only a person can
+     do it (the spec's rule). Anything else is yours to decide: a trade-off,
+     a doubt or a recurrence is a normal finding whose `decision` names what
+     you chose. If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../spec/principles.md), the one place this rule lives). Name the rule
      `check` or the `metric` it should move, so the next retro can score it.
      A finding about the retro itself (its questions, checks, metrics or this
      agent) gets `retro: true`.
@@ -56,8 +59,8 @@ created. A box takes it from there.
 4. `./src/plugin/bin/se retro report <n>`. If it refuses, fix what it names
    and run it again. It creates the issues, all `se-final`: those for a
    person where controversial, the rest as sub-issues of the retro's one
-   manifest of findings, and closes the retro. Mark a finding too big for
-   that manifest `controversial`, so a person decides it.
+   manifest of findings, and closes the retro. Split a finding too big for
+   that manifest into findings that fit; that is your decision too.
    All work moves in manifests, each one topic whose leaves together take
    about `issues.manifest/config/target` (an hour): size each finding's fix
    to fit it. End: there is no PR to land, and

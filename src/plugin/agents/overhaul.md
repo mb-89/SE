@@ -27,7 +27,7 @@ controversial, and closes the overhaul.
    `../overhaul-<n>.md`. If it says it wrote the report already posted on the
    issue (from before overhauls stopped waiting for the owner): read the
    owner's comments on the issue, apply what they moved between controversial
-   and not, if anything, to `findings` in the draft's block, and go to 4.
+   (access or principle) and not, if anything, to `findings` in the draft's block, and go to 4.
 2. Read the draft's facts: the principles, the retro's last `issues/config/overhaul-cadence` runs, the
    previous overhaul's findings. Then read SE itself: `spec/`, the README,
    CLAUDE.md, the plugin's agents and skills, `se help`, and the code under `src/`.
@@ -70,9 +70,12 @@ controversial, and closes the overhaul.
      `principle` it names (0 only for a missing one), the `place`, how far
      it `strays` (`slightly`, `far`), `sources` for an outside idea (one
      becomes a finding only with a concrete place in SE it would change),
-     and `controversial` with its `why` when it trades one metric against
-     another, you are not sure, or it recurred after an earlier fix. A
-     change to a principle is always controversial.
+     and `controversial` with its `kind` (`access` or `principle`) and `why`
+     only where only a person can do it. A change to a principle is always
+     controversial, of kind `principle`. Anything else is yours to decide: a
+     trade-off of one metric against another, a doubt or a recurrence is a
+     normal finding whose `decision` names what you chose.
+     If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../spec/principles.md), the one place this rule lives).
      Before you write a finding, `git fetch origin main` and grep
      `origin/main` for the thing it asks for (`git grep <term> origin/main`),
      since the code you read may be older than main's head. Drop the
@@ -82,7 +85,7 @@ controversial, and closes the overhaul.
    - `went_well`: what holds and should stay.
 4. `./src/plugin/bin/se overhaul file <n>`. If it refuses, fix what it names
    and run it again. It creates the issues, all `se-final`: those for a
-   person where controversial (or too big), the rest as sub-issues of the
+   person where controversial, the rest as sub-issues of the
    overhaul's one manifest of findings, and closes the overhaul. All work moves in manifests, each one topic whose leaves
    together take about `issues.manifest/config/target` (an hour): size each
    finding's fix to fit it. End: there is no PR to land, and

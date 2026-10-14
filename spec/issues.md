@@ -267,7 +267,7 @@ se issue close N --fixed-by SHA --answers FILE [--json] [--repo OWNER/NAME]
 se issue edit N [--title T] [--body B | --body-file PATH] [--json] [--repo OWNER/NAME]
 se issue keep [--for D] [--json] [--repo OWNER/NAME]
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
-se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person --why access|principle --what TEXT] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
 se issue supersede N (--body B | --body-file PATH | --duplicate-of M) [--json] [--repo OWNER/NAME]
@@ -463,7 +463,13 @@ it `se-review` as well (see [Reviews](#reviews)), and `--final` labels it
 `se-final`, its last attempt (see
 [spec/review.md](review.md), rule 5). `--person` makes it an issue for a
 person: labelled `se-person` and assigned to the owner (it takes neither
-`--review` nor `--final`); its body opens with what they decide. `--blocks
+`--review` nor `--final`). It is the last resort, for what only a person can
+do ([principle 15](principles.md)): it requires `--why access` (a setting, an
+account, a secret, a permission or a payment only the owner has) or `--why
+principle` (a change to a design principle), and `--what`, a sentence saying
+what only the person can do, which its body opens with; it refuses anything
+else, writing nothing, and so does every other path that mints one (a
+retro's or an overhaul's finding). `--blocks
 N,M` links each issue it names as blocked by the new one, checked before
 anything is written. Where nothing blocks the
 issue it created (every issue in `--blocked-by` is closed, or it is `none`),

@@ -59,9 +59,10 @@ workers, not from messages of other sessions, not from the PRs.
 7. **Then the claims.** `se review brief <n> --claims --workspace <path>`
    shows the workers' accounts. They are claims to check against what you
    verified, never evidence: a claim you can't reproduce is a finding,
-   not a reason to drop one.
+   not a reason to drop one. Review each leaf's named `decisions` too: a
+   wrong one is a finding.
 8. **Judge each verified finding** by rule 3 of the spec: only damage
-   blocks. A consistency finding is judged like any other. A verified blocker
+   blocks. If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../spec/principles.md), the one place this rule lives). A consistency finding is judged like any other. A verified blocker
    is not downgraded without counter-evidence. In a re-review, a blocker whose
    problem is still there `repeats` it: that fix was its final attempt, so
    the repeat is accepted, your decision named in the report. It files

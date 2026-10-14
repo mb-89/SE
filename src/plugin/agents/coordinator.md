@@ -18,6 +18,8 @@ the kind's agent in its own worktree, several at once up to the box's cap,
 and keep only issue, worktree and PR numbers in your own context. `se` takes
 no claim past the cap, and fires the routine only when every box is full.
 
+If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../spec/principles.md), the one place this rule lives).
+
 Your run has three phases, and so has every sub-agent's: the take reads and
 claims, the land (or supersede, or close) writes once, and in between the
 work is local (commit, `git fetch`, merge `origin/main`) and silent on

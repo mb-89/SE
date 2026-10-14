@@ -67,12 +67,13 @@ what existed only to support it.
   into the draft's block are the agent's (its step 3).
 - **Minting:** the same rule as the retro's (the owner's rule in
   [retro.md](retro.md)). Every finding becomes an issue through the same code
-  as `se issue new`, labelled `se-final`. A controversial one, or one too
-  big, is an issue for a person, labelled `se-person` and assigned to the
-  owner; the rest go into the overhaul's one manifest, `Findings of the
-  overhaul #N`, labelled `se-manifest` and `se-final`. A
-  change to a principle is always controversial: `se overhaul file` makes it
-  so. `se overhaul file` creates the issues at once, posts the report as the
+  as `se issue new`, labelled `se-final`. A controversial one, only for
+  access or a principle ([principle 15](principles.md)), is an issue for a
+  person, labelled `se-person` and assigned to the owner; the rest go into
+  the overhaul's one manifest, `Findings of the overhaul #N`, labelled
+  `se-manifest` and `se-final`, the box's `decision` named in each that
+  needed one. A change to a principle is always controversial, of kind
+  `principle`: `se overhaul file` makes it so. `se overhaul file` creates the issues at once, posts the report as the
   closing comment and closes the overhaul: it never waits. (A report posted
   for the owner before overhauls stopped waiting is handed back by
   `se overhaul read` and filed as it stands.) It deletes the claim `issue-N`,
@@ -82,7 +83,8 @@ what existed only to support it.
   `how`; an empty `looked_at` part ("nothing to change" is an answer); a
   finding without a title, a body, a known area, a principle on the list, a
   place, or `strays`; an outside finding without a source; a controversial
-  one without a `why`; nothing that went well.
+  one without a `kind` (access or principle) and a `why`; nothing that went
+  well.
 - **The report stays on the overhaul issue** as its closing comment, opening
   with `<!-- se:overhaul-report -->`, with a machine-readable block under
   `<!-- se:overhaul-yaml -->`: the principles, the retros' numbers, the

@@ -70,6 +70,12 @@ What earlier versions taught, and how this design answers it:
     CI reruns, `by-hand` answers that are not "none", the GitHub requests the
     landing facts counted, their rate-limit refusals and the minutes waited
     for the reset, and the median time from claim to merge;
+  - **issues for a person** per closed issue, against a soft budget of 0.1
+    (`PersonBudget`), which the draft says it is within or over: an issue for
+    a person is the last resort ([principle 15](principles.md));
+  - **open points** and **decisions:** every closed issue's `open` and
+    `decisions` answers that are not "none"; the decisions are listed for the
+    owner to look at;
   - **scripts:** every file added under `src/scripts/` in the window, grouped
     by the word its name starts with, each with the comment line that says why;
   - **the previous retro's findings:** did their issues close, and did their
@@ -87,26 +93,29 @@ What earlier versions taught, and how this design answers it:
     `Findings of the retro #N`, labelled `se-manifest` and `se-final`, which
     the first of them creates; its leaves land as one PR
     ([issues.md](issues.md#manifests-all-work-moves-in-them)).
-  - A **controversial** one, or one too big for the manifest, is an issue
-    for a person: labelled `se-person` and assigned to the owner, it waits
-    for them. The retro does not.
+  - A **controversial** one is an issue for a person: labelled `se-person`
+    and assigned to the owner, it waits for them. The retro does not.
   - The **open points** the window's landing answers name (`open`) are
     listed in the draft (`## Open points`): a box opens no issue, so the
     retro is the one that turns them into findings.
 
-  Controversial means any of:
-  - it changes a design principle ([principles.md](principles.md));
-  - it trades one metric against another;
-  - the box is not sure;
-  - it already failed or recurred after an earlier fix (repeated failure goes
-    to a person).
+  Controversial means only what only a person can do
+  ([principle 15](principles.md)), its `kind` one of:
+  - `access`: a setting, an account, a secret, a permission or a payment only
+    the owner has;
+  - `principle`: it changes a design principle.
 
-  Not controversial, so normal work: removing something, and changing a
-  command's interface or a landing question.
+  Its `why` says in a sentence what only the person can do. Everything else
+  is normal work, the box's decision named in the finding's `decision`, which
+  its issue carries for the owner to review afterwards: a trade-off of one
+  metric against another, a finding the box is not sure about, one that
+  recurred after an earlier fix, one too big for one leaf, removing
+  something, and changing a command's interface or a landing question.
 
   `se retro report N` files the judged draft. It refuses, writing nothing, a
   judgment that is not complete: a finding without a title, a body, a class
-  the classes name, a known home, or a `why` where it is controversial; a
+  the classes name, a known home, or a `kind` (access or principle) and a `why`
+  where it is controversial; a
   class without a fix; an unknown check or metric; nothing that went well.
   **A retro never waits**, whoever started it: `se retro report` creates the
   issues at once, by the rule above, posts the report as the retro's closing

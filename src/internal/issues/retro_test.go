@@ -12,7 +12,7 @@ import (
 )
 
 // rqs are the landing questions the retro tests read.
-var rqs = []Question{{Key: "done", Question: "What does it deliver?"}, {Key: "by-hand", Question: "What did you do by hand?"}, {Key: OpenKey, Question: "What is left open?"}}
+var rqs = []Question{{Key: "done", Question: "What does it deliver?"}, {Key: "by-hand", Question: "What did you do by hand?"}, {Key: OpenKey, Question: "What is left open?"}, {Key: DecisionsKey, Question: "What did you decide?"}}
 
 var (
 	prevClosed = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
@@ -217,20 +217,24 @@ func TestEachRuleCheck(t *testing.T) {
 }
 
 // A box opens no issue: its open points are a landing answer, and the
-// retro's draft lists them, so the retro turns them into work.
-func TestTheDraftListsTheWindowsOpenPoints(t *testing.T) {
+// retro's draft lists them, so the retro turns them into work. It lists the
+// decisions the boxes made themselves too, for the owner to review, and the
+// issues for a person against their soft budget.
+func TestTheDraftListsTheWindowsOpenPointsAndDecisions(t *testing.T) {
 	t.Parallel()
 	a := retroRepo(t, true, "<!-- se:retro attended -->")
-	a["repos/o/r/issues/23/comments?per_page=100"] = jsonComments(landing(t, 23, map[string]string{"done": "it works", OpenKey: "the lease is too short\nand untested"}, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC)))
+	a["repos/o/r/issues/23/comments?per_page=100"] = jsonComments(landing(t, 23, map[string]string{"done": "it works", OpenKey: "the lease is too short\nand untested", DecisionsKey: "kept the lease at 2h: unsure, so the safer one"}, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC)))
 	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
 	if err != nil {
 		t.Fatal(err)
 	}
 	draft, err := c.Draft(rqs)
-	if err != nil || !strings.Contains(draft, "\n## Open points\n") || !strings.Contains(draft, "- #23 t23: the lease is too short\n  and untested\n") {
+	if err != nil || !strings.Contains(draft, "\n## Open points\n") || !strings.Contains(draft, "- #23 t23: the lease is too short\n  and untested\n") ||
+		!strings.Contains(draft, "\n## Decisions\n") || !strings.Contains(draft, "- #23 t23: kept the lease at 2h: unsure, so the safer one\n") ||
+		!strings.Contains(draft, "Issues for a person: 0 per closed issue, against a soft budget of 0.1, within it.") {
 		t.Fatalf("%v\n%s", err, draft)
 	}
-	if none := collect(t, true); !strings.Contains(none.facts(), "## Open points\n") || !strings.Contains(none.facts(), "None in the window.") {
+	if none := collect(t, true); !strings.Contains(none.facts(), "## Open points\n") || !strings.Contains(none.facts(), "## Decisions\n") || !strings.Contains(none.facts(), "None in the window.") {
 		t.Fatal(none.facts())
 	}
 }
@@ -261,7 +265,7 @@ func TestTheAnswersCheckSkipsWhatLandsNoBranch(t *testing.T) {
 	}
 	// The per-issue metrics divide by the landed issues, #23 and #24, as
 	// before: closing a person's decision and an overhaul dilutes nothing.
-	if m := c.Metrics; m["closed"] != 6 || m["landed"] != 2 || m["for_person"] != 1 || m["conflicts_per_issue"] != 0.5 {
+	if m := c.Metrics; m["closed"] != 6 || m["landed"] != 2 || m["for_person"] != 1 || m["conflicts_per_issue"] != 0.5 || m["for_person_per_issue"] != 0.17 {
 		t.Fatalf("%v", m)
 	}
 }
@@ -272,7 +276,7 @@ func TestTheCountsAndScripts(t *testing.T) {
 	want := Metrics{
 		"closed": 4, "landed": 2, "for_person": 0, "conflicts": 1, "takeovers": 1, "ci_reruns": 1, "person_flags": 1, "by_hand": 1, "duplicates": 2, "requests": 40, "rate_limits": 3, "rate_limit_minutes": 90,
 		"conflicts_per_issue": 0.5, "takeovers_per_issue": 0.5, "ci_reruns_per_issue": 0.5, "person_flags_per_issue": 0.5, "by_hand_per_issue": 0.5, "duplicates_per_issue": 1, "requests_per_issue": 20, "rate_limits_per_issue": 1.5, "rate_limit_minutes_per_issue": 45,
-		"claim_to_merge_minutes": 90,
+		"for_person_per_issue": 0, "claim_to_merge_minutes": 90,
 	}
 	if !reflect.DeepEqual(c.Metrics, want) {
 		t.Fatalf("%v", c.Metrics)
@@ -391,14 +395,14 @@ func TestTheMetricsBlockComparesWithThePreviousRetros(t *testing.T) {
 }
 
 // judged is retro #30's draft with the box's judgment filled in: one
-// controversial finding and one for the normal queue.
+// finding for a person (access) and one for the normal queue.
 func judged(t *testing.T, edit func(*RetroReport)) string {
 	t.Helper()
 	r := RetroReport{
 		Retro: 30, Attended: true, Metrics: Metrics{"closed": 4}, Checks: []Broken{},
 		Findings: []Lesson{
 			{Title: "Refuse a PR without Fixes", Class: "landing", Body: "PR #51 said no Fixes.", Home: "refusal", Check: "fixes"},
-			{Title: "Drop the lease", Class: "claims", Body: "It trades speed for safety.", Home: "removal", Controversial: true, Why: "it trades one metric against another"},
+			{Title: "Drop the lease", Class: "claims", Body: "Its ruleset keeps the claims.", Home: "removal", Controversial: true, Kind: WhyAccess, Why: "Lift the ruleset only the owner may change."},
 		},
 		Classes:  []Class{{"landing", "se issue land refuses"}, {"claims", "a person decides"}},
 		WentWell: []string{"the landing answers"},
@@ -419,6 +423,8 @@ func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 		"nothing went well":        func(r *RetroReport) { r.WentWell = nil },
 		"an unknown class":         func(r *RetroReport) { r.Findings[0].Class = "nope" },
 		"controversial, no why":    func(r *RetroReport) { r.Findings[1].Why = "" },
+		"controversial, not sure":  func(r *RetroReport) { r.Findings[1].Kind = "not sure" },
+		"controversial, no kind":   func(r *RetroReport) { r.Findings[1].Kind = "" },
 		"a home that is no fix":    func(r *RetroReport) { r.Findings[0].Home = "hope" },
 		"a check that is no check": func(r *RetroReport) { r.Findings[0].Check = "vibes" },
 	} {
@@ -478,6 +484,24 @@ func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
 	}
 }
 
+func TestAFindingTheBoxIsNotSureAboutIsFiledInTheNormalQueueWithItsDecision(t *testing.T) {
+	t.Parallel()
+	gh := recorded(t, retroRepo(t, true, "<!-- se:retro unattended -->"))
+	draft := judged(t, func(r *RetroReport) {
+		f := &r.Findings[1]
+		f.Controversial, f.Kind, f.Why = false, "", ""
+		f.Decision = "The box is not sure the lease still pays; it keeps it and measures takeovers."
+	})
+	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileReport(30, draft)
+	if err != nil || len(f.Person) != 0 || !reflect.DeepEqual(f.Issues, []int{93, 94}) {
+		t.Fatalf("%+v %v", f, err)
+	}
+	unsure := issueAt(t, gh, 94)
+	if unsure.labelled(PersonLabel) || !strings.Contains(unsure.Body, "**Decision taken:** The box is not sure the lease still pays") {
+		t.Fatalf("%+v", unsure)
+	}
+}
+
 func TestAnAttendedRetroClosesToo(t *testing.T) {
 	t.Parallel()
 	// A person started it, and still nobody waits: the report is its closing
@@ -494,7 +518,7 @@ func TestAnAttendedRetroClosesToo(t *testing.T) {
 	}
 	c := commentsAt(t, gh, 30)
 	report := "body=" + c[len(c)-1].Body
-	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease** (removal; for a person: it trades one metric against another)", "- the landing answers", reportBlock} {
+	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease** (removal; for a person (access): Lift the ruleset only the owner may change.)", "- the landing answers", reportBlock} {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
 		}

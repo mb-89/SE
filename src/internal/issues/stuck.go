@@ -172,12 +172,48 @@ func (s Status) since() string {
 	return "nothing was pushed to " + Branch(s.Number) + " since " + s.Since.UTC().Format(time.RFC3339)
 }
 
+// The two kinds of thing only a person can do (spec/principles.md, principle
+// 15): access, a setting, an account, a secret, a permission or a payment only
+// the owner has; and principle, a change to a design principle. Anything else
+// an agent decides itself, names, and goes on.
+const (
+	WhyAccess    = "access"
+	WhyPrinciple = "principle"
+)
+
+// WhyKinds are the kinds an issue for a person may give.
+var WhyKinds = []string{WhyAccess, WhyPrinciple}
+
+// Why says why an issue goes to a person: its Kind, one of WhyKinds, and What
+// only the person can do there, in a sentence.
+type Why struct {
+	Kind string `json:"kind" yaml:"kind"`
+	What string `json:"what" yaml:"what"`
+}
+
+// Check refuses a Why that is not access or principle, or says nothing.
+func (w Why) Check() error {
+	if !contains(WhyKinds, w.Kind) {
+		return fmt.Errorf("an issue for a person needs a why, %s, not %q: a decision an agent can make is its own to make, name and go on with (spec/principles.md, principle 15)", strings.Join(WhyKinds, " or "), w.Kind)
+	}
+	if strings.TrimSpace(w.What) == "" {
+		return fmt.Errorf("an issue for a person (%s) needs a sentence saying what only the person can do", w.Kind)
+	}
+	return nil
+}
+
 // ForPerson creates an issue for a person, through the same code as se issue
 // new: labelled se and se-person and assigned to the repository's owner, so
 // GitHub notifies them and no box is offered it, a sub-issue of parent where
 // that is above zero, blocked by each of blockedBy, and labelled each of
-// labels (se-final) too. These are the only issues that wait on a person.
-func (s Source) ForPerson(title, body string, parent int, blockedBy []int, labels ...string) (Issue, error) {
+// labels (se-final) too. Its body opens with why; it refuses, creating
+// nothing, anything but access or a principle. These are the only issues that
+// wait on a person.
+func (s Source) ForPerson(title, body string, why Why, parent int, blockedBy []int, labels ...string) (Issue, error) {
+	if err := why.Check(); err != nil {
+		return Issue{}, err
+	}
+	body = fmt.Sprintf("**For a person (%s):** %s\n\n%s", why.Kind, strings.TrimSpace(why.What), body)
 	made, _, err := s.create(title, body, parent, blockedBy, append([]string{Label, PersonLabel}, labels...))
 	if err != nil {
 		return Issue{}, err

@@ -185,7 +185,7 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 
 // overhauled is overhaul #30's draft with the box's judgment: a finding for
 // the normal queue, a principle change it left uncontroversial, and an
-// outside idea for a person.
+// outside idea it is not sure about, decided and named in the normal queue.
 func overhauled(t *testing.T, edit func(*OverhaulReport)) string {
 	t.Helper()
 	r := OverhaulReport{
@@ -196,7 +196,7 @@ func overhauled(t *testing.T, edit func(*OverhaulReport)) string {
 		Findings: []Straying{
 			{Title: "Prefill the landing answers", Body: "by-hand answers repeat.", Area: "principle", Principle: 1, Place: "spec/landing.yaml", Strays: "slightly"},
 			{Title: "Add a principle on cost", Body: "Nothing weighs tokens.", Area: "principles", Place: "spec/principles.md", Strays: "far"},
-			{Title: "Contract tests for gh", Body: "Others record real answers.", Area: "outside", Principle: 2, Place: "src/internal/issues", Strays: "slightly", Sources: []string{"https://example.com/pact"}, Controversial: true, Why: "the box is not sure"},
+			{Title: "Contract tests for gh", Body: "Others record real answers.", Area: "outside", Principle: 2, Place: "src/internal/issues", Strays: "slightly", Sources: []string{"https://example.com/pact"}, Decision: "Not sure they pay off here; recorded answers first, contract tests where one breaks."},
 		},
 		WentWell: []string{"the cadence"},
 	}
@@ -221,7 +221,7 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	t.Parallel()
 	gh := recorded(t, overhaulAnswers(overhaulUnattendedMark))
 	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
-	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 || f.Manifest != 31 {
+	if err != nil || len(f.Issues) != 3 || len(f.Person) != 1 || f.Manifest != 31 {
 		t.Fatalf("%+v %v", f, err)
 	}
 	// The findings are the next issues, #32 to #34: the normal one goes
@@ -240,17 +240,17 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	person := `{"name":"` + PersonLabel + `"}`
 	report := "body=" + commentsAt(t, gh, 30)[0].Body
 	// The normal finding is labelled se alone; the principle change, made
-	// controversial, and the unsure one se-person too.
+	// controversial, se-person too; the unsure one is normal, its decision named.
 	if strings.Contains(created[0], person) || !strings.Contains(created[0], "it strays slightly from principle 1, at spec/landing.yaml") ||
-		!strings.Contains(created[1], person) || !strings.Contains(created[1], "waits for a person: it changes a design principle") ||
-		!strings.Contains(created[2], person) || !strings.Contains(created[2], "Sources: https://example.com/pact") {
+		!strings.Contains(created[1], person) || !strings.Contains(created[1], "For a person (principle):** Decide whether the design principle changes") ||
+		strings.Contains(created[2], person) || !strings.Contains(created[2], "Sources: https://example.com/pact") || !strings.Contains(created[2], "**Decision taken:** Not sure they pay off here") {
 		t.Fatalf("%q", created)
 	}
 	writes := gh.Writes()
 	want := []string{
 		"POST repos/o/r/issues", "POST repos/o/r/issues", "POST repos/o/r/issues/31/sub_issues",
 		"POST repos/o/r/issues", "POST repos/o/r/issues/33/assignees",
-		"POST repos/o/r/issues", "POST repos/o/r/issues/34/assignees",
+		"POST repos/o/r/issues", "POST repos/o/r/issues/31/sub_issues",
 		"POST repos/o/r/issues/30/comments", "PATCH repos/o/r/issues/30", "DELETE repos/o/r/git/refs/heads/issue-30",
 	}
 	if !reflect.DeepEqual(writes, want) {
@@ -261,7 +261,7 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	if err != nil || back.Findings[0].Issue != 32 || !back.Findings[1].Controversial || back.Verdicts[0].Strays != "slightly" {
 		t.Fatalf("%+v %v", back, err)
 	}
-	for _, part := range []string{"| 1 | Mechanize first | slightly |", "**Add a principle on cost** (principles, principle 0, strays far, at spec/principles.md; for a person: it changes a design principle): #33", "- **The outside world:** agent tools converge on hooks", "**Speed (what could run in parallel, or ask the server for more at once):** the survey runs one call at a time"} {
+	for _, part := range []string{"| 1 | Mechanize first | slightly |", "**Add a principle on cost** (principles, principle 0, strays far, at spec/principles.md; for a person (principle): Decide whether the design principle changes as the finding proposes.): #33", "- **The outside world:** agent tools converge on hooks", "**Speed (what could run in parallel, or ask the server for more at once):** the survey runs one call at a time"} {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
 		}
@@ -291,7 +291,7 @@ func TestAnAttendedOverhaulClosesToo(t *testing.T) {
 	// findings are the issues for the person.
 	gh := recorded(t, overhaulAnswers("<!-- se:overhaul attended -->"))
 	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
-	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
+	if err != nil || len(f.Issues) != 3 || len(f.Person) != 1 {
 		t.Fatalf("%+v %v", f, err)
 	}
 	if labelled(t, gh, 30, PersonLabel) {
