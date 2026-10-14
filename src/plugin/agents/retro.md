@@ -33,7 +33,10 @@ created. A box takes it from there.
    and not, if anything, to `findings` in the draft's block, and go to 4.
 2. Read the draft: the issue's field feedback, the rule checks, the counts,
    the metrics against the previous retros, the previous retro's score, the
-   scripts, the decisions the boxes named and the matrix of landing answers. Look too for what the window
+   scripts, the open points and the matrix of landing answers. The open
+   points (`## Open points`, the `open` answers) are work no box filed, since
+   a box opens no issue: turn each that still holds into a finding, or name
+   why it does not. Look too for what the window
    made inconsistent, restated or written for no reader (principles 17 to
    19).
 3. Judge, and write it into the draft's block (the YAML under
@@ -42,10 +45,8 @@ created. A box takes it from there.
      produced it, not who. Each with a `title` (the fix, as an issue title), a
      `class`, a `body` (what happened, with issue and PR numbers, and the fix),
      a `home` (`check`, `refusal`, `gate`, `field`, `command`, `guidance` or `removal`:
-     the cheapest durable one, guidance last). If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../spec/principles.md), the one place this rule lives). So
-     `controversial`, with its `kind` (`access` or `principle`) and a `why`
-     saying what only the owner can do, is for those two alone; a trade-off,
-     a doubt or a recurrence is a normal finding with the `decision` you took. Name the rule
+     the cheapest durable one, guidance last), and `controversial` with its
+     `why` where the spec's rule calls it controversial. Name the rule
      `check` or the `metric` it should move, so the next retro can score it.
      A finding about the retro itself (its questions, checks, metrics or this
      agent) gets `retro: true`.
@@ -53,6 +54,11 @@ created. A box takes it from there.
      machinery. Each a `name` and its cheapest durable `fix`.
    - `went_well`: what worked and should stay.
 4. `./src/plugin/bin/se retro report <n>`. If it refuses, fix what it names
-   and run it again. It creates the issues, those for a person where
-   controversial, and closes the retro. End: there is no PR to land, and
+   and run it again. It creates the issues, all `se-final`: those for a
+   person where controversial, the rest as sub-issues of the retro's one
+   manifest of findings, and closes the retro. Mark a finding too big for
+   that manifest `controversial`, so a person decides it.
+   All work moves in manifests, each one topic whose leaves together take
+   about `issues.manifest/config/target` (an hour): size each finding's fix
+   to fit it. End: there is no PR to land, and
    nothing waits for the owner but the issues for them.

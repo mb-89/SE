@@ -1,6 +1,14 @@
 # The io-module rule's allowlist (src/internal/rules/iomodule.go, spec/io.md):
-# each line is a Go file outside src/internal/io and one way it still reaches
-# the outside directly. The list only shrinks: each I/O module removes its own
-# entries as it lands, and the rule refuses an entry that matches nothing.
-# Adding an entry is no way to pass the check.
-
+# each line is a file and one way it still goes around a door, a Go name or a
+# command word some door's owns.yaml declares. The list only shrinks: the rule
+# refuses an entry that matches nothing. Adding an entry is no way to pass the
+# check; a line that may go around a door for good carries the marker instead.
+#
+# The entries below were there when the rule came to read scripts and shell
+# files as well as Go. Both go when the github door speaks HTTP itself and
+# runs no gh (#186).
+#
+# It installs the gh the github door runs.
+tests/tools.sh gh
+# It wraps the gh the github door runs, to time se's calls of it (#115).
+src/scripts/profile-gh-calls.sh gh

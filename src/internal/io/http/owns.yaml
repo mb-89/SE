@@ -1,0 +1,4 @@
+# What the http door guards, and what going around it looks like (spec/io.md).
+guards: "the network: serving and calling over HTTP"
+go: [net/http]
+commands: []

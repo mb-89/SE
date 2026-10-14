@@ -185,8 +185,7 @@ func TestCollectReadsTheLatestRetrosAndThePreviousOverhaul(t *testing.T) {
 
 // overhauled is overhaul #30's draft with the box's judgment: a finding for
 // the normal queue, a principle change it left uncontroversial, and an
-// outside idea the box was not sure about, normal work with its decision
-// named.
+// outside idea for a person.
 func overhauled(t *testing.T, edit func(*OverhaulReport)) string {
 	t.Helper()
 	r := OverhaulReport{
@@ -197,7 +196,7 @@ func overhauled(t *testing.T, edit func(*OverhaulReport)) string {
 		Findings: []Straying{
 			{Title: "Prefill the landing answers", Body: "by-hand answers repeat.", Area: "principle", Principle: 1, Place: "spec/landing.yaml", Strays: "slightly"},
 			{Title: "Add a principle on cost", Body: "Nothing weighs tokens.", Area: "principles", Place: "spec/principles.md", Strays: "far"},
-			{Title: "Contract tests for gh", Body: "Others record real answers.", Area: "outside", Principle: 2, Place: "src/internal/issues", Strays: "slightly", Sources: []string{"https://example.com/pact"}, Decision: "Not sure they pay off here; chose to try them on the gh calls alone."},
+			{Title: "Contract tests for gh", Body: "Others record real answers.", Area: "outside", Principle: 2, Place: "src/internal/issues", Strays: "slightly", Sources: []string{"https://example.com/pact"}, Controversial: true, Why: "the box is not sure"},
 		},
 		WentWell: []string{"the cadence"},
 	}
@@ -222,12 +221,16 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	t.Parallel()
 	gh := recorded(t, overhaulAnswers(overhaulUnattendedMark))
 	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
-	if err != nil || len(f.Issues) != 3 || len(f.Person) != 1 {
+	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 || f.Manifest != 31 {
 		t.Fatalf("%+v %v", f, err)
 	}
-	// The findings are the next issues, #31 to #33.
+	// The findings are the next issues, #32 to #34: the normal one goes
+	// into the overhaul's one manifest, #31, final as the findings are.
+	if m, err := gh.Get("repos/o/r/issues/31"); err != nil || !strings.Contains(string(m), `"title":"Findings of the overhaul #30"`) || !strings.Contains(string(m), `{"name":"`+ManifestLabel+`"}`) || !strings.Contains(string(m), `{"name":"`+FinalLabel+`"}`) {
+		t.Fatalf("%s %v", m, err)
+	}
 	var created []string
-	for n := 31; n <= 33; n++ {
+	for n := 32; n <= 34; n++ {
 		out, err := gh.Get(fmt.Sprintf("repos/o/r/issues/%d", n))
 		if err != nil {
 			t.Fatal(err)
@@ -237,17 +240,17 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	person := `{"name":"` + PersonLabel + `"}`
 	report := "body=" + commentsAt(t, gh, 30)[0].Body
 	// The normal finding is labelled se alone; the principle change, made
-	// controversial, se-person too; the unsure one is normal, its decision named.
+	// controversial, and the unsure one se-person too.
 	if strings.Contains(created[0], person) || !strings.Contains(created[0], "it strays slightly from principle 1, at spec/landing.yaml") ||
-		!strings.Contains(created[1], person) || !strings.Contains(created[1], "**For a person (principle):** Decide whether the design principle changes") ||
-		strings.Contains(created[2], person) || !strings.Contains(created[2], "Sources: https://example.com/pact") ||
-		!strings.Contains(created[2], "**Decision taken:** Not sure they pay off here") {
+		!strings.Contains(created[1], person) || !strings.Contains(created[1], "waits for a person: it changes a design principle") ||
+		!strings.Contains(created[2], person) || !strings.Contains(created[2], "Sources: https://example.com/pact") {
 		t.Fatalf("%q", created)
 	}
 	writes := gh.Writes()
 	want := []string{
-		"POST repos/o/r/issues", "POST repos/o/r/issues", "POST repos/o/r/issues/32/assignees",
-		"POST repos/o/r/issues",
+		"POST repos/o/r/issues", "POST repos/o/r/issues", "POST repos/o/r/issues/31/sub_issues",
+		"POST repos/o/r/issues", "POST repos/o/r/issues/33/assignees",
+		"POST repos/o/r/issues", "POST repos/o/r/issues/34/assignees",
 		"POST repos/o/r/issues/30/comments", "PATCH repos/o/r/issues/30", "DELETE repos/o/r/git/refs/heads/issue-30",
 	}
 	if !reflect.DeepEqual(writes, want) {
@@ -255,10 +258,10 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	}
 	// The closing comment is the report, its block naming the issues, for the next overhaul.
 	back, _, err := ParseOverhaul(strings.TrimPrefix(report, "body="))
-	if err != nil || back.Findings[0].Issue != 31 || !back.Findings[1].Controversial || back.Verdicts[0].Strays != "slightly" {
+	if err != nil || back.Findings[0].Issue != 32 || !back.Findings[1].Controversial || back.Verdicts[0].Strays != "slightly" {
 		t.Fatalf("%+v %v", back, err)
 	}
-	for _, part := range []string{"| 1 | Mechanize first | slightly |", "**Add a principle on cost** (principles, principle 0, strays far, at spec/principles.md; for a person (principle): Decide whether the design principle changes as the finding proposes.): #32", "- **The outside world:** agent tools converge on hooks", "**Speed (what could run in parallel, or ask the server for more at once):** the survey runs one call at a time"} {
+	for _, part := range []string{"| 1 | Mechanize first | slightly |", "**Add a principle on cost** (principles, principle 0, strays far, at spec/principles.md; for a person: it changes a design principle): #33", "- **The outside world:** agent tools converge on hooks", "**Speed (what could run in parallel, or ask the server for more at once):** the survey runs one call at a time"} {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
 		}
@@ -272,11 +275,11 @@ func TestARemovalsIssueSaysToRepeatTheCascade(t *testing.T) {
 	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).FileOverhaul(30, draft); err != nil {
 		t.Fatal(err)
 	}
-	removal, err := gh.Get("repos/o/r/issues/31")
+	removal, err := gh.Get("repos/o/r/issues/32")
 	if err != nil || !strings.Contains(string(removal), "Repeat the removal until nothing more falls out") {
 		t.Fatalf("%s %v", removal, err)
 	}
-	other, err := gh.Get("repos/o/r/issues/32")
+	other, err := gh.Get("repos/o/r/issues/33")
 	if err != nil || strings.Contains(string(other), "Repeat the removal") {
 		t.Fatalf("%s %v", other, err)
 	}
@@ -288,7 +291,7 @@ func TestAnAttendedOverhaulClosesToo(t *testing.T) {
 	// findings are the issues for the person.
 	gh := recorded(t, overhaulAnswers("<!-- se:overhaul attended -->"))
 	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
-	if err != nil || len(f.Issues) != 3 || len(f.Person) != 1 {
+	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
 		t.Fatalf("%+v %v", f, err)
 	}
 	if labelled(t, gh, 30, PersonLabel) {

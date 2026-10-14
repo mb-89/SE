@@ -43,7 +43,12 @@ changes.
 ## Checks
 
 `sh ./tests/check.sh` is the one definition of green; the pre-push hook and CI
-run it, and it names each step it runs. SE's own rules are one file each in
+run it, and it names each step it runs. Once it passed, it records the tree
+it ran over (HEAD's tree without the record, of a clean worktree) in
+`tests/passed`, which is the only tree `se issue land` pushes; land commits
+the record with the work, and CI trusts a commit whose record names its own
+tree instead of running the battery again (see
+[spec/coordination.md](coordination.md#merging-into-main)). SE's own rules are one file each in
 `src/internal/rules`, run by `se rules`; where a rule can apply the mechanical
 part of its finding (the `fast-test` rule's `t.Parallel()` as a test's first
 statement), `se rules --fix` applies it, so no agent does it by hand. Every
@@ -69,6 +74,20 @@ and `biome --version` answer at the versions tools.sh pins, each from
 `src/internal/battery/tools_test.go` covers the names Windows' release files
 and binaries carry; this check covers the downloads, the unpacking and the
 PATH line.
+
+## The gate
+
+What keeps an unchecked change off main is CI, not the box. main's ruleset
+requires the `ci` workflow's `check` job, which runs `sh ./tests/check.sh`:
+a PR merges once that check passed on its head, which need not be up to date
+with main. The same job runs again on every push to main, and a red main is
+the fleet's first job ([spec/coordination.md](coordination.md#merging-into-main)).
+
+The pre-push hook and `.claude/hooks/no-skip.sh` only save a round trip. The
+hook runs check.sh before a push leaves the box; `no-skip.sh` refuses a Bash
+call whose text names `--no-verify` or sets `core.hooksPath` inline. Neither
+is a refusal: a push from elsewhere, or one that turns the hooks off another
+way, passes both, and the required check still stops what it pushed.
 
 ## Debugging the daemon
 

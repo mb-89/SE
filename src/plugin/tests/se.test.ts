@@ -36,6 +36,8 @@ type World = {
   takes: Record<string, number>
   // The clock beneath the plugin, which moves only when the test moves it.
   clock: MockClock
+  // Every hook the daemon was told the duration of, by its name.
+  hooks: string[]
   // What se hook stop prints; a number is the exit code it fails with.
   verdict: unknown
 }
@@ -88,6 +90,7 @@ function world(on: On, env: Record<string, string> = {}): World {
     statuses: [],
     takes: {},
     clock: mock.clock(on),
+    hooks: [],
     verdict: { pass: 'no se issue was taken here' },
     replies: {
       '': { text: HELP },
@@ -171,6 +174,7 @@ function world(on: On, env: Record<string, string> = {}): World {
   on('http.fetch', ($, e) => {
     if (w.live === null || e.url !== `http://${w.live}/event`) return { deny: 'connection refused' }
     const body = JSON.parse(String(e.init?.body ?? '{}'))
+    if (body.event === 'se.hook' && typeof body.e?.ms === 'number') w.hooks.push(body.e.hook)
     w.posts.push({
       url: e.url,
       auth: String(e.init?.headers?.authorization ?? ''),
@@ -288,6 +292,26 @@ test('while SE is on, each se call is a row of the daemon log with its duration'
   await $.command.run(se('on'))
   await $.command.run(se('status'))
   expect(posted(w)).toContain('se.call')
+})
+
+test('while SE is on, each hook is a row of the daemon log with its duration', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('on'))
+  await $.command.run(se('status'))
+  await $.attribution.text(probe)
+  await w.clock.advance(0)
+  expect(w.hooks).toContain('command.run se')
+  expect(w.hooks).toContain('*')
+})
+
+test('while SE is off, no hook posts its duration', async ($, on) => {
+  const w = world(on)
+  await $.session.start(starts)
+  await $.command.run(se('status'))
+  await $.attribution.text(probe)
+  await w.clock.advance(0)
+  expect(w.hooks).toEqual([])
 })
 
 test('off by default: events pass, nothing starts, nothing is posted', async ($, on) => {
@@ -703,6 +727,52 @@ test('a command se offers as a button appears, and pressing it runs /se <name>',
   expect(verbs(w)).toEqual(['/se status'])
   // Its answer is a line of the transcript, as the command's answer is.
   expect(w.logs).toEqual(['No SE daemon answers for /work.'])
+})
+
+test('a three-line answer to a press arrives as three lines, never one flattened line', async ($, on) => {
+  const w = world(on)
+  w.replies.status = {
+    text: 'No SE daemon answers for /work.\nHooks loaded from aaa111.\nThey disagree: start a new session.',
+  }
+  await $.session.start(starts)
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'run status' })
+  expect(w.logs).toEqual([
+    'No SE daemon answers for /work.',
+    'Hooks loaded from aaa111.',
+    'They disagree: start a new session.',
+  ])
+})
+
+test('a press shows the short form se answers; typing shows the full one', async ($, on) => {
+  const w = world(on)
+  w.replies['issue pull'] = {
+    text: '#7 seven\nu7\nThe lowest ready issue at the top.\n1 se issue closed.\n0 retros closed.',
+    short: '#7 seven\nu7\nThe lowest ready issue at the top.\nCadence: retro at 1 of 10; overhaul at 0 of 5.',
+  }
+  await $.session.start(starts)
+  expect((await $.command.run(se('issue pull')))?.text).toBe(
+    '#7 seven\nu7\nThe lowest ready issue at the top.\n1 se issue closed.\n0 retros closed.',
+  )
+  await $.command.run(se('ui'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
+  await ui.press({ key: 'run issue pull' })
+  expect(w.logs).toEqual([
+    '#7 seven',
+    'u7',
+    'The lowest ready issue at the top.',
+    'Cadence: retro at 1 of 10; overhaul at 0 of 5.',
+  ])
+})
+
+test('a slow answer that follows in the transcript keeps its lines', async ($, on) => {
+  const w = world(on)
+  w.takes.slow = 5000
+  w.replies.slow = { text: 'one\n\ntwo' }
+  await $.session.start(starts)
+  await Promise.all([$.command.run(se('slow')), w.clock.advance(5000)])
+  expect(w.logs).toEqual(['one', 'two'])
 })
 
 test('a command se does not offer as a button does not appear', async ($, on) => {

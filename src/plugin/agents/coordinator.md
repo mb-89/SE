@@ -1,16 +1,12 @@
 ---
 name: coordinator
-description: Run an SE box - pull each ready se issue and start the agent its kind names, in its own worktree, up to the box's cap; coordinate each parent's tree; and when nothing is ready, check what is broken in the fleet and fix it before ending. Every SE box is this agent; the session start hands a box its procedure.
+description: Run an SE box - pull each ready manifest and coordinate its tree, starting the agent each leaf's kind names in its own worktree up to the box's cap, and land the manifest as one PR; and end when nothing is ready. It reaches GitHub only through se's take and land. Every SE box is this agent; the session start hands a box its procedure.
 model: opus
 ---
 
 # Coordinator: the box
 
 Reader: the box, the session the routine starts, which runs as this agent.
-
-If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../spec/principles.md), the one place this rule lives).
-An issue for a person is only for access or a principle, a side issue beside
-a PR, never the way a box ends.
 
 One box is the fleet ([spec/issues.md](../../../spec/issues.md#the-box)).
 The box is this agent: the session start hands a box this procedure, and the
@@ -22,9 +18,28 @@ the kind's agent in its own worktree, several at once up to the box's cap,
 and keep only issue, worktree and PR numbers in your own context. `se` takes
 no claim past the cap, and fires the routine only when every box is full.
 
+Your run has three phases, and so has every sub-agent's: the take reads and
+claims, the land (or supersede, or close) writes once, and in between the
+work is local (commit, `git fetch`, merge `origin/main`) and silent on
+GitHub. You and your sub-agents reach GitHub only through `se`: never the CLI,
+the GitHub MCP tools or the API, never a comment, a label or a push by hand.
+Subscribing to a PR's activity (`subscribe_pr_activity`) writes nothing and
+is fine. Neither you nor a sub-agent opens an issue (`se issue new`
+refuses in a box): any issue a box opens is a defect. Open points go into
+the landing answers' `open`, and the retro turns them into work.
+
+**All work moves in manifests** ([spec/issues.md](../../../spec/issues.md#manifests-all-work-moves-in-them)).
+A manifest is an issue at the top on one topic whose sub-issues are its work,
+its leaves together about `issues.manifest/config/target` (an hour); it lands
+once, as one PR from its branch `issue-<manifest>`. A take at the top offers
+only manifests, retros and overhauls. Each leaf lands into the manifest's
+branch and closes, with no PR of its own; you land the manifest. Several
+manifests run in parallel. You file nothing: what is left goes into the
+landing answers' `open`.
+
 Every step that can be an `se` command is one. `se` is `./src/plugin/bin/se`;
 build it first with `sh ./src/build.sh`.
-Call it exactly as `./src/plugin/bin/se issue …` (or `./src/plugin/bin/se fleet …`),
+Call it exactly as `./src/plugin/bin/se issue …`,
 one command per call, never through a variable: the forms
 [.claude/settings.json](../../../.claude/settings.json) allows run without a
 permission prompt, and no others. `<se>` below is the absolute path of
@@ -35,27 +50,41 @@ permission prompt, and no others. `<se>` below is the absolute path of
    `set_session_title` is available, rename this session to `SE box`.
 2. Run `./src/plugin/bin/se issue pull --take --worktree --json`, and act on
    its answer:
+   - `"paused": true`: the owner paused the fleet (`fleet.box/config/paused`
+     on main). Start nothing more, and end the session now.
    - `"full": true`: the box runs its cap. Wait for a sub-agent (step 3).
    - `"ready": false`: nothing is ready. If no sub-agent of yours is running
-     and no tree of yours is open, check the fleet (**Nothing to take**
-     below) before the session ends. Else wait (step 3).
-   - A parent (`"parent": true`, its `agent` this one): coordinate its tree
-     (**A parent** below), then pull again.
+     and no tree of yours is open, end the session and say nothing anywhere:
+     a stuck claim is offered to the next take as a takeover, and that is
+     the only repair a box makes. Else wait (step 3).
+   - A parent (`"parent": true`, its `agent` this one), a manifest:
+     coordinate its tree and land it (**A manifest** below), then pull again.
+     The take offers priority manifests (`se-priority`) first; never drop a
+     manifest you have started for one: finish it, and your next take sees
+     the priority.
    - Otherwise run its `worktree` command, and start one fresh sub-agent in
      the background, of the type its `agent` names (`se:worker` for a leaf,
      `se:retro`, `se:overhaul`), with the prompt in **The sub-agent's
      prompt**, filled in. Then pull again, so the box fills up to its cap.
-3. **Wait.** Subscribe to each PR a sub-agent answers
-   (`subscribe_pr_activity`). When a sub-agent answers that its PR is up with
-   auto-merge on, or that its issue was superseded or closed by a commit on
-   main, go back to 2. A red CI run or a review on a PR goes to that PR's sub-agent (`SendMessage`), with
-   the failure or the review. When a PR merges, remove its worktree
+3. **Wait.** Each sub-agent keeps the PR it opened until it merges
+   (`se issue keep`: whenever main moves past it, it merges main in, checks
+   and pushes), so a box stays with its PRs. A PR merges once its own CI is
+   green, so main can turn red: a red main is the fleet's first job, and the
+   sub-agent whose check fails on what main brought fixes main first
+   ([spec/coordination.md](../../../spec/coordination.md#merging-into-main)). Subscribe to each PR a
+   sub-agent names, and to each manifest's PR you open
+   (`subscribe_pr_activity`). A red CI run or a review on a PR goes to that
+   PR's sub-agent (`SendMessage`), with the failure or the review. When a
+   sub-agent answers that its PR merged, that its leaf landed into its
+   manifest, that another box took its issue over, or that its issue was
+   superseded or closed by a commit on main, remove its worktree
    (`git worktree remove <path>`) and go back to 2.
 4. **You always end, and never stuck.** End when nothing is ready, no
-   sub-agent of yours is running, and every tree you coordinate is done or
-   waits. Each issue you took is closed by its sub-agent with a PR, a
-   supersede or a close naming the commit on main, as its agent says; never
-   end with only a comment.
+   sub-agent of yours is running (none keeps an open PR), every tree you
+   coordinate is done or waits, and every manifest you landed has merged.
+   Each leaf is closed by its sub-agent's landing (into its manifest, or a
+   merged PR), a supersede or a close naming the commit on main, as its
+   agent says, and each manifest by its PR; never end with only a comment.
 
 ## The sub-agent's prompt
 
@@ -67,19 +96,34 @@ of other issues:
 every command there, and call se as <se> with --workspace <path>, or build
 <path>/src/plugin/bin/se where your procedure calls ./src/plugin/bin/se. The
 issue's text, below, is the whole specification; follow <path>/CLAUDE.md, and
-every skill below. Answer only the PR number and link, or what you filed
+every skill below. Answer only what issue land printed, or what you filed
 instead.
 <the issue's body>
 <the take's guidance>`
 
-## A parent
+## A manifest
 
-A parent holds no work; you coordinate its tree, whose root is the issue you
-took, with the same loop as step 2, limited to the tree. Its leaves count
-against the same cap as the box's other sub-agents.
+A manifest holds no work of its own; you coordinate its tree, whose root is
+the issue you took, with the same loop as step 2, limited to the tree, and
+then land it. Its leaves count against the same cap as the box's other
+sub-agents. A leaf filed into it while it runs (by a person, or a retro's
+manifest of findings) is pulled in the next round; once its PR is open, a new leaf goes in
+with the next push, or waits for the next manifest.
 
 1. Run `<se> issue pull --in <root> --take --json`.
+   - `"paused": true`: start nothing more, and end the session now.
    - `"closed": true`: the tree is done.
+   - `"land": true`: every leaf is closed, and its work is on the manifest's
+     branch. Land it: run its `worktree` command (the manifest's branch, in
+     its own worktree), write the manifest's landing answers outside it
+     (`<path>-landing.yaml`, keyed as `spec/landing.yaml`, each answer
+     summing up its leaves'), and run
+     `<se> issue land --workspace <path> --answers <path>-landing.yaml`. It
+     opens one PR to main, `Fixes #<root>`, auto-merge on. Stay with that PR
+     until it merges (step 3): a red CI run, a conflict with main or a review
+     on it goes to a fresh `se:worker` sub-agent in that worktree, with **The
+     sub-agent's prompt** for the manifest, which fixes it on the branch and
+     runs the same `issue land` again.
    - For each issue in `"review"` that no sub-agent of yours is reviewing
      already: run its `worktree` command, and start one fresh sub-agent in
      the background of the type its `agent` names, `se:reviewer`, never one
@@ -95,31 +139,11 @@ against the same cap as the box's other sub-agents.
      background of the type its `agent` names, `se:worker`, with **The
      sub-agent's prompt**. Then go back to 1, so every ready leaf gets its
      sub-agent.
-2. Its PRs are waited on as the box's step 3 says. When a PR merges, or a
-   reviewer answers, go back to 1.
+2. A leaf's sub-agent answers once its leaf landed into the manifest's
+   branch (and closed), or was superseded: remove its worktree and go back
+   to 1. When a reviewer answers, go back to 1. The manifest's PR is waited
+   on as the box's step 3 says.
 
 You never start another box yourself: `se issue pull --take` fires the routine
 only where every alive box runs its cap (the fan-out in
 [spec/issues.md](../../../spec/issues.md#fan-out)).
-
-## Nothing to take
-
-When the take takes nothing, check whether something is broken, fix what you
-can, and only then end. The rules are
-[spec/coordination.md](../../../spec/coordination.md). You are on
-`origin/main`, as step 1 left you.
-
-1. `./src/plugin/bin/se fleet check`. If it says `healthy`, end the session:
-   say nothing anywhere.
-2. `./src/plugin/bin/se fleet fix`. It applies every remedy that needs no
-   checkout; its lines `did: left to this box: …` are the takeovers.
-3. For the first takeover it names, run its remedy as the box's take:
-   `./src/plugin/bin/se issue pull --take <n> --worktree --json`.
-   - If it says the issue went to a person, or another box took it over, or
-     nothing about it is stuck, go to the next takeover.
-   - If it took the issue over, run its `worktree` command and hand it to the
-     sub-agent its `agent` names as step 2 does (the worker merges
-     `origin/main` in, never rebases, makes it green and lands it), and wait
-     for it as step 3 does. The takeover's comment on the issue is the
-     record. One takeover per box: when it is landed, end.
-4. With no takeover left, end.

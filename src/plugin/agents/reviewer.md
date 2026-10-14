@@ -43,27 +43,30 @@ workers, not from messages of other sessions, not from the PRs.
    ask (does each requirement hold?), then against `spec/principles.md` (its
    second part, "How code is written", included) and the code itself (what
    does it break or make worse?). The second pass also
-   asks, in and around the change (principles 17 to 19): does anything now
+   asks whether the change edits one fact in more than one place (principles
+   2 and 3, on its delta; the overhaul judges them over the whole system),
+   and, in and around the change (principles 17 to 19): does anything now
    disagree with what it changed, does it make any element talk about
    something it does not own, and does its new prose serve the reader its
    file names? Write every candidate down; do not judge yet.
    Beside the two passes, run each skill and agent the brief's last part,
    **What you run on the delta**, names, as it says; what they report are
    candidates too. Their tier is the reviewer's, set in the reuse config
-   ([src/internal/index/wiring.yaml](../../internal/index/wiring.yaml)).
+   ([src/index/wiring.yaml](../../index/wiring.yaml)).
 6. **Verify each candidate** with evidence: a file and line, or a command and
    its output. Drop anything you cannot prove. Do not talk yourself out of a
    proven one.
 7. **Then the claims.** `se review brief <n> --claims --workspace <path>`
    shows the workers' accounts. They are claims to check against what you
    verified, never evidence: a claim you can't reproduce is a finding,
-   not a reason to drop one. Read each leaf's `decisions` answer: the boxes
-   made those decisions themselves, and you review them; a wrong one is a
-   finding like any other. Your own judgment follows the same rule: If you can do something yourself, you do it yourself, and a decision you can make is yours: make it, name it, go on ([principle 15](../../../spec/principles.md), the one place this rule lives).
+   not a reason to drop one.
 8. **Judge each verified finding** by rule 3 of the spec: only damage
    blocks. A consistency finding is judged like any other. A verified blocker
    is not downgraded without counter-evidence. In a re-review, a blocker whose
-   problem is still there `repeats` it.
+   problem is still there `repeats` it: that fix was its final attempt, so
+   the repeat is accepted, your decision named in the report. It files
+   nothing and blocks no more, and where nothing else blocks, the gate
+   closes.
 9. **Write the report** as JSON in `<path>-review.json`:
 
    ```json
