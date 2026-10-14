@@ -39,13 +39,18 @@ and only then leaves.**
    - **impossible block**: an issue blocked by an issue closed as not planned,
      by an open issue no box works (not labelled `se`, or in another
      repository), or by itself through a cycle.
+   - **bare issue**: an open `se` issue at the top in no manifest, which no
+     box takes: no parent, no sub-issues, not a manifest, retro, overhaul or
+     issue for a person, nothing holds it and nothing claims it. An `se`
+     built before manifests still files such issues.
    - **waiting on a person**: an `se-person` issue, with what it holds up.
      Reported, never fixed.
 
-   Claimed work is moving while its branch was pushed within the hour (the
-   activity GitHub records for the branch, its creation included), while its
-   CI runs, or while a takeover of it is in flight: the last takeover marker
-   names the same head and is less than an hour old.
+   Claimed work is moving while its branch was pushed, or the issue taken
+   over, within the hour (the activity GitHub records for the branch, its
+   creation included, or the last takeover marker: the lease reads it the
+   same way), while its CI runs, or while a takeover of it is in flight: the
+   last takeover marker names the same head and is less than an hour old.
 3. **The box fixes what has a known remedy,** in the order
    the command lists, each with the mechanism that already exists:
    - a conflicted, red or stalled claim, or a claim with no PR, is taken
@@ -61,6 +66,9 @@ and only then leaves.**
      (`se fleet fix`, by `git push origin --delete` from the workspace, the
      transport `se issue land` pushes through): nothing is lost, and nothing
      else could clear it;
+   - a bare issue is filed into the open misc manifest (`se fleet fix`, the
+     manifest `se issue new` files into, opening the next one where none is
+     open, then GitHub's sub-issues link);
    - an impossible block, any other leftover claim, or anything else with no remedy is
      reported as an issue (`se fleet fix`, through the same code as
      `se issue new`), labelled `se-person` and assigned to the repository's
@@ -69,10 +77,10 @@ and only then leaves.**
 4. **It never fixes the same thing twice.** A takeover is recorded with
    `<!-- se:takeover N -->`, every other fix with `<!-- se:fleet KEY M -->` on
    the finding's issue (`M` is the issue it made, or 0). A finding that comes
-   back after its fix goes to a person: a takeover labels the issue
-   `se-final`, and a takeover of an `se-final` issue makes it wait on an
-   issue for a person instead, and any other finding becomes an `se-person`
-   issue. A finding
+   back after its fix goes to a person: a takeover of stuck work labels the
+   issue `se-final`, and such a takeover of an `se-final` issue makes it wait
+   on an issue for a person instead (a conflict is no failure: its takeover
+   does neither), and any other finding becomes an `se-person` issue. A finding
    already reported as an issue that is still open is left as it is.
 5. **The record.** The box lands nothing of its own, so each fix is a comment
    on the issue it acted on, saying what was found and what was done (the
@@ -87,8 +95,8 @@ se fleet check [--json] [--repo OWNER/NAME]
 se fleet fix [--json] [--repo OWNER/NAME]
 se fleet plugins --into DIR
 se fleet prune [--apply] [--json] [--repo OWNER/NAME]
-se fleet refresh [--json] [--repo OWNER/NAME]
 se fleet rules [--json] [--repo OWNER/NAME]
+se fleet trust --sha SHA --tree TREE [--json] [--repo OWNER/NAME]
 ```
 <!-- /se:manifest -->
 
@@ -120,20 +128,50 @@ its output names what it deleted.
 
 CI must run on what lands, so main's ruleset merges a PR only when its
 branch is up to date with main (its required check `check` is strict): a PR
-whose CI ran before main moved waits. Two things keep it moving, with no
-box in the loop:
+whose CI ran before main moved waits. The merge queue is not offered for a
+repository a personal account owns, and a push made with a workflow's own
+token starts no CI, so no workflow can bring a PR up to date either. The
+owner's rule (2026-10-14): **a box stays with its PR until it merges, it
+pushes only what is up to date with main and checked, and CI trusts the
+battery the box already ran.**
 
-- `se issue land` merges origin's copy of the branch and then `origin/main`
-  into it before it runs the check, so the check runs on what lands and the
-  push is a fast-forward. A merge that conflicts is undone, and the box
-  resolves it by hand (never a rebase, never a force-push).
-- `se fleet refresh` brings every open PR with auto-merge on that main has
-  moved past up to date through GitHub's update-branch, and starts the
-  `ci` workflow on its new head itself, since a push made with the
-  repository's token starts no workflow. A PR that conflicts with main is
-  left to its takeover; an update that fails is reported, and the workflow
-  run goes red. The workflow `.github/workflows/refresh.yml` runs it on every
-  push to main, and every hour.
+- **The battery records what it passed.** `tests/check.sh` records the git
+  tree it ran over, `HEAD^{tree}` of a clean worktree, read before its first
+  step and again once it passed, in `.se/.runtime/battery/tree`
+  (`src/internal/battery`, `TreeFile`): a battery run is bound to the exact
+  code.
+- **`se issue land` pushes only what is current and checked.** It merges
+  origin's copy of the branch and then `origin/main` into it before it runs
+  the check, so the check runs on what lands. It refuses to push a tree the
+  battery did not record as passed, and a branch `origin/main` (fetched
+  again after the check) has moved past: only a fast-forward onto main is
+  pushed, and main's ruleset enforces the merge side. A merge that conflicts
+  is undone, and the box resolves it by hand (never a rebase, never a
+  force-push). After the push it posts the commit status `se/battery`,
+  success, on the pushed commit, its description naming the tree, through
+  the GitHub I/O module.
+- **CI trusts that status.** The `check` job, the one main's ruleset
+  requires, first runs `se fleet trust` (built from the PR's tree, outside
+  the checkout): where the head commit's latest `se/battery` status is a
+  success naming the tree CI checked out, posted by an account with write
+  access to the repository, it passes in seconds. Otherwise (a person's push
+  without SE, say) it runs the battery as before. A status not posted yet is
+  asked for again a few times, since CI can start on a push before the box
+  posts it. It is trust in one's own boxes, not a cryptographic proof, and
+  the owner changes no setting.
+- **The box keeps each PR it opened until it merges.** The worker that
+  landed it runs `se issue keep` in its worktree: every minute it looks at
+  the PR, and whenever main has moved past the branch on origin it merges
+  `origin/main` in (never a rebase), runs the battery, pushes and posts the
+  status as `se issue land` does. The push starts CI like any person's push,
+  CI passes in seconds on the status, and auto-merge merges it. It answers
+  within `--for` (8 minutes), saying the PR merged, another box took the
+  issue over (a takeover marker, or another box's claim, since it started),
+  or that it is still open, and the worker runs it again. A merge that
+  conflicts, a failing check and a PR closed unmerged are errors the worker
+  fixes before it lands again. The Stop hook counts an open PR as unfinished
+  ([spec/issues.md](issues.md#the-stop-hook)), so a box ends only once its
+  PRs have merged or are taken over.
 
 ## A rule main takes
 

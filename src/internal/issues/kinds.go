@@ -27,8 +27,8 @@ type Kind struct {
 
 // IssueKinds is every kind, each with its agent.
 var IssueKinds = []Kind{
-	{Name: "leaf", Agent: "worker", Role: "work", What: "an issue with no sub-issues: work, landed as one PR"},
-	{Name: "parent", Agent: "coordinator", Role: "coordination", What: "an issue with sub-issues: the box coordinates its tree, as it runs the queue and checks the fleet when nothing is ready"},
+	{Name: "leaf", Agent: "worker", Role: "work", What: "an issue with no sub-issues: work, landed into its manifest's branch"},
+	{Name: "parent", Agent: "coordinator", Role: "coordination", What: "an issue with sub-issues, a manifest at the top: the box coordinates its tree and lands it as one PR, as it runs the queue and checks the fleet when nothing is ready"},
 	{Name: "gate", Agent: "reviewer", Role: "review", What: "an se-review parent ready for review: reviewed cold"},
 	{Name: "retro", Agent: "retro", Role: "retro", What: "an issue labelled se-retro"},
 	{Name: "overhaul", Agent: "overhaul", Role: "overhaul", What: "an issue labelled se-overhaul"},
@@ -69,6 +69,30 @@ func Agents() map[string]string {
 	out := map[string]string{}
 	for _, k := range IssueKinds {
 		out[k.Agent] = k.Role
+	}
+	return out
+}
+
+// RoleNamed answers the kind whose agent owns the skill name: its role, as
+// the skill went by before the agent held it, or the agent's own name. A
+// skills line naming one names no skill: the take's agent carries it.
+func RoleNamed(name string) (Kind, bool) {
+	for _, k := range IssueKinds {
+		if name == k.Role || name == k.Agent {
+			return k, true
+		}
+	}
+	return Kind{}, false
+}
+
+// Skills answers the names that are skills, each a role's dropped: an agent
+// holds that role, and no skill file does.
+func Skills(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if _, ok := RoleNamed(n); !ok {
+			out = append(out, n)
+		}
 	}
 	return out
 }

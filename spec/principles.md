@@ -57,7 +57,7 @@ principles of code once.
 7. **Fakes that behave, held to contracts.**
    Every I/O module has a fake, and one contract suite runs against both the
    fake and the real thing; a fake without its suite is refused.
-   Checked by: the battery (a lint rule).
+   Checked by: the battery (the `fake-contract` rule of `se rules`).
 
 8. **Fast tests.**
    Test a behaviour once, at the outermost interface (the `se` command), on

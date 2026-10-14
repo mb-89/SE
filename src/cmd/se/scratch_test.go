@@ -99,17 +99,24 @@ func TestAProjectHoldingNoSEFileGetsTheHelpTheGuidanceAndATake(t *testing.T) {
 	if !strings.Contains(boxed, "This session is an SE box: it is se:coordinator") || !strings.Contains(boxed, "# Coordinator: the box") || strings.Contains(boxed, "name: coordinator") {
 		t.Fatalf("the guidance of a box: %q", boxed)
 	}
-	// The fake take: the box's take names the agent of the issue's kind.
-	code, out, errs := se(t, "issue", "pull", "--take", "--worktree", "--json", "--repo", "o/r", "--workspace", ws)
+	// The fake take: the box's take names the agent of the issue's kind, the
+	// box itself for the manifest #3, and se:worker for its leaf #6.
 	var took struct {
 		Ready    bool   `json:"ready"`
 		Agent    string `json:"agent"`
 		Worktree string `json:"worktree"`
 	}
+	code, out, errs := se(t, "issue", "pull", "--take", "--worktree", "--json", "--repo", "o/r", "--workspace", ws)
+	if err := json.Unmarshal([]byte(out), &took); err != nil || code != 0 || !took.Ready || took.Agent != "se:coordinator" || took.Worktree != "" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	code, out, errs = se(t, "issue", "pull", "--in", "3", "--take", "--json", "--repo", "o/r", "--workspace", ws)
 	if err := json.Unmarshal([]byte(out), &took); err != nil || code != 0 || !took.Ready || took.Agent != "se:worker" || took.Worktree == "" {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	// The repository holds nothing of SE's but the install's settings and what a take keeps at runtime.
+	// The repository holds nothing of SE's but the install's settings and
+	// the ledger of its GitHub requests: the box's takes were a manifest's,
+	// which records nothing for the Stop hook.
 	entries, _ := os.ReadDir(ws)
 	var names []string
 	for _, e := range entries {

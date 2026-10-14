@@ -83,6 +83,36 @@ type Limited struct {
 	// writing holds one write at a time; last is when the last one ended.
 	writing sync.Mutex
 	last    time.Time
+	// refused records each rate-limit refusal, under its own lock, since
+	// reads retry side by side.
+	refusing sync.Mutex
+	refused  []Refusal
+}
+
+// Refusal is one request GitHub refused for a rate limit: when, with which
+// HTTP status, and how long se waited for the reset before it asked again;
+// GaveUp where that wait would have passed the ceiling and the request
+// failed at once instead, waiting nothing.
+type Refusal struct {
+	At     time.Time
+	Status int
+	Wait   time.Duration
+	GaveUp bool
+}
+
+// Refuser is a GitHub that keeps the rate-limit refusals it met: Limited.
+type Refuser interface {
+	// Refusals answers each rate-limit refusal met so far, oldest first.
+	Refusals() []Refusal
+}
+
+// RefusedBy answers the rate-limit refusals g met where g keeps them; none
+// where not.
+func RefusedBy(g GitHub) []Refusal {
+	if r, ok := g.(Refuser); ok {
+		return r.Refusals()
+	}
+	return nil
 }
 
 // Limit answers gh living within GitHub's rate limits, timed by c, saying on
@@ -120,6 +150,21 @@ func (l *Limited) Requests() int { n, _ := Metered(l.gh); return n }
 // Rate answers the quota as the GitHub it wraps last saw it.
 func (l *Limited) Rate() Rate { _, r := Metered(l.gh); return r }
 
+// Refusals answers each rate-limit refusal it met, and the wait it made for
+// each, oldest first.
+func (l *Limited) Refusals() []Refusal {
+	l.refusing.Lock()
+	defer l.refusing.Unlock()
+	return append([]Refusal(nil), l.refused...)
+}
+
+// refuse records a rate-limit refusal.
+func (l *Limited) refuse(r Refusal) {
+	l.refusing.Lock()
+	defer l.refusing.Unlock()
+	l.refused = append(l.refused, r)
+}
+
 // write makes one write at a time, at least Spacing after the last ended.
 func (l *Limited) write(call func() ([]byte, error)) ([]byte, error) {
 	l.writing.Lock()
@@ -149,11 +194,13 @@ func (l *Limited) retry(call func() ([]byte, error)) ([]byte, error) {
 		d := r.wait(now)
 		d = max(d, time.Second<<min(tries, 12))
 		if waited+d > l.limits.Ceiling {
+			l.refuse(Refusal{At: now, Status: Status(err), GaveUp: true})
 			return nil, fmt.Errorf("GitHub's rate limit holds until %s, past the %s se waits for it (github/config/wait-ceiling): %w",
 				now.Add(d).UTC().Format("15:04:05 UTC"), l.limits.Ceiling, err)
 		}
 		fmt.Fprintf(l.say, "se: GitHub refused a request for its rate limit (HTTP %d); waiting %s, until %s, for it to reset.\n",
 			Status(err), d.Round(time.Second), now.Add(d).UTC().Format("15:04:05 UTC"))
+		l.refuse(Refusal{At: now, Status: Status(err), Wait: d})
 		l.clock.Sleep(d)
 		waited += d
 	}

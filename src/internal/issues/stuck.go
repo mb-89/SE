@@ -197,7 +197,7 @@ var holdOf = regexp.MustCompile(`^Decide how #(\d+) goes on: `)
 // already exists: no box is left to write it.
 func (s Source) hold(i Issue, reason string) (Issue, error) {
 	title := fmt.Sprintf(holdTitle, i.Number, i.Title)
-	body := fmt.Sprintf("%s\n\n#%d (%s) is blocked by this issue. Decide how it goes on, say so here, and close this issue: #%d is then back in the queue with a fresh attempt.", reason, i.Number, i.URL, i.Number)
+	body := fmt.Sprintf("%s\n\n#%d (%s) is blocked by this issue. Decide how it goes on, say so here, and close this issue: #%d is then back in the queue with a fresh attempt.\n\n<!-- se:holds %d -->", reason, i.Number, i.URL, i.Number, i.Number)
 	made, err := s.ForPerson(title, body, 0, nil)
 	if err != nil {
 		return Issue{}, fmt.Errorf("giving #%d to a person: %w", i.Number, err)
@@ -218,6 +218,36 @@ func (s Source) hold(i Issue, reason string) (Issue, error) {
 		s.Flagged(i, reason)
 	}
 	return made, nil
+}
+
+// holdsMark is the mark hold leaves in the body of the issue for a person it
+// mints, naming the issue it holds.
+var holdsMark = regexp.MustCompile(`<!-- se:holds ([0-9]+) -->`)
+
+// holds is the issue that issue for a person i holds, where hold minted it; 0 otherwise.
+func (i issue) holds() int {
+	if !i.labelled(PersonLabel) {
+		return 0
+	}
+	got := holdsMark.FindStringSubmatch(i.Body)
+	if got == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(got[1])
+	return n
+}
+
+// closeMoot closes issue for a person h, whose held issue n closed: nothing
+// is left for the person to decide.
+func (s Source) closeMoot(h, n int) error {
+	path := fmt.Sprintf("repos/%s/issues/%d", s.Repo, h)
+	if _, err := s.GitHub.Send("POST", path+"/comments", github.F("body", fmt.Sprintf("#%d, which this issue held, is closed, so nothing is left to decide here, and it closes by itself.", n))); err != nil {
+		return fmt.Errorf("closing #%d, moot: %w", h, err)
+	}
+	if _, err := s.GitHub.Send("PATCH", path, github.F("state", "closed"), github.F("state_reason", "not_planned")); err != nil {
+		return fmt.Errorf("closing #%d, moot: %w", h, err)
+	}
+	return nil
 }
 
 // ForPerson creates an issue for a person, through the same code as se issue
