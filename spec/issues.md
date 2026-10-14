@@ -473,7 +473,9 @@ does. Without a daemon, the pull reads GitHub itself, on a short critical
 path: the open issue list is read several small pages at once, each page
 starting its issues' reads as it arrives, beside the others, and each cadence reads the counted issues
 updated last beside its last closed run, reading its whole window after that
-only where they do not reach back to the run.
+only where they do not reach back to the run. A pull reads nothing of an issue that waits
+on a person, neither its comments nor its links: it is never offered, nor is
+a tree holding it.
 
 ## Reviews
 

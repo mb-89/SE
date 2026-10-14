@@ -536,12 +536,15 @@ func (s Source) Survey() ([]Status, error) {
 	return all, err
 }
 
-func (s Source) survey() ([]Status, tree, error) { return s.surveyLinks(false) }
+func (s Source) survey() ([]Status, tree, error) { return s.surveyLinks(false, false) }
 
 // surveyLinks is survey, reading the links of every issue that has any, the
 // closed blockers too, where closed is set: only se fleet check judges a
-// closed blocker.
-func (s Source) surveyLinks(closed bool) ([]Status, tree, error) {
+// closed blocker. Where lean is set it reads only what the order of a pull
+// judges: an issue that waits on a person is never offered, nor is a tree
+// holding it, so neither its comments, for its reason, nor its links are
+// read; its Reason is its first paragraph.
+func (s Source) surveyLinks(closed, lean bool) ([]Status, tree, error) {
 	// The input phase: every read the judging below needs, each once, in
 	// parallel, each as soon as what it needs is read. The writes, closing
 	// parents and the sweep's, come after it, in order.
@@ -656,6 +659,8 @@ func (s Source) surveyLinks(closed bool) ([]Status, tree, error) {
 		deps[n], marked[n], leased[n] = d, m, st
 		var l *leaf
 		switch {
+		case i.labelled(PersonLabel) && lean:
+			return
 		case i.labelled(PersonLabel):
 			g.Go(func() (err error) {
 				*m, err = s.marks(n)
@@ -854,7 +859,7 @@ func (t tree) openBlockers(n int) []int {
 // and starts the reviewer. Next asks no PR whether it conflicts; only Take
 // does.
 func (s Source) Next() (next Issue, ok bool, err error) {
-	all, err := s.Survey()
+	all, _, err := s.surveyLinks(false, true)
 	if err != nil {
 		return Issue{}, false, err
 	}

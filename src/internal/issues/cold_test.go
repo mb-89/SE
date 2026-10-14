@@ -293,3 +293,37 @@ func TestOnlyAnIssueLinkedLatelyHasItsLinksRead(t *testing.T) {
 		t.Fatalf("read the links of %v", got)
 	}
 }
+
+// A pull's order never offers an issue that waits on a person, so Next reads
+// neither its comments nor its links; the survey se fleet check and the
+// briefing judge reads both.
+func TestAPullReadsNothingOfAnIssueThatWaitsOnAPerson(t *testing.T) {
+	t.Parallel()
+	gh := recorded(t, map[string]string{
+		listPath: list(node(1, 0, PersonLabel), node(2, 0)),
+		refsPath: `[]`,
+		links(1): `[{"id":1002,"number":2,"state":"open"}]`,
+	})
+	l := listing{GitHub: gh, paths: make(chan string, 1000)}
+	s := Source{Proc: machine, Repo: repo, GitHub: l, Clock: atNow()}
+	if next, ok, err := s.Next(); err != nil || !ok || next.Number != 2 {
+		t.Fatalf("next = %+v %v %v", next, ok, err)
+	}
+	for _, p := range l.read() {
+		if strings.Contains(p, "issues/1/") {
+			t.Fatalf("a pull read %s", p)
+		}
+	}
+	if _, err := s.Survey(); err != nil {
+		t.Fatal(err)
+	}
+	var read []string
+	for _, p := range l.read() {
+		if strings.Contains(p, "issues/1/") {
+			read = append(read, p)
+		}
+	}
+	if len(read) != 2 {
+		t.Fatalf("a survey read %v of #1", read)
+	}
+}
