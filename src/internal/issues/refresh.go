@@ -29,7 +29,7 @@ type Refreshed struct {
 // and whose head main has moved past, through GitHub's update-branch, and
 // starts CIWorkflow on its new head: the main ruleset merges a PR only when
 // it is up to date with main, so this keeps auto-merge moving. A PR that
-// conflicts with main is left to its takeover (se issue next --take). A PR
+// conflicts with main is left to its takeover (se issue pull --take). A PR
 // whose update fails is reported, and the ones after it are still updated.
 func (s Source) Refresh() ([]Refreshed, error) {
 	pulls, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?base=main&state=open&per_page=100", s.Repo), true)

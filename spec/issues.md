@@ -4,7 +4,7 @@ Reader: whoever changes how the fleet picks, claims, nests, lands or reviews its
 
 SE's work items are GitHub issues. These rules say which issue a box may work
 on next, how it claims it, and how issues and their dependencies are created.
-They live here and nowhere else; `se issue next`, `se issue new`,
+They live here and nowhere else; `se issue pull`, `se issue new`,
 `se issue land`, `se issue review`, `se issue resume` and `se issue tree` (in
 `src/internal/issues`) are their one implementation, so the
 choice is deterministic and no prompt restates it.
@@ -33,7 +33,7 @@ choice is deterministic and no prompt restates it.
 - **Conflicted claims are taken over at once.** GitHub runs no CI on a PR
   that conflicts with main and sends nothing that wakes its box, so a
   conflicted claim would sit forever. Before offering anything else,
-  `se issue next --take` looks at every claimed leaf's open PR; one GitHub
+  `se issue pull --take` looks at every claimed leaf's open PR; one GitHub
   reports as not mergeable (`mergeable` false, `mergeable_state` `dirty`) is
   taken next, whatever its age. A `null` `mergeable` means GitHub has not
   computed it yet: `se` asks again shortly, and while it stays `null` it is no
@@ -86,7 +86,7 @@ follows from its structure alone:
   ready when it is open, not claimed, and neither it nor any of its ancestors
   has an open blocker: with milestone M2 blocked by M1, no leaf of M2 starts
   before M1 has closed.
-- **The top**: `se issue next` offers only issues without a parent. A parent
+- **The top**: `se issue pull` offers only issues without a parent. A parent
   there is ready while some leaf inside it is, or some parent in its tree
   (itself included) is ready for review; a sub-issue is never offered at the
   top. So a review never waits on the coordinator that was running when its
@@ -96,7 +96,7 @@ follows from its structure alone:
   boxes: a later box that finds a leaf or a review ready inside it takes the
   parent again and picks the tree up from the claim. The leaves' own claims keep two
   coordinators from taking one leaf twice.
-- **Leaves inside a tree** are claimed by `se issue next --in <root> --take`,
+- **Leaves inside a tree** are claimed by `se issue pull --in <root> --take`,
   each with its own branch `issue-<n>` from `origin/main`, and worked on in
   their own git worktrees, so several are in flight at once and land as
   separate PRs. `--in` reaches leaves at any depth, so the coordinator of the
@@ -112,7 +112,7 @@ follows from its structure alone:
 
 A box can stall: its session dies, or it waits forever. Its issue then stays
 claimed, and the queue behind it stops. Releasing and escalating stuck work is
-mechanical, done inside `se issue next` by every box, never left to an
+mechanical, done inside `se issue pull` by every box, never left to an
 agent's memory. Work that needs a decision waits on an **issue for a
 person**, and leaves the agents' queue until the person has closed it.
 
@@ -125,7 +125,7 @@ person**, and leaves the agents' queue until the person has closed it.
   creation included; a branch GitHub keeps no push record of is stuck. A
   parent's claim is never stuck: it does not hold its tree anyway.
 - **First stuck: taken over.** A stuck leaf goes before new work: at the top,
-  `se issue next --take` takes it over before any ready issue, and a parent
+  `se issue pull --take` takes it over before any ready issue, and a parent
   with a stuck leaf inside before any other parent or leaf; inside a tree,
   `--in ROOT --take` takes it over before any ready leaf. The new box
   continues the existing branch and PR: at the top it checks `issue-<n>` out
@@ -144,21 +144,21 @@ person**, and leaves the agents' queue until the person has closed it.
   #n gets a comment saying why, with the markers `<!-- se:person -->` and
   `<!-- se:resume -->`, and loses `se-final`: once the person closes their
   issue, #n is back in the queue for a fresh attempt. This sweep runs inside
-  every `se issue next`. A claim waiting on its blockers is not stuck; once
+  every `se issue pull`. A claim waiting on its blockers is not stuck; once
   they close, its old push makes it stuck at once, and the next box takes it
-  over. `se issue next` never offers an `se-person` issue, or a tree
+  over. `se issue pull` never offers an `se-person` issue, or a tree
   containing one (at the top, nor with `--in`). #n's dependents stay blocked
   through their native links.
 - **A box never ends stuck.** It lands what it could, and files what is left
   as an issue: one for a person (`se issue new --person`) where it needs
-  their input, a normal one where it does not. `se issue next --take` names
+  their input, a normal one where it does not. `se issue pull --take` names
   the open issues the taken one blocks; the box names in `--blocks` those of
   them that need what it left over, and only those, so nothing waits that
   need not. Where it can land nothing at all (its push is refused, say), it
   files the issue for a person with `--blocks <n>`, its own issue, and ends;
   its claim then waits on that issue instead of going stale.
 - **The person's side:**
-  - `se issue next --person` lists every issue waiting on a person, with its
+  - `se issue pull --person` lists every issue waiting on a person, with its
     reason and how many open issues it holds up, directly or through a tree.
   - The person decides, says so on the issue, and closes it; what it blocked
     goes on.
@@ -174,7 +174,7 @@ person**, and leaves the agents' queue until the person has closed it.
 ```
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
 se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--json] [--repo OWNER/NAME]
-se issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
+se issue pull [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
 se issue tree [ROOT] [--json] [--repo OWNER/NAME]
@@ -184,16 +184,19 @@ se review brief N [--claims] [--json] [--repo OWNER/NAME]
 
 Every one of them first closes the parents whose sub-issues are all closed.
 
-`se issue next` prints the next issue at the top a take would have (number,
+`se issue pull` prints the next issue at the top a take would have (number,
 title, link and body): stuck work first, then the lowest ready one; or it
-says that none is ready; it exits 0 either way. A stuck leaf is marked as one
+says that none is ready; it exits 0 either way. Without `--take` it takes
+nothing, so a person can pull the next issue to read it: it pushes no branch,
+fires no routine, and writes only what every `se issue` command and the sweep
+write. A stuck leaf is marked as one
 (with `--json`: `"takeover": true`). Each issue its sweep gave to a person is
 named in a line before the answer (with `--json`: the field `flagged`). A parent is
 marked as one (with `--json`: `"parent": true`), with the command that
 coordinates it. A session has it as
-`/se issue next`.
+`/se issue pull`.
 
-`se issue next --take` claims the next ready issue, and `--take N` (or
+`se issue pull --take` claims the next ready issue, and `--take N` (or
 `--take=N`) issue `N`: it pushes `origin/main` as `issue-<n>` (a push that may
 only create the branch, never move it), then checks the branch out; a stuck
 leaf it takes over instead, checking its branch out as it stands. Where the
@@ -217,7 +220,7 @@ below) and adds a line saying what the fire did; with `--json` that line is
 the field `fanout`. It also names the open issues the taken one blocks (with
 `--json`: the issue's `blocks`), for `se issue new --blocks`.
 
-`se issue next --in ROOT` names what is ready inside ROOT's tree: its stuck
+`se issue pull --in ROOT` names what is ready inside ROOT's tree: its stuck
 leaves to take over, then its ready leaves, at any depth, lowest number first,
 and apart from them the `se-review` parents ready for review; or says that
 nothing is ready (with why, where the tree holds an issue waiting on a
@@ -301,7 +304,7 @@ A session has it as `/se issue new`.
 and [spec/review.md](review.md). A session has them as `/se issue review` and
 `/se review brief`.
 
-`se issue next --person` lists every open issue labelled `se-person`, each
+`se issue pull --person` lists every open issue labelled `se-person`, each
 with its reason and how many open issues it blocks, directly or through a tree
 (with `--json`: a list of `{"number","title","url","reason","blocks"}`), or
 says that none waits on a person. `se issue resume N` is the person's, for an
@@ -334,7 +337,7 @@ through `se`, with every verdict on the reviewed issue's thread.
   review.
 - **Ready for review**: once its sub-issues have all closed and nothing blocks
   it, it does not close by itself (see [Nesting](#nesting-leaves-are-work-parents-coordinate)).
-  `se issue next --in` names it apart from the work, and at the top its tree
+  `se issue pull --in` names it apart from the work, and at the top its tree
   is ready, so any box takes the tree and starts its reviewer.
 - **How it is reviewed** is [spec/review.md](review.md): the reviewer starts
   from `se review brief N` and ends with its report.
@@ -363,7 +366,7 @@ through `se`, with every verdict on the reviewed issue's thread.
 - **The reviewer** is a fresh sub-agent of the coordinator that worked none of
   the tree, in a fresh worktree of `origin/main` beside the checkout,
   `review-<n>-<k>` (k counts N's sub-issues, so every round after a fail gets
-  its own). `se issue next --in ROOT --take` names the command that makes it.
+  its own). `se issue pull --in ROOT --take` names the command that makes it.
   It ends with `se issue review pass|fail`.
 
 ## The routine
@@ -388,7 +391,7 @@ It also has an API trigger, which `se` fires for the fan-out.
 One merge starts one box, but there should be as many boxes as there is ready
 work. So boxes start boxes, mechanically, never by an agent's choice:
 
-- **Fan-out:** whenever `se issue next --take` has claimed an issue, it fires
+- **Fan-out:** whenever `se issue pull --take` has claimed an issue, it fires
   the routine `SE work` once, so another box starts and takes the next ready
   issue. That box fires again after its own claim, and so on.
 - **A new ready issue** fires it too: `se issue new` fires once when nothing
