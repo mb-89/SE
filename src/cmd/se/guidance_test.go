@@ -133,14 +133,14 @@ func TestIssueNewNamesTheSkillsAndRefusesOneThatDoesNotExist(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	var made struct{ Body string }
-	if err := json.Unmarshal([]byte(issueOf(t, gh, 10)), &made); err != nil || !strings.Contains(made.Body, "b\n\nSkills: triage "+guidance.Mark+"\n\n"+issues.NewMark) {
+	if err := json.Unmarshal([]byte(issueOf(t, gh, 11)), &made); err != nil || !strings.Contains(made.Body, "b\n\nSkills: triage "+guidance.Mark+"\n\n"+issues.NewMark) {
 		t.Fatalf("%q %v", made.Body, err)
 	}
 	// A role an agent holds is no skill: it writes no skills line.
 	if code, out, errs := se(t, "issue", "new", "--title", "u", "--body", "b", "--blocked-by", "none", "--skills", "retro", "--repo", "o/r", "--workspace", ws); code != 0 {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	if err := json.Unmarshal([]byte(issueOf(t, gh, 11)), &made); err != nil || strings.Contains(made.Body, guidance.Mark) {
+	if err := json.Unmarshal([]byte(issueOf(t, gh, 12)), &made); err != nil || strings.Contains(made.Body, guidance.Mark) {
 		t.Fatalf("%q %v", made.Body, err)
 	}
 }

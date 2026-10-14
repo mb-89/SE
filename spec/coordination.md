@@ -39,6 +39,10 @@ and only then leaves.**
    - **impossible block**: an issue blocked by an issue closed as not planned,
      by an open issue no box works (not labelled `se`, or in another
      repository), or by itself through a cycle.
+   - **bare issue**: an open `se` issue at the top in no manifest, which no
+     box takes: no parent, no sub-issues, not a manifest, retro, overhaul or
+     issue for a person, nothing holds it and nothing claims it. An `se`
+     built before manifests still files such issues.
    - **waiting on a person**: an `se-person` issue, with what it holds up.
      Reported, never fixed.
 
@@ -61,6 +65,9 @@ and only then leaves.**
      (`se fleet fix`, by `git push origin --delete` from the workspace, the
      transport `se issue land` pushes through): nothing is lost, and nothing
      else could clear it;
+   - a bare issue is filed into the open misc manifest (`se fleet fix`, the
+     manifest `se issue new` files into, opening the next one where none is
+     open, then GitHub's sub-issues link);
    - an impossible block, any other leftover claim, or anything else with no remedy is
      reported as an issue (`se fleet fix`, through the same code as
      `se issue new`), labelled `se-person` and assigned to the repository's
