@@ -465,10 +465,12 @@ where it cannot land a PR. It creates N's successor through the same code as
 `se issue new`: N's title and text, then the open questions the box could not
 answer (`--body` or `--body-file`), labelled `se-final`, a sub-issue of N's
 parent and blocked by N's open blockers; it links N's open dependents as
-blocked by the successor (GitHub's native links), then closes N, its comment
-naming the successor. A final issue is refused: its box lands a PR. A ready
-successor fires the routine once (with `--json`:
-`{"issue","successor","parent","blocked_by","blocks","ready","fanout"}`).
+blocked by the successor (GitHub's native links), closes N's open PR with a
+comment naming the successor and deletes N's `issue-N` claim, as
+`--duplicate-of` does, then closes N, its comment naming the successor. A
+final issue is refused: its box lands a PR. A ready successor fires the
+routine once (with `--json`:
+`{"issue","successor","parent","blocked_by","blocks","ready","pulls","branch","fanout"}`).
 
 `se issue supersede N --duplicate-of M` is the supersede of an issue that
 the open issue M already covers, its PR doing the same work (two boxes that
@@ -488,9 +490,12 @@ unless SHA names a commit that `origin/main` holds, refuses a pull request, a
 closed issue and a parent ("a parent holds no work"), and reads FILE as
 `se issue land` does, refusing a missing, empty or unknown answer, all before
 it writes anything. Then it records the worker, posts the landing answers on N
-as `land` does (see [Landing answers](#landing-answers)), comments naming the
-commit and its link under the marker `<!-- se:fixed-by SHA -->`, and closes N
-as completed (with `--json`: `{"issue","commit","subject","url"}`). N's
+as `land` does (see [Landing answers](#landing-answers)), closes N's open PR
+with a comment naming the commit and deletes N's `issue-N` claim, as
+`--duplicate-of` does, comments naming the commit and its link under the
+marker `<!-- se:fixed-by SHA -->`, and closes N as completed (with `--json`:
+`{"issue","commit","subject","url","pulls","branch"}`). So no way of closing
+leaves an open PR or a closed issue's claim behind. N's
 dependents become ready as when a PR closes it.
 
 ### The Stop hook
