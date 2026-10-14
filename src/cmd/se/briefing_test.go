@@ -18,7 +18,7 @@ import (
 var briefedAt = time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
 
 // recordedBriefing answers se briefing's gh calls for o/r (and o/probe, read
-// as o/r): #3 is ready; #1 is claimed with PR #11, green with auto-merge on;
+// as o/r): #3 is a ready manifest, its leaf #5 inside; #1 is claimed with PR #11, green with auto-merge on;
 // #6 waits on a person and holds up #2, which it blocks; #7 is a retro whose
 // report waits for the owner. Closed are #20 (landed through PR #21 with its
 // answers), #19 (not planned, went to a person on its way), #18 (the last
@@ -53,6 +53,8 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 		t.Fatal(err)
 	}
 	answers := map[string]string{
+		// #3 is a manifest, with the leaf #5 inside it.
+		"repos/o/r/issues/3/sub_issues?per_page=100":           `[{"number":5,"title":"five","state":"open","html_url":"u5","labels":[{"name":"se"}]}]`,
 		"repos/o/r/issues?labels=se&state=open&per_page=100":   "[" + strings.Join(open, ",") + "]",
 		"repos/o/r/issues?labels=se&state=closed&per_page=100": "[" + strings.Join(shut, ",") + "]",
 		"repos/o/r/git/matching-refs/heads/issue-":             `[{"ref":"refs/heads/issue-1","object":{"sha":"s1"}}]`,
@@ -164,7 +166,7 @@ func TestTheBriefingTellsEverySectionPendingFirst(t *testing.T) {
 		"- #18 a retro [retro]",
 		"## Last retro", "#18 a retro, closed 2026-10-10T12:00:00Z", "u18", "- finding one", "- finding two",
 		"## Next", "se issue pull would take #3 three", "u3",
-		"1 ready, 1 claimed, 3 blocked, 0 in trees",
+		"1 ready, 1 claimed, 3 blocked, 1 in trees",
 		"Queue: 5 open, 1 in flight; no estimate: no se issue merged with a claim time since",
 		"se issue tree tells the detail.",
 		"## What SE is", "SE is a test.\nIt has parts.\nThey talk.\nIt is small.\n",
@@ -191,7 +193,7 @@ func TestNothingPendingIsSaidPlainly(t *testing.T) {
 	t.Parallel()
 	recordedBriefing(t, false, nil)
 	out := briefed(t, "--repo", "o/r")
-	inOrder(t, out, "## Waits on you\nNothing waits on you.\n", "## In flight", "fleet check: healthy", "2 ready, 1 claimed, 0 blocked")
+	inOrder(t, out, "## Waits on you\nNothing waits on you.\n", "## In flight", "fleet check: healthy", "1 ready, 1 claimed, 0 blocked, 1 in trees, 1 in no manifest")
 }
 
 func TestTheWindowIsTheLastDayOrTheLastTenWhicheverAreMore(t *testing.T) {

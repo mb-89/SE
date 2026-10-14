@@ -92,7 +92,7 @@ func TestIssueNewNamesTheSkillsAndRefusesOneThatDoesNotExist(t *testing.T) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	var made struct{ Body string }
-	if err := json.Unmarshal([]byte(issueOf(t, gh, 10)), &made); err != nil || !strings.Contains(made.Body, "b\n\nSkills: work "+guidance.Mark+"\n\n"+issues.NewMark) {
+	if err := json.Unmarshal([]byte(issueOf(t, gh, 11)), &made); err != nil || !strings.Contains(made.Body, "b\n\nSkills: work "+guidance.Mark+"\n\n"+issues.NewMark) {
 		t.Fatalf("%q %v", made.Body, err)
 	}
 }

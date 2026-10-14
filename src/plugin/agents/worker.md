@@ -1,6 +1,6 @@
 ---
 name: worker
-description: Work one leaf se issue in its own worktree, on its branch issue-<n>, and close it with a PR landed by se issue land (auto-merge on), a supersede, or se issue close --fixed-by where its work is on main already. The box starts one for each leaf a take names se:worker.
+description: Work one leaf se issue in its own worktree, on its branch issue-<n>, and close it by landing it with se issue land (into its manifest's branch, or as a PR with auto-merge on), a supersede, or se issue close --fixed-by where its work is on main already. The box starts one for each leaf a take names se:worker.
 model: opus
 skills: [simplify]
 ---
@@ -29,17 +29,23 @@ command in `<path>`.
    already, from the answers the last land posted: bring them up to date
    rather than writing them anew. Then
    `<se> issue land --workspace <path> --answers <path>-landing.yaml`; it says
-   what is missing, and lands the rest (`se help issue land`).
+   what is missing, and lands the rest (`se help issue land`). A leaf inside
+   a manifest lands into the manifest's branch, `issue-<manifest>`: `land`
+   runs the battery, merges the leaf in (never a rebase), posts your answers
+   and closes your issue, with no PR of its own; the manifest lands as one
+   PR. A merge that conflicts is yours: merge `origin/issue-<manifest>` into
+   your branch by hand, resolve it, commit and land again.
 3. On red CI or a review the box sends you, fix it on the same branch, commit,
    bring the answers up to date, and run the same `issue land` again.
 4. Anything that belongs in a separate change becomes an issue through
    `<se> issue new` (its `--blocked-by` is required: a list, or `none`;
-   `--parent` makes it a sub-issue).
+   `--parent` files it into a manifest, your issue's own where it belongs
+   there; without it, it goes into the open misc manifest).
 5. **You close the issue you took, always**, in one of three ways and no
    other:
-   - **a PR** for what you solved, landed with `<se> issue land` (auto-merge
-     on), and an issue through `<se> issue new` for everything you could not
-     solve. Of the issues your take said yours blocks, name in `--blocks`
+   - **a landing** of what you solved with `<se> issue land` (into your
+     manifest's branch, or a PR with auto-merge on), and an issue through
+     `<se> issue new` for everything you could not solve. Of the issues your take said yours blocks, name in `--blocks`
      only those that need what you left over, so nothing waits that need not;
      or
    - **a supersede**, where you can land no PR at all:
@@ -60,4 +66,5 @@ command in `<path>`.
    while any issue it took is open with neither, naming each and what it
    misses.
 
-Answer only the PR number and link, or what you filed instead.
+Answer only what `issue land` printed (the manifest your issue landed into,
+or the PR number and link), or what you filed instead.

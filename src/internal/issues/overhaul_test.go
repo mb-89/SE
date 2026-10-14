@@ -224,9 +224,10 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
 		t.Fatalf("%+v %v", f, err)
 	}
-	// The findings are the next issues, #31 to #33.
+	// The findings are the next issues, #32 to #34: the normal one goes
+	// into a new misc manifest, #31.
 	var created []string
-	for n := 31; n <= 33; n++ {
+	for n := 32; n <= 34; n++ {
 		out, err := gh.Get(fmt.Sprintf("repos/o/r/issues/%d", n))
 		if err != nil {
 			t.Fatal(err)
@@ -244,8 +245,9 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	}
 	writes := gh.Writes()
 	want := []string{
-		"POST repos/o/r/issues", "POST repos/o/r/issues", "POST repos/o/r/issues/32/assignees",
+		"POST repos/o/r/issues", "POST repos/o/r/issues", "POST repos/o/r/issues/31/sub_issues",
 		"POST repos/o/r/issues", "POST repos/o/r/issues/33/assignees",
+		"POST repos/o/r/issues", "POST repos/o/r/issues/34/assignees",
 		"POST repos/o/r/issues/30/comments", "PATCH repos/o/r/issues/30", "DELETE repos/o/r/git/refs/heads/issue-30",
 	}
 	if !reflect.DeepEqual(writes, want) {
@@ -253,10 +255,10 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	}
 	// The closing comment is the report, its block naming the issues, for the next overhaul.
 	back, _, err := ParseOverhaul(strings.TrimPrefix(report, "body="))
-	if err != nil || back.Findings[0].Issue != 31 || !back.Findings[1].Controversial || back.Verdicts[0].Strays != "slightly" {
+	if err != nil || back.Findings[0].Issue != 32 || !back.Findings[1].Controversial || back.Verdicts[0].Strays != "slightly" {
 		t.Fatalf("%+v %v", back, err)
 	}
-	for _, part := range []string{"| 1 | Mechanize first | slightly |", "**Add a principle on cost** (principles, principle 0, strays far, at spec/principles.md; for a person: it changes a design principle): #32", "- **The outside world:** agent tools converge on hooks", "**Speed (what could run in parallel, or ask the server for more at once):** the survey runs one call at a time"} {
+	for _, part := range []string{"| 1 | Mechanize first | slightly |", "**Add a principle on cost** (principles, principle 0, strays far, at spec/principles.md; for a person: it changes a design principle): #33", "- **The outside world:** agent tools converge on hooks", "**Speed (what could run in parallel, or ask the server for more at once):** the survey runs one call at a time"} {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
 		}
@@ -270,11 +272,11 @@ func TestARemovalsIssueSaysToRepeatTheCascade(t *testing.T) {
 	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).FileOverhaul(30, draft); err != nil {
 		t.Fatal(err)
 	}
-	removal, err := gh.Get("repos/o/r/issues/31")
+	removal, err := gh.Get("repos/o/r/issues/32")
 	if err != nil || !strings.Contains(string(removal), "Repeat the removal until nothing more falls out") {
 		t.Fatalf("%s %v", removal, err)
 	}
-	other, err := gh.Get("repos/o/r/issues/32")
+	other, err := gh.Get("repos/o/r/issues/33")
 	if err != nil || strings.Contains(string(other), "Repeat the removal") {
 		t.Fatalf("%s %v", other, err)
 	}

@@ -74,7 +74,12 @@ What earlier versions taught, and how this design answers it:
   the draft's block, are the agent's (its steps 2 and 3).
 - **Who decides (the owner's rule for retros and overhauls alike):** every
   finding becomes an issue through the same code as `se issue new`.
-  - A **non-controversial** finding goes into the normal queue.
+  - A **non-controversial** finding goes into the normal queue: into the
+    open misc manifest, as every issue filed into no manifest does
+    ([issues.md](issues.md#manifests-all-work-moves-in-them)), whose leaves
+    together should take about `issues.manifest/config/target` (an hour). A
+    class too big for that is filed as a manifest of its own
+    (`se issue new --manifest`, its leaves with `--parent`).
   - A **controversial** one is an issue for a person: labelled `se-person`
     and assigned to the owner, it waits for them. The retro does not.
 
