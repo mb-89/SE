@@ -480,7 +480,7 @@ func init() {
 		Usage:   "issue land --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "check, push and open an issue-N branch's PR, auto-merge on",
-		Details: "on an issue-N branch of a leaf: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash).",
+		Details: "on an issue-N branch of a leaf: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash). It records the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue land")
@@ -512,6 +512,10 @@ func init() {
 			l, err := s.Land(c.Workspace, c.sessionID(), qs, answers, func(dir string) error { return c.Check(c.Proc, dir) })
 			if err != nil {
 				return Reply{}, err
+			}
+			// The Stop hook trusts this record before it asks GitHub.
+			if err := recordLand(c, l.Issue, l.Number); err != nil {
+				return Reply{}, fmt.Errorf("landed PR #%d (%s), but recording it for the Stop hook: %w", l.Number, l.URL, err)
 			}
 			if *asJSON {
 				data, err := json.Marshal(l)
