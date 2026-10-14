@@ -1,5 +1,5 @@
-// Package battery profiles tests/check.sh: how long each step took, and each
-// Go test, measured against the soft budgets in spec/budgets.yaml. check.sh
+// Package battery profiles tests/check.sh: how long each step took, each
+// Go test and each plugin test, measured against the soft budgets in spec/budgets.yaml. check.sh
 // writes the raw durations into Dir; Report reads them back, and the profile it
 // writes there is what the CI summary, the PR body and the landing facts show.
 package battery
@@ -58,7 +58,8 @@ type Step struct {
 	Budget *Budget `json:"budget,omitempty"`
 }
 
-// Test is one Go test and how long it took.
+// Test is one Go test, or one plugin test, and how long it took. A plugin
+// test's Package is the file it is in.
 type Test struct {
 	Package string `json:"package"`
 	Name    string `json:"name"`
@@ -74,6 +75,8 @@ type Profile struct {
 	TotalBudget *Budget `json:"total_budget,omitempty"`
 	Steps       []Step  `json:"steps"`
 	Slowest     []Test  `json:"slowest_tests"`
+	// SlowestPlugin are the slowest plugin (bun) tests, beside the Go tests.
+	SlowestPlugin []Test `json:"slowest_plugin_tests"`
 	// Overruns names each budget the run went over; Hard those of them that fail it.
 	Overruns []string `json:"overruns"`
 	Hard     []string `json:"hard_overruns"`
@@ -138,8 +141,8 @@ func ParseGoTest(r io.Reader) ([]Test, error) {
 }
 
 // Build profiles a run: its steps against their budgets, its total against
-// the total's, and its slowest tests, slowest first.
-func Build(steps []Step, tests []Test, b Budgets) Profile {
+// the total's, and its slowest Go and plugin tests, slowest first.
+func Build(steps []Step, tests, pluginTests []Test, b Budgets) Profile {
 	p := Profile{Steps: steps, Overruns: []string{}, Hard: []string{}}
 	over := func(what string, ms int64, budget Budget) {
 		if budget.Ms <= 0 || ms <= budget.Ms {
@@ -162,12 +165,18 @@ func Build(steps []Step, tests []Test, b Budgets) Profile {
 		p.TotalBudget = &b.Total
 		over("the battery", p.TotalMs, b.Total)
 	}
-	p.Slowest = append([]Test{}, tests...)
-	sort.SliceStable(p.Slowest, func(i, j int) bool { return p.Slowest[i].Ms > p.Slowest[j].Ms })
-	if len(p.Slowest) > Slowest {
-		p.Slowest = p.Slowest[:Slowest]
-	}
+	p.Slowest, p.SlowestPlugin = slowest(tests), slowest(pluginTests)
 	return p
+}
+
+// slowest are the Slowest of tests, slowest first.
+func slowest(tests []Test) []Test {
+	s := append([]Test{}, tests...)
+	sort.SliceStable(s, func(i, j int) bool { return s[i].Ms > s[j].Ms })
+	if len(s) > Slowest {
+		s = s[:Slowest]
+	}
+	return s
 }
 
 // Text is the profile as check.sh prints it.
@@ -179,6 +188,10 @@ func (p Profile) Text() string {
 	}
 	fmt.Fprintf(&b, "battery: the %d slowest tests\n", len(p.Slowest))
 	for _, t := range p.Slowest {
+		fmt.Fprintf(&b, "battery:   %dms %s %s\n", t.Ms, t.Package, t.Name)
+	}
+	fmt.Fprintf(&b, "battery: the %d slowest plugin tests\n", len(p.SlowestPlugin))
+	for _, t := range p.SlowestPlugin {
 		fmt.Fprintf(&b, "battery:   %dms %s %s\n", t.Ms, t.Package, t.Name)
 	}
 	for _, o := range p.Overruns {
@@ -209,6 +222,10 @@ func (p Profile) Markdown() string {
 	for _, t := range p.Slowest {
 		fmt.Fprintf(&b, "| %s | %s | %d |\n", t.Name, t.Package, t.Ms)
 	}
+	fmt.Fprintf(&b, "\nThe %d slowest plugin tests:\n\n| test | file | ms |\n|---|---|---:|\n", len(p.SlowestPlugin))
+	for _, t := range p.SlowestPlugin {
+		fmt.Fprintf(&b, "| %s | %s | %d |\n", strings.ReplaceAll(t.Name, "|", "\\|"), t.Package, t.Ms)
+	}
 	return b.String()
 }
 
@@ -237,19 +254,19 @@ func Report(d disk.Disk, dir string, summary io.Writer) (Profile, error) {
 	if err != nil {
 		return Profile{}, err
 	}
-	var tests []Test
-	if g, err := d.ReadFile(filepath.Join(at, GoTestFile)); err == nil {
-		if tests, err = ParseGoTest(bytes.NewReader(g)); err != nil {
-			return Profile{}, err
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	tests, err := parsed(d, filepath.Join(at, GoTestFile), ParseGoTest)
+	if err != nil {
+		return Profile{}, err
+	}
+	pluginTests, err := parsed(d, filepath.Join(at, PluginTestFile), ParsePluginTest)
+	if err != nil {
 		return Profile{}, err
 	}
 	budgets, err := ReadBudgets(d, dir)
 	if err != nil {
 		return Profile{}, err
 	}
-	p := Build(steps, tests, budgets)
+	p := Build(steps, tests, pluginTests, budgets)
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return Profile{}, err
@@ -269,6 +286,18 @@ func Report(d disk.Disk, dir string, summary io.Writer) (Profile, error) {
 		return p, fmt.Errorf("over a hard budget: %s", strings.Join(p.Hard, "; "))
 	}
 	return p, nil
+}
+
+// parsed reads the tests in the file at path with parse; none where there is no file.
+func parsed(d disk.Disk, path string, parse func(io.Reader) ([]Test, error)) ([]Test, error) {
+	data, err := d.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return parse(bytes.NewReader(data))
 }
 
 // Load reads the profile the last battery run in dir on d wrote; ok is false where there is none.

@@ -1,6 +1,8 @@
 // Command battery profiles tests/check.sh (src/internal/battery). check.sh
 // runs `battery gotest <top> <packages>` for its Go tests, which runs go test
-// -json and keeps every test's duration, and `battery report <top>` once every
+// -json and keeps every test's duration, `battery plugintest <top> <plugin>`
+// for its plugin tests, which runs `claude plugin test` and keeps what it
+// printed, each test's duration among it, and `battery report <top>` once every
 // step has passed, which prints the profile against spec/budgets.yaml, writes
 // it for the CI summary and se issue land, and fails only on a hard budget's
 // overrun. top is the checkout, where the battery's files live.
@@ -24,12 +26,14 @@ func main() {
 	// check.sh runs the battery in src/, where go.mod is, and names the
 	// checkout's top, where its files live.
 	if len(os.Args) < 3 {
-		fail(fmt.Errorf("usage: battery gotest <top> <packages> | battery report <top>"))
+		fail(fmt.Errorf("usage: battery gotest <top> <packages> | battery plugintest <top> <plugin> | battery report <top>"))
 	}
 	top := os.Args[2]
 	switch os.Args[1] {
 	case "gotest":
 		fail(gotest(proc.Real(), top, os.Args[3:]))
+	case "plugintest":
+		fail(plugintest(proc.Real(), top, os.Args[3:]))
 	case "report":
 		fail(report(top))
 	default:
@@ -81,6 +85,26 @@ func gotest(procs proc.Procs, top string, packages []string) error {
 		return fmt.Errorf("go test: %v", waited)
 	}
 	return relayed
+}
+
+// plugintest runs `claude plugin test` on the plugin, shows what it prints,
+// keeps a copy under the checkout top for report, and fails as it failed.
+// `claude plugin test` has no reporter option, so report reads each plugin
+// test's duration from the lines it prints for a person.
+func plugintest(procs proc.Procs, top string, plugin []string) error {
+	raw, err := machine.Create(filepath.Join(top, battery.Dir, battery.PluginTestFile))
+	if err != nil {
+		return err
+	}
+	defer raw.Close()
+	kept := battery.Lock(raw)
+	if err := procs.Run(proc.Cmd{
+		Name: "claude", Args: append([]string{"plugin", "test"}, plugin...),
+		Stdout: io.MultiWriter(os.Stdout, kept), Stderr: io.MultiWriter(os.Stderr, kept),
+	}); err != nil {
+		return fmt.Errorf("claude plugin test: %v", err)
+	}
+	return nil
 }
 
 // report prints the profile of the battery just run in the checkout at top,

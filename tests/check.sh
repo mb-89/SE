@@ -30,7 +30,8 @@ now() {
   esac
 }
 # The battery profiles itself: each step's duration goes to the steps file,
-# each Go test's to go test's events, and the report reads both against
+# each Go test's to go test's events, what the plugin tests printed (each
+# plugin test's duration among it), and the report reads them against
 # spec/budgets.yaml (src/cmd/battery).
 battery=.se/.runtime/battery
 rm -rf "$battery"
@@ -61,5 +62,5 @@ step "biome" within src/plugin biome check --error-on-warnings
 step "go test" go -C src run ./cmd/battery gotest "$PWD" ./...
 step "plugin validate" claude plugin validate src/plugin
 step "marketplace validate" claude plugin validate .
-step "plugin test" claude plugin test src/plugin
+step "plugin test" go -C src run ./cmd/battery plugintest "$PWD" "$PWD/src/plugin"
 go -C src run ./cmd/battery report "$PWD"
