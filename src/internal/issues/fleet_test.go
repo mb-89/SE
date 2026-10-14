@@ -501,3 +501,50 @@ func TestFleetFixAppliesEachRemedyAndRecordsIt(t *testing.T) {
 		t.Fatalf("%+v", x)
 	}
 }
+
+// Recorded from mb-89/SE on 14 October: #60, a sub-issue of #59, is claimed
+// and quiet, and #117, for a person, blocks it, directly or through #59. #44
+// waits on #60. Nothing about #60 is a box's to fix: the one finding is #117,
+// and it holds #60's dependants.
+func TestFourteenOctoberAClaimAPersonBlocksIsNoStalledRoot(t *testing.T) {
+	for _, blocked := range []int{60, 59} {
+		w := newWorld(t, []string{item(44, 0), item(59, 1), item(60, 0), item(117, 0, PersonLabel)}, 60)
+		w.answers[subsPath(59)] = `[` + item(60, 0) + `]`
+		w.answers[links(blocked)] = "[" + dep(117, "open", "", true) + "]"
+		w.answers[links(44)] = "[" + dep(60, "open", "", true) + "]"
+		w.pushed(60, quiet)
+		f := only(t, w.check(), WaitingOnPerson, 117)
+		if !reflect.DeepEqual(f.Holds, []int{44, 59, 60}) {
+			t.Fatalf("blocked through #%d: %+v", blocked, f)
+		}
+	}
+}
+
+// Every takeover remedy se fleet check names for a stuck sub-issue leaf runs:
+// within the lease, and past it.
+func TestTheTakeoverRemedyOfAStuckSubIssueLeafRuns(t *testing.T) {
+	for _, at := range []string{quiet, "2026-10-13T07:00:00Z"} {
+		a := claimed7(t)
+		w := newWorld(t, []string{item(5, 1), item(7, 0)}, 7)
+		w.answers[subsPath(5)] = `[` + item(7, 0) + `]`
+		w.answers["repos/o/r/git/matching-refs/heads/issue-7"] = w.answers[refsPath]
+		w.closedPRs(7, `[]`)
+		w.pushed(7, at)
+		got := w.check()
+		if len(got) != 1 || got[0].Issue != 7 || got[0].cause() != NoPR {
+			t.Fatalf("pushed at %s: %+v", at, got)
+		}
+		f := got[0]
+		var n int
+		if _, err := fmt.Sscanf(f.Remedy, "se issue next --take %d,", &n); err != nil || n != 7 {
+			t.Fatalf("pushed at %s: remedy %q", at, f.Remedy)
+		}
+		took, ok, err := Source{Repo: repo, GH: w.gh, Now: clock}.Take(a, n)
+		if err != nil || !ok || took.Number != 7 || took.Takeover == nil {
+			t.Fatalf("pushed at %s: took %+v %v %v", at, took, ok, err)
+		}
+		if got := run(t, a, "log", "-1", "--format=%s"); got != "work on 7" {
+			t.Fatalf("pushed at %s: issue-7 is not checked out as it stands: %s", at, got)
+		}
+	}
+}
