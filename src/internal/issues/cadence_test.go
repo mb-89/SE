@@ -155,7 +155,7 @@ func TestASecondRetroStartedByARacingBoxClosesAsADuplicate(t *testing.T) {
 	t.Parallel()
 	origin, a, b := boxes(t)
 	gh := recorded(t, cadenceRepo(10, 0))
-	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	s := Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}
 	// Both boxes read the cadence before either starts its retro.
 	ca, err := s.Cadence()
 	if err != nil || !ca.Due() {
@@ -197,7 +197,7 @@ func TestASecondRetroStartedByARacingBoxClosesAsADuplicate(t *testing.T) {
 
 func TestADuplicateRetroIsNoRetroToTheOverhaul(t *testing.T) {
 	t.Parallel()
-	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, map[string]string{
+	c, err := Source{Proc: machineOf(t), Repo: repo, GitHub: recorded(t, map[string]string{
 		"repos/o/r/issues?labels=se-overhaul&state=closed&per_page=100": `[]`,
 		"repos/o/r/issues?labels=se-overhaul&state=open&per_page=100":   `[]`,
 		"repos/o/r/issues?labels=se-retro&state=closed&per_page=100": `[{"number":1,"state":"closed","state_reason":"completed","closed_at":"2026-01-01T00:00:00Z","labels":[{"name":"se-retro"}]},` +

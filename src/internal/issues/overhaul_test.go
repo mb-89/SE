@@ -267,7 +267,7 @@ func TestARemovalsIssueSaysToRepeatTheCascade(t *testing.T) {
 	t.Parallel()
 	gh := recorded(t, overhaulAnswers(overhaulUnattendedMark))
 	draft := overhauled(t, func(r *OverhaulReport) { r.Findings[0].Area = "removal" })
-	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}).FileOverhaul(30, draft); err != nil {
+	if _, err := (Source{Proc: machineOf(t), Repo: repo, GitHub: gh, Clock: atNow()}).FileOverhaul(30, draft); err != nil {
 		t.Fatal(err)
 	}
 	removal, err := gh.Get("repos/o/r/issues/31")
