@@ -355,6 +355,12 @@ issue's kind (with `--json`: the field `agent`). Where the box (its session) alr
 its cap of sub-agents, `--worktree` and `--in ROOT --take` take nothing and
 say so (with `--json`: `{"ready":false,"full":true,"why"}`). It also names the open issues the taken one blocks (with
 `--json`: the issue's `blocks`), for `se issue new --blocks`.
+The worktree command starts from the newest of the branch and main, so a
+takeover or a fresh take never works on a stale copy: it fetches `main` and
+the branch, fast-forwards the box's `issue-<n>` to `origin/issue-<n>` (making
+the branch, and the worktree, where the box has none), and merges
+`origin/main` into it; a merge that conflicts is aborted, leaving the branch
+as origin has it for its agent to merge main into.
 
 `se issue pull --in ROOT` names what is ready inside ROOT's tree: its stuck
 leaves to take over, then its ready leaves, at any depth, lowest number first,
