@@ -704,7 +704,8 @@ func takeOrder(all []Status, want int) []Status {
 
 // Take claims an issue at the top in the git checkout dir: want, when it is
 // above zero, else the one Next names. Without want, a claimed leaf whose PR
-// conflicts with main comes first, whatever its age (see takeOverConflict).
+// conflicts with main comes first, once nothing was pushed to its branch
+// within the lease (see takeOverConflict).
 // Where another box claimed a leaf first, it moves on to the next one. A leaf
 // stuck for the first time is taken over: its branch is checked out as it
 // stands. A parent's branch claims its whole
@@ -932,10 +933,18 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 }
 
 // Worktree is the command that checks a leaf's claimed branch out in its own
-// worktree, WorktreeDir beside the checkout dir.
+// worktree, WorktreeDir beside the checkout dir, from the newest of its branch
+// and main: it fetches both, makes the local branch where the box has none
+// (and the worktree where it has none), fast-forwards the branch to origin's,
+// and merges origin/main into it. A merge that conflicts is aborted, leaving the
+// branch as origin has it for its agent to merge main into.
 func Worktree(dir string, n int) string {
-	b := Branch(n)
-	return fmt.Sprintf("git worktree add --track -b %s %s origin/%s", b, WorktreeDir(dir, n), b)
+	b, p := Branch(n), WorktreeDir(dir, n)
+	return fmt.Sprintf("git fetch -q origin main %[1]s"+
+		" && { git show-ref -q --verify refs/heads/%[1]s || git branch -q --track %[1]s origin/%[1]s; }"+
+		" && { test -e %[2]s || git worktree add -q %[2]s %[1]s; }"+
+		" && git -C %[2]s merge -q --ff-only origin/%[1]s"+
+		" && { git -C %[2]s merge -q --no-edit origin/main || git -C %[2]s merge --abort; }", b, p)
 }
 
 // WorktreeDir is where Worktree checks issue n out, beside the checkout dir.
