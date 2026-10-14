@@ -72,9 +72,20 @@ type Source struct {
 	Proc proc.Procs
 	// Flagged hears of each issue the sweep gave to a person, and why.
 	Flagged func(i Issue, reason string)
+	// Waits hears what the source waits on, and for how long, before each
+	// wait, so the person running it is not left waiting blind.
+	Waits func(note string)
 }
 
 func (s Source) now() time.Time { return s.Clock.Now() }
+
+// sleep waits d, after telling Waits what for.
+func (s Source) sleep(d time.Duration, what string) {
+	if s.Waits != nil {
+		s.Waits(fmt.Sprintf("waiting %s for %s", d, what))
+	}
+	s.Clock.Sleep(d)
+}
 
 // issue is the part of GitHub's issue object the rules read.
 type issue struct {

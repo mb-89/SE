@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 const (
@@ -135,8 +136,19 @@ func TestACleanOrUnknownPRIsNoConflict(t *testing.T) {
 		_, a, _ := boxes(t)
 		g := newPulls(t, answers...)
 		c := atNow()
-		took, ok, err := Source{Proc: machine, Repo: repo, GH: g.gh, Clock: c}.Take(a, 0)
+		// Each pause is told before it begins: the clock has not moved past the pauses told before it.
+		var told []string
+		waits := func(note string) {
+			if at := c.Now().Sub(now); at != time.Duration(len(told))*pause {
+				t.Errorf("%s: told %q only %s in", name, note, at)
+			}
+			told = append(told, note)
+		}
+		took, ok, err := Source{Proc: machine, Repo: repo, GH: g.gh, Clock: c, Waits: waits}.Take(a, 0)
 		paused := int(c.Now().Sub(now) / pause)
+		if len(told) != paused || paused > 0 && !strings.Contains(told[0], "PR #70") {
+			t.Errorf("%s: paused %d times, told %q", name, paused, told)
+		}
 		if err != nil || !ok || took.Number != 5 || took.Takeover != nil || len(g.comments) != 0 {
 			t.Errorf("%s: took %+v %v %v", name, took, ok, err)
 		}

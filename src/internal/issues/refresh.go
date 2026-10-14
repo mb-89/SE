@@ -81,7 +81,7 @@ func (s Source) update(r *Refreshed) error {
 		return err
 	}
 	for k := 0; k < waits && r.Head == old; k++ {
-		s.Clock.Sleep(pause)
+		s.sleep(pause, fmt.Sprintf("GitHub to show PR #%d's new head (ask %d of %d)", r.PR, k+1, waits))
 		got, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, r.PR), false)
 		if err != nil {
 			return err
