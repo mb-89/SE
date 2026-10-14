@@ -5,15 +5,20 @@ cd "$(dirname "$0")/.."
 set --
 . ./tests/tools.sh
 PATH="$(go env GOPATH 2>/dev/null)/bin:$PATH"
-for tool in go claude golangci-lint biome; do
+for tool in go claude; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "check: $tool is missing; RUNME.sh names what SE needs" >&2
     exit 1
   fi
 done
+# Only the battery needs the pinned linters, so it installs whichever a box lacks.
+if [ -n "$(tools_differ)" ]; then
+  echo "check: installing the pinned linters ($(echo $(tools_differ)))"
+  sh ./tests/tools.sh install
+fi
 differ=$(tools_differ)
 if [ -n "$differ" ]; then
-  echo "check: the pinned linters are not installed ($(echo $differ)); run sh tests/tools.sh install" >&2
+  echo "check: the pinned linters are not installed ($(echo $differ)) after sh tests/tools.sh install" >&2
   exit 1
 fi
 
