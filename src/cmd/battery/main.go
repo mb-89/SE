@@ -7,12 +7,17 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 
 	"github.com/mb-89/SE/src/internal/battery"
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
+
+// machine is the disk the battery reads and writes.
+var machine = disk.Real()
 
 func main() {
 	if len(os.Args) < 2 {
@@ -32,16 +37,16 @@ func main() {
 // person, keeps the events for report, and fails as go test failed. It runs
 // go test with GIT_DIR on a decoy repository, and fails if a test changed it.
 func gotest(packages []string) error {
-	dir, err := os.MkdirTemp("", "battery-decoy-")
+	dir, err := machine.MkdirTemp("", "battery-decoy-")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
-	decoy, err := battery.NewDecoy(dir)
+	defer func() { _ = machine.RemoveAll(dir) }()
+	decoy, err := battery.NewDecoy(machine, dir)
 	if err != nil {
 		return err
 	}
-	raw, err := os.Create(filepath.Join(battery.Dir, battery.GoTestFile))
+	raw, err := machine.Create(filepath.Join(battery.Dir, battery.GoTestFile))
 	if err != nil {
 		return err
 	}
@@ -70,22 +75,16 @@ func gotest(packages []string) error {
 // report prints the profile of the battery just run, and adds it to the CI
 // job's summary where there is one.
 func report() error {
-	var summary *os.File
+	var summary io.Writer
 	if path := os.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		f, err := machine.Append(path)
 		if err != nil {
 			return err
 		}
 		defer f.Close()
 		summary = f
 	}
-	var p battery.Profile
-	var err error
-	if summary != nil {
-		p, err = battery.Report(".", summary)
-	} else {
-		p, err = battery.Report(".", nil)
-	}
+	p, err := battery.Report(machine, ".", summary)
 	fmt.Print(p.Text())
 	return err
 }

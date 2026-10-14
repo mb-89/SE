@@ -162,10 +162,8 @@ func TestIssueNewNeedsBlockedBy(t *testing.T) {
 
 func TestIssueNewCreatesTheIssueAndItsLinks(t *testing.T) {
 	calls := recordedIssues(t)
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "body.md"), []byte("the body\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	d, dir := onFake(t), filepath.FromSlash("/ws")
+	put(t, d, filepath.Join(dir, "body.md"), "the body\n")
 	code, out, errs := se(t, "issue", "new", "--workspace", dir, "--repo", "o/r", "--title", "ten",
 		"--body-file", "body.md", "--blocked-by", "3,#1,3")
 	if code != 0 || out != "Created #10 ten\nu10\nBlocked by #1, #3.\n" {
@@ -203,23 +201,16 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	git(ws, "commit", "-q", "--allow-empty", "-m", "start")
 	git(ws, "push", "-q", "origin", "main")
 	git(ws, "checkout", "-q", "-b", "issue-6")
+	git(ws, "commit", "-q", "--allow-empty", "-m", "work")
+	// git keeps the checkout on the real disk; se reads its files from a fake.
 	spec, err := os.ReadFile(filepath.Join("..", "..", "..", issues.QuestionsFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(ws, "spec"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(ws, issues.QuestionsFile), spec, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(ws, "add", "spec")
-	git(ws, "commit", "-q", "-m", "work")
-	// The answers stand outside the checkout, so its tree stays clean.
+	d := onFake(t)
+	put(t, d, filepath.Join(ws, issues.QuestionsFile), string(spec))
 	answers := filepath.Join(root, "answers.yaml")
-	if err := os.WriteFile(answers, []byte("done: one\ntimeline: two\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	put(t, d, answers, "done: one\ntimeline: two\n")
 	old, oldCheck, oldSession := gh, check, sessionID
 	t.Cleanup(func() { gh, check, sessionID = old, oldCheck, oldSession })
 	checked := ""
@@ -265,16 +256,14 @@ func TestIssueLandNamesThePR(t *testing.T) {
 		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
 	}
 	all := ""
-	qs, err := issues.Questions(ws)
+	qs, err := issues.Questions(d, ws)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, q := range qs {
 		all += q.Key + ": none\n"
 	}
-	if err := os.WriteFile(answers, []byte(all), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	put(t, d, answers, all)
 	code, out, errs = se(t, "issue", "land", "--answers", answers, "--workspace", ws, "--repo", "o/r")
 	if code != 0 || out != "Pushed issue-6 and opened PR #14, auto-merge (squash) on.\nu14\n" || checked != ws {
 		t.Fatalf("exit %d, %q %q, checked %q", code, out, errs, checked)
@@ -517,14 +506,10 @@ func TestIssueReviewReadsItsWords(t *testing.T) {
 	old := sessionID
 	t.Cleanup(func() { sessionID = old })
 	sessionID = func() string { return "" }
-	dir := t.TempDir()
+	d, dir := onFake(t), filepath.FromSlash("/reports")
 	good, bad := filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(good, []byte(`{"commit":"c","requirements":[{"item":"i","evidence":"e"}],"clean":["x"]}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(bad, []byte(`{"verdict":"pass"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	put(t, d, good, `{"commit":"c","requirements":[{"item":"i","evidence":"e"}],"clean":["x"]}`)
+	put(t, d, bad, `{"verdict":"pass"}`)
 	for args, want := range map[string]string{
 		"pass":                          "pass or fail, then an issue number",
 		"maybe 3 --report " + good:      "pass or fail, then an issue number",

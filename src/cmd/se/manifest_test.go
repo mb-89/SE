@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // prose makes a git workspace holding files, and answers its folder.
@@ -98,5 +100,26 @@ func TestAFolderGitIgnoresCountsThoughNoCheckoutHoldsIt(t *testing.T) {
 	code, _, errs := se(t, "--workspace", ws, "rules")
 	if code != 1 || !strings.Contains(errs, "README.md:5: repo-path: no such path: a/gone") || strings.Count(errs, "repo-path: ") != 1 {
 		t.Fatalf("rules (exit %d): %s", code, errs)
+	}
+}
+
+func TestAManifestReadsItsOwnersFromTheDisk(t *testing.T) {
+	d, root := disk.NewFake(), filepath.FromSlash("/checkout")
+	put(t, d, filepath.Join(root, "spec", "issues.md"), "# Issues: how the fleet works\n")
+	put(t, d, filepath.Join(root, "src", "plugin", "skills", "work", "SKILL.md"), skill)
+	paths := []string{"spec/issues.md", "spec/models.yaml", "src/plugin/skills/work/SKILL.md"}
+	got, err := manifest(d, root, paths, "spec", "README.md")
+	if want := "- [spec/issues.md](spec/issues.md): Issues: how the fleet works\n- [spec/models.yaml](spec/models.yaml)"; err != nil || got != want {
+		t.Fatalf("spec: %q %v", got, err)
+	}
+	got, err = manifest(d, root, paths, "skills", "spec/a.md")
+	if want := "- [`se:work`](../src/plugin/skills/work/SKILL.md): Take the next issue."; err != nil || got != want {
+		t.Fatalf("skills: %q %v", got, err)
+	}
+	if err := d.Remove(filepath.Join(root, "src", "plugin", "skills", "work", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manifest(d, root, paths, "skills", "README.md"); err == nil {
+		t.Fatal("a skill gone from the disk was listed")
 	}
 }

@@ -113,7 +113,7 @@ func (s *Server) Append(ev Event) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f, err := os.OpenFile(filepath.Join(s.paths.Logs(), ev.Session+".jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := s.paths.Disk.Append(filepath.Join(s.paths.Logs(), ev.Session+".jsonl"))
 	if err != nil {
 		return err
 	}

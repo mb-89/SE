@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -85,7 +84,7 @@ func init() {
 			text, what := posted, "the report posted on it: apply what the owner said in its comments, if anything, to its block, then run se retro report"
 			var col issues.Collected
 			if posted == "" {
-				qs, err := issues.Questions(c.Workspace)
+				qs, err := issues.Questions(c.Disk, c.Workspace)
 				if err != nil {
 					return Reply{}, err
 				}
@@ -97,7 +96,7 @@ func init() {
 				}
 				what = fmt.Sprintf("its draft: %d closed issues, %d merged PRs, %d broken rule checks", len(col.Rows), col.PRs, len(col.Checks))
 			}
-			if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			if err := c.Disk.WriteFile(path, []byte(text)); err != nil {
 				return Reply{}, err
 			}
 			if *asJSON {
@@ -125,7 +124,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			data, err := os.ReadFile(draftPath(c, *file, "retro", n))
+			data, err := c.Disk.ReadFile(draftPath(c, *file, "retro", n))
 			if err != nil {
 				return Reply{}, err
 			}

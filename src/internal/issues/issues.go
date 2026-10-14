@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // Label marks an issue as the fleet's work.
@@ -83,6 +84,8 @@ type Source struct {
 	GH   GH
 	// Clock is the time leases, windows and stamps are read against.
 	Clock clock.Clock
+	// Disk is what checkouts' files are read from.
+	Disk disk.Disk
 	// Flagged hears of each issue the sweep gave to a person, and why.
 	Flagged func(i Issue, reason string)
 }

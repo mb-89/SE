@@ -6,12 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // ErrRunning says another daemon holds this workspace.
@@ -58,7 +60,7 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 	}
 	srv := NewServer(paths, ep.Token, ep.InstanceID, cancel, opts.Clock)
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
-	if err := WriteEndpoint(paths.Endpoint(), ep); err != nil {
+	if err := WriteEndpoint(paths, ep); err != nil {
 		ln.Close()
 		return err
 	}
@@ -83,10 +85,13 @@ func Serve(ctx context.Context, paths Paths, opts Options) error {
 }
 
 // acquire takes the lifetime lock, stepping a running daemon aside for up to takeOver.
-func acquire(paths Paths, takeOver time.Duration, clk clock.Clock) (*os.File, error) {
+func acquire(paths Paths, takeOver time.Duration, clk clock.Clock) (io.Closer, error) {
 	deadline := clk.Now().Add(takeOver)
 	for {
-		held, err := lock(paths.Lock())
+		held, err := paths.Disk.Lock(paths.Lock())
+		if errors.Is(err, disk.ErrLocked) {
+			err = ErrRunning
+		}
 		if !errors.Is(err, ErrRunning) || takeOver <= 0 || !clk.Now().Before(deadline) {
 			return held, err
 		}
@@ -112,8 +117,8 @@ func idles(ctx context.Context, srv *Server, idle time.Duration, cancel func(), 
 
 // withdraw removes daemon.json while it still names this instance.
 func withdraw(paths Paths, instance string) {
-	if ep, err := ReadEndpoint(paths.Endpoint()); err == nil && ep.InstanceID == instance {
-		os.Remove(paths.Endpoint())
+	if ep, err := ReadEndpoint(paths); err == nil && ep.InstanceID == instance {
+		_ = paths.Disk.Remove(paths.Endpoint())
 	}
 }
 

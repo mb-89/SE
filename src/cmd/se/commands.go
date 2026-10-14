@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 )
@@ -90,6 +91,8 @@ type Call struct {
 	Color bool
 	// Clock is the time the command reads, sleeps and waits by.
 	Clock clock.Clock
+	// Disk is what the command reads and writes files on.
+	Disk disk.Disk
 	// flags is the flag set Flags made, which the command's help lists.
 	flags *flag.FlagSet
 }
@@ -98,6 +101,9 @@ var commands = map[string]Command{}
 
 // wall is the clock every call is handed: the real one, which a test replaces.
 var wall = clock.Real()
+
+// drive is the disk every call is handed: the real one, which a test replaces.
+var drive = disk.Real()
 
 // register adds a command; a command file calls it from init.
 func register(c Command) {
@@ -133,7 +139,7 @@ func (c *Call) Parse(fs *flag.FlagSet) error {
 }
 
 // Paths names the workspace's runtime files.
-func (c *Call) Paths() daemon.Paths { return daemon.Paths{Workspace: c.Workspace} }
+func (c *Call) Paths() daemon.Paths { return daemon.Paths{Workspace: c.Workspace, Disk: c.Disk} }
 
 // offered lists the commands a terminal (session false) or a session can run, by name.
 func offered(session bool) []Command {
@@ -179,7 +185,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	// The help is coloured on a terminal alone, never in a session's answer.
 	color, errColor := !*session && colors(stdout), !*session && colors(stderr)
-	call := &Call{Workspace: *workspace, Session: *session, Color: color, Clock: wall}
+	call := &Call{Workspace: *workspace, Session: *session, Color: color, Clock: wall, Disk: drive}
 	name := ""
 	if fs.NArg() > 0 {
 		name, call.Args = fs.Arg(0), fs.Args()[1:]
@@ -191,7 +197,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	cmd, ok := commands[name]
 	if *session && (!ok || !cmd.Installed) {
-		if code, handed := handsOver(*workspace, args, stdout, stderr); handed {
+		if code, handed := handsOver(drive, *workspace, args, stdout, stderr); handed {
 			return code
 		}
 	}

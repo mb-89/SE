@@ -2,13 +2,13 @@ package daemon_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -17,13 +17,14 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 
 	"github.com/mb-89/SE/src/internal/daemon"
 )
 
 func workspace(t *testing.T) daemon.Paths {
 	t.Helper()
-	p := daemon.Paths{Workspace: t.TempDir()}
+	p := daemon.Paths{Workspace: filepath.FromSlash("/ws"), Disk: disk.NewFake()}
 	if err := daemon.Prepare(p); err != nil {
 		t.Fatal(err)
 	}
@@ -41,13 +42,12 @@ func post(t *testing.T, h http.Handler, token, body string) int {
 
 func rows(t *testing.T, p daemon.Paths, session string) []map[string]any {
 	t.Helper()
-	f, err := os.Open(filepath.Join(p.Logs(), session+".jsonl"))
+	log, err := p.Disk.ReadFile(filepath.Join(p.Logs(), session+".jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
 	var out []map[string]any
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(bytes.NewReader(log))
 	sc.Buffer(nil, 1<<20)
 	for sc.Scan() {
 		var row map[string]any
@@ -61,7 +61,7 @@ func rows(t *testing.T, p daemon.Paths, session string) []map[string]any {
 
 func TestPrepareIgnoresTheRuntimeFolder(t *testing.T) {
 	p := workspace(t)
-	got, err := os.ReadFile(filepath.Join(p.Runtime(), ".gitignore"))
+	got, err := p.Disk.ReadFile(filepath.Join(p.Runtime(), ".gitignore"))
 	if err != nil || string(got) != "*\n" {
 		t.Fatalf(".gitignore = %q, %v", got, err)
 	}
@@ -141,16 +141,14 @@ func TestServePublishesAndWithdrawsItsEndpoint(t *testing.T) {
 	if got, ok := daemon.Healthy(p); !ok || got.InstanceID != ep.InstanceID {
 		t.Fatalf("healthy = %v, %v", got, ok)
 	}
-	if runtime.GOOS != "windows" {
-		if err := daemon.Serve(context.Background(), p, daemon.Options{Clock: clock.Real()}); !errors.Is(err, daemon.ErrRunning) {
-			t.Fatalf("second serve: %v", err)
-		}
+	if err := daemon.Serve(context.Background(), p, daemon.Options{Clock: clock.Real()}); !errors.Is(err, daemon.ErrRunning) {
+		t.Fatalf("second serve: %v", err)
 	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(p.Endpoint()); !errors.Is(err, os.ErrNotExist) {
+	if there, err := p.Disk.Exists(p.Endpoint()); there || err != nil {
 		t.Fatalf("daemon.json stands after the daemon ended: %v", err)
 	}
 }
@@ -211,9 +209,6 @@ func TestAnIdleDaemonEnds(t *testing.T) {
 }
 
 func TestTakeOverStepsARunningDaemonAside(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the lock is not exclusive here")
-	}
 	p := workspace(t)
 	first := make(chan daemon.Endpoint, 1)
 	firstDone := make(chan error, 1)

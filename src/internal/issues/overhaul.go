@@ -3,7 +3,6 @@ package issues
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -12,6 +11,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // PrinciplesFile is where the design principles live, relative to a
@@ -83,10 +84,10 @@ var (
 	checkedLine   = regexp.MustCompile(`^\s*Checked by:\s*(.+)$`)
 )
 
-// Principles reads the design principles from the checkout dir.
-func Principles(dir string) ([]Principle, error) {
+// Principles reads the design principles from the checkout dir on d.
+func Principles(d disk.Disk, dir string) ([]Principle, error) {
 	path := filepath.Join(dir, PrinciplesFile)
-	data, err := os.ReadFile(path)
+	data, err := d.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("the design principles: %w", err)
 	}

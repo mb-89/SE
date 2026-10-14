@@ -3,10 +3,11 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // SessionVar is the environment variable that names the Claude Code session
@@ -233,10 +234,10 @@ func ReviewWorktree(dir string, n, round int) string {
 const ModelsPath = "spec/models.yaml"
 
 // ReviewerModel reads the reviewer's model from spec/models.yaml in the
-// checkout dir, the line "reviewer: <model>"; where it is not set, the
+// checkout dir on d, the line "reviewer: <model>"; where it is not set, the
 // reviewer runs the box's model, the floor, and the answer is empty.
-func ReviewerModel(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, ModelsPath))
+func ReviewerModel(d disk.Disk, dir string) string {
+	data, err := d.ReadFile(filepath.Join(dir, ModelsPath))
 	if err != nil {
 		return ""
 	}

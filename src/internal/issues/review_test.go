@@ -4,11 +4,12 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // reviewGH answers from answers, which a test changes as the tree moves; an
@@ -249,21 +250,21 @@ func TestAReviewRefusesWhatItCannotTell(t *testing.T) {
 }
 
 func TestTheReviewerModelIsOneLineOfSpecModels(t *testing.T) {
-	dir := t.TempDir()
-	if got := ReviewerModel(dir); got != "" {
+	d, dir := disk.NewFake(), filepath.FromSlash("/checkout")
+	if got := ReviewerModel(d, dir); got != "" {
 		t.Fatalf("without the file: %q", got)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "spec"), 0o755); err != nil {
+	if err := d.MkdirAll(filepath.Join(dir, "spec")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ModelsPath), []byte("# models\nbox: opus\nreviewer: \"fable\" # stronger\n"), 0o644); err != nil {
+	if err := d.WriteFile(filepath.Join(dir, ModelsPath), []byte("# models\nbox: opus\nreviewer: \"fable\" # stronger\n")); err != nil {
 		t.Fatal(err)
 	}
-	if got := ReviewerModel(dir); got != "fable" {
+	if got := ReviewerModel(d, dir); got != "fable" {
 		t.Fatalf("%q", got)
 	}
-	// The repository's own setting is never empty.
-	if got := ReviewerModel("../../.."); got == "" {
+	// The repository's own setting is never empty: it is the checkout's file, on the real disk.
+	if got := ReviewerModel(disk.Real(), "../../.."); got == "" {
 		t.Fatal("spec/models.yaml sets no reviewer")
 	}
 }

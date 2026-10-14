@@ -4,7 +4,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -93,11 +92,9 @@ func recordedBriefing(t *testing.T, person bool, closed map[int]time.Duration) {
 // briefed runs se briefing in a workspace with a README and answers its text.
 func briefed(t *testing.T, args ...string) string {
 	t.Helper()
-	dir := t.TempDir()
+	d, dir := onFake(t), filepath.FromSlash("/ws")
 	readme := "# SE\n\nReader: a person meeting SE.\n\nSE is a test. It has parts. They talk.\nIt is small. This is cut.\n\n## Install\n"
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(readme), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	put(t, d, filepath.Join(dir, "README.md"), readme)
 	code, out, errs := se(t, append([]string{"briefing", "--workspace", dir}, args...)...)
 	if code != 0 {
 		t.Fatalf("briefing %v: exit %d, %q %q", args, code, out, errs)

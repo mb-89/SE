@@ -5,6 +5,9 @@ Reader: an agent writing, moving or testing an I/O module, or code that needs on
 Processes, the disk, the clock, the network and GitHub are each reached
 through exactly one I/O module ([principles 6 to 8](principles.md)). The
 clock, `src/internal/io/clock`, is the first and the model for the rest.
+The disk, `src/internal/io/disk`, is the second: reading, writing, listing,
+locking and atomically replacing files, its fake a filesystem in memory that
+fails as the real one does.
 
 ## The layout
 

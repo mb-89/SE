@@ -1,23 +1,22 @@
 //go:build unix
 
-package daemon
+package disk
 
 import (
+	"io"
 	"os"
 	"syscall"
 )
 
-// lock takes the daemon's lifetime lock, held by the OS until the process ends.
-func lock(path string) (*os.File, error) {
+// lock takes an exclusive flock on the file, which the OS lets go when the process ends.
+func lock(path string) (io.Closer, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, err
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
-		return nil, ErrRunning
+		return nil, ErrLocked
 	}
 	return f, nil
 }
-
-func detached() *syscall.SysProcAttr { return &syscall.SysProcAttr{Setsid: true} }

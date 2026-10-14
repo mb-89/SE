@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // Result says what an update did.
@@ -23,10 +25,10 @@ type Untouched struct{ Reason string }
 
 func (u *Untouched) Error() string { return u.Reason }
 
-// Run pulls main into repo and, when that brought anything, builds se to out.
+// Run pulls main into repo and, when that brought anything, builds se to out on d.
 // It refuses, with an *Untouched, a checkout that is not on a clean main. A
 // shallow clone (git clone --depth 1) updates like a full one.
-func Run(repo, out string) (Result, error) {
+func Run(d disk.Disk, repo, out string) (Result, error) {
 	var r Result
 	if inside, err := git(repo, "rev-parse", "--is-inside-work-tree"); err != nil || inside != "true" {
 		return r, &Untouched{fmt.Sprintf("%s is no git checkout", repo)}
@@ -54,16 +56,16 @@ func Run(repo, out string) (Result, error) {
 	if r.To, err = git(repo, "rev-parse", "--short", "HEAD"); err != nil || r.To == r.From {
 		return r, err
 	}
-	if err := Build(repo, out); err != nil {
+	if err := Build(d, repo, out); err != nil {
 		return r, err
 	}
 	r.Built = out
 	return r, nil
 }
 
-// Build compiles se from repo to out, replacing the old binary only once the new one stands.
-func Build(repo, out string) error {
-	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+// Build compiles se from repo to out on d, replacing the old binary only once the new one stands.
+func Build(d disk.Disk, repo, out string) error {
+	if err := d.MkdirAll(filepath.Dir(out)); err != nil {
 		return err
 	}
 	// Two starts may build at once; each builds to a file of its own.
@@ -75,18 +77,18 @@ func Build(repo, out string) error {
 	cmd := exec.Command("go", append(args, "./src/cmd/se")...)
 	cmd.Dir = repo
 	if said, err := cmd.CombinedOutput(); err != nil {
-		os.Remove(fresh)
+		_ = d.Remove(fresh)
 		return fmt.Errorf("go build: %v\n%s", err, said)
 	}
 	// A running binary cannot be overwritten on Windows, but it can be renamed away.
 	old := out + ".old"
-	os.Remove(old)
-	if _, err := os.Stat(out); err == nil {
-		if err := os.Rename(out, old); err != nil {
+	_ = d.Remove(old)
+	if there, err := d.Exists(out); err == nil && there {
+		if err := d.Rename(out, old); err != nil {
 			return err
 		}
 	}
-	return os.Rename(fresh, out)
+	return d.Rename(fresh, out)
 }
 
 // Head is the commit repo is at.
@@ -99,9 +101,9 @@ func Ldflags(commit string) string { return "-X main.commit=" + commit }
 // Module is the module path an SE checkout's go.mod declares.
 const Module = "github.com/mb-89/SE"
 
-// IsCheckout says whether dir is an SE checkout: its go.mod declares SE's module.
-func IsCheckout(dir string) bool {
-	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+// IsCheckout says whether dir on d is an SE checkout: its go.mod declares SE's module.
+func IsCheckout(d disk.Disk, dir string) bool {
+	data, err := d.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil {
 		return false
 	}

@@ -8,10 +8,14 @@ import (
 
 	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/gitenv"
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
+// machine is the disk git makes the decoy on: a process writes it, so no fake stands in.
+var machine = disk.Real()
+
 func TestDecoyUnchanged(t *testing.T) {
-	decoy, err := battery.NewDecoy(t.TempDir())
+	decoy, err := battery.NewDecoy(machine, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +26,7 @@ func TestDecoyUnchanged(t *testing.T) {
 
 // A git that inherits the decoy's GIT_DIR acts on the decoy, wherever it runs.
 func TestDecoyCatchesInheritedGitDir(t *testing.T) {
-	decoy, err := battery.NewDecoy(t.TempDir())
+	decoy, err := battery.NewDecoy(machine, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

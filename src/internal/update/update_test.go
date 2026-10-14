@@ -8,8 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/update"
 )
+
+// machine is the disk go build writes se to: a process writes it, so no fake stands in.
+var machine = disk.Real()
 
 func repo(t *testing.T, branch string) string {
 	t.Helper()
@@ -63,7 +67,7 @@ func shallow(t *testing.T) (origin, clone string) {
 func TestAShallowCloneIsPulledAndRebuilt(t *testing.T) {
 	origin, clone := shallow(t)
 	out := filepath.Join(clone, "src", "plugin", "bin", "se")
-	r, err := update.Run(clone, out)
+	r, err := update.Run(machine, clone, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +83,7 @@ func TestACurrentCheckoutIsNotRebuilt(t *testing.T) {
 	origin, clone := shallow(t)
 	run(t, clone, "pull", "-q", "--ff-only", "origin", "main")
 	out := filepath.Join(clone, "se")
-	r, err := update.Run(clone, out)
+	r, err := update.Run(machine, clone, out)
 	if err != nil || r.From != r.To || r.To != run(t, origin, "rev-parse", "--short", "HEAD") {
 		t.Fatalf("%+v %v", r, err)
 	}
@@ -94,7 +98,7 @@ func TestAFailedPullIsAnErrorThatTouchedNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := run(t, clone, "rev-parse", "HEAD")
-	_, err := update.Run(clone, filepath.Join(clone, "se"))
+	_, err := update.Run(machine, clone, filepath.Join(clone, "se"))
 	var untouched *update.Untouched
 	if err == nil || errors.As(err, &untouched) {
 		t.Fatalf("err = %v", err)
@@ -106,14 +110,14 @@ func TestAFailedPullIsAnErrorThatTouchedNothing(t *testing.T) {
 
 func TestAFolderOutsideGitIsLeftAlone(t *testing.T) {
 	var untouched *update.Untouched
-	if _, err := update.Run(t.TempDir(), "se"); !errors.As(err, &untouched) {
+	if _, err := update.Run(machine, t.TempDir(), "se"); !errors.As(err, &untouched) {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestAnUpdateRefusesABranch(t *testing.T) {
 	dir := repo(t, "feature")
-	_, err := update.Run(dir, filepath.Join(dir, "se"))
+	_, err := update.Run(machine, dir, filepath.Join(dir, "se"))
 	var untouched *update.Untouched
 	if !errors.As(err, &untouched) || !strings.Contains(err.Error(), "not main") {
 		t.Fatalf("err = %v", err)
@@ -126,7 +130,7 @@ func TestAnUpdateRefusesUncommittedWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	run(t, dir, "add", "f")
-	_, err := update.Run(dir, filepath.Join(dir, "se"))
+	_, err := update.Run(machine, dir, filepath.Join(dir, "se"))
 	var untouched *update.Untouched
 	if !errors.As(err, &untouched) || !strings.Contains(err.Error(), "uncommitted") {
 		t.Fatalf("err = %v", err)
@@ -140,15 +144,18 @@ func TestACheckoutIsKnownByItsModule(t *testing.T) {
 		"module github.com/mb-89/SE/sub\n":        false,
 		"module example.com/other\n":              false,
 	} {
-		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o644); err != nil {
+		d, dir := disk.NewFake(), filepath.FromSlash("/se")
+		if err := d.MkdirAll(dir); err != nil {
 			t.Fatal(err)
 		}
-		if got := update.IsCheckout(dir); got != want {
+		if err := d.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod)); err != nil {
+			t.Fatal(err)
+		}
+		if got := update.IsCheckout(d, dir); got != want {
 			t.Errorf("%q: %v, want %v", mod, got, want)
 		}
 	}
-	if update.IsCheckout(t.TempDir()) {
+	if update.IsCheckout(disk.NewFake(), filepath.FromSlash("/se")) {
 		t.Error("a folder without go.mod is a checkout")
 	}
 }

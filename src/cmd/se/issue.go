@@ -244,7 +244,7 @@ func init() {
 				if !filepath.IsAbs(path) {
 					path = filepath.Join(c.Workspace, path)
 				}
-				data, err := os.ReadFile(path)
+				data, err := c.Disk.ReadFile(path)
 				if err != nil {
 					return Reply{}, err
 				}
@@ -349,11 +349,11 @@ func init() {
 			if !filepath.IsAbs(*file) {
 				*file = filepath.Join(c.Workspace, *file)
 			}
-			qs, err := issues.Questions(c.Workspace)
+			qs, err := issues.Questions(c.Disk, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
-			answers, err := issues.ReadAnswers(*file)
+			answers, err := issues.ReadAnswers(c.Disk, *file)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -427,7 +427,7 @@ func init() {
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(c.Workspace, path)
 			}
-			data, err := os.ReadFile(path)
+			data, err := c.Disk.ReadFile(path)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -575,7 +575,7 @@ func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Sour
 			}
 			*repo = r
 		}
-		return issues.Source{Repo: *repo, GH: gh, Clock: c.Clock}, nil
+		return issues.Source{Repo: *repo, GH: gh, Clock: c.Clock, Disk: c.Disk}, nil
 	}, asJSON
 }
 
@@ -740,7 +740,7 @@ type reviewAt struct {
 func reviews(c *Call, tr issues.Tree) []reviewAt {
 	out := []reviewAt{}
 	for _, i := range tr.Review {
-		out = append(out, reviewAt{i, tr.ReviewWorktree(c.Workspace, i.Number), issues.ReviewerModel(c.Workspace)})
+		out = append(out, reviewAt{i, tr.ReviewWorktree(c.Workspace, i.Number), issues.ReviewerModel(c.Disk, c.Workspace)})
 	}
 	return out
 }

@@ -5,9 +5,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 func se(t *testing.T, args ...string) (int, string, string) {
@@ -15,6 +18,26 @@ func se(t *testing.T, args ...string) (int, string, string) {
 	var out, errs bytes.Buffer
 	code := run(args, &out, &errs)
 	return code, out.String(), errs.String()
+}
+
+// onFake hands every call of the test a fake disk in place of the real one.
+func onFake(t *testing.T) *disk.Fake {
+	t.Helper()
+	d, old := disk.NewFake(), drive
+	drive = d
+	t.Cleanup(func() { drive = old })
+	return d
+}
+
+// put writes a file on the fake, making its folder.
+func put(t *testing.T, d disk.Disk, path, text string) {
+	t.Helper()
+	if err := d.MkdirAll(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.WriteFile(path, []byte(text)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func session(t *testing.T, args ...string) Reply {

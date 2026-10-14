@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 )
 
 // Rule is one of SE's rules, checked file by file.
@@ -34,6 +34,8 @@ type Rule struct {
 type Repo struct {
 	// Root is the checkout's folder.
 	Root string
+	// Disk is what the checkout's files are read from.
+	Disk disk.Disk
 	// Paths are the files git tracks or would track, slash-separated and
 	// relative to Root.
 	Paths []string
@@ -61,7 +63,7 @@ func (r *Repo) Read(p string) ([]byte, bool, error) {
 	if r.texts == nil {
 		r.texts = map[string][]byte{}
 	}
-	t, err := os.ReadFile(filepath.Join(r.Root, filepath.FromSlash(p)))
+	t, err := r.Disk.ReadFile(filepath.Join(r.Root, filepath.FromSlash(p)))
 	if errors.Is(err, fs.ErrNotExist) {
 		r.texts[p] = nil
 		return nil, false, nil
