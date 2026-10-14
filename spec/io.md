@@ -56,6 +56,11 @@ the real one's test each call it. A fake that passes the suite stands in for
 the real thing; a fake without one drifts. The clock's suite is `contract` in
 `src/internal/io/clock/contract_test.go`.
 
+The `io-contract` rule (`src/internal/rules/iocontract.go`) holds every module
+to it: its folder holds `fake.go`, `func contract` in `contract_test.go`, and
+both `fake_test.go` and `real_test.go` call `contract`. A module missing any
+of them is refused.
+
 ## Test on fakes, real only in contract tests
 
 Every other test runs on fakes: no wall clock, no sleeping, no network. The
