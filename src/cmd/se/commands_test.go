@@ -8,26 +8,80 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/github"
+	sehttp "github.com/mb-89/SE/src/internal/io/http"
+	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 func se(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	var out, errs bytes.Buffer
-	code := run(args, &out, &errs)
+	code := run(worldOf(t), args, &out, &errs)
 	return code, out.String(), errs.String()
+}
+
+// worlds holds each test's World, so tests share nothing and run in parallel.
+var worlds sync.Map // *testing.T to *testWorld
+
+type testWorld struct {
+	World
+	env map[string]string
+}
+
+// testedAt is where every test's clock stands until the test moves it.
+var testedAt = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+
+// worldOf is the World every se call of the test runs in, made on the first
+// call: a fake clock at testedAt, an environment holding only what setenv put
+// there, an empty fake GitHub, and the real disk, programs and
+// network, which a test replaces through the fields.
+func worldOf(t *testing.T) *World {
+	t.Helper()
+	if w, ok := worlds.Load(t); ok {
+		return &w.(*testWorld).World
+	}
+	w := &testWorld{env: map[string]string{}}
+	w.World = World{
+		Clock: clock.NewFake(testedAt), Disk: disk.Real(), Proc: proc.Real(), Net: sehttp.Real(),
+		GitHub:  github.NewFake(clock.NewFake(testedAt)),
+		Getenv:  func(k string) string { return w.env[k] },
+		Environ: func() []string { return w.environ() },
+		Check:   check,
+	}
+	worlds.Store(t, w)
+	t.Cleanup(func() { worlds.Delete(t) })
+	return &w.World
+}
+
+// environ is the process's environment with what setenv put there over it,
+// for the programs a call starts.
+func (w *testWorld) environ() []string {
+	out := os.Environ()
+	for k, v := range w.env {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
+// setenv sets a variable of the environment the test's calls run in.
+func setenv(t *testing.T, key, value string) {
+	t.Helper()
+	worldOf(t)
+	w, _ := worlds.Load(t)
+	w.(*testWorld).env[key] = value
 }
 
 // onFake hands every call of the test a fake disk in place of the real one.
 func onFake(t *testing.T) *disk.Fake {
 	t.Helper()
-	d, old := disk.NewFake(), drive
-	drive = d
-	t.Cleanup(func() { drive = old })
+	d := disk.NewFake()
+	worldOf(t).Disk = d
 	return d
 }
 
@@ -53,6 +107,7 @@ func session(t *testing.T, args ...string) Reply {
 }
 
 func TestEveryCommandSaysWhatItIs(t *testing.T) {
+	t.Parallel()
 	for name, c := range commands {
 		if c.Name != name || c.Summary == "" || c.Run == nil || !strings.HasPrefix(c.Usage, name) {
 			t.Errorf("command %q is incomplete: %+v", name, c)
@@ -61,6 +116,7 @@ func TestEveryCommandSaysWhatItIs(t *testing.T) {
 }
 
 func TestTheSessionIsOfferedItsCommandsAlone(t *testing.T) {
+	t.Parallel()
 	want := map[string]bool{
 		"on": true, "off": true, "status": true, "update": true, "help": true, "restart": true, "issue pull": true, "issue new": true, "issue land": true, "issue review": true, "ui": true, "fleet check": true, "fleet fix": true, "briefing": true,
 		"serve": false, "start": false, "stop": false,
@@ -74,6 +130,7 @@ func TestTheSessionIsOfferedItsCommandsAlone(t *testing.T) {
 }
 
 func TestTheHelpIsMadeFromTheRegistry(t *testing.T) {
+	t.Parallel()
 	terminal, inSession := help(false, false), help(true, false)
 	for name, c := range commands {
 		line := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(name) + ` +` + regexp.QuoteMeta(c.Summary) + `$`)
@@ -87,6 +144,7 @@ func TestTheHelpIsMadeFromTheRegistry(t *testing.T) {
 }
 
 func TestTheHelpGroupsTheCommands(t *testing.T) {
+	t.Parallel()
 	want := map[string][]string{
 		"Session":  {"help", "off", "on", "restart", "status", "ui", "update"},
 		"Issues":   {"issue land", "issue new", "issue pull", "issue resume", "issue review", "issue tree"},
@@ -112,19 +170,21 @@ func TestTheHelpGroupsTheCommands(t *testing.T) {
 }
 
 func TestACommandStandsUnderTheGroupItRegisters(t *testing.T) {
-	register(Command{
-		Name: "zz probe", Usage: "zz probe", Group: "Probes", Summary: "probe the help", Session: true,
-		Run: func(c *Call) (Reply, error) { return Reply{}, nil },
-	})
-	t.Cleanup(func() { delete(commands, "zz probe") })
+	t.Parallel()
+	// The probe joins the registered commands without touching the registry,
+	// which the other tests read in parallel.
+	probe := Command{Name: "zz probe", Usage: "zz probe", Group: "Probes", Summary: "probe the help", Session: true}
 	for _, session := range []bool{false, true} {
-		if h := help(session, false); !regexp.MustCompile(`Probes:\n  zz probe +probe the help\n`).MatchString(h) {
+		o := overview(session)
+		o.Groups = groupsOf(append(offered(session), probe), session)
+		if h := helpText(o, session, false); !regexp.MustCompile(`Probes:\n  zz probe +probe the help\n`).MatchString(h) {
 			t.Errorf("session %v:\n%s", session, h)
 		}
 	}
 }
 
 func TestNoOverviewLineIsLongerThan80(t *testing.T) {
+	t.Parallel()
 	for _, session := range []bool{false, true} {
 		for _, line := range strings.Split(help(session, false), "\n") {
 			if len(line) > 80 {
@@ -135,6 +195,7 @@ func TestNoOverviewLineIsLongerThan80(t *testing.T) {
 }
 
 func TestTheSessionHelpIsAFencedBlockAfterItsFirstLine(t *testing.T) {
+	t.Parallel()
 	h := help(true, false)
 	if !strings.HasPrefix(h, "/se <command> [flags]\n```\nFleet:") || !strings.HasSuffix(h, "\n```") {
 		t.Fatalf("%q", h)
@@ -145,6 +206,7 @@ func TestTheSessionHelpIsAFencedBlockAfterItsFirstLine(t *testing.T) {
 }
 
 func TestAColouredHelpColoursHeadingsAndNamesAlone(t *testing.T) {
+	t.Parallel()
 	plain, colored := help(false, false), help(false, true)
 	if strings.Contains(plain, "\x1b[") || !strings.Contains(colored, "\x1b[1mSession:\x1b[0m") || !strings.Contains(colored, "\x1b[36mstatus\x1b[0m") {
 		t.Fatalf("%q", colored)
@@ -155,6 +217,7 @@ func TestAColouredHelpColoursHeadingsAndNamesAlone(t *testing.T) {
 }
 
 func TestAPipeAndASessionGetNoColour(t *testing.T) {
+	t.Parallel()
 	if _, out, _ := se(t, "help"); strings.Contains(out, "\x1b[") {
 		t.Fatalf("%q", out)
 	}
@@ -167,6 +230,7 @@ func TestAPipeAndASessionGetNoColour(t *testing.T) {
 }
 
 func TestTheHelpOfACommand(t *testing.T) {
+	t.Parallel()
 	code, out, _ := se(t, "help", "issue", "pull")
 	if code != 0 {
 		t.Fatalf("exit %d, %q", code, out)
@@ -200,6 +264,7 @@ func TestTheHelpOfACommand(t *testing.T) {
 }
 
 func TestEveryCommandHasItsHelp(t *testing.T) {
+	t.Parallel()
 	for name, c := range commands {
 		code, out, _ := se(t, "help", name)
 		if code != 0 || !strings.HasPrefix(out, "se "+strings.Fields(c.Usage)[0]) {
@@ -209,6 +274,7 @@ func TestEveryCommandHasItsHelp(t *testing.T) {
 }
 
 func TestHelpOfAnUnknownCommand(t *testing.T) {
+	t.Parallel()
 	if code, _, errs := se(t, "help", "frob"); code != 1 || !strings.Contains(errs, `"frob"`) {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
@@ -218,6 +284,7 @@ func TestHelpOfAnUnknownCommand(t *testing.T) {
 }
 
 func TestHelpOnATerminal(t *testing.T) {
+	t.Parallel()
 	code, out, _ := se(t, "help")
 	if code != 0 || out != help(false, false)+"\n" {
 		t.Fatalf("exit %d, %q", code, out)
@@ -225,6 +292,7 @@ func TestHelpOnATerminal(t *testing.T) {
 }
 
 func TestABareSeShowsTheHelp(t *testing.T) {
+	t.Parallel()
 	if code, _, errs := se(t); code != 2 || !strings.Contains(errs, help(false, false)) {
 		t.Fatalf("terminal: exit %d, %q", code, errs)
 	}
@@ -237,6 +305,7 @@ func TestABareSeShowsTheHelp(t *testing.T) {
 }
 
 func TestAnUnknownWordShowsTheHelpAndNamesIt(t *testing.T) {
+	t.Parallel()
 	r := session(t, "frob")
 	if !strings.HasPrefix(r.Text, help(true, false)) || !strings.Contains(r.Text, `"frob"`) {
 		t.Fatalf("%q", r.Text)
@@ -248,6 +317,7 @@ func TestAnUnknownWordShowsTheHelpAndNamesIt(t *testing.T) {
 }
 
 func TestATerminalCommandIsUnknownInASession(t *testing.T) {
+	t.Parallel()
 	r := session(t, "stop")
 	if !strings.Contains(r.Text, `no command "stop"`) {
 		t.Fatalf("%q", r.Text)
@@ -255,6 +325,7 @@ func TestATerminalCommandIsUnknownInASession(t *testing.T) {
 }
 
 func TestOffSwitchesTheSessionOff(t *testing.T) {
+	t.Parallel()
 	r := session(t, "off")
 	if r.Active == nil || *r.Active || r.Text != "SE is off." {
 		t.Fatalf("%+v", r)
@@ -262,6 +333,7 @@ func TestOffSwitchesTheSessionOff(t *testing.T) {
 }
 
 func TestStatusWithoutADaemon(t *testing.T) {
+	t.Parallel()
 	r := session(t, "status")
 	if !strings.HasPrefix(r.Text, "No SE daemon answers") {
 		t.Fatalf("%q", r.Text)
@@ -269,6 +341,7 @@ func TestStatusWithoutADaemon(t *testing.T) {
 }
 
 func TestACommandRefusesAStrayWord(t *testing.T) {
+	t.Parallel()
 	code, out, _ := se(t, "--session", "off", "now")
 	if code != 1 || !strings.Contains(out, `takes no word \"now\"`) {
 		t.Fatalf("exit %d, %q", code, out)
@@ -276,6 +349,7 @@ func TestACommandRefusesAStrayWord(t *testing.T) {
 }
 
 func TestTheWorkspaceFlagFollowsTheCommandToo(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if code, out, errs := se(t, "status", "--workspace", dir); code != 0 || !strings.Contains(out, dir) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
@@ -283,6 +357,7 @@ func TestTheWorkspaceFlagFollowsTheCommandToo(t *testing.T) {
 }
 
 func TestUiOffersTheButtonCommandsFromTheRegistry(t *testing.T) {
+	t.Parallel()
 	r := session(t, "ui")
 	if r.Panel == nil {
 		t.Fatalf("ui opened no panel: %+v", r)
@@ -294,6 +369,7 @@ func TestUiOffersTheButtonCommandsFromTheRegistry(t *testing.T) {
 }
 
 func TestOnlySessionCommandsWithoutTypedWordsAreButtons(t *testing.T) {
+	t.Parallel()
 	for name, c := range commands {
 		if !c.Button {
 			continue
@@ -320,6 +396,7 @@ func TestOnlySessionCommandsWithoutTypedWordsAreButtons(t *testing.T) {
 }
 
 func TestNoSessionHelpOpensAFenceOnItsFirstLine(t *testing.T) {
+	t.Parallel()
 	for _, words := range [][]string{{"help"}, {"help", "issue"}, {"help", "issue", "pull"}, {"issue", "pull", "--help"}, {"frob"}} {
 		r := session(t, words...)
 		if first, _, _ := strings.Cut(r.Text, "\n"); strings.Contains(first, "```") {
@@ -329,6 +406,7 @@ func TestNoSessionHelpOpensAFenceOnItsFirstLine(t *testing.T) {
 }
 
 func TestTheSessionHelpCarriesItsData(t *testing.T) {
+	t.Parallel()
 	r := session(t, "help")
 	if r.Help == nil || r.Help.Usage != "/se <command> [flags]" || len(r.Help.Flags) != 0 {
 		t.Fatalf("%+v", r.Help)
@@ -364,32 +442,35 @@ func TestTheSessionHelpCarriesItsData(t *testing.T) {
 }
 
 func TestEveryCommandRecordsItsDurationAndATerminalOneSaysItsOverrun(t *testing.T) {
-	d, old := onFake(t), wall
-	fake := clock.NewFake(time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC))
-	wall = fake
-	t.Cleanup(func() { wall = old })
-	register(Command{
-		Name: "zz slow", Usage: "zz slow", Summary: "take two seconds", Session: true,
-		Run: func(c *Call) (Reply, error) { c.Clock.Sleep(2 * time.Second); return Reply{Text: "slept"}, nil },
-	})
-	t.Cleanup(func() { delete(commands, "zz slow") })
+	t.Parallel()
+	d := onFake(t)
+	worldOf(t).Clock = slow{clock.NewFake(time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC))}
 	ws := filepath.FromSlash("/ws")
-	put(t, d, filepath.Join(ws, "spec", "budgets.yaml"), "classes:\n  instant: {ms: 1000, hard: false}\ncommands:\n  zz slow: instant\n")
+	put(t, d, filepath.Join(ws, "spec", "budgets.yaml"), "classes:\n  instant: {ms: 1000, hard: false}\ncommands:\n  help: instant\n")
 	if err := d.MkdirAll(filepath.Join(ws, ".se", ".runtime")); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, errs := se(t, "--workspace", ws, "zz", "slow"); code != 0 ||
-		!strings.Contains(errs, "se: zz slow took 2000ms, over its budget of 1000ms (spec/budgets.yaml)") {
+	if code, _, errs := se(t, "--workspace", ws, "help"); code != 0 ||
+		!strings.Contains(errs, "se: help took 2000ms, over its budget of 1000ms (spec/budgets.yaml)") {
 		t.Fatalf("code %d, stderr %q", code, errs)
 	}
-	if code, _, errs := se(t, "--session", "--workspace", ws, "zz", "slow"); code != 0 || errs != "" {
+	if code, _, errs := se(t, "--session", "--workspace", ws, "help"); code != 0 || errs != "" {
 		t.Fatalf("a session call: code %d, stderr %q", code, errs)
 	}
 	data, err := d.ReadFile(filepath.Join(ws, ".se", ".runtime", "calls.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lines := strings.Split(strings.TrimSpace(string(data)), "\n"); len(lines) != 2 || !strings.Contains(lines[1], `"name":"zz slow","ms":2000`) {
+	if lines := strings.Split(strings.TrimSpace(string(data)), "\n"); len(lines) != 2 || !strings.Contains(lines[1], `"name":"help","ms":2000`) {
 		t.Fatalf("calls.jsonl:\n%s", data)
 	}
+}
+
+// slow is a fake clock two seconds later each time it is read, so every
+// command it times takes two seconds.
+type slow struct{ *clock.Fake }
+
+func (s slow) Now() time.Time {
+	s.Advance(2 * time.Second)
+	return s.Fake.Now()
 }

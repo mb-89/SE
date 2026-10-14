@@ -38,6 +38,7 @@ func recorded(t *testing.T, d disk.Disk, dir string) []battery.Call {
 }
 
 func TestEachCallIsRecordedAgainstItsClass(t *testing.T) {
+	t.Parallel()
 	d, dir := workspace(t, "", classes)
 	if err := d.MkdirAll(filepath.Join(dir, ".se", ".runtime")); err != nil {
 		t.Fatal(err)
@@ -67,6 +68,7 @@ func TestEachCallIsRecordedAgainstItsClass(t *testing.T) {
 }
 
 func TestAWorkspaceWithoutARuntimeFolderRecordsNothing(t *testing.T) {
+	t.Parallel()
 	d, dir := disk.NewFake(), filepath.FromSlash("/elsewhere")
 	if err := d.MkdirAll(dir); err != nil {
 		t.Fatal(err)
@@ -80,6 +82,7 @@ func TestAWorkspaceWithoutARuntimeFolderRecordsNothing(t *testing.T) {
 }
 
 func TestAWorkspaceWithoutBudgetsRecordsTheBareDuration(t *testing.T) {
+	t.Parallel()
 	d, dir := disk.NewFake(), filepath.FromSlash("/plain")
 	if err := d.MkdirAll(filepath.Join(dir, ".se", ".runtime")); err != nil {
 		t.Fatal(err)

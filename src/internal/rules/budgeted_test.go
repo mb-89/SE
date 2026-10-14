@@ -27,6 +27,7 @@ on('*', async ($, e, next) => {
 `
 
 func TestEveryCommandAndHookHasABudgetClass(t *testing.T) {
+	t.Parallel()
 	repo := &rules.Repo{Commands: map[string][]string{"help": nil, "status": nil, "issue land": nil}}
 	found := checkIn(t, repo, "budgeted", map[string]string{
 		"spec/budgets.yaml":             budgetsYAML,
@@ -50,6 +51,7 @@ func TestEveryCommandAndHookHasABudgetClass(t *testing.T) {
 }
 
 func TestBudgetsWithoutCommandsCheckOnlyTheirClasses(t *testing.T) {
+	t.Parallel()
 	if found := check(t, "budgeted", map[string]string{"spec/budgets.yaml": budgetsYAML}); len(found) != 1 {
 		t.Errorf("found:\n%s", strings.Join(found, "\n"))
 	}

@@ -14,15 +14,18 @@ the process, and its real one is tested on loopback.
 `src/internal/io/proc` runs programs: git, go, check.sh, the se a session
 hands over to and the detached daemon. gh is GitHub's, not proc's. Its fake
 is a machine that holds only the programs a case installs, each a function
-that does what the real one would, and records every run.
+that does what the real one would, and records every run. It also says which
+program is running now (`Self`): the real one asks the system, the fake
+answers what the case made it run as (`RunAs`).
 GitHub, `src/internal/io/github`, is read and written by REST path through
 gh. Its fake, `github.NewFake(clock)`, is seeded from recorded gh answers
 (`Seed`), each read for what it says about the repository, and keeps issues,
 comments, labels, links, sub-issues, branches and pull requests, so a write
 is read back. What GitHub comes to hold later, such as a PR's mergeability,
 is seeded for a time on the fake's clock (`SeedAt`). Its real contract test
-writes issues, so it runs only against the scratch repository
-`SE_GITHUB_CONTRACT_REPO` names.
+writes issues, branches and pull requests, so it runs only against the
+scratch repository `SE_GITHUB_CONTRACT_REPO` names
+([below](#the-real-github-contract)).
 
 ## The layout
 
@@ -56,23 +59,57 @@ the real one's test each call it. A fake that passes the suite stands in for
 the real thing; a fake without one drifts. The clock's suite is `contract` in
 `src/internal/io/clock/contract_test.go`.
 
+## The real GitHub contract
+
+GitHub's contract suite runs on its fake in the battery, and against the real
+GitHub in the `contract` workflow (`.github/workflows/contract.yml`), on the
+scratch repository `mb-89/SE-contract` and never on SE itself. It writes
+there: issues labelled `se-contract` with their comments, labels, sub-issues
+and blocked-by links; a branch `se-contract-<n>` with one commit, and a pull
+request from it. Each case cleans up what it made: issues and pull requests
+closed, branches deleted.
+
+The job is gated: it runs when started by hand (workflow dispatch) and once a
+week (Monday, 05:29 UTC), never on a pull request, so no PR waits on GitHub
+or writes to another repository. It writes with the secret
+`SE_CONTRACT_TOKEN`, a token that reaches the scratch repository alone, and
+fails rather than skips without it. The scratch repository holds a `main`
+branch and allows issues; nothing else is asked of it.
+
 ## Test on fakes, real only in contract tests
 
 Every other test runs on fakes: no wall clock, no sleeping, no network. The
 real implementation runs in its contract test alone, kept short.
 
-One test is the exception, named here: `TestRestartRunsTheCheckoutsOwnSource`
-in `src/cmd/se/checkout_test.go` builds se and stops the real daemon
+Two tests are the exceptions, named here. The first,
+`TestRestartRunsTheCheckoutsOwnSource` in `src/cmd/se/checkout_test.go`, builds se and stops the real daemon
 processes it starts, over the real network, by `clock.Real()`. It is what
 shows a restart runs the checkout's own source, which no fake can, and
-`go test -short` skips it.
+`go test -short` skips it. The second,
+`TestStatusAndStopReachTheDaemonOverTheNetwork` in `src/cmd/se/stop_test.go`
+hands se stop the real clock: it polls for the daemon's endpoint to go, which a fake
+clock passes at once, before the daemon has removed it.
 
-## The rule
+## The rules
+
+The `fake-contract` rule (`src/internal/rules/fakecontract.go`) refuses a fake,
+a type `Fake` or a `NewFake` under `src/internal/io/<name>`, whose package has
+no contract suite: a function in one of its `_test.go` files that a test in
+`fake_test.go` and a test in `real_test.go` both call.
+
+The `test-swap` rule (`src/internal/rules/testswap.go`) refuses a test that
+assigns a package-level func variable, its own package's or an imported one's.
+A test does not swap how code reaches the outside; it hands the code a fake,
+as an argument or a field, such as the `World` `cmd/se` hands every call.
 
 The `io-module` rule (`src/internal/rules/iomodule.go`) holds the line: outside
 `src/internal/io/`, no Go file imports `os/exec` or `net/http`, runs `gh`, calls the
 clock through `time` (`Now`, `Sleep`, `After` and their kin), or opens, reads
-or writes files through `os`. Test files are left to principle 8.
+or writes files through `os`. Test files are held by the `fast-test` rule
+(`src/internal/rules/fasttest.go`) instead: every test calls `t.Parallel`
+first, and outside `src/internal/io/` no test reads the clock through `time`
+or takes `clock.Real`. What still breaks it is named in
+`src/internal/rules/serial.txt`, which only shrinks as the allowlist below does.
 
 What broke it while the modules landed was named in one allowlist,
 `src/internal/io/allowlist.txt`, one file and what it reaches per line. Each
