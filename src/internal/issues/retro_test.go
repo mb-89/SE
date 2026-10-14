@@ -376,7 +376,7 @@ func judged(t *testing.T, edit func(*RetroReport)) string {
 		Retro: 30, Attended: true, Metrics: Metrics{"closed": 4}, Checks: []Broken{},
 		Findings: []Lesson{
 			{Title: "Refuse a PR without Fixes", Class: "landing", Body: "PR #51 said no Fixes.", Home: "refusal", Check: "fixes"},
-			{Title: "Drop the lease", Class: "claims", Body: "It trades speed for safety.", Home: "removal", Controversial: true, Why: "it trades one metric against another"},
+			{Title: "Drop the lease on claimed issues", Class: "claims", Body: "It trades speed for safety.", Home: "removal", Controversial: true, Why: "it trades one metric against another"},
 		},
 		Classes:  []Class{{"landing", "se issue land refuses"}, {"claims", "a person decides"}},
 		WentWell: []string{"the landing answers"},
@@ -394,15 +394,26 @@ func judged(t *testing.T, edit func(*RetroReport)) string {
 func TestAReportWithoutJudgmentIsRefused(t *testing.T) {
 	t.Parallel()
 	for name, edit := range map[string]func(*RetroReport){
-		"nothing went well":        func(r *RetroReport) { r.WentWell = nil },
-		"an unknown class":         func(r *RetroReport) { r.Findings[0].Class = "nope" },
-		"controversial, no why":    func(r *RetroReport) { r.Findings[1].Why = "" },
-		"a home that is no fix":    func(r *RetroReport) { r.Findings[0].Home = "hope" },
-		"a check that is no check": func(r *RetroReport) { r.Findings[0].Check = "vibes" },
+		"nothing went well":         func(r *RetroReport) { r.WentWell = nil },
+		"an unknown class":          func(r *RetroReport) { r.Findings[0].Class = "nope" },
+		"controversial, no why":     func(r *RetroReport) { r.Findings[1].Why = "" },
+		"a home that is no fix":     func(r *RetroReport) { r.Findings[0].Home = "hope" },
+		"a check that is no check":  func(r *RetroReport) { r.Findings[0].Check = "vibes" },
+		"a one-word title":          func(r *RetroReport) { r.Findings[0].Title = "Take" },
+		"a title cut off":           func(r *RetroReport) { r.Findings[0].Title = "Count however many takes find it stuck, and" },
+		"a title ending in a comma": func(r *RetroReport) { r.Findings[0].Title = "Refuse a PR without Fixes," },
 	} {
 		if _, err := (Source{Proc: machine, Repo: repo, GitHub: never{t}, Clock: atNow()}).FileReport(30, judged(t, edit)); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+func TestATitleThatSaysNothingIsNamed(t *testing.T) {
+	t.Parallel()
+	_, err := (Source{Proc: machine, Repo: repo, GitHub: never{t}, Clock: atNow()}).FileReport(30, judged(t, func(r *RetroReport) { r.Findings[1].Title = "Take" }))
+	if err == nil || !strings.Contains(err.Error(), `finding 2 ("Take") has a title under five words`) {
+		t.Fatal(err)
 	}
 }
 
@@ -471,7 +482,7 @@ func TestAnAttendedRetroClosesToo(t *testing.T) {
 	}
 	c := commentsAt(t, gh, 30)
 	report := "body=" + c[len(c)-1].Body
-	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease** (removal; for a person: it trades one metric against another)", "- the landing answers", reportBlock} {
+	for _, part := range []string{"body=" + reportMark, "### landing (1)", "**Drop the lease on claimed issues** (removal; for a person: it trades one metric against another)", "- the landing answers", reportBlock} {
 		if !strings.Contains(report, part) {
 			t.Errorf("the report lacks %q:\n%s", part, report)
 		}

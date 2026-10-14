@@ -375,8 +375,9 @@ func ParseReport(text string) (r RetroReport, facts string, err error) {
 }
 
 // judged refuses a report whose judgment is not complete: every finding
-// needs a title, a class the classes name, a body and a home, and a reason
-// where it is controversial; every class a fix; and something went well.
+// needs a title that reads as a whole (cutShort), a class the classes name, a
+// body and a home, and a reason where it is controversial; every class a
+// fix; and something went well.
 func (r RetroReport) judged() error {
 	var why []string
 	classes := map[string]bool{}
@@ -388,9 +389,12 @@ func (r RetroReport) judged() error {
 	}
 	for k, f := range r.Findings {
 		name := fmt.Sprintf("finding %d (%q)", k+1, f.Title)
+		short := cutShort(f.Title)
 		switch {
 		case strings.TrimSpace(f.Title) == "" || strings.TrimSpace(f.Body) == "":
 			why = append(why, name+" needs a title and a body")
+		case short != "":
+			why = append(why, name+" has a title "+short)
 		case !classes[f.Class]:
 			why = append(why, fmt.Sprintf("%s names class %q, which classes does not", name, f.Class))
 		case !contains(homes, f.Home):
@@ -411,6 +415,30 @@ func (r RetroReport) judged() error {
 	}
 	return fmt.Errorf("the report's judgment is not complete, so nothing was written: %s", strings.Join(why, "; "))
 }
+
+// cutShort says what keeps a finding's title from reading as an issue title,
+// "" where nothing does: one under five words says nothing of its fix
+// ("Take"), and one ending in a comma or a conjunction was cut off mid
+// sentence.
+func cutShort(title string) string {
+	words := strings.Fields(title)
+	if len(words) == 0 {
+		return ""
+	}
+	last := strings.ToLower(strings.TrimRight(words[len(words)-1], ".;:"))
+	switch {
+	case len(words) < 5:
+		return "under five words: name the fix"
+	case strings.HasSuffix(last, ","):
+		return "ending in a comma: finish the sentence"
+	case contains(conjunctions, last):
+		return fmt.Sprintf("ending in the conjunction %q: finish the sentence", last)
+	}
+	return ""
+}
+
+// conjunctions are the words a whole title does not end on.
+var conjunctions = []string{"and", "or", "but", "nor", "so", "yet", "because", "while", "when", "where", "if", "unless", "until", "since", "though", "although", "that", "whether", "than", "as"}
 
 func contains(list []string, s string) bool {
 	for _, x := range list {

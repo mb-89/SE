@@ -39,8 +39,9 @@ created. A box takes it from there.
 3. Judge, and write it into the draft's block (the YAML under
    `<!-- se:retro-yaml -->`); leave the facts as they are.
    - `findings`: what went wrong, blamelessly: the rule, tool or prompt that
-     produced it, not who. Each with a `title` (the fix, as an issue title), a
-     `class`, a `body` (what happened, with issue and PR numbers, and the fix),
+     produced it, not who. Each with a `title` (the fix, as an issue title:
+     five words or more, a whole sentence), a `class`, a `body` (what
+     happened, with issue and PR numbers, and the fix),
      a `home` (`check`, `refusal`, `gate`, `field`, `command`, `guidance` or `removal`:
      the cheapest durable one, guidance last), and `controversial` with its
      `why` where the spec's rule calls it controversial. Name the rule
