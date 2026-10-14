@@ -46,7 +46,9 @@ What earlier versions taught, and how this design answers it:
   means no second one is started, under a race too: after starting one,
   `--take` reads the open `se-retro` issues again, and where a lower one is
   open, closes its own as a duplicate of it, with a comment naming it, takes
-  nothing from the cadence and goes on to the normal take. `--take N` names its issue and skips the
+  nothing from the cadence and goes on to the normal take. A retro closed as
+  a duplicate never ran: it opens no window and the overhaul does not count
+  it. `--take N` names its issue and skips the
   cadence. The plain `se issue pull` only reports the count, and that a retro
   is due.
 - **The box** takes a retro like any issue (`se issue pull --take` says it is
@@ -135,7 +137,7 @@ list:
 - `ci`: every merged PR had green CI (the last run of each check on its head); checked from the first commit.
 - `outside-pr`: no commit reached main outside a PR (every commit on main is some merged PR's merge commit); checked from the first commit.
 - `mark`: every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body; checked on what was created after PR #91 brought it.
-- `answers`: every landed issue (a leaf closed as completed, not a retro) has landing answers; checked on what closed after PR #74 brought it.
+- `answers`: every landed issue (a leaf closed as completed, not a retro, an overhaul or a person's decision) has landing answers; checked on what closed after PR #74 brought it.
 <!-- /se:manifest -->
 
 ## The commands

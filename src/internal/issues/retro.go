@@ -42,14 +42,15 @@ func (s Source) lastRetro(n int) (last past, ok bool, all []past, err error) {
 }
 
 // lastClosed is the closed issue labelled label that closed last, apart from
-// n, and all of them, oldest first; ok is false where none has closed.
+// n and those closed as duplicates, which never ran, and all of them, oldest
+// first; ok is false where none has closed.
 func (s Source) lastClosed(label string, n int) (last past, ok bool, all []past, err error) {
 	list, err := api[past](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=closed&per_page=100", s.Repo, label), true)
 	if err != nil {
 		return past{}, false, nil, err
 	}
 	for _, r := range list {
-		if r.PullRequest != nil || r.Number == n {
+		if r.PullRequest != nil || r.Number == n || !ran(r) {
 			continue
 		}
 		all = append(all, r)
@@ -163,7 +164,7 @@ var checkKinds = []RuleCheck{
 	{"outside-pr", "no commit reached main outside a PR (every commit on main is some merged PR's merge commit)", 0, Closing},
 	// The mark is written at creation, so an issue made before #91 is not held to it.
 	{"mark", "every `se` issue carries `se issue new`'s mark, `<!-- se:new -->`, which it writes at the end of every body", 91, Creation},
-	{"answers", "every landed issue (a leaf closed as completed, not a retro) has landing answers", 74, Closing},
+	{"answers", "every landed issue (a leaf closed as completed, not a retro, an overhaul or a person's decision) has landing answers", 74, Closing},
 }
 
 // RuleChecks are the rule checks, in the order the report lists them.
@@ -466,7 +467,9 @@ func (s Source) row(x past, fixedBy map[int]merged) (Row, []Broken, error) {
 		}
 	}
 	parent := x.SubIssues != nil && x.SubIssues.Total > 0
-	work := x.StateReason == "completed" && !parent && !x.labelled(RetroLabel)
+	// A retro, an overhaul or a person's decision lands no branch, so it has
+	// no landing answers by design.
+	work := x.StateReason == "completed" && !parent && !x.labelled(RetroLabel) && !x.labelled(OverhaulLabel) && !x.labelled(PersonLabel)
 	if landed != nil {
 		r.Answers = landed.Answers
 	} else if work {
