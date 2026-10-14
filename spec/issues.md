@@ -255,7 +255,7 @@ se issue close N --fixed-by SHA --answers FILE [--json] [--repo OWNER/NAME]
 se issue edit N [--title T] [--body B | --body-file PATH] [--json] [--repo OWNER/NAME]
 se issue keep [--for D] [--json] [--repo OWNER/NAME]
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
-se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
+se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N | --manifest] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--not-blocked N,M] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
@@ -434,7 +434,14 @@ naming an issue that does not exist, or a pull request, creates nothing; so
 does a `--parent` that does not exist. So does a title that an open `se`
 issue under the same `--parent` (or at the top, without one) has already,
 spaces trimmed: the error names that issue, so a tree is not created twice;
-`--allow-duplicate` creates it anyway. The
+`--allow-duplicate` creates it anyway. So does a body that names (`#N`) an
+open `se` issue, whose work is not on main yet, that neither `--blocked-by`
+nor `--not-blocked N,M` names: the error names both, `--blocked-by N` to make
+the take hold the new issue until N merges, `--not-blocked N` to say the
+mention is only a reference. An issue built on unmerged work so waits for it
+instead of being worked on a branch that lacks it, or merging that branch in;
+its `--parent` and
+the issues `--blocks` names need neither. The
 body comes from `--body` or from `--body-file`, one of them. `--review` labels
 it `se-review` as well (see [Reviews](#reviews)), and `--final` labels it
 `se-final`, its last attempt before a person (see
