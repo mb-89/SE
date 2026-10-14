@@ -179,13 +179,17 @@ func specManifest(m manifestCall) (string, error) {
 }
 
 // checksManifest lists the retro's rule checks, each with the PR it is
-// checked from.
+// checked from and whether it holds closing or creation against it.
 func checksManifest(manifestCall) (string, error) {
 	var lines []string
 	for _, k := range issues.RuleChecks() {
 		from := "from the first commit"
 		if k.Since > 0 {
-			from = fmt.Sprintf("on what closed after PR #%d brought it", k.Since)
+			when := "closed"
+			if k.Bound == issues.Creation {
+				when = "was created"
+			}
+			from = fmt.Sprintf("on what %s after PR #%d brought it", when, k.Since)
 		}
 		lines = append(lines, fmt.Sprintf("- `%s`: %s; checked %s.", k.Kind, k.Rule, from))
 	}
