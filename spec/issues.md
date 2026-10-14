@@ -311,7 +311,9 @@ the only place they are written; `se issue land` and the retro both read it.
 - The facts: when the branch was created (the claim, from GitHub's activity
   record) and the minutes from it to landing; the branch's commits, merges
   excluded; its takeovers, from their markers; and its merges of main, all
-  counted against `origin/main`.
+  counted against `origin/main`; and the GitHub requests the `se` commands
+  run in the checkout made, from its ledger, this land's so far included
+  ([io.md](io.md#living-within-githubs-rate-limits)).
 - Landing again (after a CI fix, say) updates that comment rather than
   adding a second.
 - The comment is where the answers outlive the box that wrote them: its
