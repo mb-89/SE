@@ -149,6 +149,7 @@ It marks a function as a command with:
 | help | what the command's help says beyond the usage |
 | group | the heading it stands under in the help listing |
 | offered | in a session as `/se <name>`, and whether as a `/se ui` button |
+| installed | answered by the installed `se` even when the session works in an SE checkout, whose own `se` answers every other `/se` word: `on`, `restart`, `update` |
 
 The command runs like any other run: it reads a snapshot of the module's
 inputs plus its arguments, and answers a reply, a commit of the module's own
