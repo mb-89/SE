@@ -754,11 +754,15 @@ func Claim(dir string, n int) (claimed bool, err error) {
 	return true, nil
 }
 
-// stake is Claim without the checkout: it pushes the branch and fetches it as
+// stake is Claim without the checkout: it readies the pinned linters the push
+// hook needs, pushes the branch and fetches it as
 // origin/issue-<n>.
 func stake(dir string, n int) (claimed bool, err error) {
 	branch := Branch(n)
 	ref := "refs/heads/" + branch
+	if err := ReadyTools(dir); err != nil {
+		return false, err
+	}
 	if _, err := git(dir, "fetch", "-q", "origin", "main"); err != nil {
 		return false, err
 	}
