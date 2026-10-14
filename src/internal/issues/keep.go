@@ -7,31 +7,17 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/internal/battery"
-	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 )
 
 // The owner's rule, 2026-10-14: a box stays with its PR until it merges, it
 // pushes only what is up to date with main and checked, and CI trusts the
-// battery the box already ran. se issue land and se issue keep push through
-// ship, which posts BatteryContext on the commit it pushed; CI's check job
-// asks Trusted for it (se fleet trust) and runs the battery only where it is
-// missing.
-
-// BatteryContext is the commit status a box posts on the commit it pushed,
-// naming the tree the battery passed there.
-const BatteryContext = "se/battery"
-
-// BatteryDescription is the status's description for tree: CI trusts the
-// status only for the tree it names.
-func BatteryDescription(tree string) string { return "the battery passed tree " + tree }
-
-// trustAsks is how often Trusted asks for the status before it takes none as
-// none: CI can start on a push before the box has posted it.
-const trustAsks = 3
-
-// trustPause is the wait between those asks.
-const trustPause = 5 * time.Second
+// battery the box already ran. tests/check.sh writes the battery's stamp
+// (battery.Stamp, the issues instance's config/stamp) naming the tree it
+// passed; se issue land and se issue keep push through ship, which commits
+// it with the work; CI's check job asks battery.Trusted (se fleet trust)
+// and runs the battery only where the stamp does not name the tree it
+// checked out.
 
 // keepPause is how long se issue keep waits between its looks at the PR.
 const keepPause = time.Minute
@@ -45,30 +31,18 @@ func (e behindMain) Error() string {
 
 // ship brings the branch checked out in dir to origin, checked, as se issue
 // land and se issue keep do: it merges origin's copy of the branch and then
-// origin/main in, runs check, refuses a tree the battery did not pass and a
-// branch main has moved past since, runs before (where set), pushes, and
-// posts BatteryContext on the pushed commit, naming its tree. before writes
-// what must survive a stop after it: se issue land's landing answers.
+// origin/main in, runs check, commits the battery's stamp, refuses a tree
+// the stamp does not name and a branch main has moved past since, runs
+// before (where set), and pushes. before writes what must survive a stop
+// after it: se issue land's landing answers.
 func (s Source) ship(dir, branch string, check func(dir string) error, before func() error) error {
 	if err := s.takeIn(dir, branch); err != nil {
 		return err
 	}
-	return s.push(dir, branch, check, before)
-}
-
-// push is ship after takeIn: it runs check, refuses a tree the battery did
-// not pass and a branch main has moved past since, runs before (where set),
-// pushes, and posts BatteryContext on the pushed commit.
-func (s Source) push(dir, branch string, check func(dir string) error, before func() error) error {
 	if err := check(dir); err != nil {
 		return fmt.Errorf("the check failed, so nothing was pushed: %w", err)
 	}
-	tree, err := s.checked(dir, branch)
-	if err != nil {
-		return err
-	}
-	sha, err := s.git(dir, "rev-parse", "HEAD")
-	if err != nil {
+	if err := s.checked(dir, branch); err != nil {
 		return err
 	}
 	if before != nil {
@@ -76,62 +50,49 @@ func (s Source) push(dir, branch string, check func(dir string) error, before fu
 			return err
 		}
 	}
-	if _, err := s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch); err != nil {
+	_, err := s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch)
+	return err
+}
+
+// checked commits the battery's stamp in dir and refuses the tree checked
+// out there unless it may be pushed: the stamp names it (the battery passed
+// it), and origin/main, fetched again, is in it, so the push is one main's
+// ruleset can merge as it stands.
+func (s Source) checked(dir, branch string) error {
+	if err := s.commitStamp(dir); err != nil {
 		return err
 	}
-	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/statuses/%s", s.Repo, sha),
-		github.F("state", "success"), github.F("context", BatteryContext), github.F("description", BatteryDescription(tree))); err != nil {
-		err = fmt.Errorf("pushed %s, but posting its %s status failed, so CI runs the battery again: %w", branch, BatteryContext, err)
-		if github.Status(err) == 403 {
-			return statusRefused{err}
-		}
+	if _, err := battery.Trusted(s.Proc, dir, "HEAD", s.config().Stamp); err != nil {
+		return fmt.Errorf("the battery has not passed %s's tree, so nothing was pushed: sh ./tests/check.sh writes its stamp, from a clean worktree: %w", branch, err)
+	}
+	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
 		return err
+	}
+	if behind, err := s.behind(dir, "HEAD"); err != nil {
+		return err
+	} else if behind {
+		return behindMain{branch}
 	}
 	return nil
 }
 
-// statusRefused is push's answer where the push went through and only the
-// battery's status was refused (a cloud box's proxy refuses it): CI runs the
-// battery for the commit itself, so a land or a keep goes on, saying so.
-type statusRefused struct{ error }
-
-func (e statusRefused) Unwrap() error { return e.error }
-
-// refused answers err's message where it is only a refused status, so the
-// caller goes on with it as a warning; any other err is passed back.
-func refused(err error) (warning string, _ error) {
-	var r statusRefused
-	if errors.As(err, &r) {
-		return r.Error(), nil
+// commitStamp commits the battery's stamp in dir where it changed, alone, so
+// it goes with the work; a stamp that did not change commits nothing.
+func (s Source) commitStamp(dir string) error {
+	stamp := s.config().Stamp
+	changed, err := s.git(dir, "status", "--porcelain", "--", stamp)
+	if err != nil || changed == "" {
+		return err
 	}
-	return "", err
+	if _, err := s.git(dir, "add", "-A", "--", stamp); err != nil {
+		return err
+	}
+	_, err = s.git(dir, "commit", "-q", "-m", stampCommit, "--", stamp)
+	return err
 }
 
-// checked answers the tree checked out in dir where it may be pushed: the
-// battery passed it (battery.TreeFile), and origin/main, fetched again, is
-// in it, so the push is one main's ruleset can merge as it stands.
-func (s Source) checked(dir, branch string) (string, error) {
-	tree, err := s.git(dir, "rev-parse", "HEAD^{tree}")
-	if err != nil {
-		return "", err
-	}
-	passed, ok, err := battery.Passed(s.Disk, dir)
-	if err != nil {
-		return "", err
-	}
-	if !ok || passed != tree {
-		return "", fmt.Errorf("the battery has not passed %s's tree %s, so nothing was pushed: sh ./tests/check.sh records the tree it passed, from a clean worktree", branch, tree)
-	}
-	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
-		return "", err
-	}
-	if behind, err := s.behind(dir, "HEAD"); err != nil {
-		return "", err
-	} else if behind {
-		return "", behindMain{branch}
-	}
-	return tree, nil
-}
+// stampCommit is the message of the commit of the battery's stamp alone.
+const stampCommit = "The battery's stamp: the tree it passed"
 
 // behind says whether origin/main, as dir last fetched it, has a commit ref lacks.
 func (s Source) behind(dir, ref string) (bool, error) {
@@ -140,59 +101,6 @@ func (s Source) behind(dir, ref string) (bool, error) {
 		return true, nil
 	}
 	return false, err
-}
-
-// commitStatus is the part of GitHub's commit status Trusted reads.
-type commitStatus struct {
-	State       string `json:"state"`
-	Context     string `json:"context"`
-	Description string `json:"description"`
-	Creator     struct {
-		Login string `json:"login"`
-	} `json:"creator"`
-}
-
-// Trusted says why CI may trust the battery a box ran on commit sha, whose
-// checkout holds tree: the commit's latest BatteryContext status is a
-// success naming tree, posted by an account that writes to the repository.
-// Where it may not, the error says why, and CI runs the battery itself. It is
-// trust in one's own boxes, not a proof.
-func (s Source) Trusted(sha, tree string) (string, error) {
-	var st *commitStatus
-	for k := 0; k < trustAsks && st == nil; k++ {
-		if k > 0 {
-			s.sleep(trustPause, fmt.Sprintf("the %s status on %s (ask %d of %d)", BatteryContext, sha, k+1, trustAsks))
-		}
-		// GitHub lists a commit's statuses newest first.
-		all, err := api[commitStatus](s, fmt.Sprintf("repos/%s/commits/%s/statuses?per_page=100", s.Repo, sha), true)
-		if err != nil {
-			return "", err
-		}
-		for i := range all {
-			if all[i].Context == BatteryContext {
-				st = &all[i]
-				break
-			}
-		}
-	}
-	switch {
-	case st == nil:
-		return "", fmt.Errorf("%s carries no %s status: no box's battery passed it", sha, BatteryContext)
-	case st.State != "success":
-		return "", fmt.Errorf("%s's %s status is %s, not success", sha, BatteryContext, st.State)
-	case st.Description != BatteryDescription(tree):
-		return "", fmt.Errorf("%s's %s status says %q, and its checkout holds tree %s", sha, BatteryContext, st.Description, tree)
-	}
-	perm, err := api[struct {
-		Permission string `json:"permission"`
-	}](s, fmt.Sprintf("repos/%s/collaborators/%s/permission", s.Repo, st.Creator.Login), false)
-	if err != nil {
-		return "", fmt.Errorf("reading what %s, who posted %s's %s status, may do: %w", st.Creator.Login, sha, BatteryContext, err)
-	}
-	if p := perm[0].Permission; p != "admin" && p != "write" {
-		return "", fmt.Errorf("%s, who posted %s's %s status, has %s access to %s, not write", st.Creator.Login, sha, BatteryContext, p, s.Repo)
-	}
-	return fmt.Sprintf("%s passed the battery on tree %s, posted by %s, who writes to %s", sha, tree, st.Creator.Login, s.Repo), nil
 }
 
 // keptPull is the part of GitHub's pull request object Keep reads.
@@ -296,11 +204,13 @@ func (s Source) keepUp(dir, branch string, check func(dir string) error) error {
 	if !behind {
 		return errUpToDate
 	}
+	if err := s.commitStamp(dir); err != nil {
+		return err
+	}
 	if dirty, err := s.git(dir, "status", "--porcelain"); err != nil {
 		return err
 	} else if dirty != "" {
 		return fmt.Errorf("%s has changes not committed, so nothing was merged or pushed:\n%s", dir, dirty)
 	}
-	_, err = refused(s.ship(dir, branch, check, nil))
-	return err
+	return s.ship(dir, branch, check, nil)
 }

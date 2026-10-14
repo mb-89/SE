@@ -1,1 +1,4 @@
 * text=auto eol=lf
+# The battery's stamp (src/internal/battery, Stamp): two branches that both
+# changed it merge into a stamp that names no hash, never a conflict.
+tests/battery.stamp merge=union

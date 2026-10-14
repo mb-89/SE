@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/mb-89/SE/src/index"
+	"github.com/mb-89/SE/src/internal/battery"
 )
 
 // Instance is the wiring's instance of Module, whose config the issue work reads.
@@ -19,6 +20,7 @@ var Module = index.Declare("issues", "The se issue work: the queue, its takes an
 	index.Config("lease", Lease, "How long a claimed leaf may go without a push to its branch before it is stuck; it is under the routine's 4-hour schedule."),
 	index.Config("max-filed", MaxFiled, "How many non-blocking findings one review files as issues; the rest are counted, not filed."),
 	index.Config("manifest-target", ManifestTarget, "issues.manifest/config/target: how long one manifest's leaves together should take, and how long a misc manifest takes new issues from its creation."),
+	index.Config("stamp", battery.Stamp, "The battery's stamp: the file, in the checkout, that tests/check.sh writes once it passed and se issue land and se issue keep commit with the work, holding the hash of the tree it passed with the stamp left out; CI skips the battery where it names the tree CI checked out (se fleet trust)."),
 	index.Config("paused", false, "fleet.box/config/paused: set on main, every box ends before its next pull, and se issue pull --take takes nothing."),
 )
 
@@ -32,11 +34,13 @@ type Settings struct {
 	// Paused stops the fleet's takes.
 	ManifestTarget time.Duration
 	Paused         bool
+	// Stamp is the path of the battery's stamp in a checkout.
+	Stamp string
 }
 
 // Builtin is Module's config as its built-in values give it.
 func Builtin() Settings {
-	return Settings{RetroCadence: RetroCadence, OverhaulCadence: OverhaulCadence, MaxFiled: MaxFiled, Lease: Lease, ManifestTarget: ManifestTarget}
+	return Settings{RetroCadence: RetroCadence, OverhaulCadence: OverhaulCadence, MaxFiled: MaxFiled, Lease: Lease, ManifestTarget: ManifestTarget, Stamp: battery.Stamp}
 }
 
 // Configured answers the settings of Instance from the wiring se carries.
@@ -74,6 +78,9 @@ func From(w index.Wiring) (Settings, error) {
 		}
 	}
 	if err := read(ix, "paused", &s.Paused); err != nil {
+		return Settings{}, err
+	}
+	if err := read(ix, "stamp", &s.Stamp); err != nil {
 		return Settings{}, err
 	}
 	return s, nil

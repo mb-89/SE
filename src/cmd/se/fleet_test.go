@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
@@ -176,25 +177,60 @@ func TestRulesOnBuildsTheMergesSeAndAnswersItsRuleAndTestFindingsWithoutTimings(
 	}
 }
 
-func TestFleetTrustPassesOnlyAHeadCarryingTheBatterysStatusForItsTree(t *testing.T) {
-	t.Parallel()
-	const sha, tree = "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"
-	gh := hubAt(t, map[string]string{})
-	trust := func() (int, string, string) {
-		return se(t, "fleet", "trust", "--repo", "o/r", "--sha", sha, "--tree", tree)
+// stampedHead is a fake git's checkout whose HEAD holds the tree entries
+// and, where stamp is set, the battery's stamp saying it.
+type stampedHead struct {
+	entries []string
+	stamp   string
+}
+
+func (h *stampedHead) git(c proc.Cmd) int {
+	switch strings.Join(c.Args, " ") {
+	case "ls-tree -r -z --full-tree HEAD":
+		for _, e := range h.entries {
+			_, _ = fmt.Fprint(c.Stdout, e+"\x00")
+		}
+		if h.stamp != "" {
+			_, _ = fmt.Fprint(c.Stdout, "100644 blob 5555555555555555555555555555555555555555\t"+battery.Stamp+"\x00")
+		}
+	case "ls-tree --name-only --full-tree HEAD -- " + battery.Stamp:
+		if h.stamp != "" {
+			fmt.Fprintln(c.Stdout, battery.Stamp)
+		}
+	case "show HEAD:" + battery.Stamp:
+		fmt.Fprintln(c.Stdout, h.stamp)
+	default:
+		fmt.Fprintf(c.Stderr, "fatal: %s\n", c.Args)
+		return 128
 	}
+	return 0
+}
+
+// CI skips the battery where the stamp names the tree it checked out, and
+// runs it where it does not: no stamp, or main moved since.
+func TestFleetTrustSkipsTheBatteryOnlyWhereTheStampNamesTheTree(t *testing.T) {
+	t.Parallel()
+	head := &stampedHead{entries: []string{"100644 blob 1111111111111111111111111111111111111111\tgo.mod"}}
+	m := proc.NewFake()
+	m.Install("git", head.git)
+	worldOf(t).Proc = m
+	trust := func() (int, string, string) { return se(t, "fleet", "trust") }
 	// A push without SE: CI runs the battery.
-	if code, out, errs := trust(); code == 0 || out != "" || !strings.Contains(errs, "not trusted, so CI runs the battery") {
+	if code, out, errs := trust(); code == 0 || out != "" || !strings.Contains(errs, "not trusted, so CI runs the battery") || !strings.Contains(errs, "holds no stamp") {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	// A box's push: CI passes without it.
-	if _, err := gh.Send("POST", "repos/o/r/statuses/"+sha, github.F("state", "success"), github.F("context", issues.BatteryContext), github.F("description", issues.BatteryDescription(tree))); err != nil {
+	// A box's push: the stamp it committed names the tree, and CI skips the battery.
+	hash, err := battery.Hash(m, "/", "HEAD", battery.Stamp)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if code, out, errs := trust(); code != 0 || !strings.HasPrefix(out, "trusted: "+sha+" passed the battery on tree "+tree) {
+	head.stamp = hash
+	if code, out, errs := trust(); code != 0 || !strings.HasPrefix(out, "trusted: the battery passed tree "+hash) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	if code, _, errs := se(t, "fleet", "trust", "--repo", "o/r", "--sha", sha); code == 0 || !strings.Contains(errs, "--tree TREE") {
+	// Main moved: the merge CI checked out is another tree, and the battery runs.
+	head.entries = append(head.entries, "100644 blob 2222222222222222222222222222222222222222\tother")
+	if code, _, errs := trust(); code == 0 || !strings.Contains(errs, "changed since the battery passed") {
 		t.Fatalf("exit %d, %q", code, errs)
 	}
 }

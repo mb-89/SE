@@ -17,6 +17,7 @@ import (
 	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/clock"
+	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
 	"github.com/mb-89/SE/src/internal/io/proc"
@@ -368,12 +369,14 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	answers := filepath.Join(root, "answers.yaml")
 	put(t, d, answers, "done: one\ntimeline: two\n")
 	checked := ""
-	// The check records the tree it passed, as tests/check.sh does.
+	// The check writes the stamp naming the tree it passed, as
+	// tests/check.sh does, into the checkout on the real disk, where git
+	// commits it.
 	worldOf(t).Check = func(procs proc.Procs, dir string) error {
 		checked = dir
-		tree, err := battery.Tree(procs, dir)
+		tree, err := battery.Tree(procs, dir, battery.Stamp)
 		if err == nil {
-			_, err = battery.Pass(d, procs, dir, tree)
+			_, err = battery.Pass(disk.Real(), procs, dir, battery.Stamp, tree)
 		}
 		return err
 	}

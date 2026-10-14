@@ -28,9 +28,6 @@ type Landing struct {
 	// Closed is true where the land closed the issue itself: a leaf landed
 	// into its manifest, or a manifest with nothing left to land.
 	Closed bool `json:"closed,omitempty"`
-	// Warning is what went wrong without stopping the land: the battery's
-	// status refused on the pushed commit, which CI then checks itself.
-	Warning string `json:"warning,omitempty"`
 }
 
 // pull is the part of GitHub's pull request object land reads.
@@ -62,11 +59,11 @@ func (s Source) issued(dir string) (int, error) {
 // manifest whose leaves are all closed or a retro, lands to main: answers must
 // answer every question in qs, and check must pass on a clean tree of an
 // issue with no open sub-issues, after origin's branch and main are merged
-// in, so the check runs on what lands; the battery must have recorded that
-// tree, and main must not have moved past it since (ship). Then the answers
-// are posted on the issue, before anything is pushed, so a land stopped later
-// still leaves them; the branch is pushed with the battery's status on its
-// head, its PR against main opened (or, where it is open
+// in, so the check runs on what lands; the battery's stamp, committed with
+// the work, must name that tree, and main must not have moved past it since
+// (ship). Then the answers are posted on the issue, before anything is
+// pushed, so a land stopped later still leaves them; the branch is pushed,
+// its PR against main opened (or, where it is open
 // already, found) with the battery's profile in its body, and auto-merge
 // turned on with squash. Run again after a
 // fix, it pushes, updates the answers and reports the same PR. Where session
@@ -78,6 +75,10 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 		return Landing{}, err
 	}
 	if err := answered(qs, answers); err != nil {
+		return Landing{}, err
+	}
+	// A stamp the battery wrote since the last commit goes with the work.
+	if err := s.commitStamp(dir); err != nil {
 		return Landing{}, err
 	}
 	if dirty, err := s.git(dir, "status", "--porcelain"); err != nil {
@@ -114,13 +115,12 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	}
 	// The answers go on the issue before the push, so a land stopped after
 	// it (a PR it could not open, say) leaves its record.
-	warning, err := refused(s.push(dir, branch, check, func() error {
+	if err := s.ship(dir, branch, check, func() error {
 		if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
 			return err
 		}
 		return s.postLanding(dir, n, qs, answers)
-	}))
-	if err != nil {
+	}); err != nil {
 		return Landing{}, err
 	}
 	body := fmt.Sprintf("Fixes #%d", n)
@@ -131,7 +131,7 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	if profiled {
 		body += "\n\n" + profile.Markdown()
 	}
-	l := Landing{Issue: n, Warning: warning}
+	l := Landing{Issue: n}
 	pr, open, err := s.openPR(n)
 	if err != nil {
 		return Landing{}, err

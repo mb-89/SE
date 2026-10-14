@@ -39,8 +39,8 @@ command in `<path>`.
    `<se> issue keep --workspace <path>` (in the foreground: it answers within
    its `--for`, 8 minutes), and run it again while it says the PR is still
    open. Whenever main moves past your branch, it merges `origin/main` in,
-   runs the battery, pushes and posts the battery's status, so CI passes in
-   seconds and auto-merge merges it. You are done with it once it says the
+   runs the battery, commits its stamp with the work and pushes, so CI
+   passes in seconds and auto-merge merges it. You are done with it once it says the
    PR merged, or that another box took the issue over.
 4. On red CI, a review the box sends you, or an error from `issue keep` (a
    merge with main that conflicts, a failing check), fix it on the same

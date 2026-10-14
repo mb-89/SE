@@ -29,9 +29,11 @@ now() {
 battery=.se/.runtime/battery
 rm -rf "$battery"
 mkdir -p "$battery"
-# The battery records the tree it passed, so se issue land pushes only that
-# tree: HEAD^{tree} of a clean worktree, read now and again once it passed
-# (src/internal/battery, TreeFile).
+# The battery writes the stamp naming the tree it passed, which se issue land
+# and se issue keep commit with the work and CI trusts (se fleet trust): the
+# hash of HEAD's tree with the stamp left out, of a clean worktree, read now
+# and again once it passed (src/internal/battery, Stamp; the issues
+# instance's config/stamp names its path).
 started=$(go -C src run ./cmd/battery tree "$PWD")
 # step runs one check and reports how long it took.
 step() {
