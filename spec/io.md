@@ -129,6 +129,12 @@ first, and outside `src/internal/io/` no test reads the clock through `time`
 or takes `clock.Real`. What still breaks it is named in
 `src/internal/rules/serial.txt`, which only shrinks as the allowlist below does.
 
+The plugin has its clock too, `$.clock`. The `plugin-clock` rule
+(`src/internal/rules/pluginclock.go`) refuses, in the plugin's hooks and their
+helpers under `src/plugin/`, a read of the wall clock past it: `Date.now` and
+a `new Date` with no argument. The plugin's tests, which drive the mock clock,
+are aside.
+
 What broke it while the modules landed was named in one allowlist,
 `src/internal/io/allowlist.txt`, one file and what it reaches per line. Each
 I/O module removed its own entries as it landed, and GitHub's, the last,

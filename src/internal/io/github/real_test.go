@@ -44,6 +44,9 @@ func TestTheRealGitHubSpeaksRest(t *testing.T) {
 		case strings.Contains(q, "missing"):
 			w.WriteHeader(404)
 			fmt.Fprint(w, `{"message":"Not Found"}`)
+		case strings.Contains(q, "login"):
+			w.WriteHeader(401)
+			fmt.Fprint(w, `{"message":"Bad credentials"}`)
 		case strings.Contains(q, "invalid"):
 			w.WriteHeader(422)
 			fmt.Fprint(w, `{"message":"Validation Failed","errors":[{"code":"custom","message":"already linked"}]}`)
@@ -97,6 +100,9 @@ func TestTheRealGitHubSpeaksRest(t *testing.T) {
 	if github.Status(err) != 422 || !strings.Contains(err.Error(), "Validation Failed: already linked") {
 		t.Fatalf("%v", err)
 	}
+	if _, err := gh.Get("repos/o/r/login"); github.Status(err) != 401 || !strings.Contains(err.Error(), "run gh auth login, then this command again") {
+		t.Fatalf("without a login: %v", err)
+	}
 	want := []string{
 		"token tok GET /repos/o/r/issues?per_page=2&page=1",
 		"token tok GET /repos/o/r/issues?per_page=2&page=2",
@@ -110,6 +116,7 @@ func TestTheRealGitHubSpeaksRest(t *testing.T) {
 		`token tok POST /graphql {"query":"clean","variables":{"id":"PR_1"}}`,
 		"token tok GET /repos/o/r/issues/missing",
 		`token tok POST /repos/o/r/issues/invalid {"body":"b"}`,
+		"token tok GET /repos/o/r/login",
 	}
 	if got := strings.Join(said, "\n"); got != strings.Join(want, "\n") {
 		t.Fatalf("the API was sent\n%s\nwant\n%s", got, strings.Join(want, "\n"))

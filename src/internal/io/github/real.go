@@ -54,6 +54,11 @@ func client() *http.Client {
 	}
 }
 
+// notSignedIn is what a command that needs GitHub says where GitHub refuses
+// its credentials: the install never asks for a login, so this is where a
+// person learns of it.
+const notSignedIn = "GitHub refused se's credentials: gh has no login; run gh auth login, then this command again"
+
 // ghToken is the token gh would send: its environment's first, else what gh
 // auth token says; "" where there is none.
 func ghToken() string {
@@ -221,6 +226,8 @@ func (r *rest) do(method, path string, body []byte) ([]byte, error) {
 	switch {
 	case resp.StatusCode == http.StatusNotModified && had.etag != "":
 		return had.body, nil
+	case resp.StatusCode == http.StatusUnauthorized:
+		return nil, &Error{Status: resp.StatusCode, Message: notSignedIn}
 	case resp.StatusCode/100 != 2:
 		return nil, &Error{Status: resp.StatusCode, Message: fmt.Sprintf("%s %s: %s", method, path, refusal(out))}
 	}
