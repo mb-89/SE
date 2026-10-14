@@ -57,7 +57,7 @@ command in `<path>`.
 
    An issue for a person (`--person`) is never a way to end, only a side
    issue, for access or a principle. The Stop hook refuses the box's stop
-   while the last issue it took is open with neither, and says which is
-   missing.
+   while any issue it took is open with neither, naming each and what it
+   misses.
 
 Answer only the PR number and link, or what you filed instead.

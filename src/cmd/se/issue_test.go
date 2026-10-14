@@ -402,7 +402,7 @@ func TestAClaimFiresTheRoutineOnceAndNothingElseDoes(t *testing.T) {
 		t.Fatalf("exit %d, %d fires, %q %q", code, fires(t), out, errs)
 	}
 	// The take is recorded for the Stop hook, which holds the box to closing #3.
-	if data, err := onFake(t).ReadFile(filepath.Join(ws, ".se", ".runtime", "box.json")); err != nil || string(data) != `{"issue":3}` {
+	if data, err := onFake(t).ReadFile(filepath.Join(ws, ".se", ".runtime", "box.json")); err != nil || string(data) != `{"issues":[3]}` {
 		t.Fatalf("%q %v", data, err)
 	}
 	// #3 is now claimed on origin, but the recorded refs do not say so: the
@@ -696,7 +696,10 @@ func TestATakeoverWritesBackTheLandingAnswersBesideItsWorktree(t *testing.T) {
 	}
 	comments, _ := json.Marshal([]map[string]any{{"id": 1, "body": posted}})
 	hubAt(t, map[string]string{"repos/o/r/issues/6/comments?per_page=100": string(comments)})
-	ws := filepath.Join(t.TempDir(), "SE")
+	ws := filepath.FromSlash("/boxes/SE")
+	if err := onFake(t).MkdirAll(ws); err != nil {
+		t.Fatal(err)
+	}
 	c := &Call{Workspace: ws, World: *worldOf(t)}
 	s := issues.Source{Repo: "o/r", GitHub: c.GitHub, Disk: c.Disk}
 	took := issues.Issue{Number: 6, Title: "six", URL: "u6", Takeover: &issues.Takeover{Count: 1, Stale: "nothing pushed for 3h"}}
