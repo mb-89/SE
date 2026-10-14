@@ -3,7 +3,10 @@
 // -json and keeps every test's duration, and `battery report <top>` once every
 // step has passed, which prints the profile against spec/budgets.yaml, writes
 // it for the CI summary and se issue land, and fails only on a hard budget's
-// overrun. top is the checkout, where the battery's files live.
+// overrun. `battery tree <top>` prints the tree of the clean worktree before
+// the first step, and `battery passed <top> <tree>` records it once the
+// report passed, where the worktree still holds it (src/internal/battery,
+// TreeFile). top is the checkout, where the battery's files live.
 package main
 
 import (
@@ -24,7 +27,7 @@ func main() {
 	// check.sh runs the battery in src/, where go.mod is, and names the
 	// checkout's top, where its files live.
 	if len(os.Args) < 3 {
-		fail(fmt.Errorf("usage: battery gotest <top> <packages> | battery report <top>"))
+		fail(fmt.Errorf("usage: battery gotest <top> <packages> | battery report <top> | battery tree <top> | battery passed <top> <tree>"))
 	}
 	top := os.Args[2]
 	switch os.Args[1] {
@@ -32,6 +35,18 @@ func main() {
 		fail(gotest(proc.Listed(proc.Real()), top, os.Args[3:]))
 	case "report":
 		fail(report(top))
+	case "tree":
+		tree, err := battery.Tree(proc.Listed(proc.Real()), top)
+		fail(err)
+		fmt.Println(tree)
+	case "passed":
+		started := ""
+		if len(os.Args) > 3 {
+			started = os.Args[3]
+		}
+		said, err := battery.Pass(machine, proc.Listed(proc.Real()), top, started)
+		fail(err)
+		fmt.Println("battery:", said)
 	default:
 		fail(fmt.Errorf("battery has no command %q", os.Args[1]))
 	}

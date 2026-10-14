@@ -163,7 +163,8 @@ person**, and leaves the agents' queue until the person has closed it.
   through their native links.
 - **A box that takes an issue closes it, always** (the owner's rule,
   2026-10-14). It ends in one of three ways and no other: a PR for what it
-  solved, auto-merge on (`se issue land`), with an issue (`se issue new`) for
+  solved, auto-merge on (`se issue land`) and kept until it merges
+  (`se issue keep`), with an issue (`se issue new`) for
   everything it could not solve; a supersede (`se issue supersede <n>`),
   where it cannot land a PR at all; or, where the issue's work reached main
   before the take, a close naming that commit
@@ -191,6 +192,7 @@ person**, and leaves the agents' queue until the person has closed it.
 ```
 se issue close N --fixed-by SHA --answers FILE [--json] [--repo OWNER/NAME]
 se issue edit N [--title T] [--body B | --body-file PATH] [--json] [--repo OWNER/NAME]
+se issue keep [--for D] [--json] [--repo OWNER/NAME]
 se issue land --answers FILE [--json] [--repo OWNER/NAME]
 se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--parent N] [--blocks N,M] [--review] [--final] [--person] [--allow-duplicate] [--skills NAME,NAME] [--json] [--repo OWNER/NAME]
 se issue pull [--in ROOT] [--take [N]] [--worktree] [--person] [--full] [--json] [--repo OWNER/NAME]
@@ -289,8 +291,12 @@ the leaf is worked on by a sub-agent inside the coordinator's box, under its cap
 without an answer to each landing question (see [Landing
 answers](#landing-answers)), refuses an
 issue with open sub-issues ("a parent holds no work") and a tree with
-uncommitted changes, runs `tests/check.sh` and goes on only if it passes,
-pushes the branch, records on the leaf who worked it (see
+uncommitted changes, merges origin's copy of the branch and `origin/main` in,
+runs `tests/check.sh` and goes on only if it passes, refuses a tree the
+battery did not record as passed and a branch main moved past meanwhile,
+pushes the branch, posts the commit status `se/battery` naming its tree on
+the pushed commit, which CI trusts (see
+[spec/coordination.md](coordination.md#up-to-date-with-main)), records on the leaf who worked it (see
 [Reviews](#reviews)), posts the landing answers on the issue, opens one PR against main titled after the issue with the
 body `Fixes #<n>`, and turns on auto-merge with squash; a PR with nothing left
 to wait for is squash-merged at once. It prints the PR's number and link (with
@@ -298,6 +304,13 @@ to wait for is squash-merged at once. It prints the PR's number and link (with
 is open already, it pushes and reports that PR, so running it again after a
 fix for red CI is safe, and updates the answers it posted before. A session
 has it as `/se issue land`.
+
+`se issue keep` keeps the checked-out branch's PR until it merges: whenever
+main moves past the branch, it merges `origin/main` in, checks, pushes and
+posts the status as `se issue land` does; it answers within `--for`, saying
+the PR merged, another box took the issue over, or that it is still open
+(with `--json`: `{"issue","pr","url","merged","taken_over","updated"}`). See
+[spec/coordination.md](coordination.md#up-to-date-with-main).
 
 ### Landing answers
 
@@ -394,12 +407,13 @@ dependents become ready as when a PR closes it.
 
 In a box (a cloud session no person attends, as the routine starts it), the
 plugin hands every Stop and SubagentStop to `se hook stop`, which refuses the
-stop while any issue the box took is open with neither an open PR from its
-branch, auto-merge on, nor a supersede, naming each and what it misses (a
-close by `se issue close --fixed-by` closes the issue, so it counts as
-closed). The box's issues are every one `se issue pull --take` took (a
-parent's box coordinates and closes nothing itself); a leaf's sub-agent is
-held to the leaf its prompt names. It
+stop while any issue the box took is open, naming each and what it misses:
+a PR from its branch, its auto-merge, or its merge, since a box keeps its PR
+until it merges (`se issue keep`). A merged PR, a supersede or a close by
+`se issue close --fixed-by` closes the issue; an issue another box took over
+(its last claim names another box) is that box's. The box's issues are every
+one `se issue pull --take` took (a parent's box coordinates and closes
+nothing itself); a leaf's sub-agent is held to the leaf its prompt names. It
 is enforcement, so it fails closed: only what GitHub shows lets the box end.
 Its escape hatches: a box waiting on background work passes; it refuses at
 most `refusals` times in a row ([spec/stop.yaml](stop.yaml)); a prompt from a
@@ -548,10 +562,12 @@ cost a fire of the routine (whose limit the fan-out ran into on 2026-10-14).
   the box's disk allowance and CPU limit it, and the battery takes about
   25s. `se` refuses a take that would pass it.
 - **When it pulls again:** when a sub-agent's PR is up with auto-merge on, or
-  its issue is superseded. A red CI or a review on a PR goes back to that PR's
-  sub-agent.
+  its issue is superseded. The sub-agent then keeps its PR until it merges
+  (`se issue keep`); it mostly waits, so it no longer counts against the
+  cap. A red CI or a review on a PR goes back to that PR's sub-agent.
 - **Its context** keeps only issue, worktree and PR numbers, so it can run
-  for days. It ends when nothing is ready and no sub-agent is running.
+  for days. It ends when nothing is ready and no sub-agent is running, none
+  keeping an open PR.
 - **Alive:** a box is alive while one of its claims is: a claimed leaf whose
   branch saw a push within the lease, the box named by its last
   `<!-- se:box -->` comment. Its sub-agent counts against the cap until the
