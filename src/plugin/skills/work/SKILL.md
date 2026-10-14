@@ -16,10 +16,10 @@ and fires the routine only when every box is full.
 Every step that can be an `se` command is one. `se` is `./src/plugin/bin/se`;
 build it first with `sh ./src/build.sh`.
 Call it exactly as `./src/plugin/bin/se issue …` (or `./src/plugin/bin/se fleet …`),
-one command per call, never through a variable: `.claude/settings.json` allows
-those forms to write GitHub issues without a permission prompt, and only
-those. `<se>` below is the absolute path of `./src/plugin/bin/se` in this
-checkout.
+one command per call, never through a variable: the forms
+[.claude/settings.json](../../../../.claude/settings.json) allows run without a
+permission prompt, and no others. `<se>` below is the absolute path of
+`./src/plugin/bin/se` in this checkout.
 
 1. `git fetch origin main && git checkout origin/main` (a box started by a PR
    event starts on that PR's head commit), then rebuild `se`. If
