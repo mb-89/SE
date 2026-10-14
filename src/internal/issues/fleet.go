@@ -113,7 +113,7 @@ type ref struct {
 // Kinds, lowest issue first within a kind. It writes nothing but what every
 // se issue command writes: parents whose sub-issues are all closed close.
 func (s Source) Check() ([]Finding, error) {
-	all, t, err := s.survey()
+	all, t, err := s.surveyLinks(true)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func (s Source) Check() ([]Finding, error) {
 // once its retry time has passed and the fleet still needs the box. fire is the fire itself; the
 // line says what happened, empty where no refused fan-out is kept.
 func (s Source) CheckFanOut(fire func() Shot) ([]Finding, string, error) {
-	all, t, err := s.survey()
+	all, t, err := s.surveyLinks(true)
 	if err != nil {
 		return nil, "", err
 	}

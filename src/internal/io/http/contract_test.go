@@ -25,6 +25,7 @@ type world struct {
 type daemon struct {
 	mu     sync.Mutex
 	events []sehttp.Event
+	stale  []string
 	ended  chan struct{}
 	once   sync.Once
 }
@@ -53,6 +54,17 @@ func (d *daemon) Value(name string) (sehttp.Value, error) {
 		return sehttp.Value{}, fmt.Errorf("%w: %s", sehttp.ErrUnknown, name)
 	}
 	return sehttp.Value{Value: len(d.kept()), Provided: true}, nil
+}
+
+// Stale keeps events/kept alone, and hears it went stale.
+func (d *daemon) Stale(name string) error {
+	if name != "events/kept" {
+		return fmt.Errorf("%w: %s", sehttp.ErrUnknown, name)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.stale = append(d.stale, name)
+	return nil
 }
 
 func (d *daemon) Shutdown() { d.once.Do(func() { close(d.ended) }) }
@@ -183,6 +195,24 @@ func contract(t *testing.T, fresh func(t *testing.T) world) {
 		}
 		if _, err := w.net.Value(addr, "tok", "no/such"); status(err) != sehttp.StatusNotFound || !strings.Contains(err.Error(), "no/such") {
 			t.Fatalf("no/such: %v", err)
+		}
+	})
+	t.Run("stale reaches what keeps the name, an unknown name is not found", func(t *testing.T) {
+		w := fresh(t)
+		d, addr := serve(t, w.net)
+		if err := w.net.Stale(addr, "nope", "events/kept"); status(err) != sehttp.StatusUnauthorized {
+			t.Fatalf("a wrong token: %v", err)
+		}
+		if err := w.net.Stale(addr, "tok", "events/kept"); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.net.Stale(addr, "tok", "no/such"); status(err) != sehttp.StatusNotFound || !strings.Contains(err.Error(), "no/such") {
+			t.Fatalf("no/such: %v", err)
+		}
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		if len(d.stale) != 1 || d.stale[0] != "events/kept" {
+			t.Fatalf("the daemon heard %v", d.stale)
 		}
 	})
 	t.Run("shutdown reaches the daemon", func(t *testing.T) {

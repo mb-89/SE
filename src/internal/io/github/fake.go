@@ -70,7 +70,12 @@ type repo struct {
 	comments  map[int][]obj
 	subs      map[int][]int
 	blockedBy map[int][]int
-	refs      map[string]obj
+	// linked is when each blocked-by link, blocked and blocker, was written;
+	// a seeded link has none.
+	linked map[[2]int]time.Time
+	// now is the fake's clock, which the dependency summary lags by.
+	now  func() time.Time
+	refs map[string]obj
 	// commits counts the commits written, each a new sha.
 	commits   int
 	pulls     map[int]obj
@@ -141,7 +146,7 @@ func (f *Fake) repo(name string) *repo {
 	if !ok {
 		r = &repo{
 			name: name, issues: map[int]obj{}, seen: map[int]bool{}, deleted: map[int]bool{}, comments: map[int][]obj{},
-			subs: map[int][]int{}, blockedBy: map[int][]int{}, refs: map[string]obj{}, pulls: map[int]obj{}, docs: map[string][]byte{},
+			subs: map[int][]int{}, blockedBy: map[int][]int{}, linked: map[[2]int]time.Time{}, now: f.clock.Now, refs: map[string]obj{}, pulls: map[int]obj{}, docs: map[string][]byte{},
 		}
 		// A repository has its default branch from the start, as GitHub's do.
 		r.refs[mainRef] = r.ref(mainRef, r.commit())
@@ -391,7 +396,42 @@ func (r *repo) issue(n int) (any, error) {
 		}
 		out["sub_issues_summary"] = obj{"total": len(subs), "completed": done, "percent_completed": pct}
 	}
+	out["issue_dependencies_summary"] = r.dependencies(n)
 	return out, nil
+}
+
+// SummaryLag is how long after a blocked-by link is written GitHub's
+// issue_dependencies_summary still leaves it out, as the real one can right
+// after the write. The links themselves never lag.
+const SummaryLag = time.Minute
+
+// dependencies is issue n's issue_dependencies_summary: its blockers and the
+// issues it blocks, all and the open ones, leaving out a link written less
+// than SummaryLag ago.
+func (r *repo) dependencies(n int) obj {
+	counted := func(blocked, blocker int) bool {
+		at, ok := r.linked[[2]int{blocked, blocker}]
+		return !ok || !r.now().Before(at.Add(SummaryLag))
+	}
+	open := func(m int) bool { st, _ := r.issues[m]["state"].(string); return st != "closed" }
+	var blockedBy, totalBlockedBy, blocking, totalBlocking int
+	for _, m := range r.blockedBy[n] {
+		if counted(n, m) {
+			totalBlockedBy++
+			if open(m) {
+				blockedBy++
+			}
+		}
+	}
+	for m, blockers := range r.blockedBy {
+		if contains(blockers, n) && counted(m, n) {
+			totalBlocking++
+			if open(m) {
+				blocking++
+			}
+		}
+	}
+	return obj{"blocked_by": blockedBy, "total_blocked_by": totalBlockedBy, "blocking": blocking, "total_blocking": totalBlocking}
 }
 
 // allComments is every comment on the repository's issues updated since
@@ -489,6 +529,18 @@ func (r *repo) listIssues(q url.Values) []any {
 			v, _ := r.issue(n)
 			out = append(out, v)
 		}
+	}
+	// sort=updated lists the issues updated last first, as GitHub's
+	// direction=desc does; any other order is the fake's own.
+	if q.Get("sort") == "updated" {
+		at := func(v any) string { s, _ := v.(obj)["updated_at"].(string); return s }
+		desc := q.Get("direction") != "asc"
+		sort.SliceStable(out, func(a, b int) bool {
+			if desc {
+				return at(out[a]) > at(out[b])
+			}
+			return at(out[a]) < at(out[b])
+		})
 	}
 	return out
 }
@@ -923,6 +975,9 @@ func (f *Fake) link(r *repo, n int, v map[string]any, key string, links map[int]
 	}
 	if !contains(links[n], other) {
 		links[n] = append(links[n], other)
+		if key == "issue_id" {
+			r.linked[[2]int{n, other}] = f.clock.Now()
+		}
 	}
 	r.issues[n]["updated_at"] = f.now()
 	return r.issue(n)

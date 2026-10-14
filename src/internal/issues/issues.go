@@ -4,11 +4,14 @@ package issues
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mb-89/SE/src/internal/io/clock"
@@ -86,6 +89,41 @@ type Source struct {
 	// Config is the issue work's config, issues/config/<key>, as Configured
 	// reads it; nil runs on the built-in values.
 	Config *Settings
+	// Settle is how long after its last update an issue's dependency summary
+	// is trusted, github/config/settle; zero is its built-in value, Settle.
+	Settle time.Duration
+	// Live, where set, is GitHub itself while GitHub answers from a snapshot
+	// (github.Replay): a take re-reads through it what its claim must be sure
+	// of, the issue's state and its open blockers.
+	Live github.GitHub
+}
+
+// Settle is the built-in value of github/config/settle: an issue unchanged
+// for this long has a dependency summary that no longer lags its links.
+const Settle = 5 * time.Minute
+
+func (s Source) settle() time.Duration {
+	if s.Settle > 0 {
+		return s.Settle
+	}
+	return Settle
+}
+
+// linked says whether survey reads the blocked-by links of issue i: GitHub's
+// summary counts an open blocker, or i changed too lately for its summary to
+// be trusted, or it says nothing of the open ones. A settled summary that
+// counts no open blocker stands for the links, however many closed ones it
+// counts, except where closed asks for those too (se fleet check, which
+// judges a blocker closed as not planned).
+func (s Source) linked(i issue, closed bool) bool {
+	d := i.Dependencies
+	switch {
+	case d == nil || d.BlockedBy == nil || s.now().Sub(i.Updated) < s.settle():
+		return true
+	case closed:
+		return d.TotalBlockedBy > 0
+	}
+	return *d.BlockedBy > 0
 }
 
 func (s Source) now() time.Time { return s.Clock.Now() }
@@ -108,9 +146,18 @@ type issue struct {
 	StateReason string `json:"state_reason"`
 	// ClosedAt is when a closed issue closed; zero while it is open.
 	ClosedAt time.Time `json:"closed_at"`
-	// Created is when it was opened.
+	// Created is when it was opened, Updated when it last changed: writing
+	// a link to it changes it.
 	Created time.Time `json:"created_at"`
-	URL     string    `json:"html_url"`
+	Updated time.Time `json:"updated_at"`
+	// Dependencies is GitHub's count of its blocked-by links, which can lag
+	// a link just written (see openBlockers); absent, it says nothing.
+	Dependencies *struct {
+		// BlockedBy counts the open blockers; absent, it says nothing.
+		BlockedBy      *int `json:"blocked_by"`
+		TotalBlockedBy int  `json:"total_blocked_by"`
+	} `json:"issue_dependencies_summary"`
+	URL string `json:"html_url"`
 	// RepositoryURL names the issue's repository, which a blocker may be outside.
 	RepositoryURL string           `json:"repository_url"`
 	PullRequest   *json.RawMessage `json:"pull_request"`
@@ -166,17 +213,81 @@ const PerPage = 100
 // repositories/{id} for some lists, which the box proxy refuses.
 func pages[T any](s Source, path string) ([]T, error) {
 	var all []T
+	err := eachPage(s, path, func(page []T) bool {
+		all = append(all, page...)
+		return true
+	})
+	return all, err
+}
+
+// eachPage reads a list path as pages does, handing got each page the moment
+// it arrives, so what the page needs is read while the next page is; got
+// answers false to stop before the next page.
+func eachPage[T any](s Source, path string, got func(page []T) bool) error {
+	size := perPage(path)
 	for k := 1; ; k++ {
 		page, err := api[[]T](s, fmt.Sprintf("%s&page=%d", path, k), false)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		all = append(all, page[0]...)
-		if len(page[0]) < PerPage {
-			return all, nil
+		if !got(page[0]) || len(page[0]) < size {
+			return nil
 		}
 	}
 }
+
+// pagesAtOnce reads a list path as eachPage does, but at pages at once: pages
+// 1 to at together, then the next at, while the last of them comes back
+// full. Each page is a request of its own, so the pages arrive in about the
+// time of one, and got has each, with its number, the moment it arrives, one
+// at a time; answering false stops before the next pages.
+func pagesAtOnce[T any](s Source, path string, at int, got func(k int, page []T) bool) error {
+	size := perPage(path)
+	var mu sync.Mutex
+	for first := 1; ; first += at {
+		last, more := 0, true
+		reads := make([]func() error, at)
+		for k := range at {
+			reads[k] = func() error {
+				page, err := api[[]T](s, fmt.Sprintf("%s&page=%d", path, first+k), false)
+				if err != nil {
+					return err
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				more = got(first+k, page[0]) && more
+				if k == at-1 {
+					last = len(page[0])
+				}
+				return nil
+			}
+		}
+		if err := parallel(reads); err != nil {
+			return err
+		}
+		if !more || last < size {
+			return nil
+		}
+	}
+}
+
+// perPage is the per_page a list path asks for, PerPage where it says none.
+func perPage(path string) int {
+	if u, err := url.Parse(path); err == nil {
+		if n, err := strconv.Atoi(u.Query().Get("per_page")); err == nil && n > 0 {
+			return n
+		}
+	}
+	return PerPage
+}
+
+// ListPage and ListPages are how the open fleet issues are read: ListPages
+// pages of ListPage issues at once, each page smaller than one of PerPage, so
+// each arrives sooner and its issues' reads start sooner.
+const (
+	ListPage  = 25
+	ListPages = 6
+)
 
 // Status is where one open fleet issue stands.
 type Status struct {
@@ -267,43 +378,53 @@ func (t tree) depth(n int) int {
 // load reads the open fleet issues with their sub-issues, then closes every
 // parent whose sub-issues are all closed, deepest first, so a parent its
 // closing completes closes too. A parent labelled se-review never closes here.
-// The reads more makes from the list run beside the sub-issues' reads.
-func (s Source) load(more func(t tree) []func() error) (tree, error) {
-	list, err := api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=100", s.Repo, Label), true)
+// The list is read several pages at once (pagesAtOnce), and each page starts
+// its issues' reads as it arrives, beside the other pages: the sub-issues of each parent, and what more starts on g for
+// each issue. load waits for every read on g, which may be nil.
+func (s Source) load(g *inflight, more func(i issue)) (tree, error) {
+	if g == nil {
+		g = newGroup()
+	}
+	t := tree{byNum: map[int]issue{}, subs: map[int][]issue{}, above: map[int]int{}, closed: map[int]bool{}}
+	subs := map[int]*[]issue{}
+	err := pagesAtOnce(s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=%d", s.Repo, Label, ListPage), ListPages, func(_ int, page []issue) bool {
+		for _, i := range page {
+			// An issue the list moves to another page while it is read
+			// comes twice; its reads start once.
+			if _, seen := t.byNum[i.Number]; seen || i.PullRequest != nil {
+				continue
+			}
+			n := i.Number
+			t.byNum[n] = i
+			if t.parent(n) {
+				list := &[]issue{}
+				subs[n] = list
+				g.Go(func() (err error) {
+					*list, err = api[issue](s, fmt.Sprintf("repos/%s/issues/%d/sub_issues?per_page=100", s.Repo, n), true)
+					return err
+				})
+			}
+			if more != nil {
+				more(i)
+			}
+		}
+		return true
+	})
+	if werr := g.Wait(); err == nil {
+		err = werr
+	}
 	if err != nil {
 		return tree{}, err
 	}
-	t := tree{byNum: map[int]issue{}, subs: map[int][]issue{}, above: map[int]int{}, closed: map[int]bool{}}
-	for _, i := range list {
-		if i.PullRequest == nil {
-			t.byNum[i.Number] = i
-		}
-	}
 	var parents []int
 	for _, n := range t.numbers() {
-		if t.parent(n) {
+		if list, ok := subs[n]; ok {
 			parents = append(parents, n)
-		}
-	}
-	subs := make([][]issue, len(parents))
-	var reads []func() error
-	for k, n := range parents {
-		reads = append(reads, func() (err error) {
-			subs[k], err = api[issue](s, fmt.Sprintf("repos/%s/issues/%d/sub_issues?per_page=100", s.Repo, n), true)
-			return err
-		})
-	}
-	if more != nil {
-		reads = append(reads, more(t)...)
-	}
-	if err := parallel(reads); err != nil {
-		return tree{}, err
-	}
-	for k, n := range parents {
-		t.subs[n] = subs[k]
-		for _, c := range subs[k] {
-			if _, ok := t.byNum[c.Number]; ok {
-				t.above[c.Number] = n
+			t.subs[n] = *list
+			for _, c := range *list {
+				if _, ok := t.byNum[c.Number]; ok {
+					t.above[c.Number] = n
+				}
 			}
 		}
 	}
@@ -353,7 +474,7 @@ func (s Source) closeParent(n int) error {
 // deepest first, except those labelled se-review. Every se issue command does
 // this first.
 func (s Source) CloseParents() error {
-	_, err := s.load(nil)
+	_, err := s.load(nil, nil)
 	return err
 }
 
@@ -364,7 +485,12 @@ func (s Source) Survey() ([]Status, error) {
 	return all, err
 }
 
-func (s Source) survey() ([]Status, tree, error) {
+func (s Source) survey() ([]Status, tree, error) { return s.surveyLinks(false) }
+
+// surveyLinks is survey, reading the links of every issue that has any, the
+// closed blockers too, where closed is set: only se fleet check judges a
+// closed blocker.
+func (s Source) surveyLinks(closed bool) ([]Status, tree, error) {
 	// The input phase: every read the judging below needs, each once, in
 	// parallel, each as soon as what it needs is read. The writes, closing
 	// parents and the sweep's, come after it, in order.
@@ -374,49 +500,64 @@ func (s Source) survey() ([]Status, tree, error) {
 	claimed := map[string]bool{}
 	var refs []ref
 	var pulls []openPull
-	t, err := s.load(func(t tree) []func() error {
-		ns := t.numbers()
-		for _, n := range ns {
-			deps[n], marked[n], leased[n] = &[]issue{}, &marks{}, &Status{}
+	g := newGroup()
+	// A claimed leaf's lease needs the branches: a leaf the list names
+	// before they are read waits in leaves, one named after starts at once.
+	var mu sync.Mutex
+	var leaves []*Status
+	branched := false
+	lease := func(l *Status) {
+		if claimed[Branch(l.Number)] {
+			g.Go(func() error { return s.lease(l) })
 		}
-		reads := []func() error{
-			// The branches, and what only issue branches need: the open PRs
-			// and each claimed leaf's lease.
-			func() (err error) {
-				if refs, err = api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/issue-", s.Repo), true); err != nil || len(refs) == 0 {
-					return err
-				}
-				for _, r := range refs {
-					claimed[strings.TrimPrefix(r.Ref, "refs/heads/")] = true
-				}
-				reads := []func() error{func() (err error) {
-					pulls, err = api[openPull](s, fmt.Sprintf("repos/%s/pulls?state=open&per_page=100", s.Repo), true)
-					return err
-				}}
-				for _, n := range ns {
-					if !t.parent(n) && claimed[Branch(n)] && !t.byNum[n].labelled(PersonLabel) {
-						reads = append(reads, func() error {
-							leased[n].Number = n
-							return s.lease(leased[n])
-						})
-					}
-				}
-				return parallel(reads)
-			},
+	}
+	// The branches and the open PRs need nothing else, so they are read
+	// beside the issue list.
+	g.Go(func() (err error) {
+		got, err := api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/issue-?per_page=100", s.Repo), true)
+		if err != nil {
+			return err
 		}
-		for _, n := range ns {
-			reads = append(reads, func() (err error) {
-				*deps[n], err = api[issue](s, fmt.Sprintf("repos/%s/issues/%d/dependencies/blocked_by?per_page=100", s.Repo, n), true)
+		mu.Lock()
+		defer mu.Unlock()
+		refs = got
+		for _, r := range refs {
+			claimed[strings.TrimPrefix(r.Ref, "refs/heads/")] = true
+		}
+		branched = true
+		for _, l := range leaves {
+			lease(l)
+		}
+		return nil
+	})
+	g.Go(func() (err error) {
+		pulls, err = api[openPull](s, fmt.Sprintf("repos/%s/pulls?state=open&per_page=100", s.Repo), true)
+		return err
+	})
+	t, err := s.load(g, func(i issue) {
+		n := i.Number
+		d, m, l := &[]issue{}, &marks{}, &Status{Issue: Issue{Number: n}}
+		mu.Lock()
+		defer mu.Unlock()
+		deps[n], marked[n], leased[n] = d, m, l
+		if s.linked(i, closed) {
+			g.Go(func() (err error) {
+				*d, err = s.blockedBy(n)
 				return err
 			})
-			if t.byNum[n].labelled(PersonLabel) {
-				reads = append(reads, func() (err error) {
-					*marked[n], err = s.marks(n)
-					return err
-				})
-			}
 		}
-		return reads
+		switch {
+		case i.labelled(PersonLabel):
+			g.Go(func() (err error) {
+				*m, err = s.marks(n)
+				return err
+			})
+		case i.SubIssues != nil && i.SubIssues.Total > 0:
+		case branched:
+			lease(l)
+		default:
+			leaves = append(leaves, l)
+		}
 	})
 	if err != nil {
 		return nil, tree{}, err
@@ -548,15 +689,24 @@ func firstParagraph(body string) string {
 	return strings.Join(strings.Fields(first), " ")
 }
 
+// blockedBy reads the blocked-by links of issue n, open and closed blockers.
+func (s Source) blockedBy(n int) ([]issue, error) {
+	return api[issue](s, fmt.Sprintf("repos/%s/issues/%d/dependencies/blocked_by?per_page=100", s.Repo, n), true)
+}
+
 // openBlockers names the blockers of open fleet issue n that are still open,
 // in ascending order. Blockers are GitHub's native "blocked by" links and
 // nothing else.
 //
-// survey asks for the links of every open fleet issue, one request each, and
-// the list's issue_dependencies_summary is not read: right after a link is
-// written that summary can still count 0, and trusting it would make a
-// blocked issue ready. The fleet is small, so one request per issue is cheap,
-// and it is the only answer that cannot lag a link.
+// survey reads the links of an open fleet issue, one request each, only where
+// the list's issue_dependencies_summary may be wrong or counts an open
+// blocker (linked): right after a link is written that summary can still
+// count 0, and trusting it then would make a blocked issue ready. Writing a
+// link updates the issue, so the summary of an issue unchanged for longer
+// than the settle time (github/config/settle) no longer lags, and one that
+// counts no open blocker there stands for links that hold none open, however
+// many closed blockers it counts. The links are read for the rest, where
+// they are the only answer that cannot lag.
 func (t tree) openBlockers(n int) []int {
 	var blocking []int
 	for _, b := range t.deps[n] {
@@ -584,6 +734,67 @@ func (s Source) Next() (next Issue, ok bool, err error) {
 		return order[0].Issue, true, nil
 	}
 	return Issue{}, false, nil
+}
+
+// Pull is what se issue pull shows without a take: the issue Next names, and
+// where the retro and the overhaul cadences stand, read at once.
+func (s Source) Pull() (next Issue, ok bool, cads []Cadence, err error) {
+	cads = make([]Cadence, 2)
+	err = parallel([]func() error{
+		func() (err error) { next, ok, err = s.Next(); return err },
+		func() (err error) { cads[0], err = s.Cadence(); return err },
+		func() (err error) { cads[1], err = s.OverhaulCadence(); return err },
+	})
+	if err != nil {
+		return Issue{}, false, nil, err
+	}
+	return next, ok, cads, nil
+}
+
+// Warm reads what se issue pull reads, writing nothing, and answers it as
+// the snapshot the daemon keeps: the open fleet issues, their sub-issues and
+// links, the issue branches with their leases, the open PRs, and the
+// cadences. A pull answers from it (github.Replay); a write it would make,
+// such as closing a parent, is left to that pull.
+func Warm(s Source) (github.Snapshot, error) {
+	at := s.now()
+	rec := github.Record(s.GitHub)
+	s.GitHub, s.Flagged, s.Live = rec, nil, nil
+	if _, _, _, err := s.Pull(); err != nil && !errors.Is(err, github.ErrReadOnly) {
+		return github.Snapshot{}, err
+	}
+	return rec.Snapshot(s.Repo, at), nil
+}
+
+// fresh says whether issue n may still be claimed, as GitHub says now, where
+// the survey was answered from a snapshot (Live is set): it is open, and
+// nothing open blocks it. Without Live the survey is GitHub's word already.
+func (s Source) fresh(n int) (bool, error) {
+	if s.Live == nil {
+		return true, nil
+	}
+	live := s
+	live.GitHub = live.Live
+	var got []issue
+	var deps []issue
+	if err := parallel([]func() error{
+		func() (err error) {
+			got, err = api[issue](live, fmt.Sprintf("repos/%s/issues/%d", s.Repo, n), false)
+			return err
+		},
+		func() (err error) { deps, err = live.blockedBy(n); return err },
+	}); err != nil {
+		return false, err
+	}
+	if got[0].State != "open" {
+		return false, nil
+	}
+	for _, d := range deps {
+		if d.State == "open" {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // takeOrder lists the issues at the top a take may have, in the order it
@@ -655,6 +866,14 @@ func (s Source) Take(dir string, want int) (took Issue, ok bool, err error) {
 		}
 	}
 	for _, st := range takeOrder(all, want) {
+		if ok, err := s.fresh(st.Number); err != nil {
+			return Issue{}, false, err
+		} else if !ok {
+			if st.Number == want {
+				return Issue{}, false, fmt.Errorf("#%d is not ready: it closed or is blocked, as GitHub says now", want)
+			}
+			continue
+		}
 		var claimed bool
 		switch {
 		case st.Takeover != nil:
@@ -811,6 +1030,11 @@ func (s Source) TakeIn(dir string, root, want int) (took Issue, ok bool, tr Tree
 		byNum[st.Number] = st
 	}
 	for _, i := range order {
+		if ok, err := s.fresh(i.Number); err != nil {
+			return Issue{}, false, tr, err
+		} else if !ok {
+			continue
+		}
 		var claimed bool
 		if i.Takeover != nil {
 			claimed, err = s.takeOverStuck(dir, byNum[i.Number], false)

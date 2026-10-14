@@ -26,6 +26,7 @@ type Server struct {
 	clock    clock.Clock
 	seq      atomic.Uint64
 	last     atomic.Int64
+	keepers  []Keeper
 }
 
 var _ sehttp.Daemon = (*Server)(nil)
@@ -91,4 +92,15 @@ func (s *Server) Value(name string) (sehttp.Value, error) {
 		return sehttp.Value{}, fmt.Errorf("%w: %w", sehttp.ErrUnknown, err)
 	}
 	return sehttp.Value{Value: v.V, Provided: v.Provided}, nil
+}
+
+// Stale tells each keeper that name no longer matches the outside; the one
+// that keeps it reads it again at once.
+func (s *Server) Stale(name string) error {
+	for _, k := range s.keepers {
+		if k.Stale(name) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: nothing keeps %s", sehttp.ErrUnknown, name)
 }

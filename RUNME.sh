@@ -27,8 +27,9 @@ if ! claude plugin list 2>/dev/null | grep -q "se@se"; then
   claude plugin install se@se --scope user
 fi
 # The plugin, the daemon, /se on and /se ui need no GitHub; the fleet's
-# commands read and write it through gh. On a cloud box gh reaches it without
-# a login of its own. The login never blocks the install.
+# commands call GitHub's REST API with gh's token. On a cloud box the proxy
+# adds the credentials, with no login of its own. The login never blocks the
+# install.
 if ! gh auth status >/dev/null 2>&1 && ! gh api rate_limit >/dev/null 2>&1; then
   if [ -t 0 ] && [ -t 1 ]; then
     gh auth login || true
