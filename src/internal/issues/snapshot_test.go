@@ -47,6 +47,10 @@ func TestASettledSummaryStandsForTheLinksAndAFreshOneDoesNot(t *testing.T) {
 		listPath: `[{"id":105,"number":5,"title":"t5","state":"open","updated_at":"2026-10-13T09:00:00Z"},` +
 			`{"id":106,"number":6,"title":"t6","state":"open","updated_at":"2026-10-13T09:00:00Z"}]`,
 		refsPath: `[]`,
+		// Each is a manifest, as all work at the top is, its settled leaf
+		// counting no link.
+		subsPath(5): `[{"id":1105,"number":1005,"title":"t","state":"open","labels":[{"name":"se"}],"updated_at":"2026-10-13T09:00:00Z","issue_dependencies_summary":{"total_blocked_by":0}}]`,
+		subsPath(6): `[{"id":1106,"number":1006,"title":"t","state":"open","labels":[{"name":"se"}],"updated_at":"2026-10-13T09:00:00Z","issue_dependencies_summary":{"total_blocked_by":0}}]`,
 	})
 	c := &counting{GitHub: gh}
 	s := Source{Proc: machine, Repo: repo, GitHub: c, Clock: clk}
@@ -86,11 +90,11 @@ func TestASettledSummaryStandsForTheLinksAndAFreshOneDoesNot(t *testing.T) {
 func TestATakeFromASnapshotReReadsWhatItsClaimMustBeSureOf(t *testing.T) {
 	t.Parallel()
 	_, a, _ := boxes(t)
-	gh := recorded(t, unblocked(map[string]string{
+	gh := recorded(t, manifested(unblocked(map[string]string{
 		listPath: `[{"id":105,"number":5,"title":"t5","state":"open"},{"id":106,"number":6,"title":"t6","state":"open"},` +
 			`{"id":107,"number":7,"title":"t7","state":"open"}]`,
 		refsPath: `[]`,
-	}, 5, 6, 7))
+	}, 5, 6, 7, 1005, 1006, 1007), 5, 6, 7))
 	live := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
 	snap, err := Warm(live)
 	if err != nil {

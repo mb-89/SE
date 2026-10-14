@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mb-89/SE/src/internal/index"
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -64,9 +64,10 @@ func init() {
 		Usage:   "help [<command>]",
 		Group:   "Session",
 		Summary: "list the commands, or show one: help <command>",
-		Details: "Without a word, help lists every command under its group. " +
-			"With a command's name, it shows that command's usage and every flag it takes; " +
-			"se <command> --help shows the same.",
+		Details: []string{
+			"Without a word, help lists every command under its group.",
+			"With a command's name, it shows that command's usage and every flag it takes; se <command> --help shows the same.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			name := strings.Join(c.Args, " ")

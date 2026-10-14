@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/guidance"
-	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
@@ -37,8 +37,10 @@ type Command struct {
 	Group string
 	// Summary is the help's one short line about it, no flags.
 	Summary string
-	// Details is what se help <name> says beyond the usage and the flags.
-	Details string
+	// Details is what se help <name> says beyond the usage and the flags, one
+	// sentence each, joined at print: two changes to a command's help merge per
+	// sentence (the rule help-sentences).
+	Details []string
 	// Session offers it inside a Claude session as /se <name>.
 	Session bool
 	// Installed keeps it in the installed se when the session works in an SE
@@ -57,8 +59,11 @@ type Command struct {
 // Reply is what a command answers. On a terminal se prints Text; in a session
 // (--session) it prints the whole Reply as JSON for the plugin to apply.
 type Reply struct {
-	// Text is what to show.
+	// Text is what to show where the command was typed.
 	Text string `json:"text"`
+	// Short, when set, is what a press of the command's button in /se ui
+	// shows instead of Text: a few short lines, the rest left to typing.
+	Short string `json:"short,omitempty"`
 	// Active, when set, switches forwarding on or off for the calling session.
 	Active *bool `json:"active,omitempty"`
 	// Endpoint, when set, is where the workspace's daemon now answers.
@@ -254,8 +259,9 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	switch {
 	case ok:
 		// Every command reaches GitHub within its rate limits, and records
-		// the requests it made in its workspace; one that wrote to GitHub
-		// leaves the daemon's snapshot stale.
+		// in its workspace the requests it made and each rate-limit refusal
+		// it met, with its wait; one that wrote to GitHub leaves the daemon's
+		// snapshot stale.
 		limited := github.Limit(call.GitHub, call.Clock, githubSettings().Limits, stderr)
 		gh := &noting{GitHub: limited}
 		call.GitHub = gh
@@ -266,6 +272,11 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 		if n := limited.Requests() - before; n > 0 {
 			if rerr := issues.RecordRequests(call.Disk, call.Workspace, name, n, call.Clock.Now()); rerr != nil {
 				fmt.Fprintf(stderr, "se: recording %s's %d GitHub requests: %v\n", name, n, rerr)
+			}
+		}
+		if refused := limited.Refusals(); len(refused) > 0 {
+			if rerr := issues.RecordRefusals(call.Disk, call.Workspace, name, refused); rerr != nil {
+				fmt.Fprintf(stderr, "se: recording %s's %d GitHub rate-limit refusals: %v\n", name, len(refused), rerr)
 			}
 		}
 		if gh.wrote.Load() {

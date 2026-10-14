@@ -112,7 +112,7 @@ func agedReply(r Reply, err error, asJSON bool, age string) (Reply, error) {
 	}
 	note := fmt.Sprintf("Answered from the daemon's snapshot of GitHub, %s old.", age)
 	if !asJSON {
-		r.Text = strings.TrimRight(r.Text, "\n") + "\n\n" + note
+		r.Text = strings.TrimRight(r.Text, "\n") + "\n" + note
 		return r, nil
 	}
 	var answer map[string]any

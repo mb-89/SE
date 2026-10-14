@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mb-89/SE/src/internal/daemon"
@@ -14,7 +15,9 @@ func init() {
 		Usage:   "status",
 		Group:   "Session",
 		Summary: "say whether a daemon answers, and which commits SE came from",
-		Details: "say whether a daemon answers for this workspace, and which commits the session's SE came from.",
+		Details: []string{
+			"say whether a daemon answers for this workspace, and which commits the session's SE came from: one line where the hooks, the plugin's checkout and se agree; where they disagree, a short line per commit and the remedy, a new session, once.",
+		},
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
@@ -26,7 +29,13 @@ func init() {
 				said = fmt.Sprintf("SE's daemon answers for %s at %s (pid %d, up since %s).",
 					c.Workspace, ep.Address, ep.PID, ep.StartedAt.Local().Format(time.DateTime))
 			}
-			return Reply{Text: said + "\n" + sessionCommits(&c.World)}, nil
+			// One line where everything agrees; a short line per commit where not.
+			sep := "\n"
+			commits := sessionCommits(&c.World)
+			if !strings.Contains(commits, "\n") {
+				sep = " "
+			}
+			return Reply{Text: said + sep + commits}, nil
 		},
 	})
 }

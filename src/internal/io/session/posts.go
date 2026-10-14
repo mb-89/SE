@@ -1,6 +1,6 @@
 package session
 
-import "github.com/mb-89/SE/src/internal/index"
+import "github.com/mb-89/SE/src/index"
 
 // Events is the family Posts commits each forwarded event to, at its session's id.
 var Events = index.Family("events", Event{}, "The last event the bridgehead forwarded from a session, at the session's id.")

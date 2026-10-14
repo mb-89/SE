@@ -17,7 +17,9 @@ func init() {
 		Usage:   "issue close N --fixed-by SHA --answers FILE [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
 		Summary: "close issue N, its work on main already, naming the commit",
-		Details: "the third way a box closes the issue it took, beside a PR and a supersede, where its work is on main already and landing would take an empty commit: refuse unless SHA names a commit that origin/main holds and FILE answers every question in spec/landing.yaml (as se issue land reads it), and refuse a closed issue and a parent; then post the answers on N, comment naming the commit, and close N as completed.",
+		Details: []string{
+			"the third way a box closes the issue it took, beside a PR and a supersede, where its work is on main already and landing would take an empty commit: refuse unless SHA names a commit that origin/main holds and FILE answers every question in spec/landing.yaml (as se issue land reads it), and refuse a closed issue and a parent; then post the answers on N, close N's open PR and delete its issue-N claim by a git push from the workspace, comment naming the commit, and close N as completed.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "issue close")
@@ -76,7 +78,7 @@ func init() {
 				data, err := json.Marshal(f)
 				return Reply{Text: string(data)}, err
 			}
-			return Reply{Text: fmt.Sprintf("Closed #%d: its work is on main in %s %s; its landing answers are posted.\n%s", n, f.Commit, f.Subject, f.URL)}, nil
+			return Reply{Text: fmt.Sprintf("Closed #%d: its work is on main in %s %s; its landing answers are posted.\n%s", n, f.Commit, f.Subject, f.URL) + dropped(f.Pulls, f.Branch, 0)}, nil
 		},
 	})
 }

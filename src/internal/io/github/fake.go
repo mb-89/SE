@@ -22,9 +22,9 @@ import (
 // It knows the routes SE uses: issues with their comments, labels,
 // assignees, sub-issues and blocked-by links, branches (git refs: each
 // repository starts with main, and a file written to a branch through
-// contents is a new commit on it), pull requests with their merge, auto-merge
-// and update-branch, and workflow dispatches. Any other path it answers from
-// what was seeded at that path, read-only.
+// contents is a new commit on it), pull requests with their merge and
+// auto-merge. Any other path it answers from what was seeded at that path,
+// read-only.
 //
 // Seed fills it from recorded gh answers, each read for what it says about
 // the repository rather than kept as an answer.
@@ -848,6 +848,10 @@ func (f *Fake) write(method, path string, v map[string]any) (any, error) {
 			}
 		}
 		p["updated_at"] = f.now()
+		if p["state"] == "closed" && p["closed_at"] == nil {
+			// Closing a PR turns its auto-merge off, as GitHub does.
+			p["closed_at"], p["auto_merge"] = p["updated_at"], nil
+		}
 		return p, nil
 	case method == "PUT" && match(w, "pulls", "#", "merge"):
 		p, ok := r.pulls[num(w[1])]
@@ -860,24 +864,6 @@ func (f *Fake) write(method, path string, v map[string]any) (any, error) {
 		at := f.now()
 		p["state"], p["merged"], p["merged_at"], p["closed_at"] = "closed", true, at, at
 		return obj{"merged": true, "message": "Pull Request successfully merged"}, nil
-	case method == "PUT" && match(w, "pulls", "#", "update-branch"):
-		// GitHub takes the update and merges the base in on its own time;
-		// the new head is what the repository comes to hold (SeedAt).
-		p, ok := r.pulls[num(w[1])]
-		if !ok || p["state"] != "open" {
-			return nil, notFound()
-		}
-		if want, ok := str(v, "expected_head_sha"); ok {
-			if head, _ := p["head"].(obj); head["sha"] != want {
-				return nil, refuse(422, "expected head sha didn't match current head ref")
-			}
-		}
-		return obj{"message": "Updating pull request branch."}, nil
-	case method == "POST" && len(w) == 4 && w[0] == "actions" && w[1] == "workflows" && w[3] == "dispatches":
-		if ref, _ := str(v, "ref"); ref == "" {
-			return nil, refuse(422, "Validation Failed: a dispatch takes a ref")
-		}
-		return nil, nil
 	case method == "PUT" && f.Proxy && match(w, "pulls", "#", "ccr", "auto_merge"):
 		p, ok := r.pulls[num(w[1])]
 		if !ok {

@@ -100,6 +100,8 @@ func (c Collected) facts() string {
 	}
 	fmt.Fprintf(&b, "## The window\n%s, up to %s: %d closed `se` issues, %d merged PRs, %d commits on main.\n",
 		scope, w.Until.Format(time.RFC3339), len(c.Rows), c.PRs, c.Commits)
+	fmt.Fprintf(&b, "\nOf the closed issues, %g landed (the ones the answers check counts, which the per-issue metrics divide by) and %g %s for a person.\n",
+		c.Metrics["landed"], c.Metrics["for_person"], agree(c.Metrics["for_person"], "was", "were"))
 
 	b.WriteString("\n## Rule checks\n")
 	for _, k := range checkKinds {
@@ -127,11 +129,11 @@ func (c Collected) facts() string {
 		}
 	}
 
-	b.WriteString("\n## Counts\n| | in the window | per closed issue |\n|---|---|---|\n")
+	b.WriteString("\n## Counts\n| | in the window | per landed issue |\n|---|---|---|\n")
 	for _, name := range counted {
 		fmt.Fprintf(&b, "| %s | %g | %g |\n", name, c.Metrics[name], c.Metrics[name+"_per_issue"])
 	}
-	known, withRequests := 0, 0
+	known, withRequests, withWaits := 0, 0, 0
 	for _, r := range c.Rows {
 		if r.Minutes >= 0 {
 			known++
@@ -139,10 +141,15 @@ func (c Collected) facts() string {
 		if r.Requests > 0 {
 			withRequests++
 		}
+		if r.RateLimits > 0 {
+			withWaits++
+		}
 	}
-	fmt.Fprintf(&b, "\nGitHub requests: %g per closed issue, counted by the landing facts of %d of the %d closed issues.\n", c.Metrics["requests_per_issue"], withRequests, len(c.Rows))
-	fmt.Fprintf(&b, "\nDuplicates: %g closed as duplicate, %d issues for a person minted again for an issue one already held back.\n", c.Metrics["duplicates"]-float64(c.Reholds), c.Reholds)
+	fmt.Fprintf(&b, "\nGitHub requests: %g per landed issue, counted by the landing facts of %d of the %d closed issues.\n", c.Metrics["requests_per_issue"], withRequests, len(c.Rows))
+	fmt.Fprintf(&b, "\nGitHub rate limits: %g refusals and %g minutes waited for the reset per landed issue; %d of the %d closed issues met one.\n", c.Metrics["rate_limits_per_issue"], c.Metrics["rate_limit_minutes_per_issue"], withWaits, len(c.Rows))
+	fmt.Fprintf(&b, "\nDuplicates: %g closed as duplicate, %d %s for a person minted again for an issue one already held back.\n", c.Metrics["duplicates"]-float64(c.Reholds), c.Reholds, agree(float64(c.Reholds), "issue", "issues"))
 	fmt.Fprintf(&b, "\nClaim to merge: median %s over the %d issues whose claim and merge are both on record.\n", span(int(c.Metrics["claim_to_merge_minutes"])), known)
+	b.WriteString(c.openPoints())
 
 	b.WriteString("\n## Metrics against the previous retros\n")
 	if len(c.History) == 0 {
@@ -173,8 +180,11 @@ func (c Collected) facts() string {
 		b.WriteString("None: this is the first retro.\n")
 	} else {
 		sc := c.Score
-		fmt.Fprintf(&b, "#%d found %d, of which %d became issues and %d of those closed as completed; %d recurred.\n",
-			sc.Retro, sc.Findings, sc.Issues, sc.Closed, sc.Recurred)
+		fmt.Fprintf(&b, "#%d found %d, of which %d became issues and %d of those closed as completed", sc.Retro, sc.Findings, sc.Issues, sc.Closed)
+		if sc.Unmerged > 0 {
+			fmt.Fprintf(&b, " (%d more landed into a manifest's branch not yet on main, their recurrence not read)", sc.Unmerged)
+		}
+		fmt.Fprintf(&b, "; %d recurred.\n", sc.Recurred)
 		if len(sc.Items) > 0 {
 			b.WriteString("\n| finding | class | issue | state | recurred | metric |\n|---|---|---|---|---|---|\n")
 		}
@@ -185,8 +195,25 @@ func (c Collected) facts() string {
 			}
 			if it.Metric != "" {
 				metric = fmt.Sprintf("%s %g → %g", it.Metric, it.Before, it.Now)
+				if strings.HasPrefix(it.State, notOnMain) {
+					metric += " (not credited: its fix is not on main)"
+				} else if it.State != "completed" {
+					metric += " (not credited: its issue did not close as completed)"
+				}
 			}
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %v | %s |\n", it.Title, it.Class, issue, it.State, it.Recurred, metric)
+		}
+		for _, it := range sc.Items {
+			if it.Dropped == nil || *it.Dropped {
+				continue
+			}
+			fmt.Fprintf(&b, "\n**%s** recurred by %s, which these moved in the window:\n", it.Title, it.Metric)
+			if len(it.MovedBy) == 0 {
+				b.WriteString("- nothing in the window\n")
+			}
+			for _, m := range it.MovedBy {
+				fmt.Fprintf(&b, "- %s\n", m)
+			}
 		}
 	}
 
@@ -228,21 +255,35 @@ func count(n int) string {
 // the right way.
 func trend(name string, last, now Metrics) string {
 	before, ok := last[name]
-	switch {
-	case !ok:
+	if !ok {
 		return "new"
-	case now[name] == before:
-		return "same"
-	case (now[name] < before) == lowerIsBetter(name):
-		return fmt.Sprintf("better (%+g)", now[name]-before)
 	}
-	return fmt.Sprintf("worse (%+g)", now[name]-before)
+	// The change is rounded as the values are, so float noise neither shows
+	// nor turns a same into a move.
+	d := round2(now[name] - before)
+	switch {
+	case d == 0:
+		return "same"
+	case size(name):
+		return fmt.Sprintf("%+g", d)
+	case d < 0:
+		return fmt.Sprintf("better (%+g)", d)
+	}
+	return fmt.Sprintf("worse (%+g)", d)
+}
+
+// agree is the word that agrees with count n: one for 1, many otherwise.
+func agree(n float64, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // matrix is every closed issue × every landing question, a question at a time.
 func (c Collected) matrix(qs []Question) string {
 	var b strings.Builder
-	b.WriteString("## The matrix\nEvery closed issue's landing answer, a question at a time; \"none\" answers are left out. It stays in the draft, not in the posted report.\n")
+	b.WriteString("## The matrix\nEvery closed issue's landing answer, a question at a time; \"none\" answers are left out. Each is headed by how its issue closed: one with no merged PR (nor a landing into its manifest's branch) describes a branch, not main. It stays in the draft, not in the posted report.\n")
 	missing := []string{}
 	for _, r := range c.Rows {
 		if r.Answers == nil {
@@ -261,11 +302,36 @@ func (c Collected) matrix(qs []Question) string {
 				continue
 			}
 			said++
-			fmt.Fprintf(&b, "- #%d %s: %s\n", r.Number, r.Title, strings.ReplaceAll(strings.TrimSpace(a), "\n", "\n  "))
+			fmt.Fprintf(&b, "- #%d %s (closed %s): %s\n", r.Number, r.Title, r.Closed, strings.ReplaceAll(strings.TrimSpace(a), "\n", "\n  "))
 		}
 		if said == 0 {
 			b.WriteString("Nothing but none.\n")
 		}
+	}
+	return b.String()
+}
+
+// OpenKey is the landing question that asks for the open points a work
+// leaves. A box opens no issue: its open points go into its landing answers,
+// and the retro, which reads them here, turns them into work.
+const OpenKey = "open"
+
+// openPoints lists the open points the window's landing answers name, by
+// issue; those that say "none" are left out.
+func (c Collected) openPoints() string {
+	var b strings.Builder
+	b.WriteString("\n## Open points\nWhat the closed issues' landing answers left open (`" + OpenKey + "`): the retro turns them into work, as findings.\n")
+	said := 0
+	for _, r := range c.Rows {
+		a, ok := r.Answers[OpenKey]
+		if !ok || nothing(a) {
+			continue
+		}
+		said++
+		fmt.Fprintf(&b, "- #%d %s: %s\n", r.Number, r.Title, strings.ReplaceAll(strings.TrimSpace(a), "\n", "\n  "))
+	}
+	if said == 0 {
+		b.WriteString("None in the window.\n")
 	}
 	return b.String()
 }
@@ -368,8 +434,9 @@ func ParseReport(text string) (r RetroReport, facts string, err error) {
 }
 
 // judged refuses a report whose judgment is not complete: every finding
-// needs a title, a class the classes name, a body and a home, and a reason
-// where it is controversial; every class a fix; and something went well.
+// needs a title that reads as a whole (cutShort), a class the classes name, a
+// body and a home, and a reason where it is controversial; every class a
+// fix; and something went well.
 func (r RetroReport) judged() error {
 	var why []string
 	classes := map[string]bool{}
@@ -381,9 +448,12 @@ func (r RetroReport) judged() error {
 	}
 	for k, f := range r.Findings {
 		name := fmt.Sprintf("finding %d (%q)", k+1, f.Title)
+		short := cutShort(f.Title)
 		switch {
 		case strings.TrimSpace(f.Title) == "" || strings.TrimSpace(f.Body) == "":
 			why = append(why, name+" needs a title and a body")
+		case short != "":
+			why = append(why, name+" has a title "+short)
 		case !classes[f.Class]:
 			why = append(why, fmt.Sprintf("%s names class %q, which classes does not", name, f.Class))
 		case !contains(homes, f.Home):
@@ -404,6 +474,30 @@ func (r RetroReport) judged() error {
 	}
 	return fmt.Errorf("the report's judgment is not complete, so nothing was written: %s", strings.Join(why, "; "))
 }
+
+// cutShort says what keeps a finding's title from reading as an issue title,
+// "" where nothing does: one under five words says nothing of its fix
+// ("Take"), and one ending in a comma or a conjunction was cut off mid
+// sentence.
+func cutShort(title string) string {
+	words := strings.Fields(title)
+	if len(words) == 0 {
+		return ""
+	}
+	last := strings.ToLower(strings.TrimRight(words[len(words)-1], ".;:"))
+	switch {
+	case len(words) < 5:
+		return "under five words: name the fix"
+	case strings.HasSuffix(last, ","):
+		return "ending in a comma: finish the sentence"
+	case contains(conjunctions, last):
+		return fmt.Sprintf("ending in the conjunction %q: finish the sentence", last)
+	}
+	return ""
+}
+
+// conjunctions are the words a whole title does not end on.
+var conjunctions = []string{"and", "or", "but", "nor", "so", "yet", "because", "while", "when", "where", "if", "unless", "until", "since", "though", "although", "that", "whether", "than", "as"}
 
 func contains(list []string, s string) bool {
 	for _, x := range list {
@@ -427,8 +521,7 @@ func (s Source) postedReport(n int) (*RetroReport, error) {
 	return &r, nil
 }
 
-// lastReport is the text of the last report comment on issue n, and whether
-// a person resumed the issue after it.
+// lastReport is the text of the last report comment on issue n.
 func (s Source) lastReport(n int) (string, error) {
 	return s.lastPosted(n, reportMark)
 }
@@ -465,6 +558,11 @@ type Filed struct {
 	// Issues are the issues created, Person those of them for a person.
 	Issues []int `json:"issues"`
 	Person []int `json:"person"`
+	// Manifest is the one manifest that holds the findings not for a person,
+	// as its sub-issues; 0 where every finding is for a person.
+	Manifest int `json:"manifest,omitempty"`
+	// kind names the run: retro or overhaul.
+	kind string
 	// Left says why the claim issue-N is still there, where its deletion was
 	// refused.
 	Left string `json:"left,omitempty"`
@@ -525,7 +623,7 @@ type filing struct {
 // Its claim issue-N goes.
 func (s Source) fileRun(i issue, run filing) (Filed, error) {
 	n := i.Number
-	out := Filed{Retro: n, Issues: []int{}, Person: []int{}}
+	out := Filed{Retro: n, Issues: []int{}, Person: []int{}, kind: run.kind}
 	if err := run.mint(&out); err != nil {
 		return out, err
 	}
@@ -544,24 +642,55 @@ func (s Source) fileRun(i issue, run filing) (Filed, error) {
 }
 
 // mint creates one finding's issue through the same code as se issue new: a
-// controversial one for a person (ForPerson), the rest in the normal queue.
-// It records the issue in out.
+// controversial one for a person (ForPerson), at the top; the rest as
+// sub-issues of the run's one manifest, which the first of them creates. Each
+// is labelled se-final, the manifest too: what a run files is its output, so
+// the retro's cadence does not count it. It records the issue in out.
 func (s Source) mint(title, body string, controversial bool, why string, out *Filed) (int, error) {
 	if controversial {
-		made, err := s.ForPerson(title, "Controversial, so it waits for a person: "+why+"\n\n"+body, 0, nil)
+		made, err := s.ForPerson(title, "Controversial, so it waits for a person: "+why+"\n\n"+body, 0, nil, FinalLabel)
 		if made.Number > 0 {
 			out.Issues = append(out.Issues, made.Number)
 			out.Person = append(out.Person, made.Number)
 		}
 		return made.Number, err
 	}
-	made, ready, err := s.create(title, body, 0, nil, []string{Label})
+	if err := s.findings(out); err != nil {
+		return 0, err
+	}
+	made, ready, err := s.create(title, body, out.Manifest, nil, []string{Label, FinalLabel})
 	if err != nil {
 		return 0, err
 	}
 	out.Issues = append(out.Issues, made.Number)
 	out.Ready = out.Ready || ready
 	return made.Number, nil
+}
+
+// findings makes the manifest that holds run out's findings, where out has
+// none yet.
+func (s Source) findings(out *Filed) error {
+	if out.Manifest > 0 {
+		return nil
+	}
+	var err error
+	out.Manifest, err = s.findingsManifest(fmt.Sprintf("the %s #%d", out.kind, out.Retro))
+	return err
+}
+
+// findingsManifest makes the one manifest that holds what run (a retro, an
+// overhaul, a review) found: an issue at the top labelled se-manifest and
+// se-final, its findings its sub-issues, landing as one PR. An open one of its
+// title, from a filing cut short, is taken again.
+func (s Source) findingsManifest(run string) (int, error) {
+	title := "Findings of " + run
+	open, err := s.Duplicate(title, 0)
+	if err != nil || open > 0 {
+		return open, err
+	}
+	body := fmt.Sprintf("What %s found, as one manifest: its sub-issues, each final (%s), land as one PR. A run files its findings; a box opens no issue.", run, FinalLabel)
+	made, _, err := s.create(title, body, 0, nil, []string{Label, ManifestLabel, FinalLabel})
+	return made.Number, err
 }
 
 // postReport posts text, a report, on issue n.

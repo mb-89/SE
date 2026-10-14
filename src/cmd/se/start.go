@@ -13,7 +13,10 @@ func init() {
 		Usage:   "start",
 		Group:   "Daemon",
 		Summary: "start the daemon in the background, or find it running",
-		Details: "answer the running daemon, or start one in the background. Prints its address and token as JSON.",
+		Details: []string{
+			"answer the running daemon, or start one in the background.",
+			"Prints its address and token as JSON.",
+		},
 		Run: func(c *Call) (Reply, error) {
 			if err := c.Parse(c.Flags("start")); err != nil {
 				return Reply{}, err

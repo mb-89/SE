@@ -38,7 +38,12 @@ controversial, and closes the overhaul.
    - `verdicts`: one per principle, `principle`, `strays` (`none`,
      `slightly`, `far`) and `how`. For a mechanical one, read the retros'
      rule checks and metrics; for the rest, read the code and spec against
-     the principle's text.
+     the principle's text. Judge principles 2 (single point of truth) and 3
+     (locality) over everything, old and untouched code included, not on a
+     delta as a review does: what is written twice, what no longer earns its
+     place, what was not used in a while. The draft's "Pruning and code
+     shape" facts (the widest changes since the last overhaul, what nothing
+     reaches, the files untouched longest) are where to start, not the answer.
    - `looked_at`: `outside` (search the web for current practice and tools in
      agent orchestration, issue-driven work, testing with fakes and
      contracts, plugin and hook design, and for comparable systems; search
@@ -76,8 +81,11 @@ controversial, and closes the overhaul.
      injected already).
    - `went_well`: what holds and should stay.
 4. `./src/plugin/bin/se overhaul file <n>`. If it refuses, fix what it names
-   and run it again. It creates the issues, those for a person where
-   controversial, and closes the overhaul. End: there is no PR to land, and
+   and run it again. It creates the issues, all `se-final`: those for a
+   person where controversial (or too big), the rest as sub-issues of the
+   overhaul's one manifest of findings, and closes the overhaul. All work moves in manifests, each one topic whose leaves
+   together take about `issues.manifest/config/target` (an hour): size each
+   finding's fix to fit it. End: there is no PR to land, and
    nothing waits for the owner but the issues for them.
 
 ## Pruning
@@ -104,6 +112,6 @@ Keep only what has a reason you name in `looked_at.removal`:
 - an enforcement path that guards something even while it never fires.
 
 Pure, generic code that several modules share is a good sign, not a target.
-Each removal is a finding with area `removal`, in the normal queue, never
+Each removal is a finding with area `removal`, in the overhaul's manifest, never
 controversial for being a removal; `se overhaul file` adds to its issue that
 the removal repeats until nothing more falls out.

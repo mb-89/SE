@@ -47,16 +47,17 @@ command_classes:
   fleet prune: github
   fleet refresh: github
   fleet rules: battery
+  fleet trust: github
   guidance: local
   help: instant
   hook prompt: local
   hook stop: local
   issue close: github
   issue edit: github
+  issue keep: battery
   issue land: battery
   issue new: github
   issue pull: github
-  issue resume: github
   issue review: github
   issue supersede: github
   issue tree: github

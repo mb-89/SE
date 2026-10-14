@@ -112,6 +112,8 @@ type Counts struct {
 	Claimed int `json:"claimed"`
 	Blocked int `json:"blocked"`
 	InTrees int `json:"in_trees"`
+	// Bare counts the leaves at the top in no manifest, which no box takes.
+	Bare int `json:"bare,omitempty"`
 }
 
 // Briefing reads GitHub and the checkout dir and says where SE stands. It writes
@@ -207,7 +209,9 @@ func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 		return Briefing{}, err
 	}
 	if order := takeOrder(all, 0); len(order) > 0 {
-		b.Next = &order[0].Issue
+		next := order[0].Issue
+		next.Body, next.Picked = Shown(next.Body), picked(order[0])
+		b.Next = &next
 	}
 	b.Queue = estimate(all, t, 0, pace, s.now())
 	for _, st := range all {
@@ -218,6 +222,8 @@ func (s Source) Briefing(dir string, w Window) (Briefing, error) {
 			b.Counts.Claimed++
 		case st.Ready():
 			b.Counts.Ready++
+		case st.Why == "" && st.Bare != "":
+			b.Counts.Bare++
 		default:
 			b.Counts.Blocked++
 		}

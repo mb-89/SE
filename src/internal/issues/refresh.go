@@ -2,100 +2,150 @@ package issues
 
 import (
 	"fmt"
+	"path/filepath"
+	"slices"
 	"strings"
-
-	"github.com/mb-89/SE/src/internal/io/github"
 )
 
-// CIWorkflow is the workflow se fleet refresh starts on a PR it updated: the
-// repository's token, which the update is made with, starts no workflow by
-// its pushes.
-const CIWorkflow = "ci.yml"
+// A manifest's leaves branch from, and land into, its branch issue-<m>, so
+// main's moves reach them only through it. Merged into it once, they reach
+// every leaf through its landing; left out, each leaf meets them on its own,
+// as conflicts (#503, #504, #505). So main is merged into each open
+// manifest's branch as it moves, as se issue keep does for a PR: se fleet
+// refresh, which the refresh workflow runs on every push to main, and se
+// fleet fix, for what se fleet check finds behind.
 
-// waits is how often a PR is asked for its new head after an update.
-const waits = 10
+// RefreshDir is where, under the checkout, a manifest's branch takes main in:
+// git ignores .se/.runtime.
+const RefreshDir = ".se/.runtime/refresh"
 
-// Refreshed is one open PR, auto-merge on, that was behind main.
+// Refreshed is one open manifest's branch, and what se fleet refresh did with it.
 type Refreshed struct {
-	PR     int    `json:"pr"`
+	Issue  int    `json:"issue"`
 	Branch string `json:"branch"`
-	// Head is the PR's head after the update; the head it had where it was not updated.
-	Head string `json:"head"`
+	// Merged is true where main was merged in and pushed; Conflict where the
+	// merge conflicts, so nothing was pushed.
+	Merged   bool `json:"merged"`
+	Conflict bool `json:"conflict"`
 	// Did says what was done, in a few words.
 	Did string `json:"did"`
-	// Failed is why the update failed, where it did; Did says so too.
+	// Failed is why the refresh failed, where it did; Did says so too.
 	Failed string `json:"failed,omitempty"`
 }
 
-// Refresh merges main into every open PR against main whose auto-merge is on
-// and whose head main has moved past, through GitHub's update-branch, and
-// starts CIWorkflow on its new head: the main ruleset merges a PR only when
-// it is up to date with main, so this keeps auto-merge moving. A PR that
-// conflicts with main is left to its takeover (se issue pull --take). A PR
-// whose update fails is reported, and the ones after it are still updated.
-func (s Source) Refresh() ([]Refreshed, error) {
-	pulls, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls?base=main&state=open&per_page=100", s.Repo), true)
-	if err != nil {
+// Refresh merges origin's main into the branch of every open manifest that
+// has one on origin and no open PR into main (se issue keep keeps that one),
+// in a worktree of the checkout dir, never a rebase, and pushes it. A merge
+// that conflicts pushes nothing and is answered as such, for se fleet check's
+// stale manifest; a refresh that fails is reported, and the ones after it
+// are still run.
+func (s Source) Refresh(dir string) ([]Refreshed, error) {
+	var manifests []issue
+	var refs []ref
+	var pulls []openPull
+	if err := parallel([]func() error{
+		func() (err error) {
+			manifests, err = api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=100", s.Repo, ManifestLabel), true)
+			return err
+		},
+		func() (err error) {
+			refs, err = api[ref](s, fmt.Sprintf("repos/%s/git/matching-refs/heads/issue-", s.Repo), true)
+			return err
+		},
+		func() (err error) {
+			pulls, err = api[openPull](s, fmt.Sprintf("repos/%s/pulls?state=open&per_page=100", s.Repo), true)
+			return err
+		},
+	}); err != nil {
 		return nil, err
 	}
+	var ns []int
+	for _, m := range manifests {
+		if m.PullRequest == nil {
+			ns = append(ns, m.Number)
+		}
+	}
+	slices.Sort(ns)
 	var out []Refreshed
 	var failed []string
-	for _, p := range pulls {
-		if p.AutoMerge == nil {
-			continue
-		}
-		cmp, err := api[struct {
-			BehindBy int `json:"behind_by"`
-		}](s, fmt.Sprintf("repos/%s/compare/main...%s?per_page=1", s.Repo, p.Head.SHA), false)
-		if err != nil {
-			return out, err
-		}
-		if cmp[0].BehindBy == 0 {
-			continue
-		}
-		r := Refreshed{PR: p.Number, Branch: p.Head.Ref, Head: p.Head.SHA}
-		if p, err = s.mergeability(p); err != nil {
-			return out, err
-		}
-		if p.dirty() {
-			r.Did = "left to its takeover: it conflicts with main"
-			out = append(out, r)
-			continue
-		}
-		if err := s.update(&r); err != nil {
-			r.Failed = err.Error()
-			r.Did = "failed: " + r.Failed
-			failed = append(failed, fmt.Sprintf("PR #%d", r.PR))
+	for _, m := range refreshable(ns, refs, pulls) {
+		r := s.refreshOne(dir, m.n)
+		if r.Failed != "" {
+			failed = append(failed, r.Branch)
 		}
 		out = append(out, r)
 	}
 	if len(failed) > 0 {
-		return out, fmt.Errorf("could not bring %s up to date with main", strings.Join(failed, ", "))
+		return out, fmt.Errorf("could not refresh %s", strings.Join(failed, ", "))
 	}
 	return out, nil
 }
 
-// update merges main into r's branch, waits until GitHub shows the new head,
-// and starts CIWorkflow on the branch.
-func (s Source) update(r *Refreshed) error {
-	old := r.Head
-	if _, err := s.GitHub.Send("PUT", fmt.Sprintf("repos/%s/pulls/%d/update-branch", s.Repo, r.PR), github.F("expected_head_sha", old)); err != nil {
+// branchAt is a manifest and its branch's commit on origin.
+type branchAt struct {
+	n   int
+	sha string
+}
+
+// refreshable is the manifests of ns, in their order, whose branch is on
+// origin and has no open PR into main, each with its branch's commit.
+func refreshable(ns []int, refs []ref, pulls []openPull) []branchAt {
+	shas := map[string]string{}
+	for _, r := range refs {
+		shas[strings.TrimPrefix(r.Ref, "refs/heads/")] = r.Object.SHA
+	}
+	toMain := toMain(pulls)
+	var out []branchAt
+	for _, n := range ns {
+		b := Branch(n)
+		if _, open := toMain[b]; shas[b] != "" && !open {
+			out = append(out, branchAt{n, shas[b]})
+		}
+	}
+	return out
+}
+
+// refreshOne merges origin's main into manifest n's branch on origin, in a
+// worktree it removes after, and pushes the merge.
+func (s Source) refreshOne(dir string, n int) Refreshed {
+	r := Refreshed{Issue: n, Branch: Branch(n)}
+	if err := s.refreshIn(dir, &r); err != nil {
+		r.Failed = err.Error()
+		r.Did = "failed: " + r.Failed
+	}
+	return r
+}
+
+func (s Source) refreshIn(dir string, r *Refreshed) error {
+	b := r.Branch
+	if _, err := s.git(dir, "fetch", "-q", "origin", "main", "refs/heads/"+b+":refs/remotes/origin/"+b); err != nil {
 		return err
 	}
-	for k := 0; k < waits && r.Head == old; k++ {
-		s.sleep(pause, fmt.Sprintf("GitHub to show PR #%d's new head (ask %d of %d)", r.PR, k+1, waits))
-		got, err := api[openPull](s, fmt.Sprintf("repos/%s/pulls/%d", s.Repo, r.PR), false)
-		if err != nil {
+	if behind, err := s.behind(dir, "origin/"+b); err != nil || !behind {
+		r.Did = "up to date with main"
+		return err
+	}
+	wt := filepath.Join(dir, filepath.FromSlash(RefreshDir), b)
+	_, _ = s.git(dir, "worktree", "remove", "--force", wt)
+	if _, err := s.git(dir, "worktree", "add", "-q", "--detach", wt, "origin/"+b); err != nil {
+		return err
+	}
+	defer func() { _, _ = s.git(dir, "worktree", "remove", "--force", wt) }()
+	if _, err := s.git(wt, "merge", "-q", "--no-edit", "-m", "Merge origin/main into "+b+" (se fleet refresh)", "origin/main"); err != nil {
+		if unmerged, _ := s.git(wt, "ls-files", "--unmerged"); unmerged == "" {
 			return err
 		}
-		r.Head = got[0].Head.SHA
+		// A conflict in the battery's record alone is settled, as merge does.
+		if !s.settle(wt) {
+			r.Conflict = true
+			r.Did = fmt.Sprintf("conflicts with main, so nothing was pushed: merge origin/main into %s by hand (never rebase), as se issue land of #%d does", b, r.Issue)
+			return nil
+		}
 	}
-	if r.Head == old {
-		return fmt.Errorf("GitHub took the update, but PR #%d's head is still %s", r.PR, old)
+	if _, err := s.git(wt, "push", "-q", "origin", "HEAD:refs/heads/"+b); err != nil {
+		return err
 	}
-	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/actions/workflows/%s/dispatches", s.Repo, CIWorkflow), github.F("ref", r.Branch)); err != nil {
-		return fmt.Errorf("merged main into %s at %s, but could not start %s: %w", r.Branch, r.Head, CIWorkflow, err)
-	}
-	r.Did = fmt.Sprintf("merged main in at %s and started %s", r.Head, CIWorkflow)
+	r.Merged = true
+	r.Did = "merged main in and pushed"
 	return nil
 }

@@ -3,6 +3,8 @@ package issues
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +33,44 @@ func ParseBlockedBy(s string) ([]int, error) {
 		if !seen[n] {
 			seen[n] = true
 			out = append(out, n)
+		}
+	}
+	sort.Ints(out)
+	return out, nil
+}
+
+// mention is an issue a text names, "#12": not "o/r#12", another
+// repository's, nor "&#39;", an HTML entity.
+var mention = regexp.MustCompile(`(?:^|[^\w&/])#(\d+)\b`)
+
+// Mentions names, lowest first and once each, the issues text names as #N.
+func Mentions(text string) []int {
+	var out []int
+	for _, m := range mention.FindAllStringSubmatch(text, -1) {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 && !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// Unmerged names, lowest first, the open se issues among numbers: work that
+// is not on main yet, so an issue that names them is built on it unless it
+// waits for them. It reads the open fleet once, and nothing where numbers is
+// empty.
+func (s Source) Unmerged(numbers []int) ([]int, error) {
+	if len(numbers) == 0 {
+		return nil, nil
+	}
+	open, err := api[issue](s, fmt.Sprintf("repos/%s/issues?labels=%s&state=open&per_page=100", s.Repo, Label), true)
+	if err != nil {
+		return nil, err
+	}
+	var out []int
+	for _, i := range open {
+		if i.PullRequest == nil && slices.Contains(numbers, i.Number) {
+			out = append(out, i.Number)
 		}
 	}
 	sort.Ints(out)
@@ -145,7 +185,9 @@ func (s Source) Create(title, body string, parent int, blockedBy []int, labels .
 }
 
 // create is Create with the labels given, se among them. The body ends in
-// NewMark.
+// NewMark. There are no bare issues: one filed into no parent goes into the
+// open misc manifest (FileInto), unless it stands at the top by itself (a
+// manifest, a retro, an overhaul or an issue for a person).
 func (s Source) create(title, body string, parent int, blockedBy []int, labels []string) (made Issue, ready bool, err error) {
 	if err := titled(title); err != nil {
 		return Issue{}, false, err
@@ -153,6 +195,11 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 	ids, ready, err := s.lookup(blockedBy)
 	if err != nil {
 		return Issue{}, false, err
+	}
+	if parent == 0 && !atTop(labels) {
+		if parent, err = s.FileInto(); err != nil {
+			return Issue{}, false, err
+		}
 	}
 	if parent > 0 {
 		if _, err := s.ids([]int{parent}); err != nil {
@@ -172,10 +219,9 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 	if err := json.Unmarshal(out, &i); err != nil || i.Number == 0 {
 		return Issue{}, false, fmt.Errorf("gh api %s answered no issue: %v", path, err)
 	}
-	created := Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, id: i.ID}
+	created := Issue{Number: i.Number, Title: i.Title, Body: i.Body, URL: i.URL, id: i.ID, in: parent}
 	if parent > 0 {
-		path := fmt.Sprintf("repos/%s/issues/%d/sub_issues", s.Repo, parent)
-		if _, err := s.GitHub.Send("POST", path, github.Int("sub_issue_id", i.ID)); err != nil {
+		if err := s.subIssue(parent, i.ID); err != nil {
 			return created, false, fmt.Errorf("created #%d (%s), but making it a sub-issue of #%d: %w", i.Number, i.URL, parent, err)
 		}
 	}
@@ -183,6 +229,12 @@ func (s Source) create(title, body string, parent int, blockedBy []int, labels [
 		return created, false, fmt.Errorf("created #%d (%s), but %w", i.Number, i.URL, err)
 	}
 	return created, ready, nil
+}
+
+// subIssue makes the issue GitHub knows by id a sub-issue of parent.
+func (s Source) subIssue(parent int, id int64) error {
+	_, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/sub_issues", s.Repo, parent), github.Int("sub_issue_id", id))
+	return err
 }
 
 // titled refuses a title that is empty or only spaces.

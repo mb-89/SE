@@ -36,14 +36,25 @@ and hands nothing to the checkout's build.
 ## Adding a command
 
 A command is one file in `src/cmd/se` whose `init` calls `register`; the
-fields of `Command` in `src/cmd/se/commands.go` say what it declares. The help,
+fields of `Command` in `src/cmd/se/commands.go` say what it declares. Its
+`Details` are a list of sentences, one string literal each, joined at print:
+two changes to one command's help then merge per sentence, where one long
+line conflicted (#495). The `help-sentences` rule refuses a help string
+literal of more than one sentence, and `se rules --fix` splits one. The help,
 `/se ui` and the manifests are made from what registered, so nothing else
-changes.
+changes. One manifest, `src/cmd/se/help.md`, holds every command's help as
+`se help` gives it: `se manifest --write` rewrites it, and the PR's diff shows
+what a change to the registry did to the help (#517).
 
 ## Checks
 
 `sh ./tests/check.sh` is the one definition of green; the pre-push hook and CI
-run it, and it names each step it runs. SE's own rules are one file each in
+run it, and it names each step it runs. Once it passed, it records the tree
+it ran over (HEAD's tree without the record, of a clean worktree) in
+`tests/passed`, which is the only tree `se issue land` pushes; land commits
+the record with the work, and CI trusts a commit whose record names its own
+tree instead of running the battery again (see
+[spec/coordination.md](coordination.md#merging-into-main)). SE's own rules are one file each in
 `src/internal/rules`, run by `se rules`; where a rule can apply the mechanical
 part of its finding (the `fast-test` rule's `t.Parallel()` as a test's first
 statement), `se rules --fix` applies it, so no agent does it by hand. Every
@@ -73,9 +84,10 @@ PATH line.
 ## The gate
 
 What keeps an unchecked change off main is CI, not the box. main's ruleset
-requires the `ci` workflow's `check` job, which runs `sh ./tests/check.sh`,
-and makes it strict: a PR merges only once that check passed on a head that is
-up to date with main ([spec/coordination.md](coordination.md#up-to-date-with-main)).
+requires the `ci` workflow's `check` job, which runs `sh ./tests/check.sh`:
+a PR merges once that check passed on its head, which need not be up to date
+with main. The same job runs again on every push to main, and a red main is
+the fleet's first job ([spec/coordination.md](coordination.md#merging-into-main)).
 
 The pre-push hook and `.claude/hooks/no-skip.sh` only save a round trip. The
 hook runs check.sh before a push leaves the box; `no-skip.sh` refuses a Bash

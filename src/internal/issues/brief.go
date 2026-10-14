@@ -3,7 +3,6 @@ package issues
 import (
 	"encoding/base64"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/mb-89/SE/src/internal/io/github"
@@ -54,6 +53,17 @@ type Check struct {
 	URL        string `json:"html_url"`
 }
 
+// checkRuns reads the last run of each check on commit sha, never nil.
+func (s Source) checkRuns(sha string) ([]Check, error) {
+	got, err := api[struct {
+		Runs []Check `json:"check_runs"`
+	}](s, fmt.Sprintf("repos/%s/commits/%s/check-runs?per_page=100", s.Repo, sha), false)
+	if err != nil {
+		return nil, err
+	}
+	return append([]Check{}, got[0].Runs...), nil
+}
+
 // Rereview is what a re-review is limited to: the earlier blockers, and the
 // code changed since the review that found them.
 type Rereview struct {
@@ -86,7 +96,7 @@ func (s Source) Brief(n int, claims bool) (Brief, error) {
 	if g.PullRequest != nil {
 		return Brief{}, fmt.Errorf("#%d is a pull request, not an issue", n)
 	}
-	b := Brief{Gate: BriefIssue{Number: g.Number, Title: g.Title, Body: g.Body, State: g.State, Reason: g.Reason}, Tree: []BriefIssue{}, CI: []Check{}}
+	b := Brief{Gate: BriefIssue{Number: g.Number, Title: g.Title, Body: Shown(g.Body), State: g.State, Reason: g.Reason}, Tree: []BriefIssue{}, CI: []Check{}}
 	if err := s.briefTree(n, &b.Tree); err != nil {
 		return Brief{}, err
 	}
@@ -97,13 +107,9 @@ func (s Source) Brief(n int, claims bool) (Brief, error) {
 		return Brief{}, err
 	}
 	b.Commit = head[0].SHA
-	runs, err := api[struct {
-		Runs []Check `json:"check_runs"`
-	}](s, fmt.Sprintf("repos/%s/commits/%s/check-runs?per_page=100", s.Repo, b.Commit), false)
-	if err != nil {
+	if b.CI, err = s.checkRuns(b.Commit); err != nil {
 		return Brief{}, err
 	}
-	b.CI = append(b.CI, runs[0].Runs...)
 	if b.Principles, err = s.file(PrinciplesPath, b.Commit); err != nil {
 		return Brief{}, err
 	}
@@ -132,7 +138,7 @@ func (s Source) briefTree(n int, out *[]BriefIssue) error {
 		return err
 	}
 	for _, c := range subs {
-		*out = append(*out, BriefIssue{Number: c.Number, Title: c.Title, Body: c.Body, State: c.State, Reason: c.Reason, Above: n})
+		*out = append(*out, BriefIssue{Number: c.Number, Title: c.Title, Body: Shown(c.Body), State: c.State, Reason: c.Reason, Above: n})
 		if c.SubIssues != nil && c.SubIssues.Total > 0 {
 			if err := s.briefTree(c.Number, out); err != nil {
 				return err
@@ -164,9 +170,6 @@ func (s Source) file(path, commit string) (string, error) {
 	return string(data), nil
 }
 
-// htmlComment is a mark se leaves in a comment, which is no part of its account.
-var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
-
 // claims reads the workers' accounts of the tree's closed leaves: each one's
 // merged PR, from its branch issue-<n>, and its comments.
 func (s Source) claims(tree []BriefIssue) ([]Account, error) {
@@ -194,7 +197,7 @@ func (s Source) claims(tree []BriefIssue) ([]Account, error) {
 		c := Account{Issue: i.Number}
 		for _, p := range pulls {
 			if p.Head.Ref == Branch(i.Number) && p.Merged != nil {
-				c.PR, c.URL, c.Body = p.Number, p.URL, p.Body
+				c.PR, c.URL, c.Body = p.Number, p.URL, Shown(p.Body)
 			}
 		}
 		comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, i.Number), true)
@@ -202,7 +205,7 @@ func (s Source) claims(tree []BriefIssue) ([]Account, error) {
 			return nil, err
 		}
 		for _, m := range comments {
-			if body := strings.TrimSpace(htmlComment.ReplaceAllString(m.Body, "")); body != "" {
+			if body := Shown(m.Body); body != "" {
 				c.Comments = append(c.Comments, body)
 			}
 		}
@@ -214,7 +217,7 @@ func (s Source) claims(tree []BriefIssue) ([]Account, error) {
 // quote sets a text another wrote apart as a Markdown quote, so its headings
 // stay inside it.
 func quote(text string) string {
-	text = strings.TrimSpace(text)
+	text = Shown(text)
 	if text == "" {
 		return "> (empty)"
 	}

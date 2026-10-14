@@ -1,16 +1,15 @@
-# Merges main into every auto-merge PR behind it and reruns its CI, with the
-# repository's own token, since main merges only PRs up to date with it
-# (spec/coordination.md).
+# Merges main into each open manifest's branch whenever main moves, so its
+# leaves meet main's moves once, through the manifest, not each as its own
+# conflict (spec/coordination.md).
 name: refresh
 on:
   push:
     branches: [main]
-  schedule:
-    - cron: "41 * * * *"
+  workflow_dispatch:
 permissions:
-  actions: write
   contents: write
-  pull-requests: write
+  issues: read
+  pull-requests: read
 concurrency:
   group: refresh
 jobs:
@@ -20,12 +19,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+          # The merge needs the history main and each branch share.
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: src/go.mod
           cache-dependency-path: src/go.sum
       - run: sh src/build.sh se
-      # Its output names every PR it updated, and the head it started CI on.
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      # Its output names every manifest it merged main into, and each that conflicts.
       - run: ./se fleet refresh --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}

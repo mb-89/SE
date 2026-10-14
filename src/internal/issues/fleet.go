@@ -2,14 +2,11 @@ package issues
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/mb-89/SE/src/internal/io/github"
 )
 
 // The kinds of finding se fleet check lists, in the order it lists them and
@@ -20,19 +17,22 @@ const (
 	RedPR           = "red PR"
 	GreenUnmerged   = "green but unmerged"
 	NoPR            = "no PR"
+	StaleManifest   = "stale manifest"
 	LeftoverClaim   = "leftover claim"
 	ImpossibleBlock = "impossible block"
+	BareIssue       = "bare issue"
 	WaitingOnPerson = "waiting on a person"
 )
 
 // Kinds is every kind of finding, in the order se fleet check lists them.
-var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, LeftoverClaim, ImpossibleBlock, WaitingOnPerson}
+var Kinds = []string{StalledRoot, ConflictedPR, RedPR, GreenUnmerged, NoPR, StaleManifest, LeftoverClaim, ImpossibleBlock, BareIssue, WaitingOnPerson}
 
 // Grace is how long the prune workflow has to delete a leftover claim of a
 // closed issue before se fleet fix reports it.
 var Grace = 24 * time.Hour
 
-// Quiet is how long claimed work goes without a push before it is not moving.
+// Quiet is how long claimed work goes without a push or a takeover before se
+// fleet check finds it not moving, by the one rule Source.quiet.
 var Quiet = time.Hour
 
 // Finding is one thing se fleet check found broken.
@@ -62,6 +62,8 @@ type Finding struct {
 	closed   time.Time
 	// key names the finding in the record its fix leaves.
 	key string
+	// id is GitHub's id of a bare issue, which the sub-issues link takes.
+	id int64
 }
 
 // cause is the kind of the finding on the issue itself.
@@ -91,13 +93,15 @@ func (f *Finding) setRemedy() {
 	case f.cause() == GreenUnmerged && !f.autoMerge:
 		f.Remedy = "se fleet fix turns auto-merge on"
 	case f.prunable:
-		f.Remedy = fmt.Sprintf("the prune workflow deletes %s; se fleet fix reports it only if it is still there a day after #%d closed", Branch(f.Issue), f.Issue)
+		f.Remedy = fmt.Sprintf("the prune workflow deletes %s; se fleet check reports it if it is still there a day after #%d closed", Branch(f.Issue), f.Issue)
+	case f.Kind == BareIssue:
+		f.Remedy = "se fleet fix files it into the open misc manifest"
+	case f.Kind == StaleManifest:
+		f.Remedy = fmt.Sprintf("se fleet fix merges origin/main into %s, as se fleet refresh does; where it conflicts, merge it by hand (never rebase)", Branch(f.Issue))
 	case f.spent:
 		f.Remedy = "se fleet fix deletes " + Branch(f.Issue) + ": main holds all its commits"
-	case f.judgment || f.cause() == GreenUnmerged:
-		f.Remedy = "se fleet fix reports it as an " + PersonLabel + " issue"
 	default:
-		f.Remedy = "se fleet fix reports it as an se issue"
+		f.Remedy = "none se applies by itself; se fleet check reports it"
 	}
 }
 
@@ -138,13 +142,15 @@ func (s Source) CheckFanOut(fire func() Shot) ([]Finding, string, error) {
 
 // check is Check on a survey already read.
 func (s Source) check(all []Status, t tree) ([]Finding, error) {
-	var claims, out []Finding
+	var claims, stale, out []Finding
 	if err := parallel([]func() error{
 		func() (err error) { claims, err = s.claimFindings(all, t); return err },
+		func() (err error) { stale, err = s.staleManifests(t); return err },
 		func() (err error) { out, err = s.leftovers(t); return err },
 	}); err != nil {
 		return nil, err
 	}
+	out = append(out, stale...)
 	deps := t.deps
 	out = append(out, s.impossible(t)...)
 
@@ -202,6 +208,17 @@ func (s Source) check(all []Status, t tree) ([]Finding, error) {
 			out = append(out, Finding{
 				Kind: WaitingOnPerson, Issue: n, Holds: holds[n],
 				What: fmt.Sprintf("#%d waits for a person (%s)%s", n, PersonLabel, holding(holds[n])),
+			})
+		}
+	}
+	// An issue filed by an se that predates manifests stands in none, and no
+	// box takes it: it goes into the open misc manifest. Bare is set only on
+	// an unclaimed issue at the top that nothing holds.
+	for _, st := range all {
+		if st.Bare == BareWhy {
+			out = append(out, Finding{
+				Kind: BareIssue, Issue: st.Number, id: t.byNum[st.Number].ID, key: "bare-issue",
+				What: fmt.Sprintf("#%d stands in no manifest, and boxes take only manifests", st.Number),
 			})
 		}
 	}
@@ -281,11 +298,13 @@ var failed = map[string]bool{"failure": true, "timed_out": true, "cancelled": tr
 // where open is true, and whose branch is at sha; nil where its work is
 // moving, or a takeover of it is. What t holds already is not read again.
 func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tree) (*Finding, error) {
-	n, b, last := st.Number, Branch(st.Number), st.pushed
-	var err error
-	quiet := s.now().Sub(last) > Quiet
-	since := "no push since " + last.UTC().Format(time.RFC3339)
-	if last.IsZero() {
+	n, b, pushed := st.Number, Branch(st.Number), st.pushed
+	quiet, _, m, err := s.quiet(n, pushed, Quiet)
+	if err != nil {
+		return nil, err
+	}
+	since := "no push since " + pushed.UTC().Format(time.RFC3339)
+	if pushed.IsZero() {
 		since = "no push on record"
 	}
 	var f *Finding
@@ -345,9 +364,12 @@ func (s Source) claimFinding(st Status, p openPull, open bool, sha string, t tre
 	}
 	f.Issue = n
 	if f.takeover() {
-		m, err := s.marks(n)
-		if err != nil {
-			return nil, err
+		if m == nil {
+			got, err := s.marks(n)
+			if err != nil {
+				return nil, err
+			}
+			m = &got
 		}
 		if m.takeovers > 0 && m.head == f.head && s.now().Sub(m.lastTakeover) < Quiet {
 			return nil, nil
@@ -469,6 +491,38 @@ func (s Source) leftovers(t tree) ([]Finding, error) {
 	return found, err
 }
 
+// staleManifests is the open manifests whose branch, on origin with no open
+// PR into main, lacks commits of main: se fleet refresh had not merged them
+// in, or the merge conflicts.
+func (s Source) staleManifests(t tree) ([]Finding, error) {
+	var ns []int
+	for _, n := range t.numbers() {
+		if t.byNum[n].labelled(ManifestLabel) {
+			ns = append(ns, n)
+		}
+	}
+	ms := refreshable(ns, t.refs, t.pulls)
+	found, err := each(len(ms), func(k int) (*Finding, error) {
+		cmp, err := api[struct {
+			AheadBy int `json:"ahead_by"`
+		}](s, fmt.Sprintf("repos/%s/compare/%s...main?per_page=1", s.Repo, ms[k].sha), false)
+		if err != nil || cmp[0].AheadBy == 0 {
+			return nil, err
+		}
+		return &Finding{
+			Kind: StaleManifest, Issue: ms[k].n, head: ms[k].sha,
+			What: fmt.Sprintf("%s lacks %d commit(s) of main, which its leaves would each meet on their own", Branch(ms[k].n), cmp[0].AheadBy),
+		}, nil
+	})
+	var out []Finding
+	for _, f := range found {
+		if f != nil {
+			out = append(out, *f)
+		}
+	}
+	return out, err
+}
+
 // impossible is the blocks no box can ever lift: a blocker closed as not
 // planned, an open blocker no box works, and blockers in a cycle.
 func (s Source) impossible(t tree) []Finding {
@@ -538,29 +592,20 @@ type Fixed struct {
 	Finding
 	// Did says what was done, in a few words.
 	Did string `json:"did"`
-	// Made is the issue the fix created, where it created one.
-	Made int `json:"made,omitempty"`
-	// Ready is true for a made issue a box may take: no se-person.
-	Ready bool `json:"ready,omitempty"`
-	// Take is true where the fix is this box's takeover, by its Remedy.
+	// Take is true where the fix is a takeover, by its Remedy.
 	Take bool `json:"take,omitempty"`
 	// Failed is why the remedy failed, where it did; Did says so too.
 	Failed string `json:"failed,omitempty"`
 }
 
-// fleetMark records a fix on the finding's issue: the finding's key and the
-// issue it made, or 0.
-var fleetMark = regexp.MustCompile(`<!-- se:fleet (\S+) (\d+) -->`)
-
 // Fix applies, in order, the remedy of every finding that needs no checkout:
-// auto-merge goes on where it is off, a spent leftover branch is deleted, and
-// a finding with no other remedy
-// becomes an issue, labelled se-person where it is a judgment. A takeover is
-// left to the box, which runs its remedy. Each fix is recorded on the
-// finding's issue; a finding that is back after its fix goes to a person, and
-// one that is reported already, its issue still open, is left as it is. A
-// leftover branch is deleted by a push from the checkout dir, the transport
-// se issue land pushes through. A remedy that fails is reported in its Fixed,
+// auto-merge goes on where it is off, a stale manifest's branch takes main
+// in (refreshOne), a spent leftover branch is deleted, by
+// a push from the checkout dir, the transport se issue land pushes through,
+// and a bare issue is filed into the open misc manifest by a sub-issue link.
+// Every other finding is reported, never filed: an issue is work, not a
+// report (principle 12), and Fix writes no issue and no comment. A takeover
+// is named for the next take. A remedy that fails is reported in its Fixed,
 // and the remedies after it are still applied.
 func (s Source) Fix(dir string, findings []Finding) []Fixed {
 	var out []Fixed
@@ -570,58 +615,29 @@ func (s Source) Fix(dir string, findings []Finding) []Fixed {
 		case f.Kind == WaitingOnPerson:
 			x.Did = "reported; it waits for a person"
 		case f.takeover():
-			x.Did, x.Take = "left to this box: "+f.Remedy, true
+			x.Did, x.Take = "left to the next take: "+f.Remedy, true
+		case f.Kind == StaleManifest:
+			r := s.refreshOne(dir, f.Issue)
+			x.Did, x.Failed = r.Did, r.Failed
 		case f.prunable && s.now().Sub(f.closed) < Grace:
 			x.Did = fmt.Sprintf("left to the prune workflow until a day after #%d closed", f.Issue)
 		case f.prunable:
 			x.What += ", and is still there a day after it closed: the prune workflow did not delete it"
-			s.apply(dir, &x)
+			x.Did = "reported; the prune workflow did not delete it"
 		default:
-			s.apply(dir, &x)
+			if err := s.fix(dir, &x); err != nil {
+				x.Failed = err.Error()
+				x.Did = "failed: " + x.Failed
+			}
 		}
 		out = append(out, x)
 	}
 	return out
 }
 
-// apply runs x's remedy and, where it fails, records why in x.
-func (s Source) apply(dir string, x *Fixed) {
-	if err := s.fix(dir, x); err != nil {
-		x.Failed = err.Error()
-		x.Did = "failed: " + x.Failed
-	}
-}
-
 func (s Source) fix(dir string, x *Fixed) error {
 	f := x.Finding
-	comments, err := api[comment](s, fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", s.Repo, f.Issue), true)
-	if err != nil {
-		return err
-	}
-	fixed, made := false, 0
-	for _, c := range comments {
-		for _, m := range fleetMark.FindAllStringSubmatch(c.Body, -1) {
-			if m[1] == f.key {
-				fixed, made = true, atoi(m[2])
-			}
-		}
-	}
-	if fixed && made > 0 {
-		got, err := api[issue](s, fmt.Sprintf("repos/%s/issues/%d", s.Repo, made), false)
-		if err != nil {
-			return err
-		}
-		if got[0].State == "open" {
-			x.Did, x.Made = fmt.Sprintf("reported already as #%d, still open", made), made
-			return nil
-		}
-	}
 	switch {
-	case fixed:
-		if x.Made, err = s.report(f, true); err != nil {
-			return err
-		}
-		x.Did = fmt.Sprintf("it is back after a fix, so it went to a person as #%d", x.Made)
 	case f.cause() == GreenUnmerged && !f.autoMerge:
 		merged, err := s.autoMerge(pull{Number: f.PR, NodeID: f.nodeID, URL: f.url})
 		if err != nil {
@@ -636,38 +652,19 @@ func (s Source) fix(dir string, x *Fixed) error {
 			return fmt.Errorf("deleting %s: %w", Branch(f.Issue), err)
 		}
 		x.Did = fmt.Sprintf("deleted %s at %s, which main holds whole", Branch(f.Issue), f.head)
-	default:
-		person := f.judgment || f.cause() == GreenUnmerged
-		if x.Made, err = s.report(f, person); err != nil {
+	case f.Kind == BareIssue:
+		m, err := s.FileInto()
+		if err != nil {
 			return err
 		}
-		x.Ready = !person
-		x.Did = fmt.Sprintf("reported it as #%d", x.Made)
-		if person {
-			x.Did = fmt.Sprintf("reported it to a person as #%d", x.Made)
+		if err := s.subIssue(m, f.id); err != nil {
+			return fmt.Errorf("filing #%d into misc manifest #%d: %w", f.Issue, m, err)
 		}
-	}
-	body := fmt.Sprintf("se fleet check found: %s.\n\nse fleet fix %s.\n\n<!-- se:fleet %s %d -->", f.What, x.Did, f.key, x.Made)
-	if _, err := s.GitHub.Send("POST", fmt.Sprintf("repos/%s/issues/%d/comments", s.Repo, f.Issue), github.F("body", body)); err != nil {
-		return fmt.Errorf("recording the fix on #%d: %w", f.Issue, err)
+		x.Did = fmt.Sprintf("filed it into misc manifest #%d", m)
+	default:
+		x.Did = "reported; it has no remedy se applies by itself"
 	}
 	return nil
-}
-
-// report creates the issue a finding becomes; for a person, through ForPerson.
-func (s Source) report(f Finding, person bool) (int, error) {
-	title := strings.ToUpper(f.cause()[:1]) + f.cause()[1:] + ": " + f.What
-	if person {
-		body := fmt.Sprintf("Only a person can decide this one: it was fixed once and is back, or the fix is a judgment.\n\nse fleet check found, on #%d: %s.", f.Issue, f.What)
-		made, err := s.ForPerson(title, body, 0, nil)
-		return made.Number, err
-	}
-	body := fmt.Sprintf("se fleet check found, on #%d: %s.\n\nIt has no remedy a box applies by itself, so it is this issue.", f.Issue, f.What)
-	made, _, err := s.create(title, body, 0, nil, []string{Label})
-	if err != nil {
-		return 0, err
-	}
-	return made.Number, nil
 }
 
 func atoi(s string) int {
@@ -677,8 +674,7 @@ func atoi(s string) int {
 
 // takeOverClaim takes over claimed leaf st, named by se issue pull --take N,
 // where se fleet check finds it stuck: its branch is checked out as it stands.
-// A takeover labels it se-final; a final issue stuck waits on an issue for a
-// person instead.
+// A takeover labels it se-final; a final issue stuck is taken over again.
 func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok bool, err error) {
 	fs, err := s.claimFindings([]Status{st}, t)
 	if err != nil {
@@ -693,16 +689,12 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 		return Issue{}, false, err
 	}
 	k := m.takeovers + 1
-	if st.Final {
-		reason := fmt.Sprintf("Stuck on its final attempt (labelled %s): %s.", FinalLabel, f.What)
-		held, err := s.hold(st.Issue, reason)
-		if err != nil {
-			return Issue{}, false, err
-		}
-		return Issue{}, false, fmt.Errorf("#%d is final and stuck (%s), so it waits on #%d, an issue for a person", st.Number, f.What, held.Number)
-	}
+	took = st.Issue
+	took.Base = baseOf(dir, s, t, st.Number)
+	// A conflict is no failure: it never makes an issue final.
+	conflict := f.Kind == ConflictedPR
 	heads := fmt.Sprintf("\n\n<!-- se:takeover %d -->\n<!-- se:takeover-head %s -->", k, f.head)
-	body := fmt.Sprintf("Taken over: %s at %s. This box merges main into %s, makes it green and lands it again.", f.What, f.head, Branch(st.Number)) + heads + s.boxLine()
+	body := fmt.Sprintf("Taken over: %s at %s. This box merges %s into %s, makes it green and lands it again.", f.What, f.head, took.Onto(), Branch(st.Number)) + heads + s.boxLine()
 	won, err := s.markTakeover(st.Number, k, body)
 	if err != nil {
 		return Issue{}, false, err
@@ -710,13 +702,14 @@ func (s Source) takeOverClaim(dir string, st Status, t tree) (took Issue, ok boo
 	if !won {
 		return Issue{}, false, fmt.Errorf("#%d was taken over by another box just now", st.Number)
 	}
-	if err := s.finalize(st.Number); err != nil {
-		return Issue{}, false, err
+	if !conflict {
+		if err := s.finalize(st.Number); err != nil {
+			return Issue{}, false, err
+		}
 	}
 	if err := s.pickUp(dir, st.Number); err != nil {
 		return Issue{}, false, err
 	}
-	took = st.Issue
 	took.Takeover = &Takeover{PR: f.PR, URL: f.url, Count: k, Stale: f.What}
 	return took, true, nil
 }

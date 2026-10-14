@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/guidance"
-	"github.com/mb-89/SE/src/internal/index"
 	"github.com/mb-89/SE/src/internal/io/clock"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/github"
@@ -541,7 +541,7 @@ func TestTheHelpRendersTheConfigValues(t *testing.T) {
 		"overhaul read": {fmt.Sprintf("last %d retros' metrics (issues/config/overhaul-cadence)", cfg.OverhaulCadence)},
 	} {
 		for _, w := range want {
-			if !strings.Contains(commands[name].Details, w) {
+			if !strings.Contains(strings.Join(commands[name].Details, " "), w) {
 				t.Errorf("se help %s does not render %q from the config", name, w)
 			}
 		}

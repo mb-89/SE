@@ -32,8 +32,11 @@
   question: Which test or check fails without this change?
   hint: The test's name, or the check and what it catches.
 - key: left
-  question: What is left undone, and where did it go? (issue number, or "nothing")
-  hint: An issue number for each piece, or "nothing".
+  question: What is left undone, and where did it go? (a supersede, the open points below, or "nothing")
+  hint: Each piece, and where it went; a box opens no issue for it.
+- key: open
+  question: What open points does the work leave, for the retro to turn into work? (a list, or "none")
+  hint: One line each, the point and where it belongs; the retro files them, never the box.
 - key: doubt
   question: What are you unsure about in what you shipped?
   hint: The part you would review first.

@@ -18,7 +18,13 @@ func init() {
 		Usage:   "retro new (--field TEXT | --no-field | --unattended) [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "start a retro over everything closed since the last one",
-		Details: "create a retro: an se issue labelled se-retro, whose window is everything closed since the last retro closed, and fire the routine so a box takes it at once. A person starts it with --field TEXT, their field feedback, which goes into the issue (the agent se:retro passes it on), or --no-field. --unattended never asks. Either way its box creates the findings' issues, those for a person where controversial, and closes it: a retro never waits. spec/retro.md has the rules.",
+		Details: []string{
+			"create a retro: an se issue labelled se-retro, whose window is everything closed since the last retro closed, and fire the routine so a box takes it at once.",
+			"A person starts it with --field TEXT, their field feedback, which goes into the issue (the agent se:retro passes it on), or --no-field.",
+			"--unattended never asks.",
+			"Either way its box creates the findings' issues, those for a person where controversial, and closes it: a retro never waits.",
+			"spec/retro.md has the rules.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "retro new")
@@ -65,13 +71,19 @@ func init() {
 		Usage:   "retro collect N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "read a retro's window from GitHub and write its report draft",
-		Details: "read retro N's window from GitHub (everything closed since the last retro closed) and write the report draft to FILE (default: ../retro-N.md beside the workspace): the rule checks, the counts, the metrics against the previous retros, how the previous retro's findings fared, the scripts added under src/scripts/, and the matrix of every closed issue × every landing question. Where a report is already posted on N (a retro from before retros stopped waiting for the owner), it writes that one instead, to be filed as it stands.",
+		Details: []string{
+			"read retro N's window from GitHub (everything closed since the last retro closed) and write the report draft to FILE (default: ../retro-N.md beside the workspace): the rule checks, the counts, the metrics against the previous retros, how the previous retro's findings fared, the scripts added under src/scripts/, and the matrix of every closed issue × every landing question.",
+			"Where a report is already posted on N (a retro from before retros stopped waiting for the owner), it writes that one instead, to be filed as it stands.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "retro collect")
 			out := fs.String("out", "", "where to write the draft, a `FILE` (default: ../retro-N.md beside the workspace)")
 			n, err := numbered(c, fs, "retro collect")
 			if err != nil {
+				return Reply{}, err
+			}
+			if err := staleSE(&c.World, "its draft would count the window by the rules of an se main has moved past"); err != nil {
 				return Reply{}, err
 			}
 			path := draftPath(c, *out, "retro", n)
@@ -118,13 +130,21 @@ func init() {
 		Usage:   "retro report N [--draft FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "file a judged report: create its issues and close it",
-		Details: "file retro N's report from its judged draft FILE (default: ../retro-N.md beside the workspace). It refuses a judgment that is not complete. It gets one se issue per finding, one for a person (se-person) where it is controversial, then the report as its closing comment, and closes: it never waits for the owner. Its claim issue-N goes.",
+		Details: []string{
+			"file retro N's report from its judged draft FILE (default: ../retro-N.md beside the workspace).",
+			"It refuses a judgment that is not complete.",
+			"It gets one se issue per finding, one for a person (se-person) where it is controversial, then the report as its closing comment, and closes: it never waits for the owner.",
+			"Its claim issue-N goes.",
+		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "retro report")
 			file := fs.String("draft", "", "the judged draft, a `FILE` (default: ../retro-N.md beside the workspace)")
 			n, err := numbered(c, fs, "retro report")
 			if err != nil {
+				return Reply{}, err
+			}
+			if err := staleSE(&c.World, "it would file and store the window's numbers by the rules of an se main has moved past"); err != nil {
 				return Reply{}, err
 			}
 			data, err := c.Disk.ReadFile(draftPath(c, *file, "retro", n))
@@ -151,6 +171,9 @@ func init() {
 				return Reply{Text: string(data)}, err
 			}
 			text := fmt.Sprintf("Created %d issue(s) from the retro #%d's findings, %d of them for a person: %s. The report is its closing comment, and it is closed.", len(filed.Issues), n, len(filed.Person), numbers(filed.Issues))
+			if filed.Manifest > 0 {
+				text += fmt.Sprintf(" Those not for a person are sub-issues of the manifest #%d, all %s.", filed.Manifest, issues.FinalLabel)
+			}
 			if filed.Left != "" {
 				text += "\n" + filed.Left + "."
 			}

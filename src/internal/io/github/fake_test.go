@@ -167,23 +167,6 @@ func TestADeletedIssueIsGoneAndItsNumberIsNeverGivenAgain(t *testing.T) {
 	}
 }
 
-func TestTheFakeTakesABranchUpdateAndAWorkflowDispatch(t *testing.T) {
-	t.Parallel()
-	f := seeded(t, map[string]string{"repos/o/r/pulls/10": `{"number":10,"state":"open","head":{"ref":"issue-1","sha":"a1"}}`})
-	if _, err := f.Send("PUT", "repos/o/r/pulls/10/update-branch", github.F("expected_head_sha", "a0")); github.Status(err) != 422 {
-		t.Fatalf("an update from an old head: %v", err)
-	}
-	if _, err := f.Send("PUT", "repos/o/r/pulls/10/update-branch", github.F("expected_head_sha", "a1")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Send("POST", "repos/o/r/actions/workflows/ci.yml/dispatches", github.F("ref", "issue-1")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Send("POST", "repos/o/r/actions/workflows/ci.yml/dispatches"); github.Status(err) != 422 {
-		t.Fatalf("a dispatch without a ref: %v", err)
-	}
-}
-
 func TestTheFakeListsTheRepositorysCommentsSinceATimeByPage(t *testing.T) {
 	t.Parallel()
 	f := seeded(t, map[string]string{

@@ -34,7 +34,7 @@ func TestIssuePullAnswersFromTheDaemonsWarmSnapshot(t *testing.T) {
 	ws := "/ws"
 	kept := warmDaemon(t, ws, gh)
 	<-kept
-	cold := "#3 three\nu3\n\ndo it\n\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n\n0 retros closed and no overhaul has closed yet; an overhaul is due at 5.\n"
+	cold := "#3 three\nu3\nThe lowest ready issue at the top, a parent: a take coordinates its tree.\n#3 is a parent: it holds no work. Its agent, se:coordinator, is the box itself: coordinate its tree with se issue pull --in 3 --take\n1 se issue closed and no retro has closed yet; a retro is due at 10.\n0 retros closed and no overhaul has closed yet; an overhaul is due at 5.\n"
 	worldOf(t).GitHub = offline{}
 	code, out, errs := se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws)
 	if code != 0 || out != cold {
@@ -46,7 +46,7 @@ func TestIssuePullAnswersFromTheDaemonsWarmSnapshot(t *testing.T) {
 	}
 	worldOf(t).Clock.(*clock.Fake).Advance(3 * time.Minute)
 	code, out, errs = se(t, "issue", "pull", "--repo", "o/r", "--workspace", ws)
-	if want := strings.TrimRight(cold, "\n") + "\n\nAnswered from the daemon's snapshot of GitHub, 3m0s old.\n"; code != 0 || out != want {
+	if want := strings.TrimRight(cold, "\n") + "\nAnswered from the daemon's snapshot of GitHub, 3m0s old.\n"; code != 0 || out != want {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
 	// A command that writes to GitHub tells the daemon, which reads again at once.

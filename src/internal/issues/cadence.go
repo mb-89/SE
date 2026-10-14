@@ -2,6 +2,7 @@ package issues
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/mb-89/SE/src/internal/io/github"
 )
@@ -9,7 +10,10 @@ import (
 // RetroCadence is the built-in value of issues/config/retro-cadence: how
 // many se issues close between two retros: at this many
 // closed since the last retro closed, se issue pull --take starts an
-// unattended one and takes it before all other work (spec/retro.md).
+// unattended one and takes it before all other work (spec/retro.md). A final
+// issue (se-final: what a retro, a review or an overhaul filed, a supersede's
+// successor, a takeover's last attempt) is not counted, so retros do not feed
+// themselves.
 const RetroCadence = 10
 
 // OverhaulCadence is the built-in value of issues/config/overhaul-cadence:
@@ -32,7 +36,7 @@ type cadenceRule struct {
 }
 
 var (
-	retroRule    = cadenceRule{"retro", "a", RetroLabel, Label, "se issue", []string{RetroLabel, OverhaulLabel}, func(c Settings) int { return c.RetroCadence }}
+	retroRule    = cadenceRule{"retro", "a", RetroLabel, Label, "se issue", []string{RetroLabel, OverhaulLabel, FinalLabel}, func(c Settings) int { return c.RetroCadence }}
 	overhaulRule = cadenceRule{"overhaul", "an", OverhaulLabel, RetroLabel, "retro", nil, func(c Settings) int { return c.OverhaulCadence }}
 )
 
@@ -43,8 +47,8 @@ type Cadence struct {
 	// Every is the cadence: at this many closed, a run is due.
 	Every int `json:"every"`
 	// Closed counts the issues closed since the last run closed (se issues,
-	// retros and overhauls not counted, for a retro; retros, for an
-	// overhaul); with no run closed yet, the whole history.
+	// retros, overhauls and final issues not counted, for a retro; retros,
+	// for an overhaul); with no run closed yet, the whole history.
 	Closed int `json:"closed"`
 	// Previous is the last closed run; 0 where none has closed.
 	Previous int `json:"previous,omitempty"`
@@ -84,6 +88,33 @@ func (c Cadence) Line() string {
 	default:
 		return fmt.Sprintf("%s; %s %s is due at %d.", head, r.article, r.kind, c.Every)
 	}
+}
+
+// Brief says where the cadence stands in a few words, for a line that holds
+// both cadences: "retro at 3 of 10", "retro due (10 of 10)", "retro #7 open".
+func (c Cadence) Brief() string {
+	kind := c.rule().kind
+	switch {
+	case c.Open != 0:
+		return fmt.Sprintf("%s #%d open", kind, c.Open)
+	case c.Due():
+		return fmt.Sprintf("%s due (%d of %d)", kind, c.Closed, c.Every)
+	default:
+		return fmt.Sprintf("%s at %d of %d", kind, c.Closed, c.Every)
+	}
+}
+
+// Briefly is where the cadences stand, in one line: "Cadence: retro at 3 of
+// 10; overhaul at 1 of 5."; "" for none.
+func Briefly(cads []Cadence) string {
+	if len(cads) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, c := range cads {
+		parts = append(parts, c.Brief())
+	}
+	return "Cadence: " + strings.Join(parts, "; ") + "."
 }
 
 // Cadence reads where the retro cadence stands from GitHub.
