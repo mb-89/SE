@@ -54,10 +54,13 @@ A module is one Go package that declares, by **local name** only:
 | **config** | its keys, each with a type, a built-in value and one help line. A key is an input like any other, under `<instance>/config/<key>`; the module never learns where the value came from |
 | **commands** | the functions a person or agent calls, in [Commands and help](#commands-and-help) |
 | **requests** | for an I/O module only: the verbs it accepts from others, in [I/O modules and compute modules](#io-modules-and-compute-modules) |
+| **the I/O flag** | for an I/O module only: it marks the module as one that touches the outside (v5's `q.IO()`). A module without it is a compute module, and the battery's import rule reads the flag, in [Testing](#testing) |
 
-A run is pure: the module reads its input struct, computes, and answers one
-commit of its outputs. It calls nothing else; it never reads the store and
-never reaches the outside.
+A compute module's run is pure: the module reads its input struct, computes,
+and answers one commit of its outputs. It calls nothing else; it never reads
+the store and never reaches the outside. An I/O module's run reaches its one
+outside thing and nothing else, in
+[I/O modules and compute modules](#io-modules-and-compute-modules).
 
 The shape, with names that settle in the first code issue:
 
@@ -139,6 +142,24 @@ token:
 | `/se ui`, `se help`, the manifests | read the collector's catalog from the daemon and render it |
 | any later adapter (a REST API, an MCP tool list) | reads values by name, calls commands by name, and subscribes to changes, the same three verbs |
 
+### What a command waits on
+
+A person waits on every `se` command, so the adapter follows
+[principle 9](principles.md): feedback within 1 second, never blind.
+
+| the daemon | what the command waits on | what the person sees |
+|---|---|---|
+| answers | the post and the command's reply | the reply |
+| does not run, or does not answer | the daemon's start: `se serve` takes the lock, loads the wiring, starts the modules and publishes `daemon.json`, then the post | after 1 second without an answer, one line on stderr: the daemon is starting for this workspace; then the reply |
+| does not answer within the start wait (10 seconds today) or exits at start | nothing more | an error naming the daemon log; the command does not run |
+
+The adapter never runs a command in its own process when the daemon is slow:
+the index has one host, and a second one would give its names a second writer.
+The cold start is the command's longest wait, so the daemon records its
+duration like any command's, and a soft budget in
+[spec/budgets.yaml](budgets.yaml) reports when it grows. The core's issue
+(step 1 of the migration) sets that budget from its first measurement.
+
 ## Commands and help
 
 A module declares its own user-facing commands in its own files ([principle 18](principles.md)).
@@ -152,6 +173,7 @@ It marks a function as a command with:
 | help | what the command's help says beyond the usage |
 | group | the heading it stands under in the help listing |
 | offered | in a session as `/se <name>`, and whether as a `/se ui` button |
+| installed | answered by the installed `se` even when the session works in an SE checkout, whose own `se` answers every other `/se` word: `on`, `restart`, `update` |
 
 The command runs like any other run: it reads a snapshot of the module's
 inputs plus its arguments, and answers a reply, a commit of the module's own
@@ -181,20 +203,24 @@ Every part tests itself alone ([principles 7 and 8](principles.md)):
 | the index core | fixture modules that declare, read and write as a test scripts them |
 | every command declaration | generic cases over the catalog: each has a summary, help and group, and every adapter shows the same text |
 
-No module test starts the daemon, and no module talks to anything but the
-index. A module imports the index contract and the standard library only; a
-rule in the battery holds that once the first module lands.
+No module test starts the daemon, and no compute module talks to anything but
+the index. A compute module imports the index contract and the pure standard
+library only: no package that reaches the outside, such as `os`, `os/exec`,
+`net` or `net/http`, and no read of the clock (`time.Now`). An I/O module, one
+that carries the I/O flag, imports the index contract, the standard library
+and what its outside thing needs. A rule in the battery reads the flag and
+holds both once the first module lands.
 
 ## The migration
 
 Each step is its own issue, and SE works after each one.
 
-1. **The core, the fake index and the wiring loader**, with src/internal/index/wiring.yaml, hosted in `se serve`, tested with fixture modules. No module moves yet.
+1. **The core, the fake index and the wiring loader**, with src/internal/index/wiring.yaml, hosted in `se serve`, tested with fixture modules. It measures the daemon's cold start and sets its budget. No module moves yet.
 2. **The collector.** The command registry gathers declarations, and the CLI, `/se`, `/se ui`, the help and the manifests render from it. Commands keep their current files and get the declaration shape.
 3. **The session event log** becomes the session I/O module: the bridgehead's posts come in as the `session/<id>/events` family, and it keeps the log file. It is the first real module and the smallest.
 4. **The issue rules** (next, new, land, review and the tree rules in `src/internal/issues`) become compute modules on the GitHub I/O module (#44), and their commands move with them.
 5. **The rest of the fleet's work**, one module each: retro, overhaul, review brief, fleet, briefing, and the checks behind `se rules` and `se manifest`.
-6. **The daemon's session commands** (on, off, status, restart, update, ui) move into a session module. The daemon's process stays the host, not a module.
+6. **The daemon's session commands** that need a running daemon (off, ui) move into a session module. The host's own commands stay with the adapter (open question 1), and the daemon's process stays the host, not a module.
 
 ## What v5 learned
 
@@ -208,7 +234,7 @@ Each step is its own issue, and SE works after each one.
 
 ## Open questions for the owner
 
-1. **The host's own commands.** `se serve`, `se start` and `se stop` run before any index exists. Proposed: they stay the CLI adapter's own commands, talking only about the adapter. Or should a module the daemon always loads declare them?
+1. **The host's own commands.** `se serve`, `se start` and `se stop` run before any index exists; `se on` starts the daemon, `se status` says whether one answers, and `se restart` and `se update` replace the running one, so none of the seven can be answered by a module inside the daemon. Proposed: they stay the CLI adapter's own commands, talking only about the adapter. Or should a module the daemon always loads declare them?
 2. **Where modules live.** Proposed: the core and its fake in two packages under `src/internal`, and each module one package under a modules folder. v5 put one module per file, several per package; is a package per module right for SE?
 3. **Actions without undo.** SE takes requests now and leaves v5's undo step out. Is a failed list that stops without rolling back acceptable for GitHub and the disk?
 4. **Config layers.** Until a module needs one, config is the built-in value or the wiring file's. Which layer comes first when one is needed: environment or a local file?
