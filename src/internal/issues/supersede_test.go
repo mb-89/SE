@@ -143,3 +143,132 @@ func TestUnclosedNamesWhatIsMissing(t *testing.T) {
 		t.Fatal("answered without GitHub")
 	}
 }
+
+func TestDuplicateClosesTheIssueAndMintsNothing(t *testing.T) {
+	t.Parallel()
+	// Issue 5 is final: a duplicate closes it all the same.
+	gh := superseding(t, `{"name":"se"},{"name":"se-final"}`)
+	seed(t, gh, map[string]string{
+		"repos/o/r/issues/6": `{"id":606,"number":6,"state":"open","title":"The same","html_url":"u6"}`,
+		"repos/o/r/issues/6/dependencies/blocking?per_page=100": `[]`,
+		// Issue 5's box landed its fix as PR 90 before the duplicate showed.
+		"repos/o/r/pulls?head=o:issue-5&base=main&state=open&per_page=100": `[{"number":90,"html_url":"p90"}]`,
+	})
+	origin, a, _ := boxes(t)
+	run(t, a, "push", "-q", "origin", "main:issue-5")
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	dup, err := s.CloseDuplicate(a, 5, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dup.Issue != 5 || dup.Of != 6 || dup.URL != "u6" || !reflect.DeepEqual(dup.Blocks, []int{7}) ||
+		!reflect.DeepEqual(dup.Pulls, []int{90}) || dup.Branch != "issue-5" {
+		t.Fatalf("%+v", dup)
+	}
+	// Its PR closes naming the survivor, and its claim goes, so no PR stays
+	// open with no issue behind it and no leftover claim is found.
+	if p, err := api[openPull](s, "repos/o/r/pulls?state=open&per_page=100", true); err != nil || len(p) != 0 {
+		t.Fatalf("open PRs %+v %v", p, err)
+	}
+	if cs := commentsAt(t, gh, 90); len(cs) != 1 || !strings.Contains(cs[0].Body, "duplicate of #6") {
+		t.Fatalf("%+v", cs)
+	}
+	if got := run(t, origin, "branch", "--list", "issue-5"); got != "" {
+		t.Fatalf("origin still has %q", got)
+	}
+	// Run again, it finds nothing left to drop.
+	again := Duplicated{Issue: 5, Of: 6}
+	if err := s.dropClaim(a, &again); err != nil || again.Pulls != nil || again.Branch != "" {
+		t.Fatalf("%+v %v", again, err)
+	}
+	old := issueAt(t, gh, 5)
+	if old.State != "closed" || old.StateReason != "duplicate" {
+		t.Fatalf("%+v", old)
+	}
+	if cs := commentsAt(t, gh, 5); len(cs) != 1 || !strings.HasPrefix(cs[0].Body, "Duplicate of #6,") {
+		t.Fatalf("%+v", cs)
+	}
+	// What waited on the duplicate waits on the issue that covers it.
+	if got := linksOf(t, gh, "repos/o/r/issues/7/dependencies/blocked_by"); !slices.Contains(got, 6) {
+		t.Fatalf("#7 is blocked by %v", got)
+	}
+	for _, w := range gh.Writes() {
+		if strings.HasPrefix(w, "POST repos/o/r/issues ") || w == "POST repos/o/r/issues" {
+			t.Fatalf("minted an issue: %q", gh.Writes())
+		}
+	}
+}
+
+func TestDuplicateRefusesAClosedOrMissingIssue(t *testing.T) {
+	t.Parallel()
+	gh := superseding(t, `{"name":"se"}`)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	for _, c := range []struct {
+		n, of int
+		want  string
+	}{
+		{5, 5, "cannot duplicate itself"},
+		{5, 4, "#4 is closed"},
+		{4, 3, "#4 is closed already"},
+		{5, 99, "#99 does not exist"},
+	} {
+		if _, err := s.CloseDuplicate(t.TempDir(), c.n, c.of); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("%d of %d: %v", c.n, c.of, err)
+		}
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("wrote %q", w)
+	}
+}
+
+func TestDuplicateRefusesAnOpenPullRequest(t *testing.T) {
+	t.Parallel()
+	// #356 closed as a duplicate of the open PR #364, which had not merged:
+	// an issue duplicates an open issue or a merged PR, never an open PR.
+	gh := superseding(t, `{"name":"se"}`)
+	seed(t, gh, map[string]string{
+		"repos/o/r/issues/9":  `{"id":909,"number":9,"state":"open","pull_request":{}}`,
+		"repos/o/r/pulls/9":   `{"number":9,"state":"open","merged":false}`,
+		"repos/o/r/issues/10": `{"id":1010,"number":10,"state":"closed","pull_request":{}}`,
+		"repos/o/r/pulls/10":  `{"number":10,"state":"closed","merged":false}`,
+	})
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	for of, want := range map[int]string{9: "#9 is an open pull request", 10: "closed unmerged"} {
+		if _, err := s.CloseDuplicate(t.TempDir(), 5, of); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("of %d: %v", of, err)
+		}
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("wrote %q", w)
+	}
+	if old := issueAt(t, gh, 5); old.State != "open" {
+		t.Fatalf("%+v", old)
+	}
+}
+
+func TestDuplicateOfAMergedPullRequestNamesItsCommit(t *testing.T) {
+	t.Parallel()
+	gh := superseding(t, `{"name":"se"}`)
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	seed(t, gh, map[string]string{
+		"repos/o/r/issues/9": `{"id":909,"number":9,"state":"closed","pull_request":{}}`,
+		"repos/o/r/pulls/9":  `{"number":9,"state":"closed","merged":true,"merge_commit_sha":"` + sha + `","title":"The fix"}`,
+		"repos/o/r/pulls?head=o:issue-5&base=main&state=open&per_page=100": `[]`,
+	})
+	_, a, _ := boxes(t)
+	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}
+	dup, err := s.CloseDuplicate(a, 5, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dup.Of != 9 || dup.Commit != sha || dup.URL != "https://github.com/o/r/commit/"+sha || len(dup.Blocks) != 0 {
+		t.Fatalf("%+v", dup)
+	}
+	if old := issueAt(t, gh, 5); old.State != "closed" || old.StateReason != "duplicate" {
+		t.Fatalf("%+v", old)
+	}
+	cs := commentsAt(t, gh, 5)
+	if len(cs) != 1 || !strings.Contains(cs[0].Body, "<!-- se:fixed-by "+sha+" -->") || !strings.Contains(cs[0].Body, "Duplicate of PR #9, merged") {
+		t.Fatalf("%+v", cs)
+	}
+}

@@ -92,7 +92,8 @@ func TestABoxRunsItsCapAndPullsTheNextWhenOneLands(t *testing.T) {
 	t.Parallel()
 	_, a, _ := boxes(t)
 	answers := pushedAt(unblocked(map[string]string{
-		listPath: list(node(1, 0), node(2, 0), node(3, 0)),
+		// Retros: the leaves a box takes at the top, besides manifests.
+		listPath: list(node(1, 0, RetroLabel), node(2, 0, RetroLabel), node(3, 0, RetroLabel)),
 		refsPath: `[]`,
 	}, 1, 2, 3), fresh)
 	g := newHub(t, answers)
@@ -129,7 +130,7 @@ func TestABoxRunsItsCapAndPullsTheNextWhenOneLands(t *testing.T) {
 	if _, err := g.Send("PATCH", "repos/o/r/issues/1", github.F("state", "closed")); err != nil {
 		t.Fatal(err)
 	}
-	seed(t, g.Fake, map[string]string{listPath: list(node(2, 0), node(3, 0))})
+	seed(t, g.Fake, map[string]string{listPath: list(node(2, 0, RetroLabel), node(3, 0, RetroLabel))})
 	if took, ok, err := take(); err != nil || !ok || took.Number != 3 {
 		t.Fatalf("took %+v %v %v", took, ok, err)
 	}
@@ -138,7 +139,7 @@ func TestABoxRunsItsCapAndPullsTheNextWhenOneLands(t *testing.T) {
 func TestARefusedFanOutIsKeptAndFiresOnceItsRetryTimeHasPassed(t *testing.T) {
 	t.Parallel()
 	g := newHub(t, pushedAt(unblocked(map[string]string{
-		listPath: list(node(1, 0), node(2, 0), node(3, 0), node(4, 0)),
+		listPath: list(node(1, 0), node(2, 0), node(3, 0, RetroLabel), node(4, 0, RetroLabel)),
 		refsPath: refs(1, 2),
 	}, 4), fresh, 1, 2))
 	g.say(1, (Source{Box: "s1"}).boxNote())

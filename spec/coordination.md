@@ -39,13 +39,18 @@ and only then leaves.**
    - **impossible block**: an issue blocked by an issue closed as not planned,
      by an open issue no box works (not labelled `se`, or in another
      repository), or by itself through a cycle.
+   - **bare issue**: an open `se` issue at the top in no manifest, which no
+     box takes: no parent, no sub-issues, not a manifest, retro, overhaul or
+     issue for a person, nothing holds it and nothing claims it. An `se`
+     built before manifests still files such issues.
    - **waiting on a person**: an `se-person` issue, with what it holds up.
      Reported, never fixed.
 
-   Claimed work is moving while its branch was pushed within the hour (the
-   activity GitHub records for the branch, its creation included), while its
-   CI runs, or while a takeover of it is in flight: the last takeover marker
-   names the same head and is less than an hour old.
+   Claimed work is moving while its branch was pushed, or the issue taken
+   over, within the hour (the activity GitHub records for the branch, its
+   creation included, or the last takeover marker: the lease reads it the
+   same way), while its CI runs, or while a takeover of it is in flight: the
+   last takeover marker names the same head and is less than an hour old.
 3. **The box fixes what has a known remedy,** in the order
    the command lists, each with the mechanism that already exists:
    - a conflicted, red or stalled claim, or a claim with no PR, is taken
@@ -61,6 +66,9 @@ and only then leaves.**
      (`se fleet fix`, by `git push origin --delete` from the workspace, the
      transport `se issue land` pushes through): nothing is lost, and nothing
      else could clear it;
+   - a bare issue is filed into the open misc manifest (`se fleet fix`, the
+     manifest `se issue new` files into, opening the next one where none is
+     open, then GitHub's sub-issues link);
    - an impossible block, any other leftover claim, or anything else with no remedy is
      reported as an issue (`se fleet fix`, through the same code as
      `se issue new`), labelled `se-person` and assigned to the repository's
@@ -69,10 +77,10 @@ and only then leaves.**
 4. **It never fixes the same thing twice.** A takeover is recorded with
    `<!-- se:takeover N -->`, every other fix with `<!-- se:fleet KEY M -->` on
    the finding's issue (`M` is the issue it made, or 0). A finding that comes
-   back after its fix goes to a person: a takeover labels the issue
-   `se-final`, and a takeover of an `se-final` issue makes it wait on an
-   issue for a person instead, and any other finding becomes an `se-person`
-   issue. A finding
+   back after its fix goes to a person: a takeover of stuck work labels the
+   issue `se-final`, and such a takeover of an `se-final` issue makes it wait
+   on an issue for a person instead (a conflict is no failure: its takeover
+   does neither), and any other finding becomes an `se-person` issue. A finding
    already reported as an issue that is still open is left as it is.
 5. **The record.** The box lands nothing of its own, so each fix is a comment
    on the issue it acted on, saying what was found and what was done (the
