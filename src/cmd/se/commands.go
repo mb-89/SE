@@ -50,6 +50,14 @@ type Command struct {
 	// Class says whether a person waits on it, index.Interactive, which the
 	// battery holds to its budgets (spec/budgets.yaml), or not, index.Batch.
 	Class index.Class
+	// Flags are the flags it takes beside --workspace, which every command
+	// takes; the collector parses them into the Call's Args.
+	Flags []index.Flag
+	// Words are what it takes beside its flags: none, an issue number, or any words.
+	Words index.Words
+	// JSON is set where its reply is data as well as text: it takes --json,
+	// and the collector answers the Reply's Data as JSON there.
+	JSON bool
 	// Run does it and answers what to show, and in a session what the plugin applies.
 	Run func(c *Call) (Reply, error)
 }
@@ -72,6 +80,9 @@ type Reply struct {
 	Panel *Panel `json:"panel,omitempty"`
 	// Help, when set, is the help Text says, as data the plugin draws.
 	Help *Help `json:"help,omitempty"`
+	// Data is the reply as data, for a command declared JSON: with --json,
+	// se answers it as JSON in place of Text.
+	Data any `json:"-"`
 }
 
 // Panel is what /se ui draws: a grid of buttons, the on/off toggle top left,
@@ -98,8 +109,8 @@ func switched(on bool) *bool { return &on }
 
 // Call is one run of a command.
 type Call struct {
-	// Args are the words after the command's name.
-	Args []string
+	// Args are the words after the command's name, parsed as it declares them.
+	Args index.Args
 	// Workspace is the folder the daemon serves, made absolute by Parse.
 	Workspace string
 	// Session is set when a Claude session called through /se.
@@ -108,8 +119,6 @@ type Call struct {
 	Color bool
 	// World is everything outside se the command reaches.
 	World
-	// flags is the flag set Flags made, which the command's help lists.
-	flags *flag.FlagSet
 }
 
 // World is everything outside se that a run reaches. main hands run the real
@@ -163,30 +172,8 @@ func register(c Command) {
 	commands[c.Name] = c
 }
 
-// Flags is a flag set for the command that already takes --workspace.
-func (c *Call) Flags(name string) *flag.FlagSet {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	fs.StringVar(&c.Workspace, "workspace", c.Workspace, "the workspace `DIR` the daemon serves (default: here)")
-	c.flags = fs
-	return fs
-}
-
-// Parse reads the command's flags; a command takes no words beyond them.
-func (c *Call) Parse(fs *flag.FlagSet) error {
-	if err := fs.Parse(c.Args); err != nil {
-		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("%s takes no word %q", fs.Name(), fs.Arg(0))
-	}
-	root, err := filepath.Abs(c.Workspace)
-	if err != nil {
-		return err
-	}
-	c.Workspace = root
-	return nil
-}
+// workspaceFlag is the flag every command takes.
+var workspaceFlag = index.Flag{Name: "workspace", Default: "", Help: "the workspace `DIR` the daemon serves (default: here)"}
 
 // Paths names the workspace's runtime files.
 func (c *Call) Paths() daemon.Paths { return daemon.Paths{Workspace: c.Workspace, Disk: c.Disk} }
@@ -233,14 +220,14 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 	// The help is coloured on a terminal alone, never in a session's answer.
 	color, errColor := !*session && colors(stdout), !*session && colors(stderr)
 	call := &Call{Workspace: *workspace, Session: *session, Color: color, World: *w}
-	name := ""
+	name, words := "", []string(nil)
 	if fs.NArg() > 0 {
-		name, call.Args = fs.Arg(0), fs.Args()[1:]
+		name, words = fs.Arg(0), fs.Args()[1:]
 	}
 	cat := catalog()
-	if len(call.Args) > 0 {
-		if _, sub := cat.Command(name + " " + call.Args[0]); sub {
-			name, call.Args = name+" "+call.Args[0], call.Args[1:]
+	if len(words) > 0 {
+		if _, sub := cat.Command(name + " " + words[0]); sub {
+			name, words = name+" "+words[0], words[1:]
 		}
 	}
 	cmd, ok := cat.Command(name)
@@ -262,7 +249,7 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 		call.GitHub = limited
 		before := limited.Requests()
 		began := call.Clock.Now()
-		reply, err = runCommand(name, call)
+		reply, err = runCommand(cmd, call, words)
 		timed(call, name, began, stderr)
 		if n := limited.Requests() - before; n > 0 {
 			if rerr := issues.RecordRequests(call.Disk, call.Workspace, name, n, call.Clock.Now()); rerr != nil {
@@ -270,7 +257,7 @@ func run(w *World, args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		if errors.Is(err, flag.ErrHelp) {
-			reply, err = helpReply(commandHelpOf(cmd, call.flags, *session), *session, color), nil
+			reply, err = helpReply(commandHelpOf(cmd, *session), *session, color), nil
 		}
 	case name == "":
 		reply = helpReply(overview(*session), *session, errColor)
@@ -333,11 +320,30 @@ func timed(call *Call, name string, began time.Time, stderr io.Writer) {
 	}
 }
 
-// runCommand runs the command the catalog names with the run the command line registered for it.
-func runCommand(name string, call *Call) (Reply, error) {
-	c, ok := commands[name]
+// runCommand runs the command the catalog declares with the run the command
+// line registered for it: the collector parses words into the call's Args as
+// the command declares them, and renders its reply, its Data as JSON where
+// the call said --json.
+func runCommand(cmd index.CommandInfo, call *Call, words []string) (Reply, error) {
+	c, ok := commands[cmd.Name]
 	if !ok {
-		return Reply{}, fmt.Errorf("%s is declared on the index, but the command line has no run for it", name)
+		return Reply{}, fmt.Errorf("%s is declared on the index, but the command line has no run for it", cmd.Name)
 	}
-	return c.Run(call)
+	args, err := cmd.Parse(words)
+	if err != nil {
+		return Reply{}, err
+	}
+	if args.Given(workspaceFlag.Name) {
+		call.Workspace = args.String(workspaceFlag.Name)
+	}
+	if call.Workspace, err = filepath.Abs(call.Workspace); err != nil {
+		return Reply{}, err
+	}
+	call.Args = args
+	r, err := c.Run(call)
+	if err != nil || !args.JSON {
+		return r, err
+	}
+	text, err := args.Render(r.Text, r.Data)
+	return Reply{Text: text}, err
 }

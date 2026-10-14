@@ -23,9 +23,6 @@ func init() {
 		Details: "open SE's control panel, a grid of buttons every surface draws, the phone included: the on/off toggle top left, then a button for each command registered as one (a command that takes no typed words), each labelled with its name. A row holds at most the cli instance's columns config value (cli/config/columns) and the next button starts the next row; every cell is as wide as every other, so the columns align from row to row and a short last row stays to the left. A press runs what typing /se <name> runs.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
-			if err := c.Parse(c.Flags("ui")); err != nil {
-				return Reply{}, err
-			}
 			columns, err := panelColumns(index.Wired)
 			if err != nil {
 				return Reply{}, err

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/rules"
@@ -55,23 +56,15 @@ func init() {
 			"and is made from its owners: agents (the registry of kinds and the plugin's agents), checks (the retro's rule checks), skills (the skills folder), spec (spec/), usage <word>... (the usage lines of the commands under each word). " +
 			"With a name, manifest prints that manifest; with --write, it rewrites every section of every Markdown file git tracks and names the files it changed, and refuses while git's index holds unmerged paths. " +
 			"The rule manifest fails where a committed section differs.",
+		Flags: []index.Flag{{Name: "write", Default: false, Help: "rewrite every manifest section in the checkout"}},
+		Words: index.AnyWords,
 		Run: func(c *Call) (Reply, error) {
-			fs := c.Flags("manifest")
-			write := fs.Bool("write", false, "rewrite every manifest section in the checkout")
-			if err := fs.Parse(c.Args); err != nil {
-				return Reply{}, err
-			}
-			name := strings.Join(fs.Args(), " ")
-			root, err := filepath.Abs(c.Workspace)
-			if err != nil {
-				return Reply{}, err
-			}
-			c.Workspace = root
+			name := strings.Join(c.Args.Words, " ")
 			repo, err := repoOf(c.Disk, c.Proc, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
-			if !*write {
+			if !c.Args.Bool("write") {
 				if name == "" {
 					return Reply{}, fmt.Errorf("manifest takes a name (%s), or --write", strings.Join(manifestNames(), ", "))
 				}

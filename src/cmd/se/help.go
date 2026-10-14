@@ -68,16 +68,14 @@ func init() {
 			"With a command's name, it shows that command's usage and every flag it takes; " +
 			"se <command> --help shows the same.",
 		Session: true,
+		Words:   index.AnyWords,
 		Run: func(c *Call) (Reply, error) {
-			name := strings.Join(c.Args, " ")
-			switch name {
-			case "":
+			name := strings.Join(c.Args.Words, " ")
+			if name == "" {
 				return helpReply(overview(c.Session), c.Session, c.Color), nil
-			case "-h", "-help", "--help":
-				return Reply{}, flag.ErrHelp
 			}
 			if cmd, ok := catalog().Command(name); ok && (cmd.Session || !c.Session) {
-				return helpReply(commandHelpOf(cmd, flagsOf(cmd.Name, c.Session), c.Session), c.Session, c.Color), nil
+				return helpReply(commandHelpOf(cmd, c.Session), c.Session, c.Color), nil
 			}
 			if under := under(name, c.Session); len(under) > 0 {
 				return helpReply(Help{Groups: groupsOf(under, c.Session)}, c.Session, c.Color), nil
@@ -145,22 +143,20 @@ func groupsOf(cmds []index.CommandInfo, session bool) []HelpGroup {
 	return out
 }
 
-// commandHelpOf is one command's help as data.
-func commandHelpOf(c index.CommandInfo, fs *flag.FlagSet, session bool) Help {
+// commandHelpOf is one command's help as data, its flags as it declares them.
+func commandHelpOf(c index.CommandInfo, session bool) Help {
 	h := Help{Usage: prog(session) + " " + c.Usage, About: capital(c.Help)}
-	if fs != nil {
-		fs.VisitAll(func(f *flag.Flag) {
-			kind, usage := flag.UnquoteUsage(f)
-			name := "--" + f.Name
-			if kind != "" {
-				name += " " + kind
-			}
-			if f.Name != "workspace" && f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" {
-				usage += fmt.Sprintf(" (default: %s)", f.DefValue)
-			}
-			h.Flags = append(h.Flags, HelpFlag{Name: name, Usage: usage})
-		})
-	}
+	c.FlagSet().VisitAll(func(f *flag.Flag) {
+		kind, usage := flag.UnquoteUsage(f)
+		name := "--" + f.Name
+		if kind != "" {
+			name += " " + kind
+		}
+		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" {
+			usage += fmt.Sprintf(" (default: %s)", f.DefValue)
+		}
+		h.Flags = append(h.Flags, HelpFlag{Name: name, Usage: usage})
+	})
 	return h
 }
 
@@ -217,16 +213,6 @@ func listing(groups []HelpGroup, color bool) string {
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-// flagsOf is the flag set the command name takes, read by running it with
-// --help: every command parses its flags before it does anything.
-func flagsOf(name string, session bool) *flag.FlagSet {
-	call := &Call{Args: []string{"--help"}, Workspace: ".", Session: session}
-	if _, err := runCommand(name, call); err != nil && call.flags != nil {
-		return call.flags
-	}
-	return nil
 }
 
 // under lists the commands whose name starts with the words of first.

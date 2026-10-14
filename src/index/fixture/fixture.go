@@ -41,11 +41,12 @@ var Module = index.Declare("tally", "Sums numbers and takes notes.",
 		Session: true,
 		Button:  false,
 		Class:   index.Batch,
-	}, func(in noteIn, args []string) (index.Result, error) {
-		if len(args) == 0 {
+		Words:   index.AnyWords,
+	}, func(in noteIn, args index.Args) (index.Result, error) {
+		if len(args.Words) == 0 {
 			return index.Result{}, fmt.Errorf("tally note takes the words to keep")
 		}
-		note := strings.Join(args, " ")
+		note := strings.Join(args.Words, " ")
 		return index.Result{
 			Text:   fmt.Sprintf("noted %q beside %d numbers", note, len(in.Numbers)),
 			Writes: []index.Write{Note.Set(note)},

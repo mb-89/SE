@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -44,7 +45,7 @@ func TestTheIndexDeclaresEveryRegisteredCommand(t *testing.T) {
 	var declared, registered []string
 	for _, c := range catalog().Commands {
 		declared = append(declared, c.Name)
-		if want := declOf(commands[c.Name]); c.CommandDecl != want {
+		if want := declOf(commands[c.Name]); !reflect.DeepEqual(c.CommandDecl, want) {
 			t.Errorf("%s is declared as %+v, registered as %+v", c.Name, c.CommandDecl, want)
 		}
 	}

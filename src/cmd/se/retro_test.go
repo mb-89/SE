@@ -46,8 +46,8 @@ func TestRetroNewCreatesTheRetroAndFires(t *testing.T) {
 
 func TestARetroIsNoLongerDispatchedByItsLabel(t *testing.T) {
 	t.Parallel()
-	r, err := issueReply(false, false, issues.Issue{Number: 30, Title: "SE retro", Retro: true}, true, "issue-30", "", "", handed{})
-	if err != nil || strings.Contains(r.Text, "se-retro") || strings.Contains(r.Text, "SKILL.md") {
-		t.Fatalf("%q %v", r.Text, err)
+	r := issueReply(false, issues.Issue{Number: 30, Title: "SE retro", Retro: true}, true, "issue-30", "", "", handed{})
+	if strings.Contains(r.Text, "se-retro") || strings.Contains(r.Text, "SKILL.md") {
+		t.Fatalf("%q", r.Text)
 	}
 }

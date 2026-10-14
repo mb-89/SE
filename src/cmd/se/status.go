@@ -19,9 +19,6 @@ func init() {
 		Session: true,
 		Button:  true,
 		Run: func(c *Call) (Reply, error) {
-			if err := c.Parse(c.Flags("status")); err != nil {
-				return Reply{}, err
-			}
 			said := fmt.Sprintf("No SE daemon answers for %s.", c.Workspace)
 			if ep, ok := daemon.Healthy(c.Paths(), c.Net); ok {
 				said = fmt.Sprintf("SE's daemon answers for %s at %s (pid %d, up since %s).",

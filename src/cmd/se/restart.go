@@ -20,9 +20,6 @@ func init() {
 		Installed: true,
 		Button:    true,
 		Run: func(c *Call) (Reply, error) {
-			if err := c.Parse(c.Flags("restart")); err != nil {
-				return Reply{}, err
-			}
 			// The build runs while the old daemon still serves.
 			exe, note, err := daemonExe(&c.World, c.Paths())
 			if err != nil {

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/guidance"
 	sehttp "github.com/mb-89/SE/src/internal/io/http"
@@ -26,12 +27,9 @@ func init() {
 		Summary: "answer the principles and the skills a session holds",
 		Details: "answer the guidance a session's context carries: spec/principles.md where the guidance instance's principles switch is on, in a box the whole procedure of its agent, se:coordinator, and each skill a take handed to session ID, as its log records them, in full where the inline switch is on, else by name. Each is read from the SE checkout the plugin was loaded from (SE_PLUGIN_CHECKOUT, else the workspace), so a project holds no SE file. The plugin's SessionStart hook puts it into the context on startup, resume, clear and compact; the hand-again is a row of the session's log.",
 		Session: true,
+		Flags:   []index.Flag{{Name: "session-id", Default: "", Help: "the session `ID` whose log names the skills handed to it"}},
 		Run: func(c *Call) (Reply, error) {
-			flags := c.Flags("guidance")
-			id := flags.String("session-id", "", "the session `ID` whose log names the skills handed to it")
-			if err := c.Parse(flags); err != nil {
-				return Reply{}, err
-			}
+			id := c.Args.String("session-id")
 			set, err := c.Guided()
 			if err != nil {
 				return Reply{}, err
@@ -53,7 +51,7 @@ func init() {
 				}
 				parts = append(parts, box)
 			}
-			names, err := handedTo(c, *id)
+			names, err := handedTo(c, id)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -63,7 +61,7 @@ func init() {
 					return Reply{}, err
 				}
 				parts = append(parts, guidance.Text(skills, set.Inline))
-				if why := c.logHandOver(*id, skills, true); why != "" {
+				if why := c.logHandOver(id, skills, true); why != "" {
 					parts = append(parts, why)
 				}
 			}

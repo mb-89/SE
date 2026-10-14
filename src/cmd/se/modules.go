@@ -55,7 +55,7 @@ func cliModule() *index.Module {
 	parts = append(parts, index.Config(columnsKey, defaultColumns, "The most buttons a row of /se ui holds; the next button starts the next row."))
 	for _, n := range names {
 		decl := declOf(commands[n])
-		parts = append(parts, index.Command(decl, func(noInput, []string) (index.Result, error) {
+		parts = append(parts, index.Command(decl, func(noInput, index.Args) (index.Result, error) {
 			return index.Result{}, fmt.Errorf("se %s runs in the se command line, not on the index", decl.Name)
 		}))
 	}
@@ -63,11 +63,13 @@ func cliModule() *index.Module {
 }
 
 // declOf is a registered command as the index declares it: a command without
-// a group stands under Other, and one without details is helped by its summary.
+// a group stands under Other, one without details is helped by its summary,
+// and every command takes --workspace.
 func declOf(c Command) index.CommandDecl {
 	d := index.CommandDecl{
 		Name: c.Name, Usage: c.Usage, Summary: c.Summary, Help: c.Details, Group: c.Group,
 		Session: c.Session, Button: c.Button, Installed: c.Installed, Class: c.Class,
+		Flags: append([]index.Flag{workspaceFlag}, c.Flags...), Words: c.Words, JSON: c.JSON,
 	}
 	if d.Group == "" {
 		d.Group = "Other"

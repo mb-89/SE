@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/daemon"
 	"github.com/mb-89/SE/src/internal/issues"
 	"gopkg.in/yaml.v3"
@@ -169,24 +170,24 @@ func init() {
 		Group:   "Hooks",
 		Summary: "hold a box to a merged PR or supersede for each issue it took",
 		Details: "answer the plugin's Stop (or, with --agent-transcript, SubagentStop) as JSON: block, naming each, while any issue this box took is open: with no PR from its branch, with one whose auto-merge is off, or with one not merged yet (a box keeps its PR until it merges: se issue keep), unless another box took the issue over; else pass, with why. A merged PR or a supersede closes the issue. A PR se issue land recorded with auto-merge on in .se/.runtime/box.json, of this workspace or of the issue's worktree beside it, counts as auto-merge on whatever GitHub's auto_merge field shows. The issues are every one se issue pull --take recorded, or for a sub-agent the leaf its prompt names. An interactive session, and a box waiting on background work (--waiting), always pass. It refuses at most refusals times in a row (spec/stop.yaml); a prompt from a person resets the count (se hook prompt). A check that cannot judge lets the turn end and logs why in .se/.runtime/logs/stop.log.",
+		Flags: []index.Flag{
+			repoFlag,
+			{Name: "agent-transcript", Default: "", Help: "the sub-agent's transcript `PATH`: the stop is a SubagentStop"},
+			{Name: "waiting", Default: false, Help: "the session has background work or a wake-up that brings it back"},
+		},
 		Run: func(c *Call) (Reply, error) {
-			fs, src, _ := issueFlags(c, "hook stop")
-			transcript := fs.String("agent-transcript", "", "the sub-agent's transcript `PATH`: the stop is a SubagentStop")
-			waiting := fs.Bool("waiting", false, "the session has background work or a wake-up that brings it back")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
+			transcript := c.Args.String("agent-transcript")
 			if !c.isBox() {
 				return verdict{Pass: "an interactive session is never refused"}.reply()
 			}
-			if *waiting {
+			if c.Args.Bool("waiting") {
 				return verdict{Pass: "the box waits on background work, which wakes it again"}.reply()
 			}
 			b := readBox(c)
 			taken := b.Issues
-			if *transcript != "" {
+			if transcript != "" {
 				taken = nil
-				data, err := c.Disk.ReadFile(*transcript)
+				data, err := c.Disk.ReadFile(transcript)
 				if err != nil {
 					stopLog(c, fmt.Sprintf("let a sub-agent end unjudged: reading its transcript: %v", err))
 					return verdict{Pass: "the check is broken: " + oneLine(err)}.reply()
@@ -212,7 +213,7 @@ func init() {
 			if len(judge) == 0 {
 				return verdict{Pass: fmt.Sprintf("refused %d times in a row, the cap", limit)}.reply()
 			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				stopLog(c, fmt.Sprintf("let the box end unjudged on %s: %s", numbers(judge), oneLine(err)))
 				return verdict{Pass: "the check is broken: " + oneLine(err)}.reply()
@@ -257,9 +258,6 @@ func init() {
 		Summary: "a person prompted: reset the Stop hook's refusals",
 		Details: "a prompt from a person: reset how often in a row se hook stop has refused, so the cap counts afresh.",
 		Run: func(c *Call) (Reply, error) {
-			if err := c.Parse(c.Flags("hook prompt")); err != nil {
-				return Reply{}, err
-			}
 			b := readBox(c)
 			if len(b.Refused) == 0 {
 				return Reply{}, nil

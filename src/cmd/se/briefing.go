@@ -1,13 +1,13 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -20,28 +20,29 @@ func init() {
 		Summary: "where SE stands: what waits on you, in flight, happened, next",
 		Details: "read GitHub and the checkout and tell, pending first: every se-person issue with its reason and what it holds up, and every report waiting for the owner, from every registered pending source; the claimed issues and their PRs, and what fleet check reports; the issues closed in the window, each with its PR and landing answer done, and the last retro; what issue pull would take, how many issues are ready, claimed, blocked, in trees or in no manifest, and the queue's size with when its last issue is estimated to close (issue tree tells the detail); and what SE is. The window is the last day or the last 10 closed issues, whichever are more; --since takes a time (RFC 3339, a date, or an age such as 36h or 3d), --last a count. The skill se:briefing presents it.",
 		Session: true,
+		Flags: []index.Flag{
+			repoFlag,
+			{Name: "since", Default: "", Help: "tell of the issues closed since `TIME`: RFC 3339, a date, or an age such as 36h or 3d"},
+			{Name: "last", Default: 0, Help: "tell of the last `N` closed issues"},
+		},
+		JSON: true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "briefing")
-			since := fs.String("since", "", "tell of the issues closed since `TIME`: RFC 3339, a date, or an age such as 36h or 3d")
-			last := fs.Int("last", 0, "tell of the last `N` closed issues")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
+			since, last := c.Args.String("since"), c.Args.Int("last")
 			var w issues.Window
 			switch {
-			case *since != "" && *last != 0:
+			case since != "" && last != 0:
 				return Reply{}, errors.New("briefing takes --since or --last, not both")
-			case *last < 0:
+			case last < 0:
 				return Reply{}, errors.New("--last takes a count above zero")
-			case *since != "":
-				t, err := parseSince(*since, c.Clock.Now())
+			case since != "":
+				t, err := parseSince(since, c.Clock.Now())
 				if err != nil {
 					return Reply{}, err
 				}
 				w.Since = t
 			}
-			w.Last = *last
-			s, err := src()
+			w.Last = last
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
@@ -49,11 +50,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			if *asJSON {
-				data, err := json.Marshal(b)
-				return Reply{Text: string(data)}, err
-			}
-			return Reply{Text: briefingText(b)}, nil
+			return Reply{Text: briefingText(b), Data: b}, nil
 		},
 	})
 }

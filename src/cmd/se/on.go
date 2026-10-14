@@ -19,9 +19,6 @@ func init() {
 		Session:   true,
 		Installed: true,
 		Run: func(c *Call) (Reply, error) {
-			if err := c.Parse(c.Flags("on")); err != nil {
-				return Reply{}, err
-			}
 			reply := Reply{Active: switched(true)}
 			ep, note, err := startDaemon(&c.World, c.Paths())
 			if err != nil {

@@ -50,7 +50,11 @@ type Write struct {
 
 // Result is what a command answers: what to show, and what it commits.
 type Result struct {
-	Text   string
+	// Text is what to show; where the command's reply is data and the call
+	// said --json, Run puts Data there as JSON.
+	Text string
+	// Data is the reply as data, for a command whose reply is data.
+	Data   any
 	Writes []Write
 }
 
@@ -75,6 +79,13 @@ type CommandDecl struct {
 	Installed bool
 	// Class is Interactive or Batch: whether a person waits on its answer.
 	Class Class
+	// Flags are the flags it takes, each with its type, default and help.
+	Flags []Flag
+	// Words are what it takes beside its flags: none, an issue number, or any words.
+	Words Words
+	// JSON is set where its reply is data as well as text: it takes --json,
+	// and answers its data as JSON there.
+	JSON bool
 }
 
 // Class says who waits on a command (principle 9). The battery runs every
@@ -115,7 +126,7 @@ type derivation struct {
 type command struct {
 	decl CommandDecl
 	in   inputStruct
-	run  func(reflect.Value, []string) (Result, error)
+	run  func(reflect.Value, Args) (Result, error)
 }
 
 // inputStruct is a run's input struct: its type, and the local port each field reads.
@@ -230,12 +241,18 @@ func (m *Module) Derive(port string, read Reader) (any, error) {
 	return d.run(in)
 }
 
-// Run runs the command name with its arguments on what read answers. It
-// refuses a result that writes a port the module's commands do not write.
-func (m *Module) Run(name string, read Reader, args []string) (Result, error) {
+// Run runs the command name with the words of its call on what read
+// answers: it parses them as the command declares, and answers its text, or
+// its data as JSON where the call said --json. It refuses a result that
+// writes a port the module's commands do not write.
+func (m *Module) Run(name string, read Reader, words []string) (Result, error) {
 	c, ok := m.commands[name]
 	if !ok {
 		return Result{}, fmt.Errorf("module %s has no command %q", m.name, name)
+	}
+	args, err := c.decl.Parse(words)
+	if err != nil {
+		return Result{}, err
 	}
 	in, err := c.in.fill(read)
 	if err != nil {
@@ -243,6 +260,9 @@ func (m *Module) Run(name string, read Reader, args []string) (Result, error) {
 	}
 	r, err := c.run(in, args)
 	if err != nil {
+		return Result{}, err
+	}
+	if r.Text, err = args.Render(r.Text, r.Data); err != nil {
 		return Result{}, err
 	}
 	return r, m.CheckWrites(r.Writes)
@@ -384,11 +404,12 @@ type commandPart struct {
 	err error
 }
 
-// Command declares a command: fn reads the input struct In and the command's
-// arguments, and answers what to show and what to commit.
-func Command[In any](decl CommandDecl, fn func(in In, args []string) (Result, error)) Part {
+// Command declares a command: fn reads the input struct In and the call's
+// Args, parsed as decl declares them, and answers what to show, its data
+// where its reply is data, and what to commit.
+func Command[In any](decl CommandDecl, fn func(in In, args Args) (Result, error)) Part {
 	in, err := inputsOf(reflect.TypeFor[In]())
-	return commandPart{c: &command{decl: decl, in: in, run: func(v reflect.Value, args []string) (Result, error) {
+	return commandPart{c: &command{decl: decl, in: in, run: func(v reflect.Value, args Args) (Result, error) {
 		return fn(v.Interface().(In), args)
 	}}, err: err}
 }
@@ -409,6 +430,9 @@ func (p commandPart) declare(m *Module) {
 	}
 	if d.Class != Interactive && d.Class != Batch {
 		m.fail("command %q has no class: %s or %s", d.Name, Interactive, Batch)
+	}
+	for _, e := range d.checkFlags() {
+		m.fail("%s", e)
 	}
 	if _, taken := m.commands[d.Name]; taken {
 		m.fail("command %q is declared twice", d.Name)

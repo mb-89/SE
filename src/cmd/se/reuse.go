@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/issues"
 	"github.com/mb-89/SE/src/internal/reuse"
 )
@@ -17,16 +18,13 @@ func init() {
 		Class:   batch,
 		Summary: "fetch the outside plugins and skills SE runs, pinned",
 		Details: "fetch every source of the reuse config (src/index/wiring.yaml) at its pinned commit into DIR, as a folder of plugins that one entry of " + reuse.DirsVar + " loads: each plugin as DIR/<name>, each lone skill inside DIR/" + reuse.Adopted + ". A folder there that no source names any more is removed. A cloud environment's setup script runs it (spec/cloud.md).",
+		Flags:   []index.Flag{{Name: "into", Default: "", Help: "the `DIR` to fetch them into"}},
 		Run: func(c *Call) (Reply, error) {
-			fs := c.Flags("fleet plugins")
-			into := fs.String("into", "", "the `DIR` to fetch them into")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			if *into == "" {
+			into := c.Args.String("into")
+			if into == "" {
 				return Reply{}, fmt.Errorf("fleet plugins needs --into: the folder to fetch the plugins into")
 			}
-			dir, err := filepath.Abs(*into)
+			dir, err := filepath.Abs(into)
 			if err != nil {
 				return Reply{}, err
 			}

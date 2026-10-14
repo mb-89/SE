@@ -14,9 +14,6 @@ func init() {
 		Group:   "Daemon",
 		Summary: "end this workspace's daemon",
 		Run: func(c *Call) (Reply, error) {
-			if err := c.Parse(c.Flags("stop")); err != nil {
-				return Reply{}, err
-			}
 			return Reply{}, daemon.Stop(c.Paths(), 5*time.Second, c.Clock, c.Net)
 		},
 	})

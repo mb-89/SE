@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
@@ -26,19 +27,15 @@ func init() {
 			"The rules that read prose know se's commands and its manifests. It fails on a finding; tests/check.sh runs it. " +
 			"--fix first applies the mechanical part of each finding where the rule can, such as the fast-test rule's t.Parallel() " +
 			"as a test's first statement, names each file it changed, and then checks.",
+		Flags: []index.Flag{{Name: "fix", Default: false, Help: "apply the mechanical part of each finding where the rule can, then check"}},
 		Run: func(c *Call) (Reply, error) {
-			fs := c.Flags("rules")
-			fix := fs.Bool("fix", false, "apply the mechanical part of each finding where the rule can, then check")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
 			repo, err := repoOf(c.Disk, c.Proc, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
 			repo.Clock = c.Clock
 			var lines, findings []string
-			if *fix {
+			if c.Args.Bool("fix") {
 				fixed, err := rules.Fix(repo)
 				if err != nil {
 					return Reply{}, err
@@ -115,11 +112,9 @@ func unmergedPaths(procs proc.Procs, root string) ([]string, error) {
 func commandFlags() map[string][]string {
 	out := map[string][]string{}
 	for _, c := range catalog().Commands {
-		name, flags := c.Name, []string{}
-		if fs := flagsOf(name, false); fs != nil {
-			fs.VisitAll(func(f *flag.Flag) { flags = append(flags, f.Name) })
-		}
-		out[name] = flags
+		flags := []string{}
+		c.FlagSet().VisitAll(func(f *flag.Flag) { flags = append(flags, f.Name) })
+		out[c.Name] = flags
 	}
 	return out
 }

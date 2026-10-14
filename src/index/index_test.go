@@ -268,7 +268,7 @@ func TestABrokenDeclarationIsRefused(t *testing.T) {
 	broken := index.Declare("broken", "",
 		index.Output("o", 0, ""),
 		index.Derived("d", 0, "help", func(untagged) (int, error) { return 0, nil }),
-		index.Command(index.CommandDecl{Name: "broken"}, func(xIn, []string) (index.Result, error) { return index.Result{}, nil }),
+		index.Command(index.CommandDecl{Name: "broken"}, func(xIn, index.Args) (index.Result, error) { return index.Result{}, nil }),
 	)
 	for _, want := range []string{"module broken has no help", "output o has no help", "tagged index", `command "broken" has no summary`, `command "broken" has no class`} {
 		refused(t, "instances: {b: {module: broken}}", want, broken)
@@ -422,9 +422,9 @@ func TestABrokenFamilyIsRefused(t *testing.T) {
 func TestTheFakeKeepsAFamilyByKey(t *testing.T) {
 	t.Parallel()
 	f, err := indextest.New(index.Declare("post", "Posts 1 at its argument.", posts,
-		index.Command(index.CommandDecl{Name: "post", Usage: "post <key>", Summary: "Post.", Help: "Posts 1 at key.", Group: "Fixtures", Class: index.Batch},
-			func(_ struct{}, args []string) (index.Result, error) {
-				return index.Result{Writes: []index.Write{posts.At(args[0], 1)}}, nil
+		index.Command(index.CommandDecl{Name: "post", Usage: "post <key>", Summary: "Post.", Help: "Posts 1 at key.", Group: "Fixtures", Class: index.Batch, Words: index.AnyWords},
+			func(_ struct{}, args index.Args) (index.Result, error) {
+				return index.Result{Writes: []index.Write{posts.At(args.Words[0], 1)}}, nil
 			})))
 	must(t, err)
 	_, err = f.Call("post", "a")

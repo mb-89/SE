@@ -1,12 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/io/github"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
@@ -21,12 +21,10 @@ func init() {
 		Summary: "list what is broken in the fleet, each with its remedy",
 		Details: "read GitHub and list every finding: a stalled root, a conflicted, red or green but unmerged PR, a claim with no PR, a leftover claim, an impossible block, a bare issue (in no manifest), an issue waiting on a person. Each names its issue, its PR and its remedy, in the order the box, se:coordinator, fixes them. Nothing found, it says healthy. Where GitHub's answers say the hour's quota of requests has fallen below the github instance's quota-floor share (github/config/quota-floor), a last line says how many are left and when it resets. With fan-out on, a fan-out the routine refused with 429, which se issue pull --take keeps on the alive claims with its retry time, fires once that time has passed and the fleet still needs the box, and a last line says so. spec/coordination.md has the rules.",
 		Session: true,
+		Flags:   []index.Flag{repoFlag},
+		JSON:    true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "fleet check")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
@@ -45,15 +43,6 @@ func init() {
 			// The quota, as GitHub's answers to these reads gave it.
 			_, rate := github.Metered(c.GitHub)
 			quota := rate.Low(githubSettings().Floor)
-			if *asJSON {
-				data, err := json.Marshal(struct {
-					Healthy  bool             `json:"healthy"`
-					Findings []issues.Finding `json:"findings"`
-					Fanout   string           `json:"fanout,omitempty"`
-					Quota    string           `json:"quota,omitempty"`
-				}{len(found) == 0, append([]issues.Finding{}, found...), fanout, quota})
-				return Reply{Text: string(data)}, err
-			}
 			lines := make([]string, 0, len(found)+1)
 			for _, f := range found {
 				lines = append(lines, findingText(f))
@@ -67,7 +56,15 @@ func init() {
 			if quota != "" {
 				lines = append(lines, quota)
 			}
-			return Reply{Text: strings.Join(lines, "\n")}, nil
+			return Reply{
+				Text: strings.Join(lines, "\n"),
+				Data: struct {
+					Healthy  bool             `json:"healthy"`
+					Findings []issues.Finding `json:"findings"`
+					Fanout   string           `json:"fanout,omitempty"`
+					Quota    string           `json:"quota,omitempty"`
+				}{len(found) == 0, append([]issues.Finding{}, found...), fanout, quota},
+			}, nil
 		},
 	})
 	register(Command{
@@ -78,12 +75,10 @@ func init() {
 		Summary: "fix what fleet check finds that needs no checkout",
 		Details: "run fleet check and apply, in its order, every remedy that needs no checkout: auto-merge goes on, a leftover claim of a closed issue is left to the prune workflow for a day after the close, any other leftover claim's branch main holds whole is deleted by a git push from the workspace, a bare issue is filed into the open misc manifest (opening the next where none is open), and a finding with no other remedy becomes an se issue, or an se-person one where it is a judgment; an se issue it files goes into the open misc manifest, as se issue new files one without --parent, whose leaves together should take about issues.manifest/config/target (an hour). Each fix is recorded on the finding's issue, and a finding back after its fix goes to a person. A remedy that fails is reported, and the ones after it are still applied. A takeover is named for the box to run. A ready issue it made fires the routine once.",
 		Session: true,
+		Flags:   []index.Flag{repoFlag},
+		JSON:    true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "fleet fix")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
@@ -99,16 +94,13 @@ func init() {
 					break
 				}
 			}
-			if *asJSON {
-				data, err := json.Marshal(struct {
-					Healthy bool           `json:"healthy"`
-					Fixed   []issues.Fixed `json:"fixed"`
-					Fanout  string         `json:"fanout,omitempty"`
-				}{len(found) == 0, append([]issues.Fixed{}, done...), fanout})
-				return Reply{Text: string(data)}, err
-			}
+			data := struct {
+				Healthy bool           `json:"healthy"`
+				Fixed   []issues.Fixed `json:"fixed"`
+				Fanout  string         `json:"fanout,omitempty"`
+			}{len(found) == 0, append([]issues.Fixed{}, done...), fanout}
 			if len(done) == 0 {
-				return Reply{Text: "healthy"}, nil
+				return Reply{Text: "healthy", Data: data}, nil
 			}
 			lines := make([]string, 0, len(done)+1)
 			for _, d := range done {
@@ -117,7 +109,7 @@ func init() {
 			if fanout != "" {
 				lines = append(lines, fanout)
 			}
-			return Reply{Text: strings.Join(lines, "\n")}, nil
+			return Reply{Text: strings.Join(lines, "\n"), Data: data}, nil
 		},
 	})
 	register(Command{
@@ -128,13 +120,10 @@ func init() {
 		Summary: "list the stray branches; --apply deletes them",
 		Details: "list every issue-<n> branch whose issue is closed and every claude/* branch whose last commit is more than an hour old, each with no open PR. --apply deletes them; without it nothing is deleted. It never touches main or any other branch. The prune workflow runs it with the repository's token.",
 		Session: true,
+		Flags:   []index.Flag{repoFlag, {Name: "apply", Default: false, Help: "delete the branches it lists"}},
+		JSON:    true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "fleet prune")
-			apply := fs.Bool("apply", false, "delete the branches it lists")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
@@ -143,7 +132,7 @@ func init() {
 				return Reply{}, err
 			}
 			var pruneErr error
-			if *apply {
+			if c.Args.Bool("apply") {
 				strays, pruneErr = s.Prune(strays)
 			}
 			lines := make([]string, len(strays))
@@ -157,16 +146,13 @@ func init() {
 			if pruneErr != nil {
 				return Reply{}, fmt.Errorf("%w\n%s", pruneErr, strings.Join(lines, "\n"))
 			}
-			if *asJSON {
-				data, err := json.Marshal(struct {
-					Strays []issues.Stray `json:"strays"`
-				}{append([]issues.Stray{}, strays...)})
-				return Reply{Text: string(data)}, err
-			}
+			data := struct {
+				Strays []issues.Stray `json:"strays"`
+			}{append([]issues.Stray{}, strays...)}
 			if len(strays) == 0 {
-				return Reply{Text: "no stray branches"}, nil
+				return Reply{Text: "no stray branches", Data: data}, nil
 			}
-			return Reply{Text: strings.Join(lines, "\n")}, nil
+			return Reply{Text: strings.Join(lines, "\n"), Data: data}, nil
 		},
 	})
 	register(Command{
@@ -176,32 +162,32 @@ func init() {
 		Group:   "Fleet",
 		Summary: "say whether CI may trust the battery a box ran on a commit",
 		Details: fmt.Sprintf("CI's check job asks it first: exit 0 and say why where commit SHA's latest %s status is a success naming TREE, the tree CI checked out, posted by an account with write access to the repository, as se issue land and se issue keep post it on the commit they pushed; else exit 1 and say why, and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}). A status not posted yet is asked for again a few times. It is trust in one's own boxes, not a proof.", issues.BatteryContext),
+		Flags: []index.Flag{
+			repoFlag,
+			{Name: "sha", Default: "", Help: "the `SHA` of the PR's head commit"},
+			{Name: "tree", Default: "", Help: "the `TREE` CI checked out, HEAD^{tree}"},
+		},
+		JSON: true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "fleet trust")
-			sha := fs.String("sha", "", "the `SHA` of the PR's head commit")
-			tree := fs.String("tree", "", "the `TREE` CI checked out, HEAD^{tree}")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			if *sha == "" || *tree == "" {
+			sha, tree := c.Args.String("sha"), c.Args.String("tree")
+			if sha == "" || tree == "" {
 				return Reply{}, fmt.Errorf("fleet trust takes --sha SHA and --tree TREE")
 			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
-			why, err := s.Trusted(*sha, *tree)
+			why, err := s.Trusted(sha, tree)
 			if err != nil {
 				return Reply{}, fmt.Errorf("not trusted, so CI runs the battery: %w", err)
 			}
-			if *asJSON {
-				data, err := json.Marshal(struct {
+			return Reply{
+				Text: "trusted: " + why,
+				Data: struct {
 					Trusted bool   `json:"trusted"`
 					Why     string `json:"why"`
-				}{true, why})
-				return Reply{Text: string(data)}, err
-			}
-			return Reply{Text: "trusted: " + why}, nil
+				}{true, why},
+			}, nil
 		},
 	})
 	register(Command{
@@ -212,12 +198,10 @@ func init() {
 		Summary: "tell each open se PR the se checks it breaks merged with main",
 		Details: "for every open se PR against main: merge its head with origin's main in a worktree under .se/.runtime/rules, build se there and run se rules and the tests of the battery, the budgets and the programs list on the merge, and comment on each PR it breaks the findings and what to do, once for the same findings, so the box that owns it acts before its CI goes red. A PR that conflicts with main is left to its takeover; one whose check fails is reported, and the others are still checked. The rules workflow runs it when main takes a change to se's rules, tests/check.sh, the battery, spec/budgets.yaml or proc.",
 		Session: true,
+		Flags:   []index.Flag{repoFlag},
+		JSON:    true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "fleet rules")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
@@ -232,16 +216,13 @@ func init() {
 			if rulesErr != nil {
 				return Reply{}, fmt.Errorf("%w\n%s", rulesErr, strings.Join(lines, "\n"))
 			}
-			if *asJSON {
-				data, err := json.Marshal(struct {
-					Ruled []issues.Ruled `json:"ruled"`
-				}{append([]issues.Ruled{}, done...)})
-				return Reply{Text: string(data)}, err
-			}
+			data := struct {
+				Ruled []issues.Ruled `json:"ruled"`
+			}{append([]issues.Ruled{}, done...)}
 			if len(done) == 0 {
-				return Reply{Text: "no open se PR"}, nil
+				return Reply{Text: "no open se PR", Data: data}, nil
 			}
-			return Reply{Text: strings.Join(lines, "\n")}, nil
+			return Reply{Text: strings.Join(lines, "\n"), Data: data}, nil
 		},
 	})
 }

@@ -198,10 +198,18 @@ It marks a function as a command with:
 | offered | in a session as `/se <name>`, and whether as a `/se ui` button |
 | installed | answered by the installed `se` even when the session works in an SE checkout, whose own `se` answers every other `/se` word: `on`, `restart`, `update` |
 | class | `interactive`, a command a person waits on, which answers from the snapshot within its budgets in [spec/budgets.yaml](budgets.yaml); or `batch`, one that must write or that the fleet, a hook or the battery runs ([principle 9](principles.md)) |
+| flags | each flag it takes, with its type (by its built-in value: a string, a bool, a count, a duration, or a pick, a switch that may name one issue number as `--take N`) and one help line |
+| words | what it takes beside its flags: nothing, one issue number (`N` or `#N`), at most one, or any words |
+| reply | whether its reply is data as well as text: such a command takes `--json`, and answers its data as JSON there |
 
 The command runs like any other run: it reads a snapshot of the module's
 inputs plus its arguments, and answers a reply, a commit of the module's own
-outputs, and requests to I/O modules.
+outputs, and requests to I/O modules. **The collector does a command's
+boilerplate**: it parses the call's words by the flags and words declared,
+refusing what the command does not take, hands the command the parsed values,
+and renders the reply, its data as JSON where the call said `--json`, else its
+text. A command's own code is its logic alone: it never parses a flag or
+chooses between JSON and text.
 
 **A module's help talks only about that module.** It never explains, lists or
 refers to another module's commands or behaviour.

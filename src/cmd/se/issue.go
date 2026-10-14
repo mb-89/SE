@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mb-89/SE/src/index"
 	"github.com/mb-89/SE/src/internal/guidance"
 	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
@@ -70,44 +70,30 @@ func init() {
 		Details: fmt.Sprintf("pull the next ready se issue at the top, stuck work before new work; boxes take only manifests, so at the top it offers a manifest (a parent), a retro or an overhaul, never a leaf in no manifest, and a manifest whose leaves are all closed is offered to be landed as one PR. After stuck and conflicted work, it offers the priority manifests first, lowest number first: those labelled se-priority or holding an open leaf so labelled, and an open retro or overhaul; inside a manifest, its se-priority leaves come before the rest. Every --take first reads fleet.box/config/paused (issues/config/paused) in the wiring file on origin/main, and while it is set takes nothing and says the fleet is paused, so the box ends. Without --take it only shows it (number, title, link, why it is at the top, and where the cadences stand; --full adds the body), or says that none is ready, and takes nothing; a press of its /se ui button shows the short form, the cadences in one line. --take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out. Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into. A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands. A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it. A claim stuck a second time, or conflicting after a takeover, goes to a person on the way. A claim records the box's session on the issue, and fires the routine once only where the fleet needs another box: every alive box runs its cap of sub-agents (fleet.box/config/parallel, %d, Parallel) and another issue is ready (fan-out); a fire the routine refuses with 429 is kept on the claim with the retry time it names, nothing fires before that time, and the next take or se fleet check after it fires it. --worktree is the box's take: it checks nothing out, names the command that makes the issue's worktree for its sub-agent, and is refused while the box runs its cap. A take hands over every skill the issue's marked skills line names (se issue new --skills): their full text follows the issue, or, where the guidance instance's inline switch is off, their names and files; the session's log records each by name and hash. A name there that is an agent's role, as retro or overhaul, is no skill: the take's agent holds it, so it is neither handed over nor reported missing. A take names the agent that works the issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a parent, which is the box itself, se:retro and se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take claims one for a worktree. Every --take also refuses where main has moved past the commit se was built from, naming se update: the agents and guidance it hands over come from main. --person lists the issues waiting on a person.", issueConfig().OverhaulCadence, issueConfig().RetroCadence, issueConfig().Lease, issues.Parallel),
 		Session: true,
 		Button:  true,
+		Flags: []index.Flag{
+			repoFlag,
+			{Name: "take", Default: index.Pick{}, Help: "claim the next ready issue, or issue N as --take N"},
+			{Name: "in", Default: 0, Help: "look inside the tree of issue `ROOT` for its ready leaves"},
+			{Name: "person", Default: false, Help: "list the issues waiting on a person"},
+			{Name: "worktree", Default: false, Help: "with --take: claim for a sub-agent's worktree, checking nothing out"},
+			{Name: "full", Default: false, Help: "without --take: show the issue's body too"},
+		},
+		JSON: true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue pull")
-			take := &takeFlag{}
-			fs.Var(take, "take", "claim the next ready issue, or issue N as --take N")
-			in := fs.Int("in", 0, "look inside the tree of issue `ROOT` for its ready leaves")
-			person := fs.Bool("person", false, "list the issues waiting on a person")
-			worktree := fs.Bool("worktree", false, "with --take: claim for a sub-agent's worktree, checking nothing out")
-			full := fs.Bool("full", false, "without --take: show the issue's body too")
-			// --take N: the number may stand after --take, between or after the other flags.
-			for rest := c.Args; ; {
-				if err := fs.Parse(rest); err != nil {
-					return Reply{}, err
-				}
-				if fs.NArg() == 0 {
-					break
-				}
-				n, err := strconv.Atoi(strings.TrimPrefix(fs.Arg(0), "#"))
-				if !take.set || err != nil || n <= 0 || take.n != 0 {
-					return Reply{}, fmt.Errorf("issue pull takes one issue number, after --take, not %q", fs.Arg(0))
-				}
-				take.n, rest = n, fs.Args()[1:]
-			}
-			c.Args = nil
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			if *person && (take.set || *in != 0) {
+			a := c.Args
+			take, in, person, worktree := a.Pick("take"), a.Int("in"), a.Bool("person"), a.Bool("worktree")
+			if person && (take.Set || in != 0) {
 				return Reply{}, fmt.Errorf("issue pull takes --person alone, without --take or --in")
 			}
-			if *worktree && (!take.set || *in != 0) {
+			if worktree && (!take.Set || in != 0) {
 				return Reply{}, fmt.Errorf("issue pull takes --worktree with --take at the top, without --in: --in always takes for a worktree")
 			}
-			if take.set {
+			if take.Set {
 				if err := staleSE(&c.World); err != nil {
 					return Reply{}, err
 				}
 			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
@@ -115,30 +101,30 @@ func init() {
 			s.Flagged = func(i issues.Issue, reason string) {
 				flagged = append(flagged, fmt.Sprintf("Gave #%d %s to a person: %s", i.Number, i.Title, reason))
 			}
-			if *person {
+			if person {
 				waiting, err := s.Waiting()
 				if err != nil {
 					return Reply{}, err
 				}
-				return waitingReply(*asJSON, waiting, flagged)
+				return waitingReply(waiting, flagged)
 			}
-			if *in < 0 {
-				return Reply{}, fmt.Errorf("--in takes an issue number, not %d", *in)
+			if in < 0 {
+				return Reply{}, fmt.Errorf("--in takes an issue number, not %d", in)
 			}
 			// The pause switch on main stops every take, at the top and
 			// inside a tree, so the owner stops the fleet with one change.
-			if take.set {
+			if take.Set {
 				if paused, err := s.Paused(c.Workspace); err != nil {
 					return Reply{}, err
 				} else if paused {
-					return pausedReply(*asJSON)
+					return pausedReply(), nil
 				}
 			}
-			if *in > 0 {
-				r, err := inReply(c, s, *asJSON, *in, take)
-				return sweptReply(r, err, *asJSON, flagged)
+			if in > 0 {
+				r, err := inReply(c, s, in, take)
+				return sweptReply(r, err, flagged)
 			}
-			if !take.set {
+			if !take.Set {
 				next, ok, err := s.Next()
 				if err != nil {
 					return Reply{}, err
@@ -151,16 +137,15 @@ func init() {
 					}
 					cads = append(cads, cad)
 				}
-				r, err := issueReply(*asJSON, *full, next, ok, "", "", "", handed{}, cads...)
-				return sweptReply(r, err, *asJSON, flagged)
+				return sweptReply(issueReply(a.Bool("full"), next, ok, "", "", "", handed{}, cads...), nil, flagged)
 			}
 			// An overhaul, then a retro, the cadence has made due comes
 			// before all other work.
 			var took issues.Issue
 			var ok bool
 			var started []issues.Cadence
-			s.Worktrees = *worktree
-			if take.n == 0 {
+			s.Worktrees = worktree
+			if take.N == 0 {
 				var due issues.Cadence
 				if took, ok, due, err = s.TakeDue(c.Workspace); err != nil {
 					return Reply{}, err
@@ -170,19 +155,19 @@ func init() {
 				}
 			}
 			if !ok {
-				if took, ok, err = s.Take(c.Workspace, take.n); issues.IsFull(err) {
-					return fullReply(*asJSON, err, flagged)
+				if took, ok, err = s.Take(c.Workspace, take.N); issues.IsFull(err) {
+					return fullReply(err, flagged)
 				} else if err != nil {
 					return Reply{}, err
 				}
 			}
 			fanout, wt := "", ""
 			if ok {
-				if err := restoreAnswers(c, s, &took, *worktree); err != nil {
+				if err := restoreAnswers(c, s, &took, worktree); err != nil {
 					return Reply{}, err
 				}
 				fanout = c.fanOut(s, took.Number)
-				if *worktree && !took.Parent {
+				if worktree && !took.Parent {
 					wt = issues.Worktree(c.Workspace, took.Number)
 				}
 				// What waits for it, so the box can tell which of them need
@@ -202,8 +187,7 @@ func init() {
 			if ok {
 				h = c.handOver(took)
 			}
-			r, err := issueReply(*asJSON, false, took, ok, issues.Branch(took.Number), wt, fanout, h, started...)
-			return sweptReply(r, err, *asJSON, flagged)
+			return sweptReply(issueReply(false, took, ok, issues.Branch(took.Number), wt, fanout, h, started...), nil, flagged)
 		},
 	})
 	register(Command{
@@ -214,48 +198,28 @@ func init() {
 		Summary: "for a person: put issue N back in the queue",
 		Details: "for a person: take issue N off se-person and put it back in the queue, its takeover count reset.",
 		Session: true,
+		Flags:   []index.Flag{repoFlag},
+		Words:   index.Number,
+		JSON:    true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue resume")
-			var words []string
-			for rest := c.Args; ; {
-				if err := fs.Parse(rest); err != nil {
-					return Reply{}, err
-				}
-				if fs.NArg() == 0 {
-					break
-				}
-				words, rest = append(words, fs.Arg(0)), fs.Args()[1:]
-			}
-			c.Args = nil
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			n := 0
-			if len(words) == 1 {
-				n, _ = strconv.Atoi(strings.TrimPrefix(words[0], "#"))
-			}
-			if n <= 0 {
-				return Reply{}, fmt.Errorf("issue resume takes one issue number, not %q", strings.Join(words, " "))
-			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
 			if err := s.CloseParents(); err != nil {
 				return Reply{}, err
 			}
-			i, err := s.Resume(n)
+			i, err := s.Resume(c.Args.Number)
 			if err != nil {
 				return Reply{}, err
 			}
-			if *asJSON {
-				data, err := json.Marshal(struct {
+			return Reply{
+				Text: fmt.Sprintf("Resumed #%d %s: back in the queue, its takeover count reset.\n%s", i.Number, i.Title, i.URL),
+				Data: struct {
 					Number  int  `json:"number"`
 					Resumed bool `json:"resumed"`
-				}{i.Number, true})
-				return Reply{Text: string(data)}, err
-			}
-			return Reply{Text: fmt.Sprintf("Resumed #%d %s: back in the queue, its takeover count reset.\n%s", i.Number, i.Title, i.URL)}, nil
+				}{i.Number, true},
+			}, nil
 		},
 	})
 	register(Command{
@@ -266,30 +230,12 @@ func init() {
 		Summary: "list the open queue and estimate when its last issue closes",
 		Details: fmt.Sprintf("list every open se issue, each indented under its parent: its number, where it stands (ready, claimed, blocked and by what), how many of its sub-issues are closed, its labels and its title. With ROOT, list ROOT and every issue below it, open or closed. Then estimate when the last open one closes, from what the fleet measured over the last %s (PaceWindow), read as the retro reads it: the se issues merged an hour, and their claim-to-merge times (p50, p90) from the landing answers; how many run at once (the leaves in flight now that are not stuck, or the merges an hour times the p50, whichever is more); and the critical path, the longest chain of open work that must run in a row (blocked-by links, an ancestor's counting for its whole tree, and a review gate after its tree). The estimate is the larger of the critical path end to end and the open work spread over those running at once, at the p50 and at the p90 time; it names the critical path, and how long the work takes at the window's pace, idle hours and all. --json answers {\"issues\":[...],\"queue\":{...}} with the numbers.", issues.Span(issues.PaceWindow.Minutes())),
 		Session: true,
+		Flags:   []index.Flag{repoFlag},
+		Words:   index.MaybeNumber,
+		JSON:    true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue tree")
-			var words []string
-			for rest := c.Args; ; {
-				if err := fs.Parse(rest); err != nil {
-					return Reply{}, err
-				}
-				if fs.NArg() == 0 {
-					break
-				}
-				words, rest = append(words, fs.Arg(0)), fs.Args()[1:]
-			}
-			c.Args = nil
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			root := 0
-			if len(words) > 0 {
-				root, _ = strconv.Atoi(strings.TrimPrefix(words[0], "#"))
-				if len(words) > 1 || root <= 0 {
-					return Reply{}, fmt.Errorf("issue tree takes at most one issue number, not %q", strings.Join(words, " "))
-				}
-			}
-			s, err := src()
+			root := c.Args.Number
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
@@ -313,13 +259,6 @@ func init() {
 					nodes[k].Why = why[nodes[k].Number]
 				}
 			}
-			if *asJSON {
-				data, err := json.Marshal(struct {
-					Issues []issues.Node `json:"issues"`
-					Queue  issues.Queue  `json:"queue"`
-				}{nodes, q})
-				return Reply{Text: string(data)}, err
-			}
 			lines := make([]string, len(nodes))
 			for k, n := range nodes {
 				lines[k] = n.Line()
@@ -327,7 +266,13 @@ func init() {
 			if len(nodes) == 0 {
 				lines = []string{"No se issue is open."}
 			}
-			return Reply{Text: strings.Join(lines, "\n") + "\n\n" + q.Text()}, nil
+			return Reply{
+				Text: strings.Join(lines, "\n") + "\n\n" + q.Text(),
+				Data: struct {
+					Issues []issues.Node `json:"issues"`
+					Queue  issues.Queue  `json:"queue"`
+				}{nodes, q},
+			}, nil
 		},
 	})
 	register(Command{
@@ -338,49 +283,50 @@ func init() {
 		Summary: "create an se issue in a manifest, with its blockers",
 		Details: fmt.Sprintf("create an se issue, linked as blocked by each issue --blocked-by names (GitHub's native links), and name it. All work moves in manifests: a manifest is an issue at the top on one topic whose sub-issues are its work, landing as one PR, its leaves together about %s (issues.manifest/config/target), and boxes take only manifests. --parent N files it into a manifest (a sub-issue of N); --manifest makes it a new manifest itself, labelled se-manifest, whose leaves follow with --parent; without either it goes into the open misc manifest (labelled se-misc), which takes new issues for that time from its creation, after which the next one opens.", issues.Span(issueConfig().ManifestTarget.Minutes())) + " --blocks links each issue it names as blocked by the new one: those dependents of a box's issue that need what is left of it. --review labels it se-review; --final labels it se-final, its last attempt before a person. --person makes it an issue for a person: labelled se-person and assigned to the owner, it waits for them, and its body opens with what they decide. --skills names the skills its work needs, each a folder of src/plugin/skills in the workspace, in one marked line of its body: the take hands each over (se help issue pull). A name that is an agent's role (work, coordination, review, retro, overhaul, or the agent's own name) is left out of that line, since the take names the agent that holds it. It refuses a title an open se issue under the same --parent (or at the top) has already, naming it, unless --allow-duplicate is given. An issue for a person stands at the top, in no manifest. A ready issue, one nothing open blocks, fires the routine once.",
 		Session: true,
+		Flags: []index.Flag{
+			repoFlag,
+			{Name: "title", Default: "", Help: "the issue's title `T`"},
+			{Name: "body", Default: "", Help: "the issue's body `B`"},
+			{Name: "body-file", Default: "", Help: "a file `PATH` holding the issue's body"},
+			{Name: "blocked-by", Default: "", Help: "the issues that block it, as `N,M`, or none"},
+			{Name: "parent", Default: 0, Help: "the issue `N` it is a sub-issue of"},
+			{Name: "blocks", Default: "", Help: "the issues it blocks, as `N,M`: those that need it"},
+			{Name: "review", Default: false, Help: "label it se-review: it is reviewed once its sub-issues have closed"},
+			{Name: "final", Default: false, Help: "label it se-final: if it fails, it goes to a person"},
+			{Name: "person", Default: false, Help: "make it an issue for a person: label it se-person and assign it to the owner"},
+			{Name: "manifest", Default: false, Help: "make it a new manifest, labelled se-manifest: its leaves follow with --parent"},
+			{Name: "skills", Default: "", Help: "the skills its work needs, as `NAME,NAME`: a take hands each over"},
+			{Name: "allow-duplicate", Default: false, Help: "create it although an open se issue under the same parent has its title"},
+		},
+		JSON: true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue new")
-			title := fs.String("title", "", "the issue's title `T`")
-			body := fs.String("body", "", "the issue's body `B`")
-			bodyFile := fs.String("body-file", "", "a file `PATH` holding the issue's body")
-			blockedBy := fs.String("blocked-by", "", "the issues that block it, as `N,M`, or none")
-			parent := fs.Int("parent", 0, "the issue `N` it is a sub-issue of")
-			blocks := fs.String("blocks", "", "the issues it blocks, as `N,M`: those that need it")
-			review := fs.Bool("review", false, "label it se-review: it is reviewed once its sub-issues have closed")
-			final := fs.Bool("final", false, "label it se-final: if it fails, it goes to a person")
-			person := fs.Bool("person", false, "make it an issue for a person: label it se-person and assign it to the owner")
-			manifest := fs.Bool("manifest", false, "make it a new manifest, labelled se-manifest: its leaves follow with --parent")
-			skills := fs.String("skills", "", "the skills its work needs, as `NAME,NAME`: a take hands each over")
-			allowDuplicate := fs.Bool("allow-duplicate", false, "create it although an open se issue under the same parent has its title")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			given := map[string]bool{}
-			fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
-			if !given["blocked-by"] {
+			a, given := c.Args, c.Args.Given
+			title, body, parent := a.String("title"), a.String("body"), a.Int("parent")
+			review, final, person, manifest := a.Bool("review"), a.Bool("final"), a.Bool("person"), a.Bool("manifest")
+			if !given("blocked-by") {
 				return Reply{}, fmt.Errorf("issue new needs --blocked-by: the issues that block it, as N,M, or none")
 			}
-			blockers, err := issues.ParseBlockedBy(*blockedBy)
+			blockers, err := issues.ParseBlockedBy(a.String("blocked-by"))
 			if err != nil {
 				return Reply{}, err
 			}
 			var dependents []int
-			if given["blocks"] {
-				if dependents, err = issues.ParseBlockedBy(*blocks); err != nil || len(dependents) == 0 {
-					return Reply{}, fmt.Errorf("--blocks takes issue numbers, like 5,8, not %q", *blocks)
+			if given("blocks") {
+				if dependents, err = issues.ParseBlockedBy(a.String("blocks")); err != nil || len(dependents) == 0 {
+					return Reply{}, fmt.Errorf("--blocks takes issue numbers, like 5,8, not %q", a.String("blocks"))
 				}
 			}
-			if *parent < 0 {
-				return Reply{}, fmt.Errorf("--parent takes an issue number, not %d", *parent)
+			if parent < 0 {
+				return Reply{}, fmt.Errorf("--parent takes an issue number, not %d", parent)
 			}
-			if *manifest && (*parent > 0 || *person) {
+			if manifest && (parent > 0 || person) {
 				return Reply{}, fmt.Errorf("--manifest makes an issue at the top: it takes neither --parent nor --person")
 			}
-			if given["body"] == given["body-file"] {
+			if given("body") == given("body-file") {
 				return Reply{}, fmt.Errorf("issue new takes one of --body and --body-file")
 			}
-			if given["body-file"] {
-				path := *bodyFile
+			if given("body-file") {
+				path := a.String("body-file")
 				if !filepath.IsAbs(path) {
 					path = filepath.Join(c.Workspace, path)
 				}
@@ -388,10 +334,10 @@ func init() {
 				if err != nil {
 					return Reply{}, err
 				}
-				*body = string(data)
+				body = string(data)
 			}
-			if given["skills"] {
-				names, err := guidance.Parse(*skills)
+			if given("skills") {
+				names, err := guidance.Parse(a.String("skills"))
 				if err != nil {
 					return Reply{}, err
 				}
@@ -400,42 +346,42 @@ func init() {
 				if _, err := guidance.Read(c.Disk, c.seRoot(), names); err != nil {
 					return Reply{}, err
 				}
-				*body = guidance.With(*body, names)
+				body = guidance.With(body, names)
 			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
 			// No bare issues: without --parent or --manifest it goes into the
 			// open misc manifest, or the next one.
 			misc := 0
-			if *parent == 0 && !*manifest && !*person {
+			if parent == 0 && !manifest && !person {
 				if misc, err = s.Misc(); err != nil {
 					return Reply{}, err
 				}
-				*parent = misc
+				parent = misc
 			}
-			if *allowDuplicate {
+			if a.Bool("allow-duplicate") {
 				if err := s.CloseParents(); err != nil {
 					return Reply{}, err
 				}
-			} else if dup, err := s.Duplicate(*title, *parent); err != nil {
+			} else if dup, err := s.Duplicate(title, parent); err != nil {
 				return Reply{}, err
 			} else if dup > 0 {
 				where := "at the top"
-				if *parent > 0 {
-					where = fmt.Sprintf("a sub-issue of #%d", *parent)
+				if parent > 0 {
+					where = fmt.Sprintf("a sub-issue of #%d", parent)
 				}
-				return Reply{}, fmt.Errorf("#%d is an open se issue titled %q, %s, already; --allow-duplicate creates another", dup, strings.TrimSpace(*title), where)
+				return Reply{}, fmt.Errorf("#%d is an open se issue titled %q, %s, already; --allow-duplicate creates another", dup, strings.TrimSpace(title), where)
 			}
 			var labels []string
-			if *manifest {
+			if manifest {
 				labels = append(labels, issues.ManifestLabel)
 			}
-			if *review {
+			if review {
 				labels = append(labels, issues.ReviewLabel)
 			}
-			if *final {
+			if final {
 				labels = append(labels, issues.FinalLabel)
 			}
 			if err := s.Exist(dependents); err != nil {
@@ -443,13 +389,13 @@ func init() {
 			}
 			var made issues.Issue
 			ready := false
-			if *person {
+			if person {
 				if len(labels) > 0 {
 					return Reply{}, fmt.Errorf("--person takes neither --review nor --final: an issue for a person is no box's work")
 				}
-				made, err = s.ForPerson(*title, *body, *parent, blockers)
+				made, err = s.ForPerson(title, body, parent, blockers)
 			} else {
-				made, ready, err = s.Create(*title, *body, *parent, blockers, labels...)
+				made, ready, err = s.Create(title, body, parent, blockers, labels...)
 			}
 			if err != nil {
 				return Reply{}, err
@@ -459,48 +405,32 @@ func init() {
 			}
 			// Filed into no manifest, it went into the misc manifest, which
 			// it may have opened.
-			if *parent == 0 && made.In() > 0 {
-				misc, *parent = made.In(), made.In()
+			if parent == 0 && made.In() > 0 {
+				misc, parent = made.In(), made.In()
 			}
 			fanout := ""
 			if ready {
 				fanout = c.fanOut(s, 0)
 			}
-			if *asJSON {
-				data, err := json.Marshal(struct {
-					Number    int    `json:"number"`
-					URL       string `json:"url"`
-					BlockedBy []int  `json:"blocked_by"`
-					Parent    int    `json:"parent,omitempty"`
-					Blocks    []int  `json:"blocks,omitempty"`
-					Review    bool   `json:"review,omitempty"`
-					Final     bool   `json:"final,omitempty"`
-					Person    bool   `json:"person,omitempty"`
-					Manifest  bool   `json:"manifest,omitempty"`
-					Misc      bool   `json:"misc,omitempty"`
-					Fanout    string `json:"fanout,omitempty"`
-				}{made.Number, made.URL, append([]int{}, blockers...), *parent, dependents, *review, *final, *person, *manifest, misc > 0, fanout})
-				return Reply{Text: string(data)}, err
-			}
 			text := fmt.Sprintf("Created #%d %s\n%s", made.Number, made.Title, made.URL)
 			switch {
 			case misc > 0:
 				text += fmt.Sprintf("\nFiled into the misc manifest #%d: it named no --parent.", misc)
-			case *parent > 0:
-				text += fmt.Sprintf("\nA sub-issue of #%d.", *parent)
-			case *manifest:
+			case parent > 0:
+				text += fmt.Sprintf("\nA sub-issue of #%d.", parent)
+			case manifest:
 				text += fmt.Sprintf("\nA new manifest, labelled %s: file its leaves with --parent %d.", issues.ManifestLabel, made.Number)
 			}
-			if *review {
+			if review {
 				text += "\nLabelled " + issues.ReviewLabel + ": it is reviewed once its sub-issues have closed."
 			}
 			if len(dependents) > 0 {
 				text += "\nIt blocks " + numbers(dependents) + "."
 			}
-			if *person {
+			if person {
 				text += "\nFor a person: labelled " + issues.PersonLabel + " and assigned to the owner."
 			}
-			if *final {
+			if final {
 				text += "\nLabelled " + issues.FinalLabel + ": if it fails, it goes to a person."
 			}
 			if len(blockers) > 0 {
@@ -513,7 +443,19 @@ func init() {
 			if fanout != "" {
 				text += "\n" + fanout
 			}
-			return Reply{Text: text}, nil
+			return Reply{Text: text, Data: struct {
+				Number    int    `json:"number"`
+				URL       string `json:"url"`
+				BlockedBy []int  `json:"blocked_by"`
+				Parent    int    `json:"parent,omitempty"`
+				Blocks    []int  `json:"blocks,omitempty"`
+				Review    bool   `json:"review,omitempty"`
+				Final     bool   `json:"final,omitempty"`
+				Person    bool   `json:"person,omitempty"`
+				Manifest  bool   `json:"manifest,omitempty"`
+				Misc      bool   `json:"misc,omitempty"`
+				Fanout    string `json:"fanout,omitempty"`
+			}{made.Number, made.URL, append([]int{}, blockers...), parent, dependents, review, final, person, manifest, misc > 0, fanout}}, nil
 		},
 	})
 	register(Command{
@@ -524,27 +466,25 @@ func init() {
 		Summary: "check and land issue-N: a leaf into its manifest, else one PR",
 		Details: "on an issue-N branch: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), and refuse an issue with open sub-issues. A leaf inside a manifest (an issue with a parent) lands into the manifest's branch: merge origin's issue-N and the manifest's issue-M into it (never a rebase), pass tests/check.sh, push it to both, post the answers on the leaf with its facts (its time from claim to land among them) and close it; a leaf gets no PR of its own. An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, push, post the se/battery commit status naming the tree on the pushed commit (where GitHub refuses it with 403, as a cloud box's proxy does, it goes on and warns, since CI then runs the battery itself), post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a manifest whose branch holds nothing main does not closes with no PR.",
 		Session: true,
+		Flags:   []index.Flag{repoFlag, answersFlag},
+		JSON:    true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue land")
-			file := fs.String("answers", "", "the landing answers, a YAML `FILE` keyed as spec/landing.yaml")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			if *file == "" {
+			file := c.Args.String("answers")
+			if file == "" {
 				return Reply{}, fmt.Errorf("issue land takes --answers FILE: an answer to every question in %s", issues.QuestionsFile)
 			}
-			if !filepath.IsAbs(*file) {
-				*file = filepath.Join(c.Workspace, *file)
+			if !filepath.IsAbs(file) {
+				file = filepath.Join(c.Workspace, file)
 			}
 			qs, err := issues.Questions(c.Disk, c.Workspace)
 			if err != nil {
 				return Reply{}, err
 			}
-			answers, err := issues.ReadAnswers(c.Disk, *file)
+			answers, err := issues.ReadAnswers(c.Disk, file)
 			if err != nil {
 				return Reply{}, err
 			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
@@ -559,15 +499,11 @@ func init() {
 			if err := recordLand(c, l.Issue, l.Number); err != nil {
 				return Reply{}, fmt.Errorf("landed PR #%d (%s), but recording it for the Stop hook: %w", l.Number, l.URL, err)
 			}
-			if *asJSON {
-				data, err := json.Marshal(l)
-				return Reply{Text: string(data)}, err
-			}
 			switch {
 			case l.Manifest > 0:
-				return Reply{Text: fmt.Sprintf("Landed #%d into %s, the branch of manifest #%d, and closed it: a leaf gets no PR. The manifest lands as one PR once its leaves are done.", l.Issue, l.Into, l.Manifest)}, nil
+				return Reply{Text: fmt.Sprintf("Landed #%d into %s, the branch of manifest #%d, and closed it: a leaf gets no PR. The manifest lands as one PR once its leaves are done.", l.Issue, l.Into, l.Manifest), Data: l}, nil
 			case l.Closed:
-				return Reply{Text: fmt.Sprintf("Closed #%d: its leaves are all closed and its branch holds nothing main does not, so there is no PR.", l.Issue)}, nil
+				return Reply{Text: fmt.Sprintf("Closed #%d: its leaves are all closed and its branch holds nothing main does not, so there is no PR.", l.Issue), Data: l}, nil
 			}
 			did := "Pushed issue-%d; its PR #%d is open"
 			if l.Created {
@@ -582,7 +518,7 @@ func init() {
 			if l.Warning != "" {
 				text += "\nWarning: " + l.Warning
 			}
-			return Reply{Text: text + "\n" + l.URL}, nil
+			return Reply{Text: text + "\n" + l.URL, Data: l}, nil
 		},
 	})
 }
@@ -596,23 +532,16 @@ func init() {
 		Summary: "keep an issue-N branch's PR up to date until it merges",
 		Details: "on an issue-N branch whose PR se issue land opened: a box keeps its PR until it merges. Every minute, for D at most (default 8m, so one call fits a tool's timeout), it looks at the PR; whenever main has moved past the branch on origin, it merges origin/main in (never a rebase), passes tests/check.sh, pushes and posts the battery's status, as se issue land does, so CI trusts it and auto-merge merges. It says when the PR merged, or another box took the issue over, or that it is still open: run it again. A merge that conflicts, a failing check and a PR closed unmerged are errors to fix, then land again (with --json: {\"issue\",\"pr\",\"url\",\"merged\",\"taken_over\",\"updated\"}).",
 		Session: true,
+		Flags:   []index.Flag{repoFlag, {Name: "for", Default: 8 * time.Minute, Help: "keep the PR this long (`D`) at most before answering"}},
+		JSON:    true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue keep")
-			within := fs.Duration("for", 8*time.Minute, "keep the PR this long (`D`) at most before answering")
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
-			k, err := s.Keep(c.Workspace, *within, func(dir string) error { return c.Check(c.Proc, dir) })
+			k, err := s.Keep(c.Workspace, c.Args.Duration("for"), func(dir string) error { return c.Check(c.Proc, dir) })
 			if err != nil {
 				return Reply{}, err
-			}
-			if *asJSON {
-				data, err := json.Marshal(k)
-				return Reply{Text: string(data)}, err
 			}
 			text := fmt.Sprintf("PR #%d of issue-%d is still open: run se issue keep again.", k.PR, k.Issue)
 			switch {
@@ -624,7 +553,7 @@ func init() {
 			if k.Updated > 0 {
 				text += fmt.Sprintf(" It merged main in, checked and pushed %d time(s).", k.Updated)
 			}
-			return Reply{Text: text + "\n" + k.URL}, nil
+			return Reply{Text: text + "\n" + k.URL, Data: k}, nil
 		},
 	})
 }
@@ -638,24 +567,12 @@ func init() {
 		Summary: "pass or fail a gate whose sub-issues closed, by its report",
 		Details: fmt.Sprintf("review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree, with the report in the JSON file PATH (spec/review.md). It refuses a pass where a requirement lacks evidence, and a report without its checked-and-clean list. Every finding becomes an se-final issue: a blocking one a sub-issue of N, a non-blocking one in the queue (at most %d, issues/config/max-filed). pass posts the report and closes N; fail posts it, and N waits for its fixes. A re-review that finds an earlier blocker's problem again sends N to a person.", issueConfig().MaxFiled),
 		Session: true,
+		Flags:   []index.Flag{repoFlag, {Name: "report", Default: "", Help: "the review's report, a JSON file at `PATH`"}},
+		// The words pass|fail and N may stand before, between or after the flags.
+		Words: index.AnyWords,
+		JSON:  true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "issue review")
-			report := fs.String("report", "", "the review's report, a JSON file at `PATH`")
-			// The words pass|fail and N may stand before, between or after the flags.
-			var words []string
-			for rest := c.Args; ; {
-				if err := fs.Parse(rest); err != nil {
-					return Reply{}, err
-				}
-				if fs.NArg() == 0 {
-					break
-				}
-				words, rest = append(words, fs.Arg(0)), fs.Args()[1:]
-			}
-			c.Args = nil
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
+			words, report := c.Args.Words, c.Args.String("report")
 			if len(words) != 2 || (words[0] != "pass" && words[0] != "fail") {
 				return Reply{}, fmt.Errorf("issue review takes pass or fail, then an issue number, not %q", strings.Join(words, " "))
 			}
@@ -663,10 +580,10 @@ func init() {
 			if err != nil || n <= 0 {
 				return Reply{}, fmt.Errorf("issue review takes an issue number, not %q", words[1])
 			}
-			if *report == "" {
+			if report == "" {
 				return Reply{}, fmt.Errorf("issue review needs --report: the review's report, a JSON file (spec/review.md)")
 			}
-			path := *report
+			path := report
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(c.Workspace, path)
 			}
@@ -678,12 +595,12 @@ func init() {
 			dec := json.NewDecoder(strings.NewReader(string(data)))
 			dec.DisallowUnknownFields()
 			if err := dec.Decode(&rep); err != nil {
-				return Reply{}, fmt.Errorf("the report %s is not a review report (spec/review.md): %v", *report, err)
+				return Reply{}, fmt.Errorf("the report %s is not a review report (spec/review.md): %v", report, err)
 			}
 			if err := checkRan(rep); err != nil {
 				return Reply{}, err
 			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
@@ -696,13 +613,6 @@ func init() {
 			fanout := ""
 			if len(r.Filed) > 0 {
 				fanout = c.fire()
-			}
-			if *asJSON {
-				data, err := json.Marshal(struct {
-					issues.Reviewed
-					Fanout string `json:"fanout,omitempty"`
-				}{r, fanout})
-				return Reply{Text: string(data)}, err
 			}
 			var lines []string
 			switch {
@@ -728,7 +638,13 @@ func init() {
 			if fanout != "" {
 				lines = append(lines, fanout)
 			}
-			return Reply{Text: strings.Join(lines, "\n")}, nil
+			return Reply{
+				Text: strings.Join(lines, "\n"),
+				Data: struct {
+					issues.Reviewed
+					Fanout string `json:"fanout,omitempty"`
+				}{r, fanout},
+			}, nil
 		},
 	})
 	register(Command{
@@ -739,101 +655,50 @@ func init() {
 		Summary: "everything a reviewer of gate N starts from",
 		Details: "print the brief of gate N's review: its question, the text of every issue in its tree, main's head as the pinned commit, the CI there and spec/principles.md; for a re-review, the earlier blockers and the diff since. The workers' PR descriptions and comments are withheld; --claims adds them, once the findings are verified, as claims to check.",
 		Session: true,
+		Flags:   []index.Flag{repoFlag, {Name: "claims", Default: false, Help: "add the workers' accounts, as claims to check, once the findings are verified"}},
+		Words:   index.Number,
+		JSON:    true,
 		Run: func(c *Call) (Reply, error) {
-			fs, src, asJSON := issueFlags(c, "review brief")
-			claims := fs.Bool("claims", false, "add the workers' accounts, as claims to check, once the findings are verified")
-			var words []string
-			for rest := c.Args; ; {
-				if err := fs.Parse(rest); err != nil {
-					return Reply{}, err
-				}
-				if fs.NArg() == 0 {
-					break
-				}
-				words, rest = append(words, fs.Arg(0)), fs.Args()[1:]
-			}
-			c.Args = nil
-			if err := c.Parse(fs); err != nil {
-				return Reply{}, err
-			}
-			n := 0
-			if len(words) == 1 {
-				n, _ = strconv.Atoi(strings.TrimPrefix(words[0], "#"))
-			}
-			if n <= 0 {
-				return Reply{}, fmt.Errorf("review brief takes one issue number, not %q", strings.Join(words, " "))
-			}
-			s, err := src()
+			s, err := c.source()
 			if err != nil {
 				return Reply{}, err
 			}
-			b, err := s.Brief(n, *claims)
+			b, err := s.Brief(c.Args.Number, c.Args.Bool("claims"))
 			if err != nil {
 				return Reply{}, err
-			}
-			if *asJSON {
-				data, err := json.Marshal(b)
-				return Reply{Text: string(data)}, err
 			}
 			text := strings.TrimRight(b.Text(), "\n")
 			if ran := c.reused(reuse.Reviewer, reviewerIntro); ran != "" {
 				text += "\n\n" + ran
 			}
-			return Reply{Text: text}, nil
+			return Reply{Text: text, Data: b}, nil
 		},
 	})
 }
 
-// takeFlag is --take, alone or as --take=N; a bare --take N is read by the
-// command, since a flag that may stand alone cannot take the next word.
-type takeFlag struct {
-	set bool
-	n   int
-}
+// answersFlag is the flag of the commands that post the landing answers.
+var answersFlag = index.Flag{Name: "answers", Default: "", Help: "the landing answers, a YAML `FILE` keyed as spec/landing.yaml"}
 
-func (t *takeFlag) IsBoolFlag() bool { return true }
+// repoFlag is the flag every command that reads issues takes.
+var repoFlag = index.Flag{Name: "repo", Default: "", Help: "the repository as `OWNER/NAME` (default: the workspace's origin)"}
 
-func (t *takeFlag) String() string { return "" }
-
-func (t *takeFlag) Set(v string) error {
-	t.set = true
-	switch v {
-	case "true":
-		return nil
-	case "false":
-		t.set = false
-		return nil
-	}
-	n, err := strconv.Atoi(strings.TrimPrefix(v, "#"))
-	if err != nil || n <= 0 {
-		return fmt.Errorf("--take takes an issue number, not %q", v)
-	}
-	t.n = n
-	return nil
-}
-
-// issueFlags is the flag set every issue command takes; src reads the issues of
-// --repo, or of the workspace's origin, once the flags are parsed.
-func issueFlags(c *Call, name string) (fs *flag.FlagSet, src func() (issues.Source, error), asJSON *bool) {
-	fs = c.Flags(name)
-	asJSON = fs.Bool("json", false, "answer JSON")
-	repo := fs.String("repo", "", "the repository as `OWNER/NAME` (default: the workspace's origin)")
-	return fs, func() (issues.Source, error) {
-		if *repo == "" {
-			r, err := issues.Repo(c.Proc, c.Workspace)
-			if err != nil {
-				return issues.Source{}, err
-			}
-			*repo = r
-		}
-		// stdout is the answer; what se waits on goes beside it, as it waits.
-		waits := func(note string) { fmt.Fprintln(os.Stderr, "se:", note) }
-		cfg, err := issues.Configured()
+// source reads the issues of --repo, or of the workspace's origin.
+func (c *Call) source() (issues.Source, error) {
+	repo := c.Args.String(repoFlag.Name)
+	if repo == "" {
+		r, err := issues.Repo(c.Proc, c.Workspace)
 		if err != nil {
 			return issues.Source{}, err
 		}
-		return issues.Source{Repo: *repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Waits: waits, Box: c.sessionID(), Config: &cfg}, nil
-	}, asJSON
+		repo = r
+	}
+	// stdout is the answer; what se waits on goes beside it, as it waits.
+	waits := func(note string) { fmt.Fprintln(os.Stderr, "se:", note) }
+	cfg, err := issues.Configured()
+	if err != nil {
+		return issues.Source{}, err
+	}
+	return issues.Source{Repo: repo, GitHub: c.GitHub, Clock: c.Clock, Disk: c.Disk, Proc: c.Proc, Waits: waits, Box: c.sessionID(), Config: &cfg}, nil
 }
 
 // handed is what a take handed over: the skills its issue names, and the
@@ -849,36 +714,34 @@ type handed struct {
 // over, and cads where the retro and overhaul cadences stand. A take passes
 // the one cadence that started its issue, if any; full shows a plain pull's
 // body, which a take always shows. Every body it shows is issues.Shown.
-func issueReply(asJSON, full bool, i issues.Issue, ok bool, branch, worktree, fanout string, h handed, cads ...issues.Cadence) (Reply, error) {
+func issueReply(full bool, i issues.Issue, ok bool, branch, worktree, fanout string, h handed, cads ...issues.Cadence) Reply {
 	i.Body = issues.Shown(i.Body)
-	if asJSON {
-		answer := struct {
-			Ready     bool             `json:"ready"`
-			Issue     *issues.Issue    `json:"issue,omitempty"`
-			Branch    string           `json:"branch,omitempty"`
-			Worktree  string           `json:"worktree,omitempty"`
-			Fanout    string           `json:"fanout,omitempty"`
-			Agent     string           `json:"agent,omitempty"`
-			Skills    []guidance.Skill `json:"skills,omitempty"`
-			Guidance  string           `json:"guidance,omitempty"`
-			Retros    *issues.Cadence  `json:"retros,omitempty"`
-			Overhauls *issues.Cadence  `json:"overhauls,omitempty"`
-		}{Ready: ok, Fanout: fanout, Skills: h.Skills, Guidance: h.Text}
-		for k := range cads {
-			if cads[k].Kind == "overhaul" {
-				answer.Overhauls = &cads[k]
-			} else {
-				answer.Retros = &cads[k]
-			}
+	answer := struct {
+		Ready     bool             `json:"ready"`
+		Issue     *issues.Issue    `json:"issue,omitempty"`
+		Branch    string           `json:"branch,omitempty"`
+		Worktree  string           `json:"worktree,omitempty"`
+		Fanout    string           `json:"fanout,omitempty"`
+		Agent     string           `json:"agent,omitempty"`
+		Skills    []guidance.Skill `json:"skills,omitempty"`
+		Guidance  string           `json:"guidance,omitempty"`
+		Retros    *issues.Cadence  `json:"retros,omitempty"`
+		Overhauls *issues.Cadence  `json:"overhauls,omitempty"`
+	}{Ready: ok, Fanout: fanout, Skills: h.Skills, Guidance: h.Text}
+	for k := range cads {
+		if cads[k].Kind == "overhaul" {
+			answer.Overhauls = &cads[k]
+		} else {
+			answer.Retros = &cads[k]
 		}
-		if ok {
-			answer.Issue, answer.Branch, answer.Worktree, answer.Agent = &i, branch, worktree, issues.KindOf(i).Type()
-		}
-		data, err := json.Marshal(answer)
-		return Reply{Text: string(data)}, err
+	}
+	if ok {
+		answer.Issue, answer.Branch, answer.Worktree, answer.Agent = &i, branch, worktree, issues.KindOf(i).Type()
 	}
 	if branch == "" {
-		return pulled(i, ok, full, cads), nil
+		r := pulled(i, ok, full, cads)
+		r.Data = answer
+		return r
 	}
 	var head string
 	t := i.Takeover
@@ -919,7 +782,7 @@ func issueReply(asJSON, full bool, i issues.Issue, ok bool, branch, worktree, fa
 	if h.Text != "" {
 		text += "\n\n" + h.Text
 	}
-	return Reply{Text: text}, nil
+	return Reply{Text: text, Data: answer}
 }
 
 // pulled answers a plain issue pull, which takes nothing. Typed, it names the
@@ -957,21 +820,17 @@ func pulled(i issues.Issue, ok, full bool, cads []issues.Cadence) Reply {
 
 // inReply answers issue pull --in: what is ready inside root's tree, or, with
 // --take, the leaf claimed and the worktree command that checks it out.
-func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (Reply, error) {
-	if !take.set {
+func inReply(c *Call, s issues.Source, root int, take index.Pick) (Reply, error) {
+	if !take.Set {
 		tr, err := s.In(root)
 		if err != nil {
 			return Reply{}, err
 		}
-		if asJSON {
-			data, err := json.Marshal(tr)
-			return Reply{Text: string(data)}, err
-		}
-		return Reply{Text: treeText(tr)}, nil
+		return Reply{Text: treeText(tr), Data: tr}, nil
 	}
-	took, ok, tr, err := s.TakeIn(c.Workspace, root, take.n)
+	took, ok, tr, err := s.TakeIn(c.Workspace, root, take.N)
 	if issues.IsFull(err) {
-		return fullReply(asJSON, err, nil)
+		return fullReply(err, nil)
 	}
 	if err != nil {
 		return Reply{}, err
@@ -986,29 +845,25 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 		h = c.handOver(took)
 	}
 	took.Body = issues.Shown(took.Body)
-	if asJSON {
-		answer := struct {
-			Ready    bool             `json:"ready"`
-			Closed   bool             `json:"closed"`
-			Issue    *issues.Issue    `json:"issue,omitempty"`
-			Branch   string           `json:"branch,omitempty"`
-			Worktree string           `json:"worktree,omitempty"`
-			Agent    string           `json:"agent,omitempty"`
-			Skills   []guidance.Skill `json:"skills,omitempty"`
-			Guidance string           `json:"guidance,omitempty"`
-			Review   []reviewAt       `json:"review"`
-			Land     bool             `json:"land,omitempty"`
-		}{Ready: ok, Closed: tr.Closed, Skills: h.Skills, Guidance: h.Text, Review: reviews(c, tr), Land: tr.Land}
-		if tr.Land {
-			// Every leaf is closed: the coordinator lands the manifest from
-			// its branch, checked out in its own worktree.
-			answer.Branch, answer.Worktree = issues.Branch(root), issues.Worktree(c.Workspace, root)
-		}
-		if ok {
-			answer.Issue, answer.Branch, answer.Worktree, answer.Agent = &took, issues.Branch(took.Number), worktree, issues.KindOf(took).Type()
-		}
-		data, err := json.Marshal(answer)
-		return Reply{Text: string(data)}, err
+	answer := struct {
+		Ready    bool             `json:"ready"`
+		Closed   bool             `json:"closed"`
+		Issue    *issues.Issue    `json:"issue,omitempty"`
+		Branch   string           `json:"branch,omitempty"`
+		Worktree string           `json:"worktree,omitempty"`
+		Agent    string           `json:"agent,omitempty"`
+		Skills   []guidance.Skill `json:"skills,omitempty"`
+		Guidance string           `json:"guidance,omitempty"`
+		Review   []reviewAt       `json:"review"`
+		Land     bool             `json:"land,omitempty"`
+	}{Ready: ok, Closed: tr.Closed, Skills: h.Skills, Guidance: h.Text, Review: reviews(c, tr), Land: tr.Land}
+	if tr.Land {
+		// Every leaf is closed: the coordinator lands the manifest from
+		// its branch, checked out in its own worktree.
+		answer.Branch, answer.Worktree = issues.Branch(root), issues.Worktree(c.Workspace, root)
+	}
+	if ok {
+		answer.Issue, answer.Branch, answer.Worktree, answer.Agent = &took, issues.Branch(took.Number), worktree, issues.KindOf(took).Type()
 	}
 	if !ok {
 		work := tr
@@ -1017,7 +872,7 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 		if tr.Land {
 			text += "\n\nLand it from its branch in its own worktree, with se issue land there:\n" + issues.Worktree(c.Workspace, root)
 		}
-		return Reply{Text: text}, nil
+		return Reply{Text: text, Data: answer}, nil
 	}
 	did := "Took #%d %s, on branch %s.\n%s\nIts agent: %s.\n\nWork in its own worktree:\n%s"
 	if took.Takeover != nil {
@@ -1028,7 +883,7 @@ func inReply(c *Call, s issues.Source, asJSON bool, root int, take *takeFlag) (R
 	if h.Text != "" {
 		text += "\n\n" + h.Text
 	}
-	return Reply{Text: text}, nil
+	return Reply{Text: text, Data: answer}, nil
 }
 
 // restoreAnswers writes the landing answers a takeover's issue has on it back
@@ -1061,22 +916,14 @@ func answersLine(t *issues.Takeover) string {
 
 // pausedReply answers a take while the fleet is paused (with --json:
 // {"ready":false,"paused":true,"why"}): the box takes nothing and ends.
-func pausedReply(asJSON bool) (Reply, error) {
-	if asJSON {
-		data, err := json.Marshal(map[string]any{"ready": false, "paused": true, "why": issues.PausedWhy})
-		return Reply{Text: string(data)}, err
-	}
-	return Reply{Text: "No take: " + issues.PausedWhy + "."}, nil
+func pausedReply() Reply {
+	return Reply{Text: "No take: " + issues.PausedWhy + ".", Data: map[string]any{"ready": false, "paused": true, "why": issues.PausedWhy}}
 }
 
 // fullReply answers a box's take refused because it runs its cap of
 // sub-agents (with --json: {"ready":false,"full":true}).
-func fullReply(asJSON bool, err error, flagged []string) (Reply, error) {
-	if asJSON {
-		data, jerr := json.Marshal(map[string]any{"ready": false, "full": true, "why": err.Error()})
-		return sweptReply(Reply{Text: string(data)}, jerr, true, flagged)
-	}
-	return sweptReply(Reply{Text: "No take: " + err.Error() + "."}, nil, false, flagged)
+func fullReply(err error, flagged []string) (Reply, error) {
+	return sweptReply(Reply{Text: "No take: " + err.Error() + ".", Data: map[string]any{"ready": false, "full": true, "why": err.Error()}}, nil, flagged)
 }
 
 // treeText says where a tree stands.
@@ -1134,42 +981,46 @@ func reviewText(c *Call, tr issues.Tree) string {
 }
 
 // sweptReply adds to a reply of issue pull the issues its sweep gave to a
-// person: lines before the text, or with --json the field "flagged".
-func sweptReply(r Reply, err error, asJSON bool, flagged []string) (Reply, error) {
+// person: lines before the text, and the field "flagged" of its data.
+func sweptReply(r Reply, err error, flagged []string) (Reply, error) {
 	if err != nil || len(flagged) == 0 {
 		return r, err
 	}
-	if !asJSON {
-		r.Text = strings.Join(flagged, "\n") + "\n\n" + r.Text
-		if r.Short != "" {
-			r.Short = strings.Join(flagged, "\n") + "\n" + r.Short
-		}
+	r.Text = strings.Join(flagged, "\n") + "\n\n" + r.Text
+	if r.Short != "" {
+		r.Short = strings.Join(flagged, "\n") + "\n" + r.Short
+	}
+	if r.Data == nil {
 		return r, nil
 	}
+	data, err := json.Marshal(r.Data)
+	if err != nil {
+		return Reply{}, err
+	}
 	var answer map[string]any
-	if err := json.Unmarshal([]byte(r.Text), &answer); err != nil {
+	if err := json.Unmarshal(data, &answer); err != nil {
 		return Reply{}, err
 	}
 	answer["flagged"] = flagged
-	data, err := json.Marshal(answer)
-	return Reply{Text: string(data)}, err
+	r.Data = answer
+	return r, nil
 }
 
-// waitingReply lists the issues waiting on a person.
-func waitingReply(asJSON bool, waiting []issues.Waiting, flagged []string) (Reply, error) {
-	if asJSON {
-		data, err := json.Marshal(waiting)
-		return Reply{Text: string(data)}, err
-	}
-	if len(waiting) == 0 {
-		return sweptReply(Reply{Text: "No se issue waits on a person."}, nil, false, flagged)
-	}
-	var b strings.Builder
-	for k, w := range waiting {
-		if k > 0 {
-			b.WriteString("\n\n")
+// waitingReply lists the issues waiting on a person; its data leaves out
+// what the sweep flagged.
+func waitingReply(waiting []issues.Waiting, flagged []string) (Reply, error) {
+	text := "No se issue waits on a person."
+	if len(waiting) > 0 {
+		var b strings.Builder
+		for k, w := range waiting {
+			if k > 0 {
+				b.WriteString("\n\n")
+			}
+			fmt.Fprintf(&b, "#%d %s\n%s\nBlocks %d open issue(s).\n%s", w.Number, w.Title, w.URL, w.Blocks, w.Reason)
 		}
-		fmt.Fprintf(&b, "#%d %s\n%s\nBlocks %d open issue(s).\n%s", w.Number, w.Title, w.URL, w.Blocks, w.Reason)
+		text = b.String()
 	}
-	return sweptReply(Reply{Text: b.String()}, nil, false, flagged)
+	r, err := sweptReply(Reply{Text: text}, nil, flagged)
+	r.Data = waiting
+	return r, err
 }
