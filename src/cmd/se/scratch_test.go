@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mb-89/SE/src/internal/io/disk"
+	"github.com/mb-89/SE/src/internal/io/proc"
 	"github.com/mb-89/SE/src/internal/issues"
 )
 
@@ -23,6 +25,10 @@ import (
 func TestAProjectHoldingNoSEFileGetsTheHelpTheGuidanceAndATake(t *testing.T) {
 	t.Parallel()
 	recordedIssues(t)
+	// The install runs the real claude, which reads and writes the real
+	// disk and runs the real git, and se reads what it wrote there.
+	w := worldOf(t)
+	w.Disk, w.Proc = disk.Real(), proc.Real()
 	checkout, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)

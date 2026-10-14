@@ -38,7 +38,7 @@ func TestASourceReadsItsCadenceFromItsConfig(t *testing.T) {
 	t.Parallel()
 	cfg := Builtin()
 	cfg.OverhaulCadence = 3
-	o, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, overhaulRepo(4, 0)), Clock: atNow(), Config: &cfg}.OverhaulCadence()
+	o, err := Source{Proc: machineOf(t), Repo: repo, GitHub: recorded(t, overhaulRepo(4, 0)), Clock: atNow(), Config: &cfg}.OverhaulCadence()
 	if err != nil || o.Every != 3 || !o.Due() {
 		t.Fatalf("%+v %v", o, err)
 	}

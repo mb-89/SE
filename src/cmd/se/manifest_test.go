@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,7 +45,19 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 	if code, _, errs := se(t, "--workspace", ws, "manifest", "agents"); code != 1 || !strings.Contains(errs, "the leaf kind's agent has no file src/plugin/agents/worker.md") {
 		t.Fatalf("agents without their files (exit %d): %s", code, errs)
 	}
-	_, out, _ = se(t, "--workspace", "../../..", "manifest", "agents")
+	// With this checkout's agent files in place, each is listed.
+	agents, err := filepath.Glob(filepath.Join("..", "..", "plugin", "agents", "*.md"))
+	if err != nil || len(agents) == 0 {
+		t.Fatalf("this checkout's agents: %v %v", agents, err)
+	}
+	for _, a := range agents {
+		text, err := os.ReadFile(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		put(t, onFake(t), filepath.Join(ws, "src", "plugin", "agents", filepath.Base(a)), string(text))
+	}
+	_, out, _ = se(t, "--workspace", ws, "manifest", "agents")
 	if !strings.HasPrefix(out, "- [`se:worker`](src/plugin/agents/worker.md), for the kind leaf: ") || strings.Count(out, "\n") != 5 {
 		t.Fatalf("agents: %q", out)
 	}

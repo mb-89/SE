@@ -320,4 +320,42 @@ func gitContract(t *testing.T, fresh func(t *testing.T) gitOn) {
 			t.Fatal("a pull from an origin that is gone went through")
 		}
 	})
+	t.Run("a worktree inside the checkout merges without committing, and goes", func(t *testing.T) {
+		t.Parallel()
+		m := fresh(t)
+		_, a, b := m.boxes(t)
+		m.commit(t, a, "x", "a\n")
+		m.must(t, a, "push", "-q", "origin", "main")
+		m.must(t, b, "checkout", "-q", "-b", "side")
+		m.commit(t, b, "y", "b\n")
+		m.must(t, b, "push", "-q", "origin", "side")
+		m.must(t, b, "checkout", "-q", "-b", "clash", "main")
+		m.commit(t, b, "x", "b\n")
+		m.must(t, b, "push", "-q", "origin", "clash")
+		m.must(t, a, "fetch", "-q", "origin", "main")
+		main := m.must(t, a, "rev-parse", "FETCH_HEAD")
+		for branch, conflicts := range map[string]bool{"side": false, "clash": true} {
+			m.must(t, a, "fetch", "-q", "origin", branch)
+			head := m.must(t, a, "rev-parse", "FETCH_HEAD")
+			wt := filepath.Join(a, ".se", ".runtime", "rules", branch)
+			m.must(t, a, "worktree", "add", "-q", "--detach", wt, main)
+			_, code := m.git(t, wt, "merge", "-q", "--no-commit", "--no-ff", head)
+			if unmerged := m.must(t, wt, "ls-files", "--unmerged"); (code != 0) != conflicts || (unmerged != "") != conflicts {
+				t.Errorf("%s: merge exit %d, unmerged %q", branch, code, unmerged)
+			}
+			if there, _ := m.disk.Exists(filepath.Join(wt, "y")); there == conflicts {
+				t.Errorf("%s: the merge holds y: %v", branch, there)
+			}
+			if _, code := m.git(t, a, "worktree", "remove", wt); code == 0 {
+				t.Errorf("%s: a worktree mid-merge went without --force", branch)
+			}
+			m.must(t, a, "worktree", "remove", "--force", wt)
+			if there, _ := m.disk.Exists(wt); there {
+				t.Errorf("%s: the worktree's folder stands", branch)
+			}
+		}
+		if got := m.must(t, a, "status", "--porcelain"); got != "" {
+			t.Fatalf("the checkout changed: %q", got)
+		}
+	})
 }

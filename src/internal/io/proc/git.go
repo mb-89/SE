@@ -249,6 +249,13 @@ func (g *Git) mergeBase(a, b string) string {
 	return ""
 }
 
+// blob answers the id git gives a file holding content.
+func blob(content string) string {
+	h := sha1.New()
+	fmt.Fprintf(h, "blob %d\x00%s", len(content), content)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 func copyFiles(m map[string]string) map[string]string {
 	out := make(map[string]string, len(m))
 	for k, v := range m {
@@ -775,12 +782,28 @@ func (r *gitRun) untracked(name string) string {
 }
 
 func (r *gitRun) lsFiles(args []string) int {
-	f, _, err := flags(args, "-z", "--cached", "-c", "--others", "-o", "--exclude-standard")
+	f, _, err := flags(args, "-z", "--cached", "-c", "--others", "-o", "--exclude-standard", "--unmerged", "-u")
 	if err != nil {
 		return r.fail(129, "%v", err)
 	}
 	if r.p.index == nil {
 		return r.fail(128, "fatal: this operation must be run in a work tree")
+	}
+	if has(f, "--unmerged", "-u") {
+		var names []string
+		for name := range r.p.conflicts {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		ours, theirs := r.g.tree(r.p.headID()), r.g.tree(r.p.merging)
+		for _, name := range names {
+			for stage, side := range []map[string]string{ours, theirs} {
+				if content, ok := side[name]; ok {
+					r.say("100644 %s %d\t%s", blob(content), stage+2, name)
+				}
+			}
+		}
+		return 0
 	}
 	end := "\n"
 	if has(f, "-z") {
@@ -1264,7 +1287,7 @@ func (r *gitRun) pull(args []string) int {
 }
 
 func (r *gitRun) merge(args []string) int {
-	f, rest, err := flags(args, "-q", "--quiet", "--no-edit", "--no-ff", "--ff-only", "-m=", "--abort")
+	f, rest, err := flags(args, "-q", "--quiet", "--no-edit", "--no-ff", "--ff-only", "--no-commit", "-m=", "--abort")
 	if err != nil {
 		return r.fail(129, "%v", err)
 	}
@@ -1335,6 +1358,11 @@ func (r *gitRun) merge(args []string) int {
 		}
 		r.say("Automatic merge failed; fix conflicts and then commit the result.")
 		return 1
+	}
+	if has(f, "--no-commit") {
+		// The merge waits for its commit, as after a conflict.
+		r.p.merging = theirs
+		return 0
 	}
 	message := or(f["-m"], "Merge branch '"+r.abbrev(rest[0])+"'")
 	r.p.setHead(r.g.commit([]string{ours, theirs}, copyFiles(merged), message))
@@ -1529,6 +1557,9 @@ func (r *gitRun) push(args []string) int {
 }
 
 func (r *gitRun) worktree(args []string) int {
+	if len(args) > 0 && args[0] == "remove" {
+		return r.worktreeRemove(args[1:])
+	}
 	if len(args) == 0 || args[0] != "add" {
 		return r.fail(129, "usage: git worktree add [--track] [-b <branch>] [--detach] <path> [<commit-ish>]")
 	}
@@ -1575,6 +1606,28 @@ func (r *gitRun) worktree(args []string) int {
 	for name, content := range r.g.tree(id) {
 		r.write(p, name, content)
 		p.index[name] = content
+	}
+	return 0
+}
+
+// worktreeRemove takes a work tree of the repository away, its folder with
+// it; one with changes not committed only with --force.
+func (r *gitRun) worktreeRemove(args []string) int {
+	f, rest, err := flags(args, "-f", "--force")
+	if err != nil || len(rest) != 1 {
+		return r.fail(129, "usage: git worktree remove [--force] <worktree>")
+	}
+	dir := abs(r.dir, rest[0])
+	p, ok := r.g.places[dir]
+	if !ok || p.repo != r.p.repo || p.index == nil {
+		return r.fail(128, "fatal: '%s' is not a working tree", rest[0])
+	}
+	if !has(f, "-f", "--force") && (p.merging != "" || !sameFiles(r.work(p), r.g.tree(p.headID())) || !sameFiles(p.index, r.g.tree(p.headID()))) {
+		return r.fail(128, "fatal: '%s' contains modified or untracked files, use --force to delete it", rest[0])
+	}
+	delete(r.g.places, dir)
+	if err := r.g.disk.RemoveAll(dir); err != nil {
+		return r.fail(128, "fatal: failed to delete '%s': %v", rest[0], err)
 	}
 	return 0
 }
