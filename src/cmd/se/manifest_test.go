@@ -55,7 +55,7 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 		t.Fatalf("checks: %q", out)
 	}
 	_, out, _ = se(t, "--workspace", ws, "manifest", "usage", "fleet", "rules")
-	if want := "```\nse fleet check [--json] [--repo OWNER/NAME]\nse fleet fix [--json] [--repo OWNER/NAME]\nse fleet prune [--apply] [--json] [--repo OWNER/NAME]\nse fleet refresh [--json] [--repo OWNER/NAME]\nse rules\n```\n"; out != want {
+	if want := "```\nse fleet check [--json] [--repo OWNER/NAME]\nse fleet fix [--json] [--repo OWNER/NAME]\nse fleet prune [--apply] [--json] [--repo OWNER/NAME]\nse fleet refresh [--json] [--repo OWNER/NAME]\nse fleet rules [--json] [--repo OWNER/NAME]\nse rules\n```\n"; out != want {
 		t.Fatalf("usage: %q", out)
 	}
 	if code, _, errs := se(t, "--workspace", ws, "manifest", "frob"); code != 1 || !strings.Contains(errs, `no manifest "frob"`) {
