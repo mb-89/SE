@@ -97,7 +97,7 @@ func (s Source) ruleOne(dir, main string, r *Ruled, check func(dir string) (stri
 	// The merge is never committed, but git asks for a name to merge under,
 	// which a workflow's checkout has none of.
 	if _, err := s.git(wt, "-c", "user.name=se", "-c", "user.email=se@localhost", "merge", "-q", "--no-commit", "--no-ff", head); err != nil {
-		if unmerged, _ := s.git(wt, "diff", "--name-only", "--diff-filter=U"); unmerged == "" {
+		if unmerged, _ := s.git(wt, "ls-files", "--unmerged"); unmerged == "" {
 			return err
 		}
 		r.Did = "left to its takeover: it conflicts with main"
