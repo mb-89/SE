@@ -3,6 +3,7 @@ package github_test
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -52,6 +53,13 @@ func TestARateLimitIsWaitedOutUntilTheReset(t *testing.T) {
 	if want := "se: GitHub refused a request for its rate limit (HTTP 403); waiting 1h0m0s, until 13:00:00 UTC, for it to reset.\n"; said.String() != want {
 		t.Fatalf("it said %q, want %q", said.String(), want)
 	}
+	// The module keeps the refusal and its wait, for the issue's record.
+	if got, want := github.RefusedBy(gh), []github.Refusal{{At: start, Status: 403, Wait: time.Hour}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("it kept the refusals %+v, want %+v", got, want)
+	}
+	if got := github.RefusedBy(f); got != nil {
+		t.Fatalf("a GitHub that keeps no refusals answers %+v", got)
+	}
 }
 
 // A reset further off than the ceiling fails the request at once, naming
@@ -70,6 +78,9 @@ func TestAResetPastTheCeilingFailsAtOnce(t *testing.T) {
 	}
 	if n := f.Requests() - before; n != 1 || !c.Now().Equal(start) || said.Len() != 0 {
 		t.Fatalf("it asked %d times, waited until %s and said %q", n, c.Now(), said.String())
+	}
+	if got, want := gh.Refusals(), []github.Refusal{{At: start, Status: 403, GaveUp: true}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("it kept the refusals %+v, want %+v", got, want)
 	}
 }
 

@@ -1,0 +1,4 @@
+# The large-file rule's allowlist (src/internal/rules/large.go): each line is
+# a path the tree tracks though it is over the rule's bound, 1 MiB. A build
+# output never goes here: it is ignored in .gitignore. An entry that names no
+# file over the bound is refused.

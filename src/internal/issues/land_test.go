@@ -99,6 +99,11 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 	if err := RecordRequests(d, a, "issue pull", 30, landedAt()); err != nil {
 		t.Fatal(err)
 	}
+	// GitHub refused two of them for its rate limit: se waited 10 minutes
+	// for one reset, and gave up on the other.
+	if err := RecordRefusals(d, a, "issue pull", []github.Refusal{{At: landedAt(), Status: 403, Wait: 10 * time.Minute}, {At: landedAt(), Status: 429, GaveUp: true}}); err != nil {
+		t.Fatal(err)
+	}
 	l, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: clock.NewFake(landedAt()), Disk: d}.Land(a, "", qs, full, battered(d))
 	if err != nil {
 		t.Fatal(err)
@@ -115,11 +120,14 @@ func TestLandPushesOpensThePRAndTurnsOnAutoMerge(t *testing.T) {
 		// Those 30, and the 3 this land had made when it counted them (the
 		// manifest lookup among them; the battery status comes after).
 		Requests: 33,
+		// Those two refusals, and their 600 seconds.
+		RateLimits: 2, RateLimitWaitS: 600,
 	}}.Comment(qs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 33\n") {
+	if got := commentsAt(t, gh, 6); len(got) != 1 || got[0].Body != body || !strings.Contains(body, "- GitHub requests: 33\n") ||
+		!strings.Contains(body, "- GitHub rate-limit refusals: 2, waited 10m0s for the reset\n") {
 		t.Fatalf("the landing comment is %+v, want\n%s", got, body)
 	}
 	want := []string{"POST repos/o/r/issues/6/comments", "POST repos/o/r/statuses/" + run(t, a, "rev-parse", "HEAD"), "POST repos/o/r/pulls", "POST graphql"}
