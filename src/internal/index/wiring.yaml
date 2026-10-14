@@ -5,7 +5,7 @@ instances:
   clock: {module: clock}
   session: {module: session}
   sessionlog: {module: sessionlog}
-  cli: {module: cli}
+  cli: {module: cli, config: {columns: 3}}
   guidance: {module: guidance, config: {inline: true, principles: true}}
   github: {module: github, config: {refresh: 2m, settle: 5m}}
 wires:
