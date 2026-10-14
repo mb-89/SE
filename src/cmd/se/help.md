@@ -29,7 +29,7 @@ Fleet:
   fleet prune      list the stray branches; --apply deletes them
   fleet refresh    merge main into each open manifest's branch
   fleet rules      tell each open se PR the se checks it breaks merged with main
-  fleet trust      say whether CI may skip the battery on the commit checked out
+  fleet trust      say whether CI may trust the battery a box ran on a commit
 
 Hooks:
   hook prompt      a person prompted: reset the Stop hook's refusals
@@ -38,7 +38,7 @@ Hooks:
 Issues:
   issue close      close issue N, its work on main already, naming the commit
   issue edit       rewrite se issue N's title and body, keeping its mark
-  issue keep       keep an issue-N branch's PR up to date until it merges
+  issue keep       stay with an issue-N branch's PR until it merges
   issue land       check and land issue-N: a leaf into its manifest, else one PR
   issue new        create an se issue in a manifest, with its blockers
   issue pull       show the next se issue, stuck work first; --take claims it
@@ -91,7 +91,7 @@ Fleet:
 Issues:
   issue close      close issue N, its work on main already, naming the commit
   issue edit       rewrite se issue N's title and body, keeping its mark
-  issue keep       keep an issue-N branch's PR up to date until it merges
+  issue keep       stay with an issue-N branch's PR until it merges
   issue land       check and land issue-N: a leaf into its manifest, else one PR
   issue new        create an se issue in a manifest, with its blockers
   issue pull       show the next se issue, stuck work first; --take claims it
@@ -279,19 +279,20 @@ Flags:
 ## se help fleet trust
 
 ```text
-se fleet trust [--json]
+se fleet trust [--rev REV] [--json]
 
-CI's check job asks it first, on a pull request and on a push to main: exit 0
-and say why where the battery's stamp (issues/config/stamp), as the workspace's
-HEAD holds it, names the hash of HEAD's tree with the stamp left out, as
-tests/check.sh wrote it and se issue land and se issue keep committed it with
-the work; else exit 1 and say why (main moved, or the stamp is missing or
-stale), and CI runs the battery itself (with --json, a trusted commit answers
-{"trusted","why"}). It reads no GitHub: the stamp is a file in the commit. It is
-trust in one's own boxes, not a proof.
+CI's check job asks it first, in its checkout: exit 0 and say why where commit
+REV (default HEAD) holds the battery's record (battery/config/passed) naming
+REV's git tree with the record left out, as tests/check.sh writes it and se
+issue land and se issue keep commit it with the work; else (no record, or one
+naming another tree, as where main moved since) exit 1 and say why, and CI runs
+the battery itself (with --json, a trusted commit answers {"trusted","why"}). It
+asks GitHub nothing. It is trust in one's own boxes: faking the record is
+sabotage, not an accident.
 
 Flags:
   --json           answer JSON
+  --rev REV        the commit REV CI checked out (default: HEAD)
   --workspace DIR  the workspace DIR the daemon serves (default: here)
 ```
 
@@ -419,14 +420,16 @@ Flags:
 se issue keep [--for D] [--json] [--repo OWNER/NAME]
 
 On an issue-N branch whose PR se issue land opened: a box keeps its PR until it
-merges. Every minute, for D at most (default 8m, so one call fits a tool's
-timeout), it looks at the PR; whenever main has moved past the branch on origin,
-it merges origin/main in (never a rebase), passes tests/check.sh, commits the
-battery's stamp with the work and pushes, as se issue land does, so CI trusts
-the stamp and auto-merge merges. It says when the PR merged, or another box took
-the issue over, or that it is still open: run it again. A merge that conflicts,
-a failing check and a PR closed unmerged are errors to fix, then land again
-(with --json: {"issue","pr","url","merged","taken_over","updated"}).
+merges. The PR merges once its own CI is green, up to date with main or not;
+only a conflict holds it back. Every minute, for D at most (default 8m, so one
+call fits a tool's timeout), it looks at the PR; whenever main has moved past
+the branch on origin, it merges origin/main in (never a rebase), passes
+tests/check.sh, commits the battery's record and pushes, as se issue land does,
+so the PR is checked again against the main it merges into and CI trusts it. It
+says when the PR merged, or another box took the issue over, or that it is still
+open: run it again. A merge that conflicts, a failing check and a PR closed
+unmerged are errors to fix, then land again (with --json:
+{"issue","pr","url","merged","taken_over","updated"}).
 
 Flags:
   --for D            keep the PR this long (D) at most before answering
@@ -447,20 +450,20 @@ spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a
 relative FILE is read from the workspace), and refuse an issue with open
 sub-issues. A leaf inside a manifest (an issue with a parent) lands into the
 manifest's branch: merge origin's issue-N and the manifest's issue-M into it
-(never a rebase), pass tests/check.sh, commit the battery's stamp with the work,
-push it to both, post the answers on the leaf with its facts (its time from
-claim to land among them) and close it; a leaf gets no PR of its own, so an
-earlier box's open PR of the leaf to main is closed (its auto-merge off) with a
-comment naming the manifest. An issue at the top (a manifest whose leaves are
-all closed, a retro, an overhaul) lands to main: merge origin's branch and
-origin/main in, pass tests/check.sh, commit the battery's stamp
-(issues/config/stamp) with the work, refuse a tree the stamp does not name and a
-branch main moved past meanwhile, post the answers on the issue (or update the
-ones posted before), open its PR against main (Fixes #N, and the battery's
-profile), or find it open with its profile brought up to date, and turn on
-auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json,
-which se hook stop trusts before it asks GitHub; a manifest whose branch holds
-nothing main does not closes with no PR.
+(never a rebase), pass tests/check.sh, push it to both, post the answers on the
+leaf with its facts (its time from claim to land among them) and close it; a
+leaf gets no PR of its own, so an earlier box's open PR of the leaf to main is
+closed (its auto-merge off) with a comment naming the manifest. An issue at the
+top (a manifest whose leaves are all closed, a retro, an overhaul) lands to
+main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a
+tree the battery did not record as passed and a branch main moved past
+meanwhile, commit the battery's record (battery/config/passed, which names the
+tree) with the work, so CI trusts it (se fleet trust), post the answers on the
+issue (or update the ones posted before), push, open its PR against main (Fixes
+#N, and the battery's profile), or find it open with its profile brought up to
+date, and turn on auto-merge (squash), recording the PR, auto-merge on, in
+.se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a
+manifest whose branch holds nothing main does not closes with no PR.
 
 Flags:
   --answers FILE     the landing answers, a YAML FILE keyed as spec/landing.yaml
@@ -555,42 +558,42 @@ the cadences in one line. --take claims it (or issue N): its branch issue-N,
 pushed from origin/main and checked out. Plain --take first starts and takes an
 unattended overhaul where 5 retros (issues/config/overhaul-cadence) have closed
 since the last overhaul closed and none is open, else an unattended retro where
-10 se issues (issues/config/retro-cadence) have closed since the last retro
-closed and none is open (the plain form reports both counts); then it takes over
-a claimed issue whose PR conflicts with main: its branch is checked out as it
-stands, to merge main into. A claimed leaf nothing was pushed to for longer than
-the 3h0m0s lease (issues/config/lease) is stuck: it is taken over before new
-work, its branch checked out as it stands. A takeover writes the landing answers
-the issue's last land posted on it back to <checkout>-landing.yaml beside its
-checkout (its worktree with --worktree or --in), keeping a file there already,
-and names it. A takeover also says, from the REST API, when its branch was last
-pushed and its open PR's mergeable state and the last run of each of its checks,
-so no box reaches for gh. A takeover lists its branch's commits, not on its base
-(its manifest's branch, or main), whose subject or merge names another closed
-issue, with the files each touched, and says to take the base's side of those
-files where merging the base conflicts: that work closed in its own form. A
-claim stuck a second time, or conflicting after a takeover, is taken over again;
-nothing mints an issue for a person on a box's behalf. A claim records the box's
-session on the issue, and fires the routine once only where the fleet needs
-another box: every alive box runs its cap of sub-agents
-(fleet.box/config/parallel, 4, Parallel) and another issue is ready (fan-out); a
-fire the routine refuses with 429 is kept on the claim with the retry time it
-names, nothing fires before that time, and the next take or se fleet check after
-it fires it. --worktree is the box's take: it checks nothing out, names the
-command that makes the issue's worktree for its sub-agent, and is refused while
-the box runs its cap. A take hands over every skill the issue's marked skills
-line names (se issue new --skills): their full text follows the issue, or, where
-the guidance instance's inline switch is off, their names and files; the
-session's log records each by name and hash. A name there that is an agent's
-role, as retro or overhaul, is no skill: the take's agent holds it, so it is
-neither handed over nor reported missing. A take names the agent that works the
-issue, by its kind (the registry in src/internal/issues/kinds.go): se:worker for
-a leaf, se:coordinator for a parent, which is the box itself, se:retro and
-se:overhaul; each review names se:reviewer. --in ROOT names the ready leaves
-inside ROOT's tree, and --take claims one for a worktree. Every --take also
-refuses where main has moved past the commit se was built from, naming se
-update: the agents and guidance it hands over come from main. --person lists the
-issues waiting on a person.
+10 se issues (issues/config/retro-cadence), final ones (se-final) not counted,
+have closed since the last retro closed and none is open (the plain form reports
+both counts); then it takes over a claimed issue whose PR conflicts with main:
+its branch is checked out as it stands, to merge main into. A claimed leaf
+nothing was pushed to for longer than the 3h0m0s lease (issues/config/lease) is
+stuck: it is taken over before new work, its branch checked out as it stands. A
+takeover writes the landing answers the issue's last land posted on it back to
+<checkout>-landing.yaml beside its checkout (its worktree with --worktree or
+--in), keeping a file there already, and names it. A takeover also says, from
+the REST API, when its branch was last pushed and its open PR's mergeable state
+and the last run of each of its checks, so no box reaches for gh. A takeover
+lists its branch's commits, not on its base (its manifest's branch, or main),
+whose subject or merge names another closed issue, with the files each touched,
+and says to take the base's side of those files where merging the base
+conflicts: that work closed in its own form. A claim stuck a second time, or
+conflicting after a takeover, is taken over again; nothing mints an issue for a
+person on a box's behalf. A claim records the box's session on the issue, and
+fires the routine once only where the fleet needs another box: every alive box
+runs its cap of sub-agents (fleet.box/config/parallel, 4, Parallel) and another
+issue is ready (fan-out); a fire the routine refuses with 429 is kept on the
+claim with the retry time it names, nothing fires before that time, and the next
+take or se fleet check after it fires it. --worktree is the box's take: it
+checks nothing out, names the command that makes the issue's worktree for its
+sub-agent, and is refused while the box runs its cap. A take hands over every
+skill the issue's marked skills line names (se issue new --skills): their full
+text follows the issue, or, where the guidance instance's inline switch is off,
+their names and files; the session's log records each by name and hash. A name
+there that is an agent's role, as retro or overhaul, is no skill: the take's
+agent holds it, so it is neither handed over nor reported missing. A take names
+the agent that works the issue, by its kind (the registry in
+src/internal/issues/kinds.go): se:worker for a leaf, se:coordinator for a
+parent, which is the box itself, se:retro and se:overhaul; each review names
+se:reviewer. --in ROOT names the ready leaves inside ROOT's tree, and --take
+claims one for a worktree. Every --take also refuses where main has moved past
+the commit se was built from, naming se update: the agents and guidance it hands
+over come from main. --person lists the issues waiting on a person.
 
 Flags:
   --full             without --take: show the issue's body too
@@ -614,7 +617,8 @@ Review N, an se-review parent whose sub-issues have closed, as an agent that
 worked none of its tree, with the report in the JSON file PATH (spec/review.md).
 It refuses a pass where a requirement lacks evidence, and a report without its
 checked-and-clean list. Every finding becomes an se-final issue: a blocking one
-a sub-issue of N, a non-blocking one in the queue (at most 5,
+a sub-issue of N, a non-blocking one a sub-issue of the review's one manifest of
+findings (Findings of the review of #N, se-manifest and se-final) (at most 5,
 issues/config/max-filed). pass posts the report and closes N; fail posts it, and
 N waits for its fixes. A re-review finding that repeats an earlier blocker is an
 accepted repeat: it files nothing, the report names it, and a fail whose

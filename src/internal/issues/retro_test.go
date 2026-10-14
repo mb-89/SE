@@ -12,7 +12,7 @@ import (
 )
 
 // rqs are the landing questions the retro tests read.
-var rqs = []Question{{Key: "done", Question: "What does it deliver?"}, {Key: "by-hand", Question: "What did you do by hand?"}}
+var rqs = []Question{{Key: "done", Question: "What does it deliver?"}, {Key: "by-hand", Question: "What did you do by hand?"}, {Key: OpenKey, Question: "What is left open?"}}
 
 var (
 	prevClosed = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
@@ -213,6 +213,25 @@ func TestEachRuleCheck(t *testing.T) {
 	}
 	if !strings.Contains(c.Checks[1].What, "check failure") || !strings.Contains(c.Checks[2].What, "pushed straight:") {
 		t.Fatalf("%+v", c.Checks)
+	}
+}
+
+// A box opens no issue: its open points are a landing answer, and the
+// retro's draft lists them, so the retro turns them into work.
+func TestTheDraftListsTheWindowsOpenPoints(t *testing.T) {
+	t.Parallel()
+	a := retroRepo(t, true, "<!-- se:retro attended -->")
+	a["repos/o/r/issues/23/comments?per_page=100"] = jsonComments(landing(t, 23, map[string]string{"done": "it works", OpenKey: "the lease is too short\nand untested"}, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC)))
+	c, err := Source{Proc: machine, Repo: repo, GitHub: recorded(t, a), Clock: atNow()}.Collect(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := c.Draft(rqs)
+	if err != nil || !strings.Contains(draft, "\n## Open points\n") || !strings.Contains(draft, "- #23 t23: the lease is too short\n  and untested\n") {
+		t.Fatalf("%v\n%s", err, draft)
+	}
+	if none := collect(t, true); !strings.Contains(none.facts(), "## Open points\n") || !strings.Contains(none.facts(), "None in the window.") {
+		t.Fatal(none.facts())
 	}
 }
 
@@ -534,17 +553,18 @@ func fileFindings(t *testing.T, answers map[string]string) (Filed, *github.Fake)
 func TestAnUnattendedRetroCreatesItsIssuesAndCloses(t *testing.T) {
 	t.Parallel()
 	f, gh := fileFindings(t, retroRepo(t, true, "<!-- se:retro unattended -->"))
-	// The normal finding goes into a new misc manifest, #92; the
-	// controversial one, for a person, stands at the top.
-	if !reflect.DeepEqual(f.Issues, []int{93, 94}) || !reflect.DeepEqual(f.Person, []int{94}) || !f.Ready {
+	// The normal finding goes into the retro's one manifest, #92, final
+	// too; the controversial one, for a person, stands at the top.
+	if !reflect.DeepEqual(f.Issues, []int{93, 94}) || !reflect.DeepEqual(f.Person, []int{94}) || f.Manifest != 92 || !f.Ready {
 		t.Fatalf("%+v", f)
 	}
-	if !issueAt(t, gh, 92).labelled(MiscLabel) || issueAt(t, gh, 92).SubIssues.Total != 1 {
-		t.Fatalf("%+v", issueAt(t, gh, 92))
+	if m := issueAt(t, gh, 92); m.Title != "Findings of the retro #30" || !m.labelled(ManifestLabel) || !m.labelled(FinalLabel) || m.labelled(MiscLabel) || m.SubIssues.Total != 1 {
+		t.Fatalf("%+v", m)
 	}
-	// The normal finding is labelled se alone; the controversial one se-person too.
+	// Both are final (se-final), so the retro cadence does not count them;
+	// the controversial one is labelled se-person too.
 	normal, controversial := issueAt(t, gh, 93), issueAt(t, gh, 94)
-	if len(normal.Labels) != 1 || !normal.labelled(Label) || len(controversial.Labels) != 2 || !controversial.labelled(Label) || !controversial.labelled(PersonLabel) {
+	if len(normal.Labels) != 2 || !normal.labelled(Label) || !normal.labelled(FinalLabel) || len(controversial.Labels) != 3 || !controversial.labelled(Label) || !controversial.labelled(PersonLabel) || !controversial.labelled(FinalLabel) {
 		t.Fatalf("%+v\n%+v", normal, controversial)
 	}
 	if !strings.HasPrefix(normal.Title, "Refuse a PR without Fixes") || !strings.Contains(normal.Body, "Found by the retro #30, class **landing**") || !strings.HasSuffix(normal.Body, NewMark) {

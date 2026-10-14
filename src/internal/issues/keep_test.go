@@ -1,8 +1,9 @@
-// Internal test package: it lands on the package's fakes.
+// Internal test package: it lands and keeps on the package's fakes.
 package issues
 
 import (
-	"slices"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,23 +14,35 @@ import (
 	"github.com/mb-89/SE/src/internal/io/github"
 )
 
-func TestLandCommitsTheStampWithTheWork(t *testing.T) {
+// passedFile is where the battery records its pass.
+func passedFile(t *testing.T) string {
+	t.Helper()
+	file, err := battery.Passed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+func TestLandCommitsTheBatterysRecordOfTheTreeItPushed(t *testing.T) {
 	t.Parallel()
 	origin, a := claimed(t)
 	gh := landGH(t, map[string]string{pullsPath: `[]`})
 	d := disk.NewFake()
+	tree := run(t, a, "rev-parse", "HEAD^{tree}")
 	if _, err := (Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow(), Disk: d}).Land(a, "", qs, full, battered()); err != nil {
 		t.Fatal(err)
 	}
-	// What CI checks out of the pushed branch carries the stamp naming its tree.
-	if _, err := battery.Trusted(machine, origin, "issue-6", battery.Stamp); err != nil {
-		t.Fatalf("CI would run the battery again: %v", err)
+	// The pushed commit holds the record, naming the tree without it: the
+	// tree the battery ran over, which CI trusts.
+	if got := run(t, origin, "show", "issue-6:"+passedFile(t)); got != tree {
+		t.Fatalf("the pushed record names %q, want %s", got, tree)
 	}
-	if got := run(t, a, "log", "-1", "--format=%s", "--", battery.Stamp); !strings.Contains(got, "stamp") {
-		t.Fatalf("the stamp's commit is %q", got)
+	if why, err := battery.Trusted(machine, origin, "issue-6"); err != nil || !strings.Contains(why, tree) {
+		t.Fatalf("%q %v", why, err)
 	}
-	if w := gh.Writes(); slices.ContainsFunc(w, func(s string) bool { return strings.Contains(s, "/statuses/") }) {
-		t.Fatalf("the land posted a status: %q", w)
+	if got := run(t, a, "status", "--porcelain"); got != "" {
+		t.Fatalf("the land left %q", got)
 	}
 }
 
@@ -48,6 +61,16 @@ func TestLandRefusesATreeTheBatteryDidNotPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	commitFile(t, a, "later", "x")
+	if _, err := s.Land(a, "", qs, full, passes); err == nil || !strings.Contains(err.Error(), "has not passed") {
+		t.Fatalf("%v", err)
+	}
+	// A record committed before the last change names another tree too.
+	if err := battered()(a); err != nil {
+		t.Fatal(err)
+	}
+	run(t, a, "add", "-A")
+	run(t, a, "commit", "-q", "-m", "a record")
+	commitFile(t, a, "later", "y")
 	if _, err := s.Land(a, "", qs, full, passes); err == nil || !strings.Contains(err.Error(), "has not passed") {
 		t.Fatalf("%v", err)
 	}
@@ -82,7 +105,7 @@ func TestLandRefusesABranchMainMovedPastWhileTheBatteryRan(t *testing.T) {
 	}
 }
 
-// landedPR is box a's issue-6 landed as PR #7, auto-merge on, with the clock and the disk its battery records on.
+// landedPR is box a's issue-6 landed as PR #7, auto-merge on, with the clock and the disk se reads.
 func landedPR(t *testing.T) (origin, a, b string, gh *github.Fake, c *clock.Fake, d disk.Disk) {
 	t.Helper()
 	origin, a, b = claimedBy(t)
@@ -95,8 +118,9 @@ func landedPR(t *testing.T) (origin, a, b string, gh *github.Fake, c *clock.Fake
 	return origin, a, b, gh, c, d
 }
 
-// The coordinator's loop for one PR: it falls behind main, the box merges
-// main in, checks, commits the stamp and pushes, CI trusts the stamp, and
+// The coordinator's loop for one PR: another PR merges with its own record
+// of the battery's pass, the box merges main in (the records' conflict
+// settled), checks, commits its record and pushes, CI trusts it, and
 // auto-merge merges it.
 func TestTheBoxKeepsAPRThatFallsBehindMainUntilItMerges(t *testing.T) {
 	t.Parallel()
@@ -104,7 +128,12 @@ func TestTheBoxKeepsAPRThatFallsBehindMainUntilItMerges(t *testing.T) {
 	// Another PR merges: #7 is behind main, and main's ruleset holds it.
 	run(t, b, "checkout", "-q", "main")
 	run(t, b, "pull", "-q", "origin", "main")
+	file := passedFile(t)
+	if err := os.MkdirAll(filepath.Join(b, filepath.Dir(file)), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	commitFile(t, b, "other", "b")
+	commitFile(t, b, file, "3333333333333333333333333333333333333333\n")
 	run(t, b, "push", "-q", "origin", "main")
 	checks := 0
 	check := func(dir string) error {
@@ -114,9 +143,9 @@ func TestTheBoxKeepsAPRThatFallsBehindMainUntilItMerges(t *testing.T) {
 	s := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: c, Disk: d}
 	s.Waits = func(string) {
 		// What GitHub does while the box waits: CI on the new head trusts the
-		// battery's stamp for its tree, and auto-merge merges it once it is up to date.
+		// battery's record of its tree, and auto-merge merges it once it is up to date.
 		run(t, origin, "merge-base", "--is-ancestor", "main", "issue-6")
-		if _, err := battery.Trusted(machine, origin, "issue-6", battery.Stamp); err != nil {
+		if _, err := battery.Trusted(machine, origin, "issue-6"); err != nil {
 			t.Errorf("CI would run the battery again: %v", err)
 			return
 		}
@@ -134,7 +163,8 @@ func TestTheBoxKeepsAPRThatFallsBehindMainUntilItMerges(t *testing.T) {
 	if got, want := run(t, origin, "rev-parse", "issue-6"), run(t, a, "rev-parse", "HEAD"); got != want {
 		t.Fatalf("origin's issue-6 is %s, want %s", got, want)
 	}
-	// Merged in, never rebased: the update is a merge, its stamp committed after it.
+	// Merged in, never rebased: the landed commit is still on the branch,
+	// under the commit of the battery's record.
 	if parents := strings.Fields(run(t, a, "log", "-1", "--format=%P", "HEAD^")); len(parents) != 2 {
 		t.Fatalf("the update is no merge: %v", parents)
 	}

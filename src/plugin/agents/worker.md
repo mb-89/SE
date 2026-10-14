@@ -46,17 +46,23 @@ tools or the API, and never a comment, a label or a push by hand.
 3. **Keep your PR until it merges**, where `land` opened one. Run
    `<se> issue keep --workspace <path>` (in the foreground: it answers within
    its `--for`, 8 minutes), and run it again while it says the PR is still
-   open. Whenever main moves past your branch, it merges `origin/main` in,
-   runs the battery, commits its stamp with the work and pushes, so CI
-   passes in seconds and auto-merge merges it. You are done with it once it says the
-   PR merged, or that another box took the issue over.
+   open. The PR merges once its own CI is green; only a conflict with main
+   holds it back. Whenever main moves past your branch, `keep` merges
+   `origin/main` in, runs the battery, commits its record and pushes,
+   so it is checked against the main it merges into and CI passes in
+   seconds. You are done with it once it says the PR merged, or that another
+   box took the issue over.
 4. On red CI, a review the box sends you, or an error from `issue keep` (a
    merge with main that conflicts, a failing check), fix it on the same
    branch (merge `origin/main` in, never rebase), commit, bring the answers up
-   to date, run the same `issue land` again, and keep the PR again.
-5. **Never open an issue**: a box opens none, and `<se> issue new` refuses
-   in one. What you cannot finish goes into a supersede (step 6), which
-   carries it. Decide what you can yourself, and name the decision in the
+   to date, run the same `issue land` again, and keep the PR again. Where the
+   check fails on what main brought, main is red: fixing it is the fleet's
+   first job, so fix it on your branch first.
+5. **Never open an issue**: your output is a PR or a supersede (step 6), a
+   box opens no issue, and `<se> issue new` refuses in one; any issue a box
+   opens is a defect. Your open points, what the work leaves beside it, go
+   into the landing answers' `open`: the retro reads them and turns them
+   into work. Decide what you can yourself, and name the decision in the
    landing answers.
 6. **You close the issue you took, always**, in one of three ways and no
    other:
@@ -80,10 +86,10 @@ tools or the API, and never a comment, a label or a push by hand.
      not hold, posts the answers, comments naming the commit and closes the
      issue. Never land an empty commit to close an issue.
 
-   An issue for a person (`--person`) is never a way to end, only a side
-   issue, for access or a principle. The Stop hook refuses the box's stop
-   while any issue it took is open with neither a merged PR nor another way
-   of closing it, naming each and what it misses.
+   An issue for a person is never a way to end: a box opens none. The Stop
+   hook refuses the box's stop while any issue it took is open with neither
+   a merged PR nor another way of closing it, naming each and what it
+   misses.
 
 Answer only what `issue land` printed (the manifest your issue landed into,
 or the PR number and link), or what you filed instead.

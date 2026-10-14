@@ -74,16 +74,16 @@ func claimed(t *testing.T) (origin, a string) {
 
 func passes(string) error { return nil }
 
-// battered is a check that passes and writes the stamp naming the tree it
-// ran over, as tests/check.sh does, into the checkout on the real disk,
-// where git commits it.
+// battered is a check that passes and records the tree it ran over in the
+// checkout, as tests/check.sh does: git commits the record, so it is written
+// on the real disk.
 func battered() func(string) error {
 	return func(dir string) error {
-		tree, err := battery.Tree(machine, dir, battery.Stamp)
+		tree, err := battery.Tree(machine, dir)
 		if err != nil {
 			return err
 		}
-		_, err = battery.Pass(disk.Real(), machine, dir, battery.Stamp, tree)
+		_, err = battery.Pass(disk.Real(), machine, dir, tree)
 		return err
 	}
 }
@@ -321,9 +321,12 @@ func (w *checkout) git(c proc.Cmd) int {
 	switch args := strings.Join(c.Args, " "); args {
 	case "rev-parse --abbrev-ref HEAD":
 		fmt.Fprintln(c.Stdout, w.branch)
-	case "status --porcelain":
+	case "status --porcelain -- :(exclude)" + battery.PassedFile:
 		_, _ = fmt.Fprint(c.Stdout, w.dirty)
-	case "status --porcelain -- " + battery.Stamp:
+	case "rev-parse --verify --quiet HEAD:" + battery.PassedFile:
+		// HEAD holds no record of a pass.
+		return 1
+	case "rm -q --cached --ignore-unmatch -- " + battery.PassedFile, "clean -q -f -- " + battery.PassedFile:
 	case "fetch -q origin main", "merge -q --no-edit origin/main":
 	case "fetch -q origin refs/heads/" + w.branch + ":refs/remotes/origin/" + w.branch:
 		fmt.Fprintf(c.Stderr, "fatal: couldn't find remote ref refs/heads/%s\n", w.branch)

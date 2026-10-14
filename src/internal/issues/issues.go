@@ -24,8 +24,10 @@ const Label = "se"
 // so it never closes by itself.
 const ReviewLabel = "se-review"
 
-// FinalLabel marks an issue on its last attempt: one a review filed for a
-// finding, or one taken over once already. A final issue is never superseded
+// FinalLabel marks an issue on its last attempt: one a review, a retro or an
+// overhaul filed for a finding (or the manifest holding them), a supersede's
+// successor, or one taken over once already. The retro's cadence does not
+// count a final issue. A final issue is never superseded
 // again; stuck again, it is taken over again, and a re-review that finds its
 // problem again accepts the repeat.
 const FinalLabel = "se-final"

@@ -3,11 +3,12 @@
 // -json and keeps every test's duration, and `battery report <top>` once every
 // step has passed, which prints the profile against spec/budgets.yaml, writes
 // it for the CI summary and se issue land, and fails only on a hard budget's
-// overrun. `battery tree <top>` prints the hash of the clean worktree's tree
-// before the first step, and `battery passed <top> <tree>` writes it into the
-// stamp once the report passed, where the worktree still holds it
-// (src/internal/battery, Stamp; the issues instance's config/stamp names its
-// path). top is the checkout, where the battery's files live.
+// overrun. `battery tree <top>` prints the tree of the clean worktree before
+// the first step, and `battery passed <top> <tree>` records it once the
+// report passed, where the worktree still holds it, in the file
+// battery/config/passed names (src/internal/battery, Passed), which se issue
+// land commits and CI trusts. top is the checkout, where the battery's files
+// live.
 package main
 
 import (
@@ -19,7 +20,6 @@ import (
 	"github.com/mb-89/SE/src/internal/battery"
 	"github.com/mb-89/SE/src/internal/io/disk"
 	"github.com/mb-89/SE/src/internal/io/proc"
-	"github.com/mb-89/SE/src/internal/issues"
 )
 
 // machine is the disk the battery reads and writes.
@@ -32,15 +32,13 @@ func main() {
 		fail(fmt.Errorf("usage: battery gotest <top> <packages> | battery report <top> | battery tree <top> | battery passed <top> <tree>"))
 	}
 	top := os.Args[2]
-	cfg, err := issues.Configured()
-	fail(err)
 	switch os.Args[1] {
 	case "gotest":
 		fail(gotest(proc.Listed(proc.Real()), top, os.Args[3:]))
 	case "report":
 		fail(report(top))
 	case "tree":
-		tree, err := battery.Tree(proc.Listed(proc.Real()), top, cfg.Stamp)
+		tree, err := battery.Tree(proc.Listed(proc.Real()), top)
 		fail(err)
 		fmt.Println(tree)
 	case "passed":
@@ -48,7 +46,7 @@ func main() {
 		if len(os.Args) > 3 {
 			started = os.Args[3]
 		}
-		said, err := battery.Pass(machine, proc.Listed(proc.Real()), top, cfg.Stamp, started)
+		said, err := battery.Pass(machine, proc.Listed(proc.Real()), top, started)
 		fail(err)
 		fmt.Println("battery:", said)
 	default:

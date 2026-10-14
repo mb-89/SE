@@ -135,9 +135,12 @@ func (s Source) refreshIn(dir string, r *Refreshed) error {
 		if unmerged, _ := s.git(wt, "ls-files", "--unmerged"); unmerged == "" {
 			return err
 		}
-		r.Conflict = true
-		r.Did = fmt.Sprintf("conflicts with main, so nothing was pushed: merge origin/main into %s by hand (never rebase), as se issue land of #%d does", b, r.Issue)
-		return nil
+		// A conflict in the battery's record alone is settled, as merge does.
+		if !s.settle(wt) {
+			r.Conflict = true
+			r.Did = fmt.Sprintf("conflicts with main, so nothing was pushed: merge origin/main into %s by hand (never rebase), as se issue land of #%d does", b, r.Issue)
+			return nil
+		}
 	}
 	if _, err := s.git(wt, "push", "-q", "origin", "HEAD:refs/heads/"+b); err != nil {
 		return err

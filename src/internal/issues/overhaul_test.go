@@ -221,11 +221,14 @@ func TestAnOverhaulMintsByTheControversialRuleAndCloses(t *testing.T) {
 	t.Parallel()
 	gh := recorded(t, overhaulAnswers(overhaulUnattendedMark))
 	f, err := Source{Proc: machine, Repo: repo, GitHub: gh, Clock: atNow()}.FileOverhaul(30, overhauled(t, nil))
-	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 {
+	if err != nil || len(f.Issues) != 3 || len(f.Person) != 2 || f.Manifest != 31 {
 		t.Fatalf("%+v %v", f, err)
 	}
 	// The findings are the next issues, #32 to #34: the normal one goes
-	// into a new misc manifest, #31.
+	// into the overhaul's one manifest, #31, final as the findings are.
+	if m, err := gh.Get("repos/o/r/issues/31"); err != nil || !strings.Contains(string(m), `"title":"Findings of the overhaul #30"`) || !strings.Contains(string(m), `{"name":"`+ManifestLabel+`"}`) || !strings.Contains(string(m), `{"name":"`+FinalLabel+`"}`) {
+		t.Fatalf("%s %v", m, err)
+	}
 	var created []string
 	for n := 32; n <= 34; n++ {
 		out, err := gh.Get(fmt.Sprintf("repos/o/r/issues/%d", n))

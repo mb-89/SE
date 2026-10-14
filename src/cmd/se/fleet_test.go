@@ -4,6 +4,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -177,61 +179,63 @@ func TestRulesOnBuildsTheMergesSeAndAnswersItsRuleAndTestFindingsWithoutTimings(
 	}
 }
 
-// stampedHead is a fake git's checkout whose HEAD holds the tree entries
-// and, where stamp is set, the battery's stamp saying it.
-type stampedHead struct {
-	entries []string
-	stamp   string
-}
-
-func (h *stampedHead) git(c proc.Cmd) int {
-	switch strings.Join(c.Args, " ") {
-	case "ls-tree -r -z --full-tree HEAD":
-		for _, e := range h.entries {
-			_, _ = fmt.Fprint(c.Stdout, e+"\x00")
-		}
-		if h.stamp != "" {
-			_, _ = fmt.Fprint(c.Stdout, "100644 blob 5555555555555555555555555555555555555555\t"+battery.Stamp+"\x00")
-		}
-	case "ls-tree --name-only --full-tree HEAD -- " + battery.Stamp:
-		if h.stamp != "" {
-			fmt.Fprintln(c.Stdout, battery.Stamp)
-		}
-	case "show HEAD:" + battery.Stamp:
-		fmt.Fprintln(c.Stdout, h.stamp)
-	default:
-		fmt.Fprintf(c.Stderr, "fatal: %s\n", c.Args)
-		return 128
-	}
-	return 0
-}
-
-// CI skips the battery where the stamp names the tree it checked out, and
-// runs it where it does not: no stamp, or main moved since.
-func TestFleetTrustSkipsTheBatteryOnlyWhereTheStampNamesTheTree(t *testing.T) {
+// CI's checkout is a git repository, and se fleet trust reads it with git
+// alone: it asks GitHub nothing, and se's disk is a fake.
+func TestFleetTrustSkipsTheBatteryOnlyWhereTheRecordNamesTheTreeCheckedOut(t *testing.T) {
 	t.Parallel()
-	head := &stampedHead{entries: []string{"100644 blob 1111111111111111111111111111111111111111\tgo.mod"}}
-	m := proc.NewFake()
-	m.Install("git", head.git)
-	worldOf(t).Proc = m
-	trust := func() (int, string, string) { return se(t, "fleet", "trust") }
-	// A push without SE: CI runs the battery.
-	if code, out, errs := trust(); code == 0 || out != "" || !strings.Contains(errs, "not trusted, so CI runs the battery") || !strings.Contains(errs, "holds no stamp") {
-		t.Fatalf("exit %d, %q %q", code, out, errs)
+	gh := hubAt(t, map[string]string{})
+	onFake(t)
+	ws := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", ws, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
 	}
-	// A box's push: the stamp it committed names the tree, and CI skips the battery.
-	hash, err := battery.Hash(m, "/", "HEAD", battery.Stamp)
+	commit := func(name, text string) {
+		t.Helper()
+		at := filepath.Join(ws, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(at), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(at, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("add", "-A")
+		git("commit", "-q", "-m", name)
+	}
+	git("init", "-q", "-b", "main")
+	commit("src/a.go", "package a\n")
+	file, err := battery.Passed()
 	if err != nil {
 		t.Fatal(err)
 	}
-	head.stamp = hash
-	if code, out, errs := trust(); code != 0 || !strings.HasPrefix(out, "trusted: the battery passed tree "+hash) {
+	trust := func(args ...string) (int, string, string) {
+		return se(t, append([]string{"fleet", "trust", "--workspace", ws}, args...)...)
+	}
+	// A missing record: a push without SE, and CI runs the battery.
+	if code, out, errs := trust(); code == 0 || out != "" || !strings.Contains(errs, "not trusted, so CI runs the battery: HEAD holds no "+file) {
 		t.Fatalf("exit %d, %q %q", code, out, errs)
 	}
-	// Main moved: the merge CI checked out is another tree, and the battery runs.
-	head.entries = append(head.entries, "100644 blob 2222222222222222222222222222222222222222\tother")
-	if code, _, errs := trust(); code == 0 || !strings.Contains(errs, "changed since the battery passed") {
+	// A box's push: its record names the tree without it, and CI skips the battery.
+	tree := git("rev-parse", "HEAD^{tree}")
+	commit(file, tree+"\n")
+	sha := git("rev-parse", "HEAD")
+	if code, out, errs := trust("--rev", sha); code != 0 || out != "trusted: "+sha+"'s "+file+" names its tree "+tree+": the battery passed it\n" {
+		t.Fatalf("exit %d, %q %q", code, out, errs)
+	}
+	if code, out, _ := trust("--json"); code != 0 || !strings.Contains(out, `{"trusted":true,"why":"HEAD's `+file+` names its tree `+tree) {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+	// A mismatch: the tree moved past the record (main merged in, say), and CI runs the battery.
+	commit("src/b.go", "package a\n")
+	if code, _, errs := trust(); code == 0 || !strings.Contains(errs, "HEAD's "+file+" names tree "+tree+", and its tree without it is") {
 		t.Fatalf("exit %d, %q", code, errs)
+	}
+	if w := gh.Writes(); len(w) != 0 {
+		t.Fatalf("trust wrote %q", w)
 	}
 }
 

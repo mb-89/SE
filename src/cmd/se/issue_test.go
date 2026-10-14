@@ -168,6 +168,39 @@ func TestIssuePullNamesTheNextReadyIssue(t *testing.T) {
 	}
 }
 
+// Finals do not count: a closed se-final issue (what a retro, a review or an
+// overhaul filed) leaves the retro cadence where it was, so retros do not
+// feed themselves; any other closed se issue moves it.
+func TestAClosedFinalIssueDoesNotMoveTheRetroCadence(t *testing.T) {
+	t.Parallel()
+	gh := recordedIssues(t)
+	setenv(t, "CLAUDE_CODE_SESSION_ATTENDED", "1")
+	closeNew := func(args ...string) {
+		t.Helper()
+		code, out, errs := se(t, append([]string{"issue", "new", "--json", "--repo", "o/r", "--body", "b", "--blocked-by", "none", "--parent", "3"}, args...)...)
+		var made struct{ Number int }
+		if err := json.Unmarshal([]byte(out), &made); code != 0 || err != nil {
+			t.Fatalf("exit %d, %q %q %v", code, out, errs, err)
+		}
+		if _, err := gh.Send("PATCH", fmt.Sprintf("repos/o/r/issues/%d", made.Number), github.F("state", "closed"), github.F("state_reason", "completed")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cadence := func() string {
+		t.Helper()
+		_, out, _ := se(t, "issue", "pull", "--repo", "o/r")
+		return out
+	}
+	closeNew("--title", "a finding", "--final")
+	if out := cadence(); !strings.Contains(out, "\n1 se issue closed and no retro has closed yet") {
+		t.Fatalf("a closed final issue moved the cadence: %q", out)
+	}
+	closeNew("--title", "work")
+	if out := cadence(); !strings.Contains(out, "\n2 se issues closed and no retro has closed yet") {
+		t.Fatalf("a closed issue did not move the cadence: %q", out)
+	}
+}
+
 // A press of issue pull in /se ui shows its short form: the issue, its link,
 // why it is at the top, and the cadences in one line; typing shows each cadence.
 func TestIssuePullAnswersAPressShort(t *testing.T) {
@@ -359,7 +392,8 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	git(ws, "push", "-q", "origin", "main")
 	git(ws, "checkout", "-q", "-b", "issue-6")
 	git(ws, "commit", "-q", "--allow-empty", "-m", "work")
-	// git keeps the checkout on the real disk; se reads its files from a fake.
+	// git keeps the checkout on the real disk, the battery's record in it among
+	// them; se reads its other files from a fake.
 	spec, err := os.ReadFile(filepath.Join("..", "..", "..", issues.QuestionsFile))
 	if err != nil {
 		t.Fatal(err)
@@ -374,9 +408,9 @@ func TestIssueLandNamesThePR(t *testing.T) {
 	// commits it.
 	worldOf(t).Check = func(procs proc.Procs, dir string) error {
 		checked = dir
-		tree, err := battery.Tree(procs, dir, battery.Stamp)
+		tree, err := battery.Tree(procs, dir)
 		if err == nil {
-			_, err = battery.Pass(disk.Real(), procs, dir, battery.Stamp, tree)
+			_, err = battery.Pass(disk.Real(), procs, dir, tree)
 		}
 		return err
 	}

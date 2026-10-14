@@ -75,7 +75,7 @@ func init() {
 			"Every --take first reads fleet.box/config/paused (issues/config/paused) in the wiring file on origin/main, and while it is set takes nothing and says the fleet is paused, so the box ends.",
 			"Without --take it only shows it (number, title, link, why it is at the top, and where the cadences stand; --full adds the body), or says that none is ready, and takes nothing; a press of its /se ui button shows the short form, the cadences in one line.",
 			"--take claims it (or issue N): its branch issue-N, pushed from origin/main and checked out.",
-			fmt.Sprintf("Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence) have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into.", issueConfig().OverhaulCadence, issueConfig().RetroCadence),
+			fmt.Sprintf("Plain --take first starts and takes an unattended overhaul where %d retros (issues/config/overhaul-cadence) have closed since the last overhaul closed and none is open, else an unattended retro where %d se issues (issues/config/retro-cadence), final ones (se-final) not counted, have closed since the last retro closed and none is open (the plain form reports both counts); then it takes over a claimed issue whose PR conflicts with main: its branch is checked out as it stands, to merge main into.", issueConfig().OverhaulCadence, issueConfig().RetroCadence),
 			fmt.Sprintf("A claimed leaf nothing was pushed to for longer than the %s lease (issues/config/lease) is stuck: it is taken over before new work, its branch checked out as it stands.", issueConfig().Lease),
 			"A takeover writes the landing answers the issue's last land posted on it back to <checkout>-landing.yaml beside its checkout (its worktree with --worktree or --in), keeping a file there already, and names it.",
 			"A takeover also says, from the REST API, when its branch was last pushed and its open PR's mergeable state and the last run of each of its checks, so no box reaches for gh.",
@@ -536,8 +536,8 @@ func init() {
 		Summary: "check and land issue-N: a leaf into its manifest, else one PR",
 		Details: []string{
 			"on an issue-N branch: refuse unless FILE answers every question in spec/landing.yaml (YAML keyed by their keys, none empty, none unknown; a relative FILE is read from the workspace), and refuse an issue with open sub-issues.",
-			"A leaf inside a manifest (an issue with a parent) lands into the manifest's branch: merge origin's issue-N and the manifest's issue-M into it (never a rebase), pass tests/check.sh, commit the battery's stamp with the work, push it to both, post the answers on the leaf with its facts (its time from claim to land among them) and close it; a leaf gets no PR of its own, so an earlier box's open PR of the leaf to main is closed (its auto-merge off) with a comment naming the manifest.",
-			"An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, commit the battery's stamp (issues/config/stamp) with the work, refuse a tree the stamp does not name and a branch main moved past meanwhile, post the answers on the issue (or update the ones posted before), open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a manifest whose branch holds nothing main does not closes with no PR.",
+			"A leaf inside a manifest (an issue with a parent) lands into the manifest's branch: merge origin's issue-N and the manifest's issue-M into it (never a rebase), pass tests/check.sh, push it to both, post the answers on the leaf with its facts (its time from claim to land among them) and close it; a leaf gets no PR of its own, so an earlier box's open PR of the leaf to main is closed (its auto-merge off) with a comment naming the manifest.",
+			"An issue at the top (a manifest whose leaves are all closed, a retro, an overhaul) lands to main: merge origin's branch and origin/main in, pass tests/check.sh, refuse a tree the battery did not record as passed and a branch main moved past meanwhile, commit the battery's record (battery/config/passed, which names the tree) with the work, so CI trusts it (se fleet trust), post the answers on the issue (or update the ones posted before), push, open its PR against main (Fixes #N, and the battery's profile), or find it open with its profile brought up to date, and turn on auto-merge (squash), recording the PR, auto-merge on, in .se/.runtime/box.json, which se hook stop trusts before it asks GitHub; a manifest whose branch holds nothing main does not closes with no PR.",
 		},
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
@@ -611,10 +611,11 @@ func init() {
 		Class:   batch,
 		Usage:   "issue keep [--for D] [--json] [--repo OWNER/NAME]",
 		Group:   "Issues",
-		Summary: "keep an issue-N branch's PR up to date until it merges",
+		Summary: "stay with an issue-N branch's PR until it merges",
 		Details: []string{
 			"on an issue-N branch whose PR se issue land opened: a box keeps its PR until it merges.",
-			"Every minute, for D at most (default 8m, so one call fits a tool's timeout), it looks at the PR; whenever main has moved past the branch on origin, it merges origin/main in (never a rebase), passes tests/check.sh, commits the battery's stamp with the work and pushes, as se issue land does, so CI trusts the stamp and auto-merge merges.",
+			"The PR merges once its own CI is green, up to date with main or not; only a conflict holds it back.",
+			"Every minute, for D at most (default 8m, so one call fits a tool's timeout), it looks at the PR; whenever main has moved past the branch on origin, it merges origin/main in (never a rebase), passes tests/check.sh, commits the battery's record and pushes, as se issue land does, so the PR is checked again against the main it merges into and CI trusts it.",
 			"It says when the PR merged, or another box took the issue over, or that it is still open: run it again.",
 			"A merge that conflicts, a failing check and a PR closed unmerged are errors to fix, then land again (with --json: {\"issue\",\"pr\",\"url\",\"merged\",\"taken_over\",\"updated\"}).",
 		},
@@ -662,7 +663,7 @@ func init() {
 		Details: []string{
 			"review N, an se-review parent whose sub-issues have closed, as an agent that worked none of its tree, with the report in the JSON file PATH (spec/review.md).",
 			"It refuses a pass where a requirement lacks evidence, and a report without its checked-and-clean list.",
-			fmt.Sprintf("Every finding becomes an se-final issue: a blocking one a sub-issue of N, a non-blocking one in the queue (at most %d, issues/config/max-filed).", issueConfig().MaxFiled),
+			fmt.Sprintf("Every finding becomes an se-final issue: a blocking one a sub-issue of N, a non-blocking one a sub-issue of the review's one manifest of findings (Findings of the review of #N, se-manifest and se-final) (at most %d, issues/config/max-filed).", issueConfig().MaxFiled),
 			"pass posts the report and closes N; fail posts it, and N waits for its fixes.",
 			"A re-review finding that repeats an earlier blocker is an accepted repeat: it files nothing, the report names it, and a fail whose blocking findings are all repeats closes N.",
 		},
@@ -749,7 +750,7 @@ func init() {
 				lines = append(lines, "Accepted repeats, blocking no more: "+numbers(r.Accepted)+".")
 			}
 			if len(r.Filed) > 0 {
-				lines = append(lines, "Filed, not blocking:")
+				lines = append(lines, fmt.Sprintf("Filed, not blocking, as sub-issues of the manifest #%d, all %s:", r.Manifest, issues.FinalLabel))
 			}
 			for _, f := range r.Filed {
 				lines = append(lines, fmt.Sprintf("#%d %s\n%s", f.Number, f.Title, f.URL))

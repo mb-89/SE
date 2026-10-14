@@ -200,9 +200,6 @@ func (s Source) landInto(dir string, n, root int, session string, qs []Question,
 	if err := check(dir); err != nil {
 		return Landing{}, fmt.Errorf("the check failed, so nothing was pushed: %w", err)
 	}
-	if err := s.commitStamp(dir); err != nil {
-		return Landing{}, err
-	}
 	comments, f, err := s.factsOf(dir, n, into)
 	if err != nil {
 		return Landing{}, err
@@ -250,8 +247,7 @@ func (s Source) landInto(dir string, n, root int, session string, qs []Question,
 // its coordinator claimed it.
 func (s Source) takeInto(dir, branch, into string) error {
 	if _, err := s.git(dir, "fetch", "-q", "origin", "refs/heads/"+branch+":refs/remotes/origin/"+branch); err == nil {
-		if _, err := s.git(dir, "merge", "-q", "--no-edit", "origin/"+branch); err != nil {
-			_, _ = s.git(dir, "merge", "--abort")
+		if err := s.merge(dir, "origin/"+branch); err != nil {
 			return fmt.Errorf("merging origin/%s into %s conflicts, so nothing was pushed: merge it by hand (never rebase), resolve the conflict, commit and land again: %w", branch, branch, err)
 		}
 	}
@@ -259,13 +255,12 @@ func (s Source) takeInto(dir, branch, into string) error {
 }
 
 // mergeIn fetches the manifest's branch into and merges it into the branch
-// checked out in dir; a merge that conflicts is undone.
+// checked out in dir; a merge that conflicts is undone (merge).
 func (s Source) mergeIn(dir, branch, into string) error {
 	if _, err := s.git(dir, "fetch", "-q", "origin", "+refs/heads/"+into+":refs/remotes/origin/"+into); err != nil {
 		return fmt.Errorf("the manifest's branch %s is not on origin, so nothing was pushed (its coordinator claims it): %w", into, err)
 	}
-	if _, err := s.git(dir, "merge", "-q", "--no-edit", "origin/"+into); err != nil {
-		_, _ = s.git(dir, "merge", "--abort")
+	if err := s.merge(dir, "origin/"+into); err != nil {
 		return fmt.Errorf("merging origin/%s into %s conflicts, so nothing was pushed: merge it by hand (never rebase), resolve the conflict, commit and land again: %w", into, branch, err)
 	}
 	return nil

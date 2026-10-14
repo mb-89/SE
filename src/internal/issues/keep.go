@@ -11,13 +11,12 @@ import (
 )
 
 // The owner's rule, 2026-10-14: a box stays with its PR until it merges, it
-// pushes only what is up to date with main and checked, and CI trusts the
-// battery the box already ran. tests/check.sh writes the battery's stamp
-// (battery.Stamp, the issues instance's config/stamp) naming the tree it
-// passed; se issue land and se issue keep push through ship, which commits
-// it with the work; CI's check job asks battery.Trusted (se fleet trust)
-// and runs the battery only where the stamp does not name the tree it
-// checked out.
+// pushes only what is checked, and CI trusts the
+// battery the box already ran. se issue land and se issue keep push through
+// ship, which commits the battery's record of the tree it passed
+// (battery.Passed) with the work; CI's check job asks battery.Trusted about
+// it (se fleet trust) and runs the battery only where the record does not
+// name the tree it checked out.
 
 // keepPause is how long se issue keep waits between its looks at the PR.
 const keepPause = time.Minute
@@ -31,18 +30,29 @@ func (e behindMain) Error() string {
 
 // ship brings the branch checked out in dir to origin, checked, as se issue
 // land and se issue keep do: it merges origin's copy of the branch and then
-// origin/main in, runs check, commits the battery's stamp, refuses a tree
-// the stamp does not name and a branch main has moved past since, runs
-// before (where set), and pushes. before writes what must survive a stop
-// after it: se issue land's landing answers.
-func (s Source) ship(dir, branch string, check func(dir string) error, before func() error) error {
+// origin/main in, runs check, refuses a tree the battery did not pass and a
+// branch main has moved past since, commits the battery's record and pushes.
+func (s Source) ship(dir, branch string, check func(dir string) error) error {
 	if err := s.takeIn(dir, branch); err != nil {
 		return err
 	}
+	return s.push(dir, branch, check, nil)
+}
+
+// push is ship after takeIn: it runs check, refuses a tree the battery did
+// not pass and a branch main has moved past since, commits the battery's
+// record of the pass, so the pushed commit holds it, runs before (where
+// set), and pushes. before writes what must survive a stop after it: se
+// issue land's landing answers.
+func (s Source) push(dir, branch string, check func(dir string) error, before func() error) error {
 	if err := check(dir); err != nil {
 		return fmt.Errorf("the check failed, so nothing was pushed: %w", err)
 	}
-	if err := s.checked(dir, branch); err != nil {
+	tree, err := s.checked(dir, branch)
+	if err != nil {
+		return err
+	}
+	if err := battery.Commit(s.Proc, dir, tree); err != nil {
 		return err
 	}
 	if before != nil {
@@ -50,49 +60,36 @@ func (s Source) ship(dir, branch string, check func(dir string) error, before fu
 			return err
 		}
 	}
-	_, err := s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch)
+	_, err = s.git(dir, "push", "-q", "-u", "origin", "HEAD:refs/heads/"+branch)
 	return err
 }
 
-// checked commits the battery's stamp in dir and refuses the tree checked
-// out there unless it may be pushed: the stamp names it (the battery passed
-// it), and origin/main, fetched again, is in it, so the push is one main's
-// ruleset can merge as it stands.
-func (s Source) checked(dir, branch string) error {
-	if err := s.commitStamp(dir); err != nil {
-		return err
+// checked answers the tree checked out in dir where it may be pushed: the
+// battery passed it (its record, staged here, names it), and origin/main,
+// fetched again, is in it, so the push is one main's ruleset can merge as it
+// stands.
+func (s Source) checked(dir, branch string) (string, error) {
+	tree, err := battery.TreeOf(s.Proc, dir, "HEAD")
+	if err != nil {
+		return "", err
 	}
-	if _, err := battery.Trusted(s.Proc, dir, "HEAD", s.config().Stamp); err != nil {
-		return fmt.Errorf("the battery has not passed %s's tree, so nothing was pushed: sh ./tests/check.sh writes its stamp, from a clean worktree: %w", branch, err)
+	passed, ok, err := battery.Stage(s.Proc, dir)
+	if err != nil {
+		return "", err
+	}
+	if !ok || passed != tree {
+		return "", fmt.Errorf("the battery has not passed %s's tree %s, so nothing was pushed: sh ./tests/check.sh records the tree it passed, from a clean worktree", branch, tree)
 	}
 	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
-		return err
+		return "", err
 	}
 	if behind, err := s.behind(dir, "HEAD"); err != nil {
-		return err
+		return "", err
 	} else if behind {
-		return behindMain{branch}
+		return "", behindMain{branch}
 	}
-	return nil
+	return tree, nil
 }
-
-// commitStamp commits the battery's stamp in dir where it changed, alone, so
-// it goes with the work; a stamp that did not change commits nothing.
-func (s Source) commitStamp(dir string) error {
-	stamp := s.config().Stamp
-	changed, err := s.git(dir, "status", "--porcelain", "--", stamp)
-	if err != nil || changed == "" {
-		return err
-	}
-	if _, err := s.git(dir, "add", "-A", "--", stamp); err != nil {
-		return err
-	}
-	_, err = s.git(dir, "commit", "-q", "-m", stampCommit, "--", stamp)
-	return err
-}
-
-// stampCommit is the message of the commit of the battery's stamp alone.
-const stampCommit = "The battery's stamp: the tree it passed"
 
 // behind says whether origin/main, as dir last fetched it, has a commit ref lacks.
 func (s Source) behind(dir, ref string) (bool, error) {
@@ -101,6 +98,35 @@ func (s Source) behind(dir, ref string) (bool, error) {
 		return true, nil
 	}
 	return false, err
+}
+
+// merge merges ref into the branch checked out in dir, the battery's record
+// first put back as HEAD holds it (the battery runs again on the merge). A
+// conflict in that record alone is settled, since every branch writes its
+// own; any other conflict is undone.
+func (s Source) merge(dir, ref string) error {
+	if err := battery.Reset(s.Proc, dir); err != nil {
+		return err
+	}
+	_, err := s.git(dir, "merge", "-q", "--no-edit", ref)
+	if err == nil {
+		return nil
+	}
+	if s.settle(dir) {
+		return nil
+	}
+	_, _ = s.git(dir, "merge", "--abort")
+	return err
+}
+
+// settle commits the merge in dir where it conflicts in the battery's record
+// alone (battery.Resolve), and answers false where any other path conflicts.
+func (s Source) settle(dir string) bool {
+	if settled, err := battery.Resolve(s.Proc, dir); err != nil || !settled {
+		return false
+	}
+	_, err := s.git(dir, "commit", "-q", "--no-edit")
+	return err == nil
 }
 
 // keptPull is the part of GitHub's pull request object Keep reads.
@@ -204,13 +230,10 @@ func (s Source) keepUp(dir, branch string, check func(dir string) error) error {
 	if !behind {
 		return errUpToDate
 	}
-	if err := s.commitStamp(dir); err != nil {
-		return err
-	}
-	if dirty, err := s.git(dir, "status", "--porcelain"); err != nil {
+	if dirty, err := battery.Dirty(s.Proc, dir); err != nil {
 		return err
 	} else if dirty != "" {
 		return fmt.Errorf("%s has changes not committed, so nothing was merged or pushed:\n%s", dir, dirty)
 	}
-	return s.ship(dir, branch, check, nil)
+	return s.ship(dir, branch, check)
 }

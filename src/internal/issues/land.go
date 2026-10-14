@@ -59,16 +59,16 @@ func (s Source) issued(dir string) (int, error) {
 // manifest whose leaves are all closed or a retro, lands to main: answers must
 // answer every question in qs, and check must pass on a clean tree of an
 // issue with no open sub-issues, after origin's branch and main are merged
-// in, so the check runs on what lands; the battery's stamp, committed with
-// the work, must name that tree, and main must not have moved past it since
-// (ship). Then the answers are posted on the issue, before anything is
-// pushed, so a land stopped later still leaves them; the branch is pushed,
-// its PR against main opened (or, where it is open
-// already, found) with the battery's profile in its body, and auto-merge
-// turned on with squash. Run again after a
-// fix, it pushes, updates the answers and reports the same PR. Where session
-// is set, the leaf records who worked it, so a review of its tree can refuse
-// that worker.
+// in, so the check runs on what lands; the battery must have recorded that
+// tree, and main must not have moved past it since (push). Then the
+// battery's record is committed, the answers posted on the issue before
+// anything is pushed, so a land stopped later still leaves them, the branch
+// pushed, its PR against main opened (or, where it is open already, found)
+// with the battery's profile in its body, and auto-merge turned on with
+// squash. Run again after a fix, it pushes, updates the answers and
+// reports the same PR. Where session is set, the leaf records who worked it,
+// so a review of its tree can refuse that worker. The battery's record is no
+// change it refuses: the battery rewrites it on every pass.
 func (s Source) Land(dir, session string, qs []Question, answers map[string]string, check func(dir string) error) (Landing, error) {
 	n, err := s.issued(dir)
 	if err != nil {
@@ -77,11 +77,7 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	if err := answered(qs, answers); err != nil {
 		return Landing{}, err
 	}
-	// A stamp the battery wrote since the last commit goes with the work.
-	if err := s.commitStamp(dir); err != nil {
-		return Landing{}, err
-	}
-	if dirty, err := s.git(dir, "status", "--porcelain"); err != nil {
+	if dirty, err := battery.Dirty(s.Proc, dir); err != nil {
 		return Landing{}, err
 	} else if dirty != "" {
 		return Landing{}, fmt.Errorf("land pushes commits, and %s has changes not committed:\n%s", dir, dirty)
@@ -115,7 +111,7 @@ func (s Source) Land(dir, session string, qs []Question, answers map[string]stri
 	}
 	// The answers go on the issue before the push, so a land stopped after
 	// it (a PR it could not open, say) leaves its record.
-	if err := s.ship(dir, branch, check, func() error {
+	if err := s.push(dir, branch, check, func() error {
 		if err := s.record(n, Worker{Session: session, Workspace: dir}); err != nil {
 			return err
 		}
@@ -175,7 +171,8 @@ func (s Source) closeEmpty(n int) (Landing, error) {
 // takeIn merges into the branch checked out in dir what origin's copy of it
 // has (a takeover's box, or this box's se issue keep, pushed there) and then origin's main, so
 // the check runs on what lands and the push is a fast-forward. A merge that
-// conflicts is undone, and the box resolves it by hand.
+// conflicts is undone, and the box resolves it by hand; one in the battery's
+// record alone is settled (merge).
 func (s Source) takeIn(dir, branch string) error {
 	if _, err := s.git(dir, "fetch", "-q", "origin", "main"); err != nil {
 		return err
@@ -186,8 +183,7 @@ func (s Source) takeIn(dir, branch string) error {
 		refs = []string{"origin/" + branch, "origin/main"}
 	}
 	for _, ref := range refs {
-		if _, err := s.git(dir, "merge", "-q", "--no-edit", ref); err != nil {
-			_, _ = s.git(dir, "merge", "--abort")
+		if err := s.merge(dir, ref); err != nil {
 			return fmt.Errorf("merging %s into %s conflicts, so nothing was pushed: merge it by hand (never rebase), resolve the conflict, commit and land again: %w", ref, branch, err)
 		}
 	}

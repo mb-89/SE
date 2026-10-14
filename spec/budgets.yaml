@@ -46,7 +46,7 @@ command_classes:
   fleet prune: github
   fleet refresh: github
   fleet rules: battery
-  fleet trust: local
+  fleet trust: github
   guidance: local
   help: instant
   hook prompt: local

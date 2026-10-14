@@ -179,21 +179,22 @@ func init() {
 	register(Command{
 		Name:    "fleet trust",
 		Class:   batch,
-		Usage:   "fleet trust [--json]",
+		Usage:   "fleet trust [--rev REV] [--json]",
 		Group:   "Fleet",
-		Summary: "say whether CI may skip the battery on the commit checked out",
+		Summary: "say whether CI may trust the battery a box ran on a commit",
 		Details: []string{
-			"CI's check job asks it first, on a pull request and on a push to main: exit 0 and say why where the battery's stamp (issues/config/stamp), as the workspace's HEAD holds it, names the hash of HEAD's tree with the stamp left out, as tests/check.sh wrote it and se issue land and se issue keep committed it with the work; else exit 1 and say why (main moved, or the stamp is missing or stale), and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}).",
-			"It reads no GitHub: the stamp is a file in the commit.",
-			"It is trust in one's own boxes, not a proof.",
+			"CI's check job asks it first, in its checkout: exit 0 and say why where commit REV (default HEAD) holds the battery's record (battery/config/passed) naming REV's git tree with the record left out, as tests/check.sh writes it and se issue land and se issue keep commit it with the work; else (no record, or one naming another tree, as where main moved since) exit 1 and say why, and CI runs the battery itself (with --json, a trusted commit answers {\"trusted\",\"why\"}).",
+			"It asks GitHub nothing.",
+			"It is trust in one's own boxes: faking the record is sabotage, not an accident.",
 		},
 		Run: func(c *Call) (Reply, error) {
 			fs := c.Flags("fleet trust")
 			asJSON := fs.Bool("json", false, "answer JSON")
+			rev := fs.String("rev", "HEAD", "the commit `REV` CI checked out")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
-			why, err := battery.Trusted(c.Proc, c.Workspace, "HEAD", issueConfig().Stamp)
+			why, err := battery.Trusted(c.Proc, c.Workspace, *rev)
 			if err != nil {
 				return Reply{}, fmt.Errorf("not trusted, so CI runs the battery: %w", err)
 			}
