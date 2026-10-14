@@ -789,11 +789,11 @@ func TestATakeoverWritesBackTheLandingAnswersBesideItsWorktree(t *testing.T) {
 	if err != nil || strings.TrimSpace(got["done"]) != "half of it" || strings.TrimSpace(got["left"]) != "the tests" || took.Takeover.Answers != path {
 		t.Fatalf("%q %v, takeover %+v", got, err, took.Takeover)
 	}
-	r, err := issueReply(false, took, true, "issue-6", "git worktree add …", "", handed{})
+	r, err := issueReply(false, false, took, true, "issue-6", "git worktree add …", "", handed{})
 	if err != nil || !strings.Contains(r.Text, "Its landing answers, as its last land posted them, are in "+path+": bring them up to date, and land with --answers "+path+".") {
 		t.Fatalf("%v\n%s", err, r.Text)
 	}
-	r, err = issueReply(true, took, true, "issue-6", "", "", handed{})
+	r, err = issueReply(true, false, took, true, "issue-6", "", "", handed{})
 	if want, _ := json.Marshal(path); err != nil || !strings.Contains(r.Text, `"answers":`+string(want)) {
 		t.Fatalf("%v\n%s", err, r.Text)
 	}
