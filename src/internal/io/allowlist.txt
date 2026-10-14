@@ -10,9 +10,9 @@ src/cmd/se/checkout.go os/exec
 src/cmd/se/issue.go os/exec
 src/cmd/se/rules.go os/exec
 src/internal/battery/decoy.go os/exec
+src/internal/battery/fmt.go os/exec
 src/internal/daemon/client.go os/exec
 src/internal/issues/issues.go os/exec
-src/internal/battery/fmt.go os/exec
 src/internal/update/update.go os/exec
 
 # Files and folders: disk (#62).
@@ -50,7 +50,6 @@ src/internal/issues/briefing.go os.ReadFile
 src/internal/issues/landing.go os.ReadFile
 src/internal/issues/overhaul.go os.ReadFile
 src/internal/issues/review.go os.ReadFile
-src/internal/battery/fmt.go os.Stat
 src/internal/rules/rules.go os.ReadFile
 src/internal/update/update.go os.MkdirAll
 src/internal/update/update.go os.ReadFile

@@ -5,7 +5,7 @@ Reader: whoever changes how the fleet picks, claims, nests, lands or reviews its
 SE's work items are GitHub issues. These rules say which issue a box may work
 on next, how it claims it, and how issues and their dependencies are created.
 They live here and nowhere else; `se issue next`, `se issue new`,
-`se issue land`, `se issue review` and `se issue resume` (in
+`se issue land`, `se issue review`, `se issue resume` and `se issue tree` (in
 `src/internal/issues`) are their one implementation, so the
 choice is deterministic and no prompt restates it.
 
@@ -175,6 +175,7 @@ se issue new --title T (--body B | --body-file PATH) --blocked-by N,M|none [--pa
 se issue next [--in ROOT] [--take [N]] [--person] [--json] [--repo OWNER/NAME]
 se issue resume N [--json] [--repo OWNER/NAME]
 se issue review pass|fail N --report PATH [--json] [--repo OWNER/NAME]
+se issue tree [ROOT] [--json] [--repo OWNER/NAME]
 se review brief N [--claims] [--json] [--repo OWNER/NAME]
 ```
 <!-- /se:manifest -->
@@ -304,6 +305,14 @@ with its reason and how many open issues it blocks, directly or through a tree
 says that none waits on a person. `se issue resume N` is the person's, for an
 issue labelled `se-person` by hand or before issues for a person existed: it
 refuses an issue not labelled `se-person`; see [Stuck work](#stuck-work).
+
+`se issue tree` lists every se issue with sub-issues, open or closed, open
+first, one line each: number, state, how many of its sub-issues are closed,
+its labels and its title. `se issue tree ROOT` lists ROOT and every issue
+below it, open or closed, each indented under its parent (with `--json`: a
+list of `{"number","title","state","url","labels","depth","closed","total"}`).
+It changes nothing but the parents every command closes. A session has it as
+`/se issue tree`.
 
 They read and write GitHub through `gh api` (the links through
 `/repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by`, the tree through

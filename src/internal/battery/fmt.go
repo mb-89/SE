@@ -2,9 +2,7 @@ package battery
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -15,9 +13,6 @@ const ToolsScript = "tests/tools.sh"
 // Format runs every formatter the battery checks over dir, after installing
 // any pinned linter it lacks, and answers what they said.
 func Format(dir string) (string, error) {
-	if _, err := os.Stat(filepath.Join(dir, ToolsScript)); err != nil {
-		return "", fmt.Errorf("%s has no %s to format with: %w", dir, ToolsScript, err)
-	}
 	cmd := exec.Command("sh", ToolsScript, "fmt")
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
