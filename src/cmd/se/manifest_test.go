@@ -69,6 +69,13 @@ func TestTheManifestsAreMadeFromTheirOwners(t *testing.T) {
 	if want := "```\n" + usagesUnder("fleet") + usagesUnder("rules") + "```\n"; !strings.HasPrefix(want, "```\nse fleet check ") || !strings.HasSuffix(want, "\nse rules [--fix]\n```\n") || out != want {
 		t.Fatalf("usage: %q, want %q", out, want)
 	}
+	// The help listing holds every help se gives, each as se help gives it.
+	_, out, _ = se(t, "--workspace", ws, "manifest", "help")
+	_, land, _ := se(t, "help", "issue", "land")
+	if !strings.HasPrefix(out, "## se help\n\n```text\nse <command> [flags]\n") || !strings.Contains(out, "\n## /se help\n\n```text\n/se <command> [flags]\n") ||
+		!strings.Contains(out, "\n## se help issue land\n\n```text\n"+land+"```\n") {
+		t.Fatalf("help: %q", out)
+	}
 	if code, _, errs := se(t, "--workspace", ws, "manifest", "frob"); code != 1 || !strings.Contains(errs, `no manifest "frob"`) {
 		t.Fatalf("an unknown manifest (exit %d): %s", code, errs)
 	}
