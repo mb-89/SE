@@ -13,9 +13,9 @@ import (
 // the retro can tell an issue it made from one made by hand.
 const NewMark = "<!-- se:new -->"
 
-// unattendedMark is in the body of a retro nobody waits for: its box creates
-// the findings' issues at once. A retro a person started carries
-// <!-- se:retro attended --> instead, and its box stops for the owner.
+// unattendedMark is in the body of a retro no person started, which asked for
+// no field feedback. One a person started carries <!-- se:retro attended -->
+// instead. Either way its box files the issues and closes it.
 const unattendedMark = "<!-- se:retro unattended -->"
 
 // RetroIssue is the retro se retro new created.
@@ -73,9 +73,9 @@ func (s Source) NewRetro(field string, unattended bool) (RetroIssue, error) {
 		r.Previous = last.Number
 		window = fmt.Sprintf("everything closed since the retro #%d closed, %s", last.Number, last.ClosedAt.UTC().Format(time.RFC3339))
 	}
-	mode, who := "attended", "A person started it: the box posts its report here and stops for the owner, who decides, then runs `se issue resume`."
+	mode, who := "attended", "A person started it. The box creates the findings' issues, those for a person where controversial, and closes it."
 	if unattended {
-		mode, who = "unattended", "It runs unattended: the box creates the findings' issues at once and closes it."
+		mode, who = "unattended", "It runs unattended. The box creates the findings' issues, those for a person where controversial, and closes it."
 	}
 	feedback := strings.TrimSpace(field)
 	switch {

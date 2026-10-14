@@ -18,13 +18,13 @@ func init() {
 		Usage:   "retro new (--field TEXT | --no-field | --unattended) [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "start a retro over everything closed since the last one",
-		Details: "create a retro: an se issue labelled se-retro, whose window is everything closed since the last retro closed, and fire the routine so a box takes it at once. A person starts it with --field TEXT, their field feedback, which goes into the issue (the retro skill asks for it), or --no-field; its box posts the report and stops for the owner. --unattended never asks: its box creates the findings' issues at once and closes it. spec/retro.md has the rules.",
+		Details: "create a retro: an se issue labelled se-retro, whose window is everything closed since the last retro closed, and fire the routine so a box takes it at once. A person starts it with --field TEXT, their field feedback, which goes into the issue (the retro skill asks for it), or --no-field. --unattended never asks. Either way its box creates the findings' issues, those for a person where controversial, and closes it: a retro never waits. spec/retro.md has the rules.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "retro new")
 			field := fs.String("field", "", "the person's field feedback, as `TEXT`")
 			fs.Bool("no-field", false, "a person starts it without field feedback")
-			unattended := fs.Bool("unattended", false, "nobody waits for the report: never ask, create the issues at once")
+			unattended := fs.Bool("unattended", false, "no person started it: never ask for field feedback")
 			if err := c.Parse(fs); err != nil {
 				return Reply{}, err
 			}
@@ -64,7 +64,7 @@ func init() {
 		Usage:   "retro collect N [--out FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
 		Summary: "read a retro's window from GitHub and write its report draft",
-		Details: "read retro N's window from GitHub (everything closed since the last retro closed) and write the report draft to FILE (default: ../retro-N.md beside the workspace): the rule checks, the counts, the metrics against the previous retros, how the previous retro's findings fared, the scripts added under src/scripts/, and the matrix of every closed issue × every landing question. Where a report is already posted on N, it writes that one instead, for the box that picks the retro up after the owner decided.",
+		Details: "read retro N's window from GitHub (everything closed since the last retro closed) and write the report draft to FILE (default: ../retro-N.md beside the workspace): the rule checks, the counts, the metrics against the previous retros, how the previous retro's findings fared, the scripts added under src/scripts/, and the matrix of every closed issue × every landing question. Where a report is already posted on N (a retro from before retros stopped waiting for the owner), it writes that one instead, to be filed as it stands.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "retro collect")
@@ -82,7 +82,7 @@ func init() {
 			if err != nil {
 				return Reply{}, err
 			}
-			text, what := posted, "the report posted on it, as the owner left it: apply what the owner decided in its block, then run se retro report"
+			text, what := posted, "the report posted on it: apply what the owner said in its comments, if anything, to its block, then run se retro report"
 			var col issues.Collected
 			if posted == "" {
 				qs, err := issues.Questions(c.Workspace)
@@ -115,8 +115,8 @@ func init() {
 		Name:    "retro report",
 		Usage:   "retro report N [--draft FILE] [--json] [--repo OWNER/NAME]",
 		Group:   "Retro",
-		Summary: "file a judged report: stop for the owner, or create the issues",
-		Details: "file retro N's report from its judged draft FILE (default: ../retro-N.md beside the workspace). It refuses a judgment that is not complete. A retro a person started, whose owner has not decided yet, gets the report posted on it and goes to the owner (se-person); one started --unattended, or resumed by the owner after its report, gets one se issue per finding, se-person where it is controversial, then the report as its closing comment, and closes. Either way its claim issue-N goes.",
+		Summary: "file a judged report: create its issues and close it",
+		Details: "file retro N's report from its judged draft FILE (default: ../retro-N.md beside the workspace). It refuses a judgment that is not complete. It gets one se issue per finding, one for a person (se-person) where it is controversial, then the report as its closing comment, and closes: it never waits for the owner. Its claim issue-N goes.",
 		Session: true,
 		Run: func(c *Call) (Reply, error) {
 			fs, src, asJSON := issueFlags(c, "retro report")
@@ -149,9 +149,6 @@ func init() {
 				return Reply{Text: string(data)}, err
 			}
 			text := fmt.Sprintf("Created %d issue(s) from the retro #%d's findings, %d of them for a person: %s. The report is its closing comment, and it is closed.", len(filed.Issues), n, len(filed.Person), numbers(filed.Issues))
-			if filed.Stopped {
-				text = fmt.Sprintf("Posted the report on the retro #%d and gave it to the owner (%s): they decide, then run se issue resume %d. End here.", n, issues.PersonLabel, n)
-			}
 			if filed.Left != "" {
 				text += "\n" + filed.Left + "."
 			}
