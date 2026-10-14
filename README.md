@@ -32,7 +32,7 @@ The skills, `se:<name>` in a session:
 - [`se:overhaul`](src/plugin/skills/overhaul/SKILL.md): Start an SE overhaul, or, as the box that took one, judge SE against every principle and the outside world and file its report. A take hands it over where the issue names it, as every overhaul does.
 - [`se:retro`](src/plugin/skills/retro/SKILL.md): Start an SE retro, or, as the box that took one, collect its window, judge it, and file its report. A take hands it over where the issue names it, as every retro does.
 - [`se:review`](src/plugin/skills/review/SKILL.md): Review an se-review gate whose sub-issues have closed, cold, as an agent that worked none of its tree. Find, then verify, then judge; block only on damage; end with se issue review pass|fail and its report. The work skill starts it as a fresh sub-agent on the reviewer model.
-- [`se:work`](src/plugin/skills/work/SKILL.md): Take the next ready se issue, do its work, and land it with se issue land. Every SE box runs this; the routine SE work starts it.
+- [`se:work`](src/plugin/skills/work/SKILL.md): Run an SE box - pull each ready se issue and hand it to a fresh sub-agent in its own worktree, up to the box's cap, until nothing is ready and none is running. Every SE box runs this; the routine SE work starts it.
 <!-- /se:manifest -->
 
 The rules, each file owning one part:
