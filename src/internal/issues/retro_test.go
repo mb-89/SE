@@ -427,6 +427,7 @@ func TestARuleCheckWhosePRDidNotMergeIsRefused(t *testing.T) {
 }
 
 func TestByHandCountsAnAnswerThatProposesACommand(t *testing.T) {
+	t.Parallel()
 	for answer, want := range map[string]bool{
 		// #88's answer: nothing scripted, yet it names the command it wants.
 		`Nothing scripted. No se command reports "main fails its own check"; se fleet check could run check.sh on origin/main and name that as a finding.`: true,
