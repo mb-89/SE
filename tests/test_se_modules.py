@@ -129,7 +129,7 @@ home = "~/src/home"
 
 @pytest.mark.parametrize(
     "text",
-    ["[paths]\nlib = 3\n", "[urls]\n'a' = 3\n", "paths = 'x'\n"],
+    ["[paths]\nlib = 3\n", "[urls]\n'a' = 3\n", "[other]\nx = 1\n", "[path]\nx = 1\n", "paths = 'x'\n"],
 )
 def test_local_config_rejects_invalid(tmp_path, text):
     config = write(tmp_path / "local.toml", text)
@@ -137,11 +137,12 @@ def test_local_config_rejects_invalid(tmp_path, text):
         se_modules.load_local(config)
 
 
-def test_local_config_ignores_work_ticket_sections(tmp_path):
+def test_local_config_accepts_work_ticket_sections(tmp_path):
     config = write(
         tmp_path / "local.toml",
         """
 integrator_session = "agent-session:/example"
+public_identity = "mb <mb>"
 
 [paths]
 lib = "../lib"
