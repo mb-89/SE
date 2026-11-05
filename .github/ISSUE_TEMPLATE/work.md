@@ -9,6 +9,12 @@ labels: work
 
 <!-- The user-visible outcome and why it matters, in two to four sentences. -->
 
+## Package kind
+
+<!-- Standard packages change code and verify it with focused tests. For read-only research that
+produces findings, proposed tickets or probe results, apply the `discovery` label. Discovery
+packages record evidence instead of test-command wording. -->
+
 ## Blocked by
 
 <!-- Issues that must be closed first, linked as native "blocked by" dependencies by the dispatcher
