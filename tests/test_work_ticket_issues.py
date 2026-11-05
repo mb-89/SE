@@ -2019,6 +2019,8 @@ def test_delete_merged_branch_leaves_a_branch_the_host_refuses_to_delete(main_ch
 
 
 FAKE_SUITE = """\
+import sys
+print("warning: from the launcher", file=sys.stderr)
 print("....")
 print("==== slowest 10 durations ====")
 print("0.20s call     tests/test_fast.py::test_quick")
