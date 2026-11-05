@@ -184,6 +184,7 @@ override the settings below, and `work_tickets.py config` shows what is in effec
 
 ```toml
 integrator_session = "<integrator session to notify at delivery>"
+public_identity = "mb <mb>"
 
 [trackers] # repository name to tracker host/owner/repo; never commit this table
 "<repository name>" = "<host>/<owner>/<repo>"
