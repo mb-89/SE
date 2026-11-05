@@ -9,6 +9,12 @@ labels: work
 
 <!-- The user-visible outcome and why it matters, in two to four sentences. -->
 
+## Reproduction
+
+<!-- For an issue that comes from a field report's finding: link the report and quote the
+     reproduction command it ran and that command's output, verbatim. Delete this section
+     otherwise. -->
+
 ## Package kind
 
 <!-- Standard packages change code and verify it with focused tests. For read-only research that
