@@ -238,3 +238,17 @@ def test_neutrality_check_accepts_public_and_placeholder_names():
             "git@git.example:owner/repo; 223556219+Copilot@users.noreply.github.com; "
             "https://pypi.org/simple")
     assert neutrality_problems("a.md", text) == []
+
+
+@pytest.mark.parametrize("role", ("worker", "integrator"))
+def test_roles_say_integration_branch_and_link_its_owner(role):
+    text = normalized(AGENTS / f"{role}.agent.md")
+    assert "integration branch" in text
+    assert "(../skills/work-model/SKILL.md#integration-branch)" in text
+    assert "`main`" not in text.replace("`main` unless the project names another", "")
+
+
+def test_work_model_owns_the_integration_branch_setting():
+    text = normalized(WORK_MODEL)
+    assert "## Integration branch" in text
+    assert 'integration_branch = "se"' in text and "It is `main` unless" in text

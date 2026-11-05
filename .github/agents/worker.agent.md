@@ -24,7 +24,7 @@ local workers, the integrator session to notify.
   checkout you read is read-only.
 - Everything comes in through your work issue and its comments; everything goes out through your
   pull request and your field-report issue.
-- Never write outside the box: not `main`, not the main checkouts, not other worktrees, not other
+- Never write outside the box: not the integration branch, not the main checkouts, not other worktrees, not other
   repositories, not other issues. What you need from outside goes into the field report
   ("Tickets for other repositories", "Not delivered").
 - You never talk to other agents or wait for a human; the human talks only to the dispatcher. The
@@ -46,7 +46,8 @@ local workers, the integrator session to notify.
 `work_tickets.py` below runs with `--worktree <worktree>`.
 
 1. **Sync**: run `work_tickets.py sync` before intake and before every ticket; it fetches and
-   merges the newest `main` without rebasing a pushed branch.
+   merges the newest [integration branch](../skills/work-model/SKILL.md#integration-branch)
+   without rebasing a pushed branch.
 2. **Intake**: `work_tickets.py intake --issue <n>` writes one ticket per numbered requirement plus a
    `delivery` ticket into `.se/work/todo/` and lists the issue's comments. Read every comment: a
    comment from the dispatcher changes the requirements; edit or add tickets to match.
