@@ -1668,6 +1668,21 @@ def restore_pre_merge(root: Path, commit: str) -> None:
         raise QueueError(f"Cannot restore pre-merge main: {detail}")
 
 
+def integration_merge_message(
+    root: Path, branch: str, work_number: int, report_number: int, pull_number: int, public: bool
+) -> str:
+    if not public:
+        return f"Integrate work issue #{work_number}, field report #{report_number}, PR #{pull_number}"
+    summary = subprocess.run(
+        ["git", "-C", str(root), "log", "-1", "--format=%s", branch],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if summary.returncode != 0 or not summary.stdout.strip():
+        detail = summary.stderr.strip() or f"exit code {summary.returncode}"
+        raise QueueError(f"Cannot read the summary for {branch}: {detail}")
+    return f"Integrate {branch}: {one_line(summary.stdout)}"
+
+
 def integrate(
     root: Path,
     report_number: int,
@@ -1704,10 +1719,14 @@ def integrate(
     )
     if previous.returncode != 0 or not previous.stdout.strip():
         raise QueueError("Cannot determine pre-merge main")
+    mirrors = configured_mirrors(root)
     merged = subprocess.run(
         [
             "git", "-C", str(root), "merge", "--no-ff",
-            "-m", f"Integrate work issue #{work_number}, field report #{report_number}, PR #{pull_number}",
+            "-m", integration_merge_message(
+                root, branch, work_number, report_number, pull_number,
+                any(mirror.public for mirror in mirrors),
+            ),
             "-m", "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
             branch,
         ],
@@ -1731,7 +1750,6 @@ def integrate(
         integration_escalation(root, report_number, tracker, reason)
         raise QueueError(reason)
 
-    mirrors = configured_mirrors(root)
     has_public_mirror = any(mirror.public for mirror in mirrors)
     try:
         suite_result = run_project_command(root, suite_command, "Complete suite")

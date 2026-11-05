@@ -1195,7 +1195,9 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
         ["git", "-C", str(main_checkout), "log", "-1", "--format=%B"],
         capture_output=True, text=True, check=False,
     ).stdout
-    assert "work issue #5, field report #8, PR #7" in message
+    assert "Integrate feature/worker: worker" in message
+    assert "#" not in message
+    assert "git.example" not in message
     assert "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" in message
     assert commands == [
         ("suite", "Complete suite"), ("build", "Output regeneration"), ("check", "Project check")
