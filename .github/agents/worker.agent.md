@@ -59,7 +59,9 @@ notify, if any.
    without rebasing a pushed branch.
 2. **Intake**: `work_tickets.py intake --issue <n>` writes one ticket per numbered requirement plus a
    `delivery` ticket into `.se/work/todo/` and lists the issue's comments. Read every comment: a
-   comment from the dispatcher changes the requirements; edit or add tickets to match.
+   comment from the dispatcher changes the requirements; edit or add tickets to match. A ticket
+   created by hand (`work_tickets.py create`) gets its acceptance items with `--acceptance <text>`,
+   one per item, so `move --to done` needs no hand edit.
 3. **Before each ticket**: `work_tickets.py refresh` re-reads the issue and its comments and reports
    what changed; apply the changes to the tickets (`intake` again adds tickets for added
    requirements), run `work_tickets.py sync`, then move the ticket to `held`.
