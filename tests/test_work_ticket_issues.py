@@ -1128,6 +1128,40 @@ def test_delete_merged_branch_keeps_an_unmerged_tip(main_checkout, capsys):
     assert "main does not contain its tip" in capsys.readouterr().err
 
 
+def test_delete_merged_branch_keeps_origin_commits_beyond_reviewed_head(
+        main_checkout, capsys):
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    (worker / "worker.txt").write_text("reviewed\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "reviewed")
+    reviewed_head = subprocess.run(
+        ["git", "-C", str(worker), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    git_ok("-C", str(main_checkout), "merge", "--no-ff", "-q", "feature/worker", "-m", "merge worker")
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", "main")
+    (worker / "worker.txt").write_text("newer\n", encoding="utf-8")
+    git_ok("-C", str(worker), "commit", "-aq", "-m", "newer")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    newer_head = subprocess.run(
+        ["git", "-C", str(worker), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+
+    work_tickets.delete_merged_branch(main_checkout, "feature/worker", reviewed_head)
+
+    origin_head = subprocess.run(
+        ["git", "--git-dir", str(main_checkout.parent / "origin.git"), "rev-parse",
+         "refs/heads/feature/worker"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    assert origin_head == newer_head
+    assert "retained on origin" in capsys.readouterr().err
+
+
 def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch):
     worker = main_checkout.parent / "empty-discovery-worker"
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/discovery", str(worker))

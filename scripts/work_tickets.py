@@ -1755,7 +1755,11 @@ def delete_merged_branch(root: Path, branch: str, head: str) -> None:
     else:
         print("Cleanup: local merged branch deleted")
     remote = subprocess.run(
-        ["git", "-C", str(root), "push", "origin", "--delete", branch],
+        [
+            "git", "-C", str(root), "push",
+            f"--force-with-lease=refs/heads/{branch}:{head}",
+            "origin", f":refs/heads/{branch}",
+        ],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )
     if remote.returncode != 0:
