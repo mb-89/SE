@@ -193,6 +193,21 @@ to that label by default. Pass `--all-repos` to those commands to include tracke
 repository instead. New worktrees default to the sibling `<checkout>.worktrees` folder unless
 `--worktree-root` or `[worktree_roots]` overrides it.
 
+### Mirrors
+
+A machine may mirror a checkout to further Git remotes without declaring that relationship in the
+repository. Configure each checkout key as an array of tables under `[mirrors]`; each table names
+the locally configured remote, its target branch, whether `sync` fetches and merges that branch,
+and whether it is public. `integrate` pushes `main` to every mirror after `origin`; before each
+public mirror push it runs the project check command and refuses that push if the check fails.
+
+```toml
+[mirrors]
+"<checkout>" = [
+  { remote = "mirror", branch = "main", fetch = true, public = true },
+]
+```
+
 ## Commands and shell
 
 - `work_tickets.py` means `python <se>/scripts/work_tickets.py <command> ... --worktree <checkout>`
