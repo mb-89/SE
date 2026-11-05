@@ -413,3 +413,10 @@ def test_roles_point_to_without_gh_and_do_not_restate_it(role):
     for owned in ("Commands that still run", "GitHub tools", "MCP", "outcome branch",
                   "carries only", "`review-note`, `probe`"):
         assert owned not in text, owned
+
+
+def test_agents_md_names_the_focused_and_complete_test_commands():
+    text = normalized(ROOT / "AGENTS.md")
+    tests = text.split("## Tests", 1)[1].split(" ## ", 1)[0]
+    assert "Focused: `uv run pytest -q tests/<file>.py`" in tests
+    assert "Complete: `uv run pytest -q`" in tests

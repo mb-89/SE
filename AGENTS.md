@@ -5,6 +5,14 @@
 - SPOT everywhere: one owner per fact; everything else links to it.
 - No backwards compatibility unless asked.
 
+## Tests
+
+- Focused: `uv run pytest -q tests/<file>.py` (add `-k <name>` for one test), the tests of what changed.
+- Complete: `uv run pytest -q`; the integrator runs it as `integrate --check-command '[["uv", "run",
+  "pytest", "-q"]]'`.
+- Test environment: none to load. Where uv warns that it cannot verify TLS behind a proxy, set
+  `UV_SYSTEM_CERTS=1` in that shell.
+
 ## Public safety
 
 Everything here must be publishable at any time. Nothing may identify an employer, a work project, a
