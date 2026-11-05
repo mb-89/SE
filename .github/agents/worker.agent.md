@@ -102,5 +102,8 @@ notify, if any.
    `field report #<n> filed for <branch>, PR #<m>`. No questions, no other messages. A worker whose
    prompt names none sends nothing: the `field-report` label triggers the integrator.
 
+Every push goes through `work_tickets.py push` (`deliver` runs it): it runs the public check's push
+gate and retries a transient GitHub refusal once a minute, ten attempts. Never `git push` by hand.
+
 Never merge your pull request, close issues, publish releases or remove worktrees: the integrator
 does that.

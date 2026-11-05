@@ -1452,6 +1452,106 @@ def report_pull_request(root: Path, issue: dict[str, object], branch: str) -> in
     return open_pull_request_number(root, remote, branch) if remote is not None else None
 
 
+PUSH_ATTEMPTS = 10
+PUSH_RETRY_SECONDS = 60
+# Refusals a push never retries: the same push is refused again until something changes.
+PUSH_FINAL_REFUSALS = (
+    ("non-fast-forward", re.compile(r"non-fast-forward|\(fetch first\)|\[rejected\]", re.I)),
+    ("permission", re.compile(
+        r"permission to .* denied|permission denied|\b403\b|authentication failed|"
+        r"protected branch", re.I)),
+    ("pre-push hook", re.compile(r"pre-push hook declined", re.I)),
+)
+# Refusals GitHub withdraws on its own: the same push is accepted minutes later.
+PUSH_TRANSIENT_REFUSALS = (
+    ("commit_refs_rules", re.compile(r"commit_refs_rules", re.I)),
+    ("HTTP 5xx", re.compile(
+        r"(?:HTTP|returned error:|status)\s*5\d\d\b|\b5\d\d (?:Internal|Bad Gateway|Service|"
+        r"Gateway)", re.I)),
+    ("connection reset", re.compile(r"connection reset|reset by peer|unexpected disconnect", re.I)),
+)
+wait = time.sleep
+
+
+def push_refusal(output: str) -> tuple[str, bool]:
+    """Name a push refusal and whether it is transient; a final refusal wins over a transient one."""
+    for name, pattern in PUSH_FINAL_REFUSALS:
+        if pattern.search(output):
+            return name, False
+    for name, pattern in PUSH_TRANSIENT_REFUSALS:
+        if pattern.search(output):
+            return name, True
+    return "unknown refusal", False
+
+
+def run_git_push(root: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), "push", *arguments],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+
+
+def git_push(root: Path, arguments: list[str]) -> None:
+    """`git push <arguments>`, retried once a minute, ten attempts, on a transient refusal."""
+    command = f"git push {' '.join(arguments)}"
+    for attempt in range(1, PUSH_ATTEMPTS + 1):
+        print(f"Push attempt {attempt}/{PUSH_ATTEMPTS}: {command}")
+        pushed = run_git_push(root, arguments)
+        if pushed.returncode == 0:
+            print(f"Pushed: {command}")
+            return
+        detail = (pushed.stderr + pushed.stdout).strip() or f"exit code {pushed.returncode}"
+        refusal, transient = push_refusal(detail)
+        if not transient:
+            raise QueueError(
+                f"{command} refused by the remote ({refusal}, attempt {attempt}, not retried "
+                f"because it is not transient): {detail}. Remedy: fix the cause first, for a "
+                f"non-fast-forward run work_tickets.py sync, then work_tickets.py push again"
+            )
+        if attempt < PUSH_ATTEMPTS:
+            print(f"Push refused ({refusal}, transient); retrying in {PUSH_RETRY_SECONDS} s: {detail}")
+            wait(PUSH_RETRY_SECONDS)
+    raise QueueError(
+        f"{command} refused by the remote ({refusal}, transient) on all {PUSH_ATTEMPTS} attempts, "
+        f"one every {PUSH_RETRY_SECONDS} s: {detail}. Remedy: check "
+        f"GitHub's status page, then run the same command again"
+    )
+
+
+def push_gate(root: Path, branch: str) -> None:
+    """The public check's push gate on `branch`, as the pre-push hook runs it, where se.toml sets it."""
+    if not public_check_enabled(root):
+        return
+    pushed = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    revisions = (
+        f"{pushed.stdout.strip()}..{branch}" if pushed.returncode == 0 and pushed.stdout.strip()
+        else f"{branch} --not --remotes"
+    )
+    result = subprocess.run(
+        [sys.executable, str(PUBLIC_CHECK), "--repo", str(root), "--rev", branch,
+         "--range", revisions],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
+        raise QueueError(
+            f"Public check failed ({PUBLIC_CHECK.name}, required by project.public_check in "
+            f"se.toml); nothing was pushed. Remove the hits from {branch} or add a reasoned allow "
+            f"entry, then run work_tickets.py push again: {detail}"
+        )
+
+
+def push(root: Path, branch: str | None = None) -> str:
+    """Gate `branch` (default: the current one), then push it to origin with its upstream set."""
+    branch = branch or current_branch(root)
+    push_gate(root, branch)
+    git_push(root, ["-u", "origin", branch])
+    return branch
+
+
 def deliver(root: Path, tracker: str | None = None) -> str:
     issue = required_snapshot(root)
     branch = delivery_branch(root, issue)
@@ -1462,13 +1562,7 @@ def deliver(root: Path, tracker: str | None = None) -> str:
     validate_field_report_result(report)
     remote = remote_repo(root)
     if remote is not None:
-        pushed = subprocess.run(
-            ["git", "-C", str(root), "push", "-u", "origin", branch],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
-        )
-        if pushed.returncode != 0:
-            detail = pushed.stderr.strip() or f"exit code {pushed.returncode}"
-            raise QueueError(f"Cannot push {branch}: {detail}")
+        push(root, branch)
         pr = open_pull_request_number(root, remote, branch)
         if pr is None:
             body = f"Work issue #{issue['number']}: {issue['url']}\n"
@@ -2533,25 +2627,13 @@ def integrate(
         integration_escalation(root, report_number, tracker, str(error))
         raise
 
-    pushed = subprocess.run(
-        ["git", "-C", str(root), "push", "origin", target],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
-    )
-    if pushed.returncode != 0:
-        detail = pushed.stderr.strip() or f"exit code {pushed.returncode}"
-        raise QueueError(f"Cannot push {target}: {detail}")
+    git_push(root, ["origin", target])
     for mirror in mirrors:
         if mirror.public and check_commands:
             run_project_checks(root, check_commands, check_temporary_working_directory)
         if mirror.public:
             guard_public_push(root, mirror)
-        pushed = subprocess.run(
-            ["git", "-C", str(root), "push", mirror.remote, f"{target}:{mirror.branch}"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
-        )
-        if pushed.returncode != 0:
-            detail = pushed.stderr.strip() or f"exit code {pushed.returncode}"
-            raise QueueError(f"Cannot push {target} to mirror {mirror.remote}: {detail}")
+        git_push(root, [mirror.remote, f"{target}:{mirror.branch}"])
     commit = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
@@ -2728,6 +2810,12 @@ def make_parser() -> argparse.ArgumentParser:
         "--tracker", help="field-report tracker [HOST/]OWNER/REPO; default: the work issue tracker"
     )
 
+    push_parser = subparsers.add_parser(
+        "push", help="public check's push gate, then git push -u origin <branch>; retries a "
+        "transient refusal once a minute, ten attempts")
+    add_optional_worktree_argument(push_parser)
+    push_parser.add_argument("branch", nargs="?", help="branch to push; default: the current one")
+
     integrate_parser = subparsers.add_parser(
         "integrate", help="validate, merge, test, push and close a field report")
     add_worktree_argument(integrate_parser)
@@ -2874,6 +2962,9 @@ def main(argv: list[str] | None = None) -> int:
                 "integrator_session", str(required_snapshot(root)["repo"]), args.integrator_session)
             report_url = deliver(root, args.tracker)
             print(f"Notify {session or '<integrator session>'}: field report {report_url}")
+            return 0
+        if args.command == "push":
+            push(root, args.branch)
             return 0
         if args.command == "integrate":
             if args.check_command_temporary_directory and not args.check_command:

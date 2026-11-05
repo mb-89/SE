@@ -2119,3 +2119,97 @@ def test_suite_budget_defaults_and_refuses_a_missing_command(worktree):
     (worktree / "se.toml").write_text("[tests]\ntarget_seconds = 60\n", encoding="utf-8")
     with pytest.raises(work_tickets.QueueError, match=r"\[tests\] in .*se.toml must declare command"):
         work_tickets.suite_budget(worktree)
+
+
+TRANSIENT = "remote: fatal error in commit_refs_rules\nerror: failed to push some refs"
+NON_FAST_FORWARD = (
+    " ! [rejected]        topic -> topic (non-fast-forward)\nerror: failed to push some refs"
+)
+
+
+@pytest.fixture
+def fake_push(monkeypatch):
+    """A fake git push answering from a script of (exit code, stderr); waits are recorded, not slept."""
+    calls, waits, script = [], [], []
+
+    def run_git_push(root, arguments):
+        calls.append(arguments)
+        code, stderr = script.pop(0)
+        return subprocess.CompletedProcess(["git", "push", *arguments], code, "", stderr)
+
+    monkeypatch.setattr(work_tickets, "run_git_push", run_git_push)
+    monkeypatch.setattr(work_tickets, "wait", waits.append)
+    return calls, waits, script
+
+
+def test_push_retries_a_transient_refusal_and_pushes_once(main_checkout, fake_push, capsys):
+    calls, waits, script = fake_push
+    script.extend([(1, TRANSIENT), (0, "")])
+    assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 0
+    assert calls == [["-u", "origin", "topic"]] * 2
+    assert waits == [60]
+    output = capsys.readouterr().out
+    assert "Push attempt 1/10" in output and "commit_refs_rules, transient" in output
+    assert output.count("Pushed: git push -u origin topic") == 1
+
+
+def test_push_does_not_retry_a_non_fast_forward(main_checkout, fake_push, capsys):
+    calls, waits, script = fake_push
+    script.append((1, NON_FAST_FORWARD))
+    assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 1
+    assert len(calls) == 1 and waits == []
+    error = capsys.readouterr().err
+    assert "non-fast-forward, attempt 1, not retried" in error
+    assert "work_tickets.py sync" in error
+
+
+def test_push_does_not_retry_a_permission_refusal(main_checkout, fake_push, capsys):
+    calls, waits, script = fake_push
+    script.append((128, "remote: Permission to owner/repo.git denied to alice.\n"
+                        "fatal: unable to access: The requested URL returned error: 403"))
+    assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 1
+    assert len(calls) == 1 and waits == []
+    assert "(permission, attempt 1, not retried" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("stderr", [
+    "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502",
+    "fatal: unable to access: Connection reset by peer",
+])
+def test_push_retries_http_5xx_and_connection_reset(main_checkout, fake_push, stderr):
+    calls, waits, script = fake_push
+    script.extend([(1, stderr), (0, "")])
+    assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 0
+    assert len(calls) == 2 and waits == [60]
+
+
+def test_push_ends_ten_transient_refusals_with_the_remedy(
+    main_checkout, fake_push, capsys
+):
+    calls, waits, script = fake_push
+    script.extend([(1, TRANSIENT)] * 10)
+    assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 1
+    assert len(calls) == 10 and waits == [60] * 9
+    error = capsys.readouterr().err
+    assert "(commit_refs_rules, transient) on all 10 attempts, one every 60 s" in error
+    assert "Remedy: check GitHub's status page" in error
+    assert "then run the same command again" in error
+
+
+def test_push_runs_the_public_check_gate_first(main_checkout, fake_push, monkeypatch, capsys):
+    calls, _, _ = fake_push
+    (main_checkout / "se.toml").write_text("[project]\npublic_check = true\n", encoding="utf-8")
+    gate = []
+
+    def public_check(arguments, **_):
+        gate.append(arguments)
+        return subprocess.CompletedProcess(arguments, 1, "hit: file.txt (e-mail address)", "")
+
+    monkeypatch.setattr(work_tickets.subprocess, "run", lambda arguments, **kwargs: (
+        public_check(arguments) if str(work_tickets.PUBLIC_CHECK) in arguments
+        else subprocess.CompletedProcess(arguments, 1, "", "")
+    ))
+    assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 1
+    assert calls == []
+    assert gate[0][-4:] == ["--rev", "topic", "--range", "topic --not --remotes"]
+    assert "Public check failed" in capsys.readouterr().err
