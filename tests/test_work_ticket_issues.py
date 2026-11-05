@@ -1189,7 +1189,12 @@ def test_start_assigns_a_cloud_worker_without_creating_a_worktree(
 
 
 def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity(
-        main_checkout, monkeypatch, capsys):
+        main_checkout, local_config, monkeypatch, capsys):
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text(
+        'commit_trailer = "Co-authored-by: Agent <agent@users.noreply.github.com>"\n',
+        encoding="utf-8",
+    )
     worker = main_checkout.parent / "worker"
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
     work_tickets.initialize(worker)
@@ -1256,7 +1261,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
         capture_output=True, text=True, check=False,
     ).stdout
     assert "work issue #5, field report #8, PR #7" in message
-    assert "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" in message
+    assert message.rstrip().endswith("Co-authored-by: Agent <agent@users.noreply.github.com>")
     assert commands == [
         ("suite", "Complete suite"), ("build", "Output regeneration")
     ]
@@ -1542,7 +1547,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     assert "Integrate feature/worker: worker" in message
     assert "#" not in message
     assert "git.example" not in message
-    assert "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" in message
+    assert "Co-authored-by" not in message  # no commit_trailer configured: none by default
     assert commands == [
         ("suite", "Complete suite"), ("build", "Output regeneration")
     ]

@@ -274,3 +274,13 @@ def test_the_comment_footer_rule_is_said_once():
 def test_integrator_leaves_a_branch_the_host_refuses_to_delete():
     integrator = normalized(AGENTS / "integrator.agent.md")
     assert "automatic head-branch deletion removes it. Never retry the deletion." in integrator
+
+
+def test_the_commit_trailer_is_one_setting_the_roles_point_to():
+    assert 'commit_trailer = "<trailer line>" # optional; none by default' in WORK_MODEL.read_text(
+        encoding="utf-8")
+    for path in (*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL):
+        text = normalized(path)
+        assert "Co-authored-by" not in text, path.name
+    for path in (AGENTS / "worker.agent.md", SKILL):
+        assert "`commit_trailer`](" in normalized(path), path.name

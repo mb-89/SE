@@ -2136,6 +2136,7 @@ def integrate(
     if previous.returncode != 0 or not previous.stdout.strip():
         raise QueueError(f"Cannot determine the pre-merge {target}")
     mirrors = configured_mirrors(root)
+    trailer = config_value("commit_trailer", remote_repo(root), None)
     merged = subprocess.run(
         [
             "git", "-C", str(root), "merge", "--no-ff",
@@ -2143,7 +2144,7 @@ def integrate(
                 root, branch, work_number, report_number, pull_number,
                 any(mirror.public for mirror in mirrors),
             ),
-            "-m", "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+            *(("-m", trailer) if trailer else ()),
             branch,
         ],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,

@@ -217,6 +217,7 @@ override the settings below, and `work_tickets.py config` shows what is in effec
 ```toml
 integrator_session = "<integrator session to notify at delivery>"
 public_identity = "mb <mb>"
+commit_trailer = "<trailer line>" # optional; none by default
 
 [trackers] # repository name to tracker host/owner/repo; never commit this table
 "<repository name>" = "<host>/<owner>/<repo>"
@@ -227,6 +228,11 @@ public_identity = "mb <mb>"
 [repos."<host>/<owner>/<repo>"]   # optional overrides for one repository
 integrator_session = "<session>"
 ```
+
+`commit_trailer` is the one place that names a commit trailer: an environment that requires one
+(an agent host's co-author line) sets it on its machine, every role adds it as the last line of
+each commit it makes, and `integrate` adds it to its merge commits. Unset, commits carry no trailer,
+as a project's public rule may require.
 
 The `--repo` resolution order is argument, `[trackers]`, then `origin`. A tracker is selected by
 the repository name and is where that repository's work issues and field reports live. Work issues

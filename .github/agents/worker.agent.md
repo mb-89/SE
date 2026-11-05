@@ -57,8 +57,8 @@ local workers, the integrator session to notify.
 4. **Work the ticket**: regression test first, then the change, then the focused tests and the
    affected real command. Never run the complete suite; the integrator does. No backwards
    compatibility, no bookkeeping files. Record evidence in the ticket, check its acceptance items
-   only with evidence, `move --to done`, and commit (one commit per requirement) with the trailer
-   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`.
+   only with evidence, `move --to done`, and commit (one commit per requirement), with the environment's
+   [`commit_trailer`](../skills/work-model/SKILL.md#what-the-project-provides) if it sets one.
 5. **Deliver, always, even when partial**: complete the field-report body in `.se/work/field-report.md`
    and run `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request and
    field report, and prints the integrator notification.
