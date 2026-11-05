@@ -1020,6 +1020,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
     git_ok("-C", str(worker), "add", "worker.txt")
     git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
     head = subprocess.run(
         ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
@@ -1096,6 +1097,15 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     ]
     assert all("PR #7. Suite: 214 passed." in body for body in bodies)
     assert not worker.exists()
+    assert subprocess.run(
+        ["git", "-C", str(main_checkout), "rev-parse", "--verify", "feature/worker"],
+        capture_output=True, text=True, check=False,
+    ).returncode != 0
+    assert subprocess.run(
+        ["git", "--git-dir", str(main_checkout.parent / "origin.git"), "show-ref", "--verify",
+         "refs/heads/feature/worker"],
+        capture_output=True, text=True, check=False,
+    ).returncode != 0
 
 
 def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch):
@@ -1219,6 +1229,8 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
     git_ok("-C", str(worker), "add", "worker.txt")
     git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    git_ok("-C", str(worker), "push", "-q", "mirror", "feature/worker")
     (main_checkout / "synced.txt").write_text("synced\n", encoding="utf-8")
     git_ok("-C", str(main_checkout), "add", "synced.txt")
     git_ok("-C", str(main_checkout), "commit", "-q", "-m", "main change")
@@ -1326,6 +1338,10 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     ]
     assert all("PR #7. Suite: 214 passed." in body for body in bodies)
     assert not worker.exists()
+    assert subprocess.run(
+        ["git", "--git-dir", str(mirror), "show-ref", "--verify", "refs/heads/feature/worker"],
+        capture_output=True, text=True, check=False,
+    ).returncode == 0
 
 
 @pytest.mark.parametrize(
