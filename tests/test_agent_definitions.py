@@ -481,3 +481,10 @@ def test_the_worker_runs_what_the_acceptance_names_including_the_suite():
     rules = normalized(WORK_MODEL)
     assert "Workers run focused tests only" not in rules
     assert "the complete suite only where it names the suite" in rules
+
+
+def test_the_work_template_checks_that_acceptance_on_existing_content_is_measurable():
+    template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
+    assert ("An item that measures something that exists already (the project's own content, a figure, a count) "
+            "is checked against that content and the pinned versions before it is written, so it can be "
+            "measured at all.") in template

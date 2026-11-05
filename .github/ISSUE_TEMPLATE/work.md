@@ -66,7 +66,10 @@ None
 
 ## Acceptance
 
-<!-- Checkable items with the evidence expected (test name, command, measurement). -->
+<!-- Checkable items with the evidence expected (test name, command, measurement). An item that
+     measures something that exists already (the project's own content, a figure, a count) is
+     checked against that content and the pinned versions before it is written, so it can be
+     measured at all. -->
 
 - [ ]
 
