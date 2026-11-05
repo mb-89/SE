@@ -185,6 +185,20 @@ def test_discovery_label_creates_evidence_oriented_tickets(worktree, gh):
     assert "Discovery evidence is recorded in the evidence index." in ticket.read_text(encoding="utf-8")
     assert "focused tests" not in ticket.read_text(encoding="utf-8")
     assert "Discovery evidence from the work issue." in delivery
+    assert "Discovery evidence is complete and linked from the field report." in delivery
+    assert "Tests:" not in delivery
+
+    ticket.write_text(ticket.read_text(encoding="utf-8").replace(
+        "- [ ] Requirement 1", "- [x] Requirement 1"
+    ).replace(
+        "- [ ] Discovery evidence", "- [x] Discovery evidence"
+    ) + "\nEvidence collected.\n", encoding="utf-8")
+    assert run(worktree, "move", "--id", ticket.stem, "--to", "held") == 0
+    assert run(worktree, "move", "--id", ticket.stem, "--to", "done") == 0
+
+    unchecked = (worktree / ".se" / "work" / "todo" / "delivery.md")
+    assert run(worktree, "move", "--id", "delivery", "--to", "held") == 0
+    assert run(worktree, "move", "--id", "delivery", "--to", "done") == 1
 
 
 def test_discovery_intake_uses_the_project_declared_probe_root(worktree, gh):

@@ -952,7 +952,10 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
         "## Dependencies\n\n"
         + ", ".join(f"`{ticket_id}`" for ticket_id, _ in tickets) + "\n\n"
         "## Acceptance\n\n"
-        + (f"{acceptance}\n" if acceptance else "")
+        + (
+            "- [ ] Discovery evidence is complete and linked from the field report.\n"
+            if discovery else f"{acceptance}\n"
+        )
         + "- [ ] Branch pushed, pull request to `main` opened, field-report issue created.\n\n"
         "## Evidence\n"
     )))
