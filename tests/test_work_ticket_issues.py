@@ -48,6 +48,15 @@ uv run pytest
 ```
 """
 
+EVIDENCE_ROWS = """| Requirement 1 | complete | `abc1234` | `test`: passed |
+| Requirement 2 | complete | `abc1234` | `test`: passed |
+| Acceptance 1 | complete | `abc1234` | `test`: passed |
+| Acceptance 2 | complete | `abc1234` | `test`: passed |"""
+
+
+def fill_evidence_rows(report: str) -> str:
+    return report.replace("|---|---|---|---|", "|---|---|---|---|\n" + EVIDENCE_ROWS)
+
 
 class FakeGh:
     def __init__(self) -> None:
@@ -263,6 +272,7 @@ def test_field_report_fills_the_template_and_creates_a_labelled_issue(worktree, 
     delivered = draft.split("## Delivered", 1)[1].split("## Not delivered", 1)[0]
     assert "[Discovery evidence index](.se/work/probe/evidence.md)" in delivered
     assert "## Not delivered" in draft and "## Retro" in draft
+    report.write_text(fill_evidence_rows(draft), encoding="utf-8")
 
     assert run(worktree, "field-report", "--file", str(report)) == 0
     create = gh.calls[-1]
@@ -313,10 +323,49 @@ def test_field_report_may_mention_placeholders_below_its_header(worktree, gh, ca
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
     report.write_text("**Work issue:** #5  **Pull request:** #7  main `abc1234`\n\n"
+                      "## Delivered\n\n| Work issue item | Result | Commits | Evidence |\n"
+                      "|---|---|---|---|\n" + EVIDENCE_ROWS + "\n\n"
                       "## Spec gaps\n\nThe draft fills `#<n>`, `<branch>` and `<commit>`.\n",
                       encoding="utf-8")
     assert run(worktree, "field-report", "--file", str(report)) == 0, capsys.readouterr().err
     assert gh.calls[-1][:2] == ["issue", "create"]
+
+
+def test_field_report_refuses_missing_requirement_evidence(worktree, gh, capsys):
+    run(worktree, "intake", "--issue", "5")
+    report = worktree / "report.md"
+    assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
+    report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
+        "| Requirement 2 | complete | `abc1234` | `test`: passed |\n", ""
+    ), encoding="utf-8")
+
+    assert run(worktree, "field-report", "--file", str(report)) == 1
+    assert "Requirement 2" in capsys.readouterr().err
+
+
+def test_field_report_refuses_empty_evidence_cell(worktree, gh, capsys):
+    run(worktree, "intake", "--issue", "5")
+    report = worktree / "report.md"
+    assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
+    report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
+        "| Acceptance 2 | complete | `abc1234` | `test`: passed |",
+        "| Acceptance 2 | complete | `abc1234` | |",
+    ), encoding="utf-8")
+
+    assert run(worktree, "field-report", "--file", str(report)) == 1
+    assert "Acceptance 2" in capsys.readouterr().err
+
+
+def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
+    run(worktree, "intake", "--issue", "5")
+    report = worktree / "report.md"
+    assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
+    report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
+        "| Requirement 2 | complete | `abc1234` | `test`: passed |\n", ""
+    ).replace("## Not delivered\n\n", "## Not delivered\n\nRequirement 2 was narrowed.\n"),
+                      encoding="utf-8")
+
+    assert run(worktree, "field-report", "--file", str(report)) == 0, capsys.readouterr().err
 
 
 def test_validate_field_report_requires_template_sections_and_references(worktree, gh, monkeypatch):
