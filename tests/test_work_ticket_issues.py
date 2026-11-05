@@ -529,6 +529,9 @@ def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
      "**Commit groupings:** None"),
     (lambda report: report.replace(
         "| Decision | Alternatives | Rationale | Confidence |\n|---|---|---|---|", "None"),
+     None),
+    (lambda report: report.replace(
+        "| Decision | Alternatives | Rationale | Confidence |\n|---|---|---|---|", "Chose A."),
      'section "## Decisions": missing its table; the template\'s header row: '
      "| Decision | Alternatives | Rationale | Confidence |"),
     (lambda report: report.replace("**Branch:** `feature/example-20261104`", "**Branch:** `<branch>`"),
@@ -536,7 +539,7 @@ def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
     (lambda report: report.replace("| Requirement 2 | complete | `abc1234` | `test`: passed |\n", ""),
      "missing evidence for: Requirement 2"),
 ], ids=["complete", "no-result", "no-tested-against", "two-column-table", "short-row", "escaped-pipe",
-        "no-review-responses", "no-groupings", "decisions-none", "placeholder", "no-evidence"])
+        "no-review-responses", "no-groupings", "decisions-none", "decisions-prose", "placeholder", "no-evidence"])
 def test_field_report_check_validates_against_the_template_without_github(
         worktree, gh, capsys, change, message):
     run(worktree, "intake", "--issue", "5")
@@ -553,7 +556,8 @@ def test_field_report_check_validates_against_the_template_without_github(
     else:
         assert code == 1
         assert "Field report report.md does not follow the template" in captured.err
-        assert str(work_tickets.TEMPLATES / "field-report.md") in captured.err
+        assert "the se checkout's .github/ISSUE_TEMPLATE/field-report.md:" in captured.err
+        assert str(work_tickets.TEMPLATES) not in captured.err
         assert message in captured.err
 
 
@@ -575,6 +579,24 @@ def test_field_report_check_takes_the_issue_body_from_a_file_or_refuses_without_
     issue.write_text(BODY.replace("2. Issue tooling in `scripts/work_tickets.py`.\n", ""),
                      encoding="utf-8")
     assert run(worktree, "field-report", "--check", str(report), "--issue-body", str(issue)) == 0
+
+
+def test_field_report_check_needs_no_worktree_and_names_the_option_where_it_needs_one(
+        tmp_path, capsys):
+    report = tmp_path / "report.md"
+    report.write_text(COMPLETE_REPORT, encoding="utf-8")
+    issue = tmp_path / "issue.md"
+    issue.write_text(BODY, encoding="utf-8")
+
+    assert work_tickets.main(["field-report", "--check", str(report), "--issue-body", str(issue)]) == 0
+    assert "Field report report.md follows the template" in capsys.readouterr().out
+
+    assert work_tickets.main(["field-report", "--check", str(report)]) == 1
+    assert ("pass --issue-body <file>, or --worktree <worktree> to read intake's snapshot"
+            in capsys.readouterr().err)
+
+    assert work_tickets.main(["field-report", "--file", str(report)]) == 1
+    assert "field-report --file needs --worktree <worktree>" in capsys.readouterr().err
 
 def test_validate_field_report_requires_template_sections_and_references(worktree, gh, monkeypatch):
     report = work_tickets.fetch_issue(worktree, 8, "git.example/owner/repo")
