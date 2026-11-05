@@ -49,6 +49,8 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 
 ## Rules for all roles
 
+Framework repositories (the process plugin and document format/converter) carry every capability that is generically useful. Application repositories carry only their content and application-specific code. When an application reveals a generic capability, create a framework work issue and delete the application's copy after the framework provides it. A framework never names, special-cases or depends on an application; for public repositories, the public check's deny list enforces this boundary.
+
 - Packages are worker-sized: one separately reviewable change. Larger work is split into issues
   linked by "Blocked by", each owning its part of shared files.
 - Packages that touch the same hot file get one owner or run one after the other; the next one
