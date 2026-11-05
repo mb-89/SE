@@ -201,8 +201,7 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
 - the setup command that installs the tools the roles need (`git`, `gh`, Python 3.11 or newer and
   whatever the project's tests need);
 - the focused and the complete test commands, including gated test tiers if there are any;
-- the commit identity its commits carry where the machine sets no `public_identity`, and its
-  public check, if it has one, with the hooks that run it and `public_check = true` in its
+- its public check, if it has one, with the hooks that run it and `public_check = true` in its
   `se.toml` ([Project settings](../../../README.md#project-settings)), which gates every push to
   the integration branch on it;
 - its integration project checks as JSON argument arrays passed to `integrate --check-command`, for
@@ -237,12 +236,10 @@ integrator_session = "<session>"
 
 **Commit identity and public check**: every role commits as `public_identity` where the machine
 sets it (the [Modules guide](../../../README.md#machine-local-selocaltoml) owns what it pins), else
-as the identity the project's `AGENTS.md` names. Claude's cloud has no `~/.se/local.toml`, so there
-`public_identity` is unset and the project's identity applies. The identity goes into the
-checkout's git config at the start, so merges carry it as well as commits: where `public_identity`
-is set, `work_tickets.py sync` writes it (`user.name`, `user.email`); where it is unset, the role
-runs `git config user.name` and `git config user.email` with the project's identity before its
-first commit. A fresh clone, such as a cloud
+as the project's `identity` in its `se.toml` ([Project settings](../../../README.md#project-settings)).
+Claude's cloud has no `~/.se/local.toml`, so there the project's identity applies.
+`work_tickets.py sync`, which every role runs at the start, writes whichever applies into the
+checkout's git config (`user.name`, `user.email`), so merges carry it as well as commits. A fresh clone, such as a cloud
 session's, runs the project's setup command before its first commit, so the project's hooks run its
 public check on every commit and push. Commit messages carry no tracker numbers (`#<n>`): a commit
 outlives its tracker. No session prompt repeats any of this.

@@ -570,6 +570,45 @@ def test_sync_sets_the_configured_public_identity_in_the_checkout(main_checkout,
     assert log.stdout.strip() == "mb <mb>|mb <mb>"
 
 
+def commit_identity_after_sync(checkout: Path) -> str:
+    work_tickets.sync(checkout)
+    git_ok("-C", str(checkout), "commit", "-q", "--allow-empty", "-m", "after sync")
+    log = subprocess.run(
+        ["git", "-C", str(checkout), "log", "-1", "--format=%an <%ae>|%cn <%ce>"],
+        capture_output=True, text=True, check=True,
+    )
+    return log.stdout.strip()
+
+
+def test_sync_sets_the_project_identity_where_the_machine_sets_none(main_checkout, local_config):
+    (main_checkout / "se.toml").write_text('[project]\nidentity = "proj <proj>"\n', encoding="utf-8")
+    assert not local_config.exists()
+
+    assert commit_identity_after_sync(main_checkout) == "proj <proj>|proj <proj>"
+
+
+def test_sync_prefers_the_machine_public_identity_over_the_project_identity(main_checkout, local_config):
+    (main_checkout / "se.toml").write_text('[project]\nidentity = "proj <proj>"\n', encoding="utf-8")
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text('public_identity = "mb <mb>"\n', encoding="utf-8")
+
+    assert commit_identity_after_sync(main_checkout) == "mb <mb>|mb <mb>"
+
+
+def test_sync_refuses_a_malformed_project_identity_naming_the_file(worktree, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
+    monkeypatch.setattr(
+        work_tickets.subprocess, "run",
+        lambda arguments, **kwargs: pytest.fail(f"sync ran {arguments}"),
+    )
+    (worktree / "se.toml").write_text('[project]\nidentity = "proj"\n', encoding="utf-8")
+
+    assert run(worktree, "sync") == 1
+    error = capsys.readouterr().err
+    assert str(worktree / "se.toml") in error
+    assert "Name <email>" in error
+
+
 def test_sync_refuses_a_malformed_public_identity_naming_the_file(
         worktree, local_config, monkeypatch, capsys):
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
