@@ -504,3 +504,15 @@ def test_the_field_report_replaces_evidence_the_host_cannot_carry_with_its_comma
     report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
     assert ("Evidence the host cannot carry is replaced by the command that reproduces it: where images cannot "
             "be attached, each screenshot's row names the command that takes it again.") in report
+
+
+def test_the_work_model_waits_on_a_background_process_by_its_id():
+    shell = normalized(WORK_MODEL).split("## Commands and shell", 1)[1]
+    assert "Wait on a background process by its process id (`kill -0 <pid>`" in shell
+    assert "never by `pgrep -f <pattern>`" in shell
+
+
+def test_the_worker_builds_an_acceptance_build_at_the_new_pin_before_code():
+    worker = normalized(AGENTS / "worker.agent.md")
+    assert "where the acceptance names a real build" in worker
+    assert "build it at that pin before writing code" in worker

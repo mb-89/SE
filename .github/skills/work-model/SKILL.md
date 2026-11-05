@@ -281,6 +281,9 @@ public mirror push it runs the project check command and refuses that push if th
 - A session may start in another checkout than the one it works in: `cd` to its worktree in every
   command, use absolute paths for every read and edit and for .NET file APIs (`[IO.File]::...`
   resolves relative paths against the process directory), and run git as `git -C <worktree>`.
+- Wait on a background process by its process id (`kill -0 <pid>` in a loop; PowerShell
+  `Get-Process -Id <pid>`), never by `pgrep -f <pattern>`: the pattern matches the waiting shell's
+  own command line, so the wait never ends.
 - Windows PowerShell 5.1: judge native commands by exit code only; pass every issue, comment and
   pull-request body with `--body-file` (quotes or spaces inside native arguments break the call);
   no inline jq expressions with spaces (use `--json` and `ConvertFrom-Json`).
