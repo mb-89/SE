@@ -20,6 +20,16 @@ TRACKED_BRANCH = "main"
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 MODULE_KEYS = {"url", "ref", "path"}
+LOCAL_CONFIG_KEYS = {
+    "paths",
+    "urls",
+    "integrator_session",
+    "trackers",
+    "worktree_roots",
+    "repos",
+    "mirrors",
+    "public_identity",
+}
 
 
 class ModuleError(Exception):
@@ -111,7 +121,7 @@ def load_local(config: Path) -> LocalConfig:
     if not config.is_file():
         return LocalConfig(paths={}, urls={})
     data = _read_toml(config)
-    unknown = sorted(set(data) - {"paths", "urls"})
+    unknown = sorted(set(data) - LOCAL_CONFIG_KEYS)
     if unknown:
         raise ModuleError(f"{config}: unknown section(s) {', '.join(unknown)}")
     paths = {
