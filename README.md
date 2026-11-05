@@ -31,6 +31,8 @@ path = "skills"                              # optional: the part of the module 
   releases; `update` moves it.
 - `path`: optional relative directory inside the module; without it the whole module is used.
 - Module names use letters, digits, `.`, `_` and `-`. Other keys are errors.
+- The module named `se` is se itself; its pin is the se version the
+  [public check](AGENTS.md#public-safety) must run at.
 
 A common repository declares only modules that are public. Work-only modules on private hosts are
 declared the same way, in a work repository that consumes the common ones; a common repository never
@@ -45,10 +47,16 @@ owns.
 [project]
 authored_content = ["README.md", "docs/**/*.md"]
 integration_branch = "main"
+public_check = true
 ```
 
 `integration_branch` is owned by the
 [work model](.github/skills/work-model/SKILL.md#integration-branch).
+
+`public_check = true` makes `work_tickets.py integrate` run se's
+[public check](AGENTS.md#public-safety) on the merged tree and every merged commit before it pushes
+the integration branch; on a failure it pushes nothing, restores the pre-merge branch and
+escalates. Default `false`, for projects without a public check.
 
 `work_tickets.py guard` checks deleted sentences in the configured project paths. Each configured
 glob is relative to the project root. The field report must name every removed sentence in its
@@ -58,7 +66,8 @@ authored-prose section.
 
 `public_identity = "Name <email>"` pins the author and committer identity allowed in every
 commit pushed to a configured public mirror. If it is omitted, `integrate` uses the selected
-checkout's configured Git identity. When it is set, `sync` also makes its merge commits with it.
+checkout's configured Git identity. When it is set, `sync` writes it into the checkout's git
+config (`user.name`, `user.email`), so every later commit and merge there carries it.
 
 Each machine may adapt modules without touching tracked files. se only reads this file; it never
 writes it, and nothing from it is written into `se.toml`.

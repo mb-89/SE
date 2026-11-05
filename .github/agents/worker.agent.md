@@ -51,7 +51,8 @@ notify, if any.
 1. **Setup and sync**: in a fresh clone, first run the project's setup command that installs its
    hooks (the project's `AGENTS.md` names it), so its
    [public check](../skills/work-model/SKILL.md#what-the-project-provides) runs on every commit
-   and push. Run `work_tickets.py sync` before intake and before every ticket; it fetches and
+   and push, and set the [commit identity](../skills/work-model/SKILL.md#what-the-project-provides)
+   in the checkout. Run `work_tickets.py sync` before intake and before every ticket; it fetches and
    merges the newest [integration branch](../skills/work-model/SKILL.md#integration-branch)
    without rebasing a pushed branch.
 2. **Intake**: `work_tickets.py intake --issue <n>` writes one ticket per numbered requirement plus a
@@ -60,7 +61,9 @@ notify, if any.
 3. **Before each ticket**: `work_tickets.py refresh` re-reads the issue and its comments and reports
    what changed; apply the changes to the tickets (`intake` again adds tickets for added
    requirements), run `work_tickets.py sync`, then move the ticket to `held`.
-4. **Work the ticket**: regression test first, then the change, then the focused tests and the
+4. **Work the ticket**: where the acceptance names a real build (a module at a new pin, an
+   output a project command regenerates), build it at that pin before writing code, so a failure
+   that is not yours shows before your change. Then regression test first, then the change, then the focused tests and the
    affected real command, and what the issue's acceptance names; run the complete suite only
    where the acceptance names it, otherwise the integrator does. No backwards
    compatibility, no bookkeeping files. Record evidence in the ticket, check its acceptance items

@@ -692,6 +692,35 @@ def integration_branch(root: Path) -> str:
     return configured.strip()
 
 
+def public_check_enabled(root: Path) -> bool:
+    """`project.public_check` in se.toml: whether pushes to the integration branch need se's check."""
+    configured = project_config(root).get("public_check", False)
+    if not isinstance(configured, bool):
+        raise QueueError(
+            f"project.public_check in {root / 'se.toml'} must be true or false; fix it"
+        )
+    return configured
+
+
+PUBLIC_CHECK = Path(__file__).resolve().parent / "public_check.py"
+
+
+def run_public_check(root: Path, previous: str) -> None:
+    """se's public check on the merged tree and every commit since `previous`; refuse on failure."""
+    result = subprocess.run(
+        [sys.executable, str(PUBLIC_CHECK), "--repo", str(root), "--rev", "HEAD",
+         "--range", f"{previous}..HEAD"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
+        raise QueueError(
+            f"Public check failed ({PUBLIC_CHECK.name}, required by project.public_check in "
+            f"se.toml); nothing was pushed. Remove the hits on the branch or add a reasoned allow "
+            f"entry, then integrate again: {detail}"
+        )
+
+
 def authored_content_globs(root: Path) -> list[str]:
     configured = project_config(root).get("authored_content")
     if configured is None:
@@ -807,9 +836,15 @@ def sync(root: Path) -> str:
         )
 
     identity = local_public_identity(root)
-    as_identity = (
-        ["-c", f"user.name={identity[0]}", "-c", f"user.email={identity[1]}"] if identity else []
-    )
+    if identity is not None:
+        for key, value in zip(("user.name", "user.email"), identity):
+            configured = git("config", key, value)
+            if configured.returncode != 0:
+                detail = configured.stderr.strip() or f"exit code {configured.returncode}"
+                raise QueueError(
+                    f"work_tickets.py sync: cannot set {key} from public_identity in "
+                    f"{local_config_path()}: {detail}"
+                )
     remote = remote_repo(root)
     if remote is not None:
         fetched = git("fetch", "origin")
@@ -819,7 +854,7 @@ def sync(root: Path) -> str:
         main_ref = f"origin/{integration_branch(root)}"
     else:
         main_ref = integration_branch(root)
-    merged = git(*as_identity, "merge", "--no-edit", main_ref)
+    merged = git("merge", "--no-edit", main_ref)
     if merged.returncode != 0:
         detail = merged.stderr.strip() or f"exit code {merged.returncode}"
         raise QueueError(
@@ -833,7 +868,7 @@ def sync(root: Path) -> str:
             detail = fetched.stderr.strip() or f"exit code {fetched.returncode}"
             raise QueueError(f"Cannot fetch mirror {mirror.remote}: {detail}")
         mirror_ref = f"{mirror.remote}/{mirror.branch}"
-        merged = git(*as_identity, "merge", "--no-edit", mirror_ref)
+        merged = git("merge", "--no-edit", mirror_ref)
         if merged.returncode != 0:
             detail = merged.stderr.strip() or f"exit code {merged.returncode}"
             raise QueueError(
@@ -2206,6 +2241,8 @@ def integrate(
             run_project_command(root, build_command, "Output regeneration")
         if check_commands and not has_public_mirror:
             run_project_checks(root, check_commands, check_temporary_working_directory)
+        if public_check_enabled(root):
+            run_public_check(root, previous.stdout.strip())
     except QueueError as error:
         restore_pre_merge(root, previous.stdout.strip())
         integration_escalation(root, report_number, tracker, str(error))

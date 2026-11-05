@@ -556,23 +556,18 @@ def test_sync_without_origin_merges_local_main(worktree, monkeypatch, capsys):
     assert "Merged main abc1234" in capsys.readouterr().out
 
 
-def test_sync_merges_with_the_configured_public_identity(worktree, local_config, monkeypatch):
-    calls: list[list[str]] = []
-
-    def git(arguments, **kwargs):
-        calls.append(arguments)
-        return subprocess.CompletedProcess(arguments, 0, "abc1234\n" if "rev-parse" in arguments else "", "")
-
-    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
-    monkeypatch.setattr(work_tickets.subprocess, "run", git)
+def test_sync_sets_the_configured_public_identity_in_the_checkout(main_checkout, local_config):
     local_config.parent.mkdir(parents=True)
     local_config.write_text('public_identity = "mb <mb>"\n', encoding="utf-8")
 
-    assert run(worktree, "sync") == 0
-    assert calls[0] == [
-        "git", "-C", str(worktree), "-c", "user.name=mb", "-c", "user.email=mb",
-        "merge", "--no-edit", "main",
-    ]
+    work_tickets.sync(main_checkout)
+    git_ok("-C", str(main_checkout), "commit", "-q", "--allow-empty", "-m", "after sync")
+
+    log = subprocess.run(
+        ["git", "-C", str(main_checkout), "log", "-1", "--format=%an <%ae>|%cn <%ce>"],
+        capture_output=True, text=True, check=True,
+    )
+    assert log.stdout.strip() == "mb <mb>|mb <mb>"
 
 
 def test_sync_refuses_a_malformed_public_identity_naming_the_file(
@@ -1751,11 +1746,14 @@ def integration_fakes(monkeypatch, head: str) -> list[list[str]]:
     return calls
 
 
-def test_integrate_writes_the_configured_integration_branch_and_leaves_main(main_checkout, monkeypatch):
+@pytest.mark.parametrize("leak", [False, True], ids=["clean", "leak"])
+def test_integrate_writes_the_configured_integration_branch_and_leaves_main(
+        main_checkout, monkeypatch, leak):
     origin = main_checkout.parent / "origin.git"
     git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
     git_ok("-C", str(main_checkout), "switch", "-q", "-c", "se")
-    (main_checkout / "se.toml").write_text('[project]\nintegration_branch = "se"\n', encoding="utf-8")
+    (main_checkout / "se.toml").write_text(
+        '[project]\nintegration_branch = "se"\npublic_check = true\n', encoding="utf-8")
     git_ok("-C", str(main_checkout), "add", "se.toml")
     git_ok("-C", str(main_checkout), "commit", "-q", "-m", "integrate into se")
     git_ok("-C", str(main_checkout), "push", "-q", "-u", "origin", "se")
@@ -1766,7 +1764,8 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(main
     worker = main_checkout.parent / "worker"
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
     work_tickets.initialize(worker)
-    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    content = ("/" + "home/alice/repo\n") if leak else "worker\n"
+    (worker / "worker.txt").write_text(content, encoding="utf-8")
     git_ok("-C", str(worker), "add", "worker.txt")
     git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
     git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
@@ -1775,14 +1774,19 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(main
     ).stdout.strip()
     integration_fakes(monkeypatch, head)
 
-    assert work_tickets.integration_branch(main_checkout) == "se"
-    work_tickets.integrate(main_checkout, 8, None, "suite", None)
-
     def origin_contains(ref: str) -> bool:
         return subprocess.run(
             ["git", "--git-dir", str(origin), "merge-base", "--is-ancestor", head, ref],
             capture_output=True, check=False,
         ).returncode == 0
+
+    assert work_tickets.integration_branch(main_checkout) == "se"
+    if leak:
+        with pytest.raises(work_tickets.QueueError, match="Public check failed.*nothing was pushed"):
+            work_tickets.integrate(main_checkout, 8, None, "suite", None)
+        assert not origin_contains("refs/heads/se")
+        return
+    work_tickets.integrate(main_checkout, 8, None, "suite", None)
 
     assert origin_contains("refs/heads/se")
     assert not origin_contains("refs/heads/main")
