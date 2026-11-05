@@ -435,3 +435,9 @@ def test_the_work_model_owns_where_the_commit_identity_and_the_public_check_come
 def test_the_worker_commits_each_requirement_while_working():
     worker = normalized(AGENTS / "worker.agent.md")
     assert "Commit each requirement as soon as it is done, while working; never reconstruct commits at the end." in worker
+
+
+def test_the_work_template_asks_requirements_to_name_the_adapters_in_scope():
+    template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
+    assert ('A requirement that says what "adapters" or "consumers" must do names which ones are in scope, '
+            "for example whether an interim implementation counts.") in template
