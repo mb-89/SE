@@ -168,6 +168,37 @@ def test_guard_reports_removed_tests_until_field_report_names_them(worktree: Pat
     assert "removed JavaScript" in approved.stdout
 
 
+def test_guard_compares_against_the_fetched_remote_integration_branch(worktree: Path) -> None:
+    upstream = worktree.parent / "guard-upstream"
+    upstream.mkdir()
+    assert git(upstream, "init", "-b", "main").returncode == 0
+    assert git(upstream, "config", "user.name", "Guard test").returncode == 0
+    assert git(upstream, "config", "user.email", "guard-test@example.invalid").returncode == 0
+    (upstream / "test_example.py").write_text(
+        "def test_removed_upstream():\n    pass\n", encoding="utf-8"
+    )
+    assert git(upstream, "add", ".").returncode == 0
+    assert git(upstream, "commit", "-m", "baseline tests").returncode == 0
+    clone = worktree.parent / "guard-clone"
+    assert git(worktree.parent, "clone", "-q", str(upstream), str(clone)).returncode == 0
+    assert git(upstream, "rm", "-q", "test_example.py").returncode == 0
+    assert git(upstream, "commit", "-m", "remove a test on the integration branch").returncode == 0
+    assert git(clone, "fetch", "-q", "origin").returncode == 0
+    assert git(clone, "checkout", "-q", "-b", "feature", "origin/main").returncode == 0
+    report = clone / "field-report.md"
+    report.write_text(
+        "## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n",
+        encoding="utf-8",
+    )
+
+    guarded = run_helper(
+        "guard", "--branch", "feature", "--field-report", str(report), "--worktree", str(clone),
+    )
+
+    assert guarded.returncode == 0, guarded.stderr
+    assert "No removed protected content found." in guarded.stdout
+
+
 def test_authored_content_globs_ignores_pyproject_settings(worktree: Path) -> None:
     (worktree / "pyproject.toml").write_text(
         "[tool.se]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
