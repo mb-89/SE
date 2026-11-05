@@ -1501,6 +1501,14 @@ def draft_field_report(root: Path, file: Path, pr: int | None) -> int | None:
             lambda match: match.group(1) + quoted(requirement),
             body, count=1, flags=re.MULTILINE | re.DOTALL,
         )
+    index = discovery_index(root)
+    if index is not None:
+        relative_index = index.relative_to(root).as_posix()
+        body = body.replace(
+            "## Delivered\n\n",
+            f"## Delivered\n\n[Discovery evidence index]({relative_index})\n\n",
+            1,
+        )
     with file.open("x", encoding="utf-8", newline="\n") as stream:
         stream.write(body.lstrip("\n"))
     return pr
