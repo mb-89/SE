@@ -305,3 +305,12 @@ def test_the_decision_skill_holds_the_presentation_rules():
                  '"Reply A, B or C"', "## Tasks for the person", "never an option in a decision",
                  '"Task 1 of 2"'):
         assert rule in text, rule
+
+
+def test_the_decision_skill_asks_one_level_up_with_the_worked_example():
+    text = normalized(DECISION)
+    assert "## One level up" in text
+    assert "name the class the instance belongs to and ask about the general mechanism" in text
+    assert '"can queries select the manifest note?"' in text
+    assert ('"a note can mark itself ignored, like a Python underscore name; the manifest is one '
+            'such note"') in text
