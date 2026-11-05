@@ -48,7 +48,9 @@ anything that needs a decision goes to the dispatcher as an escalation, not back
 
 `work_tickets.py` below runs with `--worktree <main checkout>` unless another worktree is named.
 
-At the start of every turn run `work_tickets.py queue`. For each open field-report issue
+At the start of every turn run `work_tickets.py sync`, which sets the
+[commit identity](../skills/work-model/SKILL.md#what-the-project-provides) in the checkout, then
+`work_tickets.py queue`. For each open field-report issue
 (`gh issue list --label field-report --state open --json number,title`), owners of shared files
 first, otherwise oldest first, and for "integrate <branch>" requests from the dispatcher (its
 design branch). Local workers announce a filed field report with one queued message

@@ -556,23 +556,18 @@ def test_sync_without_origin_merges_local_main(worktree, monkeypatch, capsys):
     assert "Merged main abc1234" in capsys.readouterr().out
 
 
-def test_sync_merges_with_the_configured_public_identity(worktree, local_config, monkeypatch):
-    calls: list[list[str]] = []
-
-    def git(arguments, **kwargs):
-        calls.append(arguments)
-        return subprocess.CompletedProcess(arguments, 0, "abc1234\n" if "rev-parse" in arguments else "", "")
-
-    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
-    monkeypatch.setattr(work_tickets.subprocess, "run", git)
+def test_sync_sets_the_configured_public_identity_in_the_checkout(main_checkout, local_config):
     local_config.parent.mkdir(parents=True)
     local_config.write_text('public_identity = "mb <mb>"\n', encoding="utf-8")
 
-    assert run(worktree, "sync") == 0
-    assert calls[0] == [
-        "git", "-C", str(worktree), "-c", "user.name=mb", "-c", "user.email=mb",
-        "merge", "--no-edit", "main",
-    ]
+    work_tickets.sync(main_checkout)
+    git_ok("-C", str(main_checkout), "commit", "-q", "--allow-empty", "-m", "after sync")
+
+    log = subprocess.run(
+        ["git", "-C", str(main_checkout), "log", "-1", "--format=%an <%ae>|%cn <%ce>"],
+        capture_output=True, text=True, check=True,
+    )
+    assert log.stdout.strip() == "mb <mb>|mb <mb>"
 
 
 def test_sync_refuses_a_malformed_public_identity_naming_the_file(
