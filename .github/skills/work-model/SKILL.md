@@ -171,6 +171,10 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
 - the setup command that installs the tools the roles need (`git`, `gh`, Python 3.11 or newer and
   whatever the project's tests need);
 - the focused and the complete test commands, including gated test tiers if there are any;
+- its integration project checks as JSON argument arrays passed to `integrate --check-command`, for
+  example `--check-command '[["uv", "run", "pytest", "-q"], ["uv", "run", "python", "check.py"]]'`.
+  The commands run without a shell. Add `--check-command-temporary-directory` when every command
+  needs an isolated temporary working directory;
 - the build command that regenerates the project's outputs and how to check them;
 - the design notes that own product qualities, ownership and testing rules;
 - its worktree scripts, when a plain worktree is not enough (see [Worktrees](#worktrees)), and the
