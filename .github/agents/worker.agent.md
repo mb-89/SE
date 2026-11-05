@@ -60,7 +60,8 @@ notify, if any.
 4. **Work the ticket**: regression test first, then the change, then the focused tests and the
    affected real command. Never run the complete suite; the integrator does. No backwards
    compatibility, no bookkeeping files. Record evidence in the ticket, check its acceptance items
-   only with evidence, `move --to done`, and commit, with the environment's
+   only with evidence, `move --to done`, and commit as the work model's
+   [commit identity](../skills/work-model/SKILL.md#what-the-project-provides), with the environment's
    [`commit_trailer`](../skills/work-model/SKILL.md#what-the-project-provides) if it sets one.
    One commit per requirement, with two exceptions: requirements that change one function
    together share one commit, and where one requirement's behaviour cannot be separated from
