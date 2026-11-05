@@ -1707,7 +1707,8 @@ def draft_field_report(root: Path, file: Path, pr: int | None) -> int | None:
         body = body.replace("#<n>", f"#{pr}", 1)
     else:
         body = body.replace("**Pull request:** #<n>", "**Pull request:** none", 1)
-    body = body.replace("<branch>", branch).replace("<commit>", tested_main(root))
+    body = (body.replace("<integration branch>", integration_branch(root))
+            .replace("<branch>", branch).replace("<commit>", tested_main(root)))
     requirement = section(markdown_sections(issue["body"]), "user requirement")
     if requirement:
         body = re.sub(
@@ -1749,7 +1750,8 @@ def file_field_report(
     header = re.split(r"^## ", body, maxsplit=1, flags=re.MULTILINE)[0]
     problems = [
         f"unfilled placeholder {placeholder}"
-        for placeholder in ("#<n>", "<branch>", "<commit>") if placeholder in header
+        for placeholder in ("#<n>", "<branch>", "<integration branch>", "<commit>")
+        if placeholder in header
     ]
     if FIELD_REPORT_RESULT_PATTERN.search(header) is None:
         problems.append("header Result must be exactly complete or partial")
