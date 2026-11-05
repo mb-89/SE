@@ -143,7 +143,7 @@ def initialize_discovery(root: Path, configured: str | None) -> Path:
         )
     config = root / ".se" / "work" / DISCOVERY_CONFIG
     config.write_text(
-        json.dumps({"root": str(directory.relative_to(root))}, indent=2) + "\n",
+        json.dumps({"root": directory.relative_to(root).as_posix()}, indent=2) + "\n",
         encoding="utf-8", newline="\n",
     )
     return index

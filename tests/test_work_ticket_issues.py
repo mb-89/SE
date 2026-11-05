@@ -173,6 +173,19 @@ def test_discovery_intake_creates_an_evidence_index_and_probe_appends_to_it(work
     )
 
 
+def test_discovery_intake_uses_the_project_declared_probe_root(worktree, gh):
+    assert run(
+        worktree, "intake", "--issue", "5", "--discovery",
+        "--probe-root", ".se/work/project-probe",
+    ) == 0
+
+    evidence = worktree / ".se" / "work" / "project-probe" / "evidence.md"
+    assert evidence.is_file()
+    assert json.loads((worktree / ".se" / "work" / "discovery.json").read_text(
+        encoding="utf-8"
+    )) == {"root": ".se/work/project-probe"}
+
+
 def test_refresh_reports_edited_requirements_and_new_comments(worktree, gh, capsys):
     run(worktree, "intake", "--issue", "5")
     capsys.readouterr()
