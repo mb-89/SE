@@ -302,6 +302,16 @@ owns what changes.
   - `integrate`: merge the pull request's branch into the newest integration branch locally, run
     the complete suite, push the integration branch, then close the issues with the
     `Integrated in …` comment.
+- **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
+  approval prompt no one answers; a role works with the repositories its session started with.
+- **Commit trailers**: the project's [`commit_trailer`](#what-the-project-provides) wins over a
+  host's attribution reminder; with none set, commits carry no trailer.
+- **Other process files**: where a host loads other instructions (an old plugin, another
+  branch's `CLAUDE.md`), the role files and the project's `AGENTS.md` on the integration branch
+  are the rules.
+- **Retries after a server error**: after a 5xx from GitHub, read before retrying any write, not
+  only a create (the object may exist); where closing with a state reason fails, close without
+  one (GitHub's default reason is completed).
 - **The session prompt carries only** the agent, the work issue, the branch (the session's outcome
   branch, which replaces the worktree) and the integrator session to notify; everything else is in
   the role files, this skill and the project's `AGENTS.md`:
