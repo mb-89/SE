@@ -420,3 +420,13 @@ def test_agents_md_names_the_focused_and_complete_test_commands():
     tests = text.split("## Tests", 1)[1].split(" ## ", 1)[0]
     assert "Focused: `uv run pytest -q tests/<file>.py`" in tests
     assert "Complete: `uv run pytest -q`" in tests
+
+
+def test_the_work_model_owns_where_the_commit_identity_and_the_public_check_come_from():
+    provides = normalized(WORK_MODEL).split("## What the project provides", 1)[1]
+    assert "**Commit identity and public check**: every role commits as `public_identity`" in provides
+    assert "else as the identity the project's `AGENTS.md` names" in provides
+    assert "runs the project's setup command before its first commit" in provides
+    assert "Where the machine sets no `public_identity`, commit as `mb <mb>`" in normalized(ROOT / "AGENTS.md")
+    assert "[commit identity](../skills/work-model/SKILL.md#what-the-project-provides)" in normalized(
+        AGENTS / "worker.agent.md")
