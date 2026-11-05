@@ -19,6 +19,7 @@ import tomllib
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from xml.etree import ElementTree
 
 
 STATES = ("todo", "held", "done")
@@ -2076,6 +2077,11 @@ class SuiteBudget:
 
 SLOWEST_TESTS = 10
 DURATION_LINE = re.compile(r"^\s*(\d+(?:\.\d+)?)s\s+(call|setup|teardown)\s+(\S.*?)\s*$")
+TEST_REPORTS_VARIABLE = "SE_TEST_REPORTS"
+NO_SLOWEST_TESTS = (
+    f"  not reported by the runner; write JUnit XML to ${TEST_REPORTS_VARIABLE} "
+    "(the suite command's report directory) to name them"
+)
 clock = time.monotonic
 
 
@@ -2110,35 +2116,57 @@ def with_durations(command: list[str]) -> list[str]:
     return [*command, f"--durations={SLOWEST_TESTS}"]
 
 
-def slowest_tests(output: str) -> list[str]:
-    """The runner's slowest-test lines (`<seconds>s <phase> <test>`), slowest first."""
-    found = [
-        (float(match[1]), f"{match[1]}s {match[2]} {match[3]}")
-        for match in map(DURATION_LINE.match, output.splitlines()) if match
-    ]
+def report_durations(reports: Path) -> list[tuple[float, str]]:
+    """Every test case of the JUnit XML reports under `reports`, with its part (the file's stem).
+
+    A report that cannot be read is named on stderr and skipped: the list is advice."""
+    found = []
+    for report in sorted(reports.rglob("*.xml")):
+        try:
+            cases = ElementTree.parse(report).getroot().iter("testcase")
+            for case in cases:
+                test = "::".join(filter(None, (case.get("classname"), case.get("name"))))
+                found.append((float(case.get("time") or 0), f"{report.stem} {test}"))
+        except (ElementTree.ParseError, ValueError, OSError) as error:
+            print(f"warning: suite skipped the test report {report}: {error}", file=sys.stderr)
+    return found
+
+
+def slowest_tests(output: str, reports: Path) -> list[str]:
+    """The slowest tests, slowest first: from the runner's JUnit reports where it wrote any,
+    otherwise from its output's `<seconds>s <phase> <test>` lines (pytest's --durations)."""
+    found = [(seconds, f"{seconds:.2f}s {test}") for seconds, test in report_durations(reports)]
+    if not found:
+        found = [
+            (float(match[1]), f"{match[1]}s {match[2]} {match[3]}")
+            for match in map(DURATION_LINE.match, output.splitlines()) if match
+        ]
     return [line for _, line in sorted(found, key=lambda item: -item[0])][:SLOWEST_TESTS]
 
 
 def run_suite(root: Path) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget.
 
+    The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
     Prints the time and the slowest tests; warns above the target; refuses above the limit."""
     budget = suite_budget(root)
-    started = clock()
-    result = subprocess.run(
-        with_durations(budget.command), cwd=root, shell=False, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", check=False,
-    )
-    seconds = clock() - started
-    output = (result.stdout + result.stderr).strip()
+    with tempfile.TemporaryDirectory(prefix="se-test-reports-") as reports:
+        started = clock()
+        result = subprocess.run(
+            with_durations(budget.command), cwd=root, shell=False, capture_output=True,
+            text=True, encoding="utf-8", errors="replace", check=False,
+            env={**os.environ, TEST_REPORTS_VARIABLE: reports},
+        )
+        seconds = clock() - started
+        output = (result.stdout + result.stderr).strip()
+        slowest = slowest_tests(output, Path(reports))
     name = " ".join(budget.command)
     if result.returncode != 0:
         raise QueueError(
             f"Complete suite failed ({name}, [tests] command in se.toml): "
             f"{output or f'exit code {result.returncode}'}"
         )
-    slowest = slowest_tests(output)
-    listing = "\n".join(f"  {line}" for line in slowest) or "  not reported by the runner"
+    listing = "\n".join(f"  {line}" for line in slowest) or NO_SLOWEST_TESTS
     timing = (
         f"{seconds:.1f} s (target {budget.target_seconds:g} s, limit {budget.limit_seconds:g} s)"
     )
