@@ -441,3 +441,40 @@ def test_the_work_template_asks_requirements_to_name_the_adapters_in_scope():
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
     assert ('A requirement that says what "adapters" or "consumers" must do names which ones are in scope, '
             "for example whether an interim implementation counts.") in template
+
+
+CLOUD_RULES = (
+    "**Never `add_repo`**: the host's tool that attaches a repository stops the session at an approval prompt",
+    "**Commit trailers**: the project's [`commit_trailer`](#what-the-project-provides) wins over a host's "
+    "attribution reminder; with none set, commits carry no trailer.",
+    "**Other process files**: where a host loads other instructions (an old plugin, another branch's "
+    "`CLAUDE.md`), the role files and the project's `AGENTS.md` on the integration branch are the rules.",
+    "**Retries after a server error**: after a 5xx from GitHub, read before retrying any write, not only a "
+    "create (the object may exist); where closing with a state reason fails, close without one",
+)
+
+
+@pytest.mark.parametrize("rule", CLOUD_RULES, ids=lambda rule: rule.split("**")[1])
+def test_the_cloud_section_holds_each_cloud_rule_once(rule):
+    assert " ".join(without_gh_section().split()).count(rule) == 1
+    assert normalized(WORK_MODEL).count(rule.split("**")[1]) == 1
+    for path in (*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL):
+        assert rule.split("**")[1] not in normalized(path), path.name
+
+
+def test_the_worker_installs_the_hooks_before_its_first_commit():
+    worker = normalized(AGENTS / "worker.agent.md")
+    procedure = worker.split("## Procedure", 1)[1]
+    setup = procedure.index("in a fresh clone, first run the project's setup command that installs its hooks")
+    assert setup < procedure.index("`work_tickets.py sync`") < procedure.index("commit as the work model's")
+    assert "[public check](../skills/work-model/SKILL.md#what-the-project-provides) runs on every commit and push" in worker
+    assert "`scripts/setup.sh`" in " ".join(normalized(ROOT / "AGENTS.md").split("## Public safety", 1)[1].split())
+
+
+def test_the_worker_runs_what_the_acceptance_names_including_the_suite():
+    worker = normalized(AGENTS / "worker.agent.md")
+    assert "Never run the complete suite" not in worker
+    assert "run the complete suite only where the acceptance names it, otherwise the integrator does" in worker
+    rules = normalized(WORK_MODEL)
+    assert "Workers run focused tests only" not in rules
+    assert "the complete suite only where it names the suite" in rules
