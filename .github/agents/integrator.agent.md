@@ -41,7 +41,8 @@ anything that needs a decision goes to the dispatcher as an escalation, not back
   approval. Without one you do not release and do not ask; a release that looks due is a line in
   your report to the dispatcher.
 - Paths and shell follow the work model's
-  [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell).
+  [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell); where the host offers no
+  `gh`, its [Without gh](../skills/work-model/SKILL.md#without-gh) says how each step below runs.
 
 ## Procedure
 

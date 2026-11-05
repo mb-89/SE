@@ -326,3 +326,64 @@ def test_the_decision_skill_records_the_answer_where_it_takes_effect():
     text = normalized(DECISION)
     assert "## Recording the answer" in text
     assert "recorded where it takes effect, quoting the person word for word" in text
+
+
+def without_gh_section() -> str:
+    text = WORK_MODEL.read_text(encoding="utf-8")
+    return text.split("### Without gh", 1)[1].split("\n## ", 1)[0]
+
+
+def commands_that_need_no_gh() -> set[str]:
+    """Subcommands of work_tickets.py whose branch in main never reaches run_gh."""
+    import ast
+    import importlib.util
+    import sys
+
+    script = ROOT / "scripts" / "work_tickets.py"
+    spec = importlib.util.spec_from_file_location("work_tickets_commands", script)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    commands = set(module.make_parser()._subparsers._group_actions[0].choices)
+    tree = ast.parse(script.read_text(encoding="utf-8"))
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+
+    def called(node: ast.AST) -> set[str]:
+        return {call.func.id for call in ast.walk(node)
+                if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)}
+
+    reaches_gh = {"run_gh"}
+    grown = True
+    while grown:
+        grown = False
+        for name, function in functions.items():
+            if name not in reaches_gh and called(function) & reaches_gh:
+                reaches_gh.add(name)
+                grown = True
+    needs_gh: set[str] = set()
+    for node in ast.walk(functions["main"]):
+        if (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
+                and getattr(node.test.left, "attr", None) == "command"):
+            value = ast.literal_eval(node.test.comparators[0])
+            names = {value} if isinstance(value, str) else set(value)
+            if any(called(statement) & reaches_gh for statement in node.body):
+                needs_gh |= names
+    return commands - needs_gh
+
+
+def test_the_work_model_owns_without_gh_and_lists_the_commands_that_still_run():
+    section = without_gh_section()
+    line = next(line for line in section.split("\n- ") if line.startswith("**Commands that still run**"))
+    listed = set(re.findall(r"`([a-z-]+)`", line.split("Every other command")[0]))
+    assert listed == commands_that_need_no_gh()
+    assert "the host's GitHub tools" in section
+    assert "naming itself, the missing `gh` and this section" in " ".join(section.split())
+
+
+@pytest.mark.parametrize("role", ("worker", "integrator"))
+def test_roles_point_to_without_gh_and_do_not_restate_it(role):
+    text = normalized(AGENTS / f"{role}.agent.md")
+    assert "(../skills/work-model/SKILL.md#without-gh)" in text
+    for owned in ("Commands that still run", "GitHub tools", "MCP", "outcome branch",
+                  "carries only", "`review-note`, `probe`"):
+        assert owned not in text, owned

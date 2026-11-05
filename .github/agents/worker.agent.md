@@ -11,8 +11,9 @@ You implement one package: one work issue in, one pull request plus one field-re
 The rules shared by all roles are owned by the skill
 [work-model](../skills/work-model/SKILL.md), the project's commands and rules by the project's
 `AGENTS.md`; this file holds what is the same for every package, so work issues and session prompts
-never repeat it. Your session prompt names only this agent, your work issue, your worktree and, for
-local workers, the integrator session to notify.
+never repeat it. Your session prompt names only this agent, your work issue, your worktree (or,
+[without `gh`](../skills/work-model/SKILL.md#without-gh), your branch) and the integrator session to
+notify, if any.
 
 ## The box
 
@@ -36,6 +37,8 @@ local workers, the integrator session to notify.
 - Paths and shell follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell): your session may start
   in another checkout, so work with absolute worktree paths and `git -C <worktree>`.
+- Where the host offers no `gh`, the work model's
+  [Without gh](../skills/work-model/SKILL.md#without-gh) says how each step below runs.
 - Windows PowerShell 5.1 redirection `>` writes UTF-16. Create files as UTF-8 without a BOM with
   `[IO.File]::WriteAllText(<absolute path>, <text>, UTF8 without BOM)` or `Out-File -Encoding utf8`.
 - Load the test environment the project's `AGENTS.md` names, if any, in every shell that tests.
@@ -71,10 +74,10 @@ local workers, the integrator session to notify.
    **Never end your turn without delivering.** Your turn ends only after step 7. If you stop working
    for any reason (blocked, out of ideas, unsure), deliver what you have and name the blocker in the
    field report's "Not delivered"; an idle session with no field report is a failure.
-7. **Notify the integrator**, as the last delivery step and only once: a local worker sends one
-   queued message (`send_message`, delivery `queue`) to the integrator session named in its prompt:
-   `field report #<n> filed for <branch>, PR #<m>`. No questions, no other messages. Cloud workers
-   send nothing: the `field-report` label triggers the integrator.
+7. **Notify the integrator**, as the last delivery step and only once: a worker whose prompt names
+   an integrator session sends it one queued message (`send_message`, delivery `queue`):
+   `field report #<n> filed for <branch>, PR #<m>`. No questions, no other messages. A worker whose
+   prompt names none sends nothing: the `field-report` label triggers the integrator.
 
 Never merge your pull request, close issues, publish releases or remove worktrees: the integrator
 does that.
