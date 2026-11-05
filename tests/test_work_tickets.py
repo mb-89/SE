@@ -226,6 +226,42 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     assert "docs/guide.md: This sentence is removed." in approved.stdout
 
 
+def test_guard_keeps_dots_in_protected_content_with_its_sentence(worktree: Path) -> None:
+    repository = worktree.parent / "guard-protected-content-case"
+    repository.mkdir()
+    assert git(repository, "init", "-b", "main").returncode == 0
+    assert git(repository, "config", "user.name", "Guard test").returncode == 0
+    assert git(repository, "config", "user.email", "guard-test@example.invalid").returncode == 0
+    (repository / "se.toml").write_text(
+        "[project]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
+    )
+    guide = repository / "docs" / "guide.md"
+    guide.parent.mkdir()
+    guide.write_text(
+        "Deleting `pyproject.toml` keeps this sentence whole.\n"
+        "Visit https://example.com/path.name before removal.\n\n"
+        "```powershell\n"
+        "uv run python scripts/work_tickets.py\n"
+        "```\n"
+        "The fenced block stays with this sentence.\n",
+        encoding="utf-8",
+    )
+    assert git(repository, "add", ".").returncode == 0
+    assert git(repository, "commit", "-m", "baseline prose").returncode == 0
+    assert git(repository, "checkout", "-b", "remove-protected-content").returncode == 0
+    guide.write_text("", encoding="utf-8")
+    assert git(repository, "commit", "-am", "remove protected prose").returncode == 0
+
+    removed = work_tickets.deleted_authored_sentences(repository, "remove-protected-content")
+
+    assert removed == [
+        "docs/guide.md: Deleting `pyproject.toml` keeps this sentence whole.",
+        "docs/guide.md: Visit https://example.com/path.name before removal.",
+        "docs/guide.md: ```powershell uv run python scripts/work_tickets.py ``` "
+        "The fenced block stays with this sentence.",
+    ]
+
+
 def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
     repository = worktree.parent / "rewrapped-content-case"
     repository.mkdir()
