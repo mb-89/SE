@@ -1734,6 +1734,37 @@ def remove_worker_worktree(root: Path, branch: str) -> None:
         raise QueueError(f"Cannot remove worker worktree: {detail}")
 
 
+def delete_merged_branch(root: Path, branch: str, head: str) -> None:
+    contained = subprocess.run(
+        ["git", "-C", str(root), "merge-base", "--is-ancestor", head, "main"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if contained.returncode != 0:
+        print(
+            "warning: merged branch was retained because main does not contain its tip",
+            file=sys.stderr,
+        )
+        return
+    local = subprocess.run(
+        ["git", "-C", str(root), "branch", "-d", branch],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if local.returncode != 0:
+        detail = local.stderr.strip() or f"exit code {local.returncode}"
+        print(f"warning: merged branch was retained locally: {detail}", file=sys.stderr)
+    else:
+        print("Cleanup: local merged branch deleted")
+    remote = subprocess.run(
+        ["git", "-C", str(root), "push", "origin", "--delete", branch],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if remote.returncode != 0:
+        detail = remote.stderr.strip() or f"exit code {remote.returncode}"
+        print(f"warning: merged branch was retained on origin: {detail}", file=sys.stderr)
+    else:
+        print("Cleanup: origin merged branch deleted")
+
+
 def restore_pre_merge(root: Path, commit: str) -> None:
     restored = subprocess.run(
         ["git", "-C", str(root), "reset", "--hard", commit],
@@ -1951,6 +1982,7 @@ def integrate(
     except QueueError as error:
         print(f"warning: worker worktree was not removed: {error}", file=sys.stderr)
         print("Cleanup: worker worktree retained")
+    delete_merged_branch(root, branch, head)
     started = 0
     for candidate in ready_issues(root, tracker):
         slots = capacity(root, tracker)
