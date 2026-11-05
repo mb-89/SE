@@ -313,6 +313,10 @@ owns what changes.
 - **Retries after a server error**: after a 5xx from GitHub, read before retrying any write, not
   only a create (the object may exist); where closing with a state reason fails, close without
   one (GitHub's default reason is completed).
+- **Delivery fallback**: an output whose write keeps failing after those retries goes in full into
+  the next output that can be written, and a short placeholder points to it: where the field-report
+  issue cannot be created with the report, the full report goes into the pull request body, a short
+  field-report issue links it, and the delivery notice names the pull request.
 - **The session prompt carries only** the agent, the work issue, the branch (the session's outcome
   branch, which replaces the worktree) and the integrator session to notify; everything else is in
   the role files, this skill and the project's `AGENTS.md`:
