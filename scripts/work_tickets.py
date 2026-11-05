@@ -1193,9 +1193,21 @@ def template_labels(value: str) -> list[str]:
     return [label.strip().strip("\"'") for label in value.strip("[]").split(",") if label.strip()]
 
 
+def integration_ref(root: Path) -> str:
+    """`origin/<integration branch>` as `sync` fetched it; the local branch only without it."""
+    target = integration_branch(root)
+    remote = f"origin/{target}"
+    found = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{remote}^{{commit}}"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    return remote if found.returncode == 0 else target
+
+
 def deleted_tests(root: Path, branch: str) -> list[str]:
+    base = integration_ref(root)
     result = subprocess.run(
-        ["git", "-C", str(root), "diff", "--unified=0", f"{integration_branch(root)}...{branch}"],
+        ["git", "-C", str(root), "diff", "--unified=0", f"{base}...{branch}"],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -1204,7 +1216,7 @@ def deleted_tests(root: Path, branch: str) -> list[str]:
     )
     if result.returncode != 0:
         detail = result.stderr.strip() or f"exit code {result.returncode}"
-        raise QueueError(f"Cannot diff {integration_branch(root)} against {branch}: {detail}")
+        raise QueueError(f"Cannot diff {base} against {branch}: {detail}")
     found: list[str] = []
     for line in result.stdout.splitlines():
         python = REMOVED_PYTHON_TEST_PATTERN.match(line)
@@ -1221,8 +1233,9 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
     globs = authored_content_globs(root)
     if not globs:
         return []
+    base = integration_ref(root)
     changed = subprocess.run(
-        ["git", "-C", str(root), "diff", "--name-status", "-z", f"{integration_branch(root)}...{branch}"],
+        ["git", "-C", str(root), "diff", "--name-status", "-z", f"{base}...{branch}"],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -1231,7 +1244,7 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
     )
     if changed.returncode != 0:
         detail = changed.stderr.strip() or f"exit code {changed.returncode}"
-        raise QueueError(f"Cannot diff {integration_branch(root)} against {branch}: {detail}")
+        raise QueueError(f"Cannot diff {base} against {branch}: {detail}")
     paths = changed.stdout.split("\0")
     old_files: list[tuple[str, str | None]] = []
     new_files: list[tuple[str, str | None]] = []
@@ -1255,7 +1268,7 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
             if path is not None
             for glob in globs
         ):
-            old_files.append((old_path, integration_branch(root)))
+            old_files.append((old_path, base))
             new_files.append((new_path, branch))
 
     def content(path: str | None, revision: str) -> str:
@@ -2356,7 +2369,8 @@ def make_parser() -> argparse.ArgumentParser:
     add_worktree_argument(sync_parser)
 
     guard_parser = subparsers.add_parser(
-        "guard", help="require the field report to name removed protected content"
+        "guard", help="require the field report to name removed protected content, against "
+        "origin/<integration branch> as sync fetched it (the local branch without origin)"
     )
     add_worktree_argument(guard_parser)
     guard_parser.add_argument("--branch", required=True, help="branch to compare with the integration branch")
