@@ -269,3 +269,8 @@ def test_the_comment_footer_rule_is_said_once():
     assert "**Comments carry the host's footer**" in normalized(WORK_MODEL)
     for path in (*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL):
         assert "footer" not in normalized(path), path.name
+
+
+def test_integrator_leaves_a_branch_the_host_refuses_to_delete():
+    integrator = normalized(AGENTS / "integrator.agent.md")
+    assert "automatic head-branch deletion removes it. Never retry the deletion." in integrator

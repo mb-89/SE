@@ -72,7 +72,8 @@ design branch). Local workers announce a filed field report with one queued mess
 5. **Close** through `integrate`, then hand the field report's "Tickets for other repositories" to
    the dispatcher.
 6. **Clean up** through `integrate`; it removes only an eligible worker worktree and reports a
-   retained worktree explicitly.
+   retained worktree explicitly. Where the host refuses deleting a merged branch, leave it: the
+   repository's automatic head-branch deletion removes it. Never retry the deletion.
 7. **Start what is unblocked**: use `work_tickets.py ready` and `capacity` as helpers. Every work
    issue labelled `ready` whose blockers are closed, that has no branch yet and whose file ownership
    does not clash with running workers, gets a fresh worktree from the newest integration branch
