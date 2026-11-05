@@ -555,3 +555,33 @@ def test_the_integrator_reconciles_from_github_and_treats_a_missing_message_as_l
     integrator = normalized(AGENTS / "integrator.agent.md")
     assert ("A worker's delivery message can arrive minutes late: reconcile from GitHub first and treat a "
             "missing message as late, not lost.") in integrator
+
+
+TEST_RULES = (
+    "at the outermost interface",
+    "on fakes",
+    "No sleeping",
+    "no wall clock",
+    "in parallel",
+    "fixtures are built once",
+    "Browser checks are batched",
+)
+
+
+def test_the_work_model_states_the_test_rules_once_and_issues_point_to_it():
+    section = normalized(WORK_MODEL).split("## Tests", 1)[1].split(" ## ", 1)[0]
+    for rule in TEST_RULES:
+        assert rule in section, rule
+    for path in sorted(GITHUB.rglob("*.md")):
+        if path != WORK_MODEL:
+            assert "Browser checks are batched" not in normalized(path), path
+    template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
+    assert "(../skills/work-model/SKILL.md#tests)" in template
+
+
+def test_the_worker_reports_the_suite_time_before_and_after_and_slow_new_tests():
+    worker = normalized(AGENTS / "worker.agent.md")
+    assert "(../skills/work-model/SKILL.md#tests)" in worker
+    assert "work_tickets.py suite" in worker
+    template = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    assert "**Suite time:**" in template
