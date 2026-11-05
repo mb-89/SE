@@ -1,0 +1,6 @@
+# Exceptions for scripts/public_check.py (rule: AGENTS.md "Public safety").
+# One entry per line, each with its reason after '#':
+#   <path glob>   # reason     covers every hit in the matching files
+#   <path>:<line> # reason     covers the hits on that line only
+# Entries never cover commit messages or identities. An entry that matches no hit fails a check
+# that has the private deny list, so stale exceptions cannot hide a later leak.
