@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 from collections import Counter
 from dataclasses import dataclass
@@ -690,8 +691,8 @@ def local_config() -> dict[str, object]:
         raise QueueError(f"Cannot read the machine-local config {path}: {error}") from error
 
 
-def project_config(root: Path) -> dict[str, object]:
-    """The `[project]` table of the checkout's se.toml, or {} without one."""
+def se_table(root: Path, name: str) -> dict[str, object]:
+    """The `[<name>]` table of the checkout's se.toml, or {} without one."""
     path = root / "se.toml"
     if not path.is_file():
         return {}
@@ -699,8 +700,13 @@ def project_config(root: Path) -> dict[str, object]:
         config = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
         raise QueueError(f"Cannot read the project config {path}: {error}") from error
-    project = config.get("project")
-    return project if isinstance(project, dict) else {}
+    table = config.get(name)
+    return table if isinstance(table, dict) else {}
+
+
+def project_config(root: Path) -> dict[str, object]:
+    """The `[project]` table of the checkout's se.toml, or {} without one."""
+    return se_table(root, "project")
 
 
 def integration_branch(root: Path) -> str:
@@ -2059,6 +2065,102 @@ def run_project_command(root: Path, command: str, description: str) -> str:
     return output.splitlines()[-1] if output else "passed"
 
 
+@dataclass(frozen=True)
+class SuiteBudget:
+    """se.toml `[tests]`: the complete suite and its time budget (README "Test budget")."""
+
+    command: list[str]
+    target_seconds: float
+    limit_seconds: float
+
+
+SLOWEST_TESTS = 10
+DURATION_LINE = re.compile(r"^\s*(\d+(?:\.\d+)?)s\s+(call|setup|teardown)\s+(\S.*?)\s*$")
+clock = time.monotonic
+
+
+def suite_budget(root: Path) -> SuiteBudget:
+    """Read and validate `[tests]` of se.toml; refuse, naming the key and the remedy."""
+    tests = se_table(root, "tests")
+    where = f"[tests] in {root / 'se.toml'}"
+    command = tests.get("command")
+    if not isinstance(command, list) or not command or any(
+        not isinstance(argument, str) or not argument for argument in command
+    ):
+        raise QueueError(
+            f"{where} must declare command, the complete suite as a non-empty argument array, "
+            'for example command = ["uv", "run", "pytest", "-q"]'
+        )
+    values: dict[str, float] = {}
+    for key, default in (("target_seconds", 60), ("limit_seconds", 120)):
+        value = tests.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            raise QueueError(f"{where}: {key} must be a positive number of seconds; fix it")
+        values[key] = float(value)
+    if values["target_seconds"] > values["limit_seconds"]:
+        raise QueueError(f"{where}: target_seconds must not exceed limit_seconds; fix it")
+    return SuiteBudget(command, values["target_seconds"], values["limit_seconds"])
+
+
+def with_durations(command: list[str]) -> list[str]:
+    """Ask pytest for its slowest tests; other runners are run as declared."""
+    is_pytest = any(Path(argument).stem == "pytest" for argument in command)
+    if not is_pytest or any(argument.startswith("--durations") for argument in command):
+        return command
+    return [*command, f"--durations={SLOWEST_TESTS}"]
+
+
+def slowest_tests(output: str) -> list[str]:
+    """The runner's slowest-test lines (`<seconds>s <phase> <test>`), slowest first."""
+    found = [
+        (float(match[1]), f"{match[1]}s {match[2]} {match[3]}")
+        for match in map(DURATION_LINE.match, output.splitlines()) if match
+    ]
+    return [line for _, line in sorted(found, key=lambda item: -item[0])][:SLOWEST_TESTS]
+
+
+def run_suite(root: Path) -> str:
+    """Run se.toml's complete suite, measure it and hold it to its budget.
+
+    Prints the time and the slowest tests; warns above the target; refuses above the limit."""
+    budget = suite_budget(root)
+    started = clock()
+    result = subprocess.run(
+        with_durations(budget.command), cwd=root, shell=False, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=False,
+    )
+    seconds = clock() - started
+    output = (result.stdout + result.stderr).strip()
+    name = " ".join(budget.command)
+    if result.returncode != 0:
+        raise QueueError(
+            f"Complete suite failed ({name}, [tests] command in se.toml): "
+            f"{output or f'exit code {result.returncode}'}"
+        )
+    slowest = slowest_tests(output)
+    listing = "\n".join(f"  {line}" for line in slowest) or "  not reported by the runner"
+    timing = (
+        f"{seconds:.1f} s (target {budget.target_seconds:g} s, limit {budget.limit_seconds:g} s)"
+    )
+    if seconds > budget.limit_seconds:
+        raise QueueError(
+            f"Complete suite took {seconds:.1f} s, over its limit of {budget.limit_seconds:g} s "
+            f"([tests] limit_seconds in se.toml). Slowest tests:\n{listing}\n"
+            "Make those tests faster (the work model's test rules), or file a perf package "
+            "before integrating."
+        )
+    print(f"Suite time: {timing}\nSlowest tests:\n{listing}")
+    if seconds > budget.target_seconds:
+        print(
+            f"warning: the complete suite took {seconds:.1f} s, over its target of "
+            f"{budget.target_seconds:g} s ([tests] target_seconds in se.toml); make the slowest "
+            "tests above faster",
+            file=sys.stderr,
+        )
+    summary = output.splitlines()[-1] if output else "passed"
+    return f"{summary}; {timing}"
+
+
 def parse_check_commands(value: str) -> list[list[str]]:
     try:
         commands = json.loads(value)
@@ -2318,7 +2420,6 @@ def integrate(
     root: Path,
     report_number: int,
     repo: str | None,
-    suite_command: str,
     build_command: str | None,
     check_commands: list[list[str]] | None = None,
     check_temporary_working_directory: bool = False,
@@ -2391,7 +2492,7 @@ def integrate(
 
     has_public_mirror = any(mirror.public for mirror in mirrors)
     try:
-        suite_result = run_project_command(root, suite_command, "Complete suite")
+        suite_result = run_suite(root)
         if build_command:
             run_project_command(root, build_command, "Output regeneration")
         if check_commands and not has_public_mirror:
@@ -2575,6 +2676,10 @@ def make_parser() -> argparse.ArgumentParser:
              "default main) from origin, or locally without origin")
     add_worktree_argument(sync_parser)
 
+    suite_parser = subparsers.add_parser(
+        "suite", help="run se.toml's complete suite against its [tests] time budget, as integrate does")
+    add_worktree_argument(suite_parser)
+
     guard_parser = subparsers.add_parser(
         "guard", help="require the field report to name removed protected content, against "
         "origin/<integration branch> as sync fetched it (the local branch without origin)"
@@ -2599,7 +2704,6 @@ def make_parser() -> argparse.ArgumentParser:
     add_worktree_argument(integrate_parser)
     integrate_parser.add_argument("field_report", type=int, help="field-report issue number")
     integrate_parser.add_argument("--repo", help=REPO_HELP)
-    integrate_parser.add_argument("--suite-command", required=True, help="project's complete test command")
     integrate_parser.add_argument("--build-command", help="project's output regeneration command")
     integrate_parser.add_argument(
         "--check-command",
@@ -2725,6 +2829,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "sync":
             print(f"Merged {integration_branch(root)} {sync(root)}")
             return 0
+        if args.command == "suite":
+            print(f"Suite: {run_suite(root)}")
+            return 0
         if args.command == "guard":
             removed = guard(root, args.branch, args.field_report)
             if removed:
@@ -2743,7 +2850,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.check_command_temporary_directory and not args.check_command:
                 raise QueueError("--check-command-temporary-directory requires --check-command")
             commit = integrate(
-                root, args.field_report, args.repo, args.suite_command, args.build_command,
+                root, args.field_report, args.repo, args.build_command,
                 args.check_command, args.check_command_temporary_directory,
             )
             print(f"Integrated field report #{args.field_report} in {commit}")
