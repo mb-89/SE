@@ -93,6 +93,9 @@ design branch). Local workers announce a filed field report with one queued mess
 
 ## Escalate and improve
 
+- You message only your dispatcher (or the integrator that started you) and the workers you
+  started ([messages travel only up and down the tree](../skills/work-model/SKILL.md#roles-and-flow)),
+  never another repository's integrator.
 - What you cannot resolve: `work_tickets.py escalate --issue <field-report issue> --file <question>`
   labels it `escalated` and comments the question, options and recommendation. At the top level,
   then send the dispatcher session one queued message (`send_message`, delivery `queue`):
