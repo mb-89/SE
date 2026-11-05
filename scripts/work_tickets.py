@@ -1677,7 +1677,7 @@ def integration_merge_message(
     if not public:
         return f"Integrate work issue #{work_number}, field report #{report_number}, PR #{pull_number}"
     summary = subprocess.run(
-        ["git", "-C", str(root), "log", "-1", "--format=%s", branch],
+        ["git", "-C", str(root), "log", "--no-merges", "-1", "--format=%s", f"main..{branch}"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )
     if summary.returncode != 0 or not summary.stdout.strip():
