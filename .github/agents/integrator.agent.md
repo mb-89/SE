@@ -41,7 +41,8 @@ anything that needs a decision goes to the dispatcher as an escalation, not back
   approval. Without one you do not release and do not ask; a release that looks due is a line in
   your report to the dispatcher.
 - Paths and shell follow the work model's
-  [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell).
+  [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell); where the host offers no
+  `gh`, its [Without gh](../skills/work-model/SKILL.md#without-gh) says how each step below runs.
 
 ## Procedure
 
@@ -88,6 +89,9 @@ design branch). Local workers announce a filed field report with one queued mess
    Integrator session to notify at delivery: <integrator session>
    Your session may show the main checkout as its directory: do NOT call set_workspace and do NOT ask anything; cd to your worktree in every command and use absolute paths.
    ```
+
+   Without `gh`, the prompt is the one [Without gh](../skills/work-model/SKILL.md#without-gh)
+   names.
 
    Do not judge a worker by its session status right after starting it: a new session reads as
    idle or "review ready" before its first turn. A worker counts as stuck only when its events
