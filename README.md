@@ -47,10 +47,16 @@ owns.
 [project]
 authored_content = ["README.md", "docs/**/*.md"]
 integration_branch = "main"
+public_check = true
 ```
 
 `integration_branch` is owned by the
 [work model](.github/skills/work-model/SKILL.md#integration-branch).
+
+`public_check = true` makes `work_tickets.py integrate` run se's
+[public check](AGENTS.md#public-safety) on the merged tree and every merged commit before it pushes
+the integration branch; on a failure it pushes nothing, restores the pre-merge branch and
+escalates. Default `false`, for projects without a public check.
 
 `work_tickets.py guard` checks deleted sentences in the configured project paths. Each configured
 glob is relative to the project root. The field report must name every removed sentence in its

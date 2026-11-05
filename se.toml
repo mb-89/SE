@@ -1,6 +1,8 @@
 [project]
 # The branch the integrator writes; the new process lives on `se` while the old one lives on `main`.
 integration_branch = "se"
+# Every push to the integration branch runs se's public check first (README "Project settings").
+public_check = true
 authored_content = [
     "AGENTS.md",
     "README.md",

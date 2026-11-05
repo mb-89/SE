@@ -1746,11 +1746,14 @@ def integration_fakes(monkeypatch, head: str) -> list[list[str]]:
     return calls
 
 
-def test_integrate_writes_the_configured_integration_branch_and_leaves_main(main_checkout, monkeypatch):
+@pytest.mark.parametrize("leak", [False, True], ids=["clean", "leak"])
+def test_integrate_writes_the_configured_integration_branch_and_leaves_main(
+        main_checkout, monkeypatch, leak):
     origin = main_checkout.parent / "origin.git"
     git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
     git_ok("-C", str(main_checkout), "switch", "-q", "-c", "se")
-    (main_checkout / "se.toml").write_text('[project]\nintegration_branch = "se"\n', encoding="utf-8")
+    (main_checkout / "se.toml").write_text(
+        '[project]\nintegration_branch = "se"\npublic_check = true\n', encoding="utf-8")
     git_ok("-C", str(main_checkout), "add", "se.toml")
     git_ok("-C", str(main_checkout), "commit", "-q", "-m", "integrate into se")
     git_ok("-C", str(main_checkout), "push", "-q", "-u", "origin", "se")
@@ -1761,7 +1764,8 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(main
     worker = main_checkout.parent / "worker"
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
     work_tickets.initialize(worker)
-    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    content = ("/" + "home/alice/repo\n") if leak else "worker\n"
+    (worker / "worker.txt").write_text(content, encoding="utf-8")
     git_ok("-C", str(worker), "add", "worker.txt")
     git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
     git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
@@ -1770,14 +1774,19 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(main
     ).stdout.strip()
     integration_fakes(monkeypatch, head)
 
-    assert work_tickets.integration_branch(main_checkout) == "se"
-    work_tickets.integrate(main_checkout, 8, None, "suite", None)
-
     def origin_contains(ref: str) -> bool:
         return subprocess.run(
             ["git", "--git-dir", str(origin), "merge-base", "--is-ancestor", head, ref],
             capture_output=True, check=False,
         ).returncode == 0
+
+    assert work_tickets.integration_branch(main_checkout) == "se"
+    if leak:
+        with pytest.raises(work_tickets.QueueError, match="Public check failed.*nothing was pushed"):
+            work_tickets.integrate(main_checkout, 8, None, "suite", None)
+        assert not origin_contains("refs/heads/se")
+        return
+    work_tickets.integrate(main_checkout, 8, None, "suite", None)
 
     assert origin_contains("refs/heads/se")
     assert not origin_contains("refs/heads/main")
