@@ -202,7 +202,9 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
   whatever the project's tests need);
 - the focused and the complete test commands, including gated test tiers if there are any;
 - the commit identity its commits carry where the machine sets no `public_identity`, and its
-  public check, if it has one, with the hooks that run it;
+  public check, if it has one, with the hooks that run it and `public_check = true` in its
+  `se.toml` ([Project settings](../../../README.md#project-settings)), which gates every push to
+  the integration branch on it;
 - its integration project checks as JSON argument arrays passed to `integrate --check-command`, for
   example `--check-command '[["uv", "run", "pytest", "-q"], ["uv", "run", "python", "check.py"]]'`.
   The commands run without a shell. Add `--check-command-temporary-directory` when every command
@@ -236,7 +238,11 @@ integrator_session = "<session>"
 **Commit identity and public check**: every role commits as `public_identity` where the machine
 sets it (the [Modules guide](../../../README.md#machine-local-selocaltoml) owns what it pins), else
 as the identity the project's `AGENTS.md` names. Claude's cloud has no `~/.se/local.toml`, so there
-`public_identity` is unset and the project's identity applies. A fresh clone, such as a cloud
+`public_identity` is unset and the project's identity applies. The identity goes into the
+checkout's git config at the start, so merges carry it as well as commits: where `public_identity`
+is set, `work_tickets.py sync` writes it (`user.name`, `user.email`); where it is unset, the role
+runs `git config user.name` and `git config user.email` with the project's identity before its
+first commit. A fresh clone, such as a cloud
 session's, runs the project's setup command before its first commit, so the project's hooks run its
 public check on every commit and push. Commit messages carry no tracker numbers (`#<n>`): a commit
 outlives its tracker. No session prompt repeats any of this.
@@ -275,6 +281,9 @@ public mirror push it runs the project check command and refuses that push if th
 - A session may start in another checkout than the one it works in: `cd` to its worktree in every
   command, use absolute paths for every read and edit and for .NET file APIs (`[IO.File]::...`
   resolves relative paths against the process directory), and run git as `git -C <worktree>`.
+- Wait on a background process by its process id (`kill -0 <pid>` in a loop; PowerShell
+  `Get-Process -Id <pid>`), never by `pgrep -f <pattern>`: the pattern matches the waiting shell's
+  own command line, so the wait never ends.
 - Windows PowerShell 5.1: judge native commands by exit code only; pass every issue, comment and
   pull-request body with `--body-file` (quotes or spaces inside native arguments break the call);
   no inline jq expressions with spaces (use `--json` and `ConvertFrom-Json`).
@@ -301,7 +310,9 @@ owns what changes.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
     like the work issue and based on the integration branch.
   - `integrate`: merge the pull request's branch into the newest integration branch locally, run
-    the complete suite, push the integration branch, then close the issues with the
+    the complete suite and, where `se.toml` sets `public_check`, the public check
+    (`public_check.py --rev HEAD --range <pre-merge>..HEAD`), refusing on a failure, push the
+    integration branch, then close the issues with the
     `Integrated in …` comment.
 - **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
   approval prompt no one answers; a role works with the repositories its session started with.

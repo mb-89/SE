@@ -21,7 +21,8 @@ names or user profile paths, no personal e-mail addresses, no device or server n
 enterprise hosts. Use generic names (`<name>`, `alice`, `example.com`). Work-specific content belongs in
 separate repositories that use se as a module. Commit with a generic identity: a name without an e-mail
 domain or a `users.noreply.github.com` address; never a real e-mail address. Where the machine sets no
-`public_identity`, commit as `mb <mb>` (`git -c user.name=mb -c user.email=mb commit ...`).
+`public_identity`, commit as `mb <mb>`: set it in the checkout before the first commit
+(`git config user.name mb` and `git config user.email mb`), so merges carry it too.
 
 `scripts/public_check.py` enforces the rule on tracked file names and contents (binary files as bytes),
 commit messages and author and committer identities. It prints locations and pattern labels, never the
@@ -36,6 +37,9 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   file named by `SE_PRIVATE_TERMS`; one case-insensitive regex per line, `#` comments. It is never
   committed, and hits name only its line number. Without it the check warns and runs the generic
   patterns only, as on a public CI host.
+- One se version per check: every verdict names the se commit that ran it, and a repository that
+  pins se (`ref` of `[modules.se]` in its `se.toml`) is refused with exit code 2 when the running se
+  is not at that pin, naming both commits; `scripts/se_modules.py sync` brings the clone there.
 - False positives: reasoned entries in `.public-check-allow`, whose header owns their format and rules.
 - Hooks: run `scripts/setup.ps1` or `scripts/setup.sh` once per clone. They set `core.hooksPath` to
   `.githooks`: pre-commit checks the staged content, commit-msg the message and identity, pre-push

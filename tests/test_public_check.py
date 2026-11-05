@@ -14,6 +14,8 @@ import pytest
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = SE_ROOT / "scripts" / "public_check.py"
+SE_HEAD = subprocess.run(["git", "-C", str(SE_ROOT), "rev-parse", "HEAD"],
+                         capture_output=True, text=True, check=True).stdout.strip()
 BS = "\\"
 AT = "@"
 
@@ -152,8 +154,24 @@ def test_clean_repository_passes(repo: Path) -> None:
     commit(repo, {"README.md": "Paths look like C:" + BS + "Users" + BS + "<name>.\n"})
     result = run_check(cwd=repo)
     assert result.returncode == 0, result.stdout
-    assert "public-check: passed (1 files, 1 commits)" in result.stdout
+    assert f"public-check: passed (1 files, 1 commits, se {SE_HEAD[:7]})" in result.stdout
     assert "warning" not in result.stdout
+
+
+def test_a_check_at_the_pinned_se_passes(repo: Path) -> None:
+    commit(repo, {"se.toml": f'[modules.se]\nurl = "https://example.com/se.git"\nref = "{SE_HEAD}"\n'})
+    result = run_check(cwd=repo)
+    assert result.returncode == 0, result.stdout
+
+
+def test_a_stale_se_refuses_naming_both_commits_and_the_remedy(repo: Path) -> None:
+    pin = "0123456" + "0" * 33
+    commit(repo, {"se.toml": f'[modules.se]\nurl = "https://example.com/se.git"\nref = "{pin}"\n'})
+    result = run_check(cwd=repo)
+    assert result.returncode == 2, result.stdout
+    assert (f"public-check: error (se {SE_HEAD[:7]}): se.toml pins se at 0123456, but this check "
+            f"runs se {SE_HEAD[:7]}; bring the se clone to the pin") in result.stdout
+    assert "passed" not in result.stdout
 
 
 def test_file_hit_names_location_and_label_only(repo: Path) -> None:
@@ -269,7 +287,7 @@ def test_staged_scan_reads_the_index(repo: Path) -> None:
     staged = run_check("--repo", str(repo), "--staged")
     assert staged.returncode == 1
     assert "README.md:1:1: user-profile-path" in staged.stdout
-    assert "(1 files, 0 commits)" in staged.stdout
+    assert f"(1 files, 0 commits, se {SE_HEAD[:7]})" in staged.stdout
 
 
 def test_rev_scan_reads_the_commit_tree(repo: Path) -> None:
@@ -287,7 +305,7 @@ def test_message_file_scan(repo: Path, tmp_path: Path) -> None:
     result = run_check("--repo", str(repo), "--message-file", str(message))
     assert result.returncode == 1
     assert result.stdout.splitlines()[0] == "commit message:3: user-profile-path"
-    assert "(0 files, 1 commits)" in result.stdout
+    assert f"(0 files, 1 commits, se {SE_HEAD[:7]})" in result.stdout
 
 
 def allow_repo(repo: Path, allow: str) -> None:
@@ -422,7 +440,7 @@ def test_pre_push_hook_checks_pushed_commits(hooked: Path, tmp_path: Path) -> No
     result = subprocess.run(push, capture_output=True, text=True)
     assert result.returncode != 0
     assert "message:1: enterprise-github-host" in result.stdout + result.stderr
-    assert "(1 files, 1 commits)" in result.stdout + result.stderr
+    assert f"(1 files, 1 commits, se {SE_HEAD[:7]})" in result.stdout + result.stderr
 
 
 def test_se_itself_passes() -> None:
