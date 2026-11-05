@@ -1,6 +1,6 @@
 ---
 name: catch-up
-description: 'Catch up on a repository and drive it to a finished, committed state as dispatcher. Use when: catching up, resuming after a break or handover, "where are we", "what is still open", "continue the work", "finish this", "get it to a finished state". Reads handover, git, issue and session history, turns every worktree-able package into a work issue with an independent worker session, files work for other repositories as issues there, presents user decisions and escalations one at a time as tables, applies answers, has a dedicated integrator merge field-reported pull requests, rebuild and release, and updates the handover.'
+description: 'Catch up on a repository and drive it to a finished, committed state as dispatcher. Use when: catching up, resuming after a break or handover, "where are we", "what is still open", "continue the work", "finish this", "get it to a finished state". Reads handover, git, issue and session history, turns every worktree-able package into a work issue with an independent worker session, files work for other repositories as issues there, presents user decisions and escalations with the decision skill, applies answers, has a dedicated integrator merge field-reported pull requests, rebuild and release, and updates the handover.'
 argument-hint: 'Optional focus, e.g. "only the documentation" or "finish release 1.2"'
 ---
 
@@ -35,15 +35,15 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
 - **In autopilot, put everything the user must read into the `task_complete` summary.** Text written
   before the call may not be shown.
 - **Every turn ends with exactly one of these, never neither:**
-  - the next open decision, asked with the `ask_user` tool when available (one question, options as
-    enum with the recommended one as default, the context and option table in the message), or
+  - the next open decision, presented as the [decision](../decision/SKILL.md) skill says and asked
+    with the `ask_user` tool when available, or
   - the explicit sentence "No input needed from you right now", plus what happens next (which workers
     run, what you integrate when they report).
-  Keep the count visible ("Decision 2 of 7"). Decisions that come up while integrating join the queue.
+  Decisions that come up while integrating join the queue.
   The user who starts this skill is present, even in autopilot and even if `ask_user` returns "user not
   available". Never take a default on the user's behalf. If `ask_user` does not reach the user, end
-  the turn with the decision (context, option table, recommended option, "Reply A/B/C") under a heading
-  "Your input needed" at the end of the `task_complete` summary.
+  the turn with the decision under a heading "Your input needed" at the end of the `task_complete`
+  summary.
 - No backwards compatibility unless the user asks for it; no bookkeeping files (hash receipts, index
   snapshots, adjudication JSON). Commit freely, with the environment's
   [`commit_trailer`](../work-model/SKILL.md#what-the-project-provides) if it sets one.
@@ -109,19 +109,16 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
      repository's integrator. The integrator starts workers for unblocked packages in fresh
      worktrees from the newest `main` (the work model's [Worktrees](../work-model/SKILL.md#worktrees)).
    - Tell the user in one table: repository → integrator session → work issue.
-7. **Present decisions one at a time** and end the turn after each (or say that none are needed):
-   - Context in 1–3 sentences (what exists, who uses it, what was found in code or history).
-   - One table: `Option | What it means | What we gain | What we lose`, recommended option marked.
-   - Ask with `ask_user` (fallback: a one-letter answer in the final message). Apply the answer by
-     updating the source issue or dispatching a worker, mark the source item done, steer the
-     integrator to merge, then ask the next decision.
-   - If the answer changes the requirement, research it (git history, old code), then dispatch.
+7. **Present decisions** with the [decision](../decision/SKILL.md) skill and end the turn after
+   each (or say that none are needed). Apply the answer by updating the source issue or dispatching
+   a worker, mark the source item done, steer the integrator to merge, then present the next one.
+   If the answer changes the requirement, research it (git history, old code), then dispatch.
 8. **Integration runs through the [integrator](../../agents/integrator.agent.md)**, triggered as the
    work model's [scheduling rules](../work-model/SKILL.md#freshness-dependencies-and-scheduling)
    say; start each of your own turns with the same `queue` check. You tell it the order when shared
    files are involved (owners first) and anything to watch. File each field report's "Tickets for
    other repositories" as issues in that repository. Escalated issues are decisions: present them
-   to the user one at a time (step 7).
+   to the user as decisions (step 7).
 9. **Close**: when everything is integrated, ask the user to approve the release; the integrator
    releases (version, tag, push). Update the single open `handover` issue (state, open issues,
    running and unintegrated branches, parked decisions, how to resume); close the previous one.
