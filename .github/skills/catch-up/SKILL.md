@@ -45,8 +45,8 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
   the turn with the decision (context, option table, recommended option, "Reply A/B/C") under a heading
   "Your input needed" at the end of the `task_complete` summary.
 - No backwards compatibility unless the user asks for it; no bookkeeping files (hash receipts, index
-  snapshots, adjudication JSON). Commit freely; trailer
-  `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`.
+  snapshots, adjudication JSON). Commit freely, with the environment's
+  [`commit_trailer`](../work-model/SKILL.md#what-the-project-provides) if it sets one.
 
 ## Procedure
 

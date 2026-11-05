@@ -26,16 +26,16 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   (re-read with its comments before each ticket, so it can change in flight) and goes out through
   its pull request and its field-report issue. What it needs outside the box goes into the field
   report.
-- **Out**: a pushed branch, a pull request to `main`, a field-report issue from `field-report.md`
+- **Out**: a pushed branch, a pull request to the integration branch, a field-report issue from `field-report.md`
   (title `field-report: <branch>`, label `field-report`) and one notification to the integrator.
   The field report holds what was not done, decisions with confidence, spec gaps, a short retro
   and tickets for other repositories. Each "Tickets for other repositories" entry is one reusable
   capability and lists every source file it replaces.
-- **Integrator**: a subtype of worker and the only writer of `main`.
+- **Integrator**: a subtype of worker and the only writer of the integration branch.
 - **Dispatcher**: the only session the human talks to. The dispatcher never writes any repository.
   It may file work issues for and dispatch into any repository by starting or messaging that
   repository's integrator. Each repository has exactly one integrator, the only writer of its
-  `main`. The integrator starts that repository's workers. Workers stay in their box; a worker
+  integration branch. The integrator starts that repository's workers. Workers stay in their box; a worker
   records cross-repository needs in its field report.
 - **Only the dispatcher talks to the human.** Workers and integrators never ask the human anything
   and never wait for an answer, an approval or a decision: they decide what they may decide,
@@ -43,10 +43,32 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 - **Escalation**: label `escalated`, the question in a comment, to the integrator one level up or
   to the dispatcher at the top level, which presents it to the human. The answer arrives as an
   issue comment or a new request, never as a reply anyone waits for.
-- Issues are read and written with `gh`; bodies go through `--body-file`. Branches and `main` are
-  pushed; a release needs the human's approval, obtained by the dispatcher.
+- **Messages travel only up and down the tree**: a session messages only the session that started
+  it and the sessions it started. A sideways message (one integrator to another) stops at a
+  permission prompt in Claude's cloud, so news for another repository goes up to the dispatcher,
+  which passes it down to that repository's integrator.
+- **Comments carry the host's footer**: where the host requires a footer on every GitHub comment
+  (Claude's cloud does), each fixed comment text a role or command gives (`Started: …`,
+  `Integrated in …`, an escalation) is followed by that footer, unchanged. Nothing else repeats
+  this rule.
+- Issues are read and written with `gh`; bodies go through `--body-file`. Branches and the integration
+  branch are pushed; a release needs the human's approval, obtained by the dispatcher.
 - Retros use `retro.md`; each improvement names the agent definition, template, skill or script
   it changes, and becomes an ordinary work issue.
+
+## Integration branch
+
+The integration branch is the one branch the integrator writes and every worker branches from,
+merges and opens its pull request against. It is `main` unless the project names another in
+`se.toml`, for example while an older process still lives on `main`:
+
+```toml
+[project]
+integration_branch = "se"
+```
+
+`work_tickets.py` reads it from there for `sync`, `start`, `deliver`, `guard` and `integrate`;
+`integrate` refuses a main checkout that is not on it. Below, `main` means the integration branch.
 
 ## Rules for all roles
 
@@ -195,6 +217,7 @@ override the settings below, and `work_tickets.py config` shows what is in effec
 ```toml
 integrator_session = "<integrator session to notify at delivery>"
 public_identity = "mb <mb>"
+commit_trailer = "<trailer line>" # optional; none by default
 
 [trackers] # repository name to tracker host/owner/repo; never commit this table
 "<repository name>" = "<host>/<owner>/<repo>"
@@ -205,6 +228,11 @@ public_identity = "mb <mb>"
 [repos."<host>/<owner>/<repo>"]   # optional overrides for one repository
 integrator_session = "<session>"
 ```
+
+`commit_trailer` is the one place that names a commit trailer: an environment that requires one
+(an agent host's co-author line) sets it on its machine, every role adds it as the last line of
+each commit it makes, and `integrate` adds it to its merge commits. Unset, commits carry no trailer,
+as a project's public rule may require.
 
 The `--repo` resolution order is argument, `[trackers]`, then `origin`. A tracker is selected by
 the repository name and is where that repository's work issues and field reports live. Work issues

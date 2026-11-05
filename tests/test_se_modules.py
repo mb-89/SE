@@ -500,3 +500,12 @@ def test_script_runs_as_a_command(world):
     failed = subprocess.run([*args, "path", "nope"], capture_output=True, text=True)
     assert failed.returncode == 1
     assert "error: unknown module(s): nope" in failed.stderr
+
+
+def test_readme_spells_the_module_command_one_way():
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    invocations = [line for line in readme.splitlines() if "se_modules.py " in line
+                   and not line.startswith(("-", "`"))]
+    assert invocations and all(
+        line.startswith("uv run python <se>/scripts/se_modules.py ") for line in invocations
+    ), invocations

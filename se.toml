@@ -1,4 +1,6 @@
 [project]
+# The branch the integrator writes; the new process lives on `se` while the old one lives on `main`.
+integration_branch = "se"
 authored_content = [
     "AGENTS.md",
     "README.md",
