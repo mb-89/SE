@@ -1020,6 +1020,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
     git_ok("-C", str(worker), "add", "worker.txt")
     git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
     head = subprocess.run(
         ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
@@ -1096,6 +1097,69 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     ]
     assert all("PR #7. Suite: 214 passed." in body for body in bodies)
     assert not worker.exists()
+    assert subprocess.run(
+        ["git", "-C", str(main_checkout), "rev-parse", "--verify", "feature/worker"],
+        capture_output=True, text=True, check=False,
+    ).returncode != 0
+    assert subprocess.run(
+        ["git", "--git-dir", str(main_checkout.parent / "origin.git"), "show-ref", "--verify",
+         "refs/heads/feature/worker"],
+        capture_output=True, text=True, check=False,
+    ).returncode != 0
+
+
+def test_delete_merged_branch_keeps_an_unmerged_tip(main_checkout, capsys):
+    git_ok("-C", str(main_checkout), "checkout", "-q", "-b", "feature/unmerged")
+    (main_checkout / "unmerged.txt").write_text("unmerged\n", encoding="utf-8")
+    git_ok("-C", str(main_checkout), "add", "unmerged.txt")
+    git_ok("-C", str(main_checkout), "commit", "-q", "-m", "unmerged")
+    head = subprocess.run(
+        ["git", "-C", str(main_checkout), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    git_ok("-C", str(main_checkout), "checkout", "-q", "main")
+
+    work_tickets.delete_merged_branch(main_checkout, "feature/unmerged", head)
+
+    assert subprocess.run(
+        ["git", "-C", str(main_checkout), "rev-parse", "--verify", "feature/unmerged"],
+        capture_output=True, text=True, check=False,
+    ).returncode == 0
+    assert "main does not contain its tip" in capsys.readouterr().err
+
+
+def test_delete_merged_branch_keeps_origin_commits_beyond_reviewed_head(
+        main_checkout, capsys):
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    (worker / "worker.txt").write_text("reviewed\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "reviewed")
+    reviewed_head = subprocess.run(
+        ["git", "-C", str(worker), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    git_ok("-C", str(main_checkout), "merge", "--no-ff", "-q", "feature/worker", "-m", "merge worker")
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", "main")
+    (worker / "worker.txt").write_text("newer\n", encoding="utf-8")
+    git_ok("-C", str(worker), "commit", "-aq", "-m", "newer")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    newer_head = subprocess.run(
+        ["git", "-C", str(worker), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+
+    work_tickets.delete_merged_branch(main_checkout, "feature/worker", reviewed_head)
+
+    origin_head = subprocess.run(
+        ["git", "--git-dir", str(main_checkout.parent / "origin.git"), "rev-parse",
+         "refs/heads/feature/worker"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    assert origin_head == newer_head
+    assert "retained on origin" in capsys.readouterr().err
 
 
 def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch):
@@ -1219,6 +1283,8 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
     git_ok("-C", str(worker), "add", "worker.txt")
     git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    git_ok("-C", str(worker), "push", "-q", "mirror", "feature/worker")
     (main_checkout / "synced.txt").write_text("synced\n", encoding="utf-8")
     git_ok("-C", str(main_checkout), "add", "synced.txt")
     git_ok("-C", str(main_checkout), "commit", "-q", "-m", "main change")
@@ -1326,6 +1392,10 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     ]
     assert all("PR #7. Suite: 214 passed." in body for body in bodies)
     assert not worker.exists()
+    assert subprocess.run(
+        ["git", "--git-dir", str(mirror), "show-ref", "--verify", "refs/heads/feature/worker"],
+        capture_output=True, text=True, check=False,
+    ).returncode == 0
 
 
 @pytest.mark.parametrize(
