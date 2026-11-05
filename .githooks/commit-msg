@@ -1,0 +1,3 @@
+#!/bin/sh
+# Public-safety check of the commit message and the author and committer identity.
+exec "$(dirname "$0")/public-check" --message-file "$1"

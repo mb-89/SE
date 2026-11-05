@@ -1,0 +1,19 @@
+[project]
+name = "se"
+version = "0.1.0"
+description = "Systematic engineering: a project-neutral process plugin for AI agents."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
