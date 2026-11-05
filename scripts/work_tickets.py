@@ -1785,6 +1785,132 @@ def draft_field_report(root: Path, file: Path, pr: int | None) -> int | None:
     return pr
 
 
+def ordered_sections(body: str) -> list[tuple[str, list[str]]]:
+    """The body's `## ` sections in order, outside code fences; the header above them is ``""``."""
+    sections: list[tuple[str, list[str]]] = [("", [])]
+    fenced = False
+    for line in body.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        heading = None if fenced else SECTION_PATTERN.fullmatch(line)
+        if heading:
+            sections.append((heading.group(1).strip(), []))
+        else:
+            sections[-1][1].append(line)
+    return sections
+
+
+def table_cells(line: str) -> list[str]:
+    """A Markdown table row's cells; an escaped pipe `\\|` stays inside its cell."""
+    return [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+
+
+def label_pattern(label: str) -> re.Pattern[str]:
+    """A template field label such as **Tested against `<integration branch>`:** as a regex."""
+    parts = re.split(r"<[^<>\n]+>", label)
+    return re.compile(r"\*\*" + r"[^*\n]+?".join(map(re.escape, parts)) + r"\*\*")
+
+
+def field_report_problems(root: Path, body: str, issue_body: str | None) -> list[str]:
+    """Where `body` departs from the field-report template, the one owner of its form.
+
+    Every section the template has, every bold field label it writes (`**Result:**`,
+    `**Commit groupings:**`), every table's header row and width, the header's placeholders and
+    Result, and, given the work issue's body, the evidence gate. A section whose template text
+    allows "None" may say only that.
+    """
+    _, template = issue_template(root, "field-report")
+    report = {heading.casefold(): lines for heading, lines in ordered_sections(body)}
+    problems: list[str] = []
+    for heading, raw in ordered_sections(template):
+        where = "header (above the first section)" if not heading else f'section "## {heading}"'
+        lines = report.get(heading.casefold())
+        if lines is None:
+            problems.append(f'missing {where}; the template has the heading "## {heading}"')
+            continue
+        text = HTML_COMMENT_PATTERN.sub("", "\n".join(lines))
+        expected = HTML_COMMENT_PATTERN.sub("", "\n".join(raw)).splitlines()
+        if '"None"' in "\n".join(raw) and text.strip().rstrip(".").casefold() == "none":
+            continue
+        for line in expected:
+            for label in re.findall(r"\*\*([^*\n]+?:)\*\*", line):
+                if label_pattern(label).search(text) is None:
+                    problems.append(
+                        f'{where}: missing "**{label}**"; the template\'s line: {line.strip()}'
+                    )
+        template_header = next((line.strip() for line in expected if line.strip().startswith("|")), None)
+        if template_header is not None:
+            problems.extend(table_problems(where, template_header, text))
+    header = "\n".join(report[""])
+    problems.extend(
+        f'header (above the first section): unfilled placeholder {placeholder}; '
+        "replace it with its value"
+        for placeholder in field_report_placeholders(root)
+        if placeholder in header
+    )
+    if FIELD_REPORT_RESULT_PATTERN.search(header) is None:
+        problems.append(
+            'header (above the first section): Result must be exactly complete or partial, '
+            'as "**Result:** complete" or "**Result:** partial"'
+        )
+    if issue_body is not None:
+        problems.extend(field_report_evidence_errors(issue_body, body))
+    return problems
+
+
+def table_problems(where: str, template_header: str, text: str) -> list[str]:
+    width = len(table_cells(template_header))
+    rows = [line.strip() for line in text.splitlines() if line.strip().startswith("|")]
+    if not rows:
+        return [f"{where}: missing its table; the template's header row: {template_header}"]
+    problems = []
+    if [cell.casefold() for cell in table_cells(rows[0])] != [
+        cell.casefold() for cell in table_cells(template_header)
+    ]:
+        problems.append(
+            f"{where}: table header {rows[0]} does not match the template's {template_header}"
+        )
+    problems.extend(
+        f"{where}: table row {row} has {len(table_cells(row))} columns; "
+        f"the template's table has {width}: {template_header}"
+        for row in rows[1:]
+        if len(table_cells(row)) != width
+    )
+    return problems
+
+
+def field_report_error(name: str, problems: list[str]) -> QueueError:
+    template = TEMPLATES / "field-report.md"
+    return QueueError(
+        f"Field report {name} does not follow the template {template}:\n"
+        + "\n".join(f"- {problem}" for problem in problems)
+    )
+
+
+def check_field_report(root: Path, file: Path, issue_body_file: Path | None) -> None:
+    """Validate a field-report file against the template without GitHub."""
+    try:
+        body = file.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise QueueError(f"Cannot read field report {file}: {error}") from error
+    if issue_body_file is not None:
+        try:
+            issue_body = issue_body_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as error:
+            raise QueueError(f"Cannot read work issue body {issue_body_file}: {error}") from error
+    else:
+        snapshot = load_snapshot(root)
+        if snapshot is None:
+            raise QueueError(
+                "field-report --check needs the work issue's body for the evidence gate: "
+                "run intake, or save the work issue's body to a file and pass --issue-body <file>"
+            )
+        issue_body = str(snapshot["body"])
+    problems = field_report_problems(root, body, issue_body)
+    if problems:
+        raise field_report_error(file.name, problems)
+
+
 def field_report_placeholders(root: Path) -> list[str]:
     """The placeholders in field-report.md's header, its one owner: `<name>` or `#<name>`."""
     _, template = issue_template(root, "field-report")
@@ -1809,23 +1935,13 @@ def file_field_report(
     body = re.sub(r"\n{3,}", "\n\n", HTML_COMMENT_PATTERN.sub("", body)).strip() + "\n"
     if pr is None:
         pr = report_pull_request(root, issue, branch)
-    # The template keeps its fields in the header above the first section; below it a report
-    # may mention the placeholders themselves.
-    header = re.split(r"^## ", body, maxsplit=1, flags=re.MULTILINE)[0]
-    problems = [
-        f"unfilled placeholder {placeholder}"
-        for placeholder in field_report_placeholders(root)
-        if placeholder in header
-    ]
-    if FIELD_REPORT_RESULT_PATTERN.search(header) is None:
-        problems.append("header Result must be exactly complete or partial")
+    problems = field_report_problems(root, body, str(issue["body"]))
     if f"#{issue['number']}" not in body and issue["url"] not in body:
         problems.append(f"does not link work issue #{issue['number']}")
     if pr is not None and not re.search(rf"(?:#|/pull/){pr}\b", body):
         problems.append(f"does not link pull request #{pr}")
-    problems.extend(field_report_evidence_errors(str(issue["body"]), body))
     if problems:
-        raise QueueError(f"Field report {file.name}: {'; '.join(problems)}")
+        raise field_report_error(file.name, problems)
     repo = repo_arguments(tracker or issue["repo"])
     open_reports = json.loads(run_gh(root, [
         "issue", "list", "--state", "open", "--json", "number,title,url", "--limit", "200",
@@ -1866,17 +1982,6 @@ def escalate(root: Path, number: int, file: Path, repo: str | None) -> None:
     run_gh(root, ["issue", "edit", str(number), "--add-label", "escalated", *repo_arguments(repo)])
 
 
-FIELD_REPORT_SECTIONS = (
-    "user requirement (quoted back)",
-    "delivered",
-    "not delivered",
-    "decisions",
-    "spec gaps",
-    "tickets for other repositories",
-    "retro",
-)
-
-
 def field_report_references(body: str) -> tuple[int, int]:
     work = re.search(r"\bWork issue:\*{0,2}\s*#(\d+)\b", body, re.IGNORECASE)
     pull = re.search(r"\bPull request:\*{0,2}\s*#(\d+)\b", body, re.IGNORECASE)
@@ -1892,11 +1997,11 @@ def field_report_references(body: str) -> tuple[int, int]:
 
 def validate_field_report(root: Path, number: int, repo: str) -> tuple[dict[str, object], int, int]:
     report = fetch_issue(root, number, repo)
-    sections = markdown_sections(str(report["body"]))
-    missing = [heading for heading in FIELD_REPORT_SECTIONS if heading not in sections]
-    if missing:
-        raise QueueError("Field report is missing sections: " + ", ".join(missing))
     work, pull = field_report_references(str(report["body"]))
+    work_issue = fetch_issue(root, work, repo)
+    problems = field_report_problems(root, str(report["body"]), str(work_issue["body"]))
+    if problems:
+        raise field_report_error(f"#{number}", problems)
     return report, work, pull
 
 
@@ -2395,7 +2500,16 @@ def make_parser() -> argparse.ArgumentParser:
         help="create or update the field-report issue from a filled "
              ".github/ISSUE_TEMPLATE/field-report.md body")
     add_worktree_argument(report_parser)
-    report_parser.add_argument("--file", required=True, type=Path, help="Markdown body file")
+    report_target = report_parser.add_mutually_exclusive_group(required=True)
+    report_target.add_argument("--file", type=Path, help="Markdown body file")
+    report_target.add_argument(
+        "--check", type=Path, metavar="FILE",
+        help="only validate FILE against the template, without GitHub: its header lines, "
+             "sections, tables, field labels, placeholders and evidence gate")
+    report_parser.add_argument(
+        "--issue-body", type=Path, metavar="FILE",
+        help="with --check: the work issue's body for the evidence gate; default: intake's "
+             "snapshot")
     report_parser.add_argument(
         "--draft", action="store_true",
         help="write the template body with work issue, pull request, branch and user "
@@ -2541,7 +2655,12 @@ def main(argv: list[str] | None = None) -> int:
                 print_changes(changes)
             return 0
         if args.command == "field-report":
-            if args.draft:
+            if args.check is not None:
+                if args.draft:
+                    raise QueueError("field-report: --check and --draft exclude each other")
+                check_field_report(root, args.check, args.issue_body)
+                print(f"Field report {args.check.name} follows the template")
+            elif args.draft:
                 pr = draft_field_report(root, args.file, args.pr)
                 print(f"Drafted {args.file}" + ("" if pr else "; no pull request found yet"))
             else:
