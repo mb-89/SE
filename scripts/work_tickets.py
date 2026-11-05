@@ -807,9 +807,15 @@ def sync(root: Path) -> str:
         )
 
     identity = local_public_identity(root)
-    as_identity = (
-        ["-c", f"user.name={identity[0]}", "-c", f"user.email={identity[1]}"] if identity else []
-    )
+    if identity is not None:
+        for key, value in zip(("user.name", "user.email"), identity):
+            configured = git("config", key, value)
+            if configured.returncode != 0:
+                detail = configured.stderr.strip() or f"exit code {configured.returncode}"
+                raise QueueError(
+                    f"work_tickets.py sync: cannot set {key} from public_identity in "
+                    f"{local_config_path()}: {detail}"
+                )
     remote = remote_repo(root)
     if remote is not None:
         fetched = git("fetch", "origin")
@@ -819,7 +825,7 @@ def sync(root: Path) -> str:
         main_ref = f"origin/{integration_branch(root)}"
     else:
         main_ref = integration_branch(root)
-    merged = git(*as_identity, "merge", "--no-edit", main_ref)
+    merged = git("merge", "--no-edit", main_ref)
     if merged.returncode != 0:
         detail = merged.stderr.strip() or f"exit code {merged.returncode}"
         raise QueueError(
@@ -833,7 +839,7 @@ def sync(root: Path) -> str:
             detail = fetched.stderr.strip() or f"exit code {fetched.returncode}"
             raise QueueError(f"Cannot fetch mirror {mirror.remote}: {detail}")
         mirror_ref = f"{mirror.remote}/{mirror.branch}"
-        merged = git(*as_identity, "merge", "--no-edit", mirror_ref)
+        merged = git("merge", "--no-edit", mirror_ref)
         if merged.returncode != 0:
             detail = merged.stderr.strip() or f"exit code {merged.returncode}"
             raise QueueError(

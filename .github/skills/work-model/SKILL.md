@@ -236,7 +236,11 @@ integrator_session = "<session>"
 **Commit identity and public check**: every role commits as `public_identity` where the machine
 sets it (the [Modules guide](../../../README.md#machine-local-selocaltoml) owns what it pins), else
 as the identity the project's `AGENTS.md` names. Claude's cloud has no `~/.se/local.toml`, so there
-`public_identity` is unset and the project's identity applies. A fresh clone, such as a cloud
+`public_identity` is unset and the project's identity applies. The identity goes into the
+checkout's git config at the start, so merges carry it as well as commits: where `public_identity`
+is set, `work_tickets.py sync` writes it (`user.name`, `user.email`); where it is unset, the role
+runs `git config user.name` and `git config user.email` with the project's identity before its
+first commit. A fresh clone, such as a cloud
 session's, runs the project's setup command before its first commit, so the project's hooks run its
 public check on every commit and push. Commit messages carry no tracker numbers (`#<n>`): a commit
 outlives its tracker. No session prompt repeats any of this.

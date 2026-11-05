@@ -51,7 +51,8 @@ notify, if any.
 1. **Setup and sync**: in a fresh clone, first run the project's setup command that installs its
    hooks (the project's `AGENTS.md` names it), so its
    [public check](../skills/work-model/SKILL.md#what-the-project-provides) runs on every commit
-   and push. Run `work_tickets.py sync` before intake and before every ticket; it fetches and
+   and push, and set the [commit identity](../skills/work-model/SKILL.md#what-the-project-provides)
+   in the checkout. Run `work_tickets.py sync` before intake and before every ticket; it fetches and
    merges the newest [integration branch](../skills/work-model/SKILL.md#integration-branch)
    without rebasing a pushed branch.
 2. **Intake**: `work_tickets.py intake --issue <n>` writes one ticket per numbered requirement plus a

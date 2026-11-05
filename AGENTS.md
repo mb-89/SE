@@ -21,7 +21,8 @@ names or user profile paths, no personal e-mail addresses, no device or server n
 enterprise hosts. Use generic names (`<name>`, `alice`, `example.com`). Work-specific content belongs in
 separate repositories that use se as a module. Commit with a generic identity: a name without an e-mail
 domain or a `users.noreply.github.com` address; never a real e-mail address. Where the machine sets no
-`public_identity`, commit as `mb <mb>` (`git -c user.name=mb -c user.email=mb commit ...`).
+`public_identity`, commit as `mb <mb>`: set it in the checkout before the first commit
+(`git config user.name mb` and `git config user.email mb`), so merges carry it too.
 
 `scripts/public_check.py` enforces the rule on tracked file names and contents (binary files as bytes),
 commit messages and author and committer identities. It prints locations and pattern labels, never the
