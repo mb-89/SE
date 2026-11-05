@@ -34,6 +34,9 @@ REMOVED_PYTHON_TEST_PATTERN = re.compile(r"^-\s*def\s+(test_[A-Za-z0-9_]+)\s*\("
 REMOVED_JAVASCRIPT_TEST_PATTERN = re.compile(
     r"""^-\s*(?:test|it)\s*\(\s*(?P<quote>["'`])(?P<name>.*?)(?P=quote)"""
 )
+PUBLIC_REFERENCE_PATTERN = re.compile(r"#\d+\b")
+PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
+IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
 ISSUE_FIELDS = "number,title,body,url,updatedAt,comments,labels"
 ISSUE_SNAPSHOT = "issue.json"
 # The issue templates belong to se, wherever a project keeps it.
@@ -1668,6 +1671,93 @@ def restore_pre_merge(root: Path, commit: str) -> None:
         raise QueueError(f"Cannot restore pre-merge main: {detail}")
 
 
+def integration_merge_message(
+    root: Path, branch: str, work_number: int, report_number: int, pull_number: int, public: bool
+) -> str:
+    if not public:
+        return f"Integrate work issue #{work_number}, field report #{report_number}, PR #{pull_number}"
+    summary = subprocess.run(
+        ["git", "-C", str(root), "log", "--no-merges", "-1", "--format=%s", f"main..{branch}"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if summary.returncode != 0 or not summary.stdout.strip():
+        detail = summary.stderr.strip() or f"exit code {summary.returncode}"
+        raise QueueError(f"Cannot read the summary for {branch}: {detail}")
+    message = f"Integrate {branch}: {one_line(summary.stdout)}"
+    if PUBLIC_REFERENCE_PATTERN.search(message) or PUBLIC_HOST_PATTERN.search(message):
+        raise QueueError("Public merge messages cannot contain tracker references or host addresses")
+    return message
+
+
+def configured_public_identity(root: Path) -> tuple[str, str]:
+    configured = config_value("public_identity", remote_repo(root), None)
+    if configured:
+        identity = IDENTITY_PATTERN.fullmatch(configured)
+        if identity is None:
+            raise QueueError("public_identity must have the form Name <email>")
+        return identity["name"], identity["email"]
+    values: list[str] = []
+    for key in ("user.name", "user.email"):
+        result = subprocess.run(
+            ["git", "-C", str(root), "config", "--get", key],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            raise QueueError(
+                "A public mirror requires public_identity in the machine-local config "
+                "or a configured git user.name and user.email"
+            )
+        values.append(result.stdout.strip())
+    return values[0], values[1]
+
+
+def public_push_commits(root: Path, mirror: Mirror) -> list[str]:
+    remote_head = subprocess.run(
+        ["git", "-C", str(root), "ls-remote", mirror.remote, f"refs/heads/{mirror.branch}"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if remote_head.returncode != 0:
+        detail = remote_head.stderr.strip() or f"exit code {remote_head.returncode}"
+        raise QueueError(f"Cannot read public mirror {mirror.remote}: {detail}")
+    head = remote_head.stdout.split(maxsplit=1)
+    revision = f"{head[0]}..main" if head else "main"
+    commits = subprocess.run(
+        ["git", "-C", str(root), "rev-list", "--reverse", revision],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if commits.returncode != 0:
+        detail = commits.stderr.strip() or f"exit code {commits.returncode}"
+        raise QueueError(f"Cannot list commits for public mirror {mirror.remote}: {detail}")
+    return [commit for commit in commits.stdout.splitlines() if commit]
+
+
+def guard_public_push(root: Path, mirror: Mirror) -> None:
+    expected_name, expected_email = configured_public_identity(root)
+    for commit in public_push_commits(root, mirror):
+        details = subprocess.run(
+            [
+                "git", "-C", str(root), "show", "-s",
+                "--format=%B%x00%an%x00%ae%x00%cn%x00%ce", commit,
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+        )
+        if details.returncode != 0:
+            detail = details.stderr.strip() or f"exit code {details.returncode}"
+            raise QueueError(f"Cannot inspect {commit} before public push: {detail}")
+        values = details.stdout.rstrip("\n").split("\x00")
+        if len(values) != 5:
+            raise QueueError(f"Cannot parse {commit} before public push")
+        message, author_name, author_email, committer_name, committer_email = values
+        if PUBLIC_REFERENCE_PATTERN.search(message):
+            raise QueueError(f"Cannot push {commit} to a public mirror: message has a tracker reference")
+        if (author_name, author_email) != (expected_name, expected_email):
+            raise QueueError(f"Cannot push {commit} to a public mirror: author differs from public_identity")
+        if (committer_name, committer_email) != (expected_name, expected_email):
+            raise QueueError(
+                f"Cannot push {commit} to a public mirror: committer differs from public_identity"
+            )
+
+
 def integrate(
     root: Path,
     report_number: int,
@@ -1704,10 +1794,14 @@ def integrate(
     )
     if previous.returncode != 0 or not previous.stdout.strip():
         raise QueueError("Cannot determine pre-merge main")
+    mirrors = configured_mirrors(root)
     merged = subprocess.run(
         [
             "git", "-C", str(root), "merge", "--no-ff",
-            "-m", f"Integrate work issue #{work_number}, field report #{report_number}, PR #{pull_number}",
+            "-m", integration_merge_message(
+                root, branch, work_number, report_number, pull_number,
+                any(mirror.public for mirror in mirrors),
+            ),
             "-m", "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
             branch,
         ],
@@ -1731,7 +1825,6 @@ def integrate(
         integration_escalation(root, report_number, tracker, reason)
         raise QueueError(reason)
 
-    mirrors = configured_mirrors(root)
     has_public_mirror = any(mirror.public for mirror in mirrors)
     try:
         suite_result = run_project_command(root, suite_command, "Complete suite")
@@ -1754,6 +1847,8 @@ def integrate(
     for mirror in mirrors:
         if mirror.public and check_command:
             run_project_command(root, check_command, "Project check")
+        if mirror.public:
+            guard_public_push(root, mirror)
         pushed = subprocess.run(
             ["git", "-C", str(root), "push", mirror.remote, f"main:{mirror.branch}"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
