@@ -777,6 +777,10 @@ def sync(root: Path) -> str:
             capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
         )
 
+    identity = local_public_identity(root)
+    as_identity = (
+        ["-c", f"user.name={identity[0]}", "-c", f"user.email={identity[1]}"] if identity else []
+    )
     remote = remote_repo(root)
     if remote is not None:
         fetched = git("fetch", "origin")
@@ -786,7 +790,7 @@ def sync(root: Path) -> str:
         main_ref = "origin/main"
     else:
         main_ref = "main"
-    merged = git("merge", "--no-edit", main_ref)
+    merged = git(*as_identity, "merge", "--no-edit", main_ref)
     if merged.returncode != 0:
         detail = merged.stderr.strip() or f"exit code {merged.returncode}"
         raise QueueError(
@@ -800,7 +804,7 @@ def sync(root: Path) -> str:
             detail = fetched.stderr.strip() or f"exit code {fetched.returncode}"
             raise QueueError(f"Cannot fetch mirror {mirror.remote}: {detail}")
         mirror_ref = f"{mirror.remote}/{mirror.branch}"
-        merged = git("merge", "--no-edit", mirror_ref)
+        merged = git(*as_identity, "merge", "--no-edit", mirror_ref)
         if merged.returncode != 0:
             detail = merged.stderr.strip() or f"exit code {merged.returncode}"
             raise QueueError(
@@ -1979,13 +1983,24 @@ def integration_merge_message(
     return message
 
 
-def configured_public_identity(root: Path) -> tuple[str, str]:
+def local_public_identity(root: Path) -> tuple[str, str] | None:
+    """`public_identity` from ~/.se/local.toml as (name, email), or None when it is not set."""
     configured = config_value("public_identity", remote_repo(root), None)
-    if configured:
-        identity = IDENTITY_PATTERN.fullmatch(configured)
-        if identity is None:
-            raise QueueError("public_identity must have the form Name <email>")
-        return identity["name"], identity["email"]
+    if not configured:
+        return None
+    identity = IDENTITY_PATTERN.fullmatch(configured)
+    if identity is None:
+        raise QueueError(
+            f"public_identity in {local_config_path()} must have the form \"Name <email>\", "
+            f"for example \"mb <mb>\"; fix or remove it"
+        )
+    return identity["name"], identity["email"]
+
+
+def configured_public_identity(root: Path) -> tuple[str, str]:
+    identity = local_public_identity(root)
+    if identity is not None:
+        return identity
     values: list[str] = []
     for key in ("user.name", "user.email"):
         result = subprocess.run(
