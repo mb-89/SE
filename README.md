@@ -31,6 +31,8 @@ path = "skills"                              # optional: the part of the module 
   releases; `update` moves it.
 - `path`: optional relative directory inside the module; without it the whole module is used.
 - Module names use letters, digits, `.`, `_` and `-`. Other keys are errors.
+- The module named `se` is se itself; its pin is the se version the
+  [public check](AGENTS.md#public-safety) must run at.
 
 A common repository declares only modules that are public. Work-only modules on private hosts are
 declared the same way, in a work repository that consumes the common ones; a common repository never
