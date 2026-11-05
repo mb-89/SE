@@ -517,3 +517,9 @@ def test_the_worker_builds_an_acceptance_build_at_the_new_pin_before_code():
     worker = normalized(AGENTS / "worker.agent.md")
     assert "where the acceptance names a real build" in worker
     assert "build it at that pin before writing code" in worker
+
+
+def test_the_worker_may_work_without_the_ticket_queue_where_the_host_refuses_it():
+    worker = normalized(AGENTS / "worker.agent.md")
+    assert ("Where the host refuses the local ticket queue (`work_tickets.py init`, `create`, `move`, "
+            "`status`), it is optional: work without it and say so in the field report.") in worker
