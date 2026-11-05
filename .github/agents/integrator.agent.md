@@ -55,7 +55,8 @@ At the start of every turn run `work_tickets.py sync`, which sets the
 first, otherwise oldest first, and for "integrate <branch>" requests from the dispatcher (its
 design branch). Local workers announce a filed field report with one queued message
 (`field report #<n> filed for <branch>, PR #<m>`); cloud workers' reports arrive only through the
-`field-report` label, so always list the open ones too.
+`field-report` label, so always list the open ones too. A worker's delivery message can arrive
+minutes late: reconcile from GitHub first and treat a missing message as late, not lost.
 
 1. **Review** the field report, the worker's queue (`work_tickets.py status --worktree <its
    worktree>`: only `done/`, every acceptance item checked with evidence) and
@@ -72,7 +73,8 @@ design branch). Local workers announce a filed field report with one queued mess
    A merge conflict is reported with its files and left for you to resolve mechanically; a semantic
    conflict or work that no longer fits is escalated to the worker.
 3. **Test and regenerate** through `integrate` using the complete suite and project commands
-   declared by `AGENTS.md`; fix only integration breakage.
+   declared by `AGENTS.md` (where a pin moves, see
+   [suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)); fix only integration breakage.
 4. **Push** through `integrate`, which records the merge result after the checks pass, the
    project's public check included where `se.toml` sets `public_check`.
 5. **Close** through `integrate`, then hand the field report's "Tickets for other repositories" to

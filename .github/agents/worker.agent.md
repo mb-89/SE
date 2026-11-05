@@ -43,6 +43,8 @@ notify, if any.
   `[IO.File]::WriteAllText(<absolute path>, <text>, UTF8 without BOM)` or `Out-File -Encoding utf8`.
 - Load the test environment the project's `AGENTS.md` names, if any, in every shell that tests.
 - A missing tool is installed with the setup command the project's `AGENTS.md` names.
+- Where the host refuses the local ticket queue (`work_tickets.py init`, `create`, `move`,
+  `status`), it is optional: work without it and say so in the field report.
 
 ## Procedure
 
@@ -65,7 +67,10 @@ notify, if any.
    output a project command regenerates), build it at that pin before writing code, so a failure
    that is not yours shows before your change. Then regression test first, then the change, then the focused tests and the
    affected real command, and what the issue's acceptance names; run the complete suite only
-   where the acceptance names it, otherwise the integrator does. No backwards
+   where the acceptance names it, otherwise the integrator does (where a pin
+   moves, see [suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)). Where the container allows it,
+   run the affected real command once against the real outside service, not only against its
+   fake: only the real call shows what the service refuses. No backwards
    compatibility, no bookkeeping files. Record evidence in the ticket, check its acceptance items
    only with evidence, `move --to done`, and commit as the work model's
    [commit identity](../skills/work-model/SKILL.md#what-the-project-provides), with the environment's

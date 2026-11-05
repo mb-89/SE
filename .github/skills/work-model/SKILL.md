@@ -80,6 +80,10 @@ Framework repositories (the process plugin and document format/converter) carry 
 - Packages that touch the same hot file get one owner or run one after the other; the next one
   merges `main` before touching that file.
 - Work issues quote the user's requirement word for word; the field report quotes it back.
+- **Writing work issues**: an issue that renames an identifier says whether the code emits it or
+  only documents it; a docs issue that asks to point instead of restating quotes the text to
+  replace and names each note by its repository path; and a docs requirement names the test file
+  its regression test belongs in.
 - Every error message names where it comes from (the command, file or input) and, where
   possible, the remedy.
 - Work follows the user's priority order; no new investigation starts while a top-priority bug is
@@ -103,6 +107,11 @@ Framework repositories (the process plugin and document format/converter) carry 
   (`intake`, `refresh`, `sync`, `guard`, `deliver`, `escalate`, `block`, `ready`, `capacity`, `queue`,
   `start`, `close`, `config`); prose steps remain only for judgment. Escalations and product decisions stay
   manual.
+
+### Suite at a moved pin
+
+When the acceptance names the complete suite and a dependency pin moves, the suite runs at the new
+pin before the change, so failures that exist already are told apart from the change's own.
 
 ## Freshness, dependencies and scheduling
 
