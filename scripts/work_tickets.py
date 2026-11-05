@@ -16,7 +16,7 @@ import tempfile
 import tomllib
 from collections import Counter
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 STATES = ("todo", "held", "done")
@@ -34,6 +34,8 @@ REMOVED_PYTHON_TEST_PATTERN = re.compile(r"^-\s*def\s+(test_[A-Za-z0-9_]+)\s*\("
 REMOVED_JAVASCRIPT_TEST_PATTERN = re.compile(
     r"""^-\s*(?:test|it)\s*\(\s*(?P<quote>["'`])(?P<name>.*?)(?P=quote)"""
 )
+DIFF_FILE_PATTERN = re.compile(r"^diff --git a/(.*?) b/")
+SENTENCE_PATTERN = re.compile(r"[^.!?]+[.!?]+(?:[\"')\]]+)?")
 PUBLIC_REFERENCE_PATTERN = re.compile(r"#\d+\b")
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
 IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
@@ -652,6 +654,26 @@ def local_config() -> dict[str, object]:
         raise QueueError(f"Cannot read the machine-local config {path}: {error}") from error
 
 
+def authored_content_globs(root: Path) -> list[str]:
+    path = root / "pyproject.toml"
+    if not path.is_file():
+        return []
+    try:
+        config = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise QueueError(f"Cannot read the project config {path}: {error}") from error
+    tool = config.get("tool")
+    se = tool.get("se") if isinstance(tool, dict) else None
+    configured = se.get("authored_content") if isinstance(se, dict) else None
+    if configured is None:
+        return []
+    if not isinstance(configured, list) or not all(
+        isinstance(glob, str) and glob for glob in configured
+    ):
+        raise QueueError("tool.se.authored_content must be a list of non-empty globs")
+    return configured
+
+
 def config_value(key: str, repo: str | None, explicit: str | None) -> str | None:
     """The argument, else `[repos."<repo>"]` in ~/.se/local.toml, else its top-level key."""
     if explicit:
@@ -1118,6 +1140,47 @@ def deleted_tests(root: Path, branch: str) -> list[str]:
     return found
 
 
+def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
+    globs = authored_content_globs(root)
+    if not globs:
+        return []
+    result = subprocess.run(
+        ["git", "-C", str(root), "diff", "--unified=0", f"main...{branch}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"exit code {result.returncode}"
+        raise QueueError(f"Cannot diff main against {branch}: {detail}")
+    found: list[str] = []
+    path: str | None = None
+    for line in result.stdout.splitlines():
+        match = DIFF_FILE_PATTERN.match(line)
+        if match:
+            path = match.group(1)
+            continue
+        if (
+            path is None
+            or not line.startswith("-")
+            or line.startswith("---")
+            or not any(
+                PurePosixPath(path).match(glob)
+                or PurePosixPath(path).match(glob.replace("/**/", "/"))
+                for glob in globs
+            )
+        ):
+            continue
+        text = re.sub(r"^\s*(?:[-*+]\s+)?", "", line[1:])
+        for sentence in SENTENCE_PATTERN.findall(text):
+            removed = f"{path}: {sentence.strip()}"
+            if removed not in found:
+                found.append(removed)
+    return found
+
+
 def guard(root: Path, branch: str, field_report: Path) -> list[str]:
     if not field_report.is_file():
         raise QueueError(f"Field report is not a regular file: {field_report}")
@@ -1125,16 +1188,21 @@ def guard(root: Path, branch: str, field_report: Path) -> list[str]:
         report = field_report.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         raise QueueError(f"Cannot read field report {field_report}: {error}") from error
-    removed = deleted_tests(root, branch)
+    removed_tests = deleted_tests(root, branch)
+    removed_sentences = deleted_authored_sentences(root, branch)
     named = "\n".join(section_content(
-        report, "Removed behaviour and deleted or weakened tests"
+        report, "Removed behaviour, deleted or weakened tests, and authored prose"
     ))
-    missing = [name for name in removed if name not in named]
+    missing = [
+        *[name for name in removed_tests if name not in named],
+        *[sentence for sentence in removed_sentences if sentence not in named],
+    ]
     if missing:
         raise QueueError(
-            "Field report must name each deleted or renamed test: " + ", ".join(missing)
+            "Field report must name each deleted or renamed test and authored sentence: "
+            + ", ".join(missing)
         )
-    return removed
+    return [*removed_tests, *removed_sentences]
 
 
 def delivery_branch(root: Path, issue: dict[str, object]) -> str:
@@ -2067,7 +2135,7 @@ def make_parser() -> argparse.ArgumentParser:
     add_worktree_argument(sync_parser)
 
     guard_parser = subparsers.add_parser(
-        "guard", help="require the field report to name deleted or renamed tests"
+        "guard", help="require the field report to name removed protected content"
     )
     add_worktree_argument(guard_parser)
     guard_parser.add_argument("--branch", required=True, help="branch to compare with main")
@@ -2211,9 +2279,9 @@ def main(argv: list[str] | None = None) -> int:
             removed = guard(root, args.branch, args.field_report)
             if removed:
                 for name in removed:
-                    print(f"Field report names removed test: {name}")
+                    print(f"Field report names removed protected content: {name}")
             else:
-                print("No deleted or renamed tests found.")
+                print("No removed protected content found.")
             return 0
         if args.command == "deliver":
             session = config_value(
