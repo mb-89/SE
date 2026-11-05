@@ -1674,3 +1674,80 @@ def test_integrate_keeps_worktree_when_cleanup_refuses(main_checkout, monkeypatc
     assert worker.exists()
     assert "worker worktree was not removed" in capsys.readouterr().err
     assert [call[2] for call in calls if call[:2] == ["issue", "close"]] == ["5", "8"]
+
+def integration_fakes(monkeypatch, head: str) -> list[list[str]]:
+    report = {
+        "body": "**Work issue:** #5  **Pull request:** #7\n\n" + "\n\n".join(
+            f"## {heading}\nComplete." for heading in work_tickets.FIELD_REPORT_SECTIONS
+        )
+    }
+    calls: list[list[str]] = []
+    monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: calls.append(args) or (
+        json.dumps({"headRefName": "feature/worker", "headRefOid": head})
+        if args[:2] == ["pr", "view"] else ""))
+    monkeypatch.setattr(
+        work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args) or "")
+    monkeypatch.setattr(work_tickets, "run_project_command", lambda root, command, label: "1 passed")
+    monkeypatch.setattr(work_tickets, "guard", lambda root, branch, report: [])
+    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 0)
+    return calls
+
+
+def test_integrate_writes_the_configured_integration_branch_and_leaves_main(main_checkout, monkeypatch):
+    origin = main_checkout.parent / "origin.git"
+    git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
+    git_ok("-C", str(main_checkout), "switch", "-q", "-c", "se")
+    (main_checkout / "se.toml").write_text('[project]\nintegration_branch = "se"\n', encoding="utf-8")
+    git_ok("-C", str(main_checkout), "add", "se.toml")
+    git_ok("-C", str(main_checkout), "commit", "-q", "-m", "integrate into se")
+    git_ok("-C", str(main_checkout), "push", "-q", "-u", "origin", "se")
+    main_before = subprocess.run(
+        ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    work_tickets.initialize(worker)
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    head = subprocess.run(
+        ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    integration_fakes(monkeypatch, head)
+
+    assert work_tickets.integration_branch(main_checkout) == "se"
+    work_tickets.integrate(main_checkout, 8, None, "suite", None)
+
+    def origin_contains(ref: str) -> bool:
+        return subprocess.run(
+            ["git", "--git-dir", str(origin), "merge-base", "--is-ancestor", head, ref],
+            capture_output=True, check=False,
+        ).returncode == 0
+
+    assert origin_contains("refs/heads/se")
+    assert not origin_contains("refs/heads/main")
+    assert subprocess.run(
+        ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip() == main_before
+
+
+def test_integrate_refuses_a_checkout_off_the_integration_branch(main_checkout, monkeypatch):
+    (main_checkout / "se.toml").write_text('[project]\nintegration_branch = "se"\n', encoding="utf-8")
+    integration_fakes(monkeypatch, "0" * 40)
+
+    with pytest.raises(work_tickets.QueueError, match="not on the integration branch se.*switch se"):
+        work_tickets.integrate(main_checkout, 8, None, "suite", None)
+
+
+def test_integration_branch_defaults_to_main_and_rejects_an_empty_name(worktree):
+    assert work_tickets.integration_branch(worktree) == "main"
+    (worktree / "se.toml").write_text('[project]\nintegration_branch = ""\n', encoding="utf-8")
+    with pytest.raises(work_tickets.QueueError, match="se.toml.*remove it to use main"):
+        work_tickets.integration_branch(worktree)

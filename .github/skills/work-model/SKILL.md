@@ -26,16 +26,16 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   (re-read with its comments before each ticket, so it can change in flight) and goes out through
   its pull request and its field-report issue. What it needs outside the box goes into the field
   report.
-- **Out**: a pushed branch, a pull request to `main`, a field-report issue from `field-report.md`
+- **Out**: a pushed branch, a pull request to the integration branch, a field-report issue from `field-report.md`
   (title `field-report: <branch>`, label `field-report`) and one notification to the integrator.
   The field report holds what was not done, decisions with confidence, spec gaps, a short retro
   and tickets for other repositories. Each "Tickets for other repositories" entry is one reusable
   capability and lists every source file it replaces.
-- **Integrator**: a subtype of worker and the only writer of `main`.
+- **Integrator**: a subtype of worker and the only writer of the integration branch.
 - **Dispatcher**: the only session the human talks to. The dispatcher never writes any repository.
   It may file work issues for and dispatch into any repository by starting or messaging that
   repository's integrator. Each repository has exactly one integrator, the only writer of its
-  `main`. The integrator starts that repository's workers. Workers stay in their box; a worker
+  integration branch. The integrator starts that repository's workers. Workers stay in their box; a worker
   records cross-repository needs in its field report.
 - **Only the dispatcher talks to the human.** Workers and integrators never ask the human anything
   and never wait for an answer, an approval or a decision: they decide what they may decide,
@@ -43,10 +43,24 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 - **Escalation**: label `escalated`, the question in a comment, to the integrator one level up or
   to the dispatcher at the top level, which presents it to the human. The answer arrives as an
   issue comment or a new request, never as a reply anyone waits for.
-- Issues are read and written with `gh`; bodies go through `--body-file`. Branches and `main` are
-  pushed; a release needs the human's approval, obtained by the dispatcher.
+- Issues are read and written with `gh`; bodies go through `--body-file`. Branches and the integration
+  branch are pushed; a release needs the human's approval, obtained by the dispatcher.
 - Retros use `retro.md`; each improvement names the agent definition, template, skill or script
   it changes, and becomes an ordinary work issue.
+
+## Integration branch
+
+The integration branch is the one branch the integrator writes and every worker branches from,
+merges and opens its pull request against. It is `main` unless the project names another in
+`se.toml`, for example while an older process still lives on `main`:
+
+```toml
+[project]
+integration_branch = "se"
+```
+
+`work_tickets.py` reads it from there for `sync`, `start`, `deliver`, `guard` and `integrate`;
+`integrate` refuses a main checkout that is not on it. Below, `main` means the integration branch.
 
 ## Rules for all roles
 
