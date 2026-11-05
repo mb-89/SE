@@ -2157,7 +2157,8 @@ def run_suite(root: Path) -> str:
             "tests above faster",
             file=sys.stderr,
         )
-    summary = output.splitlines()[-1] if output else "passed"
+    report = result.stdout.strip() or output
+    summary = report.splitlines()[-1] if report else "passed"
     return f"{summary}; {timing}"
 
 
