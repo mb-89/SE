@@ -111,9 +111,6 @@ def load_local(config: Path) -> LocalConfig:
     if not config.is_file():
         return LocalConfig(paths={}, urls={})
     data = _read_toml(config)
-    unknown = sorted(set(data) - {"paths", "urls"})
-    if unknown:
-        raise ModuleError(f"{config}: unknown section(s) {', '.join(unknown)}")
     paths = {
         name: (config.parent / Path(value).expanduser()).resolve()
         for name, value in _string_table(config, data, "paths").items()
