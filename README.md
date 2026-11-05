@@ -45,8 +45,9 @@ Each machine may adapt modules without touching tracked files. se only reads thi
 writes it, and nothing from it is written into `se.toml`.
 
 The file is shared with `work_tickets.py`. `se_modules.py` owns `[paths]` and `[urls]`;
-`work_tickets.py` owns `integrator_session`, `[trackers]`, `[worktree_roots]`, `[repos]`, and
-`[mirrors]`, and `public_identity`. Each tool ignores sections owned by the other.
+`work_tickets.py` owns the top-level `integrator_session` and `public_identity` settings, and the
+`[trackers]`, `[worktree_roots]`, `[repos]`, and `[mirrors]` tables. Each tool ignores sections
+owned by the other.
 
 ```toml
 [paths]
