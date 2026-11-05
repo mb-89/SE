@@ -129,12 +129,45 @@ home = "~/src/home"
 
 @pytest.mark.parametrize(
     "text",
-    ["[paths]\nlib = 3\n", "[urls]\n'a' = 3\n", "[other]\nx = 1\n", "paths = 'x'\n"],
+    ["[paths]\nlib = 3\n", "[urls]\n'a' = 3\n", "[other]\nx = 1\n", "[path]\nx = 1\n", "paths = 'x'\n"],
 )
 def test_local_config_rejects_invalid(tmp_path, text):
     config = write(tmp_path / "local.toml", text)
     with pytest.raises(se_modules.ModuleError):
         se_modules.load_local(config)
+
+
+def test_local_config_accepts_work_ticket_sections(tmp_path):
+    config = write(
+        tmp_path / "local.toml",
+        """
+integrator_session = "agent-session:/example"
+public_identity = "mb <mb>"
+
+[paths]
+lib = "../lib"
+
+[urls]
+"https://example.com/" = "https://mirror.example.com/"
+
+[trackers]
+se = "tracker.example.com/example/se"
+
+[worktree_roots]
+se = "../worktrees"
+
+[repos."tracker.example.com/example/se"]
+integrator_session = "agent-session:/repository"
+
+[mirrors]
+se = [{ remote = "mirror", branch = "main", fetch = true, public = true }]
+""",
+    )
+
+    local = se_modules.load_local(config)
+
+    assert local.paths == {"lib": (tmp_path.parent / "lib").resolve()}
+    assert local.urls == {"https://example.com/": "https://mirror.example.com/"}
 
 
 def test_resolve_uses_existing_local_path(tmp_path):
