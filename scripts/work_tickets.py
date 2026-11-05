@@ -16,7 +16,7 @@ import tempfile
 import tomllib
 from collections import Counter
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 
 STATES = ("todo", "held", "done")
@@ -1155,8 +1155,10 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
     if result.returncode != 0:
         detail = result.stderr.strip() or f"exit code {result.returncode}"
         raise QueueError(f"Cannot diff main against {branch}: {detail}")
-    found: list[str] = []
+    removed_sentences: list[tuple[str, str]] = []
+    added_sentences: set[str] = set()
     path: str | None = None
+    in_html_comment = {"-": False, "+": False}
     for line in result.stdout.splitlines():
         match = DIFF_FILE_PATTERN.match(line)
         if match:
@@ -1164,21 +1166,44 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
             continue
         if (
             path is None
-            or not line.startswith("-")
-            or line.startswith("---")
-            or not any(
-                PurePosixPath(path).match(glob)
-                or PurePosixPath(path).match(glob.replace("/**/", "/"))
-                for glob in globs
-            )
+            or not line
+            or line[0] not in "-+"
+            or line.startswith(("---", "+++"))
+            or not any(authored_content_matches(path, glob) for glob in globs)
         ):
             continue
-        text = re.sub(r"^\s*(?:[-*+]\s+)?", "", line[1:])
+        prefix = line[0]
+        text = line[1:]
+        if "<!--" in text:
+            in_html_comment[prefix] = "-->" not in text
+            continue
+        if in_html_comment[prefix]:
+            if "-->" in text:
+                in_html_comment[prefix] = False
+            continue
+        text = re.sub(r"^\s*(?:[-*+]\s+)?", "", text)
         for sentence in SENTENCE_PATTERN.findall(text):
-            removed = f"{path}: {sentence.strip()}"
-            if removed not in found:
-                found.append(removed)
-    return found
+            normalized = sentence.strip()
+            if prefix == "-":
+                item = (path, normalized)
+                if item not in removed_sentences:
+                    removed_sentences.append(item)
+            else:
+                added_sentences.add(normalized)
+    return [
+        f"{removed_path}: {sentence}"
+        for removed_path, sentence in removed_sentences
+        if sentence not in added_sentences
+    ]
+
+
+def authored_content_matches(path: str, glob: str) -> bool:
+    pattern = re.escape(glob)
+    pattern = pattern.replace(r"\*\*/", r"(?:.*/)?")
+    pattern = pattern.replace(r"\*\*", r".*")
+    pattern = pattern.replace(r"\*", r"[^/]*")
+    pattern = pattern.replace(r"\?", r"[^/]")
+    return re.fullmatch(pattern, path) is not None
 
 
 def guard(root: Path, branch: str, field_report: Path) -> list[str]:
