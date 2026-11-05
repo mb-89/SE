@@ -488,3 +488,9 @@ def test_the_work_template_checks_that_acceptance_on_existing_content_is_measura
     assert ("An item that measures something that exists already (the project's own content, a figure, a count) "
             "is checked against that content and the pinned versions before it is written, so it can be "
             "measured at all.") in template
+
+
+def test_the_field_report_has_a_fixed_line_for_commit_groupings_under_delivered():
+    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    delivered = report.split("## Delivered", 1)[1].split("## Not delivered", 1)[0]
+    assert "**Commit groupings:** None <!-- or, per grouping the worker's commit rule allows" in delivered
