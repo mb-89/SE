@@ -6,6 +6,10 @@ Scans tracked file names and contents (binary files as bytes), commit messages a
 committer identities against committed generic patterns and a machine-local deny list. Output
 names the location and the pattern label only, never the matched text.
 
+Every verdict names the se commit that ran it. A checked repository that pins se (`ref` of
+`[modules.se]` in its se.toml) is refused when this se is not at that pin, so a stale clone never
+gives another verdict silently.
+
 Exit codes: 0 passed, 1 hits (or unused allow entries in a full check), 2 usage or setup error.
 """
 
@@ -18,11 +22,14 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
 ALLOW_FILE = ".public-check-allow"
+SE_ROOT = Path(__file__).resolve().parents[1]
+MANIFEST = "se.toml"
 TERMS_ENV = "SE_PRIVATE_TERMS"
 TERMS_DEFAULT = "~/.se/private-terms.txt"
 
@@ -342,6 +349,49 @@ def has_head(root: Path) -> bool:
     ).returncode == 0
 
 
+def se_commit() -> str | None:
+    """The commit of the se checkout this script runs from, or None outside a git checkout."""
+    result = subprocess.run(
+        ["git", "-C", str(SE_ROOT), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    return result.stdout.strip().lower() if result.returncode == 0 else None
+
+
+def se_pin(root: Path) -> str | None:
+    """`ref` of `[modules.se]` in the checked repository's se.toml, or None where it pins none."""
+    manifest = root / MANIFEST
+    if not manifest.is_file():
+        return None
+    try:
+        data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise SetupError(f"cannot read {MANIFEST} of the checked repository: {error}") from error
+    module = data.get("modules", {}).get("se") if isinstance(data.get("modules"), dict) else None
+    ref = module.get("ref") if isinstance(module, dict) else None
+    if module is not None and not isinstance(ref, str):
+        raise SetupError(f"[modules.se] in {MANIFEST} has no ref; pin a full commit SHA")
+    return ref.lower() if isinstance(ref, str) else None
+
+
+def check_se_version(root: Path, commit: str | None) -> None:
+    """Refuse when the checked repository pins se at another commit than the one running."""
+    pin = se_pin(root)
+    if pin is None:
+        return
+    if commit is None:
+        raise SetupError(
+            f"{MANIFEST} pins se at {pin[:7]}, but the se running this check ({SE_ROOT.name}) is "
+            "not a git checkout, so its commit is unknown; run the check from an se clone"
+        )
+    if commit != pin:
+        raise SetupError(
+            f"{MANIFEST} pins se at {pin[:7]}, but this check runs se {commit[:7]}; bring the se "
+            "clone to the pin (scripts/se_modules.py sync, or git checkout of the pin) and "
+            "check again"
+        )
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Refuse work-specific or personal content (rule: AGENTS.md 'Public safety')."
@@ -362,8 +412,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def check(args: argparse.Namespace) -> Report:
+def check(args: argparse.Namespace, commit: str | None) -> Report:
     root = Path(git(Path(args.repo).resolve(), "rev-parse", "--show-toplevel").decode().strip())
+    check_se_version(root, commit)
     report = Report()
     terms = load_private_terms()
     patterns = list(GENERIC_PATTERNS) + (terms or [])
@@ -395,16 +446,18 @@ def check(args: argparse.Namespace) -> Report:
 
 
 def main(argv: list[str] | None = None) -> int:
+    commit = se_commit()
+    version = f"se {commit[:7] if commit else 'commit unknown'}"
     try:
-        report = check(parse_args(argv))
+        report = check(parse_args(argv), commit)
     except SetupError as error:
-        print(f"public-check: error: {error}")
+        print(f"public-check: error ({version}): {error}")
         return 2
     for warning in report.warnings:
         print(f"public-check: warning: {warning}")
     for hit in report.hits:
         print(hit)
-    scope = f"{report.files} files, {report.commits} commits"
+    scope = f"{report.files} files, {report.commits} commits, {version}"
     if report.hits:
         print(f"public-check: FAILED with {len(report.hits)} hit(s) ({scope}); remove them or add "
               f"a reasoned entry to {ALLOW_FILE}")
