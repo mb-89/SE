@@ -314,3 +314,9 @@ def test_the_decision_skill_asks_one_level_up_with_the_worked_example():
     assert '"can queries select the manifest note?"' in text
     assert ('"a note can mark itself ignored, like a Python underscore name; the manifest is one '
             'such note"') in text
+
+
+def test_the_decision_skill_records_the_answer_where_it_takes_effect():
+    text = normalized(DECISION)
+    assert "## Recording the answer" in text
+    assert "recorded where it takes effect, quoting the person word for word" in text
