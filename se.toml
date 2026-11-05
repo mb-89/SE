@@ -1,6 +1,8 @@
 [project]
 # The branch the integrator writes; the new process lives on `se` while the old one lives on `main`.
 integration_branch = "se"
+# The commit identity sync sets where the machine sets no public_identity (README "Project settings").
+identity = "mb <mb>"
 # Every push to the integration branch runs se's public check first (README "Project settings").
 public_check = true
 authored_content = [
