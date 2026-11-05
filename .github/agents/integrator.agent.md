@@ -55,7 +55,8 @@ At the start of every turn run `work_tickets.py sync`, which sets the
 first, otherwise oldest first, and for "integrate <branch>" requests from the dispatcher (its
 design branch). Local workers announce a filed field report with one queued message
 (`field report #<n> filed for <branch>, PR #<m>`); cloud workers' reports arrive only through the
-`field-report` label, so always list the open ones too.
+`field-report` label, so always list the open ones too. A worker's delivery message can arrive
+minutes late: reconcile from GitHub first and treat a missing message as late, not lost.
 
 1. **Review** the field report, the worker's queue (`work_tickets.py status --worktree <its
    worktree>`: only `done/`, every acceptance item checked with evidence) and
