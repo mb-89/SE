@@ -252,3 +252,12 @@ def test_work_model_owns_the_integration_branch_setting():
     text = normalized(WORK_MODEL)
     assert "## Integration branch" in text
     assert 'integration_branch = "se"' in text and "It is `main` unless" in text
+
+
+def test_messages_travel_only_up_and_down_the_tree():
+    rule = normalized(WORK_MODEL)
+    assert "**Messages travel only up and down the tree**" in rule
+    assert "news for another repository goes up to the dispatcher" in rule
+    integrator = normalized(AGENTS / "integrator.agent.md")
+    assert "(../skills/work-model/SKILL.md#roles-and-flow)" in integrator
+    assert "never another repository's integrator" in integrator

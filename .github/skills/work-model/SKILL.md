@@ -43,6 +43,10 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 - **Escalation**: label `escalated`, the question in a comment, to the integrator one level up or
   to the dispatcher at the top level, which presents it to the human. The answer arrives as an
   issue comment or a new request, never as a reply anyone waits for.
+- **Messages travel only up and down the tree**: a session messages only the session that started
+  it and the sessions it started. A sideways message (one integrator to another) stops at a
+  permission prompt in Claude's cloud, so news for another repository goes up to the dispatcher,
+  which passes it down to that repository's integrator.
 - Issues are read and written with `gh`; bodies go through `--body-file`. Branches and the integration
   branch are pushed; a release needs the human's approval, obtained by the dispatcher.
 - Retros use `retro.md`; each improvement names the agent definition, template, skill or script
