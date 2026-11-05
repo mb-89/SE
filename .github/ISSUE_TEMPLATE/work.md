@@ -44,8 +44,9 @@ None
 
 ## Requirements
 
-<!-- Numbered, checkable, in the order to do them. One commit per item. Keep a package
-     worker-sized: one reviewable change, roughly one to five requirements. Split larger work
+<!-- Numbered, checkable, in the order to do them; commits follow the
+     [worker's procedure](../agents/worker.agent.md#procedure). Keep a package worker-sized:
+     one reviewable change, roughly one to five requirements. Split larger work
      (e.g. a scheduler with several commands) into separate issues linked by "Blocked by",
      each owning its part of shared files. Capabilities to remove must be named explicitly with
      the user's decision; otherwise all existing capabilities are preserved. A requirement found
