@@ -14,9 +14,10 @@ labels: field-report
 
 ## Delivered
 
-<!-- Per requirement: what changed, commit hash, evidence (test, command, measurement). -->
+<!-- Follow the [worker evidence rule](../agents/worker.agent.md#procedure).
+     Add one row per work-issue requirement and acceptance item. -->
 
-| Requirement | Result | Commits | Evidence |
+| Work issue item | Result | Commits | Evidence |
 |---|---|---|---|
 
 ## Not delivered
