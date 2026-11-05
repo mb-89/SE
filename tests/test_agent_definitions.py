@@ -124,6 +124,12 @@ def test_field_report_template_names_the_integration_branch_it_was_tested_agains
     assert "Tested against main" not in report
 
 
+def test_work_issue_template_asks_for_the_field_reports_reproduction():
+    template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
+    assert "## Reproduction" in template
+    assert "quote the reproduction command it ran and that command's output" in template
+
+
 def test_work_issue_template_assigns_shared_root_file_owners():
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
     assert "pyproject.toml" in template
