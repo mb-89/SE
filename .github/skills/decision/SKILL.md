@@ -25,6 +25,21 @@ the shared rules of all roles are the [work model](../work-model/SKILL.md).
 - **The answer format** closes the message: "Reply A, B or C". With `ask_user`, the options are its
   choices and the recommended one is the default.
 
+## One level up
+
+Before writing the question, name the class the instance belongs to and ask about the general
+mechanism; the instance is the example. An answer about the mechanism settles every later case of
+the class, an answer about the instance only this one. Write the class in the context sentence
+("This is one case of …") and phrase every option as a rule for the class.
+
+Worked example (5 Nov): the instance "can queries select the manifest note?" became the mechanism
+"a note can mark itself ignored, like a Python underscore name; the manifest is one such note".
+The options then were rules for every note (may mark itself ignored, or may not), and the manifest
+was the first case they settled.
+
+If no class exists, because the case is truly one of a kind, say so in the context and ask about
+the instance.
+
 ## Tasks for the person
 
 An open point that is not a choice, something only the person can do (grant access, approve a
