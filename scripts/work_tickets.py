@@ -1973,7 +1973,11 @@ def delete_merged_branch(root: Path, branch: str, head: str) -> None:
     )
     if remote.returncode != 0:
         detail = remote.stderr.strip() or f"exit code {remote.returncode}"
-        print(f"warning: merged branch was retained on origin: {detail}", file=sys.stderr)
+        print(
+            f"warning: merged branch was retained on origin, which refused deleting {branch} "
+            f"({detail}); left to the repository's automatic head-branch deletion, not retried",
+            file=sys.stderr,
+        )
     else:
         print("Cleanup: origin merged branch deleted")
 

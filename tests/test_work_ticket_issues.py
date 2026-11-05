@@ -1751,3 +1751,32 @@ def test_integration_branch_defaults_to_main_and_rejects_an_empty_name(worktree)
     (worktree / "se.toml").write_text('[project]\nintegration_branch = ""\n', encoding="utf-8")
     with pytest.raises(work_tickets.QueueError, match="se.toml.*remove it to use main"):
         work_tickets.integration_branch(worktree)
+
+
+def test_delete_merged_branch_leaves_a_branch_the_host_refuses_to_delete(main_checkout, capsys):
+    origin = main_checkout.parent / "origin.git"
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text(
+        "#!/bin/sh\nwhile read old new ref; do\n"
+        "  case $new in 0000000000000000000000000000000000000000) "
+        "echo 'deletion refused' >&2; exit 1;; esac\ndone\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
+    git_ok("-C", str(main_checkout), "branch", "feature/merged")
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", "feature/merged")
+    head = subprocess.run(
+        ["git", "-C", str(main_checkout), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+
+    work_tickets.delete_merged_branch(main_checkout, "feature/merged", head)
+
+    err = capsys.readouterr().err
+    assert err.count("refused deleting feature/merged") == 1
+    assert "automatic head-branch deletion, not retried" in err
+    assert subprocess.run(
+        ["git", "--git-dir", str(origin), "rev-parse", "--verify", "refs/heads/feature/merged"],
+        capture_output=True, check=False,
+    ).returncode == 0
