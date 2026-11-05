@@ -9,6 +9,7 @@ GITHUB = ROOT / ".github"
 AGENTS = GITHUB / "agents"
 SKILL = GITHUB / "skills" / "catch-up" / "SKILL.md"
 WORK_MODEL = GITHUB / "skills" / "work-model" / "SKILL.md"
+DECISION = GITHUB / "skills" / "decision" / "SKILL.md"
 ROLES = ("dispatcher", "worker", "integrator")
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
@@ -40,7 +41,7 @@ def test_non_dispatcher_agents_remove_workspace_switching_advice(role):
     assert "set_workspace if available" not in text
 
 
-@pytest.mark.parametrize("path", [*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL, WORK_MODEL],
+@pytest.mark.parametrize("path", [*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL, WORK_MODEL, DECISION],
                          ids=lambda path: path.name)
 def test_relative_links_resolve(path):
     text = path.read_text(encoding="utf-8")
@@ -284,3 +285,38 @@ def test_the_commit_trailer_is_one_setting_the_roles_point_to():
         assert "Co-authored-by" not in text, path.name
     for path in (AGENTS / "worker.agent.md", SKILL):
         assert "`commit_trailer`](" in normalized(path), path.name
+
+
+def test_one_skill_owns_how_a_decision_is_presented():
+    assert "name: decision" in DECISION.read_text(encoding="utf-8").split("---")[1]
+    pointers = {AGENTS / "dispatcher.agent.md": "(../skills/decision/SKILL.md)",
+                SKILL: "(../decision/SKILL.md)"}
+    for path, link in pointers.items():
+        text = normalized(path)
+        assert link in text, path.name
+        for restated in ("What we gain", "Decision 2 of", "Reply A", "one at a time", "one level up"):
+            assert restated.casefold() not in text.casefold(), (path.name, restated)
+
+
+def test_the_decision_skill_holds_the_presentation_rules():
+    text = normalized(DECISION)
+    for rule in ("exactly one decision", '"Decision 2 of 3"', "one to three sentences",
+                 "| Option | What it means | What we gain | What we lose |", "(recommended)",
+                 '"Reply A, B or C"', "## Tasks for the person", "never an option in a decision",
+                 '"Task 1 of 2"'):
+        assert rule in text, rule
+
+
+def test_the_decision_skill_asks_one_level_up_with_the_worked_example():
+    text = normalized(DECISION)
+    assert "## One level up" in text
+    assert "name the class the instance belongs to and ask about the general mechanism" in text
+    assert '"can queries select the manifest note?"' in text
+    assert ('"a note can mark itself ignored, like a Python underscore name; the manifest is one '
+            'such note"') in text
+
+
+def test_the_decision_skill_records_the_answer_where_it_takes_effect():
+    text = normalized(DECISION)
+    assert "## Recording the answer" in text
+    assert "recorded where it takes effect, quoting the person word for word" in text
