@@ -45,6 +45,7 @@ DELIVERY_TICKET = "delivery"
 DISCOVERY_DIRECTORY = Path(".se") / "work" / "probe"
 DISCOVERY_INDEX = "evidence.md"
 DISCOVERY_CONFIG = "discovery.json"
+DISCOVERY_LABEL = "discovery"
 LOCAL_CORES_PER_WORKER = 2
 LOCAL_MEMORY_MIB_PER_WORKER = 4096
 
@@ -901,6 +902,10 @@ def requirement_prefix(number: int) -> str:
     return f"r{number}-"
 
 
+def is_discovery_issue(issue: dict[str, object]) -> bool:
+    return DISCOVERY_LABEL in issue_labels(issue)
+
+
 def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
     """Derives one ticket per numbered requirement plus the delivery ticket."""
     sections = markdown_sections(issue["body"])
@@ -910,8 +915,14 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
     owner = section(sections, "design owner") or "Named in the work issue."
     tickets: list[tuple[str, str]] = []
     previous = "None"
+    discovery = is_discovery_issue(issue)
     for number, text in sorted(requirements.items()):
         ticket_id = requirement_prefix(number) + slug(text)
+        verification = (
+            "- [ ] Discovery evidence is recorded in the evidence index.\n"
+            if discovery
+            else "- [ ] Its focused tests and the affected real command pass.\n"
+        )
         tickets.append((ticket_id, (
             f"# {ticket_id}: {one_line(text.splitlines()[0])}\n\n"
             "## Design\n\n"
@@ -922,12 +933,16 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
             f"## Dependencies\n\n{previous}\n\n"
             "## Acceptance\n\n"
             f"- [ ] Requirement {number} is implemented as the work issue states it now.\n"
-            "- [ ] Its focused tests and the affected real command pass.\n\n"
+            f"{verification}\n"
             "## Evidence\n"
         )))
         previous = f"`{ticket_id}` (the work issue orders its requirements)."
     acceptance = section(sections, "acceptance")
-    verification = section(sections, "verification") or "As the work issue states."
+    verification = (
+        "Discovery evidence from the work issue."
+        if discovery
+        else section(sections, "verification") or "As the work issue states."
+    )
     tickets.append((DELIVERY_TICKET, (
         f"# {DELIVERY_TICKET}: Deliver {issue['title']}\n\n"
         "## Design\n\n"
@@ -937,7 +952,10 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
         "## Dependencies\n\n"
         + ", ".join(f"`{ticket_id}`" for ticket_id, _ in tickets) + "\n\n"
         "## Acceptance\n\n"
-        + (f"{acceptance}\n" if acceptance else "")
+        + (
+            "- [ ] Discovery evidence is complete and linked from the field report.\n"
+            if discovery else f"{acceptance}\n"
+        )
         + "- [ ] Branch pushed, pull request to `main` opened, field-report issue created.\n\n"
         "## Evidence\n"
     )))
@@ -966,7 +984,7 @@ def intake(
         with path.open("x", encoding="utf-8", newline="\n") as stream:
             stream.write(content)
         created.append(ticket_id)
-    if discovery:
+    if discovery or is_discovery_issue(issue):
         initialize_discovery(root, probe_root)
     save_snapshot(root, issue)
     return issue, created, kept
