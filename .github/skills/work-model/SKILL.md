@@ -294,16 +294,18 @@ owns what changes.
   and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same
   titles, labels, bodies and footers the commands would write.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
-  `review-note`, `probe`, `sync`, `guard`, `config`, `close`. Every other command fails, naming
-  itself, the missing `gh` and this section.
+  `review-note`, `probe`, `sync`, `guard`, `config`, `close`, and `field-report --check`.
+  Every other command fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
   for example:
   - `intake` and `refresh`: read the issue and its comments; `create` one ticket per numbered
     requirement plus `delivery`.
   - `deliver`: `sync`; `git push -u origin <branch>`; open the pull request to the integration
     branch, titled like the work issue; file the field report from `field-report.md`, filled in by
-    hand (`field-report --draft` needs `intake`'s snapshot), titled `field-report: <branch>`, label
-    `field-report`; send the notification.
+    hand (`field-report --draft` needs `intake`'s snapshot) and passing `field-report --check
+    .se/work/field-report.md --issue-body <file>` (the work issue's body saved to `<file>`), titled
+    `field-report: <branch>`, label `field-report`; send the notification. A refused report is
+    fixed and checked again, never filed.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
     like the work issue and based on the integration branch.
   - `integrate`: merge the pull request's branch into the newest integration branch locally, run
