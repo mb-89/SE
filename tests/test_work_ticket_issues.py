@@ -693,11 +693,14 @@ def test_queue_lists_open_reports_escalations_and_startable_work(worktree, monke
         "run_gh",
         lambda root, args: json.dumps(escalations if "escalated" in args else reports),
     )
+    synced: list[Path] = []
+    monkeypatch.setattr(work_tickets, "sync", lambda root: synced.append(root) or "abc1234")
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, all_repos: ready)
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, all_repos: 2)
     assert work_tickets.queue(worktree, "git.example/owner/repo") == (
         reports, escalations, ready, 2
     )
+    assert synced == [worktree]
 
 
 def test_queue_filters_to_current_repository_unless_all_repositories(worktree, monkeypatch):
@@ -707,6 +710,7 @@ def test_queue_filters_to_current_repository_unless_all_repositories(worktree, m
         "run_gh",
         lambda root, args: (calls.append(args) or json.dumps([])),
     )
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, all_repos: [])
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, all_repos: 2)
     work_tickets.queue(worktree, "git.example/owner/repo")

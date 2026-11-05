@@ -1392,6 +1392,7 @@ def capacity(root: Path, repo: str | None, all_repos: bool = False) -> int | Non
 def queue(
     root: Path, repo: str, all_repos: bool = False
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], int | None]:
+    sync(root)
     labels = repository_label_arguments(root, all_repos)
     reports = json.loads(run_gh(root, [
         "issue", "list", "--state", "open", "--label", "field-report",
