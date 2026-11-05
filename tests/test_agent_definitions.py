@@ -541,3 +541,11 @@ def test_the_suite_runs_at_a_moved_pin_before_the_change_for_worker_and_integrat
         text = normalized(AGENTS / f"{role}.agent.md")
         assert rule not in text
         assert "[suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)" in text
+
+
+def test_the_work_model_tells_issue_writers_what_renames_and_docs_issues_name():
+    rules = normalized(WORK_MODEL).split("## Rules for all roles", 1)[1]
+    assert ("**Writing work issues**: an issue that renames an identifier says whether the code emits it or "
+            "only documents it; a docs issue that asks to point instead of restating quotes the text to "
+            "replace and names each note by its repository path; and a docs requirement names the test file "
+            "its regression test belongs in.") in rules
