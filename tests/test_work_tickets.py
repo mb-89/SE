@@ -182,13 +182,16 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     guide = repository / "docs" / "guide.md"
     guide.parent.mkdir()
     guide.write_text(
-        "This sentence is removed.\nThis sentence is retained.\n", encoding="utf-8"
+        "This sentence is removed.\nThis sentence is moved.\nThis sentence is retained.\n",
+        encoding="utf-8",
     )
     assert git(repository, "add", ".").returncode == 0
     assert git(repository, "commit", "-m", "baseline prose").returncode == 0
     assert git(repository, "checkout", "-b", "remove-prose").returncode == 0
     guide.write_text("This sentence is retained.\n", encoding="utf-8")
-    assert git(repository, "commit", "-am", "remove authored prose").returncode == 0
+    (repository / "docs" / "moved.md").write_text("This sentence is moved.\n", encoding="utf-8")
+    assert git(repository, "add", ".").returncode == 0
+    assert git(repository, "commit", "-m", "move and remove prose").returncode == 0
     report = repository / "field-report.md"
     report.write_text(
         "## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n",
@@ -201,6 +204,7 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     )
     assert guarded.returncode != 0
     assert "docs/guide.md: This sentence is removed." in guarded.stderr
+    assert "This sentence is moved." not in guarded.stderr
 
     report.write_text(
         "## Removed behaviour, deleted or weakened tests, and authored prose\n\n"
