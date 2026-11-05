@@ -108,6 +108,13 @@ def test_partial_deliveries_define_blockers_and_review_responses():
     assert "(../skills/work-model/SKILL.md#rules-for-all-roles)" in report
 
 
+def test_field_report_template_has_requirement_evidence_table():
+    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    assert "one row per work-issue requirement and acceptance item" in report
+    assert "| Work issue item | Result | Commits | Evidence |" in report
+    assert "(../agents/worker.agent.md#procedure)" in report
+
+
 def test_work_issue_template_assigns_shared_root_file_owners():
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
     assert "pyproject.toml" in template
