@@ -35,6 +35,11 @@ REMOVED_JAVASCRIPT_TEST_PATTERN = re.compile(
     r"""^-\s*(?:test|it)\s*\(\s*(?P<quote>["'`])(?P<name>.*?)(?P=quote)"""
 )
 SENTENCE_PATTERN = re.compile(r"[^.!?]+[.!?]+(?:[\"')\]]+)?")
+PROTECTED_SENTENCE_CONTENT_PATTERN = re.compile(
+    r"```.*?```|`[^`\n]*`|https?://[^\s`<>()]+|\b[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+\b",
+    re.DOTALL,
+)
+PROTECTED_DOT = "\uE000"
 PUBLIC_REFERENCE_PATTERN = re.compile(r"#\d+\b")
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
 IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
@@ -1236,7 +1241,17 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
 
     def sentences(text: str) -> list[str]:
         normalized = re.sub(r"\s+", " ", HTML_COMMENT_PATTERN.sub("", text)).strip()
-        return [sentence.strip() for sentence in SENTENCE_PATTERN.findall(normalized)]
+        def protect_dots(match: re.Match[str]) -> str:
+            protected = match.group()
+            trailing = protected[len(protected.rstrip(".!?")):]
+            body = protected[:len(protected) - len(trailing)] if trailing else protected
+            return body.replace(".", PROTECTED_DOT) + trailing
+
+        protected = PROTECTED_SENTENCE_CONTENT_PATTERN.sub(protect_dots, normalized)
+        return [
+            sentence.replace(PROTECTED_DOT, ".").strip()
+            for sentence in SENTENCE_PATTERN.findall(protected)
+        ]
 
     new_sentences = {
         sentence
