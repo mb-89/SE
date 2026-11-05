@@ -118,6 +118,12 @@ def test_field_report_template_has_requirement_evidence_table():
     assert "(../agents/worker.agent.md#procedure)" in report
 
 
+def test_field_report_template_names_the_integration_branch_it_was_tested_against():
+    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    assert "**Tested against `<integration branch>`:** `<commit>`" in report
+    assert "Tested against main" not in report
+
+
 def test_work_issue_template_assigns_shared_root_file_owners():
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
     assert "pyproject.toml" in template

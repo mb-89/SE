@@ -6,7 +6,7 @@ labels: field-report
 ---
 
 **Work issue:** #<n>  **Pull request:** #<n>  **Branch:** `<branch>`  **Result:** complete | partial
-**Tested against main:** `<commit>` <!-- the main commit merged last before the pull request -->
+**Tested against `<integration branch>`:** `<commit>` <!-- the integration-branch commit merged last before the pull request -->
 
 ## User requirement (quoted back)
 
