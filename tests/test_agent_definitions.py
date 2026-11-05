@@ -9,6 +9,7 @@ GITHUB = ROOT / ".github"
 AGENTS = GITHUB / "agents"
 SKILL = GITHUB / "skills" / "catch-up" / "SKILL.md"
 WORK_MODEL = GITHUB / "skills" / "work-model" / "SKILL.md"
+DECISION = GITHUB / "skills" / "decision" / "SKILL.md"
 ROLES = ("dispatcher", "worker", "integrator")
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
@@ -40,7 +41,7 @@ def test_non_dispatcher_agents_remove_workspace_switching_advice(role):
     assert "set_workspace if available" not in text
 
 
-@pytest.mark.parametrize("path", [*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL, WORK_MODEL],
+@pytest.mark.parametrize("path", [*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL, WORK_MODEL, DECISION],
                          ids=lambda path: path.name)
 def test_relative_links_resolve(path):
     text = path.read_text(encoding="utf-8")
@@ -284,3 +285,14 @@ def test_the_commit_trailer_is_one_setting_the_roles_point_to():
         assert "Co-authored-by" not in text, path.name
     for path in (AGENTS / "worker.agent.md", SKILL):
         assert "`commit_trailer`](" in normalized(path), path.name
+
+
+def test_one_skill_owns_how_a_decision_is_presented():
+    assert "name: decision" in DECISION.read_text(encoding="utf-8").split("---")[1]
+    pointers = {AGENTS / "dispatcher.agent.md": "(../skills/decision/SKILL.md)",
+                SKILL: "(../decision/SKILL.md)"}
+    for path, link in pointers.items():
+        text = normalized(path)
+        assert link in text, path.name
+        for restated in ("What we gain", "Decision 2 of", "Reply A", "one at a time", "one level up"):
+            assert restated.casefold() not in text.casefold(), (path.name, restated)
