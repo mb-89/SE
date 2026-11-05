@@ -253,8 +253,8 @@ def test_refresh_needs_an_issue_until_one_is_recorded(worktree, gh, capsys):
 
 
 def test_field_report_fills_the_template_and_creates_a_labelled_issue(worktree, gh, capsys):
-    gh.issue["labels"] = [{"name": "work"}, {"name": "repo:example"}]
-    run(worktree, "intake", "--issue", "5", "--discovery")
+    gh.issue["labels"] = [{"name": "work"}, {"name": "repo:example"}, {"name": "discovery"}]
+    run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
     assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
     draft = report.read_text(encoding="utf-8")
@@ -440,6 +440,7 @@ def test_sync_fetches_and_merges_a_configured_mirror(main_checkout, local_config
 
 def test_deliver_is_idempotent_and_prints_configured_notification(
         worktree, gh, local_config, monkeypatch, capsys):
+    gh.issue["labels"] = [{"name": "work"}, {"name": "discovery"}]
     run(worktree, "intake", "--issue", "5")
     gh.pull_request = None
     pushes: list[list[str]] = []
@@ -1084,6 +1085,46 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
         ["issue", "close", "8", "--repo", "git.example/owner/tracker"],
     ]
     assert all("PR #7. Suite: 214 passed." in body for body in bodies)
+    assert not worker.exists()
+
+
+def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch):
+    worker = main_checkout.parent / "empty-discovery-worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/discovery", str(worker))
+    work_tickets.initialize(worker)
+    head = subprocess.run(
+        ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    report = {
+        "body": "**Work issue:** #5  **Pull request:** #7\n\n" + "\n\n".join(
+            f"## {heading}\nComplete." for heading in work_tickets.FIELD_REPORT_SECTIONS
+        )
+    }
+    commands: list[tuple[str, str]] = []
+    monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
+    monkeypatch.setattr(
+        work_tickets,
+        "run_gh",
+        lambda root, args: json.dumps({"headRefName": "feature/discovery", "headRefOid": head})
+        if args[:2] == ["pr", "view"] else "",
+    )
+    monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: "")
+    monkeypatch.setattr(
+        work_tickets,
+        "run_project_command",
+        lambda root, command, description: (commands.append((command, description)) or "passed"),
+    )
+    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
+
+    commit = work_tickets.integrate(main_checkout, 8, None, "suite", None)
+    assert commit
+    assert subprocess.run(
+        ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
+        capture_output=True, check=False,
+    ).returncode == 0
+    assert commands == [("suite", "Complete suite")]
     assert not worker.exists()
 
 
