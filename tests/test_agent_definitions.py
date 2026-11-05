@@ -461,3 +461,12 @@ def test_the_cloud_section_holds_each_cloud_rule_once(rule):
     for path in (*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL):
         assert rule.split("**")[1] not in normalized(path), path.name
 
+
+def test_the_worker_installs_the_hooks_before_its_first_commit():
+    worker = normalized(AGENTS / "worker.agent.md")
+    procedure = worker.split("## Procedure", 1)[1]
+    setup = procedure.index("in a fresh clone, first run the project's setup command that installs its hooks")
+    assert setup < procedure.index("`work_tickets.py sync`") < procedure.index("commit as the work model's")
+    assert "[public check](../skills/work-model/SKILL.md#what-the-project-provides) runs on every commit and push" in worker
+    assert "`scripts/setup.sh`" in " ".join(normalized(ROOT / "AGENTS.md").split("## Public safety", 1)[1].split())
+
