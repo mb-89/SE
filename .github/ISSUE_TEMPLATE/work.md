@@ -51,8 +51,10 @@ None
      each owning its part of shared files. Capabilities to remove must be named explicitly with
      the user's decision; otherwise all existing capabilities are preserved. A requirement found
      through an error message names the outcome ("the rebuild validates"), not the first symptom
-     ("add key X"). A requirement that says what "adapters" or "consumers" must do names which
-     ones are in scope, for example whether an interim implementation counts. -->
+     ("add key X"). A requirement over a set lists every member by file: each implementation of
+     "both evaluators" or "all adapters", which ones are in scope (whether an interim
+     implementation counts), and, in a package that moves code, the source tests it carries,
+     each marked where it needs a capability outside the package. -->
 
 1.
 

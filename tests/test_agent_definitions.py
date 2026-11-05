@@ -437,10 +437,13 @@ def test_the_worker_commits_each_requirement_while_working():
     assert "Commit each requirement as soon as it is done, while working; never reconstruct commits at the end." in worker
 
 
-def test_the_work_template_asks_requirements_to_name_the_adapters_in_scope():
+def test_the_work_template_asks_a_requirement_over_a_set_to_list_each_member_by_file():
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
-    assert ('A requirement that says what "adapters" or "consumers" must do names which ones are in scope, '
-            "for example whether an interim implementation counts.") in template
+    assert ('A requirement over a set lists every member by file: each implementation of "both evaluators" '
+            'or "all adapters", which ones are in scope (whether an interim implementation counts), and, '
+            "in a package that moves code, the source tests it carries, each marked where it needs a "
+            "capability outside the package.") in template
+    assert '"adapters" or "consumers" must do' not in template
 
 
 CLOUD_RULES = (
