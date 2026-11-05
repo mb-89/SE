@@ -84,8 +84,9 @@ Framework repositories (the process plugin and document format/converter) carry 
   possible, the remedy.
 - Work follows the user's priority order; no new investigation starts while a top-priority bug is
   open.
-- Workers run focused tests only; the integrator runs the complete suite, one integration at a
-  time, while the dispatcher talks with the human.
+- Workers run focused tests and what their issue's acceptance names, the complete suite only
+  where it names the suite; the integrator runs the complete suite, one integration at a time,
+  while the dispatcher talks with the human.
 - No hard time boxes: workers deliver whole items. A worker never ends its turn without
   delivering; when it stops, its field report names the blocker.
 - **Disagree and commit**: ambiguity is a decision. Investigate the repository, contracts and

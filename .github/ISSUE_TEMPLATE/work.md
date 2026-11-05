@@ -70,7 +70,7 @@ None
 
 ## Verification
 
-<!-- Focused tests and real commands to run; the integrator runs the complete suite. -->
+<!-- Focused tests and real commands to run; name the complete suite only where the worker must run it, otherwise the integrator does. -->
 
 ```powershell
 ```
