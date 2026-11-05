@@ -43,6 +43,8 @@ notify, if any.
   `[IO.File]::WriteAllText(<absolute path>, <text>, UTF8 without BOM)` or `Out-File -Encoding utf8`.
 - Load the test environment the project's `AGENTS.md` names, if any, in every shell that tests.
 - A missing tool is installed with the setup command the project's `AGENTS.md` names.
+- Where the host refuses the local ticket queue (`work_tickets.py init`, `create`, `move`,
+  `status`), it is optional: work without it and say so in the field report.
 
 ## Procedure
 
