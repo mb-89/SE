@@ -124,6 +124,22 @@ def test_field_report_template_names_the_integration_branch_it_was_tested_agains
     assert "Tested against main" not in report
 
 
+def test_work_issue_template_asks_for_the_field_reports_reproduction():
+    template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
+    assert "## Reproduction" in template
+    assert "quote the reproduction command it ran and that command's output" in template
+
+
+def test_worker_commit_rule_names_its_groupings_and_has_one_owner():
+    worker = normalized(GITHUB / "agents" / "worker.agent.md")
+    assert "requirements that change one function together share one commit" in worker
+    assert "its test may be a test-only commit" in worker
+    assert "The field report names each such grouping" in worker
+    owners = [path.relative_to(GITHUB).as_posix() for path in sorted(GITHUB.rglob("*.md"))
+              if "one commit per" in normalized(path).casefold()]
+    assert owners == ["agents/worker.agent.md"]
+
+
 def test_work_issue_template_assigns_shared_root_file_owners():
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
     assert "pyproject.toml" in template
