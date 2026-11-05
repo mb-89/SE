@@ -39,6 +39,9 @@ ISSUE_SNAPSHOT = "issue.json"
 # The issue templates belong to se, wherever a project keeps it.
 TEMPLATES = Path(__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE"
 DELIVERY_TICKET = "delivery"
+DISCOVERY_DIRECTORY = Path(".se") / "work" / "probe"
+DISCOVERY_INDEX = "evidence.md"
+DISCOVERY_CONFIG = "discovery.json"
 LOCAL_CORES_PER_WORKER = 2
 LOCAL_MEMORY_MIB_PER_WORKER = 4096
 
@@ -103,6 +106,60 @@ def initialize(root: Path) -> None:
                 raise QueueError(f"Expected a directory: {directory}")
         else:
             directory.mkdir()
+
+
+def discovery_directory(root: Path, configured: str | None = None) -> Path:
+    directory = Path(configured) if configured else DISCOVERY_DIRECTORY
+    if directory.is_absolute():
+        raise QueueError("Discovery output root must be relative to the selected worktree")
+    path = root / directory
+    inside_root(root, path)
+    return path
+
+
+def discovery_index(root: Path) -> Path | None:
+    config = root / ".se" / "work" / DISCOVERY_CONFIG
+    if not config.is_file():
+        return None
+    try:
+        configured = json.loads(config.read_text(encoding="utf-8"))["root"]
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise QueueError(f"Cannot read discovery configuration {config}: {error}") from error
+    if not isinstance(configured, str):
+        raise QueueError(f"Discovery configuration {config} has an invalid root")
+    return discovery_directory(root, configured) / DISCOVERY_INDEX
+
+
+def initialize_discovery(root: Path, configured: str | None) -> Path:
+    initialize(root)
+    directory = discovery_directory(root, configured)
+    directory.mkdir(parents=True, exist_ok=True)
+    index = directory / DISCOVERY_INDEX
+    inside_root(root, index)
+    if not index.exists():
+        index.write_text(
+            "# Discovery evidence\n\n| Command | Output |\n|---|---|\n",
+            encoding="utf-8", newline="\n",
+        )
+    config = root / ".se" / "work" / DISCOVERY_CONFIG
+    config.write_text(
+        json.dumps({"root": str(directory.relative_to(root))}, indent=2) + "\n",
+        encoding="utf-8", newline="\n",
+    )
+    return index
+
+
+def append_discovery_evidence(root: Path, command: str, output: str) -> Path:
+    index = discovery_index(root)
+    if index is None:
+        raise QueueError("No discovery evidence index: run intake --discovery first")
+    if not command.strip() or not output.strip():
+        raise QueueError("Discovery evidence requires a command and output path")
+    if any(character in command + output for character in "\r\n|"):
+        raise QueueError("Discovery evidence command and output cannot contain newlines or pipes")
+    with index.open("a", encoding="utf-8", newline="\n") as stream:
+        stream.write(f"| `{command}` | `{output}` |\n")
+    return index
 
 
 def read_ticket(path: Path, state: str) -> Ticket:
@@ -884,7 +941,10 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
     return tickets
 
 
-def intake(root: Path, number: int, repo: str | None) -> tuple[dict[str, object], list[str], list[str]]:
+def intake(
+    root: Path, number: int, repo: str | None, discovery: bool = False,
+    probe_root: str | None = None,
+) -> tuple[dict[str, object], list[str], list[str]]:
     initialize(root)
     paths, tickets, errors = scan_queue(root)
     if errors:
@@ -903,6 +963,8 @@ def intake(root: Path, number: int, repo: str | None) -> tuple[dict[str, object]
         with path.open("x", encoding="utf-8", newline="\n") as stream:
             stream.write(content)
         created.append(ticket_id)
+    if discovery:
+        initialize_discovery(root, probe_root)
     save_snapshot(root, issue)
     return issue, created, kept
 
@@ -1780,6 +1842,23 @@ def make_parser() -> argparse.ArgumentParser:
     add_worktree_argument(intake_parser)
     intake_parser.add_argument("--issue", required=True, type=int, help="work issue number")
     intake_parser.add_argument("--repo", help=REPO_HELP)
+    intake_parser.add_argument(
+        "--discovery", action="store_true",
+        help="create the ignored discovery evidence folder and index",
+    )
+    intake_parser.add_argument(
+        "--probe-root",
+        help="relative ignored discovery output root; default: .se/work/probe",
+    )
+
+    probe_parser = subparsers.add_parser(
+        "probe", help="append a command and output path to the discovery evidence index"
+    )
+    add_worktree_argument(probe_parser)
+    probe_parser.add_argument(
+        "--command", required=True, dest="probe_command", help="command that produced the output"
+    )
+    probe_parser.add_argument("--output", required=True, help="path to the command output")
 
     refresh_parser = subparsers.add_parser(
         "refresh", help="re-read the work issue and its comments and report changes")
@@ -1900,7 +1979,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Reviewed note {args.note}")
             return 0
         if args.command == "intake":
-            issue, created, kept = intake(root, args.issue, args.repo)
+            issue, created, kept = intake(
+                root, args.issue, args.repo, args.discovery, args.probe_root
+            )
             print(f"Work issue #{issue['number']}: {issue['title']} ({issue['url']})")
             for ticket_id in created:
                 print(f"created todo/{ticket_id}.md")
@@ -1910,6 +1991,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{len(issue['comments'])} comment(s) may change the requirements:")
                 for comment in issue["comments"]:
                     print(f"  {comment['createdAt']} {comment['author']}: {comment['url']}")
+            return 0
+        if args.command == "probe":
+            print(
+                f"Appended discovery evidence to "
+                f"{append_discovery_evidence(root, args.probe_command, args.output)}"
+            )
             return 0
         if args.command == "refresh":
             changes = refresh(root, args.issue, args.repo)
