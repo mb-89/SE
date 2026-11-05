@@ -1108,6 +1108,26 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     ).returncode != 0
 
 
+def test_delete_merged_branch_keeps_an_unmerged_tip(main_checkout, capsys):
+    git_ok("-C", str(main_checkout), "checkout", "-q", "-b", "feature/unmerged")
+    (main_checkout / "unmerged.txt").write_text("unmerged\n", encoding="utf-8")
+    git_ok("-C", str(main_checkout), "add", "unmerged.txt")
+    git_ok("-C", str(main_checkout), "commit", "-q", "-m", "unmerged")
+    head = subprocess.run(
+        ["git", "-C", str(main_checkout), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    git_ok("-C", str(main_checkout), "checkout", "-q", "main")
+
+    work_tickets.delete_merged_branch(main_checkout, "feature/unmerged", head)
+
+    assert subprocess.run(
+        ["git", "-C", str(main_checkout), "rev-parse", "--verify", "feature/unmerged"],
+        capture_output=True, text=True, check=False,
+    ).returncode == 0
+    assert "main does not contain its tip" in capsys.readouterr().err
+
+
 def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch):
     worker = main_checkout.parent / "empty-discovery-worker"
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/discovery", str(worker))
