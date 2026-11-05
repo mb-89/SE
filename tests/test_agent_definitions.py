@@ -549,3 +549,9 @@ def test_the_work_model_tells_issue_writers_what_renames_and_docs_issues_name():
             "only documents it; a docs issue that asks to point instead of restating quotes the text to "
             "replace and names each note by its repository path; and a docs requirement names the test file "
             "its regression test belongs in.") in rules
+
+
+def test_the_integrator_reconciles_from_github_and_treats_a_missing_message_as_late():
+    integrator = normalized(AGENTS / "integrator.agent.md")
+    assert ("A worker's delivery message can arrive minutes late: reconcile from GitHub first and treat a "
+            "missing message as late, not lost.") in integrator
