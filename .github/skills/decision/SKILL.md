@@ -46,3 +46,10 @@ An open point that is not a choice, something only the person can do (grant acce
 release, sign in), is a task, never an option in a decision. Tasks are listed separately, one per
 message as well, numbered against their own total ("Task 1 of 2"), each with what to do, where, and
 what it unblocks.
+
+## Recording the answer
+
+The answer is recorded where it takes effect, quoting the person word for word: in the work issue
+it creates or changes (under its verbatim user requirement), or in the spec or skill that now owns
+the rule. A decision about a class is recorded as that class's rule, not on the instance that
+raised it. A chat reply alone is no record: the next session cannot read it.
