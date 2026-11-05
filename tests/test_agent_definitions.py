@@ -494,3 +494,9 @@ def test_the_field_report_has_a_fixed_line_for_commit_groupings_under_delivered(
     report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
     delivered = report.split("## Delivered", 1)[1].split("## Not delivered", 1)[0]
     assert "**Commit groupings:** None <!-- or, per grouping the worker's commit rule allows" in delivered
+
+
+def test_the_field_report_replaces_evidence_the_host_cannot_carry_with_its_command():
+    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    assert ("Evidence the host cannot carry is replaced by the command that reproduces it: where images cannot "
+            "be attached, each screenshot's row names the command that takes it again.") in report
