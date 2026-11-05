@@ -168,6 +168,13 @@ def test_guard_reports_removed_tests_until_field_report_names_them(worktree: Pat
     assert "removed JavaScript" in approved.stdout
 
 
+def test_authored_content_globs_ignores_pyproject_settings(worktree: Path) -> None:
+    (worktree / "pyproject.toml").write_text(
+        "[tool.se]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
+    )
+    assert work_tickets.authored_content_globs(worktree) == []
+
+
 def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     worktree: Path,
 ) -> None:
@@ -176,8 +183,8 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     assert git(repository, "init", "-b", "main").returncode == 0
     assert git(repository, "config", "user.name", "Guard test").returncode == 0
     assert git(repository, "config", "user.email", "guard-test@example.invalid").returncode == 0
-    (repository / "pyproject.toml").write_text(
-        "[tool.se]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
+    (repository / "se.toml").write_text(
+        "[project]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
     )
     guide = repository / "docs" / "guide.md"
     guide.parent.mkdir()
@@ -225,8 +232,8 @@ def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
     assert git(repository, "init", "-b", "main").returncode == 0
     assert git(repository, "config", "user.name", "Guard test").returncode == 0
     assert git(repository, "config", "user.email", "guard-test@example.invalid").returncode == 0
-    (repository / "pyproject.toml").write_text(
-        "[tool.se]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
+    (repository / "se.toml").write_text(
+        "[project]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
     )
     guide = repository / "docs" / "guide.md"
     guide.parent.mkdir()

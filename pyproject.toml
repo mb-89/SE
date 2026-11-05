@@ -13,13 +13,6 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-[tool.se]
-authored_content = [
-    "AGENTS.md",
-    "README.md",
-    ".github/**/*.md",
-]
-
 [dependency-groups]
 dev = [
     "pytest>=9.2.0",

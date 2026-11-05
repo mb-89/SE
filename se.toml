@@ -1,0 +1,6 @@
+[project]
+authored_content = [
+    "AGENTS.md",
+    "README.md",
+    ".github/**/*.md",
+]

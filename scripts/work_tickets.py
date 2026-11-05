@@ -654,22 +654,21 @@ def local_config() -> dict[str, object]:
 
 
 def authored_content_globs(root: Path) -> list[str]:
-    path = root / "pyproject.toml"
+    path = root / "se.toml"
     if not path.is_file():
         return []
     try:
         config = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
         raise QueueError(f"Cannot read the project config {path}: {error}") from error
-    tool = config.get("tool")
-    se = tool.get("se") if isinstance(tool, dict) else None
-    configured = se.get("authored_content") if isinstance(se, dict) else None
+    project = config.get("project")
+    configured = project.get("authored_content") if isinstance(project, dict) else None
     if configured is None:
         return []
     if not isinstance(configured, list) or not all(
         isinstance(glob, str) and glob for glob in configured
     ):
-        raise QueueError("tool.se.authored_content must be a list of non-empty globs")
+        raise QueueError("project.authored_content must be a list of non-empty globs")
     return configured
 
 
