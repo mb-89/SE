@@ -154,6 +154,38 @@ def test_intake_writes_one_ticket_per_requirement_and_a_delivery_ticket(worktree
     assert "created" not in output and output.count("kept existing ticket") == 3
 
 
+def test_discovery_intake_creates_an_evidence_index_and_probe_appends_to_it(worktree, gh):
+    assert run(worktree, "intake", "--issue", "5", "--discovery") == 0
+
+    evidence = worktree / ".se" / "work" / "probe" / "evidence.md"
+    assert evidence.read_text(encoding="utf-8") == (
+        "# Discovery evidence\n\n"
+        "| Command | Output |\n"
+        "|---|---|\n"
+    )
+
+    assert run(
+        worktree, "probe", "--command", "uv run python inspect.py",
+        "--output", ".se/work/probe/result.json",
+    ) == 0
+    assert "| `uv run python inspect.py` | `.se/work/probe/result.json` |" in evidence.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_discovery_intake_uses_the_project_declared_probe_root(worktree, gh):
+    assert run(
+        worktree, "intake", "--issue", "5", "--discovery",
+        "--probe-root", ".se/work/project-probe",
+    ) == 0
+
+    evidence = worktree / ".se" / "work" / "project-probe" / "evidence.md"
+    assert evidence.is_file()
+    assert json.loads((worktree / ".se" / "work" / "discovery.json").read_text(
+        encoding="utf-8"
+    )) == {"root": ".se/work/project-probe"}
+
+
 def test_refresh_reports_edited_requirements_and_new_comments(worktree, gh, capsys):
     run(worktree, "intake", "--issue", "5")
     capsys.readouterr()
@@ -194,13 +226,15 @@ def test_refresh_needs_an_issue_until_one_is_recorded(worktree, gh, capsys):
 
 def test_field_report_fills_the_template_and_creates_a_labelled_issue(worktree, gh, capsys):
     gh.issue["labels"] = [{"name": "work"}, {"name": "repo:example"}]
-    run(worktree, "intake", "--issue", "5")
+    run(worktree, "intake", "--issue", "5", "--discovery")
     report = worktree / "report.md"
     assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
     draft = report.read_text(encoding="utf-8")
     assert "**Work issue:** #5  **Pull request:** #7  **Branch:** `feature/example-20261104`" in draft
     assert "**Tested against main:** `abc1234`" in draft
     assert '## User requirement (quoted back)\n\n> make it "work", please\n' in draft
+    delivered = draft.split("## Delivered", 1)[1].split("## Not delivered", 1)[0]
+    assert "[Discovery evidence index](.se/work/probe/evidence.md)" in delivered
     assert "## Not delivered" in draft and "## Retro" in draft
 
     assert run(worktree, "field-report", "--file", str(report)) == 0
