@@ -61,7 +61,8 @@ notify, if any.
    what changed; apply the changes to the tickets (`intake` again adds tickets for added
    requirements), run `work_tickets.py sync`, then move the ticket to `held`.
 4. **Work the ticket**: regression test first, then the change, then the focused tests and the
-   affected real command. Never run the complete suite; the integrator does. No backwards
+   affected real command, and what the issue's acceptance names; run the complete suite only
+   where the acceptance names it, otherwise the integrator does. No backwards
    compatibility, no bookkeeping files. Record evidence in the ticket, check its acceptance items
    only with evidence, `move --to done`, and commit as the work model's
    [commit identity](../skills/work-model/SKILL.md#what-the-project-provides), with the environment's

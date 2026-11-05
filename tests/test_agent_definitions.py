@@ -470,3 +470,11 @@ def test_the_worker_installs_the_hooks_before_its_first_commit():
     assert "[public check](../skills/work-model/SKILL.md#what-the-project-provides) runs on every commit and push" in worker
     assert "`scripts/setup.sh`" in " ".join(normalized(ROOT / "AGENTS.md").split("## Public safety", 1)[1].split())
 
+
+def test_the_worker_runs_what_the_acceptance_names_including_the_suite():
+    worker = normalized(AGENTS / "worker.agent.md")
+    assert "Never run the complete suite" not in worker
+    assert "run the complete suite only where the acceptance names it, otherwise the integrator does" in worker
+    rules = normalized(WORK_MODEL)
+    assert "Workers run focused tests only" not in rules
+    assert "the complete suite only where it names the suite" in rules
