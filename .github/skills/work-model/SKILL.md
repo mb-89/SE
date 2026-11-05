@@ -250,8 +250,11 @@ Claude's cloud has no `~/.se/local.toml`, so there the project's identity applie
 `work_tickets.py sync`, which every role runs at the start, writes whichever applies into the
 checkout's git config (`user.name`, `user.email`), so merges carry it as well as commits. A fresh clone, such as a cloud
 session's, runs the project's setup command before its first commit, so the project's hooks run its
-public check on every commit and push. Commit messages carry no tracker numbers (`#<n>`): a commit
-outlives its tracker. No session prompt repeats any of this.
+public check on every commit and push. Commit messages carry no tracker numbers (`#<n>`, `GH-<n>`,
+an issue or pull request URL): a commit outlives its tracker. se's public check refuses them in
+its commit gates ([Public safety](../../../AGENTS.md#public-safety)), and `integrate` writes its
+merge messages without them where the project's public check is on. No session prompt repeats any
+of this.
 
 `commit_trailer` is the one place that names a commit trailer: an environment that requires one
 (an agent host's co-author line) sets it on its machine, every role adds it as the last line of
