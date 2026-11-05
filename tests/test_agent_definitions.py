@@ -296,3 +296,12 @@ def test_one_skill_owns_how_a_decision_is_presented():
         assert link in text, path.name
         for restated in ("What we gain", "Decision 2 of", "Reply A", "one at a time", "one level up"):
             assert restated.casefold() not in text.casefold(), (path.name, restated)
+
+
+def test_the_decision_skill_holds_the_presentation_rules():
+    text = normalized(DECISION)
+    for rule in ("exactly one decision", '"Decision 2 of 3"', "one to three sentences",
+                 "| Option | What it means | What we gain | What we lose |", "(recommended)",
+                 '"Reply A, B or C"', "## Tasks for the person", "never an option in a decision",
+                 '"Task 1 of 2"'):
+        assert rule in text, rule
