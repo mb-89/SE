@@ -51,7 +51,8 @@ None
      each owning its part of shared files. Capabilities to remove must be named explicitly with
      the user's decision; otherwise all existing capabilities are preserved. A requirement found
      through an error message names the outcome ("the rebuild validates"), not the first symptom
-     ("add key X"). -->
+     ("add key X"). A requirement that says what "adapters" or "consumers" must do names which
+     ones are in scope, for example whether an interim implementation counts. -->
 
 1.
 
