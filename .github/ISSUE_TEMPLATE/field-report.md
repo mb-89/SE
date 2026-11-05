@@ -20,6 +20,9 @@ labels: field-report
 | Work issue item | Result | Commits | Evidence |
 |---|---|---|---|
 
+**Commit groupings:** None <!-- or, per grouping the worker's commit rule allows: the commits, the
+requirements they share, and why (one function changed together, or a test-only commit) -->
+
 ## Not delivered
 
 <!-- The delta: each unmet requirement or acceptance item, why, and exact next steps. "None" if complete. -->
