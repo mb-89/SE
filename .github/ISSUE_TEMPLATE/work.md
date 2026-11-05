@@ -66,7 +66,9 @@ None
 
 ## Acceptance
 
-<!-- Checkable items with the evidence expected (test name, command, measurement). An item that
+<!-- Checkable items with the evidence expected (test name, command, measurement). How tests are
+     written and how fast the suite must be are the work model's [test rules](../skills/work-model/SKILL.md#tests);
+     point there, never restate them. An item that
      measures something that exists already (the project's own content, a figure, a count) is
      checked against that content and the pinned versions before it is written, so it can be
      measured at all. -->
