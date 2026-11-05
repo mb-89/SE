@@ -523,3 +523,11 @@ def test_the_worker_may_work_without_the_ticket_queue_where_the_host_refuses_it(
     worker = normalized(AGENTS / "worker.agent.md")
     assert ("Where the host refuses the local ticket queue (`work_tickets.py init`, `create`, `move`, "
             "`status`), it is optional: work without it and say so in the field report.") in worker
+
+
+def test_the_worker_runs_the_affected_real_command_once_against_the_real_service():
+    worker = normalized(AGENTS / "worker.agent.md")
+    procedure = worker.split("## Procedure", 1)[1]
+    step = procedure.split("4. **Work the ticket**", 1)[1].split("5. **Deliver", 1)[0]
+    assert ("Where the container allows it, run the affected real command once against the real outside "
+            "service, not only against its fake: only the real call shows what the service refuses.") in step
