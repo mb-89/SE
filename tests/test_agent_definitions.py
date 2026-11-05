@@ -531,3 +531,13 @@ def test_the_worker_runs_the_affected_real_command_once_against_the_real_service
     step = procedure.split("4. **Work the ticket**", 1)[1].split("5. **Deliver", 1)[0]
     assert ("Where the container allows it, run the affected real command once against the real outside "
             "service, not only against its fake: only the real call shows what the service refuses.") in step
+
+
+def test_the_suite_runs_at_a_moved_pin_before_the_change_for_worker_and_integrator():
+    rule = ("When the acceptance names the complete suite and a dependency pin moves, the suite runs at the "
+            "new pin before the change, so failures that exist already are told apart from the change's own.")
+    assert normalized(WORK_MODEL).count(rule) == 1
+    for role in ("worker", "integrator"):
+        text = normalized(AGENTS / f"{role}.agent.md")
+        assert rule not in text
+        assert "[suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)" in text
