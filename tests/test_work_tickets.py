@@ -219,6 +219,44 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     assert "docs/guide.md: This sentence is removed." in approved.stdout
 
 
+def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
+    repository = worktree.parent / "rewrapped-content-case"
+    repository.mkdir()
+    assert git(repository, "init", "-b", "main").returncode == 0
+    assert git(repository, "config", "user.name", "Guard test").returncode == 0
+    assert git(repository, "config", "user.email", "guard-test@example.invalid").returncode == 0
+    (repository / "pyproject.toml").write_text(
+        "[tool.se]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
+    )
+    guide = repository / "docs" / "guide.md"
+    guide.parent.mkdir()
+    guide.write_text(
+        "This paragraph has the same words after it is rewrapped for Markdown readability.\n",
+        encoding="utf-8",
+    )
+    assert git(repository, "add", ".").returncode == 0
+    assert git(repository, "commit", "-m", "baseline prose").returncode == 0
+    assert git(repository, "checkout", "-b", "rewrap-prose").returncode == 0
+    guide.write_text(
+        "This paragraph has the same words after it is rewrapped for Markdown\n"
+        "readability.\n",
+        encoding="utf-8",
+    )
+    assert git(repository, "commit", "-am", "rewrap authored prose").returncode == 0
+    report = repository / "field-report.md"
+    report.write_text(
+        "## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n",
+        encoding="utf-8",
+    )
+
+    guarded = run_helper(
+        "guard", "--branch", "rewrap-prose", "--field-report", str(report),
+        "--worktree", str(repository),
+    )
+    assert guarded.returncode == 0, guarded.stderr
+    assert "No removed protected content found." in guarded.stdout
+
+
 def test_queue_lifecycle_requires_checklist_and_evidence(worktree: Path) -> None:
     initialize(worktree)
     initialize(worktree)

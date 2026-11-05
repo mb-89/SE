@@ -34,7 +34,6 @@ REMOVED_PYTHON_TEST_PATTERN = re.compile(r"^-\s*def\s+(test_[A-Za-z0-9_]+)\s*\("
 REMOVED_JAVASCRIPT_TEST_PATTERN = re.compile(
     r"""^-\s*(?:test|it)\s*\(\s*(?P<quote>["'`])(?P<name>.*?)(?P=quote)"""
 )
-DIFF_FILE_PATTERN = re.compile(r"^diff --git a/(.*?) b/")
 SENTENCE_PATTERN = re.compile(r"[^.!?]+[.!?]+(?:[\"')\]]+)?")
 PUBLIC_REFERENCE_PATTERN = re.compile(r"#\d+\b")
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
@@ -1144,57 +1143,77 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
     globs = authored_content_globs(root)
     if not globs:
         return []
-    result = subprocess.run(
-        ["git", "-C", str(root), "diff", "--unified=0", f"main...{branch}"],
+    changed = subprocess.run(
+        ["git", "-C", str(root), "diff", "--name-status", "-z", f"main...{branch}"],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         check=False,
     )
-    if result.returncode != 0:
-        detail = result.stderr.strip() or f"exit code {result.returncode}"
+    if changed.returncode != 0:
+        detail = changed.stderr.strip() or f"exit code {changed.returncode}"
         raise QueueError(f"Cannot diff main against {branch}: {detail}")
-    removed_sentences: list[tuple[str, str]] = []
-    added_sentences: set[str] = set()
-    path: str | None = None
-    in_html_comment = {"-": False, "+": False}
-    for line in result.stdout.splitlines():
-        match = DIFF_FILE_PATTERN.match(line)
-        if match:
-            path = match.group(1)
-            continue
-        if (
-            path is None
-            or not line
-            or line[0] not in "-+"
-            or line.startswith(("---", "+++"))
-            or not any(authored_content_matches(path, glob) for glob in globs)
+    paths = changed.stdout.split("\0")
+    old_files: list[tuple[str, str | None]] = []
+    new_files: list[tuple[str, str | None]] = []
+    index = 0
+    while index < len(paths) - 1:
+        status = paths[index]
+        index += 1
+        if status.startswith(("R", "C")):
+            old_path, new_path = paths[index:index + 2]
+            index += 2
+        else:
+            old_path = new_path = paths[index]
+            index += 1
+            if status == "A":
+                old_path = None
+            elif status == "D":
+                new_path = None
+        if any(
+            authored_content_matches(path, glob)
+            for path in (old_path, new_path)
+            if path is not None
+            for glob in globs
         ):
+            old_files.append((old_path, "main"))
+            new_files.append((new_path, branch))
+
+    def content(path: str | None, revision: str) -> str:
+        if path is None:
+            return ""
+        result = subprocess.run(
+            ["git", "-C", str(root), "show", f"{revision}:{path}"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or f"exit code {result.returncode}"
+            raise QueueError(f"Cannot read {path} at {revision}: {detail}")
+        return result.stdout
+
+    def sentences(text: str) -> list[str]:
+        normalized = re.sub(r"\s+", " ", HTML_COMMENT_PATTERN.sub("", text)).strip()
+        return [sentence.strip() for sentence in SENTENCE_PATTERN.findall(normalized)]
+
+    new_sentences = {
+        sentence
+        for path, revision in new_files
+        for sentence in sentences(content(path, revision))
+    }
+    found: list[str] = []
+    for path, revision in old_files:
+        if path is None:
             continue
-        prefix = line[0]
-        text = line[1:]
-        if "<!--" in text:
-            in_html_comment[prefix] = "-->" not in text
-            continue
-        if in_html_comment[prefix]:
-            if "-->" in text:
-                in_html_comment[prefix] = False
-            continue
-        text = re.sub(r"^\s*(?:[-*+]\s+)?", "", text)
-        for sentence in SENTENCE_PATTERN.findall(text):
-            normalized = sentence.strip()
-            if prefix == "-":
-                item = (path, normalized)
-                if item not in removed_sentences:
-                    removed_sentences.append(item)
-            else:
-                added_sentences.add(normalized)
-    return [
-        f"{removed_path}: {sentence}"
-        for removed_path, sentence in removed_sentences
-        if sentence not in added_sentences
-    ]
+        for sentence in sentences(content(path, revision)):
+            removed = f"{path}: {sentence}"
+            if sentence not in new_sentences and removed not in found:
+                found.append(removed)
+    return found
 
 
 def authored_content_matches(path: str, glob: str) -> bool:
