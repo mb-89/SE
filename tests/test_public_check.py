@@ -447,3 +447,56 @@ def test_se_itself_passes() -> None:
     """se must stay publishable; uses this machine's private deny list when it has one."""
     result = run_check("--repo", str(SE_ROOT))
     assert result.returncode == 0, result.stdout
+
+
+@pytest.mark.parametrize(("text", "found"), [
+    ("Worker role (" + "#593, requirement 3)", ["#593"]),
+    ("See GH" + "-12 and #7", ["GH-12", "#7"]),
+    ("Fixes https://github.com/o/r/" + "issues/8", ["https://github.com/o/r/issues/8"]),
+    ("Port the C# client; #include <stdio.h>; issue #x", []),
+    ("Escape &" + "#39; and color #fff", []),
+])
+def test_tracker_references(text: str, found: list[str]) -> None:
+    assert [match for _, match in public_check.tracker_references(text)] == found
+
+
+def test_commit_msg_hook_refuses_a_tracker_reference(hooked: Path) -> None:
+    (hooked / "clean.txt").write_text("clean\n", encoding="utf-8")
+    result = try_commit(hooked, "Worker role (" + "#593)")
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "commit message:1: tracker-reference '#593'" in output
+    assert "commit messages carry no tracker numbers" in output
+    assert "reword the message before committing" in output
+    assert git(hooked, "rev-list", "--all", "--count").stdout.strip() == "0"
+
+
+def test_commit_msg_hook_accepts_csharp_and_include(hooked: Path) -> None:
+    (hooked / "clean.txt").write_text("clean\n", encoding="utf-8")
+    result = try_commit(hooked, "Port the C# client\n\nKeep #include lines")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_pre_push_hook_refuses_a_tracker_reference_naming_the_commit(
+        hooked: Path, tmp_path: Path) -> None:
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", str(remote))
+    git(hooked, "remote", "add", "origin", str(remote))
+    (hooked / "clean.txt").write_text("clean\n", encoding="utf-8")
+    git(hooked, "add", "-A")
+    git(hooked, "commit", "-q", "--no-verify", "-m", "Worker role (" + "#593)")
+    sha = git(hooked, "rev-parse", "HEAD").stdout.strip()
+    result = subprocess.run(["git", "-C", str(hooked), "push", "-q", "origin", "main"],
+                            capture_output=True, text=True)
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert f"commit {sha[:12]} message:1: tracker-reference '#593'" in output
+    assert "git commit --amend" in output and "git rebase -i" in output
+
+
+def test_full_check_leaves_tracker_references_in_old_history_alone(repo: Path) -> None:
+    commit(repo, {"a.txt": "a\n"}, "Old work (" + "#1)")
+    assert run_check("--repo", str(repo)).returncode == 0
+    result = run_check("--repo", str(repo), "--range", "HEAD")
+    assert result.returncode == 1
+    assert "tracker-reference '#1'" in result.stdout
