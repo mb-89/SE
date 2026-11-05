@@ -46,9 +46,15 @@ owns.
 ```toml
 [project]
 authored_content = ["README.md", "docs/**/*.md"]
+identity = "mb <mb>"
 integration_branch = "main"
 public_check = true
 ```
+
+`identity = "Name <email>"` is the project's commit identity. `work_tickets.py sync` writes it into
+the checkout's git config (`user.name`, `user.email`), so every later commit and merge there
+carries it, unless the machine sets `public_identity`, which wins. Unset, sync leaves the checkout's
+identity as it is.
 
 `integration_branch` is owned by the
 [work model](.github/skills/work-model/SKILL.md#integration-branch).
@@ -65,9 +71,9 @@ authored-prose section.
 ### Machine-local `~/.se/local.toml`
 
 `public_identity = "Name <email>"` pins the author and committer identity allowed in every
-commit pushed to a configured public mirror. If it is omitted, `integrate` uses the selected
-checkout's configured Git identity. When it is set, `sync` writes it into the checkout's git
-config (`user.name`, `user.email`), so every later commit and merge there carries it.
+commit pushed to a configured public mirror. If it is omitted, `integrate` uses the project's
+`identity`, else the selected checkout's configured Git identity. When it is set, `sync` writes it into the checkout's git
+config in place of the project's `identity` ([Project settings](#project-settings)).
 
 Each machine may adapt modules without touching tracked files. se only reads this file; it never
 writes it, and nothing from it is written into `se.toml`.
