@@ -55,6 +55,14 @@ class Ticket:
     content: str
 
 
+@dataclass(frozen=True)
+class Mirror:
+    remote: str
+    branch: str
+    fetch: bool
+    public: bool
+
+
 def valid_id(value: str) -> bool:
     return bool(ID_PATTERN.fullmatch(value)) and value not in {".", ".."}
 
@@ -609,6 +617,38 @@ def configured_worktree_root(root: Path, explicit: str | None) -> str | None:
     return None
 
 
+def configured_mirrors(root: Path) -> list[Mirror]:
+    """Return machine-local mirror settings for this checkout."""
+    mirrors = local_config().get("mirrors")
+    if not isinstance(mirrors, dict):
+        return []
+    configured: object | None = None
+    for key in checkout_keys(root):
+        if key in mirrors:
+            configured = mirrors[key]
+            break
+    if configured is None:
+        return []
+    if not isinstance(configured, list):
+        raise QueueError("Each [mirrors] checkout entry must be an array of tables")
+    result: list[Mirror] = []
+    for entry in configured:
+        if not isinstance(entry, dict):
+            raise QueueError("Each configured mirror must be a table")
+        remote = entry.get("remote")
+        branch = entry.get("branch")
+        fetch = entry.get("fetch")
+        public = entry.get("public")
+        if not isinstance(remote, str) or not remote:
+            raise QueueError("Each configured mirror needs a non-empty remote name")
+        if not isinstance(branch, str) or not branch:
+            raise QueueError("Each configured mirror needs a non-empty branch name")
+        if not isinstance(fetch, bool) or not isinstance(public, bool):
+            raise QueueError("Each configured mirror needs boolean fetch and public settings")
+        result.append(Mirror(remote, branch, fetch, public))
+    return result
+
+
 def api_repo(repo: str) -> str:
     parts = repo.split("/")
     return "/".join(parts[-2:])
@@ -665,6 +705,20 @@ def sync(root: Path) -> str:
         raise QueueError(
             f"Cannot merge {main_ref} due to a merge conflict or merge failure: {detail}"
         )
+    for mirror in configured_mirrors(root):
+        if not mirror.fetch:
+            continue
+        fetched = git("fetch", mirror.remote)
+        if fetched.returncode != 0:
+            detail = fetched.stderr.strip() or f"exit code {fetched.returncode}"
+            raise QueueError(f"Cannot fetch mirror {mirror.remote}: {detail}")
+        mirror_ref = f"{mirror.remote}/{mirror.branch}"
+        merged = git("merge", "--no-edit", mirror_ref)
+        if merged.returncode != 0:
+            detail = merged.stderr.strip() or f"exit code {merged.returncode}"
+            raise QueueError(
+                f"Cannot merge {mirror_ref} due to a merge conflict or merge failure: {detail}"
+            )
     commit = git("rev-parse", "--short", main_ref)
     if commit.returncode != 0 or not commit.stdout.strip():
         raise QueueError(f"Merged {main_ref} but cannot determine its commit")
@@ -1338,6 +1392,7 @@ def capacity(root: Path, repo: str | None, all_repos: bool = False) -> int | Non
 def queue(
     root: Path, repo: str, all_repos: bool = False
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], int | None]:
+    sync(root)
     labels = repository_label_arguments(root, all_repos)
     reports = json.loads(run_gh(root, [
         "issue", "list", "--state", "open", "--label", "field-report",
@@ -1606,11 +1661,13 @@ def integrate(
         integration_escalation(root, report_number, tracker, reason)
         raise QueueError(reason)
 
+    mirrors = configured_mirrors(root)
+    has_public_mirror = any(mirror.public for mirror in mirrors)
     try:
         suite_result = run_project_command(root, suite_command, "Complete suite")
         if build_command:
             run_project_command(root, build_command, "Output regeneration")
-        if check_command:
+        if check_command and not has_public_mirror:
             run_project_command(root, check_command, "Project check")
     except QueueError as error:
         restore_pre_merge(root, previous.stdout.strip())
@@ -1624,6 +1681,16 @@ def integrate(
     if pushed.returncode != 0:
         detail = pushed.stderr.strip() or f"exit code {pushed.returncode}"
         raise QueueError(f"Cannot push main: {detail}")
+    for mirror in mirrors:
+        if mirror.public and check_command:
+            run_project_command(root, check_command, "Project check")
+        pushed = subprocess.run(
+            ["git", "-C", str(root), "push", mirror.remote, f"main:{mirror.branch}"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+        )
+        if pushed.returncode != 0:
+            detail = pushed.stderr.strip() or f"exit code {pushed.returncode}"
+            raise QueueError(f"Cannot push main to mirror {mirror.remote}: {detail}")
     commit = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,

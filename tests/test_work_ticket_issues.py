@@ -351,6 +351,31 @@ def test_sync_without_origin_merges_local_main(worktree, monkeypatch, capsys):
     assert "Merged main abc1234" in capsys.readouterr().out
 
 
+def test_sync_fetches_and_merges_a_configured_mirror(main_checkout, local_config):
+    mirror = main_checkout.parent / "mirror.git"
+    source = main_checkout.parent / "mirror-source"
+    git_ok("init", "-q", "--bare", "-b", "main", str(mirror))
+    git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
+    git_ok("-C", str(main_checkout), "push", "-q", "mirror", "main")
+    git_ok("clone", "-q", str(mirror), str(source))
+    git_ok("-C", str(source), "config", "user.name", "Mirror test")
+    git_ok("-C", str(source), "config", "user.email", "mirror-test@example.invalid")
+    (source / "from-mirror.txt").write_text("mirror\n", encoding="utf-8")
+    git_ok("-C", str(source), "add", "from-mirror.txt")
+    git_ok("-C", str(source), "commit", "-q", "-m", "mirror change")
+    git_ok("-C", str(source), "push", "-q", "origin", "main")
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text(
+        f'[mirrors]\n"{main_checkout.name}" = ['
+        '{ remote = "mirror", branch = "main", fetch = true, public = false }]\n',
+        encoding="utf-8",
+    )
+
+    work_tickets.sync(main_checkout)
+
+    assert (main_checkout / "from-mirror.txt").read_text(encoding="utf-8") == "mirror\n"
+
+
 def test_deliver_is_idempotent_and_prints_configured_notification(
         worktree, gh, local_config, monkeypatch, capsys):
     run(worktree, "intake", "--issue", "5")
@@ -523,6 +548,36 @@ def test_local_config_resolves_per_checkout_and_arguments_win(worktree, gh, loca
     assert "local.toml" in capsys.readouterr().err
 
 
+def test_configured_mirrors_are_scoped_to_the_checkout(worktree, local_config):
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text(
+        '[mirrors]\n'
+        '"worktree" = [\n'
+        '  { remote = "mirror", branch = "published", fetch = true, public = true },\n'
+        '  { remote = "partner", branch = "main", fetch = false, public = false },\n'
+        ']\n',
+        encoding="utf-8",
+    )
+
+    assert work_tickets.configured_mirrors(worktree) == [
+        work_tickets.Mirror("mirror", "published", True, True),
+        work_tickets.Mirror("partner", "main", False, False),
+    ]
+
+
+@pytest.mark.parametrize("configured, error", [
+    ('"worktree" = { remote = "mirror" }\n', "array of tables"),
+    ('"worktree" = [{ remote = "", branch = "main", fetch = true, public = false }]\n', "remote"),
+    ('"worktree" = [{ remote = "mirror", branch = "main", fetch = "yes", public = false }]\n', "boolean"),
+])
+def test_configured_mirrors_reject_invalid_entries(worktree, local_config, configured, error):
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text(f"[mirrors]\n{configured}", encoding="utf-8")
+
+    with pytest.raises(work_tickets.QueueError, match=error):
+        work_tickets.configured_mirrors(worktree)
+
+
 def test_tracker_from_local_config_overrides_origin(worktree, gh, local_config):
     local_config.parent.mkdir(parents=True)
     local_config.write_text(
@@ -638,11 +693,14 @@ def test_queue_lists_open_reports_escalations_and_startable_work(worktree, monke
         "run_gh",
         lambda root, args: json.dumps(escalations if "escalated" in args else reports),
     )
+    synced: list[Path] = []
+    monkeypatch.setattr(work_tickets, "sync", lambda root: synced.append(root) or "abc1234")
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, all_repos: ready)
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, all_repos: 2)
     assert work_tickets.queue(worktree, "git.example/owner/repo") == (
         reports, escalations, ready, 2
     )
+    assert synced == [worktree]
 
 
 def test_queue_filters_to_current_repository_unless_all_repositories(worktree, monkeypatch):
@@ -652,6 +710,7 @@ def test_queue_filters_to_current_repository_unless_all_repositories(worktree, m
         "run_gh",
         lambda root, args: (calls.append(args) or json.dumps([])),
     )
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, all_repos: [])
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, all_repos: 2)
     work_tickets.queue(worktree, "git.example/owner/repo")
@@ -1016,6 +1075,118 @@ def test_integrate_failure_restores_pre_merge_main_and_escalates(
     assert any(call[:3] == ["issue", "comment", "8"] for call in calls)
     assert any(call[:5] == ["issue", "edit", "8", "--add-label", "escalated"] for call in calls)
     assert not any(call[:2] == ["issue", "close"] for call in calls)
+
+
+@pytest.mark.parametrize("check_fails", [False, True])
+def test_integrate_pushes_a_public_mirror_after_running_the_check(
+        main_checkout, local_config, monkeypatch, capsys, check_fails):
+    worker = main_checkout.parent / "worker"
+    mirror = main_checkout.parent / "mirror.git"
+    git_ok("init", "-q", "--bare", "-b", "main", str(mirror))
+    git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text(
+        f'[mirrors]\n"{main_checkout.name}" = ['
+        '{ remote = "mirror", branch = "main", fetch = false, public = true }]\n',
+        encoding="utf-8",
+    )
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    work_tickets.initialize(worker)
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    head = subprocess.run(
+        ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    report = {
+        "body": "**Work issue:** #5  **Pull request:** #7\n\n" + "\n\n".join(
+            f"## {heading}\nComplete." for heading in work_tickets.FIELD_REPORT_SECTIONS
+        )
+    }
+    calls: list[list[str]] = []
+    bodies: list[str] = []
+    started: list[int] = []
+    commands: list[tuple[str, str]] = []
+    guarded: list[tuple[str, Path]] = []
+    monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
+    def gh_call(root, args):
+        calls.append(args)
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({"headRefName": "feature/worker", "headRefOid": head})
+        return ""
+    monkeypatch.setattr(
+        work_tickets, "run_gh",
+        gh_call,
+    )
+    monkeypatch.setattr(
+        work_tickets, "run_gh_with_body",
+        lambda root, args, body: (calls.append(args), bodies.append(body)),
+    )
+    def run_project_command(root, command, description):
+        commands.append((command, description))
+        if check_fails and description == "Project check":
+            raise work_tickets.QueueError("Project check failed")
+        return "214 passed"
+
+    monkeypatch.setattr(work_tickets, "run_project_command", run_project_command)
+    monkeypatch.setattr(
+        work_tickets, "guard", lambda root, branch, report: guarded.append((branch, report)) or [],
+    )
+    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [{"number": 9}])
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+    monkeypatch.setattr(
+        work_tickets, "start", lambda root, number, repo, directory, create: started.append(number)
+    )
+
+    if check_fails:
+        with pytest.raises(work_tickets.QueueError, match="Project check failed"):
+            work_tickets.integrate(main_checkout, 8, None, "suite", "build", "check")
+        mirror_head = subprocess.run(
+            ["git", "--git-dir", str(mirror), "rev-parse", "main"],
+            capture_output=True, text=True, check=False,
+        )
+        assert mirror_head.returncode != 0
+        return
+
+    commit = work_tickets.integrate(main_checkout, 8, None, "suite", "build", "check")
+    assert (main_checkout / "worker.txt").is_file()
+    assert subprocess.run(
+        ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
+        capture_output=True, check=False,
+    ).returncode == 0
+    assert commit and started == [9]
+    message = subprocess.run(
+        ["git", "-C", str(main_checkout), "log", "-1", "--format=%B"],
+        capture_output=True, text=True, check=False,
+    ).stdout
+    assert "work issue #5, field report #8, PR #7" in message
+    assert "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" in message
+    assert commands == [
+        ("suite", "Complete suite"), ("build", "Output regeneration"), ("check", "Project check")
+    ]
+    assert guarded and guarded[0][0] == "feature/worker"
+    output = capsys.readouterr().out
+    assert "Suite: 214 passed" in output
+    assert "Cleanup: worker worktree removed" in output
+    assert "Started: 1" in output
+    mirror_head = subprocess.run(
+        ["git", "--git-dir", str(mirror), "rev-parse", "main"],
+        capture_output=True, text=True, check=False,
+    )
+    assert mirror_head.returncode == 0
+    assert mirror_head.stdout.strip() == subprocess.run(
+        ["git", "-C", str(main_checkout), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    closes = [call for call in calls if call[:2] == ["issue", "close"]]
+    assert closes == [
+        ["issue", "close", "5", "--repo", "git.example/owner/tracker"],
+        ["issue", "close", "8", "--repo", "git.example/owner/tracker"],
+    ]
+    assert all("PR #7. Suite: 214 passed." in body for body in bodies)
+    assert not worker.exists()
 
 
 def test_integrate_conflict_aborts_without_escalating(main_checkout, monkeypatch):
