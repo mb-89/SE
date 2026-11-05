@@ -309,12 +309,23 @@ def review_note(root: Path, note_name: str, disposition: str, backlog_ref: str |
         raise QueueError(f"Could not append note disposition: {error}") from error
 
 
-def create_ticket(root: Path, ticket_id: str, title: str) -> None:
+PLACEHOLDER_ACCEPTANCE = "Add a checkable acceptance criterion."
+
+
+def create_ticket(
+    root: Path, ticket_id: str, title: str, acceptance: list[str] | None = None
+) -> None:
     if not valid_id(ticket_id):
         raise QueueError(f"Unsafe ticket ID: {ticket_id!r}")
     title = title.strip()
     if not title or any(character in title for character in "\r\n"):
         raise QueueError("Ticket title must be nonempty and on one line")
+    items = [item.strip() for item in acceptance or [PLACEHOLDER_ACCEPTANCE]]
+    if any(not item or any(character in item for character in "\r\n") for item in items):
+        raise QueueError(
+            "create: each --acceptance must be one nonempty line; "
+            "pass one --acceptance per acceptance item"
+        )
     paths, tickets, errors = scan_queue(root)
     if errors:
         raise QueueError("; ".join(errors))
@@ -332,8 +343,8 @@ def create_ticket(root: Path, ticket_id: str, title: str) -> None:
         "## Dependencies\n\n"
         "List dependencies, or write `None`.\n\n"
         "## Acceptance\n\n"
-        "- [ ] Add a checkable acceptance criterion.\n\n"
-        "## Evidence\n"
+        + "".join(f"- [ ] {item}\n" for item in items)
+        + "\n## Evidence\n"
     )
     try:
         with path.open("x", encoding="utf-8", newline="\n") as stream:
@@ -367,9 +378,19 @@ def move_ticket(root: Path, ticket_id: str, destination: str) -> None:
         raise QueueError("; ".join(errors))
     if destination == "done":
         problems = checklist_and_evidence_errors(ticket.content)
+        location = ticket.path.relative_to(root).as_posix()
+        lines = ticket.content.splitlines()
+        placeholder = f"- [ ] {PLACEHOLDER_ACCEPTANCE}"
+        if placeholder in lines:
+            line = lines.index(placeholder) + 1
+            problems.append(
+                f"{location}:{line} still holds the placeholder acceptance item; "
+                "remedy: create tickets with `work_tickets.py create --acceptance <text>` "
+                f"(repeatable), or edit line {line} into a real, checked criterion"
+            )
         if problems:
             raise QueueError(
-                f"Cannot move {ticket_id} to done: {', '.join(problems)}"
+                f"Cannot move {ticket_id} ({location}) to done: {'; '.join(problems)}"
             )
 
     target = paths[destination] / ticket.path.name
@@ -2452,6 +2473,10 @@ def make_parser() -> argparse.ArgumentParser:
     add_worktree_argument(create_parser)
     create_parser.add_argument("--id", required=True, help="stable ticket ID")
     create_parser.add_argument("--title", required=True, help="ticket title")
+    create_parser.add_argument(
+        "--acceptance", action="append",
+        help="one acceptance item, repeatable; replaces the placeholder item",
+    )
 
     move_parser = subparsers.add_parser("move", help="move a ticket between states")
     add_worktree_argument(move_parser)
@@ -2628,7 +2653,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Initialized ticket queue in {root / '.se' / 'work'}")
             return 0
         if args.command == "create":
-            create_ticket(root, args.id, args.title)
+            create_ticket(root, args.id, args.title, args.acceptance)
             print(f"Created ticket {args.id} in todo")
             return 0
         if args.command == "move":
