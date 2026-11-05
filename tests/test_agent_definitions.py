@@ -89,10 +89,12 @@ def test_worker_requires_evidence_for_every_work_issue_item():
     assert 'under "not delivered", never as a "decision"' in worker.casefold()
 
 
-def test_integrator_restarts_workers_waiting_for_input():
+def test_integrator_restarts_only_workers_whose_events_show_a_prompt():
     integrator = normalized(AGENTS / "integrator.agent.md")
-    assert "checks `list_sessions` for status `inputneeded`" in integrator.casefold()
-    assert "deleted and restarted in its worktree" in integrator
+    assert "inputneeded" not in integrator.casefold()
+    assert 'reads as idle or "review ready" before its first turn' in integrator
+    assert "stuck only when its events show it waiting on a prompt" in integrator
+    assert "delete it and start it again in its worktree" in integrator
 
 
 def test_partial_deliveries_define_blockers_and_review_responses():
@@ -238,3 +240,47 @@ def test_neutrality_check_accepts_public_and_placeholder_names():
             "git@git.example:owner/repo; 223556219+Copilot@users.noreply.github.com; "
             "https://pypi.org/simple")
     assert neutrality_problems("a.md", text) == []
+
+
+@pytest.mark.parametrize("role", ("worker", "integrator"))
+def test_roles_say_integration_branch_and_link_its_owner(role):
+    text = normalized(AGENTS / f"{role}.agent.md")
+    assert "integration branch" in text
+    assert "(../skills/work-model/SKILL.md#integration-branch)" in text
+    assert "`main`" not in text.replace("`main` unless the project names another", "")
+
+
+def test_work_model_owns_the_integration_branch_setting():
+    text = normalized(WORK_MODEL)
+    assert "## Integration branch" in text
+    assert 'integration_branch = "se"' in text and "It is `main` unless" in text
+
+
+def test_messages_travel_only_up_and_down_the_tree():
+    rule = normalized(WORK_MODEL)
+    assert "**Messages travel only up and down the tree**" in rule
+    assert "news for another repository goes up to the dispatcher" in rule
+    integrator = normalized(AGENTS / "integrator.agent.md")
+    assert "(../skills/work-model/SKILL.md#roles-and-flow)" in integrator
+    assert "never another repository's integrator" in integrator
+
+
+def test_the_comment_footer_rule_is_said_once():
+    assert "**Comments carry the host's footer**" in normalized(WORK_MODEL)
+    for path in (*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL):
+        assert "footer" not in normalized(path), path.name
+
+
+def test_integrator_leaves_a_branch_the_host_refuses_to_delete():
+    integrator = normalized(AGENTS / "integrator.agent.md")
+    assert "automatic head-branch deletion removes it. Never retry the deletion." in integrator
+
+
+def test_the_commit_trailer_is_one_setting_the_roles_point_to():
+    assert 'commit_trailer = "<trailer line>" # optional; none by default' in WORK_MODEL.read_text(
+        encoding="utf-8")
+    for path in (*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL):
+        text = normalized(path)
+        assert "Co-authored-by" not in text, path.name
+    for path in (AGENTS / "worker.agent.md", SKILL):
+        assert "`commit_trailer`](" in normalized(path), path.name

@@ -659,16 +659,32 @@ def local_config() -> dict[str, object]:
         raise QueueError(f"Cannot read the machine-local config {path}: {error}") from error
 
 
-def authored_content_globs(root: Path) -> list[str]:
+def project_config(root: Path) -> dict[str, object]:
+    """The `[project]` table of the checkout's se.toml, or {} without one."""
     path = root / "se.toml"
     if not path.is_file():
-        return []
+        return {}
     try:
         config = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
         raise QueueError(f"Cannot read the project config {path}: {error}") from error
     project = config.get("project")
-    configured = project.get("authored_content") if isinstance(project, dict) else None
+    return project if isinstance(project, dict) else {}
+
+
+def integration_branch(root: Path) -> str:
+    """`project.integration_branch` in se.toml, the branch the integrator writes; default main."""
+    configured = project_config(root).get("integration_branch", "main")
+    if not isinstance(configured, str) or not configured.strip():
+        raise QueueError(
+            f"project.integration_branch in {root / 'se.toml'} must be a non-empty branch name; "
+            "fix it or remove it to use main"
+        )
+    return configured.strip()
+
+
+def authored_content_globs(root: Path) -> list[str]:
+    configured = project_config(root).get("authored_content")
     if configured is None:
         return []
     if not isinstance(configured, list) or not all(
@@ -755,18 +771,22 @@ def current_branch(root: Path) -> str:
 
 
 def tested_main(root: Path) -> str:
-    """The newest main commit merged into the branch, local or remote main alike."""
+    """The newest integration-branch commit merged into the branch, local or remote alike."""
     def git(*arguments: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["git", "-C", str(root), *arguments],
             capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
         )
 
-    refs = [ref for ref in ("main", "origin/main")
+    target = integration_branch(root)
+    refs = [ref for ref in (target, f"origin/{target}")
             if git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode == 0]
     base = git("merge-base", "HEAD", *refs) if refs else None
     if base is None or base.returncode != 0:
-        raise QueueError("Cannot find the main commit merged into this branch")
+        raise QueueError(
+            f"work_tickets.py: cannot find the {target} commit merged into this branch; "
+            "run work_tickets.py sync first"
+        )
     return git("rev-parse", "--short", base.stdout.strip()).stdout.strip()
 
 
@@ -787,9 +807,9 @@ def sync(root: Path) -> str:
         if fetched.returncode != 0:
             detail = fetched.stderr.strip() or f"exit code {fetched.returncode}"
             raise QueueError(f"Cannot fetch origin: {detail}")
-        main_ref = "origin/main"
+        main_ref = f"origin/{integration_branch(root)}"
     else:
-        main_ref = "main"
+        main_ref = integration_branch(root)
     merged = git(*as_identity, "merge", "--no-edit", main_ref)
     if merged.returncode != 0:
         detail = merged.stderr.strip() or f"exit code {merged.returncode}"
@@ -1025,7 +1045,8 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
             "- [ ] Discovery evidence is complete and linked from the field report.\n"
             if discovery else f"{acceptance}\n"
         )
-        + "- [ ] Branch pushed, pull request to `main` opened, field-report issue created.\n\n"
+        + "- [ ] Branch pushed, pull request to the integration branch opened, field-report issue "
+          "created.\n\n"
         "## Evidence\n"
     )))
     return tickets
@@ -1165,7 +1186,7 @@ def template_labels(value: str) -> list[str]:
 
 def deleted_tests(root: Path, branch: str) -> list[str]:
     result = subprocess.run(
-        ["git", "-C", str(root), "diff", "--unified=0", f"main...{branch}"],
+        ["git", "-C", str(root), "diff", "--unified=0", f"{integration_branch(root)}...{branch}"],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -1174,7 +1195,7 @@ def deleted_tests(root: Path, branch: str) -> list[str]:
     )
     if result.returncode != 0:
         detail = result.stderr.strip() or f"exit code {result.returncode}"
-        raise QueueError(f"Cannot diff main against {branch}: {detail}")
+        raise QueueError(f"Cannot diff {integration_branch(root)} against {branch}: {detail}")
     found: list[str] = []
     for line in result.stdout.splitlines():
         python = REMOVED_PYTHON_TEST_PATTERN.match(line)
@@ -1192,7 +1213,7 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
     if not globs:
         return []
     changed = subprocess.run(
-        ["git", "-C", str(root), "diff", "--name-status", "-z", f"main...{branch}"],
+        ["git", "-C", str(root), "diff", "--name-status", "-z", f"{integration_branch(root)}...{branch}"],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -1201,7 +1222,7 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
     )
     if changed.returncode != 0:
         detail = changed.stderr.strip() or f"exit code {changed.returncode}"
-        raise QueueError(f"Cannot diff main against {branch}: {detail}")
+        raise QueueError(f"Cannot diff {integration_branch(root)} against {branch}: {detail}")
     paths = changed.stdout.split("\0")
     old_files: list[tuple[str, str | None]] = []
     new_files: list[tuple[str, str | None]] = []
@@ -1225,7 +1246,7 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
             if path is not None
             for glob in globs
         ):
-            old_files.append((old_path, "main"))
+            old_files.append((old_path, integration_branch(root)))
             new_files.append((new_path, branch))
 
     def content(path: str | None, revision: str) -> str:
@@ -1319,7 +1340,7 @@ def delivery_branch(root: Path, issue: dict[str, object]) -> str:
 def open_pull_request_number(root: Path, repo: str, branch: str) -> int | None:
     data = json.loads(run_gh(
         root, [
-            "pr", "list", "--head", branch, "--base", "main", "--state", "open",
+            "pr", "list", "--head", branch, "--base", integration_branch(root), "--state", "open",
             "--json", "number,url", *repo_arguments(repo),
         ]
     ))
@@ -1353,7 +1374,7 @@ def deliver(root: Path, tracker: str | None = None) -> str:
             body = f"Work issue #{issue['number']}: {issue['url']}\n"
             output = run_gh_with_body(
                 root,
-                ["pr", "create", "--base", "main", "--head", branch, "--title", branch,
+                ["pr", "create", "--base", integration_branch(root), "--head", branch, "--title", branch,
                  *repo_arguments(remote)],
                 body,
             )
@@ -1508,7 +1529,8 @@ def start(
         if path.exists():
             raise QueueError(f"Worktree path already exists: {path}")
         for arguments in (("fetch", "origin"),
-                          ("worktree", "add", "-b", branch, str(path), "origin/main")):
+                          ("worktree", "add", "-b", branch, str(path),
+                           f"origin/{integration_branch(root)}")):
             result = subprocess.run(
                 ["git", "-C", str(root), *arguments],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
@@ -1905,7 +1927,7 @@ def worker_worktree(root: Path, branch: str) -> Path:
 
 def remove_worker_worktree(root: Path, branch: str) -> None:
     worker = worker_worktree(root, branch)
-    report = status_report(worker, "main")
+    report = status_report(worker, integration_branch(root))
     if not report["cleanup_eligible"]:
         reasons = "; ".join(report["cleanup_reasons"])
         raise QueueError(f"Worker worktree is not ready for removal: {reasons}")
@@ -1921,13 +1943,14 @@ def remove_worker_worktree(root: Path, branch: str) -> None:
 
 
 def delete_merged_branch(root: Path, branch: str, head: str) -> None:
+    target = integration_branch(root)
     contained = subprocess.run(
-        ["git", "-C", str(root), "merge-base", "--is-ancestor", head, "main"],
+        ["git", "-C", str(root), "merge-base", "--is-ancestor", head, target],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )
     if contained.returncode != 0:
         print(
-            "warning: merged branch was retained because main does not contain its tip",
+            f"warning: merged branch was retained because {target} does not contain its tip",
             file=sys.stderr,
         )
         return
@@ -1950,7 +1973,11 @@ def delete_merged_branch(root: Path, branch: str, head: str) -> None:
     )
     if remote.returncode != 0:
         detail = remote.stderr.strip() or f"exit code {remote.returncode}"
-        print(f"warning: merged branch was retained on origin: {detail}", file=sys.stderr)
+        print(
+            f"warning: merged branch was retained on origin, which refused deleting {branch} "
+            f"({detail}); left to the repository's automatic head-branch deletion, not retried",
+            file=sys.stderr,
+        )
     else:
         print("Cleanup: origin merged branch deleted")
 
@@ -1962,7 +1989,7 @@ def restore_pre_merge(root: Path, commit: str) -> None:
     )
     if restored.returncode != 0:
         detail = restored.stderr.strip() or f"exit code {restored.returncode}"
-        raise QueueError(f"Cannot restore pre-merge main: {detail}")
+        raise QueueError(f"Cannot restore the pre-merge {integration_branch(root)}: {detail}")
 
 
 def integration_merge_message(
@@ -1971,7 +1998,8 @@ def integration_merge_message(
     if not public:
         return f"Integrate work issue #{work_number}, field report #{report_number}, PR #{pull_number}"
     summary = subprocess.run(
-        ["git", "-C", str(root), "log", "--no-merges", "-1", "--format=%s", f"main..{branch}"],
+        ["git", "-C", str(root), "log", "--no-merges", "-1", "--format=%s",
+         f"{integration_branch(root)}..{branch}"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )
     if summary.returncode != 0 or not summary.stdout.strip():
@@ -2025,7 +2053,8 @@ def public_push_commits(root: Path, mirror: Mirror) -> list[str]:
         detail = remote_head.stderr.strip() or f"exit code {remote_head.returncode}"
         raise QueueError(f"Cannot read public mirror {mirror.remote}: {detail}")
     head = remote_head.stdout.split(maxsplit=1)
-    revision = f"{head[0]}..main" if head else "main"
+    target = integration_branch(root)
+    revision = f"{head[0]}..{target}" if head else target
     commits = subprocess.run(
         ["git", "-C", str(root), "rev-list", "--reverse", revision],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
@@ -2093,14 +2122,21 @@ def integrate(
     finally:
         report_path.unlink(missing_ok=True)
 
+    target = integration_branch(root)
+    if current_branch(root) != target:
+        raise QueueError(
+            f"work_tickets.py integrate: {root} is not on the integration branch {target}; "
+            f"run git -C {root} switch {target}, or set project.integration_branch in se.toml"
+        )
     sync(root)
     previous = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "HEAD"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )
     if previous.returncode != 0 or not previous.stdout.strip():
-        raise QueueError("Cannot determine pre-merge main")
+        raise QueueError(f"Cannot determine the pre-merge {target}")
     mirrors = configured_mirrors(root)
+    trailer = config_value("commit_trailer", remote_repo(root), None)
     merged = subprocess.run(
         [
             "git", "-C", str(root), "merge", "--no-ff",
@@ -2108,7 +2144,7 @@ def integrate(
                 root, branch, work_number, report_number, pull_number,
                 any(mirror.public for mirror in mirrors),
             ),
-            "-m", "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+            *(("-m", trailer) if trailer else ()),
             branch,
         ],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
@@ -2123,11 +2159,11 @@ def integrate(
         raise QueueError(f"Cannot merge {branch}; conflicts: {files or 'unknown files'}")
     head = str(pull.get("headRefOid", ""))
     contained = subprocess.run(
-        ["git", "-C", str(root), "merge-base", "--is-ancestor", head, "main"],
+        ["git", "-C", str(root), "merge-base", "--is-ancestor", head, target],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )
     if not head or contained.returncode != 0:
-        reason = "merged main does not contain the pull request head"
+        reason = f"merged {target} does not contain the pull request head"
         integration_escalation(root, report_number, tracker, reason)
         raise QueueError(reason)
 
@@ -2144,24 +2180,24 @@ def integrate(
         raise
 
     pushed = subprocess.run(
-        ["git", "-C", str(root), "push", "origin", "main"],
+        ["git", "-C", str(root), "push", "origin", target],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )
     if pushed.returncode != 0:
         detail = pushed.stderr.strip() or f"exit code {pushed.returncode}"
-        raise QueueError(f"Cannot push main: {detail}")
+        raise QueueError(f"Cannot push {target}: {detail}")
     for mirror in mirrors:
         if mirror.public and check_commands:
             run_project_checks(root, check_commands, check_temporary_working_directory)
         if mirror.public:
             guard_public_push(root, mirror)
         pushed = subprocess.run(
-            ["git", "-C", str(root), "push", mirror.remote, f"main:{mirror.branch}"],
+            ["git", "-C", str(root), "push", mirror.remote, f"{target}:{mirror.branch}"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
         )
         if pushed.returncode != 0:
             detail = pushed.stderr.strip() or f"exit code {pushed.returncode}"
-            raise QueueError(f"Cannot push main to mirror {mirror.remote}: {detail}")
+            raise QueueError(f"Cannot push {target} to mirror {mirror.remote}: {detail}")
     commit = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
@@ -2296,14 +2332,15 @@ def make_parser() -> argparse.ArgumentParser:
     escalate_parser.add_argument("--file", required=True, type=Path, help="Markdown question")
     escalate_parser.add_argument("--repo", help=REPO_HELP)
 
-    sync_parser = subparsers.add_parser("sync", help="merge the newest origin/main or local main")
+    sync_parser = subparsers.add_parser("sync", help="merge the newest integration branch (se.toml project.integration_branch, "
+             "default main) from origin, or locally without origin")
     add_worktree_argument(sync_parser)
 
     guard_parser = subparsers.add_parser(
         "guard", help="require the field report to name removed protected content"
     )
     add_worktree_argument(guard_parser)
-    guard_parser.add_argument("--branch", required=True, help="branch to compare with main")
+    guard_parser.add_argument("--branch", required=True, help="branch to compare with the integration branch")
     guard_parser.add_argument(
         "--field-report", required=True, type=Path,
         help="field report containing approved removed behaviour and tests",
@@ -2438,7 +2475,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Escalated #{args.issue}")
             return 0
         if args.command == "sync":
-            print(f"Merged main {sync(root)}")
+            print(f"Merged {integration_branch(root)} {sync(root)}")
             return 0
         if args.command == "guard":
             removed = guard(root, args.branch, args.field_report)

@@ -11,7 +11,8 @@ License: MIT, see [LICENSE](LICENSE).
 ## Modules
 
 A repository pulls its dependencies (se itself, format tools, styles, other repositories) as modules
-pinned to commits, from any Git host. `scripts/se_modules.py` implements this section.
+pinned to commits, from any Git host. `scripts/se_modules.py` implements this section; its
+invocation is in [Commands](#commands).
 
 ### `se.toml`
 
@@ -43,7 +44,11 @@ owns.
 ```toml
 [project]
 authored_content = ["README.md", "docs/**/*.md"]
+integration_branch = "main"
 ```
+
+`integration_branch` is owned by the
+[work model](.github/skills/work-model/SKILL.md#integration-branch).
 
 `work_tickets.py guard` checks deleted sentences in the configured project paths. Each configured
 glob is relative to the project root. The field report must name every removed sentence in its
@@ -59,8 +64,8 @@ Each machine may adapt modules without touching tracked files. se only reads thi
 writes it, and nothing from it is written into `se.toml`.
 
 The file is shared with `work_tickets.py`. `se_modules.py` owns `[paths]` and `[urls]`;
-`work_tickets.py` owns the top-level `integrator_session` and `public_identity` settings, and the
-`[trackers]`, `[worktree_roots]`, `[repos]`, and `[mirrors]` tables. Each tool ignores sections
+`work_tickets.py` owns the top-level `integrator_session`, `public_identity` and `commit_trailer`
+settings, and the `[trackers]`, `[worktree_roots]`, `[repos]`, and `[mirrors]` tables. Each tool ignores sections
 owned by the other.
 
 ```toml
@@ -82,12 +87,15 @@ Work queue tracker, worktree and mirror settings are documented in the
 
 ### Commands
 
+One invocation on every platform; a project copies it as it is into its `AGENTS.md`, with `<se>`
+the path where se lives in the project (`.` in se itself):
+
 ```sh
-uv run python scripts/se_modules.py sync [<name>...]
-uv run python scripts/se_modules.py status [<name>...]
-uv run python scripts/se_modules.py update <name> [--to <ref>]
-uv run python scripts/se_modules.py update --all
-uv run python scripts/se_modules.py path <name>
+uv run python <se>/scripts/se_modules.py sync [<name>...]
+uv run python <se>/scripts/se_modules.py status [<name>...]
+uv run python <se>/scripts/se_modules.py update <name> [--to <ref>]
+uv run python <se>/scripts/se_modules.py update --all
+uv run python <se>/scripts/se_modules.py path <name>
 ```
 
 - `sync`: a module with an existing local path is used from there; any other is cloned or fetched into
