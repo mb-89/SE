@@ -58,6 +58,14 @@ def fill_evidence_rows(report: str) -> str:
     return report.replace("|---|---|---|---|", "|---|---|---|---|\n" + EVIDENCE_ROWS)
 
 
+def draft_complete_field_report(worktree: Path, pr: int | None = None) -> Path:
+    report = worktree / ".se" / "work" / "field-report.md"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    work_tickets.draft_field_report(worktree, report, pr)
+    report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")), encoding="utf-8")
+    return report
+
+
 class FakeGh:
     def __init__(self) -> None:
         self.issue = {"number": 5, "title": BRANCH, "body": BODY, "url": URL,
@@ -496,6 +504,7 @@ def test_deliver_is_idempotent_and_prints_configured_notification(
     gh.issue["labels"] = labels
     run(worktree, "intake", "--issue", "5")
     gh.pull_request = None
+    draft_complete_field_report(worktree)
     pushes: list[list[str]] = []
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
@@ -533,6 +542,7 @@ def test_deliver_uses_only_an_open_pull_request(
         gh.pull_request = None
     else:
         gh.pull_request_state = state
+    draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
         work_tickets.subprocess, "run",
@@ -546,9 +556,7 @@ def test_deliver_uses_only_an_open_pull_request(
 def test_deliver_updates_a_pre_pull_request_draft(worktree, gh, monkeypatch, capsys):
     run(worktree, "intake", "--issue", "5")
     gh.pull_request = None
-    report = worktree / ".se" / "work" / "field-report.md"
-    report.parent.mkdir(parents=True, exist_ok=True)
-    work_tickets.draft_field_report(worktree, report, None)
+    report = draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
         work_tickets.subprocess, "run",
@@ -564,6 +572,7 @@ def test_deliver_uses_origin_for_the_pull_request_and_tracker_for_the_report(
         worktree, gh, monkeypatch):
     run(worktree, "intake", "--issue", "5")
     gh.pull_request = None
+    draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "source.example/owner/source")
     monkeypatch.setattr(
@@ -582,6 +591,7 @@ def test_deliver_without_origin_files_report_on_the_given_tracker(
         worktree, gh, monkeypatch, capsys):
     run(worktree, "intake", "--issue", "5")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
+    draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
 
     assert run(worktree, "deliver", "--tracker", "tracker.example/owner/tracker") == 0
@@ -594,6 +604,19 @@ def test_deliver_without_origin_files_report_on_the_given_tracker(
         for call in gh.calls
     )
     assert "Notify <integrator session>: field report" in capsys.readouterr().out
+
+
+def test_deliver_refuses_report_without_evidence(worktree, gh, monkeypatch, capsys):
+    run(worktree, "intake", "--issue", "5")
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(
+        work_tickets.subprocess, "run",
+        lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
+    )
+
+    assert run(worktree, "deliver") == 1
+    assert "missing evidence for: Requirement 1" in capsys.readouterr().err
+    assert not any(call[:2] == ["issue", "create"] for call in gh.calls)
 
 
 @pytest.mark.parametrize(("url", "repo"), [
