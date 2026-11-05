@@ -430,3 +430,8 @@ def test_the_work_model_owns_where_the_commit_identity_and_the_public_check_come
     assert "Where the machine sets no `public_identity`, commit as `mb <mb>`" in normalized(ROOT / "AGENTS.md")
     assert "[commit identity](../skills/work-model/SKILL.md#what-the-project-provides)" in normalized(
         AGENTS / "worker.agent.md")
+
+
+def test_the_worker_commits_each_requirement_while_working():
+    worker = normalized(AGENTS / "worker.agent.md")
+    assert "Commit each requirement as soon as it is done, while working; never reconstruct commits at the end." in worker
