@@ -49,7 +49,8 @@ labels: field-report
 ## Tickets for other repositories
 
 <!-- One block per ticket, ready for the dispatcher to file as a work issue there:
-     ### <repo>: <title> / Goal / Requirements / Acceptance. "None" otherwise. -->
+     ### <repo>: <title> / Goal / Requirements / Acceptance. Generic findings from an
+     application become framework tickets and must not name the application. "None" otherwise. -->
 
 ## Retro
 
