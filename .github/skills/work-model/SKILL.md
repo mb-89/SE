@@ -51,8 +51,9 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   (Claude's cloud does), each fixed comment text a role or command gives (`Started: …`,
   `Integrated in …`, an escalation) is followed by that footer, unchanged. Nothing else repeats
   this rule.
-- Issues are read and written with `gh`; bodies go through `--body-file`. Branches and the integration
-  branch are pushed; a release needs the human's approval, obtained by the dispatcher.
+- Issues are read and written with `gh`, bodies through `--body-file`; where the host offers no
+  `gh`, see [Without gh](#without-gh). Branches and the integration branch are pushed; a release
+  needs the human's approval, obtained by the dispatcher.
 - Retros use `retro.md`; each improvement names the agent definition, template, skill or script
   it changes, and becomes an ordinary work issue.
 
@@ -266,3 +267,38 @@ public mirror push it runs the project check command and refuses that push if th
 - Windows PowerShell 5.1: judge native commands by exit code only; pass every issue, comment and
   pull-request body with `--body-file` (quotes or spaces inside native arguments break the call);
   no inline jq expressions with spaces (use `--json` and `ConvertFrom-Json`).
+
+### Without gh
+
+Where the host offers no `gh` (Claude's cloud), a role still follows its procedure; this section
+owns what changes.
+
+- **GitHub through the host's tools**: issues, comments, pull requests and field reports are read
+  and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same
+  titles, labels, bodies and footers the commands would write.
+- **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
+  `review-note`, `probe`, `sync`, `guard`, `config`, `close`. Every other command fails, naming
+  itself, the missing `gh` and this section.
+- **Every other step by hand**, as that command's `--help` and its role's procedure document it,
+  for example:
+  - `intake` and `refresh`: read the issue and its comments; `create` one ticket per numbered
+    requirement plus `delivery`.
+  - `deliver`: `sync`; `git push -u origin <branch>`; open the pull request to the integration
+    branch, titled like the work issue; file the field report from `field-report.md`, filled in by
+    hand (`field-report --draft` needs `intake`'s snapshot), titled `field-report: <branch>`, label
+    `field-report`; send the notification.
+  - `start`: start the worker session with the host's session tool, on an outcome branch named
+    like the work issue and based on the integration branch.
+  - `integrate`: merge the pull request's branch into the newest integration branch locally, run
+    the complete suite, push the integration branch, then close the issues with the
+    `Integrated in …` comment.
+- **The session prompt carries only** the agent, the work issue, the branch (the session's outcome
+  branch, which replaces the worktree) and the integrator session to notify; everything else is in
+  the role files, this skill and the project's `AGENTS.md`:
+
+  ```text
+  Act as the worker agent defined in <se>/.github/agents/worker.agent.md (read it first, plus the project's AGENTS.md).
+  Work issue: <issue URL>
+  Branch: <branch>
+  Integrator session to notify at delivery: <integrator session>
+  ```

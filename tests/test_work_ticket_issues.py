@@ -472,11 +472,17 @@ def test_comments_print_on_a_legacy_console_encoding(worktree, gh, monkeypatch):
     assert "Order: first ? second ?" in console.buffer.getvalue().decode("cp1252")
 
 
-def test_missing_gh_points_to_setup(worktree, monkeypatch, capsys):
+def test_missing_gh_names_the_command_the_tool_and_the_without_gh_section(worktree, monkeypatch, capsys):
     worktree.mkdir(exist_ok=True)
     monkeypatch.setattr(work_tickets.shutil, "which", lambda name: None)
     assert run(worktree, "intake", "--issue", "5", "--repo", "git.example/owner/repo") == 1
-    assert "setup command" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert error.startswith("error: work_tickets.py intake needs the GitHub CLI (gh), which is not on PATH.")
+    assert "setup command" in error
+    section = error.rstrip().removesuffix(" says").rsplit(" ", 1)[-1]
+    path, anchor = section.split("#")
+    assert anchor == "without-gh"
+    assert "### Without gh" in Path(path).read_text(encoding="utf-8")
 
 
 def test_sync_fetches_and_merges_main_or_reports_conflicts(worktree, monkeypatch, capsys):
