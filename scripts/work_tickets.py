@@ -1737,6 +1737,14 @@ def draft_field_report(root: Path, file: Path, pr: int | None) -> int | None:
     return pr
 
 
+def field_report_placeholders(root: Path) -> list[str]:
+    """The placeholders in field-report.md's header, its one owner: `<name>` or `#<name>`."""
+    _, template = issue_template(root, "field-report")
+    header = re.split(r"^## ", HTML_COMMENT_PATTERN.sub("", template), maxsplit=1,
+                      flags=re.MULTILINE)[0]
+    return list(dict.fromkeys(re.findall(r"#?<[^<>\n]+>", header)))
+
+
 def file_field_report(
     root: Path, file: Path, pr: int | None, tracker: str | None = None
 ) -> tuple[str, str]:
@@ -1758,7 +1766,7 @@ def file_field_report(
     header = re.split(r"^## ", body, maxsplit=1, flags=re.MULTILINE)[0]
     problems = [
         f"unfilled placeholder {placeholder}"
-        for placeholder in ("#<n>", "<branch>", "<integration branch>", "<commit>")
+        for placeholder in field_report_placeholders(root)
         if placeholder in header
     ]
     if FIELD_REPORT_RESULT_PATTERN.search(header) is None:

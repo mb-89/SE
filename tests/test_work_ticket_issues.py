@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -354,6 +355,26 @@ def test_field_report_refuses_unfilled_or_unlinked_reports(worktree, gh, monkeyp
     monkeypatch.setattr(work_tickets, "current_branch", lambda root: "main")
     assert run(worktree, "field-report", "--file", str(report)) == 1
     assert "does not match the work issue title" in capsys.readouterr().err
+
+
+def test_field_report_refuses_a_placeholder_added_to_its_template(
+    worktree, gh, monkeypatch, tmp_path, capsys
+):
+    templates = tmp_path / "templates"
+    shutil.copytree(work_tickets.TEMPLATES, templates)
+    template = templates / "field-report.md"
+    text = template.read_text(encoding="utf-8")
+    template.write_text(text.replace("**Result:**", "**Reviewed on:** <date>  **Result:**", 1),
+                        encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "TEMPLATES", templates)
+    run(worktree, "intake", "--issue", "5")
+    report = worktree / "report.md"
+    report.write_text("**Work issue:** #5  **Pull request:** #7  **Reviewed on:** <date>  "
+                      "**Result:** complete\n\n## Delivered\n\n"
+                      "| Work issue item | Result | Commits | Evidence |\n|---|---|---|---|\n"
+                      + EVIDENCE_ROWS + "\n", encoding="utf-8")
+    assert run(worktree, "field-report", "--file", str(report)) == 1
+    assert "unfilled placeholder <date>" in capsys.readouterr().err
 
 
 def test_field_report_may_mention_placeholders_below_its_header(worktree, gh, capsys):
