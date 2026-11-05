@@ -378,9 +378,19 @@ def move_ticket(root: Path, ticket_id: str, destination: str) -> None:
         raise QueueError("; ".join(errors))
     if destination == "done":
         problems = checklist_and_evidence_errors(ticket.content)
+        location = ticket.path.relative_to(root).as_posix()
+        lines = ticket.content.splitlines()
+        placeholder = f"- [ ] {PLACEHOLDER_ACCEPTANCE}"
+        if placeholder in lines:
+            line = lines.index(placeholder) + 1
+            problems.append(
+                f"{location}:{line} still holds the placeholder acceptance item; "
+                "remedy: create tickets with `work_tickets.py create --acceptance <text>` "
+                f"(repeatable), or edit line {line} into a real, checked criterion"
+            )
         if problems:
             raise QueueError(
-                f"Cannot move {ticket_id} to done: {', '.join(problems)}"
+                f"Cannot move {ticket_id} ({location}) to done: {'; '.join(problems)}"
             )
 
     target = paths[destination] / ticket.path.name

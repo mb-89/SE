@@ -491,6 +491,26 @@ def test_create_refuses_multiline_acceptance(worktree: Path) -> None:
     assert not (worktree / ".se" / "work" / "todo" / "T-1.md").exists()
 
 
+def test_done_refusing_placeholder_names_file_line_and_remedy(worktree: Path) -> None:
+    initialize(worktree)
+    ticket = create(worktree)
+    ticket.write_text(
+        ticket.read_text(encoding="utf-8") + "\nEvidence: focused test passed.\n",
+        encoding="utf-8",
+    )
+    assert move(worktree, "T-1", "held").returncode == 0
+    held_ticket = worktree / ".se" / "work" / "held" / "T-1.md"
+    line = held_ticket.read_text(encoding="utf-8").splitlines().index(
+        "- [ ] Add a checkable acceptance criterion."
+    ) + 1
+
+    refused = move(worktree, "T-1", "done")
+    assert refused.returncode != 0
+    assert f".se/work/held/T-1.md:{line}" in refused.stderr
+    assert "create --acceptance" in refused.stderr
+    assert f"edit line {line}" in refused.stderr
+
+
 def test_move_rejects_acceptance_override_flag(worktree: Path) -> None:
     initialize(worktree)
     result = run_helper(
