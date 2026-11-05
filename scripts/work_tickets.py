@@ -835,15 +835,14 @@ def sync(root: Path) -> str:
             capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
         )
 
-    identity = local_public_identity(root)
+    identity = commit_identity(root)
     if identity is not None:
-        for key, value in zip(("user.name", "user.email"), identity):
+        for key, value in zip(("user.name", "user.email"), identity[:2]):
             configured = git("config", key, value)
             if configured.returncode != 0:
                 detail = configured.stderr.strip() or f"exit code {configured.returncode}"
                 raise QueueError(
-                    f"work_tickets.py sync: cannot set {key} from public_identity in "
-                    f"{local_config_path()}: {detail}"
+                    f"work_tickets.py sync: cannot set {key} from {identity[2]}: {detail}"
                 )
     remote = remote_repo(root)
     if remote is not None:
@@ -2078,24 +2077,33 @@ def integration_merge_message(
     return message
 
 
-def local_public_identity(root: Path) -> tuple[str, str] | None:
-    """`public_identity` from ~/.se/local.toml as (name, email), or None when it is not set."""
-    configured = config_value("public_identity", remote_repo(root), None)
-    if not configured:
-        return None
-    identity = IDENTITY_PATTERN.fullmatch(configured)
+def parsed_identity(configured: object, source: str) -> tuple[str, str]:
+    identity = IDENTITY_PATTERN.fullmatch(configured) if isinstance(configured, str) else None
     if identity is None:
         raise QueueError(
-            f"public_identity in {local_config_path()} must have the form \"Name <email>\", "
-            f"for example \"mb <mb>\"; fix or remove it"
+            f"{source} must have the form \"Name <email>\", for example \"mb <mb>\"; fix or remove it"
         )
     return identity["name"], identity["email"]
 
 
+def commit_identity(root: Path) -> tuple[str, str, str] | None:
+    """(name, email, source) of the commit identity: the machine-local `public_identity`, else
+    se.toml `project.identity`; None when neither is set."""
+    configured = config_value("public_identity", remote_repo(root), None)
+    if configured:
+        source = f"public_identity in {local_config_path()}"
+        return (*parsed_identity(configured, source), source)
+    configured = project_config(root).get("identity")
+    if configured is None or configured == "":
+        return None
+    source = f"project.identity in {root / 'se.toml'}"
+    return (*parsed_identity(configured, source), source)
+
+
 def configured_public_identity(root: Path) -> tuple[str, str]:
-    identity = local_public_identity(root)
+    identity = commit_identity(root)
     if identity is not None:
-        return identity
+        return identity[0], identity[1]
     values: list[str] = []
     for key in ("user.name", "user.email"):
         result = subprocess.run(
@@ -2104,8 +2112,8 @@ def configured_public_identity(root: Path) -> tuple[str, str]:
         )
         if result.returncode != 0 or not result.stdout.strip():
             raise QueueError(
-                "A public mirror requires public_identity in the machine-local config "
-                "or a configured git user.name and user.email"
+                "A public mirror requires public_identity in the machine-local config, "
+                "project.identity in se.toml or a configured git user.name and user.email"
             )
         values.append(result.stdout.strip())
     return values[0], values[1]
