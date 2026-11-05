@@ -29,7 +29,8 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 - **Out**: a pushed branch, a pull request to `main`, a field-report issue from `field-report.md`
   (title `field-report: <branch>`, label `field-report`) and one notification to the integrator.
   The field report holds what was not done, decisions with confidence, spec gaps, a short retro
-  and tickets for other repositories.
+  and tickets for other repositories. Each "Tickets for other repositories" entry is one reusable
+  capability and lists every source file it replaces.
 - **Integrator**: a subtype of worker and the only writer of `main`.
 - **Dispatcher**: the only session the human talks to. The dispatcher never writes any repository.
   It may file work issues for and dispatch into any repository by starting or messaging that
