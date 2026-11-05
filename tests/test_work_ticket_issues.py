@@ -62,7 +62,12 @@ def draft_complete_field_report(worktree: Path, pr: int | None = None) -> Path:
     report = worktree / ".se" / "work" / "field-report.md"
     report.parent.mkdir(parents=True, exist_ok=True)
     work_tickets.draft_field_report(worktree, report, pr)
-    report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")), encoding="utf-8")
+    report.write_text(
+        fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
+            "**Result:** complete | partial", "**Result:** complete"
+        ),
+        encoding="utf-8",
+    )
     return report
 
 
@@ -280,7 +285,12 @@ def test_field_report_fills_the_template_and_creates_a_labelled_issue(worktree, 
     delivered = draft.split("## Delivered", 1)[1].split("## Not delivered", 1)[0]
     assert "[Discovery evidence index](.se/work/probe/evidence.md)" in delivered
     assert "## Not delivered" in draft and "## Retro" in draft
-    report.write_text(fill_evidence_rows(draft), encoding="utf-8")
+    report.write_text(
+        fill_evidence_rows(draft).replace(
+            "**Result:** complete | partial", "**Result:** complete"
+        ),
+        encoding="utf-8",
+    )
 
     assert run(worktree, "field-report", "--file", str(report)) == 0
     create = gh.calls[-1]
@@ -330,13 +340,37 @@ def test_field_report_refuses_unfilled_or_unlinked_reports(worktree, gh, monkeyp
 def test_field_report_may_mention_placeholders_below_its_header(worktree, gh, capsys):
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
-    report.write_text("**Work issue:** #5  **Pull request:** #7  main `abc1234`\n\n"
+    report.write_text("**Work issue:** #5  **Pull request:** #7  main `abc1234`  **Result:** complete\n\n"
                       "## Delivered\n\n| Work issue item | Result | Commits | Evidence |\n"
                       "|---|---|---|---|\n" + EVIDENCE_ROWS + "\n\n"
                       "## Spec gaps\n\nThe draft fills `#<n>`, `<branch>` and `<commit>`.\n",
                       encoding="utf-8")
     assert run(worktree, "field-report", "--file", str(report)) == 0, capsys.readouterr().err
     assert gh.calls[-1][:2] == ["issue", "create"]
+
+
+@pytest.mark.parametrize(("result", "accepted"), [
+    ("complete", True),
+    ("partial", True),
+    ("complete | partial", False),
+    ("unknown", False),
+])
+def test_field_report_requires_an_exact_result_header(worktree, gh, capsys, result, accepted):
+    run(worktree, "intake", "--issue", "5")
+    report = draft_complete_field_report(worktree)
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "**Result:** complete", f"**Result:** {result}"
+        ),
+        encoding="utf-8",
+    )
+
+    assert run(worktree, "field-report", "--file", str(report)) == (0 if accepted else 1)
+    if accepted:
+        assert any(call[:2] == ["issue", "create"] for call in gh.calls)
+    else:
+        assert "header Result must be exactly complete or partial" in capsys.readouterr().err
+        assert not any(call[:2] == ["issue", "create"] for call in gh.calls)
 
 
 def test_field_report_refuses_missing_requirement_evidence(worktree, gh, capsys):
@@ -368,10 +402,14 @@ def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
     assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
-    report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
-        "| Requirement 2 | complete | `abc1234` | `test`: passed |\n", ""
-    ).replace("## Not delivered\n\n", "## Not delivered\n\nRequirement 2 was narrowed.\n"),
-                      encoding="utf-8")
+    report.write_text(
+        fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
+            "**Result:** complete | partial", "**Result:** partial"
+        ).replace(
+            "| Requirement 2 | complete | `abc1234` | `test`: passed |\n", ""
+        ).replace("## Not delivered\n\n", "## Not delivered\n\nRequirement 2 was narrowed.\n"),
+        encoding="utf-8",
+    )
 
     assert run(worktree, "field-report", "--file", str(report)) == 0, capsys.readouterr().err
 
@@ -608,6 +646,14 @@ def test_deliver_without_origin_files_report_on_the_given_tracker(
 
 def test_deliver_refuses_report_without_evidence(worktree, gh, monkeypatch, capsys):
     run(worktree, "intake", "--issue", "5")
+    report = worktree / ".se" / "work" / "field-report.md"
+    work_tickets.draft_field_report(worktree, report, 7)
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "**Result:** complete | partial", "**Result:** complete"
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
         work_tickets.subprocess, "run",
@@ -617,6 +663,29 @@ def test_deliver_refuses_report_without_evidence(worktree, gh, monkeypatch, caps
     assert run(worktree, "deliver") == 1
     assert "missing evidence for: Requirement 1" in capsys.readouterr().err
     assert not any(call[:2] == ["issue", "create"] for call in gh.calls)
+
+
+def test_deliver_refuses_a_report_with_an_invalid_result(worktree, gh, monkeypatch, capsys):
+    run(worktree, "intake", "--issue", "5")
+    report = draft_complete_field_report(worktree)
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "**Result:** complete", "**Result:** complete | partial"
+        ),
+        encoding="utf-8",
+    )
+    pushes: list[list[str]] = []
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(
+        work_tickets.subprocess, "run",
+        lambda arguments, **kwargs: (
+            pushes.append(arguments) or subprocess.CompletedProcess(arguments, 0, "", "")
+        ),
+    )
+
+    assert run(worktree, "deliver") == 1
+    assert "header Result must be exactly complete or partial" in capsys.readouterr().err
+    assert not pushes
 
 
 @pytest.mark.parametrize(("url", "repo"), [
