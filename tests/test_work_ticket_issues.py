@@ -945,6 +945,138 @@ def test_start_assigns_a_cloud_worker_without_creating_a_worktree(
     ] in fake.calls
 
 
+def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity(
+        main_checkout, monkeypatch, capsys):
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    work_tickets.initialize(worker)
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    head = subprocess.run(
+        ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    report = {
+        "body": "**Work issue:** #5  **Pull request:** #7\n\n" + "\n\n".join(
+            f"## {heading}\nComplete." for heading in work_tickets.FIELD_REPORT_SECTIONS
+        )
+    }
+    calls: list[list[str]] = []
+    bodies: list[str] = []
+    started: list[int] = []
+    commands: list[tuple[str, str]] = []
+    guarded: list[tuple[str, Path]] = []
+    monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
+    def gh_call(root, args):
+        calls.append(args)
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({"headRefName": "feature/worker", "headRefOid": head})
+        return ""
+    monkeypatch.setattr(
+        work_tickets, "run_gh",
+        gh_call,
+    )
+    monkeypatch.setattr(
+        work_tickets, "run_gh_with_body",
+        lambda root, args, body: (calls.append(args), bodies.append(body)),
+    )
+    monkeypatch.setattr(
+        work_tickets, "run_project_command",
+        lambda root, command, description: (commands.append((command, description)) or "214 passed"),
+    )
+    monkeypatch.setattr(
+        work_tickets, "guard", lambda root, branch, report: guarded.append((branch, report)) or [],
+    )
+    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [{"number": 9}])
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+    monkeypatch.setattr(
+        work_tickets, "start", lambda root, number, repo, directory, create: started.append(number)
+    )
+
+    commit = work_tickets.integrate(main_checkout, 8, None, "suite", "build", "check")
+    assert (main_checkout / "worker.txt").is_file()
+    assert subprocess.run(
+        ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
+        capture_output=True, check=False,
+    ).returncode == 0
+    assert commit and started == [9]
+    message = subprocess.run(
+        ["git", "-C", str(main_checkout), "log", "-1", "--format=%B"],
+        capture_output=True, text=True, check=False,
+    ).stdout
+    assert "work issue #5, field report #8, PR #7" in message
+    assert "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" in message
+    assert commands == [
+        ("suite", "Complete suite"), ("build", "Output regeneration"), ("check", "Project check")
+    ]
+    assert guarded and guarded[0][0] == "feature/worker"
+    output = capsys.readouterr().out
+    assert "Suite: 214 passed" in output
+    assert "Cleanup: worker worktree removed" in output
+    assert "Started: 1" in output
+    closes = [call for call in calls if call[:2] == ["issue", "close"]]
+    assert closes == [
+        ["issue", "close", "5", "--repo", "git.example/owner/tracker"],
+        ["issue", "close", "8", "--repo", "git.example/owner/tracker"],
+    ]
+    assert all("PR #7. Suite: 214 passed." in body for body in bodies)
+    assert not worker.exists()
+
+
+@pytest.mark.parametrize("failed_step", ["Complete suite", "Output regeneration", "Project check"])
+def test_integrate_failure_restores_pre_merge_main_and_escalates(
+        main_checkout, monkeypatch, failed_step):
+    worker = main_checkout.parent / "failure-worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/failure", str(worker))
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    head = subprocess.run(
+        ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    report = {"body": "**Work issue:** #5  **Pull request:** #7\n\n" + "\n\n".join(
+        f"## {heading}\nComplete." for heading in work_tickets.FIELD_REPORT_SECTIONS)}
+    calls: list[list[str]] = []
+    monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
+    def gh_call(root, args):
+        calls.append(args)
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({"headRefName": "feature/failure", "headRefOid": head})
+        return ""
+    monkeypatch.setattr(work_tickets, "run_gh", gh_call)
+    monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args))
+    def fail(root, command, description):
+        if description == failed_step:
+            raise work_tickets.QueueError(f"{description} failed: expected")
+    monkeypatch.setattr(work_tickets, "run_project_command", fail)
+
+    with pytest.raises(work_tickets.QueueError, match=failed_step):
+        work_tickets.integrate(
+            main_checkout, 8, None, "suite", "build",
+            "check" if failed_step == "Project check" else None,
+        )
+    after = subprocess.run(
+        ["git", "-C", str(main_checkout), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    assert after
+    assert subprocess.run(
+        ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "HEAD"],
+        capture_output=True, check=False,
+    ).returncode != 0
+    assert not subprocess.run(
+        ["git", "-C", str(main_checkout), "status", "--porcelain"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    assert not any(call[:3] == ["git", "-C", str(main_checkout)] for call in calls)
+    assert any(call[:3] == ["issue", "comment", "8"] for call in calls)
+    assert any(call[:5] == ["issue", "edit", "8", "--add-label", "escalated"] for call in calls)
+    assert not any(call[:2] == ["issue", "close"] for call in calls)
+
+
 @pytest.mark.parametrize("check_fails", [False, True])
 def test_integrate_pushes_a_public_mirror_after_running_the_check(
         main_checkout, local_config, monkeypatch, capsys, check_fails):
@@ -1055,58 +1187,6 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     ]
     assert all("PR #7. Suite: 214 passed." in body for body in bodies)
     assert not worker.exists()
-
-
-@pytest.mark.parametrize("failed_step", ["Complete suite", "Output regeneration", "Project check"])
-def test_integrate_failure_restores_pre_merge_main_and_escalates(
-        main_checkout, monkeypatch, failed_step):
-    worker = main_checkout.parent / "failure-worker"
-    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/failure", str(worker))
-    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
-    git_ok("-C", str(worker), "add", "worker.txt")
-    git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
-    head = subprocess.run(
-        ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
-    ).stdout.strip()
-    report = {"body": "**Work issue:** #5  **Pull request:** #7\n\n" + "\n\n".join(
-        f"## {heading}\nComplete." for heading in work_tickets.FIELD_REPORT_SECTIONS)}
-    calls: list[list[str]] = []
-    monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
-    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
-    def gh_call(root, args):
-        calls.append(args)
-        if args[:2] == ["pr", "view"]:
-            return json.dumps({"headRefName": "feature/failure", "headRefOid": head})
-        return ""
-    monkeypatch.setattr(work_tickets, "run_gh", gh_call)
-    monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args))
-    def fail(root, command, description):
-        if description == failed_step:
-            raise work_tickets.QueueError(f"{description} failed: expected")
-    monkeypatch.setattr(work_tickets, "run_project_command", fail)
-
-    with pytest.raises(work_tickets.QueueError, match=failed_step):
-        work_tickets.integrate(
-            main_checkout, 8, None, "suite", "build",
-            "check" if failed_step == "Project check" else None,
-        )
-    after = subprocess.run(
-        ["git", "-C", str(main_checkout), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
-    ).stdout.strip()
-    assert after
-    assert subprocess.run(
-        ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "HEAD"],
-        capture_output=True, check=False,
-    ).returncode != 0
-    assert not subprocess.run(
-        ["git", "-C", str(main_checkout), "status", "--porcelain"],
-        capture_output=True, text=True, check=False,
-    ).stdout.strip()
-    assert not any(call[:3] == ["git", "-C", str(main_checkout)] for call in calls)
-    assert any(call[:3] == ["issue", "comment", "8"] for call in calls)
-    assert any(call[:5] == ["issue", "edit", "8", "--add-label", "escalated"] for call in calls)
-    assert not any(call[:2] == ["issue", "close"] for call in calls)
 
 
 def test_integrate_conflict_aborts_without_escalating(main_checkout, monkeypatch):
