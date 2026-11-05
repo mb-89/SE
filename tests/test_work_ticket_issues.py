@@ -154,6 +154,25 @@ def test_intake_writes_one_ticket_per_requirement_and_a_delivery_ticket(worktree
     assert "created" not in output and output.count("kept existing ticket") == 3
 
 
+def test_discovery_intake_creates_an_evidence_index_and_probe_appends_to_it(worktree, gh):
+    assert run(worktree, "intake", "--issue", "5", "--discovery") == 0
+
+    evidence = worktree / ".se" / "work" / "probe" / "evidence.md"
+    assert evidence.read_text(encoding="utf-8") == (
+        "# Discovery evidence\n\n"
+        "| Command | Output |\n"
+        "|---|---|\n"
+    )
+
+    assert run(
+        worktree, "probe", "--command", "uv run python inspect.py",
+        "--output", ".se/work/probe/result.json",
+    ) == 0
+    assert "| `uv run python inspect.py` | `.se/work/probe/result.json` |" in evidence.read_text(
+        encoding="utf-8"
+    )
+
+
 def test_refresh_reports_edited_requirements_and_new_comments(worktree, gh, capsys):
     run(worktree, "intake", "--issue", "5")
     capsys.readouterr()
