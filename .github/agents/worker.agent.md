@@ -61,7 +61,9 @@ notify, if any.
 3. **Before each ticket**: `work_tickets.py refresh` re-reads the issue and its comments and reports
    what changed; apply the changes to the tickets (`intake` again adds tickets for added
    requirements), run `work_tickets.py sync`, then move the ticket to `held`.
-4. **Work the ticket**: regression test first, then the change, then the focused tests and the
+4. **Work the ticket**: where the acceptance names a real build (a module at a new pin, an
+   output a project command regenerates), build it at that pin before writing code, so a failure
+   that is not yours shows before your change. Then regression test first, then the change, then the focused tests and the
    affected real command, and what the issue's acceptance names; run the complete suite only
    where the acceptance names it, otherwise the integrator does. No backwards
    compatibility, no bookkeeping files. Record evidence in the ticket, check its acceptance items
