@@ -74,8 +74,10 @@ notify, if any.
    end. One commit per requirement, with two exceptions: requirements that change one function
    together share one commit, and where one requirement's behaviour cannot be separated from
    another's code, its test may be a test-only commit. The field report names each such grouping.
-5. **Deliver, always, even when partial**: complete the field-report body in `.se/work/field-report.md`
-   and run `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request and
+5. **Deliver, always, even when partial**: complete the field-report body in `.se/work/field-report.md`,
+   check it with `work_tickets.py field-report --check .se/work/field-report.md` (it needs no
+   GitHub; add `--issue-body <file>` without intake's snapshot) and fix it until it passes, then run
+   `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request and
    field report, and prints the integrator notification.
    Before filing, walk every numbered requirement and every acceptance line of the work issue. For
    each, add one evidence-table row with one quoted evidence line: command and output, file and
