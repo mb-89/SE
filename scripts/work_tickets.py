@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import importlib.util
 import json
 import os
 import re
@@ -41,7 +42,6 @@ PROTECTED_SENTENCE_CONTENT_PATTERN = re.compile(
 )
 PROTECTED_DOT = "\uE000"
 FIELD_REPORT_RESULT_PATTERN = re.compile(r"\*\*Result:\*\*\s*(complete|partial)\s*(?:\n|$)")
-PUBLIC_REFERENCE_PATTERN = re.compile(r"#\d+\b")
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
 IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
 ISSUE_FIELDS = "number,title,body,url,updatedAt,comments,labels"
@@ -725,6 +725,17 @@ def public_check_enabled(root: Path) -> bool:
 
 
 PUBLIC_CHECK = Path(__file__).resolve().parent / "public_check.py"
+
+
+def tracker_references(text: str) -> list[tuple[int, str]]:
+    """The public check's tracker-reference test (one owner: public_check.tracker_references)."""
+    module = sys.modules.get("public_check")
+    if module is None:
+        spec = importlib.util.spec_from_file_location("public_check", PUBLIC_CHECK)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["public_check"] = module
+        spec.loader.exec_module(module)
+    return module.tracker_references(text)
 
 
 def run_public_check(root: Path, previous: str) -> None:
@@ -2208,7 +2219,7 @@ def integration_merge_message(
         detail = summary.stderr.strip() or f"exit code {summary.returncode}"
         raise QueueError(f"Cannot read the summary for {branch}: {detail}")
     message = f"Integrate {branch}: {one_line(summary.stdout)}"
-    if PUBLIC_REFERENCE_PATTERN.search(message) or PUBLIC_HOST_PATTERN.search(message):
+    if tracker_references(message) or PUBLIC_HOST_PATTERN.search(message):
         raise QueueError("Public merge messages cannot contain tracker references or host addresses")
     return message
 
@@ -2293,7 +2304,7 @@ def guard_public_push(root: Path, mirror: Mirror) -> None:
         if len(values) != 5:
             raise QueueError(f"Cannot parse {commit} before public push")
         message, author_name, author_email, committer_name, committer_email = values
-        if PUBLIC_REFERENCE_PATTERN.search(message):
+        if tracker_references(message):
             raise QueueError(f"Cannot push {commit} to a public mirror: message has a tracker reference")
         if (author_name, author_email) != (expected_name, expected_email):
             raise QueueError(f"Cannot push {commit} to a public mirror: author differs from public_identity")
@@ -2353,7 +2364,7 @@ def integrate(
             "git", "-C", str(root), "merge", "--no-ff",
             "-m", integration_merge_message(
                 root, branch, work_number, report_number, pull_number,
-                any(mirror.public for mirror in mirrors),
+                public_check_enabled(root) or any(mirror.public for mirror in mirrors),
             ),
             *(("-m", trailer) if trailer else ()),
             branch,
