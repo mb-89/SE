@@ -202,6 +202,21 @@ A worker splits its work issue into local tickets in its worktree:
 - Rebuilds use the latest integrated state through the project's build command; every integrated
   package that changes output includes a fresh build and a check of the affected output.
 
+## Tests
+
+This section is the one statement of how tests are written (SE's principle 8, fast tests); work
+issues point here and never restate it. The project's suite and its time budget are `[tests]` in
+`se.toml` ([Test budget](../../../README.md#test-budget)), which the integration gate enforces.
+
+- Test a behaviour once, at the outermost interface (the command a person or role runs), on fakes;
+  real outside services appear only in their own contract tests.
+- No sleeping and no wall clock: time comes from an injected clock, waiting from an event.
+- Tests run in parallel and share no state; fixtures are built once and reused.
+- Browser checks are batched: one browser session serves every check of a run.
+- A worker whose change adds tests runs `work_tickets.py suite` before and after the change and
+  reports both times in its field report (`**Suite time:**`); each new test that takes over 2 s is
+  named there with its reason.
+
 ## What the project provides
 
 se is project-neutral. A project that uses it states in its `AGENTS.md`:
@@ -306,7 +321,7 @@ owns what changes.
   and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same
   titles, labels, bodies and footers the commands would write.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
-  `review-note`, `probe`, `sync`, `guard`, `config`, `close`, and `field-report --check`.
+  `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, and `field-report --check`.
   Every other command fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
   for example:

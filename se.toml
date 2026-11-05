@@ -10,3 +10,10 @@ authored_content = [
     "README.md",
     ".github/**/*.md",
 ]
+
+# The complete suite and its time budget; work_tickets.py integrate holds every integration to it
+# (README "Test budget").
+[tests]
+command = ["uv", "run", "pytest", "-q"]
+target_seconds = 60
+limit_seconds = 120

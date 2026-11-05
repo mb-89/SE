@@ -64,6 +64,24 @@ identity as it is.
 the integration branch; on a failure it pushes nothing, restores the pre-merge branch and
 escalates. Default `false`, for projects without a public check.
 
+### Test budget
+
+```toml
+[tests]
+command = ["uv", "run", "pytest", "-q"]
+target_seconds = 60
+limit_seconds = 120
+```
+
+`command` is the project's complete suite, an argument array run without a shell from the project
+root; `work_tickets.py integrate` runs it at every integration, and `work_tickets.py suite` runs it
+the same way for a worker's before-and-after times. The gate measures the wall time and prints it
+with the ten slowest tests (it adds `--durations=10` to a pytest command; other runners' lines of
+the form `<seconds>s <phase> <test>` are read from their output). Above `target_seconds` (default
+60) it warns; above `limit_seconds` (default 120) it refuses the integration, naming the time, the
+limit, the slowest tests and the remedy: make those tests faster, or file a perf package first. How
+tests are written is owned by the [work model](.github/skills/work-model/SKILL.md#tests).
+
 `work_tickets.py guard` checks deleted sentences in the configured project paths. Each configured
 glob is relative to the project root. The field report must name every removed sentence in its
 authored-prose section.
