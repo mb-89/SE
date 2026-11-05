@@ -999,6 +999,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     bodies: list[str] = []
     started: list[int] = []
     commands: list[tuple[str, str]] = []
+    checks: list[tuple[list[list[str]], bool]] = []
     guarded: list[tuple[str, Path]] = []
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -1021,6 +1022,10 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
         lambda root, command, description: (commands.append((command, description)) or "214 passed"),
     )
     monkeypatch.setattr(
+        work_tickets, "run_project_checks",
+        lambda root, check_commands, temporary: (checks.append((check_commands, temporary)) or "passed"),
+    )
+    monkeypatch.setattr(
         work_tickets, "guard", lambda root, branch, report: guarded.append((branch, report)) or [],
     )
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [{"number": 9}])
@@ -1029,7 +1034,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
         work_tickets, "start", lambda root, number, repo, directory, create: started.append(number)
     )
 
-    commit = work_tickets.integrate(main_checkout, 8, None, "suite", "build", "check")
+    commit = work_tickets.integrate(main_checkout, 8, None, "suite", "build", [["check"]])
     assert (main_checkout / "worker.txt").is_file()
     assert subprocess.run(
         ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
@@ -1043,8 +1048,9 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     assert "work issue #5, field report #8, PR #7" in message
     assert "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" in message
     assert commands == [
-        ("suite", "Complete suite"), ("build", "Output regeneration"), ("check", "Project check")
+        ("suite", "Complete suite"), ("build", "Output regeneration")
     ]
+    assert checks == [([["check"]], False)]
     assert guarded and guarded[0][0] == "feature/worker"
     output = capsys.readouterr().out
     assert "Suite: 214 passed" in output
@@ -1087,11 +1093,15 @@ def test_integrate_failure_restores_pre_merge_main_and_escalates(
         if description == failed_step:
             raise work_tickets.QueueError(f"{description} failed: expected")
     monkeypatch.setattr(work_tickets, "run_project_command", fail)
+    def fail_checks(root, commands, temporary):
+        if failed_step == "Project check":
+            raise work_tickets.QueueError("Project check failed: expected")
+    monkeypatch.setattr(work_tickets, "run_project_checks", fail_checks)
 
     with pytest.raises(work_tickets.QueueError, match=failed_step):
         work_tickets.integrate(
             main_checkout, 8, None, "suite", "build",
-            "check" if failed_step == "Project check" else None,
+            [["check"]] if failed_step == "Project check" else None,
         )
     after = subprocess.run(
         ["git", "-C", str(main_checkout), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
@@ -1154,6 +1164,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     bodies: list[str] = []
     started: list[int] = []
     commands: list[tuple[str, str]] = []
+    checks: list[tuple[list[list[str]], bool]] = []
     guarded: list[tuple[str, Path]] = []
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -1173,11 +1184,15 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     )
     def run_project_command(root, command, description):
         commands.append((command, description))
-        if check_fails and description == "Project check":
-            raise work_tickets.QueueError("Project check failed")
         return "214 passed"
 
     monkeypatch.setattr(work_tickets, "run_project_command", run_project_command)
+    def run_project_checks(root, check_commands, temporary):
+        checks.append((check_commands, temporary))
+        if check_fails:
+            raise work_tickets.QueueError("Project check failed")
+        return "passed"
+    monkeypatch.setattr(work_tickets, "run_project_checks", run_project_checks)
     monkeypatch.setattr(
         work_tickets, "guard", lambda root, branch, report: guarded.append((branch, report)) or [],
     )
@@ -1189,7 +1204,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
 
     if check_fails:
         with pytest.raises(work_tickets.QueueError, match="Project check failed"):
-            work_tickets.integrate(main_checkout, 8, None, "suite", "build", "check")
+            work_tickets.integrate(main_checkout, 8, None, "suite", "build", [["check"]])
         mirror_head = subprocess.run(
             ["git", "--git-dir", str(mirror), "rev-parse", "main"],
             capture_output=True, text=True, check=False,
@@ -1198,7 +1213,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
         assert mirror_head.stdout.strip() == mirror_baseline
         return
 
-    commit = work_tickets.integrate(main_checkout, 8, None, "suite", "build", "check")
+    commit = work_tickets.integrate(main_checkout, 8, None, "suite", "build", [["check"]])
     assert (main_checkout / "worker.txt").is_file()
     assert subprocess.run(
         ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
@@ -1214,8 +1229,9 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     assert "git.example" not in message
     assert "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" in message
     assert commands == [
-        ("suite", "Complete suite"), ("build", "Output regeneration"), ("check", "Project check")
+        ("suite", "Complete suite"), ("build", "Output regeneration")
     ]
+    assert checks == [([["check"]], False)]
     assert guarded and guarded[0][0] == "feature/worker"
     output = capsys.readouterr().out
     assert "Suite: 214 passed" in output
