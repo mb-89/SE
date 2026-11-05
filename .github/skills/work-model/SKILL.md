@@ -306,7 +306,7 @@ owns what changes.
   and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same
   titles, labels, bodies and footers the commands would write.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
-  `review-note`, `probe`, `sync`, `guard`, `config`, `close`, and `field-report --check`.
+  `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, and `field-report --check`.
   Every other command fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
   for example:

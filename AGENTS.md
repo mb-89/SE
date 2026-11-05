@@ -8,8 +8,8 @@
 ## Tests
 
 - Focused: `uv run pytest -q tests/<file>.py` (add `-k <name>` for one test), the tests of what changed.
-- Complete: `uv run pytest -q`; the integrator runs it as `integrate --check-command '[["uv", "run",
-  "pytest", "-q"]]'`.
+- Complete: `uv run pytest -q`, declared with its time budget in `se.toml` `[tests]`; `integrate` runs
+  it against that budget, and `work_tickets.py suite --worktree <checkout>` runs it the same way.
 - Test environment: none to load. Where uv warns that it cannot verify TLS behind a proxy, set
   `UV_SYSTEM_CERTS=1` in that shell.
 

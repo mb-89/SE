@@ -1457,6 +1457,10 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
         lambda root, command, description: (commands.append((command, description)) or "214 passed"),
     )
     monkeypatch.setattr(
+        work_tickets, "run_suite",
+        lambda root: (commands.append(("suite", "Complete suite")) or "214 passed"),
+    )
+    monkeypatch.setattr(
         work_tickets, "run_project_checks",
         lambda root, check_commands, temporary: (checks.append((check_commands, temporary)) or "passed"),
     )
@@ -1469,7 +1473,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
         work_tickets, "start", lambda root, number, repo, directory, create: started.append(number)
     )
 
-    commit = work_tickets.integrate(main_checkout, 8, None, "suite", "build", [["check"]])
+    commit = work_tickets.integrate(main_checkout, 8, None, "build", [["check"]])
     assert (main_checkout / "worker.txt").is_file()
     assert subprocess.run(
         ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
@@ -1587,9 +1591,13 @@ def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch)
         "run_project_command",
         lambda root, command, description: (commands.append((command, description)) or "passed"),
     )
+    monkeypatch.setattr(
+        work_tickets, "run_suite",
+        lambda root: (commands.append(("suite", "Complete suite")) or "passed"),
+    )
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
 
-    commit = work_tickets.integrate(main_checkout, 8, None, "suite", None)
+    commit = work_tickets.integrate(main_checkout, 8, None, None)
     assert commit
     assert subprocess.run(
         ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
@@ -1626,6 +1634,7 @@ def test_integrate_failure_restores_pre_merge_main_and_escalates(
         if description == failed_step:
             raise work_tickets.QueueError(f"{description} failed: expected")
     monkeypatch.setattr(work_tickets, "run_project_command", fail)
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root: fail(root, "suite", "Complete suite"))
     def fail_checks(root, commands, temporary):
         if failed_step == "Project check":
             raise work_tickets.QueueError("Project check failed: expected")
@@ -1633,7 +1642,7 @@ def test_integrate_failure_restores_pre_merge_main_and_escalates(
 
     with pytest.raises(work_tickets.QueueError, match=failed_step):
         work_tickets.integrate(
-            main_checkout, 8, None, "suite", "build",
+            main_checkout, 8, None, "build",
             [["check"]] if failed_step == "Project check" else None,
         )
     after = subprocess.run(
@@ -1718,6 +1727,8 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
         return "214 passed"
 
     monkeypatch.setattr(work_tickets, "run_project_command", run_project_command)
+    monkeypatch.setattr(
+        work_tickets, "run_suite", lambda root: run_project_command(root, "suite", "Complete suite"))
     def run_project_checks(root, check_commands, temporary):
         checks.append((check_commands, temporary))
         if check_fails:
@@ -1735,7 +1746,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
 
     if check_fails:
         with pytest.raises(work_tickets.QueueError, match="Project check failed"):
-            work_tickets.integrate(main_checkout, 8, None, "suite", "build", [["check"]])
+            work_tickets.integrate(main_checkout, 8, None, "build", [["check"]])
         mirror_head = subprocess.run(
             ["git", "--git-dir", str(mirror), "rev-parse", "main"],
             capture_output=True, text=True, check=False,
@@ -1744,7 +1755,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
         assert mirror_head.stdout.strip() == mirror_baseline
         return
 
-    commit = work_tickets.integrate(main_checkout, 8, None, "suite", "build", [["check"]])
+    commit = work_tickets.integrate(main_checkout, 8, None, "build", [["check"]])
     assert (main_checkout / "worker.txt").is_file()
     assert subprocess.run(
         ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
@@ -1860,7 +1871,7 @@ def test_integrate_conflict_aborts_without_escalating(main_checkout, monkeypatch
     monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: calls.append(args) or (json.dumps({"headRefName": "feature/conflict", "headRefOid": head}) if args[:2] == ["pr", "view"] else ""))
     monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args))
     with pytest.raises(work_tickets.QueueError, match="shared.txt"):
-        work_tickets.integrate(main_checkout, 8, None, "suite", None)
+        work_tickets.integrate(main_checkout, 8, None, None)
     assert not subprocess.run(["git", "-C", str(main_checkout), "status", "--porcelain"], capture_output=True, text=True).stdout.strip()
     assert not any(call[:3] == ["issue", "comment", "8"] for call in calls)
     assert not any(call[:5] == ["issue", "edit", "8", "--add-label", "escalated"] for call in calls)
@@ -1884,9 +1895,10 @@ def test_integrate_keeps_worktree_when_cleanup_refuses(main_checkout, monkeypatc
     monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: calls.append(args) or (json.dumps({"headRefName": "feature/blocked", "headRefOid": head}) if args[:2] == ["pr", "view"] else ""))
     monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args))
     monkeypatch.setattr(work_tickets, "run_project_command", lambda root, command, description: None)
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root: "passed")
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
 
-    work_tickets.integrate(main_checkout, 8, None, "suite", None)
+    work_tickets.integrate(main_checkout, 8, None, None)
     assert worker.exists()
     assert "worker worktree was not removed" in capsys.readouterr().err
     assert [call[2] for call in calls if call[:2] == ["issue", "close"]] == ["5", "8"]
@@ -1903,6 +1915,7 @@ def integration_fakes(monkeypatch, head: str) -> list[list[str]]:
     monkeypatch.setattr(
         work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args) or "")
     monkeypatch.setattr(work_tickets, "run_project_command", lambda root, command, label: "1 passed")
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root: "1 passed")
     monkeypatch.setattr(work_tickets, "guard", lambda root, branch, report: [])
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 0)
@@ -1946,10 +1959,10 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(
     assert work_tickets.integration_branch(main_checkout) == "se"
     if leak:
         with pytest.raises(work_tickets.QueueError, match="Public check failed.*nothing was pushed"):
-            work_tickets.integrate(main_checkout, 8, None, "suite", None)
+            work_tickets.integrate(main_checkout, 8, None, None)
         assert not origin_contains("refs/heads/se")
         return
-    work_tickets.integrate(main_checkout, 8, None, "suite", None)
+    work_tickets.integrate(main_checkout, 8, None, None)
 
     assert origin_contains("refs/heads/se")
     assert not origin_contains("refs/heads/main")
@@ -1964,7 +1977,7 @@ def test_integrate_refuses_a_checkout_off_the_integration_branch(main_checkout, 
     integration_fakes(monkeypatch, "0" * 40)
 
     with pytest.raises(work_tickets.QueueError, match="not on the integration branch se.*switch se"):
-        work_tickets.integrate(main_checkout, 8, None, "suite", None)
+        work_tickets.integrate(main_checkout, 8, None, None)
 
 
 def test_integration_branch_defaults_to_main_and_rejects_an_empty_name(worktree):
@@ -2001,3 +2014,66 @@ def test_delete_merged_branch_leaves_a_branch_the_host_refuses_to_delete(main_ch
         ["git", "--git-dir", str(origin), "rev-parse", "--verify", "refs/heads/feature/merged"],
         capture_output=True, check=False,
     ).returncode == 0
+
+
+FAKE_SUITE = """\
+print("....")
+print("==== slowest 10 durations ====")
+print("0.20s call     tests/test_fast.py::test_quick")
+print("3.10s call     tests/test_slow.py::test_sleepy")
+print("0.90s setup    tests/test_slow.py::test_fixture")
+print("3 passed")
+"""
+
+
+def fake_suite(worktree: Path, monkeypatch, seconds: float) -> None:
+    """A fake suite in se.toml `[tests]` and a clock that says it took `seconds`."""
+    (worktree / "suite.py").write_text(FAKE_SUITE, encoding="utf-8")
+    (worktree / "se.toml").write_text(
+        f"[tests]\ncommand = {json.dumps([sys.executable, 'suite.py'])}\n"
+        "target_seconds = 60\nlimit_seconds = 120\n",
+        encoding="utf-8",
+    )
+    readings = iter([0.0, seconds])
+    monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
+
+
+def test_suite_over_the_limit_is_refused_with_the_remedy(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 130.0)
+
+    assert run(worktree, "suite") == 1
+    error = capsys.readouterr().err
+    assert "130.0 s, over its limit of 120 s" in error
+    assert "make those tests faster" in error.lower()
+    assert "file a perf package before integrating" in error
+    assert error.index("test_sleepy") < error.index("test_fixture") < error.index("test_quick")
+
+
+def test_suite_between_target_and_limit_warns_and_names_the_slowest(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 90.0)
+
+    assert run(worktree, "suite") == 0
+    captured = capsys.readouterr()
+    assert "warning: the complete suite took 90.0 s, over its target of 60 s" in captured.err
+    assert "3.10s call tests/test_slow.py::test_sleepy" in captured.out
+    assert "Suite: 3 passed; 90.0 s (target 60 s, limit 120 s)" in captured.out
+
+
+def test_suite_under_the_target_passes_quietly(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 5.0)
+
+    assert run(worktree, "suite") == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Suite time: 5.0 s (target 60 s, limit 120 s)" in captured.out
+
+
+def test_suite_budget_defaults_and_refuses_a_missing_command(worktree):
+    (worktree / "se.toml").write_text('[tests]\ncommand = ["uv", "run", "pytest", "-q"]\n',
+                                      encoding="utf-8")
+    budget = work_tickets.suite_budget(worktree)
+    assert (budget.target_seconds, budget.limit_seconds) == (60, 120)
+    assert work_tickets.with_durations(budget.command)[-1] == "--durations=10"
+    (worktree / "se.toml").write_text("[tests]\ntarget_seconds = 60\n", encoding="utf-8")
+    with pytest.raises(work_tickets.QueueError, match=r"\[tests\] in .*se.toml must declare command"):
+        work_tickets.suite_budget(worktree)
