@@ -437,10 +437,13 @@ def test_the_worker_commits_each_requirement_while_working():
     assert "Commit each requirement as soon as it is done, while working; never reconstruct commits at the end." in worker
 
 
-def test_the_work_template_asks_requirements_to_name_the_adapters_in_scope():
+def test_the_work_template_asks_a_requirement_over_a_set_to_list_each_member_by_file():
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
-    assert ('A requirement that says what "adapters" or "consumers" must do names which ones are in scope, '
-            "for example whether an interim implementation counts.") in template
+    assert ('A requirement over a set lists every member by file: each implementation of "both evaluators" '
+            'or "all adapters", which ones are in scope (whether an interim implementation counts), and, '
+            "in a package that moves code, the source tests it carries, each marked where it needs a "
+            "capability outside the package.") in template
+    assert '"adapters" or "consumers" must do' not in template
 
 
 CLOUD_RULES = (
@@ -451,6 +454,10 @@ CLOUD_RULES = (
     "`CLAUDE.md`), the role files and the project's `AGENTS.md` on the integration branch are the rules.",
     "**Retries after a server error**: after a 5xx from GitHub, read before retrying any write, not only a "
     "create (the object may exist); where closing with a state reason fails, close without one",
+    "**Delivery fallback**: an output whose write keeps failing after those retries goes in full into the next "
+    "output that can be written, and a short placeholder points to it: where the field-report issue cannot be "
+    "created with the report, the full report goes into the pull request body, a short field-report issue "
+    "links it, and the delivery notice names the pull request.",
 )
 
 
@@ -478,3 +485,22 @@ def test_the_worker_runs_what_the_acceptance_names_including_the_suite():
     rules = normalized(WORK_MODEL)
     assert "Workers run focused tests only" not in rules
     assert "the complete suite only where it names the suite" in rules
+
+
+def test_the_work_template_checks_that_acceptance_on_existing_content_is_measurable():
+    template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
+    assert ("An item that measures something that exists already (the project's own content, a figure, a count) "
+            "is checked against that content and the pinned versions before it is written, so it can be "
+            "measured at all.") in template
+
+
+def test_the_field_report_has_a_fixed_line_for_commit_groupings_under_delivered():
+    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    delivered = report.split("## Delivered", 1)[1].split("## Not delivered", 1)[0]
+    assert "**Commit groupings:** None <!-- or, per grouping the worker's commit rule allows" in delivered
+
+
+def test_the_field_report_replaces_evidence_the_host_cannot_carry_with_its_command():
+    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    assert ("Evidence the host cannot carry is replaced by the command that reproduces it: where images cannot "
+            "be attached, each screenshot's row names the command that takes it again.") in report
