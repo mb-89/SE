@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import subprocess
@@ -9,6 +10,10 @@ import pytest
 
 PROJECT = Path(__file__).resolve().parents[1]
 HELPER = PROJECT / "scripts" / "work_tickets.py"
+SPEC = importlib.util.spec_from_file_location("work_tickets", HELPER)
+work_tickets = importlib.util.module_from_spec(SPEC)
+sys.modules.setdefault("work_tickets", work_tickets)
+SPEC.loader.exec_module(work_tickets)
 
 
 @pytest.fixture
@@ -74,6 +79,36 @@ def git_worktree(case_root: Path) -> tuple[Path, Path]:
     assert git(coordinator, "commit", "-m", "baseline").returncode == 0
     assert git(coordinator, "worktree", "add", "-b", "worker", str(worker)).returncode == 0
     return coordinator, worker
+
+
+def test_project_checks_run_all_commands_and_report_failures(tmp_path: Path) -> None:
+    passed = tmp_path / "passed.txt"
+    first_failed = tmp_path / "first-failed.txt"
+    second_failed = tmp_path / "second-failed.txt"
+    script = (
+        "from pathlib import Path; import sys; "
+        "Path(sys.argv[1]).write_text(Path.cwd().as_posix(), encoding='utf-8'); "
+        "print(sys.argv[2]); raise SystemExit(int(sys.argv[3]))"
+    )
+    commands = [
+        [sys.executable, "-c", script, str(first_failed), "first failure", "1"],
+        [sys.executable, "-c", script, str(passed), "passing output", "0"],
+        [sys.executable, "-c", script, str(second_failed), "second failure", "2"],
+    ]
+
+    with pytest.raises(work_tickets.QueueError, match="Project check failed") as error:
+        work_tickets.run_project_checks(tmp_path, commands, True)
+
+    assert passed.is_file()
+    assert first_failed.is_file()
+    assert second_failed.is_file()
+    assert "check 1" in str(error.value)
+    assert "first failure" in str(error.value)
+    assert "check 3" in str(error.value)
+    assert "second failure" in str(error.value)
+    assert passed.read_text(encoding="utf-8") != first_failed.read_text(encoding="utf-8")
+    assert first_failed.read_text(encoding="utf-8") != second_failed.read_text(encoding="utf-8")
+    assert passed.read_text(encoding="utf-8") != tmp_path.as_posix()
 
 
 def test_guard_reports_removed_tests_until_field_report_names_them(worktree: Path) -> None:

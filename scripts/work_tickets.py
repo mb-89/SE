@@ -1620,6 +1620,61 @@ def run_project_command(root: Path, command: str, description: str) -> str:
     return output.splitlines()[-1] if output else "passed"
 
 
+def parse_check_commands(value: str) -> list[list[str]]:
+    try:
+        commands = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise argparse.ArgumentTypeError(
+            "--check-command must be a JSON list of non-empty argument arrays"
+        ) from error
+    if not isinstance(commands, list) or not commands:
+        raise argparse.ArgumentTypeError(
+            "--check-command must be a non-empty JSON list of argument arrays"
+        )
+    if any(
+        not isinstance(command, list)
+        or not command
+        or any(not isinstance(argument, str) or not argument for argument in command)
+        for command in commands
+    ):
+        raise argparse.ArgumentTypeError(
+            "--check-command must contain only non-empty argument arrays"
+        )
+    return commands
+
+
+def run_project_checks(
+    root: Path,
+    commands: list[list[str]],
+    temporary_working_directory: bool,
+) -> str:
+    failures: list[str] = []
+    outputs: list[str] = []
+    for index, command in enumerate(commands, start=1):
+        if temporary_working_directory:
+            with tempfile.TemporaryDirectory(prefix="se-check-") as directory:
+                result = subprocess.run(
+                    command, cwd=directory, shell=False, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", check=False,
+                )
+        else:
+            result = subprocess.run(
+                command, cwd=root, shell=False, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", check=False,
+            )
+        output = one_line(result.stdout + result.stderr)
+        reference = f"check {index} ({' '.join(command)})"
+        if result.returncode:
+            failures.append(
+                f"{reference}: exit code {result.returncode}; output: {output or 'none'}"
+            )
+        else:
+            outputs.append(f"{reference}: {output or 'passed'}")
+    if failures:
+        raise QueueError("Project check failed:\n" + "\n".join(failures))
+    return "; ".join(outputs) or "passed"
+
+
 def integration_escalation(root: Path, number: int, repo: str, reason: str) -> None:
     run_gh_with_body(
         root, ["issue", "comment", str(number), *repo_arguments(repo)],
@@ -1764,7 +1819,8 @@ def integrate(
     repo: str | None,
     suite_command: str,
     build_command: str | None,
-    check_command: str | None = None,
+    check_commands: list[list[str]] | None = None,
+    check_temporary_working_directory: bool = False,
 ) -> str:
     """Merge a completed worker branch and perform the mechanical integration steps."""
     tracker = resolve_repo(root, repo)
@@ -1830,8 +1886,8 @@ def integrate(
         suite_result = run_project_command(root, suite_command, "Complete suite")
         if build_command:
             run_project_command(root, build_command, "Output regeneration")
-        if check_command and not has_public_mirror:
-            run_project_command(root, check_command, "Project check")
+        if check_commands and not has_public_mirror:
+            run_project_checks(root, check_commands, check_temporary_working_directory)
     except QueueError as error:
         restore_pre_merge(root, previous.stdout.strip())
         integration_escalation(root, report_number, tracker, str(error))
@@ -1845,8 +1901,8 @@ def integrate(
         detail = pushed.stderr.strip() or f"exit code {pushed.returncode}"
         raise QueueError(f"Cannot push main: {detail}")
     for mirror in mirrors:
-        if mirror.public and check_command:
-            run_project_command(root, check_command, "Project check")
+        if mirror.public and check_commands:
+            run_project_checks(root, check_commands, check_temporary_working_directory)
         if mirror.public:
             guard_public_push(root, mirror)
         pushed = subprocess.run(
@@ -2017,7 +2073,17 @@ def make_parser() -> argparse.ArgumentParser:
     integrate_parser.add_argument("--repo", help=REPO_HELP)
     integrate_parser.add_argument("--suite-command", required=True, help="project's complete test command")
     integrate_parser.add_argument("--build-command", help="project's output regeneration command")
-    integrate_parser.add_argument("--check-command", help="project's additional check command")
+    integrate_parser.add_argument(
+        "--check-command",
+        type=parse_check_commands,
+        metavar="JSON",
+        help="project checks as a JSON list of argument arrays",
+    )
+    integrate_parser.add_argument(
+        "--check-command-temporary-directory",
+        action="store_true",
+        help="run every project check in its own temporary working directory",
+    )
 
     config_parser = subparsers.add_parser(
         "config", help="show the repository and the machine-local settings in effect")
@@ -2138,9 +2204,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Notify {session or '<integrator session>'}: field report {report_url}")
             return 0
         if args.command == "integrate":
+            if args.check_command_temporary_directory and not args.check_command:
+                raise QueueError("--check-command-temporary-directory requires --check-command")
             commit = integrate(
                 root, args.field_report, args.repo, args.suite_command, args.build_command,
-                args.check_command,
+                args.check_command, args.check_command_temporary_directory,
             )
             print(f"Integrated field report #{args.field_report} in {commit}")
             return 0
