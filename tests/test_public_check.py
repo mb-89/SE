@@ -33,6 +33,9 @@ POSITIVE = {
     "email-address": [
         "alice" + AT + "corp.test",
         "Alice.Smith+x" + AT + "mail.corp.test",
+        "alice" + AT + "github.com",
+        "alice" + AT + "anthropic.com",
+        "noreply" + AT + "mail.github.com",
     ],
     "enterprise-github-host": [
         "https://acme" + ".ghe" + ".com/org/repo",
@@ -56,6 +59,9 @@ NEGATIVE = {
     ],
     "email-address": [
         "12345+someone" + AT + "users.noreply.github.com",
+        "noreply" + AT + "github.com",
+        "noreply" + AT + "anthropic.com",
+        "Claude <noreply" + AT + "anthropic.com>",
         "alice" + AT + "example.com",
         "bob" + AT + "mail.example.org",
         "git" + AT + "github.com:owner/repo",
