@@ -23,9 +23,10 @@ labels: field-report
 
 <!-- The delta: each unmet requirement or acceptance item, why, and exact next steps. "None" if complete. -->
 
-## Removed behaviour and deleted or weakened tests
+## Removed behaviour, deleted or weakened tests, and authored prose
 
-<!-- Each removal must name the behaviour or test and the user's decision allowing it. "None" otherwise. -->
+<!-- Follow the [capability-preservation rule](../skills/work-model/SKILL.md#rules-for-all-roles).
+     "None" otherwise. -->
 
 ## Review responses
 
