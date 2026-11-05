@@ -57,6 +57,15 @@ def test_manifest_without_modules_is_empty(tmp_path):
     assert se_modules.load_manifest(tmp_path) == []
 
 
+def test_manifest_accepts_project_settings(tmp_path):
+    write(
+        tmp_path / "se.toml",
+        '[project]\nauthored_content = ["README.md", "docs/**/*.md"]\n',
+    )
+    assert se_modules.load_manifest(tmp_path) == []
+    assert se_modules.main(["--root", str(tmp_path), "status"]) == 0
+
+
 @pytest.mark.parametrize(
     ("body", "message"),
     [
