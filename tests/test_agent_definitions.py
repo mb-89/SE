@@ -380,6 +380,16 @@ def test_the_work_model_owns_without_gh_and_lists_the_commands_that_still_run():
     assert "naming itself, the missing `gh` and this section" in " ".join(section.split())
 
 
+def test_without_gh_names_what_the_session_prompt_still_carries_and_nothing_else():
+    section = without_gh_section()
+    assert ("**The session prompt carries only** the agent, the work issue, the branch"
+            in " ".join(section.split()))
+    prompt = section.split("```text", 1)[1].split("```", 1)[0]
+    keys = [line.strip().split(":", 1)[0] for line in prompt.strip().splitlines()]
+    assert keys == ["Act as the worker agent defined in <se>/.github/agents/worker.agent.md (read it first, plus the project's AGENTS.md).",
+                    "Work issue", "Branch", "Integrator session to notify at delivery"]
+
+
 @pytest.mark.parametrize("role", ("worker", "integrator"))
 def test_roles_point_to_without_gh_and_do_not_restate_it(role):
     text = normalized(AGENTS / f"{role}.agent.md")

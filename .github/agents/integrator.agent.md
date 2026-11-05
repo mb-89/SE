@@ -90,6 +90,9 @@ design branch). Local workers announce a filed field report with one queued mess
    Your session may show the main checkout as its directory: do NOT call set_workspace and do NOT ask anything; cd to your worktree in every command and use absolute paths.
    ```
 
+   Without `gh`, the prompt is the one [Without gh](../skills/work-model/SKILL.md#without-gh)
+   names.
+
    Do not judge a worker by its session status right after starting it: a new session reads as
    idle or "review ready" before its first turn. A worker counts as stuck only when its events
    show it waiting on a prompt; then delete it and start it again in its worktree.
