@@ -54,6 +54,9 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
 - `[urls]`: prefix rewrites applied to `url` before any git step, for example a private mirror of a
   public host. The longest matching prefix wins.
 
+Work queue tracker, worktree and mirror settings are documented in the
+[work model](.github/skills/work-model/SKILL.md#what-the-project-provides).
+
 ### Commands
 
 ```sh

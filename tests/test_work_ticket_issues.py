@@ -523,6 +523,36 @@ def test_local_config_resolves_per_checkout_and_arguments_win(worktree, gh, loca
     assert "local.toml" in capsys.readouterr().err
 
 
+def test_configured_mirrors_are_scoped_to_the_checkout(worktree, local_config):
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text(
+        '[mirrors]\n'
+        '"worktree" = [\n'
+        '  { remote = "mirror", branch = "published", fetch = true, public = true },\n'
+        '  { remote = "partner", branch = "main", fetch = false, public = false },\n'
+        ']\n',
+        encoding="utf-8",
+    )
+
+    assert work_tickets.configured_mirrors(worktree) == [
+        work_tickets.Mirror("mirror", "published", True, True),
+        work_tickets.Mirror("partner", "main", False, False),
+    ]
+
+
+@pytest.mark.parametrize("configured, error", [
+    ('"worktree" = { remote = "mirror" }\n', "array of tables"),
+    ('"worktree" = [{ remote = "", branch = "main", fetch = true, public = false }]\n', "remote"),
+    ('"worktree" = [{ remote = "mirror", branch = "main", fetch = "yes", public = false }]\n', "boolean"),
+])
+def test_configured_mirrors_reject_invalid_entries(worktree, local_config, configured, error):
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text(f"[mirrors]\n{configured}", encoding="utf-8")
+
+    with pytest.raises(work_tickets.QueueError, match=error):
+        work_tickets.configured_mirrors(worktree)
+
+
 def test_tracker_from_local_config_overrides_origin(worktree, gh, local_config):
     local_config.parent.mkdir(parents=True)
     local_config.write_text(
