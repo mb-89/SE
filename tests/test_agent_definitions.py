@@ -94,8 +94,11 @@ def test_partial_deliveries_define_blockers_and_review_responses():
     assert "A partial-delivery blocker is only work outside the worker's box" in rules
     assert "tests of the package's own code are never blockers" in rules.casefold()
     assert "throw-away tracker issues for live acceptance runs" in rules
+    assert "Deleting or condensing authored content is recorded in the field report" in rules
     assert "## Review responses" in report
     assert "answers every review point" in report
+    assert "## Removed behaviour, deleted or weakened tests, and authored prose" in report
+    assert "(../skills/work-model/SKILL.md#rules-for-all-roles)" in report
 
 
 def test_work_issue_template_assigns_shared_root_file_owners():

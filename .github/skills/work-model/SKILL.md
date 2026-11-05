@@ -68,9 +68,11 @@ Framework repositories (the process plugin and document format/converter) carry 
   confidence for the field report, and continue. This never grants authority to bypass policy,
   disclose private data, act destructively or publish without approval.
 - **Preserve capabilities**: removing or narrowing an existing user-visible capability, or
-  deleting or weakening its protecting test, is a product decision for the human. "Disagree and
-  commit" never covers it: the worker escalates instead. The dispatcher never writes a work issue
-  that leaves "keep or remove" to the worker.
+  deleting or weakening its protecting test, is a product decision for the human. Deleting or
+  condensing authored content is recorded in the field report with what was dropped and where it
+  moved, unless the work issue names the change. "Disagree and commit" never covers it: the worker
+  escalates instead. The dispatcher never writes a work issue that leaves "keep or remove" to the
+  worker.
 - **Mechanical first**: a procedure that repeats becomes a command in `work_tickets.py`
   (`intake`, `refresh`, `sync`, `guard`, `deliver`, `escalate`, `block`, `ready`, `capacity`, `queue`,
   `start`, `close`, `config`); prose steps remain only for judgment. Escalations and product decisions stay

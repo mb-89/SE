@@ -66,6 +66,19 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
 Work queue tracker, worktree and mirror settings are documented in the
 [work model](.github/skills/work-model/SKILL.md#what-the-project-provides).
 
+### Authored content
+
+`work_tickets.py guard` checks deleted sentences in the project paths configured in
+`pyproject.toml`:
+
+```toml
+[tool.se]
+authored_content = ["README.md", "docs/**/*.md"]
+```
+
+Each configured glob is relative to the project root. The field report must name every removed
+sentence in its authored-prose section.
+
 ### Commands
 
 ```sh

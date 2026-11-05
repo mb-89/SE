@@ -34,6 +34,7 @@ REMOVED_PYTHON_TEST_PATTERN = re.compile(r"^-\s*def\s+(test_[A-Za-z0-9_]+)\s*\("
 REMOVED_JAVASCRIPT_TEST_PATTERN = re.compile(
     r"""^-\s*(?:test|it)\s*\(\s*(?P<quote>["'`])(?P<name>.*?)(?P=quote)"""
 )
+SENTENCE_PATTERN = re.compile(r"[^.!?]+[.!?]+(?:[\"')\]]+)?")
 PUBLIC_REFERENCE_PATTERN = re.compile(r"#\d+\b")
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
 IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
@@ -652,6 +653,26 @@ def local_config() -> dict[str, object]:
         raise QueueError(f"Cannot read the machine-local config {path}: {error}") from error
 
 
+def authored_content_globs(root: Path) -> list[str]:
+    path = root / "pyproject.toml"
+    if not path.is_file():
+        return []
+    try:
+        config = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise QueueError(f"Cannot read the project config {path}: {error}") from error
+    tool = config.get("tool")
+    se = tool.get("se") if isinstance(tool, dict) else None
+    configured = se.get("authored_content") if isinstance(se, dict) else None
+    if configured is None:
+        return []
+    if not isinstance(configured, list) or not all(
+        isinstance(glob, str) and glob for glob in configured
+    ):
+        raise QueueError("tool.se.authored_content must be a list of non-empty globs")
+    return configured
+
+
 def config_value(key: str, repo: str | None, explicit: str | None) -> str | None:
     """The argument, else `[repos."<repo>"]` in ~/.se/local.toml, else its top-level key."""
     if explicit:
@@ -1118,6 +1139,92 @@ def deleted_tests(root: Path, branch: str) -> list[str]:
     return found
 
 
+def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
+    globs = authored_content_globs(root)
+    if not globs:
+        return []
+    changed = subprocess.run(
+        ["git", "-C", str(root), "diff", "--name-status", "-z", f"main...{branch}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if changed.returncode != 0:
+        detail = changed.stderr.strip() or f"exit code {changed.returncode}"
+        raise QueueError(f"Cannot diff main against {branch}: {detail}")
+    paths = changed.stdout.split("\0")
+    old_files: list[tuple[str, str | None]] = []
+    new_files: list[tuple[str, str | None]] = []
+    index = 0
+    while index < len(paths) - 1:
+        status = paths[index]
+        index += 1
+        if status.startswith(("R", "C")):
+            old_path, new_path = paths[index:index + 2]
+            index += 2
+        else:
+            old_path = new_path = paths[index]
+            index += 1
+            if status == "A":
+                old_path = None
+            elif status == "D":
+                new_path = None
+        if any(
+            authored_content_matches(path, glob)
+            for path in (old_path, new_path)
+            if path is not None
+            for glob in globs
+        ):
+            old_files.append((old_path, "main"))
+            new_files.append((new_path, branch))
+
+    def content(path: str | None, revision: str) -> str:
+        if path is None:
+            return ""
+        result = subprocess.run(
+            ["git", "-C", str(root), "show", f"{revision}:{path}"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or f"exit code {result.returncode}"
+            raise QueueError(f"Cannot read {path} at {revision}: {detail}")
+        return result.stdout
+
+    def sentences(text: str) -> list[str]:
+        normalized = re.sub(r"\s+", " ", HTML_COMMENT_PATTERN.sub("", text)).strip()
+        return [sentence.strip() for sentence in SENTENCE_PATTERN.findall(normalized)]
+
+    new_sentences = {
+        sentence
+        for path, revision in new_files
+        for sentence in sentences(content(path, revision))
+    }
+    found: list[str] = []
+    for path, revision in old_files:
+        if path is None:
+            continue
+        for sentence in sentences(content(path, revision)):
+            removed = f"{path}: {sentence}"
+            if sentence not in new_sentences and removed not in found:
+                found.append(removed)
+    return found
+
+
+def authored_content_matches(path: str, glob: str) -> bool:
+    pattern = re.escape(glob)
+    pattern = pattern.replace(r"\*\*/", r"(?:.*/)?")
+    pattern = pattern.replace(r"\*\*", r".*")
+    pattern = pattern.replace(r"\*", r"[^/]*")
+    pattern = pattern.replace(r"\?", r"[^/]")
+    return re.fullmatch(pattern, path) is not None
+
+
 def guard(root: Path, branch: str, field_report: Path) -> list[str]:
     if not field_report.is_file():
         raise QueueError(f"Field report is not a regular file: {field_report}")
@@ -1125,16 +1232,21 @@ def guard(root: Path, branch: str, field_report: Path) -> list[str]:
         report = field_report.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         raise QueueError(f"Cannot read field report {field_report}: {error}") from error
-    removed = deleted_tests(root, branch)
+    removed_tests = deleted_tests(root, branch)
+    removed_sentences = deleted_authored_sentences(root, branch)
     named = "\n".join(section_content(
-        report, "Removed behaviour and deleted or weakened tests"
+        report, "Removed behaviour, deleted or weakened tests, and authored prose"
     ))
-    missing = [name for name in removed if name not in named]
+    missing = [
+        *[name for name in removed_tests if name not in named],
+        *[sentence for sentence in removed_sentences if sentence not in named],
+    ]
     if missing:
         raise QueueError(
-            "Field report must name each deleted or renamed test: " + ", ".join(missing)
+            "Field report must name each deleted or renamed test and authored sentence: "
+            + ", ".join(missing)
         )
-    return removed
+    return [*removed_tests, *removed_sentences]
 
 
 def delivery_branch(root: Path, issue: dict[str, object]) -> str:
@@ -2103,7 +2215,7 @@ def make_parser() -> argparse.ArgumentParser:
     add_worktree_argument(sync_parser)
 
     guard_parser = subparsers.add_parser(
-        "guard", help="require the field report to name deleted or renamed tests"
+        "guard", help="require the field report to name removed protected content"
     )
     add_worktree_argument(guard_parser)
     guard_parser.add_argument("--branch", required=True, help="branch to compare with main")
@@ -2247,9 +2359,9 @@ def main(argv: list[str] | None = None) -> int:
             removed = guard(root, args.branch, args.field_report)
             if removed:
                 for name in removed:
-                    print(f"Field report names removed test: {name}")
+                    print(f"Field report names removed protected content: {name}")
             else:
-                print("No deleted or renamed tests found.")
+                print("No removed protected content found.")
             return 0
         if args.command == "deliver":
             session = config_value(
