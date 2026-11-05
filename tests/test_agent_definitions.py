@@ -89,10 +89,12 @@ def test_worker_requires_evidence_for_every_work_issue_item():
     assert 'under "not delivered", never as a "decision"' in worker.casefold()
 
 
-def test_integrator_restarts_workers_waiting_for_input():
+def test_integrator_restarts_only_workers_whose_events_show_a_prompt():
     integrator = normalized(AGENTS / "integrator.agent.md")
-    assert "checks `list_sessions` for status `inputneeded`" in integrator.casefold()
-    assert "deleted and restarted in its worktree" in integrator
+    assert "inputneeded" not in integrator.casefold()
+    assert 'reads as idle or "review ready" before its first turn' in integrator
+    assert "stuck only when its events show it waiting on a prompt" in integrator
+    assert "delete it and start it again in its worktree" in integrator
 
 
 def test_partial_deliveries_define_blockers_and_review_responses():
