@@ -40,6 +40,7 @@ PROTECTED_SENTENCE_CONTENT_PATTERN = re.compile(
     re.DOTALL,
 )
 PROTECTED_DOT = "\uE000"
+FIELD_REPORT_RESULT_PATTERN = re.compile(r"\*\*Result:\*\*\s*(complete|partial)\s*(?:\n|$)")
 PUBLIC_REFERENCE_PATTERN = re.compile(r"#\d+\b")
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
 IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
@@ -1330,6 +1331,10 @@ def deliver(root: Path, tracker: str | None = None) -> str:
     issue = required_snapshot(root)
     branch = delivery_branch(root, issue)
     sync(root)
+    report = root / ".se" / "work" / "field-report.md"
+    if not report.exists():
+        draft_field_report(root, report, None)
+    validate_field_report_result(report)
     remote = remote_repo(root)
     if remote is not None:
         pushed = subprocess.run(
@@ -1360,10 +1365,7 @@ def deliver(root: Path, tracker: str | None = None) -> str:
     else:
         pr = None
 
-    report = root / ".se" / "work" / "field-report.md"
-    if not report.exists():
-        draft_field_report(root, report, pr)
-    elif pr is not None:
+    if pr is not None:
         body = report.read_text(encoding="utf-8")
         body = body.replace("**Pull request:** none", f"**Pull request:** #{pr}", 1)
         report.write_text(body, encoding="utf-8", newline="\n")
@@ -1723,6 +1725,8 @@ def file_field_report(
         f"unfilled placeholder {placeholder}"
         for placeholder in ("#<n>", "<branch>", "<commit>") if placeholder in header
     ]
+    if FIELD_REPORT_RESULT_PATTERN.search(header) is None:
+        problems.append("header Result must be exactly complete or partial")
     if f"#{issue['number']}" not in body and issue["url"] not in body:
         problems.append(f"does not link work issue #{issue['number']}")
     if pr is not None and not re.search(rf"(?:#|/pull/){pr}\b", body):
@@ -1744,6 +1748,18 @@ def file_field_report(
         *(argument for label in labels for argument in ("--label", label)), *repo,
     ], body)
     return "created", output.strip().splitlines()[-1] if output.strip() else title
+
+
+def validate_field_report_result(file: Path) -> None:
+    try:
+        body = file.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise QueueError(f"Cannot read field report {file}: {error}") from error
+    header = re.split(r"^## ", body, maxsplit=1, flags=re.MULTILINE)[0]
+    if FIELD_REPORT_RESULT_PATTERN.search(header) is None:
+        raise QueueError(
+            f"Field report {file.name}: header Result must be exactly complete or partial"
+        )
 
 
 def escalate(root: Path, number: int, file: Path, repo: str | None) -> None:
