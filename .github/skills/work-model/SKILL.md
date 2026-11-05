@@ -321,13 +321,14 @@ owns what changes.
   and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same
   titles, labels, bodies and footers the commands would write.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
-  `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, and `field-report --check`.
+  `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push` and
+  `field-report --check`.
   Every other command fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
   for example:
   - `intake` and `refresh`: read the issue and its comments; `create` one ticket per numbered
     requirement plus `delivery`.
-  - `deliver`: `sync`; `git push -u origin <branch>`; open the pull request to the integration
+  - `deliver`: `sync`; `push`; open the pull request to the integration
     branch, titled like the work issue; file the field report from `field-report.md`, filled in by
     hand (`field-report --draft` needs `intake`'s snapshot) and passing `field-report --check
     .se/work/field-report.md --issue-body <file>` (the work issue's body saved to `<file>`), titled
@@ -337,8 +338,8 @@ owns what changes.
     like the work issue and based on the integration branch.
   - `integrate`: merge the pull request's branch into the newest integration branch locally, run
     the complete suite and, where `se.toml` sets `public_check`, the public check
-    (`public_check.py --rev HEAD --range <pre-merge>..HEAD`), refusing on a failure, push the
-    integration branch, then close the issues with the
+    (`public_check.py --rev HEAD --range <pre-merge>..HEAD`), refusing on a failure, `push <integration branch>`,
+    then close the issues with the
     `Integrated in …` comment.
 - **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
   approval prompt no one answers; a role works with the repositories its session started with.
