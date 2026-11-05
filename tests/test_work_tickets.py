@@ -455,6 +455,42 @@ def test_done_validation_allows_tickets_without_checklists(worktree: Path) -> No
     assert completed.returncode == 0, completed.stderr
 
 
+def test_create_acceptance_replaces_placeholder_and_finishes_without_editing(
+    worktree: Path,
+) -> None:
+    initialize(worktree)
+    created = run_helper(
+        *command(worktree, "create"), "--id", "T-1", "--title", "Example ticket",
+        "--acceptance", "Focused test passes.", "--acceptance", "Help names the option.",
+    )
+    assert created.returncode == 0, created.stderr
+    ticket = worktree / ".se" / "work" / "todo" / "T-1.md"
+    content = ticket.read_text(encoding="utf-8")
+    assert "Add a checkable acceptance criterion." not in content
+    assert "- [ ] Focused test passes.\n- [ ] Help names the option.\n" in content
+
+    assert move(worktree, "T-1", "held").returncode == 0
+    held_ticket = worktree / ".se" / "work" / "held" / "T-1.md"
+    held_ticket.write_text(
+        held_ticket.read_text(encoding="utf-8").replace("- [ ]", "- [x]")
+        + "\nEvidence: focused test passed.\n",
+        encoding="utf-8",
+    )
+    completed = move(worktree, "T-1", "done")
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_create_refuses_multiline_acceptance(worktree: Path) -> None:
+    initialize(worktree)
+    result = run_helper(
+        *command(worktree, "create"), "--id", "T-1", "--title", "Example ticket",
+        "--acceptance", "one\ntwo",
+    )
+    assert result.returncode != 0
+    assert "--acceptance" in result.stderr
+    assert not (worktree / ".se" / "work" / "todo" / "T-1.md").exists()
+
+
 def test_move_rejects_acceptance_override_flag(worktree: Path) -> None:
     initialize(worktree)
     result = run_helper(
