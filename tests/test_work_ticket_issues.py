@@ -1136,6 +1136,12 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
     git_ok("-C", str(worker), "add", "worker.txt")
     git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    (main_checkout / "synced.txt").write_text("synced\n", encoding="utf-8")
+    git_ok("-C", str(main_checkout), "add", "synced.txt")
+    git_ok("-C", str(main_checkout), "commit", "-q", "-m", "main change")
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", "main")
+    git_ok("-C", str(worker), "fetch", "-q", "origin")
+    git_ok("-C", str(worker), "merge", "--no-edit", "origin/main")
     head = subprocess.run(
         ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
