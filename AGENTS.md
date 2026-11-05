@@ -27,6 +27,11 @@ domain or a `users.noreply.github.com` address; never a real e-mail address. Whe
 commit messages and author and committer identities. It prints locations and pattern labels, never the
 matched text; exit code 0 passed, 1 hits, 2 setup error.
 
+- Tracker references in commit messages, the
+  [work model's rule](.github/skills/work-model/SKILL.md#what-the-project-provides): the commit
+  gates (`--message-file`, and the commits of a `--range`, as the hooks and `integrate` pass it)
+  refuse them and, as they name nothing private, print the reference with its remedy. A full check
+  leaves history already pushed alone.
 - Generic patterns, committed in the script: user profile paths (`X:\Users\<name>`, `/home/<name>`,
   `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and `example.*`,
   enterprise GitHub hosts (GitHub Enterprise Cloud subdomains), machine names in UNC paths.
