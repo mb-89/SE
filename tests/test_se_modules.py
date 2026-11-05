@@ -63,6 +63,7 @@ def test_manifest_accepts_project_settings(tmp_path):
         '[project]\nauthored_content = ["README.md", "docs/**/*.md"]\n',
     )
     assert se_modules.load_manifest(tmp_path) == []
+    assert se_modules.main(["--root", str(tmp_path), "status"]) == 0
 
 
 @pytest.mark.parametrize(
