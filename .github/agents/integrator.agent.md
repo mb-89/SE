@@ -59,8 +59,10 @@ design branch). Local workers announce a filed field report with one queued mess
 
 1. **Review** the field report, the worker's queue (`work_tickets.py status --worktree <its
    worktree>`: only `done/`, every acceptance item checked with evidence) and
-   `git diff <integration branch>...<branch>`. Run `work_tickets.py guard --branch <branch> --field-report
-   <file> --worktree <its worktree>`. Refuse with reasons when it writes outside its box (files
+   `git diff <integration branch>...<branch>`. Save the filed report's body and its work issue's
+   body to files and run `work_tickets.py field-report --check <report file> --issue-body <issue
+   file>`; refuse a report it rejects with its messages (`integrate` runs the same check). Run
+   `work_tickets.py guard --branch <branch> --field-report <file> --worktree <its worktree>`. Refuse with reasons when it writes outside its box (files
    owned by another package, another repository), lacks tests for changed behaviour, or claims
    unverified work. Refuse and escalate to the dispatcher when it removes a capability or deletes
    or weakens a protecting test without the user's decision recorded in the field report.
