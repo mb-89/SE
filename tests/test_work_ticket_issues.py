@@ -196,7 +196,6 @@ def test_discovery_label_creates_evidence_oriented_tickets(worktree, gh):
     assert run(worktree, "move", "--id", ticket.stem, "--to", "held") == 0
     assert run(worktree, "move", "--id", ticket.stem, "--to", "done") == 0
 
-    unchecked = (worktree / ".se" / "work" / "todo" / "delivery.md")
     assert run(worktree, "move", "--id", "delivery", "--to", "held") == 0
     assert run(worktree, "move", "--id", "delivery", "--to", "done") == 1
 
@@ -438,9 +437,14 @@ def test_sync_fetches_and_merges_a_configured_mirror(main_checkout, local_config
     assert (main_checkout / "from-mirror.txt").read_text(encoding="utf-8") == "mirror\n"
 
 
+@pytest.mark.parametrize(
+    "labels",
+    [[{"name": "work"}], [{"name": "work"}, {"name": "discovery"}]],
+    ids=["standard", "discovery"],
+)
 def test_deliver_is_idempotent_and_prints_configured_notification(
-        worktree, gh, local_config, monkeypatch, capsys):
-    gh.issue["labels"] = [{"name": "work"}, {"name": "discovery"}]
+        worktree, gh, local_config, monkeypatch, capsys, labels):
+    gh.issue["labels"] = labels
     run(worktree, "intake", "--issue", "5")
     gh.pull_request = None
     pushes: list[list[str]] = []
