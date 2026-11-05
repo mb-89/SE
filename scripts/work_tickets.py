@@ -1801,7 +1801,8 @@ def ordered_sections(body: str) -> list[tuple[str, list[str]]]:
 
 
 def table_cells(line: str) -> list[str]:
-    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+    """A Markdown table row's cells; an escaped pipe `\\|` stays inside its cell."""
+    return [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
 
 
 def label_pattern(label: str) -> re.Pattern[str]:

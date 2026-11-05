@@ -520,6 +520,7 @@ def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
                                    "| Acceptance 2 | `test`: passed |"),
      'section "## Delivered": table row | Acceptance 2 | `test`: passed | has 2 columns; '
      "the template's table has 4"),
+    (lambda report: report.replace("`test`: passed |", "`a \\| b`: passed |"), None),
     (lambda report: report.replace("## Review responses\n\nNone\n\n", ""),
      'missing section "## Review responses"; the template has the heading '
      '"## Review responses"'),
@@ -534,7 +535,7 @@ def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
      "header (above the first section): unfilled placeholder <branch>"),
     (lambda report: report.replace("| Requirement 2 | complete | `abc1234` | `test`: passed |\n", ""),
      "missing evidence for: Requirement 2"),
-], ids=["complete", "no-result", "no-tested-against", "two-column-table", "short-row",
+], ids=["complete", "no-result", "no-tested-against", "two-column-table", "short-row", "escaped-pipe",
         "no-review-responses", "no-groupings", "decisions-none", "placeholder", "no-evidence"])
 def test_field_report_check_validates_against_the_template_without_github(
         worktree, gh, capsys, change, message):
