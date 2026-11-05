@@ -507,6 +507,41 @@ def test_sync_without_origin_merges_local_main(worktree, monkeypatch, capsys):
     assert "Merged main abc1234" in capsys.readouterr().out
 
 
+def test_sync_merges_with_the_configured_public_identity(worktree, local_config, monkeypatch):
+    calls: list[list[str]] = []
+
+    def git(arguments, **kwargs):
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "abc1234\n" if "rev-parse" in arguments else "", "")
+
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
+    monkeypatch.setattr(work_tickets.subprocess, "run", git)
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text('public_identity = "mb <mb>"\n', encoding="utf-8")
+
+    assert run(worktree, "sync") == 0
+    assert calls[0] == [
+        "git", "-C", str(worktree), "-c", "user.name=mb", "-c", "user.email=mb",
+        "merge", "--no-edit", "main",
+    ]
+
+
+def test_sync_refuses_a_malformed_public_identity_naming_the_file(
+        worktree, local_config, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
+    monkeypatch.setattr(
+        work_tickets.subprocess, "run",
+        lambda arguments, **kwargs: pytest.fail(f"sync ran {arguments}"),
+    )
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text('public_identity = "mb"\n', encoding="utf-8")
+
+    assert run(worktree, "sync") == 1
+    error = capsys.readouterr().err
+    assert str(local_config) in error
+    assert "Name <email>" in error
+
+
 def test_sync_fetches_and_merges_a_configured_mirror(main_checkout, local_config):
     mirror = main_checkout.parent / "mirror.git"
     source = main_checkout.parent / "mirror-source"

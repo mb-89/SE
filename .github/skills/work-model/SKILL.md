@@ -57,6 +57,8 @@ Framework repositories (the process plugin and document format/converter) carry 
 - Packages that touch the same hot file get one owner or run one after the other; the next one
   merges `main` before touching that file.
 - Work issues quote the user's requirement word for word; the field report quotes it back.
+- Every error message names where it comes from (the command, file or input) and, where
+  possible, the remedy.
 - Work follows the user's priority order; no new investigation starts while a top-priority bug is
   open.
 - Workers run focused tests only; the integrator runs the complete suite, one integration at a

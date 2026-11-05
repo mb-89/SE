@@ -21,6 +21,8 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
 - Generic patterns, committed in the script: user profile paths (`X:\Users\<name>`, `/home/<name>`,
   `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and `example.*`,
   enterprise GitHub hosts (GitHub Enterprise Cloud subdomains), machine names in UNC paths.
+  The fixed addresses services write into commits themselves, `noreply` at `github.com` and at
+  `anthropic.com`, name no person and pass.
 - Private deny list for terms that must never be written down here: `~/.se/private-terms.txt`, or the
   file named by `SE_PRIVATE_TERMS`; one case-insensitive regex per line, `#` comments. It is never
   committed, and hits name only its line number. Without it the check warns and runs the generic
