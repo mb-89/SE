@@ -692,6 +692,35 @@ def integration_branch(root: Path) -> str:
     return configured.strip()
 
 
+def public_check_enabled(root: Path) -> bool:
+    """`project.public_check` in se.toml: whether pushes to the integration branch need se's check."""
+    configured = project_config(root).get("public_check", False)
+    if not isinstance(configured, bool):
+        raise QueueError(
+            f"project.public_check in {root / 'se.toml'} must be true or false; fix it"
+        )
+    return configured
+
+
+PUBLIC_CHECK = Path(__file__).resolve().parent / "public_check.py"
+
+
+def run_public_check(root: Path, previous: str) -> None:
+    """se's public check on the merged tree and every commit since `previous`; refuse on failure."""
+    result = subprocess.run(
+        [sys.executable, str(PUBLIC_CHECK), "--repo", str(root), "--rev", "HEAD",
+         "--range", f"{previous}..HEAD"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
+        raise QueueError(
+            f"Public check failed ({PUBLIC_CHECK.name}, required by project.public_check in "
+            f"se.toml); nothing was pushed. Remove the hits on the branch or add a reasoned allow "
+            f"entry, then integrate again: {detail}"
+        )
+
+
 def authored_content_globs(root: Path) -> list[str]:
     configured = project_config(root).get("authored_content")
     if configured is None:
@@ -2212,6 +2241,8 @@ def integrate(
             run_project_command(root, build_command, "Output regeneration")
         if check_commands and not has_public_mirror:
             run_project_checks(root, check_commands, check_temporary_working_directory)
+        if public_check_enabled(root):
+            run_public_check(root, previous.stdout.strip())
     except QueueError as error:
         restore_pre_merge(root, previous.stdout.strip())
         integration_escalation(root, report_number, tracker, str(error))

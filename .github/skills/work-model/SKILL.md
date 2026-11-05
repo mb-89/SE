@@ -202,7 +202,9 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
   whatever the project's tests need);
 - the focused and the complete test commands, including gated test tiers if there are any;
 - the commit identity its commits carry where the machine sets no `public_identity`, and its
-  public check, if it has one, with the hooks that run it;
+  public check, if it has one, with the hooks that run it and `public_check = true` in its
+  `se.toml` ([Project settings](../../../README.md#project-settings)), which gates every push to
+  the integration branch on it;
 - its integration project checks as JSON argument arrays passed to `integrate --check-command`, for
   example `--check-command '[["uv", "run", "pytest", "-q"], ["uv", "run", "python", "check.py"]]'`.
   The commands run without a shell. Add `--check-command-temporary-directory` when every command
@@ -305,7 +307,9 @@ owns what changes.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
     like the work issue and based on the integration branch.
   - `integrate`: merge the pull request's branch into the newest integration branch locally, run
-    the complete suite, push the integration branch, then close the issues with the
+    the complete suite and, where `se.toml` sets `public_check`, the public check
+    (`public_check.py --rev HEAD --range <pre-merge>..HEAD`), refusing on a failure, push the
+    integration branch, then close the issues with the
     `Integrated in …` comment.
 - **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
   approval prompt no one answers; a role works with the repositories its session started with.
