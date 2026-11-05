@@ -76,8 +76,11 @@ limit_seconds = 120
 `command` is the project's complete suite, an argument array run without a shell from the project
 root; `work_tickets.py integrate` runs it at every integration, and `work_tickets.py suite` runs it
 the same way for a worker's before-and-after times. The gate measures the wall time and prints it
-with the ten slowest tests (it adds `--durations=10` to a pytest command; other runners' lines of
-the form `<seconds>s <phase> <test>` are read from their output). Above `target_seconds` (default
+with the ten slowest tests. A runner of any kind may write JUnit XML reports into the directory
+named by the environment variable `SE_TEST_REPORTS`, one file per part; the gate then lists the ten
+slowest tests across all reports, each with its part (the file's name). Without reports it reads
+pytest's lines (it adds `--durations=10` to a pytest command), and where neither names a test it
+says so and names that remedy. Above `target_seconds` (default
 60) it warns; above `limit_seconds` (default 120) it refuses the integration, naming the time, the
 limit, the slowest tests and the remedy: make those tests faster, or file a perf package first. How
 tests are written is owned by the [work model](.github/skills/work-model/SKILL.md#tests).
