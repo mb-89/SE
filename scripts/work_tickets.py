@@ -61,6 +61,13 @@ class QueueError(Exception):
     """A queue operation cannot be completed safely."""
 
 
+WITHOUT_GH = Path(__file__).resolve().parents[1] / ".github" / "skills" / "work-model" / "SKILL.md"
+
+
+class MissingGhError(QueueError):
+    """The GitHub CLI a command needs is not on PATH; main names the command."""
+
+
 @dataclass(frozen=True)
 class Ticket:
     ticket_id: str
@@ -546,9 +553,10 @@ def status_report(
 def run_gh(root: Path, arguments: list[str]) -> str:
     executable = shutil.which("gh")
     if executable is None:
-        raise QueueError(
-            "GitHub CLI (gh) not found; install it with the setup command the project's "
-            "AGENTS.md names"
+        raise MissingGhError(
+            "needs the GitHub CLI (gh), which is not on PATH. Install it with the setup command "
+            "the project's AGENTS.md names, or, where the host has no gh (Claude's cloud), do this "
+            f"step by hand as {WITHOUT_GH.as_posix()}#without-gh says"
         )
     result = subprocess.run(
         [executable, *arguments],
@@ -2623,6 +2631,9 @@ def main(argv: list[str] | None = None) -> int:
             for error in report["errors"]:
                 print(f"error: {error}")
         return 0 if report["initialized"] and not report["errors"] else 1
+    except MissingGhError as error:
+        print(f"error: work_tickets.py {args.command} {error}", file=sys.stderr)
+        return 1
     except (QueueError, OSError, ValueError, KeyError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
