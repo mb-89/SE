@@ -50,7 +50,9 @@ labels: field-report
 
 <!-- One block per ticket, ready for the dispatcher to file as a work issue there:
      ### <repo>: <title> / Goal / Requirements / Acceptance. Generic findings from an
-     application become framework tickets and must not name the application. "None" otherwise. -->
+     application become framework tickets and must not name the application. See the
+     [work model](../skills/work-model/SKILL.md#roles-and-flow) for the entry granularity and
+     source-file requirement. "None" otherwise. -->
 
 ## Retro
 
