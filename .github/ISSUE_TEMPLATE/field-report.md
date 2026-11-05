@@ -15,7 +15,9 @@ labels: field-report
 ## Delivered
 
 <!-- Follow the [worker evidence rule](../agents/worker.agent.md#procedure).
-     Add one row per work-issue requirement and acceptance item. -->
+     Add one row per work-issue requirement and acceptance item. Evidence the host cannot carry
+     is replaced by the command that reproduces it: where images cannot be attached, each
+     screenshot's row names the command that takes it again. -->
 
 | Work issue item | Result | Commits | Evidence |
 |---|---|---|---|
