@@ -2072,6 +2072,44 @@ def test_suite_under_the_target_passes_quietly(worktree, monkeypatch, capsys):
     assert "Suite time: 5.0 s (target 60 s, limit 120 s)" in captured.out
 
 
+REPORTING_SUITE = """\
+import os, pathlib
+reports = pathlib.Path(os.environ["SE_TEST_REPORTS"])
+(reports / "unit.xml").write_text(
+    '<testsuites><testsuite name="pytest">'
+    '<testcase classname="tests.test_a" name="test_quick" time="0.10"/>'
+    '<testcase classname="tests.test_a" name="test_slow" time="2.50"/>'
+    '</testsuite></testsuites>', encoding="utf-8")
+(reports / "browser.xml").write_text(
+    '<testsuite name="browser">'
+    + "".join(f'<testcase classname="ui" name="page{i}" time="{i / 10}"/>' for i in range(1, 12))
+    + '</testsuite>', encoding="utf-8")
+print("13 passed")
+"""
+
+
+def test_suite_merges_the_slowest_ten_from_every_junit_report(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 5.0)
+    (worktree / "suite.py").write_text(REPORTING_SUITE, encoding="utf-8")
+
+    assert run(worktree, "suite") == 0
+    out = capsys.readouterr().out
+    listed = out.split("Slowest tests:\n", 1)[1].split("Suite:", 1)[0].splitlines()
+    assert listed[0] == "  2.50s unit tests.test_a::test_slow"
+    assert listed[1] == "  1.10s browser ui::page11"
+    assert len(listed) == 10
+    assert "test_quick" not in out and "page2" not in out
+
+
+def test_suite_without_reports_or_durations_names_the_remedy_once(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 5.0)
+    (worktree / "suite.py").write_text('print("1 passed")\n', encoding="utf-8")
+
+    assert run(worktree, "suite") == 0
+    out = capsys.readouterr().out
+    assert out.count("write JUnit XML to $SE_TEST_REPORTS") == 1
+
+
 def test_suite_budget_defaults_and_refuses_a_missing_command(worktree):
     (worktree / "se.toml").write_text('[tests]\ncommand = ["uv", "run", "pytest", "-q"]\n',
                                       encoding="utf-8")
