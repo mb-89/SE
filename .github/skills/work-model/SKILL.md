@@ -104,6 +104,11 @@ Framework repositories (the process plugin and document format/converter) carry 
   `start`, `close`, `config`); prose steps remain only for judgment. Escalations and product decisions stay
   manual.
 
+### Suite at a moved pin
+
+When the acceptance names the complete suite and a dependency pin moves, the suite runs at the new
+pin before the change, so failures that exist already are told apart from the change's own.
+
 ## Freshness, dependencies and scheduling
 
 Pull requests built on an old `main` cause most integration trouble.
