@@ -40,6 +40,10 @@ names them.
 Each machine may adapt modules without touching tracked files. se only reads this file; it never
 writes it, and nothing from it is written into `se.toml`.
 
+The file is shared with `work_tickets.py`. `se_modules.py` owns `[paths]` and `[urls]`;
+`work_tickets.py` owns `integrator_session`, `[trackers]`, `[worktree_roots]`, `[repos]`, and
+`[mirrors]`. Each tool ignores sections owned by the other.
+
 ```toml
 [paths]
 obs = "~/src/obs"                     # use this checkout of module obs if the directory exists
