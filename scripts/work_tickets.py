@@ -46,8 +46,9 @@ PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
 IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
 ISSUE_FIELDS = "number,title,body,url,updatedAt,comments,labels"
 ISSUE_SNAPSHOT = "issue.json"
-# The issue templates belong to se, wherever a project keeps it.
-TEMPLATES = Path(__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE"
+# The issue templates belong to se, wherever a project keeps it; messages name them relative to it.
+TEMPLATE_DIRECTORY = ".github/ISSUE_TEMPLATE"
+TEMPLATES = Path(__file__).resolve().parents[1] / TEMPLATE_DIRECTORY
 DELIVERY_TICKET = "delivery"
 DISCOVERY_DIRECTORY = Path(".se") / "work" / "probe"
 DISCOVERY_INDEX = "evidence.md"
@@ -1206,15 +1207,19 @@ def print_changes(changes: dict[str, object]) -> None:
                 print(f"  {line}")
 
 
-def issue_template(root: Path, name: str) -> tuple[dict[str, str], str]:
-    path = TEMPLATES / f"{name}.md"
+def template_name(name: str) -> str:
+    """An issue template as messages name it: relative to the se checkout, never absolute."""
+    return f"the se checkout's {TEMPLATE_DIRECTORY}/{name}.md"
+
+
+def issue_template(name: str) -> tuple[dict[str, str], str]:
     try:
-        text = path.read_text(encoding="utf-8")
+        text = (TEMPLATES / f"{name}.md").read_text(encoding="utf-8")
     except OSError as error:
-        raise QueueError(f"Issue template not found: {path}") from error
+        raise QueueError(f"Issue template not found: {template_name(name)}: {error}") from error
     match = FRONT_MATTER_PATTERN.match(text)
     if match is None:
-        raise QueueError(f"Issue template has no front matter: {path}")
+        raise QueueError(f"Issue template has no front matter: {template_name(name)}")
     meta: dict[str, str] = {}
     for line in match.group(1).splitlines():
         key, separator, value = line.partition(":")
@@ -1757,7 +1762,7 @@ def draft_field_report(root: Path, file: Path, pr: int | None) -> int | None:
             pr = report_pull_request(root, issue, branch)
         except QueueError:
             pr = None
-    _, body = issue_template(root, "field-report")
+    _, body = issue_template("field-report")
     body = body.replace("#<n>", f"#{issue['number']}", 1)
     if pr is not None:
         body = body.replace("#<n>", f"#{pr}", 1)
@@ -1811,7 +1816,7 @@ def label_pattern(label: str) -> re.Pattern[str]:
     return re.compile(r"\*\*" + r"[^*\n]+?".join(map(re.escape, parts)) + r"\*\*")
 
 
-def field_report_problems(root: Path, body: str, issue_body: str | None) -> list[str]:
+def field_report_problems(body: str, issue_body: str | None) -> list[str]:
     """Where `body` departs from the field-report template, the one owner of its form.
 
     Every section the template has, every bold field label it writes (`**Result:**`,
@@ -1819,7 +1824,7 @@ def field_report_problems(root: Path, body: str, issue_body: str | None) -> list
     Result, and, given the work issue's body, the evidence gate. A section whose template text
     allows "None" may say only that.
     """
-    _, template = issue_template(root, "field-report")
+    _, template = issue_template("field-report")
     report = {heading.casefold(): lines for heading, lines in ordered_sections(body)}
     problems: list[str] = []
     for heading, raw in ordered_sections(template):
@@ -1845,7 +1850,7 @@ def field_report_problems(root: Path, body: str, issue_body: str | None) -> list
     problems.extend(
         f'header (above the first section): unfilled placeholder {placeholder}; '
         "replace it with its value"
-        for placeholder in field_report_placeholders(root)
+        for placeholder in field_report_placeholders()
         if placeholder in header
     )
     if FIELD_REPORT_RESULT_PATTERN.search(header) is None:
@@ -1880,15 +1885,15 @@ def table_problems(where: str, template_header: str, text: str) -> list[str]:
 
 
 def field_report_error(name: str, problems: list[str]) -> QueueError:
-    template = TEMPLATES / "field-report.md"
     return QueueError(
-        f"Field report {name} does not follow the template {template}:\n"
+        f"Field report {name} does not follow the template {template_name('field-report')}:\n"
         + "\n".join(f"- {problem}" for problem in problems)
     )
 
 
-def check_field_report(root: Path, file: Path, issue_body_file: Path | None) -> None:
-    """Validate a field-report file against the template without GitHub."""
+def check_field_report(root: Path | None, file: Path, issue_body_file: Path | None) -> None:
+    """Validate a field-report file against the template without GitHub or, given the issue
+    body, without a worktree."""
     try:
         body = file.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
@@ -1898,6 +1903,11 @@ def check_field_report(root: Path, file: Path, issue_body_file: Path | None) -> 
             issue_body = issue_body_file.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as error:
             raise QueueError(f"Cannot read work issue body {issue_body_file}: {error}") from error
+    elif root is None:
+        raise QueueError(
+            "field-report --check needs the work issue's body for the evidence gate: "
+            "pass --issue-body <file>, or --worktree <worktree> to read intake's snapshot"
+        )
     else:
         snapshot = load_snapshot(root)
         if snapshot is None:
@@ -1906,14 +1916,14 @@ def check_field_report(root: Path, file: Path, issue_body_file: Path | None) -> 
                 "run intake, or save the work issue's body to a file and pass --issue-body <file>"
             )
         issue_body = str(snapshot["body"])
-    problems = field_report_problems(root, body, issue_body)
+    problems = field_report_problems(body, issue_body)
     if problems:
         raise field_report_error(file.name, problems)
 
 
-def field_report_placeholders(root: Path) -> list[str]:
+def field_report_placeholders() -> list[str]:
     """The placeholders in field-report.md's header, its one owner: `<name>` or `#<name>`."""
-    _, template = issue_template(root, "field-report")
+    _, template = issue_template("field-report")
     header = re.split(r"^## ", HTML_COMMENT_PATTERN.sub("", template), maxsplit=1,
                       flags=re.MULTILINE)[0]
     return list(dict.fromkeys(re.findall(r"#?<[^<>\n]+>", header)))
@@ -1924,7 +1934,7 @@ def file_field_report(
 ) -> tuple[str, str]:
     issue = required_snapshot(root)
     branch = delivery_branch(root, issue)
-    meta, _ = issue_template(root, "field-report")
+    meta, _ = issue_template("field-report")
     title = meta.get("title", "").replace("<branch>", branch)
     labels = template_labels(meta.get("labels", ""))
     labels.extend(sorted(label for label in issue_labels(issue) if label.startswith("repo:")))
@@ -1935,7 +1945,7 @@ def file_field_report(
     body = re.sub(r"\n{3,}", "\n\n", HTML_COMMENT_PATTERN.sub("", body)).strip() + "\n"
     if pr is None:
         pr = report_pull_request(root, issue, branch)
-    problems = field_report_problems(root, body, str(issue["body"]))
+    problems = field_report_problems(body, str(issue["body"]))
     if f"#{issue['number']}" not in body and issue["url"] not in body:
         problems.append(f"does not link work issue #{issue['number']}")
     if pr is not None and not re.search(rf"(?:#|/pull/){pr}\b", body):
@@ -1999,7 +2009,7 @@ def validate_field_report(root: Path, number: int, repo: str) -> tuple[dict[str,
     report = fetch_issue(root, number, repo)
     work, pull = field_report_references(str(report["body"]))
     work_issue = fetch_issue(root, work, repo)
-    problems = field_report_problems(root, str(report["body"]), str(work_issue["body"]))
+    problems = field_report_problems(str(report["body"]), str(work_issue["body"]))
     if problems:
         raise field_report_error(f"#{number}", problems)
     return report, work, pull
@@ -2499,7 +2509,9 @@ def make_parser() -> argparse.ArgumentParser:
         "field-report",
         help="create or update the field-report issue from a filled "
              ".github/ISSUE_TEMPLATE/field-report.md body")
-    add_worktree_argument(report_parser)
+    report_parser.add_argument(
+        "--worktree", help="path to the selected worktree; needed except by --check with --issue-body"
+    )
     report_target = report_parser.add_mutually_exclusive_group(required=True)
     report_target.add_argument("--file", type=Path, help="Markdown body file")
     report_target.add_argument(
@@ -2610,7 +2622,7 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(errors="replace")
     args = make_parser().parse_args(argv)
     try:
-        root = worktree_root(args.worktree)
+        root = worktree_root(args.worktree) if args.worktree is not None else None
         if args.command == "init":
             initialize(root)
             print(f"Initialized ticket queue in {root / '.se' / 'work'}")
@@ -2660,6 +2672,9 @@ def main(argv: list[str] | None = None) -> int:
                     raise QueueError("field-report: --check and --draft exclude each other")
                 check_field_report(root, args.check, args.issue_body)
                 print(f"Field report {args.check.name} follows the template")
+            elif root is None:
+                mode = "--draft" if args.draft else "--file"
+                raise QueueError(f"field-report {mode} needs --worktree <worktree>, the worker's checkout")
             elif args.draft:
                 pr = draft_field_report(root, args.file, args.pr)
                 print(f"Drafted {args.file}" + ("" if pr else "; no pull request found yet"))
