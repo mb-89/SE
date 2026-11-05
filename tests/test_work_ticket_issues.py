@@ -14,6 +14,7 @@ SPEC = importlib.util.spec_from_file_location("work_tickets", PROJECT / "scripts
 work_tickets = importlib.util.module_from_spec(SPEC)
 sys.modules.setdefault("work_tickets", work_tickets)
 SPEC.loader.exec_module(work_tickets)
+TESTED_MAIN = work_tickets.tested_main
 
 BRANCH = "feature/example-20261104"
 URL = "https://git.example/owner/repo/issues/5"
@@ -280,7 +281,7 @@ def test_field_report_fills_the_template_and_creates_a_labelled_issue(worktree, 
     assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
     draft = report.read_text(encoding="utf-8")
     assert "**Work issue:** #5  **Pull request:** #7  **Branch:** `feature/example-20261104`" in draft
-    assert "**Tested against main:** `abc1234`" in draft
+    assert "**Tested against `main`:** `abc1234`" in draft
     assert '## User requirement (quoted back)\n\n> make it "work", please\n' in draft
     delivered = draft.split("## Delivered", 1)[1].split("## Not delivered", 1)[0]
     assert "[Discovery evidence index](.se/work/probe/evidence.md)" in delivered
@@ -309,6 +310,23 @@ def test_field_report_fills_the_template_and_creates_a_labelled_issue(worktree, 
     assert "Field report updated" in capsys.readouterr().out
 
 
+def test_field_report_draft_names_the_configured_integration_branch_and_its_commit(
+        worktree, gh, monkeypatch):
+    monkeypatch.setattr(work_tickets, "tested_main", TESTED_MAIN)
+    git_ok("init", "-q", "-b", "se", str(worktree))
+    git_ok("-C", str(worktree), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+           "commit", "-q", "--allow-empty", "-m", "base")
+    commit = subprocess.run(["git", "-C", str(worktree), "rev-parse", "--short", "HEAD"],
+                            capture_output=True, text=True, check=True).stdout.strip()
+    git_ok("-C", str(worktree), "switch", "-q", "-c", BRANCH)
+    (worktree / "se.toml").write_text('[project]\nintegration_branch = "se"\n', encoding="utf-8")
+    run(worktree, "intake", "--issue", "5")
+    report = worktree / "report.md"
+
+    assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
+    assert f"**Tested against `se`:** `{commit}`" in report.read_text(encoding="utf-8")
+
+
 def test_field_report_draft_uses_the_se_template_when_project_has_none(worktree, gh):
     run(worktree, "intake", "--issue", "5")
     gh.pull_request = None
@@ -323,12 +341,13 @@ def test_field_report_draft_uses_the_se_template_when_project_has_none(worktree,
 def test_field_report_refuses_unfilled_or_unlinked_reports(worktree, gh, monkeypatch, capsys):
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
-    report.write_text("**Work issue:** #<n>  **Branch:** `<branch>` main `<commit>`\n",
-                      encoding="utf-8")
+    report.write_text("**Work issue:** #<n>  **Branch:** `<branch>` "
+                      "`<integration branch>` `<commit>`\n", encoding="utf-8")
     assert run(worktree, "field-report", "--file", str(report)) == 1
     error = capsys.readouterr().err
     assert "unfilled placeholder #<n>" in error and "unfilled placeholder <branch>" in error
     assert "unfilled placeholder <commit>" in error
+    assert "unfilled placeholder <integration branch>" in error
     assert "does not link work issue #5" in error and "does not link pull request #7" in error
     assert not any(call[:2] == ["issue", "create"] for call in gh.calls)
 
