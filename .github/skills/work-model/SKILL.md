@@ -47,6 +47,10 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   it and the sessions it started. A sideways message (one integrator to another) stops at a
   permission prompt in Claude's cloud, so news for another repository goes up to the dispatcher,
   which passes it down to that repository's integrator.
+- **Comments carry the host's footer**: where the host requires a footer on every GitHub comment
+  (Claude's cloud does), each fixed comment text a role or command gives (`Started: …`,
+  `Integrated in …`, an escalation) is followed by that footer, unchanged. Nothing else repeats
+  this rule.
 - Issues are read and written with `gh`; bodies go through `--body-file`. Branches and the integration
   branch are pushed; a release needs the human's approval, obtained by the dispatcher.
 - Retros use `retro.md`; each improvement names the agent definition, template, skill or script

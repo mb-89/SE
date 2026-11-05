@@ -263,3 +263,9 @@ def test_messages_travel_only_up_and_down_the_tree():
     integrator = normalized(AGENTS / "integrator.agent.md")
     assert "(../skills/work-model/SKILL.md#roles-and-flow)" in integrator
     assert "never another repository's integrator" in integrator
+
+
+def test_the_comment_footer_rule_is_said_once():
+    assert "**Comments carry the host's footer**" in normalized(WORK_MODEL)
+    for path in (*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL):
+        assert "footer" not in normalized(path), path.name
