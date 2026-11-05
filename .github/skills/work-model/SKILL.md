@@ -178,8 +178,9 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
 - its hot files (files that parallel packages touch and that need one owner) and its backlog.
 
 The repository and its host come from the checkout's git remote `origin` (or `--repo`). Machine-local
-facts never go into a repository; they live in `~/.se/local.toml`, command-line arguments override
-them, and `work_tickets.py config` shows what is in effect:
+facts never go into a repository; they live in `~/.se/local.toml`. The
+[Modules guide](../../../README.md#modules) owns the module-specific settings; command-line arguments
+override the settings below, and `work_tickets.py config` shows what is in effect:
 
 ```toml
 integrator_session = "<integrator session to notify at delivery>"
