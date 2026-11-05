@@ -35,6 +35,20 @@ A common repository declares only modules that are public. Work-only modules on 
 declared the same way, in a work repository that consumes the common ones; a common repository never
 names them.
 
+### Project settings
+
+`se.toml` also holds every project setting owned by se. Each se tool validates only the settings it
+owns.
+
+```toml
+[project]
+authored_content = ["README.md", "docs/**/*.md"]
+```
+
+`work_tickets.py guard` checks deleted sentences in the configured project paths. Each configured
+glob is relative to the project root. The field report must name every removed sentence in its
+authored-prose section.
+
 ### Machine-local `~/.se/local.toml`
 
 `public_identity = "Name <email>"` pins the author and committer identity allowed in every
@@ -65,19 +79,6 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
 
 Work queue tracker, worktree and mirror settings are documented in the
 [work model](.github/skills/work-model/SKILL.md#what-the-project-provides).
-
-### Authored content
-
-`work_tickets.py guard` checks deleted sentences in the project paths configured in
-`pyproject.toml`:
-
-```toml
-[tool.se]
-authored_content = ["README.md", "docs/**/*.md"]
-```
-
-Each configured glob is relative to the project root. The field report must name every removed
-sentence in its authored-prose section.
 
 ### Commands
 
