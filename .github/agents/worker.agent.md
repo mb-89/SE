@@ -68,7 +68,9 @@ notify, if any.
 4. **Work the ticket**: where the acceptance names a real build (a module at a new pin, an
    output a project command regenerates), build it at that pin before writing code, so a failure
    that is not yours shows before your change. Then regression test first, then the change, then the focused tests and the
-   affected real command, and what the issue's acceptance names; run the complete suite only
+   affected real command, and what the issue's acceptance names. Tests follow the work model's
+   [test rules](../skills/work-model/SKILL.md#tests); a change that adds tests measures the suite
+   with `work_tickets.py suite` before and after it, for the field report; run the complete suite only
    where the acceptance names it, otherwise the integrator does (where a pin
    moves, see [suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)). Where the container allows it,
    run the affected real command once against the real outside service, not only against its

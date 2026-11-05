@@ -67,9 +67,11 @@ minutes late: reconcile from GitHub first and treat a missing message as late, n
    owned by another package, another repository), lacks tests for changed behaviour, or claims
    unverified work. Refuse and escalate to the dispatcher when it removes a capability or deletes
    or weakens a protecting test without the user's decision recorded in the field report.
-2. **Integrate** the validated report with `work_tickets.py integrate <field-report> --suite-command
-   "<complete suite command>"` (and `--build-command` when the project declares one). It merges into
-   newest integration branch, checks the report, tests, regenerates, pushes, closes, cleans up and starts work.
+2. **Integrate** the validated report with `work_tickets.py integrate <field-report>` (and
+   `--build-command` when the project declares one). It merges into the newest integration branch,
+   checks the report, runs the complete suite against its time budget (`[tests]` in `se.toml`,
+   [Test budget](../../README.md#test-budget)), regenerates, pushes, closes, cleans up and starts work.
+   A suite over its limit is refused: escalate it to the worker with the gate's remedy.
    A merge conflict is reported with its files and left for you to resolve mechanically; a semantic
    conflict or work that no longer fits is escalated to the worker.
 3. **Test and regenerate** through `integrate` using the complete suite and project commands
