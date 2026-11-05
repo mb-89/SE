@@ -6,6 +6,9 @@ Scans tracked file names and contents (binary files as bytes), commit messages a
 committer identities against committed generic patterns and a machine-local deny list. Output
 names the location and the pattern label only, never the matched text.
 
+The commit gates (a message file, the commits of a --range) also refuse tracker references in
+messages, naming the reference and the remedy; a full check leaves old history to them.
+
 Every verdict names the se commit that ran it. A checked repository that pins se (`ref` of
 `[modules.se]` in its se.toml) is refused when this se is not at that pin, so a stale clone never
 gives another verdict silently.
@@ -111,6 +114,30 @@ GENERIC_PATTERNS = (
 )
 
 
+TRACKER_RULE = (
+    "rule: commit messages carry no tracker numbers, .github/skills/work-model/SKILL.md"
+)
+TRACKER_REFERENCE = re.compile(
+    r"(?<![\w&#])#\d+\b"  # #593, not C#5 or the HTML entity &#39;
+    r"|(?i:\bGH-\d+\b)"
+    r"|(?i:\bhttps?://[^\s/]+/[^\s/]+/[^\s/]+/(?:issues|pulls?)/\d+)"
+)
+REWORD_BEFORE_COMMIT = "reword the message before committing"
+REWORD_BEFORE_PUSH = (
+    "reword it before pushing: git commit --amend for the last commit, or git rebase -i while "
+    "the branch is unpushed"
+)
+
+
+def tracker_references(text: str) -> list[tuple[int, str]]:
+    """(line, reference) for every tracker reference in a commit message: `#<digits>`,
+    `GH-<digits>`, an issue or pull request URL. The one test both commit gates apply."""
+    return [
+        (text.count("\n", 0, match.start()) + 1, match.group())
+        for match in TRACKER_REFERENCE.finditer(text)
+    ]
+
+
 class SetupError(Exception):
     """A usage or configuration problem; exit code 2."""
 
@@ -119,9 +146,10 @@ class SetupError(Exception):
 class Hit:
     location: str
     label: str
+    detail: str = ""
 
     def __str__(self) -> str:
-        return f"{self.location}: {self.label}"
+        return f"{self.location}: {self.label}{self.detail}"
 
 
 @dataclass
@@ -307,9 +335,17 @@ def scan_files(files: Iterable[tuple[str, bytes]], patterns: list[Pattern],
                 report.hits.append(Hit(f"{shown}:{line}:{column}{binary}", label))
 
 
-def scan_message(where: str, message: str, patterns: list[Pattern], report: Report) -> None:
+def scan_message(where: str, message: str, patterns: list[Pattern], report: Report,
+                 remedy: str | None = None) -> None:
+    """Hits in a commit message; with a remedy, tracker references too (the commit gates)."""
     for line, _, label in find(message, patterns):
         report.hits.append(Hit(f"{where} message:{line}", label))
+    if remedy is None:
+        return
+    for line, reference in tracker_references(message):
+        shown = redact(reference, patterns)  # a URL may name a private host
+        report.hits.append(Hit(f"{where} message:{line}", "tracker-reference",
+                               f" '{shown}' ({TRACKER_RULE}); {remedy}"))
 
 
 def scan_identity(where: str, role: str, identity: str, patterns: list[Pattern],
@@ -318,7 +354,8 @@ def scan_identity(where: str, role: str, identity: str, patterns: list[Pattern],
         report.hits.append(Hit(f"{where} {role}", label))
 
 
-def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], report: Report) -> None:
+def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], report: Report,
+                 gate: bool) -> None:
     output = git(root, "log", "-z", "--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B", *revisions, "--")
     for record in output.decode("utf-8", "replace").split("\0"):
         if not record.strip():
@@ -329,14 +366,14 @@ def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], repo
         scan_identity(where, "author", author, patterns, report)
         if committer != author:
             scan_identity(where, "committer", committer, patterns, report)
-        scan_message(where, message, patterns, report)
+        scan_message(where, message, patterns, report, REWORD_BEFORE_PUSH if gate else None)
 
 
 def scan_message_file(root: Path, path: Path, patterns: list[Pattern], report: Report) -> None:
     report.commits += 1
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     scan_message("commit", "\n".join("" if line.startswith("#") else line for line in lines),
-                 patterns, report)
+                 patterns, report, REWORD_BEFORE_COMMIT)
     for role, variable in (("author", "GIT_AUTHOR_IDENT"), ("committer", "GIT_COMMITTER_IDENT")):
         identity = git(root, "var", variable).decode("utf-8", "replace")
         scan_identity("commit", role, identity.rsplit(">", 1)[0] + ">", patterns, report)
@@ -406,7 +443,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="scan only this commit message and the current author and committer")
     parser.add_argument("--range", dest="revisions",
                         help="git log revisions whose messages and identities are checked, split "
-                             "on spaces (for example 'A..B' or 'B --not --remotes'); default: HEAD")
+                             "on spaces (for example 'A..B' or 'B --not --remotes'); default: "
+                             "HEAD. Given, it gates commits: their messages must carry no tracker "
+                             "references either")
     parser.add_argument("--no-history", action="store_true",
                         help="skip commit messages and identities")
     return parser.parse_args(argv)
@@ -441,7 +480,7 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
             report.hits.append(Hit(f"{ALLOW_FILE}:{entry.line}", "unused-allow-entry"))
     revisions = args.revisions or ("" if args.staged else args.rev or "HEAD")
     if not args.no_history and revisions and (args.revisions or has_head(root)):
-        scan_history(root, revisions.split(), patterns, report)
+        scan_history(root, revisions.split(), patterns, report, gate=bool(args.revisions))
     return report
 
 
@@ -459,8 +498,10 @@ def main(argv: list[str] | None = None) -> int:
         print(hit)
     scope = f"{report.files} files, {report.commits} commits, {version}"
     if report.hits:
-        print(f"public-check: FAILED with {len(report.hits)} hit(s) ({scope}); remove them or add "
-              f"a reasoned entry to {ALLOW_FILE}")
+        remedy = "fix each as its line says"
+        if any(hit.label != "tracker-reference" for hit in report.hits):
+            remedy = f"remove them or add a reasoned entry to {ALLOW_FILE}"
+        print(f"public-check: FAILED with {len(report.hits)} hit(s) ({scope}); {remedy}")
         return 1
     print(f"public-check: passed ({scope})")
     return 0
