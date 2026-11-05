@@ -144,11 +144,13 @@ A worker splits its work issue into local tickets in its worktree:
 
 - `.se/` is ignored, worktree-local state and never merges. `work_tickets.py` moves the same
   ticket file between `todo/`, `held/` (in progress) and `done/`; there is no second task list.
-- A discovery package starts with `work_tickets.py intake --discovery`, which creates the ignored
-  `.se/work/probe/evidence.md` index. A project that needs another ignored root declares it in its
-  worker command with `--probe-root <relative-path>`; `work_tickets.py probe --command <command>
-  --output <path>` appends the command and its output to the index. `field-report --draft` links
-  that index in Delivered.
+- A work issue labelled `discovery` is a read-only research package: its acceptance is evidence
+  (findings, proposed tickets or probe results), not test-command wording. Its intake creates the
+  ignored `.se/work/probe/evidence.md` index. `intake --discovery` also creates that index for an
+  existing standard issue. A project that needs another ignored root declares it in its worker
+  command with `--probe-root <relative-path>`; `work_tickets.py probe --command <command> --output
+  <path>` appends the command and its output to the index. `field-report --draft` links that index
+  in Delivered.
 - Test-driven: regression first, then the change, then focused checks and the affected real
   command. Check an acceptance item only with evidence; move a ticket to `done/` only when every
   item is satisfied. A ticket that cannot be finished stays in `held/` with the attempts and

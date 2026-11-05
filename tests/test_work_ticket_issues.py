@@ -173,6 +173,20 @@ def test_discovery_intake_creates_an_evidence_index_and_probe_appends_to_it(work
     )
 
 
+def test_discovery_label_creates_evidence_oriented_tickets(worktree, gh):
+    gh.issue["labels"] = [{"name": "work"}, {"name": "discovery"}]
+
+    assert run(worktree, "intake", "--issue", "5") == 0
+
+    evidence = worktree / ".se" / "work" / "probe" / "evidence.md"
+    ticket = next((worktree / ".se" / "work" / "todo").glob("r1-*.md"))
+    delivery = (worktree / ".se" / "work" / "todo" / "delivery.md").read_text(encoding="utf-8")
+    assert evidence.is_file()
+    assert "Discovery evidence is recorded in the evidence index." in ticket.read_text(encoding="utf-8")
+    assert "focused tests" not in ticket.read_text(encoding="utf-8")
+    assert "Discovery evidence from the work issue." in delivery
+
+
 def test_discovery_intake_uses_the_project_declared_probe_root(worktree, gh):
     assert run(
         worktree, "intake", "--issue", "5", "--discovery",
