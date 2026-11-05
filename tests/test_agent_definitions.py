@@ -413,3 +413,31 @@ def test_roles_point_to_without_gh_and_do_not_restate_it(role):
     for owned in ("Commands that still run", "GitHub tools", "MCP", "outcome branch",
                   "carries only", "`review-note`, `probe`"):
         assert owned not in text, owned
+
+
+def test_agents_md_names_the_focused_and_complete_test_commands():
+    text = normalized(ROOT / "AGENTS.md")
+    tests = text.split("## Tests", 1)[1].split(" ## ", 1)[0]
+    assert "Focused: `uv run pytest -q tests/<file>.py`" in tests
+    assert "Complete: `uv run pytest -q`" in tests
+
+
+def test_the_work_model_owns_where_the_commit_identity_and_the_public_check_come_from():
+    provides = normalized(WORK_MODEL).split("## What the project provides", 1)[1]
+    assert "**Commit identity and public check**: every role commits as `public_identity`" in provides
+    assert "else as the identity the project's `AGENTS.md` names" in provides
+    assert "runs the project's setup command before its first commit" in provides
+    assert "Where the machine sets no `public_identity`, commit as `mb <mb>`" in normalized(ROOT / "AGENTS.md")
+    assert "[commit identity](../skills/work-model/SKILL.md#what-the-project-provides)" in normalized(
+        AGENTS / "worker.agent.md")
+
+
+def test_the_worker_commits_each_requirement_while_working():
+    worker = normalized(AGENTS / "worker.agent.md")
+    assert "Commit each requirement as soon as it is done, while working; never reconstruct commits at the end." in worker
+
+
+def test_the_work_template_asks_requirements_to_name_the_adapters_in_scope():
+    template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
+    assert ('A requirement that says what "adapters" or "consumers" must do names which ones are in scope, '
+            "for example whether an interim implementation counts.") in template

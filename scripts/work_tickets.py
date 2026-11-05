@@ -61,7 +61,8 @@ class QueueError(Exception):
     """A queue operation cannot be completed safely."""
 
 
-WITHOUT_GH = Path(__file__).resolve().parents[1] / ".github" / "skills" / "work-model" / "SKILL.md"
+# Relative to se's checkout: an absolute path would carry a user profile path into logs.
+WITHOUT_GH = ".github/skills/work-model/SKILL.md#without-gh"
 
 
 class MissingGhError(QueueError):
@@ -556,7 +557,7 @@ def run_gh(root: Path, arguments: list[str]) -> str:
         raise MissingGhError(
             "needs the GitHub CLI (gh), which is not on PATH. Install it with the setup command "
             "the project's AGENTS.md names, or, where the host has no gh (Claude's cloud), do this "
-            f"step by hand as {WITHOUT_GH.as_posix()}#without-gh says"
+            f"step by hand as the se checkout's {WITHOUT_GH} says"
         )
     result = subprocess.run(
         [executable, *arguments],
