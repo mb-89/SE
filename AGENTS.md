@@ -5,6 +5,14 @@
 - SPOT everywhere: one owner per fact; everything else links to it.
 - No backwards compatibility unless asked.
 
+## Tests
+
+- Focused: `uv run pytest -q tests/<file>.py` (add `-k <name>` for one test), the tests of what changed.
+- Complete: `uv run pytest -q`; the integrator runs it as `integrate --check-command '[["uv", "run",
+  "pytest", "-q"]]'`.
+- Test environment: none to load. Where uv warns that it cannot verify TLS behind a proxy, set
+  `UV_SYSTEM_CERTS=1` in that shell.
+
 ## Public safety
 
 Everything here must be publishable at any time. Nothing may identify an employer, a work project, a
@@ -12,7 +20,8 @@ person, a machine, an account or an internal host: no work company, product or p
 names or user profile paths, no personal e-mail addresses, no device or server names, no internal or
 enterprise hosts. Use generic names (`<name>`, `alice`, `example.com`). Work-specific content belongs in
 separate repositories that use se as a module. Commit with a generic identity: a name without an e-mail
-domain (`mb <mb>`) or a `users.noreply.github.com` address; never a real e-mail address.
+domain or a `users.noreply.github.com` address; never a real e-mail address. Where the machine sets no
+`public_identity`, commit as `mb <mb>` (`git -c user.name=mb -c user.email=mb commit ...`).
 
 `scripts/public_check.py` enforces the rule on tracked file names and contents (binary files as bytes),
 commit messages and author and committer identities. It prints locations and pattern labels, never the

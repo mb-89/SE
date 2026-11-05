@@ -200,6 +200,8 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
 - the setup command that installs the tools the roles need (`git`, `gh`, Python 3.11 or newer and
   whatever the project's tests need);
 - the focused and the complete test commands, including gated test tiers if there are any;
+- the commit identity its commits carry where the machine sets no `public_identity`, and its
+  public check, if it has one, with the hooks that run it;
 - its integration project checks as JSON argument arrays passed to `integrate --check-command`, for
   example `--check-command '[["uv", "run", "pytest", "-q"], ["uv", "run", "python", "check.py"]]'`.
   The commands run without a shell. Add `--check-command-temporary-directory` when every command
@@ -229,6 +231,14 @@ commit_trailer = "<trailer line>" # optional; none by default
 [repos."<host>/<owner>/<repo>"]   # optional overrides for one repository
 integrator_session = "<session>"
 ```
+
+**Commit identity and public check**: every role commits as `public_identity` where the machine
+sets it (the [Modules guide](../../../README.md#machine-local-selocaltoml) owns what it pins), else
+as the identity the project's `AGENTS.md` names. Claude's cloud has no `~/.se/local.toml`, so there
+`public_identity` is unset and the project's identity applies. A fresh clone, such as a cloud
+session's, runs the project's setup command before its first commit, so the project's hooks run its
+public check on every commit and push. Commit messages carry no tracker numbers (`#<n>`): a commit
+outlives its tracker. No session prompt repeats any of this.
 
 `commit_trailer` is the one place that names a commit trailer: an environment that requires one
 (an agent host's co-author line) sets it on its machine, every role adds it as the last line of
