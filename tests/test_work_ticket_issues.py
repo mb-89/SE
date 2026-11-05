@@ -1120,10 +1120,17 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
     local_config.parent.mkdir(parents=True)
     local_config.write_text(
+        'public_identity = "Start test <start-test@example.invalid>"\n\n'
         f'[mirrors]\n"{main_checkout.name}" = ['
         '{ remote = "mirror", branch = "main", fetch = false, public = true }]\n',
         encoding="utf-8",
     )
+    git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
+    git_ok("-C", str(main_checkout), "push", "-q", "mirror", "main")
+    mirror_baseline = subprocess.run(
+        ["git", "--git-dir", str(mirror), "rev-parse", "main"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
     work_tickets.initialize(worker)
     (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
@@ -1181,7 +1188,8 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
             ["git", "--git-dir", str(mirror), "rev-parse", "main"],
             capture_output=True, text=True, check=False,
         )
-        assert mirror_head.returncode != 0
+        assert mirror_head.returncode == 0
+        assert mirror_head.stdout.strip() == mirror_baseline
         return
 
     commit = work_tickets.integrate(main_checkout, 8, None, "suite", "build", "check")
@@ -1223,6 +1231,54 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     ]
     assert all("PR #7. Suite: 214 passed." in body for body in bodies)
     assert not worker.exists()
+
+
+@pytest.mark.parametrize(
+    ("message", "email", "error"),
+    [
+        ("worker #12", "start-test@example.invalid", "tracker reference"),
+        ("worker", "other@example.invalid", "author differs"),
+    ],
+)
+def test_public_mirror_guard_rejects_references_and_mismatched_identities(
+        main_checkout, local_config, message, email, error):
+    mirror = main_checkout.parent / "mirror.git"
+    git_ok("init", "-q", "--bare", "-b", "main", str(mirror))
+    git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text(
+        'public_identity = "Start test <start-test@example.invalid>"\n\n'
+        f'[mirrors]\n"{main_checkout.name}" = ['
+        '{ remote = "mirror", branch = "main", fetch = false, public = true }]\n',
+        encoding="utf-8",
+    )
+    git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
+    git_ok("-C", str(main_checkout), "push", "-q", "mirror", "main")
+    (main_checkout / "public.txt").write_text("public\n", encoding="utf-8")
+    git_ok("-C", str(main_checkout), "add", "public.txt")
+    git_ok(
+        "-C", str(main_checkout), "-c", "user.name=Start test", f"-c", f"user.email={email}",
+        "commit", "-q", "-m", message,
+    )
+
+    with pytest.raises(work_tickets.QueueError, match=error):
+        work_tickets.guard_public_push(
+            main_checkout, work_tickets.Mirror("mirror", "main", False, True)
+        )
+
+
+@pytest.mark.parametrize("subject", ["worker #12", "https://example.invalid/worker"])
+def test_public_merge_message_rejects_tracker_references_and_host_addresses(
+        main_checkout, monkeypatch, subject):
+    def summary(arguments, **kwargs):
+        return subprocess.CompletedProcess(arguments, 0, subject + "\n", "")
+
+    monkeypatch.setattr(work_tickets.subprocess, "run", summary)
+
+    with pytest.raises(work_tickets.QueueError, match="cannot contain"):
+        work_tickets.integration_merge_message(
+            main_checkout, "feature/worker", 5, 8, 7, True
+        )
 
 
 def test_integrate_conflict_aborts_without_escalating(main_checkout, monkeypatch):
