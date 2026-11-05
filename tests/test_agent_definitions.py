@@ -454,6 +454,10 @@ CLOUD_RULES = (
     "`CLAUDE.md`), the role files and the project's `AGENTS.md` on the integration branch are the rules.",
     "**Retries after a server error**: after a 5xx from GitHub, read before retrying any write, not only a "
     "create (the object may exist); where closing with a state reason fails, close without one",
+    "**Delivery fallback**: an output whose write keeps failing after those retries goes in full into the next "
+    "output that can be written, and a short placeholder points to it: where the field-report issue cannot be "
+    "created with the report, the full report goes into the pull request body, a short field-report issue "
+    "links it, and the delivery notice names the pull request.",
 )
 
 
