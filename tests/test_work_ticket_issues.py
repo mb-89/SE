@@ -71,6 +71,8 @@ COMPLETE_REPORT = """**Work issue:** #5  **Pull request:** #7  **Branch:** `feat
 
 **Commit groupings:** None
 
+**Suite time:** None
+
 ## Not delivered
 
 None

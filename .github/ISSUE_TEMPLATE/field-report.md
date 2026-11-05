@@ -25,6 +25,9 @@ labels: field-report
 **Commit groupings:** None <!-- or, per grouping the worker's commit rule allows: the commits, the
 requirements they share, and why (one function changed together, or a test-only commit) -->
 
+**Suite time:** None <!-- where the change adds tests, the [test rules](../skills/work-model/SKILL.md#tests):
+     `work_tickets.py suite` before and after, and each new test over 2 s with its reason -->
+
 ## Not delivered
 
 <!-- The delta: each unmet requirement or acceptance item, why, and exact next steps. "None" if complete. -->
