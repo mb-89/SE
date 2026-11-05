@@ -292,3 +292,13 @@ owns what changes.
   - `integrate`: merge the pull request's branch into the newest integration branch locally, run
     the complete suite, push the integration branch, then close the issues with the
     `Integrated in …` comment.
+- **The session prompt carries only** the agent, the work issue, the branch (the session's outcome
+  branch, which replaces the worktree) and the integrator session to notify; everything else is in
+  the role files, this skill and the project's `AGENTS.md`:
+
+  ```text
+  Act as the worker agent defined in <se>/.github/agents/worker.agent.md (read it first, plus the project's AGENTS.md).
+  Work issue: <issue URL>
+  Branch: <branch>
+  Integrator session to notify at delivery: <integrator session>
+  ```
