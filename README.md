@@ -53,7 +53,7 @@ authored-prose section.
 
 `public_identity = "Name <email>"` pins the author and committer identity allowed in every
 commit pushed to a configured public mirror. If it is omitted, `integrate` uses the selected
-checkout's configured Git identity.
+checkout's configured Git identity. When it is set, `sync` also makes its merge commits with it.
 
 Each machine may adapt modules without touching tracked files. se only reads this file; it never
 writes it, and nothing from it is written into `se.toml`.
