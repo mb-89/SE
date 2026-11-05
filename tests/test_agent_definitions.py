@@ -517,3 +517,41 @@ def test_the_worker_builds_an_acceptance_build_at_the_new_pin_before_code():
     worker = normalized(AGENTS / "worker.agent.md")
     assert "where the acceptance names a real build" in worker
     assert "build it at that pin before writing code" in worker
+
+
+def test_the_worker_may_work_without_the_ticket_queue_where_the_host_refuses_it():
+    worker = normalized(AGENTS / "worker.agent.md")
+    assert ("Where the host refuses the local ticket queue (`work_tickets.py init`, `create`, `move`, "
+            "`status`), it is optional: work without it and say so in the field report.") in worker
+
+
+def test_the_worker_runs_the_affected_real_command_once_against_the_real_service():
+    worker = normalized(AGENTS / "worker.agent.md")
+    procedure = worker.split("## Procedure", 1)[1]
+    step = procedure.split("4. **Work the ticket**", 1)[1].split("5. **Deliver", 1)[0]
+    assert ("Where the container allows it, run the affected real command once against the real outside "
+            "service, not only against its fake: only the real call shows what the service refuses.") in step
+
+
+def test_the_suite_runs_at_a_moved_pin_before_the_change_for_worker_and_integrator():
+    rule = ("When the acceptance names the complete suite and a dependency pin moves, the suite runs at the "
+            "new pin before the change, so failures that exist already are told apart from the change's own.")
+    assert normalized(WORK_MODEL).count(rule) == 1
+    for role in ("worker", "integrator"):
+        text = normalized(AGENTS / f"{role}.agent.md")
+        assert rule not in text
+        assert "[suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)" in text
+
+
+def test_the_work_model_tells_issue_writers_what_renames_and_docs_issues_name():
+    rules = normalized(WORK_MODEL).split("## Rules for all roles", 1)[1]
+    assert ("**Writing work issues**: an issue that renames an identifier says whether the code emits it or "
+            "only documents it; a docs issue that asks to point instead of restating quotes the text to "
+            "replace and names each note by its repository path; and a docs requirement names the test file "
+            "its regression test belongs in.") in rules
+
+
+def test_the_integrator_reconciles_from_github_and_treats_a_missing_message_as_late():
+    integrator = normalized(AGENTS / "integrator.agent.md")
+    assert ("A worker's delivery message can arrive minutes late: reconcile from GitHub first and treat a "
+            "missing message as late, not lost.") in integrator
