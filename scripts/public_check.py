@@ -47,11 +47,18 @@ def _not_placeholder(generic: set[str]) -> Callable[[re.Match[str]], bool]:
     return accept
 
 
+# Fixed addresses services write into commits themselves; they name no person.
+SERVICE_EMAILS = frozenset({
+    "noreply" + "@github.com",  # GitHub's web-flow committer
+    "noreply" + "@anthropic.com",  # Claude Code's co-author trailer
+})
+
+
 def _personal_email(match: re.Match[str]) -> bool:
     local, domain = match.group(1).lower(), match.group(2).lower()
     if local == "git":  # SSH remote such as git@host:owner/repo; the host has its own pattern
         return False
-    if domain == "users.noreply.github.com":
+    if domain == "users.noreply.github.com" or f"{local}@{domain}" in SERVICE_EMAILS:
         return False
     return re.fullmatch(r"(?:[\w-]+\.)*example\.[a-z]+", domain) is None
 
