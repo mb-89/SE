@@ -44,7 +44,7 @@ requirements they share, and why (one function changed together, or a test-only 
 
 ## Decisions
 
-<!-- Every decision taken without the user (disagree and commit). -->
+<!-- Every decision taken without the user (disagree and commit). "None" otherwise. -->
 
 | Decision | Alternatives | Rationale | Confidence |
 |---|---|---|---|

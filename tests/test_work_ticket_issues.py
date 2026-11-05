@@ -529,6 +529,9 @@ def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
      "**Commit groupings:** None"),
     (lambda report: report.replace(
         "| Decision | Alternatives | Rationale | Confidence |\n|---|---|---|---|", "None"),
+     None),
+    (lambda report: report.replace(
+        "| Decision | Alternatives | Rationale | Confidence |\n|---|---|---|---|", "Chose A."),
      'section "## Decisions": missing its table; the template\'s header row: '
      "| Decision | Alternatives | Rationale | Confidence |"),
     (lambda report: report.replace("**Branch:** `feature/example-20261104`", "**Branch:** `<branch>`"),
@@ -536,7 +539,7 @@ def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
     (lambda report: report.replace("| Requirement 2 | complete | `abc1234` | `test`: passed |\n", ""),
      "missing evidence for: Requirement 2"),
 ], ids=["complete", "no-result", "no-tested-against", "two-column-table", "short-row", "escaped-pipe",
-        "no-review-responses", "no-groupings", "decisions-none", "placeholder", "no-evidence"])
+        "no-review-responses", "no-groupings", "decisions-none", "decisions-prose", "placeholder", "no-evidence"])
 def test_field_report_check_validates_against_the_template_without_github(
         worktree, gh, capsys, change, message):
     run(worktree, "intake", "--issue", "5")
