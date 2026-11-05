@@ -78,7 +78,9 @@ minutes late: reconcile from GitHub first and treat a missing message as late, n
    declared by `AGENTS.md` (where a pin moves, see
    [suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)); fix only integration breakage.
 4. **Push** through `integrate`, which records the merge result after the checks pass, the
-   project's public check included where `se.toml` sets `public_check`.
+   project's public check included where `se.toml` sets `public_check`. Every push goes through
+   `work_tickets.py` (`integrate`, or `push` without `gh`), which retries a transient GitHub
+   refusal once a minute, ten attempts; never `git push` by hand, and never tell a worker to retry.
 5. **Close** through `integrate`, then hand the field report's "Tickets for other repositories" to
    the dispatcher.
 6. **Clean up** through `integrate`; it removes only an eligible worker worktree and reports a
