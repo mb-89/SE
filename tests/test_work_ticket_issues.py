@@ -503,7 +503,10 @@ def test_missing_gh_names_the_command_the_tool_and_the_without_gh_section(worktr
     section = error.rstrip().removesuffix(" says").rsplit(" ", 1)[-1]
     path, anchor = section.split("#")
     assert anchor == "without-gh"
-    assert "### Without gh" in Path(path).read_text(encoding="utf-8")
+    assert path == ".github/skills/work-model/SKILL.md"  # relative: no user profile path in logs
+    assert "the se checkout's .github/" in error
+    se_root = Path(work_tickets.__file__).resolve().parents[1]
+    assert "### Without gh" in (se_root / path).read_text(encoding="utf-8")
 
 
 def test_sync_fetches_and_merges_main_or_reports_conflicts(worktree, monkeypatch, capsys):
