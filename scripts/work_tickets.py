@@ -902,6 +902,45 @@ def requirement_items(body: str) -> dict[int, str]:
     return {number: "\n".join(lines).strip() for number, lines in items.items()}
 
 
+def field_report_evidence_items(body: str) -> list[str]:
+    requirements = [f"Requirement {number}" for number in requirement_items(body)]
+    acceptance_items = [
+        match.group(2)
+        for line in section(markdown_sections(body), "acceptance").splitlines()
+        if (match := CHECKBOX_PATTERN.fullmatch(line)) is not None
+    ]
+    acceptance = [
+        f"Acceptance {number}"
+        for number, _ in enumerate(acceptance_items, 1)
+    ]
+    return [*requirements, *acceptance]
+
+
+def field_report_evidence_errors(issue_body: str, report_body: str) -> list[str]:
+    delivered = section_content(report_body, "delivered")
+    not_delivered = "\n".join(section_content(report_body, "not delivered"))
+    missing: list[str] = []
+    for item in field_report_evidence_items(issue_body):
+        item_pattern = re.compile(rf"^{re.escape(item)}(?:\b|:)", re.IGNORECASE)
+        rows = [
+            [cell.strip() for cell in line.strip().strip("|").split("|")]
+            for line in delivered
+            if line.strip().startswith("|")
+        ]
+        has_evidence = any(
+            row and item_pattern.match(row[0]) and len(row) >= 4 and bool(row[-1])
+            for row in rows
+        )
+        listed_as_not_delivered = re.search(
+            rf"\b{re.escape(item)}\b", not_delivered, flags=re.IGNORECASE
+        )
+        if not has_evidence and not listed_as_not_delivered:
+            missing.append(item)
+    if not missing:
+        return []
+    return ["missing evidence for: " + "; ".join(missing)]
+
+
 def slug(text: str, limit: int = 40) -> str:
     result = ""
     for word in re.findall(r"[a-z0-9]+", text.casefold()):
@@ -1674,6 +1713,7 @@ def file_field_report(
         problems.append(f"does not link work issue #{issue['number']}")
     if pr is not None and not re.search(rf"(?:#|/pull/){pr}\b", body):
         problems.append(f"does not link pull request #{pr}")
+    problems.extend(field_report_evidence_errors(str(issue["body"]), body))
     if problems:
         raise QueueError(f"Field report {file.name}: {'; '.join(problems)}")
     repo = repo_arguments(tracker or issue["repo"])

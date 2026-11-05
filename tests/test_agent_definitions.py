@@ -82,6 +82,13 @@ def test_worker_instructions_require_utf8_file_writes_in_windows_powershell():
     assert "out-file -encoding utf8" in worker.casefold()
 
 
+def test_worker_requires_evidence_for_every_work_issue_item():
+    worker = normalized(AGENTS / "worker.agent.md")
+    assert "every numbered requirement and every acceptance line" in worker
+    assert "one quoted evidence line" in worker
+    assert 'under "not delivered", never as a "decision"' in worker.casefold()
+
+
 def test_integrator_restarts_workers_waiting_for_input():
     integrator = normalized(AGENTS / "integrator.agent.md")
     assert "checks `list_sessions` for status `inputneeded`" in integrator.casefold()
@@ -99,6 +106,13 @@ def test_partial_deliveries_define_blockers_and_review_responses():
     assert "answers every review point" in report
     assert "## Removed behaviour, deleted or weakened tests, and authored prose" in report
     assert "(../skills/work-model/SKILL.md#rules-for-all-roles)" in report
+
+
+def test_field_report_template_has_requirement_evidence_table():
+    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    assert "one row per work-issue requirement and acceptance item" in report
+    assert "| Work issue item | Result | Commits | Evidence |" in report
+    assert "(../agents/worker.agent.md#procedure)" in report
 
 
 def test_work_issue_template_assigns_shared_root_file_owners():

@@ -61,6 +61,10 @@ local workers, the integrator session to notify.
 5. **Deliver, always, even when partial**: complete the field-report body in `.se/work/field-report.md`
    and run `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request and
    field report, and prints the integrator notification.
+   Before filing, walk every numbered requirement and every acceptance line of the work issue. For
+   each, add one evidence-table row with one quoted evidence line: command and output, file and
+   line, or measurement. A requirement the worker narrowed or did not meet is listed under "Not
+   delivered", never as a "decision". A worker may decide only what the issue leaves open.
 6. A ticket you cannot finish stays in `held/` with the attempts and failure evidence; the field
    report states it as "Not delivered" with exact next steps. Never claim unfinished work complete.
    **Never end your turn without delivering.** Your turn ends only after step 7. If you stop working
