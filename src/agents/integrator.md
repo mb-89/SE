@@ -80,6 +80,9 @@ minutes late: reconcile from GitHub first and treat a missing message as late, n
    checks the report, runs the complete suite against its time budget (`[tests]` in `se.toml`,
    [Test budget](../../README.md#test-budget)), regenerates, pushes, closes, cleans up and starts work.
    - A suite over its limit is refused: escalate it to the worker with the gate's remedy.
+   - Commits on the branch after the report's Branch tip are refused, named: escalate them to the
+     worker to update the report in place, or include them with `--include-late <reason>` where
+     the reason is yours to state.
    - A merge conflict is reported with its files and left for you to resolve mechanically; a
      semantic conflict or work that no longer fits is escalated to the worker.
 3. **Test and regenerate** through `integrate` using the complete suite and project commands
