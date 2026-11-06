@@ -259,7 +259,19 @@ the right lever, one long test or the part's total work:
 ```
 
 The wall time is the report's own `time`, the worker count its `workers` testsuite property
-(pytest's `record_testsuite_property`), 1 without one. Without reports the gate reads pytest's lines
+(pytest's `record_testsuite_property`), 1 without one.
+
+Where a test case carries a `setup_time` property (pytest's `record_property`, with `worker` and
+optionally `fixture`), the part's line is followed by each test whose setup took over 2 s. Each
+such setup, named by its fixture or else its module, that more than one worker paid follows too:
+the signature of broken test grouping.
+
+```text
+    slow setup 6.0 s tests.test_ui::test_a (browser, worker gw0)
+    setup browser paid on 2 workers (gw0, gw1): 12.5 s; group its tests on one worker
+```
+
+Without reports the gate reads pytest's lines
 (it adds `--durations=<N>` to a pytest command), and where neither names a test it says so and names
 that remedy.
 
