@@ -1,7 +1,9 @@
-# Tags se's releases with the reusable release workflow (README "Release tags").
+# Copy this file as is and set branches to your integration branch (se's README "Release tags").
 name: release-tag
 
-on: push
+on:
+  push:
+    branches: [se]
 
 permissions:
   contents: write
