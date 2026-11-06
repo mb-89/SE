@@ -1,6 +1,7 @@
 """work_tickets.py push releases the integration branch: it bumps se.toml's version and tags it."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -336,3 +337,85 @@ def test_a_malformed_release_build_is_an_error_naming_the_file(checkout, capsys)
     assert push(checkout) == 1
     assert (f"project.release_build in {checkout / 'se.toml'} must be a non-empty argument array"
             in capsys.readouterr().err)
+
+
+WORKFLOW = PROJECT / ".github" / "workflows" / "release.yml"
+
+
+def workflow_script() -> str:
+    """The Python the release workflow runs, its one `run: |` block."""
+    lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
+    start = next(index for index, line in enumerate(lines) if line.strip() == "run: |") + 1
+    block = []
+    for line in lines[start:]:
+        if line.strip() and not line.startswith(" " * 10):
+            break
+        block.append(line[10:])
+    return "\n".join(block) + "\n"
+
+
+def run_workflow(checkout: Path, ref: str = "main") -> subprocess.CompletedProcess[str]:
+    """Run the workflow as its runner does: in a fresh full clone of origin, on a push of `ref`."""
+    runner = checkout.parent / "runner"
+    shutil.rmtree(runner, ignore_errors=True)
+    subprocess.run(["git", "clone", "-q", "-b", ref, str(checkout.parent / "origin.git"), str(runner)],
+                   check=True, capture_output=True)
+    script = checkout.parent / "release.py"
+    script.write_text(workflow_script(), encoding="utf-8")
+    return subprocess.run([sys.executable, "-I", str(script)], cwd=runner, capture_output=True, text=True,
+                          check=False, env={**os.environ, "GITHUB_REF_NAME": ref})
+
+
+def origin_tag(checkout: Path, tag: str) -> str:
+    return git(checkout.parent / "origin.git", "rev-parse", f"{tag}^{{commit}}")
+
+
+def missed_release(checkout: Path) -> str:
+    """1.3.0 integrated but never tagged, then 1.3.1 tagged: SE's missed v1.0.0. Its first commit."""
+    by_workflow(checkout)
+    git(checkout, "switch", "-q", "-c", "feature/topic-20261106")
+    (checkout / "se.toml").write_text(settings("1.3.0") + 'release = "workflow"\n', encoding="utf-8")
+    git(checkout, "commit", "-q", "-am", "bump in the branch")
+    git(checkout, "switch", "-q", "main")
+    git(checkout, "merge", "-q", "--no-ff", "-m", "Integrate feature/topic-20261106: work", "feature/topic-20261106")
+    first = git(checkout, "rev-parse", "HEAD")
+    (checkout / "note.txt").write_text("x", encoding="utf-8")
+    git(checkout, "add", ".")
+    git(checkout, "commit", "-q", "-m", "still 1.3.0")
+    (checkout / "se.toml").write_text(settings("1.3.1") + 'release = "workflow"\n', encoding="utf-8")
+    git(checkout, "commit", "-q", "-am", "Release v1.3.1")
+    git(checkout, "tag", "v1.3.1")
+    git(checkout, "push", "-q", "origin", "main", "v1.3.1")
+    return first
+
+
+def test_the_workflow_backfills_a_missed_version_on_its_first_commit(checkout):
+    first = missed_release(checkout)
+    before = {tag: origin_tag(checkout, tag) for tag in ("v1.2.3", "v1.3.1")}
+    result = run_workflow(checkout)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert f"Release v1.3.0: tagged {first[:7]}" in result.stdout
+    assert origin_tag(checkout, "v1.3.0") == first
+    assert {tag: origin_tag(checkout, tag) for tag in before} == before
+
+
+def test_a_second_workflow_run_changes_nothing(checkout):
+    missed_release(checkout)
+    assert run_workflow(checkout).returncode == 0
+    tags = git(checkout.parent / "origin.git", "show-ref", "--tags")
+    second = run_workflow(checkout)
+    assert second.returncode == 0, second.stderr + second.stdout
+    assert second.stdout.splitlines() == [line for line in second.stdout.splitlines() if "tagged already" in line]
+    assert git(checkout.parent / "origin.git", "show-ref", "--tags") == tags
+
+
+def test_the_workflow_never_moves_an_existing_tag(checkout):
+    by_workflow(checkout, "1.3.0")
+    stray = git(checkout, "rev-parse", "HEAD~1")
+    git(checkout, "tag", "v1.3.0", stray)
+    git(checkout, "push", "-q", "origin", "main", "v1.3.0")
+    result = run_workflow(checkout)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "::warning::Release v1.3.0: the tag names" in result.stdout
+    assert origin_tag(checkout, "v1.3.0") == stray
+
