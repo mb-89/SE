@@ -82,8 +82,11 @@ Framework repositories (the process plugin and document format/converter) carry 
 - Work issues quote the user's requirement word for word; the field report quotes it back.
 - **Writing work issues**: an issue that renames an identifier says whether the code emits it or
   only documents it; a docs issue that asks to point instead of restating quotes the text to
-  replace and names each note by its repository path; and a docs requirement names the test file
-  its regression test belongs in.
+  replace and names each note by its repository path; a docs requirement names the test file
+  its regression test belongs in; and content a worker needs from another repository (a list, a
+  decision, a spec passage) is quoted inline with its source named, because a cloud worker reads
+  only its own repository: a cross-repository link is never the only copy (`intake` warns on one
+  with no quoted block next to it).
 - Every error message names where it comes from (the command, file or input) and, where
   possible, the remedy.
 - Work follows the user's priority order; no new investigation starts while a top-priority bug is

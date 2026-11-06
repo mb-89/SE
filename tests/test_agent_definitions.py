@@ -547,8 +547,11 @@ def test_the_work_model_tells_issue_writers_what_renames_and_docs_issues_name():
     rules = normalized(WORK_MODEL).split("## Rules for all roles", 1)[1]
     assert ("**Writing work issues**: an issue that renames an identifier says whether the code emits it or "
             "only documents it; a docs issue that asks to point instead of restating quotes the text to "
-            "replace and names each note by its repository path; and a docs requirement names the test file "
-            "its regression test belongs in.") in rules
+            "replace and names each note by its repository path; a docs requirement names the test file "
+            "its regression test belongs in; and content a worker needs from another repository (a list, a "
+            "decision, a spec passage) is quoted inline with its source named, because a cloud worker reads "
+            "only its own repository: a cross-repository link is never the only copy (`intake` warns on one "
+            "with no quoted block next to it).") in rules
 
 
 def test_the_integrator_reconciles_from_github_and_treats_a_missing_message_as_late():
