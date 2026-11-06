@@ -113,8 +113,9 @@ every package, so work issues and session prompts never repeat it.
    - Then run `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request
      (its body as `work_tickets.py pr-body` prints it) and field report, and prints the integrator
      notification.
-6. A ticket you cannot finish stays in `held/` with the attempts and failure evidence; the field
-   report states it as "Not delivered" with exact next steps. Never claim unfinished work complete.
+6. A ticket you cannot finish is handled as the work model's
+   [Local tickets and notes](../skills/work-model/SKILL.md#local-tickets-and-notes) says, under
+   "Not delivered". Never claim unfinished work complete.
 
    **Never end your turn without delivering.** Your turn ends only after step 7. If you stop working
    for any reason (blocked, out of ideas, unsure), deliver what you have and name the blocker in the

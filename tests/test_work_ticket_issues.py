@@ -503,29 +503,21 @@ def test_field_report_requires_an_exact_result_header(worktree, gh, capsys, resu
         assert not any(call[:2] == ["issue", "create"] for call in gh.calls)
 
 
-def test_field_report_refuses_missing_requirement_evidence(worktree, gh, capsys):
+@pytest.mark.parametrize(("row", "replacement", "named"), [
+    ("| Requirement 2 | complete | `abc1234` | `test`: passed |\n", "", "Requirement 2"),
+    ("| Acceptance 2 | complete | `abc1234` | `test`: passed |",
+     "| Acceptance 2 | complete | `abc1234` | |", "Acceptance 2"),
+], ids=["missing-row", "empty-evidence-cell"])
+def test_field_report_refuses_missing_or_empty_evidence(
+        worktree, gh, capsys, row, replacement, named):
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
     assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
     report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
-        "| Requirement 2 | complete | `abc1234` | `test`: passed |\n", ""
-    ), encoding="utf-8")
+        row, replacement), encoding="utf-8")
 
     assert run(worktree, "field-report", "--file", str(report)) == 1
-    assert "Requirement 2" in capsys.readouterr().err
-
-
-def test_field_report_refuses_empty_evidence_cell(worktree, gh, capsys):
-    run(worktree, "intake", "--issue", "5")
-    report = worktree / "report.md"
-    assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
-    report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
-        "| Acceptance 2 | complete | `abc1234` | `test`: passed |",
-        "| Acceptance 2 | complete | `abc1234` | |",
-    ), encoding="utf-8")
-
-    assert run(worktree, "field-report", "--file", str(report)) == 1
-    assert "Acceptance 2" in capsys.readouterr().err
+    assert named in capsys.readouterr().err
 
 
 def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
@@ -1436,17 +1428,21 @@ def main_checkout(tmp_path: Path, repositories) -> Path:
     return tmp_path / "main"
 
 
-def test_start_creates_a_worktree_from_the_newest_main_and_marks_the_issue(
-        main_checkout, local_config, monkeypatch, capsys):
+def start_fakes(monkeypatch, ready=lambda root, repo, allow_existing_branch=False: [
+        {"number": 5, "title": BRANCH}], slots=1) -> "StartGh":
+    """Fake gh for start: issue #5 ready (or `ready`), `slots` free; returns the fake."""
     fake = StartGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(
-        work_tickets, "ready_issues",
-        lambda root, repo, allow_existing_branch=False: [{"number": 5, "title": BRANCH}],
-    )
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+    monkeypatch.setattr(work_tickets, "ready_issues", ready)
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: slots)
+    return fake
+
+
+def test_start_creates_a_worktree_from_the_newest_main_and_marks_the_issue(
+        main_checkout, local_config, monkeypatch, capsys):
+    fake = start_fakes(monkeypatch)
     trees = main_checkout.parent / "trees"
     local_config.parent.mkdir(parents=True)
     local_config.write_text(
@@ -1466,23 +1462,10 @@ def test_start_creates_a_worktree_from_the_newest_main_and_marks_the_issue(
     assert ["issue", "edit", "5", "--remove-label", "ready", "--add-label", "in-progress",
             "--repo", "git.example/owner/repo"] in fake.calls
 
-    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
-    assert run(main_checkout, "start", "5") == 1
-    assert "not startable" in capsys.readouterr().err
-
 
 def test_start_argument_overrides_the_checkout_worktree_root(
         main_checkout, local_config, monkeypatch):
-    fake = StartGh()
-    monkeypatch.setattr(work_tickets, "run_gh", fake)
-    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
-    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(
-        work_tickets,
-        "ready_issues",
-        lambda root, repo, allow_existing_branch=False: [{"number": 5, "title": BRANCH}],
-    )
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+    fake = start_fakes(monkeypatch)
     configured = main_checkout.parent / "configured"
     explicit = main_checkout.parent / "explicit"
     local_config.parent.mkdir(parents=True)
@@ -1501,27 +1484,14 @@ def test_start_argument_overrides_the_checkout_worktree_root(
     ([{"number": 5, "title": BRANCH}], 0, "capacity is exhausted"),
 ])
 def test_start_refuses_unstartable_issues(main_checkout, monkeypatch, capsys, ready, slots, message):
-    fake = StartGh()
-    monkeypatch.setattr(work_tickets, "run_gh", fake)
-    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
-    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: ready)
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: slots)
+    fake = start_fakes(monkeypatch, ready=lambda root, repo: ready, slots=slots)
     assert run(main_checkout, "start", "5", "--worktree-root", str(main_checkout.parent)) == 1
     assert message in capsys.readouterr().err
     assert not any(call[:2] == ["issue", "edit"] for call in fake.calls)
 
 
 def test_start_uses_a_sibling_worktree_root_by_default(main_checkout, monkeypatch, capsys):
-    fake = StartGh()
-    monkeypatch.setattr(work_tickets, "run_gh", fake)
-    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
-    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(
-        work_tickets, "ready_issues",
-        lambda root, repo, allow_existing_branch=False: [{"number": 5, "title": BRANCH}],
-    )
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+    fake = start_fakes(monkeypatch)
     assert run(main_checkout, "start", "5") == 0
     worktree = main_checkout.parent / f"{main_checkout.name}.worktrees" / (
         "feature-example-20261104"
@@ -1537,15 +1507,7 @@ def test_start_uses_a_sibling_worktree_root_by_default(main_checkout, monkeypatc
 
 def test_start_no_create_uses_an_existing_issue_branch_worktree(
         main_checkout, monkeypatch, capsys):
-    fake = StartGh()
-    monkeypatch.setattr(work_tickets, "run_gh", fake)
-    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
-    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(
-        work_tickets, "ready_issues",
-        lambda root, repo, allow_existing_branch=False: [{"number": 5, "title": BRANCH}],
-    )
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+    fake = start_fakes(monkeypatch)
     worker = main_checkout.parent / "existing-worker"
     git_ok("-C", str(main_checkout), "fetch", "origin")
     git_ok(
@@ -1569,15 +1531,7 @@ def test_start_no_create_uses_an_existing_issue_branch_worktree(
 
 def test_start_no_create_requires_a_worktree_on_the_issue_branch(
         main_checkout, monkeypatch, capsys):
-    fake = StartGh()
-    monkeypatch.setattr(work_tickets, "run_gh", fake)
-    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
-    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(
-        work_tickets, "ready_issues",
-        lambda root, repo, allow_existing_branch=False: [{"number": 5, "title": BRANCH}],
-    )
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+    fake = start_fakes(monkeypatch)
     git_ok(
         "-C", str(main_checkout), "worktree", "add", "-b", "feature/other",
         str(main_checkout.parent / "other-worker"), "origin/main",
@@ -1590,18 +1544,8 @@ def test_start_no_create_requires_a_worktree_on_the_issue_branch(
 
 def test_start_without_no_create_refuses_an_existing_issue_branch(
         main_checkout, monkeypatch, capsys):
-    fake = StartGh()
-    monkeypatch.setattr(work_tickets, "run_gh", fake)
-    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
-    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(
-        work_tickets,
-        "ready_issues",
-        lambda root, repo, allow_existing_branch=False: (
-            [{"number": 5, "title": BRANCH}] if allow_existing_branch else []
-        ),
-    )
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+    fake = start_fakes(monkeypatch, ready=lambda root, repo, allow_existing_branch=False: (
+        [{"number": 5, "title": BRANCH}] if allow_existing_branch else []))
     git_ok(
         "-C", str(main_checkout), "worktree", "add", "-b", BRANCH,
         str(main_checkout.parent / "existing-worker"), "origin/main",
@@ -1614,14 +1558,7 @@ def test_start_without_no_create_refuses_an_existing_issue_branch(
 
 def test_start_assigns_a_cloud_worker_without_creating_a_worktree(
         main_checkout, monkeypatch, capsys):
-    fake = StartGh()
-    monkeypatch.setattr(work_tickets, "run_gh", fake)
-    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
-    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(
-        work_tickets, "ready_issues", lambda root, repo: [{"number": 5, "title": BRANCH}]
-    )
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: None)
+    fake = start_fakes(monkeypatch, slots=None)
 
     assert run(main_checkout, "start", "5", "--cloud-agent", "worker-login") == 0
     assert "Launch worker:" not in capsys.readouterr().out
