@@ -158,9 +158,10 @@ not tags (Claude's cloud sessions).
 - `push` still bumps and commits the version, pushes the branch only and names the workflow; it
   reads the released versions from origin's tags (`git ls-remote --tags`), never from local ones,
   so a version without its tag on origin is left for the workflow, not bumped.
-- On each push to the integration branch the workflow tags `v<version>` on the first-parent commit
-  since which `se.toml` carries that version, unless the tag is there.
-- Where the tag names another commit, the run fails, naming the version and the remedy.
+- On each push to the integration branch the workflow walks its first-parent history and tags
+  every version `se.toml` carried without a tag, `v<version>` on the first commit that carried it,
+  so a missed release is backfilled; a second run changes nothing.
+- An existing tag never moves: where it names another commit, the run warns and leaves it.
 - Without `release`, `push` pushes the tags itself; another value is refused, naming the file.
 
 A repository turns it on with `release = "workflow"` and this file,
