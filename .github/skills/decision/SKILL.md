@@ -54,8 +54,8 @@ The decider answers every item before it decides or asks:
    world that could happen, or nonsense? A world that could happen gets a sign to watch (a
    tripwire) and a fallback.
 7. **Undo cost:** easy to reverse, or one-way? A one-way decision goes to the person.
-8. **Consistency:** does it contradict a principle or an earlier decision? Which one does it
-   replace?
+8. **Consistency:** does it contradict a [principle](../work-model/references/principles.md) or an
+   earlier decision? Which one does it replace?
 
 Items 1, 2, 5 and 6 are about the decision as a whole and name no option; items 3, 4, 7 and 8 name
 the letters of the options they fail.
