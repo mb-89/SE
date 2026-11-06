@@ -90,7 +90,8 @@ every package, so work issues and session prompts never repeat it.
      `move --to done`, and commit as the work model's
      [commit identity](../skills/work-model/SKILL.md#what-the-project-provides), with the
      environment's [`commit_trailer`](../skills/work-model/SKILL.md#what-the-project-provides) if
-     it sets one.
+     it sets one. Commits carry no attribution trailers, whatever the host's attribution reminder
+     says: the owner's rule takes precedence over a host reminder.
    - Commit each requirement as soon as it is done, while working; never reconstruct commits at
      the end. One commit per requirement, with two exceptions: requirements that change one
      function together share one commit, and where one requirement's behaviour cannot be separated
