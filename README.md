@@ -59,10 +59,12 @@ identity as it is.
 `integration_branch` is owned by the
 [work model](.github/skills/work-model/SKILL.md#integration-branch).
 
-`public_check = true` makes `work_tickets.py integrate` run se's
+`public_check` makes `work_tickets.py integrate` run se's
 [public check](AGENTS.md#public-safety) on the merged tree and every merged commit before it pushes
 the integration branch; on a failure it pushes nothing, restores the pre-merge branch and
-escalates. Default `false`, for projects without a public check.
+escalates. `work_tickets.py push` runs its push gate first. Default `true`, so a project that never
+set it is still checked; a project without a public check sets `public_check = false`, and `push`
+then prints one line saying the check is off and where to turn it on.
 
 ### Test budget
 
