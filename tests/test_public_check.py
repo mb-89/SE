@@ -459,17 +459,42 @@ def test_unused_allow_entry_fails_a_full_check(repo: Path) -> None:
     allow_repo(repo, "docs/*  # sample paths\nsrc/*.py  # fixtures\nsrc/x.py:1  # stale\n")
     result = run_check("--repo", str(repo))
     assert result.returncode == 1
-    assert ".public-check-allow:3: unused-allow-entry ('<path>:<line>' entry" in result.stdout
+    assert (".public-check-allow:3: unused-allow-entry ('<path>:<line>' entry; unused: remove it "
+            "or correct it in place)") in result.stdout
+    assert "unverifiable" not in result.stdout
 
 
-def test_unused_allow_entry_only_warns_without_private_list(
+def test_used_allow_entries_are_counted_in_the_verdict(repo: Path) -> None:
+    allow_repo(repo, "docs/*  # sample paths\nsrc/*.py  # fixtures\n")
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 0, result.stdout
+    assert "2 allow entries used" in result.stdout.splitlines()[-1]
+    assert "unused" not in result.stdout and "unverifiable" not in result.stdout
+
+
+def test_without_private_list_an_unused_entry_is_unverifiable_not_unused(
         repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(public_check.TERMS_ENV, str(tmp_path / "missing.txt"))
     allow_repo(repo, "docs/*  # sample paths\nsrc/*.py  # fixtures\nold/*  # moved away\n")
     result = run_check("--repo", str(repo))
     assert result.returncode == 0, result.stdout
-    assert ("public-check: warning: unused allow entry .public-check-allow:3 ('<path glob>' entry"
-            in result.stdout)
+    assert ("public-check: warning: allow entry .public-check-allow:3 ('<path glob>' entry) is "
+            "unverifiable without the private deny list: run with it ") in result.stdout
+    assert "unused" not in result.stdout and "remove it" not in result.stdout
+    assert "2 allow entries used" in result.stdout.splitlines()[-1]
+
+
+def test_without_private_list_an_unused_commit_entry_in_a_gate_is_unverifiable(
+        repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(public_check.TERMS_ENV, str(tmp_path / "missing.txt"))
+    commit(repo, {"a.txt": "a\n"}, "Clean message")
+    sha = git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / public_check.ALLOW_FILE).write_text(
+        f"commit:{sha} message  # stale\n", encoding="utf-8")
+    result = run_check("--repo", str(repo), "--range", "HEAD")
+    assert result.returncode == 0, result.stdout
+    assert ("allow entry .public-check-allow:1 ('commit:<full sha> message' entry) is "
+            "unverifiable without the private deny list") in result.stdout
 
 
 def test_allow_entry_needs_a_reason(repo: Path) -> None:
@@ -596,7 +621,7 @@ def test_an_unused_commit_entry_in_a_gate_is_reported_with_its_line_and_form(rep
     result = run_check("--repo", str(repo), "--range", "HEAD")
     assert result.returncode == 1
     assert (".public-check-allow:1: unused-allow-entry ('commit:<full sha> message' entry; "
-            "remove it or correct it in place)") in result.stdout
+            "unused: remove it or correct it in place)") in result.stdout
 
 
 def shallow_clone(repo: Path, tmp_path: Path, depth: int) -> Path:
