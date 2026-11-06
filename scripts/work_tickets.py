@@ -34,7 +34,8 @@ FRONT_MATTER_PATTERN = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", 
 HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 ISSUE_URL_PATTERN = re.compile(r"^https?://([^/]+)/([^/]+)/([^/]+)/issues/\d+$")
 CROSS_REFERENCE_PATTERN = re.compile(
-    r"https?://(?P<host>[\w.-]+)/(?P<url_owner>[\w.-]+)/(?P<url_repo>[\w.-]+)/[^\s)>\]]+"
+    r"https?://(?P<host>[\w.-]+)/(?P<url_owner>[\w.-]+)/(?P<url_repo>[\w.-]+)"
+    r"/(?:issues|pull|blob|tree)(?![\w.-])[^\s)>\]]*(?<![.,;:!?])"
     r"|(?<![\w/.-])(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)#\d+"
 )
 REMOVED_PYTHON_TEST_PATTERN = re.compile(r"^-\s*def\s+(test_[A-Za-z0-9_]+)\s*\(")
@@ -1173,8 +1174,11 @@ def bare_cross_repository_references(body: str, repo: str) -> list[str]:
     A cloud worker reads only its own repository, so what it needs from another one is quoted
     inline (work-model skill, "Writing work issues"): a reference counts as quoted when it sits in
     a quote or code block, follows one directly (an attribution), or the nearest non-blank line
-    after it opens one."""
-    own_owner, own_repo = (part.casefold() for part in repo.split("/")[-2:])
+    after it opens one. The URL form counts only on GitHub hosts (github.com, or the host of the
+    work issue's own repository) and only for issue, pull request, blob and tree paths."""
+    parts = [part.casefold() for part in repo.split("/")]
+    own_owner, own_repo = parts[-2:]
+    github_hosts = {"github.com", *parts[:-2]}
     lines = body.splitlines()
     fenced, in_block = False, []
     for line in lines:
@@ -1195,6 +1199,8 @@ def bare_cross_repository_references(body: str, repo: str) -> list[str]:
         if quoted(index):
             continue
         for match in CROSS_REFERENCE_PATTERN.finditer(line):
+            if match.group("host") and match.group("host").casefold() not in github_hosts:
+                continue
             owner = match.group("url_owner") or match.group("owner")
             name = match.group("url_repo") or match.group("repo")
             if (owner.casefold(), name.casefold()) != (own_owner, own_repo):
