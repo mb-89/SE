@@ -2069,15 +2069,31 @@ def fake_suite(worktree: Path, monkeypatch, seconds: float) -> None:
     monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
 
 
-def test_suite_over_the_limit_is_refused_with_the_remedy(worktree, monkeypatch, capsys):
+def test_suite_passing_over_the_limit_says_passed_and_refuses_with_its_own_exit_code(
+        worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 130.0)
+
+    assert run(worktree, "suite") == work_tickets.SUITE_OVER_LIMIT_EXIT_CODE != 1
+    error = capsys.readouterr().err
+    assert "Complete suite passed (3 passed) but took 130.0 s, over its limit of 120 s" in error
+    assert "rerun it once on an idle host" in error
+    assert "if it is still over, make the slowest tests above faster" in error
+    assert error.index("test_sleepy") < error.index("test_fixture") < error.index("test_quick")
+
+
+FAILING_SUITE = FAKE_SUITE.replace('print("3 passed")', 'print("1 failed, 2 passed")\nsys.exit(1)')
+
+
+@pytest.mark.parametrize("seconds", [5.0, 130.0])
+def test_suite_failing_says_failed_with_its_counts_and_exits_1(
+        worktree, monkeypatch, capsys, seconds):
+    fake_suite(worktree, monkeypatch, seconds)
+    (worktree / "suite.py").write_text(FAILING_SUITE, encoding="utf-8")
 
     assert run(worktree, "suite") == 1
     error = capsys.readouterr().err
-    assert "130.0 s, over its limit of 120 s" in error
-    assert "make those tests faster" in error.lower()
-    assert "file a perf package before integrating" in error
-    assert error.index("test_sleepy") < error.index("test_fixture") < error.index("test_quick")
+    assert f"Complete suite failed (1 failed, 2 passed; {seconds:.1f} s" in error
+    assert "over its limit" not in error
 
 
 def test_suite_between_target_and_limit_warns_and_names_the_slowest(worktree, monkeypatch, capsys):
