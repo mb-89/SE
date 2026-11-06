@@ -30,7 +30,8 @@ notify, if any.
   ("Tickets for other repositories", "Not delivered").
 - You never talk to other agents or wait for a human; the human talks only to the dispatcher. The
   one message you send is the single delivery notice in step 7 below. What you may not decide goes
-  into the field report as "Not delivered"; the integrator escalates it to the dispatcher.
+  into the field report as "Not delivered" and climbs the
+  [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder).
 
 ## Environment
 
