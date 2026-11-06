@@ -1,0 +1,41 @@
+# Builds se's documentation and publishes it to GitHub Pages (README "Documentation").
+name: docs
+
+on:
+  push:
+    branches: [se]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Build
+        run: |
+          mkdir -p "$RUNNER_TEMP/site"
+          python3 scripts/build_docs.py --destination "$RUNNER_TEMP/site/index.html"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/site
+
+  # Runs only after a successful build, so a failed build leaves the published artifact in place.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
