@@ -33,10 +33,7 @@ def settings(version: str | None) -> str:
     return f"[project]\n# the released version\n{line}public_check = false\n{IDENTITY}"
 
 
-@pytest.fixture
-def checkout(tmp_path: Path, monkeypatch) -> Path:
-    """A clone of a bare origin on main, the integration branch, with se.toml at 1.2.3 tagged."""
-    monkeypatch.setattr(work_tickets, "local_config_path", lambda: tmp_path / "no-local.toml")
+def build_checkout(tmp_path: Path) -> None:
     origin, root = tmp_path / "origin.git", tmp_path / "main"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
     subprocess.run(["git", "clone", "-q", str(origin), str(root)], check=True,
@@ -48,7 +45,14 @@ def checkout(tmp_path: Path, monkeypatch) -> Path:
     git(root, "commit", "-q", "-m", "base")
     git(root, "tag", "v1.2.3")
     git(root, "push", "-q", "origin", "main", "v1.2.3")
-    return root
+
+
+@pytest.fixture
+def checkout(tmp_path: Path, monkeypatch, repositories) -> Path:
+    """A clone of a bare origin on main, the integration branch, with se.toml at 1.2.3 tagged."""
+    monkeypatch.setattr(work_tickets, "local_config_path", lambda: tmp_path / "no-local.toml")
+    repositories(build_checkout, tmp_path)
+    return tmp_path / "main"
 
 
 def issue_body(breaking: bool) -> str:
@@ -231,6 +235,37 @@ def test_release_trailer_passes_a_branch_at_its_reported_tip(checkout, capsys):
     assert release_trailer(checkout, "fix/topic-20261106", False,
                            "--field-report", report_at(checkout, tip)) == 0
     assert capsys.readouterr().out.strip() == "Release-kind: patch"
+
+
+def test_release_trailer_reads_a_branch_only_origin_has(checkout, capsys):
+    tip = commit_on(checkout, "fix/topic-20261106", "reported")
+    git(checkout, "push", "-q", "origin", "fix/topic-20261106")
+    git(checkout, "branch", "-q", "-D", "fix/topic-20261106")
+    report = report_at(checkout, tip)
+    assert release_trailer(checkout, "fix/topic-20261106", False, "--field-report", report) == 0
+    assert capsys.readouterr().out.strip() == "Release-kind: patch"
+
+
+def test_release_trailer_prefers_the_local_branch_to_origin(checkout, capsys):
+    pushed = commit_on(checkout, "fix/topic-20261106", "pushed")
+    git(checkout, "push", "-q", "origin", "fix/topic-20261106")
+    local = commit_on(checkout, "fix/topic-20261106", "local only")
+    assert release_trailer(checkout, "fix/topic-20261106", False,
+                           "--field-report", report_at(checkout, local)) == 0
+    assert capsys.readouterr().out.strip() == "Release-kind: patch"
+    assert release_trailer(checkout, "fix/topic-20261106", False,
+                           "--field-report", report_at(checkout, pushed)) == 1
+    assert "- " + local[:7] + " local only" in capsys.readouterr().err
+
+
+def test_release_trailer_without_the_branch_names_both_refs_and_the_fetch(checkout, capsys):
+    report = report_at(checkout, git(checkout, "rev-parse", "HEAD"))
+    assert release_trailer(checkout, "fix/topic-20261106", False, "--field-report", report) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert ("Cannot find branch fix/topic-20261106: neither fix/topic-20261106 nor "
+            "origin/fix/topic-20261106 exists") in captured.err
+    assert "fetch origin fix/topic-20261106" in captured.err
 
 
 def test_release_trailer_refuses_a_commit_after_the_reported_tip_naming_it(checkout, capsys):
