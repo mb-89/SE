@@ -3074,3 +3074,76 @@ def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeyp
     assert "#7" not in capsys.readouterr().out
     assert run(worktree, "route", "2", "--title", " ", "--comment-file", str(comment)) == 1
     assert github.issues[2]["labels"] == [] and 2 not in github.comments
+
+
+POST_MERGE_BODY = BODY.replace("- [ ] Tooling has tests.", "- [ ] CI is green on main after the merge.")
+
+
+@pytest.mark.parametrize(
+    ("body", "keyword"), [(BODY, "Fixes"), (POST_MERGE_BODY, "Refs")], ids=["pre-merge", "post-merge"])
+def test_deliver_names_the_issue_with_a_closing_keyword_only_for_pre_merge_acceptance(
+        worktree, gh, monkeypatch, body, keyword):
+    gh.issue["body"] = body
+    run(worktree, "intake", "--issue", "5")
+    gh.pull_request = None
+    draft_complete_field_report(worktree)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(
+        work_tickets.subprocess, "run",
+        lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
+    )
+
+    assert run(worktree, "deliver") == 0
+    pr_body = gh.bodies[[call[:2] for call in gh.calls if "--body-file" in call].index(["pr", "create"])]
+    assert pr_body.startswith(f"{keyword} {URL}\n")
+    assert ("Fixes" in pr_body) is (keyword == "Fixes")
+
+
+@pytest.mark.parametrize(
+    ("body", "keyword"), [(BODY, "Fixes"), (POST_MERGE_BODY, "Refs")], ids=["pre-merge", "post-merge"])
+def test_pr_body_prints_the_form_deliver_writes(tmp_path, capsys, body, keyword):
+    issue_body = tmp_path / "issue.md"
+    issue_body.write_text(body, encoding="utf-8")
+    assert work_tickets.main(["pr-body", "--issue-body", str(issue_body), "--issue-url", URL]) == 0
+    assert capsys.readouterr().out == f"{keyword} {URL}\n\nWork issue #5.\n"
+
+
+def test_integrate_leaves_an_issue_with_post_merge_acceptance_open_and_reports_github_states(
+        main_checkout, monkeypatch, capsys):
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    head = subprocess.run(["git", "-C", str(worker), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    calls = integration_fakes(monkeypatch, head)
+    report = {"body": reported_at(head)}
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: (
+        {"body": POST_MERGE_BODY} if number == 5 else report))
+    closed: set[str] = set()
+    bodies: list[str] = []
+
+    def gh_call(root, args):
+        calls.append(args)
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({"headRefName": "feature/worker", "headRefOid": head})
+        if args[:2] == ["issue", "close"]:
+            closed.add(args[2])
+        if args[:2] == ["issue", "view"]:
+            return "CLOSED\n" if args[2] in closed else "OPEN\n"
+        return ""
+    monkeypatch.setattr(work_tickets, "run_gh", gh_call)
+    monkeypatch.setattr(work_tickets, "run_gh_with_body",
+                        lambda root, args, body: calls.append(args) or bodies.append(body) or "")
+
+    work_tickets.integrate(main_checkout, 8, None, None)
+    assert [call[2] for call in calls if call[:2] == ["issue", "close"]] == ["8"]
+    assert "Stays open until this acceptance is seen after the merge: " \
+           "- [ ] CI is green on main after the merge." in bodies[0]
+    output = capsys.readouterr().out
+    assert "Issue #5: OPEN on GitHub after the merge" in output
+    assert "Issue #8: CLOSED on GitHub after the merge" in output
+    assert "Close #5 once its post-merge acceptance is seen" in output

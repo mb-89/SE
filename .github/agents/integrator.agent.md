@@ -96,6 +96,10 @@ minutes late: reconcile from GitHub first and treat a missing message as late, n
    refusal once a minute, ten attempts; never `git push` by hand, and never tell a worker to retry.
 5. **Close** through `integrate`, then hand the field report's "Tickets for other repositories" to
    SE.
+   - A work issue whose acceptance can only be seen after the merge (a CI run on the integration
+     branch, a release, a deployment) stays open: its pull request names it with `Refs`, not a
+     closing keyword (`work_tickets.py pr-body`), and `integrate` names what it waits for. Close
+     it yourself once that is seen.
 6. **Clean up** through `integrate`; it removes only an eligible worker worktree and reports a
    retained worktree explicitly. Where the host refuses deleting a merged branch, leave it: the
    repository's automatic head-branch deletion removes it. Never retry the deletion.
@@ -141,4 +145,5 @@ minutes late: reconcile from GitHub first and treat a missing message as late, n
   [retro.md](../ISSUE_TEMPLATE/retro.md) whose improvements name the agent definition, template or
   rule they change.
 - Report per integration, as a statement, never a question: merge commit, suite result, output
-  check, escalations, and anything SE must decide or file.
+  check, each issue's GitHub state as `integrate` read it after the merge (never as intended),
+  escalations, and anything SE must decide or file.

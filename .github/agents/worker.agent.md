@@ -110,8 +110,9 @@ every package, so work issues and session prompts never repeat it.
      `--issue-body <file>` without intake's snapshot; it also refuses comments and a body edit that
      arrived on the work issue after step 3 last recorded them as read, naming the remedy) and fix
      it until it passes.
-   - Then run `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request and
-     field report, and prints the integrator notification.
+   - Then run `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request
+     (its body as `work_tickets.py pr-body` prints it) and field report, and prints the integrator
+     notification.
 6. A ticket you cannot finish stays in `held/` with the attempts and failure evidence; the field
    report states it as "Not delivered" with exact next steps. Never claim unfinished work complete.
 
