@@ -34,6 +34,7 @@ CHECKBOX_PATTERN = re.compile(r"^\s*-\s+\[([ xX])\]\s+(.+?)\s*$")
 SECTION_PATTERN = re.compile(r"^##\s+(.+?)\s*$")
 DISPOSITION_PATTERN = re.compile(r"^\s*Disposition:\s*(.*?)\s*$", re.IGNORECASE)
 REQUIREMENT_PATTERN = re.compile(r"^(\d+)\.\s+(.*\S)\s*$")
+REQUIREMENT_SECTIONS = ("Requirements", "Changes after filing")
 FRONT_MATTER_PATTERN = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 ISSUE_URL_PATTERN = re.compile(r"^https?://([^/]+)/([^/]+)/([^/]+)/issues/\d+$")
@@ -1273,38 +1274,49 @@ def section(sections: dict[str, str], name: str) -> str:
     )
 
 
-def requirement_items(body: str) -> dict[int, str]:
-    items: dict[int, list[str]] = {}
-    current: list[str] | None = None
-    for line in section(markdown_sections(body), "requirements").splitlines():
-        match = REQUIREMENT_PATTERN.fullmatch(line)
-        if match:
-            current = items.setdefault(int(match.group(1)), [])
-            current.append(match.group(2))
-        elif current is not None:
-            current.append(line)
-    return {number: "\n".join(lines).strip() for number, lines in items.items()}
+def requirement_items(body: str) -> dict[int, tuple[str, str]]:
+    """The one parser of an issue's requirements: number -> (section, text).
+
+    Numbered items under "Changes after filing" are requirements too, numbered as written; a
+    number both sections use is one requirement, named by the section that first lists it.
+    """
+    sections = markdown_sections(body)
+    items: dict[int, tuple[str, list[str]]] = {}
+    for name in REQUIREMENT_SECTIONS:
+        current: list[str] | None = None
+        for line in section(sections, name).splitlines():
+            match = REQUIREMENT_PATTERN.fullmatch(line)
+            if match:
+                current = items.setdefault(int(match.group(1)), (name, []))[1]
+                current.append(match.group(2))
+            elif current is not None:
+                current.append(line)
+    return {
+        number: (name, "\n".join(lines).strip()) for number, (name, lines) in items.items()
+    }
 
 
-def field_report_evidence_items(body: str) -> list[str]:
-    requirements = [f"Requirement {number}" for number in requirement_items(body)]
+def field_report_evidence_items(body: str) -> dict[str, str]:
+    """Every item a field report needs a row for -> the issue section that lists it."""
+    requirements = {
+        f"Requirement {number}": name for number, (name, _) in requirement_items(body).items()
+    }
     acceptance_items = [
         match.group(2)
         for line in section(markdown_sections(body), "acceptance").splitlines()
         if (match := CHECKBOX_PATTERN.fullmatch(line)) is not None
     ]
-    acceptance = [
-        f"Acceptance {number}"
-        for number, _ in enumerate(acceptance_items, 1)
-    ]
-    return [*requirements, *acceptance]
+    acceptance = {
+        f"Acceptance {number}": "Acceptance" for number, _ in enumerate(acceptance_items, 1)
+    }
+    return {**requirements, **acceptance}
 
 
 def field_report_evidence_errors(issue_body: str, report_body: str) -> list[str]:
     delivered = section_content(report_body, "delivered")
     not_delivered = "\n".join(section_content(report_body, "not delivered"))
     missing: list[str] = []
-    for item in field_report_evidence_items(issue_body):
+    for item, where in field_report_evidence_items(issue_body).items():
         item_pattern = re.compile(rf"^{re.escape(item)}(?:\b|:)", re.IGNORECASE)
         rows = [
             [cell.strip() for cell in line.strip().strip("|").split("|")]
@@ -1319,7 +1331,10 @@ def field_report_evidence_errors(issue_body: str, report_body: str) -> list[str]
             rf"\b{re.escape(item)}\b", not_delivered, flags=re.IGNORECASE
         )
         if not has_evidence and not listed_as_not_delivered:
-            missing.append(item)
+            missing.append(
+                item if where in (REQUIREMENT_SECTIONS[0], "Acceptance")
+                else f'{item} (under "{where}")'
+            )
     if not missing:
         return []
     return ["missing evidence for: " + "; ".join(missing)]
@@ -1353,7 +1368,7 @@ def is_discovery_issue(issue: dict[str, object]) -> bool:
 def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
     """Derives one ticket per numbered requirement plus the delivery ticket."""
     sections = markdown_sections(issue["body"])
-    requirements = requirement_items(issue["body"])
+    requirements = {n: text for n, (_, text) in requirement_items(issue["body"]).items()}
     if not requirements:
         requirements = {1: section(sections, "goal") or issue["title"]}
     owner = section(sections, "design owner") or "Named in the work issue."
