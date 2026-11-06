@@ -339,23 +339,25 @@ public mirror push it runs the project check command and refuses that push if th
 ### Without gh
 
 Where the host offers no `gh` (Claude's cloud), a role still follows its procedure; this section
-owns what changes.
+owns what changes. A `gh` that is installed but fails `gh auth status` counts as no `gh`.
 
 - **GitHub through the host's tools**: issues, comments, pull requests and field reports are read
   and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same
   titles, labels, bodies and footers the commands would write.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
-  `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push` and
-  `field-report --check`.
+  `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push`,
+  `comments-read` and `field-report --check`.
   Every other command fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
   for example:
   - `intake` and `refresh`: read the issue and its comments; `create` one ticket per numbered
-    requirement plus `delivery`.
+    requirement plus `delivery`; record the comments read with `comments-read --count <n>
+    --newest <id>`, from what the GitHub tools read.
   - `deliver`: `sync`; `push`; open the pull request to the integration
     branch, titled like the work issue; file the field report from `field-report.md`, filled in by
     hand (`field-report --draft` needs `intake`'s snapshot) and passing `field-report --check
-    .se/work/field-report.md --issue-body <file>` (the work issue's body saved to `<file>`), titled
+    .se/work/field-report.md --issue-body <file> --comment-count <n> --newest-comment <id>` (the
+    work issue's body saved to `<file>`, its comments as the GitHub tools read them now), titled
     `field-report: <branch>`, label `field-report`; send the notification. A refused report is
     fixed and checked again, never filed.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
