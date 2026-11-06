@@ -32,6 +32,10 @@ DESCRIPTION = ("SE, the agent a person talks to, with its integrator and worker 
 BOOTSTRAP = 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" --hook || true'
 LINK = re.compile(r"(\]\()([^)\s#]+)((?:#[^)\s]*)?\))")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+# A script path not under `<se>`, the root the start hook names (scripts/se_start.py `root_line`):
+# bare `scripts/...`, relative to the working directory, or under another placeholder. Relative links
+# (`../../scripts/...`) and other folders' `scripts/` stay allowed.
+UNROOTED_SCRIPT = re.compile(r"(?<![\w./>}-])scripts/|<(?!se>)[^<>\n]*>/scripts/|\$\{?\w+\}?/scripts/")
 
 
 @dataclass(frozen=True)
@@ -130,7 +134,12 @@ def _generated_file(source: PurePosixPath, layout: Layout, root: Path) -> tuple[
     data = (root / source).read_bytes()
     if source.suffix != ".md":
         return generated, data
-    front, body = _front_matter(data.decode("utf-8"), source, layout)
+    text = data.decode("utf-8")
+    for number, line in enumerate(text.splitlines(), 1):
+        if UNROOTED_SCRIPT.search(line):
+            raise SourceError(f"{source}:{number}: names a script without SE's root; write "
+                              "`<se>/scripts/<name>.py` (the work model's \"What the project provides\")")
+    front, body = _front_matter(text, source, layout)
     notice = (f"<!-- Generated from {source} by scripts/se_plugin.py; edit the source and run "
               f"`python scripts/se_plugin.py build`. -->\n")
     body = _rewrite_links(body, source, generated, layout)

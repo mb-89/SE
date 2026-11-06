@@ -46,7 +46,7 @@ it, and which solutions there are.
     options names the letters of those it fails.
 
 Nothing else goes before the fence: its options are the list of solutions the reader expands.
-Any longer material goes in `##` sections after it, which obs shows as tabs. `scripts/deck.py
+Any longer material goes in `##` sections after it, which obs shows as tabs. `<se>/scripts/deck.py
 build` refuses a decision note without both sections before its fence.
 
 The aim is no failed item: a failed item's answer says what would fix it. The worked example is
@@ -105,23 +105,23 @@ against their own total ("Task 1 of 2"), each with what to do, where, and what i
 
 ## Bringing decisions to the person
 
-The decisions the person must bless go to them as one deck, in one turn. `scripts/deck.py` builds,
+The decisions the person must bless go to them as one deck, in one turn. `<se>/scripts/deck.py` builds,
 serves and reads it; its `--help` owns what each subcommand does.
 
 A deck may also carry record chapters, notes without a bless request and without a `pugh` fence, such as
 what was decided without the person and their [tasks](#tasks-for-the-person), beside at least one decision.
 
 1. Write the decision notes and their manifest into a scratch directory `<notes>`, then run
-   `uv run python scripts/deck.py build <notes> --destination <deck>.html`.
+   `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html`.
 2. Hand the deck to the person where they are, and wait for their answers:
    - **The Claude app** (cloud and mobile): publish `<deck>.html` with the Artifact tool and
      `capabilities: {artifact: {}}`, and send the person its link. Their Send publishes
      `answers.json` into the artifact, which wakes this session; read it with the Artifact
      tool's `read` and `path: "answers.json"`.
    - **Claude Code and Copilot** (local): run
-     `uv run python scripts/deck.py serve <deck>.html --wait --timeout <seconds>` and send the
+     `uv run python <se>/scripts/deck.py serve <deck>.html --wait --timeout <seconds>` and send the
      person the URL it prints first; it ends with their answers.
-3. Run `uv run python scripts/deck.py answers <answers.json>` and act on what it prints; add
+3. Run `uv run python <se>/scripts/deck.py answers <answers.json>` and act on what it prints; add
    `--record <notes> --destination <record>.html` for [the record](#the-record).
 
 ## The record

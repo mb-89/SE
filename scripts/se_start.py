@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable
 
 SE_ROOT = Path(__file__).resolve().parents[1]
+ROOT_NAME = "SE root"  # the hook's context names SE_ROOT under this name
 CACHE_DEFAULT = Path("~/.se/start-check.json")
 CACHE_ENV = "SE_START_CACHE"
 MAX_AGE = 3600  # seconds a cached update check stays fresh
@@ -637,12 +638,19 @@ def refresh(se_root: Path, root: Path | None, local_config: Path | None, cache_p
     return lines, failed
 
 
-def hook_output(lines: list[str], notes: list[str]) -> str:
+def root_line(se_root: Path) -> str:
+    """The one named value that tells a session where SE is: `<se>` in SE's skills and agents."""
+    return f"{ROOT_NAME}: {se_root}"
+
+
+def hook_output(lines: list[str], notes: list[str], se_root: Path) -> str:
     """Claude Code's SessionStart hook output: the greeting shown to the person (systemMessage) and
-    handed to the session, which opens its first message with it."""
+    handed to the session, which opens its first message with it, and SE's root for the session."""
     text = "\n".join(notes + lines)
     context = (f"{text}\n\nSE's start greeting, already shown to the person. As SE, open your first "
-               "message with it as it is; pass on any line that names a command to run.")
+               "message with it as it is; pass on any line that names a command to run.\n\n"
+               f"{root_line(se_root)}\n`<se>` in SE's skills and agents is this path: run SE's scripts as "
+               "`uv run python <se>/scripts/<name>.py`, never relative to the working directory.")
     return json.dumps({"systemMessage": text,
                        "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}})
 
@@ -690,7 +698,7 @@ def main(argv: list[str] | None = None, world: World | None = None) -> int:
         return 1 if report.errors else 0
     report = status(SE_ROOT, root, args.local, cache_path, world, args.offline)
     if args.hook:
-        print(hook_output(greeting(report, SE_ROOT), args.note))
+        print(hook_output(greeting(report, SE_ROOT), args.note, SE_ROOT))
     else:
         print("\n".join(args.note + (greeting if args.greeting else full)(report, SE_ROOT)))
     return 0
