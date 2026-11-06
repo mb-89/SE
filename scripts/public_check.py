@@ -9,7 +9,8 @@ names the location and the pattern label only, never the matched text.
 The commit gates (a message file, the commits of a --range) also refuse tracker references in
 messages, naming the reference and the remedy; a full check leaves old history to them. The
 commits of a --range must also carry the project identity (se.toml [project] identity, unless the
-machine sets public_identity), where one is set; a hit names the identity found, redacted.
+machine sets public_identity), where one is set; GitHub's web-flow identity, the committer of a
+commit made on GitHub, passes as committer. A hit names the identity found, redacted.
 
 Every verdict names the se commit that ran it. A checked repository that pins se (`[modules.se]`
 in its se.toml) is refused when this se is not at that `ref`, or when the version this se's
@@ -59,6 +60,10 @@ def _not_placeholder(generic: set[str], group: int = 1) -> Callable[[re.Match[st
 
     return accept
 
+
+# GitHub's web-flow identity: the committer of a commit made on GitHub itself. It names no person,
+# so the identity gate accepts it as committer next to the project identity, never as author.
+WEB_FLOW = "GitHub <" + "noreply" + "@github.com>"
 
 # Fixed addresses services write into commits themselves; they name no person.
 SERVICE_EMAILS = frozenset({
@@ -383,7 +388,7 @@ def project_identity(root: Path) -> str | None:
 
 def scan_project_identity(where: str, role: str, identity: str, expected: str,
                           patterns: list[Pattern], report: Report) -> None:
-    if identity != expected:
+    if identity != expected and (role, identity) != ("committer", WEB_FLOW):
         shown = redact(identity, patterns)  # a foreign identity may name a person
         report.hits.append(Hit(f"{where} {role}", "foreign-identity",
                                f" '{shown}' is not the project identity '{expected}'; "
