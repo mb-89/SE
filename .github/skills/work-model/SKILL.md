@@ -95,6 +95,21 @@ integration_branch = "se"
 `work_tickets.py` reads it from there for `sync`, `start`, `deliver`, `guard` and `integrate`;
 `integrate` refuses a main checkout that is not on it. Below, `main` means the integration branch.
 
+Nothing reaches the integration branch without a passing complete suite and, unless `se.toml` sets
+`public_check = false`, a passing public check on exactly the tree pushed:
+
+- `work_tickets.py suite` (which `integrate` runs) records its verdict on the tree of the commit
+  it ran on, where the checkout holds exactly that commit; `public_check.py --rev <commit>` records
+  its verdict on that commit's tree. A failure, or a suite over its limit, records a failure.
+- `work_tickets.py push` and se's pre-push hook (`work_tickets.py verified`) refuse a push of the
+  integration branch without both passing verdicts on its tree, naming the commit and the remedy,
+  so a plain `git push` is refused the same way.
+- The release commit `push` makes (only the version and what `release_build` regenerates) carries
+  its parent's suite verdict.
+- There is no bypass: an emergency push runs `suite` like any other.
+- The verdicts live in the repository's git directory (`se-verdicts/`, `scripts/verdicts.py`),
+  shared by its worktrees.
+
 ## Rules for all roles
 
 Framework repositories (the process plugin and document format/converter) carry every capability
@@ -366,7 +381,7 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same
   titles, labels, bodies and footers the commands would write.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
-  `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push`,
+  `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push`, `verified`,
   `comments-read`, `release-trailer` and `field-report --check`.
   Every other command fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
@@ -388,8 +403,9 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     with the message `integrate` writes (`Integrate <branch>: <summary>`, plus the trailer
     `work_tickets.py release-trailer` prints, which
     [releases](../../../README.md#project-settings) require).
-    - Then run the complete suite and, unless `se.toml` sets `public_check = false`, the public
-      check (`public_check.py --rev HEAD --range <pre-merge>..HEAD`), refusing on a failure.
+    - Then run the complete suite with `work_tickets.py suite` and, unless `se.toml` sets
+      `public_check = false`, the public check (`public_check.py --rev HEAD --range
+      <pre-merge>..HEAD`), refusing on a failure; both record the verdicts `push` needs.
     - Then `push <integration branch>`, and close the issues with the `Integrated in …` comment.
 - **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
   approval prompt no one answers; a role works with the repositories its session started with.
