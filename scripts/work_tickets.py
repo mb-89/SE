@@ -2928,11 +2928,15 @@ def backlog_file(root: Path, title: str, file: Path, repo: str | None) -> str:
         raise QueueError(f"Cannot read backlog body {file}: {error}") from error
     if not title.strip() or not body:
         raise QueueError("backlog file needs a title and a body")
-    run_gh(root, [
-        "label", "create", BACKLOG_LABEL, "--force", "--color", "c5def5",
-        "--description", "A far-out idea for the person; not work until SE re-files it",
-        *repo_arguments(repo),
-    ])
+    existing = json.loads(run_gh(root, [
+        "label", "list", "--search", BACKLOG_LABEL, "--json", "name", *repo_arguments(repo),
+    ]) or "[]")
+    if BACKLOG_LABEL not in {label["name"] for label in existing}:
+        run_gh(root, [
+            "label", "create", BACKLOG_LABEL, "--color", "c5def5",
+            "--description", "A far-out idea for the person; not work until SE re-files it",
+            *repo_arguments(repo),
+        ])
     output = run_gh_with_body(root, [
         "issue", "create", "--title", title.strip(), "--label", BACKLOG_LABEL,
         "--label", PERSON_LABEL, *repo_arguments(repo),
