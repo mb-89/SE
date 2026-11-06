@@ -338,7 +338,7 @@ public mirror push it runs the project check command and refuses that push if th
 ### Without gh
 
 Where the host offers no `gh` (Claude's cloud), a role still follows its procedure; this section
-owns what changes.
+owns what changes. A `gh` that is installed but fails `gh auth status` counts as no `gh`.
 
 - **GitHub through the host's tools**: issues, comments, pull requests and field reports are read
   and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same

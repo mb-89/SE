@@ -728,6 +728,24 @@ def test_deliver_refuses_comments_after_intake_before_pushing(worktree, gh, monk
     assert not any(call[:2] in (["pr", "create"], ["issue", "create"]) for call in gh.calls)
 
 
+def test_a_gh_that_is_not_signed_in_takes_the_no_gh_path(worktree, monkeypatch, capsys):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(work_tickets.shutil, "which", lambda name: "/opt/unsigned/gh")
+    monkeypatch.setattr(
+        work_tickets.subprocess, "run",
+        lambda arguments, **kwargs: (
+            calls.append(arguments) or subprocess.CompletedProcess(arguments, 1, "", "not logged in")
+        ),
+    )
+    assert work_tickets.gh_usable() is False
+    assert run(worktree, "intake", "--issue", "5", "--repo", "git.example/owner/repo") == 1
+    error = capsys.readouterr().err
+    assert error.startswith("error: work_tickets.py intake needs the GitHub CLI (gh), which is "
+                            "installed but not signed in")
+    assert "counts as no gh" in error and "SKILL.md#without-gh" in error
+    assert all(call == ["/opt/unsigned/gh", "auth", "status"] for call in calls)
+
+
 def test_sync_fetches_and_merges_main_or_reports_conflicts(worktree, monkeypatch, capsys):
     calls: list[list[str]] = []
 

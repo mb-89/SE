@@ -581,11 +581,13 @@ def status_report(
     }
 
 
-def gh_usable() -> bool:
-    return shutil.which("gh") is not None
+GH_ENVIRONMENT = {"GH_PROMPT_DISABLED": "1"}
+_signed_in_gh: set[str] = set()
 
 
-def run_gh(root: Path, arguments: list[str]) -> str:
+def gh_executable() -> str:
+    """The `gh` on PATH, refused where it is missing or `gh auth status` fails: a `gh` that is
+    installed but not signed in counts as no `gh`. A passed check holds for the process."""
     executable = shutil.which("gh")
     if executable is None:
         raise MissingGhError(
@@ -593,6 +595,33 @@ def run_gh(root: Path, arguments: list[str]) -> str:
             "the project's AGENTS.md names, or, where the host has no gh (Claude's cloud), do this "
             f"step by hand as the se checkout's {WITHOUT_GH} says"
         )
+    if executable not in _signed_in_gh:
+        status = subprocess.run(
+            [executable, "auth", "status"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL, env={**os.environ, **GH_ENVIRONMENT}, check=False,
+        )
+        if status.returncode != 0:
+            raise MissingGhError(
+                "needs the GitHub CLI (gh), which is installed but not signed in "
+                f"(gh auth status: exit code {status.returncode}), so it counts as no gh. Sign in "
+                "with gh auth login, or, where the host gives gh no account (Claude's cloud), do "
+                f"this step by hand as the se checkout's {WITHOUT_GH} says"
+            )
+        _signed_in_gh.add(executable)
+    return executable
+
+
+def gh_usable() -> bool:
+    try:
+        gh_executable()
+    except MissingGhError:
+        return False
+    return True
+
+
+def run_gh(root: Path, arguments: list[str]) -> str:
+    executable = gh_executable()
     result = subprocess.run(
         [executable, *arguments],
         cwd=root,
@@ -601,7 +630,7 @@ def run_gh(root: Path, arguments: list[str]) -> str:
         encoding="utf-8",
         errors="replace",
         stdin=subprocess.DEVNULL,
-        env={**os.environ, "GH_PROMPT_DISABLED": "1"},
+        env={**os.environ, **GH_ENVIRONMENT},
         check=False,
     )
     if result.returncode != 0:
