@@ -17,12 +17,17 @@ SE's hard rules in [catch-up](../catch-up/SKILL.md#hard-rules).
 
 ## The decision note
 
-One Obsidian Markdown note per decision, in this order:
+One Obsidian Markdown note per decision. Its reader must understand the problem before they see
+any option, so every note answers, in this order: what is the situation today, what is wrong with
+it, and which solutions there are.
 
-- **Frontmatter:** `obs.bless: pending` when a person must bless the decision; no frontmatter when
-  the note is only a record of a decision the agent took itself.
-- **Context:** one to three sentences: what exists, who uses it, what shows the problem. The first
+- **Frontmatter:** `obs: {bless: pending}` when a person must bless the decision; no frontmatter
+  when the note is only a record of a decision the agent took itself.
+- **The heading:** `# <the decision>`, the question in a few words.
+- **`## Current situation`:** what exists today and who uses it, in plain words. The first
   sentence names the class the case belongs to ([one level up](#one-level-up)).
+- **`## The problem`:** what is wrong with it, and what shows it: a failure, a measurement, the
+  person's words.
 - **The `pugh` fence**, the matrix and its checklist. Its fields, marks and letters are obs's
   contract, owned by obs's capability note
   [pugh-decisions](https://github.com/mb-89/obs/blob/main/spec/capabilities/pugh-decisions.md) and
@@ -40,6 +45,10 @@ One Obsidian Markdown note per decision, in this order:
     ([your own decisions](#your-own-decisions)).
   - The checklist is [the checklist](#the-checklist), one entry per item; an item about particular
     options names the letters of those it fails.
+
+Nothing else goes before the fence: its options are the list of solutions the reader expands.
+Any longer material goes in `##` sections after it, which obs shows as tabs. `scripts/deck.py
+build` refuses a decision note without both sections before its fence.
 
 The aim is no failed item: a failed item's answer says what would fix it. The worked example is
 [the decision deck](references/decision-deck.md).
@@ -65,7 +74,7 @@ the letters of the options they fail.
 
 ## Your own decisions
 
-An agent decides its own questions with the same note, without `obs.bless`. Where it prefers an
+An agent decides its own questions with the same note, without the bless request. Where it prefers an
 option the matrix does not pick, it sets `chosen` and states, in that option's `losses` or the
 "What if" answer, the world that choice needs: the weights under which it would win.
 
@@ -78,16 +87,16 @@ right one.
 
 Before writing the note, name the class the instance belongs to and decide the general mechanism;
 the instance is the example. An answer about the mechanism settles every later case of the class,
-an answer about the instance only this one. Write the class in the context sentence ("This is one
-case of …") and phrase every option as a rule for the class.
+an answer about the instance only this one. Write the class in the first sentence of
+`## Current situation` ("This is one case of …") and phrase every option as a rule for the class.
 
 Worked example (5 Nov): the instance "can queries select the manifest note?" became the mechanism
 "a note can mark itself ignored, like a Python underscore name; the manifest is one such note".
 The options then were rules for every note (may mark itself ignored, or may not), and the manifest
 was the first case they settled.
 
-If no class exists, because the case is truly one of a kind, say so in the context and decide the
-instance.
+If no class exists, because the case is truly one of a kind, say so in `## Current situation`
+and decide the instance.
 
 ## Tasks for the person
 
