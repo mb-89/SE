@@ -2113,6 +2113,8 @@ def test_suite_under_the_target_passes_quietly(worktree, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert captured.err == ""
     assert "Suite time: 5.0 s (target 60 s, limit 120 s)" in captured.out
+    tail = captured.out.split("Suite output (last lines):\n", 1)[1].split("Suite time:", 1)[0]
+    assert "  3 passed" in tail and "test_sleepy" not in tail
 
 
 REPORTING_SUITE = """\
@@ -2151,6 +2153,68 @@ def test_suite_without_reports_or_durations_names_the_remedy_once(worktree, monk
     assert run(worktree, "suite") == 0
     out = capsys.readouterr().out
     assert out.count("write JUnit XML to $SE_TEST_REPORTS") == 1
+
+
+SETUP = """\
+import sys
+print("installing browsers")
+print("setup: 2 browsers ready")
+"""
+
+
+def fake_setup(worktree: Path, monkeypatch, setup_seconds: float, suite_seconds: float,
+               script: str = SETUP) -> None:
+    """The fake suite with a fake `[tests]` setup; the clock says how long each took."""
+    fake_suite(worktree, monkeypatch, suite_seconds)
+    (worktree / "setup.py").write_text(script, encoding="utf-8")
+    with (worktree / "se.toml").open("a", encoding="utf-8") as config:
+        config.write(f"setup = {json.dumps([sys.executable, 'setup.py'])}\n")
+    readings = iter([0.0, setup_seconds, 100.0, 100.0 + suite_seconds])
+    monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
+
+
+def test_suite_setup_is_timed_apart_and_not_held_to_the_budget(worktree, monkeypatch, capsys):
+    fake_setup(worktree, monkeypatch, setup_seconds=200.0, suite_seconds=5.0)
+
+    assert run(worktree, "suite") == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Setup time: 200.0 s (not budgeted)" in captured.out
+    assert "  setup: 2 browsers ready" in captured.out
+    assert "Suite time: 5.0 s (target 60 s, limit 120 s)" in captured.out
+    assert captured.out.index("Setup time") < captured.out.index("Suite time")
+
+
+def test_suite_setup_failing_stops_the_run_with_its_output(worktree, monkeypatch, capsys):
+    failing = SETUP + 'print("no network", file=sys.stderr)\nsys.exit(2)\n'
+    fake_setup(worktree, monkeypatch, 3.0, 5.0, failing)
+    (worktree / "suite.py").write_text('raise SystemExit("suite ran")\n', encoding="utf-8")
+
+    assert run(worktree, "suite") == 1
+    error = capsys.readouterr().err
+    assert "Suite setup failed (exit code 2; 3.0 s) running" in error
+    assert "setup.py ([tests] setup in se.toml)" in error
+    assert "installing browsers" in error and "no network" in error
+    assert "suite ran" not in error
+
+
+def test_suite_passing_prints_the_last_lines_of_its_own_output(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 5.0)
+    (worktree / "suite.py").write_text(
+        "".join(f'print("line {i}")\n' for i in range(20)) + 'print("browser part: 4 passed")\n'
+        'print("3 passed")\n', encoding="utf-8")
+
+    assert run(worktree, "suite") == 0
+    out = capsys.readouterr().out
+    assert "  browser part: 4 passed\n  3 passed" in out
+    assert "line 19" in out and "line 0\n" not in out
+
+
+def test_suite_budget_refuses_a_setup_that_is_not_an_argument_array(worktree):
+    (worktree / "se.toml").write_text('[tests]\ncommand = ["pytest"]\nsetup = "make deps"\n',
+                                      encoding="utf-8")
+    with pytest.raises(work_tickets.QueueError, match=r"setup must be a non-empty argument array"):
+        work_tickets.suite_budget(worktree)
 
 
 def test_suite_budget_defaults_and_refuses_a_missing_command(worktree):
