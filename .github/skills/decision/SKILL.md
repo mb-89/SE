@@ -1,6 +1,6 @@
 ---
 name: decision
-description: 'How every decision is made, the agent''s own and those it brings to the person: one Obsidian Markdown note per decision, a Pugh matrix in a `pugh` fence with the eight-item checklist as its second tab, asked about the general mechanism rather than the single instance, and stored with its answered artifact in the repository it is about. Load it whenever you decide something that is not mechanical, or present a decision, an escalation or an open point to the person.'
+description: 'How every decision is made, the agent''s own and those it brings to the person: one Obsidian Markdown note per decision, a Pugh matrix in a `pugh` fence with the eight-item checklist as its second tab, asked about the general mechanism rather than the single instance; its output is the answered artifact. Load it whenever you decide something that is not mechanical, or present a decision, an escalation or an open point to the person.'
 ---
 
 # Decision
@@ -93,11 +93,8 @@ against their own total ("Task 1 of 2"), each with what to do, where, and what i
 
 ## The record
 
-The answered artifact (obs's `--answers` output) is the decision's record. The decision note and
-its answered artifact are stored together in the repository the decision is about, in its
-`decisions/` folder, as `decisions/<yyyymmdd>-<topic>.md` and the artifact beside it under the
-same name. A decision the agent took itself is recorded by its note alone.
-
-Every issue, spec or skill change that follows from the decision links the note; none of them
-copies its content. A decision about a class changes that class's rule, which links the note. A
-chat reply alone is no record: the next session cannot read it.
+The skill's output is the answered artifact (obs's `--answers` output): one decision with its
+verdict, comments, overrides and vetoes. That artifact is the decision's record. Where it is kept
+is not this skill's concern: whatever uses the decision handles the artifact, an issue may carry
+it as an attachment, and nothing is required to commit it. A decision about a class changes that
+class's rule.

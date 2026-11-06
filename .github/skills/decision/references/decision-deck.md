@@ -31,7 +31,7 @@ options:
       The person's effort per decision: 1
       Many decisions without a flood: 1
       Cost to build: -1
-    wins: The answered deck is the record, stored next to the notes; the person sees every open decision at once.
+    wins: The answered artifact is the record and outlives the session; the person sees every open decision at once.
     losses: Needs the deck command and obs's blessing, which do not exist yet.
   B:
     name: Tables in the chat (keep what we have)

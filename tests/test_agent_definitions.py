@@ -346,12 +346,15 @@ def test_the_decision_skill_asks_one_level_up_with_the_worked_example():
             'such note"') in text
 
 
-def test_the_decision_skill_stores_the_note_with_its_answered_artifact():
+def test_the_decision_skill_outputs_the_answered_artifact_and_names_no_storage():
     text = normalized(DECISION)
     assert "## The record" in text
-    for rule in ("The answered artifact", "stored together in the repository the decision is about",
-                 "`decisions/` folder", "links the note; none of them copies its content"):
+    for rule in ("The skill's output is the answered artifact", "verdict, comments, overrides and vetoes",
+                 "That artifact is the decision's record", "an issue may carry it as an attachment",
+                 "nothing is required to commit it"):
         assert rule in text, rule
+    for storage in ("decisions/", "stored together", "folder", "graft"):
+        assert storage not in text, storage
 
 
 def without_gh_section() -> str:
