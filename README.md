@@ -83,8 +83,10 @@ named by the environment variable `SE_TEST_REPORTS`, one file per part; the gate
 slowest tests across all reports, each with its part (the file's name). Without reports it reads
 pytest's lines (it adds `--durations=10` to a pytest command), and where neither names a test it
 says so and names that remedy. Above `target_seconds` (default
-60) it warns; above `limit_seconds` (default 120) it refuses the integration, naming the time, the
-limit, the slowest tests and the remedy: make those tests faster, or file a perf package first. How
+60) it warns; above `limit_seconds` (default 120) it refuses the integration, naming the test
+result (passed, with its counts), the time, the limit, the slowest tests and the remedy: rerun once on
+an idle host, as a loaded host can push a passing suite over the limit, and if it is still over, make
+those tests faster. Failed tests exit with code 1, a passing suite over the limit with code 3. How
 tests are written is owned by the [work model](.github/skills/work-model/SKILL.md#tests).
 
 `work_tickets.py guard` checks deleted sentences in the configured project paths. Each configured
