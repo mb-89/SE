@@ -2375,6 +2375,68 @@ def test_suite_budget_defaults_and_refuses_a_missing_command(worktree):
         work_tickets.suite_budget(worktree)
 
 
+@pytest.fixture
+def compare_checkout(main_checkout, monkeypatch):
+    """A checkout whose se.toml declares a suite, committed as `base`, and a fake suite runner:
+    each call takes the next set duration of its state ("HEAD" here, "base" in the temporary
+    worktree of `base`) and is recorded in order; nothing runs and no clock is read."""
+    (main_checkout / "se.toml").write_text('[tests]\ncommand = ["pytest"]\n', encoding="utf-8")
+    git_ok("-C", str(main_checkout), "add", "se.toml")
+    git_ok("-C", str(main_checkout), "commit", "-q", "-m", "suite")
+    git_ok("-C", str(main_checkout), "branch", "base")
+    calls, durations = [], {"HEAD": [], "base": []}
+
+    def time_suite(checkout, command):
+        state = "HEAD" if checkout == main_checkout else "base"
+        assert state == "HEAD" or (checkout / "se.toml").is_file()
+        calls.append(state)
+        part = work_tickets.SuitePart(f"part-{state}", 1.0, 1, [(1.0, "t")])
+        return work_tickets.SuiteRun(durations[state].pop(0), 0, "1 passed", "1 passed", [part])
+
+    monkeypatch.setattr(work_tickets, "time_suite", time_suite)
+    return main_checkout, calls, durations
+
+
+def test_suite_compare_interleaves_the_states_after_an_uncounted_warm_up(compare_checkout, capsys):
+    checkout, calls, durations = compare_checkout
+    durations["HEAD"] += [99.0, 10.0, 11.0, 12.0]
+    durations["base"] += [77.0, 10.0, 10.5, 11.0]
+
+    assert work_tickets.main(["suite", "--compare", "base", "--runs", "3",
+                              "--worktree", str(checkout)]) == 0
+    assert calls == ["HEAD", "base"] * 4
+    out = capsys.readouterr().out
+    head, base = out.split("HEAD:\n", 1)[1].split("base:\n", 1)
+    assert "Wall times: 10.0 s, 11.0 s, 12.0 s\n  Mean: 11.0 s" in head and "99" not in head
+    assert "Wall times: 10.0 s, 10.5 s, 11.0 s\n  Mean: 10.5 s" in base and "77" not in base
+    assert "Parts (run 1):\n    part-HEAD: 1.0 s wall" in head
+    assert "Difference of the means: +0.5 s (HEAD minus base); observed spread 2.0 s" in out
+    assert out.rstrip().endswith("Verdict: not slower")
+    assert subprocess.run(["git", "-C", str(checkout), "worktree", "list"], capture_output=True,
+                          text=True, check=False).stdout.count("\n") == 1  # the temporary one is gone
+
+
+@pytest.mark.parametrize(("head", "verdict"), [
+    ([10.0, 11.0], "not slower"),  # means 10.5 against 9.5: 1.0 s, the spread exactly
+    ([10.2, 11.0], "slower by 1.1 s"),  # means 10.6 against 9.5: 1.1 s, past the spread of 1.0
+])
+def test_suite_compare_verdict_at_the_edge_of_the_spread(compare_checkout, capsys, head, verdict):
+    checkout, _, durations = compare_checkout
+    durations["HEAD"] += [1.0, *head]
+    durations["base"] += [1.0, 9.0, 10.0]
+
+    assert work_tickets.main(["suite", "--compare", "base", "--worktree", str(checkout)]) == 0
+    assert capsys.readouterr().out.rstrip().endswith(f"Verdict: {verdict}")
+
+
+def test_suite_compare_refuses_a_ref_it_cannot_check_out(compare_checkout, capsys):
+    checkout, calls, _ = compare_checkout
+
+    assert work_tickets.main(["suite", "--compare", "no-such-ref", "--worktree", str(checkout)]) == 1
+    assert "suite --compare cannot check out no-such-ref" in capsys.readouterr().err
+    assert calls == []
+
+
 TRANSIENT = "remote: fatal error in commit_refs_rules\nerror: failed to push some refs"
 NON_FAST_FORWARD = (
     " ! [rejected]        topic -> topic (non-fast-forward)\nerror: failed to push some refs"

@@ -435,7 +435,20 @@ def test_se_runs_the_release_workflow_on_pushes_to_its_integration_branch_only()
     project = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]
     caller = (PROJECT / ".github" / "workflows" / "release-tag.yml").read_text(encoding="utf-8")
     assert f"on:\n  push:\n    branches: [{project['integration_branch']}]\n" in caller
+
+
+def test_the_release_workflow_is_one_copy_whose_only_se_line_is_its_branch():
+    """Consumers copy se's own release-tag.yml and change only its branch, so no other line is se's."""
+    branch = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]["integration_branch"]
+    caller = (PROJECT / ".github" / "workflows" / "release-tag.yml").read_text(encoding="utf-8")
+    own = [line for line in caller.splitlines() if line.strip() == f"branches: [{branch}]"]
+    assert len(own) == 1
+    consumer = caller.replace(own[0], "    branches: [<integration branch>]")
+    shared = "uses: mb-89/SE/.github/workflows/release.yml@se"
+    assert shared in consumer
+    for line in consumer.replace(shared, "").splitlines():
+        assert f"[{branch}]" not in line, line
+        assert not line.lstrip().startswith("#") or "set branches to your integration branch" in line, line
     readme = (PROJECT / "README.md").read_text(encoding="utf-8")
-    shown = readme.split("`.github/workflows/release-tag.yml`", 1)[1].split("```yaml\n", 1)[1].split("```", 1)[0]
-    own = caller.split("\n", 1)[1].replace(f"[{project['integration_branch']}]", "[<integration branch>]")
-    assert shown == own
+    assert "name: release-tag" not in readme
+    assert "](.github/workflows/release-tag.yml)" in readme
