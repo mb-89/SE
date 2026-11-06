@@ -2276,6 +2276,30 @@ def push(root: Path, branch: str | None = None) -> str:
     return branch
 
 
+# Acceptance that can only be seen after the merge: a run, release or deployment on the integration
+# branch. A pull request then names its issue without a closing keyword, and the integrator closes it.
+POST_MERGE_PATTERN = re.compile(
+    r"\bafter (?:the |a |its )?(?:merge|integration)\b|\bpost-merge\b|"
+    r"\bon (?:main|the integration branch)\b|\breleased?\b(?!-)|\bdeploy(?:ed|ment|s)?\b",
+    re.IGNORECASE,
+)
+
+
+def post_merge_acceptance(body: str) -> list[str]:
+    """The work issue's acceptance lines that can only be seen after the merge."""
+    return [
+        line.strip() for line in section(markdown_sections(body), "acceptance").splitlines()
+        if POST_MERGE_PATTERN.search(line)
+    ]
+
+
+def pull_request_body(issue: dict[str, object]) -> str:
+    """The pull request body: `Fixes <issue>` where all its acceptance shows before the merge, else
+    `Refs <issue>`, so GitHub never closes an issue before its acceptance can be seen."""
+    keyword = "Refs" if post_merge_acceptance(str(issue.get("body", ""))) else "Fixes"
+    return f"{keyword} {issue['url']}\n\nWork issue #{issue['number']}.\n"
+
+
 def deliver(root: Path, tracker: str | None = None) -> str:
     issue = required_snapshot(root)
     check_issue_read(root, None, None, str(issue["url"]))
@@ -2289,8 +2313,8 @@ def deliver(root: Path, tracker: str | None = None) -> str:
     if remote is not None:
         push(root, branch)
         pr = open_pull_request_number(root, remote, branch)
+        body = pull_request_body(issue)
         if pr is None:
-            body = f"Work issue #{issue['number']}: {issue['url']}\n"
             output = run_gh_with_body(
                 root,
                 ["pr", "create", "--base", integration_branch(root), "--head", branch, "--title", branch,
@@ -2303,8 +2327,7 @@ def deliver(root: Path, tracker: str | None = None) -> str:
             pr = int(match.group(1))
         else:
             run_gh_with_body(
-                root, ["pr", "edit", str(pr), "--title", branch, *repo_arguments(remote)],
-                f"Work issue #{issue['number']}: {issue['url']}\n",
+                root, ["pr", "edit", str(pr), "--title", branch, *repo_arguments(remote)], body,
             )
     else:
         pr = None
@@ -3930,16 +3953,29 @@ def integrate(
     print(f"Suite: {suite_result}")
     extra = (f"Includes {len(late)} commit(s) after the field report's Branch tip: {included}\n"
              if late else "")
+    pending = post_merge_acceptance(str(work_issue.get("body", "")))
     for issue in (work_number, report_number):
+        stays_open = issue == work_number and bool(pending)
+        waits = ("Stays open until this acceptance is seen after the merge: "
+                 + "; ".join(pending) + "\n") if stays_open else ""
         run_gh_with_body(
             root, ["issue", "comment", str(issue), *repo_arguments(tracker)],
-            f"Integrated in {commit} from PR #{pull_number}. Suite: {suite_result}.\n{extra}",
+            f"Integrated in {commit} from PR #{pull_number}. Suite: {suite_result}.\n{extra}{waits}",
         )
         run_gh(root, [
             "issue", "edit", str(issue), "--remove-label", "in-progress",
             *repo_arguments(tracker),
         ])
-        run_gh(root, ["issue", "close", str(issue), *repo_arguments(tracker)])
+        if not stays_open:
+            run_gh(root, ["issue", "close", str(issue), *repo_arguments(tracker)])
+    for issue in (work_number, report_number):
+        state = run_gh(root, [
+            "issue", "view", str(issue), "--json", "state", "--jq", ".state",
+            *repo_arguments(tracker),
+        ]).strip() or "unreadable"
+        print(f"Issue #{issue}: {state} on GitHub after the merge")
+    if pending:
+        print(f"Close #{work_number} once its post-merge acceptance is seen: {'; '.join(pending)}")
     try:
         remove_worker_worktree(root, branch)
         print("Cleanup: worker worktree removed")
@@ -4209,6 +4245,15 @@ def make_parser() -> argparse.ArgumentParser:
     verified_parser.add_argument("remote_ref", help="the pushed remote ref, for example refs/heads/main")
     verified_parser.add_argument("commit", help="the pushed commit")
 
+    pr_body_parser = subparsers.add_parser(
+        "pr-body", help="print the pull request body deliver writes: Fixes <issue> where all its "
+        "acceptance shows before the merge, else Refs <issue>")
+    add_optional_worktree_argument(pr_body_parser)
+    pr_body_parser.add_argument(
+        "--issue-body", required=True, type=Path, help="file holding the work issue's body")
+    pr_body_parser.add_argument(
+        "--issue-url", required=True, help="the work issue's URL, ending in /issues/<n>")
+
     trailer_parser = subparsers.add_parser(
         "release-trailer", help="print the Release-kind trailer an integration merge of <branch> "
         "carries, from its work issue's Package kind and the branch prefix; push requires it")
@@ -4434,6 +4479,17 @@ def main(argv: list[str] | None = None) -> int:
             if args.remote_ref == f"refs/heads/{integration_branch(root)}":
                 guard_pushed_tree(root, args.commit)
                 print(f"Verified: {args.commit[:12]} carries the verdicts the integration branch needs")
+            return 0
+        if args.command == "pr-body":
+            number = re.search(r"/issues/(\d+)/?$", args.issue_url)
+            if number is None:
+                raise QueueError(f"pr-body: --issue-url {args.issue_url!r} does not end in /issues/<n>")
+            try:
+                body = args.issue_body.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as error:
+                raise QueueError(f"pr-body: cannot read {args.issue_body}: {error}") from error
+            print(pull_request_body(
+                {"number": number.group(1), "url": args.issue_url, "body": body}), end="")
             return 0
         if args.command == "release-trailer":
             try:
