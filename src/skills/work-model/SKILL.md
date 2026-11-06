@@ -346,7 +346,7 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   titles, labels, bodies and footers the commands would write.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
   `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push`,
-  `comments-read` and `field-report --check`.
+  `comments-read`, `release-trailer` and `field-report --check`.
   Every other command fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
   for example:
@@ -364,8 +364,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     like the work issue and based on the integration branch.
   - `integrate`: merge the pull request's branch into the newest integration branch locally,
     with the message `integrate` writes (`Integrate <branch>: <summary>`, plus the trailer
-    `Breaking-change: yes` where the work issue marks a breaking change, which
-    [releases](../../../README.md#project-settings) read), run
+    `work_tickets.py release-trailer` prints, which
+    [releases](../../../README.md#project-settings) require), run
     the complete suite and, unless `se.toml` sets `public_check = false`, the public check
     (`public_check.py --rev HEAD --range <pre-merge>..HEAD`), refusing on a failure, `push <integration branch>`,
     then close the issues with the
