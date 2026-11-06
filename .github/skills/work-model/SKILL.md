@@ -339,7 +339,10 @@ owns what changes.
     fixed and checked again, never filed.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
     like the work issue and based on the integration branch.
-  - `integrate`: merge the pull request's branch into the newest integration branch locally, run
+  - `integrate`: merge the pull request's branch into the newest integration branch locally,
+    with the message `integrate` writes (`Integrate <branch>: <summary>`, plus the trailer
+    `Breaking-change: yes` where the work issue marks a breaking change, which
+    [releases](../../../README.md#project-settings) read), run
     the complete suite and, unless `se.toml` sets `public_check = false`, the public check
     (`public_check.py --rev HEAD --range <pre-merge>..HEAD`), refusing on a failure, `push <integration branch>`,
     then close the issues with the
