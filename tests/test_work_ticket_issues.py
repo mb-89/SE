@@ -2382,6 +2382,41 @@ def test_suite_shows_each_parts_test_time_per_worker_and_slowest(worktree, monke
     )
 
 
+SETUP_SUITE = """\
+import os, pathlib
+reports = pathlib.Path(os.environ["SE_TEST_REPORTS"])
+def case(name, seconds, setup, worker, fixture=""):
+    props = f'<property name="setup_time" value="{setup}"/><property name="worker" value="{worker}"/>'
+    if fixture:
+        props += f'<property name="fixture" value="{fixture}"/>'
+    return (f'<testcase classname="tests.test_ui" name="{name}" time="{seconds}">'
+            f'<properties>{props}</properties></testcase>')
+(reports / "ui.xml").write_text(
+    '<testsuites><testsuite name="pytest" time="20.0">'
+    '<properties><property name="workers" value="2"/></properties>'
+    + case("test_a", 8.0, 6.0, "gw0", "browser") + case("test_b", 9.0, 6.5, "gw1", "browser")
+    + case("test_c", 1.0, 0.1, "gw0") + case("test_d", 4.0, 2.5, "gw1")
+    + '</testsuite></testsuites>', encoding="utf-8")
+print("4 passed")
+"""
+
+
+def test_suite_lists_slow_setups_and_a_setup_paid_on_several_workers(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 5.0)
+    (worktree / "suite.py").write_text(SETUP_SUITE, encoding="utf-8")
+
+    assert run(worktree, "suite") == 0
+    out = capsys.readouterr().out
+    parts = out.split("Parts:\n", 1)[1].split("Slowest tests:", 1)[0]
+    assert parts == (
+        "  ui: 20.0 s wall; 22.0 s test time / 2 workers = 11.0 s; slowest 9.0 s\n"
+        "    slow setup 6.5 s tests.test_ui::test_b (browser, worker gw1)\n"
+        "    slow setup 6.0 s tests.test_ui::test_a (browser, worker gw0)\n"
+        "    slow setup 2.5 s tests.test_ui::test_d (tests.test_ui, worker gw1)\n"
+        "    setup browser paid on 2 workers (gw0, gw1): 12.5 s; group its tests on one worker\n"
+    )
+
+
 def test_suite_without_reports_or_durations_names_the_remedy_once(worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 5.0)
     (worktree / "suite.py").write_text('print("1 passed")\n', encoding="utf-8")

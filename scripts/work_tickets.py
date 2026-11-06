@@ -2982,6 +2982,19 @@ def with_durations(command: list[str], count: int) -> list[str]:
     return [*command, f"--durations={count}"]
 
 
+SLOW_SETUP_SECONDS = 2.0
+
+
+@dataclass(frozen=True)
+class SuiteSetup:
+    """A test case's setup phase, from its `setup_time` property in a JUnit report."""
+
+    seconds: float
+    test: str
+    name: str  # its `fixture` property, else the test's module (the JUnit classname)
+    worker: str | None  # its `worker` property (pytest-xdist: the worker id), where it writes one
+
+
 @dataclass(frozen=True)
 class SuitePart:
     """One JUnit XML report of the suite: a part, named by the file's stem."""
@@ -2990,6 +3003,7 @@ class SuitePart:
     wall_seconds: float | None  # the report's own `time`, where it writes one
     workers: int  # its `workers` testsuite property (pytest: record_testsuite_property), else 1
     cases: list[tuple[float, str]]  # (seconds, test) of every test case
+    setups: tuple[SuiteSetup, ...] = ()  # the test cases that report a setup time
 
     def line(self) -> str:
         """`<part>: <wall> s wall; <sum> s test time / <n> workers = <per worker> s; slowest <s> s`:
@@ -3004,6 +3018,29 @@ class SuitePart:
             f"{total / self.workers:.1f} s; slowest {slowest:.1f} s"
         )
 
+    def setup_lines(self) -> list[str]:
+        """The tests whose setup took over SLOW_SETUP_SECONDS, slowest first, then each slow setup
+        name paid on more than one worker: one shared setup run again per worker is the signature
+        of broken test grouping. Empty where the report has no setup times."""
+        slow = sorted((s for s in self.setups if s.seconds > SLOW_SETUP_SECONDS),
+                      key=lambda setup: -setup.seconds)
+        lines = [
+            f"slow setup {s.seconds:.1f} s {s.test} ({s.name}"
+            + (f", worker {s.worker})" if s.worker else ")")
+            for s in slow
+        ]
+        paid: dict[str, list[SuiteSetup]] = {}
+        for setup in slow:
+            paid.setdefault(setup.name, []).append(setup)
+        for name, setups in paid.items():
+            workers = sorted({s.worker for s in setups if s.worker})
+            if len(workers) > 1:
+                lines.append(
+                    f"setup {name} paid on {len(workers)} workers ({', '.join(workers)}): "
+                    f"{sum(s.seconds for s in setups):.1f} s; group its tests on one worker"
+                )
+        return lines
+
 
 def read_part(report: Path) -> SuitePart:
     root = ElementTree.parse(report).getroot()
@@ -3013,11 +3050,17 @@ def read_part(report: Path) -> SuitePart:
     workers = [
         int(prop.get("value") or 0) for prop in root.iter("property") if prop.get("name") == "workers"
     ]
-    cases = [
-        (float(case.get("time") or 0), "::".join(filter(None, (case.get("classname"), case.get("name")))))
-        for case in root.iter("testcase")
-    ]
-    return SuitePart(report.stem, wall, max([1, *workers]), cases)
+    cases, setups = [], []
+    for case in root.iter("testcase"):
+        test = "::".join(filter(None, (case.get("classname"), case.get("name"))))
+        cases.append((float(case.get("time") or 0), test))
+        properties = {prop.get("name"): prop.get("value") for prop in case.iter("property")}
+        if properties.get("setup_time"):
+            setups.append(SuiteSetup(
+                float(properties["setup_time"]), test,
+                properties.get("fixture") or case.get("classname") or test, properties.get("worker"),
+            ))
+    return SuitePart(report.stem, wall, max([1, *workers]), cases, tuple(setups))
 
 
 def report_parts(reports: Path) -> list[SuitePart]:
@@ -3110,7 +3153,7 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
     Runs `[tests]` setup first, outside the budget. Prints the last result lines of the suite's
     stdout (without progress lines, banners and durations), its time, one line per JUnit report
-    (SuitePart.line) and its `slowest_count` slowest tests;
+    (SuitePart.line) with its slow setups under it (SuitePart.setup_lines) and its `slowest_count` slowest tests;
     warns above the target; refuses failed tests, and a passing suite above the limit with
     SuiteOverLimitError. Records its verdict on HEAD's tree where the checkout holds exactly it
     (clean_commit); push reads it before the integration branch is pushed."""
@@ -3145,7 +3188,10 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
         print(f"Suite output (last lines):\n{output_tail(own_lines)}")
     print(f"Suite time: {timing}")
     if parts:
-        print("Parts:\n" + "\n".join(f"  {part.line()}" for part in parts))
+        print("Parts:\n" + "\n".join(
+            "\n".join([f"  {part.line()}", *(f"    {line}" for line in part.setup_lines())])
+            for part in parts
+        ))
     print(f"Slowest tests:\n{listing}")
     if seconds > budget.target_seconds:
         print(
