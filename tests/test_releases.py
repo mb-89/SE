@@ -419,3 +419,21 @@ def test_the_workflow_never_moves_an_existing_tag(checkout):
     assert "::warning::Release v1.3.0: the tag names" in result.stdout
     assert origin_tag(checkout, "v1.3.0") == stray
 
+
+def test_the_workflow_tags_nothing_on_another_branch(checkout):
+    missed_release(checkout)
+    git(checkout, "push", "-q", "origin", "main:fix/other-20261106")
+    result = run_workflow(checkout, "fix/other-20261106")
+    assert result.returncode == 0
+    assert "No release: fix/other-20261106 is not the integration branch main" in result.stdout
+    assert origin_tags(checkout) == ["v1.2.3", "v1.3.1"]
+
+
+def test_se_runs_the_release_workflow_on_pushes_to_its_integration_branch_only():
+    project = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]
+    caller = (PROJECT / ".github" / "workflows" / "release-tag.yml").read_text(encoding="utf-8")
+    assert f"on:\n  push:\n    branches: [{project['integration_branch']}]\n" in caller
+    readme = (PROJECT / "README.md").read_text(encoding="utf-8")
+    shown = readme.split("`.github/workflows/release-tag.yml`", 1)[1].split("```yaml\n", 1)[1].split("```", 1)[0]
+    own = caller.split("\n", 1)[1].replace(f"[{project['integration_branch']}]", "[<integration branch>]")
+    assert shown == own

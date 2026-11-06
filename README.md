@@ -165,12 +165,15 @@ not tags (Claude's cloud sessions).
 - Without `release`, `push` pushes the tags itself; another value is refused, naming the file.
 
 A repository turns it on with `release = "workflow"` and this file,
-`.github/workflows/release-tag.yml`, the same in every repository (se's own included):
+`.github/workflows/release-tag.yml`, the same in every repository but for its integration branch
+(se's own names `se`), so that worker branches run nothing:
 
 ```yaml
 name: release-tag
 
-on: push
+on:
+  push:
+    branches: [<integration branch>]
 
 permissions:
   contents: write
