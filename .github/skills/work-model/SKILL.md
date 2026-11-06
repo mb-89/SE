@@ -40,9 +40,7 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 - **Only the dispatcher talks to the human.** Workers and integrators never ask the human anything
   and never wait for an answer, an approval or a decision: they decide what they may decide,
   escalate the rest, and continue with other work or end their turn.
-- **Escalation**: label `escalated`, the question in a comment, to the integrator one level up or
-  to the dispatcher at the top level, which presents it to the human. The answer arrives as an
-  issue comment or a new request, never as a reply anyone waits for.
+- **Escalation**: what a role may not decide climbs the [escalation ladder](#escalation-ladder).
 - **Messages travel only up and down the tree**: a session messages only the session that started
   it and the sessions it started. A sideways message (one integrator to another) stops at a
   permission prompt in Claude's cloud, so news for another repository goes up to the dispatcher,
@@ -56,6 +54,28 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   needs the human's approval, obtained by the dispatcher.
 - Retros use `retro.md`; each improvement names the agent definition, template, skill or script
   it changes, and becomes an ordinary work issue.
+
+## Escalation ladder
+
+Issues carry work between boxes. A decision a box may not take climbs a ladder: worker, then
+integrator (integrators may nest, each escalating to the one that started it), then dispatcher,
+then person. Every level decides, and writes what it sends up, as the
+[decision skill](../decision/SKILL.md) says.
+
+- **One level per loop**: a loop climbs one level each time it would repeat. A point that has gone
+  around once at one level (a merge refused and sent back, the same open point raised again) goes
+  to the next level up instead of around again.
+- **How each level sends it up**: a worker in its field report's "Not delivered"; an integrator
+  with `work_tickets.py escalate` (label `escalated`, the decision note linked in the comment)
+  and, at the top level, one message to the dispatcher. The answer comes back as an issue comment
+  or a new request, never as a reply anyone waits for.
+- **Straight to the person**: a level that is sure a person must decide (a one-way decision, a
+  removed capability) may mark it "for the person", and the levels above pass it on without
+  deciding it. That is allowed, not preferred.
+- **The person gets decisions as a deck, not as issues**: the dispatcher brings the person the open
+  decision notes together as one deck. Not everything that reaches the person is an escalated
+  issue: a decision from the dispatcher's own discussion with the person joins the deck directly.
+  Until the deck command exists, the dispatcher shows the notes one after the other.
 
 ## Integration branch
 
