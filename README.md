@@ -34,6 +34,43 @@ and the project's [modules](#modules).
 The one tool it cannot install without admin rights is `git`; it then names the one line to run. An
 interrupted first start finishes when run again.
 
+## Start and refresh
+
+SE's first message is its greeting, for example `SE 1.2.0 started: 3 skills, 5 rules, 2 sub-agents.
+Documentation: <docs_url>`. Under it, and only then, one line per module or SE itself with a newer
+version, and the refresh command. [scripts/se_start.py](scripts/se_start.py) implements this
+section:
+
+```sh
+uv run python <se>/scripts/se_start.py status [--greeting]
+uv run python <se>/scripts/se_start.py check
+uv run python <se>/scripts/se_start.py refresh
+```
+
+- Where it runs: in Claude Code, the plugin's start hook (`bootstrap.sh --hook`) shows the greeting
+  to the person and hands it to the session; elsewhere SE's [instructions](src/agents/se.md) run
+  `status --greeting` first.
+- The counts are what loaded: the skills and agents of the plugin's layout (every agent but SE is a
+  sub-agent) and the rules the [public check](AGENTS.md#public-safety) enforces.
+- `status` reads only the disk and the last update check, cached in `~/.se/start-check.json`
+  (`--cache`, or `SE_START_CACHE`), so it answers within a second. A check older than an hour, or
+  none, starts `check` in the background; the next start shows its result.
+- `check` reads the version tags of SE's own remote and of every module's remote, once each and in
+  parallel. A failed read is named in the greeting with its remote, its cause and the command to see
+  it; the greeting still appears.
+- What is due: the highest version a module's `version` range admits above its locked one, and for
+  SE the highest version of its major. A newer version outside the range is shown apart and never
+  applied. A local path is reported as local and never touched; a module pinned by commit is
+  reported, and only the module command's [`update`](#commands) moves it.
+- `refresh` takes no choices. It checks now, then moves each due item: it checks the new version
+  out into a temporary worktree first, checks that it starts (its `se.toml` names that version; for
+  SE, `status` runs there) and only then switches. A module's lock moves in `se.lock`; commit it. SE
+  itself is fast-forwarded, or checked out where it is detached.
+- What fails stays at the version in use, with the cause and the command to try again. An se
+  checkout with local changes or its own commits is a development checkout and is left alone; an
+  installed plugin copy (no git checkout) is not checked. Run twice, the second `refresh` moves
+  nothing.
+
 ## Documentation
 
 se's documentation is one HTML file, published at the `docs_url` of `se.toml` `[project]`

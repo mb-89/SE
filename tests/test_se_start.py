@@ -1,0 +1,384 @@
+"""Tests for scripts/se_start.py: the greeting, status from its cache, check and refresh, on fakes and
+temporary local git repositories (no network)."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+_spec = importlib.util.spec_from_file_location("se_start", ROOT / "scripts" / "se_start.py")
+se_start = importlib.util.module_from_spec(_spec)
+sys.modules["se_start"] = se_start
+_spec.loader.exec_module(se_start)
+se_modules = se_start.se_modules
+
+SE_URL = "https://git.example.org/team/se.git"
+LIB_URL = "https://git.example.org/team/lib.git"
+TOOL_URL = "https://git.example.org/team/tool.git"
+OBS_URL = "https://git.example.org/team/obs.git"
+SHA = "a" * 40
+
+
+def write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+class Clock:
+    """A fake clock: time moves only where a test or a fake remote moves it."""
+
+    def __init__(self, now: float = 1_000_000.0):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class Remotes:
+    """Fake remotes: tags per url, or offline; each read costs 5 seconds of the fake clock."""
+
+    def __init__(self, clock: Clock, tags: dict[str, list[str]], offline: bool = False):
+        self.clock, self.tags, self.offline, self.calls = clock, tags, offline, []
+
+    def __call__(self, url: str):
+        self.calls.append(url)
+        self.clock.now += 5
+        if self.offline:
+            raise se_start.RemoteError(f"cannot reach {url}: Could not resolve host")
+        return [se_modules.parse_version(tag[1:]) for tag in self.tags.get(url, [])]
+
+
+class Spawns(list):
+    def __call__(self, argv):
+        self.append(argv)
+
+
+def plugin(path: Path, version: str = "1.2.0", *, origin: str | None = SE_URL) -> Path:
+    """A fixture plugin: three agents (SE and two sub-agents) and two skills in its Claude layout."""
+    write(path / "se.toml", f'[project]\nversion = "{version}"\ndocs_url = "https://docs.example.com/se/"\n')
+    for name in ("se", "integrator", "worker"):
+        write(path / "agents" / f"{name}.md", f"---\nname: {name}\n---\n")
+    for name in ("catch-up", "decision"):
+        write(path / "skills" / name / "SKILL.md", f"---\nname: {name}\n---\n")
+    write(path / "skills" / "decision" / "example.md", "not a skill\n")
+    if origin:
+        write(path / ".git" / "HEAD", "")
+    return path
+
+
+@pytest.fixture
+def setup(tmp_path, monkeypatch):
+    se = plugin(tmp_path / "se")
+    monkeypatch.setattr(se_start, "_origin", lambda root: SE_URL if (root / ".git").exists() else None)
+    project = tmp_path / "project"
+    local_dir = tmp_path / "local-lib"
+    write(local_dir / "se.toml", '[project]\nversion = "3.1.0"\n')
+    write(project / "se.toml", f"""
+[modules.lib]
+url = "{LIB_URL}"
+version = "^1.2"
+
+[modules.tool]
+url = "{TOOL_URL}"
+version = "~2.0.1"
+
+[modules.mine]
+url = "https://git.example.org/team/mine.git"
+version = "^3"
+
+[modules.obs]
+url = "{OBS_URL}"
+ref = "{SHA}"
+""")
+    write(project / "se.lock", f"""
+[modules.lib]
+version = "1.2.0"
+ref = "{SHA}"
+
+[modules.tool]
+version = "2.0.3"
+ref = "{SHA}"
+""")
+    config = write(tmp_path / "local.toml", f'[paths]\nmine = "{local_dir.as_posix()}"\n')
+    clock = Clock()
+    tags = {SE_URL: ["v1.2.0", "v1.3.0", "v2.0.0"], LIB_URL: ["v1.2.0", "v1.4.1", "v2.0.0"],
+            TOOL_URL: ["v2.0.3", "v2.1.0"], OBS_URL: ["v0.9.0"]}
+    remotes = Remotes(clock, tags)
+    world = se_start.World(clock=clock, remote=remotes, spawn=Spawns())
+    return dict(se=se, project=project, config=config, cache=tmp_path / "cache.json",
+                clock=clock, remotes=remotes, world=world)
+
+
+def report(s, command="status", offline=False):
+    if command == "check":
+        return se_start.check(s["se"], s["project"], s["config"], s["cache"], s["world"])
+    return se_start.status(s["se"], s["project"], s["config"], s["cache"], s["world"], offline)
+
+
+def by_name(rep):
+    return {state.item.name: state for state in rep.states}
+
+
+# Requirement 1: counts from what loaded.
+
+
+def test_counts_come_from_the_fixture_plugin(setup):
+    rep = report(setup, offline=True)
+    rules = len(se_start.public_check.RULES)
+    assert se_start.greeting(rep, setup["se"])[0] == (
+        f"SE 1.2.0 started: 2 skills, {rules} rules, 2 sub-agents. "
+        "Documentation: https://docs.example.com/se/")
+
+
+def test_the_rules_are_the_public_checks_labels():
+    labels = {pattern.label for pattern in se_start.public_check.GENERIC_PATTERNS}
+    assert set(se_start.public_check.RULES) == labels | {"tracker-reference"}
+    assert len(se_start.public_check.RULES) == len(labels) + 1
+
+
+# Requirement 1: each module's state.
+
+
+def test_up_to_date_out_of_date_newer_major_local_path_and_commit_pin(setup):
+    states = by_name(report(setup, "check"))
+    assert states["tool"].due is None and states["tool"].outside == (2, 1, 0)  # ~2.0.1 admits 2.0.x
+    assert states["lib"].due == (1, 4, 1) and states["lib"].outside == (2, 0, 0)
+    assert states["SE"].due == (1, 3, 0) and states["SE"].outside == (2, 0, 0)
+    assert states["mine"].item.kind == "local" and states["mine"].item.version == (3, 1, 0)
+    assert states["obs"].due is None and states["obs"].latest == (0, 9, 0)
+    lines = se_start.full(report(setup), setup["se"])
+    assert "tool: in use 2.0.3; latest 2.1.0; up to date; 2.1.0 is outside ~2.0.1, never applied by refresh" in lines
+    assert "lib: in use 1.2.0; latest 2.0.0; update due to 1.4.1; 2.0.0 is outside ^1.2, never applied by refresh" in lines
+    assert any(line.startswith("mine: in use 3.1.0 (local path ") and line.endswith("local, refresh never touches it")
+               for line in lines)
+    assert any(line.startswith("obs: in use none (pinned to commit aaaaaaa); latest 0.9.0; pinned by commit")
+               for line in lines)
+    assert sorted(setup["remotes"].calls) == sorted([SE_URL, LIB_URL, TOOL_URL, OBS_URL])  # one read each
+
+
+def test_the_greeting_names_only_what_is_out_of_date_and_the_refresh(setup):
+    report(setup, "check")
+    lines = se_start.greeting(report(setup), setup["se"])
+    assert lines[1:] == [
+        "  SE: 1.2.0 -> 1.3.0",
+        "  lib: 1.2.0 -> 1.4.1",
+        "  SE: 2.0.0 is outside SE's major 1; refresh never applies it",
+        "  lib: 2.0.0 is outside ^1.2; refresh never applies it",
+        "  tool: 2.1.0 is outside ~2.0.1; refresh never applies it",
+        f"Refresh: uv run python {setup['se'].as_posix()}/scripts/se_start.py refresh",
+    ]
+
+
+def test_an_up_to_date_greeting_is_one_line(setup):
+    setup["remotes"].tags = {SE_URL: ["v1.2.0"], LIB_URL: ["v1.2.0"], TOOL_URL: ["v2.0.3"]}
+    report(setup, "check")
+    assert len(se_start.greeting(report(setup), setup["se"])) == 1
+
+
+# Requirement 4: errors say where they come from and the remedy; the greeting still appears.
+
+
+def test_offline_marks_the_check_as_not_done(setup):
+    setup["remotes"].offline = True
+    assert report(setup, "check").errors
+    lines = se_start.greeting(report(setup), setup["se"])
+    assert lines[0].startswith("SE 1.2.0 started: ")
+    assert f"Update check not done: lib: cannot reach {LIB_URL}: Could not resolve host; run it by hand to see " \
+           f"the cause: uv run python {setup['se'].as_posix()}/scripts/se_start.py check" in lines
+
+
+def test_a_bad_manifest_is_named_and_the_greeting_still_appears(setup):
+    write(setup["project"] / "se.toml", "[modules.lib]\nurl = 1\n")
+    lines = se_start.greeting(report(setup, offline=True), setup["se"])
+    assert lines[0].startswith("SE 1.2.0 started: ")
+    assert any("modules of" in line and "url is required" in line for line in lines)
+
+
+def test_an_installed_plugin_copy_is_not_checked(setup):
+    shutil.rmtree(setup["se"] / ".git")
+    states = by_name(report(setup, "check"))
+    assert states["SE"].item.url is None and states["SE"].due is None
+    assert SE_URL not in setup["remotes"].calls
+
+
+# Requirement 1 and acceptance: status answers within its budget from the cache.
+
+
+def test_status_answers_from_a_fresh_cache_without_the_network(setup):
+    report(setup, "check")
+    setup["remotes"].calls.clear()
+    start = setup["clock"].now
+    rep = report(setup)
+    assert setup["remotes"].calls == [] and setup["world"].spawn == []
+    assert setup["clock"].now - start < se_start.BUDGET
+    assert by_name(rep)["lib"].due == (1, 4, 1)
+
+
+def test_a_stale_cache_answers_at_once_and_checks_in_the_background(setup):
+    report(setup, "check")
+    setup["remotes"].calls.clear()
+    setup["clock"].now += se_start.MAX_AGE + 1
+    start = setup["clock"].now
+    rep = report(setup)
+    assert setup["clock"].now - start < se_start.BUDGET and setup["remotes"].calls == []
+    assert [argv[-1] for argv in setup["world"].spawn] == ["check"]
+    assert by_name(rep)["lib"].due == (1, 4, 1)  # the last check's answer meanwhile
+    report(setup)  # a second start while the check runs starts no second one
+    assert len(setup["world"].spawn) == 1
+
+
+def test_no_cache_yet_says_the_check_runs_in_the_background(setup):
+    lines = se_start.greeting(report(setup), setup["se"])
+    assert lines[-1] == "Update check not done: running in the background; the next start shows its result"
+    assert setup["remotes"].calls == []
+
+
+def test_a_new_module_without_a_cached_answer_starts_a_check(setup):
+    report(setup, "check")
+    write(setup["project"] / "se.toml", f'[modules.new]\nurl = "https://git.example.org/team/new.git"\nversion = "^1"\n')
+    report(setup)
+    assert len(setup["world"].spawn) == 1
+
+
+def test_the_hook_output_shows_the_greeting_and_hands_it_to_the_session():
+    data = json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], ["se bootstrap: installing uv"]))
+    assert data["systemMessage"] == "se bootstrap: installing uv\nSE 1.2.0 started: ..."
+    assert data["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert data["hookSpecificOutput"]["additionalContext"].startswith(data["systemMessage"])
+
+
+# Requirement 3: refresh moves only what is due, real git repositories.
+
+
+@pytest.fixture
+def isolated_git(tmp_path, monkeypatch):
+    gitconfig = write(tmp_path / "gitconfig", "[init]\n\tdefaultBranch = main\n")
+    for key, value in {
+        "GIT_CONFIG_GLOBAL": str(gitconfig), "GIT_CONFIG_NOSYSTEM": "1", "GIT_ALLOW_PROTOCOL": "file",
+        "GIT_TERMINAL_PROMPT": "0", "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+        "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.invalid",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+
+def git(repo: Path, *args: str) -> str:
+    return se_modules.git(repo, *args)
+
+
+def release(repo: Path, version: str, files: dict[str, str] | None = None, *, says: str | None = None) -> None:
+    write(repo / "se.toml", f'[project]\nversion = "{says or version}"\n' + (
+        repo.joinpath("se.toml.extra").read_text(encoding="utf-8") if (repo / "se.toml.extra").exists() else ""))
+    for name, text in (files or {}).items():
+        write(repo / name, text)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", f"release {version}")
+    git(repo, "tag", f"v{version}")
+
+
+@pytest.fixture
+def repos(tmp_path, isolated_git):
+    """An se remote with v1.0.0, v1.1.0 and v2.0.0, a clone of it at v1.0.0; module remotes lib
+    (v1.0.0, v1.1.0, v2.0.0) and tool (v1.0.0 only); a project locked at lib 1.0.0 and tool 1.0.0."""
+    scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
+               for name in ("se_start.py", "se_modules.py", "public_check.py")}
+    upstream = tmp_path / "se-remote"
+    upstream.mkdir()
+    git(upstream, "init", "-q", "-b", "main")
+    write(upstream / "se.toml.extra", 'docs_url = "https://docs.example.com/se/"\n')
+    for version in ("1.0.0", "1.1.0", "2.0.0"):
+        release(upstream, version, scripts)
+    se = tmp_path / "se"
+    git(tmp_path, "clone", "-q", upstream.as_uri(), str(se))
+    git(se, "reset", "-q", "--hard", "v1.0.0")
+    remotes = {}
+    for name, versions in {"lib": ("1.0.0", "1.1.0", "2.0.0"), "tool": ("1.0.0",)}.items():
+        remote = tmp_path / f"{name}-remote"
+        remote.mkdir()
+        git(remote, "init", "-q", "-b", "main")
+        for version in versions:
+            release(remote, version)
+        remotes[name] = remote
+    project = tmp_path / "project"
+    local_dir = tmp_path / "local-lib"
+    write(local_dir / "se.toml", '[project]\nversion = "0.1.0"\n')
+    write(project / "se.toml", "".join(
+        f'[modules.{name}]\nurl = "{remote.as_uri()}"\nversion = "^1"\n\n' for name, remote in remotes.items())
+        + f'[modules.mine]\nurl = "{remotes["lib"].as_uri()}"\nversion = "^0.1"\n')
+    config = write(tmp_path / "local.toml", f'[paths]\nmine = "{local_dir.as_posix()}"\n')
+    for name, remote in remotes.items():
+        se_modules.write_lock(project, name, "1.0.0", git(remote, "rev-parse", "v1.0.0"))
+    assert se_modules.main(["--root", str(project), "--local", str(config), "sync"]) == 0
+    clock = Clock()
+    world = se_start.World(clock=clock, spawn=Spawns())
+    return dict(se=se, project=project, config=config, cache=tmp_path / "cache.json", world=world,
+                remotes=remotes, upstream=upstream)
+
+
+def refresh(r):
+    return se_start.refresh(r["se"], r["project"], r["config"], r["cache"], r["world"])
+
+
+def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
+    lock_before = se_modules.read_lock(repos["project"])
+    assert lock_before["lib"][0] == "1.0.0" and lock_before["tool"][0] == "1.0.0"
+    lines, failed = refresh(repos)
+    assert not failed, lines
+    assert any(line.startswith("SE: ") and line.endswith(" -> v1.1.0") for line in lines)
+    assert "lib: 1.0.0 -> 1.1.0 (se.lock; commit it)" in lines
+    assert "lib: 2.0.0 is outside ^1; not applied" in lines
+    assert "SE: 2.0.0 is outside SE's major 1; not applied" in lines
+    assert "mine: local, not touched" in lines
+    assert not any(line.startswith("tool:") for line in lines)
+    lock = se_modules.read_lock(repos["project"])
+    assert lock["lib"] == ("1.1.0", git(repos["remotes"]["lib"], "rev-parse", "v1.1.0"))
+    assert lock["tool"] == lock_before["tool"]
+    clone = repos["project"] / ".se" / "modules" / "lib"
+    assert git(clone, "rev-parse", "HEAD") == lock["lib"][1]
+    assert se_modules.checkout_version(repos["se"]) == (1, 1, 0)
+    assert git(repos["se"], "rev-parse", "--abbrev-ref", "HEAD") == "main"  # fast-forwarded, still on main
+    assert git(repos["se"], "worktree", "list").count("\n") == 0  # the trial worktrees are gone
+    again, failed = refresh(repos)
+    assert not failed and again[0] == "Everything is up to date; nothing moved."
+    assert not any("->" in line for line in again)
+    cache = json.loads(repos["cache"].read_text(encoding="utf-8"))
+    assert cache["checked_at"] is not None  # the greeting after a refresh shows the new state
+
+
+def test_a_due_version_that_fails_its_trial_leaves_the_old_one_in_use(repos):
+    release(repos["remotes"]["lib"], "1.2.0", says="1.0.0")  # its se.toml names another version
+    before = se_modules.read_lock(repos["project"])["lib"]
+    lines, failed = refresh(repos)
+    assert failed
+    assert any(line.startswith("lib: not refreshed, 1.0.0 stays in use: module lib v1.2.0: v1.2.0 sets "
+                               "version 1.0.0") for line in lines)
+    assert lines[-1] == f"Try again with: uv run python {repos['se'].as_posix()}/scripts/se_start.py refresh"
+    assert se_modules.read_lock(repos["project"])["lib"] == before
+    clone = repos["project"] / ".se" / "modules" / "lib"
+    assert git(clone, "rev-parse", "HEAD") == before[1]
+    assert any(line.startswith("SE: ") and line.endswith(" -> v1.1.0") for line in lines)  # the rest moves
+
+
+def test_an_se_version_that_does_not_start_is_not_switched_to(repos):
+    release(repos["upstream"], "1.2.0", {"scripts/se_start.py": "raise SystemExit('broken start')\n"})
+    head = git(repos["se"], "rev-parse", "HEAD")
+    lines, failed = refresh(repos)
+    assert failed
+    assert any(line.startswith("SE: not refreshed, 1.0.0 stays in use: SE v1.2.0 does not start: broken start")
+               for line in lines)
+    assert git(repos["se"], "rev-parse", "HEAD") == head
+
+
+def test_a_development_checkout_of_se_is_left_alone(repos):
+    write(repos["se"] / "notes.txt", "work in progress\n")
+    git(repos["se"], "add", "notes.txt")
+    lines, failed = refresh(repos)
+    assert failed
+    assert any(line.startswith("SE: not refreshed, 1.0.0 stays in use: the se checkout ") and "local changes" in line
+               for line in lines)
