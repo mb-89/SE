@@ -8,11 +8,13 @@ disallowedTools: AskUserQuestion
 # Integrator
 
 You integrate finished packages. You are a subtype of worker: everything a worker may not do, you
-may not do either. The rules shared by all roles are owned by the skill
-[work-model](../skills/work-model/SKILL.md); the project's commands, product qualities and testing
-boundaries by the project's `AGENTS.md` and the design notes it names; this file holds what is the
-same for every integration. Your session prompt names only this agent, the main checkout you own
-and SE session. Integrators can nest; where an escalation goes is the work model's
+may not do either. Your session prompt names only this agent, the main checkout you own and SE
+session.
+
+The rules shared by all roles are owned by the skill [work-model](../skills/work-model/SKILL.md);
+the project's commands, product qualities and testing boundaries by the project's `AGENTS.md` and
+the design notes it names; this file holds what is the same for every integration. Integrators can
+nest; where an escalation goes is the work model's
 [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder).
 
 ## Never wait for a human
@@ -52,30 +54,35 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 
 At the start of every turn run `work_tickets.py sync`, which sets the
 [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) in the checkout, then
-`work_tickets.py queue`. For each open field-report issue
+`work_tickets.py queue`.
+
+Then work through the steps below for each open field-report issue
 (`gh issue list --label field-report --state open --json number,title`), owners of shared files
-first, otherwise oldest first, and for "integrate <branch>" requests from SE (its
-design branch). Local workers announce a filed field report with one queued message
+first, otherwise oldest first, and for "integrate <branch>" requests from SE (its design branch).
+
+Local workers announce a filed field report with one queued message
 (`field report #<n> filed for <branch>, PR #<m>`); cloud workers' reports arrive only through the
 `field-report` label, so always list the open ones too. A worker's delivery message can arrive
 minutes late: reconcile from GitHub first and treat a missing message as late, not lost.
 
 1. **Review** the field report, the worker's queue (`work_tickets.py status --worktree <its
    worktree>`: only `done/`, every acceptance item checked with evidence) and
-   `git diff <integration branch>...<branch>`. Save the filed report's body and its work issue's
-   body to files and run `work_tickets.py field-report --check <report file> --issue-body <issue
-   file>`; refuse a report it rejects with its messages (`integrate` runs the same check). Run
-   `work_tickets.py guard --branch <branch> --field-report <file> --worktree <its worktree>`. Refuse with reasons when it writes outside its box (files
-   owned by another package, another repository), lacks tests for changed behaviour, or claims
-   unverified work. Refuse and escalate to SE when it removes a capability or deletes
-   or weakens a protecting test without the user's decision recorded in the field report.
+   `git diff <integration branch>...<branch>`.
+   - Save the filed report's body and its work issue's body to files and run
+     `work_tickets.py field-report --check <report file> --issue-body <issue file>`; refuse a
+     report it rejects with its messages (`integrate` runs the same check).
+   - Run `work_tickets.py guard --branch <branch> --field-report <file> --worktree <its worktree>`.
+   - Refuse with reasons when it writes outside its box (files owned by another package, another
+     repository), lacks tests for changed behaviour, or claims unverified work.
+   - Refuse and escalate to SE when it removes a capability or deletes or weakens a protecting test
+     without the user's decision recorded in the field report.
 2. **Integrate** the validated report with `work_tickets.py integrate <field-report>` (and
    `--build-command` when the project declares one). It merges into the newest integration branch,
    checks the report, runs the complete suite against its time budget (`[tests]` in `se.toml`,
    [Test budget](../README.md#test-budget)), regenerates, pushes, closes, cleans up and starts work.
-   A suite over its limit is refused: escalate it to the worker with the gate's remedy.
-   A merge conflict is reported with its files and left for you to resolve mechanically; a semantic
-   conflict or work that no longer fits is escalated to the worker.
+   - A suite over its limit is refused: escalate it to the worker with the gate's remedy.
+   - A merge conflict is reported with its files and left for you to resolve mechanically; a
+     semantic conflict or work that no longer fits is escalated to the worker.
 3. **Test and regenerate** through `integrate` using the complete suite and project commands
    declared by `AGENTS.md` (where a pin moves, see
    [suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)); fix only integration breakage.
@@ -91,9 +98,10 @@ minutes late: reconcile from GitHub first and treat a missing message as late, n
 7. **Start what is unblocked**: use `work_tickets.py ready` and `capacity` as helpers. Every work
    issue labelled `ready` whose blockers are closed, that has no branch yet and whose file ownership
    does not clash with running workers, gets a fresh worktree from the newest integration branch
-   (`work_tickets.py start`, see [Worktrees](../skills/work-model/SKILL.md#worktrees)) and a worker
-   session whose `workspace` is that worktree folder; local workers only within capacity. Its prompt
-   contains only:
+   (`work_tickets.py start`, see [Worktrees](../skills/work-model/SKILL.md#worktrees)).
+
+   It also gets a worker session whose `workspace` is that worktree folder; local workers only
+   within capacity. Its prompt contains only:
 
    ```text
    Act as the worker agent defined in <se>/.github/agents/worker.agent.md (read it first, plus the project's AGENTS.md).

@@ -9,10 +9,11 @@ description: 'The shared rules of how we work, for every role (SE, worker, integ
 This skill owns the rules that are the same for every role. Each role's own rules live in its
 agent definition: [SE](../../agents/se.md),
 [worker](../../agents/worker.md), [integrator](../../agents/integrator.md). The
-SE's procedure is the [catch-up](../catch-up/SKILL.md) skill. Issue formats are the
-templates in [`.github/ISSUE_TEMPLATE/`](../../.github/ISSUE_TEMPLATE/). Everything specific to one project
-(its commands, design notes, quality rules, hot files) is owned by the project's `AGENTS.md`; see
-[What the project provides](#what-the-project-provides).
+SE's procedure is the [catch-up](../catch-up/SKILL.md) skill.
+
+Issue formats are the templates in [`.github/ISSUE_TEMPLATE/`](../../.github/ISSUE_TEMPLATE/).
+Everything specific to one project (its commands, design notes, quality rules, hot files) is owned
+by the project's `AGENTS.md`; see [What the project provides](#what-the-project-provides).
 
 ## Roles and flow
 
@@ -29,16 +30,17 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   report.
 - **Out**: a pushed branch, a pull request to the integration branch, a field-report issue from `field-report.md`
   (title `field-report: <branch>`, label `field-report`) and one notification to the integrator.
-  The field report holds what was not done, decisions with confidence, spec gaps, a short retro
-  and tickets for other repositories. Each "Tickets for other repositories" entry is one reusable
-  capability and lists every source file it replaces.
+  - The field report holds what was not done, decisions with confidence, spec gaps, a short retro
+    and tickets for other repositories.
+  - Each "Tickets for other repositories" entry is one reusable capability and lists every source
+    file it replaces.
 - **Integrator**: a subtype of worker and the only writer of the integration branch.
 - **SE**, the main agent (formerly the dispatcher): the only session the human talks to. SE never
-  writes any repository.
-  It may file work issues for and dispatch into any repository by starting or messaging that
-  repository's integrator. Each repository has exactly one integrator, the only writer of its
-  integration branch. The integrator starts that repository's workers. Workers stay in their box; a worker
-  records cross-repository needs in its field report.
+  writes any repository. It may file work issues for and dispatch into any repository by starting or
+  messaging that repository's integrator.
+  - Each repository has exactly one integrator, the only writer of its integration branch. The
+    integrator starts that repository's workers.
+  - Workers stay in their box; a worker records cross-repository needs in its field report.
 - **Only SE talks to the human.** Workers and integrators never ask the human anything
   and never wait for an answer, an approval or a decision: they decide what they may decide,
   escalate the rest, and continue with other work or end their turn.
@@ -95,20 +97,29 @@ integration_branch = "se"
 
 ## Rules for all roles
 
-Framework repositories (the process plugin and document format/converter) carry every capability that is generically useful. Application repositories carry only their content and application-specific code. When an application reveals a generic capability, create a framework work issue and delete the application's copy after the framework provides it. A framework never names, special-cases or depends on an application; for public repositories, the public check's deny list enforces this boundary.
+Framework repositories (the process plugin and document format/converter) carry every capability
+that is generically useful. Application repositories carry only their content and
+application-specific code.
+
+When an application reveals a generic capability, create a framework work issue and delete the
+application's copy after the framework provides it. A framework never names, special-cases or
+depends on an application; for public repositories, the public check's deny list enforces this
+boundary.
 
 - Packages are worker-sized: one separately reviewable change. Larger work is split into issues
   linked by "Blocked by", each owning its part of shared files.
 - Packages that touch the same hot file get one owner or run one after the other; the next one
   merges `main` before touching that file.
 - Work issues quote the user's requirement word for word; the field report quotes it back.
-- **Writing work issues**: an issue that renames an identifier says whether the code emits it or
-  only documents it; a docs issue that asks to point instead of restating quotes the text to
-  replace and names each note by its repository path; a docs requirement names the test file
-  its regression test belongs in; and content a worker needs from another repository (a list, a
-  decision, a spec passage) is quoted inline with its source named, because a cloud worker reads
-  only its own repository: a cross-repository link is never the only copy (`intake` warns on one
-  with no quoted block next to it).
+- **Writing work issues**:
+  - an issue that renames an identifier says whether the code emits it or only documents it;
+  - a docs issue that asks to point instead of restating quotes the text to replace and names each
+    note by its repository path;
+  - a docs requirement names the test file its regression test belongs in;
+  - content a worker needs from another repository (a list, a decision, a spec passage) is quoted
+    inline with its source named, because a cloud worker reads only its own repository: a
+    cross-repository link is never the only copy (`intake` warns on one with no quoted block next
+    to it).
 - Every error message names where it comes from (the command, file or input) and, where
   possible, the remedy.
 - Work follows the user's priority order; no new investigation starts while a top-priority bug is
@@ -123,11 +134,11 @@ Framework repositories (the process plugin and document format/converter) carry 
   confidence for the field report, and continue. This never grants authority to bypass policy,
   disclose private data, act destructively or publish without approval.
 - **Preserve capabilities**: removing or narrowing an existing user-visible capability, or
-  deleting or weakening its protecting test, is a product decision for the human. Deleting or
-  condensing authored content is recorded in the field report with what was dropped and where it
-  moved, unless the work issue names the change. "Disagree and commit" never covers it: the worker
-  escalates instead. SE never writes a work issue that leaves "keep or remove" to the
-  worker.
+  deleting or weakening its protecting test, is a product decision for the human. "Disagree and
+  commit" never covers it: the worker escalates instead. SE never writes a work issue that leaves
+  "keep or remove" to the worker.
+  - Deleting or condensing authored content is recorded in the field report with what was dropped
+    and where it moved, unless the work issue names the change.
 - **Mechanical first**: a procedure that repeats becomes a command in `work_tickets.py`
   (`intake`, `refresh`, `sync`, `guard`, `deliver`, `escalate`, `block`, `ready`, `capacity`, `queue`,
   `start`, `close`, `config`); prose steps remain only for judgment. Escalations and product decisions stay
@@ -168,29 +179,32 @@ Pull requests built on an old `main` cause most integration trouble.
 
 ## Worktrees
 
-- One worktree per local worker, created when its work starts, from the newest `main`:
-  `work_tickets.py start <issue> --worktree <main checkout>` refuses an issue that is not
-  startable (including open blockers, an existing branch, a file-ownership clash or exhausted
-  local capacity), fetches, runs
-  `git worktree add -b <branch> <worktree-root>/<branch-with-slashes-replaced> origin/main` and
-  changes the issue's `ready` label to `in-progress`. It prints the worker launch line with the
-  exact created path. In a cloud runner, pass `--cloud-agent <login>` (or set
-  `SE_CLOUD_AGENT`) to assign the worker and change the labels without creating a local worktree.
+- One worktree per local worker, created when its work starts, from the newest `main`, by
+  `work_tickets.py start <issue> --worktree <main checkout>`:
+  - it refuses an issue that is not startable (including open blockers, an existing branch, a
+    file-ownership clash or exhausted local capacity);
+  - it fetches, runs
+    `git worktree add -b <branch> <worktree-root>/<branch-with-slashes-replaced> origin/main` and
+    changes the issue's `ready` label to `in-progress`;
+  - it prints the worker launch line with the exact created path.
+  - In a cloud runner, pass `--cloud-agent <login>` (or set `SE_CLOUD_AGENT`) to assign the worker
+    and change the labels without creating a local worktree.
 - Copilot CLI offers a platform-enforced alternative, not the local-worker launch path:
-  `copilot --agent worker --no-ask-user --allow-all-tools --prompt "<worker prompt>"`.
-  A live `worker`-profile run declared its `execute`, `read`, `edit`, `search`, and
-  `send_message` allowlist and exposed no `ask_user`; however, the unprofiled CLI prompt-mode
-  control also exposed no `ask_user`, so this does not prove that absence is profile-specific
-  (and `set_workspace` is not a CLI tool). This alternative creates no UI session, so there is no
-  user visibility, steering or review return by message, or delivery notification; additionally,
-  `--allow-all-tools` approves every tool in the profile without prompts. Keep agent-host
-  `create_session` workers as the default until a separate decision changes that path.
+  `copilot --agent worker --no-ask-user --allow-all-tools --prompt "<worker prompt>"`. Keep
+  agent-host `create_session` workers as the default until a separate decision changes that path.
+  - A live `worker`-profile run declared its `execute`, `read`, `edit`, `search`, and
+    `send_message` allowlist and exposed no `ask_user`; however, the unprofiled CLI prompt-mode
+    control also exposed no `ask_user`, so this does not prove that absence is profile-specific
+    (and `set_workspace` is not a CLI tool).
+  - This alternative creates no UI session, so there is no user visibility, steering or review
+    return by message, or delivery notification; additionally, `--allow-all-tools` approves every
+    tool in the profile without prompts.
 - A project whose packages need more than one plain worktree (paired checkouts, a test environment
   file, linked dependency folders) provides its own creation and removal scripts and names them in
-  its `AGENTS.md`; it creates the worktree from the newest `main` with its script, then
-  `start --no-create` verifies the linked worktree for the issue's branch, merges `main` into it,
-  then changes `ready` to `in-progress` and prints the launch line; without a worktree it refuses.
-  Cloud start (`--cloud-agent`) is unchanged.
+  its `AGENTS.md`; it creates the worktree from the newest `main` with its script.
+  - Then `start --no-create` verifies the linked worktree for the issue's branch, merges `main`
+    into it, then changes `ready` to `in-progress` and prints the launch line; without a worktree
+    it refuses. Cloud start (`--cloud-agent`) is unchanged.
 - Removal happens only after integration, with `work_tickets.py close --remove
   --integration-target main --worktree <worktree>` or the project's removal script, never
   `git worktree remove --force` (it follows links into other checkouts). Removal refuses while
@@ -209,10 +223,11 @@ A worker splits its work issue into local tickets in its worktree:
 - A work issue labelled `discovery` is a read-only research package: its acceptance is evidence
   (findings, proposed tickets or probe results), not test-command wording. Its intake creates the
   ignored `.se/work/probe/evidence.md` index. `intake --discovery` also creates that index for an
-  existing standard issue. A project that needs another ignored root declares it in its worker
-  command with `--probe-root <relative-path>`; `work_tickets.py probe --command <command> --output
-  <path>` appends the command and its output to the index. `field-report --draft` links that index
-  in Delivered.
+  existing standard issue.
+  - A project that needs another ignored root declares it in its worker command with
+    `--probe-root <relative-path>`.
+  - `work_tickets.py probe --command <command> --output <path>` appends the command and its output
+    to the index. `field-report --draft` links that index in Delivered.
 - Test-driven: regression first, then the change, then focused checks and the affected real
   command. Check an acceptance item only with evidence; move a ticket to `done/` only when every
   item is satisfied. A ticket that cannot be finished stays in `held/` with the attempts and
@@ -286,15 +301,17 @@ integrator_session = "<session>"
 **Commit identity and public check**: every role commits as `public_identity` where the machine
 sets it (the [Modules guide](../../README.md#machine-local-selocaltoml) owns what it pins), else
 as the project's `identity` in its `se.toml` ([Project settings](../../README.md#project-settings)).
-Claude's cloud has no `~/.se/local.toml`, so there the project's identity applies.
-`work_tickets.py sync`, which every role runs at the start, writes whichever applies into the
-checkout's git config (`user.name`, `user.email`), so merges carry it as well as commits. A fresh clone, such as a cloud
-session's, runs the project's setup command before its first commit, so the project's hooks run its
-public check on every commit and push. Commit messages carry no tracker numbers (`#<n>`, `GH-<n>`,
-an issue or pull request URL): a commit outlives its tracker. se's public check refuses them in
-its commit gates ([Public safety](../../AGENTS.md#public-safety)), and `integrate` writes its
-merge messages without them where the project's public check is on. No session prompt repeats any
-of this.
+Claude's cloud has no `~/.se/local.toml`, so there the project's identity applies. No session prompt
+repeats any of this section's rules:
+
+- `work_tickets.py sync`, which every role runs at the start, writes whichever applies into the
+  checkout's git config (`user.name`, `user.email`), so merges carry it as well as commits.
+- A fresh clone, such as a cloud session's, runs the project's setup command before its first
+  commit, so the project's hooks run its public check on every commit and push.
+- Commit messages carry no tracker numbers (`#<n>`, `GH-<n>`, an issue or pull request URL): a
+  commit outlives its tracker. se's public check refuses them in its commit gates
+  ([Public safety](../../AGENTS.md#public-safety)), and `integrate` writes its merge messages
+  without them where the project's public check is on.
 
 `commit_trailer` is the one place that names a commit trailer: an environment that requires one
 (an agent host's co-author line) sets it on its machine, every role adds it as the last line of
@@ -302,19 +319,22 @@ each commit it makes, and `integrate` adds it to its merge commits. Unset, commi
 as a project's public rule may require.
 
 The `--repo` resolution order is argument, `[trackers]`, then `origin`. A tracker is selected by
-the repository name and is where that repository's work issues and field reports live. Work issues
-and field reports carry `repo:<name>` for their repository; `ready`, `capacity`, and `queue` filter
-to that label by default. Pass `--all-repos` to those commands to include tracker issues for every
-repository instead. New worktrees default to the sibling `<checkout>.worktrees` folder unless
-`--worktree-root` or `[worktree_roots]` overrides it.
+the repository name and is where that repository's work issues and field reports live.
+
+Work issues and field reports carry `repo:<name>` for their repository; `ready`, `capacity`, and
+`queue` filter to that label by default. Pass `--all-repos` to those commands to include tracker
+issues for every repository instead. New worktrees default to the sibling `<checkout>.worktrees`
+folder unless `--worktree-root` or `[worktree_roots]` overrides it.
 
 ### Mirrors
 
 A machine may mirror a checkout to further Git remotes without declaring that relationship in the
 repository. Configure each checkout key as an array of tables under `[mirrors]`; each table names
 the locally configured remote, its target branch, whether `sync` fetches and merges that branch,
-and whether it is public. `integrate` pushes `main` to every mirror after `origin`; before each
-public mirror push it runs the project check command and refuses that push if the check fails.
+and whether it is public.
+
+`integrate` pushes `main` to every mirror after `origin`; before each public mirror push it runs
+the project check command and refuses that push if the check fails.
 
 ```toml
 [mirrors]
@@ -355,22 +375,22 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     requirement plus `delivery`; record the comments read with `comments-read --count <n>
     --newest <id>`, from what the GitHub tools read.
   - `deliver`: `sync`; `push`; open the pull request to the integration
-    branch, titled like the work issue; file the field report from `field-report.md`, filled in by
-    hand (`field-report --draft` needs `intake`'s snapshot) and passing `field-report --check
-    .se/work/field-report.md --issue-body <file> --comment-count <n> --newest-comment <id>` (the
-    work issue's body saved to `<file>`, its comments as the GitHub tools read them now), titled
-    `field-report: <branch>`, label `field-report`; send the notification. A refused report is
-    fixed and checked again, never filed.
+    branch, titled like the work issue; file the field report, titled `field-report: <branch>`,
+    label `field-report`; send the notification.
+    - The field report comes from `field-report.md`, filled in by hand (`field-report --draft`
+      needs `intake`'s snapshot), and passes `field-report --check .se/work/field-report.md
+      --issue-body <file> --comment-count <n> --newest-comment <id>` (the work issue's body saved
+      to `<file>`, its comments as the GitHub tools read them now).
+    - A refused report is fixed and checked again, never filed.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
     like the work issue and based on the integration branch.
   - `integrate`: merge the pull request's branch into the newest integration branch locally,
     with the message `integrate` writes (`Integrate <branch>: <summary>`, plus the trailer
     `work_tickets.py release-trailer` prints, which
-    [releases](../../README.md#project-settings) require), run
-    the complete suite and, unless `se.toml` sets `public_check = false`, the public check
-    (`public_check.py --rev HEAD --range <pre-merge>..HEAD`), refusing on a failure, `push <integration branch>`,
-    then close the issues with the
-    `Integrated in …` comment.
+    [releases](../../README.md#project-settings) require).
+    - Then run the complete suite and, unless `se.toml` sets `public_check = false`, the public
+      check (`public_check.py --rev HEAD --range <pre-merge>..HEAD`), refusing on a failure.
+    - Then `push <integration branch>`, and close the issues with the `Integrated in …` comment.
 - **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
   approval prompt no one answers; a role works with the repositories its session started with.
 - **Commit trailers**: the project's [`commit_trailer`](#what-the-project-provides) wins over a
