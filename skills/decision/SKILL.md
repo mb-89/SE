@@ -33,6 +33,9 @@ One Obsidian Markdown note per decision, in this order:
   - The datum is the strongest rival; every other option is marked against it. "Keep what we have"
     is an option whenever something exists.
   - Every option says what it is and its own wins and losses.
+  - Every option carries `short`, its short name: one word where possible, at most five. The
+    field is obs's, owned by
+    [pugh-decisions](https://github.com/mb-89/obs/blob/main/spec/capabilities/pugh-decisions.md).
   - `chosen` only where the decider prefers an option the matrix does not pick
     ([your own decisions](#your-own-decisions)).
   - The checklist is [the checklist](#the-checklist), one entry per item; an item about particular
