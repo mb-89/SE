@@ -1445,6 +1445,8 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
         'commit_trailer = "Co-authored-by: Agent <agent@users.noreply.github.com>"\n',
         encoding="utf-8",
     )
+    # A project without a public check: its merge message names the tracker items.
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
     worker = main_checkout.parent / "worker"
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
     work_tickets.initialize(worker)
@@ -1600,6 +1602,7 @@ def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch)
     head = subprocess.run(
         ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
     report = {"body": COMPLETE_REPORT}
     commands: list[tuple[str, str]] = []
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
@@ -2152,8 +2155,12 @@ NON_FAST_FORWARD = (
 
 
 @pytest.fixture
-def fake_push(monkeypatch):
-    """A fake git push answering from a script of (exit code, stderr); waits are recorded, not slept."""
+def fake_push(main_checkout, monkeypatch):
+    """A fake git push answering from a script of (exit code, stderr); waits are recorded, not slept.
+
+    Its checkout turns the public check off, so the retry tests reach the push; the gate's own
+    tests set se.toml themselves."""
+    (main_checkout / "se.toml").write_text("[project]\npublic_check = false\n", encoding="utf-8")
     calls, waits, script = [], [], []
 
     def run_git_push(root, arguments):
@@ -2220,9 +2227,15 @@ def test_push_ends_ten_transient_refusals_with_the_remedy(
     assert "then run the same command again" in error
 
 
-def test_push_runs_the_public_check_gate_first(main_checkout, fake_push, monkeypatch, capsys):
+@pytest.mark.parametrize("settings", ["[project]\npublic_check = true\n", None])
+def test_push_runs_the_public_check_gate_first(main_checkout, fake_push, monkeypatch, capsys,
+                                               settings):
+    """The gate is on unless se.toml turns it off: without the key, too (fail closed)."""
     calls, _, _ = fake_push
-    (main_checkout / "se.toml").write_text("[project]\npublic_check = true\n", encoding="utf-8")
+    if settings is None:
+        (main_checkout / "se.toml").unlink()
+    else:
+        (main_checkout / "se.toml").write_text(settings, encoding="utf-8")
     gate = []
 
     def public_check(arguments, **_):
@@ -2236,4 +2249,29 @@ def test_push_runs_the_public_check_gate_first(main_checkout, fake_push, monkeyp
     assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 1
     assert calls == []
     assert gate[0][-4:] == ["--rev", "topic", "--range", "topic --not --remotes"]
-    assert "Public check failed" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "Public check failed" in error
+    assert error.rstrip().endswith(
+        "a project without a public check sets `public_check = false` in `[project]` of "
+        f"{main_checkout / 'se.toml'}"
+    )
+
+
+def test_push_with_the_public_check_off_says_so_and_where_to_turn_it_on(
+        main_checkout, fake_push, monkeypatch, capsys):
+    calls, _, script = fake_push
+    script.append((0, ""))
+    (main_checkout / "se.toml").write_text("[project]\npublic_check = false\n", encoding="utf-8")
+    checked = []
+    real_run = subprocess.run
+    monkeypatch.setattr(work_tickets.subprocess, "run", lambda arguments, **kwargs: (
+        checked.append(arguments) if str(work_tickets.PUBLIC_CHECK) in arguments
+        else real_run(arguments, **kwargs)
+    ))
+    assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 0
+    assert checked == [] and calls == [["-u", "origin", "topic"]]
+    off = [line for line in capsys.readouterr().out.splitlines() if "Public check off" in line]
+    assert off == [
+        f"Public check off: project.public_check = false in {main_checkout / 'se.toml'}; "
+        "set it to true (or remove it) to check every push"
+    ]
