@@ -27,10 +27,14 @@
 Everything here must be publishable at any time. Nothing may identify an employer, a work project, a
 person, a machine, an account or an internal host: no work company, product or project names, no user
 names or user profile paths, no personal e-mail addresses, no device or server names, no internal or
-enterprise hosts. Use generic names (`<name>`, `alice`, `example.com`). Work-specific content belongs in
-separate repositories that use se as a module. Commit with a generic identity: a name without an e-mail
-domain or a `users.noreply.github.com` address; never a real e-mail address. Where the machine sets no
-`public_identity`, se's commits carry `mb <mb>`, the `identity` in `se.toml`.
+enterprise hosts.
+
+Use generic names (`<name>`, `alice`, `example.com`). Work-specific content belongs in separate
+repositories that use se as a module.
+
+Commit with a generic identity: a name without an e-mail domain or a `users.noreply.github.com`
+address; never a real e-mail address. Where the machine sets no `public_identity`, se's commits carry
+`mb <mb>`, the `identity` in `se.toml`.
 
 `scripts/public_check.py` enforces the rule on tracked file names and contents (binary files as bytes),
 commit messages and author and committer identities. It prints locations and pattern labels, never the
@@ -44,8 +48,8 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
 - Generic patterns, committed in the script: user profile paths (`X:\Users\<name>`, `/home/<name>`,
   `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and `example.*`,
   enterprise GitHub hosts (GitHub Enterprise Cloud subdomains), machine names in UNC paths.
-  The fixed addresses services write into commits themselves, `noreply` at `github.com` and at
-  `anthropic.com`, name no person and pass.
+  - The fixed addresses services write into commits themselves, `noreply` at `github.com` and at
+    `anthropic.com`, name no person and pass.
 - Private deny list for terms that must never be written down here: `~/.se/private-terms.txt`, or the
   file named by `SE_PRIVATE_TERMS`; one case-insensitive regex per line, `#` comments. It is never
   committed, and hits name only its line number. Without it the check warns and runs the generic

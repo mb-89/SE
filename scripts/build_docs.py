@@ -17,12 +17,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "docs.md"
 MODULES = ROOT / "scripts" / "se_modules.py"
-# obs's core configuration for this build. se's prose keeps paragraphs and list items of up to
-# 30 lines (the lint's maximum), so the long-paragraph lint warns only above that; every other
-# obs warning, broken links and missing notes included, fails the build.
+# obs's core configuration for this build. Its lints run at obs's defaults; every obs warning,
+# long paragraphs, broken links and missing notes included, fails the build.
 CORE_CONFIG = {
-    "input": {"manifestFilename": MANIFEST.name, "projectConfigFilename": "cfg.json",
-              "longParagraphs": {"warningLines": 30, "lineCharacters": 80}},
+    "input": {"manifestFilename": MANIFEST.name, "projectConfigFilename": "cfg.json"},
     "execution": {"commandTimeoutSeconds": 15},
 }
 
