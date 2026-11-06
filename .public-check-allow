@@ -10,5 +10,7 @@
 #                              commit only, for history already published; the same text in any
 #                              other commit still fails
 # File entries never cover commit messages. An entry that matches no hit fails a check that has the
-# private deny list, naming its line and form, so stale exceptions cannot hide a later leak; a
-# commit entry counts only in the gate of a range that holds its commit, which alone sees its hits.
+# private deny list, naming its line and form, so stale exceptions cannot hide a later leak; without
+# the list it is only warned about as unverifiable, as it may cover a private-term hit the run
+# cannot see. A commit entry counts only in the gate of a range that holds its commit, which alone
+# sees its hits.
