@@ -1257,7 +1257,7 @@ def test_repo_help_matches_the_work_model_resolution_order():
     )
     terms = ("argument", "[trackers]", "origin")
 
-    for text in (documented_order, work_tickets.REPO_HELP):
+    for text in (documented_order, work_tickets.REPO.options["help"]):
         positions = [text.index(term) for term in terms]
         assert positions == sorted(positions)
 
