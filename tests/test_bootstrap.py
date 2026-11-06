@@ -11,9 +11,11 @@ SCRIPT = ROOT / "scripts" / "bootstrap.sh"
 TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch", "uname")
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bootstrap.sh runs in bash")
 
-# A fake uv: `python find` fails until `python install` ran; every call is logged.
+# A fake uv: `python find` fails until `python install` ran; SE's start prints a greeting unless
+# `status-fails` exists; every call is logged.
 FAKE_UV = """#!/bin/sh
 echo "uv $*" >> "$HOME/calls"
+case "$*" in *se_start.py*) [ -f "$HOME/status-fails" ] && exit 1; echo '{"greeting": 1}'; exit 0 ;; esac
 case "$1 $2" in
   "python find") [ -f "$HOME/python" ] ;;
   "python install") touch "$HOME/python" ;;
@@ -46,9 +48,9 @@ def fake_bin(base: Path, *, git: bool = True) -> Path:
     return folder
 
 
-def run(home: Path, path: Path, project: Path) -> subprocess.CompletedProcess:
+def run(home: Path, path: Path, project: Path, *args: str) -> subprocess.CompletedProcess:
     env = {"HOME": str(home), "PATH": str(path), "CLAUDE_PROJECT_DIR": str(project)}
-    return subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=60)
+    return subprocess.run(["bash", str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60)
 
 
 def calls(home: Path) -> list[str]:
@@ -120,3 +122,29 @@ def test_the_session_finds_uv_through_claudes_env_file(machine):
     subprocess.run(["bash", str(SCRIPT)], env=env, check=True, capture_output=True, timeout=60)
     assert env_file.read_text(encoding="utf-8") == f'export PATH="{home}/.local/bin:$PATH"\n'
     assert os.access(home / ".local" / "bin" / "uv", os.X_OK)
+
+
+def test_the_hook_ends_with_ses_greeting_carrying_what_bootstrap_said(machine):
+    home, project, base = machine
+    result = run(home, fake_bin(base), project, "--hook")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == '{"greeting": 1}\n'  # the JSON alone: Claude Code parses the hook's stdout
+    start = [line for line in calls(home) if "se_start.py" in line]
+    assert len(start) == 1
+    assert start[0].startswith(f"uv run --no-project --python >=3.11 python {SCRIPT.parent}/se_start.py "
+                               f"--root {project} status --hook --note se bootstrap: installing uv into ")
+    assert "--note se bootstrap: installing Python 3.11" in start[0]
+
+
+def test_the_hook_falls_back_to_plain_lines_when_the_greeting_cannot_run(machine):
+    home, project, base = machine
+    path = fake_bin(base)
+    (home / "offline").touch()
+    offline = run(home, path, project, "--hook")  # no uv: no greeting, the line that says why
+    assert offline.returncode == 1
+    assert "installing uv failed (offline?). Run this again when online" in offline.stdout
+    (home / "offline").unlink()
+    (home / "status-fails").touch()
+    failing = run(home, path, project, "--hook")
+    assert failing.returncode == 0
+    assert failing.stdout.startswith("se bootstrap: installing uv into ")

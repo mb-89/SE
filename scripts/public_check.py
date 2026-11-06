@@ -125,6 +125,8 @@ TRACKER_REFERENCE = re.compile(
     r"|(?i:(?<![\w/-])GH-\d+\b)"  # GH-12, not the branch fix/…-without-gh-20261106
     r"|(?i:\bhttps?://[^\s/]+/[^\s/]+/[^\s/]+/(?:issues|pulls?)/\d+)"
 )
+# The rules the check enforces, one label each: SE's start counts them (scripts/se_start.py).
+RULES = tuple(dict.fromkeys(pattern.label for pattern in GENERIC_PATTERNS)) + ("tracker-reference",)
 REWORD_BEFORE_COMMIT = "reword the message before committing"
 REWORD_BEFORE_PUSH = (
     "reword it before pushing: git commit --amend for the last commit, or git rebase -i while "
