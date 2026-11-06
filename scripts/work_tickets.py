@@ -2221,9 +2221,17 @@ class SuiteBudget:
     command: list[str]
     target_seconds: float
     limit_seconds: float
+    setup: list[str] | None = None
+
+
+def is_argument_array(value: object) -> bool:
+    return isinstance(value, list) and bool(value) and all(
+        isinstance(argument, str) and argument for argument in value
+    )
 
 
 SLOWEST_TESTS = 10
+OUTPUT_TAIL_LINES = 5
 DURATION_LINE = re.compile(r"^\s*(\d+(?:\.\d+)?)s\s+(call|setup|teardown)\s+(\S.*?)\s*$")
 TEST_REPORTS_VARIABLE = "SE_TEST_REPORTS"
 NO_SLOWEST_TESTS = (
@@ -2244,12 +2252,16 @@ def suite_budget(root: Path) -> SuiteBudget:
     tests = se_table(root, "tests")
     where = f"[tests] in {root / 'se.toml'}"
     command = tests.get("command")
-    if not isinstance(command, list) or not command or any(
-        not isinstance(argument, str) or not argument for argument in command
-    ):
+    if not is_argument_array(command):
         raise QueueError(
             f"{where} must declare command, the complete suite as a non-empty argument array, "
             'for example command = ["uv", "run", "pytest", "-q"]'
+        )
+    setup = tests.get("setup")
+    if setup is not None and not is_argument_array(setup):
+        raise QueueError(
+            f"{where}: setup must be a non-empty argument array, the command that installs the "
+            'test dependencies, for example setup = ["uv", "sync"]; fix it or remove it'
         )
     values: dict[str, float] = {}
     for key, default in (("target_seconds", 60), ("limit_seconds", 120)):
@@ -2259,7 +2271,34 @@ def suite_budget(root: Path) -> SuiteBudget:
         values[key] = float(value)
     if values["target_seconds"] > values["limit_seconds"]:
         raise QueueError(f"{where}: target_seconds must not exceed limit_seconds; fix it")
-    return SuiteBudget(command, values["target_seconds"], values["limit_seconds"])
+    return SuiteBudget(command, values["target_seconds"], values["limit_seconds"], setup)
+
+
+def output_tail(output: str) -> str:
+    """The last lines of a command's output, indented, for the person reading the run."""
+    return "\n".join(f"  {line}" for line in output.splitlines()[-OUTPUT_TAIL_LINES:])
+
+
+def run_suite_setup(root: Path, setup: list[str]) -> None:
+    """Run `[tests]` setup before the suite and time it apart: it is not held to the budget.
+
+    Prints its time and its last lines; refuses a failing setup with its whole output."""
+    started = clock()
+    result = subprocess.run(
+        setup, cwd=root, shell=False, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=False,
+    )
+    seconds = clock() - started
+    output = (result.stdout + result.stderr).strip()
+    if result.returncode != 0:
+        raise QueueError(
+            f"Suite setup failed (exit code {result.returncode}; {seconds:.1f} s) running "
+            f"{' '.join(setup)} ([tests] setup in se.toml); the suite did not run. Fix the setup:\n"
+            f"{output or 'no output'}"
+        )
+    print(f"Setup time: {seconds:.1f} s (not budgeted)")
+    if output:
+        print(output_tail(output))
 
 
 def with_durations(command: list[str]) -> list[str]:
@@ -2302,9 +2341,12 @@ def run_suite(root: Path) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget.
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
-    Prints the time and the slowest tests; warns above the target; refuses failed tests, and a
+    Runs `[tests]` setup first, outside the budget. Prints the suite's last output lines, its
+    time and the slowest tests; warns above the target; refuses failed tests, and a
     passing suite above the limit with SuiteOverLimitError."""
     budget = suite_budget(root)
+    if budget.setup:
+        run_suite_setup(root, budget.setup)
     with tempfile.TemporaryDirectory(prefix="se-test-reports-") as reports:
         started = clock()
         result = subprocess.run(
@@ -2337,6 +2379,11 @@ def run_suite(root: Path) -> str:
             "an idle host; if it is still over, make the slowest tests above faster (the work "
             "model's test rules)."
         )
+    own_lines = "\n".join(  # the durations are listed below, as the slowest tests
+        line for line in output.splitlines() if not DURATION_LINE.match(line)
+    )
+    if own_lines:
+        print(f"Suite output (last lines):\n{output_tail(own_lines)}")
     print(f"Suite time: {timing}\nSlowest tests:\n{listing}")
     if seconds > budget.target_seconds:
         print(
