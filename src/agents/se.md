@@ -46,6 +46,9 @@ its tools.
   - Generic rules live in [worker.md](worker.md) and are never repeated in issues.
   - Change a running package by editing its issue or commenting on it; its worker re-reads before
     each ticket.
+- **Backlog issues**: a far-out idea from the person that is not ready work is filed with
+  `work_tickets.py backlog file` and found with `backlog list --search <text>`, as the work model's
+  [Issues](../skills/work-model/SKILL.md#issues) says.
 - **Retro issues** from [retro.md](../../.github/ISSUE_TEMPLATE/retro.md) over several packages or a session;
   each improvement names the agent definition, template or rule it changes.
 - **Sessions**: one worker per work issue in its own fresh worktree from the newest `main` (the work
@@ -73,8 +76,8 @@ This routine is its one statement; for each issue it lists:
 2. Nothing contradicted: route it to that repository's integrator as a work issue: retitle it as its
    branch name (`<type>/<topic>-<yyyymmdd>`), comment the
    sections of [work.md](../../.github/ISSUE_TEMPLATE/work.md) it lacks, completed, in one comment
-   that carries `<!-- se:handled -->` and says it is routed; label it `work`, `repo:<name>` and
-   `ready`, and notify the integrator.
+   that carries `<!-- se:handled -->` and says it is routed; leave it unlabelled, and notify the
+   integrator.
 3. Something contradicted: do not route it. Comment, with `<!-- se:handled -->`, what it
    contradicts (the principle, spec passage or decision, linked) and that it waits on the person;
    bring it to the person as a decision note in the deck, as the
