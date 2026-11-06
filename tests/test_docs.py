@@ -8,6 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "build_docs.py"
+# Every build syncs the obs module into the checkout. These tests share one file, so one worker runs
+# them in order (`--dist loadfile`, pyproject.toml): a fresh checkout clones obs once, never twice at once.
 
 
 def build(*arguments: str) -> subprocess.CompletedProcess:
