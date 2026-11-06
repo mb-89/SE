@@ -8,22 +8,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "build_docs.py"
-# Every build syncs the obs module into the checkout. These tests share one file, so one worker runs
-# them in order (`--dist loadfile`, pyproject.toml): a fresh checkout clones obs once, never twice at once.
+# Every build syncs the obs module into the checkout; the fixture `obs` (conftest.py) prepares it first,
+# once at a time.
 
 
 def build(*arguments: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, str(SCRIPT), *arguments], capture_output=True, text=True)
 
 
-def test_documentation_builds_without_warnings(tmp_path):
+def test_documentation_builds_without_warnings(tmp_path, obs):
     destination = tmp_path / "index.html"
     result = build("--destination", str(destination))
     assert result.returncode == 0, result.stderr + result.stdout
     assert destination.stat().st_size > 0
 
 
-def test_a_missing_note_fails_the_build(tmp_path):
+def test_a_missing_note_fails_the_build(tmp_path, obs):
     vault = tmp_path / "vault"
     vault.mkdir()
     (vault / "chapter.md").write_text("# Chapter\n\nSee [[no-such-note]].\n", encoding="utf-8")
@@ -33,7 +33,7 @@ def test_a_missing_note_fails_the_build(tmp_path):
     assert "no-such-note" in result.stderr
 
 
-def test_a_paragraph_over_obs_default_limit_fails_the_build(tmp_path):
+def test_a_paragraph_over_obs_default_limit_fails_the_build(tmp_path, obs):
     vault = tmp_path / "vault"
     vault.mkdir()
     long_paragraph = " ".join(["word"] * 100)  # six lines at 80 characters, over obs's default of five
