@@ -96,6 +96,9 @@ against their own total ("Task 1 of 2"), each with what to do, where, and what i
 The decisions the person must bless go to them as one deck, in one turn. `scripts/deck.py` builds,
 serves and reads it; its `--help` owns what each subcommand does.
 
+A deck may also carry record chapters, notes without a bless request and without a `pugh` fence, such as
+what was decided without the person and their [tasks](#tasks-for-the-person), beside at least one decision.
+
 1. Write the decision notes and their manifest into a scratch directory `<notes>`, then run
    `uv run python scripts/deck.py build <notes> --destination <deck>.html`.
 2. Hand the deck to the person where they are, and wait for their answers:
