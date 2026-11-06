@@ -5,7 +5,8 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
 
   build FOLDER --destination HTML   FOLDER holds the decision notes and their manifest (obs's
       `manifest.md`, or what the folder's cfg.json names). obs builds them into one HTML artifact in one
-      call, with se's answers bundle (scripts/deck_answers.js) as its trusted runtime bundle. A chapter
+      call, with se's answers bundle (scripts/deck_answers.js) as its trusted runtime bundle, in obs's
+      screens layout (one chapter per phone screen) unless the manifest sets `obsHtml.layout`. A chapter
       asks for a bless (`obs: {bless: pending}`) or is a record: what was decided without the person, or
       their tasks. It fails on a deck where no chapter asks, on a decision (a `pugh` fence) that does
       not ask, outside a record built with the answers, and on any obs warning.
@@ -26,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -53,6 +55,7 @@ def build(folder: Path, destination: Path, answers: Path | None = None) -> int:
         vault = Path(scratch) / folder.name
         shutil.copytree(folder, vault, ignore=shutil.ignore_patterns(".*"))
         shutil.copyfile(BUNDLE, vault / BUNDLE_FILE)
+        _screens(vault)
         document = Path(scratch) / "document.json"
         code = obs_document(obs, [
             "--source", str(vault), "--document", str(document), "--destination", str(destination.resolve()),
@@ -69,6 +72,43 @@ def build(folder: Path, destination: Path, answers: Path | None = None) -> int:
         return 1
     print(f"deck: built {destination}")
     return 0
+
+
+def _screens(vault: Path) -> None:
+    """Give the vault's manifest ``obsHtml.layout: screens``, the phone view of one chapter per screen (obs's
+    adapters/html/spec/input-model.md, Author presentation), unless its frontmatter sets a layout."""
+    try:
+        name = json.loads((vault / "cfg.json").read_text(encoding="utf-8"))["input"]["manifestFilename"]
+    except (OSError, ValueError, KeyError, TypeError):
+        name = "manifest.md"
+    manifest = vault / name
+    if not manifest.is_file():
+        return  # obs-document names the missing manifest.
+    lines = manifest.read_text(encoding="utf-8").split("\n")
+    if lines[0].strip() != "---" or "---" not in (line.strip() for line in lines[1:]):
+        lines[:0] = ["---", "obsHtml: {layout: screens}", "---"]
+    else:
+        end = next(n for n in range(1, len(lines)) if lines[n].strip() == "---")
+        start = next((n for n in range(1, end) if re.match(r"obsHtml\s*:", lines[n])), None)
+        if start is None:
+            lines.insert(end, "obsHtml: {layout: screens}")
+        else:
+            value = lines[start].split(":", 1)[1].strip()
+            if value.startswith("{"):
+                if not re.search(r"[{,]\s*layout\s*:", value):
+                    empty = value[1:].strip().startswith("}")
+                    lines[start] = re.sub(r"\{\s*", "{layout: screens" + ("" if empty else ", "), lines[start], count=1)
+            else:
+                children = []
+                for line in lines[start + 1:end]:
+                    if line.strip() and line[:1] not in (" ", "\t"):
+                        break
+                    if line.strip():
+                        children.append(line)
+                indent = re.match(r"\s*", children[0]).group() if children else "  "
+                if not any(re.match(re.escape(indent) + r"layout\s*:", line) for line in children):
+                    lines.insert(start + 1, f"{indent}layout: screens")
+    manifest.write_text("\n".join(lines), encoding="utf-8")
 
 
 def _holds_pugh(nodes: list[dict]) -> bool:
