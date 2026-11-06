@@ -1,6 +1,6 @@
 ---
 name: decision
-description: 'How every decision is made, the agent''s own and those it brings to the person: one Obsidian Markdown note per decision, a Pugh matrix in a `pugh` fence with the eight-item checklist as its second tab, asked about the general mechanism rather than the single instance; its output is the answered artifact. Load it whenever you decide something that is not mechanical, or present a decision, an escalation or an open point to the person.'
+description: 'How every decision is made, the agent''s own and those it brings to the person: one Obsidian Markdown note per decision, a Pugh matrix in obs''s `pugh` fence with the eight-item checklist, asked about the general mechanism rather than the single instance; its output is the answered artifact. Load it whenever you decide something that is not mechanical, or present a decision, an escalation or an open point to the person.'
 ---
 <!-- Generated from src/skills/decision/SKILL.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 
@@ -23,23 +23,22 @@ One Obsidian Markdown note per decision, in this order:
   the note is only a record of a decision the agent took itself.
 - **Context:** one to three sentences: what exists, who uses it, what shows the problem. The first
   sentence names the class the case belongs to ([one level up](#one-level-up)).
-- **The `pugh` fence**, the matrix and its checklist, in the input form obs defines:
-  - `criteria`: each with its `name` and `weight`, weighted before any option is marked.
-  - `datum`: the letter of the strongest rival; every other option is marked against it.
-  - `options`: one per letter (`A`, `B`, …), each with its `name`, a `what` sentence, its `marks`
-    against the datum per criterion (`1` better, `0` the same, `-1` worse), and `wins` and
-    `losses`: its unique gains and losses, as text. "Keep what we have" is an option whenever
-    something exists.
-  - `chosen`: only where the decider prefers an option the matrix does not pick
+- **The `pugh` fence**, the matrix and its checklist. Its fields, marks and letters are obs's
+  contract, owned by obs's capability note
+  [pugh-decisions](https://github.com/mb-89/obs/blob/main/spec/capabilities/pugh-decisions.md) and
+  its input model's
+  [Pugh decision figures](https://github.com/mb-89/obs/blob/main/spec/design_input/input-model.md#pugh-decision-figures).
+  SE asks of it:
+  - The criteria are weighted before any option is marked.
+  - The datum is the strongest rival; every other option is marked against it. "Keep what we have"
+    is an option whenever something exists.
+  - Every option says what it is and its own wins and losses.
+  - `chosen` only where the decider prefers an option the matrix does not pick
     ([your own decisions](#your-own-decisions)).
-  - `checklist`: [the checklist](#the-checklist), one entry per item, each with its `item`, a
-    one-line `answer` and `pass` (`true` or `false`); an item about particular options adds
-    `options`, the letters it fails.
+  - The checklist is [the checklist](#the-checklist), one entry per item; an item about particular
+    options names the letters of those it fails.
 
-obs shows the matrix on the first tab and the checklist on the second. A failed item that names
-options becomes a weighted "Checklist" row in the matrix; a failed item about the decision as a
-whole names no option, and obs raises it on the matrix tab. The aim is no failures: a failed item's
-answer says what would fix it. The worked example is
+The aim is no failed item: a failed item's answer says what would fix it. The worked example is
 [the decision deck](references/decision-deck.md).
 
 ## The checklist

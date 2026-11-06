@@ -326,11 +326,18 @@ def test_one_skill_owns_how_a_decision_is_presented():
 def test_the_decision_skill_owns_the_shape_of_the_decision_note():
     text = normalized(DECISION)
     for rule in ("## The decision note", "One Obsidian Markdown note per decision", "`obs.bless: pending`",
-                 "one to three sentences", "The `pugh` fence", "`what` sentence", "`wins` and `losses`",
-                 "`datum`: the letter of the strongest rival", '"Keep what we have" is an option',
-                 "`checklist`", "`item`", "`answer`", "`pass`", "`options`, the letters it fails",
+                 "one to three sentences", "The `pugh` fence", "The datum is the strongest rival",
+                 '"Keep what we have" is an option', "the letters of those it fails",
                  "## Tasks for the person", "never an option in a decision", '"Task 1 of 2"'):
         assert rule in text, rule
+
+
+def test_the_decision_skill_points_to_obs_for_the_fence_contract_and_restates_none_of_it():
+    text = normalized(DECISION)
+    assert "(https://github.com/mb-89/obs/blob/main/spec/capabilities/pugh-decisions.md)" in text
+    for restated in ("`criteria`", "`candidates`", "`datum`", "`marks`", "`what`", "`wins`", "`item`",
+                     "`answer`", "`pass`", "`checklistWeight`", "`-1` worse", "second tab"):
+        assert restated not in text, restated
 
 
 def test_the_agent_decides_its_own_questions_with_the_same_note():
@@ -623,13 +630,18 @@ def test_the_decision_skill_names_the_eight_checklist_items():
     assert items == list(CHECKLIST)
 
 
+def test_the_worked_example_is_a_chapter_of_the_documentation_obs_builds():
+    manifest = (ROOT / "docs.md").read_text(encoding="utf-8")
+    assert "[[src/skills/decision/references/decision-deck|" in manifest
+
+
 def test_the_worked_example_answers_every_checklist_item_in_its_fence():
     note = (DECISION.parent / "references" / "decision-deck.md").read_text(encoding="utf-8")
     assert note.startswith("---\nobs.bless: pending\n---\n")
     fence = note.split("```pugh\n", 1)[1].split("```", 1)[0]
     assert re.findall(r"^  - item: (.+)$", fence, re.MULTILINE) == list(CHECKLIST)
-    assert "datum: B" in fence and "(keep what we have)" in fence
-    for key in ("name:", "what:", "marks:", "wins:", "losses:", "answer:", "pass:"):
+    assert "datum: {prefer: [chat]}" in fence and "(keep what we have)" in fence
+    for key in ("candidates:", "label:", "what:", "marks:", "wins:", "losses:", "answer:", "pass:"):
         assert key in fence, key
 
 
