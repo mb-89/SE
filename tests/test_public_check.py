@@ -491,7 +491,7 @@ def test_pre_push_hook_checks_pushed_commits(hooked: Path, tmp_path: Path) -> No
     git(hooked, "remote", "add", "origin", str(remote))
     (hooked / "clean.txt").write_text("clean\n", encoding="utf-8")
     assert try_commit(hooked).returncode == 0
-    push = ["git", "-C", str(hooked), "push", "-q", "origin", "main"]
+    push = ["git", "-C", str(hooked), "push", "-q", "origin", "main:topic"]  # not the integration branch
     assert subprocess.run(push, capture_output=True, text=True).returncode == 0
     (hooked / "clean.txt").write_text("still clean\n", encoding="utf-8")
     git(hooked, "add", "-A")
