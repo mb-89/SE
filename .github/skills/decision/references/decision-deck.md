@@ -1,6 +1,7 @@
 ---
 obs.bless: pending
 ---
+<!-- Generated from src/skills/decision/references/decision-deck.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 
 # How decisions reach the person
 
@@ -35,7 +36,7 @@ options:
     losses: Needs the deck command and obs's blessing, which do not exist yet.
   B:
     name: Tables in the chat (keep what we have)
-    what: The dispatcher shows one option table per message, numbered against the open total.
+    what: SE shows one option table per message, numbered against the open total.
     marks:
       The record survives the session: 0
       The person's effort per decision: 0

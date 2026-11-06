@@ -1,14 +1,15 @@
 ---
 name: work-model
-description: 'The shared rules of how we work, for every role (dispatcher, worker, integrator): one work issue in, a pull request plus a field-report issue out; the box; escalation; freshness, dependencies and scheduling; worktrees; local tickets and notes; what a project provides. Load it whenever you act as dispatcher, worker or integrator, write or read work, field-report or retro issues, or use scripts/work_tickets.py.'
+description: 'The shared rules of how we work, for every role (SE, worker, integrator): one work issue in, a pull request plus a field-report issue out; the box; escalation; freshness, dependencies and scheduling; worktrees; local tickets and notes; what a project provides. Load it whenever you act as SE, worker or integrator, write or read work, field-report or retro issues, or use scripts/work_tickets.py.'
 ---
+<!-- Generated from src/skills/work-model/SKILL.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 
 # Work model
 
 This skill owns the rules that are the same for every role. Each role's own rules live in its
-agent definition: [dispatcher](../../agents/dispatcher.agent.md),
+agent definition: [SE](../../agents/se.agent.md),
 [worker](../../agents/worker.agent.md), [integrator](../../agents/integrator.agent.md). The
-dispatcher's procedure is the [catch-up](../catch-up/SKILL.md) skill. Issue formats are the
+SE's procedure is the [catch-up](../catch-up/SKILL.md) skill. Issue formats are the
 templates in [`.github/ISSUE_TEMPLATE/`](../../ISSUE_TEMPLATE/). Everything specific to one project
 (its commands, design notes, quality rules, hot files) is owned by the project's `AGENTS.md`; see
 [What the project provides](#what-the-project-provides).
@@ -32,18 +33,19 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   and tickets for other repositories. Each "Tickets for other repositories" entry is one reusable
   capability and lists every source file it replaces.
 - **Integrator**: a subtype of worker and the only writer of the integration branch.
-- **Dispatcher**: the only session the human talks to. The dispatcher never writes any repository.
+- **SE**, the main agent (formerly the dispatcher): the only session the human talks to. SE never
+  writes any repository.
   It may file work issues for and dispatch into any repository by starting or messaging that
   repository's integrator. Each repository has exactly one integrator, the only writer of its
   integration branch. The integrator starts that repository's workers. Workers stay in their box; a worker
   records cross-repository needs in its field report.
-- **Only the dispatcher talks to the human.** Workers and integrators never ask the human anything
+- **Only SE talks to the human.** Workers and integrators never ask the human anything
   and never wait for an answer, an approval or a decision: they decide what they may decide,
   escalate the rest, and continue with other work or end their turn.
 - **Escalation**: what a role may not decide climbs the [escalation ladder](#escalation-ladder).
 - **Messages travel only up and down the tree**: a session messages only the session that started
   it and the sessions it started. A sideways message (one integrator to another) stops at a
-  permission prompt in Claude's cloud, so news for another repository goes up to the dispatcher,
+  permission prompt in Claude's cloud, so news for another repository goes up to SE,
   which passes it down to that repository's integrator.
 - **Comments carry the host's footer**: where the host requires a footer on every GitHub comment
   (Claude's cloud does), each fixed comment text a role or command gives (`Started: …`,
@@ -51,14 +53,14 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   this rule.
 - Issues are read and written with `gh`, bodies through `--body-file`; where the host offers no
   `gh`, see [Without gh](#without-gh). Branches and the integration branch are pushed; a release
-  needs the human's approval, obtained by the dispatcher.
+  needs the human's approval, obtained by SE.
 - Retros use `retro.md`; each improvement names the agent definition, template, skill or script
   it changes, and becomes an ordinary work issue.
 
 ## Escalation ladder
 
 Issues carry work between boxes. A decision a box may not take climbs a ladder: worker, then
-integrator (integrators may nest, each escalating to the one that started it), then dispatcher,
+integrator (integrators may nest, each escalating to the one that started it), then SE,
 then person. Every level decides, and writes what it sends up, as the
 [decision skill](../decision/SKILL.md) says.
 
@@ -67,15 +69,15 @@ then person. Every level decides, and writes what it sends up, as the
   to the next level up instead of around again.
 - **How each level sends it up**: a worker in its field report's "Not delivered"; an integrator
   with `work_tickets.py escalate` (label `escalated`, the decision note linked in the comment)
-  and, at the top level, one message to the dispatcher. The answer comes back as an issue comment
+  and, at the top level, one message to SE. The answer comes back as an issue comment
   or a new request, never as a reply anyone waits for.
 - **Straight to the person**: a level that is sure a person must decide (a one-way decision, a
   removed capability) may mark it "for the person", and the levels above pass it on without
   deciding it. That is allowed, not preferred.
-- **The person gets decisions as a deck, not as issues**: the dispatcher brings the person the open
+- **The person gets decisions as a deck, not as issues**: SE brings the person the open
   decision notes together as one deck. Not everything that reaches the person is an escalated
-  issue: a decision from the dispatcher's own discussion with the person joins the deck directly.
-  Until the deck command exists, the dispatcher shows the notes one after the other.
+  issue: a decision from SE's own discussion with the person joins the deck directly.
+  Until the deck command exists, SE shows the notes one after the other.
 
 ## Integration branch
 
@@ -113,7 +115,7 @@ Framework repositories (the process plugin and document format/converter) carry 
   open.
 - Workers run focused tests and what their issue's acceptance names, the complete suite only
   where it names the suite; the integrator runs the complete suite, one integration at a time,
-  while the dispatcher talks with the human.
+  while SE talks with the human.
 - No hard time boxes: workers deliver whole items. A worker never ends its turn without
   delivering; when it stops, its field report names the blocker.
 - **Disagree and commit**: ambiguity is a decision. Investigate the repository, contracts and
@@ -124,7 +126,7 @@ Framework repositories (the process plugin and document format/converter) carry 
   deleting or weakening its protecting test, is a product decision for the human. Deleting or
   condensing authored content is recorded in the field report with what was dropped and where it
   moved, unless the work issue names the change. "Disagree and commit" never covers it: the worker
-  escalates instead. The dispatcher never writes a work issue that leaves "keep or remove" to the
+  escalates instead. SE never writes a work issue that leaves "keep or remove" to the
   worker.
 - **Mechanical first**: a procedure that repeats becomes a command in `work_tickets.py`
   (`intake`, `refresh`, `sync`, `guard`, `deliver`, `escalate`, `block`, `ready`, `capacity`, `queue`,
@@ -148,16 +150,16 @@ Pull requests built on an old `main` cause most integration trouble.
 - A worktree and its branch are created when work starts, from the newest `main`. The worker
   syncs first, before each ticket and before the pull request; the field report names the `main`
   commit it was tested against.
-- Dependencies are native GitHub "blocked by" links, set by the dispatcher. Blocked state is
+- Dependencies are native GitHub "blocked by" links, set by SE. Blocked state is
   computed (`issue_dependencies_summary.blocked_by`), never a label. `ready` is only the
-  dispatcher's approval; startable = `ready` and zero open blockers.
+  SE's approval; startable = `ready` and zero open blockers.
 - No label is edited by hand: `start` changes `ready` to `in-progress`; the integrator removes
   `in-progress` when it closes the issue.
 - After each integration the integrator starts every startable work issue that has no branch yet
   and whose file ownership does not clash with running workers, and starts its session itself.
 - Nobody watches for field reports. Triggers: the worker's delivery notification (its only message
   to another agent, never a question); `work_tickets.py queue` at the start of every integrator and
-  dispatcher turn, so a missed notification is handled as soon as either session is talked to;
+  SE turn, so a missed notification is handled as soon as either session is talked to;
   in the cloud only, scheduled triggers and Actions workflows on the `field-report` label.
 - Capacity limits apply only to local workers (CPU cores and memory minus running workers). Cloud
   workers have none. File clashes and the serial merge queue apply everywhere.
