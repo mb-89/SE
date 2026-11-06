@@ -7,8 +7,9 @@ committer identities against committed generic patterns and a machine-local deny
 names the location and the pattern label only, never the matched text.
 
 The commit gates (a message file, the commits of a --range) also refuse tracker references and
-attribution trailers (`Co-Authored-By:`, `Claude-Session:`) in messages, naming the reference or
-trailer and the remedy; a full check leaves old history to them. The
+attribution trailers (`Co-Authored-By:`, `Claude-Session:`) in messages, from every author,
+naming the reference or trailer and the remedy; a full check leaves old history to them. CI runs
+the --range gate on every push to the integration branch (.github/workflows/public-check.yml). The
 commits of a --range must also carry the project identity (se.toml [project] identity, unless the
 machine sets public_identity), where one is set; GitHub's web-flow identity, the committer of a
 commit made on GitHub, passes as committer. A hit names the identity found, redacted. A
@@ -146,6 +147,11 @@ ATTRIBUTION_RULE = (
     "AGENTS.md 'Public safety'"
 )
 ATTRIBUTION_TRAILER = re.compile(r"(?im)^[ \t]*(co-authored-by|claude-session)[ \t]*:")
+# Where a co-author line comes from, named with its hit: an editor adds it on commit.
+CO_AUTHOR_SOURCE = (
+    "an editor's AI co-author setting writes this line: turn it off (VS Code: "
+    "git.addAICoAuthor off, README 'Install')"
+)
 # The rules the check enforces, one label each: SE's start counts them (scripts/se_start.py).
 MESSAGE_RULES = ("tracker-reference", "attribution-trailer")
 RULES = tuple(dict.fromkeys(pattern.label for pattern in GENERIC_PATTERNS)) + MESSAGE_RULES
@@ -418,8 +424,9 @@ def scan_message(where: str, message: str, patterns: list[Pattern], report: Repo
         report.hits.append(Hit(f"{where} message:{line}", "tracker-reference",
                                f" '{shown}' ({TRACKER_RULE}); {remedy}"))
     for line, key in attribution_trailers(message):
+        source = f"; {CO_AUTHOR_SOURCE}" if key.lower() == "co-authored-by" else ""
         report.hits.append(Hit(f"{where} message:{line}", "attribution-trailer",
-                               f" '{key}:' ({ATTRIBUTION_RULE}); {remedy}"))
+                               f" '{key}:' ({ATTRIBUTION_RULE}); {remedy}{source}"))
 
 
 def scan_identity(where: str, role: str, identity: str, patterns: list[Pattern],

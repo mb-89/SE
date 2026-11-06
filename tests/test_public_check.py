@@ -841,3 +841,70 @@ def test_the_range_gate_refuses_unpushed_trailers_and_leaves_published_ones(
     assert len(hits) == 1, result.stdout
     assert f"commit {sha[:12]} message:3: attribution-trailer 'Claude-Session:'" in hits[0]
     assert "git commit --amend" in hits[0]
+
+
+CI_WORKFLOW = SE_ROOT / ".github" / "workflows" / "public-check.yml"
+
+
+def ci_script() -> str:
+    """The shell the public-check workflow runs, its one `run: |` block, calling this se's check."""
+    lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
+    start = next(index for index, line in enumerate(lines) if line.strip() == "run: |") + 1
+    block = []
+    for line in lines[start:]:
+        if line.strip() and not line.startswith(" " * 10):
+            break
+        block.append(line[10:])
+    return "\n".join(block).replace("python3 scripts/public_check.py", f"'{sys.executable}' '{SCRIPT}'")
+
+
+def owner_push(repo: Path, tmp_path: Path, message: str) -> tuple[str, str]:
+    """The owner, with the project identity, pushes one commit to se; returns (before, after)."""
+    git(repo, "config", "user.name", "mb")
+    git(repo, "config", "user.email", "mb")
+    commit(repo, {"se.toml": PROJECT_IDENTITY})
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", str(remote))
+    git(repo, "remote", "add", "origin", str(remote))
+    git(repo, "push", "-q", "origin", "main:se")
+    before = git(repo, "rev-parse", "HEAD").stdout.strip()
+    commit(repo, {"a.txt": "a\n"}, message)
+    git(repo, "push", "-q", "origin", "main:se")
+    return before, git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def run_ci(tmp_path: Path, before: str, after: str) -> subprocess.CompletedProcess[str]:
+    """The workflow's step as its runner runs it: in a fresh full clone, on a push to se."""
+    runner = tmp_path / "runner"
+    shutil.rmtree(runner, ignore_errors=True)
+    git(tmp_path, "clone", "-q", "-b", "se", str(tmp_path / "remote.git"), str(runner))
+    env = {**os.environ, "BEFORE": before, "AFTER": after, "BRANCH": "se"}
+    return subprocess.run(["bash", "-e", "-c", ci_script()], cwd=runner, env=env,
+                          capture_output=True, text=True, check=False)
+
+
+@pytest.mark.parametrize("known_before", [True, False])
+def test_ci_refuses_the_owners_pushed_co_author_line_naming_its_source_and_remedy(
+        repo: Path, tmp_path: Path, known_before: bool) -> None:
+    before, after = owner_push(repo, tmp_path, "Fix the build\n\nco-authored-by: Copilot")
+    result = run_ci(tmp_path, before if known_before else "0" * 40, after)
+    assert result.returncode == 1, result.stdout
+    hits = [line for line in result.stdout.splitlines() if "attribution-trailer" in line]
+    assert [hit.split(": ", 1)[0] for hit in hits] == [f"commit {after[:12]} message:3"]
+    assert "git commit --amend" in hits[0] and "VS Code: git.addAICoAuthor off" in hits[0]
+    assert "::error::public-check (scripts/public_check.py" in result.stdout
+    assert "turn off the editor's co-author setting" in result.stdout
+
+
+def test_ci_passes_an_allow_listed_co_author_commit(repo: Path, tmp_path: Path) -> None:
+    before, listed = owner_push(repo, tmp_path, f"Old work\n\n{CO_AUTHOR}")
+    commit(repo, {public_check.ALLOW_FILE: f"commit:{listed} message  # published before the rule\n"})
+    git(repo, "push", "-q", "origin", "main:se")
+    result = run_ci(tmp_path, before, git(repo, "rev-parse", "HEAD").stdout.strip())
+    assert result.returncode == 0, result.stdout
+    assert "1 allow entries used" in result.stdout
+
+
+def test_ci_passes_a_clean_push(repo: Path, tmp_path: Path) -> None:
+    before, after = owner_push(repo, tmp_path, "Fix the build")
+    assert run_ci(tmp_path, before, after).returncode == 0
