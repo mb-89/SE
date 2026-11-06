@@ -47,12 +47,34 @@ def test_build_refuses_on_an_obs_warning(tmp_path, monkeypatch, capsys):
     assert "long paragraph" in err and "deck: 1 obs warning(s)" in err
 
 
-def test_build_refuses_a_chapter_that_asks_for_no_bless(tmp_path, obs):
-    folder = _folder(tmp_path, {"one": NOTE % ("One", "one"), "two": "# Two\n\nA record only.\n"})
-    result = subprocess.run([sys.executable, str(SCRIPTS / "deck.py"), "build", str(folder),
-                             "--destination", str(tmp_path / "deck.html")], capture_output=True, text=True)
+RECORD = "# %s\n\nThis was decided without the person.\n"
+PUGH = ("\n```pugh\ncriteria:\n  - {key: cost, label: Cost, weight: 1, better: higher, kind: judged}\n"
+        "datum: {prefer: [b]}\ncandidates:\n"
+        "  - {key: a, label: A, what: One way., marks: {cost: 1}, wins: Cheap., losses: New.}\n"
+        "  - {key: b, label: B, what: The other., marks: {cost: 0}, wins: Known., losses: Dear.}\n```\n")
+
+
+def _deck(folder: Path, destination: Path) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(SCRIPTS / "deck.py"), "build", str(folder),
+                           "--destination", str(destination)], capture_output=True, text=True)
+
+
+def test_build_takes_record_chapters_beside_the_decisions(tmp_path, obs):
+    folder = _folder(tmp_path, {"one": NOTE % ("One", "one"), "two": NOTE % ("Two", "two"),
+                                "done": RECORD % "Done"})
+    result = _deck(folder, tmp_path / "deck.html")
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "deck.html").exists()
+
+
+@pytest.mark.parametrize(("notes", "refusal"), [
+    ({"done": RECORD % "Done", "tasks": RECORD % "Tasks"}, "no chapter asks for a bless"),
+    ({"one": NOTE % ("One", "one"), "silent": RECORD % "Silent" + PUGH}, "decision(s) silent ask for no bless"),
+], ids=["only-records", "decision-without-bless"])
+def test_build_refuses_a_deck_that_asks_nothing_or_a_silent_decision(tmp_path, obs, notes, refusal):
+    result = _deck(_folder(tmp_path, notes), tmp_path / "deck.html")
     assert result.returncode == 1, result.stderr
-    assert "chapter(s) two ask for no bless" in result.stderr
+    assert refusal in result.stderr and "`obs: {bless: pending}`" in result.stderr
     assert not (tmp_path / "deck.html").exists()
 
 

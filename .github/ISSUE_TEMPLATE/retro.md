@@ -4,6 +4,7 @@ about: Look back over several packages or a session to improve the agents, templ
 title: "retro: <scope> <yyyymmdd>"
 labels: retro
 ---
+<!-- se:fleet -->
 
 **Scope:** <!-- work issues, field reports and sessions covered, e.g. #2, #5–#9 -->
 
