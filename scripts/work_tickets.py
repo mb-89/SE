@@ -59,6 +59,13 @@ COMMENTS_READ = "comments-read.json"
 TEMPLATE_DIRECTORY = ".github/ISSUE_TEMPLATE"
 TEMPLATES = Path(__file__).resolve().parents[1] / TEMPLATE_DIRECTORY
 DELIVERY_TICKET = "delivery"
+# The fleet's marks on GitHub, owned by the work model's "Outside issues": every issue the fleet
+# files carries FLEET_MARKER (as does every issue labelled FLEET_LABEL), and the comment that
+# records an outside issue as handled carries HANDLED_MARKER.
+FLEET_MARKER = "<!-- se:fleet -->"
+HANDLED_MARKER = "<!-- se:handled -->"
+FLEET_LABEL = "field-report"
+OUTSIDE_PAGE = 100
 DISCOVERY_DIRECTORY = Path(".se") / "work" / "probe"
 DISCOVERY_INDEX = "evidence.md"
 DISCOVERY_CONFIG = "discovery.json"
@@ -1359,6 +1366,81 @@ def intake(
     return issue, created, kept
 
 
+def outside_cutoffs(root: Path) -> dict[str, int]:
+    """se.toml's `[outside]` table: each repository SE watches for outside issues and the last
+    issue number that existed before the fleet marked its own (the work model's "Outside issues")."""
+    table = se_table(root, "outside")
+    remedy = (
+        f'name each repository and its cut-off in {root / "se.toml"}, as '
+        '[outside] "<host>/<owner>/<repo>" = <last issue number before the fleet marker> '
+        '(the se checkout\'s src/skills/work-model/SKILL.md#outside-issues)'
+    )
+    if not table:
+        raise QueueError(f"intake --outside: no [outside] table; {remedy}")
+    cutoffs: dict[str, int] = {}
+    for repo, cutoff in table.items():
+        if len(repo.split("/")) != 3 or not all(repo.split("/")) or isinstance(cutoff, bool) \
+                or not isinstance(cutoff, int) or cutoff < 0:
+            raise QueueError(f"intake --outside: [outside] entry {repo!r} = {cutoff!r} is invalid; {remedy}")
+        cutoffs[repo] = cutoff
+    if len({repo.split("/")[0] for repo in cutoffs}) != 1:
+        raise QueueError(
+            "intake --outside: [outside] names repositories on more than one host, which one "
+            f"query cannot read; {remedy}")
+    return cutoffs
+
+
+def outside_query(repos: list[str]) -> str:
+    """One GraphQL query for the open issues of every repository, newest first."""
+    parts = []
+    for index, repo in enumerate(repos):
+        _, owner, name = repo.split("/")
+        parts.append(
+            f"r{index}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ "
+            f"issues(states: OPEN, first: {OUTSIDE_PAGE}, "
+            "orderBy: {field: CREATED_AT, direction: DESC}) { pageInfo { hasNextPage } "
+            "nodes { number title url body labels(first: 50) { nodes { name } } "
+            "comments(last: 100) { nodes { body } } } } }"
+        )
+    return "query { " + " ".join(parts) + " }"
+
+
+def outside_issues(cutoffs: dict[str, int], data: dict[str, object]) -> list[dict[str, object]]:
+    """The open issues above each cut-off that carry neither the fleet marker nor its label and
+    have no handled comment; refused where an unread page could hold more."""
+    found: list[dict[str, object]] = []
+    for index, (repo, cutoff) in enumerate(cutoffs.items()):
+        repository = (data.get("data") or {}).get(f"r{index}")
+        if not repository:
+            raise QueueError(f"intake --outside: GitHub returned no repository {repo}; check [outside] in se.toml")
+        issues = repository["issues"]
+        nodes = issues["nodes"]
+        if issues["pageInfo"]["hasNextPage"] and nodes and min(n["number"] for n in nodes) > cutoff + 1:
+            raise QueueError(
+                f"intake --outside: {repo} has more than {OUTSIDE_PAGE} open issues above its "
+                "cut-off, more than one query reads; handle or close some, or raise its cut-off "
+                "in se.toml [outside]")
+        for issue in nodes:
+            labels = {label["name"] for label in issue["labels"]["nodes"]}
+            if (issue["number"] <= cutoff or FLEET_MARKER in (issue.get("body") or "")
+                    or FLEET_LABEL in labels
+                    or any(HANDLED_MARKER in (comment.get("body") or "")
+                           for comment in issue["comments"]["nodes"])):
+                continue
+            found.append({"repo": repo, "number": issue["number"], "title": issue["title"],
+                          "url": issue["url"]})
+    return found
+
+
+def intake_outside(root: Path) -> list[dict[str, object]]:
+    """The outside issues SE has not handled yet, read in one batched query."""
+    cutoffs = outside_cutoffs(root)
+    host = next(iter(cutoffs)).split("/")[0]
+    query = outside_query(list(cutoffs))
+    return outside_issues(cutoffs, json.loads(
+        run_gh(root, ["api", "graphql", "--hostname", host, "-f", f"query={query}"])))
+
+
 def bare_cross_repository_references(body: str, repo: str) -> list[str]:
     """References in a work issue to another repository with no quoted block next to them.
 
@@ -2541,10 +2623,12 @@ def check_comments_read(root: Path, current: dict[str, object] | None) -> None:
 def check_field_report(
     root: Path | None, file: Path, issue_body_file: Path | None,
     comments: dict[str, object] | None = None,
-) -> None:
+) -> bool:
     """Validate a field-report file against the template without writing GitHub or, given the
     issue body, without a worktree; in a worktree with a comments-read record, also refuse comments
-    that arrived after it (read with gh, unless `comments` gives the issue's state)."""
+    that arrived after it (read with gh, unless `comments` gives the issue's state). A passing
+    report without the fleet marker gets it, so one filed by hand is marked too; returns whether
+    it was added."""
     try:
         body = file.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
@@ -2572,6 +2656,15 @@ def check_field_report(
         raise field_report_error(file.name, problems)
     if root is not None and (comments is not None or load_comments_read(root) is not None):
         check_comments_read(root, comments)
+    if FLEET_MARKER in body:
+        return False
+    file.write_text(fleet_marked(body), encoding="utf-8", newline="\n")
+    return True
+
+
+def fleet_marked(body: str) -> str:
+    """`body` with the fleet marker as its first line, once."""
+    return body if FLEET_MARKER in body else f"{FLEET_MARKER}\n{body}"
 
 
 def field_report_placeholders() -> list[str]:
@@ -2595,7 +2688,8 @@ def file_field_report(
         body = file.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         raise QueueError(f"Cannot read field report {file}: {error}") from error
-    body = re.sub(r"\n{3,}", "\n\n", HTML_COMMENT_PATTERN.sub("", body)).strip() + "\n"
+    body = fleet_marked(
+        re.sub(r"\n{3,}", "\n\n", HTML_COMMENT_PATTERN.sub("", body)).strip() + "\n")
     if pr is None:
         pr = report_pull_request(root, issue, branch)
     problems = field_report_problems(body, str(issue["body"]))
@@ -3501,7 +3595,12 @@ def make_parser() -> argparse.ArgumentParser:
     intake_parser = subparsers.add_parser(
         "intake", help="read the work issue with gh and write its tickets into todo")
     add_worktree_argument(intake_parser)
-    intake_parser.add_argument("--issue", required=True, type=int, help="work issue number")
+    intake_source = intake_parser.add_mutually_exclusive_group(required=True)
+    intake_source.add_argument("--issue", type=int, help="work issue number")
+    intake_source.add_argument(
+        "--outside", action="store_true",
+        help="for SE: list the open issues of se.toml's [outside] repositories that carry no "
+             "fleet marker and no handled comment, in one query; writes nothing")
     intake_parser.add_argument("--repo", help=REPO_HELP)
     intake_parser.add_argument(
         "--discovery", action="store_true",
@@ -3719,6 +3818,18 @@ def main(argv: list[str] | None = None) -> int:
             review_note(root, args.note, args.disposition, args.backlog_ref)
             print(f"Reviewed note {args.note}")
             return 0
+        if args.command == "intake" and args.outside:
+            if args.repo or args.discovery or args.probe_root:
+                raise QueueError("intake --outside takes its repositories from se.toml [outside], "
+                                 "and no --repo, --discovery or --probe-root")
+            found = intake_outside(root)
+            if not found:
+                print("No outside issues to handle.")
+            else:
+                print(f"Outside issues ({len(found)}), not yet handled:")
+                for issue in found:
+                    print(f"  {issue['repo']}#{issue['number']} {issue['title']} {issue['url']}")
+            return 0
         if args.command == "intake":
             issue, created, kept = intake(
                 root, args.issue, args.repo, args.discovery, args.probe_root
@@ -3767,8 +3878,9 @@ def main(argv: list[str] | None = None) -> int:
                         "field-report --check: --comment-count and --newest-comment go together")
                 comments = None if args.comment_count is None else {
                     "count": args.comment_count, "newest": args.newest_comment}
-                check_field_report(root, args.check, args.issue_body, comments)
-                print(f"Field report {args.check.name} follows the template")
+                marked = check_field_report(root, args.check, args.issue_body, comments)
+                print(f"Field report {args.check.name} follows the template"
+                      + ("; added the fleet marker" if marked else ""))
             elif root is None:
                 mode = "--draft" if args.draft else "--file"
                 raise QueueError(f"field-report {mode} needs --worktree <worktree>, the worker's checkout")

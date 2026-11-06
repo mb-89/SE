@@ -60,16 +60,25 @@ uv run python <se>/scripts/se_start.py refresh
   it; the greeting still appears.
 - What is due: the highest version a module's `version` range admits above its locked one, and for
   SE the highest version of its major. A newer version outside the range is shown apart and never
-  applied. A local path is reported as local and never touched; a module pinned by commit is
-  reported, and only the module command's [`update`](#commands) moves it.
+  applied.
+- A local path (`[paths]` of `~/.se/local.toml`, SE's own under the name `se`) is reported as local
+  and never touched. A module pinned by commit is reported, and only the module command's
+  [`update`](#commands) moves it.
 - `refresh` takes no choices. It checks now, then moves each due item: it checks the new version
   out into a temporary worktree first, checks that it starts (its `se.toml` names that version; for
-  SE, `status` runs there) and only then switches. A module's lock moves in `se.lock`; commit it. SE
-  itself is fast-forwarded, or checked out where it is detached.
+  SE, `status` runs there) and only then switches. A module's lock moves in `se.lock`; commit it.
+- SE itself moves the way it was [installed](#install):
+  - a git checkout, including the cloud's setup-script clone, is fast-forwarded, or checked out
+    where it is detached;
+  - an installed Claude Code plugin is updated with `claude plugin update`, then `status` runs in
+    the new install; where it does not start, Claude Code's record of the plugin is put back to the
+    old install. Restart Claude Code to load the new one;
+  - any other copy (a Copilot copy) is checked against the `repository` of its plugin manifest;
+    VS Code alone updates it and has no command line for it, so `refresh` names the command to run
+    there.
 - What fails stays at the version in use, with the cause and the command to try again. An se
-  checkout with local changes or its own commits is a development checkout and is left alone; an
-  installed plugin copy (no git checkout) is not checked. Run twice, the second `refresh` moves
-  nothing.
+  checkout with local changes or its own commits is a development checkout and is left alone. Run
+  twice, the second `refresh` moves nothing.
 
 ## Documentation
 
@@ -289,7 +298,8 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
   public host. The longest matching prefix wins.
 
 Work queue tracker, worktree and mirror settings are documented in the
-[work model](src/skills/work-model/SKILL.md#what-the-project-provides).
+[work model](src/skills/work-model/SKILL.md#what-the-project-provides), the `[outside]` table in its
+[Outside issues](src/skills/work-model/SKILL.md#outside-issues).
 
 ### Commands
 

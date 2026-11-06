@@ -668,3 +668,15 @@ def test_the_work_model_owns_the_escalation_ladder():
                  "(../decision/SKILL.md)"):
         assert rule in text, rule
     assert "one table per message" not in text.casefold()
+
+
+def test_the_outside_issue_routine_is_stated_once_in_the_se_agent():
+    se = AGENTS / "se.md"
+    owners = [path for path in PROSE if "<!-- se:handled -->" in normalized(path)]
+    assert owners == [se, WORK_MODEL]  # the routine, and the work model's definition of the mark
+    routine = normalized(se).split("## Outside issues", 1)[1]
+    assert "intake --outside" in routine and "decision note in the deck" in routine
+    assert "never as an issue" in routine
+    model = normalized(WORK_MODEL).split("## Outside issues", 1)[1].split("## ", 1)[0]
+    assert "(../../agents/se.md#outside-issues)" in model and "Something contradicted" not in model
+    assert sum("Something contradicted" in normalized(path) for path in PROSE) == 1
