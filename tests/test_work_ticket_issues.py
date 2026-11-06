@@ -2168,6 +2168,19 @@ def test_suite_merges_the_slowest_ten_from_every_junit_report(worktree, monkeypa
     assert "test_quick" not in out and "page2" not in out
 
 
+def test_suite_slowest_sets_how_many_tests_it_lists(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 5.0)
+    (worktree / "suite.py").write_text(REPORTING_SUITE, encoding="utf-8")
+
+    assert run(worktree, "suite", "--slowest", "3") == 0
+    out = capsys.readouterr().out
+    listed = out.split("Slowest tests:\n", 1)[1].split("Suite:", 1)[0].splitlines()
+    assert listed == [
+        "  2.50s unit tests.test_a::test_slow", "  1.10s browser ui::page11", "  1.00s browser ui::page10",
+    ]
+    assert work_tickets.with_durations(["uv", "run", "pytest", "-q"], 3)[-1] == "--durations=3"
+
+
 def test_suite_without_reports_or_durations_names_the_remedy_once(worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 5.0)
     (worktree / "suite.py").write_text('print("1 passed")\n', encoding="utf-8")
@@ -2244,7 +2257,7 @@ def test_suite_budget_defaults_and_refuses_a_missing_command(worktree):
                                       encoding="utf-8")
     budget = work_tickets.suite_budget(worktree)
     assert (budget.target_seconds, budget.limit_seconds) == (60, 120)
-    assert work_tickets.with_durations(budget.command)[-1] == "--durations=10"
+    assert work_tickets.with_durations(budget.command, work_tickets.SLOWEST_TESTS)[-1] == "--durations=10"
     (worktree / "se.toml").write_text("[tests]\ntarget_seconds = 60\n", encoding="utf-8")
     with pytest.raises(work_tickets.QueueError, match=r"\[tests\] in .*se.toml must declare command"):
         work_tickets.suite_budget(worktree)

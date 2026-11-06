@@ -2303,12 +2303,12 @@ def run_suite_setup(root: Path, setup: list[str]) -> None:
         print(output_tail(output))
 
 
-def with_durations(command: list[str]) -> list[str]:
-    """Ask pytest for its slowest tests; other runners are run as declared."""
+def with_durations(command: list[str], count: int) -> list[str]:
+    """Ask pytest for its `count` slowest tests; other runners are run as declared."""
     is_pytest = any(Path(argument).stem == "pytest" for argument in command)
     if not is_pytest or any(argument.startswith("--durations") for argument in command):
         return command
-    return [*command, f"--durations={SLOWEST_TESTS}"]
+    return [*command, f"--durations={count}"]
 
 
 def report_durations(reports: Path) -> list[tuple[float, str]]:
@@ -2327,8 +2327,8 @@ def report_durations(reports: Path) -> list[tuple[float, str]]:
     return found
 
 
-def slowest_tests(output: str, reports: Path) -> list[str]:
-    """The slowest tests, slowest first: from the runner's JUnit reports where it wrote any,
+def slowest_tests(output: str, reports: Path, count: int) -> list[str]:
+    """The `count` slowest tests, slowest first: from the runner's JUnit reports where it wrote any,
     otherwise from its output's `<seconds>s <phase> <test>` lines (pytest's --durations)."""
     found = [(seconds, f"{seconds:.2f}s {test}") for seconds, test in report_durations(reports)]
     if not found:
@@ -2336,15 +2336,16 @@ def slowest_tests(output: str, reports: Path) -> list[str]:
             (float(match[1]), f"{match[1]}s {match[2]} {match[3]}")
             for match in map(DURATION_LINE.match, output.splitlines()) if match
         ]
-    return [line for _, line in sorted(found, key=lambda item: -item[0])][:SLOWEST_TESTS]
+    return [line for _, line in sorted(found, key=lambda item: -item[0])][:count]
 
 
-def run_suite(root: Path) -> str:
+def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget.
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
     Runs `[tests]` setup first, outside the budget. Prints the last result lines of the suite's
-    stdout (without progress lines, banners and durations), its time and the slowest tests;
+    stdout (without progress lines, banners and durations), its time and its `slowest_count`
+    slowest tests;
     warns above the target; refuses failed tests, and a passing suite above the limit with
     SuiteOverLimitError."""
     budget = suite_budget(root)
@@ -2353,13 +2354,13 @@ def run_suite(root: Path) -> str:
     with tempfile.TemporaryDirectory(prefix="se-test-reports-") as reports:
         started = clock()
         result = subprocess.run(
-            with_durations(budget.command), cwd=root, shell=False, capture_output=True,
+            with_durations(budget.command, slowest_count), cwd=root, shell=False, capture_output=True,
             text=True, encoding="utf-8", errors="replace", check=False,
             env={**os.environ, TEST_REPORTS_VARIABLE: reports},
         )
         seconds = clock() - started
         output = (result.stdout + result.stderr).strip()
-        slowest = slowest_tests(output, Path(reports))
+        slowest = slowest_tests(output, Path(reports), slowest_count)
     name = " ".join(budget.command)
     report = result.stdout.strip() or output
     summary = report.splitlines()[-1] if report else "no result line"
@@ -2397,6 +2398,16 @@ def run_suite(root: Path) -> str:
             file=sys.stderr,
         )
     return f"{summary}; {timing}"
+
+
+def positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"expected a whole number of at least 1, not {value!r}")
+    return number
 
 
 def parse_check_commands(value: str) -> list[list[str]]:
@@ -2906,6 +2917,10 @@ def make_parser() -> argparse.ArgumentParser:
         "suite", help="run se.toml's complete suite against its [tests] time budget, as integrate does; "
         "exit code 1 when tests fail, 3 when they pass over the limit")
     add_worktree_argument(suite_parser)
+    suite_parser.add_argument(
+        "--slowest", type=positive_int, default=SLOWEST_TESTS, metavar="N",
+        help=f"how many slowest tests to list, from the JUnit reports or pytest's --durations "
+        f"(default {SLOWEST_TESTS})")
 
     guard_parser = subparsers.add_parser(
         "guard", help="require the field report to name removed protected content, against "
@@ -3071,7 +3086,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Merged {integration_branch(root)} {sync(root)}")
             return 0
         if args.command == "suite":
-            print(f"Suite: {run_suite(root)}")
+            print(f"Suite: {run_suite(root, args.slowest)}")
             return 0
         if args.command == "guard":
             removed = guard(root, args.branch, args.field_report)
