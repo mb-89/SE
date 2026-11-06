@@ -6,11 +6,14 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 GITHUB = ROOT / ".github"
-AGENTS = GITHUB / "agents"
-SKILL = GITHUB / "skills" / "catch-up" / "SKILL.md"
-WORK_MODEL = GITHUB / "skills" / "work-model" / "SKILL.md"
-DECISION = GITHUB / "skills" / "decision" / "SKILL.md"
-ROLES = ("dispatcher", "worker", "integrator")
+SOURCE = ROOT / "src"
+AGENTS = SOURCE / "agents"
+SKILL = SOURCE / "skills" / "catch-up" / "SKILL.md"
+WORK_MODEL = SOURCE / "skills" / "work-model" / "SKILL.md"
+DECISION = SOURCE / "skills" / "decision" / "SKILL.md"
+ROLES = ("se", "worker", "integrator")
+# The authored prose: the agent and skill sources and the issue templates (generated layouts excluded).
+PROSE = sorted([*SOURCE.rglob("*.md"), *(GITHUB / "ISSUE_TEMPLATE").glob("*.md")])
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
 
@@ -20,14 +23,14 @@ def normalized(path: Path) -> str:
 
 @pytest.mark.parametrize("role", ROLES)
 def test_agent_definition_names_its_role_and_points_to_the_work_model(role):
-    text = (AGENTS / f"{role}.agent.md").read_text(encoding="utf-8")
+    text = (AGENTS / f"{role}.md").read_text(encoding="utf-8")
     front_matter = text.split("---")[1]
     assert f"name: {role}" in front_matter and "description:" in front_matter
     assert "(../skills/work-model/SKILL.md)" in text
 
 
 def test_worker_agent_tools_exclude_input_and_workspace_prompts():
-    text = (AGENTS / "worker.agent.md").read_text(encoding="utf-8")
+    text = (GITHUB / "agents" / "worker.agent.md").read_text(encoding="utf-8")  # what Copilot reads
     front_matter = text.split("---")[1]
     assert "tools: ['execute', 'read', 'edit', 'search', 'send_message']" in front_matter
     assert "strict-tools-list: true" in front_matter
@@ -36,12 +39,12 @@ def test_worker_agent_tools_exclude_input_and_workspace_prompts():
 
 
 @pytest.mark.parametrize("role", ("worker", "integrator"))
-def test_non_dispatcher_agents_remove_workspace_switching_advice(role):
-    text = (AGENTS / f"{role}.agent.md").read_text(encoding="utf-8")
+def test_non_se_agents_remove_workspace_switching_advice(role):
+    text = (AGENTS / f"{role}.md").read_text(encoding="utf-8")
     assert "set_workspace if available" not in text
 
 
-@pytest.mark.parametrize("path", [*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL, WORK_MODEL, DECISION],
+@pytest.mark.parametrize("path", [*(AGENTS / f"{role}.md" for role in ROLES), SKILL, WORK_MODEL, DECISION],
                          ids=lambda path: path.name)
 def test_relative_links_resolve(path):
     text = path.read_text(encoding="utf-8")
@@ -53,45 +56,45 @@ def test_relative_links_resolve(path):
 def test_skill_links_every_agent_definition():
     text = SKILL.read_text(encoding="utf-8")
     for role in ROLES:
-        assert f"(../../agents/{role}.agent.md)" in text
+        assert f"(../../agents/{role}.md)" in text
 
 
 @pytest.mark.parametrize("role", ("worker", "integrator"))
-def test_non_dispatcher_roles_ban_input_prompts_and_escalate(role):
-    text = normalized(AGENTS / f"{role}.agent.md")
+def test_non_se_roles_ban_input_prompts_and_escalate(role):
+    text = normalized(AGENTS / f"{role}.md")
     assert "never call `ask_user`" in text.casefold()
     assert "`ask_user`" in text.casefold()
     assert "question, confirmation or approval prompt" in text
-    assert "dispatcher" in text
+    assert "SE" in text
 
 
-def test_only_the_dispatcher_talks_to_the_human():
-    dispatcher = normalized(AGENTS / "dispatcher.agent.md")
+def test_only_se_talks_to_the_human():
+    dispatcher = normalized(AGENTS / "se.md")
     assert "only session the human talks to" in dispatcher
     assert "only role that may ask the human with `ask_user`" in dispatcher
     for role in ("worker", "integrator"):
-        assert "ask the human" not in normalized(AGENTS / f"{role}.agent.md")
+        assert "ask the human" not in normalized(AGENTS / f"{role}.md")
     rules = normalized(WORK_MODEL)
-    assert "Only the dispatcher talks to the human" in rules
+    assert "Only SE talks to the human" in rules
     assert "to the human at the top level" not in rules
 
 
 def test_worker_instructions_require_utf8_file_writes_in_windows_powershell():
-    worker = normalized(AGENTS / "worker.agent.md")
+    worker = normalized(AGENTS / "worker.md")
     assert "powershell 5.1 redirection `>` writes utf-16" in worker.casefold()
     assert "[io.file]::writealltext" in worker.casefold()
     assert "out-file -encoding utf8" in worker.casefold()
 
 
 def test_worker_requires_evidence_for_every_work_issue_item():
-    worker = normalized(AGENTS / "worker.agent.md")
+    worker = normalized(AGENTS / "worker.md")
     assert "every numbered requirement and every acceptance line" in worker
     assert "one quoted evidence line" in worker
     assert 'under "not delivered", never as a "decision"' in worker.casefold()
 
 
 def test_integrator_restarts_only_workers_whose_events_show_a_prompt():
-    integrator = normalized(AGENTS / "integrator.agent.md")
+    integrator = normalized(AGENTS / "integrator.md")
     assert "inputneeded" not in integrator.casefold()
     assert 'reads as idle or "review ready" before its first turn' in integrator
     assert "stuck only when its events show it waiting on a prompt" in integrator
@@ -131,13 +134,13 @@ def test_work_issue_template_asks_for_the_field_reports_reproduction():
 
 
 def test_worker_commit_rule_names_its_groupings_and_has_one_owner():
-    worker = normalized(GITHUB / "agents" / "worker.agent.md")
+    worker = normalized(AGENTS / "worker.md")
     assert "requirements that change one function together share one commit" in worker
     assert "its test may be a test-only commit" in worker
     assert "The field report names each such grouping" in worker
-    owners = [path.relative_to(GITHUB).as_posix() for path in sorted(GITHUB.rglob("*.md"))
+    owners = [path.relative_to(ROOT).as_posix() for path in PROSE
               if "one commit per" in normalized(path).casefold()]
-    assert owners == ["agents/worker.agent.md"]
+    assert owners == ["src/agents/worker.md"]
 
 
 def test_work_issue_template_assigns_shared_root_file_owners():
@@ -153,16 +156,16 @@ def test_work_issue_template_assigns_shared_root_file_owners():
     "Packages are worker-sized",
 ))
 def test_shared_rules_have_one_owner(rule):
-    owners = [path.relative_to(GITHUB).as_posix() for path in sorted(GITHUB.rglob("*.md"))
+    owners = [path.relative_to(ROOT).as_posix() for path in PROSE
               if rule.casefold() in normalized(path).casefold()]
     assert len(owners) == 1, owners
 
 
-def test_dispatcher_can_dispatch_anywhere_without_writing_repositories():
-    rule = "The dispatcher never writes any repository"
-    owners = [path.relative_to(GITHUB).as_posix() for path in sorted(GITHUB.rglob("*.md"))
+def test_se_can_dispatch_anywhere_without_writing_repositories():
+    rule = "SE never writes any repository"
+    owners = [path.relative_to(ROOT).as_posix() for path in PROSE
               if rule.casefold() in normalized(path).casefold()]
-    assert owners == ["skills/work-model/SKILL.md"]
+    assert owners == ["src/skills/work-model/SKILL.md"]
     rules = normalized(WORK_MODEL)
     assert "may file work issues for and dispatch into any repository" in rules
     assert "Each repository has exactly one integrator" in rules
@@ -172,18 +175,18 @@ def test_dispatcher_can_dispatch_anywhere_without_writing_repositories():
 def test_catch_up_starts_integrators_not_workers():
     catch_up = normalized(SKILL)
     assert "If none runs, start one with the prompt" in catch_up
-    assert "naming the integrator agent, the repository and this dispatcher session" in catch_up
+    assert "naming the integrator agent, the repository and this SE session" in catch_up
     assert "Never start workers directly" in catch_up
 
 
-def test_dispatcher_and_catch_up_link_to_the_shared_dispatch_rule():
-    dispatcher = (AGENTS / "dispatcher.agent.md").read_text(encoding="utf-8")
+def test_se_and_catch_up_link_to_the_shared_dispatch_rule():
+    dispatcher = (AGENTS / "se.md").read_text(encoding="utf-8")
     catch_up = SKILL.read_text(encoding="utf-8")
     assert "(../skills/work-model/SKILL.md#roles-and-flow)" in dispatcher
     assert "(../work-model/SKILL.md#roles-and-flow)" in catch_up
 
 
-MARKDOWN = sorted(GITHUB.rglob("*.md"))
+MARKDOWN = PROSE
 ANCHOR_LINK = re.compile(r"\]\(([^)\s]*)\)")
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE)
 
@@ -194,7 +197,7 @@ def anchors(path: Path) -> set[str]:
             for heading in HEADING.findall(path.read_text(encoding="utf-8"))}
 
 
-@pytest.mark.parametrize("path", MARKDOWN, ids=lambda path: path.relative_to(GITHUB).as_posix())
+@pytest.mark.parametrize("path", MARKDOWN, ids=lambda path: path.relative_to(ROOT).as_posix())
 def test_every_process_link_and_anchor_resolves(path):
     for link in ANCHOR_LINK.findall(path.read_text(encoding="utf-8")):
         if "://" in link or not link:
@@ -267,7 +270,7 @@ def test_neutrality_check_accepts_public_and_placeholder_names():
 
 @pytest.mark.parametrize("role", ("worker", "integrator"))
 def test_roles_say_integration_branch_and_link_its_owner(role):
-    text = normalized(AGENTS / f"{role}.agent.md")
+    text = normalized(AGENTS / f"{role}.md")
     assert "integration branch" in text
     assert "(../skills/work-model/SKILL.md#integration-branch)" in text
     assert "`main`" not in text.replace("`main` unless the project names another", "")
@@ -282,36 +285,36 @@ def test_work_model_owns_the_integration_branch_setting():
 def test_messages_travel_only_up_and_down_the_tree():
     rule = normalized(WORK_MODEL)
     assert "**Messages travel only up and down the tree**" in rule
-    assert "news for another repository goes up to the dispatcher" in rule
-    integrator = normalized(AGENTS / "integrator.agent.md")
+    assert "news for another repository goes up to SE" in rule
+    integrator = normalized(AGENTS / "integrator.md")
     assert "(../skills/work-model/SKILL.md#roles-and-flow)" in integrator
     assert "never another repository's integrator" in integrator
 
 
 def test_the_comment_footer_rule_is_said_once():
     assert "**Comments carry the host's footer**" in normalized(WORK_MODEL)
-    for path in (*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL):
+    for path in (*(AGENTS / f"{role}.md" for role in ROLES), SKILL):
         assert "footer" not in normalized(path), path.name
 
 
 def test_integrator_leaves_a_branch_the_host_refuses_to_delete():
-    integrator = normalized(AGENTS / "integrator.agent.md")
+    integrator = normalized(AGENTS / "integrator.md")
     assert "automatic head-branch deletion removes it. Never retry the deletion." in integrator
 
 
 def test_the_commit_trailer_is_one_setting_the_roles_point_to():
     assert 'commit_trailer = "<trailer line>" # optional; none by default' in WORK_MODEL.read_text(
         encoding="utf-8")
-    for path in (*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL):
+    for path in (*(AGENTS / f"{role}.md" for role in ROLES), SKILL):
         text = normalized(path)
         assert "Co-authored-by" not in text, path.name
-    for path in (AGENTS / "worker.agent.md", SKILL):
+    for path in (AGENTS / "worker.md", SKILL):
         assert "`commit_trailer`](" in normalized(path), path.name
 
 
 def test_one_skill_owns_how_a_decision_is_presented():
     assert "name: decision" in DECISION.read_text(encoding="utf-8").split("---")[1]
-    pointers = {AGENTS / "dispatcher.agent.md": "(../skills/decision/SKILL.md)",
+    pointers = {AGENTS / "se.md": "(../skills/decision/SKILL.md)",
                 SKILL: "(../decision/SKILL.md)"}
     for path, link in pointers.items():
         text = normalized(path)
@@ -421,7 +424,7 @@ def test_without_gh_names_what_the_session_prompt_still_carries_and_nothing_else
 
 @pytest.mark.parametrize("role", ("worker", "integrator"))
 def test_roles_point_to_without_gh_and_do_not_restate_it(role):
-    text = normalized(AGENTS / f"{role}.agent.md")
+    text = normalized(AGENTS / f"{role}.md")
     assert "(../skills/work-model/SKILL.md#without-gh)" in text
     for owned in ("Commands that still run", "GitHub tools", "MCP", "outcome branch",
                   "carries only", "`review-note`, `probe`"):
@@ -443,11 +446,11 @@ def test_the_work_model_owns_where_the_commit_identity_and_the_public_check_come
     assert "runs the project's setup command before its first commit" in provides
     assert "se's commits carry `mb <mb>`, the `identity` in `se.toml`" in normalized(ROOT / "AGENTS.md")
     assert "[commit identity](../skills/work-model/SKILL.md#what-the-project-provides)" in normalized(
-        AGENTS / "worker.agent.md")
+        AGENTS / "worker.md")
 
 
 def test_the_worker_commits_each_requirement_while_working():
-    worker = normalized(AGENTS / "worker.agent.md")
+    worker = normalized(AGENTS / "worker.md")
     assert "Commit each requirement as soon as it is done, while working; never reconstruct commits at the end." in worker
 
 
@@ -479,12 +482,12 @@ CLOUD_RULES = (
 def test_the_cloud_section_holds_each_cloud_rule_once(rule):
     assert " ".join(without_gh_section().split()).count(rule) == 1
     assert normalized(WORK_MODEL).count(rule.split("**")[1]) == 1
-    for path in (*(AGENTS / f"{role}.agent.md" for role in ROLES), SKILL):
+    for path in (*(AGENTS / f"{role}.md" for role in ROLES), SKILL):
         assert rule.split("**")[1] not in normalized(path), path.name
 
 
 def test_the_worker_installs_the_hooks_before_its_first_commit():
-    worker = normalized(AGENTS / "worker.agent.md")
+    worker = normalized(AGENTS / "worker.md")
     procedure = worker.split("## Procedure", 1)[1]
     setup = procedure.index("in a fresh clone, first run the project's setup command that installs its hooks")
     assert setup < procedure.index("`work_tickets.py sync`") < procedure.index("commit as the work model's")
@@ -493,7 +496,7 @@ def test_the_worker_installs_the_hooks_before_its_first_commit():
 
 
 def test_the_worker_runs_what_the_acceptance_names_including_the_suite():
-    worker = normalized(AGENTS / "worker.agent.md")
+    worker = normalized(AGENTS / "worker.md")
     assert "Never run the complete suite" not in worker
     assert "run the complete suite only where the acceptance names it, otherwise the integrator does" in worker
     rules = normalized(WORK_MODEL)
@@ -527,19 +530,19 @@ def test_the_work_model_waits_on_a_background_process_by_its_id():
 
 
 def test_the_worker_builds_an_acceptance_build_at_the_new_pin_before_code():
-    worker = normalized(AGENTS / "worker.agent.md")
+    worker = normalized(AGENTS / "worker.md")
     assert "where the acceptance names a real build" in worker
     assert "build it at that pin before writing code" in worker
 
 
 def test_the_worker_may_work_without_the_ticket_queue_where_the_host_refuses_it():
-    worker = normalized(AGENTS / "worker.agent.md")
+    worker = normalized(AGENTS / "worker.md")
     assert ("Where the host refuses the local ticket queue (`work_tickets.py init`, `create`, `move`, "
             "`status`), it is optional: work without it and say so in the field report.") in worker
 
 
 def test_the_worker_runs_the_affected_real_command_once_against_the_real_service():
-    worker = normalized(AGENTS / "worker.agent.md")
+    worker = normalized(AGENTS / "worker.md")
     procedure = worker.split("## Procedure", 1)[1]
     step = procedure.split("4. **Work the ticket**", 1)[1].split("5. **Deliver", 1)[0]
     assert ("Where the container allows it, run the affected real command once against the real outside "
@@ -551,7 +554,7 @@ def test_the_suite_runs_at_a_moved_pin_before_the_change_for_worker_and_integrat
             "new pin before the change, so failures that exist already are told apart from the change's own.")
     assert normalized(WORK_MODEL).count(rule) == 1
     for role in ("worker", "integrator"):
-        text = normalized(AGENTS / f"{role}.agent.md")
+        text = normalized(AGENTS / f"{role}.md")
         assert rule not in text
         assert "[suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)" in text
 
@@ -568,7 +571,7 @@ def test_the_work_model_tells_issue_writers_what_renames_and_docs_issues_name():
 
 
 def test_the_integrator_reconciles_from_github_and_treats_a_missing_message_as_late():
-    integrator = normalized(AGENTS / "integrator.agent.md")
+    integrator = normalized(AGENTS / "integrator.md")
     assert ("A worker's delivery message can arrive minutes late: reconcile from GitHub first and treat a "
             "missing message as late, not lost.") in integrator
 
@@ -588,7 +591,7 @@ def test_the_work_model_states_the_test_rules_once_and_issues_point_to_it():
     section = normalized(WORK_MODEL).split("## Tests", 1)[1].split(" ## ", 1)[0]
     for rule in TEST_RULES:
         assert rule in section, rule
-    for path in sorted(GITHUB.rglob("*.md")):
+    for path in PROSE:
         if path != WORK_MODEL:
             assert "Browser checks are batched" not in normalized(path), path
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
@@ -596,7 +599,7 @@ def test_the_work_model_states_the_test_rules_once_and_issues_point_to_it():
 
 
 def test_the_worker_reports_the_suite_time_before_and_after_and_slow_new_tests():
-    worker = normalized(AGENTS / "worker.agent.md")
+    worker = normalized(AGENTS / "worker.md")
     assert "(../skills/work-model/SKILL.md#tests)" in worker
     assert "work_tickets.py suite" in worker
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
@@ -607,9 +610,9 @@ CHECKLIST = ("Class or case", "Is the problem real", "Keep what we have", "A nam
              "What if", "Undo cost", "Consistency")
 LADDER = ("worker, then integrator", "One level per loop", "Straight to the person",
           "as a deck, not as issues")
-POINTERS = {AGENTS / "dispatcher.agent.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
-            AGENTS / "worker.agent.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
-            AGENTS / "integrator.agent.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
+POINTERS = {AGENTS / "se.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
+            AGENTS / "worker.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
+            AGENTS / "integrator.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
             SKILL: "(../work-model/SKILL.md#escalation-ladder)"}
 
 
@@ -642,7 +645,7 @@ def test_the_work_model_owns_the_escalation_ladder():
     text = normalized(WORK_MODEL)
     assert "## Escalation ladder" in text
     for rule in ("Issues carry work between boxes", "worker, then integrator (integrators may nest",
-                 "then dispatcher, then person", *LADDER[1:], "allowed, not preferred",
+                 "then SE, then person", *LADDER[1:], "allowed, not preferred",
                  "(../decision/SKILL.md)"):
         assert rule in text, rule
     assert "one table per message" not in text.casefold()
