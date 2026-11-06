@@ -375,7 +375,9 @@ def test_field_report_fills_the_template_and_creates_a_labelled_issue(worktree, 
     assert "repo:example" in create
     assert create[create.index("--repo") + 1] == "git.example/owner/repo"
     body = gh.bodies[-1]
-    assert "<!--" not in body and "\n\n\n" not in body and body.startswith("**Work issue:** #5")
+    assert body.startswith(work_tickets.FLEET_MARKER + "\n**Work issue:** #5")
+    body = body.removeprefix(work_tickets.FLEET_MARKER)
+    assert "<!--" not in body and "\n\n\n" not in body
     assert "Field report created: https://git.example/owner/repo/issues/8" in capsys.readouterr().out
 
     gh.open_reports = [{"number": 8, "title": f"field-report: {BRANCH}",
@@ -2564,3 +2566,41 @@ def test_push_with_the_public_check_off_says_so_and_where_to_turn_it_on(
         f"Public check off: project.public_check = false in {main_checkout / 'se.toml'}; "
         "set it to true (or remove it) to check every push"
     ]
+
+
+OUTSIDE_CONFIG = """[outside]
+"git.example/owner/repo" = 10
+"git.example/owner/other" = 0
+"""
+
+
+def outside_issue(number: int, body: str = "From the other side.", labels=(), comments=()) -> dict:
+    return {"number": number, "title": f"issue {number}", "url": f"https://git.example/owner/repo/issues/{number}",
+            "body": body, "labels": {"nodes": [{"name": name} for name in labels]},
+            "comments": {"nodes": [{"body": text} for text in comments]}}
+
+
+def outside_answer(repo: list[dict], other: list[dict], more: bool = False) -> str:
+    def repository(nodes):
+        return {"issues": {"pageInfo": {"hasNextPage": more}, "nodes": nodes}}
+    return json.dumps({"data": {"r0": repository(repo), "r1": repository(other)}})
+
+
+def test_fleet_issues_carry_the_marker_and_check_adds_it_to_a_report_by_hand(worktree, gh, capsys):
+    for name in ("work", "field-report", "retro"):
+        _, body = work_tickets.issue_template(name)
+        assert work_tickets.FLEET_MARKER in body, name
+    run(worktree, "intake", "--issue", "5")
+    report = draft_complete_field_report(worktree)
+    assert work_tickets.FLEET_MARKER in report.read_text(encoding="utf-8")
+    assert run(worktree, "field-report", "--file", str(report)) == 0
+    assert gh.bodies[-1].startswith(work_tickets.FLEET_MARKER + "\n**Work issue:** #5")
+
+    by_hand = worktree / "by-hand.md"
+    by_hand.write_text(COMPLETE_REPORT, encoding="utf-8")
+    assert run(worktree, "field-report", "--check", str(by_hand)) == 0
+    assert by_hand.read_text(encoding="utf-8") == work_tickets.FLEET_MARKER + "\n" + COMPLETE_REPORT
+    assert "added the fleet marker" in capsys.readouterr().out
+    assert run(worktree, "field-report", "--check", str(by_hand)) == 0
+    assert by_hand.read_text(encoding="utf-8").count(work_tickets.FLEET_MARKER) == 1
+

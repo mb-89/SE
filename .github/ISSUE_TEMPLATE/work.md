@@ -4,6 +4,7 @@ about: One package for one worker. Title = branch name. Carries only the task; g
 title: "<type>/<topic>-<yyyymmdd>"
 labels: work
 ---
+<!-- se:fleet -->
 
 ## Goal
 

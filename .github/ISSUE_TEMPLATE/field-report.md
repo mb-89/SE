@@ -4,6 +4,7 @@ about: What a worker delivered and did not deliver. One per work issue, created 
 title: "field-report: <branch>"
 labels: field-report
 ---
+<!-- se:fleet -->
 
 **Work issue:** #<n>  **Pull request:** #<n>  **Branch:** `<branch>`  **Result:** complete | partial
 **Tested against `<integration branch>`:** `<commit>` <!-- the integration-branch commit merged last before the pull request -->
