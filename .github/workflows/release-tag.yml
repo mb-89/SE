@@ -1,0 +1,11 @@
+# Tags se's releases with the reusable release workflow (README "Release tags").
+name: release-tag
+
+on: push
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: mb-89/SE/.github/workflows/release.yml@se
