@@ -181,6 +181,7 @@ def local_config(tmp_path: Path, monkeypatch) -> Path:
 def gh(monkeypatch) -> FakeGh:
     fake = FakeGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "current_branch", lambda root: BRANCH)
     monkeypatch.setattr(work_tickets, "tested_main", lambda root: "abc1234")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -575,7 +576,7 @@ def test_field_report_check_validates_against_the_template_without_github(
 
     code = run(worktree, "field-report", "--check", str(report))
     captured = capsys.readouterr()
-    assert gh.calls == []
+    assert all(call[:2] == ["issue", "view"] for call in gh.calls)  # reads only, for the comments
     if message is None:
         assert code == 0, captured.err
         assert "Field report report.md follows the template" in captured.out
@@ -674,6 +675,57 @@ def test_missing_gh_names_the_command_the_tool_and_the_without_gh_section(worktr
     assert "the se checkout's .github/" in error
     se_root = Path(work_tickets.__file__).resolve().parents[1]
     assert "### Without gh" in (se_root / path).read_text(encoding="utf-8")
+
+
+def test_field_report_check_refuses_comments_after_intake_until_they_are_recorded_as_read(
+        worktree, gh, capsys):
+    gh.comment("C1", "Started.")
+    run(worktree, "intake", "--issue", "5")
+    report = worktree / "report.md"
+    report.write_text(COMPLETE_REPORT, encoding="utf-8")
+    assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
+
+    gh.comment("C2", "Requirement 2 also covers the docs.")
+    capsys.readouterr()
+    assert run(worktree, "field-report", "--check", str(report)) == 1
+    error = capsys.readouterr().err
+    assert f"dispatcher: {URL}#issuecomment-C2" in error
+    assert "issuecomment-C1" not in error
+    assert ("Read them, apply them or answer them in the field report's Review responses, then "
+            "record them as read: work_tickets.py comments-read --count 2 --newest C2") in error
+
+    assert run(worktree, "comments-read", "--count", "2", "--newest", "C2") == 0
+    assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
+
+
+def test_field_report_check_takes_the_comments_by_hand_without_gh(worktree, gh, monkeypatch, capsys):
+    report = worktree / "report.md"
+    report.write_text(COMPLETE_REPORT, encoding="utf-8")
+    issue = worktree / "issue.md"
+    issue.write_text(BODY, encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: False)
+    check = ["field-report", "--check", str(report), "--issue-body", str(issue)]
+
+    assert run(worktree, "comments-read", "--count", "1", "--newest", "C1") == 0
+    assert run(worktree, *check) == 1
+    assert "pass --comment-count <n> --newest-comment <id>" in capsys.readouterr().err
+    assert run(worktree, *check, "--comment-count", "1", "--newest-comment", "C1") == 0
+    assert run(worktree, *check, "--comment-count", "2", "--newest-comment", "C2") == 1
+    error = capsys.readouterr().err
+    assert "2 comment(s) now, 1 recorded as read; newest now C2, recorded C1" in error
+    assert "comments-read --count 2 --newest C2 --worktree <worktree>" in error
+    assert gh.calls == []
+
+
+def test_deliver_refuses_comments_after_intake_before_pushing(worktree, gh, monkeypatch, capsys):
+    run(worktree, "intake", "--issue", "5")
+    draft_complete_field_report(worktree)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(work_tickets, "push", lambda root, branch: pytest.fail("pushed"))
+    gh.comment("C1", "Change of plan.")
+    assert run(worktree, "deliver") == 1
+    assert f"{URL}#issuecomment-C1" in capsys.readouterr().err
+    assert not any(call[:2] in (["pr", "create"], ["issue", "create"]) for call in gh.calls)
 
 
 def test_sync_fetches_and_merges_main_or_reports_conflicts(worktree, monkeypatch, capsys):
@@ -1255,6 +1307,7 @@ def test_start_creates_a_worktree_from_the_newest_main_and_marks_the_issue(
         main_checkout, local_config, monkeypatch, capsys):
     fake = StartGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(
         work_tickets, "ready_issues",
@@ -1289,6 +1342,7 @@ def test_start_argument_overrides_the_checkout_worktree_root(
         main_checkout, local_config, monkeypatch):
     fake = StartGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(
         work_tickets,
@@ -1316,6 +1370,7 @@ def test_start_argument_overrides_the_checkout_worktree_root(
 def test_start_refuses_unstartable_issues(main_checkout, monkeypatch, capsys, ready, slots, message):
     fake = StartGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: ready)
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: slots)
@@ -1327,6 +1382,7 @@ def test_start_refuses_unstartable_issues(main_checkout, monkeypatch, capsys, re
 def test_start_uses_a_sibling_worktree_root_by_default(main_checkout, monkeypatch, capsys):
     fake = StartGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(
         work_tickets, "ready_issues",
@@ -1350,6 +1406,7 @@ def test_start_no_create_uses_an_existing_issue_branch_worktree(
         main_checkout, monkeypatch, capsys):
     fake = StartGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(
         work_tickets, "ready_issues",
@@ -1381,6 +1438,7 @@ def test_start_no_create_requires_a_worktree_on_the_issue_branch(
         main_checkout, monkeypatch, capsys):
     fake = StartGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(
         work_tickets, "ready_issues",
@@ -1401,6 +1459,7 @@ def test_start_without_no_create_refuses_an_existing_issue_branch(
         main_checkout, monkeypatch, capsys):
     fake = StartGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(
         work_tickets,
@@ -1424,6 +1483,7 @@ def test_start_assigns_a_cloud_worker_without_creating_a_worktree(
         main_checkout, monkeypatch, capsys):
     fake = StartGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(
         work_tickets, "ready_issues", lambda root, repo: [{"number": 5, "title": BRANCH}]
