@@ -317,10 +317,11 @@ issues point here and never restate it. The project's suite and its time budget 
 se is project-neutral. A project that uses it states in its `AGENTS.md`:
 
 - where se lives in the project, `<se>` in every skill and agent (`.` in se itself), and that `.se/`
-  is git-ignored. In Claude Code, the start hook names it in the session context as `SE root:
-  <path>` (a plugin install, a `~/.claude/skills/se` clone and se's own checkout alike), and that
-  path wins. Scripts are always `<se>/scripts/<name>.py`, never relative to the working directory;
-  `<se>/scripts/se_plugin.py` refuses a skill or agent that names one otherwise;
+  is git-ignored;
+  - in Claude Code, the start hook names it in the session context as `SE root: <path>` (a plugin
+    install, a `~/.claude/skills/se` clone and se's own checkout alike), and that path wins;
+  - scripts are always `<se>/scripts/<name>.py`, never relative to the working directory;
+    `<se>/scripts/se_plugin.py` refuses a skill or agent that names one otherwise;
 - the setup command that installs the tools the roles need (`git`, `gh`, Python 3.11 or newer and
   whatever the project's tests need);
 - the focused and the complete test commands, including gated test tiers if there are any;
