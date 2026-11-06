@@ -27,8 +27,8 @@ to `se`; a failed build publishes nothing, so the previous artifact stays.
 ## Modules
 
 A repository pulls its dependencies (se itself, format tools, styles, other repositories) as modules
-pinned to commits or to semantic version ranges, from any Git host. `scripts/se_modules.py` implements this section; its
-invocation is in [Commands](#commands).
+pinned to commits or to semantic version ranges, from any Git host. `scripts/se_modules.py`
+implements this section; its invocation is in [Commands](#commands).
 
 ### `se.toml`
 
