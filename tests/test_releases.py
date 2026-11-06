@@ -65,6 +65,8 @@ def integrate(root: Path, branch: str, breaking: bool = False, trailer: str | No
 
 
 def push(root: Path) -> int:
+    """work_tickets.py push, after the suite passed on HEAD (its verdict recorded as suite does)."""
+    work_tickets.sibling("verdicts").record(root, "suite", "HEAD", True)
     return work_tickets.main(["push", "--worktree", str(root)])
 
 

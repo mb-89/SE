@@ -417,15 +417,34 @@ def se_pin(root: Path) -> dict | None:
     return module
 
 
-def se_modules():
-    """scripts/se_modules.py, the owner of semantic versions and ranges, loaded beside this script."""
+def sibling(name: str):
+    """The script `<name>.py` beside this one, loaded under its own name."""
     import importlib.util
-    name = "public_check_se_modules"
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("se_modules.py"))
+    qualified = f"public_check_{name}"
+    spec = importlib.util.spec_from_file_location(qualified, Path(__file__).with_name(f"{name}.py"))
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    sys.modules[qualified] = module
     spec.loader.exec_module(module)
     return module
+
+
+def se_modules():
+    """scripts/se_modules.py, the owner of semantic versions and ranges."""
+    return sibling("se_modules")
+
+
+def record_verdict(args: argparse.Namespace, passed: bool) -> None:
+    """A check of `--rev` records its verdict on that tree (scripts/verdicts.py), which the push to
+    the integration branch needs."""
+    if not args.rev or args.no_history:
+        return
+    root = Path(args.repo).resolve()
+    try:
+        tree = sibling("verdicts").record(root, "public-check", args.rev, passed)
+    except (OSError, ValueError) as error:
+        print(f"public-check: warning: verdict not recorded: {error}")
+        return
+    print(f"public-check: verdict recorded on tree {tree[:12]}")
 
 
 def check_se_range(text: str) -> None:
@@ -531,11 +550,13 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
 def main(argv: list[str] | None = None) -> int:
     commit = se_commit()
     version = f"se {commit[:7] if commit else 'commit unknown'}"
+    args = parse_args(argv)
     try:
-        report = check(parse_args(argv), commit)
+        report = check(args, commit)
     except SetupError as error:
         print(f"public-check: error ({version}): {error}")
         return 2
+    record_verdict(args, not report.hits)
     for warning in report.warnings:
         print(f"public-check: warning: {warning}")
     for hit in report.hits:
