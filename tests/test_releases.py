@@ -167,3 +167,42 @@ def test_a_malformed_version_is_an_error_naming_the_file_and_the_remedy(checkout
 ])
 def test_the_work_issue_marks_a_breaking_change_in_its_package_kind(kind, breaking):
     assert work_tickets.is_breaking(f"## Goal\n\nx\n\n## Package kind\n\n{kind}\n\n## Blocked by\n") is breaking
+
+
+def by_workflow(root: Path, version: str = "1.2.3") -> None:
+    (root / "se.toml").write_text(settings(version) + 'release = "workflow"\n', encoding="utf-8")
+    git(root, "commit", "-q", "-am", "release by workflow")
+
+
+def origin_tags(root: Path) -> list[str]:
+    return subprocess.run(["git", "--git-dir", str(root.parent / "origin.git"), "tag"],
+                          capture_output=True, text=True, check=True).stdout.split()
+
+
+def test_with_release_by_workflow_push_bumps_and_pushes_the_branch_only(checkout, capsys):
+    by_workflow(checkout)
+    integrate(checkout, "feature/topic-20261106")
+    assert push(checkout) == 0
+    assert origin_tags(checkout) == ["v1.2.3"]
+    assert git(checkout, "show", "origin/main:se.toml").count('version = "1.3.0"') == 1
+    assert git(checkout, "log", "-1", "--format=%s", "origin/main") == "Release v1.3.0"
+    out = capsys.readouterr().out
+    assert ("Release: v1.3.0 is tagged by the release workflow (.github/workflows/release.yml of se) "
+            "on its push, as se.toml [project] release = \"workflow\" says") in out
+
+
+def test_with_release_by_workflow_an_untagged_version_waits_for_the_workflow(checkout, capsys):
+    by_workflow(checkout, "2.0.0")
+    integrate(checkout, "feature/topic-20261106")
+    assert push(checkout) == 0
+    assert origin_tags(checkout) == ["v1.2.3"]
+    assert git(checkout, "tag", "--list", "v2.0.0") == ""
+    assert git(checkout, "rev-parse", "origin/main") == git(checkout, "rev-parse", "main")
+    assert "Release: v2.0.0 is tagged by the release workflow" in capsys.readouterr().out
+
+
+def test_another_release_setting_is_an_error_naming_the_file(checkout, capsys):
+    (checkout / "se.toml").write_text(settings("1.2.3") + 'release = "manual"\n', encoding="utf-8")
+    assert push(checkout) == 1
+    assert (f"project.release in {checkout / 'se.toml'} is 'manual'; set it to \"workflow\" or remove it"
+            in capsys.readouterr().err)

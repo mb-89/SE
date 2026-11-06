@@ -770,6 +770,26 @@ def public_check_enabled(root: Path) -> bool:
     return configured
 
 
+RELEASE_WORKFLOW = ".github/workflows/release.yml of se"
+
+
+def release_by_workflow(root: Path) -> bool:
+    """`project.release = "workflow"` in se.toml: the release workflow pushes the tags, not push."""
+    configured = project_config(root).get("release")
+    if configured not in (None, "workflow"):
+        raise QueueError(
+            f"project.release in {root / 'se.toml'} is {configured!r}; set it to \"workflow\" or remove it"
+        )
+    return configured == "workflow"
+
+
+def workflow_tags(tag: str) -> None:
+    print(
+        f"Release: {tag} is tagged by the release workflow ({RELEASE_WORKFLOW}) on its push, "
+        'as se.toml [project] release = "workflow" says'
+    )
+
+
 VERSION_PATTERN = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 VERSION_REMEDY = 'write it as version = "MAJOR.MINOR.PATCH" under [project], for example "1.0.0"'
 
@@ -1825,13 +1845,17 @@ def set_project_version(root: Path, version: str) -> None:
 
 def release(root: Path, branch: str) -> str | None:
     """Release what was integrated into `branch`: bump project.version by the packages' highest
-    kind, commit it and tag `v<version>`; the tag to push, or None where nothing is released."""
+    kind, commit it and tag `v<version>`; the tag to push, or None where nothing is released.
+    Where the release workflow tags, a version without its tag is left for it to tag."""
+    by_workflow = release_by_workflow(root)
     version = project_version(root)
     if version is None:
         print(f"Release off: no project.version in {root / 'se.toml'}; {VERSION_REMEDY} to tag each integration")
         return None
     current = f"v{version_text(version)}"
     if not tag_exists(root, current):
+        if by_workflow:
+            return current
         checked_git(root, "tag", current, branch)
         print(f"Release: {current} tagged, the first tag of project.version")
         return current
@@ -1857,9 +1881,13 @@ def release(root: Path, branch: str) -> str | None:
 
 def push(root: Path, branch: str | None = None) -> str:
     """Gate `branch` (default: the current one), then push it to origin with its upstream set; the
-    integration branch is released first and its new tag pushed with it."""
+    integration branch is released first and its new tag pushed with it, unless the release
+    workflow pushes the tags (`project.release = "workflow"`)."""
     branch = branch or current_branch(root)
     tag = release(root, branch) if branch == integration_branch(root) else None
+    if tag and release_by_workflow(root):
+        workflow_tags(tag)
+        tag = None
     push_gate(root, branch)
     git_push(root, ["-u", "origin", branch, *((f"refs/tags/{tag}",) if tag else ())])
     return branch
