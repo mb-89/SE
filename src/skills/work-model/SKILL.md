@@ -44,6 +44,9 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   and never wait for an answer, an approval or a decision: they decide what they may decide,
   escalate the rest, and continue with other work or end their turn.
 - **Escalation**: what a role may not decide climbs the [escalation ladder](#escalation-ladder).
+- **Asking a working agent**: a person who wants to ask a running worker or integrator something
+  asks SE, which sends it a message down the tree. There is no other channel into a running
+  session.
 - **Messages travel only up and down the tree**: a session messages only the session that started
   it and the sessions it started. A sideways message (one integrator to another) stops at a
   permission prompt in Claude's cloud, so news for another repository goes up to SE,
@@ -57,6 +60,25 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   needs the human's approval, obtained by SE.
 - Retros use `retro.md`; each improvement names the agent definition, template, skill or script
   it changes, and becomes an ordinary work issue.
+
+## Issues
+
+An issue is one package of work: its title is its branch name, and it ends as one merge with one
+field report.
+
+- **Sizes**: tiny, small or medium. A topic bigger than medium becomes several issues, worked in
+  order.
+- **Kinds**: a work issue, a field report (the two of [Roles and flow](#roles-and-flow)), work
+  from outside ([Outside issues](#outside-issues)) and a backlog issue (below).
+- **Decisions are never issues**: they go to the person as a deck, as the
+  [escalation ladder](#escalation-ladder) says.
+- **Backlog**: a far-out idea that is not ready work is an issue labelled `backlogged` and
+  `se-person`, filed and found by SE with `work_tickets.py backlog file` and `backlog list
+  --search <text>` (title and body).
+  - It is not work: no integrator or worker takes it (`ready` and `start` skip it), and the
+    outside-issue intake skips it, as neither new work nor an outside issue.
+  - It becomes work only when SE re-files it as a work issue, or removes the `backlogged` label
+    once the owner has blessed it.
 
 ## Escalation ladder
 
@@ -270,8 +292,8 @@ A worker splits its work issue into local tickets in its worktree:
   failure paths exercised with temporary repositories or fakes. Workers may create, use and close
   throw-away tracker issues for live acceptance runs.
 - Notes are private scratch: never committed, never copied into tracked files or reports. A note
-  is resolved by a local `Disposition:` line stating the decision; future work becomes a tracked
-  backlog item or work issue, not a copy of the note. Only unresolved notes block worktree removal.
+  is resolved by a local `Disposition:` line stating the decision; future work becomes a
+  [backlog issue](#issues) or work issue, not a copy of the note. Only unresolved notes block worktree removal.
 - Rebuilds use the latest integrated state through the project's build command; every integrated
   package that changes output includes a fresh build and a check of the affected output.
 
@@ -309,7 +331,7 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
 - the design notes that own product qualities, ownership and testing rules;
 - its worktree scripts, when a plain worktree is not enough (see [Worktrees](#worktrees)), and the
   environment file a testing shell must load, if any;
-- its hot files (files that parallel packages touch and that need one owner) and its backlog.
+- its hot files (files that parallel packages touch and that need one owner).
 
 The repository and its host come from the checkout's git remote `origin` (or `--repo`). Machine-local
 facts never go into a repository; they live in `~/.se/local.toml`. The
