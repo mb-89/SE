@@ -117,7 +117,7 @@ GENERIC_PATTERNS = (
 
 
 TRACKER_RULE = (
-    "rule: commit messages carry no tracker numbers, .github/skills/work-model/SKILL.md"
+    "rule: commit messages carry no tracker numbers, src/skills/work-model/SKILL.md"
 )
 TRACKER_REFERENCE = re.compile(
     r"(?<![\w&#])#\d+\b"  # #593, not C#5 or the HTML entity &#39;

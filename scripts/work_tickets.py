@@ -71,7 +71,7 @@ class QueueError(Exception):
 
 
 # Relative to se's checkout: an absolute path would carry a user profile path into logs.
-WITHOUT_GH = ".github/skills/work-model/SKILL.md#without-gh"
+WITHOUT_GH = "src/skills/work-model/SKILL.md#without-gh"
 
 
 class MissingGhError(QueueError):
@@ -1254,7 +1254,7 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
         f"# {DELIVERY_TICKET}: Deliver {issue['title']}\n\n"
         "## Design\n\n"
         f"Work issue {issue['url']}, sections Acceptance and Verification; the delivery steps "
-        "are in `.github/agents/worker.agent.md`.\n\n"
+        "are in `src/agents/worker.md`.\n\n"
         f"## Scope\n\nVerification from the work issue:\n\n{verification}\n\n"
         "## Dependencies\n\n"
         + ", ".join(f"`{ticket_id}`" for ticket_id, _ in tickets) + "\n\n"

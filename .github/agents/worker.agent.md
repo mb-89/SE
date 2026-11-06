@@ -4,6 +4,7 @@ description: 'Works one work issue in its own worktree and always ends with a pu
 tools: ['execute', 'read', 'edit', 'search', 'send_message']
 strict-tools-list: true
 ---
+<!-- Generated from src/agents/worker.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 
 # Worker
 
@@ -28,7 +29,7 @@ notify, if any.
 - Never write outside the box: not the integration branch, not the main checkouts, not other worktrees, not other
   repositories, not other issues. What you need from outside goes into the field report
   ("Tickets for other repositories", "Not delivered").
-- You never talk to other agents or wait for a human; the human talks only to the dispatcher. The
+- You never talk to other agents or wait for a human; the human talks only to SE. The
   one message you send is the single delivery notice in step 7 below. What you may not decide goes
   into the field report as "Not delivered" and climbs the
   [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder).
@@ -60,7 +61,7 @@ notify, if any.
    without rebasing a pushed branch.
 2. **Intake**: `work_tickets.py intake --issue <n>` writes one ticket per numbered requirement plus a
    `delivery` ticket into `.se/work/todo/` and lists the issue's comments. Read every comment: a
-   comment from the dispatcher changes the requirements; edit or add tickets to match. A ticket
+   comment from SE changes the requirements; edit or add tickets to match. A ticket
    created by hand (`work_tickets.py create`) gets its acceptance items with `--acceptance <text>`,
    one per item, so `move --to done` needs no hand edit.
 3. **Before each ticket**: `work_tickets.py refresh` re-reads the issue and its comments and reports
