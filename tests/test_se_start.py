@@ -257,10 +257,24 @@ def test_a_new_module_without_a_cached_answer_starts_a_check(setup):
 
 
 def test_the_hook_output_shows_the_greeting_and_hands_it_to_the_session():
-    data = json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], ["se bootstrap: installing uv"]))
+    data = json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], ["se bootstrap: installing uv"],
+                                           Path("/opt/se")))
     assert data["systemMessage"] == "se bootstrap: installing uv\nSE 1.2.0 started: ..."
     assert data["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert data["hookSpecificOutput"]["additionalContext"].startswith(data["systemMessage"])
+
+
+def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, monkeypatch):
+    """The session finds SE's scripts at the root the hook names, not by searching for the plugin."""
+    monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
+    assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]),
+                          "--cache", str(setup["cache"]), "status", "--hook", "--offline"],
+                         world=setup["world"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    context = data["hookSpecificOutput"]["additionalContext"]
+    assert f"\nSE root: {setup['se']}\n" in context
+    assert "<se>/scripts/<name>.py" in context
+    assert "SE root" not in data["systemMessage"]
 
 
 # Requirement 3: refresh moves only what is due, real git repositories.

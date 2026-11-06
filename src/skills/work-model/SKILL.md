@@ -1,6 +1,6 @@
 ---
 name: work-model
-description: 'The shared rules of how we work, for every role (SE, worker, integrator): one work issue in, a pull request plus a field-report issue out; the box; escalation; freshness, dependencies and scheduling; worktrees; local tickets and notes; what a project provides. Load it whenever you act as SE, worker or integrator, write or read work, field-report or retro issues, or use scripts/work_tickets.py.'
+description: 'The shared rules of how we work, for every role (SE, worker, integrator): one work issue in, a pull request plus a field-report issue out; the box; escalation; freshness, dependencies and scheduling; worktrees; local tickets and notes; what a project provides. Load it whenever you act as SE, worker or integrator, write or read work, field-report or retro issues, or use <se>/scripts/work_tickets.py.'
 ---
 
 # Work model
@@ -147,7 +147,7 @@ Nothing reaches the integration branch without a passing complete suite and, unl
 - The release commit `push` makes (only the version and what `release_build` regenerates) carries
   its parent's suite verdict.
 - There is no bypass: an emergency push runs `suite` like any other.
-- The verdicts live in the repository's git directory (`se-verdicts/`, `scripts/verdicts.py`),
+- The verdicts live in the repository's git directory (`se-verdicts/`, `<se>/scripts/verdicts.py`),
   shared by its worktrees.
 
 ## Rules for all roles
@@ -316,7 +316,12 @@ issues point here and never restate it. The project's suite and its time budget 
 
 se is project-neutral. A project that uses it states in its `AGENTS.md`:
 
-- where se lives in the project (`<se>` below; `.` in se itself) and that `.se/` is git-ignored;
+- where se lives in the project, `<se>` in every skill and agent (`.` in se itself), and that `.se/`
+  is git-ignored;
+  - in Claude Code, the start hook names it in the session context as `SE root: <path>` (a plugin
+    install, a `~/.claude/skills/se` clone and se's own checkout alike), and that path wins;
+  - scripts are always `<se>/scripts/<name>.py`, never relative to the working directory;
+    `<se>/scripts/se_plugin.py` refuses a skill or agent that names one otherwise;
 - the setup command that installs the tools the roles need (`git`, `gh`, Python 3.11 or newer and
   whatever the project's tests need);
 - the focused and the complete test commands, including gated test tiers if there are any;

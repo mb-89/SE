@@ -108,3 +108,29 @@ def test_the_readme_installs_the_plugin_the_marketplace_declares():
     assert f"`{plugin}@{marketplace['name']}`" in readme
     for agent in sorted(path.stem for path in (ROOT / "src" / "agents").glob("*.md")):
         assert f"`{plugin}:{agent}`" in readme
+
+
+@pytest.mark.parametrize("named", ("`uv run python scripts/deck.py build`", "<se checkout>/scripts/se_start.py",
+                                   "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh"))
+def test_a_source_naming_a_script_without_ses_root_is_refused(checkout, capsys, named):
+    source = checkout / "src" / "skills" / "decision" / "SKILL.md"
+    original = source.read_text(encoding="utf-8")
+    source.write_text(original + f"\nRun {named}.\n", encoding="utf-8")
+    try:
+        assert se_plugin.main(["check", "--root", str(checkout)]) == 2
+        assert "src/skills/decision/SKILL.md:" in capsys.readouterr().err
+        assert se_plugin.main(["build", "--root", str(checkout)]) == 2
+    finally:
+        source.write_text(original, encoding="utf-8")
+
+
+def test_a_script_under_ses_root_a_relative_link_and_another_folder_pass(checkout):
+    source = checkout / "src" / "skills" / "decision" / "SKILL.md"
+    original = source.read_text(encoding="utf-8")
+    source.write_text(original + "\nRun `uv run python <se>/scripts/deck.py`, see "
+                      "[it](../../../scripts/deck.py) and `src/scripts/`.\n", encoding="utf-8")
+    try:
+        assert se_plugin.main(["build", "--root", str(checkout)]) == 0
+    finally:
+        source.write_text(original, encoding="utf-8")
+        assert se_plugin.main(["build", "--root", str(checkout)]) == 0
