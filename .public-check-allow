@@ -5,6 +5,10 @@
 #   commit:<full sha> author|committer  # reason
 #                              covers the identity hits of that role on that commit only, for
 #                              history already published; the same identity elsewhere still fails
-# Entries never cover commit messages. A file entry that matches no hit fails a check that has the
-# private deny list, so stale exceptions cannot hide a later leak; a commit entry is not reported
-# unused, as only the gate of a range that holds its commit sees its hit.
+#   commit:<full sha> message  # reason
+#                              covers the message hits (tracker references included) of that
+#                              commit only, for history already published; the same text in any
+#                              other commit still fails
+# File entries never cover commit messages. An entry that matches no hit fails a check that has the
+# private deny list, naming its line and form, so stale exceptions cannot hide a later leak; a
+# commit entry counts only in the gate of a range that holds its commit, which alone sees its hits.

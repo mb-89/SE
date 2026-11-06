@@ -459,7 +459,7 @@ def test_unused_allow_entry_fails_a_full_check(repo: Path) -> None:
     allow_repo(repo, "docs/*  # sample paths\nsrc/*.py  # fixtures\nsrc/x.py:1  # stale\n")
     result = run_check("--repo", str(repo))
     assert result.returncode == 1
-    assert ".public-check-allow:3: unused-allow-entry" in result.stdout
+    assert ".public-check-allow:3: unused-allow-entry ('<path>:<line>' entry" in result.stdout
 
 
 def test_unused_allow_entry_only_warns_without_private_list(
@@ -468,7 +468,8 @@ def test_unused_allow_entry_only_warns_without_private_list(
     allow_repo(repo, "docs/*  # sample paths\nsrc/*.py  # fixtures\nold/*  # moved away\n")
     result = run_check("--repo", str(repo))
     assert result.returncode == 0, result.stdout
-    assert "public-check: warning: unused allow entry .public-check-allow:3" in result.stdout
+    assert ("public-check: warning: unused allow entry .public-check-allow:3 ('<path glob>' entry"
+            in result.stdout)
 
 
 def test_allow_entry_needs_a_reason(repo: Path) -> None:
@@ -546,6 +547,56 @@ def test_a_commit_entry_without_reason_full_sha_or_role_is_rejected(repo: Path, 
     result = run_check("--repo", str(repo))
     assert result.returncode == 2, result.stdout
     assert ".public-check-allow:1:" in result.stdout
+
+
+def message_entry_repo(repo: Path) -> tuple[str, str]:
+    """Two commits whose messages carry the same tracker reference; returns their SHAs."""
+    shas = []
+    for name in ("a.txt", "b.txt"):
+        commit(repo, {name: "clean\n"}, f"Merge work into {name} (" + "#7)")
+        shas.append(git(repo, "rev-parse", "HEAD").stdout.strip())
+    return shas[0], shas[1]
+
+
+def test_a_message_entry_allows_the_message_of_that_commit_only(repo: Path) -> None:
+    listed, other = message_entry_repo(repo)
+    (repo / public_check.ALLOW_FILE).write_text(
+        f"commit:{listed} message  # merge already published\n", encoding="utf-8")
+    assert run_check("--repo", str(repo), "--range", "HEAD~1").returncode == 0
+    result = run_check("--repo", str(repo), "--range", "HEAD")
+    assert result.returncode == 1
+    hits = [line for line in result.stdout.splitlines() if "tracker-reference" in line]
+    assert [hit.split(" message:")[0] for hit in hits] == [f"commit {other[:12]}"], result.stdout
+
+
+def test_a_message_entry_covers_pattern_hits_in_its_message(repo: Path) -> None:
+    commit(repo, {"a.txt": "a\n"}, "Copy from /" + "home/alice")
+    sha = git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / public_check.ALLOW_FILE).write_text(
+        f"commit:{sha} message  # imported history\n", encoding="utf-8")
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 0, result.stdout
+
+
+def test_a_message_entry_without_reason_is_rejected(repo: Path) -> None:
+    listed, _ = message_entry_repo(repo)
+    (repo / public_check.ALLOW_FILE).write_text(f"commit:{listed} message\n", encoding="utf-8")
+    result = run_check("--repo", str(repo), "--range", "HEAD~1")
+    assert result.returncode == 2, result.stdout
+    assert ".public-check-allow:1: write" in result.stdout
+    assert "author|committer|message" in result.stdout
+
+
+def test_an_unused_commit_entry_in_a_gate_is_reported_with_its_line_and_form(repo: Path) -> None:
+    commit(repo, {"a.txt": "a\n"}, "Clean message")
+    sha = git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / public_check.ALLOW_FILE).write_text(
+        f"commit:{sha} message  # stale\n", encoding="utf-8")
+    assert run_check("--repo", str(repo)).returncode == 0  # a full check does not decide it
+    result = run_check("--repo", str(repo), "--range", "HEAD")
+    assert result.returncode == 1
+    assert (".public-check-allow:1: unused-allow-entry ('commit:<full sha> message' entry; "
+            "remove it or correct it in place)") in result.stdout
 
 
 def git_sh() -> str | None:

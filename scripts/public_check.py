@@ -12,7 +12,8 @@ commits of a --range must also carry the project identity (se.toml [project] ide
 machine sets public_identity), where one is set; GitHub's web-flow identity, the committer of a
 commit made on GitHub, passes as committer. A hit names the identity found, redacted. A
 `commit:<full sha> author|committer` entry in .public-check-allow allows the identity in that role
-on that one commit, for history already published.
+on that one commit, and a `commit:<full sha> message` entry the message hits of that one commit,
+for history already published.
 
 Every verdict names the se commit that ran it. A checked repository that pins se (`[modules.se]`
 in its se.toml) is refused when this se is not at that `ref`, or when the version this se's
@@ -185,6 +186,14 @@ class AllowEntry:
     commit: str | None = None
     role: str | None = None
     used: bool = False
+    seen: bool = False  # a commit entry's commit was gated, so every hit it covers was looked for
+
+    @property
+    def form(self) -> str:
+        """The entry's form as the header of the allow file writes it."""
+        if self.commit is not None:
+            return f"commit:<full sha> {self.role}"
+        return "<path glob>" if self.glob is not None else "<path>:<line>"
 
     def matches(self, path: str, line: int | None) -> bool:
         if self.glob is not None:
@@ -193,7 +202,8 @@ class AllowEntry:
 
 
 COMMIT_ENTRY = re.compile(r"commit:(\S*)(?:\s+(\S+))?")
-ROLES = ("author", "committer")
+ROLES = ("author", "committer", "message")
+COMMIT_FORM = "commit:<full sha> author|committer|message"
 
 
 @dataclass
@@ -236,13 +246,12 @@ def load_allow(root: Path) -> list[AllowEntry]:
         entry = entry.strip()
         if not entry or not reason.strip():
             raise SetupError(f"{ALLOW_FILE}:{number}: write '<path glob or file:line>  # reason' "
-                             "or 'commit:<full sha> author|committer  # reason'")
+                             f"or '{COMMIT_FORM}  # reason'")
         commit = COMMIT_ENTRY.fullmatch(entry)
         if commit:
             sha, role = commit.group(1).lower(), commit.group(2)
             if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) or role not in ROLES:
-                raise SetupError(f"{ALLOW_FILE}:{number}: write "
-                                 "'commit:<full sha> author|committer  # reason'")
+                raise SetupError(f"{ALLOW_FILE}:{number}: write '{COMMIT_FORM}  # reason'")
             entries.append(AllowEntry(number, commit=sha, role=role))
             continue
         file_line = re.fullmatch(r"(.+):(\d+)", entry)
@@ -417,7 +426,8 @@ def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], repo
                  gate: bool, allow: list[AllowEntry]) -> None:
     """Hits in the identities and messages of `revisions`; a gate (commits not yet pushed) also
     refuses tracker references and identities other than the project identity. A commit entry of
-    `allow` drops the identity hits of its role on its commit."""
+    `allow` drops the hits of its role (an identity, or the message) on its commit; in a gate,
+    where every hit it may cover is looked for, one that drops none is reported unused."""
     expected = project_identity(root) if gate else None
     output = git(root, "log", "-z", "--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B", *revisions, "--")
     for record in output.decode("utf-8", "replace").split("\0"):
@@ -433,9 +443,19 @@ def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], repo
         if expected is not None:
             scan_project_identity(where, "author", author, expected, patterns, report)
             scan_project_identity(where, "committer", committer, expected, patterns, report)
-        allowed = {f"{where} {entry.role}" for entry in allow if entry.commit == sha}
-        report.hits[found:] = [hit for hit in report.hits[found:] if hit.location not in allowed]
         scan_message(where, message, patterns, report, REWORD_BEFORE_PUSH if gate else None)
+        entries = {entry.role: entry for entry in allow if entry.commit == sha}
+        kept = []
+        for hit in report.hits[found:]:
+            role = hit.location[len(where) + 1:].split(":", 1)[0]
+            if role in entries:
+                entries[role].used = True
+            else:
+                kept.append(hit)
+        report.hits[found:] = kept
+        if gate:
+            for entry in entries.values():
+                entry.seen = True
 
 
 def scan_message_file(root: Path, path: Path, patterns: list[Pattern], report: Report) -> None:
@@ -599,18 +619,26 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
     else:
         files = worktree_files(root)
     scan_files(files, patterns, allow, report)
-    for entry in allow:
-        if entry.used or entry.commit is not None:  # a gate's hit is not seen by every check
-            continue
-        if terms is None:  # the entry may cover a private-term hit this run cannot see
-            report.warnings.append(f"unused allow entry {ALLOW_FILE}:{entry.line}")
-        else:
-            report.hits.append(Hit(f"{ALLOW_FILE}:{entry.line}", "unused-allow-entry"))
     revisions = args.revisions or ("" if args.staged else args.rev or "HEAD")
     if not args.no_history and revisions and (args.revisions or has_head(root)):
         scan_history(root, revisions.split(), patterns, report, gate=bool(args.revisions),
                      allow=allow)
+    report_unused(allow, terms is not None, report)
     return report
+
+
+def report_unused(allow: list[AllowEntry], full: bool, report: Report) -> None:
+    """Every unused entry, by line and form: a hit where the check is full, else a warning (it
+    may cover a private-term hit this run cannot see). A commit entry counts only where its commit
+    was gated, as a gate's hit is not seen by every check."""
+    for entry in allow:
+        if entry.used or (entry.commit is not None and not entry.seen):
+            continue
+        form = f"'{entry.form}' entry; remove it or correct it in place"
+        if full:
+            report.hits.append(Hit(f"{ALLOW_FILE}:{entry.line}", "unused-allow-entry", f" ({form})"))
+        else:
+            report.warnings.append(f"unused allow entry {ALLOW_FILE}:{entry.line} ({form})")
 
 
 def main(argv: list[str] | None = None) -> int:

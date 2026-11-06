@@ -44,7 +44,8 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   [work model's rule](src/skills/work-model/SKILL.md#what-the-project-provides): the commit
   gates (`--message-file`, and the commits of a `--range`, as the hooks and `integrate` pass it)
   refuse them and, as they name nothing private, print the reference with its remedy. A full check
-  leaves history already pushed alone.
+  leaves history already pushed alone; a commit already published passes by its reasoned message
+  entry in `.public-check-allow`.
 - The project identity in the commit gates of a `--range`: where the project sets an `identity`
   (or the machine a `public_identity`, which wins), a commit whose author or committer differs is
   refused, naming the commit, the identity found (redacted) and the remedy. A full check leaves
