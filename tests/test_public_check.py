@@ -794,3 +794,50 @@ def test_full_check_leaves_tracker_references_in_old_history_alone(repo: Path) -
     result = run_check("--repo", str(repo), "--range", "HEAD")
     assert result.returncode == 1
     assert "tracker-reference '#1'" in result.stdout
+
+
+CO_AUTHOR = "Co-Authored-By: Bot <bot" + AT + "example.com>"
+SESSION = "Claude-Session: https://session.example.com/s1"
+
+
+@pytest.mark.parametrize(("trailer", "key"), [
+    (CO_AUTHOR, "Co-Authored-By"),
+    ("co-authored-by: Bot", "co-authored-by"),
+    (SESSION, "Claude-Session"),
+])
+def test_the_message_gate_refuses_an_attribution_trailer(
+        repo: Path, tmp_path: Path, trailer: str, key: str) -> None:
+    message = tmp_path / "msg"
+    message.write_text(f"Add file\n\nBody\n\n{trailer}\n", encoding="utf-8")
+    result = run_check("--repo", str(repo), "--message-file", str(message))
+    assert result.returncode == 1, result.stdout
+    assert f"commit message:5: attribution-trailer '{key}:'" in result.stdout
+    assert "commits carry no attribution trailers" in result.stdout
+    assert "reword the message before committing" in result.stdout
+
+
+def test_the_message_gate_passes_a_clean_message(repo: Path, tmp_path: Path) -> None:
+    message = tmp_path / "msg"
+    message.write_text("Add file\n\nThe co-authored-by rule is named in prose.\n",
+                       encoding="utf-8")
+    result = run_check("--repo", str(repo), "--message-file", str(message))
+    assert result.returncode == 0, result.stdout
+
+
+def test_the_range_gate_refuses_unpushed_trailers_and_leaves_published_ones(
+        repo: Path, tmp_path: Path) -> None:
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", str(remote))
+    git(repo, "remote", "add", "origin", str(remote))
+    commit(repo, {"a.txt": "a\n"}, f"Published work\n\n{CO_AUTHOR}")
+    git(repo, "push", "-q", "origin", "main")
+    unpushed = "HEAD --not --remotes"
+    assert run_check("--repo", str(repo), "--range", unpushed).returncode == 0
+    commit(repo, {"b.txt": "b\n"}, f"New work\n\n{SESSION}")
+    sha = git(repo, "rev-parse", "HEAD").stdout.strip()
+    result = run_check("--repo", str(repo), "--range", unpushed)
+    assert result.returncode == 1, result.stdout
+    hits = [line for line in result.stdout.splitlines() if "attribution-trailer" in line]
+    assert len(hits) == 1, result.stdout
+    assert f"commit {sha[:12]} message:3: attribution-trailer 'Claude-Session:'" in hits[0]
+    assert "git commit --amend" in hits[0]
