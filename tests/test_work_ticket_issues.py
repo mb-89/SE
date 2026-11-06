@@ -633,10 +633,10 @@ def test_validate_field_report_requires_template_sections_and_references(worktre
         work_tickets.validate_field_report(worktree, 8, "git.example/owner/repo")
 
     report["body"] = COMPLETE_REPORT
-    validated, work, pull = work_tickets.validate_field_report(
+    validated, work_issue, work, pull = work_tickets.validate_field_report(
         worktree, 8, "git.example/owner/repo"
     )
-    assert validated is report and (work, pull) == (5, 7)
+    assert validated is report and work_issue is report and (work, pull) == (5, 7)
 
 
 def test_escalate_comments_through_a_body_file_and_labels(worktree, gh):

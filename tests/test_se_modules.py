@@ -509,3 +509,128 @@ def test_readme_spells_the_module_command_one_way():
     assert invocations and all(
         line.startswith("uv run python <se>/scripts/se_modules.py ") for line in invocations
     ), invocations
+
+
+# Semantic versions: ranges resolve to the highest matching tag; local paths report their version.
+
+
+@pytest.mark.parametrize(("text", "low", "high"), [
+    ("^1.4", (1, 4, 0), (2, 0, 0)),
+    ("^1.4.2", (1, 4, 2), (2, 0, 0)),
+    ("^0.4", (0, 4, 0), (0, 5, 0)),
+    ("^0.0.3", (0, 0, 3), (0, 0, 4)),
+    ("^0", (0, 0, 0), (1, 0, 0)),
+    ("~1.4.2", (1, 4, 2), (1, 5, 0)),
+    ("~1", (1, 0, 0), (2, 0, 0)),
+    ("1.4", (1, 4, 0), (1, 5, 0)),
+    ("1.4.2", (1, 4, 2), (1, 4, 3)),
+    ("=1.4.2", (1, 4, 2), (1, 4, 3)),
+])
+def test_a_range_admits_its_semver_versions(text, low, high):
+    assert se_modules.version_bounds("lib", text) == (low, high)
+
+
+@pytest.mark.parametrize("text", ["latest", "^v1", ">=1.0", "1.4.2.1", "=1.4", "^01.2"])
+def test_a_malformed_range_is_an_error_naming_the_module(text):
+    with pytest.raises(se_modules.ModuleError, match="module lib: .*1\\.4"):
+        se_modules.version_bounds("lib", text)
+
+
+@pytest.fixture
+def released(world):
+    """The upstream tagged v1.3.0, v1.4.0, v1.4.2, v1.10.1 and v2.0.0; the consumer pins ^1.4."""
+    tags = {}
+    for tag in ["v1.3.0", "v1.4.0", "v1.4.2", "v1.10.1", "v2.0.0", "nightly", "v1.11.0-rc1"]:
+        tags[tag] = commit(world.upstream, tag, {"version.txt": f"{tag}\n"})
+        git(world.upstream, "tag", tag)
+    world.manifest.write_text(
+        f'[modules.lib]\nurl = "{world.upstream.as_posix()}"\nversion = "^1.4"\npath = "sub"\n'
+    )
+    world.tags = tags
+    return world
+
+
+def locked(w) -> dict:
+    return se_modules.read_lock(w.root)
+
+
+def test_a_range_resolves_to_the_highest_matching_tag_and_is_locked(released, capsys):
+    code, out = run(released, capsys, "sync")
+    assert code == 0, out
+    assert locked(released) == {"lib": ("1.10.1", released.tags["v1.10.1"])}
+    assert git(released.cache, "rev-parse", "HEAD") == released.tags["v1.10.1"]
+    assert f"({released.tags['v1.10.1'][:12]}, ^1.4 locked)" in out
+    assert "version" in released.manifest.read_text() and "ref" not in released.manifest.read_text()
+
+
+def test_a_locked_range_stays_until_update_and_status_says_a_newer_tag_exists(released, capsys):
+    assert run(released, capsys, "sync")[0] == 0
+    newer = commit(released.upstream, "v1.11.0", {"version.txt": "1.11.0\n"})
+    git(released.upstream, "tag", "v1.11.0")
+    assert run(released, capsys, "sync")[0] == 0
+    assert locked(released)["lib"] == ("1.10.1", released.tags["v1.10.1"])
+    se_modules.fetch(released.cache)
+    code, out = run(released, capsys, "status")
+    assert code == 0, out
+    assert "(version ^1.4, pin " in out and "1.11.0 available: run update" in out
+    code, out = run(released, capsys, "update", "lib")
+    assert code == 0, out
+    assert locked(released)["lib"] == ("1.11.0", newer)
+    assert "(highest tag matching ^1.4)" in out and "4 commits added" in out
+    assert git(released.cache, "rev-parse", "HEAD") == newer
+
+
+def test_a_changed_range_is_resolved_again(released, capsys):
+    assert run(released, capsys, "sync")[0] == 0
+    released.manifest.write_text(released.manifest.read_text().replace("^1.4", "~1.4.0"))
+    assert run(released, capsys, "sync")[0] == 0
+    assert locked(released) == {"lib": ("1.4.2", released.tags["v1.4.2"])}
+
+
+def test_a_range_no_tag_matches_is_an_error_naming_the_remedy(released, capsys):
+    released.manifest.write_text(released.manifest.read_text().replace("^1.4", "^3"))
+    code, out = run(released, capsys, "sync")
+    assert code == 1
+    assert "no tag vMAJOR.MINOR.PATCH" in out and "matches version '^3'" in out
+    assert "widen the range or release the module" in out
+
+
+def test_ref_and_version_together_or_update_to_a_ranged_module_are_errors(released, capsys):
+    code, out = run(released, capsys, "update", "lib", "--to", "v1.4.0")
+    assert code == 1 and "change the range in" in out
+    write(released.manifest, released.manifest.read_text() + f'ref = "{SHA_A}"\n')
+    with pytest.raises(se_modules.ModuleError, match="either ref or version"):
+        se_modules.load_manifest(released.root)
+
+
+def test_a_local_path_is_used_as_it_is_and_its_version_reported_not_updated(released, capsys):
+    checkout = released.upstream
+    write(checkout / "se.toml", '[project]\nversion = "1.12.0"\n')
+    git(checkout, "add", "se.toml")
+    head = commit(checkout, "local work", {"sub/local.txt": "mine\n"})
+    write(checkout / "sub" / "uncommitted.txt", "draft\n")
+    write(released.local, f'[paths]\nlib = "{checkout.as_posix()}"\n')
+    for command in ("sync", "status"):
+        code, out = run(released, capsys, command)
+        assert code == 0, out
+        assert "lib: local" in out and "version 1.12.0" in out
+    assert git(checkout, "rev-parse", "HEAD") == head
+    assert (checkout / "sub" / "uncommitted.txt").read_text() == "draft\n"
+    assert not released.cache.exists() and locked(released) == {}
+    write(checkout / "se.toml", '[project]\nversion = "2.1.0"\n')
+    assert "version 2.1.0, outside ^1.4" in run(released, capsys, "sync")[1]
+
+
+@pytest.mark.parametrize(("text", "message"), [
+    ("", "sets no version, so range '^1.4' cannot be checked"),
+    ('[project]\nversion = "1.4"\n', "version '1.4' is not MAJOR.MINOR.PATCH"),
+    ('[project]\nversion = 2\n', "version 2 is not MAJOR.MINOR.PATCH"),
+])
+def test_a_missing_or_malformed_local_version_is_an_error_naming_the_file_and_the_remedy(
+        released, capsys, text, message):
+    write(released.upstream / "se.toml", text)
+    write(released.local, f'[paths]\nlib = "{released.upstream.as_posix()}"\n')
+    code, out = run(released, capsys, "sync")
+    assert code == 1
+    assert str(released.upstream / "se.toml") in out and message in out
+    assert 'set version = "MAJOR.MINOR.PATCH" under [project]' in out
