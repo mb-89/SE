@@ -92,6 +92,24 @@ An open point that is not a choice, something only the person can do (grant acce
 release, sign in), is a task, never an option in a decision. Tasks are listed separately, numbered
 against their own total ("Task 1 of 2"), each with what to do, where, and what it unblocks.
 
+## Bringing decisions to the person
+
+The decisions the person must bless go to them as one deck, in one turn. `scripts/deck.py` builds,
+serves and reads it; its `--help` owns what each subcommand does.
+
+1. Write the decision notes and their manifest into a scratch directory `<notes>`, then run
+   `uv run python scripts/deck.py build <notes> --destination <deck>.html`.
+2. Hand the deck to the person where they are, and wait for their answers:
+   - **The Claude app** (cloud and mobile): publish `<deck>.html` with the Artifact tool and
+     `capabilities: {artifact: {}}`, and send the person its link. Their Send publishes
+     `answers.json` into the artifact, which wakes this session; read it with the Artifact
+     tool's `read` and `path: "answers.json"`.
+   - **Claude Code and Copilot** (local): run
+     `uv run python scripts/deck.py serve <deck>.html --wait --timeout <seconds>` and send the
+     person the URL it prints first; it ends with their answers.
+3. Run `uv run python scripts/deck.py answers <answers.json>` and act on what it prints; add
+   `--record <notes> --destination <record>.html` for [the record](#the-record).
+
 ## The record
 
 The skill's output is the answered artifact (obs's `--answers` output): one decision with its
