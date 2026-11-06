@@ -9,7 +9,9 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       screens layout (one chapter per phone screen) unless the manifest sets `obsHtml.layout`. A chapter
       asks for a bless (`obs: {bless: pending}`) or is a record: what was decided without the person, or
       their tasks. It fails on a deck where no chapter asks, on a decision (a `pugh` fence) that does
-      not ask, outside a record built with the answers, and on any obs warning.
+      not ask, outside a record built with the answers, on a decision without `## Current situation`
+      and `## The problem`, in that order, before its fence (the decision skill's note shape), and on
+      any obs warning.
   serve HTML --wait [--timeout S]   Serves the deck with obs-html serve: prints the URL to open first,
       then, once the person sends, the answers payload as one JSON line (also written to answers.json
       beside HTML). For Claude Code, Copilot and any local browser.
@@ -20,7 +22,7 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
 
 The answers payload's fields are owned by obs's src/obs/answers.schema.json. Exit code 0: done;
 1: the build failed, obs warned, no chapter or no decision asks for a bless, or the answers are
-malformed; 2: setup error, or no answers within --timeout.
+malformed, or a decision does not explain its problem before its options; 2: setup error, or no answers within --timeout.
 """
 
 from __future__ import annotations
@@ -115,15 +117,35 @@ def _holds_pugh(nodes: list[dict]) -> bool:
     return any(node["type"] == "pugh" or _holds_pugh(node["children"]) for node in nodes)
 
 
+SECTIONS = ["Current situation", "The problem"]  # The decision skill's note shape, before the fence.
+
+
+def _explains(content: list[dict]) -> bool:
+    """Whether the ``##`` sections before the chapter's first ``pugh`` fence include SECTIONS, in order."""
+    headings = []
+    for node in content:
+        if _holds_pugh([node]):
+            break
+        if node["type"] == "section" and node["attrs"].get("level") == 2:
+            headings.append("".join(child.get("text", "") for child in node["children"]).strip())
+    found = iter(headings)
+    return all(section in found for section in SECTIONS)
+
+
 def _refusal(chapters: list[dict], recorded: bool) -> str | None:
     """Why the deck's chapters are refused: a decision that asks for no bless, unless the build ``recorded``
-    the answers, or no chapter that asks."""
+    the answers, a decision that does not explain its problem before its options, or no chapter that asks."""
     remedy = "give each decision note `obs: {bless: pending}` in its frontmatter"
-    silent = [chapter["id"] for chapter in chapters if not recorded and "bless" not in chapter
-              and _holds_pugh(chapter["content"])]
+    decisions = [chapter for chapter in chapters if _holds_pugh(chapter["content"])]
+    silent = [chapter["id"] for chapter in decisions if not recorded and "bless" not in chapter]
     if silent:
         return (f"decision(s) {', '.join(silent)} ask for no bless; {remedy}, or build it as a record with "
                 "`deck.py answers --record`")
+    unexplained = [chapter["id"] for chapter in decisions if not _explains(chapter["content"])]
+    if unexplained:
+        return (f"decision(s) {', '.join(unexplained)} do not explain the problem before the options; write "
+                "`## Current situation` and `## The problem` before the `pugh` fence, as the decision skill's "
+                "note shape (src/skills/decision/SKILL.md) says")
     if not any("bless" in chapter for chapter in chapters):
         return f"no chapter asks for a bless, so the deck asks the person nothing; {remedy}"
     return None

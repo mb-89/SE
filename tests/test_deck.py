@@ -23,7 +23,8 @@ sys.path.insert(0, str(SCRIPTS))
 import build_docs  # noqa: E402
 import deck  # noqa: E402
 
-NOTE = "---\nobs: {bless: pending}\n---\n# %s\n\nThis is one case of how %s is chosen.\n"
+NOTE = ("---\nobs: {bless: pending}\n---\n# %s\n\n## Current situation\n\nThis is one case of how %s is chosen.\n"
+        "\n## The problem\n\nIt is chosen by hand.\n")
 
 
 def _folder(tmp_path: Path, notes: dict[str, str], manifest: str | None = None) -> Path:
@@ -57,6 +58,7 @@ PUGH = ("\n```pugh\ncriteria:\n  - {key: cost, label: Cost, weight: 1, better: h
         "  - {key: b, label: B, what: The other., marks: {cost: 0}, wins: Known., losses: Dear.}\n```\n")
 
 
+EXAMPLE = ROOT / "src" / "skills" / "decision" / "references" / "decision-deck.md"
 SHORT = PUGH.replace("label: B,", "label: B, short: Short,")
 SCREENS = "- [[pick|Pick]]\n- [[done|Done]]\n"
 PROFILES = {
@@ -75,6 +77,11 @@ DECKS = {
     "scrolling": ({"one": NOTE % ("One", "one"), "done": RECORD % "Done"},
                   "---\nobsHtml:\n  layout: scrolling\n---\n\n- [[one|One]]\n- [[done|Done]]\n"),
     "send": ({"cache": NOTE % ("Cache", "a cache"), "queue": NOTE % ("Queue", "a queue")}, None),
+    "no-situation": ({"bare": NOTE.replace("## Current situation\n\n", "") % ("Bare", "a bare") + PUGH}, None),
+    "no-problem": ({"bare": NOTE.replace("\n## The problem\n\n", "\n") % ("Bare", "a bare") + PUGH}, None),
+    "after-the-fence": ({"late": (NOTE % ("Late", "a late")).split("\n## Current")[0] + PUGH
+                         + "\n## Current situation\n\nToday.\n\n## The problem\n\nIt hurts.\n"}, None),
+    "worked-example": ({"decision-deck": EXAMPLE.read_text(encoding="utf-8")}, None),
 }
 
 
@@ -111,6 +118,22 @@ def test_build_refuses_a_deck_that_asks_nothing_or_a_silent_decision(decks, name
     assert result.returncode == 1, result.stderr
     assert refusal in result.stderr and "`obs: {bless: pending}`" in result.stderr
     assert not destination.exists()
+
+
+@pytest.mark.parametrize("name", ["no-situation", "no-problem", "after-the-fence"])
+def test_build_refuses_a_decision_that_does_not_explain_the_problem_before_its_options(decks, name):
+    result, destination = decks[name]
+    assert result.returncode == 1, result.stderr
+    note = "late" if name == "after-the-fence" else "bare"
+    assert f"decision(s) {note} do not explain" in result.stderr
+    assert "`## Current situation` and `## The problem` before the `pugh` fence" in result.stderr
+    assert not destination.exists()
+
+
+def test_the_worked_example_builds(decks):
+    result, destination = decks["worked-example"]
+    assert result.returncode == 0, result.stderr
+    assert destination.exists()
 
 
 PAGE = """
