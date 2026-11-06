@@ -5,8 +5,10 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
 
   build FOLDER --destination HTML   FOLDER holds the decision notes and their manifest (obs's
       `manifest.md`, or what the folder's cfg.json names). obs builds them into one HTML artifact in one
-      call, with se's answers bundle (scripts/deck_answers.js) as its trusted runtime bundle. Every chapter
-      must ask for a bless (`obs.bless: pending`); a chapter that does not, or any obs warning, fails it.
+      call, with se's answers bundle (scripts/deck_answers.js) as its trusted runtime bundle. A chapter
+      asks for a bless (`obs: {bless: pending}`) or is a record: what was decided without the person, or
+      their tasks. It fails on a deck where no chapter asks, on a decision (a `pugh` fence) that does
+      not ask, outside a record built with the answers, and on any obs warning.
   serve HTML --wait [--timeout S]   Serves the deck with obs-html serve: prints the URL to open first,
       then, once the person sends, the answers payload as one JSON line (also written to answers.json
       beside HTML). For Claude Code, Copilot and any local browser.
@@ -16,8 +18,8 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       artifact is the decision's record.
 
 The answers payload's fields are owned by obs's src/obs/answers.schema.json. Exit code 0: done;
-1: the build failed, obs warned, a chapter asks for no bless or the answers are malformed; 2: setup
-error, or no answers within --timeout.
+1: the build failed, obs warned, no chapter or no decision asks for a bless, or the answers are
+malformed; 2: setup error, or no answers within --timeout.
 """
 
 from __future__ import annotations
@@ -60,14 +62,31 @@ def build(folder: Path, destination: Path, answers: Path | None = None) -> int:
         if code:
             return code
         chapters = json.loads(document.read_text(encoding="utf-8"))["chapters"]
-    asking_none = [chapter["id"] for chapter in chapters if "bless" not in chapter]
-    if asking_none:
+    refusal = _refusal(chapters, recorded=answers is not None)
+    if refusal:
         destination.unlink(missing_ok=True)
-        print(f"deck: chapter(s) {', '.join(asking_none)} ask for no bless; give each decision note "
-              "`obs.bless: pending` in its frontmatter", file=sys.stderr)
+        print(f"deck: {refusal}", file=sys.stderr)
         return 1
     print(f"deck: built {destination}")
     return 0
+
+
+def _holds_pugh(nodes: list[dict]) -> bool:
+    return any(node["type"] == "pugh" or _holds_pugh(node["children"]) for node in nodes)
+
+
+def _refusal(chapters: list[dict], recorded: bool) -> str | None:
+    """Why the deck's chapters are refused: a decision that asks for no bless, unless the build ``recorded``
+    the answers, or no chapter that asks."""
+    remedy = "give each decision note `obs: {bless: pending}` in its frontmatter"
+    silent = [chapter["id"] for chapter in chapters if not recorded and "bless" not in chapter
+              and _holds_pugh(chapter["content"])]
+    if silent:
+        return (f"decision(s) {', '.join(silent)} ask for no bless; {remedy}, or build it as a record with "
+                "`deck.py answers --record`")
+    if not any("bless" in chapter for chapter in chapters):
+        return f"no chapter asks for a bless, so the deck asks the person nothing; {remedy}"
+    return None
 
 
 def serve(artifact: Path, wait: bool, timeout: str | None) -> int:

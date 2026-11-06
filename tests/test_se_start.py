@@ -201,7 +201,15 @@ def test_a_bad_manifest_is_named_and_the_greeting_still_appears(setup):
     assert any("modules of" in line and "url is required" in line for line in lines)
 
 
-def test_an_installed_plugin_copy_is_not_checked(setup):
+def test_an_installed_copy_is_checked_against_its_plugin_manifests_repository(setup):
+    shutil.rmtree(setup["se"] / ".git")
+    write(setup["se"] / ".claude-plugin" / "plugin.json", json.dumps({"name": "se", "repository": SE_URL}))
+    states = by_name(report(setup, "check"))
+    assert states["SE"].item.note == "an installed copy" and states["SE"].due == (1, 3, 0)
+    assert SE_URL in setup["remotes"].calls
+
+
+def test_an_installed_copy_without_a_repository_is_not_checked(setup):
     shutil.rmtree(setup["se"] / ".git")
     states = by_name(report(setup, "check"))
     assert states["SE"].item.url is None and states["SE"].due is None
@@ -382,3 +390,104 @@ def test_a_development_checkout_of_se_is_left_alone(repos):
     assert failed
     assert any(line.startswith("SE: not refreshed, 1.0.0 stays in use: the se checkout ") and "local changes" in line
                for line in lines)
+
+
+# Refresh by the way SE is installed: a Claude Code plugin, a cloud setup-script clone, a Copilot
+# copy, a local path.
+
+
+def installed(repos, tag: str, where: Path) -> Path:
+    """A copy of the se remote at `tag` without git, as an installer leaves it."""
+    where.parent.mkdir(parents=True, exist_ok=True)
+    git(where.parent, "clone", "-q", "--branch", tag, repos["upstream"].as_uri(), str(where))
+    shutil.rmtree(where / ".git")
+    write(where / ".claude-plugin" / "plugin.json", json.dumps({"name": "se", "repository": repos["upstream"].as_uri()}))
+    return where
+
+
+class FakeClaude:
+    """Claude Code's command line on a fake record: `plugin list --json` reads it; `plugin update`
+    installs the se remote at `serves` as a new versioned copy and rewrites the record."""
+
+    def __init__(self, repos, record: Path, entries: list[dict], serves: str | None = None):
+        self.repos, self.record, self.serves, self.calls = repos, record, serves, []
+        write(record, json.dumps(entries))
+
+    def __call__(self, args):
+        self.calls.append(args)
+        if args[:2] == ["plugin", "list"]:
+            return se_start.subprocess.CompletedProcess(args, 0, self.record.read_text(encoding="utf-8"), "")
+        if args[:2] == ["plugin", "update"]:
+            entries = json.loads(self.record.read_text(encoding="utf-8"))
+            entry = next(e for e in entries if e["id"] == args[2])
+            path = installed(self.repos, self.serves, Path(entry["installPath"]).parent / self.serves[1:])
+            entry.update(installPath=str(path), version=self.serves[1:])
+            self.record.write_text(json.dumps(entries), encoding="utf-8")
+            return se_start.subprocess.CompletedProcess(args, 0, '{"ok": true}', "")
+        return se_start.subprocess.CompletedProcess(args, 1, "", "unknown command")
+
+
+def as_plugin(repos, tmp_path, monkeypatch, serves: str) -> FakeClaude:
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    cache = tmp_path / "claude" / "plugins" / "cache" / "se" / "se"
+    repos["se"] = installed(repos, "v1.0.0", cache / "1.0.0")
+    fake = FakeClaude(repos, se_start.plugin_registry(), [
+        {"id": "se@se", "version": "1.0.0", "scope": "user", "enabled": True, "installPath": str(repos["se"])}],
+        serves)
+    repos["world"] = se_start.World(clock=repos["world"].clock, spawn=Spawns(), claude=fake)
+    return fake
+
+
+def test_an_installed_plugin_is_updated_through_claude_code(repos, tmp_path, monkeypatch):
+    fake = as_plugin(repos, tmp_path, monkeypatch, "v1.1.0")
+    lines, failed = refresh(repos)
+    assert not failed, lines
+    assert "SE: 1.0.0 -> 1.1.0 (claude plugin update se@se; restart Claude Code to load it)" in lines
+    assert ["plugin", "update", "se@se", "--scope", "user", "--json"] in fake.calls
+    entry = json.loads(fake.record.read_text(encoding="utf-8"))[0]
+    assert entry["version"] == "1.1.0" and se_modules.checkout_version(Path(entry["installPath"])) == (1, 1, 0)
+
+
+def test_an_updated_plugin_that_does_not_start_leaves_the_old_install_in_use(repos, tmp_path, monkeypatch):
+    release(repos["upstream"], "1.2.0", {"scripts/se_start.py": "raise SystemExit('broken start')\n"})
+    fake = as_plugin(repos, tmp_path, monkeypatch, "v1.2.0")
+    record = fake.record.read_bytes()
+    lines, failed = refresh(repos)
+    assert failed
+    line = next(line for line in lines if line.startswith("SE: not refreshed, 1.0.0 stays in use: "))
+    assert "SE v1.2.0 does not start: broken start" in line and "is back in" in line
+    assert fake.record.read_bytes() == record
+
+
+def test_a_cloud_setup_script_clone_is_pulled_like_a_checkout(repos, tmp_path):
+    git(repos["upstream"], "branch", "se", "v1.0.0")
+    clone = tmp_path / "home" / ".claude" / "skills" / "se"
+    git(tmp_path, "clone", "-q", "--depth", "1", "-b", "se", repos["upstream"].as_uri(), str(clone))
+    repos["se"] = clone
+    lines, failed = refresh(repos)
+    assert not failed, lines
+    assert any(line.startswith("SE: ") and line.endswith(" -> v1.1.0") for line in lines)
+    assert se_modules.checkout_version(clone) == (1, 1, 0)
+    assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "se"
+
+
+def test_a_copilot_copy_names_the_one_command_and_why(repos, tmp_path, monkeypatch):
+    fake = as_plugin(repos, tmp_path, monkeypatch, "v1.1.0")
+    fake.record.write_text("[]", encoding="utf-8")  # Claude Code has no plugin here
+    repos["se"] = installed(repos, "v1.0.0", tmp_path / "copilot" / "se")
+    lines, failed = refresh(repos)
+    assert not failed, lines
+    line = next(line for line in lines if line.startswith("SE: 1.0.0 -> 1.1.0 is due, but "))
+    assert "only VS Code can update" in line and "Chat: Install Plugin from Source" in line
+    assert se_modules.checkout_version(repos["se"]) == (1, 0, 0)
+    assert not any(args[:2] == ["plugin", "update"] for args in fake.calls)
+
+
+def test_se_at_a_local_path_is_never_touched(repos):
+    write(repos["config"], repos["config"].read_text(encoding="utf-8") + f'se = "{repos["se"].as_posix()}"\n')
+    head = git(repos["se"], "rev-parse", "HEAD")
+    lines, failed = refresh(repos)
+    assert not failed, lines
+    assert "SE: local, not touched" in lines
+    assert not any(line.startswith("SE: ") and "->" in line for line in lines)
+    assert git(repos["se"], "rev-parse", "HEAD") == head
