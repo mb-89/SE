@@ -1844,15 +1844,16 @@ def bumped(version: tuple[int, int, int], kind: str) -> tuple[int, int, int]:
     }[kind]
 
 
-def run_git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+def run_git(root: Path, *arguments: str,
+            env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(root), *arguments],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, env=env,
     )
 
 
-def checked_git(root: Path, *arguments: str) -> str:
-    result = run_git(root, *arguments)
+def checked_git(root: Path, *arguments: str, env: dict[str, str] | None = None) -> str:
+    result = run_git(root, *arguments, env=env)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip() or f"exit code {result.returncode}"
         raise QueueError(f"git {' '.join(arguments)} failed in {root}: {detail}")
@@ -2005,10 +2006,12 @@ def release(root: Path, branch: str) -> str | None:
             f"Cannot release {tag}: the tag exists already; fetch the tags (work_tickets.py sync) "
             f"and check project.version in {root / 'se.toml'}"
         )
+    environment = identity_environment(required_identity(root, "push"))
     paths = build_release(root, tag)
     trailer = config_value("commit_trailer", remote_repo(root), None)
     checked_git(root, "add", "--", *paths)
-    checked_git(root, "commit", "-q", "-m", f"Release {tag}", *(("-m", trailer) if trailer else ()))
+    checked_git(root, "commit", "-q", "-m", f"Release {tag}", *(("-m", trailer) if trailer else ()),
+                env=environment)
     sibling("verdicts").carry(root, SUITE_VERDICT, "HEAD~1", "HEAD")
     if not by_workflow:
         checked_git(root, "tag", tag)
@@ -2020,6 +2023,7 @@ def push(root: Path, branch: str | None = None) -> str:
     """Gate `branch` (default: the current one), then push it to origin with its upstream set; the
     integration branch is released first and its new tag pushed with it, unless the release
     workflow pushes the tags (`project.release = "workflow"`)."""
+    required_identity(root, "push")
     branch = branch or current_branch(root)
     tag = release(root, branch) if branch == integration_branch(root) else None
     if tag and release_by_workflow(root):
@@ -3219,6 +3223,26 @@ def commit_identity(root: Path) -> tuple[str, str, str] | None:
         return None
     source = f"project.identity in {root / 'se.toml'}"
     return (*parsed_identity(configured, source), source)
+
+
+def required_identity(root: Path, command: str) -> tuple[str, str]:
+    """(name, email) every commit `command` makes carries; refused without a commit identity."""
+    identity = commit_identity(root)
+    if identity is None:
+        raise QueueError(
+            f"work_tickets.py {command}: no commit identity; set identity = \"Name <email>\" in "
+            f"[project] of {root / 'se.toml'} (README \"Project settings\"), run "
+            "work_tickets.py sync and try again"
+        )
+    return identity[0], identity[1]
+
+
+def identity_environment(identity: tuple[str, str]) -> dict[str, str]:
+    """The environment that makes a git commit carry `identity` as author and committer, whatever
+    the clone's configuration or the environment's own GIT_AUTHOR_* and GIT_COMMITTER_* say."""
+    name, email = identity
+    return {**os.environ, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email}
 
 
 def configured_public_identity(root: Path) -> tuple[str, str]:
