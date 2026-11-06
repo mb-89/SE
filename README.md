@@ -73,12 +73,16 @@ then prints one line saying the check is off and where to turn it on.
 command = ["uv", "run", "pytest", "-q"]
 target_seconds = 60
 limit_seconds = 120
+setup = ["uv", "sync"] # optional
 ```
 
 `command` is the project's complete suite, an argument array run without a shell from the project
 root; `work_tickets.py integrate` runs it at every integration, and `work_tickets.py suite` runs it
-the same way for a worker's before-and-after times. The gate measures the wall time and prints it
-with the ten slowest tests. A runner of any kind may write JUnit XML reports into the directory
+the same way for a worker's before-and-after times. `setup`, optional and of the same form, installs
+the test dependencies (packages, browsers) and runs first; the gate prints its time and its last
+lines apart, and that time does not count against the budget. A failing setup stops the run before
+the suite, naming the command and its output. The gate measures the suite's wall time and prints it
+with the last lines of the suite's own output and the ten slowest tests. A runner of any kind may write JUnit XML reports into the directory
 named by the environment variable `SE_TEST_REPORTS`, one file per part; the gate then lists the ten
 slowest tests across all reports, each with its part (the file's name). Without reports it reads
 pytest's lines (it adds `--durations=10` to a pytest command), and where neither names a test it
