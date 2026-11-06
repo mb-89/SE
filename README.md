@@ -123,11 +123,13 @@ then prints one line saying the check is off and where to turn it on.
 ([`se.toml`](#setoml)). Nobody types it after the first: `work_tickets.py push` of the integration
 branch (which `integrate` runs) releases what was integrated since origin and the last tag. Each
 integration is a first-parent merge whose message starts `Integrate <branch>`, as `integrate`
-writes it; its kind comes from the branch prefix, `feature` (or `feat`) a minor bump, `fix`,
-`perf`, `chore` or `docs` a patch bump, and a merge carrying the trailer `Breaking-change: yes`
-(which `integrate` adds where the work issue's "Package kind" says "breaking") a major one. One push
-bumps once, by its integrations' highest kind: it rewrites only `version`, commits `Release v<new>`,
-tags it and pushes the tag with the branch. Another prefix is refused before anything is written; a
+writes it, and states its kind in the trailer `Release-kind: major|minor|patch`, which `integrate`
+writes and `work_tickets.py release-trailer` prints for a merge by hand: `major` where the work
+issue's "Package kind" says "breaking", else by the branch prefix, `feature` (or `feat`) `minor`,
+`fix`, `perf`, `chore` or `docs` `patch`; another prefix is refused before anything is merged. An
+integration without the trailer is refused, naming the merge and the remedy; push never guesses. One
+push bumps once, by its integrations' highest kind: it rewrites only `version`, commits
+`Release v<new>`, tags it and pushes the tag with the branch. A
 version without its tag yet is tagged as it is, which is how a project starts versioning. Without
 `version` push releases nothing and says so; a malformed one is refused, naming the file.
 
