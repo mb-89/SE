@@ -45,6 +45,10 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   gates (`--message-file`, and the commits of a `--range`, as the hooks and `integrate` pass it)
   refuse them and, as they name nothing private, print the reference with its remedy. A full check
   leaves history already pushed alone.
+- The project identity in the commit gates of a `--range`: where the project sets an `identity`
+  (or the machine a `public_identity`, which wins), a commit whose author or committer differs is
+  refused, naming the commit, the identity found (redacted) and the remedy. A full check leaves
+  history already pushed alone.
 - Generic patterns, committed in the script: user profile paths (`X:\Users\<name>`, `/home/<name>`,
   `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and `example.*`,
   enterprise GitHub hosts (GitHub Enterprise Cloud subdomains), machine names in UNC paths.
