@@ -154,24 +154,13 @@ principles of code once.
 
 15. **Persons decide, agents execute.**
     Anything controversial goes to a person; everything else flows without
-    one.
+    one. A decision a box may not take climbs the work model's
+    [escalation ladder](../SKILL.md#escalation-ladder), and every level decides
+    what it may.
 
-    It goes as an issue minted for the person, and only such an issue
-    waits on one: every run ends, a box landing what it could, a retro or an
-    overhaul closing once its issues exist. What needs the person's answer is
-    blocked by their issue, and nothing else is. Nothing mints an issue for
-    a person on a box's behalf.
-
-    A worker's output is a PR or a supersede;
-    its open points go into its landing answers (`open`), which the retro
-    reads, and any issue a box opens is a defect (`se issue new` refuses in
-    one).
-
-    A review, a retro or an overhaul exists to file issues: they are
-    its output, filed through its own command in one go at its end, as one
-    manifest of finals (`se-final`, the findings its sub-issues), or for a
-    person where too big or controversial. Finals do not count toward the
-    retro's cadence, so retros do not feed themselves.
+    Issues carry work between boxes. What needs the person reaches them as a
+    decision note ([decision skill](../../decision/SKILL.md)) in SE's deck,
+    never as an issue.
 
     Checked by: retro, mechanically (`se-person` counts); overhaul, by
     judgment.
