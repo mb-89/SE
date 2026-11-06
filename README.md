@@ -83,8 +83,8 @@ version = "^1.4"                             # in place of ref: a semver range o
   version and commit; `sync` and `update` write it and the repository commits it.
 - `path`: optional relative directory inside the module; without it the whole module is used.
 - Module names use letters, digits, `.`, `_` and `-`. Other keys are errors.
-- The module named `se` is se itself; its pin (its `ref`, or the commit `se.lock` locks for its
-  `version`) is the se version the [public check](AGENTS.md#public-safety) must run at.
+- The module named `se` is se itself; its pin is the se the [public check](AGENTS.md#public-safety)
+  must run: exactly its `ref`, or any se whose `se.toml` version its `version` range admits.
 
 A common repository declares only modules that are public. Work-only modules on private hosts are
 declared the same way, in a work repository that consumes the common ones; a common repository never
@@ -128,14 +128,13 @@ turn it on.
 branch (which `integrate` runs) releases what was integrated since origin and the last tag.
 
 Each integration is a first-parent merge whose message starts `Integrate <branch>`, as `integrate`
-writes it, and states its kind in the trailer `Release-kind: major|minor|patch`. `integrate` writes
-it, and `work_tickets.py release-trailer` prints it for a merge by hand:
+writes it. Its kind comes from the branch prefix:
 
-- `major` where the work issue's "Package kind" says "breaking";
-- else by the branch prefix: `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs`
-  `patch`; another prefix is refused before anything is merged.
-
-An integration without the trailer is refused, naming the merge and the remedy; push never guesses.
+- `feature` (or `feat`): a minor bump;
+- `fix`, `perf`, `chore` or `docs`: a patch bump;
+- a merge carrying the trailer `Breaking-change: yes` (which `integrate` adds where the work issue's
+  "Package kind" says "breaking"): a major bump;
+- another prefix: refused before anything is written.
 
 One push bumps once, by its integrations' highest kind: it rewrites only `version`, commits
 `Release v<new>`, tags it and pushes the tag with the branch. A version without its tag yet is
@@ -145,16 +144,17 @@ and says so; a malformed one is refused, naming the file.
 #### Release tags
 
 `release = "workflow"` hands the tags to se's release workflow, for hosts that may push branches but
-not tags (Claude's cloud sessions). `push` still bumps and commits the version, pushes the branch
-only and names the workflow; a version without its tag is left for the workflow, not bumped.
+not tags (Claude's cloud sessions).
 
-On each push to the integration branch the workflow tags `v<version>` on the first-parent commit
-since which `se.toml` carries that version, unless the tag is there. Where the tag names another
-commit, the run fails, naming the version and the remedy.
+- `push` still bumps and commits the version, pushes the branch only and names the workflow; a
+  version without its tag is left for the workflow, not bumped.
+- On each push to the integration branch the workflow tags `v<version>` on the first-parent commit
+  since which `se.toml` carries that version, unless the tag is there.
+- Where the tag names another commit, the run fails, naming the version and the remedy.
+- Without `release`, `push` pushes the tags itself; another value is refused, naming the file.
 
-Without `release`, `push` pushes the tags itself; another value is refused, naming the file. A
-repository turns it on with `release = "workflow"` and this file, `.github/workflows/release-tag.yml`,
-the same in every repository (se's own included):
+A repository turns it on with `release = "workflow"` and this file,
+`.github/workflows/release-tag.yml`, the same in every repository (se's own included):
 
 ```yaml
 name: release-tag
