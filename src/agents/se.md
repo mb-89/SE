@@ -40,8 +40,9 @@ its tools.
 
 - **Turn-start check**: run `work_tickets.py queue --worktree <main checkout>` to surface field
   reports and startable ready work; local sessions have no scheduled agent.
-- **Work issues** from [work.md](../../.github/ISSUE_TEMPLATE/work.md): title = branch name, label `work`,
-  carrying only the task (goal, the user's requirement verbatim, design owner, numbered
+- **Work issues** from [work.md](../../.github/ISSUE_TEMPLATE/work.md), filed with
+  `work_tickets.py file`, labelled as the work model's [Issues](../skills/work-model/SKILL.md#issues)
+  says: title = branch name, carrying only the task (goal, the user's requirement verbatim, design owner, numbered
   requirements, file ownership when packages share files, acceptance, verification).
   - Generic rules live in [worker.md](worker.md) and are never repeated in issues.
   - Change a running package by editing its issue or commenting on it; its worker re-reads before
@@ -73,11 +74,14 @@ This routine is its one statement; for each issue it lists:
 1. Check the issue against SE's [design principles](../skills/work-model/references/principles.md),
    the project's spec and design notes, and the recorded decisions (decision notes, answered
    escalations, the issues they closed).
-2. Nothing contradicted: route it to that repository's integrator as a work issue: retitle it as its
-   branch name (`<type>/<topic>-<yyyymmdd>`), comment the
-   sections of [work.md](../../.github/ISSUE_TEMPLATE/work.md) it lacks, completed, in one comment
-   that carries `<!-- se:handled -->` and says it is routed; leave it unlabelled, and notify the
-   integrator.
+2. Nothing contradicted: route it to that repository's integrator as a work issue with
+   `work_tickets.py route <n> --title <type>/<topic>-<yyyymmdd> --comment-file <file> --repo
+   <repository>`: the comment holds the sections of [work.md](../../.github/ISSUE_TEMPLATE/work.md)
+   it lacks, completed, and says it is routed. Then notify the integrator.
+   - `route` labels it `work` and `ready` ([Issues](../skills/work-model/SKILL.md#issues)),
+     reversing the earlier rule that left it unlabelled: the other side sends issues unlabelled and
+     the person never labels them, so without SE's labels the queue (`ready`, `start`) finds no
+     routed issue, and the label is the GitHub record that this check passed.
 3. Something contradicted: do not route it. Comment, with `<!-- se:handled -->`, what it
    contradicts (the principle, spec passage or decision, linked) and that it waits on the person;
    bring it to the person as a decision note in the deck, as the

@@ -108,13 +108,14 @@ project's commands and hot files by the project's `AGENTS.md`.
    - Stale unfinished worktrees: send their continuation requirements to that repository's
      integrator (step 2).
    - New packages: one work issue each from `.github/ISSUE_TEMPLATE/work.md`, title = branch name,
-     labels `work` and `repo:<target repository>`, carrying only the task
-     (`gh issue create ... --body-file <filled template>`).
+     carrying only the task, filed with `work_tickets.py file --title <branch> --body-file <filled
+     template> --repo <target repository>`, which labels it as the work model's
+     [Issues](../work-model/SKILL.md#issues) says.
      - Generic rules (the box, paths, delivery, field-report format) live in the worker definition
        and are never repeated in issues.
-     - Link blockers as native dependencies ("Blocked by" field and
-       `work_tickets.py block <n> --by <m>`), then label the issue `ready` and notify that
-       repository's integrator.
+     - Name blockers in its "Blocked by" field and pass each as `--blocked-by <m>`, so `file`
+       links them as native dependencies before it adds `ready`; then notify that repository's
+       integrator.
      - The integrator starts workers for unblocked packages in fresh worktrees from the newest
        `main` (the work model's [Worktrees](../work-model/SKILL.md#worktrees)).
    - Tell the user in one table: repository → integrator session → work issue.
