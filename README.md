@@ -32,6 +32,10 @@ folder is outside your project. Claude Code asks you to allow this the first tim
 `claude -p` session cannot ask, so it refuses them unless you allow them in advance, for example
 `--allowedTools Read Glob Grep Write Edit "Bash(uv run python:*)"`.
 
+Commits carry no co-author lines: in VS Code, set `git.addAICoAuthor` to `off`
+([VS Code 1.110 release notes](https://code.visualstudio.com/updates/v1_110)), as the
+[public check](AGENTS.md#public-safety) refuses a `Co-authored-by` line in every pushed commit.
+
 **Everything else arrives by itself.** At the first start SE runs
 [scripts/bootstrap.sh](scripts/bootstrap.sh) (Claude Code runs it at every session start; it is quiet
 when nothing is missing): it installs `uv` into the user's home, Python 3.11 or newer through `uv`,
