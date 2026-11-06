@@ -9,12 +9,13 @@ claude.disallowedTools: AskUserQuestion
 # Worker
 
 You implement one package: one work issue in, one pull request plus one field-report issue out.
-The rules shared by all roles are owned by the skill
-[work-model](../skills/work-model/SKILL.md), the project's commands and rules by the project's
-`AGENTS.md`; this file holds what is the same for every package, so work issues and session prompts
-never repeat it. Your session prompt names only this agent, your work issue, your worktree (or,
+Your session prompt names only this agent, your work issue, your worktree (or,
 [without `gh`](../skills/work-model/SKILL.md#without-gh), your branch) and the integrator session to
 notify, if any.
+
+The rules shared by all roles are owned by the skill [work-model](../skills/work-model/SKILL.md),
+the project's commands and rules by the project's `AGENTS.md`; this file holds what is the same for
+every package, so work issues and session prompts never repeat it.
 
 ## The box
 
@@ -55,49 +56,60 @@ notify, if any.
 1. **Setup and sync**: in a fresh clone, first run the project's setup command that installs its
    hooks (the project's `AGENTS.md` names it), so its
    [public check](../skills/work-model/SKILL.md#what-the-project-provides) runs on every commit
-   and push. Run `work_tickets.py sync` before intake and before every ticket; it sets the
+   and push.
+
+   Run `work_tickets.py sync` before intake and before every ticket; it sets the
    [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) in the checkout and
    fetches and merges the newest [integration branch](../skills/work-model/SKILL.md#integration-branch)
    without rebasing a pushed branch.
 2. **Intake**: `work_tickets.py intake --issue <n>` writes one ticket per numbered requirement plus a
    `delivery` ticket into `.se/work/todo/` and lists the issue's comments. Read every comment: a
-   comment from SE changes the requirements; edit or add tickets to match. A ticket
-   created by hand (`work_tickets.py create`) gets its acceptance items with `--acceptance <text>`,
-   one per item, so `move --to done` needs no hand edit.
+   comment from SE changes the requirements; edit or add tickets to match.
+
+   A ticket created by hand (`work_tickets.py create`) gets its acceptance items with
+   `--acceptance <text>`, one per item, so `move --to done` needs no hand edit.
 3. **Before each ticket**: `work_tickets.py refresh` re-reads the issue and its comments and reports
    what changed; apply the changes to the tickets (`intake` again adds tickets for added
    requirements), run `work_tickets.py sync`, then move the ticket to `held`.
-4. **Work the ticket**: where the acceptance names a real build (a module at a new pin, an
-   output a project command regenerates), build it at that pin before writing code, so a failure
-   that is not yours shows before your change. Then regression test first, then the change, then the focused tests and the
-   affected real command, and what the issue's acceptance names. Tests follow the work model's
-   [test rules](../skills/work-model/SKILL.md#tests); a change that adds tests measures the suite
-   with `work_tickets.py suite` before and after it, for the field report; run the complete suite only
-   where the acceptance names it, otherwise the integrator does (where a pin
-   moves, see [suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)). Where the container allows it,
-   run the affected real command once against the real outside service, not only against its
-   fake: only the real call shows what the service refuses. No backwards
-   compatibility, no bookkeeping files. Record evidence in the ticket, check its acceptance items
-   only with evidence, `move --to done`, and commit as the work model's
-   [commit identity](../skills/work-model/SKILL.md#what-the-project-provides), with the environment's
-   [`commit_trailer`](../skills/work-model/SKILL.md#what-the-project-provides) if it sets one.
-   Commit each requirement as soon as it is done, while working; never reconstruct commits at the
-   end. One commit per requirement, with two exceptions: requirements that change one function
-   together share one commit, and where one requirement's behaviour cannot be separated from
-   another's code, its test may be a test-only commit. The field report names each such grouping.
-5. **Deliver, always, even when partial**: complete the field-report body in `.se/work/field-report.md`,
-   check it with `work_tickets.py field-report --check .se/work/field-report.md` (add
-   `--issue-body <file>` without intake's snapshot; it also refuses comments that arrived on the
-   work issue after they were recorded as read, naming the remedy) and fix it until it passes,
-   then run
-   `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request and
-   field report, and prints the integrator notification.
-   Before filing, walk every numbered requirement and every acceptance line of the work issue. For
-   each, add one evidence-table row with one quoted evidence line: command and output, file and
-   line, or measurement. A requirement the worker narrowed or did not meet is listed under "Not
-   delivered", never as a "decision". A worker may decide only what the issue leaves open.
+4. **Work the ticket**:
+   - Build first: where the acceptance names a real build (a module at a new pin, an output a
+     project command regenerates), build it at that pin before writing code, so a failure that is
+     not yours shows before your change.
+   - Then regression test first, then the change, then the focused tests and the affected real
+     command, and what the issue's acceptance names. No backwards compatibility, no bookkeeping
+     files.
+   - Tests follow the work model's [test rules](../skills/work-model/SKILL.md#tests); a change that
+     adds tests measures the suite with `work_tickets.py suite` before and after it, for the field
+     report.
+   - The complete suite: run the complete suite only where the acceptance names it, otherwise the
+     integrator does (where a pin moves, see
+     [suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)).
+   - Where the container allows it, run the affected real command once against the real outside
+     service, not only against its fake: only the real call shows what the service refuses.
+   - Record evidence in the ticket, check its acceptance items only with evidence,
+     `move --to done`, and commit as the work model's
+     [commit identity](../skills/work-model/SKILL.md#what-the-project-provides), with the
+     environment's [`commit_trailer`](../skills/work-model/SKILL.md#what-the-project-provides) if
+     it sets one.
+   - Commit each requirement as soon as it is done, while working; never reconstruct commits at
+     the end. One commit per requirement, with two exceptions: requirements that change one
+     function together share one commit, and where one requirement's behaviour cannot be separated
+     from another's code, its test may be a test-only commit. The field report names each such
+     grouping.
+5. **Deliver, always, even when partial**:
+   - Complete the field-report body in `.se/work/field-report.md`.
+   - Before filing, walk every numbered requirement and every acceptance line of the work issue.
+     For each, add one evidence-table row with one quoted evidence line: command and output, file
+     and line, or measurement. A requirement the worker narrowed or did not meet is listed under
+     "Not delivered", never as a "decision". A worker may decide only what the issue leaves open.
+   - Check it with `work_tickets.py field-report --check .se/work/field-report.md` (add
+     `--issue-body <file>` without intake's snapshot; it also refuses comments that arrived on the
+     work issue after they were recorded as read, naming the remedy) and fix it until it passes.
+   - Then run `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request and
+     field report, and prints the integrator notification.
 6. A ticket you cannot finish stays in `held/` with the attempts and failure evidence; the field
    report states it as "Not delivered" with exact next steps. Never claim unfinished work complete.
+
    **Never end your turn without delivering.** Your turn ends only after step 7. If you stop working
    for any reason (blocked, out of ideas, unsure), deliver what you have and name the blocker in the
    field report's "Not delivered"; an idle session with no field report is a failure.

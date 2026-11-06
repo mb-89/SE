@@ -64,9 +64,10 @@ the letters of the options they fail.
 
 An agent decides its own questions with the same note, without `obs.bless`. Where it prefers an
 option the matrix does not pick, it sets `chosen` and states, in that option's `losses` or the
-"What if" answer, the world that choice needs: the weights under which it would win. If that
-world is nonsense, the preference is wrong: it takes the matrix's winner, or, where it may not
-decide, sends the note up the [escalation ladder](../work-model/SKILL.md#escalation-ladder). A
+"What if" answer, the world that choice needs: the weights under which it would win.
+
+If that world is nonsense, the preference is wrong: it takes the matrix's winner, or, where it may
+not decide, sends the note up the [escalation ladder](../work-model/SKILL.md#escalation-ladder). A
 matrix that matches a decision only with weird or useless weights says the decision is not the
 right one.
 
@@ -94,7 +95,8 @@ against their own total ("Task 1 of 2"), each with what to do, where, and what i
 ## The record
 
 The skill's output is the answered artifact (obs's `--answers` output): one decision with its
-verdict, comments, overrides and vetoes. That artifact is the decision's record. Where it is kept
-is not this skill's concern: whatever uses the decision handles the artifact, an issue may carry
-it as an attachment, and nothing is required to commit it. A decision about a class changes that
-class's rule.
+verdict, comments, overrides and vetoes. That artifact is the decision's record. A decision about
+a class changes that class's rule.
+
+Where it is kept is not this skill's concern: whatever uses the decision handles the artifact, an
+issue may carry it as an attachment, and nothing is required to commit it.
