@@ -33,6 +33,10 @@ REQUIREMENT_PATTERN = re.compile(r"^(\d+)\.\s+(.*\S)\s*$")
 FRONT_MATTER_PATTERN = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 ISSUE_URL_PATTERN = re.compile(r"^https?://([^/]+)/([^/]+)/([^/]+)/issues/\d+$")
+CROSS_REFERENCE_PATTERN = re.compile(
+    r"https?://(?P<host>[\w.-]+)/(?P<url_owner>[\w.-]+)/(?P<url_repo>[\w.-]+)/[^\s)>\]]+"
+    r"|(?<![\w/.-])(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)#\d+"
+)
 REMOVED_PYTHON_TEST_PATTERN = re.compile(r"^-\s*def\s+(test_[A-Za-z0-9_]+)\s*\(")
 REMOVED_JAVASCRIPT_TEST_PATTERN = re.compile(
     r"""^-\s*(?:test|it)\s*\(\s*(?P<quote>["'`])(?P<name>.*?)(?P=quote)"""
@@ -1161,6 +1165,41 @@ def intake(
         initialize_discovery(root, probe_root)
     save_snapshot(root, issue)
     return issue, created, kept
+
+
+def bare_cross_repository_references(body: str, repo: str) -> list[str]:
+    """References in a work issue to another repository with no quoted block next to them.
+
+    A cloud worker reads only its own repository, so what it needs from another one is quoted
+    inline (work-model skill, "Writing work issues"): a reference counts as quoted when it sits in
+    a quote or code block, follows one directly (an attribution), or the nearest non-blank line
+    after it opens one."""
+    own_owner, own_repo = (part.casefold() for part in repo.split("/")[-2:])
+    lines = body.splitlines()
+    fenced, in_block = False, []
+    for line in lines:
+        opens_fence = line.lstrip().startswith("```")
+        in_block.append(fenced or opens_fence or line.lstrip().startswith(">"))
+        fenced = fenced != opens_fence
+
+    def quoted(index: int) -> bool:
+        if in_block[index] or (index > 0 and in_block[index - 1]):
+            return True
+        index += 1
+        while index < len(lines) and not lines[index].strip():
+            index += 1
+        return index < len(lines) and in_block[index]
+
+    bare = []
+    for index, line in enumerate(lines):
+        if quoted(index):
+            continue
+        for match in CROSS_REFERENCE_PATTERN.finditer(line):
+            owner = match.group("url_owner") or match.group("owner")
+            name = match.group("url_repo") or match.group("repo")
+            if (owner.casefold(), name.casefold()) != (own_owner, own_repo):
+                bare.append(match.group(0))
+    return bare
 
 
 def issue_changes(previous: dict[str, object] | None, issue: dict[str, object]) -> dict[str, object]:
@@ -2905,6 +2944,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"created todo/{ticket_id}.md")
             for ticket_id in kept:
                 print(f"kept existing ticket for {ticket_id}")
+            for reference in bare_cross_repository_references(issue["body"], issue["repo"]):
+                print(
+                    f"warning: intake: work issue #{issue['number']} cites {reference} with no "
+                    "quoted block next to it; a cloud worker cannot read another repository, so "
+                    "quote what it needs inline, with its source (work-model skill, "
+                    '"Writing work issues")',
+                    file=sys.stderr,
+                )
             if issue["comments"]:
                 print(f"{len(issue['comments'])} comment(s) may change the requirements:")
                 for comment in issue["comments"]:
