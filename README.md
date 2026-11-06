@@ -144,13 +144,17 @@ and says so; a malformed one is refused, naming the file.
 #### Release tags
 
 `release = "workflow"` hands the tags to se's release workflow, for hosts that may push branches but
-not tags (Claude's cloud sessions). `push` still bumps and commits the version, pushes the branch
-only and names the workflow; a version without its tag is left for the workflow, not bumped. On each
-push to the integration branch the workflow tags `v<version>` on the first-parent commit since
-which `se.toml` carries that version, unless the tag is there. Where the tag names another commit,
-the run fails, naming the version and the remedy. Without `release`, `push` pushes the tags itself;
-another value is refused, naming the file. A repository turns it on with `release = "workflow"` and
-this file, `.github/workflows/release-tag.yml`, the same in every repository (se's own included):
+not tags (Claude's cloud sessions).
+
+- `push` still bumps and commits the version, pushes the branch only and names the workflow; a
+  version without its tag is left for the workflow, not bumped.
+- On each push to the integration branch the workflow tags `v<version>` on the first-parent commit
+  since which `se.toml` carries that version, unless the tag is there.
+- Where the tag names another commit, the run fails, naming the version and the remedy.
+- Without `release`, `push` pushes the tags itself; another value is refused, naming the file.
+
+A repository turns it on with `release = "workflow"` and this file,
+`.github/workflows/release-tag.yml`, the same in every repository (se's own included):
 
 ```yaml
 name: release-tag
