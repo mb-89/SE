@@ -54,8 +54,9 @@ uv run python <se>/scripts/se_start.py refresh
 ```
 
 - Where it runs: in Claude Code, the plugin's start hook (`bootstrap.sh --hook`) shows the greeting
-  to the person and hands it to the session; elsewhere SE's [instructions](src/agents/se.md) run
-  `status --greeting` first.
+  to the person and hands it to the session, together with SE's root (`SE root: <path>`), where the
+  skills find SE's scripts; elsewhere SE's [instructions](src/agents/se.md) run `status --greeting`
+  first.
 - The counts are what loaded: the skills and agents of the plugin's layout (every agent but SE is a
   sub-agent) and the rules the [public check](AGENTS.md#public-safety) enforces.
 - `status` reads only the disk and the last update check, cached in `~/.se/start-check.json`
