@@ -30,6 +30,11 @@ its tools.
 
 ## Tools
 
+- **First start**: where no hook ran it (every host but Claude Code), run
+  [`scripts/bootstrap.sh`](../scripts/bootstrap.sh) of the se checkout with `bash` once at the
+  start of a session. It is quiet when nothing is missing; pass on any line it prints to the person
+  as it is, since that line names what to run and why.
+
 - **Turn-start check**: run `work_tickets.py queue --worktree <main checkout>` to surface field
   reports and startable ready work; local sessions have no scheduled agent.
 - **Work issues** from [work.md](../.github/ISSUE_TEMPLATE/work.md): title = branch name, label `work`,

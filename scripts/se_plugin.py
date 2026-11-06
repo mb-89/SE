@@ -27,7 +27,8 @@ OWNER = "mb-89"
 REPOSITORY = "https://github.com/mb-89/SE"
 DESCRIPTION = ("SE, the agent a person talks to, with its integrator and worker sub-agents and "
                "their skills.")
-BOOTSTRAP = 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh"'
+# `|| true`: a step that needs the person is advice for the session, never a failed start.
+BOOTSTRAP = 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" || true'
 LINK = re.compile(r"(\]\()([^)\s#]+)((?:#[^)\s]*)?\))")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
