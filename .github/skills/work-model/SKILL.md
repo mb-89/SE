@@ -81,6 +81,25 @@ then person. Every level decides, and writes what it sends up, as the
   issue: a decision from SE's own discussion with the person joins the deck directly.
   Until the deck command exists, SE shows the notes one after the other.
 
+## Outside issues
+
+An outside issue reaches a repository from outside the fleet: from the person's other side or any
+other source. Nobody labels it and nothing is asked of whoever files it; the fleet tells its own
+issues apart instead:
+
+- Every issue the fleet files carries the hidden marker `<!-- se:fleet -->` in its body: the issue
+  templates hold it, filing a field report writes it, and `work_tickets.py field-report --check`
+  adds it to a report without it, so a report filed by hand is marked too. An issue labelled
+  `field-report` counts as marked.
+- `se.toml` `[outside]` names each repository SE watches with its cut-off, the last issue number
+  that existed before the marker (`"<host>/<owner>/<repo>" = <number>`); issues up to it are known,
+  never outside issues.
+- An outside issue is handled once SE has commented on it with a comment that carries
+  `<!-- se:handled -->`, so the record lives on the issue itself.
+- `work_tickets.py intake --outside` lists the open, unmarked, unhandled issues above each
+  cut-off, read in one query. What SE does with each is its
+  [outside-issue routine](../../agents/se.agent.md#outside-issues).
+
 ## Integration branch
 
 The integration branch is the one branch the integrator writes and every worker branches from,
@@ -389,6 +408,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - `intake` and `refresh`: read the issue and its comments; `create` one ticket per numbered
     requirement plus `delivery`; record the comments read with `comments-read --count <n>
     --newest <id>`, from what the GitHub tools read.
+  - `intake --outside`: read each `[outside]` repository's open issues and their comments, and
+    keep those [Outside issues](#outside-issues) leaves.
   - `deliver`: `sync`; `push`; open the pull request to the integration
     branch, titled like the work issue; file the field report, titled `field-report: <branch>`,
     label `field-report`; send the notification.
