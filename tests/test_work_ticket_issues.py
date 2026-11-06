@@ -2440,6 +2440,37 @@ def test_suite_compare_verdict_at_the_edge_of_the_spread(compare_checkout, capsy
     assert capsys.readouterr().out.rstrip().endswith(f"Verdict: {verdict}")
 
 
+def test_suite_compare_measures_a_branch_as_published_not_its_stale_local_copy(
+        compare_checkout, capsys):
+    """A local branch that sync never moves predates [tests]; origin's copy declares it."""
+    checkout, calls, durations = compare_checkout
+    git_ok("-C", str(checkout), "branch", "stale", "HEAD~1")
+    git_ok("-C", str(checkout), "push", "-q", "origin", "HEAD:refs/heads/stale")
+    git_ok("-C", str(checkout), "fetch", "-q", "origin")
+    durations["HEAD"] += [1.0, 10.0, 10.0]
+    durations["base"] += [1.0, 10.0, 10.0]
+
+    assert work_tickets.main(["suite", "--compare", "stale", "--worktree", str(checkout)]) == 0
+    out = capsys.readouterr().out
+    assert "Suite compare: HEAD against stale (origin/stale at " in out
+    assert out.rstrip().endswith("Verdict: not slower")
+    assert calls == ["HEAD", "base"] * 3
+
+
+def test_suite_compare_refuses_a_ref_that_predates_tests_naming_it_and_the_remedy(
+        compare_checkout, capsys):
+    checkout, calls, _ = compare_checkout
+
+    assert work_tickets.main(["suite", "--compare", "HEAD~1", "--worktree", str(checkout)]) == 1
+    err = capsys.readouterr().err
+    assert "suite --compare: HEAD~1 (" in err
+    assert "declares no [tests] command in its se.toml; it predates [tests]" in err
+    assert "compare against a ref that declares it" in err
+    assert calls == []
+    assert subprocess.run(["git", "-C", str(checkout), "worktree", "list"], capture_output=True,
+                          text=True, check=False).stdout.count("\n") == 1
+
+
 def test_suite_compare_refuses_a_ref_it_cannot_check_out(compare_checkout, capsys):
     checkout, calls, _ = compare_checkout
 
