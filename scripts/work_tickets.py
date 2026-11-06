@@ -727,8 +727,8 @@ def integration_branch(root: Path) -> str:
 
 
 def public_check_enabled(root: Path) -> bool:
-    """`project.public_check` in se.toml: whether pushes to the integration branch need se's check."""
-    configured = project_config(root).get("public_check", False)
+    """`project.public_check` in se.toml: whether pushes need se's check; on unless set false."""
+    configured = project_config(root).get("public_check", True)
     if not isinstance(configured, bool):
         raise QueueError(
             f"project.public_check in {root / 'se.toml'} must be true or false; fix it"
@@ -1564,8 +1564,12 @@ def git_push(root: Path, arguments: list[str]) -> None:
 
 
 def push_gate(root: Path, branch: str) -> None:
-    """The public check's push gate on `branch`, as the pre-push hook runs it, where se.toml sets it."""
+    """The public check's push gate on `branch`, as the pre-push hook runs it, unless se.toml turns it off."""
     if not public_check_enabled(root):
+        print(
+            f"Public check off: project.public_check = false in {root / 'se.toml'}; "
+            "set it to true (or remove it) to check every push"
+        )
         return
     pushed = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}"],

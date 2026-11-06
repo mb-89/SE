@@ -228,9 +228,9 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
 - the setup command that installs the tools the roles need (`git`, `gh`, Python 3.11 or newer and
   whatever the project's tests need);
 - the focused and the complete test commands, including gated test tiers if there are any;
-- its public check, if it has one, with the hooks that run it and `public_check = true` in its
-  `se.toml` ([Project settings](../../../README.md#project-settings)), which gates every push to
-  the integration branch on it;
+- its public check with the hooks that run it; `public_check` in its `se.toml`
+  ([Project settings](../../../README.md#project-settings)) gates every push to the integration
+  branch on it, on unless the project sets it to `false`;
 - its integration project checks as JSON argument arrays passed to `integrate --check-command`, for
   example `--check-command '[["uv", "run", "pytest", "-q"], ["uv", "run", "python", "check.py"]]'`.
   The commands run without a shell. Add `--check-command-temporary-directory` when every command
@@ -340,7 +340,7 @@ owns what changes.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
     like the work issue and based on the integration branch.
   - `integrate`: merge the pull request's branch into the newest integration branch locally, run
-    the complete suite and, where `se.toml` sets `public_check`, the public check
+    the complete suite and, unless `se.toml` sets `public_check = false`, the public check
     (`public_check.py --rev HEAD --range <pre-merge>..HEAD`), refusing on a failure, `push <integration branch>`,
     then close the issues with the
     `Integrated in …` comment.
