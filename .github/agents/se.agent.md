@@ -77,8 +77,8 @@ This routine is its one statement; for each issue it lists:
 2. Nothing contradicted: route it to that repository's integrator as a work issue: retitle it as its
    branch name (`<type>/<topic>-<yyyymmdd>`), comment the
    sections of [work.md](../ISSUE_TEMPLATE/work.md) it lacks, completed, in one comment
-   that carries `<!-- se:handled -->` and says it is routed; label it `work`, `repo:<name>` and
-   `ready`, and notify the integrator.
+   that carries `<!-- se:handled -->` and says it is routed; leave it unlabelled, and notify the
+   integrator.
 3. Something contradicted: do not route it. Comment, with `<!-- se:handled -->`, what it
    contradicts (the principle, spec passage or decision, linked) and that it waits on the person;
    bring it to the person as a decision note in the deck, as the
