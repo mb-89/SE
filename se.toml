@@ -8,7 +8,8 @@ public_check = true
 authored_content = [
     "AGENTS.md",
     "README.md",
-    ".github/**/*.md",
+    ".github/ISSUE_TEMPLATE/*.md",
+    "src/**/*.md",
 ]
 
 # The complete suite and its time budget; work_tickets.py integrate holds every integration to it
