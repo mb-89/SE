@@ -183,7 +183,9 @@ Each integration is a first-parent merge whose message starts `Integrate <branch
 writes it, and states its kind in the trailer `Release-kind: major|minor|patch`. `integrate` writes
 it, and `work_tickets.py release-trailer` prints it for a merge by hand:
 
-- `major` where the work issue's "Package kind" says "breaking";
+- on a re-integration (a merge `Integrate <branch>` of the same branch is already on the
+  integration branch) the field report's "Re-integration kind", `patch` unless it says otherwise;
+- else `major` where the work issue's "Package kind" says "breaking";
 - else by the branch prefix: `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs`
   `patch`; another prefix is refused before anything is merged.
 

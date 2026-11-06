@@ -50,6 +50,9 @@ PROTECTED_SENTENCE_CONTENT_PATTERN = re.compile(
 )
 PROTECTED_DOT = "\uE000"
 FIELD_REPORT_RESULT_PATTERN = re.compile(r"\*\*Result:\*\*\s*(complete|partial)\s*(?:\n|$)")
+BRANCH_TIP_FIELD = re.compile(r"(\*\*Branch tip:\*\*[ \t]*)(`[^`\n]*`|\S*)")
+BRANCH_TIP_PATTERN = re.compile(r"\*\*Branch tip:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
+REINTEGRATION_KIND_PATTERN = re.compile(r"\*\*Re-integration kind:\*\*[ \t]*([^\s<]*)")
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
 IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
 ISSUE_FIELDS = "number,title,body,url,updatedAt,comments,labels"
@@ -1904,9 +1907,73 @@ def release_kind(branch: str, breaking: bool) -> str:
     return kind
 
 
-def release_trailer(branch: str, issue_body: str) -> str:
-    """The trailer every integration merge carries, the one source of its release kind."""
+def integrated_before(root: Path, branch: str) -> bool:
+    """Whether a first-parent merge `Integrate <branch>` is already on the integration branch."""
+    subjects = checked_git(root, "log", "--first-parent", "--merges", "--format=%s",
+                           integration_branch(root))
+    return any(
+        (match := INTEGRATION_SUBJECT_PATTERN.match(subject)) is not None and match[1] == branch
+        for subject in subjects.splitlines()
+    )
+
+
+def reintegration_kind(report_body: str | None) -> str:
+    """The kind a field report states for a later integration of its branch; patch without one."""
+    match = REINTEGRATION_KIND_PATTERN.search(report_body or "")
+    if match is None:
+        return "patch"
+    if match[1] not in RELEASE_ORDER:
+        raise QueueError(
+            f"Field report states Re-integration kind {match[1]!r}; write one of "
+            f"{', '.join(RELEASE_ORDER)}; nothing was merged"
+        )
+    return match[1]
+
+
+def release_trailer(root: Path, branch: str, issue_body: str, report_body: str | None = None) -> str:
+    """The trailer every integration merge carries, the one source of its release kind: the work
+    issue's kind on a first integration, and on a re-integration (an earlier merge of `branch` is
+    on the integration branch) the field report's Re-integration kind, patch without a report."""
+    if integrated_before(root, branch):
+        return f"{RELEASE_TRAILER}: {reintegration_kind(report_body)}"
     return f"{RELEASE_TRAILER}: {release_kind(branch, is_breaking(issue_body))}"
+
+
+def reported_tip(report_body: str) -> str:
+    match = BRANCH_TIP_PATTERN.search(report_body)
+    if match is None:
+        raise QueueError(
+            "Field report names no Branch tip; the worker runs field-report --check --worktree "
+            "<worktree>, which fills it from the branch, and files the report again; nothing was merged"
+        )
+    return match[1]
+
+
+def late_commits(root: Path, report_body: str, head: str) -> list[str]:
+    """The commits on `head` the field report's Branch tip does not cover, as `<short> <subject>`:
+    those after the tip that are not already on the integration branch. A merge carries none of
+    its own, so a sync of the integration branch after the report is not one."""
+    return checked_git(
+        root, "log", "--no-merges", "--format=%h %s", head, f"^{reported_tip(report_body)}",
+        f"^{integration_branch(root)}",
+    ).splitlines()
+
+
+def check_branch_tip(root: Path, report_body: str, branch: str, head: str,
+                     included: str | None) -> list[str]:
+    """Refuse where `branch` at `head` has commits past the field report's Branch tip, unless the
+    integrator states in `included` why they are included; returns those commits."""
+    late = late_commits(root, report_body, head)
+    if late and not included:
+        raise QueueError(
+            f"Branch {branch} has commits after the field report's Branch tip "
+            f"{reported_tip(report_body)[:12]}:\n" + "\n".join(f"- {commit}" for commit in late)
+            + "\nNothing was merged. Either the worker updates the field report in place "
+            "(field-report --check --worktree <worktree> fills the new tip; deliver files it "
+            "again), or the integrator states why the extra commits are included with "
+            "--include-late <reason>"
+        )
+    return late
 
 
 def merge_release_kind(commit: str, subject: str, message: str) -> str:
@@ -2489,7 +2556,7 @@ def draft_field_report(root: Path, file: Path, pr: int | None) -> int | None:
             1,
         )
     with file.open("x", encoding="utf-8", newline="\n") as stream:
-        stream.write(body.lstrip("\n"))
+        stream.write(with_branch_tip(root, body.lstrip("\n")))
     return pr
 
 
@@ -2554,8 +2621,19 @@ def field_report_problems(body: str, issue_body: str | None) -> list[str]:
         f'header (above the first section): unfilled placeholder {placeholder}; '
         "replace it with its value"
         for placeholder in field_report_placeholders()
-        if placeholder in header
+        if placeholder in header and placeholder != "<tip>"
     )
+    if BRANCH_TIP_PATTERN.search(header) is None:
+        problems.append(
+            "header (above the first section): Branch tip must be the branch's commit; "
+            "field-report --check --worktree <worktree> fills it from the branch"
+        )
+    kind = REINTEGRATION_KIND_PATTERN.search(header)
+    if kind is not None and kind[1] not in RELEASE_ORDER:
+        problems.append(
+            f"header (above the first section): Re-integration kind {kind[1]!r} must be one of "
+            f"{', '.join(RELEASE_ORDER)}"
+        )
     if FIELD_REPORT_RESULT_PATTERN.search(header) is None:
         problems.append(
             'header (above the first section): Result must be exactly complete or partial, '
@@ -2629,9 +2707,9 @@ def check_field_report(
 ) -> bool:
     """Validate a field-report file against the template without writing GitHub or, given the
     issue body, without a worktree; in a worktree with a comments-read record, also refuse comments
-    that arrived after it (read with gh, unless `comments` gives the issue's state). A passing
-    report without the fleet marker gets it, so one filed by hand is marked too; returns whether
-    it was added."""
+    that arrived after it (read with gh, unless `comments` gives the issue's state). In a worktree
+    its Branch tip is first set to the branch's commit. A passing report without the fleet marker
+    gets it, so one filed by hand is marked too; returns whether it was added."""
     try:
         body = file.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
@@ -2654,15 +2732,30 @@ def check_field_report(
                 "run intake, or save the work issue's body to a file and pass --issue-body <file>"
             )
         issue_body = str(snapshot["body"])
+    if root is not None:
+        body = with_branch_tip(root, body)
     problems = field_report_problems(body, issue_body)
     if problems:
         raise field_report_error(file.name, problems)
     if root is not None and (comments is not None or load_comments_read(root) is not None):
         check_comments_read(root, comments)
-    if FLEET_MARKER in body:
-        return False
     file.write_text(fleet_marked(body), encoding="utf-8", newline="\n")
-    return True
+    return FLEET_MARKER not in body
+
+
+def branch_tip(root: Path) -> str | None:
+    """The commit the branch checked out in `root` is at; None without one."""
+    result = run_git(root, "rev-parse", "--verify", "--quiet", "HEAD")
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def with_branch_tip(root: Path, body: str) -> str:
+    """`body` with its Branch tip set to the branch's commit in `root`, the one value it records;
+    unchanged where `root` has no commit, and the template check then names an unfilled tip."""
+    tip = branch_tip(root)
+    if tip is None:
+        return body
+    return BRANCH_TIP_FIELD.sub(lambda match: f"{match[1]}`{tip}`", body, count=1)
 
 
 def fleet_marked(body: str) -> str:
@@ -2691,8 +2784,8 @@ def file_field_report(
         body = file.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         raise QueueError(f"Cannot read field report {file}: {error}") from error
-    body = fleet_marked(
-        re.sub(r"\n{3,}", "\n\n", HTML_COMMENT_PATTERN.sub("", body)).strip() + "\n")
+    body = fleet_marked(with_branch_tip(
+        root, re.sub(r"\n{3,}", "\n\n", HTML_COMMENT_PATTERN.sub("", body)).strip() + "\n"))
     if pr is None:
         pr = report_pull_request(root, issue, branch)
     problems = field_report_problems(body, str(issue["body"]))
@@ -3426,8 +3519,10 @@ def integrate(
     build_command: str | None,
     check_commands: list[list[str]] | None = None,
     check_temporary_working_directory: bool = False,
+    included: str | None = None,
 ) -> str:
-    """Merge a completed worker branch and perform the mechanical integration steps."""
+    """Merge a completed worker branch and perform the mechanical integration steps; `included`
+    states why commits after the field report's Branch tip are merged too."""
     tracker = resolve_repo(root, repo)
     report, work_issue, work_number, pull_number = validate_field_report(root, report_number, tracker)
     project_repo = remote_repo(root) or tracker
@@ -3461,9 +3556,11 @@ def integrate(
     )
     if previous.returncode != 0 or not previous.stdout.strip():
         raise QueueError(f"Cannot determine the pre-merge {target}")
+    head = str(pull.get("headRefOid", ""))
+    late = check_branch_tip(root, str(report["body"]), branch, head or branch, included)
     mirrors = configured_mirrors(root)
     trailer = config_value("commit_trailer", remote_repo(root), None)
-    kind = release_trailer(branch, str(work_issue["body"]))
+    kind = release_trailer(root, branch, str(work_issue["body"]), str(report["body"]))
     merged = subprocess.run(
         [
             "git", "-C", str(root), "merge", "--no-ff",
@@ -3485,7 +3582,6 @@ def integrate(
         subprocess.run(["git", "-C", str(root), "merge", "--abort"], capture_output=True, check=False)
         files = ", ".join(line for line in conflicts.stdout.splitlines() if line.strip())
         raise QueueError(f"Cannot merge {branch}; conflicts: {files or 'unknown files'}")
-    head = str(pull.get("headRefOid", ""))
     contained = subprocess.run(
         ["git", "-C", str(root), "merge-base", "--is-ancestor", head, target],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
@@ -3521,10 +3617,12 @@ def integrate(
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     ).stdout.strip()
     print(f"Suite: {suite_result}")
+    extra = (f"Includes {len(late)} commit(s) after the field report's Branch tip: {included}\n"
+             if late else "")
     for issue in (work_number, report_number):
         run_gh_with_body(
             root, ["issue", "comment", str(issue), *repo_arguments(tracker)],
-            f"Integrated in {commit} from PR #{pull_number}. Suite: {suite_result}.\n",
+            f"Integrated in {commit} from PR #{pull_number}. Suite: {suite_result}.\n{extra}",
         )
         run_gh(root, [
             "issue", "edit", str(issue), "--remove-label", "in-progress",
@@ -3557,6 +3655,13 @@ def add_optional_worktree_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--worktree", default=".", help="path to the selected worktree; default: current checkout"
     )
+
+
+def add_include_late_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--include-late", metavar="REASON",
+        help="why commits on the branch after the field report's Branch tip are merged too; "
+             "without it they are refused")
 
 
 REPO_HELP = "[HOST/]OWNER/REPO; default: argument, [trackers], then origin"
@@ -3747,10 +3852,15 @@ def make_parser() -> argparse.ArgumentParser:
     trailer_parser = subparsers.add_parser(
         "release-trailer", help="print the Release-kind trailer an integration merge of <branch> "
         "carries, from its work issue's Package kind and the branch prefix; push requires it")
-    trailer_parser.set_defaults(worktree=None)
+    add_optional_worktree_argument(trailer_parser)
     trailer_parser.add_argument("branch", help="the integrated branch")
     trailer_parser.add_argument(
         "--issue-body", required=True, type=Path, help="file holding the work issue's body")
+    trailer_parser.add_argument(
+        "--field-report", type=Path, metavar="FILE",
+        help="file holding the field report; refuses commits on <branch> after its Branch tip, "
+             "and gives a re-integration its Re-integration kind (default patch)")
+    add_include_late_argument(trailer_parser)
 
     integrate_parser = subparsers.add_parser(
         "integrate", help="validate, merge, test, push and close a field report")
@@ -3758,6 +3868,7 @@ def make_parser() -> argparse.ArgumentParser:
     integrate_parser.add_argument("field_report", type=int, help="field-report issue number")
     integrate_parser.add_argument("--repo", help=REPO_HELP)
     integrate_parser.add_argument("--build-command", help="project's output regeneration command")
+    add_include_late_argument(integrate_parser)
     integrate_parser.add_argument(
         "--check-command",
         type=parse_check_commands,
@@ -3943,16 +4054,23 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "release-trailer":
             try:
                 body = args.issue_body.read_text(encoding="utf-8")
+                report = (None if args.field_report is None
+                          else args.field_report.read_text(encoding="utf-8"))
             except (OSError, UnicodeError) as error:
-                raise QueueError(f"Cannot read the work issue's body {args.issue_body}: {error}") from error
-            print(release_trailer(args.branch, body))
+                raise QueueError(f"Cannot read {error.filename or 'an input file'}: {error}") from error
+            if report is not None:
+                late = check_branch_tip(root, report, args.branch, args.branch, args.include_late)
+                if late:
+                    print(f"Includes {len(late)} commit(s) after the field report's Branch tip: "
+                          f"{args.include_late}", file=sys.stderr)
+            print(release_trailer(root, args.branch, body, report))
             return 0
         if args.command == "integrate":
             if args.check_command_temporary_directory and not args.check_command:
                 raise QueueError("--check-command-temporary-directory requires --check-command")
             commit = integrate(
                 root, args.field_report, args.repo, args.build_command,
-                args.check_command, args.check_command_temporary_directory,
+                args.check_command, args.check_command_temporary_directory, args.include_late,
             )
             print(f"Integrated field report #{args.field_report} in {commit}")
             return 0

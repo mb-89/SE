@@ -22,18 +22,21 @@ datum: {prefer: [chat]}
 candidates:
   - key: deck
     label: Decision deck
+    short: Deck
     what: Each decision is one note rendered as a one-pager; the notes go to the person as one deck, answered in one pass.
     marks: {record: 1, effort: 1, volume: 1, cost: -1}
     wins: The answered artifact is the record and outlives the session; the person sees every open decision at once.
     losses: Each deck is built and handed over with the deck command; the person needs a browser or the Claude app.
   - key: chat
     label: Tables in the chat (keep what we have)
+    short: Chat
     what: SE shows one option table per message, numbered against the open total.
     marks: {record: 0, effort: 0, volume: 0, cost: 0}
     wins: Works today with nothing to build.
     losses: The answer lives in the chat until someone copies it; one decision per turn.
   - key: issue
     label: An issue per decision
+    short: Issues
     what: Each decision is a GitHub issue minted for the person, answered in a comment.
     marks: {record: 1, effort: -1, volume: -1, cost: 0}
     wins: The question and its answer are on GitHub from the start.
