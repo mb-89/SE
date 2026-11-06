@@ -617,6 +617,55 @@ def test_field_report_check_takes_the_issue_body_from_a_file_or_refuses_without_
     assert run(worktree, "field-report", "--check", str(report), "--issue-body", str(issue)) == 0
 
 
+def with_requirement_3(report: str) -> str:
+    row = "| Requirement 2 | complete | `abc1234` | `test`: passed |\n"
+    return report.replace(row, row + row.replace("Requirement 2", "Requirement 3"))
+
+
+SIX_REQUIREMENTS = BODY.replace(
+    "2. Issue tooling in `scripts/work_tickets.py`.\n",
+    "".join(f"{n}. Requirement text {n}.\n" for n in range(2, 6)),
+).replace("## Acceptance", "## Changes after filing\n\n6. Added after filing.\n\n## Acceptance")
+
+
+def six_requirement_report(rows: range) -> str:
+    row = "| Requirement 1 | complete | `abc1234` | `test`: passed |\n"
+    return COMPLETE_REPORT.replace(
+        row + "| Requirement 2 | complete | `abc1234` | `test`: passed |\n",
+        "".join(row.replace("Requirement 1", f"Requirement {n}") for n in rows),
+    )
+
+
+@pytest.mark.parametrize(("rows", "refused"), [(range(1, 6), True), (range(1, 7), False)],
+                         ids=["lacks-row-6", "has-row-6"])
+def test_field_report_check_counts_requirements_under_changes_after_filing(
+        worktree, capsys, rows, refused):
+    worktree.mkdir(exist_ok=True)
+    issue = worktree / "issue.md"
+    issue.write_text(SIX_REQUIREMENTS, encoding="utf-8")
+    report = worktree / "report.md"
+    report.write_text(six_requirement_report(rows), encoding="utf-8")
+
+    code = run(worktree, "field-report", "--check", str(report), "--issue-body", str(issue))
+    error = capsys.readouterr().err
+    if refused:
+        assert code == 1
+        assert 'missing evidence for: Requirement 6 (under "Changes after filing")' in error
+    else:
+        assert code == 0, error
+
+
+def test_intake_and_refresh_read_requirements_under_changes_after_filing(worktree, gh):
+    gh.issue["body"] = SIX_REQUIREMENTS
+    run(worktree, "intake", "--issue", "5")
+    todo = sorted(path.name for path in (worktree / ".se" / "work" / "todo").iterdir())
+    assert any(name.startswith("r6-added-after-filing") for name in todo), todo
+
+    gh.issue["body"] = SIX_REQUIREMENTS.replace(
+        "6. Added after filing.\n", "6. Added after filing.\n7. Added later.\n")
+    assert work_tickets.refresh(worktree, 5, None)["requirements_added"] == [7]
+
+
 def test_field_report_check_records_the_branch_tip_of_its_worktree(tmp_path, capsys):
     root = tmp_path / "worker"
     git_ok("init", "-q", "-b", BRANCH, str(root))
@@ -773,12 +822,17 @@ def test_field_report_check_refuses_a_body_edited_after_intake_until_it_is_recor
             "report, then record the body as read: work_tickets.py body-read") in error
 
     assert run(worktree, "body-read") == 0
+    assert run(worktree, "refresh") == 0
+    assert run(worktree, "field-report", "--check", str(report)) == 1
+    assert 'missing evidence for: Requirement 3 (under "Changes after filing")' in (
+        capsys.readouterr().err)
+    report.write_text(with_requirement_3(COMPLETE_REPORT), encoding="utf-8")
     assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
 
 
 def test_field_report_check_takes_the_body_by_hand_without_gh(worktree, gh, monkeypatch, capsys):
     report = worktree / "report.md"
-    report.write_text(COMPLETE_REPORT, encoding="utf-8")
+    report.write_text(with_requirement_3(COMPLETE_REPORT), encoding="utf-8")
     issue = worktree / "issue.md"
     issue.write_text(BODY.replace("\n", "\r\n") + "\n", encoding="utf-8", newline="")
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: False)
