@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import importlib.util
 import json
 import os
@@ -53,11 +54,13 @@ FIELD_REPORT_RESULT_PATTERN = re.compile(r"\*\*Result:\*\*\s*(complete|partial)\
 BRANCH_TIP_FIELD = re.compile(r"(\*\*Branch tip:\*\*[ \t]*)(`[^`\n]*`|\S*)")
 BRANCH_TIP_PATTERN = re.compile(r"\*\*Branch tip:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
 REINTEGRATION_KIND_PATTERN = re.compile(r"\*\*Re-integration kind:\*\*[ \t]*([^\s<]*)")
+WORK_ISSUE_PATTERN = re.compile(r"\bWork issue:\*{0,2}\s*#(\d+)\b", re.IGNORECASE)
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
 IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
 ISSUE_FIELDS = "number,title,body,url,updatedAt,comments,labels"
 ISSUE_SNAPSHOT = "issue.json"
 COMMENTS_READ = "comments-read.json"
+BODY_READ = "body-read.json"
 # The issue templates belong to se, wherever a project keeps it; messages name them relative to it.
 TEMPLATE_DIRECTORY = ".github/ISSUE_TEMPLATE"
 TEMPLATES = Path(__file__).resolve().parents[1] / TEMPLATE_DIRECTORY
@@ -1150,6 +1153,64 @@ def record_comments_read(root: Path, state: dict[str, object]) -> None:
     )
 
 
+def body_hash(body: str) -> str:
+    """What a read of the work issue's body records: the hash of its text, line endings and
+    surrounding whitespace aside, so a body read with gh and one saved by hand agree."""
+    return hashlib.sha256(body.replace("\r\n", "\n").strip().encode("utf-8")).hexdigest()
+
+
+def body_read_path(root: Path) -> Path:
+    path = queue_paths(root)["todo"].parent / BODY_READ
+    inside_root(root, path)
+    return path
+
+
+def load_body_read(root: Path) -> str | None:
+    path = body_read_path(root)
+    if not path.is_file():
+        return None
+    try:
+        return str(json.loads(path.read_text(encoding="utf-8"))["sha256"])
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise QueueError(
+            f"Cannot read the body-read record {path}: {error}; record the body again with "
+            "body-read"
+        ) from error
+
+
+def record_body_read(root: Path, body: str) -> None:
+    initialize(root)
+    body_read_path(root).write_text(
+        json.dumps({"sha256": body_hash(body)}) + "\n", encoding="utf-8", newline="\n",
+    )
+
+
+def body_read(root: Path, file: Path | None) -> None:
+    """Record the work issue's body as read: from `file`, as the worker's GitHub tools read it,
+    or, without one, as gh reads it now."""
+    if file is not None:
+        try:
+            body = file.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as error:
+            raise QueueError(f"Cannot read work issue body {file}: {error}") from error
+    else:
+        snapshot = required_snapshot(root)
+        body = str(fetch_issue(root, int(snapshot["number"]), str(snapshot["repo"]))["body"])
+    record_body_read(root, body)
+
+
+def changed_body_error(recorded: str, body: str, issue: str) -> QueueError | None:
+    """The refusal where the work issue's body changed after it was recorded as read."""
+    if recorded == body_hash(body):
+        return None
+    return QueueError(
+        f"The body of the work issue {issue} changed after it was last recorded as read. "
+        "Read its \"Changes after filing\", apply them, add their evidence rows to the field "
+        "report, then record the body as read: work_tickets.py body-read --worktree <worktree> "
+        "(without gh: add --body-file <file>, the body as your GitHub tools read it now)"
+    )
+
+
 EMPTY_ARGUMENT = "''"
 
 
@@ -1303,7 +1364,7 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
         tickets.append((ticket_id, (
             f"# {ticket_id}: {one_line(text.splitlines()[0])}\n\n"
             "## Design\n\n"
-            f"Work issue {issue['url']}, requirement {number}; re-read it and its comments "
+            f"Work issue {issue['url']}, requirement {number}; re-read its body and its comments "
             "before starting.\n\n"
             f"Design owner: {owner}\n\n"
             f"## Scope\n\n{text}\n\n"
@@ -1366,6 +1427,7 @@ def intake(
         initialize_discovery(root, probe_root)
     save_snapshot(root, issue)
     record_comments_read(root, comment_state(issue["comments"]))
+    record_body_read(root, str(issue["body"]))
     return issue, created, kept
 
 
@@ -2202,7 +2264,7 @@ def push(root: Path, branch: str | None = None) -> str:
 
 def deliver(root: Path, tracker: str | None = None) -> str:
     issue = required_snapshot(root)
-    check_comments_read(root, None)
+    check_issue_read(root, None, None, str(issue["url"]))
     branch = delivery_branch(root, issue)
     sync(root)
     report = root / ".se" / "work" / "field-report.md"
@@ -2684,33 +2746,44 @@ def field_report_error(name: str, problems: list[str]) -> QueueError:
     )
 
 
-def check_comments_read(root: Path, current: dict[str, object] | None) -> None:
-    """Refuse where the work issue has comments past those recorded as read.
+def check_issue_read(
+    root: Path, current: dict[str, object] | None, body: str | None, issue: str,
+) -> None:
+    """Refuse where the work issue has comments past those recorded as read, or a body other than
+    the one recorded as read.
 
-    `current` is the issue's comment state as the worker's own GitHub tools read it; without it,
-    the issue is read with gh, and where gh is not usable the check refuses (it guards)."""
+    `current` and `body` are the issue's comment state and body as the worker's own GitHub tools
+    read them; where either is missing, the issue is read with gh, once, and where gh is not
+    usable the check refuses (it guards). `issue` names the work issue in the refusals."""
     recorded = load_comments_read(root)
-    if recorded is None:
-        if current is None:
-            raise QueueError(
-                "No comments recorded as read for the work issue: run intake, or, without gh, "
-                "comments-read --count <n> --newest <id> with what your GitHub tools read"
-            )
-        return
+    recorded_body = load_body_read(root)
+    if recorded is None or recorded_body is None:
+        what = "comments" if recorded is None else "body"
+        raise QueueError(
+            f"No {what} recorded as read for the work issue: run intake, or, without gh, "
+            + ("comments-read --count <n> --newest <id>" if recorded is None
+               else "body-read --body-file <file>")
+            + " with what your GitHub tools read"
+        )
     comments = None
-    if current is None:
+    if current is None or body is None:
         snapshot = load_snapshot(root)
         if snapshot is None or not gh_usable():
             raise QueueError(
-                "Cannot compare the work issue's comments with those recorded as read: "
-                "gh is not usable or intake's snapshot is missing; pass --comment-count <n> "
-                "--newest-comment <id> as your GitHub tools read the issue now"
+                "Cannot compare the work issue with what was recorded as read: gh is not usable "
+                "or intake's snapshot is missing; pass --comment-count <n> --newest-comment <id> "
+                "and --issue-body <file> as your GitHub tools read the issue now"
             )
-        comments = fetch_issue(root, int(snapshot["number"]), str(snapshot["repo"]))["comments"]
-        current = comment_state(comments)
-    error = unread_comments_error(recorded, current, comments)
-    if error is not None:
-        raise error
+        fetched = fetch_issue(root, int(snapshot["number"]), str(snapshot["repo"]))
+        if current is None:
+            comments = fetched["comments"]
+            current = comment_state(comments)
+        if body is None:
+            body = str(fetched["body"])
+    for error in (unread_comments_error(recorded, current, comments),
+                  changed_body_error(recorded_body, body, issue)):
+        if error is not None:
+            raise error
 
 
 def check_field_report(
@@ -2718,8 +2791,9 @@ def check_field_report(
     comments: dict[str, object] | None = None,
 ) -> bool:
     """Validate a field-report file against the template without writing GitHub or, given the
-    issue body, without a worktree; in a worktree with a comments-read record, also refuse comments
-    that arrived after it (read with gh, unless `comments` gives the issue's state). In a worktree
+    issue body, without a worktree; in a worktree with a comments-read or body-read record, also
+    refuse comments that arrived after it and a body changed since (read with gh, unless
+    `comments` and the issue body file give them). In a worktree
     its Branch tip is first set to the branch's commit. A passing report without the fleet marker
     gets it, so one filed by hand is marked too; returns whether it was added."""
     try:
@@ -2749,8 +2823,13 @@ def check_field_report(
     problems = field_report_problems(body, issue_body)
     if problems:
         raise field_report_error(file.name, problems)
-    if root is not None and (comments is not None or load_comments_read(root) is not None):
-        check_comments_read(root, comments)
+    if root is not None and (comments is not None or load_comments_read(root) is not None
+                             or load_body_read(root) is not None):
+        snapshot = load_snapshot(root)
+        named = WORK_ISSUE_PATTERN.search(body)
+        issue = (str(snapshot["url"]) if snapshot is not None
+                 else f"#{named[1]}" if named else "named in the field report")
+        check_issue_read(root, comments, None if issue_body_file is None else issue_body, issue)
     file.write_text(fleet_marked(body), encoding="utf-8", newline="\n")
     return FLEET_MARKER not in body
 
@@ -2848,7 +2927,7 @@ def escalate(root: Path, number: int, file: Path, repo: str | None) -> None:
 
 
 def field_report_references(body: str) -> tuple[int, int]:
-    work = re.search(r"\bWork issue:\*{0,2}\s*#(\d+)\b", body, re.IGNORECASE)
+    work = WORK_ISSUE_PATTERN.search(body)
     pull = re.search(r"\bPull request:\*{0,2}\s*#(\d+)\b", body, re.IGNORECASE)
     if work is None or pull is None:
         missing = []
@@ -3862,6 +3941,15 @@ def make_parser() -> argparse.ArgumentParser:
     comments_parser.add_argument(
         "--newest", required=True, help="id of the newest comment ('' for none)")
 
+    body_parser = subparsers.add_parser(
+        "body-read",
+        help="record the work issue's body as read (intake records it; field-report --check and "
+             "deliver refuse a body changed after it)")
+    add_worktree_argument(body_parser)
+    body_parser.add_argument(
+        "--body-file", type=Path, metavar="FILE",
+        help="the work issue's body as your GitHub tools read it now; default: read with gh")
+
     report_parser = subparsers.add_parser(
         "field-report",
         help="create or update the field-report issue from a filled "
@@ -3875,11 +3963,13 @@ def make_parser() -> argparse.ArgumentParser:
         "--check", type=Path, metavar="FILE",
         help="only validate FILE against the template, without writing GitHub: its header lines, "
              "sections, tables, field labels, placeholders and evidence gate, and, in a worktree "
-             "with a comments-read record, refuse comments after it")
+             "with a comments-read or body-read record, refuse comments after it and a changed "
+             "body")
     report_parser.add_argument(
         "--issue-body", type=Path, metavar="FILE",
-        help="with --check: the work issue's body for the evidence gate; default: intake's "
-             "snapshot")
+        help="with --check: the work issue's body as your GitHub tools read it now, for the "
+             "evidence gate and the body-read check; default: intake's snapshot, the body read "
+             "with gh")
     report_parser.add_argument(
         "--comment-count", type=int, metavar="N",
         help="with --check: the work issue's comment count as your GitHub tools read it now; "
@@ -4102,6 +4192,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "comments-read":
             record_comments_read(root, {"count": args.count, "newest": args.newest})
             print(f"Recorded {args.count} comment(s) as read, newest {args.newest or 'none'}")
+            return 0
+        if args.command == "body-read":
+            body_read(root, args.body_file)
+            print("Recorded the work issue's body as read")
             return 0
         if args.command == "field-report":
             if args.check is not None:
