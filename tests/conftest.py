@@ -69,3 +69,41 @@ def repositories(tmp_path_factory) -> Callable[[Callable[[Path], None], Path], N
                 config.write_text(text, encoding="utf-8")
 
     return lay_out
+
+
+
+# The suite's JUnit report for `work_tickets.py suite` (README "Test budget"): where the gate names a
+# report directory, the controller writes se.xml there with its worker count and each test's setup
+# time and worker, so the gate prints se's Parts line and its slow setups.
+REPORTS_VARIABLE = "SE_TEST_REPORTS"
+setup_seconds: dict[tuple[str, str], float] = {}  # (test, worker): the controller's setup times
+
+
+@pytest.hookimpl(tryfirst=True)  # before junitxml opens its report
+def pytest_configure(config: pytest.Config) -> None:
+    reports = os.environ.get(REPORTS_VARIABLE)
+    if reports and not config.option.xmlpath and not hasattr(config, "workerinput"):
+        config.option.xmlpath = str(Path(reports) / "se.xml")
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    from _pytest.junitxml import xml_key
+
+    report = session.config.stash.get(xml_key, None)
+    if report is not None:  # junitxml opens it on the controller only
+        session.config.pluginmanager.register(SetupTimes(), "se-setup-times")
+        report.add_global_property("workers", getattr(session.config.option, "numprocesses", 0) or 1)
+
+
+class SetupTimes:
+    """Adds each test's setup time and worker to its JUnit test case, on the controller."""
+
+    @pytest.hookimpl(tryfirst=True)  # before junitxml writes the test case's properties
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        node = getattr(report, "node", None)  # pytest-xdist: the worker that ran the test
+        worker = node.gateway.id if node is not None else "main"
+        if report.when == "setup":
+            setup_seconds[(report.nodeid, worker)] = report.duration
+        elif report.when == "teardown" and (report.nodeid, worker) in setup_seconds:
+            seconds = setup_seconds.pop((report.nodeid, worker))
+            report.user_properties.extend([("setup_time", f"{seconds:.3f}"), ("worker", worker)])

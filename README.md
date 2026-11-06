@@ -266,6 +266,8 @@ optionally `fixture`), the part's line is followed by each test whose setup took
 such setup, named by its fixture or else its module, that more than one worker paid follows too:
 the signature of broken test grouping.
 
+se's own suite writes such a report, `se.xml`, from `tests/conftest.py`.
+
 ```text
     slow setup 6.0 s tests.test_ui::test_a (browser, worker gw0)
     setup browser paid on 2 workers (gw0, gw1): 12.5 s; group its tests on one worker

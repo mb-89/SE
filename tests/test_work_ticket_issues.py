@@ -2417,6 +2417,23 @@ def test_suite_lists_slow_setups_and_a_setup_paid_on_several_workers(worktree, m
     )
 
 
+def test_ses_own_suite_reports_its_parts_line_with_workers_and_setup_times(worktree, monkeypatch, capsys):
+    """se's conftest writes the JUnit report `suite` reads (README "Test budget")."""
+    root = Path(__file__).resolve().parents[1]
+    command = [sys.executable, "-m", "pytest", "-q", "-n", "1", "-p", "no:cacheprovider",
+               "--rootdir", str(root), str(root / "tests" / "test_se_plugin.py"), "-k", "layouts_match or one_source"]
+    (worktree / "se.toml").write_text(f"[tests]\ncommand = {json.dumps(command)}\n", encoding="utf-8")
+    readings = iter([0.0, 5.0])
+    monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
+    monkeypatch.setattr(work_tickets, "SLOW_SETUP_SECONDS", -1.0)  # list every setup
+
+    assert run(worktree, "suite") == 0
+    out = capsys.readouterr().out
+    parts = out.split("Parts:\n", 1)[1].split("Slowest tests:", 1)[0]
+    assert parts.startswith("  se: ") and " / 1 worker = " in parts
+    assert "    slow setup " in parts and ", worker gw0)" in parts
+
+
 def test_suite_without_reports_or_durations_names_the_remedy_once(worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 5.0)
     (worktree / "suite.py").write_text('print("1 passed")\n', encoding="utf-8")
