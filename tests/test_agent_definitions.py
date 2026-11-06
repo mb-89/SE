@@ -613,6 +613,13 @@ def test_the_worker_reports_the_suite_time_before_and_after_and_slow_new_tests()
     assert "**Suite time:**" in template
 
 
+
+def test_the_worker_delivery_measures_not_slower_with_one_command():
+    delivery = normalized(AGENTS / "worker.md").split("5. **Deliver", 1)[1].split("\n6. ", 1)[0]
+    assert ('Where the issue asks for "not slower", run `work_tickets.py suite --compare <integration '
+            'branch>` and quote its verdict line in the evidence table.') in delivery
+    assert "interleav" not in delivery
+
 CHECKLIST = ("Class or case", "Is the problem real", "Keep what we have", "A named loser", "Fair criteria",
              "What if", "Undo cost", "Consistency")
 LADDER = ("worker, then integrator", "One level per loop", "Straight to the person",
