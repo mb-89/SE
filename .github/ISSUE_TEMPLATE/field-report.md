@@ -58,7 +58,7 @@ requirements they share, and why (one function changed together, or a test-only 
 
 ## Tickets for other repositories
 
-<!-- One block per ticket, ready for the dispatcher to file as a work issue there:
+<!-- One block per ticket, ready for SE to file as a work issue there:
      ### <repo>: <title> / Goal / Requirements / Acceptance. Generic findings from an
      application become framework tickets and must not name the application. See the
      [work model](../skills/work-model/SKILL.md#roles-and-flow) for the entry granularity and

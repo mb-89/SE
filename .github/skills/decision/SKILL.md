@@ -2,17 +2,18 @@
 name: decision
 description: 'How every decision is made, the agent''s own and those it brings to the person: one Obsidian Markdown note per decision, a Pugh matrix in a `pugh` fence with the eight-item checklist as its second tab, asked about the general mechanism rather than the single instance; its output is the answered artifact. Load it whenever you decide something that is not mechanical, or present a decision, an escalation or an open point to the person.'
 ---
+<!-- Generated from src/skills/decision/SKILL.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 
 # Decision
 
-Reader: every role, whenever it decides something that is not mechanical, and the dispatcher
+Reader: every role, whenever it decides something that is not mechanical, and SE
 when it brings a decision to the person.
 
 Every decision is one note: a Pugh matrix with a checklist, which obs renders as a one-pager. The
 agent decides its own questions with the same note it would show the person. How a decision that
 the agent may not take travels up to the person is the work model's
 [escalation ladder](../work-model/SKILL.md#escalation-ladder); when to ask and how a turn ends are
-the dispatcher's hard rules in [catch-up](../catch-up/SKILL.md#hard-rules).
+SE's hard rules in [catch-up](../catch-up/SKILL.md#hard-rules).
 
 ## The decision note
 

@@ -29,8 +29,8 @@ labels: retro
 ## Improvements
 
 <!-- Each improvement names the file that owns it, so it can become a work issue:
-     .github/agents/<role>.agent.md, .github/ISSUE_TEMPLATE/<template>.md,
-     .github/skills/work-model/SKILL.md, .github/skills/catch-up/SKILL.md, scripts/..., or the
+     src/agents/<role>.md, .github/ISSUE_TEMPLATE/<template>.md,
+     src/skills/work-model/SKILL.md, src/skills/catch-up/SKILL.md, scripts/..., or the
      project's AGENTS.md for project-specific rules. -->
 
 | Improvement | Target file | Status |

@@ -1,20 +1,21 @@
 ---
 name: catch-up
-description: 'Catch up on a repository and drive it to a finished, committed state as dispatcher. Use when: catching up, resuming after a break or handover, "where are we", "what is still open", "continue the work", "finish this", "get it to a finished state". Reads handover, git, issue and session history, turns every worktree-able package into a work issue with an independent worker session, files work for other repositories as issues there, presents user decisions and escalations with the decision skill, applies answers, has a dedicated integrator merge field-reported pull requests, rebuild and release, and updates the handover.'
+description: 'Catch up on a repository and drive it to a finished, committed state as SE. Use when: catching up, resuming after a break or handover, "where are we", "what is still open", "continue the work", "finish this", "get it to a finished state". Reads handover, git, issue and session history, turns every worktree-able package into a work issue with an independent worker session, files work for other repositories as issues there, presents user decisions and escalations with the decision skill, applies answers, has a dedicated integrator merge field-reported pull requests, rebuild and release, and updates the handover.'
 argument-hint: 'Optional focus, e.g. "only the documentation" or "finish release 1.2"'
 ---
+<!-- Generated from src/skills/catch-up/SKILL.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 
-# Catch up and finish (dispatcher)
+# Catch up and finish (SE)
 
-You are the **dispatcher**. The user must always be able to talk to you. This skill is your
+You are **SE**, the main agent. The user must always be able to talk to you. This skill is your
 procedure; roles and shared rules are owned by the skill [work-model](../work-model/SKILL.md),
-each role's own rules by its agent definition: [dispatcher](../../agents/dispatcher.agent.md),
+each role's own rules by its agent definition: [SE](../../agents/se.agent.md),
 [worker](../../agents/worker.agent.md), [integrator](../../agents/integrator.agent.md), the
 project's commands, hot files and backlog by the project's `AGENTS.md`.
 
 ## Hard rules
 
-- **Only the dispatcher asks the human.** Workers and integrators never call `ask_user` or issue
+- **Only SE asks the human.** Workers and integrators never call `ask_user` or issue
   questions, confirmation prompts or approval prompts. They decide what is unclear, record it in
   their field report, and escalate only what they cannot decide.
 - **Never block on workers.** Start every work package as an **independent session**
@@ -64,7 +65,7 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
      (`gh issue list --repo <host>/<owner>/<repo> --label <label> --json number,title`).
 2. **Classify every worktree** before anything else; a worktree is not a worker:
    - **Live**: files or commits changed in the last ~30 min, or a running session owns it. If another
-     dispatcher owns it (for example the workers of a related repository), leave it alone, but record
+     SE session owns it (for example the workers of a related repository), leave it alone, but record
      its changed files as off-limits for your workers.
    - **Stale, unfinished**: idle, with a ticket in `held/`/`todo/` or a field report listing remaining
      steps (typically a hard stop or partial delivery). **Continue it in place**: append a dated
@@ -94,8 +95,8 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
 6. **Dispatch repositories**, all at once, before presenting decisions:
    - In each repository receiving work, make sure exactly one integrator session runs
      (`list_sessions`). If none runs, start one with the prompt from
-     [integrator-prompt.md](./references/integrator-prompt.md), naming the integrator agent, the
-     repository and this dispatcher session. Never start workers directly.
+     [integrator-prompt.md](references/integrator-prompt.md), naming the integrator agent, the
+     repository and this SE session. Never start workers directly.
    - Work issues quote the user's requirement word for word; work follows the user's priority.
    - Apply the [capability-preservation rule](../work-model/SKILL.md#rules-for-all-roles) before
      writing a work issue.
