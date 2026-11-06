@@ -5,6 +5,15 @@
 - SPOT everywhere: one owner per fact; everything else links to it.
 - No backwards compatibility unless asked.
 
+## Agents and skills
+
+- Each agent and skill is written once, in `src/agents/<name>.md` and `src/skills/<name>/`. Front
+  matter keys prefixed `copilot.` or `claude.` go only into that host's layout.
+- `uv run python scripts/se_plugin.py build` generates everything else from it: the Copilot layout
+  (`.github/agents/`, `.github/skills/`) and the Claude Code plugin (`agents/`, `skills/`,
+  `.claude-plugin/`). Never edit those by hand; `tests/test_se_plugin.py` fails until they match.
+- Installing SE is the README's [Install](README.md#install).
+
 ## Tests
 
 - Focused: `uv run pytest -q tests/<file>.py` (add `-k <name>` for one test), the tests of what changed.
