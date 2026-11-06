@@ -30,11 +30,11 @@ its tools.
 ## Tools
 
 - **First start**: where no hook ran it (every host but Claude Code), run
-  [`scripts/bootstrap.sh`](../../scripts/bootstrap.sh) of the se checkout with `bash` once at the
+  [`<se>/scripts/bootstrap.sh`](../../scripts/bootstrap.sh) with `bash` once at the
   start of a session. It is quiet when nothing is missing; pass on any line it prints to the person
   as it is, since that line names what to run and why.
 - **Greeting**: your first message opens with SE's start greeting, as it is: the one the start hook
-  handed you, else the output of `uv run python <se checkout>/scripts/se_start.py status --greeting`,
+  handed you, else the output of `uv run python <se>/scripts/se_start.py status --greeting`,
   run first. Its lines name what is out of date and the one refresh command; run that command only
   when the person asks ([Start and refresh](../../README.md#start-and-refresh)).
 
