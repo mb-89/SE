@@ -1196,10 +1196,7 @@ def body_read(root: Path, file: Path | None) -> None:
     """Record the work issue's body as read: from `file`, as the worker's GitHub tools read it,
     or, without one, as gh reads it now."""
     if file is not None:
-        try:
-            body = file.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as error:
-            raise QueueError(f"Cannot read work issue body {file}: {error}") from error
+        body = read_file(file, "work issue body")
     else:
         snapshot = required_snapshot(root)
         body = str(fetch_issue(root, int(snapshot["number"]), str(snapshot["repo"]))["body"])
@@ -1779,10 +1776,7 @@ def authored_content_matches(path: str, glob: str) -> bool:
 def guard(root: Path, branch: str, field_report: Path) -> list[str]:
     if not field_report.is_file():
         raise QueueError(f"Field report is not a regular file: {field_report}")
-    try:
-        report = field_report.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as error:
-        raise QueueError(f"Cannot read field report {field_report}: {error}") from error
+    report = read_file(field_report, "field report")
     removed_tests = deleted_tests(root, branch)
     removed_sentences = deleted_authored_sentences(root, branch)
     named = "\n".join(section_content(
@@ -2787,15 +2781,9 @@ def check_field_report(
     `comments` and the issue body file give them). In a worktree
     its Branch tip is first set to the branch's commit. A passing report without the fleet marker
     gets it, so one filed by hand is marked too; returns whether it was added."""
-    try:
-        body = file.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as error:
-        raise QueueError(f"Cannot read field report {file}: {error}") from error
+    body = read_file(file, "field report")
     if issue_body_file is not None:
-        try:
-            issue_body = issue_body_file.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as error:
-            raise QueueError(f"Cannot read work issue body {issue_body_file}: {error}") from error
+        issue_body = read_file(issue_body_file, "work issue body")
     elif root is None:
         raise QueueError(
             "field-report --check needs the work issue's body for the evidence gate: "
@@ -2862,10 +2850,7 @@ def file_field_report(
     title = meta.get("title", "").replace("<branch>", branch)
     labels = template_labels(meta.get("labels", ""))
     labels.extend(sorted(label for label in issue_labels(issue) if label.startswith("repo:")))
-    try:
-        body = file.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as error:
-        raise QueueError(f"Cannot read field report {file}: {error}") from error
+    body = read_file(file, "field report")
     body = fleet_marked(with_branch_tip(
         root, re.sub(r"\n{3,}", "\n\n", HTML_COMMENT_PATTERN.sub("", body)).strip() + "\n"))
     if pr is None:
@@ -2894,10 +2879,7 @@ def file_field_report(
 
 
 def validate_field_report_result(file: Path) -> None:
-    try:
-        body = file.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as error:
-        raise QueueError(f"Cannot read field report {file}: {error}") from error
+    body = read_file(file, "field report")
     header = re.split(r"^## ", body, maxsplit=1, flags=re.MULTILINE)[0]
     if FIELD_REPORT_RESULT_PATTERN.search(header) is None:
         raise QueueError(
@@ -2927,11 +2909,16 @@ def work_labels(root: Path, explicit: str | None) -> list[str]:
     return [*WORK_LABELS, f"repo:{name}"]
 
 
-def read_text_file(file: Path, what: str) -> str:
+def read_file(file: Path, what: str) -> str:
+    """The UTF-8 text of `file`; the error names it as `what`."""
     try:
-        text = file.read_text(encoding="utf-8").strip()
+        return file.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         raise QueueError(f"Cannot read {what} {file}: {error}") from error
+
+
+def read_text_file(file: Path, what: str) -> str:
+    text = read_file(file, what).strip()
     if not text:
         raise QueueError(f"The {what} {file} is empty")
     return text
@@ -2989,10 +2976,7 @@ def route_outside_issue(
 def backlog_file(root: Path, title: str, file: Path, repo: str | None) -> str:
     """File a far-out idea as a backlog issue for the person, creating its label where missing."""
     repo = resolve_repo(root, repo)
-    try:
-        body = file.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeError) as error:
-        raise QueueError(f"Cannot read backlog body {file}: {error}") from error
+    body = read_file(file, "backlog body").strip()
     if not title.strip() or not body:
         raise QueueError("backlog file needs a title and a body")
     ensure_labels(root, repo, [BACKLOG_LABEL])
@@ -3015,10 +2999,7 @@ def backlog_list(root: Path, search: str | None, repo: str | None) -> list[dict[
 
 def escalate(root: Path, number: int, file: Path, repo: str | None) -> None:
     repo = resolve_repo(root, repo)
-    try:
-        question = file.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeError) as error:
-        raise QueueError(f"Cannot read escalation {file}: {error}") from error
+    question = read_file(file, "escalation").strip()
     if not question:
         raise QueueError("The escalation needs a question")
     run_gh_with_body(root, ["issue", "comment", str(number), *repo_arguments(repo)], question + "\n")
