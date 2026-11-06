@@ -381,7 +381,7 @@ def without_gh_section() -> str:
 
 
 def commands_that_need_no_gh() -> set[str]:
-    """Subcommands of work_tickets.py whose branch in main never reaches run_gh."""
+    """Commands of work_tickets.py whose registered handlers never reach run_gh."""
     import ast
     import importlib.util
     import sys
@@ -391,7 +391,6 @@ def commands_that_need_no_gh() -> set[str]:
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    commands = set(module.make_parser()._subparsers._group_actions[0].choices)
     tree = ast.parse(script.read_text(encoding="utf-8"))
     functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
 
@@ -407,14 +406,12 @@ def commands_that_need_no_gh() -> set[str]:
             if name not in reaches_gh and called(function) & reaches_gh:
                 reaches_gh.add(name)
                 grown = True
+    commands: set[str] = set()
     needs_gh: set[str] = set()
-    for node in ast.walk(functions["main"]):
-        if (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
-                and getattr(node.test.left, "attr", None) == "command"):
-            value = ast.literal_eval(node.test.comparators[0])
-            names = {value} if isinstance(value, str) else set(value)
-            if any(called(statement) & reaches_gh for statement in node.body):
-                needs_gh |= names
+    for words, command in module.leaf_commands():
+        commands.add(words[0])
+        if command.handler.__name__ in reaches_gh:
+            needs_gh.add(words[0])
     return commands - needs_gh
 
 
