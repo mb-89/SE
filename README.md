@@ -1,12 +1,36 @@
 # se: systematic engineering
 
-A process plugin for AI agents: roles (SE, worker, integrator), skills, issue templates and the
-scripts they call. It is project-neutral; a project describes its own commands in its `AGENTS.md` and
+A process plugin for AI agents. Its main agent, **SE**, is the one a person talks to; its sub-agents
+are the integrator and the worker. With them come their skills, issue templates and the scripts they
+call. It is project-neutral; a project describes its own commands in its `AGENTS.md` and
 pulls se in as a module.
 
 Status: being bootstrapped. Everything in this repository must be publishable; see `AGENTS.md`.
 
 License: MIT, see [LICENSE](LICENSE).
+
+## Install
+
+One step per place. The `se` branch is where SE lives until it replaces `main`, so the commands name
+it (`#se`, `-b se`); once it is `main`, they drop it. What each agent does is in its own file in
+[src/agents/](src/agents/).
+
+| Place | Install | Choose SE | Check that it loaded |
+| --- | --- | --- | --- |
+| Claude Code | `claude plugin install se --marketplace mb-89/SE#se` | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator` and `se:worker` |
+| Claude Code cloud (claude.ai/code) | the environment's setup script: `rm -rf ~/.claude/skills/se; git clone --depth 1 -b se https://github.com/mb-89/SE ~/.claude/skills/se` | `"agent": "se:se"` in the repository's `.claude/settings.json` | ask the session which agent it runs as and which `se:` agents and skills it has |
+| GitHub Copilot in VS Code, in se's own checkout | `git clone -b se https://github.com/mb-89/SE` and open it: VS Code reads its `.github/agents/` and `.github/skills/` | pick `se` in the Agent dropdown of the Chat view | the dropdown lists `se`, `integrator` and `worker`; **Configure Skills** lists `catch-up`, `decision` and `work-model` |
+| GitHub Copilot in VS Code, every repository | **Chat: Install Plugin from Source** with `https://github.com/mb-89/SE` (agent plugins, `chat.plugins.enabled`); or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/` | as above | as above |
+
+Marketplace plugins do not load in a cloud session; a plugin cloned into `~/.claude/skills/` does
+(it shows as `se@skills-dir`). Remove the environment's own SE plugin, if it has one (a
+`CLAUDE_CODE_PLUGIN_DIRS` naming another plugin `se`), so the two do not collide.
+
+**Everything else arrives by itself.** At the first start SE runs
+[scripts/bootstrap.sh](scripts/bootstrap.sh) (Claude Code runs it at every session start; it is quiet
+when nothing is missing): it installs `uv` into the user's home, Python 3.11 or newer through `uv`,
+and the project's [modules](#modules). The one tool it cannot install without admin rights is `git`;
+it then names the one line to run. An interrupted first start finishes when run again.
 
 ## Modules
 

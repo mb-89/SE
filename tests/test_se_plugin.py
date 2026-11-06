@@ -96,3 +96,13 @@ def test_the_plugin_manifests_install_the_whole_checkout_and_bootstrap_it(checko
     hook = plugin["hooks"]["SessionStart"][0]["hooks"][0]
     assert hook["command"] == 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" || true'
     assert (ROOT / "scripts" / "bootstrap.sh").is_file()
+
+
+def test_the_readme_installs_the_plugin_the_marketplace_declares():
+    marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+    readme = (ROOT / "README.md").read_text(encoding="utf-8").split("## Install", 1)[1].split("\n## ", 1)[0]
+    plugin = marketplace["plugins"][0]["name"]
+    assert f"`claude plugin install {plugin} --marketplace mb-89/SE#se`" in readme
+    assert f"`{plugin}@{marketplace['name']}`" in readme
+    for agent in sorted(path.stem for path in (ROOT / "src" / "agents").glob("*.md")):
+        assert f"`{plugin}:{agent}`" in readme
