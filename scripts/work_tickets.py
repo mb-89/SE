@@ -1366,6 +1366,81 @@ def intake(
     return issue, created, kept
 
 
+def outside_cutoffs(root: Path) -> dict[str, int]:
+    """se.toml's `[outside]` table: each repository SE watches for outside issues and the last
+    issue number that existed before the fleet marked its own (the work model's "Outside issues")."""
+    table = se_table(root, "outside")
+    remedy = (
+        f'name each repository and its cut-off in {root / "se.toml"}, as '
+        '[outside] "<host>/<owner>/<repo>" = <last issue number before the fleet marker> '
+        '(the se checkout\'s src/skills/work-model/SKILL.md#outside-issues)'
+    )
+    if not table:
+        raise QueueError(f"intake --outside: no [outside] table; {remedy}")
+    cutoffs: dict[str, int] = {}
+    for repo, cutoff in table.items():
+        if len(repo.split("/")) != 3 or not all(repo.split("/")) or isinstance(cutoff, bool) \
+                or not isinstance(cutoff, int) or cutoff < 0:
+            raise QueueError(f"intake --outside: [outside] entry {repo!r} = {cutoff!r} is invalid; {remedy}")
+        cutoffs[repo] = cutoff
+    if len({repo.split("/")[0] for repo in cutoffs}) != 1:
+        raise QueueError(
+            "intake --outside: [outside] names repositories on more than one host, which one "
+            f"query cannot read; {remedy}")
+    return cutoffs
+
+
+def outside_query(repos: list[str]) -> str:
+    """One GraphQL query for the open issues of every repository, newest first."""
+    parts = []
+    for index, repo in enumerate(repos):
+        _, owner, name = repo.split("/")
+        parts.append(
+            f"r{index}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ "
+            f"issues(states: OPEN, first: {OUTSIDE_PAGE}, "
+            "orderBy: {field: CREATED_AT, direction: DESC}) { pageInfo { hasNextPage } "
+            "nodes { number title url body labels(first: 50) { nodes { name } } "
+            "comments(last: 100) { nodes { body } } } } }"
+        )
+    return "query { " + " ".join(parts) + " }"
+
+
+def outside_issues(cutoffs: dict[str, int], data: dict[str, object]) -> list[dict[str, object]]:
+    """The open issues above each cut-off that carry neither the fleet marker nor its label and
+    have no handled comment; refused where an unread page could hold more."""
+    found: list[dict[str, object]] = []
+    for index, (repo, cutoff) in enumerate(cutoffs.items()):
+        repository = (data.get("data") or {}).get(f"r{index}")
+        if not repository:
+            raise QueueError(f"intake --outside: GitHub returned no repository {repo}; check [outside] in se.toml")
+        issues = repository["issues"]
+        nodes = issues["nodes"]
+        if issues["pageInfo"]["hasNextPage"] and nodes and min(n["number"] for n in nodes) > cutoff + 1:
+            raise QueueError(
+                f"intake --outside: {repo} has more than {OUTSIDE_PAGE} open issues above its "
+                "cut-off, more than one query reads; handle or close some, or raise its cut-off "
+                "in se.toml [outside]")
+        for issue in nodes:
+            labels = {label["name"] for label in issue["labels"]["nodes"]}
+            if (issue["number"] <= cutoff or FLEET_MARKER in (issue.get("body") or "")
+                    or FLEET_LABEL in labels
+                    or any(HANDLED_MARKER in (comment.get("body") or "")
+                           for comment in issue["comments"]["nodes"])):
+                continue
+            found.append({"repo": repo, "number": issue["number"], "title": issue["title"],
+                          "url": issue["url"]})
+    return found
+
+
+def intake_outside(root: Path) -> list[dict[str, object]]:
+    """The outside issues SE has not handled yet, read in one batched query."""
+    cutoffs = outside_cutoffs(root)
+    host = next(iter(cutoffs)).split("/")[0]
+    query = outside_query(list(cutoffs))
+    return outside_issues(cutoffs, json.loads(
+        run_gh(root, ["api", "graphql", "--hostname", host, "-f", f"query={query}"])))
+
+
 def bare_cross_repository_references(body: str, repo: str) -> list[str]:
     """References in a work issue to another repository with no quoted block next to them.
 
@@ -3496,7 +3571,12 @@ def make_parser() -> argparse.ArgumentParser:
     intake_parser = subparsers.add_parser(
         "intake", help="read the work issue with gh and write its tickets into todo")
     add_worktree_argument(intake_parser)
-    intake_parser.add_argument("--issue", required=True, type=int, help="work issue number")
+    intake_source = intake_parser.add_mutually_exclusive_group(required=True)
+    intake_source.add_argument("--issue", type=int, help="work issue number")
+    intake_source.add_argument(
+        "--outside", action="store_true",
+        help="for SE: list the open issues of se.toml's [outside] repositories that carry no "
+             "fleet marker and no handled comment, in one query; writes nothing")
     intake_parser.add_argument("--repo", help=REPO_HELP)
     intake_parser.add_argument(
         "--discovery", action="store_true",
@@ -3713,6 +3793,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "review-note":
             review_note(root, args.note, args.disposition, args.backlog_ref)
             print(f"Reviewed note {args.note}")
+            return 0
+        if args.command == "intake" and args.outside:
+            if args.repo or args.discovery or args.probe_root:
+                raise QueueError("intake --outside takes its repositories from se.toml [outside], "
+                                 "and no --repo, --discovery or --probe-root")
+            found = intake_outside(root)
+            if not found:
+                print("No outside issues to handle.")
+            else:
+                print(f"Outside issues ({len(found)}), not yet handled:")
+                for issue in found:
+                    print(f"  {issue['repo']}#{issue['number']} {issue['title']} {issue['url']}")
             return 0
         if args.command == "intake":
             issue, created, kept = intake(
