@@ -20,9 +20,10 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
   their field report, and escalate only what they cannot decide.
 - **Never block on workers.** Start every work package as an **independent session**
   (VS Code agent host: `create_session` with `worktree: false` and the worker's worktree folder as
-  `workspace`; Copilot CLI: a separate session). Never use in-chat subagents (`task`) for work packages:
-  they keep you busy and are cancelled when the user interrupts. Never call blocking waits
-  (`read_agent` with `wait`, polling loops, `Start-Sleep`). After dispatching, report and **end the turn**.
+  `workspace`; Copilot CLI: a separate session). After dispatching, report and **end the turn**.
+  - Never use in-chat subagents (`task`) for work packages: they keep you busy and are cancelled
+    when the user interrupts.
+  - Never call blocking waits (`read_agent` with `wait`, polling loops, `Start-Sleep`).
 - **One worktree per worker.** Never two workers in one checkout, never a worker in a main checkout.
   Separate worktrees prevent edit collisions; shared files still conflict at merge time, so check
   overlap before dispatch (step 5).
@@ -41,11 +42,13 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
     `ask_user` tool when available, or
   - the explicit sentence "No input needed from you right now", plus what happens next (which workers
     run, what you integrate when they report).
+
   Decisions that come up while integrating join the queue.
-  The user who starts this skill is present, even in autopilot and even if `ask_user` returns "user not
-  available". Never take a default on the user's behalf. If `ask_user` does not reach the user, end
-  the turn with the decision under a heading "Your input needed" at the end of the `task_complete`
-  summary.
+
+  The user who starts this skill is present, even in autopilot and even if `ask_user` returns "user
+  not available". Never take a default on the user's behalf. If `ask_user` does not reach the user,
+  end the turn with the decision under a heading "Your input needed" at the end of the
+  `task_complete` summary.
 - No backwards compatibility unless the user asks for it; no bookkeeping files (hash receipts, index
   snapshots, adjudication JSON). Commit freely, with the environment's
   [`commit_trailer`](../work-model/SKILL.md#what-the-project-provides) if it sets one.
@@ -68,10 +71,12 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
      SE session owns it (for example the workers of a related repository), leave it alone, but record
      its changed files as off-limits for your workers.
    - **Stale, unfinished**: idle, with a ticket in `held/`/`todo/` or a field report listing remaining
-     steps (typically a hard stop or partial delivery). **Continue it in place**: append a dated
-     "Continuation" section to the held ticket (scope left, what changed on `main` since), dispatch a
-     worker into that same worktree that first merges `main`, then finishes the field report's next steps.
-     Do not recreate it and do not drop its notes.
+     steps (typically a hard stop or partial delivery). **Continue it in place**; do not recreate it
+     and do not drop its notes:
+     - append a dated "Continuation" section to the held ticket (scope left, what changed on `main`
+       since);
+     - dispatch a worker into that same worktree that first merges `main`, then finishes the field
+       report's next steps.
    - **Finished, not integrated**: idle, ticket in `done/`, branch ahead of `main`, but no
      field-report issue. `queue` cannot see it: ask the integrator to integrate the branch, in
      shared-file order.
@@ -105,23 +110,28 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
    - New packages: one work issue each from `.github/ISSUE_TEMPLATE/work.md`, title = branch name,
      labels `work` and `repo:<target repository>`, carrying only the task
      (`gh issue create ... --body-file <filled template>`).
-     Generic rules (the box, paths, delivery, field-report format) live in the worker definition
-     and are never repeated in issues. Link blockers as native dependencies ("Blocked by" field and
-     `work_tickets.py block <n> --by <m>`), then label the issue `ready` and notify that
-     repository's integrator. The integrator starts workers for unblocked packages in fresh
-     worktrees from the newest `main` (the work model's [Worktrees](../work-model/SKILL.md#worktrees)).
+     - Generic rules (the box, paths, delivery, field-report format) live in the worker definition
+       and are never repeated in issues.
+     - Link blockers as native dependencies ("Blocked by" field and
+       `work_tickets.py block <n> --by <m>`), then label the issue `ready` and notify that
+       repository's integrator.
+     - The integrator starts workers for unblocked packages in fresh worktrees from the newest
+       `main` (the work model's [Worktrees](../work-model/SKILL.md#worktrees)).
    - Tell the user in one table: repository → integrator session → work issue.
 7. **Present decisions**, each a note from the [decision](../decision/SKILL.md) skill, as the
    [escalation ladder](../work-model/SKILL.md#escalation-ladder) says, and end the turn (or say
-   that none are needed). Apply the answer by updating the source issue or dispatching
-   a worker, mark the source item done, steer the integrator to merge, then present the next one.
-   If the answer changes the requirement, research it (git history, old code), then dispatch.
+   that none are needed).
+
+   Apply the answer by updating the source issue or dispatching a worker, mark the source item
+   done, steer the integrator to merge, then present the next one. If the answer changes the
+   requirement, research it (git history, old code), then dispatch.
 8. **Integration runs through the [integrator](../../agents/integrator.agent.md)**, triggered as the
    work model's [scheduling rules](../work-model/SKILL.md#freshness-dependencies-and-scheduling)
    say; start each of your own turns with the same `queue` check. You tell it the order when shared
-   files are involved (owners first) and anything to watch. File each field report's "Tickets for
-   other repositories" as issues in that repository. Escalated issues are decisions: present them
-   to the user as decisions (step 7).
+   files are involved (owners first) and anything to watch.
+
+   File each field report's "Tickets for other repositories" as issues in that repository.
+   Escalated issues are decisions: present them to the user as decisions (step 7).
 9. **Close**: when everything is integrated, ask the user to approve the release; the integrator
    releases (version, tag, push). Update the single open `handover` issue (state, open issues,
    running and unintegrated branches, parked decisions, how to resume); close the previous one.
