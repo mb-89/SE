@@ -80,6 +80,11 @@ NEGATIVE = {
         BS * 2 + "<server>" + BS + "share",
         "C:" + BS * 2 + "tools" + BS * 2 + "x",
         '"' + BS * 2 + 'n"',
+        # JSON-escaped control characters and backslashes in source text, not UNC paths.
+        '"%%' + BS * 2 + "nkept" + BS * 2 + 'n%%"',
+        '"%%' + BS * 2 + "tkept" + BS * 2 + 't%%"',
+        '"%%' + BS * 2 + "rkept" + BS * 2 + 'r%%"',
+        '"%%' + BS * 4 + "kept" + BS * 4 + '%%"',
     ],
 }
 

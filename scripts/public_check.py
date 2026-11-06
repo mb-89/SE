@@ -49,9 +49,9 @@ PLACEHOLDER_START = ("{", "%", "$", "*", "...")
 _NAME = r"""([^\\/\s"'`<>|:;,()\[\]]+)"""
 
 
-def _not_placeholder(generic: set[str]) -> Callable[[re.Match[str]], bool]:
+def _not_placeholder(generic: set[str], group: int = 1) -> Callable[[re.Match[str]], bool]:
     def accept(match: re.Match[str]) -> bool:
-        name = match.group(1)
+        name = match.group(group)
         return not name.startswith(PLACEHOLDER_START) and name.lower() not in generic
 
     return accept
@@ -108,8 +108,10 @@ GENERIC_PATTERNS = (
     ),
     Pattern(
         "unc-machine-name",
-        re.compile(r"(?i)(?<![\\\w:/])\\\\(?:\\\\)?([a-z0-9][\w.$-]+)\\(?:\\)?[\w$.-]"),
-        _not_placeholder(GENERIC_MACHINES),
+        # Written raw (two backslashes, then one) or escaped (four, then two), never mixed: a
+        # mixed run is escape sequences in source text, such as a JSON-escaped newline.
+        re.compile(r"(?i)(?<![\\\w:/])\\\\(\\\\)?([a-z0-9][\w.$-]+)\\(?(1)\\)[\w$.-]"),
+        _not_placeholder(GENERIC_MACHINES, group=2),
     ),
 )
 
