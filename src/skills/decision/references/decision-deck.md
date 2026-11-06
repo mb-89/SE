@@ -24,7 +24,7 @@ candidates:
     what: Each decision is one note rendered as a one-pager; the notes go to the person as one deck, answered in one pass.
     marks: {record: 1, effort: 1, volume: 1, cost: -1}
     wins: The answered artifact is the record and outlives the session; the person sees every open decision at once.
-    losses: Needs the deck command and obs's blessing, which do not exist yet.
+    losses: Each deck is built and handed over with the deck command; the person needs a browser or the Claude app.
   - key: chat
     label: Tables in the chat (keep what we have)
     what: SE shows one option table per message, numbered against the open total.
@@ -54,7 +54,7 @@ checklist:
     answer: The record counts once (survival), effort and volume are separate; weights were set before the marks.
     pass: true
   - item: What if
-    answer: B wins only where the cost to build outweighs the other three together (weight above 8); that world happens if the deck command never lands, so the tripwire is the deck command still blocked and the fallback is B. C beats A only where the cost to build outweighs twice effort and volume together, the same world in which B, cheaper still, wins; so C has no world of its own.
+    answer: B wins only where the cost to build outweighs the other three together (weight above 8); that world happens if decks stop reaching the person, so the tripwire is a deck the person could not open and the fallback is B. C beats A only where the cost to build outweighs twice effort and volume together, the same world in which B, cheaper still, wins; so C has no world of its own.
     pass: true
   - item: Undo cost
     answer: Easy to reverse; the notes are Markdown and the chat stays available.
