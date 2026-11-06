@@ -627,7 +627,7 @@ def test_the_worker_delivery_measures_not_slower_with_one_command():
     assert "interleav" not in delivery
 
 CHECKLIST = ("Class or case", "Is the problem real", "Keep what we have", "A named loser", "Fair criteria",
-             "What if", "Undo cost", "Consistency")
+             "Right before cheap", "What if", "Undo cost", "Consistency")
 LADDER = ("worker, then integrator", "One level per loop", "Straight to the person",
           "as a deck, not as issues")
 POINTERS = {AGENTS / "se.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
@@ -636,7 +636,7 @@ POINTERS = {AGENTS / "se.md": "(../skills/work-model/SKILL.md#escalation-ladder)
             SKILL: "(../work-model/SKILL.md#escalation-ladder)"}
 
 
-def test_the_decision_skill_names_the_eight_checklist_items():
+def test_the_decision_skill_names_the_nine_checklist_items():
     text = DECISION.read_text(encoding="utf-8")
     checklist = text.split("## The checklist", 1)[1].split("\n## ", 1)[0]
     items = re.findall(r"^\d+\. \*\*(.+?):\*\*", checklist, re.MULTILINE)
