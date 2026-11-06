@@ -68,9 +68,10 @@ every package, so work issues and session prompts never repeat it.
 
    A ticket created by hand (`work_tickets.py create`) gets its acceptance items with
    `--acceptance <text>`, one per item, so `move --to done` needs no hand edit.
-3. **Before each ticket**: `work_tickets.py refresh` re-reads the issue and its comments and reports
-   what changed; apply the changes to the tickets (`intake` again adds tickets for added
-   requirements), run `work_tickets.py sync`, then move the ticket to `held`.
+3. **Before each ticket**: re-read the body and the comments. `work_tickets.py refresh` reads the
+   issue's body (with its "Changes after filing") and its comments and reports what changed; apply
+   the changes to the tickets (`intake` again adds tickets for added requirements), run
+   `work_tickets.py sync`, then move the ticket to `held`.
 4. **Work the ticket**:
    - Build first: where the acceptance names a real build (a module at a new pin, an output a
      project command regenerates), build it at that pin before writing code, so a failure that is
@@ -106,8 +107,9 @@ every package, so work issues and session prompts never repeat it.
      and line, or measurement. A requirement the worker narrowed or did not meet is listed under
      "Not delivered", never as a "decision". A worker may decide only what the issue leaves open.
    - Check it with `work_tickets.py field-report --check .se/work/field-report.md` (add
-     `--issue-body <file>` without intake's snapshot; it also refuses comments that arrived on the
-     work issue after they were recorded as read, naming the remedy) and fix it until it passes.
+     `--issue-body <file>` without intake's snapshot; it also refuses comments and a body edit that
+     arrived on the work issue after step 3 last recorded them as read, naming the remedy) and fix
+     it until it passes.
    - Then run `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request and
      field report, and prints the integrator notification.
 6. A ticket you cannot finish stays in `held/` with the attempts and failure evidence; the field
