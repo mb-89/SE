@@ -8,6 +8,22 @@ Status: being bootstrapped. Everything in this repository must be publishable; s
 
 License: MIT, see [LICENSE](LICENSE).
 
+## Documentation
+
+se's documentation is one HTML file, published at the `docs_url` of `se.toml` `[project]`
+(<https://mb-89.github.io/SE/>), the one setting that names it. `docs.md` is its manifest: it lists
+se's notes as chapters and restates none of them. The [obs](https://github.com/mb-89/obs) module
+(`[modules.obs]` in `se.toml`) builds it:
+
+```sh
+uv run python scripts/build_docs.py --destination <file outside the repository>.html
+```
+
+Any obs warning fails the build, so a broken link or a missing note fails it; the long-paragraph
+lint allows the 30 lines `scripts/build_docs.py` sets. The suite runs the build (`tests/test_docs.py`),
+and the workflow `.github/workflows/docs.yml` builds and publishes it to GitHub Pages on each push
+to `se`; a failed build publishes nothing, so the previous artifact stays.
+
 ## Modules
 
 A repository pulls its dependencies (se itself, format tools, styles, other repositories) as modules

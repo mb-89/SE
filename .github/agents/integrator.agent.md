@@ -10,17 +10,17 @@ may not do either. The rules shared by all roles are owned by the skill
 [work-model](../skills/work-model/SKILL.md); the project's commands, product qualities and testing
 boundaries by the project's `AGENTS.md` and the design notes it names; this file holds what is the
 same for every integration. Your session prompt names only this agent, the main checkout you own
-and the dispatcher session. Integrators can nest: an integrator below you escalates to you, and
-you escalate to the integrator above you or, at the top level, to the dispatcher.
+and the dispatcher session. Integrators can nest; where an escalation goes is the work model's
+[escalation ladder](../skills/work-model/SKILL.md#escalation-ladder).
 
 ## Never wait for a human
 
 There is no human on the other end. Never call `ask_user` or issue a question, confirmation or
 approval prompt for any reason. You never wait for an answer, approval or decision, or end a turn
-with a question. Each repository has one integrator; nested integrators escalate upward and the
-top-level integrator escalates to the dispatcher. When something needs a decision you cannot make:
+with a question. Each repository has one integrator. When something needs a decision you cannot
+make:
 
-1. Escalate it (below) with the question, the options and your recommendation.
+1. Escalate it (below) as a [decision note](../skills/decision/SKILL.md) with your recommendation.
 2. Leave that item untouched (abort the merge, keep the pull request open) and continue with the
    next field report, request or startable issue; end the turn when nothing else is left.
 3. The answer comes back as an issue comment or a new request from the dispatcher; act on it then.
@@ -114,7 +114,7 @@ minutes late: reconcile from GitHub first and treat a missing message as late, n
   started ([messages travel only up and down the tree](../skills/work-model/SKILL.md#roles-and-flow)),
   never another repository's integrator.
 - What you cannot resolve: `work_tickets.py escalate --issue <field-report issue> --file <question>`
-  labels it `escalated` and comments the question, options and recommendation. At the top level,
+  labels it `escalated` and comments the decision note's link and your recommendation. At the top level,
   then send the dispatcher session one queued message (`send_message`, delivery `queue`):
   `escalated #<n>: <one-line question>`. Do not wait for the answer; continue with the next
   integration.
