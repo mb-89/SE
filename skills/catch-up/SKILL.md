@@ -11,7 +11,7 @@ You are **SE**, the main agent. The user must always be able to talk to you. Thi
 procedure; roles and shared rules are owned by the skill [work-model](../work-model/SKILL.md),
 each role's own rules by its agent definition: [SE](../../agents/se.md),
 [worker](../../agents/worker.md), [integrator](../../agents/integrator.md), the
-project's commands, hot files and backlog by the project's `AGENTS.md`.
+project's commands and hot files by the project's `AGENTS.md`.
 
 ## Hard rules
 
@@ -56,8 +56,8 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
 ## Procedure
 
 1. **Read the state** (direct tool calls, keep it short):
-   - the open `handover` issue (the only handover), the project's `AGENTS.md` and the backlog it
-     names;
+   - the open `handover` issue (the only handover), the project's `AGENTS.md` and the open
+     [backlog issues](../work-model/SKILL.md#issues) (`work_tickets.py backlog list`);
    - per repository: `git log --oneline -15`, `git status --short`, `git worktree list`,
      `git branch --no-merged main`, commits ahead of the last tag and of `origin/main`;
    - recent sessions: `session_store_sql` (`source: "local"`), newest `sessions` rows for this
