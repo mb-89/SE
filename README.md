@@ -1,6 +1,6 @@
 # se: systematic engineering
 
-A process plugin for AI agents: roles (dispatcher, worker, integrator), skills, issue templates and the
+A process plugin for AI agents: roles (SE, worker, integrator), skills, issue templates and the
 scripts they call. It is project-neutral; a project describes its own commands in its `AGENTS.md` and
 pulls se in as a module.
 
@@ -57,7 +57,7 @@ carries it, unless the machine sets `public_identity`, which wins. Unset, sync l
 identity as it is.
 
 `integration_branch` is owned by the
-[work model](.github/skills/work-model/SKILL.md#integration-branch).
+[work model](src/skills/work-model/SKILL.md#integration-branch).
 
 `public_check` makes `work_tickets.py integrate` run se's
 [public check](AGENTS.md#public-safety) on the merged tree and every merged commit before it pushes
@@ -96,7 +96,7 @@ says so and names that remedy. Above `target_seconds` (default
 result (passed, with its counts), the time, the limit, the slowest tests and the remedy: rerun once on
 an idle host, as a loaded host can push a passing suite over the limit, and if it is still over, make
 those tests faster. Failed tests exit with code 1, a passing suite over the limit with code 3. How
-tests are written is owned by the [work model](.github/skills/work-model/SKILL.md#tests).
+tests are written is owned by the [work model](src/skills/work-model/SKILL.md#tests).
 
 `work_tickets.py guard` checks deleted sentences in the configured project paths. Each configured
 glob is relative to the project root. The field report must name every removed sentence in its
@@ -132,7 +132,7 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
   public host. The longest matching prefix wins.
 
 Work queue tracker, worktree and mirror settings are documented in the
-[work model](.github/skills/work-model/SKILL.md#what-the-project-provides).
+[work model](src/skills/work-model/SKILL.md#what-the-project-provides).
 
 ### Commands
 

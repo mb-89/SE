@@ -28,7 +28,7 @@ commit messages and author and committer identities. It prints locations and pat
 matched text; exit code 0 passed, 1 hits, 2 setup error.
 
 - Tracker references in commit messages, the
-  [work model's rule](.github/skills/work-model/SKILL.md#what-the-project-provides): the commit
+  [work model's rule](src/skills/work-model/SKILL.md#what-the-project-provides): the commit
   gates (`--message-file`, and the commits of a `--range`, as the hooks and `integrate` pass it)
   refuse them and, as they name nothing private, print the reference with its remedy. A full check
   leaves history already pushed alone.

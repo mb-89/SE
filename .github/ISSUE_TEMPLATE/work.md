@@ -1,6 +1,6 @@
 ---
 name: Work issue (design input)
-about: One package for one worker. Title = branch name. Carries only the task; generic rules live in .github/agents/worker.agent.md.
+about: One package for one worker. Title = branch name. Carries only the task; generic rules live in src/agents/worker.md.
 title: "<type>/<topic>-<yyyymmdd>"
 labels: work
 ---
@@ -23,7 +23,7 @@ packages record evidence instead of test-command wording. -->
 
 ## Blocked by
 
-<!-- Issues that must be closed first, linked as native "blocked by" dependencies by the dispatcher
+<!-- Issues that must be closed first, linked as native "blocked by" dependencies by SE
      (scripts/work_tickets.py block <this> --by <n>). Blocked state is computed from those links,
      never a label; nobody edits labels by hand. Label `ready` = approved; startable = ready and no
      open blockers. The worktree and branch are created when work starts, from the newest main.

@@ -1,0 +1,14 @@
+{
+  "name": "se",
+  "owner": {
+    "name": "mb-89"
+  },
+  "description": "SE, installed from this repository.",
+  "plugins": [
+    {
+      "name": "se",
+      "source": "./",
+      "description": "SE, the agent a person talks to, with its integrator and worker sub-agents and their skills."
+    }
+  ]
+}
