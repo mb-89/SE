@@ -2231,6 +2231,12 @@ NO_SLOWEST_TESTS = (
     "(the suite command's report directory) to name them"
 )
 clock = time.monotonic
+# Apart from 1 (failed tests and every other refusal), so a caller can tell a slow suite from a red one.
+SUITE_OVER_LIMIT_EXIT_CODE = 3
+
+
+class SuiteOverLimitError(QueueError):
+    """The complete suite passed but ran over its limit; exits with SUITE_OVER_LIMIT_EXIT_CODE."""
 
 
 def suite_budget(root: Path) -> SuiteBudget:
@@ -2296,7 +2302,8 @@ def run_suite(root: Path) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget.
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
-    Prints the time and the slowest tests; warns above the target; refuses above the limit."""
+    Prints the time and the slowest tests; warns above the target; refuses failed tests, and a
+    passing suite above the limit with SuiteOverLimitError."""
     budget = suite_budget(root)
     with tempfile.TemporaryDirectory(prefix="se-test-reports-") as reports:
         started = clock()
@@ -2309,9 +2316,12 @@ def run_suite(root: Path) -> str:
         output = (result.stdout + result.stderr).strip()
         slowest = slowest_tests(output, Path(reports))
     name = " ".join(budget.command)
+    report = result.stdout.strip() or output
+    summary = report.splitlines()[-1] if report else "no result line"
     if result.returncode != 0:
         raise QueueError(
-            f"Complete suite failed ({name}, [tests] command in se.toml): "
+            f"Complete suite failed ({summary}; {seconds:.1f} s) running {name} "
+            f"([tests] command in se.toml); fix the failing tests:\n"
             f"{output or f'exit code {result.returncode}'}"
         )
     listing = "\n".join(f"  {line}" for line in slowest) or NO_SLOWEST_TESTS
@@ -2319,11 +2329,13 @@ def run_suite(root: Path) -> str:
         f"{seconds:.1f} s (target {budget.target_seconds:g} s, limit {budget.limit_seconds:g} s)"
     )
     if seconds > budget.limit_seconds:
-        raise QueueError(
-            f"Complete suite took {seconds:.1f} s, over its limit of {budget.limit_seconds:g} s "
-            f"([tests] limit_seconds in se.toml). Slowest tests:\n{listing}\n"
-            "Make those tests faster (the work model's test rules), or file a perf package "
-            "before integrating."
+        raise SuiteOverLimitError(
+            f"Complete suite passed ({summary}) but took {seconds:.1f} s, over its limit of "
+            f"{budget.limit_seconds:g} s ([tests] limit_seconds in se.toml). Slowest tests:\n"
+            f"{listing}\n"
+            "Remedy: a loaded host can push a passing suite over the limit, so rerun it once on "
+            "an idle host; if it is still over, make the slowest tests above faster (the work "
+            "model's test rules)."
         )
     print(f"Suite time: {timing}\nSlowest tests:\n{listing}")
     if seconds > budget.target_seconds:
@@ -2333,8 +2345,6 @@ def run_suite(root: Path) -> str:
             "tests above faster",
             file=sys.stderr,
         )
-    report = result.stdout.strip() or output
-    summary = report.splitlines()[-1] if report else "passed"
     return f"{summary}; {timing}"
 
 
@@ -2842,7 +2852,8 @@ def make_parser() -> argparse.ArgumentParser:
     add_worktree_argument(sync_parser)
 
     suite_parser = subparsers.add_parser(
-        "suite", help="run se.toml's complete suite against its [tests] time budget, as integrate does")
+        "suite", help="run se.toml's complete suite against its [tests] time budget, as integrate does; "
+        "exit code 1 when tests fail, 3 when they pass over the limit")
     add_worktree_argument(suite_parser)
 
     guard_parser = subparsers.add_parser(
@@ -3161,6 +3172,9 @@ def main(argv: list[str] | None = None) -> int:
     except MissingGhError as error:
         print(f"error: work_tickets.py {args.command} {error}", file=sys.stderr)
         return 1
+    except SuiteOverLimitError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return SUITE_OVER_LIMIT_EXIT_CODE
     except (QueueError, OSError, ValueError, KeyError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
