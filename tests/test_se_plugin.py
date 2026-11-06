@@ -20,7 +20,7 @@ LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 def checkout(tmp_path_factory):
     """A copy of the sources and their generated layouts, built once."""
     root = tmp_path_factory.mktemp("se")
-    shutil.copy(ROOT / "pyproject.toml", root)
+    shutil.copy(ROOT / "se.toml", root)
     shutil.copytree(ROOT / "src", root / "src")
     shutil.copytree(ROOT / "scripts", root / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(ROOT / ".github" / "ISSUE_TEMPLATE", root / ".github" / "ISSUE_TEMPLATE")
@@ -90,7 +90,7 @@ def test_relative_links_resolve_in_each_layout(checkout, layout):
 def test_the_plugin_manifests_install_the_whole_checkout_and_bootstrap_it(checkout):
     plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     marketplace = json.loads((checkout / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
-    assert plugin["name"] == "se" and plugin["version"] == "0.1.0"
+    assert plugin["name"] == "se" and plugin["version"] == "1.0.0"  # se.toml [project] version
     assert marketplace["name"] == "se"
     assert marketplace["plugins"] == [{"name": "se", "source": "./", "description": plugin["description"]}]
     hook = plugin["hooks"]["SessionStart"][0]["hooks"][0]

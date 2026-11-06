@@ -137,8 +137,12 @@ def _generated_file(source: PurePosixPath, layout: Layout, root: Path) -> tuple[
 
 
 def _version(root: Path) -> str:
-    with (root / "pyproject.toml").open("rb") as handle:
-        return tomllib.load(handle)["project"]["version"]
+    """The plugin's version is the project's one version, `version` of `se.toml` `[project]`."""
+    with (root / "se.toml").open("rb") as handle:
+        version = tomllib.load(handle).get("project", {}).get("version")
+    if not isinstance(version, str):
+        raise SourceError(f"{root / 'se.toml'}: [project] has no version for the plugin manifest")
+    return version
 
 
 def _json(value: dict) -> bytes:
