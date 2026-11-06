@@ -2311,26 +2311,63 @@ def with_durations(command: list[str], count: int) -> list[str]:
     return [*command, f"--durations={count}"]
 
 
-def report_durations(reports: Path) -> list[tuple[float, str]]:
-    """Every test case of the JUnit XML reports under `reports`, with its part (the file's stem).
+@dataclass(frozen=True)
+class SuitePart:
+    """One JUnit XML report of the suite: a part, named by the file's stem."""
 
-    A report that cannot be read is named on stderr and skipped: the list is advice."""
+    name: str
+    wall_seconds: float | None  # the report's own `time`, where it writes one
+    workers: int  # its `workers` testsuite property (pytest: record_testsuite_property), else 1
+    cases: list[tuple[float, str]]  # (seconds, test) of every test case
+
+    def line(self) -> str:
+        """`<part>: <wall> s wall; <sum> s test time / <n> workers = <per worker> s; slowest <s> s`:
+        a part bound by its total work has a per-worker time near its wall time, one bound by a
+        long test a slowest test near it."""
+        total = sum(seconds for seconds, _ in self.cases)
+        wall = "wall not reported" if self.wall_seconds is None else f"{self.wall_seconds:.1f} s wall"
+        workers = f"{self.workers} worker{'s' if self.workers != 1 else ''}"
+        slowest = max((seconds for seconds, _ in self.cases), default=0.0)
+        return (
+            f"{self.name}: {wall}; {total:.1f} s test time / {workers} = "
+            f"{total / self.workers:.1f} s; slowest {slowest:.1f} s"
+        )
+
+
+def read_part(report: Path) -> SuitePart:
+    root = ElementTree.parse(report).getroot()
+    suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+    times = [float(suite.get("time")) for suite in suites if suite.get("time")]
+    wall = float(root.get("time")) if root.get("time") else (sum(times) if times else None)
+    workers = [
+        int(prop.get("value") or 0) for prop in root.iter("property") if prop.get("name") == "workers"
+    ]
+    cases = [
+        (float(case.get("time") or 0), "::".join(filter(None, (case.get("classname"), case.get("name")))))
+        for case in root.iter("testcase")
+    ]
+    return SuitePart(report.stem, wall, max([1, *workers]), cases)
+
+
+def report_parts(reports: Path) -> list[SuitePart]:
+    """Every JUnit XML report under `reports`, one part each, by name.
+
+    A report that cannot be read is named on stderr and skipped: the parts are advice."""
     found = []
     for report in sorted(reports.rglob("*.xml")):
         try:
-            cases = ElementTree.parse(report).getroot().iter("testcase")
-            for case in cases:
-                test = "::".join(filter(None, (case.get("classname"), case.get("name"))))
-                found.append((float(case.get("time") or 0), f"{report.stem} {test}"))
+            found.append(read_part(report))
         except (ElementTree.ParseError, ValueError, OSError) as error:
             print(f"warning: suite skipped the test report {report}: {error}", file=sys.stderr)
     return found
 
 
-def slowest_tests(output: str, reports: Path, count: int) -> list[str]:
+def slowest_tests(output: str, parts: list[SuitePart], count: int) -> list[str]:
     """The `count` slowest tests, slowest first: from the runner's JUnit reports where it wrote any,
     otherwise from its output's `<seconds>s <phase> <test>` lines (pytest's --durations)."""
-    found = [(seconds, f"{seconds:.2f}s {test}") for seconds, test in report_durations(reports)]
+    found = [
+        (seconds, f"{seconds:.2f}s {part.name} {test}") for part in parts for seconds, test in part.cases
+    ]
     if not found:
         found = [
             (float(match[1]), f"{match[1]}s {match[2]} {match[3]}")
@@ -2344,8 +2381,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
     Runs `[tests]` setup first, outside the budget. Prints the last result lines of the suite's
-    stdout (without progress lines, banners and durations), its time and its `slowest_count`
-    slowest tests;
+    stdout (without progress lines, banners and durations), its time, one line per JUnit report
+    (SuitePart.line) and its `slowest_count` slowest tests;
     warns above the target; refuses failed tests, and a passing suite above the limit with
     SuiteOverLimitError."""
     budget = suite_budget(root)
@@ -2360,7 +2397,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
         )
         seconds = clock() - started
         output = (result.stdout + result.stderr).strip()
-        slowest = slowest_tests(output, Path(reports), slowest_count)
+        parts = report_parts(Path(reports))
+        slowest = slowest_tests(output, parts, slowest_count)
     name = " ".join(budget.command)
     report = result.stdout.strip() or output
     summary = report.splitlines()[-1] if report else "no result line"
@@ -2389,7 +2427,10 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     )
     if own_lines:
         print(f"Suite output (last lines):\n{output_tail(own_lines)}")
-    print(f"Suite time: {timing}\nSlowest tests:\n{listing}")
+    print(f"Suite time: {timing}")
+    if parts:
+        print("Parts:\n" + "\n".join(f"  {part.line()}" for part in parts))
+    print(f"Slowest tests:\n{listing}")
     if seconds > budget.target_seconds:
         print(
             f"warning: the complete suite took {seconds:.1f} s, over its target of "
