@@ -81,8 +81,8 @@ version = "^1.4"                             # in place of ref: a semver range o
   and `version`.
 - `path`: optional relative directory inside the module; without it the whole module is used.
 - Module names use letters, digits, `.`, `_` and `-`. Other keys are errors.
-- The module named `se` is se itself; its pin (its `ref`, or the commit `se.lock` locks for its
-  `version`) is the se version the [public check](AGENTS.md#public-safety) must run at.
+- The module named `se` is se itself; its pin is the se the [public check](AGENTS.md#public-safety)
+  must run: exactly its `ref`, or any se whose `se.toml` version its `version` range admits.
 
 A common repository declares only modules that are public. Work-only modules on private hosts are
 declared the same way, in a work repository that consumes the common ones; a common repository never
