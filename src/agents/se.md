@@ -67,8 +67,8 @@ At the start and with every turn-start check, run `work_tickets.py intake --outs
 <main checkout>` (the work model's [Outside issues](../skills/work-model/SKILL.md#outside-issues)).
 This routine is its one statement; for each issue it lists:
 
-1. Check the issue against SE's design principles (as the session start hands them), the
-   project's spec and design notes, and the recorded decisions (decision notes, answered
+1. Check the issue against SE's [design principles](../skills/work-model/references/principles.md),
+   the project's spec and design notes, and the recorded decisions (decision notes, answered
    escalations, the issues they closed).
 2. Nothing contradicted: route it to that repository's integrator as a work issue: retitle it as its
    branch name (`<type>/<topic>-<yyyymmdd>`), comment the

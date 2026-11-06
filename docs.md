@@ -12,5 +12,6 @@ document type: Documentation
 - [[src/skills/catch-up/SKILL|Catch-up]]
 - [[src/skills/decision/SKILL|Decision]]
 - [[src/skills/decision/references/decision-deck|A decision note]]
+- [[src/skills/work-model/references/principles|Design principles]]
 
 se's documentation, built from its own prose: every chapter is one of its notes.
