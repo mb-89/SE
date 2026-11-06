@@ -17,6 +17,7 @@ import tempfile
 import time
 import tomllib
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
@@ -2724,6 +2725,44 @@ def slowest_tests(output: str, parts: list[SuitePart], count: int) -> list[str]:
     return [line for _, line in sorted(found, key=lambda item: -item[0])][:count]
 
 
+@dataclass(frozen=True)
+class SuiteRun:
+    """One timed run of the suite command in one checkout."""
+
+    seconds: float
+    returncode: int
+    stdout: str
+    output: str  # stdout and stderr, stripped
+    parts: list[SuitePart]
+
+    def refuse_failed(self, budget: SuiteBudget) -> str:
+        """The run's result line; refuses a run whose tests failed, with its output."""
+        report = self.stdout.strip() or self.output
+        summary = report.splitlines()[-1] if report else "no result line"
+        if self.returncode != 0:
+            raise QueueError(
+                f"Complete suite failed ({summary}; {self.seconds:.1f} s) running "
+                f"{' '.join(budget.command)} ([tests] command in se.toml); fix the failing tests:\n"
+                f"{self.output or f'exit code {self.returncode}'}"
+            )
+        return summary
+
+
+def time_suite(checkout: Path, command: list[str]) -> SuiteRun:
+    """Run the suite command once in `checkout` and time it; its JUnit reports become its parts."""
+    with tempfile.TemporaryDirectory(prefix="se-test-reports-") as reports:
+        started = clock()
+        result = subprocess.run(
+            command, cwd=checkout, shell=False, capture_output=True,
+            text=True, encoding="utf-8", errors="replace", check=False,
+            env={**os.environ, TEST_REPORTS_VARIABLE: reports},
+        )
+        seconds = clock() - started
+        parts = report_parts(Path(reports))
+    return SuiteRun(seconds, result.returncode, result.stdout,
+                    (result.stdout + result.stderr).strip(), parts)
+
+
 def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget.
 
@@ -2736,26 +2775,10 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     budget = suite_budget(root)
     if budget.setup:
         run_suite_setup(root, budget.setup)
-    with tempfile.TemporaryDirectory(prefix="se-test-reports-") as reports:
-        started = clock()
-        result = subprocess.run(
-            with_durations(budget.command, slowest_count), cwd=root, shell=False, capture_output=True,
-            text=True, encoding="utf-8", errors="replace", check=False,
-            env={**os.environ, TEST_REPORTS_VARIABLE: reports},
-        )
-        seconds = clock() - started
-        output = (result.stdout + result.stderr).strip()
-        parts = report_parts(Path(reports))
-        slowest = slowest_tests(output, parts, slowest_count)
-    name = " ".join(budget.command)
-    report = result.stdout.strip() or output
-    summary = report.splitlines()[-1] if report else "no result line"
-    if result.returncode != 0:
-        raise QueueError(
-            f"Complete suite failed ({summary}; {seconds:.1f} s) running {name} "
-            f"([tests] command in se.toml); fix the failing tests:\n"
-            f"{output or f'exit code {result.returncode}'}"
-        )
+    result = time_suite(root, with_durations(budget.command, slowest_count))
+    seconds, output, parts = result.seconds, result.output, result.parts
+    slowest = slowest_tests(output, parts, slowest_count)
+    summary = result.refuse_failed(budget)
     listing = "\n".join(f"  {line}" for line in slowest) or NO_SLOWEST_TESTS
     timing = (
         f"{seconds:.1f} s (target {budget.target_seconds:g} s, limit {budget.limit_seconds:g} s)"
@@ -2787,6 +2810,78 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
             file=sys.stderr,
         )
     return f"{summary}; {timing}"
+
+
+COMPARE_RUNS = 2
+
+
+@contextmanager
+def ref_checkout(root: Path, ref: str):
+    """A temporary detached worktree of `ref`, removed afterwards."""
+    with tempfile.TemporaryDirectory(prefix="se-compare-") as directory:
+        path = Path(directory) / "ref"
+        added = run_git(root, "worktree", "add", "--detach", str(path), ref)
+        if added.returncode != 0:
+            detail = added.stderr.strip() or f"exit code {added.returncode}"
+            raise QueueError(
+                f"suite --compare cannot check out {ref}: {detail}; name a branch, tag or commit "
+                "this checkout has (fetch it first)"
+            )
+        try:
+            yield path
+        finally:
+            run_git(root, "worktree", "remove", "--force", str(path))
+
+
+def compare_verdict(current: list[float], other: list[float]) -> tuple[float, float, str]:
+    """The difference of the means (current minus other), the observed spread (the larger range
+    of the two states' wall times) and the verdict: "not slower" where the difference is within
+    the spread, otherwise "slower by <difference> s"."""
+    difference = sum(current) / len(current) - sum(other) / len(other)
+    spread = max(max(times) - min(times) for times in (current, other))
+    within = round(difference - spread, 6) <= 0  # rounded: float means land a hair off the edge
+    return difference, spread, "not slower" if within else f"slower by {difference:.1f} s"
+
+
+def compare_suites(root: Path, ref: str, runs: int = COMPARE_RUNS) -> str:
+    """Time the suite on this checkout and on `ref` (in a temporary worktree), interleaved,
+    `runs` times each, after one untimed warm-up run of each; each state runs its own se.toml
+    `[tests]`, setup included. Prints per state its wall times, mean and Parts lines, then the
+    difference of the means and the verdict, which it returns. Failed tests refuse; the budget
+    does not apply: this is a measurement."""
+    with ref_checkout(root, ref) as other:
+        states = [("HEAD", root), (ref, other)]
+        budgets = {label: suite_budget(checkout) for label, checkout in states}
+        for label, checkout in states:
+            if budgets[label].setup:
+                run_suite_setup(checkout, budgets[label].setup)
+
+        def timed(label: str, checkout: Path) -> SuiteRun:
+            result = time_suite(checkout, budgets[label].command)
+            result.refuse_failed(budgets[label])
+            return result
+
+        for label, checkout in states:  # warm-up: caches, environments, bytecode; not counted
+            timed(label, checkout)
+        results: dict[str, list[SuiteRun]] = {label: [] for label, _ in states}
+        for _ in range(runs):
+            for label, checkout in states:
+                results[label].append(timed(label, checkout))
+    print(f"Suite compare: HEAD against {ref}, {runs} timed runs each, interleaved, "
+          "after one untimed warm-up run of each")
+    for label, _ in states:
+        times = [result.seconds for result in results[label]]
+        print(f"{label}:\n  Wall times: {', '.join(f'{seconds:.1f} s' for seconds in times)}"
+              f"\n  Mean: {sum(times) / len(times):.1f} s")
+        for number, result in enumerate(results[label], 1):
+            if result.parts:
+                print(f"  Parts (run {number}):\n"
+                      + "\n".join(f"    {part.line()}" for part in result.parts))
+    difference, spread, verdict = compare_verdict(
+        *([result.seconds for result in results[label]] for label, _ in states))
+    print(f"Difference of the means: {difference:+.1f} s (HEAD minus {ref}); "
+          f"observed spread {spread:.1f} s")
+    return verdict
 
 
 def positive_int(value: str) -> int:
@@ -3330,6 +3425,14 @@ def make_parser() -> argparse.ArgumentParser:
         "--slowest", type=positive_int, default=SLOWEST_TESTS, metavar="N",
         help=f"how many slowest tests to list, from the JUnit reports or pytest's --durations "
         f"(default {SLOWEST_TESTS})")
+    suite_parser.add_argument(
+        "--compare", metavar="REF",
+        help="instead of the budget check, time the suite here and on REF (a temporary worktree), "
+        "interleaved, after one untimed warm-up of each, and say whether this checkout is "
+        "\"not slower\" or \"slower by X s\" than REF")
+    suite_parser.add_argument(
+        "--runs", type=positive_int, default=COMPARE_RUNS, metavar="N",
+        help=f"with --compare: timed runs of each state (default {COMPARE_RUNS})")
 
     guard_parser = subparsers.add_parser(
         "guard", help="require the field report to name removed protected content, against "
@@ -3512,6 +3615,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Merged {integration_branch(root)} {sync(root)}")
             return 0
         if args.command == "suite":
+            if args.compare:
+                print(f"Verdict: {compare_suites(root, args.compare, args.runs)}")
+                return 0
             print(f"Suite: {run_suite(root, args.slowest)}")
             return 0
         if args.command == "guard":
