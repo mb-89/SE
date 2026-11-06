@@ -82,6 +82,9 @@ DECKS = {
     "after-the-fence": ({"late": (NOTE % ("Late", "a late")).split("\n## Current")[0] + PUGH
                          + "\n## Current situation\n\nToday.\n\n## The problem\n\nIt hurts.\n"}, None),
     "worked-example": ({"decision-deck": EXAMPLE.read_text(encoding="utf-8")}, None),
+    # Option A names neither its success nor the reason for its mark; B, the datum, needs no reasons.
+    "unargued": ({"bare": NOTE % ("Bare", "a bare") + PUGH.replace("wins: Known.,", "wins: Known., success: Kept.,")},
+                 None),
 }
 
 
@@ -94,11 +97,12 @@ def _deck(folder: Path, destination: Path) -> subprocess.CompletedProcess:
 def decks(tmp_path_factory, obs) -> dict[str, tuple[subprocess.CompletedProcess, Path]]:
     """Each of DECKS built once with `deck.py build`, all at once: its build and its destination."""
     def built(name: str) -> tuple[subprocess.CompletedProcess, Path]:
-        directory = tmp_path_factory.mktemp(name)
+        directory = directories[name]
         notes, manifest = DECKS[name]
         destination = directory / "deck.html"
         return _deck(_folder(directory, notes, manifest), destination), destination
 
+    directories = {name: tmp_path_factory.mktemp(name) for name in DECKS}  # mktemp is not thread-safe.
     with ThreadPoolExecutor(len(DECKS)) as pool:
         return dict(zip(DECKS, pool.map(built, DECKS)))
 
@@ -130,33 +134,46 @@ def test_build_refuses_a_decision_that_does_not_explain_the_problem_before_its_o
     assert not destination.exists()
 
 
-def test_the_worked_example_builds(decks):
+def test_the_worked_example_builds_without_a_warning(decks):
     result, destination = decks["worked-example"]
     assert result.returncode == 0, result.stderr
     assert destination.exists()
+    assert "warning" not in result.stderr
+
+
+def test_build_warns_of_an_option_without_success_or_a_mark_without_its_reason(decks):
+    result, destination = decks["unargued"]
+    assert result.returncode == 0, result.stderr
+    assert destination.exists()
+    assert result.stderr.splitlines() == [
+        "deck: warning: bare, option A: no `success`, its success criterion",
+        "deck: warning: bare, option A: the mark on `cost` has no `because`, its reason",
+    ]
 
 
 PAGE = """
 const {chromium} = require("playwright");
 const readline = require("readline");
 const actions = {
-    // A deck opened at its pick chapter: its layout and the pugh figure's bottom line.
+    // A deck opened at its pick chapter: its layout and the pugh figure's option rows.
     look: async (page, {path}) => {
         await page.setViewportSize({width: 1200, height: 900});
         await page.goto(`file://${path}#pick`);
-        await page.waitForSelector(".figure-pugh-ready .pugh-bottom");
+        await page.waitForSelector('.figure-pugh-ready [data-pugh-part="options"]');
         return {layout: await page.evaluate(() => document.documentElement.dataset.layout),
-                bottom: await page.locator(".pugh-bottom").first().innerText()};
+                options: await page.locator('.figure-pugh-ready [data-pugh-option] summary').allInnerTexts()};
     },
-    // A served deck blessed chapter by chapter from `first`, then sent.
-    send: async (page, {url, first}) => {
+    // A served deck whose `chapters` are blessed one by one (a verdict never walks on), then sent.
+    send: async (page, {url, chapters}) => {
         await page.setViewportSize({width: 1280, height: 720});
-        await page.goto(`${url}#${first}`);
+        await page.goto(url);
         await page.waitForFunction(() => document.documentElement.dataset.artifactStatus === "ready");
-        const send = page.locator("[data-bless-send]");
-        while (!/^Send (\\d+)\\/\\1$/.test(await send.textContent())) {
+        for (const chapter of chapters) {
+            await page.evaluate(name => obsArtifact.activateChapter(name), chapter);
             await page.locator('[data-bless-key="bless"]:visible').click();
         }
+        const send = page.locator("[data-bless-send]");
+        await page.waitForFunction(() => /^Send (\\d+)\\/\\1$/.test(document.querySelector("[data-bless-send]").textContent));
         await send.click();
         await page.locator("[data-bless-pill]", {hasText: "sent"}).waitFor({timeout: 10000});
         return null;
@@ -197,7 +214,7 @@ def page():
                                stderr=subprocess.DEVNULL, text=True)
     reader = ThreadPoolExecutor(1)
 
-    def run(action: str, **request: str) -> object:
+    def run(action: str, **request: object) -> object:
         browser.stdin.write(json.dumps({"action": action, **request}) + "\n")
         browser.stdin.flush()
         line = reader.submit(browser.stdout.readline).result(timeout=60)
@@ -223,7 +240,7 @@ def test_a_built_deck_opens_in_screens_and_names_options_by_letter_and_short_nam
     assert result.returncode == 0, result.stderr
     shown = page("look", path=str(destination))
     assert shown["layout"] == "screens"
-    assert "B · Short" in shown["bottom"]
+    assert any(option.startswith("B · Short") for option in shown["options"]), shown["options"]
 
 
 def test_a_layout_the_notes_set_is_kept(decks):
@@ -300,7 +317,7 @@ def test_build_serve_wait_and_send_from_the_browser_print_the_answers(decks, pag
     try:
         url = served.stdout.readline().strip()
         assert url.startswith("http://127.0.0.1:"), served.stderr.read()
-        page("send", url=url, first="cache")
+        page("send", url=url, chapters=["cache", "queue"])
         out, err = served.communicate(timeout=30)
     finally:
         served.kill()
