@@ -2604,3 +2604,51 @@ def test_fleet_issues_carry_the_marker_and_check_adds_it_to_a_report_by_hand(wor
     assert run(worktree, "field-report", "--check", str(by_hand)) == 0
     assert by_hand.read_text(encoding="utf-8").count(work_tickets.FLEET_MARKER) == 1
 
+
+def test_intake_outside_lists_each_unmarked_unhandled_issue_once_from_one_query(
+        worktree, gh, monkeypatch, capsys):
+    (worktree / "se.toml").write_text(OUTSIDE_CONFIG, encoding="utf-8")
+    answers = [outside_answer(
+        [outside_issue(14), outside_issue(13, f"{work_tickets.FLEET_MARKER}\nA work issue."),
+         outside_issue(12, labels=["field-report"]),
+         outside_issue(11, comments=["seen", f"{work_tickets.HANDLED_MARKER}\nRouted."]),
+         outside_issue(10)],
+        [outside_issue(1)],
+    )]
+    calls: list[list[str]] = []
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: calls.append(arguments) or answers[-1])
+
+    assert run(worktree, "intake", "--outside") == 0
+    output = capsys.readouterr().out
+    assert len(calls) == 1 and calls[0][:2] == ["api", "graphql"]
+    assert calls[0][calls[0].index("--hostname") + 1] == "git.example"
+    query = calls[0][-1]
+    assert 'r0: repository(owner: "owner", name: "repo")' in query
+    assert 'r1: repository(owner: "owner", name: "other")' in query
+    lines = output.splitlines()
+    assert lines == [
+        "Outside issues (2), not yet handled:",
+        "  git.example/owner/repo#14 issue 14 https://git.example/owner/repo/issues/14",
+        "  git.example/owner/other#1 issue 1 https://git.example/owner/repo/issues/1",
+    ]
+
+    answers.append(outside_answer(
+        [outside_issue(14, comments=[f"{work_tickets.HANDLED_MARKER}\nEscalated."])],
+        [outside_issue(1, comments=[work_tickets.HANDLED_MARKER])],
+    ))
+    assert run(worktree, "intake", "--outside") == 0
+    assert capsys.readouterr().out == "No outside issues to handle.\n"
+
+
+def test_intake_outside_refuses_without_cut_offs_or_with_issues_beyond_one_page(
+        worktree, gh, monkeypatch, capsys):
+    assert run(worktree, "intake", "--outside") == 1
+    error = capsys.readouterr().err
+    assert "[outside]" in error and "se.toml" in error and "work-model" in error
+
+    (worktree / "se.toml").write_text(OUTSIDE_CONFIG, encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: outside_answer(
+        [outside_issue(number) for number in range(111, 11, -1)], [], more=True))
+    assert run(worktree, "intake", "--outside") == 1
+    assert "git.example/owner/repo has more than 100 open issues above its cut-off" in (
+        capsys.readouterr().err)
