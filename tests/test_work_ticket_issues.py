@@ -170,6 +170,9 @@ class FakeGh:
         return ""
 
 
+IDENTITY = '[project]\nidentity = "mb <mb>"\n'
+
+
 @pytest.fixture(autouse=True)
 def local_config(tmp_path: Path, monkeypatch) -> Path:
     path = tmp_path / "home" / ".se" / "local.toml"
@@ -190,8 +193,10 @@ def gh(monkeypatch) -> FakeGh:
 
 @pytest.fixture
 def worktree(tmp_path: Path) -> Path:
+    """A worker's checkout; its se.toml sets the project identity that push needs."""
     root = tmp_path / "worktree"
     root.mkdir()
+    (root / "se.toml").write_text(IDENTITY, encoding="utf-8")
     return root
 
 
@@ -749,6 +754,7 @@ def test_a_gh_that_is_not_signed_in_takes_the_no_gh_path(worktree, monkeypatch, 
 
 
 def test_sync_fetches_and_merges_main_or_reports_conflicts(worktree, monkeypatch, capsys):
+    (worktree / "se.toml").unlink()  # no identity: sync leaves the checkout's as it is
     calls: list[list[str]] = []
 
     def git(arguments, **kwargs):
@@ -778,6 +784,7 @@ def test_sync_fetches_and_merges_main_or_reports_conflicts(worktree, monkeypatch
 
 
 def test_sync_without_origin_merges_local_main(worktree, monkeypatch, capsys):
+    (worktree / "se.toml").unlink()  # no identity: sync leaves the checkout's as it is
     calls: list[list[str]] = []
 
     def git(arguments, **kwargs):
@@ -1317,9 +1324,11 @@ def main_checkout(tmp_path: Path) -> Path:
     origin, checkout = tmp_path / "origin.git", tmp_path / "main"
     git_ok("init", "-q", "--bare", "-b", "main", str(origin))
     git_ok("clone", "-q", str(origin), str(checkout))
-    git_ok("-C", str(checkout), "config", "user.name", "Start test")
-    git_ok("-C", str(checkout), "config", "user.email", "start-test@example.invalid")
-    git_ok("-C", str(checkout), "commit", "-q", "--allow-empty", "-m", "base")
+    git_ok("-C", str(checkout), "config", "user.name", "mb")
+    git_ok("-C", str(checkout), "config", "user.email", "mb")
+    (checkout / "se.toml").write_text(IDENTITY, encoding="utf-8")
+    git_ok("-C", str(checkout), "add", "se.toml")
+    git_ok("-C", str(checkout), "commit", "-q", "-m", "base")
     git_ok("-C", str(checkout), "push", "-q", "origin", "HEAD:main")
     # The newest main exists only on origin; start must fetch it.
     git_ok("clone", "-q", str(origin), str(tmp_path / "other"))
@@ -1787,7 +1796,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
     local_config.parent.mkdir(parents=True)
     local_config.write_text(
-        'public_identity = "Start test <start-test@example.invalid>"\n\n'
+        'public_identity = "mb <mb>"\n\n'
         f'[mirrors]\n"{main_checkout.name}" = ['
         '{ remote = "mirror", branch = "main", fetch = false, public = true }]\n',
         encoding="utf-8",
@@ -1921,7 +1930,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
 @pytest.mark.parametrize(
     ("message", "email", "error"),
     [
-        ("worker #12", "start-test@example.invalid", "tracker reference"),
+        ("worker #12", "mb", "tracker reference"),
         ("worker", "other@example.invalid", "author differs"),
     ],
 )
@@ -1932,7 +1941,7 @@ def test_public_mirror_guard_rejects_references_and_mismatched_identities(
     git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
     local_config.parent.mkdir(parents=True)
     local_config.write_text(
-        'public_identity = "Start test <start-test@example.invalid>"\n\n'
+        'public_identity = "mb <mb>"\n\n'
         f'[mirrors]\n"{main_checkout.name}" = ['
         '{ remote = "mirror", branch = "main", fetch = false, public = true }]\n',
         encoding="utf-8",
@@ -1942,7 +1951,7 @@ def test_public_mirror_guard_rejects_references_and_mismatched_identities(
     (main_checkout / "public.txt").write_text("public\n", encoding="utf-8")
     git_ok("-C", str(main_checkout), "add", "public.txt")
     git_ok(
-        "-C", str(main_checkout), "-c", "user.name=Start test", f"-c", f"user.email={email}",
+        "-C", str(main_checkout), "-c", "user.name=mb", f"-c", f"user.email={email}",
         "commit", "-q", "-m", message,
     )
 
@@ -2046,7 +2055,7 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(
     git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
     git_ok("-C", str(main_checkout), "switch", "-q", "-c", "se")
     (main_checkout / "se.toml").write_text(
-        '[project]\nintegration_branch = "se"\npublic_check = true\n', encoding="utf-8")
+        IDENTITY + 'integration_branch = "se"\npublic_check = true\n', encoding="utf-8")
     git_ok("-C", str(main_checkout), "add", "se.toml")
     git_ok("-C", str(main_checkout), "commit", "-q", "-m", "integrate into se")
     git_ok("-C", str(main_checkout), "push", "-q", "-u", "origin", "se")
@@ -2451,7 +2460,7 @@ def fake_push(main_checkout, monkeypatch):
 
     Its checkout turns the public check off, so the retry tests reach the push; the gate's own
     tests set se.toml themselves."""
-    (main_checkout / "se.toml").write_text("[project]\npublic_check = false\n", encoding="utf-8")
+    (main_checkout / "se.toml").write_text(IDENTITY + "public_check = false\n", encoding="utf-8")
     calls, waits, script = [], [], []
 
     def run_git_push(root, arguments):
@@ -2518,15 +2527,12 @@ def test_push_ends_ten_transient_refusals_with_the_remedy(
     assert "then run the same command again" in error
 
 
-@pytest.mark.parametrize("settings", ["[project]\npublic_check = true\n", None])
+@pytest.mark.parametrize("settings", ["public_check = true\n", ""])
 def test_push_runs_the_public_check_gate_first(main_checkout, fake_push, monkeypatch, capsys,
                                                settings):
     """The gate is on unless se.toml turns it off: without the key, too (fail closed)."""
     calls, _, _ = fake_push
-    if settings is None:
-        (main_checkout / "se.toml").unlink()
-    else:
-        (main_checkout / "se.toml").write_text(settings, encoding="utf-8")
+    (main_checkout / "se.toml").write_text(IDENTITY + settings, encoding="utf-8")
     gate = []
 
     def public_check(arguments, **_):
@@ -2552,7 +2558,7 @@ def test_push_with_the_public_check_off_says_so_and_where_to_turn_it_on(
         main_checkout, fake_push, monkeypatch, capsys):
     calls, _, script = fake_push
     script.append((0, ""))
-    (main_checkout / "se.toml").write_text("[project]\npublic_check = false\n", encoding="utf-8")
+    (main_checkout / "se.toml").write_text(IDENTITY + "public_check = false\n", encoding="utf-8")
     checked = []
     real_run = subprocess.run
     monkeypatch.setattr(work_tickets.subprocess, "run", lambda arguments, **kwargs: (

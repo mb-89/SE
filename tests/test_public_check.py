@@ -124,7 +124,10 @@ def terms(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def repo(tmp_path: Path, terms: Path) -> Path:
+def repo(tmp_path: Path, terms: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A repository with a generic identity, checked without the machine's ~/.se/local.toml."""
+    for variable in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(variable, str(tmp_path / "home"))
     path = tmp_path / "repo"
     path.mkdir()
     git(path, "init", "-q", "-b", "main")
@@ -318,6 +321,52 @@ def test_author_and_committer_identity_hits(repo: Path) -> None:
     result = run_check("--repo", str(repo), "--range", "HEAD^!")
     assert result.returncode == 1
     assert result.stdout.splitlines()[0].endswith(" committer: email-address")
+
+
+PROJECT_IDENTITY = '[project]\nidentity = "mb <mb>"\n'
+
+
+def test_a_commit_not_yet_pushed_with_a_foreign_identity_is_refused_naming_the_remedy(
+        repo: Path) -> None:
+    git(repo, "config", "user.name", "mb")
+    git(repo, "config", "user.email", "mb")
+    commit(repo, {"se.toml": PROJECT_IDENTITY})
+    commit(repo, {"README.md": "clean\n"}, "Add readme", "user.name=agent",
+           "user.email=agent" + AT + "example.com")
+    sha = git(repo, "rev-parse", "--short=12", "HEAD").stdout.strip()
+    result = run_check("--repo", str(repo), "--range", "HEAD~1..HEAD")
+    assert result.returncode == 1, result.stdout
+    hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
+    assert [hit.split(":", 1)[0] for hit in hits] == [f"commit {sha} author", f"commit {sha} committer"]
+    assert ("'agent <agent" + AT + "example.com>' is not the project identity 'mb <mb>'; set the "
+            "project identity in the checkout (work_tickets.py sync") in hits[0]
+    assert "git commit --amend --no-edit --reset-author" in hits[0]
+    assert "remove them or add a reasoned entry" not in result.stdout
+    # History already pushed stays as it is: a full check and the project's own commits pass.
+    assert run_check("--repo", str(repo)).returncode == 0
+    assert run_check("--repo", str(repo), "--range", "HEAD~1").returncode == 0
+
+
+def test_a_foreign_committer_alone_is_refused_and_a_redacted_identity_names_no_person(
+        repo: Path) -> None:
+    git(repo, "config", "user.name", "mb")
+    git(repo, "config", "user.email", "mb")
+    commit(repo, {"se.toml": PROJECT_IDENTITY})
+    (repo / "README.md").write_text("clean\n", encoding="utf-8")
+    git(repo, "add", "README.md")
+    env = {**os.environ, "GIT_COMMITTER_EMAIL": "bob" + AT + "corp.test"}
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "Add readme"], env=env, check=True)
+    result = run_check("--repo", str(repo), "--range", "HEAD^!")
+    assert result.returncode == 1
+    hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
+    assert len(hits) == 1 and " committer: foreign-identity " in hits[0]
+    assert "corp.test" not in result.stdout
+
+
+def test_without_a_project_identity_any_generic_identity_passes_the_gate(repo: Path) -> None:
+    commit(repo, {"README.md": "clean\n"})
+    result = run_check("--repo", str(repo), "--range", "HEAD^!")
+    assert result.returncode == 0, result.stdout
 
 
 def test_identity_without_mail_domain_is_generic(repo: Path, tmp_path: Path) -> None:
