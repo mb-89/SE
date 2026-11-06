@@ -59,6 +59,13 @@ COMMENTS_READ = "comments-read.json"
 TEMPLATE_DIRECTORY = ".github/ISSUE_TEMPLATE"
 TEMPLATES = Path(__file__).resolve().parents[1] / TEMPLATE_DIRECTORY
 DELIVERY_TICKET = "delivery"
+# The fleet's marks on GitHub, owned by the work model's "Outside issues": every issue the fleet
+# files carries FLEET_MARKER (as does every issue labelled FLEET_LABEL), and the comment that
+# records an outside issue as handled carries HANDLED_MARKER.
+FLEET_MARKER = "<!-- se:fleet -->"
+HANDLED_MARKER = "<!-- se:handled -->"
+FLEET_LABEL = "field-report"
+OUTSIDE_PAGE = 100
 DISCOVERY_DIRECTORY = Path(".se") / "work" / "probe"
 DISCOVERY_INDEX = "evidence.md"
 DISCOVERY_CONFIG = "discovery.json"
@@ -2537,10 +2544,12 @@ def check_comments_read(root: Path, current: dict[str, object] | None) -> None:
 def check_field_report(
     root: Path | None, file: Path, issue_body_file: Path | None,
     comments: dict[str, object] | None = None,
-) -> None:
+) -> bool:
     """Validate a field-report file against the template without writing GitHub or, given the
     issue body, without a worktree; in a worktree with a comments-read record, also refuse comments
-    that arrived after it (read with gh, unless `comments` gives the issue's state)."""
+    that arrived after it (read with gh, unless `comments` gives the issue's state). A passing
+    report without the fleet marker gets it, so one filed by hand is marked too; returns whether
+    it was added."""
     try:
         body = file.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
@@ -2568,6 +2577,15 @@ def check_field_report(
         raise field_report_error(file.name, problems)
     if root is not None and (comments is not None or load_comments_read(root) is not None):
         check_comments_read(root, comments)
+    if FLEET_MARKER in body:
+        return False
+    file.write_text(fleet_marked(body), encoding="utf-8", newline="\n")
+    return True
+
+
+def fleet_marked(body: str) -> str:
+    """`body` with the fleet marker as its first line, once."""
+    return body if FLEET_MARKER in body else f"{FLEET_MARKER}\n{body}"
 
 
 def field_report_placeholders() -> list[str]:
@@ -2591,7 +2609,8 @@ def file_field_report(
         body = file.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         raise QueueError(f"Cannot read field report {file}: {error}") from error
-    body = re.sub(r"\n{3,}", "\n\n", HTML_COMMENT_PATTERN.sub("", body)).strip() + "\n"
+    body = fleet_marked(
+        re.sub(r"\n{3,}", "\n\n", HTML_COMMENT_PATTERN.sub("", body)).strip() + "\n")
     if pr is None:
         pr = report_pull_request(root, issue, branch)
     problems = field_report_problems(body, str(issue["body"]))
@@ -3743,8 +3762,9 @@ def main(argv: list[str] | None = None) -> int:
                         "field-report --check: --comment-count and --newest-comment go together")
                 comments = None if args.comment_count is None else {
                     "count": args.comment_count, "newest": args.newest_comment}
-                check_field_report(root, args.check, args.issue_body, comments)
-                print(f"Field report {args.check.name} follows the template")
+                marked = check_field_report(root, args.check, args.issue_body, comments)
+                print(f"Field report {args.check.name} follows the template"
+                      + ("; added the fleet marker" if marked else ""))
             elif root is None:
                 mode = "--draft" if args.draft else "--file"
                 raise QueueError(f"field-report {mode} needs --worktree <worktree>, the worker's checkout")
