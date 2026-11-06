@@ -487,6 +487,67 @@ def test_allowlist_does_not_cover_commit_messages(repo: Path) -> None:
     assert "a.txt" not in result.stdout
 
 
+def commit_entry_repo(repo: Path) -> tuple[str, str]:
+    """A project-identity repository with two commits by a foreign author; returns their SHAs."""
+    git(repo, "config", "user.name", "mb")
+    git(repo, "config", "user.email", "mb")
+    commit(repo, {"se.toml": PROJECT_IDENTITY})
+    shas = []
+    for name in ("a.txt", "b.txt"):
+        (repo / name).write_text("clean\n", encoding="utf-8")
+        git(repo, "add", name)
+        env = {**os.environ, "GIT_AUTHOR_NAME": "Claude",
+               "GIT_AUTHOR_EMAIL": "noreply" + AT + "anthropic.com"}
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", f"Add {name}"], env=env,
+                       check=True)
+        shas.append(git(repo, "rev-parse", "HEAD").stdout.strip())
+    return shas[0], shas[1]
+
+
+def test_a_commit_entry_allows_that_identity_on_that_commit_only(repo: Path) -> None:
+    listed, other = commit_entry_repo(repo)
+    (repo / public_check.ALLOW_FILE).write_text(
+        f"commit:{listed} author  # merge made by a bot, already published\n", encoding="utf-8")
+    result = run_check("--repo", str(repo), "--range", "HEAD~2..HEAD")
+    hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
+    assert [hit.split(":", 1)[0] for hit in hits] == [f"commit {other[:12]} author"], result.stdout
+    assert result.returncode == 1
+    assert "or, for a commit already published" in hits[0]
+    assert run_check("--repo", str(repo), "--range", "HEAD~2..HEAD~1").returncode == 0
+    # A full check never sees the gate's hit, so the entry is not reported unused there.
+    assert run_check("--repo", str(repo)).returncode == 0
+
+
+def test_a_commit_entry_covers_pattern_hits_of_its_role_only(repo: Path) -> None:
+    commit(repo, {"README.md": "clean\n"}, "Add readme", "user.email=alice" + AT + "corp.test")
+    sha = git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / public_check.ALLOW_FILE).write_text(
+        f"commit:{sha} committer  # wrong role\n", encoding="utf-8")
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 1 and " author: email-address" in result.stdout
+    (repo / public_check.ALLOW_FILE).write_text(
+        f"commit:{sha} author  # imported history\n", encoding="utf-8")
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 0, result.stdout
+
+
+@pytest.mark.parametrize("entry", [
+    "commit:{sha} author",
+    "commit:{sha} author  #",
+    "commit:{short} author  # an abbreviated SHA",
+    "commit:{sha} reviewer  # no such role",
+    "commit:{sha}  # no role",
+])
+def test_a_commit_entry_without_reason_full_sha_or_role_is_rejected(repo: Path, entry: str) -> None:
+    commit(repo, {"README.md": "clean\n"})
+    sha = git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / public_check.ALLOW_FILE).write_text(
+        entry.format(sha=sha, short=sha[:12]) + "\n", encoding="utf-8")
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 2, result.stdout
+    assert ".public-check-allow:1:" in result.stdout
+
+
 def git_sh() -> str | None:
     """The POSIX shell: on PATH, or the one shipped with Git for Windows."""
     found = shutil.which("sh")
