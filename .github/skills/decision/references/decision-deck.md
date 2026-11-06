@@ -14,44 +14,28 @@ session that showed it.
 
 ```pugh
 criteria:
-  - name: The record survives the session
-    weight: 3
-  - name: The person's effort per decision
-    weight: 3
-  - name: Many decisions without a flood
-    weight: 2
-  - name: Cost to build
-    weight: 1
-datum: B
-options:
-  A:
-    name: Decision deck
+  - {key: record, label: The record survives the session, weight: 3, better: higher, kind: judged}
+  - {key: effort, label: The person's effort per decision, weight: 3, better: higher, kind: judged}
+  - {key: volume, label: Many decisions without a flood, weight: 2, better: higher, kind: judged}
+  - {key: cost, label: Cost to build, weight: 1, better: higher, kind: judged}
+datum: {prefer: [chat]}
+candidates:
+  - key: deck
+    label: Decision deck
     what: Each decision is one note rendered as a one-pager; the notes go to the person as one deck, answered in one pass.
-    marks:
-      The record survives the session: 1
-      The person's effort per decision: 1
-      Many decisions without a flood: 1
-      Cost to build: -1
+    marks: {record: 1, effort: 1, volume: 1, cost: -1}
     wins: The answered artifact is the record and outlives the session; the person sees every open decision at once.
     losses: Needs the deck command and obs's blessing, which do not exist yet.
-  B:
-    name: Tables in the chat (keep what we have)
+  - key: chat
+    label: Tables in the chat (keep what we have)
     what: SE shows one option table per message, numbered against the open total.
-    marks:
-      The record survives the session: 0
-      The person's effort per decision: 0
-      Many decisions without a flood: 0
-      Cost to build: 0
+    marks: {record: 0, effort: 0, volume: 0, cost: 0}
     wins: Works today with nothing to build.
     losses: The answer lives in the chat until someone copies it; one decision per turn.
-  C:
-    name: An issue per decision
+  - key: issue
+    label: An issue per decision
     what: Each decision is a GitHub issue minted for the person, answered in a comment.
-    marks:
-      The record survives the session: 1
-      The person's effort per decision: -1
-      Many decisions without a flood: -1
-      Cost to build: 0
+    marks: {record: 1, effort: -1, volume: -1, cost: 0}
     wins: The question and its answer are on GitHub from the start.
     losses: The person reads issue threads instead of one page; questions crowd the work queue.
 checklist:
