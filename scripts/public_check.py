@@ -13,7 +13,8 @@ machine sets public_identity), where one is set; GitHub's web-flow identity, the
 commit made on GitHub, passes as committer. A hit names the identity found, redacted. A
 `commit:<full sha> author|committer` entry in .public-check-allow allows the identity in that role
 on that one commit, and a `commit:<full sha> message` entry the message hits of that one commit,
-for history already published.
+for history already published. A --range on a shallow clone that reaches beyond the fetched
+history is refused, so the check never passes over commits it cannot see.
 
 Every verdict names the se commit that ran it. A checked repository that pins se (`[modules.se]`
 in its se.toml) is refused when this se is not at that `ref`, or when the version this se's
@@ -621,6 +622,8 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
     scan_files(files, patterns, allow, report)
     revisions = args.revisions or ("" if args.staged else args.rev or "HEAD")
     if not args.no_history and revisions and (args.revisions or has_head(root)):
+        if args.revisions:
+            check_fetched(root, args.revisions)
         scan_history(root, revisions.split(), patterns, report, gate=bool(args.revisions),
                      allow=allow)
     report_unused(allow, terms is not None, report)
@@ -639,6 +642,31 @@ def report_unused(allow: list[AllowEntry], full: bool, report: Report) -> None:
             report.hits.append(Hit(f"{ALLOW_FILE}:{entry.line}", "unused-allow-entry", f" ({form})"))
         else:
             report.warnings.append(f"unused allow entry {ALLOW_FILE}:{entry.line} ({form})")
+
+
+def shallow_boundary(root: Path) -> set[str]:
+    """The commits whose parents a shallow clone has not fetched; empty in a complete clone."""
+    if git(root, "rev-parse", "--is-shallow-repository").decode().strip() != "true":
+        return set()
+    path = Path(git(root, "rev-parse", "--git-path", "shallow").decode().strip())
+    path = path if path.is_absolute() else root / path
+    return set(path.read_text(encoding="utf-8").split()) if path.is_file() else set()
+
+
+def check_fetched(root: Path, revisions: str) -> None:
+    """Refuse a range that reaches beyond a shallow clone's fetched history: a gate over commits
+    it cannot see would pass vacuously."""
+    boundary = shallow_boundary(root)
+    if not boundary:
+        return
+    listed = git(root, "rev-list", *revisions.split(), "--").decode().split()
+    beyond = sorted(boundary.intersection(listed))
+    if beyond:
+        raise SetupError(
+            f"--range '{revisions}' reaches beyond the fetched history of this shallow clone (at "
+            f"{beyond[0][:12]}, whose parents are not fetched); run git fetch --unshallow and "
+            "check again"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
