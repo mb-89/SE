@@ -117,6 +117,7 @@ def test_partial_deliveries_define_blockers_and_review_responses():
 def test_field_report_template_has_requirement_evidence_table():
     report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
     assert "one row per work-issue requirement and acceptance item" in report
+    assert 'numbered items under "Changes after filing" are requirements, by their number' in report
     assert "| Work issue item | Result | Commits | Evidence |" in report
     assert "(../agents/worker.agent.md#procedure)" in report
 
