@@ -44,6 +44,9 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   and never wait for an answer, an approval or a decision: they decide what they may decide,
   escalate the rest, and continue with other work or end their turn.
 - **Escalation**: what a role may not decide climbs the [escalation ladder](#escalation-ladder).
+- **Asking a working agent**: a person who wants to ask a running worker or integrator something
+  asks SE, which sends it a message down the tree. There is no other channel into a running
+  session.
 - **Messages travel only up and down the tree**: a session messages only the session that started
   it and the sessions it started. A sideways message (one integrator to another) stops at a
   permission prompt in Claude's cloud, so news for another repository goes up to SE,
