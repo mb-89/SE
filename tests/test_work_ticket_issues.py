@@ -1357,8 +1357,7 @@ def suite_passed(root: Path, result: str | None) -> str | None:
     return result
 
 
-@pytest.fixture
-def main_checkout(tmp_path: Path) -> Path:
+def build_main_checkout(tmp_path: Path) -> None:
     origin, checkout = tmp_path / "origin.git", tmp_path / "main"
     git_ok("init", "-q", "--bare", "-b", "main", str(origin))
     git_ok("clone", "-q", str(origin), str(checkout))
@@ -1373,7 +1372,12 @@ def main_checkout(tmp_path: Path) -> Path:
     git_ok("-C", str(tmp_path / "other"), "-c", "user.name=Other", "-c",
            "user.email=other@example.invalid", "commit", "-q", "--allow-empty", "-m", "newest")
     git_ok("-C", str(tmp_path / "other"), "push", "-q", "origin", "HEAD:main")
-    return checkout
+
+
+@pytest.fixture
+def main_checkout(tmp_path: Path, repositories) -> Path:
+    repositories(build_main_checkout, tmp_path)
+    return tmp_path / "main"
 
 
 def test_start_creates_a_worktree_from_the_newest_main_and_marks_the_issue(
