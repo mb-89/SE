@@ -52,7 +52,8 @@ it, and which solutions there are.
 
 Nothing else goes before the fence: its options are the list of solutions the reader expands.
 Any longer material goes in `##` sections after it, which obs shows as tabs. `<se>/scripts/deck.py
-build` refuses a decision note without both sections before its fence.
+build` refuses a decision note without both sections before its fence, and warns of an option
+without `success` or a mark without `because`.
 
 The aim is no failed item: a failed item's answer says what would fix it. The worked example is
 [the decision deck](references/decision-deck.md).
