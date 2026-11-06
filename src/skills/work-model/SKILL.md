@@ -437,7 +437,7 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   titles, labels, bodies and footers the commands would write.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
   `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push`, `verified`,
-  `comments-read`, `body-read --body-file`, `release-trailer`, `pr-body` and
+  `comments-read`, `body-read --body-file`, `release-trailer`, `pr-body`, `docs` and
   `field-report --check`.
   Every other command fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
