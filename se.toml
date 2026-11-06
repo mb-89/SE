@@ -29,4 +29,4 @@ limit_seconds = 120
 # obs builds the documentation (README "Documentation").
 [modules.obs]
 url = "https://github.com/mb-89/obs.git"
-ref = "021c9e0b5c9416fd9eac97185be474abeca7b7e7"
+ref = "5c6d1f541a77a5c2f5b60c138dddb56c94259866"
