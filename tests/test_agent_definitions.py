@@ -659,6 +659,12 @@ def test_the_worked_example_answers_every_checklist_item_in_its_fence():
         assert key in fence, key
 
 
+def test_the_decision_skill_asks_every_option_for_a_short_name_and_points_to_obs_for_the_field():
+    text = normalized(DECISION)
+    assert "Every option carries `short`" in text and "one word where possible, at most five" in text
+    assert "(https://github.com/mb-89/obs/blob/main/spec/capabilities/pugh-decisions.md)" in text
+
+
 @pytest.mark.parametrize("path", POINTERS, ids=lambda path: path.name)
 def test_roles_point_to_the_checklist_and_the_ladder_rather_than_restating_them(path):
     text = normalized(path)
