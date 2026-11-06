@@ -10,7 +10,9 @@ The commit gates (a message file, the commits of a --range) also refuse tracker 
 messages, naming the reference and the remedy; a full check leaves old history to them. The
 commits of a --range must also carry the project identity (se.toml [project] identity, unless the
 machine sets public_identity), where one is set; GitHub's web-flow identity, the committer of a
-commit made on GitHub, passes as committer. A hit names the identity found, redacted.
+commit made on GitHub, passes as committer. A hit names the identity found, redacted. A
+`commit:<full sha> author|committer` entry in .public-check-allow allows the identity in that role
+on that one commit, for history already published.
 
 Every verdict names the se commit that ran it. A checked repository that pins se (`[modules.se]`
 in its se.toml) is refused when this se is not at that `ref`, or when the version this se's
@@ -143,7 +145,8 @@ REIDENTIFY_BEFORE_PUSH = (
     "set the project identity in the checkout (work_tickets.py sync, from se.toml [project] "
     "identity) and re-author the commit before pushing: git commit --amend --no-edit "
     "--reset-author for the last commit, or git rebase --exec 'git commit --amend --no-edit "
-    "--reset-author' <base> while the branch is unpushed"
+    "--reset-author' <base> while the branch is unpushed; or, for a commit already published, "
+    f"a reasoned 'commit:<full sha> <role>' entry in {ALLOW_FILE}"
 )
 # Labels whose hit line names its own remedy; the summary line does not repeat the generic one.
 OWN_REMEDY = {"tracker-reference", "foreign-identity"}
@@ -179,12 +182,18 @@ class AllowEntry:
     glob: str | None = None
     path: str | None = None
     path_line: int | None = None
+    commit: str | None = None
+    role: str | None = None
     used: bool = False
 
     def matches(self, path: str, line: int | None) -> bool:
         if self.glob is not None:
             return fnmatch.fnmatchcase(path, self.glob)
-        return path == self.path and line == self.path_line
+        return self.path is not None and path == self.path and line == self.path_line
+
+
+COMMIT_ENTRY = re.compile(r"commit:(\S*)(?:\s+(\S+))?")
+ROLES = ("author", "committer")
 
 
 @dataclass
@@ -226,7 +235,16 @@ def load_allow(root: Path) -> list[AllowEntry]:
         entry, _, reason = text.partition("#")
         entry = entry.strip()
         if not entry or not reason.strip():
-            raise SetupError(f"{ALLOW_FILE}:{number}: write '<path glob or file:line>  # reason'")
+            raise SetupError(f"{ALLOW_FILE}:{number}: write '<path glob or file:line>  # reason' "
+                             "or 'commit:<full sha> author|committer  # reason'")
+        commit = COMMIT_ENTRY.fullmatch(entry)
+        if commit:
+            sha, role = commit.group(1).lower(), commit.group(2)
+            if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) or role not in ROLES:
+                raise SetupError(f"{ALLOW_FILE}:{number}: write "
+                                 "'commit:<full sha> author|committer  # reason'")
+            entries.append(AllowEntry(number, commit=sha, role=role))
+            continue
         file_line = re.fullmatch(r"(.+):(\d+)", entry)
         if file_line:
             entries.append(
@@ -396,9 +414,10 @@ def scan_project_identity(where: str, role: str, identity: str, expected: str,
 
 
 def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], report: Report,
-                 gate: bool) -> None:
+                 gate: bool, allow: list[AllowEntry]) -> None:
     """Hits in the identities and messages of `revisions`; a gate (commits not yet pushed) also
-    refuses tracker references and identities other than the project identity."""
+    refuses tracker references and identities other than the project identity. A commit entry of
+    `allow` drops the identity hits of its role on its commit."""
     expected = project_identity(root) if gate else None
     output = git(root, "log", "-z", "--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B", *revisions, "--")
     for record in output.decode("utf-8", "replace").split("\0"):
@@ -407,12 +426,15 @@ def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], repo
         sha, author, committer, message = record.split("\x1f", 3)
         where = f"commit {sha[:12]}"
         report.commits += 1
+        found = len(report.hits)
         scan_identity(where, "author", author, patterns, report)
         if committer != author:
             scan_identity(where, "committer", committer, patterns, report)
         if expected is not None:
             scan_project_identity(where, "author", author, expected, patterns, report)
             scan_project_identity(where, "committer", committer, expected, patterns, report)
+        allowed = {f"{where} {entry.role}" for entry in allow if entry.commit == sha}
+        report.hits[found:] = [hit for hit in report.hits[found:] if hit.location not in allowed]
         scan_message(where, message, patterns, report, REWORD_BEFORE_PUSH if gate else None)
 
 
@@ -578,7 +600,7 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
         files = worktree_files(root)
     scan_files(files, patterns, allow, report)
     for entry in allow:
-        if entry.used:
+        if entry.used or entry.commit is not None:  # a gate's hit is not seen by every check
             continue
         if terms is None:  # the entry may cover a private-term hit this run cannot see
             report.warnings.append(f"unused allow entry {ALLOW_FILE}:{entry.line}")
@@ -586,7 +608,8 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
             report.hits.append(Hit(f"{ALLOW_FILE}:{entry.line}", "unused-allow-entry"))
     revisions = args.revisions or ("" if args.staged else args.rev or "HEAD")
     if not args.no_history and revisions and (args.revisions or has_head(root)):
-        scan_history(root, revisions.split(), patterns, report, gate=bool(args.revisions))
+        scan_history(root, revisions.split(), patterns, report, gate=bool(args.revisions),
+                     allow=allow)
     return report
 
 

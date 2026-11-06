@@ -51,6 +51,7 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   history already pushed alone.
   - GitHub's web-flow identity (`GitHub`, `noreply` at `github.com`), the committer of a commit
     made on GitHub, passes as committer, never as author.
+  - A commit already published passes by its reasoned commit entry in `.public-check-allow`.
 - Generic patterns, committed in the script: user profile paths (`X:\Users\<name>`, `/home/<name>`,
   `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and `example.*`,
   enterprise GitHub hosts (GitHub Enterprise Cloud subdomains), machine names in UNC paths.
