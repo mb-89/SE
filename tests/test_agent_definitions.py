@@ -320,28 +320,38 @@ def test_one_skill_owns_how_a_decision_is_presented():
             assert restated.casefold() not in text.casefold(), (path.name, restated)
 
 
-def test_the_decision_skill_holds_the_presentation_rules():
+def test_the_decision_skill_owns_the_shape_of_the_decision_note():
     text = normalized(DECISION)
-    for rule in ("exactly one decision", '"Decision 2 of 3"', "one to three sentences",
-                 "| Option | What it means | What we gain | What we lose |", "(recommended)",
-                 '"Reply A, B or C"', "## Tasks for the person", "never an option in a decision",
-                 '"Task 1 of 2"'):
+    for rule in ("## The decision note", "One Obsidian Markdown note per decision", "`obs.bless: pending`",
+                 "one to three sentences", "The `pugh` fence", "`what` sentence", "`wins` and `losses`",
+                 "`datum`: the letter of the strongest rival", '"Keep what we have" is an option',
+                 "`checklist`", "`item`", "`answer`", "`pass`", "`options`, the letters it fails",
+                 "## Tasks for the person", "never an option in a decision", '"Task 1 of 2"'):
+        assert rule in text, rule
+
+
+def test_the_agent_decides_its_own_questions_with_the_same_note():
+    text = normalized(DECISION)
+    assert "## Your own decisions" in text
+    for rule in ("same note", "sets `chosen`", "the world that choice needs", "If that world is nonsense"):
         assert rule in text, rule
 
 
 def test_the_decision_skill_asks_one_level_up_with_the_worked_example():
     text = normalized(DECISION)
     assert "## One level up" in text
-    assert "name the class the instance belongs to and ask about the general mechanism" in text
+    assert "name the class the instance belongs to and decide the general mechanism" in text
     assert '"can queries select the manifest note?"' in text
     assert ('"a note can mark itself ignored, like a Python underscore name; the manifest is one '
             'such note"') in text
 
 
-def test_the_decision_skill_records_the_answer_where_it_takes_effect():
+def test_the_decision_skill_stores_the_note_with_its_answered_artifact():
     text = normalized(DECISION)
-    assert "## Recording the answer" in text
-    assert "recorded where it takes effect, quoting the person word for word" in text
+    assert "## The record" in text
+    for rule in ("The answered artifact", "stored together in the repository the decision is about",
+                 "`decisions/` folder", "links the note; none of them copies its content"):
+        assert rule in text, rule
 
 
 def without_gh_section() -> str:
@@ -588,3 +598,4 @@ def test_the_worker_reports_the_suite_time_before_and_after_and_slow_new_tests()
     assert "work_tickets.py suite" in worker
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
     assert "**Suite time:**" in template
+
