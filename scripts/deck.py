@@ -11,7 +11,8 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       their tasks. It fails on a deck where no chapter asks, on a decision (a `pugh` fence) that does
       not ask, outside a record built with the answers, on a decision without `## Current situation`
       and `## The problem`, in that order, before its fence (the decision skill's note shape), and on
-      any obs warning.
+      any obs warning. It warns, building all the same, of each option without `success` and each
+      mark off the datum without `because` (the decision skill's fence fields), naming the note and the option.
   serve HTML --wait [--timeout S]   Serves the deck with obs-html serve: prints the URL to open first,
       then, once the person sends, the answers payload as one JSON line (also written to answers.json
       beside HTML). For Claude Code, Copilot and any local browser.
@@ -67,6 +68,8 @@ def build(folder: Path, destination: Path, answers: Path | None = None) -> int:
         if code:
             return code
         chapters = json.loads(document.read_text(encoding="utf-8"))["chapters"]
+    for warning in _warnings(chapters):
+        print(f"deck: warning: {warning}", file=sys.stderr)
     refusal = _refusal(chapters, recorded=answers is not None)
     if refusal:
         destination.unlink(missing_ok=True)
@@ -115,6 +118,30 @@ def _screens(vault: Path) -> None:
 
 def _holds_pugh(nodes: list[dict]) -> bool:
     return any(node["type"] == "pugh" or _holds_pugh(node["children"]) for node in nodes)
+
+
+def _matrices(nodes: list[dict]) -> list[dict]:
+    """The matrices of the ``pugh`` fences in ``nodes``, in order."""
+    return [matrix for node in nodes for matrix in
+            ([node["attrs"]["matrix"]] if node["type"] == "pugh" else _matrices(node["children"]))]
+
+
+def _warnings(chapters: list[dict]) -> list[str]:
+    """Each option without ``success`` and each mark off the datum without ``because``, the fields the decision skill asks
+    of the fence (src/skills/decision/SKILL.md), as ``<note>, option <letter>: <what is missing>``."""
+    warnings = []
+    for chapter in chapters:
+        for matrix in _matrices(chapter["content"]):
+            for index, option in enumerate(matrix["candidates"]):
+                where = f"{chapter['id']}, option {chr(ord('A') + index)}"
+                if not option.get("success"):
+                    warnings.append(f"{where}: no `success`, its success criterion")
+                if option["key"] in matrix.get("datum", {}).get("prefer", [])[:1]:
+                    continue  # The datum is marked against itself: its marks need no reason.
+                warnings.extend(f"{where}: the mark on `{key}` has no `because`, its reason"
+                                for key, mark in option.get("marks", {}).items()
+                                if not (isinstance(mark, dict) and mark.get("because")))
+    return warnings
 
 
 SECTIONS = ["Current situation", "The problem"]  # The decision skill's note shape, before the fence.

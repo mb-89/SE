@@ -82,6 +82,9 @@ DECKS = {
     "after-the-fence": ({"late": (NOTE % ("Late", "a late")).split("\n## Current")[0] + PUGH
                          + "\n## Current situation\n\nToday.\n\n## The problem\n\nIt hurts.\n"}, None),
     "worked-example": ({"decision-deck": EXAMPLE.read_text(encoding="utf-8")}, None),
+    # Option A names neither its success nor the reason for its mark; B, the datum, needs no reasons.
+    "unargued": ({"bare": NOTE % ("Bare", "a bare") + PUGH.replace("wins: Known.,", "wins: Known., success: Kept.,")},
+                 None),
 }
 
 
@@ -131,10 +134,21 @@ def test_build_refuses_a_decision_that_does_not_explain_the_problem_before_its_o
     assert not destination.exists()
 
 
-def test_the_worked_example_builds(decks):
+def test_the_worked_example_builds_without_a_warning(decks):
     result, destination = decks["worked-example"]
     assert result.returncode == 0, result.stderr
     assert destination.exists()
+    assert "warning" not in result.stderr
+
+
+def test_build_warns_of_an_option_without_success_or_a_mark_without_its_reason(decks):
+    result, destination = decks["unargued"]
+    assert result.returncode == 0, result.stderr
+    assert destination.exists()
+    assert result.stderr.splitlines() == [
+        "deck: warning: bare, option A: no `success`, its success criterion",
+        "deck: warning: bare, option A: the mark on `cost` has no `because`, its reason",
+    ]
 
 
 PAGE = """
