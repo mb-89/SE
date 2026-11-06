@@ -50,6 +50,11 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   addresses in commits"), which takes precedence over a host's attribution reminder: the commit
   gates refuse a `Co-Authored-By:` or `Claude-Session:` line in any case, naming the commit and
   the remedy, reword before pushing. A full check leaves history already pushed alone.
+  - Every author is refused, the owner included; a co-author line's hit also names the editor
+    setting that writes it ([README "Install"](README.md#install)).
+- CI: `.github/workflows/public-check.yml` runs the commit gates of a `--range` on every push to
+  `se` and `main`, so a push the hooks did not see fails there; it is the required check of both
+  branches.
 - A `--range` on a shallow clone that reaches beyond the fetched history is refused with exit code
   2, naming `git fetch --unshallow`, so a gate never passes over commits it cannot see.
 - The project identity in the commit gates of a `--range`: where the project sets an `identity`
