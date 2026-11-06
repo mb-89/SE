@@ -46,6 +46,8 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   refuse them and, as they name nothing private, print the reference with its remedy. A full check
   leaves history already pushed alone; a commit already published passes by its reasoned message
   entry in `.public-check-allow`.
+- A `--range` on a shallow clone that reaches beyond the fetched history is refused with exit code
+  2, naming `git fetch --unshallow`, so a gate never passes over commits it cannot see.
 - The project identity in the commit gates of a `--range`: where the project sets an `identity`
   (or the machine a `public_identity`, which wins), a commit whose author or committer differs is
   refused, naming the commit, the identity found (redacted) and the remedy. A full check leaves

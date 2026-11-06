@@ -599,6 +599,31 @@ def test_an_unused_commit_entry_in_a_gate_is_reported_with_its_line_and_form(rep
             "remove it or correct it in place)") in result.stdout
 
 
+def shallow_clone(repo: Path, tmp_path: Path, depth: int) -> Path:
+    for index in range(4):
+        commit(repo, {f"f{index}.txt": "x\n"}, f"Change {index}")
+    clone = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", str(depth), repo.as_uri(), str(clone)],
+                   capture_output=True, check=True)
+    return clone
+
+
+def test_a_range_beyond_a_shallow_clone_is_refused_naming_the_remedy(
+        repo: Path, tmp_path: Path) -> None:
+    clone = shallow_clone(repo, tmp_path, 2)
+    result = run_check("--repo", str(clone), "--range", "HEAD")
+    assert result.returncode == 2, result.stdout
+    assert "reaches beyond the fetched history of this shallow clone" in result.stdout
+    assert "git fetch --unshallow" in result.stdout
+
+
+def test_a_range_within_a_shallow_clone_passes(repo: Path, tmp_path: Path) -> None:
+    clone = shallow_clone(repo, tmp_path, 2)
+    result = run_check("--repo", str(clone), "--range", "HEAD~1..HEAD")
+    assert result.returncode == 0, result.stdout
+    assert ", 1 commits," in result.stdout
+
+
 def git_sh() -> str | None:
     """The POSIX shell: on PATH, or the one shipped with Git for Windows."""
     found = shutil.which("sh")
