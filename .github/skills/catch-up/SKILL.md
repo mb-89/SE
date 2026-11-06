@@ -35,8 +35,9 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
 - **In autopilot, put everything the user must read into the `task_complete` summary.** Text written
   before the call may not be shown.
 - **Every turn ends with exactly one of these, never neither:**
-  - the next open decision, presented as the [decision](../decision/SKILL.md) skill says and asked
-    with the `ask_user` tool when available, or
+  - the open decisions, brought to the person as the
+    [escalation ladder](../work-model/SKILL.md#escalation-ladder) says and asked with the
+    `ask_user` tool when available, or
   - the explicit sentence "No input needed from you right now", plus what happens next (which workers
     run, what you integrate when they report).
   Decisions that come up while integrating join the queue.
@@ -109,8 +110,9 @@ project's commands, hot files and backlog by the project's `AGENTS.md`.
      repository's integrator. The integrator starts workers for unblocked packages in fresh
      worktrees from the newest `main` (the work model's [Worktrees](../work-model/SKILL.md#worktrees)).
    - Tell the user in one table: repository → integrator session → work issue.
-7. **Present decisions** with the [decision](../decision/SKILL.md) skill and end the turn after
-   each (or say that none are needed). Apply the answer by updating the source issue or dispatching
+7. **Present decisions**, each a note from the [decision](../decision/SKILL.md) skill, as the
+   [escalation ladder](../work-model/SKILL.md#escalation-ladder) says, and end the turn (or say
+   that none are needed). Apply the answer by updating the source issue or dispatching
    a worker, mark the source item done, steer the integrator to merge, then present the next one.
    If the answer changes the requirement, research it (git history, old code), then dispatch.
 8. **Integration runs through the [integrator](../../agents/integrator.agent.md)**, triggered as the

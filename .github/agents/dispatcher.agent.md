@@ -43,9 +43,9 @@ its tools.
   whose prompt names only the worker agent, the issue, the worktree and the integrator session.
   Start exactly one integrator session for each repository you dispatch into; its prompt names the
   main checkout and your session (for escalations).
-- **Escalations** (label `escalated`) are decisions for the user: present them with the
-  [decision skill](../skills/decision/SKILL.md), then answer with a comment on the escalated issue
-  or a request to the session that escalated.
+- **Escalations** (label `escalated`) are decisions for the user: bring them to the person as the
+  [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder) says, then answer with a
+  comment on the escalated issue or a request to the session that escalated.
 - **Releases**: ask the user; on approval send the integrator a release request. The integrator
   never asks for one.
 - Paths and shell follow the work model's
