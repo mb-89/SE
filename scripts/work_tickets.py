@@ -53,6 +53,7 @@ PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
 IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
 ISSUE_FIELDS = "number,title,body,url,updatedAt,comments,labels"
 ISSUE_SNAPSHOT = "issue.json"
+COMMENTS_READ = "comments-read.json"
 # The issue templates belong to se, wherever a project keeps it; messages name them relative to it.
 TEMPLATE_DIRECTORY = ".github/ISSUE_TEMPLATE"
 TEMPLATES = Path(__file__).resolve().parents[1] / TEMPLATE_DIRECTORY
@@ -580,7 +581,13 @@ def status_report(
     }
 
 
-def run_gh(root: Path, arguments: list[str]) -> str:
+GH_ENVIRONMENT = {"GH_PROMPT_DISABLED": "1"}
+_signed_in_gh: set[str] = set()
+
+
+def gh_executable() -> str:
+    """The `gh` on PATH, refused where it is missing or `gh auth status` fails: a `gh` that is
+    installed but not signed in counts as no `gh`. A passed check holds for the process."""
     executable = shutil.which("gh")
     if executable is None:
         raise MissingGhError(
@@ -588,6 +595,33 @@ def run_gh(root: Path, arguments: list[str]) -> str:
             "the project's AGENTS.md names, or, where the host has no gh (Claude's cloud), do this "
             f"step by hand as the se checkout's {WITHOUT_GH} says"
         )
+    if executable not in _signed_in_gh:
+        status = subprocess.run(
+            [executable, "auth", "status"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL, env={**os.environ, **GH_ENVIRONMENT}, check=False,
+        )
+        if status.returncode != 0:
+            raise MissingGhError(
+                "needs the GitHub CLI (gh), which is installed but not signed in "
+                f"(gh auth status: exit code {status.returncode}), so it counts as no gh. Sign in "
+                "with gh auth login, or, where the host gives gh no account (Claude's cloud), do "
+                f"this step by hand as the se checkout's {WITHOUT_GH} says"
+            )
+        _signed_in_gh.add(executable)
+    return executable
+
+
+def gh_usable() -> bool:
+    try:
+        gh_executable()
+    except MissingGhError:
+        return False
+    return True
+
+
+def run_gh(root: Path, arguments: list[str]) -> str:
+    executable = gh_executable()
     result = subprocess.run(
         [executable, *arguments],
         cwd=root,
@@ -596,7 +630,7 @@ def run_gh(root: Path, arguments: list[str]) -> str:
         encoding="utf-8",
         errors="replace",
         stdin=subprocess.DEVNULL,
-        env={**os.environ, "GH_PROMPT_DISABLED": "1"},
+        env={**os.environ, **GH_ENVIRONMENT},
         check=False,
     )
     if result.returncode != 0:
@@ -1008,6 +1042,76 @@ def save_snapshot(root: Path, issue: dict[str, object]) -> None:
     )
 
 
+def comment_state(comments: list[dict[str, object]]) -> dict[str, object]:
+    """What a read of the work issue's comments records: their count and the newest one's id."""
+    return {"count": len(comments), "newest": str(comments[-1]["id"]) if comments else ""}
+
+
+def comments_read_path(root: Path) -> Path:
+    path = queue_paths(root)["todo"].parent / COMMENTS_READ
+    inside_root(root, path)
+    return path
+
+
+def load_comments_read(root: Path) -> dict[str, object] | None:
+    path = comments_read_path(root)
+    if not path.is_file():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        return {"count": int(record["count"]), "newest": str(record["newest"])}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise QueueError(
+            f"Cannot read the comments-read record {path}: {error}; record the comments again "
+            "with comments-read --count <n> --newest <id>"
+        ) from error
+
+
+def record_comments_read(root: Path, state: dict[str, object]) -> None:
+    if int(state["count"]) < 0 or bool(state["newest"]) != bool(state["count"]):
+        raise QueueError(
+            "comments-read: --count must be 0 with an empty --newest, or positive with the newest "
+            f"comment's id; got --count {state['count']} --newest {state['newest']!r}"
+        )
+    initialize(root)
+    comments_read_path(root).write_text(
+        json.dumps({"count": int(state["count"]), "newest": str(state["newest"])}) + "\n",
+        encoding="utf-8", newline="\n",
+    )
+
+
+EMPTY_ARGUMENT = "''"
+
+
+def unread_comments_error(
+    recorded: dict[str, object], current: dict[str, object],
+    comments: list[dict[str, object]] | None,
+) -> QueueError | None:
+    """The refusal where the work issue's comments moved past what was recorded as read.
+
+    `comments` is the issue's comment list where it was read with gh; given by hand, only the
+    current count and newest id are known."""
+    if recorded == current:
+        return None
+    if comments is not None:
+        ids = [str(comment["id"]) for comment in comments]
+        start = ids.index(str(recorded["newest"])) + 1 if recorded["newest"] in ids else 0
+        named = [
+            f"{comment['createdAt']} {comment['author']}: {comment['url'] or comment['id']}"
+            for comment in comments[start:]
+        ] or [f"comment(s) were deleted: {recorded['count']} recorded, {current['count']} now"]
+    else:
+        named = [f"{current['count']} comment(s) now, {recorded['count']} recorded as read; "
+                 f"newest now {current['newest'] or 'none'}, recorded {recorded['newest'] or 'none'}"]
+    return QueueError(
+        "The work issue has comments that arrived after they were last recorded as read:\n"
+        + "".join(f"- {line}\n" for line in named)
+        + "Read them, apply them or answer them in the field report's Review responses, then "
+        f"record them as read: work_tickets.py comments-read --count {current['count']} "
+        f"--newest {current['newest'] or EMPTY_ARGUMENT} --worktree <worktree>"
+    )
+
+
 def markdown_sections(body: str) -> dict[str, str]:
     sections: dict[str, list[str]] = {}
     current: list[str] | None = None
@@ -1191,6 +1295,7 @@ def intake(
     if discovery or is_discovery_issue(issue):
         initialize_discovery(root, probe_root)
     save_snapshot(root, issue)
+    record_comments_read(root, comment_state(issue["comments"]))
     return issue, created, kept
 
 
@@ -1762,6 +1867,7 @@ def push(root: Path, branch: str | None = None) -> str:
 
 def deliver(root: Path, tracker: str | None = None) -> str:
     issue = required_snapshot(root)
+    check_comments_read(root, None)
     branch = delivery_branch(root, issue)
     sync(root)
     report = root / ".se" / "work" / "field-report.md"
@@ -2232,9 +2338,42 @@ def field_report_error(name: str, problems: list[str]) -> QueueError:
     )
 
 
-def check_field_report(root: Path | None, file: Path, issue_body_file: Path | None) -> None:
-    """Validate a field-report file against the template without GitHub or, given the issue
-    body, without a worktree."""
+def check_comments_read(root: Path, current: dict[str, object] | None) -> None:
+    """Refuse where the work issue has comments past those recorded as read.
+
+    `current` is the issue's comment state as the worker's own GitHub tools read it; without it,
+    the issue is read with gh, and where gh is not usable the check refuses (it guards)."""
+    recorded = load_comments_read(root)
+    if recorded is None:
+        if current is None:
+            raise QueueError(
+                "No comments recorded as read for the work issue: run intake, or, without gh, "
+                "comments-read --count <n> --newest <id> with what your GitHub tools read"
+            )
+        return
+    comments = None
+    if current is None:
+        snapshot = load_snapshot(root)
+        if snapshot is None or not gh_usable():
+            raise QueueError(
+                "Cannot compare the work issue's comments with those recorded as read: "
+                "gh is not usable or intake's snapshot is missing; pass --comment-count <n> "
+                "--newest-comment <id> as your GitHub tools read the issue now"
+            )
+        comments = fetch_issue(root, int(snapshot["number"]), str(snapshot["repo"]))["comments"]
+        current = comment_state(comments)
+    error = unread_comments_error(recorded, current, comments)
+    if error is not None:
+        raise error
+
+
+def check_field_report(
+    root: Path | None, file: Path, issue_body_file: Path | None,
+    comments: dict[str, object] | None = None,
+) -> None:
+    """Validate a field-report file against the template without writing GitHub or, given the
+    issue body, without a worktree; in a worktree with a comments-read record, also refuse comments
+    that arrived after it (read with gh, unless `comments` gives the issue's state)."""
     try:
         body = file.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
@@ -2260,6 +2399,8 @@ def check_field_report(root: Path | None, file: Path, issue_body_file: Path | No
     problems = field_report_problems(body, issue_body)
     if problems:
         raise field_report_error(file.name, problems)
+    if root is not None and (comments is not None or load_comments_read(root) is not None):
+        check_comments_read(root, comments)
 
 
 def field_report_placeholders() -> list[str]:
@@ -3078,6 +3219,15 @@ def make_parser() -> argparse.ArgumentParser:
     refresh_parser.add_argument("--repo", help=REPO_HELP)
     refresh_parser.add_argument("--json", action="store_true", help="emit JSON")
 
+    comments_parser = subparsers.add_parser(
+        "comments-read",
+        help="record the work issue's comments as read: their count and the newest one's id "
+             "(intake records them; field-report --check and deliver refuse comments after it)")
+    add_worktree_argument(comments_parser)
+    comments_parser.add_argument("--count", required=True, type=int, help="number of comments")
+    comments_parser.add_argument(
+        "--newest", required=True, help="id of the newest comment ('' for none)")
+
     report_parser = subparsers.add_parser(
         "field-report",
         help="create or update the field-report issue from a filled "
@@ -3089,12 +3239,21 @@ def make_parser() -> argparse.ArgumentParser:
     report_target.add_argument("--file", type=Path, help="Markdown body file")
     report_target.add_argument(
         "--check", type=Path, metavar="FILE",
-        help="only validate FILE against the template, without GitHub: its header lines, "
-             "sections, tables, field labels, placeholders and evidence gate")
+        help="only validate FILE against the template, without writing GitHub: its header lines, "
+             "sections, tables, field labels, placeholders and evidence gate, and, in a worktree "
+             "with a comments-read record, refuse comments after it")
     report_parser.add_argument(
         "--issue-body", type=Path, metavar="FILE",
         help="with --check: the work issue's body for the evidence gate; default: intake's "
              "snapshot")
+    report_parser.add_argument(
+        "--comment-count", type=int, metavar="N",
+        help="with --check: the work issue's comment count as your GitHub tools read it now; "
+             "default: read with gh")
+    report_parser.add_argument(
+        "--newest-comment", metavar="ID",
+        help="with --check: the id of the work issue's newest comment, as your GitHub tools "
+             "read it now ('' for none)")
     report_parser.add_argument(
         "--draft", action="store_true",
         help="write the template body with work issue, pull request, branch and user "
@@ -3261,11 +3420,20 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print_changes(changes)
             return 0
+        if args.command == "comments-read":
+            record_comments_read(root, {"count": args.count, "newest": args.newest})
+            print(f"Recorded {args.count} comment(s) as read, newest {args.newest or 'none'}")
+            return 0
         if args.command == "field-report":
             if args.check is not None:
                 if args.draft:
                     raise QueueError("field-report: --check and --draft exclude each other")
-                check_field_report(root, args.check, args.issue_body)
+                if (args.comment_count is None) != (args.newest_comment is None):
+                    raise QueueError(
+                        "field-report --check: --comment-count and --newest-comment go together")
+                comments = None if args.comment_count is None else {
+                    "count": args.comment_count, "newest": args.newest_comment}
+                check_field_report(root, args.check, args.issue_body, comments)
                 print(f"Field report {args.check.name} follows the template")
             elif root is None:
                 mode = "--draft" if args.draft else "--file"
