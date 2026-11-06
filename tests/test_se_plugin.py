@@ -22,6 +22,7 @@ def checkout(tmp_path_factory):
     root = tmp_path_factory.mktemp("se")
     shutil.copy(ROOT / "pyproject.toml", root)
     shutil.copytree(ROOT / "src", root / "src")
+    shutil.copytree(ROOT / "scripts", root / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(ROOT / ".github" / "ISSUE_TEMPLATE", root / ".github" / "ISSUE_TEMPLATE")
     for name in ("README.md", "AGENTS.md"):
         shutil.copy(ROOT / name, root)
@@ -93,4 +94,5 @@ def test_the_plugin_manifests_install_the_whole_checkout_and_bootstrap_it(checko
     assert marketplace["name"] == "se"
     assert marketplace["plugins"] == [{"name": "se", "source": "./", "description": plugin["description"]}]
     hook = plugin["hooks"]["SessionStart"][0]["hooks"][0]
-    assert hook["command"] == 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh"'
+    assert hook["command"] == 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" || true'
+    assert (ROOT / "scripts" / "bootstrap.sh").is_file()
