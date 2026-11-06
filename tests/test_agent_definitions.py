@@ -599,3 +599,47 @@ def test_the_worker_reports_the_suite_time_before_and_after_and_slow_new_tests()
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
     assert "**Suite time:**" in template
 
+
+CHECKLIST = ("Class or case", "Is the problem real", "Keep what we have", "A named loser", "Fair criteria",
+             "What if", "Undo cost", "Consistency")
+LADDER = ("worker, then integrator", "One level per loop", "Straight to the person",
+          "as a deck, not as issues")
+POINTERS = {AGENTS / "dispatcher.agent.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
+            AGENTS / "worker.agent.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
+            AGENTS / "integrator.agent.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
+            SKILL: "(../work-model/SKILL.md#escalation-ladder)"}
+
+
+def test_the_decision_skill_names_the_eight_checklist_items():
+    text = DECISION.read_text(encoding="utf-8")
+    checklist = text.split("## The checklist", 1)[1].split("\n## ", 1)[0]
+    items = re.findall(r"^\d+\. \*\*(.+?):\*\*", checklist, re.MULTILINE)
+    assert items == list(CHECKLIST)
+
+
+def test_the_worked_example_answers_every_checklist_item_in_its_fence():
+    note = (DECISION.parent / "references" / "decision-deck.md").read_text(encoding="utf-8")
+    assert note.startswith("---\nobs.bless: pending\n---\n")
+    fence = note.split("```pugh\n", 1)[1].split("```", 1)[0]
+    assert re.findall(r"^  - item: (.+)$", fence, re.MULTILINE) == list(CHECKLIST)
+    assert "datum: B" in fence and "(keep what we have)" in fence
+    for key in ("name:", "what:", "marks:", "wins:", "losses:", "answer:", "pass:"):
+        assert key in fence, key
+
+
+@pytest.mark.parametrize("path", POINTERS, ids=lambda path: path.name)
+def test_roles_point_to_the_checklist_and_the_ladder_rather_than_restating_them(path):
+    text = normalized(path)
+    assert POINTERS[path] in text
+    for restated in (*(f"**{item}:**" for item in CHECKLIST), "named loser", "tripwire", *LADDER):
+        assert restated.casefold() not in text.casefold(), restated
+
+
+def test_the_work_model_owns_the_escalation_ladder():
+    text = normalized(WORK_MODEL)
+    assert "## Escalation ladder" in text
+    for rule in ("Issues carry work between boxes", "worker, then integrator (integrators may nest",
+                 "then dispatcher, then person", *LADDER[1:], "allowed, not preferred",
+                 "(../decision/SKILL.md)"):
+        assert rule in text, rule
+    assert "one table per message" not in text.casefold()
