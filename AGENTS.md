@@ -49,6 +49,8 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   (or the machine a `public_identity`, which wins), a commit whose author or committer differs is
   refused, naming the commit, the identity found (redacted) and the remedy. A full check leaves
   history already pushed alone.
+  - GitHub's web-flow identity (`GitHub`, `noreply` at `github.com`), the committer of a commit
+    made on GitHub, passes as committer, never as author.
 - Generic patterns, committed in the script: user profile paths (`X:\Users\<name>`, `/home/<name>`,
   `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and `example.*`,
   enterprise GitHub hosts (GitHub Enterprise Cloud subdomains), machine names in UNC paths.
