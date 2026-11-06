@@ -1750,7 +1750,11 @@ RELEASE_KINDS = {
     "fix": "patch", "perf": "patch", "chore": "patch", "docs": "patch",
 }
 RELEASE_ORDER = ("patch", "minor", "major")
-BREAKING_TRAILER = "Breaking-change: yes"
+RELEASE_TRAILER = "Release-kind"
+RELEASE_TRAILER_PATTERN = re.compile(rf"^{RELEASE_TRAILER}:[ \t]*(\S*)[ \t]*$", re.MULTILINE)
+RELEASE_TRAILER_HELP = (
+    "work_tickets.py release-trailer <branch> --issue-body <file> prints it from the work issue"
+)
 INTEGRATION_SUBJECT_PATTERN = re.compile(r"Integrate ([^\s:()]+)")
 
 
@@ -1770,9 +1774,27 @@ def release_kind(branch: str, breaking: bool) -> str:
         raise QueueError(
             f"Cannot release {branch}: its prefix {prefix!r} names no package kind; name the "
             f"branch <type>/<topic>-<yyyymmdd> with a type of {', '.join(RELEASE_KINDS)}, or mark "
-            "a breaking change in its work issue's Package kind"
+            "a breaking change in its work issue's Package kind; nothing was merged"
         )
     return kind
+
+
+def release_trailer(branch: str, issue_body: str) -> str:
+    """The trailer every integration merge carries, the one source of its release kind."""
+    return f"{RELEASE_TRAILER}: {release_kind(branch, is_breaking(issue_body))}"
+
+
+def merge_release_kind(commit: str, subject: str, message: str) -> str:
+    """The release kind an integration merge states in its trailer; refused where it states none."""
+    kinds = RELEASE_TRAILER_PATTERN.findall(message)
+    if len(kinds) == 1 and kinds[0] in RELEASE_ORDER:
+        return kinds[0]
+    stated = f"states {', '.join(map(repr, kinds))}" if kinds else "states no kind"
+    raise QueueError(
+        f"Cannot release merge {commit[:7]} ({one_line(subject)}): it {stated}; nothing was "
+        f"written. Reword the merge to end with one trailer {RELEASE_TRAILER}: "
+        f"{'|'.join(reversed(RELEASE_ORDER))}, as {RELEASE_TRAILER_HELP}, then push again"
+    )
 
 
 def bumped(version: tuple[int, int, int], kind: str) -> tuple[int, int, int]:
@@ -1801,12 +1823,12 @@ def tag_exists(root: Path, tag: str) -> bool:
     return run_git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}").returncode == 0
 
 
-def integrated_packages(root: Path, branch: str, released: str) -> list[tuple[str, bool]]:
-    """(branch, breaking) of each integration merged into `branch` since origin and `released`.
+def integrated_packages(root: Path, branch: str, released: str) -> list[tuple[str, str]]:
+    """(branch, release kind) of each integration merged into `branch` since origin and `released`.
 
     An integration is a first-parent merge whose subject starts `Integrate <branch>`, the message
-    integrate writes; a breaking one carries the Breaking-change trailer. Other merges release
-    nothing and are named."""
+    integrate writes; its kind is its Release-kind trailer, and one without it is refused. Other
+    merges release nothing and are named."""
     upstream = run_git(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
     revisions = [f"^{upstream.stdout.strip()}"] if upstream.returncode == 0 else ["--not", "--remotes", "--not"]
     log = checked_git(
@@ -1821,7 +1843,7 @@ def integrated_packages(root: Path, branch: str, released: str) -> list[tuple[st
         if match is None:
             print(f"Release: merge {commit[:7]} ({one_line(subject)}) is no integration; it bumps nothing")
             continue
-        packages.append((match[1], BREAKING_TRAILER in message.splitlines()))
+        packages.append((match[1], merge_release_kind(commit, subject, message)))
     return list(reversed(packages))
 
 
@@ -1863,7 +1885,7 @@ def release(root: Path, branch: str) -> str | None:
     if not packages:
         pushed = run_git(root, "merge-base", "--is-ancestor", current, f"refs/remotes/origin/{branch}")
         return None if pushed.returncode == 0 else current
-    kind = max((release_kind(name, breaking) for name, breaking in packages), key=RELEASE_ORDER.index)
+    kind = max((kind for _, kind in packages), key=RELEASE_ORDER.index)
     tag = f"v{version_text(bumped(version, kind))}"
     if tag_exists(root, tag):
         raise QueueError(
@@ -3076,6 +3098,7 @@ def integrate(
         raise QueueError(f"Cannot determine the pre-merge {target}")
     mirrors = configured_mirrors(root)
     trailer = config_value("commit_trailer", remote_repo(root), None)
+    kind = release_trailer(branch, str(work_issue["body"]))
     merged = subprocess.run(
         [
             "git", "-C", str(root), "merge", "--no-ff",
@@ -3083,7 +3106,7 @@ def integrate(
                 root, branch, work_number, report_number, pull_number,
                 public_check_enabled(root) or any(mirror.public for mirror in mirrors),
             ),
-            *(("-m", BREAKING_TRAILER) if is_breaking(str(work_issue["body"])) else ()),
+            "-m", kind,
             *(("-m", trailer) if trailer else ()),
             branch,
         ],
@@ -3333,6 +3356,14 @@ def make_parser() -> argparse.ArgumentParser:
     add_optional_worktree_argument(push_parser)
     push_parser.add_argument("branch", nargs="?", help="branch to push; default: the current one")
 
+    trailer_parser = subparsers.add_parser(
+        "release-trailer", help="print the Release-kind trailer an integration merge of <branch> "
+        "carries, from its work issue's Package kind and the branch prefix; push requires it")
+    trailer_parser.set_defaults(worktree=None)
+    trailer_parser.add_argument("branch", help="the integrated branch")
+    trailer_parser.add_argument(
+        "--issue-body", required=True, type=Path, help="file holding the work issue's body")
+
     integrate_parser = subparsers.add_parser(
         "integrate", help="validate, merge, test, push and close a field report")
     add_worktree_argument(integrate_parser)
@@ -3499,6 +3530,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "push":
             push(root, args.branch)
+            return 0
+        if args.command == "release-trailer":
+            try:
+                body = args.issue_body.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as error:
+                raise QueueError(f"Cannot read the work issue's body {args.issue_body}: {error}") from error
+            print(release_trailer(args.branch, body))
             return 0
         if args.command == "integrate":
             if args.check_command_temporary_directory and not args.check_command:
