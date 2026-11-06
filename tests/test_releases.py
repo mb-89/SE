@@ -44,14 +44,20 @@ def checkout(tmp_path: Path, monkeypatch) -> Path:
     return root
 
 
-def integrate(root: Path, branch: str, breaking: bool = False) -> None:
+def issue_body(breaking: bool) -> str:
+    return f"## Goal\n\nx\n\n## Package kind\n\nStandard{', breaking' if breaking else ''}.\n"
+
+
+def integrate(root: Path, branch: str, breaking: bool = False, trailer: str | None = None) -> None:
+    """Merge `branch` as integrate does: its trailer from work_tickets.release_trailer, unless given."""
     git(root, "switch", "-q", "-c", branch)
     (root / f"{branch.replace('/', '-')}.txt").write_text(branch, encoding="utf-8")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", branch)
     git(root, "switch", "-q", "main")
-    trailer = ["-m", work_tickets.BREAKING_TRAILER] if breaking else []
-    git(root, "merge", "-q", "--no-ff", "-m", f"Integrate {branch}: work", *trailer, branch)
+    trailer = work_tickets.release_trailer(branch, issue_body(breaking)) if trailer is None else trailer
+    git(root, "merge", "-q", "--no-ff", "-m", f"Integrate {branch}: work",
+        *(("-m", trailer) if trailer else ()), branch)
 
 
 def push(root: Path) -> int:
@@ -124,21 +130,52 @@ def test_other_branches_and_merges_release_nothing(checkout, capsys):
     assert work_tickets.main(["push", "fix/other-20261106", "--worktree", str(checkout)]) == 0
     git(checkout, "switch", "-q", "main")
     git(checkout, "reset", "-q", "--hard", "origin/main")
-    integrate(checkout, "side")  # a merge named like no integration
+    integrate(checkout, "side", trailer="")  # a merge named like no integration
     git(checkout, "commit", "-q", "--amend", "-m", "Merge branch 'side'")
     assert push(checkout) == 0
     assert released(checkout) == ("1.2.3", "v1.2.3")
     assert "is no integration; it bumps nothing" in capsys.readouterr().out
 
 
-def test_an_unknown_branch_prefix_is_refused_before_anything_is_written(checkout, capsys):
-    integrate(checkout, "refactor/topic-20261106")
-    before = git(checkout, "rev-parse", "HEAD")
-    assert push(checkout) == 1
-    assert git(checkout, "rev-parse", "HEAD") == before
+def release_trailer(tmp_path: Path, branch: str, breaking: bool) -> int:
+    body = tmp_path / "issue.md"
+    body.write_text(issue_body(breaking), encoding="utf-8")
+    return work_tickets.main(["release-trailer", branch, "--issue-body", str(body)])
+
+
+def test_an_unknown_branch_prefix_is_refused_before_anything_is_merged(tmp_path, capsys):
+    assert release_trailer(tmp_path, "refactor/topic-20261106", False) == 1
     error = capsys.readouterr().err
     assert "Cannot release refactor/topic-20261106: its prefix 'refactor' names no package kind" in error
     assert "feature, feat, fix, perf, chore, docs" in error
+    assert "nothing was merged" in error
+
+
+def test_a_breaking_package_integrated_by_hand_releases_major(checkout, tmp_path, capsys):
+    assert release_trailer(tmp_path, "fix/topic-20261106", True) == 0
+    trailer = capsys.readouterr().out.strip()
+    assert trailer == "Release-kind: major"
+    integrate(checkout, "fix/topic-20261106", trailer=trailer)
+    assert push(checkout) == 0
+    assert released(checkout) == ("2.0.0", "v2.0.0")
+
+
+@pytest.mark.parametrize(("trailer", "stated"), [
+    ("", "states no kind"),
+    ("Breaking-change: yes", "states no kind"),
+    ("Release-kind: breaking", "states 'breaking'"),
+    ("Release-kind: minor\nRelease-kind: major", "states 'minor', 'major'"),
+])
+def test_a_merge_whose_kind_cannot_be_told_is_refused_with_the_remedy(checkout, capsys, trailer, stated):
+    integrate(checkout, "fix/topic-20261106", trailer=trailer)
+    before = git(checkout, "rev-parse", "HEAD")
+    assert push(checkout) == 1
+    assert git(checkout, "rev-parse", "HEAD") == before
+    assert released(checkout) == ("1.2.3", "v1.2.3")
+    error = capsys.readouterr().err
+    assert f"Cannot release merge {before[:7]} (Integrate fix/topic-20261106: work): it {stated}" in error
+    assert ("Reword the merge to end with one trailer Release-kind: major|minor|patch, as "
+            "work_tickets.py release-trailer <branch> --issue-body <file> prints it") in error
 
 
 def test_without_a_version_push_says_how_to_release(checkout, capsys):
@@ -206,3 +243,13 @@ def test_another_release_setting_is_an_error_naming_the_file(checkout, capsys):
     assert push(checkout) == 1
     assert (f"project.release in {checkout / 'se.toml'} is 'manual'; set it to \"workflow\" or remove it"
             in capsys.readouterr().err)
+
+
+def test_a_pushed_merge_without_a_kind_is_never_read_again(checkout, capsys):
+    """Integrations pushed before the trailer existed are behind origin: push reads none of them."""
+    integrate(checkout, "fix/old-20261106", trailer="")
+    git(checkout, "push", "-q", "origin", "main")
+    integrate(checkout, "feature/new-20261106")
+    assert push(checkout) == 0
+    assert released(checkout) == ("1.3.0", "v1.3.0")
+    assert "Release: v1.3.0 (minor: feature/new-20261106)" in capsys.readouterr().out

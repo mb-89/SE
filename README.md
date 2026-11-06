@@ -128,13 +128,14 @@ turn it on.
 branch (which `integrate` runs) releases what was integrated since origin and the last tag.
 
 Each integration is a first-parent merge whose message starts `Integrate <branch>`, as `integrate`
-writes it. Its kind comes from the branch prefix:
+writes it, and states its kind in the trailer `Release-kind: major|minor|patch`. `integrate` writes
+it, and `work_tickets.py release-trailer` prints it for a merge by hand:
 
-- `feature` (or `feat`): a minor bump;
-- `fix`, `perf`, `chore` or `docs`: a patch bump;
-- a merge carrying the trailer `Breaking-change: yes` (which `integrate` adds where the work issue's
-  "Package kind" says "breaking"): a major bump;
-- another prefix: refused before anything is written.
+- `major` where the work issue's "Package kind" says "breaking";
+- else by the branch prefix: `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs`
+  `patch`; another prefix is refused before anything is merged.
+
+An integration without the trailer is refused, naming the merge and the remedy; push never guesses.
 
 One push bumps once, by its integrations' highest kind: it rewrites only `version`, commits
 `Release v<new>`, tags it and pushes the tag with the branch. A version without its tag yet is
