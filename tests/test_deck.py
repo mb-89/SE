@@ -78,6 +78,58 @@ def test_build_refuses_a_deck_that_asks_nothing_or_a_silent_decision(tmp_path, o
     assert not (tmp_path / "deck.html").exists()
 
 
+LOOK = """
+const {chromium} = require("playwright");
+(async () => {
+    const browser = await chromium.launch();
+    try {
+        const page = await browser.newPage({viewport: {width: 1200, height: 900}});
+        await page.goto(`file://${process.argv[1]}#pick`);
+        await page.waitForSelector(".figure-pugh-ready .pugh-bottom");
+        console.log(JSON.stringify({layout: await page.evaluate(
+            () => document.documentElement.dataset.layout),
+            bottom: await page.locator(".pugh-bottom").first().innerText()}));
+    } finally {
+        await browser.close();
+    }
+})();
+"""
+
+
+def _playwright() -> bool:
+    return shutil.which("node") is not None and not subprocess.run(
+        ["node", "-e", "require('playwright')"], capture_output=True).returncode
+
+
+@pytest.mark.parametrize("manifest", [
+    "---\ntitle: Decisions\n---\n\n",
+    "---\ntitle: Decisions\nobsHtml:\n  heading: compact\n---\n\n",
+    "---\nobsHtml: {heading: compact}\n---\n\n",
+], ids=["no-profile", "block-profile", "flow-profile"])
+def test_a_built_deck_opens_in_screens_and_names_options_by_letter_and_short_name(tmp_path, obs, manifest):
+    if not _playwright():
+        pytest.skip("node with playwright is not installed")
+    short = PUGH.replace("label: B,", "label: B, short: Short,")
+    # A record chapter beside the decision: obs alone would open such a deck paged.
+    folder = _folder(tmp_path, {"pick": NOTE % ("Pick", "a pick") + short, "done": RECORD % "Done"})
+    (folder / "manifest.md").write_text(manifest + "- [[pick|Pick]]\n- [[done|Done]]\n", encoding="utf-8")
+    result = _deck(folder, tmp_path / "deck.html")
+    assert result.returncode == 0, result.stderr
+    shown = json.loads(subprocess.run(["node", "-e", LOOK, str(tmp_path / "deck.html")], capture_output=True,
+                                      text=True, check=True, timeout=60).stdout)
+    assert shown["layout"] == "screens"
+    assert "B · Short" in shown["bottom"]
+
+
+def test_a_layout_the_notes_set_is_kept(tmp_path, obs):
+    folder = _folder(tmp_path, {"one": NOTE % ("One", "one"), "done": RECORD % "Done"})
+    (folder / "manifest.md").write_text("---\nobsHtml:\n  layout: scrolling\n---\n\n- [[one|One]]\n"
+                                        "- [[done|Done]]\n", encoding="utf-8")
+    result = _deck(folder, tmp_path / "deck.html")
+    assert result.returncode == 0, result.stderr
+    assert 'data-layout="scrolling"' in (tmp_path / "deck.html").read_text(encoding="utf-8")
+
+
 PAYLOAD = {"verdicts": [
     {"chapter": "record", "version": "0" * 64, "verdict": "pick", "comment": "C needs no second place.",
      "pick": {"figure": "record--figure-1", "option": "C"},
