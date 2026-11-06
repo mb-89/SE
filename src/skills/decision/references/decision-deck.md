@@ -1,15 +1,20 @@
 ---
-obs.bless: pending
+obs: {bless: pending}
 ---
 
 # How decisions reach the person
 
-Reader: whoever writes a decision note and wants the shape of a real one.
+## Current situation
 
 This is one case of how any decision reaches the person, so it decides the mechanism for every
-decision, not for one. Today each decision is one option table per chat message; the person said
-"fundamentally, one decision in the end should be a one-pager", and a chat table dies with the
-session that showed it.
+decision, not for one. Today SE shows each decision as one option table in a chat message, one
+decision per turn, and the person answers in the chat.
+
+## The problem
+
+A chat table dies with the session that showed it: answers had to be copied into issues by hand.
+And the person wants one page per decision, in their words: "fundamentally, one decision in the
+end should be a one-pager".
 
 ```pugh
 criteria:
