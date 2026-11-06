@@ -206,10 +206,9 @@ def test_authored_content_globs_ignores_pyproject_settings(worktree: Path) -> No
     assert work_tickets.authored_content_globs(worktree) == []
 
 
-def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
-    worktree: Path,
-) -> None:
-    repository = worktree.parent / "authored-content-case"
+def authored_repository(repository: Path, branch: str, guide_text: str) -> tuple[Path, Path]:
+    """A repository whose authored content is docs/**/*.md, with docs/guide.md holding
+    `guide_text` committed on main, checked out on the new branch `branch`."""
     repository.mkdir()
     assert git(repository, "init", "-b", "main").returncode == 0
     assert git(repository, "config", "user.name", "Guard test").returncode == 0
@@ -219,13 +218,20 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     )
     guide = repository / "docs" / "guide.md"
     guide.parent.mkdir()
-    guide.write_text(
-        "This sentence is removed.\nThis sentence is moved.\nThis sentence is retained.\n",
-        encoding="utf-8",
-    )
+    guide.write_text(guide_text, encoding="utf-8")
     assert git(repository, "add", ".").returncode == 0
     assert git(repository, "commit", "-m", "baseline prose").returncode == 0
-    assert git(repository, "checkout", "-b", "remove-prose").returncode == 0
+    assert git(repository, "checkout", "-b", branch).returncode == 0
+    return repository, guide
+
+
+def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
+    worktree: Path,
+) -> None:
+    repository, guide = authored_repository(
+        worktree.parent / "authored-content-case", "remove-prose",
+        "This sentence is removed.\nThis sentence is moved.\nThis sentence is retained.\n",
+    )
     guide.write_text("This sentence is retained.\n", encoding="utf-8")
     (repository / "docs" / "moved.md").write_text("This sentence is moved.\n", encoding="utf-8")
     assert git(repository, "add", ".").returncode == 0
@@ -258,28 +264,15 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
 
 
 def test_guard_keeps_dots_in_protected_content_with_its_sentence(worktree: Path) -> None:
-    repository = worktree.parent / "guard-protected-content-case"
-    repository.mkdir()
-    assert git(repository, "init", "-b", "main").returncode == 0
-    assert git(repository, "config", "user.name", "Guard test").returncode == 0
-    assert git(repository, "config", "user.email", "guard-test@example.invalid").returncode == 0
-    (repository / "se.toml").write_text(
-        "[project]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
-    )
-    guide = repository / "docs" / "guide.md"
-    guide.parent.mkdir()
-    guide.write_text(
+    repository, guide = authored_repository(
+        worktree.parent / "guard-protected-content-case", "remove-protected-content",
         "Deleting `pyproject.toml` keeps this sentence whole.\n"
         "Visit https://example.com/path.name before removal.\n\n"
         "```powershell\n"
         "uv run python scripts/work_tickets.py\n"
         "```\n"
         "The fenced block stays with this sentence.\n",
-        encoding="utf-8",
     )
-    assert git(repository, "add", ".").returncode == 0
-    assert git(repository, "commit", "-m", "baseline prose").returncode == 0
-    assert git(repository, "checkout", "-b", "remove-protected-content").returncode == 0
     guide.write_text("", encoding="utf-8")
     assert git(repository, "commit", "-am", "remove protected prose").returncode == 0
 
@@ -294,23 +287,10 @@ def test_guard_keeps_dots_in_protected_content_with_its_sentence(worktree: Path)
 
 
 def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
-    repository = worktree.parent / "rewrapped-content-case"
-    repository.mkdir()
-    assert git(repository, "init", "-b", "main").returncode == 0
-    assert git(repository, "config", "user.name", "Guard test").returncode == 0
-    assert git(repository, "config", "user.email", "guard-test@example.invalid").returncode == 0
-    (repository / "se.toml").write_text(
-        "[project]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
-    )
-    guide = repository / "docs" / "guide.md"
-    guide.parent.mkdir()
-    guide.write_text(
+    repository, guide = authored_repository(
+        worktree.parent / "rewrapped-content-case", "rewrap-prose",
         "This paragraph has the same words after it is rewrapped for Markdown readability.\n",
-        encoding="utf-8",
     )
-    assert git(repository, "add", ".").returncode == 0
-    assert git(repository, "commit", "-m", "baseline prose").returncode == 0
-    assert git(repository, "checkout", "-b", "rewrap-prose").returncode == 0
     guide.write_text(
         "This paragraph has the same words after it is rewrapped for Markdown\n"
         "readability.\n",
