@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -179,18 +180,57 @@ def test_a_stale_se_refuses_naming_both_commits_and_the_remedy(repo: Path) -> No
     assert "passed" not in result.stdout
 
 
-def test_an_se_pinned_by_a_version_range_is_checked_at_its_locked_commit(repo: Path) -> None:
-    manifest = '[modules.se]\nurl = "https://example.com/se.git"\nversion = "^1.0"\n'
-    commit(repo, {"se.toml": manifest})
+SE_VERSION = tomllib.loads((SE_ROOT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
+SE_MAJOR, SE_MINOR, _ = (int(part) for part in SE_VERSION.split("."))
+
+
+def range_manifest(text: str) -> str:
+    return f'[modules.se]\nurl = "https://example.com/se.git"\nversion = "{text}"\n'
+
+
+def test_an_se_within_the_pinned_version_range_passes_whatever_its_commit(repo: Path) -> None:
+    stale = "0123456" + "0" * 33
+    commit(repo, {"se.toml": range_manifest(f"~{SE_MAJOR}.{SE_MINOR}"),
+                  "se.lock": f'[modules.se]\nversion = "{SE_VERSION}"\nref = "{stale}"\n'})
+    result = run_check(cwd=repo)
+    assert result.returncode == 0, result.stdout
+
+
+def test_an_se_outside_the_pinned_version_range_refuses_naming_both_and_the_remedy(repo: Path) -> None:
+    commit(repo, {"se.toml": range_manifest(f"^{SE_MAJOR + 1}.0")})
     result = run_check(cwd=repo)
     assert result.returncode == 2, result.stdout
-    assert "se.lock locks no commit for it; run scripts/se_modules.py sync" in result.stdout
-    pin = "0123456" + "0" * 33
-    commit(repo, {"se.lock": f'[modules.se]\nversion = "1.0.0"\nref = "{pin}"\n'})
+    assert (f"se.toml pins se at version '^{SE_MAJOR + 1}.0', but this check runs se {SE_VERSION}; "
+            "bring the se clone into the range (scripts/se_modules.py sync) or widen the range"
+            ) in result.stdout
+    assert "passed" not in result.stdout
+
+
+@pytest.mark.parametrize("project, found", [
+    ("", "sets no version in its se.toml"),
+    ('[project]\nversion = "one"\n', "is not MAJOR.MINOR.PATCH"),
+])
+def test_an_se_whose_version_cannot_be_read_refuses_a_version_range(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, project: str, found: str,
+) -> None:
+    se = tmp_path / "se"
+    se.mkdir()
+    (se / "se.toml").write_text(project, encoding="utf-8")
+    checked = tmp_path / "checked"
+    checked.mkdir()
+    (checked / "se.toml").write_text(range_manifest("^1.0"), encoding="utf-8")
+    monkeypatch.setattr(public_check, "SE_ROOT", se)
+    with pytest.raises(public_check.SetupError) as error:
+        public_check.check_se_version(checked, SE_HEAD)
+    assert "se.toml pins se at version '^1.0', but" in str(error.value)
+    assert found in str(error.value)
+    assert "bring the se clone into the range" in str(error.value)
+
+
+def test_a_malformed_version_range_refuses(repo: Path) -> None:
+    commit(repo, {"se.toml": range_manifest("latest")})
     result = run_check(cwd=repo)
-    assert result.returncode == 2 and "se.toml pins se at 0123456" in result.stdout
-    commit(repo, {"se.lock": f'[modules.se]\nversion = "1.0.0"\nref = "{SE_HEAD}"\n'})
-    assert run_check(cwd=repo).returncode == 0
+    assert result.returncode == 2 and "version must be a semver range" in result.stdout
 
 
 def test_file_hit_names_location_and_label_only(repo: Path) -> None:
