@@ -98,6 +98,8 @@ every package, so work issues and session prompts never repeat it.
      grouping.
 5. **Deliver, always, even when partial**:
    - Complete the field-report body in `.se/work/field-report.md`.
+   - Where the issue asks for "not slower", run `work_tickets.py suite --compare <integration
+     branch>` and quote its verdict line in the evidence table.
    - Before filing, walk every numbered requirement and every acceptance line of the work issue.
      For each, add one evidence-table row with one quoted evidence line: command and output, file
      and line, or measurement. A requirement the worker narrowed or did not meet is listed under
