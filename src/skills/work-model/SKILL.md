@@ -19,9 +19,9 @@ by the project's `AGENTS.md`; see [What the project provides](#what-the-project-
 One issue in, one issue out; the same for local sessions and cloud agents.
 
 - **Work issue (in)**: one GitHub issue per package from `work.md`, carrying only the task. Title
-  = branch name (`<type>/<topic>-<yyyymmdd>`), label `work`. Everything that is the same for every
-  package lives in the agent definitions and this skill, never in issues. A session prompt names
-  only the agent, the issue and the worktree.
+  = branch name (`<type>/<topic>-<yyyymmdd>`), labelled as [Issues](#issues) says. Everything that
+  is the same for every package lives in the agent definitions and this skill, never in issues. A
+  session prompt names only the agent, the issue and the worktree.
 - **The box**: a worker changes only its own worktree. Any other checkout it reads (for example a
   related repository its tests use) is read-only. Everything comes in through its work issue
   (re-read with its comments before each ticket, so it can change in flight) and goes out through
@@ -72,6 +72,13 @@ field report.
   from outside ([Outside issues](#outside-issues)) and a backlog issue (below).
 - **Decisions are never issues**: they go to the person as a deck, as the
   [escalation ladder](#escalation-ladder) says.
+- **Labels**: SE labels work itself; the person never labels anything. SE files a work issue with
+  `work_tickets.py file`, and routes a checked outside issue with `work_tickets.py route`; both
+  apply `work`, `ready` and `repo:<name>` in the same step, creating the labels a repository lacks.
+  - `ready` is the GitHub record that SE checked the issue and it may be worked; `ready` and
+    `start` take only `work` + `ready`, never a `backlogged`, `field-report` or `in-progress`
+    issue.
+  - `file --blocked-by <n>` links the blockers before it adds `ready`.
 - **Backlog**: a far-out idea that is not ready work is an issue labelled `backlogged` and
   `se-person`, filed and found by SE with `work_tickets.py backlog file` and `backlog list
   --search <text>` (title and body).
@@ -105,8 +112,8 @@ then person. Every level decides, and writes what it sends up, as the
 ## Outside issues
 
 An outside issue reaches a repository from outside the fleet: from the person's other side or any
-other source. Nobody labels it and nothing is asked of whoever files it; the fleet tells its own
-issues apart instead:
+other source. It arrives unlabelled and nothing is asked of whoever files it; the fleet tells its
+own issues apart instead, and SE labels it once it routes it ([Issues](#issues)):
 
 - Every issue the fleet files carries the hidden marker `<!-- se:fleet -->` in its body: the issue
   templates hold it, filing a field report writes it, and `work_tickets.py field-report --check`
@@ -195,8 +202,8 @@ boundary.
   - Deleting or condensing authored content is recorded in the field report with what was dropped
     and where it moved, unless the work issue names the change.
 - **Mechanical first**: a procedure that repeats becomes a command in `work_tickets.py`
-  (`intake`, `refresh`, `sync`, `guard`, `deliver`, `escalate`, `block`, `ready`, `capacity`, `queue`,
-  `start`, `close`, `config`); prose steps remain only for judgment. Escalations and product decisions stay
+  (`intake`, `refresh`, `sync`, `guard`, `deliver`, `escalate`, `block`, `file`, `route`, `ready`,
+  `capacity`, `queue`, `start`, `close`, `config`); prose steps remain only for judgment. Escalations and product decisions stay
   manual.
 
 ### Suite at a moved pin
@@ -217,10 +224,12 @@ Pull requests built on an old `main` cause most integration trouble.
   syncs first, before each ticket and before the pull request; the field report names the `main`
   commit it was tested against.
 - Dependencies are native GitHub "blocked by" links, set by SE. Blocked state is
-  computed (`issue_dependencies_summary.blocked_by`), never a label. `ready` is only the
-  SE's approval; startable = `ready` and zero open blockers.
-- No label is edited by hand: `start` changes `ready` to `in-progress`; the integrator removes
-  `in-progress` when it closes the issue.
+  computed (`issue_dependencies_summary.blocked_by`), never a label. `ready` is only
+  [SE's approval](#issues); startable = `ready` and zero open blockers.
+- Labels change only in these steps: SE's `file` and `route` ([Issues](#issues)); `start` changes
+  `ready` to `in-progress`, and so does the integrator in the step where it starts a worker with
+  `create_session` instead of `start`; the integrator removes `in-progress` when it closes the
+  issue.
 - After each integration the integrator starts every startable work issue that has no branch yet
   and whose file ownership does not clash with running workers, and starts its session itself.
 - Nobody watches for field reports. Triggers: the worker's delivery notification (its only message

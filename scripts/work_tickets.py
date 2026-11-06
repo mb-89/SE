@@ -74,6 +74,17 @@ FLEET_LABEL = "field-report"
 # A backlog issue, owned by the work model's "Issues": a far-out idea for the person, never work.
 BACKLOG_LABEL = "backlogged"
 PERSON_LABEL = "se-person"
+# Work, owned by the work model's "Issues": SE files a work issue, or routes an outside issue, with
+# WORK_LABELS (its record that the issue was checked and may be worked) and the issue's `repo:`
+# label; `ready` and `start` take only those, and never an issue that carries a NOT_STARTABLE label.
+WORK_LABELS = ("work", "ready")
+IN_PROGRESS_LABEL = "in-progress"
+NOT_STARTABLE_LABELS = frozenset({BACKLOG_LABEL, FLEET_LABEL, IN_PROGRESS_LABEL})
+LABEL_DESCRIPTIONS = {
+    "work": "A work issue: one package for one worker",
+    "ready": "Checked by SE and may be worked",
+    BACKLOG_LABEL: "A far-out idea for the person; not work until SE re-files it",
+}
 OUTSIDE_PAGE = 100
 DISCOVERY_DIRECTORY = Path(".se") / "work" / "probe"
 DISCOVERY_INDEX = "evidence.md"
@@ -2537,7 +2548,7 @@ def ready_issues(
     active_ownership = set().union(*(issue_ownership(item) for item in active))
     ready: list[dict[str, object]] = []
     for candidate in candidates:
-        if BACKLOG_LABEL in issue_labels(candidate):
+        if issue_labels(candidate) & NOT_STARTABLE_LABELS:
             continue
         number = int(candidate["number"])
         detail = issue_api(root, repo, f"issues/{number}")
@@ -2919,6 +2930,87 @@ def validate_field_report_result(file: Path) -> None:
         )
 
 
+def ensure_labels(root: Path, repo: str, labels: list[str]) -> None:
+    """Create each of `labels` that `repo` does not have yet, after one listing."""
+    existing = json.loads(run_gh(root, [
+        "label", "list", "--json", "name", "--limit", "500", *repo_arguments(repo),
+    ]) or "[]")
+    names = {label["name"] for label in existing}
+    for label in labels:
+        if label not in names:
+            run_gh(root, [
+                "label", "create", label, "--color", "c5def5",
+                *(("--description", LABEL_DESCRIPTIONS[label]) if label in LABEL_DESCRIPTIONS else ()),
+                *repo_arguments(repo),
+            ])
+
+
+def work_labels(root: Path, explicit: str | None) -> list[str]:
+    """WORK_LABELS and the `repo:` label of the repository the issue is for: the named one, else
+    this checkout's (whose tracker may hold the issue)."""
+    name = explicit.rstrip("/").rsplit("/", 1)[-1] if explicit else repository_name(root)
+    return [*WORK_LABELS, f"repo:{name}"]
+
+
+def read_text_file(file: Path, what: str) -> str:
+    try:
+        text = file.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as error:
+        raise QueueError(f"Cannot read {what} {file}: {error}") from error
+    if not text:
+        raise QueueError(f"The {what} {file} is empty")
+    return text
+
+
+def file_work_issue(
+    root: Path, title: str, file: Path, blockers: list[int], repo: str | None
+) -> str:
+    """File a work issue with its labels; with blockers, link them first and add `ready` last, so
+    the issue is never startable before its blockers are linked."""
+    if not title.strip():
+        raise QueueError("file needs a title, the branch name")
+    body = fleet_marked(read_text_file(file, "work issue body") + "\n")
+    labels = work_labels(root, repo)
+    repo = resolve_repo(root, repo)
+    ensure_labels(root, repo, labels)
+    first = [label for label in labels if not blockers or label != "ready"]
+    output = run_gh_with_body(root, [
+        "issue", "create", "--title", title.strip(),
+        *(argument for label in first for argument in ("--label", label)), *repo_arguments(repo),
+    ], body)
+    url = output.strip().splitlines()[-1] if output.strip() else ""
+    if blockers:
+        match = re.search(r"/issues/(\d+)$", url)
+        if match is None:
+            raise QueueError(f"file: gh issue create printed no issue URL: {output.strip()!r}")
+        number = int(match.group(1))
+        for blocker in blockers:
+            block(root, number, blocker, repo)
+        run_gh(root, ["issue", "edit", str(number), "--add-label", "ready", *repo_arguments(repo)])
+    return url or title
+
+
+def route_outside_issue(
+    root: Path, number: int, title: str, file: Path, repo: str | None
+) -> None:
+    """Route a checked outside issue as a work issue: retitle and label it, then comment the
+    handled record, which `intake --outside` reads as done."""
+    if not title.strip():
+        raise QueueError("route needs a title, the branch name")
+    comment = read_text_file(file, "routing comment")
+    if HANDLED_MARKER not in comment:
+        comment = f"{HANDLED_MARKER}\n{comment}"
+    labels = work_labels(root, repo)
+    repo = resolve_repo(root, repo)
+    ensure_labels(root, repo, labels)
+    run_gh(root, [
+        "issue", "edit", str(number), "--title", title.strip(),
+        *(argument for label in labels for argument in ("--add-label", label)),
+        *repo_arguments(repo),
+    ])
+    run_gh_with_body(root, ["issue", "comment", str(number), *repo_arguments(repo)], comment + "\n")
+
+
 def backlog_file(root: Path, title: str, file: Path, repo: str | None) -> str:
     """File a far-out idea as a backlog issue for the person, creating its label where missing."""
     repo = resolve_repo(root, repo)
@@ -2928,15 +3020,7 @@ def backlog_file(root: Path, title: str, file: Path, repo: str | None) -> str:
         raise QueueError(f"Cannot read backlog body {file}: {error}") from error
     if not title.strip() or not body:
         raise QueueError("backlog file needs a title and a body")
-    existing = json.loads(run_gh(root, [
-        "label", "list", "--search", BACKLOG_LABEL, "--json", "name", *repo_arguments(repo),
-    ]) or "[]")
-    if BACKLOG_LABEL not in {label["name"] for label in existing}:
-        run_gh(root, [
-            "label", "create", BACKLOG_LABEL, "--color", "c5def5",
-            "--description", "A far-out idea for the person; not work until SE re-files it",
-            *repo_arguments(repo),
-        ])
+    ensure_labels(root, repo, [BACKLOG_LABEL])
     output = run_gh_with_body(root, [
         "issue", "create", "--title", title.strip(), "--label", BACKLOG_LABEL,
         "--label", PERSON_LABEL, *repo_arguments(repo),
@@ -4031,6 +4115,28 @@ def make_parser() -> argparse.ArgumentParser:
     escalate_parser.add_argument("--file", required=True, type=Path, help="Markdown question")
     escalate_parser.add_argument("--repo", help=REPO_HELP)
 
+    file_parser = subparsers.add_parser(
+        "file", help="for SE: file a work issue labelled work, ready and repo:<name>; with "
+                     "--blocked-by, ready only once its blockers are linked")
+    add_worktree_argument(file_parser)
+    file_parser.add_argument("--title", required=True, help="the branch name")
+    file_parser.add_argument("--body-file", required=True, type=Path,
+                             help="the filled .github/ISSUE_TEMPLATE/work.md body")
+    file_parser.add_argument("--blocked-by", type=int, action="append", default=[], metavar="N",
+                             help="a native blocker to link before it is ready, repeatable")
+    file_parser.add_argument("--repo", help=REPO_HELP)
+
+    route_parser = subparsers.add_parser(
+        "route", help="for SE: route a checked outside issue as a work issue: retitle it, label it "
+                      "work, ready and repo:<name>, and comment the handled record")
+    add_worktree_argument(route_parser)
+    route_parser.add_argument("issue", type=int)
+    route_parser.add_argument("--title", required=True, help="the branch name")
+    route_parser.add_argument("--comment-file", required=True, type=Path,
+                              help="the work.md sections the issue lacks, completed, and that it is "
+                                   "routed; the handled marker is added where missing")
+    route_parser.add_argument("--repo", help=REPO_HELP)
+
     backlog_parser = subparsers.add_parser(
         "backlog", help="for SE: file or list backlog issues, far-out ideas labelled "
         f"{BACKLOG_LABEL} and {PERSON_LABEL} that no role takes as work")
@@ -4197,6 +4303,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "review-note":
             review_note(root, args.note, args.disposition, args.backlog_ref)
             print(f"Reviewed note {args.note}")
+            return 0
+        if args.command == "file":
+            print(f"Filed work issue {file_work_issue(root, args.title, args.body_file, args.blocked_by, args.repo)}")
+            return 0
+        if args.command == "route":
+            route_outside_issue(root, args.issue, args.title, args.comment_file, args.repo)
+            print(f"Routed issue #{args.issue} as {args.title.strip()}")
             return 0
         if args.command == "backlog" and args.backlog_action == "file":
             print(f"Filed backlog issue {backlog_file(root, args.title, args.body_file, args.repo)}")

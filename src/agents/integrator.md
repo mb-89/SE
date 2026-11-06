@@ -118,6 +118,11 @@ minutes late: reconcile from GitHub first and treat a missing message as late, n
    Without `gh`, the prompt is the one [Without gh](../skills/work-model/SKILL.md#without-gh)
    names.
 
+   Where you start the worker with `create_session` rather than `start` (the cloud flow), change
+   the issue's labels in that same step as `start` does, and remove `in-progress` when you close
+   it, as the work model's
+   [scheduling](../skills/work-model/SKILL.md#freshness-dependencies-and-scheduling) says.
+
    Do not judge a worker by its session status right after starting it: a new session reads as
    idle or "review ready" before its first turn. A worker counts as stuck only when its events
    show it waiting on a prompt; then delete it and start it again in its worktree.
