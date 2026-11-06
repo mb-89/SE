@@ -3072,7 +3072,7 @@ def ref_checkout(root: Path, ref: str):
         try:
             commit = run_git(path, "rev-parse", "--short", "HEAD").stdout.strip()
             where = f"{resolved} at {commit}" if resolved != ref else commit
-            yield path, f"{ref} ({where})"
+            yield path, ref if where == ref else f"{ref} ({where})"
         finally:
             run_git(root, "worktree", "remove", "--force", str(path))
 
