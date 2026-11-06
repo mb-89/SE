@@ -1,0 +1,59 @@
+# Tags each release: v<version> of se.toml [project] version on the integration branch (README
+# "Release tags"). Reusable: a repository calls it with the short file that section shows, as se
+# does in release-tag.yml.
+name: release
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag the version
+        shell: python3 {0}
+        run: |
+          import subprocess, sys, tomllib
+
+          def git(*arguments):
+              return subprocess.run(["git", *arguments], capture_output=True, text=True, check=True).stdout.strip()
+
+          def version(commit):
+              shown = subprocess.run(["git", "show", f"{commit}:se.toml"], capture_output=True, text=True)
+              if shown.returncode != 0:
+                  return None
+              return tomllib.loads(shown.stdout).get("project", {}).get("version")
+
+          project = tomllib.loads(open("se.toml", encoding="utf-8").read()).get("project", {})
+          branch, pushed = project.get("integration_branch", "main"), "${{ github.ref_name }}"
+          if pushed != branch:
+              sys.exit(print(f"No release: {pushed} is not the integration branch {branch} (se.toml [project] integration_branch)"))
+          current = project.get("version")
+          if current is None:
+              sys.exit(print("No release: se.toml sets no [project] version"))
+          tag = f"v{current}"
+          # The release commit: the oldest first-parent commit since which se.toml carries this version.
+          commit = git("rev-parse", "HEAD")
+          for changed in git("log", "--first-parent", "--format=%H", "--", "se.toml").split():
+              if version(changed) != current:
+                  break
+              commit = changed
+          tagged = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}"],
+                                  capture_output=True, text=True).stdout.strip()
+          if tagged == commit:
+              sys.exit(print(f"Release {tag}: tagged already on {commit[:7]}"))
+          if tagged:
+              print(f"::error::Release {tag}: the tag exists on {tagged[:7]}, but se.toml [project] version became "
+                       f"{current} on {commit[:7]}. Remedy: set the next version in se.toml (work_tickets.py push "
+                       f"does so on the next integration), or delete the stray tag (git push origin :refs/tags/{tag}) "
+                    "and run this workflow again")
+              sys.exit(1)
+          git("tag", tag, commit)
+          git("push", "origin", f"refs/tags/{tag}")
+          print(f"Release {tag}: tagged {commit[:7]}")
