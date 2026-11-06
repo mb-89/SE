@@ -31,7 +31,7 @@ limit_seconds = 120
 # obs builds the documentation (README "Documentation").
 [modules.obs]
 url = "https://github.com/mb-89/obs.git"
-ref = "93023fceecfc2df0121113aebff9bbc2b3fb541c"
+ref = "795ac7b606b8581711ad47b735cdda3fb02d9ac5"
 
 # The repositories SE watches for outside issues, each with the last issue number that existed
 # before the fleet marked its own (work model "Outside issues").
