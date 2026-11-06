@@ -24,7 +24,13 @@ it (`#se`, `-b se`); once it is `main`, they drop it. What each agent does is in
 
 Marketplace plugins do not load in a cloud session; a plugin cloned into `~/.claude/skills/` does
 (it shows as `se@skills-dir`). Remove the environment's own SE plugin, if it has one (a
-`CLAUDE_CODE_PLUGIN_DIRS` naming another plugin `se`), so the two do not collide.
+`CLAUDE_CODE_PLUGIN_DIRS` naming another plugin `se`), so the two do not collide: while it is set,
+the other plugin wins and `claude --agent se:se` stops with `--agent 'se:se' not found`.
+
+SE's skills read files in the plugin's folder and run its scripts with `uv run python`, and that
+folder is outside your project. Claude Code asks you to allow this the first time. A headless
+`claude -p` session cannot ask, so it refuses them unless you allow them in advance, for example
+`--allowedTools Read Glob Grep Write Edit "Bash(uv run python:*)"`.
 
 **Everything else arrives by itself.** At the first start SE runs
 [scripts/bootstrap.sh](scripts/bootstrap.sh) (Claude Code runs it at every session start; it is quiet
