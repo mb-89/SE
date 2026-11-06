@@ -753,6 +753,9 @@ def test_field_report_check_takes_the_comments_by_hand_without_gh(worktree, gh, 
 
     assert run(worktree, "comments-read", "--count", "1", "--newest", "C1") == 0
     assert run(worktree, *check) == 1
+    assert "body-read --body-file <file>" in capsys.readouterr().err
+    assert run(worktree, "body-read", "--body-file", str(issue)) == 0
+    assert run(worktree, *check) == 1
     assert "pass --comment-count <n> --newest-comment <id>" in capsys.readouterr().err
     assert run(worktree, *check, "--comment-count", "1", "--newest-comment", "C1") == 0
     assert run(worktree, *check, "--comment-count", "2", "--newest-comment", "C2") == 1
@@ -760,6 +763,58 @@ def test_field_report_check_takes_the_comments_by_hand_without_gh(worktree, gh, 
     assert "2 comment(s) now, 1 recorded as read; newest now C2, recorded C1" in error
     assert "comments-read --count 2 --newest C2 --worktree <worktree>" in error
     assert gh.calls == []
+
+
+def test_field_report_check_refuses_a_body_edited_after_intake_until_it_is_recorded_as_read(
+        worktree, gh, capsys):
+    run(worktree, "intake", "--issue", "5")
+    report = worktree / "report.md"
+    report.write_text(COMPLETE_REPORT, encoding="utf-8")
+    assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
+
+    gh.issue["body"] = BODY + "\n## Changes after filing\n\n3. Also the docs.\n"
+    capsys.readouterr()
+    assert run(worktree, "field-report", "--check", str(report)) == 1
+    error = capsys.readouterr().err
+    assert f"The body of the work issue {URL} changed after it was last recorded as read" in error
+    assert ('Read its "Changes after filing", apply them, add their evidence rows to the field '
+            "report, then record the body as read: work_tickets.py body-read") in error
+
+    assert run(worktree, "body-read") == 0
+    assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
+
+
+def test_field_report_check_takes_the_body_by_hand_without_gh(worktree, gh, monkeypatch, capsys):
+    report = worktree / "report.md"
+    report.write_text(COMPLETE_REPORT, encoding="utf-8")
+    issue = worktree / "issue.md"
+    issue.write_text(BODY.replace("\n", "\r\n") + "\n", encoding="utf-8", newline="")
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: False)
+    check = ["field-report", "--check", str(report), "--issue-body", str(issue),
+             "--comment-count", "0", "--newest-comment", ""]
+    assert run(worktree, "comments-read", "--count", "0", "--newest", "") == 0
+    assert run(worktree, "body-read", "--body-file", str(issue)) == 0
+    assert run(worktree, *check) == 0, capsys.readouterr().err
+
+    issue.write_text(BODY + "\n## Changes after filing\n\n3. Also the docs.\n", encoding="utf-8")
+    assert run(worktree, *check) == 1
+    error = capsys.readouterr().err
+    assert "The body of the work issue #5 changed after it was last recorded as read" in error
+    assert "add --body-file <file>" in error
+    assert run(worktree, "body-read", "--body-file", str(issue)) == 0
+    assert run(worktree, *check) == 0, capsys.readouterr().err
+    assert gh.calls == []
+
+
+def test_deliver_refuses_a_body_edited_after_intake_before_pushing(worktree, gh, monkeypatch, capsys):
+    run(worktree, "intake", "--issue", "5")
+    draft_complete_field_report(worktree)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(work_tickets, "push", lambda root, branch: pytest.fail("pushed"))
+    gh.issue["body"] = BODY + "\n## Changes after filing\n\n3. Also the docs.\n"
+    assert run(worktree, "deliver") == 1
+    assert "changed after it was last recorded as read" in capsys.readouterr().err
+    assert not any(call[:2] in (["pr", "create"], ["issue", "create"]) for call in gh.calls)
 
 
 def test_deliver_refuses_comments_after_intake_before_pushing(worktree, gh, monkeypatch, capsys):
