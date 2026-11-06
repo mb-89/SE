@@ -229,6 +229,7 @@ command = ["uv", "run", "pytest", "-q"]
 target_seconds = 60
 limit_seconds = 120
 setup = ["uv", "sync"] # optional
+tier = "tests.tiers:tier" # optional
 ```
 
 - `command`: the project's complete suite, an argument array run without a shell from the project
@@ -276,6 +277,18 @@ se's own suite writes such a report, `se.xml`, from `tests/conftest.py`.
 Without reports the gate reads pytest's lines
 (it adds `--durations=<N>` to a pytest command), and where neither names a test it says so and names
 that remedy.
+
+Where `tier` names the project's tier function, `<module>:<function>` with the module importable
+from the project root, the gate calls it with each reported test's id (`<classname>::<name>`, as the
+listing names it) and prints, per tier, from the reports, its slowest test and time:
+
+```text
+Slowest per tier:
+  browser: 1.10s browser ui::page11
+  unit: 2.50s unit tests.test_a::test_slow
+```
+
+A `tier` it cannot import is refused before the suite runs; without `tier`, nothing changes.
 
 `work_tickets.py guard` checks deleted sentences in the configured project paths. Each configured
 glob is relative to the project root. The field report must name every removed sentence in its
