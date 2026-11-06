@@ -233,6 +233,37 @@ def test_release_trailer_passes_a_branch_at_its_reported_tip(checkout, capsys):
     assert capsys.readouterr().out.strip() == "Release-kind: patch"
 
 
+def test_release_trailer_reads_a_branch_only_origin_has(checkout, capsys):
+    tip = commit_on(checkout, "fix/topic-20261106", "reported")
+    git(checkout, "push", "-q", "origin", "fix/topic-20261106")
+    git(checkout, "branch", "-q", "-D", "fix/topic-20261106")
+    report = report_at(checkout, tip)
+    assert release_trailer(checkout, "fix/topic-20261106", False, "--field-report", report) == 0
+    assert capsys.readouterr().out.strip() == "Release-kind: patch"
+
+
+def test_release_trailer_prefers_the_local_branch_to_origin(checkout, capsys):
+    pushed = commit_on(checkout, "fix/topic-20261106", "pushed")
+    git(checkout, "push", "-q", "origin", "fix/topic-20261106")
+    local = commit_on(checkout, "fix/topic-20261106", "local only")
+    assert release_trailer(checkout, "fix/topic-20261106", False,
+                           "--field-report", report_at(checkout, local)) == 0
+    assert capsys.readouterr().out.strip() == "Release-kind: patch"
+    assert release_trailer(checkout, "fix/topic-20261106", False,
+                           "--field-report", report_at(checkout, pushed)) == 1
+    assert "- " + local[:7] + " local only" in capsys.readouterr().err
+
+
+def test_release_trailer_without_the_branch_names_both_refs_and_the_fetch(checkout, capsys):
+    report = report_at(checkout, git(checkout, "rev-parse", "HEAD"))
+    assert release_trailer(checkout, "fix/topic-20261106", False, "--field-report", report) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert ("Cannot find branch fix/topic-20261106: neither fix/topic-20261106 nor "
+            "origin/fix/topic-20261106 exists") in captured.err
+    assert "fetch origin fix/topic-20261106" in captured.err
+
+
 def test_release_trailer_refuses_a_commit_after_the_reported_tip_naming_it(checkout, capsys):
     tip = commit_on(checkout, "fix/topic-20261106", "reported")
     late = commit_on(checkout, "fix/topic-20261106", "pushed after delivery")
