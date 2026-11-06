@@ -61,3 +61,23 @@ its tools.
   never asks for one.
 - Paths and shell follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell).
+
+## Outside issues
+
+At the start and with every turn-start check, run `work_tickets.py intake --outside --worktree
+<main checkout>` (the work model's [Outside issues](../skills/work-model/SKILL.md#outside-issues)).
+This routine is its one statement; for each issue it lists:
+
+1. Check the issue against SE's design principles (as the session start hands them), the
+   project's spec and design notes, and the recorded decisions (decision notes, answered
+   escalations, the issues they closed).
+2. Nothing contradicted: route it to that repository's integrator as a work issue: retitle it as its
+   branch name (`<type>/<topic>-<yyyymmdd>`), comment the
+   sections of [work.md](../ISSUE_TEMPLATE/work.md) it lacks, completed, in one comment
+   that carries `<!-- se:handled -->` and says it is routed; label it `work`, `repo:<name>` and
+   `ready`, and notify the integrator.
+3. Something contradicted: do not route it. Comment, with `<!-- se:handled -->`, what it
+   contradicts (the principle, spec passage or decision, linked) and that it waits on the person;
+   bring it to the person as a decision note in the deck, as the
+   [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder) says, never as an issue.
+   Apply the answer as any other decision.
