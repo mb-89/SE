@@ -1,4 +1,4 @@
-"""Pull dependencies into a repository as modules pinned to commits.
+"""Pull dependencies into a repository as modules pinned to commits or semantic version ranges.
 
 The format and the commands are described once in the README section "Modules".
 """
@@ -15,11 +15,16 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 MANIFEST = "se.toml"
+LOCK = "se.lock"
 MODULES_DIR = Path(".se") / "modules"
 TRACKED_BRANCH = "main"
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-MODULE_KEYS = {"url", "ref", "path"}
+MODULE_KEYS = {"url", "ref", "version", "path"}
+VERSION_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+RANGE_RE = re.compile(r"^([\^~=]?)(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?(?:\.(0|[1-9][0-9]*))?$")
+VERSION_REMEDY = 'set version = "MAJOR.MINOR.PATCH" under [project] (README "Project settings")'
+Version = tuple[int, int, int]
 LOCAL_CONFIG_KEYS = {
     "paths",
     "urls",
@@ -38,10 +43,93 @@ class ModuleError(Exception):
 
 @dataclass(frozen=True)
 class Module:
+    """A declared module; `ref` is its pin, for a `version` range the locked commit ("" unlocked)."""
+
     name: str
     url: str
     ref: str
     path: str | None = None
+    version: str | None = None
+
+
+# Semantic versions
+
+
+def parse_version(text: object) -> Version | None:
+    match = VERSION_RE.match(text) if isinstance(text, str) else None
+    return (int(match[1]), int(match[2]), int(match[3])) if match else None
+
+
+def version_text(version: Version) -> str:
+    return ".".join(str(part) for part in version)
+
+
+def version_bounds(name: str, text: str) -> tuple[Version, Version]:
+    """The versions `[low, high)` a range admits: `^1.4`, `~1.4.2`, `1.4` (any 1.4.x) or `1.4.2`."""
+    match = RANGE_RE.match(text)
+    if not match:
+        raise ModuleError(
+            f"module {name}: version must be a semver range such as ^1.4, ~1.4.2 or 1.4.2, got {text!r}"
+        )
+    operator, major, minor, patch = match[1], int(match[2]), match[3], match[4]
+    low = (major, int(minor or 0), int(patch or 0))
+    if operator == "=" and patch is None:
+        raise ModuleError(f"module {name}: ={text[1:]} needs MAJOR.MINOR.PATCH")
+    if operator == "^":
+        if major or minor is None:
+            return low, (major + 1, 0, 0)
+        if low[1] or patch is None:
+            return low, (0, low[1] + 1, 0)
+        return low, (0, 0, low[2] + 1)
+    if patch is not None and operator != "~":
+        return low, (low[0], low[1], low[2] + 1)
+    return low, ((major, low[1] + 1, 0) if minor is not None else (major + 1, 0, 0))
+
+
+def matches(version: Version, bounds: tuple[Version, Version]) -> bool:
+    return bounds[0] <= version < bounds[1]
+
+
+def checkout_version(checkout: Path) -> Version | None:
+    """`[project] version` of a module checkout's se.toml; None where it sets none."""
+    manifest = checkout / MANIFEST
+    data = _read_toml(manifest) if manifest.is_file() else {}
+    project = data.get("project", {})
+    value = project.get("version") if isinstance(project, dict) else None
+    if value is None:
+        return None
+    version = parse_version(value)
+    if version is None:
+        raise ModuleError(f"{manifest}: version {value!r} is not MAJOR.MINOR.PATCH; {VERSION_REMEDY}")
+    return version
+
+
+def read_lock(root: Path) -> dict[str, tuple[str, str]]:
+    """`se.lock`: per module pinned by a range, the resolved (version, commit)."""
+    lock = root / LOCK
+    if not lock.is_file():
+        return {}
+    entries = {}
+    for name, table in _read_toml(lock).get("modules", {}).items():
+        version = table.get("version") if isinstance(table, dict) else None
+        ref = table.get("ref") if isinstance(table, dict) else None
+        if parse_version(version) is None or not isinstance(ref, str) or not SHA_RE.match(ref):
+            raise ModuleError(f"{lock}: [modules.{name}] needs version and a full commit ref; delete it and run sync")
+        entries[name] = (version, ref.lower())
+    return entries
+
+
+def write_lock(root: Path, name: str, version: str, ref: str) -> None:
+    """Record one module's resolved version in `se.lock`, dropping modules no longer pinned by a range."""
+    ranged = {m.name for m in load_manifest(root) if m.version}
+    entries = {key: value for key, value in read_lock(root).items() if key in ranged}
+    entries[name] = (version, ref)
+    lines = [f"# {LOCK}: the commits scripts/se_modules.py resolved for the version ranges in {MANIFEST}.",
+             "# Written by sync and update; commit it, never edit it."]
+    for key in sorted(entries):
+        locked_version, locked_ref = entries[key]
+        lines += ["", f"[modules.{key}]", f'version = "{locked_version}"', f'ref = "{locked_ref}"']
+    (root / LOCK).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 def _read_toml(path: Path) -> dict:
@@ -69,6 +157,7 @@ def load_manifest(root: Path) -> list[Module]:
     tables = _read_toml(manifest).get("modules", {})
     if not isinstance(tables, dict):
         raise ModuleError(f"{MANIFEST}: [modules] must be a table")
+    locked = read_lock(root)
     modules = []
     for name, table in tables.items():
         if not NAME_RE.match(name):
@@ -78,14 +167,24 @@ def load_manifest(root: Path) -> list[Module]:
         unknown = sorted(set(table) - MODULE_KEYS)
         if unknown:
             raise ModuleError(f"module {name}: unknown key(s) {', '.join(unknown)}")
-        url, ref = table.get("url"), table.get("ref")
+        url, ref, version = table.get("url"), table.get("ref"), table.get("version")
         if not isinstance(url, str) or not url:
             raise ModuleError(f"module {name}: url is required")
+        path = _check_subpath(name, table["path"]) if "path" in table else None
+        if version is not None:
+            if ref is not None:
+                raise ModuleError(f"module {name}: pin either ref or version, not both")
+            if not isinstance(version, str):
+                raise ModuleError(f"module {name}: version must be a semver range string such as \"^1.4\"")
+            bounds = version_bounds(name, version)
+            locked_version, locked_ref = locked.get(name, ("", ""))
+            ok = parse_version(locked_version) is not None and matches(parse_version(locked_version), bounds)
+            modules.append(Module(name, url, locked_ref if ok else "", path, version))
+            continue
         if not isinstance(ref, str) or not ref:
-            raise ModuleError(f"module {name}: ref is required")
+            raise ModuleError(f"module {name}: ref or version is required")
         if not SHA_RE.match(ref):
             raise ModuleError(f"module {name}: ref must be a full commit SHA, got {ref!r}")
-        path = _check_subpath(name, table["path"]) if "path" in table else None
         modules.append(Module(name, url, ref.lower(), path))
     return modules
 
@@ -242,6 +341,67 @@ def ensure_commit(source: Source, sha: str) -> None:
         raise ModuleError(f"module {source.module.name}: commit {sha} not found in {source.url}")
 
 
+def tagged_versions(clone: Path) -> dict[Version, str]:
+    """The clone's `vMAJOR.MINOR.PATCH` tags by version; other tags are ignored."""
+    output = git(clone, "tag", "--list", "v*")
+    return {version: tag for tag in output.splitlines() if (version := parse_version(tag[1:])) is not None}
+
+
+def newest_matching(source: Source) -> tuple[str, str] | None:
+    """The highest tagged version the module's range admits in its clone, and its commit."""
+    module = source.module
+    bounds = version_bounds(module.name, module.version or "")
+    admitted = [version for version in tagged_versions(source.checkout) if matches(version, bounds)]
+    if not admitted:
+        return None
+    best = max(admitted)
+    return version_text(best), git(source.checkout, "rev-parse", "--verify", f"refs/tags/v{version_text(best)}^{{commit}}")
+
+
+def resolve_range(root: Path, source: Source) -> Module:
+    """Fetch the module's tags, lock the highest one its range admits and return the locked module."""
+    module = source.module
+    ensure_clone(source)
+    fetch(source.checkout)
+    found = newest_matching(source)
+    if found is None:
+        raise ModuleError(
+            f"module {module.name}: no tag vMAJOR.MINOR.PATCH in {source.url} matches version "
+            f"{module.version!r} of {root / MANIFEST}; widen the range or release the module "
+            "(README \"Project settings\")"
+        )
+    write_lock(root, module.name, *found)
+    return Module(module.name, module.url, found[1], module.path, module.version)
+
+
+def pinned_source(root: Path, module: Module, local: LocalConfig) -> Source:
+    return Source(module, "pinned", root / MODULES_DIR / module.name, local.rewrite(module.url))
+
+
+def lock_range(root: Path, module: Module, local: LocalConfig) -> Module:
+    """A module pinned by a range keeps its locked commit; an unlocked one is resolved and locked."""
+    if module.version is None or module.ref:
+        return module
+    return resolve_range(root, pinned_source(root, module, local))
+
+
+def version_report(source: Source) -> str:
+    """The version of a local checkout, and whether the module's range admits it."""
+    version = checkout_version(source.checkout)
+    module = source.module
+    if version is None:
+        if module.version:
+            raise ModuleError(
+                f"module {module.name}: {source.checkout / MANIFEST} sets no version, so range "
+                f"{module.version!r} cannot be checked; {VERSION_REMEDY} there"
+            )
+        return "version none"
+    text = f"version {version_text(version)}"
+    if module.version and not matches(version, version_bounds(module.name, module.version)):
+        text += f", outside {module.version}"
+    return text
+
+
 # Commands
 
 
@@ -262,7 +422,10 @@ def sync_module(source: Source) -> str:
     if not source.dir.is_dir():
         at = "the local path" if source.kind == "local" else module.ref[:7]
         raise ModuleError(f"module {module.name}: path {module.path} does not exist at {at}")
-    state = f"{module.ref[:12]}" if source.kind == "pinned" else "working tree as is"
+    if source.kind == "pinned":
+        state = module.ref[:12] + (f", {module.version} locked" if module.version else "")
+    else:
+        state = f"working tree as is, {version_report(source)}"
     return _with_note(f"{module.name}: {source.kind} {source.dir} ({state})", source)
 
 
@@ -274,9 +437,19 @@ def _plural(count: int, word: str) -> str:
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
 
 
+def range_state(source: Source) -> str:
+    """For a pinned module with a range: a newer admitted tag its clone knows (status never fetches)."""
+    newest = newest_matching(source) if is_populated(source.checkout) else None
+    if newest and newest[1] != source.module.ref:
+        return f"{newest[0]} available: run update"
+    return ""
+
+
 def status_state(source: Source) -> str:
     pin = source.module.ref
     checkout = source.checkout
+    if not pin:
+        return f"version {source.module.version} not locked (run sync)"
     if source.kind == "pinned":
         if not is_populated(checkout):
             return "not synced (run sync)"
@@ -305,8 +478,13 @@ def status_state(source: Source) -> str:
 
 def status_line(source: Source) -> str:
     module = source.module
-    line = f"{module.name}: {source.kind} {source.dir} (pin {module.ref[:7]}): {status_state(source)}"
-    return _with_note(line, source)
+    pin = f"version {module.version}, pin {module.ref[:7] or 'none'}" if module.version else f"pin {module.ref[:7]}"
+    state = status_state(source)
+    if module.version and module.ref and source.kind == "pinned":
+        state = ", ".join(filter(None, [state, range_state(source)]))
+    if source.kind == "local":
+        state = f"{state}, {version_report(source)}"
+    return _with_note(f"{module.name}: {source.kind} {source.dir} ({pin}): {state}", source)
 
 
 def set_pin(root: Path, name: str, sha: str) -> None:
@@ -348,14 +526,26 @@ def resolve_target(source: Source, to: str | None) -> str:
 
 
 def update_module(root: Path, module: Module, local: LocalConfig, to: str | None) -> list[str]:
-    """Move the pin to the newest `main` commit (or to `to`), report the range and sync."""
-    pinned = Source(module, "pinned", root / MODULES_DIR / module.name, local.rewrite(module.url))
-    ensure_clone(pinned)
-    fetch(pinned.checkout)
-    new = resolve_target(pinned, to)
+    """Move the pin to the newest `main` commit (or to `to`), or a range's lock to its highest
+    admitted tag; report the commits between and sync."""
+    pinned = pinned_source(root, module, local)
+    if module.version is not None:
+        if to is not None:
+            raise ModuleError(
+                f"module {module.name}: pinned by version {module.version!r}; change the range in "
+                f"{root / MANIFEST} instead of passing --to"
+            )
+        new = resolve_range(root, pinned).ref
+        label = f"highest tag matching {module.version}"
+    else:
+        ensure_clone(pinned)
+        fetch(pinned.checkout)
+        new = resolve_target(pinned, to)
+        label = to or TRACKED_BRANCH
     old = module.ref
-    label = to or TRACKED_BRANCH
-    if new == old:
+    if not old:
+        report = [f"{module.name}: locked at {new[:7]} ({label})"]
+    elif new == old:
         report = [f"{module.name}: already at {new[:7]} ({label})"]
     else:
         report = [f"{module.name}: {old[:7]} -> {new[:7]} ({label})"]
@@ -370,8 +560,9 @@ def update_module(root: Path, module: Module, local: LocalConfig, to: str | None
                 report.extend(f"    {line}" for line in dropped)
         else:
             report.append(f"  previous pin {old[:7]} is not in {pinned.url}; range unknown")
-        set_pin(root, module.name, new)
-    moved = Module(module.name, module.url, new, module.path)
+        if module.version is None:
+            set_pin(root, module.name, new)
+    moved = Module(module.name, module.url, new, module.path, module.version)
     report.append(sync_module(resolve(root, moved, local)))
     return report
 
@@ -418,7 +609,10 @@ def main(argv: list[str] | None = None) -> int:
         for module in select(modules, names):
             try:
                 if args.command == "sync":
-                    print(sync_module(resolve(root, module, local)))
+                    source = resolve(root, module, local)
+                    if source.kind == "pinned":
+                        source = resolve(root, lock_range(root, module, local), local)
+                    print(sync_module(source))
                 elif args.command == "status":
                     print(status_line(resolve(root, module, local)))
                 else:
