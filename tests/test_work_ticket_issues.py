@@ -58,6 +58,7 @@ EVIDENCE_ROWS = """| Requirement 1 | complete | `abc1234` | `test`: passed |
 
 COMPLETE_REPORT = """**Work issue:** #5  **Pull request:** #7  **Branch:** `feature/example-20261104`  **Result:** complete
 **Tested against `main`:** `abc1234`
+**Branch tip:** `abc1234`  **Re-integration kind:** patch
 
 ## User requirement (quoted back)
 
@@ -104,6 +105,14 @@ None
 - **Cost time:** nothing.
 - **Proposed improvement:** none.
 """
+
+
+TIP = "fedcba9876543210fedcba9876543210fedcba98"
+
+
+def reported_at(tip: str) -> str:
+    """COMPLETE_REPORT describing the branch at `tip`."""
+    return COMPLETE_REPORT.replace("**Branch tip:** `abc1234`", f"**Branch tip:** `{tip}`")
 
 def fill_evidence_rows(report: str) -> str:
     return report.replace("|---|---|---|---|", "|---|---|---|---|\n" + EVIDENCE_ROWS)
@@ -187,6 +196,7 @@ def gh(monkeypatch) -> FakeGh:
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "current_branch", lambda root: BRANCH)
     monkeypatch.setattr(work_tickets, "tested_main", lambda root: "abc1234")
+    monkeypatch.setattr(work_tickets, "branch_tip", lambda root: TIP)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     return fake
 
@@ -613,6 +623,34 @@ def test_field_report_check_takes_the_issue_body_from_a_file_or_refuses_without_
     issue.write_text(BODY.replace("2. Issue tooling in `scripts/work_tickets.py`.\n", ""),
                      encoding="utf-8")
     assert run(worktree, "field-report", "--check", str(report), "--issue-body", str(issue)) == 0
+
+
+def test_field_report_check_records_the_branch_tip_of_its_worktree(tmp_path, capsys):
+    root = tmp_path / "worker"
+    git_ok("init", "-q", "-b", BRANCH, str(root))
+    git_ok("-C", str(root), "-c", "user.name=mb", "-c", "user.email=mb", "commit", "-q",
+           "--allow-empty", "-m", "work")
+    tip = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    report, issue = tmp_path / "report.md", tmp_path / "issue.md"
+    report.write_text(COMPLETE_REPORT.replace("`abc1234`  **Re", "`<tip>`  **Re"), encoding="utf-8")
+    issue.write_text(BODY, encoding="utf-8")
+
+    assert work_tickets.main(["field-report", "--check", str(report), "--issue-body", str(issue)]) == 1
+    assert ("Branch tip must be the branch's commit; field-report --check --worktree <worktree> "
+            "fills it from the branch") in capsys.readouterr().err
+    assert work_tickets.main(["field-report", "--check", str(report), "--issue-body", str(issue),
+                              "--worktree", str(root)]) == 0
+    assert f"**Branch tip:** `{tip}`  **Re-integration kind:** patch" in report.read_text(
+        encoding="utf-8")
+
+
+def test_field_report_check_refuses_a_re_integration_kind_it_cannot_release(tmp_path, capsys):
+    report, issue = tmp_path / "report.md", tmp_path / "issue.md"
+    report.write_text(COMPLETE_REPORT.replace("kind:** patch", "kind:** large"), encoding="utf-8")
+    issue.write_text(BODY, encoding="utf-8")
+    assert work_tickets.main(["field-report", "--check", str(report), "--issue-body", str(issue)]) == 1
+    assert "Re-integration kind 'large' must be one of patch, minor, major" in capsys.readouterr().err
 
 
 def test_field_report_check_needs_no_worktree_and_names_the_option_where_it_needs_one(
@@ -1552,7 +1590,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     head = subprocess.run(
         ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
-    report = {"body": COMPLETE_REPORT}
+    report = {"body": reported_at(head)}
     calls: list[list[str]] = []
     bodies: list[str] = []
     started: list[int] = []
@@ -1698,7 +1736,7 @@ def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch)
         ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
     monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
-    report = {"body": COMPLETE_REPORT}
+    report = {"body": reported_at(head)}
     commands: list[tuple[str, str]] = []
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -1742,7 +1780,7 @@ def test_integrate_failure_restores_pre_merge_main_and_escalates(
     head = subprocess.run(
         ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
-    report = {"body": COMPLETE_REPORT}
+    report = {"body": reported_at(head)}
     calls: list[list[str]] = []
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -1823,7 +1861,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     head = subprocess.run(
         ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
-    report = {"body": COMPLETE_REPORT}
+    report = {"body": reported_at(head)}
     calls: list[list[str]] = []
     bodies: list[str] = []
     started: list[int] = []
@@ -1989,7 +2027,7 @@ def test_integrate_conflict_aborts_without_escalating(main_checkout, monkeypatch
     git_ok("-C", str(main_checkout), "commit", "-am", "main conflict")
     git_ok("-C", str(main_checkout), "push", "-q", "origin", "main")
     head = subprocess.run(["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    report = {"body": COMPLETE_REPORT}
+    report = {"body": reported_at(head)}
     calls = []
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -2013,7 +2051,7 @@ def test_integrate_keeps_worktree_when_cleanup_refuses(main_checkout, monkeypatc
     git_ok("-C", str(worker), "add", "worker.txt")
     git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
     head = subprocess.run(["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    report = {"body": COMPLETE_REPORT}
+    report = {"body": reported_at(head)}
     calls = []
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -2030,7 +2068,7 @@ def test_integrate_keeps_worktree_when_cleanup_refuses(main_checkout, monkeypatc
     assert [call[2] for call in calls if call[:2] == ["issue", "close"]] == ["5", "8"]
 
 def integration_fakes(monkeypatch, head: str) -> list[list[str]]:
-    report = {"body": COMPLETE_REPORT}
+    report = {"body": reported_at(head)}
     calls: list[list[str]] = []
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -2046,6 +2084,43 @@ def integration_fakes(monkeypatch, head: str) -> list[list[str]]:
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 0)
     return calls
+
+
+def test_integrate_refuses_commits_after_the_reported_tip_unless_their_inclusion_is_stated(
+        main_checkout, monkeypatch):
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    (worker / "worker.txt").write_text("reported\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "reported")
+    reported = subprocess.run(["git", "-C", str(worker), "rev-parse", "HEAD"],
+                              capture_output=True, text=True, check=True).stdout.strip()
+    (worker / "worker.txt").write_text("late\n", encoding="utf-8")
+    git_ok("-C", str(worker), "commit", "-qam", "pushed after delivery")
+    head = subprocess.run(["git", "-C", str(worker), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    calls = integration_fakes(monkeypatch, head)
+    monkeypatch.setattr(work_tickets, "fetch_issue",
+                        lambda root, number, repo: {"body": reported_at(reported)})
+    bodies: list[str] = []
+    monkeypatch.setattr(work_tickets, "run_gh_with_body",
+                        lambda root, args, body: calls.append(args) or bodies.append(body) or "")
+
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.integrate(main_checkout, 8, None, None)
+    assert (f"Branch feature/worker has commits after the field report's Branch tip "
+            f"{reported[:12]}:\n- {head[:7]} pushed after delivery\nNothing was merged.") in str(
+                refused.value)
+    assert "the worker updates the field report in place" in str(refused.value)
+    assert subprocess.run(["git", "-C", str(main_checkout), "merge-base", "--is-ancestor",
+                           reported, "HEAD"], capture_output=True, check=False).returncode == 1
+    assert not bodies
+
+    work_tickets.integrate(main_checkout, 8, None, None, included="it fixes a typo the review asked for")
+    assert all("Includes 1 commit(s) after the field report's Branch tip: it fixes a typo the "
+               "review asked for" in body for body in bodies) and len(bodies) == 2
 
 
 @pytest.mark.parametrize("leak", [False, True], ids=["clean", "leak"])
@@ -2636,7 +2711,7 @@ def test_fleet_issues_carry_the_marker_and_check_adds_it_to_a_report_by_hand(wor
     by_hand = worktree / "by-hand.md"
     by_hand.write_text(COMPLETE_REPORT, encoding="utf-8")
     assert run(worktree, "field-report", "--check", str(by_hand)) == 0
-    assert by_hand.read_text(encoding="utf-8") == work_tickets.FLEET_MARKER + "\n" + COMPLETE_REPORT
+    assert by_hand.read_text(encoding="utf-8") == work_tickets.FLEET_MARKER + "\n" + reported_at(TIP)
     assert "added the fleet marker" in capsys.readouterr().out
     assert run(worktree, "field-report", "--check", str(by_hand)) == 0
     assert by_hand.read_text(encoding="utf-8").count(work_tickets.FLEET_MARKER) == 1

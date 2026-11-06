@@ -657,6 +657,16 @@ def test_the_worked_example_answers_every_checklist_item_in_its_fence():
     assert "datum: {prefer: [chat]}" in fence and "(keep what we have)" in fence
     for key in ("candidates:", "label:", "what:", "marks:", "wins:", "losses:", "answer:", "pass:"):
         assert key in fence, key
+    candidates = fence.split("candidates:\n", 1)[1].split("checklist:", 1)[0]
+    shorts = re.findall(r"^    short: (.+)$", candidates, re.MULTILINE)
+    assert len(shorts) == len(re.findall(r"^  - key: ", candidates, re.MULTILINE)) == 3
+    assert all(len(short.split()) == 1 for short in shorts), shorts
+
+
+def test_the_decision_skill_asks_every_option_for_a_short_name_and_points_to_obs_for_the_field():
+    text = normalized(DECISION)
+    assert "Every option carries `short`" in text and "one word where possible, at most five" in text
+    assert "(https://github.com/mb-89/obs/blob/main/spec/capabilities/pugh-decisions.md)" in text
 
 
 @pytest.mark.parametrize("path", POINTERS, ids=lambda path: path.name)
