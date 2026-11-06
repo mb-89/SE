@@ -1874,6 +1874,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
         capture_output=True, text=True, check=False,
     ).stdout
     assert "Integrate feature/worker: worker" in message
+    assert "\n\nRelease-kind: minor\n" in message  # the trailer push releases by
     assert "#" not in message
     assert "git.example" not in message
     assert "Co-authored-by" not in message  # no commit_trailer configured: none by default
