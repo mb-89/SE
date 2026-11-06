@@ -514,6 +514,31 @@ def remove_private_queue(path: Path) -> None:
     shutil.rmtree(path, onerror=onerror)
 
 
+def remove_worktree(root: Path, report: dict[str, object]) -> None:
+    """Remove the worker's worktree `root` from its primary checkout, recording the outcome in
+    `report` (`removed`, or `cleanup_eligible` false with the reason)."""
+    listing = run_git(root, "worktree", "list", "--porcelain")
+    try:
+        admin_path = primary_checkout_path(listing.stdout)
+        if listing.returncode != 0 or admin_path is None:
+            raise OSError("Could not identify the primary checkout")
+        remove_private_queue(root / ".se")
+        make_worktree_removable(root)
+        removed = run_git(admin_path, "worktree", "remove", str(root))
+    except OSError:
+        removed = None
+    if removed is None or removed.returncode != 0:
+        report["cleanup_eligible"] = False
+        detail = (
+            removed.stderr.strip()
+            if removed is not None and removed.stderr.strip()
+            else "Normal Git worktree removal failed"
+        )
+        report["cleanup_reasons"] = [detail]
+    else:
+        report["removed"] = True
+
+
 def status_report(
     root: Path, integration_target: str | None = None
 ) -> dict[str, object]:
@@ -4428,35 +4453,7 @@ def main(argv: list[str] | None = None) -> int:
             report = status_report(root, args.integration_target)
             report["removed"] = False
             if report["cleanup_eligible"] and args.remove:
-                listing = subprocess.run(
-                    ["git", "worktree", "list", "--porcelain"],
-                    cwd=root,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    check=False,
-                )
-                try:
-                    admin_path = primary_checkout_path(listing.stdout)
-                    if listing.returncode != 0 or admin_path is None:
-                        raise OSError("Could not identify the primary checkout")
-                    remove_private_queue(root / ".se")
-                    make_worktree_removable(root)
-                    removed = run_git(admin_path, "worktree", "remove", str(root))
-                except OSError:
-                    removed = None
-                if removed is None or removed.returncode != 0:
-                    report["cleanup_eligible"] = False
-                    detail = (
-                        removed.stderr.strip()
-                        if removed is not None and removed.stderr.strip()
-                        else "Normal Git worktree removal failed"
-                    )
-                    report["cleanup_reasons"] = [detail]
-                    report["removed"] = False
-                else:
-                    report["removed"] = True
+                remove_worktree(root, report)
             if args.json:
                 print(json.dumps(report, indent=2, sort_keys=True))
             else:
