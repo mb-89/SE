@@ -1,6 +1,6 @@
 ---
 name: decision
-description: 'How every decision is made, the agent''s own and those it brings to the person: one Obsidian Markdown note per decision, a Pugh matrix in obs''s `pugh` fence with the eight-item checklist, asked about the general mechanism rather than the single instance; its output is the answered artifact. Load it whenever you decide something that is not mechanical, or present a decision, an escalation or an open point to the person.'
+description: 'How every decision is made, the agent''s own and those it brings to the person: one Obsidian Markdown note per decision, a Pugh matrix in obs''s `pugh` fence with the nine-item checklist, asked about the general mechanism rather than the single instance; its output is the answered artifact. Load it whenever you decide something that is not mechanical, or present a decision, an escalation or an open point to the person.'
 ---
 
 # Decision
@@ -33,10 +33,14 @@ it, and which solutions there are.
   its input model's
   [Pugh decision figures](https://github.com/mb-89/obs/blob/main/spec/design_input/input-model.md#pugh-decision-figures).
   SE asks of it:
+  - `context` and `concern`: the situation and the concern the decision answers, for its
+    one-sentence summary.
   - The criteria are weighted before any option is marked.
   - The datum is the strongest rival; every other option is marked against it. "Keep what we have"
     is an option whenever something exists.
   - Every option says what it is and its own wins and losses.
+  - Every option carries `success`, its success criterion: what marks it successful once done.
+  - Every mark carries its reason, `{mark, because}`; the datum's marks, against itself, need none.
   - Every option carries `short`, its short name: one word where possible, at most five. The
     field is obs's, owned by
     [pugh-decisions](https://github.com/mb-89/obs/blob/main/spec/capabilities/pugh-decisions.md).
@@ -47,7 +51,8 @@ it, and which solutions there are.
 
 Nothing else goes before the fence: its options are the list of solutions the reader expands.
 Any longer material goes in `##` sections after it, which obs shows as tabs. `<se>/scripts/deck.py
-build` refuses a decision note without both sections before its fence.
+build` refuses a decision note without both sections before its fence, and warns of an option
+without `success` or a mark without `because`.
 
 The aim is no failed item: a failed item's answer says what would fix it. The worked example is
 [the decision deck](references/decision-deck.md).
@@ -60,16 +65,21 @@ The decider answers every item before it decides or asks:
 2. **Is the problem real:** what shows it exists: a failure, a measurement, the person's words?
 3. **Keep what we have:** is "keep what we have" an option, and is the datum the strongest rival?
 4. **A named loser:** each losing option with the reason it lost.
-5. **Fair criteria:** nothing counted twice, and weights set before the options were marked.
-6. **What if:** for each other option, the weights under which it wins, with no bound. Is that a
+5. **Fair criteria:** nothing counted twice, and weights set before the options were marked. Does
+   each criterion name the benefit it stands for? Do any two measure the same thing? If they do,
+   merge them. Effort-type criteria (time, your effort, our effort) are one criterion unless their
+   benefits differ and the note says how.
+6. **Right before cheap:** being right and consistent outweighs effort, and effort never decides
+   alone: does an option win only on effort?
+7. **What if:** for each other option, the weights under which it wins, with no bound. Is that a
    world that could happen, or nonsense? A world that could happen gets a sign to watch (a
    tripwire) and a fallback.
-7. **Undo cost:** easy to reverse, or one-way? A one-way decision goes to the person.
-8. **Consistency:** does it contradict a [principle](../work-model/references/principles.md) or an
+8. **Undo cost:** easy to reverse, or one-way? A one-way decision goes to the person.
+9. **Consistency:** does it contradict a [principle](../work-model/references/principles.md) or an
    earlier decision? Which one does it replace?
 
-Items 1, 2, 5 and 6 are about the decision as a whole and name no option; items 3, 4, 7 and 8 name
-the letters of the options they fail.
+Items 1, 2, 5 and 7 are about the decision as a whole and name no option; items 3, 4, 6, 8 and 9
+name the letters of the options they fail.
 
 ## Your own decisions
 
