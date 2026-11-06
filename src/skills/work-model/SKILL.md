@@ -437,7 +437,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   titles, labels, bodies and footers the commands would write.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
   `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push`, `verified`,
-  `comments-read`, `body-read --body-file`, `release-trailer` and `field-report --check`.
+  `comments-read`, `body-read --body-file`, `release-trailer`, `pr-body` and
+  `field-report --check`.
   Every other command fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
   for example:
@@ -448,7 +449,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - `intake --outside`: read each `[outside]` repository's open issues and their comments, and
     keep those [Outside issues](#outside-issues) leaves.
   - `deliver`: `sync`; `push`; open the pull request to the integration
-    branch, titled like the work issue; file the field report, titled `field-report: <branch>`,
+    branch, titled like the work issue, with the body `pr-body --issue-body <file> --issue-url
+    <url>` prints; file the field report, titled `field-report: <branch>`,
     label `field-report`; send the notification.
     - The field report comes from `field-report.md`, filled in by hand (`field-report --draft`
       needs `intake`'s snapshot), and passes `field-report --check .se/work/field-report.md
