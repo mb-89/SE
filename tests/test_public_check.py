@@ -363,6 +363,25 @@ def test_a_foreign_committer_alone_is_refused_and_a_redacted_identity_names_no_p
     assert "corp.test" not in result.stdout
 
 
+WEB_FLOW = {"GIT_COMMITTER_NAME": "GitHub", "GIT_COMMITTER_EMAIL": "noreply" + AT + "github.com"}
+
+
+@pytest.mark.parametrize("author, refused", [("mb", []), ("agent", ["author"])])
+def test_a_commit_made_on_github_passes_only_with_the_project_author(
+        repo: Path, author: str, refused: list[str]) -> None:
+    git(repo, "config", "user.name", "mb")
+    git(repo, "config", "user.email", "mb")
+    commit(repo, {"se.toml": PROJECT_IDENTITY})
+    (repo / "README.md").write_text("clean\n", encoding="utf-8")
+    git(repo, "add", "README.md")
+    env = {**os.environ, **WEB_FLOW, "GIT_AUTHOR_NAME": author, "GIT_AUTHOR_EMAIL": author}
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "Add readme"], env=env, check=True)
+    result = run_check("--repo", str(repo), "--range", "HEAD^!")
+    hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
+    assert [hit.split(": ", 1)[0].rsplit(" ", 1)[1] for hit in hits] == refused, result.stdout
+    assert result.returncode == (1 if refused else 0), result.stdout
+
+
 def test_without_a_project_identity_any_generic_identity_passes_the_gate(repo: Path) -> None:
     commit(repo, {"README.md": "clean\n"})
     result = run_check("--repo", str(repo), "--range", "HEAD^!")
