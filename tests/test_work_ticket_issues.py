@@ -227,6 +227,23 @@ def test_intake_writes_one_ticket_per_requirement_and_a_delivery_ticket(worktree
     assert "created" not in output and output.count("kept existing ticket") == 3
 
 
+def test_intake_warns_on_a_bare_cross_repository_reference(worktree, gh, capsys):
+    gh.issue["body"] = BODY.replace("## Design owner", """See other/list#3 for the list.
+
+Quoted from https://git.example/other/spec/issues/9:
+
+> The spec passage the worker needs.
+
+Our own owner/repo#4 and https://git.example/owner/repo/issues/2 need no quote.
+
+## Design owner""")
+    assert run(worktree, "intake", "--issue", "5", "--repo", "git.example/owner/repo") == 0
+    warnings = [line for line in capsys.readouterr().err.splitlines() if "warning" in line]
+    assert len(warnings) == 1
+    assert "intake: work issue #5 cites other/list#3 with no quoted block" in warnings[0]
+    assert '"Writing work issues"' in warnings[0]
+
+
 def test_discovery_intake_creates_an_evidence_index_and_probe_appends_to_it(worktree, gh):
     assert run(worktree, "intake", "--issue", "5", "--discovery") == 0
 
