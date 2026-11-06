@@ -2417,6 +2417,60 @@ def test_suite_lists_slow_setups_and_a_setup_paid_on_several_workers(worktree, m
     )
 
 
+TIER_FUNCTION = """\
+def tier(test):
+    return "browser" if test.startswith("ui::") else "unit"
+"""
+
+
+def with_tier(worktree: Path, module: str) -> None:
+    """A fixture tier function in `<module>.py` and `[tests] tier` naming it."""
+    (worktree / f"{module}.py").write_text(TIER_FUNCTION, encoding="utf-8")
+    with (worktree / "se.toml").open("a", encoding="utf-8") as config:
+        config.write(f'tier = "{module}:tier"\n')
+
+
+def test_suite_with_a_tier_function_prints_each_tiers_slowest_test(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 5.0)
+    (worktree / "suite.py").write_text(REPORTING_SUITE, encoding="utf-8")
+    with_tier(worktree, "fixture_tiers_print")
+
+    assert run(worktree, "suite") == 0
+    out = capsys.readouterr().out
+    tiers = out.split("Slowest per tier:\n", 1)[1].split("Suite:", 1)[0]
+    assert tiers == (
+        "  browser: 1.10s browser ui::page11\n"
+        "  unit: 2.50s unit tests.test_a::test_slow\n"
+    )
+
+
+def test_suite_without_a_tier_setting_prints_no_tiers(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 5.0)
+    (worktree / "suite.py").write_text(REPORTING_SUITE, encoding="utf-8")
+
+    assert run(worktree, "suite") == 0
+    out = capsys.readouterr().out
+    assert "Slowest per tier:" not in out
+    assert out.split("Slowest tests:\n", 1)[1].split("Suite:", 1)[0].count("\n") == 10
+
+
+@pytest.mark.parametrize("setting, refusal", [
+    ('"no-colon"', 'tier must name the project\'s tier function as "<module>:<function>"'),
+    ('"fixture_tiers_missing:tier"', "cannot import fixture_tiers_missing from the project root"),
+    ('"fixture_tiers_refuse:other"', "fixture_tiers_refuse has no function other"),
+])
+def test_suite_refuses_a_tier_setting_it_cannot_load_before_running(
+        worktree, monkeypatch, capsys, setting, refusal):
+    fake_suite(worktree, monkeypatch, 5.0)
+    (worktree / "fixture_tiers_refuse.py").write_text(TIER_FUNCTION, encoding="utf-8")
+    with (worktree / "se.toml").open("a", encoding="utf-8") as config:
+        config.write(f"tier = {setting}\n")
+
+    assert run(worktree, "suite") == 1
+    captured = capsys.readouterr()
+    assert refusal in captured.err and "Suite time:" not in captured.out
+
+
 def test_ses_own_suite_reports_its_parts_line_with_workers_and_setup_times(worktree, monkeypatch, capsys):
     """se's conftest writes the JUnit report `suite` reads (README "Test budget")."""
     root = Path(__file__).resolve().parents[1]
