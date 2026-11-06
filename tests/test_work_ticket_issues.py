@@ -503,29 +503,21 @@ def test_field_report_requires_an_exact_result_header(worktree, gh, capsys, resu
         assert not any(call[:2] == ["issue", "create"] for call in gh.calls)
 
 
-def test_field_report_refuses_missing_requirement_evidence(worktree, gh, capsys):
+@pytest.mark.parametrize(("row", "replacement", "named"), [
+    ("| Requirement 2 | complete | `abc1234` | `test`: passed |\n", "", "Requirement 2"),
+    ("| Acceptance 2 | complete | `abc1234` | `test`: passed |",
+     "| Acceptance 2 | complete | `abc1234` | |", "Acceptance 2"),
+], ids=["missing-row", "empty-evidence-cell"])
+def test_field_report_refuses_missing_or_empty_evidence(
+        worktree, gh, capsys, row, replacement, named):
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
     assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
     report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
-        "| Requirement 2 | complete | `abc1234` | `test`: passed |\n", ""
-    ), encoding="utf-8")
+        row, replacement), encoding="utf-8")
 
     assert run(worktree, "field-report", "--file", str(report)) == 1
-    assert "Requirement 2" in capsys.readouterr().err
-
-
-def test_field_report_refuses_empty_evidence_cell(worktree, gh, capsys):
-    run(worktree, "intake", "--issue", "5")
-    report = worktree / "report.md"
-    assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
-    report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
-        "| Acceptance 2 | complete | `abc1234` | `test`: passed |",
-        "| Acceptance 2 | complete | `abc1234` | |",
-    ), encoding="utf-8")
-
-    assert run(worktree, "field-report", "--file", str(report)) == 1
-    assert "Acceptance 2" in capsys.readouterr().err
+    assert named in capsys.readouterr().err
 
 
 def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
