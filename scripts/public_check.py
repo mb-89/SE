@@ -10,8 +10,8 @@ The commit gates (a message file, the commits of a --range) also refuse tracker 
 messages, naming the reference and the remedy; a full check leaves old history to them.
 
 Every verdict names the se commit that ran it. A checked repository that pins se (`ref` of
-`[modules.se]` in its se.toml) is refused when this se is not at that pin, so a stale clone never
-gives another verdict silently.
+`[modules.se]` in its se.toml, or the commit se.lock locks for its `version`) is refused when
+this se is not at that pin, so a stale clone never gives another verdict silently.
 
 Exit codes: 0 passed, 1 hits (or unused allow entries in a full check), 2 usage or setup error.
 """
@@ -407,10 +407,29 @@ def se_pin(root: Path) -> str | None:
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
         raise SetupError(f"cannot read {MANIFEST} of the checked repository: {error}") from error
     module = data.get("modules", {}).get("se") if isinstance(data.get("modules"), dict) else None
+    if isinstance(module, dict) and "version" in module:
+        return locked_se_pin(root)
     ref = module.get("ref") if isinstance(module, dict) else None
     if module is not None and not isinstance(ref, str):
         raise SetupError(f"[modules.se] in {MANIFEST} has no ref; pin a full commit SHA")
     return ref.lower() if isinstance(ref, str) else None
+
+
+def locked_se_pin(root: Path) -> str:
+    """The commit se.lock records for an se pinned by a version range."""
+    lock = root / "se.lock"
+    try:
+        data = tomllib.loads(lock.read_text(encoding="utf-8")) if lock.is_file() else {}
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise SetupError(f"cannot read se.lock of the checked repository: {error}") from error
+    module = data.get("modules", {}).get("se") if isinstance(data.get("modules"), dict) else None
+    ref = module.get("ref") if isinstance(module, dict) else None
+    if not isinstance(ref, str):
+        raise SetupError(
+            f"[modules.se] in {MANIFEST} pins a version range, but se.lock locks no commit for it; "
+            "run scripts/se_modules.py sync and commit se.lock"
+        )
+    return ref.lower()
 
 
 def check_se_version(root: Path, commit: str | None) -> None:
