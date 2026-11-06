@@ -6,8 +6,9 @@ Scans tracked file names and contents (binary files as bytes), commit messages a
 committer identities against committed generic patterns and a machine-local deny list. Output
 names the location and the pattern label only, never the matched text.
 
-The commit gates (a message file, the commits of a --range) also refuse tracker references in
-messages, naming the reference and the remedy; a full check leaves old history to them. The
+The commit gates (a message file, the commits of a --range) also refuse tracker references and
+attribution trailers (`Co-Authored-By:`, `Claude-Session:`) in messages, naming the reference or
+trailer and the remedy; a full check leaves old history to them. The
 commits of a --range must also carry the project identity (se.toml [project] identity, unless the
 machine sets public_identity), where one is set; GitHub's web-flow identity, the committer of a
 commit made on GitHub, passes as committer. A hit names the identity found, redacted. A
@@ -140,8 +141,14 @@ TRACKER_REFERENCE = re.compile(
     r"|(?i:(?<![\w/-])GH-\d+\b)"  # GH-12, not the branch fix/…-without-gh-20261106
     r"|(?i:\bhttps?://[^\s/]+/[^\s/]+/[^\s/]+/(?:issues|pulls?)/\d+)"
 )
+ATTRIBUTION_RULE = (
+    "rule: commits carry no attribution trailers, whatever a host's attribution reminder says, "
+    "AGENTS.md 'Public safety'"
+)
+ATTRIBUTION_TRAILER = re.compile(r"(?im)^[ \t]*(co-authored-by|claude-session)[ \t]*:")
 # The rules the check enforces, one label each: SE's start counts them (scripts/se_start.py).
-RULES = tuple(dict.fromkeys(pattern.label for pattern in GENERIC_PATTERNS)) + ("tracker-reference",)
+MESSAGE_RULES = ("tracker-reference", "attribution-trailer")
+RULES = tuple(dict.fromkeys(pattern.label for pattern in GENERIC_PATTERNS)) + MESSAGE_RULES
 REWORD_BEFORE_COMMIT = "reword the message before committing"
 REWORD_BEFORE_PUSH = (
     "reword it before pushing: git commit --amend for the last commit, or git rebase -i while "
@@ -155,7 +162,7 @@ REIDENTIFY_BEFORE_PUSH = (
     f"a reasoned 'commit:<full sha> <role>' entry in {ALLOW_FILE}"
 )
 # Labels whose hit line names its own remedy; the summary line does not repeat the generic one.
-OWN_REMEDY = {"tracker-reference", "foreign-identity"}
+OWN_REMEDY = {*MESSAGE_RULES, "foreign-identity"}
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
@@ -165,6 +172,15 @@ def tracker_references(text: str) -> list[tuple[int, str]]:
     return [
         (text.count("\n", 0, match.start()) + 1, match.group())
         for match in TRACKER_REFERENCE.finditer(text)
+    ]
+
+
+def attribution_trailers(text: str) -> list[tuple[int, str]]:
+    """(line, trailer key) for every `Co-Authored-By:` or `Claude-Session:` line of a commit
+    message, in any case. The one test both commit gates apply."""
+    return [
+        (text.count("\n", 0, match.start()) + 1, match.group(1))
+        for match in ATTRIBUTION_TRAILER.finditer(text)
     ]
 
 
@@ -391,7 +407,8 @@ def scan_files(files: Iterable[tuple[str, bytes]], patterns: list[Pattern],
 
 def scan_message(where: str, message: str, patterns: list[Pattern], report: Report,
                  remedy: str | None = None) -> None:
-    """Hits in a commit message; with a remedy, tracker references too (the commit gates)."""
+    """Hits in a commit message; with a remedy, tracker references and attribution trailers too
+    (the commit gates)."""
     for line, _, label in find(message, patterns):
         report.hits.append(Hit(f"{where} message:{line}", label))
     if remedy is None:
@@ -400,6 +417,9 @@ def scan_message(where: str, message: str, patterns: list[Pattern], report: Repo
         shown = redact(reference, patterns)  # a URL may name a private host
         report.hits.append(Hit(f"{where} message:{line}", "tracker-reference",
                                f" '{shown}' ({TRACKER_RULE}); {remedy}"))
+    for line, key in attribution_trailers(message):
+        report.hits.append(Hit(f"{where} message:{line}", "attribution-trailer",
+                               f" '{key}:' ({ATTRIBUTION_RULE}); {remedy}"))
 
 
 def scan_identity(where: str, role: str, identity: str, patterns: list[Pattern],
@@ -431,7 +451,8 @@ def scan_project_identity(where: str, role: str, identity: str, expected: str,
 def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], report: Report,
                  gate: bool, allow: list[AllowEntry]) -> None:
     """Hits in the identities and messages of `revisions`; a gate (commits not yet pushed) also
-    refuses tracker references and identities other than the project identity. A commit entry of
+    refuses tracker references, attribution trailers and identities other than the project
+    identity. A commit entry of
     `allow` drops the hits of its role (an identity, or the message) on its commit; in a gate,
     where every hit it may cover is looked for, one that drops none is reported unused."""
     expected = project_identity(root) if gate else None
@@ -599,7 +620,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="git log revisions whose messages and identities are checked, split "
                              "on spaces (for example 'A..B' or 'B --not --remotes'); default: "
                              "HEAD. Given, it gates commits: their messages must carry no tracker "
-                             "references either")
+                             "references or attribution trailers either")
     parser.add_argument("--no-history", action="store_true",
                         help="skip commit messages and identities")
     return parser.parse_args(argv)

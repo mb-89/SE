@@ -44,6 +44,8 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 - Releases (version, tag) only on a release request from SE, which carries the human's
   approval. Without one you do not release and do not ask; a release that looks due is a line in
   your report to SE.
+- A branch whose commits carry attribution trailers is refused at the public check's gate; it
+  goes back to its worker to reword.
 - Paths and shell follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell); where the host offers no
   `gh`, its [Without gh](../skills/work-model/SKILL.md#without-gh) says how each step below runs.
