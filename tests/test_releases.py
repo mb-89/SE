@@ -33,10 +33,7 @@ def settings(version: str | None) -> str:
     return f"[project]\n# the released version\n{line}public_check = false\n{IDENTITY}"
 
 
-@pytest.fixture
-def checkout(tmp_path: Path, monkeypatch) -> Path:
-    """A clone of a bare origin on main, the integration branch, with se.toml at 1.2.3 tagged."""
-    monkeypatch.setattr(work_tickets, "local_config_path", lambda: tmp_path / "no-local.toml")
+def build_checkout(tmp_path: Path) -> None:
     origin, root = tmp_path / "origin.git", tmp_path / "main"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
     subprocess.run(["git", "clone", "-q", str(origin), str(root)], check=True,
@@ -48,7 +45,14 @@ def checkout(tmp_path: Path, monkeypatch) -> Path:
     git(root, "commit", "-q", "-m", "base")
     git(root, "tag", "v1.2.3")
     git(root, "push", "-q", "origin", "main", "v1.2.3")
-    return root
+
+
+@pytest.fixture
+def checkout(tmp_path: Path, monkeypatch, repositories) -> Path:
+    """A clone of a bare origin on main, the integration branch, with se.toml at 1.2.3 tagged."""
+    monkeypatch.setattr(work_tickets, "local_config_path", lambda: tmp_path / "no-local.toml")
+    repositories(build_checkout, tmp_path)
+    return tmp_path / "main"
 
 
 def issue_body(breaking: bool) -> str:

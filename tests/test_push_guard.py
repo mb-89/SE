@@ -36,11 +36,7 @@ def commit(root: Path, verdict: str = "pass", name: str = "work.txt", text: str 
 IDENTITY = '[project]\nidentity = "alice <alice@example.com>"\n'
 
 
-@pytest.fixture
-def checkout(tmp_path: Path, monkeypatch) -> Path:
-    """A clone of a bare origin on main, the integration branch, without hooks; its suite passes
-    where verdict.txt says pass."""
-    monkeypatch.setattr(work_tickets, "local_config_path", lambda: tmp_path / "no-local.toml")
+def build_checkout(tmp_path: Path) -> None:
     origin, root = tmp_path / "origin.git", tmp_path / "main"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
     subprocess.run(["git", "clone", "-q", str(origin), str(root)], check=True, capture_output=True)
@@ -50,7 +46,15 @@ def checkout(tmp_path: Path, monkeypatch) -> Path:
     (root / "se.toml").write_text(f"{IDENTITY}[tests]\ncommand = {SUITE}\n", encoding="utf-8")
     commit(root, name="base.txt")
     git(root, "push", "-q", "origin", "main")
-    return root
+
+
+@pytest.fixture
+def checkout(tmp_path: Path, monkeypatch, repositories) -> Path:
+    """A clone of a bare origin on main, the integration branch, without hooks; its suite passes
+    where verdict.txt says pass."""
+    monkeypatch.setattr(work_tickets, "local_config_path", lambda: tmp_path / "no-local.toml")
+    repositories(build_checkout, tmp_path)
+    return tmp_path / "main"
 
 
 def run_suite(root: Path) -> None:
