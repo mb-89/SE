@@ -2233,6 +2233,8 @@ def is_argument_array(value: object) -> bool:
 SLOWEST_TESTS = 10
 OUTPUT_TAIL_LINES = 5
 DURATION_LINE = re.compile(r"^\s*(\d+(?:\.\d+)?)s\s+(call|setup|teardown)\s+(\S.*?)\s*$")
+# Noise in a passing suite's tail: pytest's progress lines and its section banners.
+TAIL_NOISE = (re.compile(r"^[.sFEx]+\s+\[\s*\d+%\]$"), re.compile(r"^=+ .* =+$"))
 TEST_REPORTS_VARIABLE = "SE_TEST_REPORTS"
 NO_SLOWEST_TESTS = (
     f"  not reported by the runner; write JUnit XML to ${TEST_REPORTS_VARIABLE} "
@@ -2341,9 +2343,10 @@ def run_suite(root: Path) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget.
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
-    Runs `[tests]` setup first, outside the budget. Prints the suite's last output lines, its
-    time and the slowest tests; warns above the target; refuses failed tests, and a
-    passing suite above the limit with SuiteOverLimitError."""
+    Runs `[tests]` setup first, outside the budget. Prints the last result lines of the suite's
+    stdout (without progress lines, banners and durations), its time and the slowest tests;
+    warns above the target; refuses failed tests, and a passing suite above the limit with
+    SuiteOverLimitError."""
     budget = suite_budget(root)
     if budget.setup:
         run_suite_setup(root, budget.setup)
@@ -2379,8 +2382,9 @@ def run_suite(root: Path) -> str:
             "an idle host; if it is still over, make the slowest tests above faster (the work "
             "model's test rules)."
         )
-    own_lines = "\n".join(  # the durations are listed below, as the slowest tests
-        line for line in output.splitlines() if not DURATION_LINE.match(line)
+    own_lines = "\n".join(  # stdout only; the durations are listed below, as the slowest tests
+        line for line in result.stdout.strip().splitlines()
+        if not DURATION_LINE.match(line) and not any(noise.match(line) for noise in TAIL_NOISE)
     )
     if own_lines:
         print(f"Suite output (last lines):\n{output_tail(own_lines)}")

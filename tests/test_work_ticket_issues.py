@@ -2093,6 +2093,7 @@ def test_suite_failing_says_failed_with_its_counts_and_exits_1(
     assert run(worktree, "suite") == 1
     error = capsys.readouterr().err
     assert f"Complete suite failed (1 failed, 2 passed; {seconds:.1f} s" in error
+    assert "warning: from the launcher" in error  # stderr stays in a failure's full output
     assert "over its limit" not in error
 
 
@@ -2115,6 +2116,27 @@ def test_suite_under_the_target_passes_quietly(worktree, monkeypatch, capsys):
     assert "Suite time: 5.0 s (target 60 s, limit 120 s)" in captured.out
     tail = captured.out.split("Suite output (last lines):\n", 1)[1].split("Suite time:", 1)[0]
     assert "  3 passed" in tail and "test_sleepy" not in tail
+
+
+PYTEST_SUITE = """\
+import sys
+print("warning: The `UV_NATIVE_TLS` environment variable is deprecated", file=sys.stderr)
+print("........................................ [ 50%]")
+print("....s...x............................... [100%]")
+print("============================= slowest 10 durations =============================")
+print("0.20s call     tests/test_fast.py::test_quick")
+print("3 passed, 1 skipped, 1 xfailed in 1.20s")
+"""
+
+
+def test_suite_success_tail_shows_only_the_result_lines_of_stdout(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 5.0)
+    (worktree / "suite.py").write_text(PYTEST_SUITE, encoding="utf-8")
+
+    assert run(worktree, "suite") == 0
+    out = capsys.readouterr().out
+    tail = out.split("Suite output (last lines):\n", 1)[1].split("Suite time:", 1)[0]
+    assert tail == "  3 passed, 1 skipped, 1 xfailed in 1.20s\n"
 
 
 REPORTING_SUITE = """\
