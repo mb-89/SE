@@ -2181,6 +2181,31 @@ def test_suite_slowest_sets_how_many_tests_it_lists(worktree, monkeypatch, capsy
     assert work_tickets.with_durations(["uv", "run", "pytest", "-q"], 3)[-1] == "--durations=3"
 
 
+WORKER_SUITE = """\
+import os, pathlib
+reports = pathlib.Path(os.environ["SE_TEST_REPORTS"])
+(reports / "adapters-html.xml").write_text(
+    '<testsuites><testsuite name="pytest" time="84.2">'
+    '<properties><property name="workers" value="4"/></properties>'
+    '<testcase classname="tests.test_html" name="test_big" time="17.5"/>'
+    + "".join(f'<testcase classname="tests.test_html" name="test_{i}" time="12.7"/>' for i in range(23))
+    + '</testsuite></testsuites>', encoding="utf-8")
+print("24 passed")
+"""
+
+
+def test_suite_shows_each_parts_test_time_per_worker_and_slowest(worktree, monkeypatch, capsys):
+    fake_suite(worktree, monkeypatch, 5.0)
+    (worktree / "suite.py").write_text(WORKER_SUITE, encoding="utf-8")
+
+    assert run(worktree, "suite") == 0
+    out = capsys.readouterr().out
+    parts = out.split("Parts:\n", 1)[1].split("Slowest tests:", 1)[0]
+    assert parts == (
+        "  adapters-html: 84.2 s wall; 309.6 s test time / 4 workers = 77.4 s; slowest 17.5 s\n"
+    )
+
+
 def test_suite_without_reports_or_durations_names_the_remedy_once(worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 5.0)
     (worktree / "suite.py").write_text('print("1 passed")\n', encoding="utf-8")
@@ -2188,6 +2213,7 @@ def test_suite_without_reports_or_durations_names_the_remedy_once(worktree, monk
     assert run(worktree, "suite") == 0
     out = capsys.readouterr().out
     assert out.count("write JUnit XML to $SE_TEST_REPORTS") == 1
+    assert "Parts:" not in out
 
 
 SETUP = """\

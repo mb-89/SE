@@ -85,7 +85,11 @@ the suite, naming the command and its output. The gate measures the suite's wall
 with the last lines of the suite's own output and the ten slowest tests (`suite --slowest N`
 lists N). A runner of any kind may write JUnit XML reports into the directory
 named by the environment variable `SE_TEST_REPORTS`, one file per part; the gate then lists the
-slowest tests across all reports, each with its part (the file's name). Without reports it reads
+slowest tests across all reports, each with its part (the file's name), and prints one line per
+part, so a speed issue names the right lever, one long test or the part's total work:
+`<part>: 84.2 s wall; 309.6 s test time / 4 workers = 77.4 s; slowest 17.5 s`. The wall time is the
+report's own `time`, the worker count its `workers` testsuite property (pytest's
+`record_testsuite_property`), 1 without one. Without reports it reads
 pytest's lines (it adds `--durations=<N>` to a pytest command), and where neither names a test it
 says so and names that remedy. Above `target_seconds` (default
 60) it warns; above `limit_seconds` (default 120) it refuses the integration, naming the test
