@@ -401,13 +401,14 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   titles, labels, bodies and footers the commands would write.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
   `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push`, `verified`,
-  `comments-read`, `release-trailer` and `field-report --check`.
+  `comments-read`, `body-read --body-file`, `release-trailer` and `field-report --check`.
   Every other command fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
   for example:
   - `intake` and `refresh`: read the issue and its comments; `create` one ticket per numbered
     requirement plus `delivery`; record the comments read with `comments-read --count <n>
-    --newest <id>`, from what the GitHub tools read.
+    --newest <id>` and the body read with `body-read --body-file <file>`, from what the GitHub
+    tools read.
   - `intake --outside`: read each `[outside]` repository's open issues and their comments, and
     keep those [Outside issues](#outside-issues) leaves.
   - `deliver`: `sync`; `push`; open the pull request to the integration
