@@ -414,15 +414,22 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     label `field-report`; send the notification.
     - The field report comes from `field-report.md`, filled in by hand (`field-report --draft`
       needs `intake`'s snapshot), and passes `field-report --check .se/work/field-report.md
-      --issue-body <file> --comment-count <n> --newest-comment <id>` (the work issue's body saved
-      to `<file>`, its comments as the GitHub tools read them now).
+      --worktree <worktree> --issue-body <file> --comment-count <n> --newest-comment <id>` (the
+      work issue's body saved to `<file>`, its comments as the GitHub tools read them now).
+    - That check runs after `sync` and before `push`: it fills the report's Branch tip from the
+      branch.
+    - A commit after delivery changes the tip: run the check again and update the filed report
+      in place.
     - A refused report is fixed and checked again, never filed.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
     like the work issue and based on the integration branch.
   - `integrate`: merge the pull request's branch into the newest integration branch locally,
     with the message `integrate` writes (`Integrate <branch>: <summary>`, plus the trailer
-    `work_tickets.py release-trailer` prints, which
-    [releases](../../../README.md#project-settings) require).
+    `work_tickets.py release-trailer <branch> --issue-body <file> --field-report <file>` prints,
+    which [releases](../../../README.md#project-settings) require).
+    - That command refuses, as `integrate` does, a branch with commits after the report's
+      Branch tip, naming them; merge only once the report is updated, or state why they are
+      included with `--include-late <reason>` and in the `Integrated in …` comment.
     - Then run the complete suite with `work_tickets.py suite` and, unless `se.toml` sets
       `public_check = false`, the public check (`public_check.py --rev HEAD --range
       <pre-merge>..HEAD`), refusing on a failure; both record the verdicts `push` needs.
