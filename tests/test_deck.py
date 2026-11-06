@@ -106,7 +106,7 @@ const calls = {application: null, sink: null, published: []};
 const run = (claude) => {
     calls.sink = null;
     globalThis.obsArtifact = {
-        registerApplication: application => { calls.application = application.id; },
+        registerApplication: application => { calls.application = [application.id, application.actions]; },
         trustedExtension: namespace => ({register: sink => { calls.sink = {namespace, ...sink}; }}),
     };
     globalThis.claude = claude;
@@ -131,7 +131,7 @@ def test_the_bundle_saves_the_payload_through_the_files_form():
                             capture_output=True, text=True, check=True)
     calls = json.loads(result.stdout)
     # Outside the Claude app it registers no sink, so obs-html serve takes the answers.
-    assert calls["local"] == {"application": deck.BUNDLE_ID, "sink": None}
+    assert calls["local"] == {"application": [deck.BUNDLE_ID, []], "sink": None}
     assert (calls["namespace"], calls["id"]) == ("obsHtml.answers", "claude-artifact")
     assert calls["result"] == {"written": "answers.json", "version": "v2"}
     assert [list(files) for files in calls["published"]] == [["answers.json"]]
