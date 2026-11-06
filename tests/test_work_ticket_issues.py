@@ -2965,3 +2965,112 @@ def test_backlog_files_with_both_labels_and_lists_by_title_and_body(worktree, gh
     assert "--search" not in gh.calls[-1] and capsys.readouterr().out == "No backlog issues.\n"
     idea.write_text("", encoding="utf-8")
     assert run(worktree, "backlog", "file", "--title", "Empty", "--body-file", str(idea)) == 1
+
+
+class LabelledGh:
+    """GitHub's issues and labels, as far as filing, routing and the queue use them."""
+
+    def __init__(self, issues: dict[int, dict]) -> None:
+        self.issues = issues
+        self.labels: set[str] = set()
+        self.comments: dict[int, list[str]] = {}
+        self.blocked_by: dict[int, list[int]] = {}
+
+    def __call__(self, root: Path, arguments: list[str]) -> str:
+        def values(flag: str) -> list[str]:
+            return [arguments[i + 1] for i, argument in enumerate(arguments) if argument == flag]
+        body = (Path(values("--body-file")[0]).read_text(encoding="utf-8")
+                if "--body-file" in arguments else None)
+        command = arguments[:2]
+        if command == ["label", "list"]:
+            return json.dumps([{"name": name} for name in sorted(self.labels)])
+        if command == ["label", "create"]:
+            self.labels.add(arguments[2])
+            return ""
+        if command == ["issue", "create"]:
+            assert set(values("--label")) <= self.labels, "gh refuses a label the repository lacks"
+            number = max(self.issues) + 1
+            self.issues[number] = {"number": number, "title": values("--title")[0], "body": body,
+                                   "url": f"https://git.example/owner/repo/issues/{number}",
+                                   "labels": values("--label")}
+            return self.issues[number]["url"] + "\n"
+        if command == ["issue", "edit"]:
+            issue = self.issues[int(arguments[2])]
+            assert set(values("--add-label")) <= self.labels, "gh refuses a label the repository lacks"
+            issue["labels"] = [label for label in issue["labels"] if label not in values("--remove-label")]
+            issue["labels"] += [label for label in values("--add-label") if label not in issue["labels"]]
+            issue["title"] = (values("--title") or [issue["title"]])[0]
+            issue["body"] = body if body is not None else issue["body"]
+            return ""
+        if command == ["issue", "comment"]:
+            self.comments.setdefault(int(arguments[2]), []).append(body)
+            return ""
+        if command == ["issue", "view"]:
+            issue = self.issues[int(arguments[2])]
+            return json.dumps({**issue, "labels": [{"name": name} for name in issue["labels"]],
+                               "updatedAt": "2026-11-06T10:00:00Z", "comments": []})
+        if command == ["issue", "list"]:
+            wanted = set(values("--label"))
+            return json.dumps([
+                {**issue, "labels": [{"name": name} for name in issue["labels"]]}
+                for issue in self.issues.values() if wanted <= set(issue["labels"])])
+        if arguments[0] == "api":
+            path = arguments[1].split("/")
+            number = int(path[4])
+            if path[5:] == ["dependencies", "blocked_by"]:
+                self.blocked_by.setdefault(number, []).append(int(values("-F")[0].split("=")[1]))
+                return ""
+            if "--jq" in arguments:
+                return f"{number}\n"
+            return json.dumps({"issue_dependencies_summary": {"blocked_by": len(self.blocked_by.get(number, []))}})
+        raise AssertionError(f"unexpected gh call {arguments}")
+
+
+def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeypatch, capsys):
+    github = LabelledGh({
+        1: {"number": 1, "title": "Something from the other side", "body": "Please fix it.",
+            "url": "https://git.example/owner/repo/issues/1", "labels": []},
+        2: {"number": 2, "title": "Not routed yet", "body": "Another one.",
+            "url": "https://git.example/owner/repo/issues/2", "labels": []},
+        3: {"number": 3, "title": "feature/idea-20261106", "body": "",
+            "url": "https://git.example/owner/repo/issues/3",
+            "labels": ["work", "ready", "repo:repo", "backlogged"]},
+        4: {"number": 4, "title": "field-report: feature/x-20261106", "body": "",
+            "url": "https://git.example/owner/repo/issues/4",
+            "labels": ["work", "ready", "repo:repo", "field-report"]},
+        5: {"number": 5, "title": "feature/running-20261106", "body": "",
+            "url": "https://git.example/owner/repo/issues/5",
+            "labels": ["work", "ready", "repo:repo", "in-progress"]},
+    })
+    monkeypatch.setattr(work_tickets, "run_gh", github)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
+    body = worktree / "work.md"
+    body.write_text("## Goal\n\nA filed package.\n", encoding="utf-8")
+    comment = worktree / "route.md"
+    comment.write_text("Routed: the sections it lacks, completed.\n", encoding="utf-8")
+
+    assert run(worktree, "file", "--title", "feature/filed-20261106", "--body-file", str(body)) == 0
+    assert capsys.readouterr().out == "Filed work issue https://git.example/owner/repo/issues/6\n"
+    assert github.issues[6]["labels"] == ["work", "ready", "repo:repo"]
+    assert github.issues[6]["body"] == f"{work_tickets.FLEET_MARKER}\n## Goal\n\nA filed package.\n"
+    assert run(worktree, "route", "1", "--title", "fix/routed-20261106", "--comment-file", str(comment)) == 0
+    assert github.issues[1]["title"] == "fix/routed-20261106"
+    assert github.issues[1]["labels"] == ["work", "ready", "repo:repo"]
+    assert github.comments[1] == [f"{work_tickets.HANDLED_MARKER}\nRouted: the sections it lacks, completed.\n"]
+    assert {"work", "ready", "repo:repo"} <= github.labels
+    capsys.readouterr()
+
+    assert run(worktree, "ready") == 0
+    assert capsys.readouterr().out == "#1 fix/routed-20261106\n#6 feature/filed-20261106\n"
+
+    assert run(worktree, "file", "--title", "feature/later-20261106", "--body-file", str(body),
+               "--blocked-by", "6") == 0
+    assert github.issues[7]["labels"] == ["work", "repo:repo", "ready"]
+    assert github.blocked_by[7] == [6] and "#6" in github.issues[7]["body"]
+    capsys.readouterr()
+    assert run(worktree, "ready") == 0
+    assert "#7" not in capsys.readouterr().out
+    assert run(worktree, "route", "2", "--title", " ", "--comment-file", str(comment)) == 1
+    assert github.issues[2]["labels"] == [] and 2 not in github.comments
