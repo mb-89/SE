@@ -1819,12 +1819,30 @@ def checked_git(root: Path, *arguments: str) -> str:
     return result.stdout
 
 
-def tag_exists(root: Path, tag: str) -> bool:
-    return run_git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}").returncode == 0
+def local_tag(root: Path, tag: str) -> str | None:
+    """The commit the local tag `tag` names, or None without it."""
+    result = run_git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}")
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def remote_tags(root: Path) -> dict[str, str]:
+    """Each tag on origin and the commit it names, read with `git ls-remote --tags`; local tags,
+    which may be stale, are never read."""
+    tags: dict[str, str] = {}
+    peeled: dict[str, str] = {}
+    for line in checked_git(root, "ls-remote", "--tags", "origin").splitlines():
+        commit, _, ref = line.partition("\t")
+        name = ref.strip().removeprefix("refs/tags/")
+        if name.endswith("^{}"):
+            peeled[name[:-3]] = commit
+        else:
+            tags[name] = commit
+    return tags | peeled
 
 
 def integrated_packages(root: Path, branch: str, released: str) -> list[tuple[str, str]]:
-    """(branch, release kind) of each integration merged into `branch` since origin and `released`.
+    """(branch, release kind) of each integration merged into `branch` since origin and the commit
+    `released`, the last release's.
 
     An integration is a first-parent merge whose subject starts `Integrate <branch>`, the message
     integrate writes; its kind is its Release-kind trailer, and one without it is refused. Other
@@ -1833,7 +1851,7 @@ def integrated_packages(root: Path, branch: str, released: str) -> list[tuple[st
     revisions = [f"^{upstream.stdout.strip()}"] if upstream.returncode == 0 else ["--not", "--remotes", "--not"]
     log = checked_git(
         root, "log", "--first-parent", "--merges", "--format=%H%x00%B%x1e",
-        branch, f"^refs/tags/{released}", *revisions,
+        branch, f"^{released}", *revisions,
     )
     packages = []
     for record in filter(str.strip, log.split("\x1e")):
@@ -1865,38 +1883,94 @@ def set_project_version(root: Path, version: str) -> None:
     raise QueueError(f"{path}: write project.version as version = \"MAJOR.MINOR.PATCH\" inside [project]")
 
 
+def release_build(root: Path) -> list[str] | None:
+    """`project.release_build` in se.toml: the command that regenerates what copies the version."""
+    configured = project_config(root).get("release_build")
+    if configured is not None and not is_argument_array(configured):
+        raise QueueError(
+            f"project.release_build in {root / 'se.toml'} must be a non-empty argument array, the "
+            'command that regenerates what copies the version, for example release_build = '
+            '["uv", "run", "python", "scripts/se_plugin.py", "build"]; fix it or remove it'
+        )
+    return configured
+
+
+def changed_paths(root: Path) -> set[str]:
+    """The paths `git status` names as changed or untracked in the checkout."""
+    status = checked_git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    entries = status.split("\0")
+    paths, index = set(), 0
+    while index < len(entries):
+        entry = entries[index]
+        if entry:
+            paths.add(entry[3:])
+            if entry[0] in "RC":
+                index += 1  # a rename's or copy's source follows it
+        index += 1
+    return paths
+
+
+def build_release(root: Path, tag: str) -> list[str]:
+    """Write `tag`'s version into se.toml and run `project.release_build`, if set; the paths the
+    release commit carries. A failing build restores se.toml and is refused with its output."""
+    command = release_build(root)
+    before = changed_paths(root)
+    set_project_version(root, tag[1:])
+    if command is None:
+        return ["se.toml"]
+    result = subprocess.run(command, cwd=root, shell=False, capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", check=False)
+    if result.returncode != 0:
+        checked_git(root, "checkout", "HEAD", "--", "se.toml")
+        output = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
+        raise QueueError(
+            f"Cannot release {tag}: project.release_build ({' '.join(command)}) failed in {root}; "
+            f"se.toml is restored and nothing was committed. Fix the build and push again:\n{output}"
+        )
+    return sorted({"se.toml"} | (changed_paths(root) - before))
+
+
 def release(root: Path, branch: str) -> str | None:
     """Release what was integrated into `branch`: bump project.version by the packages' highest
-    kind, commit it and tag `v<version>`; the tag to push, or None where nothing is released.
-    Where the release workflow tags, a version without its tag is left for it to tag."""
+    kind, commit it with what `project.release_build` regenerates and tag `v<version>`; the tag to
+    push, or None where nothing is released.
+    Where the release workflow tags, the released versions are origin's tags, and a version without
+    its tag there is left for the workflow to tag."""
     by_workflow = release_by_workflow(root)
     version = project_version(root)
     if version is None:
         print(f"Release off: no project.version in {root / 'se.toml'}; {VERSION_REMEDY} to tag each integration")
         return None
+    origin = remote_tags(root) if by_workflow else None
+
+    def tagged(tag: str) -> str | None:
+        return origin.get(tag) if origin is not None else local_tag(root, tag)
+
     current = f"v{version_text(version)}"
-    if not tag_exists(root, current):
+    released = tagged(current)
+    if released is None:
         if by_workflow:
             return current
         checked_git(root, "tag", current, branch)
         print(f"Release: {current} tagged, the first tag of project.version")
         return current
-    packages = integrated_packages(root, branch, current)
+    packages = integrated_packages(root, branch, released)
     if not packages:
-        pushed = run_git(root, "merge-base", "--is-ancestor", current, f"refs/remotes/origin/{branch}")
+        pushed = run_git(root, "merge-base", "--is-ancestor", released, f"refs/remotes/origin/{branch}")
         return None if pushed.returncode == 0 else current
     kind = max((kind for _, kind in packages), key=RELEASE_ORDER.index)
     tag = f"v{version_text(bumped(version, kind))}"
-    if tag_exists(root, tag):
+    if tagged(tag) is not None:
         raise QueueError(
             f"Cannot release {tag}: the tag exists already; fetch the tags (work_tickets.py sync) "
             f"and check project.version in {root / 'se.toml'}"
         )
-    set_project_version(root, tag[1:])
+    paths = build_release(root, tag)
     trailer = config_value("commit_trailer", remote_repo(root), None)
-    checked_git(root, "add", "se.toml")
+    checked_git(root, "add", "--", *paths)
     checked_git(root, "commit", "-q", "-m", f"Release {tag}", *(("-m", trailer) if trailer else ()))
-    checked_git(root, "tag", tag)
+    if not by_workflow:
+        checked_git(root, "tag", tag)
     print(f"Release: {tag} ({kind}: {', '.join(name for name, _ in packages)})")
     return tag
 

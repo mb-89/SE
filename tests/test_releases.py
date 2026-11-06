@@ -1,8 +1,12 @@
 """work_tickets.py push releases the integration branch: it bumps se.toml's version and tags it."""
 import importlib.util
+import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tomllib
 
 import pytest
 
@@ -253,3 +257,183 @@ def test_a_pushed_merge_without_a_kind_is_never_read_again(checkout, capsys):
     assert push(checkout) == 0
     assert released(checkout) == ("1.3.0", "v1.3.0")
     assert "Release: v1.3.0 (minor: feature/new-20261106)" in capsys.readouterr().out
+
+
+def test_with_release_by_workflow_a_stale_local_tag_causes_no_bump(checkout, capsys):
+    """The released versions are origin's tags: a local tag origin lacks releases nothing."""
+    by_workflow(checkout, "2.0.0")
+    git(checkout, "push", "-q", "origin", "main")
+    git(checkout, "tag", "v2.0.0")  # stale: origin has no v2.0.0
+    integrate(checkout, "feature/topic-20261106")
+    assert push(checkout) == 0
+    assert git(checkout, "show", "origin/main:se.toml").count('version = "2.0.0"') == 1
+    assert git(checkout, "log", "-1", "--format=%s", "origin/main") == "Integrate feature/topic-20261106: work"
+    assert origin_tags(checkout) == ["v1.2.3"]
+    assert "Release: v2.0.0 is tagged by the release workflow" in capsys.readouterr().out
+
+
+def test_with_release_by_workflow_origin_tags_count_without_local_ones(checkout):
+    """A checkout without the tags locally still releases from origin's, and makes no local tag."""
+    by_workflow(checkout)
+    git(checkout, "tag", "-d", "v1.2.3")
+    integrate(checkout, "fix/topic-20261106")
+    assert push(checkout) == 0
+    assert git(checkout, "log", "-1", "--format=%s", "origin/main") == "Release v1.2.4"
+    assert git(checkout, "tag", "--list") == ""
+
+
+def plugin_checkout(checkout: Path, build: list[str]) -> Path:
+    """The checkout made an se plugin: se's sources and generator, its layouts built and pushed."""
+    shutil.copytree(PROJECT / "src", checkout / "src")
+    (checkout / "scripts").mkdir()
+    shutil.copy2(PROJECT / "scripts" / "se_plugin.py", checkout / "scripts" / "se_plugin.py")
+    (checkout / "se.toml").write_text(
+        settings("1.2.3") + f"release_build = {json.dumps(build)}\n", encoding="utf-8")
+    plugin("build", checkout)
+    git(checkout, "add", ".")
+    git(checkout, "commit", "-q", "-m", "plugin")
+    git(checkout, "push", "-q", "origin", "main")
+    return checkout
+
+
+def plugin(command: str, root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, str(root / "scripts" / "se_plugin.py"), command, "--root", str(root)],
+                          capture_output=True, text=True, check=False)
+
+
+def test_the_release_commit_carries_what_release_build_regenerates(checkout):
+    plugin_checkout(checkout, [sys.executable, "scripts/se_plugin.py", "build"])
+    integrate(checkout, "feature/topic-20261106")
+    assert push(checkout) == 0
+    assert git(checkout, "log", "-1", "--format=%s", "origin/main") == "Release v1.3.0"
+    assert git(checkout, "status", "--porcelain") == ""
+    assert plugin("check", checkout).returncode == 0
+    manifest = json.loads(git(checkout, "show", "origin/main:.claude-plugin/plugin.json"))
+    assert manifest["version"] == "1.3.0"
+
+
+def test_se_regenerates_its_plugin_in_each_release_commit():
+    project = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]
+    assert project["release_build"][-2:] == ["scripts/se_plugin.py", "build"]
+
+
+def test_a_failing_release_build_restores_se_toml_and_commits_nothing(checkout, capsys):
+    plugin_checkout(checkout, [sys.executable, "-c", "raise SystemExit('generator broke')"])
+    integrate(checkout, "feature/topic-20261106")
+    before = git(checkout, "rev-parse", "HEAD")
+    assert push(checkout) == 1
+    assert git(checkout, "rev-parse", "HEAD") == before
+    assert git(checkout, "status", "--porcelain") == ""
+    error = capsys.readouterr().err
+    assert "Cannot release v1.3.0: project.release_build (" in error
+    assert "se.toml is restored and nothing was committed" in error
+    assert "generator broke" in error
+
+
+def test_a_malformed_release_build_is_an_error_naming_the_file(checkout, capsys):
+    (checkout / "se.toml").write_text(settings("1.2.3") + 'release_build = "make"\n', encoding="utf-8")
+    git(checkout, "commit", "-q", "-am", "malformed")
+    integrate(checkout, "feature/topic-20261106")
+    assert push(checkout) == 1
+    assert (f"project.release_build in {checkout / 'se.toml'} must be a non-empty argument array"
+            in capsys.readouterr().err)
+
+
+WORKFLOW = PROJECT / ".github" / "workflows" / "release.yml"
+
+
+def workflow_script() -> str:
+    """The Python the release workflow runs, its one `run: |` block."""
+    lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
+    start = next(index for index, line in enumerate(lines) if line.strip() == "run: |") + 1
+    block = []
+    for line in lines[start:]:
+        if line.strip() and not line.startswith(" " * 10):
+            break
+        block.append(line[10:])
+    return "\n".join(block) + "\n"
+
+
+def run_workflow(checkout: Path, ref: str = "main") -> subprocess.CompletedProcess[str]:
+    """Run the workflow as its runner does: in a fresh full clone of origin, on a push of `ref`."""
+    runner = checkout.parent / "runner"
+    shutil.rmtree(runner, ignore_errors=True)
+    subprocess.run(["git", "clone", "-q", "-b", ref, str(checkout.parent / "origin.git"), str(runner)],
+                   check=True, capture_output=True)
+    script = checkout.parent / "release.py"
+    script.write_text(workflow_script(), encoding="utf-8")
+    return subprocess.run([sys.executable, "-I", str(script)], cwd=runner, capture_output=True, text=True,
+                          check=False, env={**os.environ, "GITHUB_REF_NAME": ref})
+
+
+def origin_tag(checkout: Path, tag: str) -> str:
+    return git(checkout.parent / "origin.git", "rev-parse", f"{tag}^{{commit}}")
+
+
+def missed_release(checkout: Path) -> str:
+    """1.3.0 integrated but never tagged, then 1.3.1 tagged: SE's missed v1.0.0. Its first commit."""
+    by_workflow(checkout)
+    git(checkout, "switch", "-q", "-c", "feature/topic-20261106")
+    (checkout / "se.toml").write_text(settings("1.3.0") + 'release = "workflow"\n', encoding="utf-8")
+    git(checkout, "commit", "-q", "-am", "bump in the branch")
+    git(checkout, "switch", "-q", "main")
+    git(checkout, "merge", "-q", "--no-ff", "-m", "Integrate feature/topic-20261106: work", "feature/topic-20261106")
+    first = git(checkout, "rev-parse", "HEAD")
+    (checkout / "note.txt").write_text("x", encoding="utf-8")
+    git(checkout, "add", ".")
+    git(checkout, "commit", "-q", "-m", "still 1.3.0")
+    (checkout / "se.toml").write_text(settings("1.3.1") + 'release = "workflow"\n', encoding="utf-8")
+    git(checkout, "commit", "-q", "-am", "Release v1.3.1")
+    git(checkout, "tag", "v1.3.1")
+    git(checkout, "push", "-q", "origin", "main", "v1.3.1")
+    return first
+
+
+def test_the_workflow_backfills_a_missed_version_on_its_first_commit(checkout):
+    first = missed_release(checkout)
+    before = {tag: origin_tag(checkout, tag) for tag in ("v1.2.3", "v1.3.1")}
+    result = run_workflow(checkout)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert f"Release v1.3.0: tagged {first[:7]}" in result.stdout
+    assert origin_tag(checkout, "v1.3.0") == first
+    assert {tag: origin_tag(checkout, tag) for tag in before} == before
+
+
+def test_a_second_workflow_run_changes_nothing(checkout):
+    missed_release(checkout)
+    assert run_workflow(checkout).returncode == 0
+    tags = git(checkout.parent / "origin.git", "show-ref", "--tags")
+    second = run_workflow(checkout)
+    assert second.returncode == 0, second.stderr + second.stdout
+    assert second.stdout.splitlines() == [line for line in second.stdout.splitlines() if "tagged already" in line]
+    assert git(checkout.parent / "origin.git", "show-ref", "--tags") == tags
+
+
+def test_the_workflow_never_moves_an_existing_tag(checkout):
+    by_workflow(checkout, "1.3.0")
+    stray = git(checkout, "rev-parse", "HEAD~1")
+    git(checkout, "tag", "v1.3.0", stray)
+    git(checkout, "push", "-q", "origin", "main", "v1.3.0")
+    result = run_workflow(checkout)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "::warning::Release v1.3.0: the tag names" in result.stdout
+    assert origin_tag(checkout, "v1.3.0") == stray
+
+
+def test_the_workflow_tags_nothing_on_another_branch(checkout):
+    missed_release(checkout)
+    git(checkout, "push", "-q", "origin", "main:fix/other-20261106")
+    result = run_workflow(checkout, "fix/other-20261106")
+    assert result.returncode == 0
+    assert "No release: fix/other-20261106 is not the integration branch main" in result.stdout
+    assert origin_tags(checkout) == ["v1.2.3", "v1.3.1"]
+
+
+def test_se_runs_the_release_workflow_on_pushes_to_its_integration_branch_only():
+    project = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]
+    caller = (PROJECT / ".github" / "workflows" / "release-tag.yml").read_text(encoding="utf-8")
+    assert f"on:\n  push:\n    branches: [{project['integration_branch']}]\n" in caller
+    readme = (PROJECT / "README.md").read_text(encoding="utf-8")
+    shown = readme.split("`.github/workflows/release-tag.yml`", 1)[1].split("```yaml\n", 1)[1].split("```", 1)[0]
+    own = caller.split("\n", 1)[1].replace(f"[{project['integration_branch']}]", "[<integration branch>]")
+    assert shown == own
