@@ -1939,6 +1939,18 @@ def release_trailer(root: Path, branch: str, issue_body: str, report_body: str |
     return f"{RELEASE_TRAILER}: {release_kind(branch, is_breaking(issue_body))}"
 
 
+def branch_head(root: Path, branch: str) -> str:
+    """The ref `release-trailer` reads `branch` at: the local branch where the clone has one, else
+    `origin/<branch>`, the ref an integrator clone that only fetched it has; refused with neither."""
+    for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}"):
+        if run_git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode == 0:
+            return ref.removeprefix("refs/heads/").removeprefix("refs/remotes/")
+    raise QueueError(
+        f"Cannot find branch {branch}: neither {branch} nor origin/{branch} exists in {root}; "
+        f"fetch it with git -C {root} fetch origin {branch}, then run release-trailer again"
+    )
+
+
 def reported_tip(report_body: str) -> str:
     match = BRANCH_TIP_PATTERN.search(report_body)
     if match is None:
@@ -3853,7 +3865,8 @@ def make_parser() -> argparse.ArgumentParser:
         "release-trailer", help="print the Release-kind trailer an integration merge of <branch> "
         "carries, from its work issue's Package kind and the branch prefix; push requires it")
     add_optional_worktree_argument(trailer_parser)
-    trailer_parser.add_argument("branch", help="the integrated branch")
+    trailer_parser.add_argument(
+        "branch", help="the integrated branch: the local branch, else origin/<branch>")
     trailer_parser.add_argument(
         "--issue-body", required=True, type=Path, help="file holding the work issue's body")
     trailer_parser.add_argument(
@@ -4059,7 +4072,8 @@ def main(argv: list[str] | None = None) -> int:
             except (OSError, UnicodeError) as error:
                 raise QueueError(f"Cannot read {error.filename or 'an input file'}: {error}") from error
             if report is not None:
-                late = check_branch_tip(root, report, args.branch, args.branch, args.include_late)
+                late = check_branch_tip(root, report, args.branch,
+                                        branch_head(root, args.branch), args.include_late)
                 if late:
                     print(f"Includes {len(late)} commit(s) after the field report's Branch tip: "
                           f"{args.include_late}", file=sys.stderr)
