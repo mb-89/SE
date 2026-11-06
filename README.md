@@ -164,24 +164,9 @@ not tags (Claude's cloud sessions).
 - An existing tag never moves: where it names another commit, the run warns and leaves it.
 - Without `release`, `push` pushes the tags itself; another value is refused, naming the file.
 
-A repository turns it on with `release = "workflow"` and this file,
-`.github/workflows/release-tag.yml`, the same in every repository but for its integration branch
-(se's own names `se`), so that worker branches run nothing:
-
-```yaml
-name: release-tag
-
-on:
-  push:
-    branches: [<integration branch>]
-
-permissions:
-  contents: write
-
-jobs:
-  release:
-    uses: mb-89/SE/.github/workflows/release.yml@se
-```
+A repository turns it on with `release = "workflow"` and a copy of se's own
+[`.github/workflows/release-tag.yml`](.github/workflows/release-tag.yml), changed only in
+`branches` to name its integration branch (se's names `se`), so that worker branches run nothing.
 
 ### Test budget
 
