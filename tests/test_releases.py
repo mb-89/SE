@@ -1,8 +1,11 @@
 """work_tickets.py push releases the integration branch: it bumps se.toml's version and tags it."""
 import importlib.util
+import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tomllib
 
 import pytest
 
@@ -253,3 +256,83 @@ def test_a_pushed_merge_without_a_kind_is_never_read_again(checkout, capsys):
     assert push(checkout) == 0
     assert released(checkout) == ("1.3.0", "v1.3.0")
     assert "Release: v1.3.0 (minor: feature/new-20261106)" in capsys.readouterr().out
+
+
+def test_with_release_by_workflow_a_stale_local_tag_causes_no_bump(checkout, capsys):
+    """The released versions are origin's tags: a local tag origin lacks releases nothing."""
+    by_workflow(checkout, "2.0.0")
+    git(checkout, "push", "-q", "origin", "main")
+    git(checkout, "tag", "v2.0.0")  # stale: origin has no v2.0.0
+    integrate(checkout, "feature/topic-20261106")
+    assert push(checkout) == 0
+    assert git(checkout, "show", "origin/main:se.toml").count('version = "2.0.0"') == 1
+    assert git(checkout, "log", "-1", "--format=%s", "origin/main") == "Integrate feature/topic-20261106: work"
+    assert origin_tags(checkout) == ["v1.2.3"]
+    assert "Release: v2.0.0 is tagged by the release workflow" in capsys.readouterr().out
+
+
+def test_with_release_by_workflow_origin_tags_count_without_local_ones(checkout):
+    """A checkout without the tags locally still releases from origin's, and makes no local tag."""
+    by_workflow(checkout)
+    git(checkout, "tag", "-d", "v1.2.3")
+    integrate(checkout, "fix/topic-20261106")
+    assert push(checkout) == 0
+    assert git(checkout, "log", "-1", "--format=%s", "origin/main") == "Release v1.2.4"
+    assert git(checkout, "tag", "--list") == ""
+
+
+def plugin_checkout(checkout: Path, build: list[str]) -> Path:
+    """The checkout made an se plugin: se's sources and generator, its layouts built and pushed."""
+    shutil.copytree(PROJECT / "src", checkout / "src")
+    (checkout / "scripts").mkdir()
+    shutil.copy2(PROJECT / "scripts" / "se_plugin.py", checkout / "scripts" / "se_plugin.py")
+    (checkout / "se.toml").write_text(
+        settings("1.2.3") + f"release_build = {json.dumps(build)}\n", encoding="utf-8")
+    plugin("build", checkout)
+    git(checkout, "add", ".")
+    git(checkout, "commit", "-q", "-m", "plugin")
+    git(checkout, "push", "-q", "origin", "main")
+    return checkout
+
+
+def plugin(command: str, root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, str(root / "scripts" / "se_plugin.py"), command, "--root", str(root)],
+                          capture_output=True, text=True, check=False)
+
+
+def test_the_release_commit_carries_what_release_build_regenerates(checkout):
+    plugin_checkout(checkout, [sys.executable, "scripts/se_plugin.py", "build"])
+    integrate(checkout, "feature/topic-20261106")
+    assert push(checkout) == 0
+    assert git(checkout, "log", "-1", "--format=%s", "origin/main") == "Release v1.3.0"
+    assert git(checkout, "status", "--porcelain") == ""
+    assert plugin("check", checkout).returncode == 0
+    manifest = json.loads(git(checkout, "show", "origin/main:.claude-plugin/plugin.json"))
+    assert manifest["version"] == "1.3.0"
+
+
+def test_se_regenerates_its_plugin_in_each_release_commit():
+    project = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]
+    assert project["release_build"][-2:] == ["scripts/se_plugin.py", "build"]
+
+
+def test_a_failing_release_build_restores_se_toml_and_commits_nothing(checkout, capsys):
+    plugin_checkout(checkout, [sys.executable, "-c", "raise SystemExit('generator broke')"])
+    integrate(checkout, "feature/topic-20261106")
+    before = git(checkout, "rev-parse", "HEAD")
+    assert push(checkout) == 1
+    assert git(checkout, "rev-parse", "HEAD") == before
+    assert git(checkout, "status", "--porcelain") == ""
+    error = capsys.readouterr().err
+    assert "Cannot release v1.3.0: project.release_build (" in error
+    assert "se.toml is restored and nothing was committed" in error
+    assert "generator broke" in error
+
+
+def test_a_malformed_release_build_is_an_error_naming_the_file(checkout, capsys):
+    (checkout / "se.toml").write_text(settings("1.2.3") + 'release_build = "make"\n', encoding="utf-8")
+    git(checkout, "commit", "-q", "-am", "malformed")
+    integrate(checkout, "feature/topic-20261106")
+    assert push(checkout) == 1
+    assert (f"project.release_build in {checkout / 'se.toml'} must be a non-empty argument array"
+            in capsys.readouterr().err)

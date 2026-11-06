@@ -102,6 +102,7 @@ identity = "mb <mb>"
 integration_branch = "main"
 public_check = true
 release = "workflow"
+release_build = ["uv", "run", "python", "scripts/se_plugin.py", "build"]
 version = "1.4.2"
 ```
 
@@ -137,18 +138,26 @@ it, and `work_tickets.py release-trailer` prints it for a merge by hand:
 
 An integration without the trailer is refused, naming the merge and the remedy; push never guesses.
 
-One push bumps once, by its integrations' highest kind: it rewrites only `version`, commits
-`Release v<new>`, tags it and pushes the tag with the branch. A version without its tag yet is
-tagged as it is, which is how a project starts versioning. Without `version` push releases nothing
-and says so; a malformed one is refused, naming the file.
+One push bumps once, by its integrations' highest kind: it rewrites only `version`, runs
+`release_build` where set, commits `Release v<new>` with what that regenerated, tags it and pushes
+the tag with the branch.
+
+A version without its tag yet is tagged as it is, which is how a project
+starts versioning. Without `version` push releases nothing and says so; a malformed one is refused,
+naming the file.
+
+`release_build` is the command that regenerates what copies the version (se's plugin manifests:
+`["uv", "run", "python", "scripts/se_plugin.py", "build"]`), an argument array run without a shell
+from the project root. Where it fails, push restores `se.toml`, commits nothing and shows its output.
 
 #### Release tags
 
 `release = "workflow"` hands the tags to se's release workflow, for hosts that may push branches but
 not tags (Claude's cloud sessions).
 
-- `push` still bumps and commits the version, pushes the branch only and names the workflow; a
-  version without its tag is left for the workflow, not bumped.
+- `push` still bumps and commits the version, pushes the branch only and names the workflow; it
+  reads the released versions from origin's tags (`git ls-remote --tags`), never from local ones,
+  so a version without its tag on origin is left for the workflow, not bumped.
 - On each push to the integration branch the workflow tags `v<version>` on the first-parent commit
   since which `se.toml` carries that version, unless the tag is there.
 - Where the tag names another commit, the run fails, naming the version and the remedy.

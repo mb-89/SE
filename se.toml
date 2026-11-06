@@ -3,6 +3,8 @@
 version = "1.0.1"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
+# Regenerates what copies the version (the plugin manifests) into each release commit.
+release_build = ["uv", "run", "python", "scripts/se_plugin.py", "build"]
 # The branch the integrator writes; the new process lives on `se` while the old one lives on `main`.
 integration_branch = "se"
 # The commit identity sync sets where the machine sets no public_identity (README "Project settings").
