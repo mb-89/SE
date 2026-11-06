@@ -320,28 +320,41 @@ def test_one_skill_owns_how_a_decision_is_presented():
             assert restated.casefold() not in text.casefold(), (path.name, restated)
 
 
-def test_the_decision_skill_holds_the_presentation_rules():
+def test_the_decision_skill_owns_the_shape_of_the_decision_note():
     text = normalized(DECISION)
-    for rule in ("exactly one decision", '"Decision 2 of 3"', "one to three sentences",
-                 "| Option | What it means | What we gain | What we lose |", "(recommended)",
-                 '"Reply A, B or C"', "## Tasks for the person", "never an option in a decision",
-                 '"Task 1 of 2"'):
+    for rule in ("## The decision note", "One Obsidian Markdown note per decision", "`obs.bless: pending`",
+                 "one to three sentences", "The `pugh` fence", "`what` sentence", "`wins` and `losses`",
+                 "`datum`: the letter of the strongest rival", '"Keep what we have" is an option',
+                 "`checklist`", "`item`", "`answer`", "`pass`", "`options`, the letters it fails",
+                 "## Tasks for the person", "never an option in a decision", '"Task 1 of 2"'):
+        assert rule in text, rule
+
+
+def test_the_agent_decides_its_own_questions_with_the_same_note():
+    text = normalized(DECISION)
+    assert "## Your own decisions" in text
+    for rule in ("same note", "sets `chosen`", "the world that choice needs", "If that world is nonsense"):
         assert rule in text, rule
 
 
 def test_the_decision_skill_asks_one_level_up_with_the_worked_example():
     text = normalized(DECISION)
     assert "## One level up" in text
-    assert "name the class the instance belongs to and ask about the general mechanism" in text
+    assert "name the class the instance belongs to and decide the general mechanism" in text
     assert '"can queries select the manifest note?"' in text
     assert ('"a note can mark itself ignored, like a Python underscore name; the manifest is one '
             'such note"') in text
 
 
-def test_the_decision_skill_records_the_answer_where_it_takes_effect():
+def test_the_decision_skill_outputs_the_answered_artifact_and_names_no_storage():
     text = normalized(DECISION)
-    assert "## Recording the answer" in text
-    assert "recorded where it takes effect, quoting the person word for word" in text
+    assert "## The record" in text
+    for rule in ("The skill's output is the answered artifact", "verdict, comments, overrides and vetoes",
+                 "That artifact is the decision's record", "an issue may carry it as an attachment",
+                 "nothing is required to commit it"):
+        assert rule in text, rule
+    for storage in ("decisions/", "stored together", "folder", "graft"):
+        assert storage not in text, storage
 
 
 def without_gh_section() -> str:
@@ -588,3 +601,48 @@ def test_the_worker_reports_the_suite_time_before_and_after_and_slow_new_tests()
     assert "work_tickets.py suite" in worker
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
     assert "**Suite time:**" in template
+
+
+CHECKLIST = ("Class or case", "Is the problem real", "Keep what we have", "A named loser", "Fair criteria",
+             "What if", "Undo cost", "Consistency")
+LADDER = ("worker, then integrator", "One level per loop", "Straight to the person",
+          "as a deck, not as issues")
+POINTERS = {AGENTS / "dispatcher.agent.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
+            AGENTS / "worker.agent.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
+            AGENTS / "integrator.agent.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
+            SKILL: "(../work-model/SKILL.md#escalation-ladder)"}
+
+
+def test_the_decision_skill_names_the_eight_checklist_items():
+    text = DECISION.read_text(encoding="utf-8")
+    checklist = text.split("## The checklist", 1)[1].split("\n## ", 1)[0]
+    items = re.findall(r"^\d+\. \*\*(.+?):\*\*", checklist, re.MULTILINE)
+    assert items == list(CHECKLIST)
+
+
+def test_the_worked_example_answers_every_checklist_item_in_its_fence():
+    note = (DECISION.parent / "references" / "decision-deck.md").read_text(encoding="utf-8")
+    assert note.startswith("---\nobs.bless: pending\n---\n")
+    fence = note.split("```pugh\n", 1)[1].split("```", 1)[0]
+    assert re.findall(r"^  - item: (.+)$", fence, re.MULTILINE) == list(CHECKLIST)
+    assert "datum: B" in fence and "(keep what we have)" in fence
+    for key in ("name:", "what:", "marks:", "wins:", "losses:", "answer:", "pass:"):
+        assert key in fence, key
+
+
+@pytest.mark.parametrize("path", POINTERS, ids=lambda path: path.name)
+def test_roles_point_to_the_checklist_and_the_ladder_rather_than_restating_them(path):
+    text = normalized(path)
+    assert POINTERS[path] in text
+    for restated in (*(f"**{item}:**" for item in CHECKLIST), "named loser", "tripwire", *LADDER):
+        assert restated.casefold() not in text.casefold(), restated
+
+
+def test_the_work_model_owns_the_escalation_ladder():
+    text = normalized(WORK_MODEL)
+    assert "## Escalation ladder" in text
+    for rule in ("Issues carry work between boxes", "worker, then integrator (integrators may nest",
+                 "then dispatcher, then person", *LADDER[1:], "allowed, not preferred",
+                 "(../decision/SKILL.md)"):
+        assert rule in text, rule
+    assert "one table per message" not in text.casefold()
