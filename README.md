@@ -11,7 +11,7 @@ License: MIT, see [LICENSE](LICENSE).
 ## Modules
 
 A repository pulls its dependencies (se itself, format tools, styles, other repositories) as modules
-pinned to commits, from any Git host. `scripts/se_modules.py` implements this section; its
+pinned to commits or to semantic version ranges, from any Git host. `scripts/se_modules.py` implements this section; its
 invocation is in [Commands](#commands).
 
 ### `se.toml`
@@ -23,16 +23,26 @@ The consuming repository declares its modules in `se.toml` at its root:
 url = "https://github.com/<owner>/obs.git"   # public form of the clone URL
 ref = "<40-hex commit SHA>"                  # the pin
 path = "skills"                              # optional: the part of the module that is used
+
+[modules.style]
+url = "https://github.com/<owner>/style.git"
+version = "^1.4"                             # in place of ref: a semver range of the module's tags
 ```
 
 - `url`: the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in
   the machine-local file below, never here.
 - `ref`: the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only
   releases; `update` moves it.
+- `version`: in place of `ref`, a semantic version range of the module's release tags
+  `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases):
+  `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). The
+  highest matching tag is resolved and its version and commit are recorded in `se.lock` next to
+  `se.toml`, which `sync` and `update` write and the repository commits. A module pins one of `ref`
+  and `version`.
 - `path`: optional relative directory inside the module; without it the whole module is used.
 - Module names use letters, digits, `.`, `_` and `-`. Other keys are errors.
-- The module named `se` is se itself; its pin is the se version the
-  [public check](AGENTS.md#public-safety) must run at.
+- The module named `se` is se itself; its pin (its `ref`, or the commit `se.lock` locks for its
+  `version`) is the se version the [public check](AGENTS.md#public-safety) must run at.
 
 A common repository declares only modules that are public. Work-only modules on private hosts are
 declared the same way, in a work repository that consumes the common ones; a common repository never
@@ -140,7 +150,10 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
 ```
 
 - `[paths]`: a local checkout per module name. If the directory exists, the module comes from it as
-  it is (working tree, any commit, no git step); if it is missing, the pin is used. Relative paths are
+  it is (working tree, any commit, no git step) and is never updated; `sync` and `status` report the
+  version its `se.toml` sets, and whether the module's `version` range admits it. A malformed
+  version, or none where the module pins a range, is an error naming that file. If the directory is
+  missing, the pin is used. Relative paths are
   relative to the file, `~` is expanded.
 - `[urls]`: prefix rewrites applied to `url` before any git step, for example a private mirror of a
   public host. The longest matching prefix wins.
@@ -162,15 +175,18 @@ uv run python <se>/scripts/se_modules.py path <name>
 ```
 
 - `sync`: a module with an existing local path is used from there; any other is cloned or fetched into
-  `.se/modules/<name>` and checked out (detached) at its pin. A clone with local changes is never
+  `.se/modules/<name>` and checked out (detached) at its pin. A `version` range without a lock entry
+  that admits it is resolved and locked first; a locked one stays where it is until `update`. A clone with local changes is never
   overwritten. Consuming repositories ignore `.se/`.
 - `status`: one line per module with its source (`local` or `pinned`), the directory it is used from,
   the pin and the drift: for a local path the commits ahead of and behind the pin, uncommitted
-  changes, or a pin the checkout does not have yet; for a pinned module whether the clone is at the pin.
+  changes, or a pin the checkout does not have yet; for a pinned module whether the clone is at the pin
+  and, for a `version` range, a newer matching tag the clone knows ("run update"). It never fetches.
 - `update`: fetches the module (through `.se/modules/<name>`, also when a local path is used),
   resolves the newest commit on its `main` (or `--to` a branch, tag or commit), rewrites only that
-  `ref` in `se.toml`, prints the commits added (and dropped, if the pin moves back) and syncs. It does
-  not commit; commit the new pin with the commit list.
+  `ref` in `se.toml`, prints the commits added (and dropped, if the pin moves back) and syncs. A
+  `version` range moves to its highest matching tag in `se.lock` instead (`--to` is refused there;
+  change the range). It does not commit; commit the new pin with the commit list.
 - `path`: prints the directory a module is used from (its `path` included), for tools that load it.
 - `--root <dir>` names the repository (default: the nearest ancestor with `se.toml`); `--local <file>`
   reads another machine-local file than `~/.se/local.toml`.

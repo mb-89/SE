@@ -179,6 +179,20 @@ def test_a_stale_se_refuses_naming_both_commits_and_the_remedy(repo: Path) -> No
     assert "passed" not in result.stdout
 
 
+def test_an_se_pinned_by_a_version_range_is_checked_at_its_locked_commit(repo: Path) -> None:
+    manifest = '[modules.se]\nurl = "https://example.com/se.git"\nversion = "^1.0"\n'
+    commit(repo, {"se.toml": manifest})
+    result = run_check(cwd=repo)
+    assert result.returncode == 2, result.stdout
+    assert "se.lock locks no commit for it; run scripts/se_modules.py sync" in result.stdout
+    pin = "0123456" + "0" * 33
+    commit(repo, {"se.lock": f'[modules.se]\nversion = "1.0.0"\nref = "{pin}"\n'})
+    result = run_check(cwd=repo)
+    assert result.returncode == 2 and "se.toml pins se at 0123456" in result.stdout
+    commit(repo, {"se.lock": f'[modules.se]\nversion = "1.0.0"\nref = "{SE_HEAD}"\n'})
+    assert run_check(cwd=repo).returncode == 0
+
+
 def test_file_hit_names_location_and_label_only(repo: Path) -> None:
     secret_path = "/" + "home/alice/project"
     commit(repo, {"notes.txt": "first\nsee " + secret_path + "\n"})
