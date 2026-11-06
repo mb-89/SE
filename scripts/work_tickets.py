@@ -737,6 +737,9 @@ def public_check_enabled(root: Path) -> bool:
 
 
 PUBLIC_CHECK = Path(__file__).resolve().parent / "public_check.py"
+PUBLIC_CHECK_OPT_OUT = (
+    "a project without a public check sets `public_check = false` in `[project]` of "
+)
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
@@ -762,7 +765,8 @@ def run_public_check(root: Path, previous: str) -> None:
         raise QueueError(
             f"Public check failed ({PUBLIC_CHECK.name}, required by project.public_check in "
             f"se.toml); nothing was pushed. Remove the hits on the branch or add a reasoned allow "
-            f"entry, then integrate again: {detail}"
+            f"entry, then integrate again: {detail}; "
+            f"{PUBLIC_CHECK_OPT_OUT}{root / 'se.toml'}"
         )
 
 
@@ -1589,7 +1593,8 @@ def push_gate(root: Path, branch: str) -> None:
         raise QueueError(
             f"Public check failed ({PUBLIC_CHECK.name}, required by project.public_check in "
             f"se.toml); nothing was pushed. Remove the hits from {branch} or add a reasoned allow "
-            f"entry, then run work_tickets.py push again: {detail}"
+            f"entry, then run work_tickets.py push again: {detail}; "
+            f"{PUBLIC_CHECK_OPT_OUT}{root / 'se.toml'}"
         )
 
 
