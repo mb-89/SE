@@ -1589,15 +1589,18 @@ def template_labels(value: str) -> list[str]:
     return [label.strip().strip("\"'") for label in value.strip("[]").split(",") if label.strip()]
 
 
+def published_ref(root: Path, ref: str) -> str:
+    """`origin/<ref>` where `ref` names a branch origin has, as `sync` fetched it; `ref` otherwise.
+
+    `sync` merges the remote branch and never moves a local copy, which is older the longer a
+    clone lives."""
+    found = run_git(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{ref}")
+    return f"origin/{ref}" if found.returncode == 0 else ref
+
+
 def integration_ref(root: Path) -> str:
     """`origin/<integration branch>` as `sync` fetched it; the local branch only without it."""
-    target = integration_branch(root)
-    remote = f"origin/{target}"
-    found = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{remote}^{{commit}}"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
-    )
-    return remote if found.returncode == 0 else target
+    return published_ref(root, integration_branch(root))
 
 
 def deleted_tests(root: Path, branch: str) -> list[str]:
@@ -3054,10 +3057,12 @@ COMPARE_RUNS = 2
 
 @contextmanager
 def ref_checkout(root: Path, ref: str):
-    """A temporary detached worktree of `ref`, removed afterwards."""
+    """A temporary detached worktree of `ref` as published (`published_ref`), removed afterwards;
+    yields its path and what it checked out, `<ref> (<published ref> at <commit>)`."""
+    resolved = published_ref(root, ref)
     with tempfile.TemporaryDirectory(prefix="se-compare-") as directory:
         path = Path(directory) / "ref"
-        added = run_git(root, "worktree", "add", "--detach", str(path), ref)
+        added = run_git(root, "worktree", "add", "--detach", str(path), resolved)
         if added.returncode != 0:
             detail = added.stderr.strip() or f"exit code {added.returncode}"
             raise QueueError(
@@ -3065,7 +3070,9 @@ def ref_checkout(root: Path, ref: str):
                 "this checkout has (fetch it first)"
             )
         try:
-            yield path
+            commit = run_git(path, "rev-parse", "--short", "HEAD").stdout.strip()
+            where = f"{resolved} at {commit}" if resolved != ref else commit
+            yield path, f"{ref} ({where})"
         finally:
             run_git(root, "worktree", "remove", "--force", str(path))
 
@@ -3086,7 +3093,13 @@ def compare_suites(root: Path, ref: str, runs: int = COMPARE_RUNS) -> str:
     `[tests]`, setup included. Prints per state its wall times, mean and Parts lines, then the
     difference of the means and the verdict, which it returns. Failed tests refuse; the budget
     does not apply: this is a measurement."""
-    with ref_checkout(root, ref) as other:
+    with ref_checkout(root, ref) as (other, described):
+        if se_table(other, "tests").get("command") is None:
+            raise QueueError(
+                f"suite --compare: {described} declares no [tests] command in its se.toml; it "
+                "predates [tests]: compare against a ref that declares it, a newer commit or the "
+                "branch as origin has it (git fetch origin first)"
+            )
         states = [("HEAD", root), (ref, other)]
         budgets = {label: suite_budget(checkout) for label, checkout in states}
         for label, checkout in states:
@@ -3104,7 +3117,7 @@ def compare_suites(root: Path, ref: str, runs: int = COMPARE_RUNS) -> str:
         for _ in range(runs):
             for label, checkout in states:
                 results[label].append(timed(label, checkout))
-    print(f"Suite compare: HEAD against {ref}, {runs} timed runs each, interleaved, "
+    print(f"Suite compare: HEAD against {described}, {runs} timed runs each, interleaved, "
           "after one untimed warm-up run of each")
     for label, _ in states:
         times = [result.seconds for result in results[label]]
@@ -3689,7 +3702,8 @@ def make_parser() -> argparse.ArgumentParser:
         f"(default {SLOWEST_TESTS})")
     suite_parser.add_argument(
         "--compare", metavar="REF",
-        help="instead of the budget check, time the suite here and on REF (a temporary worktree), "
+        help="instead of the budget check, time the suite here and on REF (a temporary worktree; "
+        "a branch as origin has it, the local branch only where origin has none), "
         "interleaved, after one untimed warm-up of each, and say whether this checkout is "
         "\"not slower\" or \"slower by X s\" than REF")
     suite_parser.add_argument(
