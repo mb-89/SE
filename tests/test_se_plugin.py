@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import sys
+import tomllib
 
 import pytest
 
@@ -90,7 +91,8 @@ def test_relative_links_resolve_in_each_layout(checkout, layout):
 def test_the_plugin_manifests_install_the_whole_checkout_and_bootstrap_it(checkout):
     plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     marketplace = json.loads((checkout / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
-    assert plugin["name"] == "se" and plugin["version"] == "1.0.0"  # se.toml [project] version
+    version = tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
+    assert plugin["name"] == "se" and plugin["version"] == version  # se.toml [project] version
     assert marketplace["name"] == "se"
     assert marketplace["plugins"] == [{"name": "se", "source": "./", "description": plugin["description"]}]
     hook = plugin["hooks"]["SessionStart"][0]["hooks"][0]
