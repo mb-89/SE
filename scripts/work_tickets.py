@@ -819,15 +819,54 @@ PUBLIC_CHECK_OPT_OUT = (
 )
 
 
+def sibling(name: str):
+    """The script `<name>.py` beside this one, loaded once."""
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
 def tracker_references(text: str) -> list[tuple[int, str]]:
     """The public check's tracker-reference test (one owner: public_check.tracker_references)."""
-    module = sys.modules.get("public_check")
-    if module is None:
-        spec = importlib.util.spec_from_file_location("public_check", PUBLIC_CHECK)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["public_check"] = module
-        spec.loader.exec_module(module)
-    return module.tracker_references(text)
+    return sibling("public_check").tracker_references(text)
+
+
+SUITE_VERDICT, PUBLIC_CHECK_VERDICT = "suite", "public-check"
+
+
+def pushed_tree_refusals(root: Path, commit: str) -> list[str]:
+    """Why `commit` may not reach the integration branch: each check (the public check unless
+    se.toml turns it off) needs a passing verdict recorded on exactly its tree (scripts/verdicts.py)."""
+    verdicts = sibling("verdicts")
+    try:
+        commit = verdicts.git(root, "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}")
+        refusals = [verdicts.refusal(
+            root, SUITE_VERDICT, commit,
+            f"check out {commit[:12]} clean and run work_tickets.py suite --worktree <checkout> "
+            "until it passes, then push again; there is no other way past",
+        )]
+        if public_check_enabled(root):
+            refusals.append(verdicts.refusal(
+                root, PUBLIC_CHECK_VERDICT, commit,
+                f"run public_check.py --repo <checkout> --rev {commit[:12]} until it passes "
+                "(work_tickets.py push runs it), then push again",
+            ))
+    except ValueError as error:
+        return [f"cannot read the verdicts of {commit}: {error}"]
+    return [refusal for refusal in refusals if refusal]
+
+
+def guard_pushed_tree(root: Path, commit: str) -> None:
+    refusals = pushed_tree_refusals(root, commit)
+    if refusals:
+        raise QueueError(
+            f"Refusing to push {commit} to the integration branch {integration_branch(root)}; "
+            "nothing was pushed:\n" + "\n".join(f"  {refusal}" for refusal in refusals)
+        )
 
 
 def run_public_check(root: Path, previous: str) -> None:
@@ -1970,6 +2009,7 @@ def release(root: Path, branch: str) -> str | None:
     trailer = config_value("commit_trailer", remote_repo(root), None)
     checked_git(root, "add", "--", *paths)
     checked_git(root, "commit", "-q", "-m", f"Release {tag}", *(("-m", trailer) if trailer else ()))
+    sibling("verdicts").carry(root, SUITE_VERDICT, "HEAD~1", "HEAD")
     if not by_workflow:
         checked_git(root, "tag", tag)
     print(f"Release: {tag} ({kind}: {', '.join(name for name, _ in packages)})")
@@ -1986,6 +2026,8 @@ def push(root: Path, branch: str | None = None) -> str:
         workflow_tags(tag)
         tag = None
     push_gate(root, branch)
+    if branch == integration_branch(root):
+        guard_pushed_tree(root, branch)
     git_push(root, ["-u", "origin", branch, *((f"refs/tags/{tag}",) if tag else ())])
     return branch
 
@@ -2837,6 +2879,25 @@ def time_suite(checkout: Path, command: list[str]) -> SuiteRun:
                     (result.stdout + result.stderr).strip(), parts)
 
 
+def clean_commit(root: Path) -> str | None:
+    """HEAD where the checkout holds exactly its tree (nothing changed or untracked), else None."""
+    head = run_git(root, "rev-parse", "--verify", "--quiet", "HEAD")
+    if head.returncode != 0 or changed_paths(root):
+        return None
+    return head.stdout.strip()
+
+
+def record_suite_verdict(root: Path, commit: str | None, passed: bool, seconds: float) -> None:
+    """Record the suite's verdict on `commit`'s tree, where the checkout still holds exactly it."""
+    if commit is None or clean_commit(root) != commit:
+        print("Suite verdict not recorded: the checkout differs from a commit (changed or untracked "
+              "files, or HEAD moved); commit, then run suite again to push the integration branch")
+        return
+    tree = sibling("verdicts").record(root, SUITE_VERDICT, commit, passed, seconds)
+    print(f"Suite verdict recorded: {'passed' if passed else 'failed'} on tree {tree[:12]} "
+          f"(commit {commit[:12]})")
+
+
 def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget.
 
@@ -2845,12 +2906,16 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     stdout (without progress lines, banners and durations), its time, one line per JUnit report
     (SuitePart.line) and its `slowest_count` slowest tests;
     warns above the target; refuses failed tests, and a passing suite above the limit with
-    SuiteOverLimitError."""
+    SuiteOverLimitError. Records its verdict on HEAD's tree where the checkout holds exactly it
+    (clean_commit); push reads it before the integration branch is pushed."""
     budget = suite_budget(root)
     if budget.setup:
         run_suite_setup(root, budget.setup)
+    commit = clean_commit(root)
     result = time_suite(root, with_durations(budget.command, slowest_count))
     seconds, output, parts = result.seconds, result.output, result.parts
+    passed = result.returncode == 0 and seconds <= budget.limit_seconds
+    record_suite_verdict(root, commit, passed, seconds)
     slowest = slowest_tests(output, parts, slowest_count)
     summary = result.refuse_failed(budget)
     listing = "\n".join(f"  {line}" for line in slowest) or NO_SLOWEST_TESTS
@@ -3529,9 +3594,18 @@ def make_parser() -> argparse.ArgumentParser:
 
     push_parser = subparsers.add_parser(
         "push", help="public check's push gate, then git push -u origin <branch>; retries a "
-        "transient refusal once a minute, ten attempts")
+        "transient refusal once a minute, ten attempts; the integration branch needs a passing "
+        "suite and public check recorded on the tree pushed")
     add_optional_worktree_argument(push_parser)
     push_parser.add_argument("branch", nargs="?", help="branch to push; default: the current one")
+
+    verified_parser = subparsers.add_parser(
+        "verified", help="the pre-push hook's guard: refuse a push of <commit> to <remote ref> "
+        "where the ref is the integration branch and no passing suite and public check are "
+        "recorded on its tree; push runs the same check")
+    add_optional_worktree_argument(verified_parser)
+    verified_parser.add_argument("remote_ref", help="the pushed remote ref, for example refs/heads/main")
+    verified_parser.add_argument("commit", help="the pushed commit")
 
     trailer_parser = subparsers.add_parser(
         "release-trailer", help="print the Release-kind trailer an integration merge of <branch> "
@@ -3710,6 +3784,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "push":
             push(root, args.branch)
+            return 0
+        if args.command == "verified":
+            if args.remote_ref == f"refs/heads/{integration_branch(root)}":
+                guard_pushed_tree(root, args.commit)
+                print(f"Verified: {args.commit[:12]} carries the verdicts the integration branch needs")
             return 0
         if args.command == "release-trailer":
             try:

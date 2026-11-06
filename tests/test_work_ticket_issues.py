@@ -1304,6 +1304,12 @@ def git_ok(*arguments: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def suite_passed(root: Path, result: str | None) -> str | None:
+    """A fake suite's pass on HEAD: its verdict recorded as run_suite records it; `result`."""
+    work_tickets.sibling("verdicts").record(root, "suite", "HEAD", True)
+    return result
+
+
 @pytest.fixture
 def main_checkout(tmp_path: Path) -> Path:
     origin, checkout = tmp_path / "origin.git", tmp_path / "main"
@@ -1564,7 +1570,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     )
     monkeypatch.setattr(
         work_tickets, "run_suite",
-        lambda root: (commands.append(("suite", "Complete suite")) or "214 passed"),
+        lambda root: (commands.append(("suite", "Complete suite")) or suite_passed(root, "214 passed")),
     )
     monkeypatch.setattr(
         work_tickets, "run_project_checks",
@@ -1700,7 +1706,7 @@ def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch)
     )
     monkeypatch.setattr(
         work_tickets, "run_suite",
-        lambda root: (commands.append(("suite", "Complete suite")) or "passed"),
+        lambda root: (commands.append(("suite", "Complete suite")) or suite_passed(root, "passed")),
     )
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
 
@@ -1741,7 +1747,7 @@ def test_integrate_failure_restores_pre_merge_main_and_escalates(
         if description == failed_step:
             raise work_tickets.QueueError(f"{description} failed: expected")
     monkeypatch.setattr(work_tickets, "run_project_command", fail)
-    monkeypatch.setattr(work_tickets, "run_suite", lambda root: fail(root, "suite", "Complete suite"))
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root: fail(root, "suite", "Complete suite") or suite_passed(root, None))
     def fail_checks(root, commands, temporary):
         if failed_step == "Project check":
             raise work_tickets.QueueError("Project check failed: expected")
@@ -1835,7 +1841,8 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
 
     monkeypatch.setattr(work_tickets, "run_project_command", run_project_command)
     monkeypatch.setattr(
-        work_tickets, "run_suite", lambda root: run_project_command(root, "suite", "Complete suite"))
+        work_tickets, "run_suite",
+        lambda root: suite_passed(root, run_project_command(root, "suite", "Complete suite")))
     def run_project_checks(root, check_commands, temporary):
         checks.append((check_commands, temporary))
         if check_fails:
@@ -2003,7 +2010,7 @@ def test_integrate_keeps_worktree_when_cleanup_refuses(main_checkout, monkeypatc
     monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: calls.append(args) or (json.dumps({"headRefName": "feature/blocked", "headRefOid": head}) if args[:2] == ["pr", "view"] else ""))
     monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args))
     monkeypatch.setattr(work_tickets, "run_project_command", lambda root, command, description: None)
-    monkeypatch.setattr(work_tickets, "run_suite", lambda root: "passed")
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root: suite_passed(root, "passed"))
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
 
     work_tickets.integrate(main_checkout, 8, None, None)
@@ -2023,7 +2030,7 @@ def integration_fakes(monkeypatch, head: str) -> list[list[str]]:
     monkeypatch.setattr(
         work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args) or "")
     monkeypatch.setattr(work_tickets, "run_project_command", lambda root, command, label: "1 passed")
-    monkeypatch.setattr(work_tickets, "run_suite", lambda root: "1 passed")
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root: suite_passed(root, "1 passed"))
     monkeypatch.setattr(work_tickets, "guard", lambda root, branch, report: [])
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 0)
