@@ -71,6 +71,9 @@ DELIVERY_TICKET = "delivery"
 FLEET_MARKER = "<!-- se:fleet -->"
 HANDLED_MARKER = "<!-- se:handled -->"
 FLEET_LABEL = "field-report"
+# A backlog issue, owned by the work model's "Issues": a far-out idea for the person, never work.
+BACKLOG_LABEL = "backlogged"
+PERSON_LABEL = "se-person"
 OUTSIDE_PAGE = 100
 DISCOVERY_DIRECTORY = Path(".se") / "work" / "probe"
 DISCOVERY_INDEX = "evidence.md"
@@ -1471,8 +1474,8 @@ def outside_query(repos: list[str]) -> str:
 
 
 def outside_issues(cutoffs: dict[str, int], data: dict[str, object]) -> list[dict[str, object]]:
-    """The open issues above each cut-off that carry neither the fleet marker nor its label and
-    have no handled comment; refused where an unread page could hold more."""
+    """The open issues above each cut-off that carry neither the fleet marker nor its label, are
+    not backlogged and have no handled comment; refused where an unread page could hold more."""
     found: list[dict[str, object]] = []
     for index, (repo, cutoff) in enumerate(cutoffs.items()):
         repository = (data.get("data") or {}).get(f"r{index}")
@@ -1488,7 +1491,7 @@ def outside_issues(cutoffs: dict[str, int], data: dict[str, object]) -> list[dic
         for issue in nodes:
             labels = {label["name"] for label in issue["labels"]["nodes"]}
             if (issue["number"] <= cutoff or FLEET_MARKER in (issue.get("body") or "")
-                    or FLEET_LABEL in labels
+                    or FLEET_LABEL in labels or BACKLOG_LABEL in labels
                     or any(HANDLED_MARKER in (comment.get("body") or "")
                            for comment in issue["comments"]["nodes"])):
                 continue
@@ -2534,6 +2537,8 @@ def ready_issues(
     active_ownership = set().union(*(issue_ownership(item) for item in active))
     ready: list[dict[str, object]] = []
     for candidate in candidates:
+        if BACKLOG_LABEL in issue_labels(candidate):
+            continue
         number = int(candidate["number"])
         detail = issue_api(root, repo, f"issues/{number}")
         blockers = int(
@@ -2912,6 +2917,37 @@ def validate_field_report_result(file: Path) -> None:
         raise QueueError(
             f"Field report {file.name}: header Result must be exactly complete or partial"
         )
+
+
+def backlog_file(root: Path, title: str, file: Path, repo: str | None) -> str:
+    """File a far-out idea as a backlog issue for the person, creating its label where missing."""
+    repo = resolve_repo(root, repo)
+    try:
+        body = file.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as error:
+        raise QueueError(f"Cannot read backlog body {file}: {error}") from error
+    if not title.strip() or not body:
+        raise QueueError("backlog file needs a title and a body")
+    run_gh(root, [
+        "label", "create", BACKLOG_LABEL, "--force", "--color", "c5def5",
+        "--description", "A far-out idea for the person; not work until SE re-files it",
+        *repo_arguments(repo),
+    ])
+    output = run_gh_with_body(root, [
+        "issue", "create", "--title", title.strip(), "--label", BACKLOG_LABEL,
+        "--label", PERSON_LABEL, *repo_arguments(repo),
+    ], fleet_marked(body + "\n"))
+    return output.strip().splitlines()[-1] if output.strip() else title
+
+
+def backlog_list(root: Path, search: str | None, repo: str | None) -> list[dict[str, object]]:
+    """The open backlog issues, those whose title or body matches `search` where given."""
+    query = ["--search", f"{search} in:title,body"] if search else []
+    return json.loads(run_gh(root, [
+        "issue", "list", "--state", "open", "--label", BACKLOG_LABEL,
+        "--json", "number,title,url", "--limit", "200", *query,
+        *repo_arguments(resolve_repo(root, repo)),
+    ]))
 
 
 def escalate(root: Path, number: int, file: Path, repo: str | None) -> None:
@@ -3991,6 +4027,22 @@ def make_parser() -> argparse.ArgumentParser:
     escalate_parser.add_argument("--file", required=True, type=Path, help="Markdown question")
     escalate_parser.add_argument("--repo", help=REPO_HELP)
 
+    backlog_parser = subparsers.add_parser(
+        "backlog", help="for SE: file or list backlog issues, far-out ideas labelled "
+        f"{BACKLOG_LABEL} and {PERSON_LABEL} that no role takes as work")
+    backlog_actions = backlog_parser.add_subparsers(dest="backlog_action", required=True)
+    backlog_file_parser = backlog_actions.add_parser(
+        "file", help=f"file one backlog issue with both labels, creating {BACKLOG_LABEL} where missing")
+    add_worktree_argument(backlog_file_parser)
+    backlog_file_parser.add_argument("--title", required=True, help="the idea in one line")
+    backlog_file_parser.add_argument("--body-file", required=True, type=Path, help="Markdown body")
+    backlog_file_parser.add_argument("--repo", help=REPO_HELP)
+    backlog_list_parser = backlog_actions.add_parser(
+        "list", help="list the open backlog issues, or those whose title or body matches --search")
+    add_worktree_argument(backlog_list_parser)
+    backlog_list_parser.add_argument("--search", help="text to find in title or body")
+    backlog_list_parser.add_argument("--repo", help=REPO_HELP)
+
     sync_parser = subparsers.add_parser("sync", help="merge the newest integration branch (se.toml project.integration_branch, "
              "default main) from origin, or locally without origin")
     add_worktree_argument(sync_parser)
@@ -4141,6 +4193,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "review-note":
             review_note(root, args.note, args.disposition, args.backlog_ref)
             print(f"Reviewed note {args.note}")
+            return 0
+        if args.command == "backlog" and args.backlog_action == "file":
+            print(f"Filed backlog issue {backlog_file(root, args.title, args.body_file, args.repo)}")
+            return 0
+        if args.command == "backlog":
+            found = backlog_list(root, args.search, args.repo)
+            if not found:
+                print("No backlog issues.")
+            else:
+                print(f"Backlog issues ({len(found)}):")
+                for issue in found:
+                    print(f"  #{issue['number']} {issue['title']} {issue['url']}")
             return 0
         if args.command == "intake" and args.outside:
             if args.repo or args.discovery or args.probe_root:
