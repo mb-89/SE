@@ -45,8 +45,8 @@ se's notes as chapters and restates none of them. The [obs](https://github.com/m
 uv run python scripts/build_docs.py --destination <file outside the repository>.html
 ```
 
-Any obs warning fails the build, so a broken link or a missing note fails it; the long-paragraph
-lint allows the 30 lines `scripts/build_docs.py` sets. The suite runs the build (`tests/test_docs.py`),
+Any obs warning fails the build, so a broken link, a missing note or a paragraph longer than obs's
+default limit fails it. The suite runs the build (`tests/test_docs.py`),
 and the workflow `.github/workflows/docs.yml` builds and publishes it to GitHub Pages on each push
 to `se`; a failed build publishes nothing, so the previous artifact stays.
 
