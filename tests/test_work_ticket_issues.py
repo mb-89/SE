@@ -1291,9 +1291,10 @@ def test_ready_filters_blocked_existing_and_clashing_work(worktree, monkeypatch)
         {"number": 2, "title": "feature/two", "body": "## File ownership\n\ntwo.py\n"},
         {"number": 3, "title": "feature/three", "body": "## File ownership\n\nshared.py\n"},
         {"number": 4, "title": "feature/four", "body": "## File ownership\n\nshared.py\n"},
+        {"number": 6, "title": "feature/six", "body": "", "labels": [{"name": "backlogged"}]},
     ]
     active = [{"number": 5, "title": "active", "body": "## File ownership\n\nshared.py\n"}]
-    details = {1: 0, 2: 1, 3: 0, 4: 0}
+    details = {1: 0, 2: 1, 3: 0, 4: 0, 6: 0}
     monkeypatch.setattr(
         work_tickets, "run_gh",
         lambda root, args: json.dumps(
@@ -2888,6 +2889,7 @@ def test_intake_outside_lists_each_unmarked_unhandled_issue_once_from_one_query(
     answers = [outside_answer(
         [outside_issue(14), outside_issue(13, f"{work_tickets.FLEET_MARKER}\nA work issue."),
          outside_issue(12, labels=["field-report"]),
+         outside_issue(15, labels=["backlogged", "se-person"]),
          outside_issue(11, comments=["seen", f"{work_tickets.HANDLED_MARKER}\nRouted."]),
          outside_issue(10)],
         [outside_issue(1)],
@@ -2929,3 +2931,29 @@ def test_intake_outside_refuses_without_cut_offs_or_with_issues_beyond_one_page(
     assert run(worktree, "intake", "--outside") == 1
     assert "git.example/owner/repo has more than 100 open issues above its cut-off" in (
         capsys.readouterr().err)
+
+
+def test_backlog_files_with_both_labels_and_lists_by_title_and_body(worktree, gh, capsys):
+    idea = worktree / "idea.md"
+    idea.write_text("A far-out idea.\n", encoding="utf-8")
+    assert run(worktree, "backlog", "file", "--title", "Idea: voice input", "--body-file", str(idea)) == 0
+    assert capsys.readouterr().out == "Filed backlog issue https://git.example/owner/repo/issues/8\n"
+    label, create = gh.calls[-2], gh.calls[-1]
+    assert label[:3] == ["label", "create", "backlogged"] and "--force" in label
+    assert create[:4] == ["issue", "create", "--title", "Idea: voice input"]
+    assert [create[i + 1] for i, a in enumerate(create) if a == "--label"] == ["backlogged", "se-person"]
+    assert gh.bodies[-1] == f"{work_tickets.FLEET_MARKER}\nA far-out idea.\n"
+
+    gh.open_reports = [{"number": 8, "title": "Idea: voice input", "url": "https://git.example/owner/repo/issues/8"}]
+    assert run(worktree, "backlog", "list", "--search", "voice") == 0
+    listed = gh.calls[-1]
+    assert listed[:2] == ["issue", "list"] and listed[listed.index("--label") + 1] == "backlogged"
+    assert listed[listed.index("--search") + 1] == "voice in:title,body"
+    assert capsys.readouterr().out == (
+        "Backlog issues (1):\n  #8 Idea: voice input https://git.example/owner/repo/issues/8\n")
+
+    gh.open_reports = []
+    assert run(worktree, "backlog", "list") == 0
+    assert "--search" not in gh.calls[-1] and capsys.readouterr().out == "No backlog issues.\n"
+    idea.write_text("", encoding="utf-8")
+    assert run(worktree, "backlog", "file", "--title", "Empty", "--body-file", str(idea)) == 1
