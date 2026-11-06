@@ -21,6 +21,10 @@ in its se.toml) is refused when this se is not at that `ref`, or when the versio
 se.toml sets lies outside that `version` range, so a stale clone never gives another verdict
 silently.
 
+Allow entries are reported by kind: used ones are counted in the verdict; an unused one is a hit
+where the private deny list is loaded, and without it a warning that it is unverifiable, as it may
+cover a private-term hit the run cannot see.
+
 Exit codes: 0 passed, 1 hits (or unused allow entries in a full check), 2 usage or setup error.
 """
 
@@ -213,6 +217,7 @@ class Report:
     warnings: list[str] = field(default_factory=list)
     files: int = 0
     commits: int = 0
+    allow_used: int = 0
 
 
 def load_private_terms() -> list[Pattern] | None:
@@ -631,17 +636,25 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
 
 
 def report_unused(allow: list[AllowEntry], full: bool, report: Report) -> None:
-    """Every unused entry, by line and form: a hit where the check is full, else a warning (it
-    may cover a private-term hit this run cannot see). A commit entry counts only where its commit
-    was gated, as a gate's hit is not seen by every check."""
+    """Each entry this run could judge, by kind: used (counted in the verdict); unused, a hit
+    where the check is full; unverifiable, a warning without the private deny list, as the entry
+    may cover a private-term hit this run cannot see. A commit entry is judged only where its
+    commit was gated, as a gate's hit is not seen by every check."""
     for entry in allow:
-        if entry.used or (entry.commit is not None and not entry.seen):
+        if entry.used:
+            report.allow_used += 1
+        elif entry.commit is not None and not entry.seen:
             continue
-        form = f"'{entry.form}' entry; remove it or correct it in place"
-        if full:
-            report.hits.append(Hit(f"{ALLOW_FILE}:{entry.line}", "unused-allow-entry", f" ({form})"))
+        elif full:
+            report.hits.append(Hit(f"{ALLOW_FILE}:{entry.line}", "unused-allow-entry",
+                                   f" ('{entry.form}' entry; unused: remove it or correct it in "
+                                   "place)"))
         else:
-            report.warnings.append(f"unused allow entry {ALLOW_FILE}:{entry.line} ({form})")
+            report.warnings.append(
+                f"allow entry {ALLOW_FILE}:{entry.line} ('{entry.form}' entry) is unverifiable "
+                f"without the private deny list: run with it ({TERMS_DEFAULT} or {TERMS_ENV}) "
+                "to check whether it is still used"
+            )
 
 
 def shallow_boundary(root: Path) -> set[str]:
@@ -683,7 +696,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"public-check: warning: {warning}")
     for hit in report.hits:
         print(hit)
-    scope = f"{report.files} files, {report.commits} commits, {version}"
+    used = f"{report.allow_used} allow entries used, " if report.allow_used else ""
+    scope = f"{report.files} files, {report.commits} commits, {used}{version}"
     if report.hits:
         remedy = "fix each as its line says"
         if any(hit.label not in OWN_REMEDY for hit in report.hits):
