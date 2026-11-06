@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "1.0.0"
+version = "1.0.1"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # The branch the integrator writes; the new process lives on `se` while the old one lives on `main`.
