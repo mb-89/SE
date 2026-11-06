@@ -31,17 +31,42 @@ def obs_dir() -> Path:
         result = subprocess.run([sys.executable, str(MODULES), command, "obs"], cwd=ROOT,
                                 capture_output=True, text=True)
         if result.returncode:
-            print(f"build_docs: se_modules.py {command} obs failed:\n{result.stderr}{result.stdout}", file=sys.stderr)
+            print(f"se_modules.py {command} obs failed:\n{result.stderr}{result.stdout}", file=sys.stderr)
             sys.exit(2)
     return Path(result.stdout.strip().splitlines()[-1])
 
 
 def child_environment() -> dict[str, str]:
-    """This environment without uv's deprecated UV_NATIVE_TLS, whose notice would read as a warning."""
+    """This environment without uv's deprecated UV_NATIVE_TLS and the caller's VIRTUAL_ENV, whose notices
+    would read as warnings (obs runs in its own project's environment)."""
     environment = dict(os.environ)
+    environment.pop("VIRTUAL_ENV", None)
     if environment.pop("UV_NATIVE_TLS", None):
         environment.setdefault("UV_SYSTEM_CERTS", "1")
     return environment
+
+
+def obs_document(obs: Path, arguments: list[str], tool: str) -> int:
+    """Run obs-document with ``arguments`` through the html adapter; 1 on a failure or any warning.
+
+    Each warning is printed to stderr under ``tool``'s name; scripts/deck.py shares this run.
+    """
+    result = subprocess.run(
+        ["uv", "run", "--quiet", "--project", str(obs), "obs-document", "--adapter", "html",
+         "--adapter-config", str(obs / "adapters.json"), *arguments],
+        cwd=ROOT, capture_output=True, text=True, env=child_environment(),
+    )
+    output = result.stdout + result.stderr
+    warnings = [line for line in output.splitlines() if "warning" in line.casefold()]
+    for line in warnings:
+        print(line, file=sys.stderr)
+    if result.returncode:
+        print(f"{tool}: obs-document failed with exit code {result.returncode}:\n{output}", file=sys.stderr)
+        return 1
+    if warnings:
+        print(f"{tool}: {len(warnings)} obs warning(s); fix the notes named above", file=sys.stderr)
+        return 1
+    return 0
 
 
 def build(source: Path, destination: Path) -> int:
@@ -49,24 +74,11 @@ def build(source: Path, destination: Path) -> int:
     with tempfile.TemporaryDirectory() as scratch:
         config = Path(scratch) / "obs-config.json"
         config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8")
-        result = subprocess.run(
-            ["uv", "run", "--quiet", "--project", str(obs), "obs-document", "--config", str(config),
-             "--source", str(source.resolve()), "--adapter", "html", "--adapter-config", str(obs / "adapters.json"),
-             "--destination", str(destination.resolve())],
-            cwd=ROOT, capture_output=True, text=True, env=child_environment(),
-        )
-    output = result.stdout + result.stderr
-    warnings = [line for line in output.splitlines() if "warning" in line.casefold()]
-    for line in warnings:
-        print(line, file=sys.stderr)
-    if result.returncode:
-        print(f"build_docs: obs-document failed with exit code {result.returncode}:\n{output}", file=sys.stderr)
-        return 1
-    if warnings:
-        print(f"build_docs: {len(warnings)} obs warning(s); fix the notes named above", file=sys.stderr)
-        return 1
-    print(f"build_docs: built {destination}")
-    return 0
+        code = obs_document(obs, ["--config", str(config), "--source", str(source.resolve()),
+                                  "--destination", str(destination.resolve())], "build_docs")
+    if code == 0:
+        print(f"build_docs: built {destination}")
+    return code
 
 
 def main(argv: list[str] | None = None) -> int:
