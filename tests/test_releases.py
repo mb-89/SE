@@ -243,3 +243,13 @@ def test_another_release_setting_is_an_error_naming_the_file(checkout, capsys):
     assert push(checkout) == 1
     assert (f"project.release in {checkout / 'se.toml'} is 'manual'; set it to \"workflow\" or remove it"
             in capsys.readouterr().err)
+
+
+def test_a_pushed_merge_without_a_kind_is_never_read_again(checkout, capsys):
+    """Integrations pushed before the trailer existed are behind origin: push reads none of them."""
+    integrate(checkout, "fix/old-20261106", trailer="")
+    git(checkout, "push", "-q", "origin", "main")
+    integrate(checkout, "feature/new-20261106")
+    assert push(checkout) == 0
+    assert released(checkout) == ("1.3.0", "v1.3.0")
+    assert "Release: v1.3.0 (minor: feature/new-20261106)" in capsys.readouterr().out
