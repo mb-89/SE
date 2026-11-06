@@ -332,8 +332,9 @@ def test_one_skill_owns_how_a_decision_is_presented():
 
 def test_the_decision_skill_owns_the_shape_of_the_decision_note():
     text = normalized(DECISION)
-    for rule in ("## The decision note", "One Obsidian Markdown note per decision", "`obs.bless: pending`",
-                 "one to three sentences", "The `pugh` fence", "The datum is the strongest rival",
+    for rule in ("## The decision note", "One Obsidian Markdown note per decision", "`obs: {bless: pending}`",
+                 "**`## Current situation`:**", "**`## The problem`:**", "Nothing else goes before the fence",
+                 "The `pugh` fence", "The datum is the strongest rival",
                  '"Keep what we have" is an option', "the letters of those it fails",
                  "## Tasks for the person", "never an option in a decision", '"Task 1 of 2"'):
         assert rule in text, rule
@@ -651,7 +652,7 @@ def test_the_worked_example_is_a_chapter_of_the_documentation_obs_builds():
 
 def test_the_worked_example_answers_every_checklist_item_in_its_fence():
     note = (DECISION.parent / "references" / "decision-deck.md").read_text(encoding="utf-8")
-    assert note.startswith("---\nobs.bless: pending\n---\n")
+    assert note.startswith("---\nobs: {bless: pending}\n---\n")
     fence = note.split("```pugh\n", 1)[1].split("```", 1)[0]
     assert re.findall(r"^  - item: (.+)$", fence, re.MULTILINE) == list(CHECKLIST)
     assert "datum: {prefer: [chat]}" in fence and "(keep what we have)" in fence
