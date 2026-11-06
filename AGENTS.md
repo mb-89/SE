@@ -64,6 +64,8 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   `.githooks`: pre-commit checks the staged content, commit-msg the message and identity, pre-push
   every pushed commit. A repository that uses se as a module runs `scripts/setup.ps1 -Repo <path>`
   (or `scripts/setup.sh <path>`) and so runs se's check without copying it.
+- Pushes of the integration branch: pre-push and `work_tickets.py push` also need the verdicts the
+  [work model](src/skills/work-model/SKILL.md#integration-branch) names.
 - By hand: `uv run python scripts/public_check.py --repo <path>` (`--help` for the options).
 
 Never bypass the hooks with `--no-verify`: remove the content or add a reasoned allow entry.
