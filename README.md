@@ -82,10 +82,11 @@ the same way for a worker's before-and-after times. `setup`, optional and of the
 the test dependencies (packages, browsers) and runs first; the gate prints its time and its last
 lines apart, and that time does not count against the budget. A failing setup stops the run before
 the suite, naming the command and its output. The gate measures the suite's wall time and prints it
-with the last lines of the suite's own output and the ten slowest tests. A runner of any kind may write JUnit XML reports into the directory
-named by the environment variable `SE_TEST_REPORTS`, one file per part; the gate then lists the ten
+with the last lines of the suite's own output and the ten slowest tests (`suite --slowest N`
+lists N). A runner of any kind may write JUnit XML reports into the directory
+named by the environment variable `SE_TEST_REPORTS`, one file per part; the gate then lists the
 slowest tests across all reports, each with its part (the file's name). Without reports it reads
-pytest's lines (it adds `--durations=10` to a pytest command), and where neither names a test it
+pytest's lines (it adds `--durations=<N>` to a pytest command), and where neither names a test it
 says so and names that remedy. Above `target_seconds` (default
 60) it warns; above `limit_seconds` (default 120) it refuses the integration, naming the test
 result (passed, with its counts), the time, the limit, the slowest tests and the remedy: rerun once on
