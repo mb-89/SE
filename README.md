@@ -284,7 +284,8 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
   public host. The longest matching prefix wins.
 
 Work queue tracker, worktree and mirror settings are documented in the
-[work model](src/skills/work-model/SKILL.md#what-the-project-provides).
+[work model](src/skills/work-model/SKILL.md#what-the-project-provides), the `[outside]` table in its
+[Outside issues](src/skills/work-model/SKILL.md#outside-issues).
 
 ### Commands
 
