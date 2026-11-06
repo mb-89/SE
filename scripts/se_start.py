@@ -28,6 +28,7 @@ CACHE_ENV = "SE_START_CACHE"
 MAX_AGE = 3600  # seconds a cached update check stays fresh
 RUNNING_FOR = 120  # seconds a started background check counts as running
 BUDGET = 1.0  # seconds status may take: it is interactive
+PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
 CHECK_REMEDY = "run it by hand to see the cause: uv run python {se}/scripts/se_start.py check"
 
 
@@ -139,18 +140,45 @@ def read_local(se_root: Path, root: Path | None, local_config: Path | None) -> L
     """SE's version, docs and counts, and each module's version in use; never the network."""
     errors = []
     se_version = se_modules.parse_version(_project(se_root).get("version"))
-    origin = _origin(se_root)
-    items = [Item("SE", "se", se_version, origin,
-                  note="" if origin else "not a git checkout (an installed plugin copy), not checked")]
-    if root is not None and (root / se_modules.MANIFEST).is_file():
+    try:
+        local = se_modules.load_local(local_config or se_modules.default_local_config())
+    except ModuleError as error:
+        errors.append(f"machine-local configuration: {error}")
+        local = se_modules.LocalConfig(paths={}, urls={})
+    items = [_se_item(se_root, se_version, local)]
+    if root is not None and (root / se_modules.MANIFEST).is_file() and not errors:
         try:
-            local = se_modules.load_local(local_config or se_modules.default_local_config())
             locked = se_modules.read_lock(root)
             for module in se_modules.load_manifest(root):
                 items.append(_module_item(root, module, local, locked))
         except ModuleError as error:
             errors.append(f"modules of {root / se_modules.MANIFEST}: {error}")
     return Local(se_version, str(_project(se_root).get("docs_url", "")), counts(se_root), items, errors)
+
+
+def _plugin_repository(se_root: Path) -> str | None:
+    """The repository an installed copy names in its plugin manifest, where its versions are tagged."""
+    try:
+        data = json.loads((se_root / PLUGIN_MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    repository = data.get("repository") if isinstance(data, dict) else None
+    return repository if isinstance(repository, str) and repository else None
+
+
+def _se_item(se_root: Path, version: Version | None, local) -> Item:
+    """SE itself: a local path of `se` in the machine-local configuration (never touched), a git
+    checkout (a development checkout or a cloud setup-script clone), or an installed copy (a Claude
+    Code plugin or a Copilot copy), checked against the repository its plugin manifest names."""
+    path = local.paths.get("se")
+    if path is not None and path == se_root.resolve():
+        return Item("SE", "local", version, None, note=f"local path {se_root}")
+    origin = _origin(se_root)
+    if origin:
+        return Item("SE", "se", version, origin)
+    repository = _plugin_repository(se_root)
+    return Item("SE", "se", version, repository, note="an installed copy" if repository else
+                f"an installed copy without a repository in {PLUGIN_MANIFEST}, not checked")
 
 
 def _module_item(root: Path, module, local, locked) -> Item:
@@ -351,14 +379,24 @@ def _spawn_detached(argv: list[str]) -> None:
                      stderr=subprocess.DEVNULL, close_fds=True, **kwargs)
 
 
+def _claude(args: list[str]) -> subprocess.CompletedProcess:
+    """Claude Code's command line; a machine without it answers as a failed command."""
+    try:
+        return subprocess.run(["claude", *args], capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", stdin=subprocess.DEVNULL, timeout=600)
+    except (OSError, subprocess.SubprocessError) as error:
+        return subprocess.CompletedProcess(["claude", *args], 127, "", str(error))
+
+
 @dataclass(frozen=True)
 class World:
     """The outside world status, check and refresh reach: the clock, the remotes, the start of a
-    background check. Tests replace each."""
+    background check, Claude Code's command line. Tests replace each."""
 
     clock: Callable[[], float] = time.time
     remote: Callable[[str], list[Version]] = git_tags
     spawn: Callable[[list[str]], None] = _spawn_detached
+    claude: Callable[[list[str]], subprocess.CompletedProcess] = _claude
 
 
 def status(se_root: Path, root: Path | None, local_config: Path | None, cache_path: Path,
@@ -422,6 +460,16 @@ def _expect_version(path: Path, version: Version, what: str) -> None:
         raise RefreshError(f"{what}: v{_v(version)} sets version {_v(found)} in its se.toml")
 
 
+def _starts(se: Path, root: Path | None, version: Version) -> None:
+    """SE at `se` starts: its `status` runs there and greets with `version`."""
+    with tempfile.TemporaryDirectory(prefix="se-start-") as scratch:
+        argv = [sys.executable, str(se / "scripts" / "se_start.py"), "--cache", str(Path(scratch) / "cache.json")]
+        argv += (["--root", str(root)] if root else []) + ["status", "--offline"]
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    if result.returncode != 0 or f"SE {_v(version)} started" not in result.stdout:
+        raise RefreshError(f"SE v{_v(version)} does not start: {(result.stderr or result.stdout).strip()[-300:]}")
+
+
 def refresh_se(se_root: Path, root: Path | None, version: Version) -> str:
     """Bring the se checkout to tag v<version>, after the new version started in a trial worktree."""
     tag = f"v{_v(version)}"
@@ -432,11 +480,7 @@ def refresh_se(se_root: Path, root: Path | None, version: Version) -> str:
 
     def starts(trial: Path) -> None:
         _expect_version(trial, version, f"SE {tag}")
-        argv = [sys.executable, str(trial / "scripts" / "se_start.py"), "--cache", str(trial / "cache.json")]
-        argv += (["--root", str(root)] if root else []) + ["status", "--offline"]
-        result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
-        if result.returncode != 0 or f"SE {_v(version)} started" not in result.stdout:
-            raise RefreshError(f"SE {tag} does not start: {(result.stderr or result.stdout).strip()[-300:]}")
+        _starts(trial, root, version)
 
     _trial(se_root, sha, starts)
     old = _git(se_root, "rev-parse", "--short", "HEAD")
@@ -447,6 +491,81 @@ def refresh_se(se_root: Path, root: Path | None, version: Version) -> str:
         raise RefreshError(f"the se checkout {se_root} has commits on {branch} that {tag} lacks; "
                            "it is a development checkout, so refresh leaves it")
     return f"SE: {old} -> {tag}"
+
+
+def plugin_registry() -> Path:
+    """Claude Code's record of the installed plugins, which `claude plugin update` rewrites."""
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser() / "plugins" / "installed_plugins.json"
+
+
+def _installed(world: World) -> list[dict]:
+    result = world.claude(["plugin", "list", "--json"])
+    if result.returncode != 0:
+        return []
+    try:
+        entries = json.loads(result.stdout)
+    except ValueError:
+        return []
+    return [e for e in entries if isinstance(e, dict) and isinstance(e.get("installPath"), str)] \
+        if isinstance(entries, list) else []
+
+
+def installed_plugin(se_root: Path, world: World) -> dict | None:
+    """The Claude Code plugin installed at `se_root`, as `claude plugin list --json` names it."""
+    here = se_root.resolve()
+    return next((e for e in _installed(world) if Path(e["installPath"]).resolve() == here), None)
+
+
+def _tail(result: subprocess.CompletedProcess) -> str:
+    return (result.stderr or result.stdout).strip()[-300:] or f"exit code {result.returncode}"
+
+
+def refresh_plugin(se_root: Path, root: Path | None, entry: dict, old: Version, due: Version,
+                   world: World) -> str:
+    """Update the installed plugin through Claude Code, check that the new install starts, and put
+    the old install back in Claude Code's record when it does not."""
+    plugin_id = entry["id"]
+    registry = plugin_registry()
+    try:
+        saved = registry.read_bytes()
+    except OSError:
+        saved = None
+    scope = ["--scope", entry["scope"]] if entry.get("scope") in ("user", "project", "local", "managed") else []
+    result = world.claude(["plugin", "update", plugin_id, *scope, "--json"])
+    if result.returncode != 0:
+        raise RefreshError(f"claude plugin update {plugin_id} failed: {_tail(result)}")
+    new = next((e for e in _installed(world) if e.get("id") == plugin_id and e.get("scope") == entry.get("scope")),
+               None)
+    new_root = Path(new["installPath"]) if new else None
+    try:
+        if new_root is None:
+            raise RefreshError(f"claude plugin list no longer names {plugin_id}")
+        found = se_modules.checkout_version(new_root) if (new_root / se_modules.MANIFEST).is_file() else None
+        if found is None or found < due or found[0] != old[0]:
+            raise RefreshError(f"claude plugin update {plugin_id} installed version {_v(found)}, "
+                               f"not v{_v(due)} or newer within major {old[0]}")
+        _starts(new_root, root, found)
+    except (RefreshError, ModuleError) as error:
+        if saved is None:
+            raise RefreshError(f"{error}; the old install could not be put back: Claude Code's record "
+                               f"{registry} was not readable before the update") from error
+        if new_root is not None and new_root.resolve() == se_root.resolve():
+            raise
+        if not (se_root / se_modules.MANIFEST).is_file():
+            raise RefreshError(f"{error}; the old install at {se_root} is gone, so it cannot be put back: "
+                               f"reinstall with claude plugin install {plugin_id}") from error
+        registry.write_bytes(saved)
+        raise RefreshError(f"{error}; the old install at {se_root} is back in {registry}") from error
+    return f"SE: {_v(old)} -> {_v(found)} (claude plugin update {plugin_id}; restart Claude Code to load it)"
+
+
+def refresh_copy(se_root: Path, item: Item, due: Version) -> str:
+    """A copy that is neither a git checkout nor a Claude Code plugin: a Copilot copy, which only
+    VS Code updates."""
+    return (f"SE: {_v(item.version)} -> {_v(due)} is due, but {se_root} is a copy that is neither a git "
+            "checkout nor a Claude Code plugin (a GitHub Copilot copy), which only VS Code can update "
+            "and it has no command line for it; run in VS Code: Chat: Install Plugin from Source "
+            f"with {item.url}")
 
 
 def refresh_module(root: Path, local_config: Path | None, name: str, version: Version) -> str:
@@ -492,8 +611,12 @@ def refresh(se_root: Path, root: Path | None, local_config: Path | None, cache_p
         if not state.due:
             continue
         try:
-            if item.kind == "se":
+            if item.kind == "se" and (se_root / ".git").exists():
                 lines.append(refresh_se(se_root, root, state.due))
+            elif item.kind == "se" and (entry := installed_plugin(se_root, world)):
+                lines.append(refresh_plugin(se_root, root, entry, item.version, state.due, world))
+            elif item.kind == "se":
+                lines.append(refresh_copy(se_root, item, state.due))
             else:
                 lines.append(refresh_module(root, local_config, item.name, state.due))
         except (RefreshError, ModuleError, OSError, subprocess.SubprocessError) as error:
