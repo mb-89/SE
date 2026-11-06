@@ -2933,16 +2933,24 @@ def test_intake_outside_refuses_without_cut_offs_or_with_issues_beyond_one_page(
         capsys.readouterr().err)
 
 
-def test_backlog_files_with_both_labels_and_lists_by_title_and_body(worktree, gh, capsys):
+def test_backlog_files_with_both_labels_and_lists_by_title_and_body(worktree, gh, monkeypatch, capsys):
     idea = worktree / "idea.md"
     idea.write_text("A far-out idea.\n", encoding="utf-8")
     assert run(worktree, "backlog", "file", "--title", "Idea: voice input", "--body-file", str(idea)) == 0
     assert capsys.readouterr().out == "Filed backlog issue https://git.example/owner/repo/issues/8\n"
-    label, create = gh.calls[-2], gh.calls[-1]
-    assert label[:3] == ["label", "create", "backlogged"] and "--force" in label
+    listed_labels, label, create = gh.calls[-3:]
+    assert listed_labels[:2] == ["label", "list"] and label[:3] == ["label", "create", "backlogged"]
     assert create[:4] == ["issue", "create", "--title", "Idea: voice input"]
     assert [create[i + 1] for i, a in enumerate(create) if a == "--label"] == ["backlogged", "se-person"]
     assert gh.bodies[-1] == f"{work_tickets.FLEET_MARKER}\nA far-out idea.\n"
+
+    labelled = FakeGh()
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: (
+        '[{"name": "backlogged"}]' if arguments[:2] == ["label", "list"] else labelled(root, arguments)))
+    assert run(worktree, "backlog", "file", "--title", "Idea: two", "--body-file", str(idea)) == 0
+    assert [call[:2] for call in labelled.calls] == [["issue", "create"]]
+    capsys.readouterr()
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
 
     gh.open_reports = [{"number": 8, "title": "Idea: voice input", "url": "https://git.example/owner/repo/issues/8"}]
     assert run(worktree, "backlog", "list", "--search", "voice") == 0
