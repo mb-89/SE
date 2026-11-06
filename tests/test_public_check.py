@@ -514,6 +514,11 @@ def test_se_itself_passes() -> None:
     ("Fixes https://github.com/o/r/" + "issues/8", ["https://github.com/o/r/issues/8"]),
     ("Port the C# client; #include <stdio.h>; issue #x", []),
     ("Escape &" + "#39; and color #fff", []),
+    ("Integrate fix/breaking-release-without-" + "gh-20261106: release kind", []),
+    ("Branch issue_" + "gh-3 and fix/" + "gh-4", []),
+    ("GH" + "-12", ["GH-12"]),
+    ("gh" + "-12", ["gh-12"]),
+    ("(GH" + "-12)", ["GH-12"]),
 ])
 def test_tracker_references(text: str, found: list[str]) -> None:
     assert [match for _, match in public_check.tracker_references(text)] == found

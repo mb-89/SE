@@ -122,7 +122,7 @@ TRACKER_RULE = (
 )
 TRACKER_REFERENCE = re.compile(
     r"(?<![\w&#])#\d+\b"  # #593, not C#5 or the HTML entity &#39;
-    r"|(?i:\bGH-\d+\b)"
+    r"|(?i:(?<![\w/-])GH-\d+\b)"  # GH-12, not the branch fix/…-without-gh-20261106
     r"|(?i:\bhttps?://[^\s/]+/[^\s/]+/[^\s/]+/(?:issues|pulls?)/\d+)"
 )
 REWORD_BEFORE_COMMIT = "reword the message before committing"
@@ -133,8 +133,9 @@ REWORD_BEFORE_PUSH = (
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
-    """(line, reference) for every tracker reference in a commit message: `#<digits>`,
-    `GH-<digits>`, an issue or pull request URL. The one test both commit gates apply."""
+    """(line, reference) for every tracker reference in a commit message: `#<digits>`, a
+    standalone `GH-<digits>` (not inside a branch name), an issue or pull request URL. The one
+    test both commit gates apply."""
     return [
         (text.count("\n", 0, match.start()) + 1, match.group())
         for match in TRACKER_REFERENCE.finditer(text)
