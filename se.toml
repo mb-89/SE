@@ -5,10 +5,13 @@ integration_branch = "se"
 identity = "mb <mb>"
 # Every push to the integration branch runs se's public check first (README "Project settings").
 public_check = true
+# Where the documentation built from docs.md is published (README "Documentation").
+docs_url = "https://mb-89.github.io/SE/"
 authored_content = [
     "AGENTS.md",
     "README.md",
     ".github/**/*.md",
+    "docs.md",
 ]
 
 # The complete suite and its time budget; work_tickets.py integrate holds every integration to it
@@ -17,3 +20,8 @@ authored_content = [
 command = ["uv", "run", "pytest", "-q"]
 target_seconds = 60
 limit_seconds = 120
+
+# obs builds the documentation (README "Documentation").
+[modules.obs]
+url = "https://github.com/mb-89/obs.git"
+ref = "021c9e0b5c9416fd9eac97185be474abeca7b7e7"
