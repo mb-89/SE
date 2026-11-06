@@ -148,6 +148,11 @@ the checkout's git config (`user.name`, `user.email`), so every later commit and
 carries it, unless the machine sets `public_identity`, which wins. Unset, sync leaves the checkout's
 identity as it is.
 
+`work_tickets.py push` and its release commit with that identity explicitly, whatever the
+checkout's configuration or environment says, and refuse without one. The
+[public check](AGENTS.md#public-safety) refuses a commit not yet pushed whose author or committer
+differs from it.
+
 `integration_branch` is owned by the
 [work model](src/skills/work-model/SKILL.md#integration-branch).
 

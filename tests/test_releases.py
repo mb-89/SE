@@ -25,9 +25,12 @@ def git(root: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
+IDENTITY = 'identity = "mb <mb>"\n'
+
+
 def settings(version: str | None) -> str:
     line = f'version = "{version}"\n' if version is not None else ""
-    return f"[project]\n# the released version\n{line}public_check = false\n"
+    return f"[project]\n# the released version\n{line}public_check = false\n{IDENTITY}"
 
 
 @pytest.fixture
@@ -192,10 +195,35 @@ def test_without_a_version_push_says_how_to_release(checkout, capsys):
             'version = "MAJOR.MINOR.PATCH" under [project]') in capsys.readouterr().out
 
 
+def test_a_clone_with_a_foreign_identity_releases_with_the_project_identity(checkout, monkeypatch):
+    git(checkout, "config", "user.name", "agent")
+    git(checkout, "config", "user.email", "agent@example.com")
+    integrate(checkout, "fix/topic-20261106")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "agent@example.com")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "agent@example.com")
+    assert push(checkout) == 0
+    assert git(checkout, "log", "-1", "--format=%s|%an <%ae>|%cn <%ce>", "origin/main") == (
+        "Release v1.2.4|mb <mb>|mb <mb>")
+
+
+def test_without_an_identity_push_refuses_naming_the_setting_and_sync(checkout, capsys):
+    (checkout / "se.toml").write_text(settings("1.2.3").replace(IDENTITY, ""), encoding="utf-8")
+    git(checkout, "commit", "-q", "-am", "no identity")
+    integrate(checkout, "fix/topic-20261106")
+    before = git(checkout, "rev-parse", "origin/main")
+    assert push(checkout) == 1
+    error = capsys.readouterr().err
+    assert (f'work_tickets.py push: no commit identity; set identity = "Name <email>" in [project] '
+            f"of {checkout / 'se.toml'}") in error and "run work_tickets.py sync" in error
+    git(checkout, "fetch", "-q", "origin")
+    assert git(checkout, "rev-parse", "origin/main") == before
+    assert git(checkout, "log", "-1", "--format=%s") == "Integrate fix/topic-20261106: work"
+
+
 @pytest.mark.parametrize("version", ["1.2", "v1.2.3", "01.2.3", "1.2.3-rc1", "", 1])
 def test_a_malformed_version_is_an_error_naming_the_file_and_the_remedy(checkout, capsys, version):
     value = f'"{version}"' if isinstance(version, str) else str(version)
-    (checkout / "se.toml").write_text(f"[project]\nversion = {value}\npublic_check = false\n",
+    (checkout / "se.toml").write_text(f"[project]\nversion = {value}\npublic_check = false\n{IDENTITY}",
                                       encoding="utf-8")
     assert push(checkout) == 1
     error = capsys.readouterr().err

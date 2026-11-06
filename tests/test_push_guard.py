@@ -33,6 +33,9 @@ def commit(root: Path, verdict: str = "pass", name: str = "work.txt", text: str 
     return git(root, "rev-parse", "HEAD")
 
 
+IDENTITY = '[project]\nidentity = "alice <alice@example.com>"\n'
+
+
 @pytest.fixture
 def checkout(tmp_path: Path, monkeypatch) -> Path:
     """A clone of a bare origin on main, the integration branch, without hooks; its suite passes
@@ -44,7 +47,7 @@ def checkout(tmp_path: Path, monkeypatch) -> Path:
     git(root, "config", "user.name", "alice")
     git(root, "config", "user.email", "alice@example.com")
     git(root, "config", "core.hooksPath", str(tmp_path / "no-hooks"))
-    (root / "se.toml").write_text(f"[tests]\ncommand = {SUITE}\n", encoding="utf-8")
+    (root / "se.toml").write_text(f"{IDENTITY}[tests]\ncommand = {SUITE}\n", encoding="utf-8")
     commit(root, name="base.txt")
     git(root, "push", "-q", "origin", "main")
     return root
@@ -135,7 +138,7 @@ def test_the_guard_needs_a_passing_public_check_on_the_tree(checkout, capsys, pu
 
 
 def test_without_a_public_check_the_guard_needs_the_suite_only(checkout):
-    (checkout / "se.toml").write_text(f"[project]\npublic_check = false\n[tests]\ncommand = {SUITE}\n",
+    (checkout / "se.toml").write_text(f"{IDENTITY}public_check = false\n[tests]\ncommand = {SUITE}\n",
                                       encoding="utf-8")
     verdicts.record(checkout, "suite", commit(checkout), True)
     assert verified(checkout) == 0
@@ -189,7 +192,7 @@ def test_the_public_check_of_a_rev_records_its_verdict(checkout, content, passed
 
 def test_a_release_commit_carries_its_parents_suite_verdict(checkout, capfd):
     (checkout / "se.toml").write_text(
-        f'[project]\nversion = "1.0.0"\n[tests]\ncommand = {SUITE}\n', encoding="utf-8")
+        f'{IDENTITY}version = "1.0.0"\n[tests]\ncommand = {SUITE}\n', encoding="utf-8")
     commit(checkout)
     git(checkout, "tag", "v1.0.0")
     git(checkout, "switch", "-q", "-c", "fix/topic-20261106")
