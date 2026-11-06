@@ -7,7 +7,9 @@ committer identities against committed generic patterns and a machine-local deny
 names the location and the pattern label only, never the matched text.
 
 The commit gates (a message file, the commits of a --range) also refuse tracker references in
-messages, naming the reference and the remedy; a full check leaves old history to them.
+messages, naming the reference and the remedy; a full check leaves old history to them. The
+commits of a --range must also carry the project identity (se.toml [project] identity, unless the
+machine sets public_identity), where one is set; a hit names the identity found, redacted.
 
 Every verdict names the se commit that ran it. A checked repository that pins se (`[modules.se]`
 in its se.toml) is refused when this se is not at that `ref`, or when the version this se's
@@ -132,6 +134,14 @@ REWORD_BEFORE_PUSH = (
     "reword it before pushing: git commit --amend for the last commit, or git rebase -i while "
     "the branch is unpushed"
 )
+REIDENTIFY_BEFORE_PUSH = (
+    "set the project identity in the checkout (work_tickets.py sync, from se.toml [project] "
+    "identity) and re-author the commit before pushing: git commit --amend --no-edit "
+    "--reset-author for the last commit, or git rebase --exec 'git commit --amend --no-edit "
+    "--reset-author' <base> while the branch is unpushed"
+)
+# Labels whose hit line names its own remedy; the summary line does not repeat the generic one.
+OWN_REMEDY = {"tracker-reference", "foreign-identity"}
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
@@ -360,8 +370,31 @@ def scan_identity(where: str, role: str, identity: str, patterns: list[Pattern],
         report.hits.append(Hit(f"{where} {role}", label))
 
 
+def project_identity(root: Path) -> str | None:
+    """`Name <email>` every gated commit carries: the identity work_tickets.py sync sets (one
+    owner: work_tickets.commit_identity); None where the project and the machine set none."""
+    work_tickets = sibling("work_tickets")
+    try:
+        identity = work_tickets.commit_identity(root)
+    except work_tickets.QueueError as error:
+        raise SetupError(str(error)) from error
+    return None if identity is None else f"{identity[0]} <{identity[1]}>"
+
+
+def scan_project_identity(where: str, role: str, identity: str, expected: str,
+                          patterns: list[Pattern], report: Report) -> None:
+    if identity != expected:
+        shown = redact(identity, patterns)  # a foreign identity may name a person
+        report.hits.append(Hit(f"{where} {role}", "foreign-identity",
+                               f" '{shown}' is not the project identity '{expected}'; "
+                               f"{REIDENTIFY_BEFORE_PUSH}"))
+
+
 def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], report: Report,
                  gate: bool) -> None:
+    """Hits in the identities and messages of `revisions`; a gate (commits not yet pushed) also
+    refuses tracker references and identities other than the project identity."""
+    expected = project_identity(root) if gate else None
     output = git(root, "log", "-z", "--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B", *revisions, "--")
     for record in output.decode("utf-8", "replace").split("\0"):
         if not record.strip():
@@ -372,6 +405,9 @@ def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], repo
         scan_identity(where, "author", author, patterns, report)
         if committer != author:
             scan_identity(where, "committer", committer, patterns, report)
+        if expected is not None:
+            scan_project_identity(where, "author", author, expected, patterns, report)
+            scan_project_identity(where, "committer", committer, expected, patterns, report)
         scan_message(where, message, patterns, report, REWORD_BEFORE_PUSH if gate else None)
 
 
@@ -566,7 +602,7 @@ def main(argv: list[str] | None = None) -> int:
     scope = f"{report.files} files, {report.commits} commits, {version}"
     if report.hits:
         remedy = "fix each as its line says"
-        if any(hit.label != "tracker-reference" for hit in report.hits):
+        if any(hit.label not in OWN_REMEDY for hit in report.hits):
             remedy = f"remove them or add a reasoned entry to {ALLOW_FILE}"
         print(f"public-check: FAILED with {len(report.hits)} hit(s) ({scope}); {remedy}")
         return 1
