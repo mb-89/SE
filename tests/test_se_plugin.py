@@ -96,7 +96,7 @@ def test_the_plugin_manifests_install_the_whole_checkout_and_bootstrap_it(checko
     assert marketplace["name"] == "se"
     assert marketplace["plugins"] == [{"name": "se", "source": "./", "description": plugin["description"]}]
     hook = plugin["hooks"]["SessionStart"][0]["hooks"][0]
-    assert hook["command"] == 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" || true'
+    assert hook["command"] == 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" --hook || true'
     assert (ROOT / "scripts" / "bootstrap.sh").is_file()
 
 
