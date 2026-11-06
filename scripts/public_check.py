@@ -9,9 +9,10 @@ names the location and the pattern label only, never the matched text.
 The commit gates (a message file, the commits of a --range) also refuse tracker references in
 messages, naming the reference and the remedy; a full check leaves old history to them.
 
-Every verdict names the se commit that ran it. A checked repository that pins se (`ref` of
-`[modules.se]` in its se.toml, or the commit se.lock locks for its `version`) is refused when
-this se is not at that pin, so a stale clone never gives another verdict silently.
+Every verdict names the se commit that ran it. A checked repository that pins se (`[modules.se]`
+in its se.toml) is refused when this se is not at that `ref`, or when the version this se's
+se.toml sets lies outside that `version` range, so a stale clone never gives another verdict
+silently.
 
 Exit codes: 0 passed, 1 hits (or unused allow entries in a full check), 2 usage or setup error.
 """
@@ -397,8 +398,8 @@ def se_commit() -> str | None:
     return result.stdout.strip().lower() if result.returncode == 0 else None
 
 
-def se_pin(root: Path) -> str | None:
-    """`ref` of `[modules.se]` in the checked repository's se.toml, or None where it pins none."""
+def se_pin(root: Path) -> dict | None:
+    """`[modules.se]` of the checked repository's se.toml, or None where it pins none."""
     manifest = root / MANIFEST
     if not manifest.is_file():
         return None
@@ -406,37 +407,58 @@ def se_pin(root: Path) -> str | None:
         data = tomllib.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
         raise SetupError(f"cannot read {MANIFEST} of the checked repository: {error}") from error
-    module = data.get("modules", {}).get("se") if isinstance(data.get("modules"), dict) else None
-    if isinstance(module, dict) and "version" in module:
-        return locked_se_pin(root)
-    ref = module.get("ref") if isinstance(module, dict) else None
-    if module is not None and not isinstance(ref, str):
-        raise SetupError(f"[modules.se] in {MANIFEST} has no ref; pin a full commit SHA")
-    return ref.lower() if isinstance(ref, str) else None
+    modules = data.get("modules")
+    module = modules.get("se") if isinstance(modules, dict) else None
+    if module is None:
+        return None
+    if not isinstance(module, dict) or not isinstance(module.get("ref", module.get("version")), str):
+        raise SetupError(f"[modules.se] in {MANIFEST} has no ref; pin a full commit SHA or a version range")
+    return module
 
 
-def locked_se_pin(root: Path) -> str:
-    """The commit se.lock records for an se pinned by a version range."""
-    lock = root / "se.lock"
+def se_modules():
+    """scripts/se_modules.py, the owner of semantic versions and ranges, loaded beside this script."""
+    import importlib.util
+    name = "public_check_se_modules"
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("se_modules.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_se_range(text: str) -> None:
+    """Refuse unless the version this se's own se.toml sets lies within the range `text`."""
+    modules = se_modules()
+    remedy = ("bring the se clone into the range (scripts/se_modules.py sync) or widen the range, "
+              "and check again")
     try:
-        data = tomllib.loads(lock.read_text(encoding="utf-8")) if lock.is_file() else {}
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
-        raise SetupError(f"cannot read se.lock of the checked repository: {error}") from error
-    module = data.get("modules", {}).get("se") if isinstance(data.get("modules"), dict) else None
-    ref = module.get("ref") if isinstance(module, dict) else None
-    if not isinstance(ref, str):
+        bounds = modules.version_bounds("se", text)
+        version = modules.checkout_version(SE_ROOT)
+    except modules.ModuleError as error:
+        raise SetupError(f"{MANIFEST} pins se at version {text!r}, but {error}; {remedy}") from error
+    if version is None:
         raise SetupError(
-            f"[modules.se] in {MANIFEST} pins a version range, but se.lock locks no commit for it; "
-            "run scripts/se_modules.py sync and commit se.lock"
+            f"{MANIFEST} pins se at version {text!r}, but the se running this check "
+            f"({SE_ROOT.name}) sets no version in its {MANIFEST}; {remedy}"
         )
-    return ref.lower()
+    if not modules.matches(version, bounds):
+        raise SetupError(
+            f"{MANIFEST} pins se at version {text!r}, but this check runs se "
+            f"{modules.version_text(version)}; {remedy}"
+        )
 
 
 def check_se_version(root: Path, commit: str | None) -> None:
-    """Refuse when the checked repository pins se at another commit than the one running."""
-    pin = se_pin(root)
-    if pin is None:
+    """Refuse when the checked repository pins another se than the one running: another commit
+    for a `ref`, a version outside the range for a `version`."""
+    module = se_pin(root)
+    if module is None:
         return
+    if "version" in module:
+        check_se_range(module["version"])
+        return
+    pin = module["ref"].lower()
     if commit is None:
         raise SetupError(
             f"{MANIFEST} pins se at {pin[:7]}, but the se running this check ({SE_ROOT.name}) is "
