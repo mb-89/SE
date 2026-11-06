@@ -227,7 +227,9 @@ Pull requests built on an old `main` cause most integration trouble.
   computed (`issue_dependencies_summary.blocked_by`), never a label. `ready` is only
   [SE's approval](#issues); startable = `ready` and zero open blockers.
 - Labels change only in these steps: SE's `file` and `route` ([Issues](#issues)); `start` changes
-  `ready` to `in-progress`; the integrator removes `in-progress` when it closes the issue.
+  `ready` to `in-progress`, and so does the integrator in the step where it starts a worker with
+  `create_session` instead of `start`; the integrator removes `in-progress` when it closes the
+  issue.
 - After each integration the integrator starts every startable work issue that has no branch yet
   and whose file ownership does not clash with running workers, and starts its session itself.
 - Nobody watches for field reports. Triggers: the worker's delivery notification (its only message
