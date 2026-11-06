@@ -55,14 +55,24 @@ def issue_body(breaking: bool) -> str:
     return f"## Goal\n\nx\n\n## Package kind\n\nStandard{', breaking' if breaking else ''}.\n"
 
 
-def integrate(root: Path, branch: str, breaking: bool = False, trailer: str | None = None) -> None:
-    """Merge `branch` as integrate does: its trailer from work_tickets.release_trailer, unless given."""
-    git(root, "switch", "-q", "-c", branch)
-    (root / f"{branch.replace('/', '-')}.txt").write_text(branch, encoding="utf-8")
+def commit_on(root: Path, branch: str, text: str) -> str:
+    """Commit `text` on `branch` (created where missing), back on main; returns the commit."""
+    git(root, "switch", "-q", branch) if git(root, "branch", "--list", branch) else git(
+        root, "switch", "-q", "-c", branch)
+    (root / f"{branch.replace('/', '-')}.txt").write_text(text, encoding="utf-8")
     git(root, "add", ".")
-    git(root, "commit", "-q", "-m", branch)
+    git(root, "commit", "-q", "-m", text)
+    commit = git(root, "rev-parse", "HEAD")
     git(root, "switch", "-q", "main")
-    trailer = work_tickets.release_trailer(branch, issue_body(breaking)) if trailer is None else trailer
+    return commit
+
+
+def integrate(root: Path, branch: str, breaking: bool = False, trailer: str | None = None,
+              text: str | None = None, report: str | None = None) -> None:
+    """Merge `branch` as integrate does: its trailer from work_tickets.release_trailer, unless given."""
+    commit_on(root, branch, text or branch)
+    if trailer is None:
+        trailer = work_tickets.release_trailer(root, branch, issue_body(breaking), report)
     git(root, "merge", "-q", "--no-ff", "-m", f"Integrate {branch}: work",
         *(("-m", trailer) if trailer else ()), branch)
 
@@ -146,22 +156,23 @@ def test_other_branches_and_merges_release_nothing(checkout, capsys):
     assert "is no integration; it bumps nothing" in capsys.readouterr().out
 
 
-def release_trailer(tmp_path: Path, branch: str, breaking: bool) -> int:
-    body = tmp_path / "issue.md"
+def release_trailer(root: Path, branch: str, breaking: bool, *arguments: str) -> int:
+    body = root.parent / "issue.md"
     body.write_text(issue_body(breaking), encoding="utf-8")
-    return work_tickets.main(["release-trailer", branch, "--issue-body", str(body)])
+    return work_tickets.main(["release-trailer", branch, "--issue-body", str(body),
+                              "--worktree", str(root), *arguments])
 
 
-def test_an_unknown_branch_prefix_is_refused_before_anything_is_merged(tmp_path, capsys):
-    assert release_trailer(tmp_path, "refactor/topic-20261106", False) == 1
+def test_an_unknown_branch_prefix_is_refused_before_anything_is_merged(checkout, capsys):
+    assert release_trailer(checkout, "refactor/topic-20261106", False) == 1
     error = capsys.readouterr().err
     assert "Cannot release refactor/topic-20261106: its prefix 'refactor' names no package kind" in error
     assert "feature, feat, fix, perf, chore, docs" in error
     assert "nothing was merged" in error
 
 
-def test_a_breaking_package_integrated_by_hand_releases_major(checkout, tmp_path, capsys):
-    assert release_trailer(tmp_path, "fix/topic-20261106", True) == 0
+def test_a_breaking_package_integrated_by_hand_releases_major(checkout, capsys):
+    assert release_trailer(checkout, "fix/topic-20261106", True) == 0
     trailer = capsys.readouterr().out.strip()
     assert trailer == "Release-kind: major"
     integrate(checkout, "fix/topic-20261106", trailer=trailer)
@@ -185,6 +196,63 @@ def test_a_merge_whose_kind_cannot_be_told_is_refused_with_the_remedy(checkout, 
     assert f"Cannot release merge {before[:7]} (Integrate fix/topic-20261106: work): it {stated}" in error
     assert ("Reword the merge to end with one trailer Release-kind: major|minor|patch, as "
             "work_tickets.py release-trailer <branch> --issue-body <file> prints it") in error
+
+
+def test_a_second_integration_of_a_branch_releases_a_patch_and_the_first_its_kind(checkout):
+    integrate(checkout, "feature/topic-20261106")
+    assert git(checkout, "log", "-1", "--format=%(trailers:key=Release-kind,valueonly)") == "minor"
+    assert push(checkout) == 0
+    assert released(checkout) == ("1.3.0", "v1.3.0")
+    integrate(checkout, "feature/topic-20261106", text="a late prose fix")
+    assert git(checkout, "log", "-1", "--format=%(trailers:key=Release-kind,valueonly)") == "patch"
+    assert push(checkout) == 0
+    assert released(checkout) == ("1.3.1", "v1.3.1")
+
+
+def test_a_re_integration_releases_the_kind_its_own_report_states(checkout, capsys):
+    integrate(checkout, "fix/topic-20261106")
+    report = "**Branch tip:** `abc1234`  **Re-integration kind:** minor\n"
+    integrate(checkout, "fix/topic-20261106", text="more", report=report)
+    assert push(checkout) == 0
+    assert released(checkout) == ("1.3.0", "v1.3.0")
+    with pytest.raises(work_tickets.QueueError, match="Re-integration kind 'big'; write one of"):
+        work_tickets.release_trailer(checkout, "fix/topic-20261106", issue_body(False),
+                                     "**Re-integration kind:** big\n")
+
+
+def report_at(root: Path, tip: str) -> str:
+    path = root.parent / "report.md"
+    path.write_text(f"**Branch tip:** `{tip}`  **Re-integration kind:** patch\n", encoding="utf-8")
+    return str(path)
+
+
+def test_release_trailer_passes_a_branch_at_its_reported_tip(checkout, capsys):
+    tip = commit_on(checkout, "fix/topic-20261106", "reported")
+    assert release_trailer(checkout, "fix/topic-20261106", False,
+                           "--field-report", report_at(checkout, tip)) == 0
+    assert capsys.readouterr().out.strip() == "Release-kind: patch"
+
+
+def test_release_trailer_refuses_a_commit_after_the_reported_tip_naming_it(checkout, capsys):
+    tip = commit_on(checkout, "fix/topic-20261106", "reported")
+    late = commit_on(checkout, "fix/topic-20261106", "pushed after delivery")
+    git(checkout, "merge", "-q", "--no-ff", "-m", "unrelated", commit_on(checkout, "side", "x"))
+    git(checkout, "switch", "-q", "fix/topic-20261106")
+    git(checkout, "merge", "-q", "--no-ff", "-m", "sync main", "main")  # a sync adds nothing late
+    git(checkout, "switch", "-q", "main")
+    report = report_at(checkout, tip)
+    assert release_trailer(checkout, "fix/topic-20261106", False, "--field-report", report) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert (f"Branch fix/topic-20261106 has commits after the field report's Branch tip "
+            f"{tip[:12]}:\n- {late[:7]} pushed after delivery\nNothing was merged.") in captured.err
+    assert "the worker updates the field report in place" in captured.err
+    assert "--include-late <reason>" in captured.err
+    assert release_trailer(checkout, "fix/topic-20261106", False, "--field-report", report,
+                           "--include-late", "the late commit fixes a typo the review asked for") == 0
+    captured = capsys.readouterr()
+    assert captured.out.strip() == "Release-kind: patch"
+    assert "Includes 1 commit(s) after the field report's Branch tip: the late commit" in captured.err
 
 
 def test_without_a_version_push_says_how_to_release(checkout, capsys):
