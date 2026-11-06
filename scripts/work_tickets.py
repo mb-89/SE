@@ -2893,6 +2893,7 @@ class SuiteBudget:
     target_seconds: float
     limit_seconds: float
     setup: list[str] | None = None
+    tier: str | None = None  # `<module>:<function>`, the project's tier function
 
 
 def is_argument_array(value: object) -> bool:
@@ -2936,6 +2937,13 @@ def suite_budget(root: Path) -> SuiteBudget:
             f"{where}: setup must be a non-empty argument array, the command that installs the "
             'test dependencies, for example setup = ["uv", "sync"]; fix it or remove it'
         )
+    tier = tests.get("tier")
+    if tier is not None and not (isinstance(tier, str) and TIER_SETTING.fullmatch(tier)):
+        raise QueueError(
+            f"{where}: tier must name the project's tier function as \"<module>:<function>\", "
+            'a module importable from the project root, for example tier = "tests.tiers:tier"; '
+            "fix it or remove it"
+        )
     values: dict[str, float] = {}
     for key, default in (("target_seconds", 60), ("limit_seconds", 120)):
         value = tests.get(key, default)
@@ -2944,7 +2952,45 @@ def suite_budget(root: Path) -> SuiteBudget:
         values[key] = float(value)
     if values["target_seconds"] > values["limit_seconds"]:
         raise QueueError(f"{where}: target_seconds must not exceed limit_seconds; fix it")
-    return SuiteBudget(command, values["target_seconds"], values["limit_seconds"], setup)
+    return SuiteBudget(command, values["target_seconds"], values["limit_seconds"], setup, tier)
+
+
+TIER_SETTING = re.compile(r"[A-Za-z_][\w.]*:[A-Za-z_]\w*")
+
+
+def tier_function(root: Path, setting: str):
+    """Import `[tests]` tier, `<module>:<function>`, with the project root first on the path;
+    refuses, naming the setting, a module or function it cannot load."""
+    module_name, function_name = setting.split(":")
+    sys.path.insert(0, str(root))
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as error:
+        raise QueueError(
+            f"[tests] tier in {root / 'se.toml'}: cannot import {module_name} from the project "
+            f"root: {error}; fix the module or the setting"
+        ) from error
+    finally:
+        sys.path.remove(str(root))
+    function = getattr(module, function_name, None)
+    if not callable(function):
+        raise QueueError(
+            f"[tests] tier in {root / 'se.toml'}: {module_name} has no function {function_name}; "
+            "fix the setting"
+        )
+    return function
+
+
+def tier_lines(parts: list[SuitePart], tier_of) -> list[str]:
+    """Per tier, by name, its slowest test and its time: `<tier>: <seconds>s <part> <test>`.
+    `tier_of` maps a test id, `<classname>::<name>` as the JUnit report names it, to its tier."""
+    slowest: dict[str, tuple[float, str]] = {}
+    for part in parts:
+        for seconds, test in part.cases:
+            tier = str(tier_of(test))
+            if tier not in slowest or seconds > slowest[tier][0]:
+                slowest[tier] = (seconds, f"{seconds:.2f}s {part.name} {test}")
+    return [f"{tier}: {line}" for tier, (_, line) in sorted(slowest.items())]
 
 
 def output_tail(output: str) -> str:
@@ -3153,11 +3199,13 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
     Runs `[tests]` setup first, outside the budget. Prints the last result lines of the suite's
     stdout (without progress lines, banners and durations), its time, one line per JUnit report
-    (SuitePart.line) with its slow setups under it (SuitePart.setup_lines) and its `slowest_count` slowest tests;
+    (SuitePart.line) with its slow setups under it (SuitePart.setup_lines), its `slowest_count` slowest tests
+    and, where `[tests]` names a tier function, each tier's slowest test (tier_lines);
     warns above the target; refuses failed tests, and a passing suite above the limit with
     SuiteOverLimitError. Records its verdict on HEAD's tree where the checkout holds exactly it
     (clean_commit); push reads it before the integration branch is pushed."""
     budget = suite_budget(root)
+    tier_of = tier_function(root, budget.tier) if budget.tier else None
     if budget.setup:
         run_suite_setup(root, budget.setup)
     commit = clean_commit(root)
@@ -3193,6 +3241,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
             for part in parts
         ))
     print(f"Slowest tests:\n{listing}")
+    if tier_of and parts:
+        print("Slowest per tier:\n" + "\n".join(f"  {line}" for line in tier_lines(parts, tier_of)))
     if seconds > budget.target_seconds:
         print(
             f"warning: the complete suite took {seconds:.1f} s, over its target of "
