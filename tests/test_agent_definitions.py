@@ -630,6 +630,11 @@ def test_the_decision_skill_names_the_eight_checklist_items():
     assert items == list(CHECKLIST)
 
 
+def test_the_worked_example_is_a_chapter_of_the_documentation_obs_builds():
+    manifest = (ROOT / "docs.md").read_text(encoding="utf-8")
+    assert "[[src/skills/decision/references/decision-deck|" in manifest
+
+
 def test_the_worked_example_answers_every_checklist_item_in_its_fence():
     note = (DECISION.parent / "references" / "decision-deck.md").read_text(encoding="utf-8")
     assert note.startswith("---\nobs.bless: pending\n---\n")
