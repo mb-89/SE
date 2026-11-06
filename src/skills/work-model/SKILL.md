@@ -347,9 +347,10 @@ repeats any of this section's rules:
   without them where the project's public check is on.
 
 `commit_trailer` is the one place that names a commit trailer: an environment that requires one
-(an agent host's co-author line) sets it on its machine, every role adds it as the last line of
+sets it on its machine, every role adds it as the last line of
 each commit it makes, and `integrate` adds it to its merge commits. Unset, commits carry no trailer,
-as a project's public rule may require.
+as a project's public rule may require; se's public check refuses attribution trailers
+([Public safety](../../../AGENTS.md#public-safety)).
 
 The `--repo` resolution order is argument, `[trackers]`, then `origin`. A tracker is selected by
 the repository name and is where that repository's work issues and field reports live.
