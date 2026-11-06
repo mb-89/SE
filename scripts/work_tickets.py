@@ -736,6 +736,28 @@ def public_check_enabled(root: Path) -> bool:
     return configured
 
 
+VERSION_PATTERN = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+VERSION_REMEDY = 'write it as version = "MAJOR.MINOR.PATCH" under [project], for example "1.0.0"'
+
+
+def project_version(root: Path) -> tuple[int, int, int] | None:
+    """`project.version` in se.toml as (major, minor, patch), or None where the project sets none."""
+    configured = project_config(root).get("version")
+    if configured is None:
+        return None
+    match = VERSION_PATTERN.fullmatch(configured) if isinstance(configured, str) else None
+    if match is None:
+        raise QueueError(
+            f"project.version in {root / 'se.toml'} is {configured!r}, not MAJOR.MINOR.PATCH; "
+            f"{VERSION_REMEDY}"
+        )
+    return (int(match[1]), int(match[2]), int(match[3]))
+
+
+def version_text(version: tuple[int, int, int]) -> str:
+    return ".".join(str(part) for part in version)
+
+
 PUBLIC_CHECK = Path(__file__).resolve().parent / "public_check.py"
 PUBLIC_CHECK_OPT_OUT = (
     "a project without a public check sets `public_check = false` in `[project]` of "
@@ -1598,11 +1620,143 @@ def push_gate(root: Path, branch: str) -> None:
         )
 
 
+RELEASE_KINDS = {
+    "feature": "minor", "feat": "minor",
+    "fix": "patch", "perf": "patch", "chore": "patch", "docs": "patch",
+}
+RELEASE_ORDER = ("patch", "minor", "major")
+BREAKING_TRAILER = "Breaking-change: yes"
+INTEGRATION_SUBJECT_PATTERN = re.compile(r"Integrate ([^\s:()]+)")
+
+
+def is_breaking(issue_body: str) -> bool:
+    """Whether a work issue marks a breaking change: the word in its Package kind section."""
+    kind = HTML_COMMENT_PATTERN.sub("", section(markdown_sections(issue_body), "Package kind"))
+    return re.search(r"\bbreaking\b", kind, re.IGNORECASE) is not None
+
+
+def release_kind(branch: str, breaking: bool) -> str:
+    """The version part a package bumps: major if breaking, else by its branch prefix."""
+    if breaking:
+        return "major"
+    prefix = branch.split("/", 1)[0] if "/" in branch else ""
+    kind = RELEASE_KINDS.get(prefix)
+    if kind is None:
+        raise QueueError(
+            f"Cannot release {branch}: its prefix {prefix!r} names no package kind; name the "
+            f"branch <type>/<topic>-<yyyymmdd> with a type of {', '.join(RELEASE_KINDS)}, or mark "
+            "a breaking change in its work issue's Package kind"
+        )
+    return kind
+
+
+def bumped(version: tuple[int, int, int], kind: str) -> tuple[int, int, int]:
+    major, minor, patch = version
+    return {
+        "major": (major + 1, 0, 0), "minor": (major, minor + 1, 0), "patch": (major, minor, patch + 1),
+    }[kind]
+
+
+def run_git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *arguments],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
+
+
+def checked_git(root: Path, *arguments: str) -> str:
+    result = run_git(root, *arguments)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip() or f"exit code {result.returncode}"
+        raise QueueError(f"git {' '.join(arguments)} failed in {root}: {detail}")
+    return result.stdout
+
+
+def tag_exists(root: Path, tag: str) -> bool:
+    return run_git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}").returncode == 0
+
+
+def integrated_packages(root: Path, branch: str, released: str) -> list[tuple[str, bool]]:
+    """(branch, breaking) of each integration merged into `branch` since origin and `released`.
+
+    An integration is a first-parent merge whose subject starts `Integrate <branch>`, the message
+    integrate writes; a breaking one carries the Breaking-change trailer. Other merges release
+    nothing and are named."""
+    upstream = run_git(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    revisions = [f"^{upstream.stdout.strip()}"] if upstream.returncode == 0 else ["--not", "--remotes", "--not"]
+    log = checked_git(
+        root, "log", "--first-parent", "--merges", "--format=%H%x00%B%x1e",
+        branch, f"^refs/tags/{released}", *revisions,
+    )
+    packages = []
+    for record in filter(str.strip, log.split("\x1e")):
+        commit, _, message = record.strip().partition("\x00")
+        subject = message.splitlines()[0] if message else ""
+        match = INTEGRATION_SUBJECT_PATTERN.match(subject)
+        if match is None:
+            print(f"Release: merge {commit[:7]} ({one_line(subject)}) is no integration; it bumps nothing")
+            continue
+        packages.append((match[1], BREAKING_TRAILER in message.splitlines()))
+    return list(reversed(packages))
+
+
+def set_project_version(root: Path, version: str) -> None:
+    """Rewrite only the `version` value of `[project]` in se.toml, keeping the rest byte for byte."""
+    path = root / "se.toml"
+    lines = path.read_bytes().decode("utf-8").splitlines(keepends=True)
+    inside = False
+    for index, line in enumerate(lines):
+        bare = line.rstrip("\r\n")
+        if re.match(r"\s*\[", bare):
+            inside = re.match(r"\s*\[\s*project\s*\]\s*(?:#.*)?$", bare) is not None
+            continue
+        match = re.match(r"""(\s*version\s*=\s*)(["'])[^"']*\2""", bare) if inside else None
+        if match:
+            lines[index] = f"{match[1]}{match[2]}{version}{match[2]}{line[match.end():]}"
+            path.write_bytes("".join(lines).encode("utf-8"))
+            return
+    raise QueueError(f"{path}: write project.version as version = \"MAJOR.MINOR.PATCH\" inside [project]")
+
+
+def release(root: Path, branch: str) -> str | None:
+    """Release what was integrated into `branch`: bump project.version by the packages' highest
+    kind, commit it and tag `v<version>`; the tag to push, or None where nothing is released."""
+    version = project_version(root)
+    if version is None:
+        print(f"Release off: no project.version in {root / 'se.toml'}; {VERSION_REMEDY} to tag each integration")
+        return None
+    current = f"v{version_text(version)}"
+    if not tag_exists(root, current):
+        checked_git(root, "tag", current, branch)
+        print(f"Release: {current} tagged, the first tag of project.version")
+        return current
+    packages = integrated_packages(root, branch, current)
+    if not packages:
+        pushed = run_git(root, "merge-base", "--is-ancestor", current, f"refs/remotes/origin/{branch}")
+        return None if pushed.returncode == 0 else current
+    kind = max((release_kind(name, breaking) for name, breaking in packages), key=RELEASE_ORDER.index)
+    tag = f"v{version_text(bumped(version, kind))}"
+    if tag_exists(root, tag):
+        raise QueueError(
+            f"Cannot release {tag}: the tag exists already; fetch the tags (work_tickets.py sync) "
+            f"and check project.version in {root / 'se.toml'}"
+        )
+    set_project_version(root, tag[1:])
+    trailer = config_value("commit_trailer", remote_repo(root), None)
+    checked_git(root, "add", "se.toml")
+    checked_git(root, "commit", "-q", "-m", f"Release {tag}", *(("-m", trailer) if trailer else ()))
+    checked_git(root, "tag", tag)
+    print(f"Release: {tag} ({kind}: {', '.join(name for name, _ in packages)})")
+    return tag
+
+
 def push(root: Path, branch: str | None = None) -> str:
-    """Gate `branch` (default: the current one), then push it to origin with its upstream set."""
+    """Gate `branch` (default: the current one), then push it to origin with its upstream set; the
+    integration branch is released first and its new tag pushed with it."""
     branch = branch or current_branch(root)
+    tag = release(root, branch) if branch == integration_branch(root) else None
     push_gate(root, branch)
-    git_push(root, ["-u", "origin", branch])
+    git_push(root, ["-u", "origin", branch, *((f"refs/tags/{tag}",) if tag else ())])
     return branch
 
 
@@ -2192,14 +2346,17 @@ def field_report_references(body: str) -> tuple[int, int]:
     return int(work.group(1)), int(pull.group(1))
 
 
-def validate_field_report(root: Path, number: int, repo: str) -> tuple[dict[str, object], int, int]:
+def validate_field_report(
+    root: Path, number: int, repo: str
+) -> tuple[dict[str, object], dict[str, object], int, int]:
+    """The field report, its work issue and their numbers, refused where the report is incomplete."""
     report = fetch_issue(root, number, repo)
     work, pull = field_report_references(str(report["body"]))
     work_issue = fetch_issue(root, work, repo)
     problems = field_report_problems(str(report["body"]), str(work_issue["body"]))
     if problems:
         raise field_report_error(f"#{number}", problems)
-    return report, work, pull
+    return report, work_issue, work, pull
 
 
 def run_project_command(root: Path, command: str, description: str) -> str:
@@ -2601,7 +2758,7 @@ def integration_merge_message(
     root: Path, branch: str, work_number: int, report_number: int, pull_number: int, public: bool
 ) -> str:
     if not public:
-        return f"Integrate work issue #{work_number}, field report #{report_number}, PR #{pull_number}"
+        return f"Integrate {branch} (work issue #{work_number}, field report #{report_number}, PR #{pull_number})"
     summary = subprocess.run(
         ["git", "-C", str(root), "log", "--no-merges", "-1", "--format=%s",
          f"{integration_branch(root)}..{branch}"],
@@ -2716,7 +2873,7 @@ def integrate(
 ) -> str:
     """Merge a completed worker branch and perform the mechanical integration steps."""
     tracker = resolve_repo(root, repo)
-    report, work_number, pull_number = validate_field_report(root, report_number, tracker)
+    report, work_issue, work_number, pull_number = validate_field_report(root, report_number, tracker)
     project_repo = remote_repo(root) or tracker
     pull = json.loads(run_gh(root, [
         "pr", "view", str(pull_number), "--json", "headRefName,headRefOid",
@@ -2757,6 +2914,7 @@ def integrate(
                 root, branch, work_number, report_number, pull_number,
                 public_check_enabled(root) or any(mirror.public for mirror in mirrors),
             ),
+            *(("-m", BREAKING_TRAILER) if is_breaking(str(work_issue["body"])) else ()),
             *(("-m", trailer) if trailer else ()),
             branch,
         ],
@@ -2794,7 +2952,7 @@ def integrate(
         integration_escalation(root, report_number, tracker, str(error))
         raise
 
-    git_push(root, ["origin", target])
+    push(root, target)
     for mirror in mirrors:
         if mirror.public and check_commands:
             run_project_checks(root, check_commands, check_temporary_working_directory)

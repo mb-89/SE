@@ -49,6 +49,7 @@ authored_content = ["README.md", "docs/**/*.md"]
 identity = "mb <mb>"
 integration_branch = "main"
 public_check = true
+version = "1.4.2"
 ```
 
 `identity = "Name <email>"` is the project's commit identity. `work_tickets.py sync` writes it into
@@ -65,6 +66,19 @@ the integration branch; on a failure it pushes nothing, restores the pre-merge b
 escalates. `work_tickets.py push` runs its push gate first. Default `true`, so a project that never
 set it is still checked; a project without a public check sets `public_check = false`, and `push`
 then prints one line saying the check is off and where to turn it on.
+
+`version = "MAJOR.MINOR.PATCH"` is the project's one semantic version, published as the git tag
+`vMAJOR.MINOR.PATCH` on its integration branch; consumers pin ranges of it
+([`se.toml`](#setoml)). Nobody types it after the first: `work_tickets.py push` of the integration
+branch (which `integrate` runs) releases what was integrated since origin and the last tag. Each
+integration is a first-parent merge whose message starts `Integrate <branch>`, as `integrate`
+writes it; its kind comes from the branch prefix, `feature` (or `feat`) a minor bump, `fix`,
+`perf`, `chore` or `docs` a patch bump, and a merge carrying the trailer `Breaking-change: yes`
+(which `integrate` adds where the work issue's "Package kind" says "breaking") a major one. One push
+bumps once, by its integrations' highest kind: it rewrites only `version`, commits `Release v<new>`,
+tags it and pushes the tag with the branch. Another prefix is refused before anything is written; a
+version without its tag yet is tagged as it is, which is how a project starts versioning. Without
+`version` push releases nothing and says so; a malformed one is refused, naming the file.
 
 ### Test budget
 
