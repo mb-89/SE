@@ -236,11 +236,18 @@ Quoted from https://git.example/other/spec/issues/9:
 
 Our own owner/repo#4 and https://git.example/owner/repo/issues/2 need no quote.
 
+Not repositories: https://docs.example.com/3/library/re.html, https://gitlab.example/a/b/issues/1
+and https://github.com/a/b/releases/tag/v1.
+
+Bare: https://github.com/a/b/issues/3 and https://git.example/c/d/blob/main/x.md.
+
 ## Design owner""")
     assert run(worktree, "intake", "--issue", "5", "--repo", "git.example/owner/repo") == 0
     warnings = [line for line in capsys.readouterr().err.splitlines() if "warning" in line]
-    assert len(warnings) == 1
+    assert len(warnings) == 3
     assert "intake: work issue #5 cites other/list#3 with no quoted block" in warnings[0]
+    assert "cites https://github.com/a/b/issues/3 with no quoted block" in warnings[1]
+    assert "cites https://git.example/c/d/blob/main/x.md with no quoted block" in warnings[2]
     assert '"Writing work issues"' in warnings[0]
 
 
