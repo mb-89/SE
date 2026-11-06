@@ -6,11 +6,7 @@
 (root => {
     "use strict";
     const artifact = root.obsArtifact;
-    // obs-html trusts a bundle that registers an application with at least one action; no note of a deck
-    // offers an action, so this one is never shown.
-    artifact.registerApplication({id: "se-answers", actions: [{
-        id: "none", accept: ".json", help: "se's decision deck takes no files.", handle: async () => false,
-    }]});
+    artifact.registerApplication({id: "se-answers", actions: []});
     if (typeof root.claude?.use !== "function") return;
     artifact.trustedExtension("obsHtml.answers").register({
         id: "claude-artifact",
