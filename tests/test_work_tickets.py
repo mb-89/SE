@@ -760,3 +760,27 @@ def test_close_remove_requires_explicit_target_and_removes_normally(worktree: Pa
 def test_se_is_ignored_in_full() -> None:
     result = git(PROJECT, "check-ignore", ".se/work/notes/private.txt")
     assert result.returncode == 0
+
+
+def test_readme_command_reference_is_what_docs_writes():
+    assert work_tickets.main(["docs", "--check"]) == 0
+
+
+def test_docs_check_refuses_a_stale_reference_and_docs_rewrites_it(tmp_path, monkeypatch, capsys):
+    readme = tmp_path / "README.md"
+    stale = (f"# Title\n\nProse stays.\n\n{work_tickets.REFERENCE_BEGIN}\nstale\n"
+             f"{work_tickets.REFERENCE_END}\n\nMore prose.\n")
+    readme.write_text(stale, encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "README", readme)
+
+    assert work_tickets.main(["docs", "--check"]) == 1
+    assert readme.read_text(encoding="utf-8") == stale
+    assert "differs from the registry" in capsys.readouterr().err
+
+    assert work_tickets.main(["docs"]) == 0
+    written = readme.read_text(encoding="utf-8")
+    assert written.startswith("# Title\n\nProse stays.\n\n")
+    assert written.endswith(f"{work_tickets.REFERENCE_END}\n\nMore prose.\n")
+    assert "work_tickets.py backlog list --worktree WORKTREE" in written
+    assert "stale" not in written
+    assert work_tickets.main(["docs", "--check"]) == 0

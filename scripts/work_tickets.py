@@ -15,11 +15,13 @@ import stat
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import tomllib
 from collections import Counter
 from contextlib import contextmanager
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -3865,335 +3867,681 @@ def integrate(
     return commit
 
 
-def add_worktree_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--worktree", required=True, help="path to the selected worktree")
+@dataclass(frozen=True)
+class Arg:
+    """One argument, as argparse's add_argument takes it."""
+
+    flags: tuple[str, ...]
+    options: dict[str, object]
 
 
-def add_optional_worktree_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--worktree", default=".", help="path to the selected worktree; default: current checkout"
-    )
+def arg(*flags: str, **options: object) -> Arg:
+    return Arg(flags, options)
 
 
-def add_include_late_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--include-late", metavar="REASON",
-        help="why commits on the branch after the field report's Branch tip are merged too; "
-             "without it they are refused")
+@dataclass(frozen=True)
+class Exclusive:
+    """Arguments of which at most one, or with required exactly one, is given."""
+
+    members: tuple[Arg, ...]
+    required: bool = False
 
 
-REPO_HELP = "[HOST/]OWNER/REPO; default: argument, [trackers], then origin"
-ROOT_HELP = (
-    "directory for new worktrees; default: sibling <checkout>.worktrees or "
-    "[worktree_roots] in ~/.se/local.toml"
-)
+@dataclass
+class Command:
+    """One command of the registry: its name, help and arguments, and either its handler or its
+    subcommands. A handler takes the selected worktree (None without --worktree) and the parsed
+    arguments and returns the exit code."""
+
+    name: str
+    help: str
+    arguments: tuple[Arg | Exclusive, ...] = ()
+    handler: Callable[[Path | None, argparse.Namespace], int] | None = None
+    subcommands: list[Command] = field(default_factory=list)
+    dest: str = "command"
+
+
+COMMANDS = Command("work_tickets.py", __doc__ or "")
+
+
+def command(name: str, help: str, *arguments: Arg | Exclusive, parent: Command = COMMANDS
+            ) -> Callable[[Callable[[Path | None, argparse.Namespace], int]],
+                          Callable[[Path | None, argparse.Namespace], int]]:
+    """Register the decorated handler as the command `name` of `parent`, in declaration order."""
+    def register(handler: Callable[[Path | None, argparse.Namespace], int]
+                 ) -> Callable[[Path | None, argparse.Namespace], int]:
+        parent.subcommands.append(Command(name, help, arguments, handler))
+        return handler
+    return register
+
+
+def command_group(name: str, help: str, dest: str) -> Command:
+    """Register a command whose subcommands, registered with parent=, do its work."""
+    group = Command(name, help, dest=dest)
+    COMMANDS.subcommands.append(group)
+    return group
+
+
+WORKTREE = arg("--worktree", required=True, help="path to the selected worktree")
+OPTIONAL_WORKTREE = arg(
+    "--worktree", default=".", help="path to the selected worktree; default: current checkout")
+INCLUDE_LATE = arg(
+    "--include-late", metavar="REASON",
+    help="why commits on the branch after the field report's Branch tip are merged too; "
+         "without it they are refused")
+REPO = arg("--repo", help="[HOST/]OWNER/REPO; default: argument, [trackers], then origin")
+WORKTREE_ROOT = arg(
+    "--worktree-root",
+    help="directory for new worktrees; default: sibling <checkout>.worktrees or "
+         "[worktree_roots] in ~/.se/local.toml")
 SESSION_HELP = "integrator session; default: integrator_session in ~/.se/local.toml"
+JSON_OUTPUT = arg("--json", action="store_true", help="emit JSON")
+INTEGRATION_TARGET = arg("--integration-target", help="Git ref containing worker commits")
+ISSUE_BODY = arg("--issue-body", required=True, type=Path, help="file holding the work issue's body")
+
+
+@command("init", "initialize the ticket queue", WORKTREE)
+def run_init(root: Path, args: argparse.Namespace) -> int:
+    initialize(root)
+    print(f"Initialized ticket queue in {root / '.se' / 'work'}")
+    return 0
+
+
+@command("create", "create a ticket in todo",
+         WORKTREE,
+         arg("--id", required=True, help="stable ticket ID"),
+         arg("--title", required=True, help="ticket title"),
+         arg("--acceptance", action="append",
+             help="one acceptance item, repeatable; replaces the placeholder item"))
+def run_create(root: Path, args: argparse.Namespace) -> int:
+    create_ticket(root, args.id, args.title, args.acceptance)
+    print(f"Created ticket {args.id} in todo")
+    return 0
+
+
+@command("move", "move a ticket between states",
+         WORKTREE,
+         arg("--id", required=True, help="ticket ID"),
+         arg("--to", required=True, choices=STATES))
+def run_move(root: Path, args: argparse.Namespace) -> int:
+    move_ticket(root, args.id, args.to)
+    print(f"Moved ticket {args.id} to {args.to}")
+    return 0
+
+
+@command("status", "report queue status", WORKTREE, JSON_OUTPUT, INTEGRATION_TARGET)
+def run_status(root: Path, args: argparse.Namespace) -> int:
+    report = status_report(root, args.integration_target)
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(f"Initialized: {'yes' if report['initialized'] else 'no'}")
+        print("Counts: " + ", ".join(f"{state}={report['counts'][state]}" for state in STATES))
+        for state in STATES:
+            print(f"{state}: {', '.join(report['tickets'][state]) or '(none)'}")
+        print(f"notes: {', '.join(report['notes']) or '(none)'}")
+        print("notes resolved/unresolved: "
+              f"{report['note_counts']['resolved']}/{report['note_counts']['unresolved']}")
+        print(f"complete: {'yes' if report['complete'] else 'no'}")
+        print(f"cleanup eligible: {'yes' if report['cleanup_eligible'] else 'no'}")
+        for reason in report["cleanup_reasons"]:
+            print(f"cleanup reason: {reason}")
+        for error in report["errors"]:
+            print(f"error: {error}")
+    return 0 if report["initialized"] and not report["errors"] else 1
+
+
+@command("review-note", "append a local note disposition",
+         WORKTREE,
+         arg("--note", required=True, help="note filename in work/notes"),
+         arg("--disposition", required=True, help="local review decision"),
+         arg("--backlog-ref", help="optional authored backlog reference"))
+def run_review_note(root: Path, args: argparse.Namespace) -> int:
+    review_note(root, args.note, args.disposition, args.backlog_ref)
+    print(f"Reviewed note {args.note}")
+    return 0
+
+
+@command("close", "check or close an integrated worktree",
+         WORKTREE, INTEGRATION_TARGET,
+         arg("--remove", action="store_true", help="remove eligible linked worktree"),
+         JSON_OUTPUT)
+def run_close(root: Path, args: argparse.Namespace) -> int:
+    if args.remove and not args.integration_target:
+        raise QueueError("--remove requires --integration-target")
+    report = status_report(root, args.integration_target)
+    report["removed"] = False
+    if report["cleanup_eligible"] and args.remove:
+        remove_worktree(root, report)
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(f"Cleanup eligible: {'yes' if report['cleanup_eligible'] else 'no'}")
+        for reason in report["cleanup_reasons"]:
+            print(f"reason: {reason}")
+        if report["removed"]:
+            print("removed: yes")
+    return 0 if report["cleanup_eligible"] else 1
+
+
+@command("intake", "read the work issue with gh and write its tickets into todo",
+         WORKTREE,
+         Exclusive((
+             arg("--issue", type=int, help="work issue number"),
+             arg("--outside", action="store_true",
+                 help="for SE: list the open issues of se.toml's [outside] repositories that carry "
+                      "no fleet marker and no handled comment, in one query; writes nothing"),
+         ), required=True),
+         REPO,
+         arg("--discovery", action="store_true",
+             help="create the ignored discovery evidence folder and index"),
+         arg("--probe-root",
+             help="relative ignored discovery output root; default: .se/work/probe"))
+def run_intake(root: Path, args: argparse.Namespace) -> int:
+    if args.outside:
+        if args.repo or args.discovery or args.probe_root:
+            raise QueueError("intake --outside takes its repositories from se.toml [outside], "
+                             "and no --repo, --discovery or --probe-root")
+        found = intake_outside(root)
+        if not found:
+            print("No outside issues to handle.")
+        else:
+            print(f"Outside issues ({len(found)}), not yet handled:")
+            for issue in found:
+                print(f"  {issue['repo']}#{issue['number']} {issue['title']} {issue['url']}")
+        return 0
+    issue, created, kept = intake(root, args.issue, args.repo, args.discovery, args.probe_root)
+    print(f"Work issue #{issue['number']}: {issue['title']} ({issue['url']})")
+    for ticket_id in created:
+        print(f"created todo/{ticket_id}.md")
+    for ticket_id in kept:
+        print(f"kept existing ticket for {ticket_id}")
+    for reference in bare_cross_repository_references(issue["body"], issue["repo"]):
+        print(
+            f"warning: intake: work issue #{issue['number']} cites {reference} with no "
+            "quoted block next to it; a cloud worker cannot read another repository, so "
+            "quote what it needs inline, with its source (work-model skill, "
+            '"Writing work issues")',
+            file=sys.stderr,
+        )
+    if issue["comments"]:
+        print(f"{len(issue['comments'])} comment(s) may change the requirements:")
+        for comment in issue["comments"]:
+            print(f"  {comment['createdAt']} {comment['author']}: {comment['url']}")
+    return 0
+
+
+@command("probe", "append a command and output path to the discovery evidence index",
+         WORKTREE,
+         arg("--command", required=True, dest="probe_command",
+             help="command that produced the output"),
+         arg("--output", required=True, help="path to the command output"))
+def run_probe(root: Path, args: argparse.Namespace) -> int:
+    print(f"Appended discovery evidence to "
+          f"{append_discovery_evidence(root, args.probe_command, args.output)}")
+    return 0
+
+
+@command("refresh", "re-read the work issue and its comments and report changes",
+         WORKTREE,
+         arg("--issue", type=int, help="work issue number; default: recorded"),
+         REPO, JSON_OUTPUT)
+def run_refresh(root: Path, args: argparse.Namespace) -> int:
+    changes = refresh(root, args.issue, args.repo)
+    if args.json:
+        print(json.dumps(changes, indent=2, ensure_ascii=False))
+    else:
+        print_changes(changes)
+    return 0
+
+
+@command("comments-read",
+         "record the work issue's comments as read: their count and the newest one's id "
+         "(intake records them; field-report --check and deliver refuse comments after it)",
+         WORKTREE,
+         arg("--count", required=True, type=int, help="number of comments"),
+         arg("--newest", required=True, help="id of the newest comment ('' for none)"))
+def run_comments_read(root: Path, args: argparse.Namespace) -> int:
+    record_comments_read(root, {"count": args.count, "newest": args.newest})
+    print(f"Recorded {args.count} comment(s) as read, newest {args.newest or 'none'}")
+    return 0
+
+
+@command("body-read",
+         "record the work issue's body as read (intake records it; field-report --check and "
+         "deliver refuse a body changed after it)",
+         WORKTREE,
+         arg("--body-file", type=Path, metavar="FILE",
+             help="the work issue's body as your GitHub tools read it now; default: read with gh"))
+def run_body_read(root: Path, args: argparse.Namespace) -> int:
+    body_read(root, args.body_file)
+    print("Recorded the work issue's body as read")
+    return 0
+
+
+@command("field-report",
+         "create or update the field-report issue from a filled "
+         ".github/ISSUE_TEMPLATE/field-report.md body",
+         arg("--worktree",
+             help="path to the selected worktree; needed except by --check with --issue-body"),
+         Exclusive((
+             arg("--file", type=Path, help="Markdown body file"),
+             arg("--check", type=Path, metavar="FILE",
+                 help="only validate FILE against the template, without writing GitHub: its "
+                      "header lines, sections, tables, field labels, placeholders and evidence "
+                      "gate, and, in a worktree with a comments-read or body-read record, refuse "
+                      "comments after it and a changed body"),
+         ), required=True),
+         arg("--issue-body", type=Path, metavar="FILE",
+             help="with --check: the work issue's body as your GitHub tools read it now, for the "
+                  "evidence gate and the body-read check; default: intake's snapshot, the body "
+                  "read with gh"),
+         arg("--comment-count", type=int, metavar="N",
+             help="with --check: the work issue's comment count as your GitHub tools read it now; "
+                  "default: read with gh"),
+         arg("--newest-comment", metavar="ID",
+             help="with --check: the id of the work issue's newest comment, as your GitHub tools "
+                  "read it now ('' for none)"),
+         arg("--draft", action="store_true",
+             help="write the template body with work issue, pull request, branch and user "
+                  "requirement filled in to --file instead"),
+         arg("--pr", type=int, help="pull request number; default: the branch's"))
+def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
+    if args.check is not None:
+        if args.draft:
+            raise QueueError("field-report: --check and --draft exclude each other")
+        if (args.comment_count is None) != (args.newest_comment is None):
+            raise QueueError(
+                "field-report --check: --comment-count and --newest-comment go together")
+        comments = None if args.comment_count is None else {
+            "count": args.comment_count, "newest": args.newest_comment}
+        marked = check_field_report(root, args.check, args.issue_body, comments)
+        print(f"Field report {args.check.name} follows the template"
+              + ("; added the fleet marker" if marked else ""))
+    elif root is None:
+        mode = "--draft" if args.draft else "--file"
+        raise QueueError(f"field-report {mode} needs --worktree <worktree>, the worker's checkout")
+    elif args.draft:
+        pr = draft_field_report(root, args.file, args.pr)
+        print(f"Drafted {args.file}" + ("" if pr else "; no pull request found yet"))
+    else:
+        action, url = file_field_report(root, args.file, args.pr)
+        print(f"Field report {action}: {url}")
+    return 0
+
+
+@command("escalate", "comment a question on an issue and label it escalated",
+         WORKTREE,
+         arg("--issue", required=True, type=int, help="issue to escalate"),
+         arg("--file", required=True, type=Path, help="Markdown question"),
+         REPO)
+def run_escalate(root: Path, args: argparse.Namespace) -> int:
+    escalate(root, args.issue, args.file, args.repo)
+    print(f"Escalated #{args.issue}")
+    return 0
+
+
+@command("file", "for SE: file a work issue labelled work, ready and repo:<name>; with "
+                 "--blocked-by, ready only once its blockers are linked",
+         WORKTREE,
+         arg("--title", required=True, help="the branch name"),
+         arg("--body-file", required=True, type=Path,
+             help="the filled .github/ISSUE_TEMPLATE/work.md body"),
+         arg("--blocked-by", type=int, action="append", default=[], metavar="N",
+             help="a native blocker to link before it is ready, repeatable"),
+         REPO)
+def run_file(root: Path, args: argparse.Namespace) -> int:
+    print(f"Filed work issue {file_work_issue(root, args.title, args.body_file, args.blocked_by, args.repo)}")
+    return 0
+
+
+@command("route", "for SE: route a checked outside issue as a work issue: retitle it, label it "
+                  "work, ready and repo:<name>, and comment the handled record",
+         WORKTREE,
+         arg("issue", type=int),
+         arg("--title", required=True, help="the branch name"),
+         arg("--comment-file", required=True, type=Path,
+             help="the work.md sections the issue lacks, completed, and that it is routed; the "
+                  "handled marker is added where missing"),
+         REPO)
+def run_route(root: Path, args: argparse.Namespace) -> int:
+    route_outside_issue(root, args.issue, args.title, args.comment_file, args.repo)
+    print(f"Routed issue #{args.issue} as {args.title.strip()}")
+    return 0
+
+
+BACKLOG = command_group(
+    "backlog", f"for SE: file or list backlog issues, far-out ideas labelled {BACKLOG_LABEL} and "
+               f"{PERSON_LABEL} that no role takes as work", dest="backlog_action")
+
+
+@command("file", f"file one backlog issue with both labels, creating {BACKLOG_LABEL} where missing",
+         WORKTREE,
+         arg("--title", required=True, help="the idea in one line"),
+         arg("--body-file", required=True, type=Path, help="Markdown body"),
+         REPO, parent=BACKLOG)
+def run_backlog_file(root: Path, args: argparse.Namespace) -> int:
+    print(f"Filed backlog issue {backlog_file(root, args.title, args.body_file, args.repo)}")
+    return 0
+
+
+@command("list", "list the open backlog issues, or those whose title or body matches --search",
+         WORKTREE, arg("--search", help="text to find in title or body"), REPO, parent=BACKLOG)
+def run_backlog_list(root: Path, args: argparse.Namespace) -> int:
+    found = backlog_list(root, args.search, args.repo)
+    if not found:
+        print("No backlog issues.")
+    else:
+        print(f"Backlog issues ({len(found)}):")
+        for issue in found:
+            print(f"  #{issue['number']} {issue['title']} {issue['url']}")
+    return 0
+
+
+@command("sync", "merge the newest integration branch (se.toml project.integration_branch, "
+                 "default main) from origin, or locally without origin", WORKTREE)
+def run_sync(root: Path, args: argparse.Namespace) -> int:
+    print(f"Merged {integration_branch(root)} {sync(root)}")
+    return 0
+
+
+@command("suite", "run se.toml's complete suite against its [tests] time budget, as integrate "
+                  "does; exit code 1 when tests fail, 3 when they pass over the limit",
+         WORKTREE,
+         arg("--slowest", type=positive_int, default=SLOWEST_TESTS, metavar="N",
+             help=f"how many slowest tests to list, from the JUnit reports or pytest's --durations "
+                  f"(default {SLOWEST_TESTS})"),
+         arg("--compare", metavar="REF",
+             help="instead of the budget check, time the suite here and on REF (a temporary "
+                  "worktree; a branch as origin has it, the local branch only where origin has "
+                  "none), interleaved, after one untimed warm-up of each, and say whether this "
+                  "checkout is \"not slower\" or \"slower by X s\" than REF"),
+         arg("--runs", type=positive_int, default=COMPARE_RUNS, metavar="N",
+             help=f"with --compare: timed runs of each state (default {COMPARE_RUNS})"))
+def run_suite_command(root: Path, args: argparse.Namespace) -> int:
+    if args.compare:
+        print(f"Verdict: {compare_suites(root, args.compare, args.runs)}")
+        return 0
+    print(f"Suite: {run_suite(root, args.slowest)}")
+    return 0
+
+
+@command("guard", "require the field report to name removed protected content, against "
+                  "origin/<integration branch> as sync fetched it (the local branch without "
+                  "origin)",
+         WORKTREE,
+         arg("--branch", required=True, help="branch to compare with the integration branch"),
+         arg("--field-report", required=True, type=Path,
+             help="field report containing approved removed behaviour and tests"))
+def run_guard(root: Path, args: argparse.Namespace) -> int:
+    removed = guard(root, args.branch, args.field_report)
+    if removed:
+        for name in removed:
+            print(f"Field report names removed protected content: {name}")
+    else:
+        print("No removed protected content found.")
+    return 0
+
+
+@command("deliver", "sync, push, create or update the pull request and file report",
+         WORKTREE,
+         arg("--integrator-session", help=f"{SESSION_HELP} to notify"),
+         arg("--tracker",
+             help="field-report tracker [HOST/]OWNER/REPO; default: the work issue tracker"))
+def run_deliver(root: Path, args: argparse.Namespace) -> int:
+    session = config_value(
+        "integrator_session", str(required_snapshot(root)["repo"]), args.integrator_session)
+    report_url = deliver(root, args.tracker)
+    print(f"Notify {session or '<integrator session>'}: field report {report_url}")
+    return 0
+
+
+@command("push", "public check's push gate, then git push -u origin <branch>; retries a "
+                 "transient refusal once a minute, ten attempts; the integration branch needs a "
+                 "passing suite and public check recorded on the tree pushed",
+         OPTIONAL_WORKTREE,
+         arg("branch", nargs="?", help="branch to push; default: the current one"))
+def run_push(root: Path, args: argparse.Namespace) -> int:
+    push(root, args.branch)
+    return 0
+
+
+@command("verified", "the pre-push hook's guard: refuse a push of <commit> to <remote ref> where "
+                     "the ref is the integration branch and no passing suite and public check are "
+                     "recorded on its tree; push runs the same check",
+         OPTIONAL_WORKTREE,
+         arg("remote_ref", help="the pushed remote ref, for example refs/heads/main"),
+         arg("commit", help="the pushed commit"))
+def run_verified(root: Path, args: argparse.Namespace) -> int:
+    if args.remote_ref == f"refs/heads/{integration_branch(root)}":
+        guard_pushed_tree(root, args.commit)
+        print(f"Verified: {args.commit[:12]} carries the verdicts the integration branch needs")
+    return 0
+
+
+@command("pr-body", "print the pull request body deliver writes: Fixes <issue> where all its "
+                    "acceptance shows before the merge, else Refs <issue>",
+         OPTIONAL_WORKTREE, ISSUE_BODY,
+         arg("--issue-url", required=True, help="the work issue's URL, ending in /issues/<n>"))
+def run_pr_body(root: Path, args: argparse.Namespace) -> int:
+    number = re.search(r"/issues/(\d+)/?$", args.issue_url)
+    if number is None:
+        raise QueueError(f"pr-body: --issue-url {args.issue_url!r} does not end in /issues/<n>")
+    try:
+        body = args.issue_body.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise QueueError(f"pr-body: cannot read {args.issue_body}: {error}") from error
+    print(pull_request_body({"number": number.group(1), "url": args.issue_url, "body": body}),
+          end="")
+    return 0
+
+
+@command("release-trailer", "print the Release-kind trailer an integration merge of <branch> "
+                            "carries, from its work issue's Package kind and the branch prefix; "
+                            "push requires it",
+         OPTIONAL_WORKTREE,
+         arg("branch", help="the integrated branch: the local branch, else origin/<branch>"),
+         ISSUE_BODY,
+         arg("--field-report", type=Path, metavar="FILE",
+             help="file holding the field report; refuses commits on <branch> after its Branch "
+                  "tip, and gives a re-integration its Re-integration kind (default patch)"),
+         INCLUDE_LATE)
+def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
+    try:
+        body = args.issue_body.read_text(encoding="utf-8")
+        report = (None if args.field_report is None
+                  else args.field_report.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError) as error:
+        raise QueueError(f"Cannot read {error.filename or 'an input file'}: {error}") from error
+    if report is not None:
+        late = check_branch_tip(root, report, args.branch,
+                                branch_head(root, args.branch), args.include_late)
+        if late:
+            print(f"Includes {len(late)} commit(s) after the field report's Branch tip: "
+                  f"{args.include_late}", file=sys.stderr)
+    print(release_trailer(root, args.branch, body, report))
+    return 0
+
+
+@command("integrate", "validate, merge, test, push and close a field report",
+         WORKTREE,
+         arg("field_report", type=int, help="field-report issue number"),
+         REPO,
+         arg("--build-command", help="project's output regeneration command"),
+         INCLUDE_LATE,
+         arg("--check-command", type=parse_check_commands, metavar="JSON",
+             help="project checks as a JSON list of argument arrays"),
+         arg("--check-command-temporary-directory", action="store_true",
+             help="run every project check in its own temporary working directory"))
+def run_integrate(root: Path, args: argparse.Namespace) -> int:
+    if args.check_command_temporary_directory and not args.check_command:
+        raise QueueError("--check-command-temporary-directory requires --check-command")
+    commit = integrate(
+        root, args.field_report, args.repo, args.build_command,
+        args.check_command, args.check_command_temporary_directory, args.include_late,
+    )
+    print(f"Integrated field report #{args.field_report} in {commit}")
+    return 0
+
+
+@command("config", "show the repository and the machine-local settings in effect",
+         WORKTREE, REPO, WORKTREE_ROOT, arg("--integrator-session", help=SESSION_HELP))
+def run_config(root: Path, args: argparse.Namespace) -> int:
+    repo = resolve_repo(root, args.repo)
+    print(f"repository: {repo}")
+    print(f"machine-local config: {local_config_path()}")
+    directory = configured_worktree_root(root, args.worktree_root)
+    print(f"worktree root: {directory or default_worktree_root(root)}")
+    session = config_value("integrator_session", repo, args.integrator_session)
+    print(f"integrator session: {session or '(not set)'}")
+    return 0
+
+
+@command("start", "start a ready work issue: worktree from the newest main, label in-progress",
+         WORKTREE,
+         arg("issue", type=int),
+         REPO, WORKTREE_ROOT,
+         arg("--no-create", dest="create", action="store_false",
+             help="only change the labels; the project's own script created the worktree"),
+         arg("--cloud-agent", help="GitHub login for a cloud worker"))
+def run_start(root: Path, args: argparse.Namespace) -> int:
+    path = start(root, args.issue, args.repo, args.worktree_root, args.create, args.cloud_agent)
+    if path is not None:
+        issue = fetch_issue(root, args.issue, resolve_repo(root, args.repo))
+        print(f"Launch worker: agent=worker issue={issue['url']} worktree={path}")
+    print(f"Started #{args.issue}")
+    return 0
+
+
+@command("block", "link an issue to a native blocker",
+         WORKTREE, arg("issue", type=int), arg("--by", required=True, type=int, dest="blocker"),
+         REPO)
+def run_block(root: Path, args: argparse.Namespace) -> int:
+    block(root, args.issue, args.blocker, args.repo)
+    print(f"Blocked #{args.issue} by #{args.blocker}")
+    return 0
+
+
+TRACKER_QUERY = (OPTIONAL_WORKTREE, REPO,
+                 arg("--all-repos", action="store_true",
+                     help="include tracker issues for every repository"))
+
+
+@command("ready", "list startable ready work issues", *TRACKER_QUERY)
+def run_ready(root: Path, args: argparse.Namespace) -> int:
+    for issue in ready_issues(root, resolve_repo(root, args.repo), args.all_repos):
+        print(f"#{issue['number']} {issue['title']}")
+    return 0
+
+
+@command("capacity", "show local worker capacity or cloud unlimited capacity", *TRACKER_QUERY)
+def run_capacity(root: Path, args: argparse.Namespace) -> int:
+    slots = capacity(root, resolve_repo(root, args.repo), args.all_repos)
+    print("Capacity: unlimited (cloud)" if slots is None else f"Capacity: {slots}")
+    return 0
+
+
+@command("queue", "list open field reports and startable work issues", *TRACKER_QUERY)
+def run_queue(root: Path, args: argparse.Namespace) -> int:
+    repo = resolve_repo(root, args.repo)
+    ready = ready_issues(root, repo, args.all_repos)
+    reports, escalations, _, slots = queue(root, repo, args.all_repos)
+    for report in reports:
+        print(f"field-report #{report['number']} {report['title']} {report['url']}")
+    for escalation in escalations:
+        print(f"escalated #{escalation['number']} {escalation['title']} {escalation['url']}")
+    print("Capacity: unlimited (cloud)" if slots is None else f"Capacity: {slots}")
+    for issue in ready:
+        print(f"ready #{issue['number']} {issue['title']}")
+    return 0
+
+
+README = Path(__file__).resolve().parents[1] / "README.md"
+REFERENCE_BEGIN = "<!-- generated by `work_tickets.py docs` from its command registry: begin -->"
+REFERENCE_END = "<!-- generated by `work_tickets.py docs`: end -->"
+REFERENCE_WIDTH = 100
+
+
+@command("docs", "write the README's command reference from this registry; with --check, only "
+                 "refuse a README that differs",
+         arg("--check", action="store_true",
+             help="exit code 1, writing nothing, when README.md differs from what docs writes"))
+def run_docs(root: None, args: argparse.Namespace) -> int:
+    text = README.read_text(encoding="utf-8")
+    expected = with_command_reference(text)
+    if text == expected:
+        print(f"{README.name}: the command reference is up to date")
+        return 0
+    if args.check:
+        print(f"error: {README.name}: the command reference differs from the registry; run "
+              "work_tickets.py docs", file=sys.stderr)
+        return 1
+    README.write_text(expected, encoding="utf-8", newline="\n")
+    print(f"{README.name}: wrote the command reference")
+    return 0
+
+
+def leaf_commands(group: Command = COMMANDS, path: tuple[str, ...] = ()
+                  ) -> list[tuple[tuple[str, ...], Command]]:
+    """Every command with a handler, as its words after work_tickets.py, in registry order."""
+    found = []
+    for command_ in group.subcommands:
+        words = (*path, command_.name)
+        found += leaf_commands(command_, words) if command_.subcommands else [(words, command_)]
+    return found
+
+
+def add_arguments(parser: argparse.ArgumentParser, command_: Command) -> None:
+    for argument in command_.arguments:
+        if isinstance(argument, Exclusive):
+            group = parser.add_mutually_exclusive_group(required=argument.required)
+            for member in argument.members:
+                group.add_argument(*member.flags, **member.options)
+        else:
+            parser.add_argument(*argument.flags, **argument.options)
+
+
+def build_parser(parser: argparse.ArgumentParser, command_: Command) -> argparse.ArgumentParser:
+    add_arguments(parser, command_)
+    if command_.subcommands:
+        subparsers = parser.add_subparsers(dest=command_.dest, required=True)
+        for sub in command_.subcommands:
+            build_parser(subparsers.add_parser(sub.name, help=sub.help), sub)
+    else:
+        parser.set_defaults(handler=command_.handler)
+    return parser
 
 
 def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    return build_parser(argparse.ArgumentParser(description=COMMANDS.help), COMMANDS)
 
-    init_parser = subparsers.add_parser("init", help="initialize the ticket queue")
-    add_worktree_argument(init_parser)
 
-    create_parser = subparsers.add_parser("create", help="create a ticket in todo")
-    add_worktree_argument(create_parser)
-    create_parser.add_argument("--id", required=True, help="stable ticket ID")
-    create_parser.add_argument("--title", required=True, help="ticket title")
-    create_parser.add_argument(
-        "--acceptance", action="append",
-        help="one acceptance item, repeatable; replaces the placeholder item",
-    )
+def command_reference() -> str:
+    """The README's command reference: each command's usage and help, from the registry."""
+    def formatter(prog: str) -> argparse.HelpFormatter:
+        return argparse.HelpFormatter(prog, width=REFERENCE_WIDTH)
+    entries = []
+    for words, command_ in leaf_commands():
+        parser = argparse.ArgumentParser(
+            prog=" ".join((COMMANDS.name, *words)), add_help=False, formatter_class=formatter)
+        add_arguments(parser, command_)
+        # Without argparse's "usage: " prefix, its continuation lines move left by as much.
+        usage = "\n".join(line[len("usage: "):]
+                          for line in parser.format_usage().rstrip().splitlines())
+        help_text = textwrap.fill(command_.help, REFERENCE_WIDTH, initial_indent="    ",
+                                  subsequent_indent="    ")
+        entries.append(f"{usage}\n{help_text}")
+    return "```text\n" + "\n\n".join(entries) + "\n```"
 
-    move_parser = subparsers.add_parser("move", help="move a ticket between states")
-    add_worktree_argument(move_parser)
-    move_parser.add_argument("--id", required=True, help="ticket ID")
-    move_parser.add_argument("--to", required=True, choices=STATES)
 
-    status_parser = subparsers.add_parser("status", help="report queue status")
-    add_worktree_argument(status_parser)
-    status_parser.add_argument("--json", action="store_true", help="emit JSON")
-    status_parser.add_argument("--integration-target", help="Git ref containing worker commits")
-
-    review_parser = subparsers.add_parser("review-note", help="append a local note disposition")
-    add_worktree_argument(review_parser)
-    review_parser.add_argument("--note", required=True, help="note filename in work/notes")
-    review_parser.add_argument("--disposition", required=True, help="local review decision")
-    review_parser.add_argument("--backlog-ref", help="optional authored backlog reference")
-
-    close_parser = subparsers.add_parser("close", help="check or close an integrated worktree")
-    add_worktree_argument(close_parser)
-    close_parser.add_argument("--integration-target", help="Git ref containing worker commits")
-    close_parser.add_argument("--remove", action="store_true", help="remove eligible linked worktree")
-    close_parser.add_argument("--json", action="store_true", help="emit JSON")
-
-    intake_parser = subparsers.add_parser(
-        "intake", help="read the work issue with gh and write its tickets into todo")
-    add_worktree_argument(intake_parser)
-    intake_source = intake_parser.add_mutually_exclusive_group(required=True)
-    intake_source.add_argument("--issue", type=int, help="work issue number")
-    intake_source.add_argument(
-        "--outside", action="store_true",
-        help="for SE: list the open issues of se.toml's [outside] repositories that carry no "
-             "fleet marker and no handled comment, in one query; writes nothing")
-    intake_parser.add_argument("--repo", help=REPO_HELP)
-    intake_parser.add_argument(
-        "--discovery", action="store_true",
-        help="create the ignored discovery evidence folder and index",
-    )
-    intake_parser.add_argument(
-        "--probe-root",
-        help="relative ignored discovery output root; default: .se/work/probe",
-    )
-
-    probe_parser = subparsers.add_parser(
-        "probe", help="append a command and output path to the discovery evidence index"
-    )
-    add_worktree_argument(probe_parser)
-    probe_parser.add_argument(
-        "--command", required=True, dest="probe_command", help="command that produced the output"
-    )
-    probe_parser.add_argument("--output", required=True, help="path to the command output")
-
-    refresh_parser = subparsers.add_parser(
-        "refresh", help="re-read the work issue and its comments and report changes")
-    add_worktree_argument(refresh_parser)
-    refresh_parser.add_argument("--issue", type=int, help="work issue number; default: recorded")
-    refresh_parser.add_argument("--repo", help=REPO_HELP)
-    refresh_parser.add_argument("--json", action="store_true", help="emit JSON")
-
-    comments_parser = subparsers.add_parser(
-        "comments-read",
-        help="record the work issue's comments as read: their count and the newest one's id "
-             "(intake records them; field-report --check and deliver refuse comments after it)")
-    add_worktree_argument(comments_parser)
-    comments_parser.add_argument("--count", required=True, type=int, help="number of comments")
-    comments_parser.add_argument(
-        "--newest", required=True, help="id of the newest comment ('' for none)")
-
-    body_parser = subparsers.add_parser(
-        "body-read",
-        help="record the work issue's body as read (intake records it; field-report --check and "
-             "deliver refuse a body changed after it)")
-    add_worktree_argument(body_parser)
-    body_parser.add_argument(
-        "--body-file", type=Path, metavar="FILE",
-        help="the work issue's body as your GitHub tools read it now; default: read with gh")
-
-    report_parser = subparsers.add_parser(
-        "field-report",
-        help="create or update the field-report issue from a filled "
-             ".github/ISSUE_TEMPLATE/field-report.md body")
-    report_parser.add_argument(
-        "--worktree", help="path to the selected worktree; needed except by --check with --issue-body"
-    )
-    report_target = report_parser.add_mutually_exclusive_group(required=True)
-    report_target.add_argument("--file", type=Path, help="Markdown body file")
-    report_target.add_argument(
-        "--check", type=Path, metavar="FILE",
-        help="only validate FILE against the template, without writing GitHub: its header lines, "
-             "sections, tables, field labels, placeholders and evidence gate, and, in a worktree "
-             "with a comments-read or body-read record, refuse comments after it and a changed "
-             "body")
-    report_parser.add_argument(
-        "--issue-body", type=Path, metavar="FILE",
-        help="with --check: the work issue's body as your GitHub tools read it now, for the "
-             "evidence gate and the body-read check; default: intake's snapshot, the body read "
-             "with gh")
-    report_parser.add_argument(
-        "--comment-count", type=int, metavar="N",
-        help="with --check: the work issue's comment count as your GitHub tools read it now; "
-             "default: read with gh")
-    report_parser.add_argument(
-        "--newest-comment", metavar="ID",
-        help="with --check: the id of the work issue's newest comment, as your GitHub tools "
-             "read it now ('' for none)")
-    report_parser.add_argument(
-        "--draft", action="store_true",
-        help="write the template body with work issue, pull request, branch and user "
-             "requirement filled in to --file instead")
-    report_parser.add_argument("--pr", type=int, help="pull request number; default: the branch's")
-
-    escalate_parser = subparsers.add_parser(
-        "escalate", help="comment a question on an issue and label it escalated")
-    add_worktree_argument(escalate_parser)
-    escalate_parser.add_argument("--issue", required=True, type=int, help="issue to escalate")
-    escalate_parser.add_argument("--file", required=True, type=Path, help="Markdown question")
-    escalate_parser.add_argument("--repo", help=REPO_HELP)
-
-    file_parser = subparsers.add_parser(
-        "file", help="for SE: file a work issue labelled work, ready and repo:<name>; with "
-                     "--blocked-by, ready only once its blockers are linked")
-    add_worktree_argument(file_parser)
-    file_parser.add_argument("--title", required=True, help="the branch name")
-    file_parser.add_argument("--body-file", required=True, type=Path,
-                             help="the filled .github/ISSUE_TEMPLATE/work.md body")
-    file_parser.add_argument("--blocked-by", type=int, action="append", default=[], metavar="N",
-                             help="a native blocker to link before it is ready, repeatable")
-    file_parser.add_argument("--repo", help=REPO_HELP)
-
-    route_parser = subparsers.add_parser(
-        "route", help="for SE: route a checked outside issue as a work issue: retitle it, label it "
-                      "work, ready and repo:<name>, and comment the handled record")
-    add_worktree_argument(route_parser)
-    route_parser.add_argument("issue", type=int)
-    route_parser.add_argument("--title", required=True, help="the branch name")
-    route_parser.add_argument("--comment-file", required=True, type=Path,
-                              help="the work.md sections the issue lacks, completed, and that it is "
-                                   "routed; the handled marker is added where missing")
-    route_parser.add_argument("--repo", help=REPO_HELP)
-
-    backlog_parser = subparsers.add_parser(
-        "backlog", help="for SE: file or list backlog issues, far-out ideas labelled "
-        f"{BACKLOG_LABEL} and {PERSON_LABEL} that no role takes as work")
-    backlog_actions = backlog_parser.add_subparsers(dest="backlog_action", required=True)
-    backlog_file_parser = backlog_actions.add_parser(
-        "file", help=f"file one backlog issue with both labels, creating {BACKLOG_LABEL} where missing")
-    add_worktree_argument(backlog_file_parser)
-    backlog_file_parser.add_argument("--title", required=True, help="the idea in one line")
-    backlog_file_parser.add_argument("--body-file", required=True, type=Path, help="Markdown body")
-    backlog_file_parser.add_argument("--repo", help=REPO_HELP)
-    backlog_list_parser = backlog_actions.add_parser(
-        "list", help="list the open backlog issues, or those whose title or body matches --search")
-    add_worktree_argument(backlog_list_parser)
-    backlog_list_parser.add_argument("--search", help="text to find in title or body")
-    backlog_list_parser.add_argument("--repo", help=REPO_HELP)
-
-    sync_parser = subparsers.add_parser("sync", help="merge the newest integration branch (se.toml project.integration_branch, "
-             "default main) from origin, or locally without origin")
-    add_worktree_argument(sync_parser)
-
-    suite_parser = subparsers.add_parser(
-        "suite", help="run se.toml's complete suite against its [tests] time budget, as integrate does; "
-        "exit code 1 when tests fail, 3 when they pass over the limit")
-    add_worktree_argument(suite_parser)
-    suite_parser.add_argument(
-        "--slowest", type=positive_int, default=SLOWEST_TESTS, metavar="N",
-        help=f"how many slowest tests to list, from the JUnit reports or pytest's --durations "
-        f"(default {SLOWEST_TESTS})")
-    suite_parser.add_argument(
-        "--compare", metavar="REF",
-        help="instead of the budget check, time the suite here and on REF (a temporary worktree; "
-        "a branch as origin has it, the local branch only where origin has none), "
-        "interleaved, after one untimed warm-up of each, and say whether this checkout is "
-        "\"not slower\" or \"slower by X s\" than REF")
-    suite_parser.add_argument(
-        "--runs", type=positive_int, default=COMPARE_RUNS, metavar="N",
-        help=f"with --compare: timed runs of each state (default {COMPARE_RUNS})")
-
-    guard_parser = subparsers.add_parser(
-        "guard", help="require the field report to name removed protected content, against "
-        "origin/<integration branch> as sync fetched it (the local branch without origin)"
-    )
-    add_worktree_argument(guard_parser)
-    guard_parser.add_argument("--branch", required=True, help="branch to compare with the integration branch")
-    guard_parser.add_argument(
-        "--field-report", required=True, type=Path,
-        help="field report containing approved removed behaviour and tests",
-    )
-
-    deliver_parser = subparsers.add_parser(
-        "deliver", help="sync, push, create or update the pull request and file report")
-    add_worktree_argument(deliver_parser)
-    deliver_parser.add_argument("--integrator-session", help=f"{SESSION_HELP} to notify")
-    deliver_parser.add_argument(
-        "--tracker", help="field-report tracker [HOST/]OWNER/REPO; default: the work issue tracker"
-    )
-
-    push_parser = subparsers.add_parser(
-        "push", help="public check's push gate, then git push -u origin <branch>; retries a "
-        "transient refusal once a minute, ten attempts; the integration branch needs a passing "
-        "suite and public check recorded on the tree pushed")
-    add_optional_worktree_argument(push_parser)
-    push_parser.add_argument("branch", nargs="?", help="branch to push; default: the current one")
-
-    verified_parser = subparsers.add_parser(
-        "verified", help="the pre-push hook's guard: refuse a push of <commit> to <remote ref> "
-        "where the ref is the integration branch and no passing suite and public check are "
-        "recorded on its tree; push runs the same check")
-    add_optional_worktree_argument(verified_parser)
-    verified_parser.add_argument("remote_ref", help="the pushed remote ref, for example refs/heads/main")
-    verified_parser.add_argument("commit", help="the pushed commit")
-
-    pr_body_parser = subparsers.add_parser(
-        "pr-body", help="print the pull request body deliver writes: Fixes <issue> where all its "
-        "acceptance shows before the merge, else Refs <issue>")
-    add_optional_worktree_argument(pr_body_parser)
-    pr_body_parser.add_argument(
-        "--issue-body", required=True, type=Path, help="file holding the work issue's body")
-    pr_body_parser.add_argument(
-        "--issue-url", required=True, help="the work issue's URL, ending in /issues/<n>")
-
-    trailer_parser = subparsers.add_parser(
-        "release-trailer", help="print the Release-kind trailer an integration merge of <branch> "
-        "carries, from its work issue's Package kind and the branch prefix; push requires it")
-    add_optional_worktree_argument(trailer_parser)
-    trailer_parser.add_argument(
-        "branch", help="the integrated branch: the local branch, else origin/<branch>")
-    trailer_parser.add_argument(
-        "--issue-body", required=True, type=Path, help="file holding the work issue's body")
-    trailer_parser.add_argument(
-        "--field-report", type=Path, metavar="FILE",
-        help="file holding the field report; refuses commits on <branch> after its Branch tip, "
-             "and gives a re-integration its Re-integration kind (default patch)")
-    add_include_late_argument(trailer_parser)
-
-    integrate_parser = subparsers.add_parser(
-        "integrate", help="validate, merge, test, push and close a field report")
-    add_worktree_argument(integrate_parser)
-    integrate_parser.add_argument("field_report", type=int, help="field-report issue number")
-    integrate_parser.add_argument("--repo", help=REPO_HELP)
-    integrate_parser.add_argument("--build-command", help="project's output regeneration command")
-    add_include_late_argument(integrate_parser)
-    integrate_parser.add_argument(
-        "--check-command",
-        type=parse_check_commands,
-        metavar="JSON",
-        help="project checks as a JSON list of argument arrays",
-    )
-    integrate_parser.add_argument(
-        "--check-command-temporary-directory",
-        action="store_true",
-        help="run every project check in its own temporary working directory",
-    )
-
-    config_parser = subparsers.add_parser(
-        "config", help="show the repository and the machine-local settings in effect")
-    add_worktree_argument(config_parser)
-    config_parser.add_argument("--repo", help=REPO_HELP)
-    config_parser.add_argument("--worktree-root", help=ROOT_HELP)
-    config_parser.add_argument("--integrator-session", help=SESSION_HELP)
-
-    start_parser = subparsers.add_parser(
-        "start", help="start a ready work issue: worktree from the newest main, label in-progress")
-    add_worktree_argument(start_parser)
-    start_parser.add_argument("issue", type=int)
-    start_parser.add_argument("--repo", help=REPO_HELP)
-    start_parser.add_argument("--worktree-root", help=ROOT_HELP)
-    start_parser.add_argument(
-        "--no-create", dest="create", action="store_false",
-        help="only change the labels; the project's own script created the worktree")
-    start_parser.add_argument("--cloud-agent", help="GitHub login for a cloud worker")
-
-    block_parser = subparsers.add_parser("block", help="link an issue to a native blocker")
-    add_worktree_argument(block_parser)
-    block_parser.add_argument("issue", type=int)
-    block_parser.add_argument("--by", required=True, type=int, dest="blocker")
-    block_parser.add_argument("--repo", help=REPO_HELP)
-
-    for name, help_text in (
-        ("ready", "list startable ready work issues"),
-        ("capacity", "show local worker capacity or cloud unlimited capacity"),
-        ("queue", "list open field reports and startable work issues"),
-    ):
-        command_parser = subparsers.add_parser(name, help=help_text)
-        add_optional_worktree_argument(command_parser)
-        command_parser.add_argument("--repo", help=REPO_HELP)
-        command_parser.add_argument(
-            "--all-repos", action="store_true", help="include tracker issues for every repository"
-        )
-    return parser
+def with_command_reference(text: str) -> str:
+    """`text` with the block between the reference markers replaced by the generated one."""
+    before, begin, rest = text.partition(REFERENCE_BEGIN)
+    _, end, after = rest.partition(REFERENCE_END)
+    if not begin or not end:
+        raise QueueError(f"{README.name}: no {REFERENCE_BEGIN} ... {REFERENCE_END} block; add the "
+                         "markers where the command reference belongs")
+    return f"{before}{begin}\n{command_reference()}\n{end}{after}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -4203,272 +4551,8 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(errors="replace")
     args = make_parser().parse_args(argv)
     try:
-        root = worktree_root(args.worktree) if args.worktree is not None else None
-        if args.command == "init":
-            initialize(root)
-            print(f"Initialized ticket queue in {root / '.se' / 'work'}")
-            return 0
-        if args.command == "create":
-            create_ticket(root, args.id, args.title, args.acceptance)
-            print(f"Created ticket {args.id} in todo")
-            return 0
-        if args.command == "move":
-            move_ticket(root, args.id, args.to)
-            print(f"Moved ticket {args.id} to {args.to}")
-            return 0
-        if args.command == "review-note":
-            review_note(root, args.note, args.disposition, args.backlog_ref)
-            print(f"Reviewed note {args.note}")
-            return 0
-        if args.command == "file":
-            print(f"Filed work issue {file_work_issue(root, args.title, args.body_file, args.blocked_by, args.repo)}")
-            return 0
-        if args.command == "route":
-            route_outside_issue(root, args.issue, args.title, args.comment_file, args.repo)
-            print(f"Routed issue #{args.issue} as {args.title.strip()}")
-            return 0
-        if args.command == "backlog" and args.backlog_action == "file":
-            print(f"Filed backlog issue {backlog_file(root, args.title, args.body_file, args.repo)}")
-            return 0
-        if args.command == "backlog":
-            found = backlog_list(root, args.search, args.repo)
-            if not found:
-                print("No backlog issues.")
-            else:
-                print(f"Backlog issues ({len(found)}):")
-                for issue in found:
-                    print(f"  #{issue['number']} {issue['title']} {issue['url']}")
-            return 0
-        if args.command == "intake" and args.outside:
-            if args.repo or args.discovery or args.probe_root:
-                raise QueueError("intake --outside takes its repositories from se.toml [outside], "
-                                 "and no --repo, --discovery or --probe-root")
-            found = intake_outside(root)
-            if not found:
-                print("No outside issues to handle.")
-            else:
-                print(f"Outside issues ({len(found)}), not yet handled:")
-                for issue in found:
-                    print(f"  {issue['repo']}#{issue['number']} {issue['title']} {issue['url']}")
-            return 0
-        if args.command == "intake":
-            issue, created, kept = intake(
-                root, args.issue, args.repo, args.discovery, args.probe_root
-            )
-            print(f"Work issue #{issue['number']}: {issue['title']} ({issue['url']})")
-            for ticket_id in created:
-                print(f"created todo/{ticket_id}.md")
-            for ticket_id in kept:
-                print(f"kept existing ticket for {ticket_id}")
-            for reference in bare_cross_repository_references(issue["body"], issue["repo"]):
-                print(
-                    f"warning: intake: work issue #{issue['number']} cites {reference} with no "
-                    "quoted block next to it; a cloud worker cannot read another repository, so "
-                    "quote what it needs inline, with its source (work-model skill, "
-                    '"Writing work issues")',
-                    file=sys.stderr,
-                )
-            if issue["comments"]:
-                print(f"{len(issue['comments'])} comment(s) may change the requirements:")
-                for comment in issue["comments"]:
-                    print(f"  {comment['createdAt']} {comment['author']}: {comment['url']}")
-            return 0
-        if args.command == "probe":
-            print(
-                f"Appended discovery evidence to "
-                f"{append_discovery_evidence(root, args.probe_command, args.output)}"
-            )
-            return 0
-        if args.command == "refresh":
-            changes = refresh(root, args.issue, args.repo)
-            if args.json:
-                print(json.dumps(changes, indent=2, ensure_ascii=False))
-            else:
-                print_changes(changes)
-            return 0
-        if args.command == "comments-read":
-            record_comments_read(root, {"count": args.count, "newest": args.newest})
-            print(f"Recorded {args.count} comment(s) as read, newest {args.newest or 'none'}")
-            return 0
-        if args.command == "body-read":
-            body_read(root, args.body_file)
-            print("Recorded the work issue's body as read")
-            return 0
-        if args.command == "field-report":
-            if args.check is not None:
-                if args.draft:
-                    raise QueueError("field-report: --check and --draft exclude each other")
-                if (args.comment_count is None) != (args.newest_comment is None):
-                    raise QueueError(
-                        "field-report --check: --comment-count and --newest-comment go together")
-                comments = None if args.comment_count is None else {
-                    "count": args.comment_count, "newest": args.newest_comment}
-                marked = check_field_report(root, args.check, args.issue_body, comments)
-                print(f"Field report {args.check.name} follows the template"
-                      + ("; added the fleet marker" if marked else ""))
-            elif root is None:
-                mode = "--draft" if args.draft else "--file"
-                raise QueueError(f"field-report {mode} needs --worktree <worktree>, the worker's checkout")
-            elif args.draft:
-                pr = draft_field_report(root, args.file, args.pr)
-                print(f"Drafted {args.file}" + ("" if pr else "; no pull request found yet"))
-            else:
-                action, url = file_field_report(root, args.file, args.pr)
-                print(f"Field report {action}: {url}")
-            return 0
-        if args.command == "escalate":
-            escalate(root, args.issue, args.file, args.repo)
-            print(f"Escalated #{args.issue}")
-            return 0
-        if args.command == "sync":
-            print(f"Merged {integration_branch(root)} {sync(root)}")
-            return 0
-        if args.command == "suite":
-            if args.compare:
-                print(f"Verdict: {compare_suites(root, args.compare, args.runs)}")
-                return 0
-            print(f"Suite: {run_suite(root, args.slowest)}")
-            return 0
-        if args.command == "guard":
-            removed = guard(root, args.branch, args.field_report)
-            if removed:
-                for name in removed:
-                    print(f"Field report names removed protected content: {name}")
-            else:
-                print("No removed protected content found.")
-            return 0
-        if args.command == "deliver":
-            session = config_value(
-                "integrator_session", str(required_snapshot(root)["repo"]), args.integrator_session)
-            report_url = deliver(root, args.tracker)
-            print(f"Notify {session or '<integrator session>'}: field report {report_url}")
-            return 0
-        if args.command == "push":
-            push(root, args.branch)
-            return 0
-        if args.command == "verified":
-            if args.remote_ref == f"refs/heads/{integration_branch(root)}":
-                guard_pushed_tree(root, args.commit)
-                print(f"Verified: {args.commit[:12]} carries the verdicts the integration branch needs")
-            return 0
-        if args.command == "pr-body":
-            number = re.search(r"/issues/(\d+)/?$", args.issue_url)
-            if number is None:
-                raise QueueError(f"pr-body: --issue-url {args.issue_url!r} does not end in /issues/<n>")
-            try:
-                body = args.issue_body.read_text(encoding="utf-8")
-            except (OSError, UnicodeError) as error:
-                raise QueueError(f"pr-body: cannot read {args.issue_body}: {error}") from error
-            print(pull_request_body(
-                {"number": number.group(1), "url": args.issue_url, "body": body}), end="")
-            return 0
-        if args.command == "release-trailer":
-            try:
-                body = args.issue_body.read_text(encoding="utf-8")
-                report = (None if args.field_report is None
-                          else args.field_report.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError) as error:
-                raise QueueError(f"Cannot read {error.filename or 'an input file'}: {error}") from error
-            if report is not None:
-                late = check_branch_tip(root, report, args.branch,
-                                        branch_head(root, args.branch), args.include_late)
-                if late:
-                    print(f"Includes {len(late)} commit(s) after the field report's Branch tip: "
-                          f"{args.include_late}", file=sys.stderr)
-            print(release_trailer(root, args.branch, body, report))
-            return 0
-        if args.command == "integrate":
-            if args.check_command_temporary_directory and not args.check_command:
-                raise QueueError("--check-command-temporary-directory requires --check-command")
-            commit = integrate(
-                root, args.field_report, args.repo, args.build_command,
-                args.check_command, args.check_command_temporary_directory, args.include_late,
-            )
-            print(f"Integrated field report #{args.field_report} in {commit}")
-            return 0
-        if args.command == "config":
-            repo = resolve_repo(root, args.repo)
-            print(f"repository: {repo}")
-            print(f"machine-local config: {local_config_path()}")
-            directory = configured_worktree_root(root, args.worktree_root)
-            print(f"worktree root: {directory or default_worktree_root(root)}")
-            session = config_value("integrator_session", repo, args.integrator_session)
-            print(f"integrator session: {session or '(not set)'}")
-            return 0
-        if args.command == "start":
-            path = start(
-                root, args.issue, args.repo, args.worktree_root, args.create, args.cloud_agent
-            )
-            if path is not None:
-                issue = fetch_issue(root, args.issue, resolve_repo(root, args.repo))
-                print(f"Launch worker: agent=worker issue={issue['url']} worktree={path}")
-            print(f"Started #{args.issue}")
-            return 0
-        if args.command == "block":
-            block(root, args.issue, args.blocker, args.repo)
-            print(f"Blocked #{args.issue} by #{args.blocker}")
-            return 0
-        if args.command in {"ready", "capacity", "queue"}:
-            repo = resolve_repo(root, args.repo)
-            if args.command == "capacity":
-                slots = capacity(root, repo, args.all_repos)
-                print("Capacity: unlimited (cloud)" if slots is None else f"Capacity: {slots}")
-                return 0
-            ready = ready_issues(root, repo, args.all_repos)
-            if args.command == "ready":
-                for issue in ready:
-                    print(f"#{issue['number']} {issue['title']}")
-                return 0
-            reports, escalations, _, slots = queue(root, repo, args.all_repos)
-            for report in reports:
-                print(f"field-report #{report['number']} {report['title']} {report['url']}")
-            for escalation in escalations:
-                print(f"escalated #{escalation['number']} {escalation['title']} {escalation['url']}")
-            print("Capacity: unlimited (cloud)" if slots is None else f"Capacity: {slots}")
-            for issue in ready:
-                print(f"ready #{issue['number']} {issue['title']}")
-            return 0
-        if args.command == "close":
-            if args.remove and not args.integration_target:
-                raise QueueError("--remove requires --integration-target")
-            report = status_report(root, args.integration_target)
-            report["removed"] = False
-            if report["cleanup_eligible"] and args.remove:
-                remove_worktree(root, report)
-            if args.json:
-                print(json.dumps(report, indent=2, sort_keys=True))
-            else:
-                print(f"Cleanup eligible: {'yes' if report['cleanup_eligible'] else 'no'}")
-                for reason in report["cleanup_reasons"]:
-                    print(f"reason: {reason}")
-                if report["removed"]:
-                    print("removed: yes")
-            return 0 if report["cleanup_eligible"] else 1
-
-        report = status_report(root, args.integration_target)
-        if args.json:
-            print(json.dumps(report, indent=2, sort_keys=True))
-        else:
-            print(f"Initialized: {'yes' if report['initialized'] else 'no'}")
-            print("Counts: " + ", ".join(
-                f"{state}={report['counts'][state]}" for state in STATES
-            ))
-            for state in STATES:
-                print(f"{state}: {', '.join(report['tickets'][state]) or '(none)'}")
-            print(f"notes: {', '.join(report['notes']) or '(none)'}")
-            print(
-                "notes resolved/unresolved: "
-                f"{report['note_counts']['resolved']}/{report['note_counts']['unresolved']}"
-            )
-            print(f"complete: {'yes' if report['complete'] else 'no'}")
-            print(
-                f"cleanup eligible: {'yes' if report['cleanup_eligible'] else 'no'}"
-            )
-            for reason in report["cleanup_reasons"]:
-                print(f"cleanup reason: {reason}")
-            for error in report["errors"]:
-                print(f"error: {error}")
-        return 0 if report["initialized"] and not report["errors"] else 1
+        worktree = getattr(args, "worktree", None)
+        return args.handler(worktree_root(worktree) if worktree is not None else None, args)
     except MissingGhError as error:
         print(f"error: work_tickets.py {args.command} {error}", file=sys.stderr)
         return 1
