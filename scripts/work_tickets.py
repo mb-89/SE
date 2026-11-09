@@ -35,6 +35,9 @@ SECTION_PATTERN = re.compile(r"^##\s+(.+?)\s*$")
 DISPOSITION_PATTERN = re.compile(r"^\s*Disposition:\s*(.*?)\s*$", re.IGNORECASE)
 REQUIREMENT_PATTERN = re.compile(r"^(\d+)\.\s+(.*\S)\s*$")
 REQUIREMENT_SECTIONS = ("Requirements", "Changes after filing")
+# The section `route` appends to an outside issue, owned by the work model's "Outside issues": the
+# work.md sections it lacks, each one heading level down, read as if the body held them itself.
+ROUTING_SECTION = "Routing"
 FRONT_MATTER_PATTERN = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 ISSUE_URL_PATTERN = re.compile(r"^https?://([^/]+)/([^/]+)/([^/]+)/issues/\d+$")
@@ -1250,14 +1253,16 @@ def unread_comments_error(
     )
 
 
-def markdown_sections(body: str) -> dict[str, str]:
+def markdown_sections(body: str, level: int = 2) -> dict[str, str]:
+    """The body's sections at one heading level (`##` by default), heading -> text."""
+    pattern = re.compile(rf"^{'#' * level}\s+(.+?)\s*$")
     sections: dict[str, list[str]] = {}
     current: list[str] | None = None
     fenced = False
     for line in body.splitlines():
         if line.lstrip().startswith("```"):
             fenced = not fenced
-        heading = None if fenced else SECTION_PATTERN.fullmatch(line)
+        heading = None if fenced else pattern.fullmatch(line)
         if heading:
             current = sections.setdefault(heading.group(1).strip().casefold(), [])
         elif current is not None:
@@ -1274,17 +1279,33 @@ def section(sections: dict[str, str], name: str) -> str:
     )
 
 
+def routed_sections(body: str) -> dict[str, str]:
+    """The sections under the body's routing heading, which `route` wrote one level down."""
+    return markdown_sections(section(markdown_sections(body), ROUTING_SECTION), level=3)
+
+
+def issue_sections(body: str) -> dict[str, str]:
+    """An issue's sections as its readers see them: the body's own, then the routed ones."""
+    sections = markdown_sections(body)
+    for name, text in routed_sections(body).items():
+        sections[name] = "\n\n".join(part for part in (sections.get(name, ""), text) if part)
+    return sections
+
+
 def requirement_items(body: str) -> dict[int, tuple[str, str]]:
     """The one parser of an issue's requirements: number -> (section, text).
 
-    Numbered items under "Changes after filing" are requirements too, numbered as written; a
-    number both sections use is one requirement, named by the section that first lists it.
+    Numbered items under "Changes after filing", and under the routing section's requirements,
+    are requirements too, numbered as written; a number two sections use is one requirement,
+    named by the section that first lists it.
     """
     sections = markdown_sections(body)
+    sources = [(name, section(sections, name)) for name in REQUIREMENT_SECTIONS]
+    sources.append((ROUTING_SECTION, section(routed_sections(body), "requirements")))
     items: dict[int, tuple[str, list[str]]] = {}
-    for name in REQUIREMENT_SECTIONS:
+    for name, text in sources:
         current: list[str] | None = None
-        for line in section(sections, name).splitlines():
+        for line in text.splitlines():
             match = REQUIREMENT_PATTERN.fullmatch(line)
             if match:
                 current = items.setdefault(int(match.group(1)), (name, []))[1]
@@ -1303,7 +1324,7 @@ def field_report_evidence_items(body: str) -> dict[str, str]:
     }
     acceptance_items = [
         match.group(2)
-        for line in section(markdown_sections(body), "acceptance").splitlines()
+        for line in section(issue_sections(body), "acceptance").splitlines()
         if (match := CHECKBOX_PATTERN.fullmatch(line)) is not None
     ]
     acceptance = {
@@ -1367,7 +1388,7 @@ def is_discovery_issue(issue: dict[str, object]) -> bool:
 
 def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
     """Derives one ticket per numbered requirement plus the delivery ticket."""
-    sections = markdown_sections(issue["body"])
+    sections = issue_sections(issue["body"])
     requirements = {n: text for n, (_, text) in requirement_items(issue["body"]).items()}
     if not requirements:
         requirements = {1: section(sections, "goal") or issue["title"]}
@@ -1508,7 +1529,8 @@ def outside_issues(cutoffs: dict[str, int], data: dict[str, object]) -> list[dic
                 "in se.toml [outside]")
         for issue in nodes:
             labels = {label["name"] for label in issue["labels"]["nodes"]}
-            if (issue["number"] <= cutoff or FLEET_MARKER in (issue.get("body") or "")
+            body = issue.get("body") or ""
+            if (issue["number"] <= cutoff or FLEET_MARKER in body or HANDLED_MARKER in body
                     or FLEET_LABEL in labels or BACKLOG_LABEL in labels
                     or any(HANDLED_MARKER in (comment.get("body") or "")
                            for comment in issue["comments"]["nodes"])):
@@ -1941,7 +1963,7 @@ INTEGRATION_SUBJECT_PATTERN = re.compile(r"Integrate ([^\s:()]+)")
 
 def is_breaking(issue_body: str) -> bool:
     """Whether a work issue marks a breaking change: the word in its Package kind section."""
-    kind = HTML_COMMENT_PATTERN.sub("", section(markdown_sections(issue_body), "Package kind"))
+    kind = HTML_COMMENT_PATTERN.sub("", section(issue_sections(issue_body), "Package kind"))
     return re.search(r"\bbreaking\b", kind, re.IGNORECASE) is not None
 
 
@@ -2270,7 +2292,7 @@ POST_MERGE_PATTERN = re.compile(
 def post_merge_acceptance(body: str) -> list[str]:
     """The work issue's acceptance lines that can only be seen after the merge."""
     return [
-        line.strip() for line in section(markdown_sections(body), "acceptance").splitlines()
+        line.strip() for line in section(issue_sections(body), "acceptance").splitlines()
         if POST_MERGE_PATTERN.search(line)
     ]
 
@@ -2497,7 +2519,7 @@ def repository_label_arguments(root: Path, all_repos: bool) -> list[str]:
 
 
 def issue_ownership(issue: dict[str, object]) -> set[str]:
-    value = section(markdown_sections(str(issue.get("body", ""))), "file ownership")
+    value = section(issue_sections(str(issue.get("body", ""))), "file ownership")
     return {
         line.strip("` -")
         for line in value.splitlines()
@@ -2616,7 +2638,7 @@ def draft_field_report(root: Path, file: Path, pr: int | None) -> int | None:
         body = body.replace("**Pull request:** #<n>", "**Pull request:** none", 1)
     body = (body.replace("<integration branch>", integration_branch(root))
             .replace("<branch>", branch).replace("<commit>", tested_main(root)))
-    requirement = section(markdown_sections(issue["body"]), "user requirement")
+    requirement = section(issue_sections(issue["body"]), "user requirement")
     if requirement:
         body = re.sub(
             r"(^## User requirement[^\n]*\n(?:\s*<!--.*?-->)?\s*\n)>[ \t]*$",
@@ -2969,25 +2991,56 @@ def file_work_issue(
     return url or title
 
 
+def today_stamp() -> str:
+    """Today as a branch name's date, `<yyyymmdd>`."""
+    return time.strftime("%Y%m%d")
+
+
+def routed_branch(title: str, kind: str) -> str:
+    """The branch name derived from an outside issue's title: `<kind>/<topic>-<yyyymmdd>`, without
+    a leading label such as "Proposal:"."""
+    if kind not in RELEASE_KINDS:
+        raise QueueError(f"route --type {kind!r} names no package kind; use one of "
+                         f"{', '.join(RELEASE_KINDS)}")
+    topic = re.sub(r"^\s*\w+:\s*(?=\S)", "", title)
+    return f"{kind}/{slug(topic)}-{today_stamp()}"
+
+
+def routed_body(body: str, title: str, routing: str) -> str:
+    """The body unchanged, then the handled record and the routing section: the original title as
+    "Routed from" and the routing file's sections, each one heading level down."""
+    fenced = False
+    lines = []
+    for line in routing.strip().splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        lines.append(f"#{line}" if not fenced and SECTION_PATTERN.fullmatch(line) else line)
+    return (f"{body.rstrip()}\n\n{HANDLED_MARKER}\n## {ROUTING_SECTION}\n\n"
+            f"Routed from: {title.strip()}\n\n" + "\n".join(lines) + "\n")
+
+
 def route_outside_issue(
-    root: Path, number: int, title: str, file: Path, repo: str | None
-) -> None:
-    """Route a checked outside issue as a work issue: retitle and label it, then comment the
-    handled record, which `intake --outside` reads as done."""
-    if not title.strip():
-        raise QueueError("route needs a title, the branch name")
-    comment = read_text_file(file, "routing comment")
-    if HANDLED_MARKER not in comment:
-        comment = f"{HANDLED_MARKER}\n{comment}"
-    labels = work_labels(root, repo)
+    root: Path, number: int, title: str | None, kind: str, file: Path, repo: str | None
+) -> str:
+    """Route a checked outside issue as a work issue in one edit: its title becomes its branch name
+    (given, or derived from the title), it gets the work labels, and its body gets the routing
+    section, whose handled record `intake --outside` reads as done. Returns the branch name."""
+    routing = read_text_file(file, "routing sections")
     repo = resolve_repo(root, repo)
+    issue = fetch_issue(root, number, repo)
+    if section(markdown_sections(str(issue["body"])), ROUTING_SECTION):
+        raise QueueError(f"route: #{number} is routed already; edit its {ROUTING_SECTION} section")
+    branch = title.strip() if title is not None else routed_branch(str(issue["title"]), kind)
+    if not branch:
+        raise QueueError("route needs a title, the branch name, or none to derive it")
+    labels = work_labels(root, repo)
     ensure_labels(root, repo, labels)
-    run_gh(root, [
-        "issue", "edit", str(number), "--title", title.strip(),
+    run_gh_with_body(root, [
+        "issue", "edit", str(number), "--title", branch,
         *(argument for label in labels for argument in ("--add-label", label)),
         *repo_arguments(repo),
-    ])
-    run_gh_with_body(root, ["issue", "comment", str(number), *repo_arguments(repo)], comment + "\n")
+    ], routed_body(str(issue["body"]), str(issue["title"]), routing))
+    return branch
 
 
 def backlog_file(root: Path, title: str, file: Path, repo: str | None) -> str:
@@ -4210,18 +4263,21 @@ def run_file(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("route", "for SE: route a checked outside issue as a work issue: retitle it, label it "
-                  "work, ready and repo:<name>, and comment the handled record",
+@command("route", "for SE: route a checked outside issue as a work issue in one edit: retitle it "
+                  "to its branch name, label it work, ready and repo:<name>, and append the "
+                  "routing section with the handled record to its body",
          WORKTREE,
          arg("issue", type=int),
-         arg("--title", required=True, help="the branch name"),
-         arg("--comment-file", required=True, type=Path,
-             help="the work.md sections the issue lacks, completed, and that it is routed; the "
-                  "handled marker is added where missing"),
+         arg("--title", help="the branch name; derived from the issue's title where omitted"),
+         arg("--type", default="feat", help="the derived branch name's type (default feat)"),
+         arg("--routing-file", required=True, type=Path,
+             help="the work.md sections the issue lacks, completed, appended to its body under "
+                  f"## {ROUTING_SECTION} with the handled marker"),
          REPO)
 def run_route(root: Path, args: argparse.Namespace) -> int:
-    route_outside_issue(root, args.issue, args.title, args.comment_file, args.repo)
-    print(f"Routed issue #{args.issue} as {args.title.strip()}")
+    branch = route_outside_issue(
+        root, args.issue, args.title, args.type, args.routing_file, args.repo)
+    print(f"Routed issue #{args.issue} as {branch}")
     return 0
 
 
