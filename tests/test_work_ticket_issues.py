@@ -59,6 +59,7 @@ EVIDENCE_ROWS = """| Requirement 1 | complete | `abc1234` | `test`: passed |
 COMPLETE_REPORT = """**Work issue:** #5  **Pull request:** #7  **Branch:** `feature/example-20261104`  **Result:** complete
 **Tested against `main`:** `abc1234`
 **Branch tip:** `abc1234`  **Re-integration kind:** patch
+**Release kind:** minor — adds an example command
 
 ## User requirement (quoted back)
 
@@ -115,7 +116,9 @@ def reported_at(tip: str) -> str:
     return COMPLETE_REPORT.replace("**Branch tip:** `abc1234`", f"**Branch tip:** `{tip}`")
 
 def fill_evidence_rows(report: str) -> str:
-    return report.replace("|---|---|---|---|", "|---|---|---|---|\n" + EVIDENCE_ROWS)
+    """`report` with its evidence rows and its Release kind's reason filled in."""
+    return report.replace("|---|---|---|---|", "|---|---|---|---|\n" + EVIDENCE_ROWS).replace(
+        "<reason>", "adds an example command")
 
 
 def draft_complete_field_report(worktree: Path, pr: int | None = None) -> Path:
@@ -372,6 +375,7 @@ def test_field_report_fills_the_template_and_creates_a_labelled_issue(worktree, 
     draft = report.read_text(encoding="utf-8")
     assert "**Work issue:** #5  **Pull request:** #7  **Branch:** `feature/example-20261104`" in draft
     assert "**Tested against `main`:** `abc1234`" in draft
+    assert "**Release kind:** minor — <reason>" in draft  # the prefix only proposes the kind
     assert '## User requirement (quoted back)\n\n> make it "work", please\n' in draft
     delivered = draft.split("## Delivered", 1)[1].split("## Not delivered", 1)[0]
     assert "[Discovery evidence index](.se/work/probe/evidence.md)" in delivered
@@ -3204,3 +3208,25 @@ def test_integrate_leaves_an_issue_with_post_merge_acceptance_open_and_reports_g
     assert "Issue #5: OPEN on GitHub after the merge" in output
     assert "Issue #8: CLOSED on GitHub after the merge" in output
     assert "Close #5 once its post-merge acceptance is seen" in output
+
+
+@pytest.mark.parametrize(("old", "new", "refusal"), [
+    ("**Release kind:** minor — adds an example command\n", "",
+     'missing "**Release kind:**"'),
+    ("**Release kind:** minor", "**Release kind:** huge",
+     "Release kind 'huge' must be one of patch, minor, major"),
+    ("## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone",
+     "## Removed behaviour, deleted or weakened tests, and authored prose\n\n"
+     "- **Breaking:** removed the --all option",
+     "Release kind is minor, but section \"## Removed behaviour, deleted or weakened tests, and "
+     "authored prose\" lists a breaking change, which is major: - **Breaking:** removed the --all "
+     "option"),
+], ids=["missing", "unknown", "breaking-as-minor"])
+def test_field_report_check_refuses_a_release_kind_it_cannot_release(
+        tmp_path, capsys, old, new, refusal):
+    report, issue = tmp_path / "report.md", tmp_path / "issue.md"
+    assert old in COMPLETE_REPORT
+    report.write_text(COMPLETE_REPORT.replace(old, new), encoding="utf-8")
+    issue.write_text(BODY, encoding="utf-8")
+    assert work_tickets.main(["field-report", "--check", str(report), "--issue-body", str(issue)]) == 1
+    assert refusal in capsys.readouterr().err
