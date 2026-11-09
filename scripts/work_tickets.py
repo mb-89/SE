@@ -60,6 +60,9 @@ FIELD_REPORT_RESULT_PATTERN = re.compile(r"\*\*Result:\*\*\s*(complete|partial)\
 BRANCH_TIP_FIELD = re.compile(r"(\*\*Branch tip:\*\*[ \t]*)(`[^`\n]*`|\S*)")
 BRANCH_TIP_PATTERN = re.compile(r"\*\*Branch tip:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
 REINTEGRATION_KIND_PATTERN = re.compile(r"\*\*Re-integration kind:\*\*[ \t]*([^\s<]*)")
+RELEASE_KIND_PATTERN = re.compile(r"\*\*Release kind:\*\*[ \t]*(\w*)[ \t]*[—–:,-]*[ \t]*([^\n]*)")
+BREAKING_PATTERN = re.compile(r"\*\*Breaking:\*\*")
+REMOVED_SECTION = "Removed behaviour, deleted or weakened tests, and authored prose"
 WORK_ISSUE_PATTERN = re.compile(r"\bWork issue:\*{0,2}\s*#(\d+)\b", re.IGNORECASE)
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
 IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
@@ -1818,9 +1821,7 @@ def guard(root: Path, branch: str, field_report: Path) -> list[str]:
     report = read_file(field_report, "field report")
     removed_tests = deleted_tests(root, branch)
     removed_sentences = deleted_authored_sentences(root, branch)
-    named = "\n".join(section_content(
-        report, "Removed behaviour, deleted or weakened tests, and authored prose"
-    ))
+    named = "\n".join(section_content(report, REMOVED_SECTION))
     missing = [
         *[name for name in removed_tests if name not in named],
         *[sentence for sentence in removed_sentences if sentence not in named],
@@ -1956,7 +1957,8 @@ RELEASE_ORDER = ("patch", "minor", "major")
 RELEASE_TRAILER = "Release-kind"
 RELEASE_TRAILER_PATTERN = re.compile(rf"^{RELEASE_TRAILER}:[ \t]*(\S*)[ \t]*$", re.MULTILINE)
 RELEASE_TRAILER_HELP = (
-    "work_tickets.py release-trailer <branch> --issue-body <file> prints it from the work issue"
+    "work_tickets.py release-trailer <branch> --issue-body <file> --field-report <file> prints it "
+    "from the field report"
 )
 INTEGRATION_SUBJECT_PATTERN = re.compile(r"Integrate ([^\s:()]+)")
 
@@ -1967,19 +1969,50 @@ def is_breaking(issue_body: str) -> bool:
     return re.search(r"\bbreaking\b", kind, re.IGNORECASE) is not None
 
 
-def release_kind(branch: str, breaking: bool) -> str:
-    """The version part a package bumps: major if breaking, else by its branch prefix."""
-    if breaking:
+def default_release_kind(branch: str, issue_body: str) -> str | None:
+    """The kind field-report --draft proposes: major where the work issue marks a breaking change,
+    else by the branch prefix; None for a prefix that names none."""
+    if is_breaking(issue_body):
         return "major"
-    prefix = branch.split("/", 1)[0] if "/" in branch else ""
-    kind = RELEASE_KINDS.get(prefix)
-    if kind is None:
-        raise QueueError(
-            f"Cannot release {branch}: its prefix {prefix!r} names no package kind; name the "
-            f"branch <type>/<topic>-<yyyymmdd> with a type of {', '.join(RELEASE_KINDS)}, or mark "
-            "a breaking change in its work issue's Package kind; nothing was merged"
+    return RELEASE_KINDS.get(branch.split("/", 1)[0] if "/" in branch else "")
+
+
+def release_kind_problems(report_body: str, issue_body: str | None) -> list[str]:
+    """Where the field report's Release kind, the one source of a first integration's kind, is
+    missing, unknown, without its reason, or below major although the report's Removed behaviour
+    lists a breaking change (a **Breaking:** line) or the work issue marks one."""
+    header = HTML_COMMENT_PATTERN.sub("", "\n".join(ordered_sections(report_body)[0][1]))
+    match = RELEASE_KIND_PATTERN.search(header)
+    where = "header (above the first section): Release kind"
+    if match is None:
+        return [f"{where} is missing; write **Release kind:** patch|minor|major — <reason>, "
+                "what changed decides it (work model, Release kind)"]
+    kind, reason = match[1], match[2].strip()
+    problems = []
+    if kind not in RELEASE_ORDER:
+        problems.append(f"{where} {kind!r} must be one of {', '.join(RELEASE_ORDER)}")
+    if not reason:
+        problems.append(f"{where} needs a one-line reason after the kind")
+    if kind in RELEASE_ORDER and kind != "major":
+        removed = HTML_COMMENT_PATTERN.sub("", "\n".join(section_content(report_body, REMOVED_SECTION)))
+        problems.extend(
+            f"{where} is {kind}, but section \"## {REMOVED_SECTION}\" lists a breaking change, "
+            f"which is major: {line.strip()}"
+            for line in removed.splitlines() if BREAKING_PATTERN.search(line)
         )
-    return kind
+        if issue_body is not None and is_breaking(issue_body):
+            problems.append(f"{where} is {kind}, but the work issue's Package kind marks a "
+                            "breaking change, which is major")
+    return problems
+
+
+def declared_release_kind(branch: str, report_body: str | None, issue_body: str) -> str:
+    """The kind a first integration of `branch` releases: its field report's Release kind."""
+    problems = (["no field report given; pass --field-report <file>"] if report_body is None
+                else release_kind_problems(report_body, issue_body))
+    if problems:
+        raise QueueError(f"Cannot release {branch}: " + "; ".join(problems) + "; nothing was merged")
+    return RELEASE_KIND_PATTERN.search(report_body)[1]
 
 
 def integrated_before(root: Path, branch: str) -> bool:
@@ -2006,12 +2039,12 @@ def reintegration_kind(report_body: str | None) -> str:
 
 
 def release_trailer(root: Path, branch: str, issue_body: str, report_body: str | None = None) -> str:
-    """The trailer every integration merge carries, the one source of its release kind: the work
-    issue's kind on a first integration, and on a re-integration (an earlier merge of `branch` is
-    on the integration branch) the field report's Re-integration kind, patch without a report."""
+    """The trailer every integration merge carries, the one source of its release kind: the field
+    report's Release kind on a first integration, and on a re-integration (an earlier merge of
+    `branch` is on the integration branch) its Re-integration kind, patch without a report."""
     if integrated_before(root, branch):
         return f"{RELEASE_TRAILER}: {reintegration_kind(report_body)}"
-    return f"{RELEASE_TRAILER}: {release_kind(branch, is_breaking(issue_body))}"
+    return f"{RELEASE_TRAILER}: {declared_release_kind(branch, report_body, issue_body)}"
 
 
 def branch_head(root: Path, branch: str) -> str:
@@ -2636,6 +2669,9 @@ def draft_field_report(root: Path, file: Path, pr: int | None) -> int | None:
         body = body.replace("#<n>", f"#{pr}", 1)
     else:
         body = body.replace("**Pull request:** #<n>", "**Pull request:** none", 1)
+    kind = default_release_kind(branch, str(issue["body"]))
+    if kind is not None:
+        body = body.replace("**Release kind:** <kind>", f"**Release kind:** {kind}", 1)
     body = (body.replace("<integration branch>", integration_branch(root))
             .replace("<branch>", branch).replace("<commit>", tested_main(root)))
     requirement = section(issue_sections(issue["body"]), "user requirement")
@@ -2726,6 +2762,7 @@ def field_report_problems(body: str, issue_body: str | None) -> list[str]:
             "header (above the first section): Branch tip must be the branch's commit; "
             "field-report --check --worktree <worktree> fills it from the branch"
         )
+    problems.extend(release_kind_problems(body, issue_body))
     kind = REINTEGRATION_KIND_PATTERN.search(header)
     if kind is not None and kind[1] not in RELEASE_ORDER:
         problems.append(
@@ -4408,14 +4445,15 @@ def run_pr_body(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("release-trailer", "print the Release-kind trailer an integration merge of <branch> "
-                            "carries, from its work issue's Package kind and the branch prefix; "
-                            "push requires it",
+                            "carries, from its field report's Release kind (a re-integration's "
+                            "from its Re-integration kind); push requires it",
          OPTIONAL_WORKTREE,
          arg("branch", help="the integrated branch: the local branch, else origin/<branch>"),
          ISSUE_BODY,
          arg("--field-report", type=Path, metavar="FILE",
-             help="file holding the field report; refuses commits on <branch> after its Branch "
-                  "tip, and gives a re-integration its Re-integration kind (default patch)"),
+             help="file holding the field report, required on a first integration: its Release "
+                  "kind; refuses commits on <branch> after its Branch tip, and gives a "
+                  "re-integration its Re-integration kind (default patch)"),
          INCLUDE_LATE)
 def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
     try:

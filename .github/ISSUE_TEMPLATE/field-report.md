@@ -9,6 +9,7 @@ labels: field-report
 **Work issue:** #<n>  **Pull request:** #<n>  **Branch:** `<branch>`  **Result:** complete | partial
 **Tested against `<integration branch>`:** `<commit>` <!-- the integration-branch commit merged last before the pull request -->
 **Branch tip:** `<tip>` <!-- the branch commit this report describes; field-report --check --worktree <worktree> fills it from the branch -->
+**Release kind:** <kind> — <reason> <!-- patch, minor or major and a one-line reason: what changed decides it, as the [work model's Release kind](../skills/work-model/SKILL.md#release-kind) says; field-report --draft proposes the branch prefix's -->
 **Re-integration kind:** patch <!-- what a later integration of this branch releases once its first merge is on the integration branch: patch, minor or major -->
 
 ## User requirement (quoted back)
@@ -39,7 +40,9 @@ requirements they share, and why (one function changed together, or a test-only 
 ## Removed behaviour, deleted or weakened tests, and authored prose
 
 <!-- Follow the [capability-preservation rule](../skills/work-model/SKILL.md#rules-for-all-roles).
-     "None" otherwise. -->
+     Each removed or renamed public item and each newly required field gets its own line
+     "**Breaking:** <item>", which makes the Release kind major
+     ([work model](../skills/work-model/SKILL.md#release-kind)). "None" otherwise. -->
 
 ## Review responses
 
