@@ -1529,7 +1529,8 @@ def outside_issues(cutoffs: dict[str, int], data: dict[str, object]) -> list[dic
                 "in se.toml [outside]")
         for issue in nodes:
             labels = {label["name"] for label in issue["labels"]["nodes"]}
-            if (issue["number"] <= cutoff or FLEET_MARKER in (issue.get("body") or "")
+            body = issue.get("body") or ""
+            if (issue["number"] <= cutoff or FLEET_MARKER in body or HANDLED_MARKER in body
                     or FLEET_LABEL in labels or BACKLOG_LABEL in labels
                     or any(HANDLED_MARKER in (comment.get("body") or "")
                            for comment in issue["comments"]["nodes"])):
@@ -2990,25 +2991,56 @@ def file_work_issue(
     return url or title
 
 
+def today_stamp() -> str:
+    """Today as a branch name's date, `<yyyymmdd>`."""
+    return time.strftime("%Y%m%d")
+
+
+def routed_branch(title: str, kind: str) -> str:
+    """The branch name derived from an outside issue's title: `<kind>/<topic>-<yyyymmdd>`, without
+    a leading label such as "Proposal:"."""
+    if kind not in RELEASE_KINDS:
+        raise QueueError(f"route --type {kind!r} names no package kind; use one of "
+                         f"{', '.join(RELEASE_KINDS)}")
+    topic = re.sub(r"^\s*\w+:\s*(?=\S)", "", title)
+    return f"{kind}/{slug(topic)}-{today_stamp()}"
+
+
+def routed_body(body: str, title: str, routing: str) -> str:
+    """The body unchanged, then the handled record and the routing section: the original title as
+    "Routed from" and the routing file's sections, each one heading level down."""
+    fenced = False
+    lines = []
+    for line in routing.strip().splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        lines.append(f"#{line}" if not fenced and SECTION_PATTERN.fullmatch(line) else line)
+    return (f"{body.rstrip()}\n\n{HANDLED_MARKER}\n## {ROUTING_SECTION}\n\n"
+            f"Routed from: {title.strip()}\n\n" + "\n".join(lines) + "\n")
+
+
 def route_outside_issue(
-    root: Path, number: int, title: str, file: Path, repo: str | None
-) -> None:
-    """Route a checked outside issue as a work issue: retitle and label it, then comment the
-    handled record, which `intake --outside` reads as done."""
-    if not title.strip():
-        raise QueueError("route needs a title, the branch name")
-    comment = read_text_file(file, "routing comment")
-    if HANDLED_MARKER not in comment:
-        comment = f"{HANDLED_MARKER}\n{comment}"
-    labels = work_labels(root, repo)
+    root: Path, number: int, title: str | None, kind: str, file: Path, repo: str | None
+) -> str:
+    """Route a checked outside issue as a work issue in one edit: its title becomes its branch name
+    (given, or derived from the title), it gets the work labels, and its body gets the routing
+    section, whose handled record `intake --outside` reads as done. Returns the branch name."""
+    routing = read_text_file(file, "routing sections")
     repo = resolve_repo(root, repo)
+    issue = fetch_issue(root, number, repo)
+    if section(markdown_sections(str(issue["body"])), ROUTING_SECTION):
+        raise QueueError(f"route: #{number} is routed already; edit its {ROUTING_SECTION} section")
+    branch = title.strip() if title is not None else routed_branch(str(issue["title"]), kind)
+    if not branch:
+        raise QueueError("route needs a title, the branch name, or none to derive it")
+    labels = work_labels(root, repo)
     ensure_labels(root, repo, labels)
-    run_gh(root, [
-        "issue", "edit", str(number), "--title", title.strip(),
+    run_gh_with_body(root, [
+        "issue", "edit", str(number), "--title", branch,
         *(argument for label in labels for argument in ("--add-label", label)),
         *repo_arguments(repo),
-    ])
-    run_gh_with_body(root, ["issue", "comment", str(number), *repo_arguments(repo)], comment + "\n")
+    ], routed_body(str(issue["body"]), str(issue["title"]), routing))
+    return branch
 
 
 def backlog_file(root: Path, title: str, file: Path, repo: str | None) -> str:
@@ -4231,18 +4263,21 @@ def run_file(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("route", "for SE: route a checked outside issue as a work issue: retitle it, label it "
-                  "work, ready and repo:<name>, and comment the handled record",
+@command("route", "for SE: route a checked outside issue as a work issue in one edit: retitle it "
+                  "to its branch name, label it work, ready and repo:<name>, and append the "
+                  "routing section with the handled record to its body",
          WORKTREE,
          arg("issue", type=int),
-         arg("--title", required=True, help="the branch name"),
-         arg("--comment-file", required=True, type=Path,
-             help="the work.md sections the issue lacks, completed, and that it is routed; the "
-                  "handled marker is added where missing"),
+         arg("--title", help="the branch name; derived from the issue's title where omitted"),
+         arg("--type", default="feat", help="the derived branch name's type (default feat)"),
+         arg("--routing-file", required=True, type=Path,
+             help="the work.md sections the issue lacks, completed, appended to its body under "
+                  f"## {ROUTING_SECTION} with the handled marker"),
          REPO)
 def run_route(root: Path, args: argparse.Namespace) -> int:
-    route_outside_issue(root, args.issue, args.title, args.comment_file, args.repo)
-    print(f"Routed issue #{args.issue} as {args.title.strip()}")
+    branch = route_outside_issue(
+        root, args.issue, args.title, args.type, args.routing_file, args.repo)
+    print(f"Routed issue #{args.issue} as {branch}")
     return 0
 
 
