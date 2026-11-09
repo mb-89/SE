@@ -761,6 +761,21 @@ def test_setup_points_core_hooks_path_at_se_hooks(kind: str, repo: Path) -> None
     assert Path(hooks).resolve() == (SE_ROOT / ".githooks").resolve()
 
 
+@pytest.mark.parametrize("kind", SETUPS)
+def test_setup_ignores_the_local_list_once(kind: str, repo: Path) -> None:
+    (repo / ".gitignore").write_text("build/", encoding="utf-8")
+    for _ in range(2):
+        result = setup_hooks(kind, repo)
+        assert result.returncode == 0, result.stdout + result.stderr
+    text = (repo / ".gitignore").read_text(encoding="utf-8")
+    assert text == f"build/\n{public_check.LOCAL_FILE}\n"
+
+
+def test_se_ignores_its_local_list() -> None:
+    lines = (SE_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert public_check.LOCAL_FILE in lines
+
+
 @pytest.fixture(params=SETUPS)
 def hooked(request: pytest.FixtureRequest, repo: Path) -> Path:
     result = setup_hooks(request.param, repo)
@@ -805,7 +820,7 @@ def test_pre_push_hook_checks_pushed_commits(hooked: Path, tmp_path: Path) -> No
     result = subprocess.run(push, capture_output=True, text=True)
     assert result.returncode != 0
     assert "message:1: enterprise-github-host" in result.stdout + result.stderr
-    assert f"(1 files, 1 commits, se {SE_HEAD[:7]})" in result.stdout + result.stderr
+    assert f"(2 files, 1 commits, se {SE_HEAD[:7]})" in result.stdout + result.stderr
 
 
 def test_se_itself_passes() -> None:
