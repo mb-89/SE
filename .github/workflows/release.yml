@@ -1,6 +1,6 @@
-# Tags each release: v<version> of every se.toml [project] version on the integration branch (README
-# "Release tags"). Reusable: a repository calls it with the short file that section shows, as se
-# does in release-tag.yml.
+# Tags each release: v<version> of every se.toml [project] version on the integration branch, and
+# moves v<major> to the newest release of each major (README "Release tags"). Reusable: a repository
+# calls it with the short file that section shows, as se does in release-tag.yml.
 name: release
 
 on:
@@ -20,7 +20,8 @@ jobs:
         shell: python3 {0}
         run: |
           # Tags every version se.toml carried on the integration branch's first-parent history on
-          # the first commit that carried it, where the tag is missing; an existing tag never moves.
+          # the first commit that carried it, where the tag is missing; an existing tag never moves. The
+          # one moving tag, v<major>, then names the newest release of that major.
           import os, re, subprocess, sys, tomllib
 
           def git(*arguments):
@@ -58,7 +59,22 @@ jobs:
                         f"{carried} on {commit[:7]}; the tag is left as it is")
               else:
                   git("tag", tag, commit)
-                  created.append(tag)
+                  tagged[tag] = commit
+                  created.append(f"refs/tags/{tag}")
                   print(f"Release {tag}: tagged {commit[:7]}")
+          newest = {}
+          for name, commit in tagged.items():
+              number = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", name)
+              if number is not None:
+                  release = (tuple(int(part) for part in number.groups()), name, commit)
+                  newest[release[0][0]] = max(newest.get(release[0][0], release), release)
+          for major, (_, name, commit) in sorted(newest.items()):
+              tag = f"v{major}"
+              if tagged.get(tag) == commit:
+                  print(f"Release {tag}: tagged already on {commit[:7]} ({name})")
+              else:
+                  git("tag", "--force", tag, commit)
+                  created.append(f"+refs/tags/{tag}")
+                  print(f"Release {tag}: moved to {commit[:7]} ({name})")
           if created:
-              git("push", "origin", *(f"refs/tags/{tag}" for tag in created))
+              git("push", "origin", *created)
