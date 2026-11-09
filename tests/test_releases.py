@@ -59,6 +59,12 @@ def issue_body(breaking: bool) -> str:
     return f"## Goal\n\nx\n\n## Package kind\n\nStandard{', breaking' if breaking else ''}.\n"
 
 
+def declared(kind: str, removed: str = "None") -> str:
+    """A field report's header and Removed behaviour section declaring `kind`."""
+    return (f"**Release kind:** {kind} — what changed\n\n"
+            f"## Removed behaviour, deleted or weakened tests, and authored prose\n\n{removed}\n")
+
+
 def commit_on(root: Path, branch: str, text: str) -> str:
     """Commit `text` on `branch` (created where missing), back on main; returns the commit."""
     git(root, "switch", "-q", branch) if git(root, "branch", "--list", branch) else git(
@@ -76,6 +82,8 @@ def integrate(root: Path, branch: str, breaking: bool = False, trailer: str | No
     """Merge `branch` as integrate does: its trailer from work_tickets.release_trailer, unless given."""
     commit_on(root, branch, text or branch)
     if trailer is None:
+        if report is None:
+            report = declared(work_tickets.default_release_kind(branch, issue_body(breaking)))
         trailer = work_tickets.release_trailer(root, branch, issue_body(breaking), report)
     git(root, "merge", "-q", "--no-ff", "-m", f"Integrate {branch}: work",
         *(("-m", trailer) if trailer else ()), branch)
@@ -167,16 +175,49 @@ def release_trailer(root: Path, branch: str, breaking: bool, *arguments: str) ->
                               "--worktree", str(root), *arguments])
 
 
-def test_an_unknown_branch_prefix_is_refused_before_anything_is_merged(checkout, capsys):
-    assert release_trailer(checkout, "refactor/topic-20261106", False) == 1
-    error = capsys.readouterr().err
-    assert "Cannot release refactor/topic-20261106: its prefix 'refactor' names no package kind" in error
-    assert "feature, feat, fix, perf, chore, docs" in error
-    assert "nothing was merged" in error
+def test_the_declared_kind_wins_over_the_branch_prefix(checkout, capsys):
+    integrate(checkout, "fix/topic-20261106", report=declared("minor"))
+    integrate(checkout, "refactor/other-20261106", report=declared("patch"))
+    assert push(checkout) == 0
+    assert released(checkout) == ("1.3.0", "v1.3.0")
+
+
+@pytest.mark.parametrize(("report", "refusal"), [
+    (None, "no field report given; pass --field-report <file>"),
+    ("**Branch tip:** `abc1234`\n", "Release kind is missing; write **Release kind:**"),
+    ("**Release kind:** big — x\n", "Release kind 'big' must be one of patch, minor, major"),
+    ("**Release kind:** minor\n", "Release kind needs a one-line reason after the kind"),
+    (declared("minor", "- **Breaking:** renamed the --all option to --every"),
+     "Release kind is minor, but section \"## Removed behaviour, deleted or weakened tests, and "
+     "authored prose\" lists a breaking change, which is major: - **Breaking:** renamed the --all "
+     "option to --every"),
+])
+def test_a_missing_unknown_or_too_small_kind_is_refused_before_anything_is_merged(
+        checkout, report, refusal):
+    with pytest.raises(work_tickets.QueueError) as error:
+        work_tickets.release_trailer(checkout, "fix/topic-20261106", issue_body(False), report)
+    assert refusal in str(error.value)
+    assert str(error.value).endswith("nothing was merged")
+
+
+def test_a_work_issue_marked_breaking_refuses_a_smaller_declared_kind(checkout):
+    with pytest.raises(work_tickets.QueueError, match="Release kind is minor, but the work "
+                       "issue's Package kind marks a breaking change, which is major"):
+        work_tickets.release_trailer(checkout, "fix/topic-20261106", issue_body(True),
+                                     declared("minor"))
+
+
+def test_a_breaking_removal_declared_major_releases_major(checkout):
+    integrate(checkout, "fix/topic-20261106",
+              report=declared("major", "- **Breaking:** made the `kind` field required"))
+    assert push(checkout) == 0
+    assert released(checkout) == ("2.0.0", "v2.0.0")
 
 
 def test_a_breaking_package_integrated_by_hand_releases_major(checkout, capsys):
-    assert release_trailer(checkout, "fix/topic-20261106", True) == 0
+    tip = commit_on(checkout, "fix/topic-20261106", "reported")
+    assert release_trailer(checkout, "fix/topic-20261106", True,
+                           "--field-report", report_at(checkout, tip, "major")) == 0
     trailer = capsys.readouterr().out.strip()
     assert trailer == "Release-kind: major"
     integrate(checkout, "fix/topic-20261106", trailer=trailer)
@@ -199,7 +240,8 @@ def test_a_merge_whose_kind_cannot_be_told_is_refused_with_the_remedy(checkout, 
     error = capsys.readouterr().err
     assert f"Cannot release merge {before[:7]} (Integrate fix/topic-20261106: work): it {stated}" in error
     assert ("Reword the merge to end with one trailer Release-kind: major|minor|patch, as "
-            "work_tickets.py release-trailer <branch> --issue-body <file> prints it") in error
+            "work_tickets.py release-trailer <branch> --issue-body <file> --field-report <file> "
+            "prints it") in error
 
 
 def test_a_second_integration_of_a_branch_releases_a_patch_and_the_first_its_kind(checkout):
@@ -224,9 +266,10 @@ def test_a_re_integration_releases_the_kind_its_own_report_states(checkout, caps
                                      "**Re-integration kind:** big\n")
 
 
-def report_at(root: Path, tip: str) -> str:
+def report_at(root: Path, tip: str, kind: str = "patch") -> str:
     path = root.parent / "report.md"
-    path.write_text(f"**Branch tip:** `{tip}`  **Re-integration kind:** patch\n", encoding="utf-8")
+    path.write_text(f"**Branch tip:** `{tip}`  **Re-integration kind:** patch\n{declared(kind)}",
+                    encoding="utf-8")
     return str(path)
 
 

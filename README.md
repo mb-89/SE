@@ -196,9 +196,11 @@ it, and `work_tickets.py release-trailer` prints it for a merge by hand:
 
 - on a re-integration (a merge `Integrate <branch>` of the same branch is already on the
   integration branch) the field report's "Re-integration kind", `patch` unless it says otherwise;
-- else `major` where the work issue's "Package kind" says "breaking";
-- else by the branch prefix: `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs`
-  `patch`; another prefix is refused before anything is merged.
+- else the field report's "Release kind", which the
+  [work model](src/skills/work-model/SKILL.md#release-kind) owns; a missing or unknown kind is
+  refused before anything is merged. The branch prefix only proposes it (`field-report --draft`):
+  `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs` `patch`; `major` where the work
+  issue's "Package kind" says "breaking".
 
 An integration without the trailer is refused, naming the merge and the remedy; push never guesses.
 
@@ -483,8 +485,8 @@ work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-ur
 work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
                                 [--field-report FILE] [--include-late REASON]
                                 branch
-    print the Release-kind trailer an integration merge of <branch> carries, from its work issue's
-    Package kind and the branch prefix; push requires it
+    print the Release-kind trailer an integration merge of <branch> carries, from its field report's
+    Release kind (a re-integration's from its Re-integration kind); push requires it
 
 work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--build-command BUILD_COMMAND]
                           [--include-late REASON] [--check-command JSON]

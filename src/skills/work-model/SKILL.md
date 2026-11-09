@@ -164,6 +164,23 @@ Nothing reaches the integration branch without a passing complete suite and, unl
 - The verdicts live in the repository's git directory (`se-verdicts/`, `<se>/scripts/verdicts.py`),
   shared by its worktrees.
 
+## Release kind
+
+A release's kind follows what changed, never the branch name: the worker declares it in the field
+report's "Release kind" (patch, minor or major, with a one-line reason), and
+[releases](../../../README.md#project-settings) bump by it. The branch prefix only proposes a
+default (`field-report --draft`).
+
+- **Breaking means major**, as Semantic Versioning 2.0.0 (item 8) defines it: removing or
+  renaming a public command, option, field or format, or making an optional field required,
+  breaks what depends on it.
+- **The check**: such a report lists each as a `**Breaking:**` line under "Removed behaviour", and
+  `field-report --check` refuses it, or a work issue whose "Package kind" says "breaking", as
+  patch or minor.
+- **Public** is what a user of the project relies on: its command-line interfaces, its file formats
+  and schemas, and its documented module APIs.
+- Otherwise new behaviour is minor and a fix that changes no public interface is patch.
+
 ## Rules for all roles
 
 Framework repositories (the process plugin and document format/converter) carry every capability
