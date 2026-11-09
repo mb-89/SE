@@ -193,7 +193,7 @@ application-specific code.
 
 When an application reveals a generic capability, create a framework work issue and delete the
 application's copy after the framework provides it. A framework never names, special-cases or
-depends on an application; for public repositories, the public check's deny list enforces this
+depends on an application; for public repositories, the public check's local list enforces this
 boundary.
 
 - Packages are worker-sized: one separately reviewable change. Larger work is split into issues
