@@ -596,6 +596,28 @@ def test_the_workflow_never_moves_an_existing_tag(checkout):
     assert origin_tag(checkout, "v1.3.0") == stray
 
 
+def test_the_workflow_creates_each_major_tag_on_the_newest_release_of_that_major(checkout):
+    missed_release(checkout)
+    older = git(checkout, "rev-parse", "v1.2.3")
+    git(checkout, "tag", "v0.9.0", older)
+    git(checkout, "push", "-q", "origin", "v0.9.0")
+    result = run_workflow(checkout)
+    assert result.returncode == 0, result.stderr + result.stdout
+    newest = origin_tag(checkout, "v1.3.1")
+    assert f"Release v1: moved to {newest[:7]} (v1.3.1)" in result.stdout
+    assert origin_tag(checkout, "v1") == newest
+    assert origin_tag(checkout, "v0") == older
+
+
+def test_the_workflow_force_updates_a_major_tag_behind_its_newest_release(checkout):
+    missed_release(checkout)
+    git(checkout, "tag", "v1", "v1.2.3")
+    git(checkout, "push", "-q", "origin", "v1")
+    result = run_workflow(checkout)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert origin_tag(checkout, "v1") == origin_tag(checkout, "v1.3.1")
+
+
 def test_the_workflow_tags_nothing_on_another_branch(checkout):
     missed_release(checkout)
     git(checkout, "push", "-q", "origin", "main:fix/other-20261106")
