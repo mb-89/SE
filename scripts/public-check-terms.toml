@@ -1,0 +1,63 @@
+# The public term list of scripts/public_check.py (rule: AGENTS.md "Public safety"): the generic
+# terms every source is checked against, read from the se module the check runs from. Terms a
+# source keeps private, and public entries it switches off, go into its local list,
+# .public-check.local, which is never checked in.
+#
+# Each [[term]] has a label (what a hit names), a regex and an accept filter, one of
+#   always           every match is a hit
+#   not-placeholder  not a name that starts like a placeholder, or one of the generic names of
+#                    `generic`, in regex group `group` (default 1)
+#   personal-email   not an address of `[service] emails`, of users.noreply.github.com, of an
+#                    example.* domain, nor the git@ of an SSH remote
+# A local list switches a term off by its label, every term of that label.
+
+[placeholder]
+start = ["{", "%", "$", "*", "..."]
+
+[generic]
+users = [
+    "all", "default", "example", "me", "name", "public", "shared", "user", "username", "you",
+    "yourname",
+]
+machines = [
+    "127.0.0.1", "computer", "host", "hostname", "localhost", "machine", "server", "servername",
+    "wsl$", "wsl.localhost",
+]
+
+[service]
+# Fixed addresses services write into commits themselves; they name no person.
+emails = [
+    "noreply@github.com",  # GitHub's web-flow committer
+    "noreply@anthropic.com",  # Claude Code's co-author trailer
+]
+
+[[term]]
+label = "user-profile-path"
+regex = '''(?i)\b[a-z]:[\\/]+users[\\/]+([^\\/\s"'`<>|:;,()\[\]]+)'''
+accept = "not-placeholder"
+generic = "users"
+
+[[term]]
+label = "user-profile-path"
+regex = '''(?<![\w.~:-])/(?:home|Users)/([^\\/\s"'`<>|:;,()\[\]]+)'''
+accept = "not-placeholder"
+generic = "users"
+
+[[term]]
+label = "email-address"
+regex = '''(?i)(?<![\w.%+-])([a-z0-9._%+-]+)@([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})\b'''
+accept = "personal-email"
+
+[[term]]
+label = "enterprise-github-host"
+regex = '''(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+ghe\.com\b'''
+accept = "always"
+
+[[term]]
+label = "unc-machine-name"
+# Written raw (two backslashes, then one) or escaped (four, then two), never mixed: a mixed run is
+# escape sequences in source text, such as a JSON-escaped newline.
+regex = '''(?i)(?<![\\\w:/])\\\\(\\\\)?([a-z0-9][\w.$-]+)\\(?(1)\\)[\w$.-]'''
+accept = "not-placeholder"
+generic = "machines"
+group = 2
