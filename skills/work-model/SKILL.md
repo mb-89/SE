@@ -123,8 +123,15 @@ own issues apart instead, and SE labels it once it routes it ([Issues](#issues))
 - `se.toml` `[outside]` names each repository SE watches with its cut-off, the last issue number
   that existed before the marker (`"<host>/<owner>/<repo>" = <number>`); issues up to it are known,
   never outside issues.
-- An outside issue is handled once SE has commented on it with a comment that carries
-  `<!-- se:handled -->`, so the record lives on the issue itself.
+- An outside issue is handled once its body or one of its comments carries `<!-- se:handled -->`,
+  so the record lives on the issue itself.
+- Routing one (`work_tickets.py route`) is one edit: its title becomes its branch name, given or
+  derived from its title, and it gets the work labels.
+  - Its body, unchanged above, gets the handled marker and one section headed Routing: a
+    `Routed from:` line with the original title, then the
+    [work.md](../../.github/ISSUE_TEMPLATE/work.md) sections it lacks, one heading level down.
+  - Every reader of the issue's sections reads these as its own; `field-report --check` enforces
+    the numbered requirements there, named "Routing".
 - `work_tickets.py intake --outside` lists the open, unmarked, unhandled issues above each
   cut-off, read in one query. What SE does with each is its
   [outside-issue routine](../../agents/se.md#outside-issues).

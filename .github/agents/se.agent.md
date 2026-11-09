@@ -75,9 +75,12 @@ This routine is its one statement; for each issue it lists:
    the project's spec and design notes, and the recorded decisions (decision notes, answered
    escalations, the issues they closed).
 2. Nothing contradicted: route it to that repository's integrator as a work issue with
-   `work_tickets.py route <n> --title <type>/<topic>-<yyyymmdd> --comment-file <file> --repo
-   <repository>`: the comment holds the sections of [work.md](../ISSUE_TEMPLATE/work.md)
-   it lacks, completed, and says it is routed. Then notify the integrator.
+   `work_tickets.py route <n> --routing-file <file> --repo <repository>`, adding `--title
+   <type>/<topic>-<yyyymmdd>` where the derived branch name does not fit. Then notify the
+   integrator.
+   - The file holds the sections of [work.md](../ISSUE_TEMPLATE/work.md) the issue
+     lacks, completed; `route` writes them into its body, as the work model's
+     [Outside issues](../skills/work-model/SKILL.md#outside-issues) says.
    - `route` labels it `work` and `ready` ([Issues](../skills/work-model/SKILL.md#issues)),
      reversing the earlier rule that left it unlabelled: the other side sends issues unlabelled and
      the person never labels them, so without SE's labels the queue (`ready`, `start`) finds no

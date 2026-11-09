@@ -436,11 +436,12 @@ work_tickets.py file --worktree WORKTREE --title TITLE --body-file BODY_FILE [--
     for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only
     once its blockers are linked
 
-work_tickets.py route --worktree WORKTREE --title TITLE --comment-file COMMENT_FILE
-                      [--repo REPO]
+work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE]
+                      --routing-file ROUTING_FILE [--repo REPO]
                       issue
-    for SE: route a checked outside issue as a work issue: retitle it, label it work, ready and
-    repo:<name>, and comment the handled record
+    for SE: route a checked outside issue as a work issue in one edit: retitle it to its branch
+    name, label it work, ready and repo:<name>, and append the routing section with the handled
+    record to its body
 
 work_tickets.py backlog file --worktree WORKTREE --title TITLE --body-file BODY_FILE
                              [--repo REPO]
