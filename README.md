@@ -227,12 +227,18 @@ not tags (Claude's cloud sessions).
 - On each push to the integration branch the workflow walks its first-parent history and tags
   every version `se.toml` carried without a tag, `v<version>` on the first commit that carried it,
   so a missed release is backfilled; a second run changes nothing.
-- An existing tag never moves: where it names another commit, the run warns and leaves it.
+- An existing tag never moves: where it names another commit, the run warns and leaves it. The one
+  exception is the major tag `v<major>` (`v2`): each run creates or force-updates it to the newest
+  release of that major, so others follow se's reusable workflows by major version.
 - Without `release`, `push` pushes the tags itself; another value is refused, naming the file.
 
 A repository turns it on with `release = "workflow"` and a copy of se's own
 [`.github/workflows/release-tag.yml`](.github/workflows/release-tag.yml), changed only in
-`branches` to name its integration branch (se's names `se`), so that worker branches run nothing.
+`branches` to name its integration branch (se's names `se`), so that worker branches run nothing,
+and in `uses`, which calls `mb-89/SE/.github/workflows/release.yml@v<major>`.
+
+Other repositories reference se's reusable workflows and actions at `@v<major>`, never at a branch,
+so a breaking change reaches them only with the major they choose.
 
 ### Test budget
 
