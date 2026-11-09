@@ -414,6 +414,26 @@ the project check command and refuses that push if the check fails.
 ]
 ```
 
+## Adapter sync contract
+
+An adapter is a command that writes to an external system (a tracker, a wiki, a service's API).
+Every adapter follows this contract; [`<se>/scripts/adapter_sync.py`](../../scripts/adapter_sync.py)
+is its reusable part, imported from the project's se module.
+
+- **One command, dry run by default**: it reads the external state, computes the plan and the
+  merge, prints a complete change and conflict report, and writes nothing.
+- **An explicit `--apply`** performs the writes (`add_apply_argument`).
+- **Preflight on apply**: the apply repeats the reads; an object whose external revision changed
+  since the plan was computed is not written, and the report names it (`preflight`).
+- **One logged write path**: every external request goes through one transport (`Transport`),
+  whose verb guard refuses any non-read request outside apply mode, naming its method and path,
+  and whose log (method, path, status, time; never headers or bodies) is the audit. No side
+  scripts, no second client.
+- **Secrets**: read from the environment at run time (`secret_from_env`); never printed, logged,
+  committed or stored, and scrubbed from every recorded response (`Transport.recorded`).
+- **Artifacts**: the dry run's plan and the apply's result are written as machine-readable files
+  (sorted JSON, `write_artifact`), so reviews and tests compare them.
+
 ## Commands and shell
 
 - `work_tickets.py` means `python <se>/scripts/work_tickets.py <command> ... --worktree <checkout>`
