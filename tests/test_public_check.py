@@ -115,19 +115,12 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 @pytest.fixture
-def terms(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """An existing, empty deny list, so a run is a full check without the user's own list."""
-    path = tmp_path / "private-terms.txt"
-    path.write_text("# no terms\n", encoding="utf-8")
-    monkeypatch.setenv(public_check.TERMS_ENV, str(path))
-    return path
-
-
-@pytest.fixture
-def repo(tmp_path: Path, terms: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A repository with a generic identity, checked without the machine's ~/.se/local.toml."""
+def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A repository with a generic identity and an empty, ignored local list, so a run is a full
+    check; checked without the machine's ~/.se/local.toml or a machine-level list."""
     for variable in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(variable, str(tmp_path / "home"))
+    monkeypatch.delenv(public_check.MACHINE_ENV, raising=False)
     path = tmp_path / "repo"
     path.mkdir()
     git(path, "init", "-q", "-b", "main")
@@ -135,7 +128,16 @@ def repo(tmp_path: Path, terms: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     git(path, "config", "user.email", "test" + AT + "example.com")
     git(path, "config", "commit.gpgsign", "false")
     git(path, "config", "core.hooksPath", str(tmp_path / "no-hooks"))
+    (path / ".git" / "info" / "exclude").write_text(f"{public_check.LOCAL_FILE}\n",
+                                                    encoding="utf-8")
+    (path / public_check.LOCAL_FILE).write_text("# no terms\n", encoding="utf-8")
     return path
+
+
+@pytest.fixture
+def local(repo: Path) -> Path:
+    """The repository's local list."""
+    return repo / public_check.LOCAL_FILE
 
 
 def commit(repo: Path, files: dict[str, str | bytes], message: str = "Add files",
@@ -260,45 +262,119 @@ def test_binary_file_hit(repo: Path) -> None:
     assert "image.bin:2:1 (binary): user-profile-path" in result.stdout
 
 
-def test_private_terms_hit_without_printing_the_term(repo: Path, terms: Path) -> None:
-    terms.write_text("# employer\n\nacme\\w*\n", encoding="utf-8")
-    commit(repo, {"src/app.py": "print('built for AcmeCorp')\n"}, "Port the AcmeCorp tool")
+def test_a_public_term_found(repo: Path) -> None:
+    commit(repo, {"notes.md": "Mirror at https://acme" + ".ghe" + ".com/x\n"})
     result = run_check("--repo", str(repo))
     assert result.returncode == 1
-    assert "src/app.py:1:18: private-term:3" in result.stdout
-    assert "message:1: private-term:3" in result.stdout
-    assert "acme" not in result.stdout.lower()
+    assert "notes.md:1:19: enterprise-github-host" in result.stdout
 
 
-def test_paths_with_private_terms_are_redacted(repo: Path, terms: Path) -> None:
-    terms.write_text("acme\\w*\n", encoding="utf-8")
-    commit(repo, {"src/AcmeTools/app.py": "x = 1\nbuilt by acme\n",
+def test_the_public_list_is_the_data_file_beside_the_script() -> None:
+    data = tomllib.loads(public_check.TERMS_FILE.read_text(encoding="utf-8"))
+    assert public_check.TERMS_FILE.parent == SCRIPT.parent
+    assert [p.label for p in public_check.GENERIC_PATTERNS] == [t["label"] for t in data["term"]]
+    assert [p.regex.pattern for p in public_check.GENERIC_PATTERNS] == [
+        t["regex"] for t in data["term"]]
+
+
+def test_a_local_term_found_without_printing_the_term(repo: Path, local: Path) -> None:
+    local.write_text("# kept private\n\nexample-secret\\w*\n", encoding="utf-8")
+    commit(repo, {"src/app.py": "print('built for Example-SecretCorp')\n"},
+           "Port the Example-SecretCorp tool")
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 1
+    assert "src/app.py:1:18: local-term:3" in result.stdout
+    assert "message:1: local-term:3" in result.stdout
+    assert "secret" not in result.stdout.lower()
+
+
+def test_paths_with_local_terms_are_redacted(repo: Path, local: Path) -> None:
+    local.write_text("example-secret\\w*\n", encoding="utf-8")
+    commit(repo, {"src/example-secretTools/app.py": "x = 1\nbuilt by example-secret\n",
                   "docs/alice" + AT + "corp.test.md": "/" + "home/alice\n"})
     result = run_check("--repo", str(repo))
     assert result.returncode == 1
     lines = result.stdout.splitlines()
-    assert "src/<private-term:1>/app.py (file name): private-term:1" in lines
-    assert "src/<private-term:1>/app.py:2:10: private-term:1" in lines
+    assert "src/<local-term:1>/app.py (file name): local-term:1" in lines
+    assert "src/<local-term:1>/app.py:2:10: local-term:1" in lines
     assert "docs/<email-address>:1:1: user-profile-path" in lines
-    assert "acme" not in result.stdout.lower()
+    assert "secret" not in result.stdout.lower()
     assert "alice" not in result.stdout
 
 
-def test_invalid_private_term_is_a_setup_error(repo: Path, terms: Path) -> None:
-    terms.write_text("acme(\n", encoding="utf-8")
+def test_a_local_override_silences_a_public_term(repo: Path, local: Path) -> None:
+    local.write_text("off:email-address  # this source lists contact addresses by design\n",
+                     encoding="utf-8")
+    commit(repo, {"contacts.md": "alice" + AT + "corp.test\n", "home.md": "/" + "home/alice\n"})
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 1
+    assert "email-address" not in result.stdout.replace("off locally: email-address", "")
+    assert "home.md:1:1: user-profile-path" in result.stdout
+    assert "public entries off locally: email-address" in result.stdout.splitlines()[-1]
+
+
+@pytest.mark.parametrize(("line", "error"), [
+    ("off:email-address\n", ".public-check.local:1: write '<regex>' or 'off:<public label>  # reason'"),
+    ("off:no-such-label  # why\n", ".public-check.local:1: no public entry is labelled 'no-such-label'"),
+    ("example-secret(\n", ".public-check.local:1 is not a valid regex"),
+])
+def test_a_malformed_local_list_is_a_setup_error(repo: Path, local: Path, line: str,
+                                                 error: str) -> None:
+    local.write_text(line, encoding="utf-8")
     result = run_check("--repo", str(repo))
     assert result.returncode == 2
-    assert "line 1 of the private deny list is not a valid regex" in result.stdout
-    assert "acme" not in result.stdout.lower()
+    assert error in result.stdout
+    assert "secret" not in result.stdout.lower()
 
 
-def test_missing_private_list_warns(repo: Path, tmp_path: Path,
-                                   monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(public_check.TERMS_ENV, str(tmp_path / "missing.txt"))
+@pytest.mark.parametrize("mode", [[], ["--staged"], ["--rev", "HEAD"]])
+def test_a_tracked_local_list_is_refused(repo: Path, local: Path, mode: list[str]) -> None:
+    commit(repo, {"README.md": "clean\n"})
+    git(repo, "add", "-f", public_check.LOCAL_FILE)
+    git(repo, "commit", "-q", "-m", "Track the local list")
+    result = run_check("--repo", str(repo), *mode)
+    assert result.returncode == 2
+    assert (".public-check.local is tracked by git, but a local list is never checked in: run "
+            "git rm --cached .public-check.local, then ignore it") in result.stdout
+
+
+def test_a_local_list_tracked_only_in_the_checked_commit_is_refused(repo: Path) -> None:
+    commit(repo, {"README.md": "clean\n"})
+    git(repo, "add", "-f", public_check.LOCAL_FILE)
+    git(repo, "commit", "-q", "-m", "Track the local list")
+    git(repo, "rm", "-q", "--cached", public_check.LOCAL_FILE)
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 2
+    assert ".public-check.local is tracked by git" in result.stdout
+
+
+@pytest.mark.parametrize("configure", ["default", "variable"])
+def test_the_machine_list_is_refused_with_its_remedy(repo: Path, tmp_path: Path,
+                                                     monkeypatch: pytest.MonkeyPatch,
+                                                     configure: str) -> None:
+    if configure == "default":
+        machine = tmp_path / "home" / ".se" / "private-terms.txt"
+        machine.parent.mkdir(parents=True)
+    else:
+        machine = tmp_path / "elsewhere.txt"
+        monkeypatch.setenv(public_check.MACHINE_ENV, str(machine))
+    machine.write_text("example-secret\n", encoding="utf-8")
+    commit(repo, {"README.md": "clean\n"})
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 2
+    assert "the machine-level term list" in result.stdout
+    assert ("is retired: move its terms into <source>/.public-check.local, the local list at the "
+            "root of each repository or vault that needs them") in result.stdout
+    assert "secret" not in result.stdout.lower() and str(tmp_path) not in result.stdout
+
+
+def test_missing_local_list_warns(repo: Path, local: Path) -> None:
+    local.unlink()
     commit(repo, {"README.md": "clean\n"})
     result = run_check("--repo", str(repo))
     assert result.returncode == 0
-    assert "public-check: warning: no private deny list" in result.stdout
+    assert ("public-check: warning: no local list (.public-check.local); only the public list was "
+            "checked") in result.stdout
 
 
 def test_commit_message_hit(repo: Path) -> None:
@@ -472,21 +548,21 @@ def test_used_allow_entries_are_counted_in_the_verdict(repo: Path) -> None:
     assert "unused" not in result.stdout and "unverifiable" not in result.stdout
 
 
-def test_without_private_list_an_unused_entry_is_unverifiable_not_unused(
-        repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(public_check.TERMS_ENV, str(tmp_path / "missing.txt"))
+def test_without_local_list_an_unused_entry_is_unverifiable_not_unused(
+        repo: Path, local: Path) -> None:
+    local.unlink()
     allow_repo(repo, "docs/*  # sample paths\nsrc/*.py  # fixtures\nold/*  # moved away\n")
     result = run_check("--repo", str(repo))
     assert result.returncode == 0, result.stdout
     assert ("public-check: warning: allow entry .public-check-allow:3 ('<path glob>' entry) is "
-            "unverifiable without the private deny list: run with it ") in result.stdout
+            "unverifiable without the local list: run with it ") in result.stdout
     assert "unused" not in result.stdout and "remove it" not in result.stdout
     assert "2 allow entries used" in result.stdout.splitlines()[-1]
 
 
-def test_without_private_list_an_unused_commit_entry_in_a_gate_is_unverifiable(
-        repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(public_check.TERMS_ENV, str(tmp_path / "missing.txt"))
+def test_without_local_list_an_unused_commit_entry_in_a_gate_is_unverifiable(
+        repo: Path, local: Path) -> None:
+    local.unlink()
     commit(repo, {"a.txt": "a\n"}, "Clean message")
     sha = git(repo, "rev-parse", "HEAD").stdout.strip()
     (repo / public_check.ALLOW_FILE).write_text(
@@ -494,7 +570,7 @@ def test_without_private_list_an_unused_commit_entry_in_a_gate_is_unverifiable(
     result = run_check("--repo", str(repo), "--range", "HEAD")
     assert result.returncode == 0, result.stdout
     assert ("allow entry .public-check-allow:1 ('commit:<full sha> message' entry) is "
-            "unverifiable without the private deny list") in result.stdout
+            "unverifiable without the local list") in result.stdout
 
 
 def test_allow_entry_needs_a_reason(repo: Path) -> None:
@@ -733,7 +809,7 @@ def test_pre_push_hook_checks_pushed_commits(hooked: Path, tmp_path: Path) -> No
 
 
 def test_se_itself_passes() -> None:
-    """se must stay publishable; uses this machine's private deny list when it has one."""
+    """se must stay publishable; uses se's local list when the checkout has one."""
     result = run_check("--repo", str(SE_ROOT))
     assert result.returncode == 0, result.stdout
 

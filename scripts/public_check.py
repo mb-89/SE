@@ -3,8 +3,11 @@
 machine, account or internal host. The rule is owned by AGENTS.md, section "Public safety".
 
 Scans tracked file names and contents (binary files as bytes), commit messages and author and
-committer identities against committed generic patterns and a machine-local deny list. Output
-names the location and the pattern label only, never the matched text.
+committer identities against the public term list (public-check-terms.toml, beside this script)
+and the source's local list (.public-check.local at its root, never checked in), which adds the
+source's own terms and switches public entries off for it. Output names the location and the
+pattern label only, never the matched text. A tracked local list, and the retired machine-level
+list (~/.se/private-terms.txt, SE_PRIVATE_TERMS), stop the check with their remedy.
 
 The commit gates (a message file, the commits of a --range) also refuse tracker references and
 attribution trailers (`Co-Authored-By:`, `Claude-Session:`) in messages, from every author,
@@ -24,8 +27,8 @@ se.toml sets lies outside that `version` range, so a stale clone never gives ano
 silently.
 
 Allow entries are reported by kind: used ones are counted in the verdict; an unused one is a hit
-where the private deny list is loaded, and without it a warning that it is unverifiable, as it may
-cover a private-term hit the run cannot see.
+where the source has a local list, and without it a warning that it is unverifiable, as it may
+cover a local-term hit the run cannot see.
 
 Exit codes: 0 passed, 1 hits (or unused allow entries in a full check), 2 usage or setup error.
 """
@@ -47,48 +50,15 @@ from typing import Callable, Iterable
 ALLOW_FILE = ".public-check-allow"
 SE_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "se.toml"
-TERMS_ENV = "SE_PRIVATE_TERMS"
-TERMS_DEFAULT = "~/.se/private-terms.txt"
-
-GENERIC_USERS = {
-    "all", "default", "example", "me", "name", "public", "shared", "user", "username", "you",
-    "yourname",
-}
-GENERIC_MACHINES = {
-    "127.0.0.1", "computer", "host", "hostname", "localhost", "machine", "server", "servername",
-    "wsl$", "wsl.localhost",
-}
-PLACEHOLDER_START = ("{", "%", "$", "*", "...")
-
-_NAME = r"""([^\\/\s"'`<>|:;,()\[\]]+)"""
-
-
-def _not_placeholder(generic: set[str], group: int = 1) -> Callable[[re.Match[str]], bool]:
-    def accept(match: re.Match[str]) -> bool:
-        name = match.group(group)
-        return not name.startswith(PLACEHOLDER_START) and name.lower() not in generic
-
-    return accept
-
+TERMS_FILE = Path(__file__).with_name("public-check-terms.toml")
+LOCAL_FILE = ".public-check.local"
+# The retired machine-level list: found, the check stops and names where its terms go.
+MACHINE_ENV = "SE_PRIVATE_TERMS"
+MACHINE_DEFAULT = "~/.se/private-terms.txt"
 
 # GitHub's web-flow identity: the committer of a commit made on GitHub itself. It names no person,
 # so the identity gate accepts it as committer next to the project identity, never as author.
 WEB_FLOW = "GitHub <" + "noreply" + "@github.com>"
-
-# Fixed addresses services write into commits themselves; they name no person.
-SERVICE_EMAILS = frozenset({
-    "noreply" + "@github.com",  # GitHub's web-flow committer
-    "noreply" + "@anthropic.com",  # Claude Code's co-author trailer
-})
-
-
-def _personal_email(match: re.Match[str]) -> bool:
-    local, domain = match.group(1).lower(), match.group(2).lower()
-    if local == "git":  # SSH remote such as git@host:owner/repo; the host has its own pattern
-        return False
-    if domain == "users.noreply.github.com" or f"{local}@{domain}" in SERVICE_EMAILS:
-        return False
-    return re.fullmatch(r"(?:[\w-]+\.)*example\.[a-z]+", domain) is None
 
 
 def _always(match: re.Match[str]) -> bool:
@@ -102,36 +72,50 @@ class Pattern:
     accept: Callable[[re.Match[str]], bool] = _always
 
 
-GENERIC_PATTERNS = (
-    Pattern(
-        "user-profile-path",
-        re.compile(r"(?i)\b[a-z]:[\\/]+users[\\/]+" + _NAME),
-        _not_placeholder(GENERIC_USERS),
-    ),
-    Pattern(
-        "user-profile-path",
-        re.compile(r"(?<![\w.~:-])/(?:home|Users)/" + _NAME),
-        _not_placeholder(GENERIC_USERS),
-    ),
-    Pattern(
-        "email-address",
-        re.compile(
-            r"(?i)(?<![\w.%+-])([a-z0-9._%+-]+)@([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})\b"
-        ),
-        _personal_email,
-    ),
-    Pattern(
-        "enterprise-github-host",
-        re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+ghe\.com\b"),
-    ),
-    Pattern(
-        "unc-machine-name",
-        # Written raw (two backslashes, then one) or escaped (four, then two), never mixed: a
-        # mixed run is escape sequences in source text, such as a JSON-escaped newline.
-        re.compile(r"(?i)(?<![\\\w:/])\\\\(\\\\)?([a-z0-9][\w.$-]+)\\(?(1)\\)[\w$.-]"),
-        _not_placeholder(GENERIC_MACHINES, group=2),
-    ),
-)
+def _not_placeholder(data: dict, term: dict) -> Callable[[re.Match[str]], bool]:
+    start = tuple(data["placeholder"]["start"])
+    generic = set(data["generic"][term["generic"]])
+    group = term.get("group", 1)
+
+    def accept(match: re.Match[str]) -> bool:
+        name = match.group(group)
+        return not name.startswith(start) and name.lower() not in generic
+
+    return accept
+
+
+def _personal_email(data: dict, term: dict) -> Callable[[re.Match[str]], bool]:
+    services = frozenset(data["service"]["emails"])
+
+    def accept(match: re.Match[str]) -> bool:
+        local, domain = match.group(1).lower(), match.group(2).lower()
+        if local == "git":  # SSH remote such as git@host:owner/repo; the host has its own pattern
+            return False
+        if domain == "users.noreply.github.com" or f"{local}@{domain}" in services:
+            return False
+        return re.fullmatch(r"(?:[\w-]+\.)*example\.[a-z]+", domain) is None
+
+    return accept
+
+
+# The accept filters a [[term]] of the public list names.
+ACCEPT = {
+    "always": lambda data, term: _always,
+    "not-placeholder": _not_placeholder,
+    "personal-email": _personal_email,
+}
+
+
+def load_public_terms(path: Path = TERMS_FILE) -> tuple[Pattern, ...]:
+    """The public term list, the generic terms every source is checked against."""
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    return tuple(
+        Pattern(term["label"], re.compile(term["regex"]), ACCEPT[term["accept"]](data, term))
+        for term in data["term"]
+    )
+
+
+GENERIC_PATTERNS = load_public_terms()
 
 
 TRACKER_RULE = (
@@ -240,25 +224,81 @@ class Report:
     files: int = 0
     commits: int = 0
     allow_used: int = 0
+    off: list[str] = field(default_factory=list)  # public labels the local list switches off
 
 
-def load_private_terms() -> list[Pattern] | None:
-    path = Path(os.environ.get(TERMS_ENV) or TERMS_DEFAULT).expanduser()
+@dataclass
+class LocalList:
+    """A source's local list: its own terms, and the public labels it switches off."""
+    terms: list[Pattern] = field(default_factory=list)
+    off: set[str] = field(default_factory=set)
+
+
+LOCAL_OFF = re.compile(r"off:(\S+)")
+LOCAL_FORMS = "'<regex>' or 'off:<public label>  # reason'"
+UNTRACK_REMEDY = (
+    f"run git rm --cached {LOCAL_FILE}, then ignore it (scripts/setup.sh or setup.ps1 adds it to "
+    ".gitignore)"
+)
+
+
+def check_machine_list() -> None:
+    """Refuse while the retired machine-level list is configured, so none of its terms is
+    silently skipped."""
+    if os.environ.get(MACHINE_ENV):
+        where = f"the file {MACHINE_ENV} names"
+    elif Path(MACHINE_DEFAULT).expanduser().is_file():
+        where = MACHINE_DEFAULT
+    else:
+        return
+    raise SetupError(
+        f"the machine-level term list ({where}) is retired: move its terms into "
+        f"<source>/{LOCAL_FILE}, the local list at the root of each repository or vault that "
+        f"needs them (never checked in), then delete it and unset {MACHINE_ENV}; "
+        "AGENTS.md 'Public safety'"
+    )
+
+
+def check_untracked(root: Path, rev: str | None) -> None:
+    """Refuse a local list git tracks, in the index or in the checked commit."""
+    tracked = git(root, "ls-files", "--", LOCAL_FILE).strip()
+    if not tracked and rev:
+        tracked = git(root, "ls-tree", "--name-only", rev, "--", LOCAL_FILE).strip()
+    if tracked:
+        raise SetupError(f"{LOCAL_FILE} is tracked by git, but a local list is never checked in: "
+                         f"{UNTRACK_REMEDY}")
+
+
+def load_local(root: Path) -> LocalList | None:
+    """The local list at the source's root, or None where it has none. Hits name only its line
+    number, never the term."""
+    path = root / LOCAL_FILE
     if not path.is_file():
         return None
-    patterns = []
+    public = {pattern.label for pattern in GENERIC_PATTERNS}
+    local = LocalList()
     for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        term = raw.strip()
-        if not term or term.startswith("#"):
+        text = raw.strip()
+        if not text or text.startswith("#"):
+            continue
+        off = LOCAL_OFF.match(text)
+        if off:
+            label, _, reason = text[off.end():].partition("#")
+            if label.strip() or not reason.strip():
+                raise SetupError(f"{LOCAL_FILE}:{number}: write {LOCAL_FORMS}")
+            if off.group(1) not in public:
+                raise SetupError(f"{LOCAL_FILE}:{number}: no public entry is labelled "
+                                 f"{off.group(1)!r}; the labels are {', '.join(sorted(public))}")
+            local.off.add(off.group(1))
             continue
         try:
-            regex = re.compile(term, re.IGNORECASE)
+            regex = re.compile(text, re.IGNORECASE)
         except re.error as error:
             raise SetupError(
-                f"line {number} of the private deny list is not a valid regex ({error.msg})"
+                f"{LOCAL_FILE}:{number} is not a valid regex ({error.msg})"
             ) from None
-        patterns.append(Pattern(f"private-term:{number}", regex))
-    return patterns
+        local.terms.append(Pattern(f"local-term:{number}", regex))
+    return local
 
 
 def load_allow(root: Path) -> list[AllowEntry]:
@@ -636,14 +676,19 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def check(args: argparse.Namespace, commit: str | None) -> Report:
     root = Path(git(Path(args.repo).resolve(), "rev-parse", "--show-toplevel").decode().strip())
     check_se_version(root, commit)
+    check_machine_list()
+    check_untracked(root, args.rev)
     report = Report()
-    terms = load_private_terms()
-    patterns = list(GENERIC_PATTERNS) + (terms or [])
-    if terms is None:
+    local = load_local(root)
+    has_local = local is not None
+    if local is None:
+        local = LocalList()
         report.warnings.append(
-            f"no private deny list ({TERMS_DEFAULT} or {TERMS_ENV}); "
-            "only the generic patterns were checked"
+            f"no local list ({LOCAL_FILE}); only the public list was checked"
         )
+    else:
+        report.off = sorted(local.off)
+    patterns = [p for p in GENERIC_PATTERNS if p.label not in local.off] + local.terms
     if args.message_file is not None:
         scan_message_file(root, args.message_file, patterns, report)
         return report
@@ -659,14 +704,14 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
             check_fetched(root, args.revisions)
         scan_history(root, revisions.split(), patterns, report, gate=bool(args.revisions),
                      allow=allow)
-    report_unused(allow, terms is not None, report)
+    report_unused(allow, has_local, report)
     return report
 
 
 def report_unused(allow: list[AllowEntry], full: bool, report: Report) -> None:
     """Each entry this run could judge, by kind: used (counted in the verdict); unused, a hit
-    where the check is full; unverifiable, a warning without the private deny list, as the entry
-    may cover a private-term hit this run cannot see. A commit entry is judged only where its
+    where the check is full; unverifiable, a warning without the local list, as the entry may
+    cover a local-term hit this run cannot see. A commit entry is judged only where its
     commit was gated, as a gate's hit is not seen by every check."""
     for entry in allow:
         if entry.used:
@@ -680,8 +725,8 @@ def report_unused(allow: list[AllowEntry], full: bool, report: Report) -> None:
         else:
             report.warnings.append(
                 f"allow entry {ALLOW_FILE}:{entry.line} ('{entry.form}' entry) is unverifiable "
-                f"without the private deny list: run with it ({TERMS_DEFAULT} or {TERMS_ENV}) "
-                "to check whether it is still used"
+                f"without the local list: run with it ({LOCAL_FILE}) to check whether it is "
+                "still used"
             )
 
 
@@ -725,7 +770,8 @@ def main(argv: list[str] | None = None) -> int:
     for hit in report.hits:
         print(hit)
     used = f"{report.allow_used} allow entries used, " if report.allow_used else ""
-    scope = f"{report.files} files, {report.commits} commits, {used}{version}"
+    off = f"public entries off locally: {', '.join(report.off)}, " if report.off else ""
+    scope = f"{report.files} files, {report.commits} commits, {used}{off}{version}"
     if report.hits:
         remedy = "fix each as its line says"
         if any(hit.label not in OWN_REMEDY for hit in report.hits):
