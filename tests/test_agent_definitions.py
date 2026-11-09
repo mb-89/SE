@@ -252,7 +252,7 @@ PROCESS_FILES = [*MARKDOWN, ROOT / "scripts" / "work_tickets.py",
 
 @pytest.mark.parametrize("path", PROCESS_FILES, ids=lambda path: path.relative_to(ROOT).as_posix())
 def test_process_files_name_no_project_host_or_local_path(path):
-    # Project and person names are the public check's machine-local deny list; this test
+    # Project and person names are the public check's local list; this test
     # covers what can be recognised without one.
     assert neutrality_problems(path.name, path.read_text(encoding="utf-8")) == []
 
