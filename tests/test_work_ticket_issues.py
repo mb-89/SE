@@ -2882,6 +2882,7 @@ def test_intake_outside_lists_each_unmarked_unhandled_issue_once_from_one_query(
          outside_issue(12, labels=["field-report"]),
          outside_issue(15, labels=["backlogged", "se-person"]),
          outside_issue(11, comments=["seen", f"{work_tickets.HANDLED_MARKER}\nRouted."]),
+         outside_issue(16, f"Please.\n\n{work_tickets.HANDLED_MARKER}\n## Routing\n"),
          outside_issue(10)],
         [outside_issue(1)],
     )]
@@ -3039,17 +3040,18 @@ def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeyp
     monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
     body = worktree / "work.md"
     body.write_text("## Goal\n\nA filed package.\n", encoding="utf-8")
-    comment = worktree / "route.md"
-    comment.write_text("Routed: the sections it lacks, completed.\n", encoding="utf-8")
+    routing = worktree / "route.md"
+    routing.write_text("## Package kind\n\nStandard, small.\n", encoding="utf-8")
 
     assert run(worktree, "file", "--title", "feature/filed-20261106", "--body-file", str(body)) == 0
     assert capsys.readouterr().out == "Filed work issue https://git.example/owner/repo/issues/6\n"
     assert github.issues[6]["labels"] == ["work", "ready", "repo:repo"]
     assert github.issues[6]["body"] == f"{work_tickets.FLEET_MARKER}\n## Goal\n\nA filed package.\n"
-    assert run(worktree, "route", "1", "--title", "fix/routed-20261106", "--comment-file", str(comment)) == 0
+    assert run(worktree, "route", "1", "--title", "fix/routed-20261106", "--routing-file", str(routing)) == 0
     assert github.issues[1]["title"] == "fix/routed-20261106"
     assert github.issues[1]["labels"] == ["work", "ready", "repo:repo"]
-    assert github.comments[1] == [f"{work_tickets.HANDLED_MARKER}\nRouted: the sections it lacks, completed.\n"]
+    assert github.issues[1]["body"].startswith("Please fix it.\n\n" + work_tickets.HANDLED_MARKER)
+    assert 1 not in github.comments
     assert {"work", "ready", "repo:repo"} <= github.labels
     capsys.readouterr()
 
@@ -3063,8 +3065,72 @@ def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeyp
     capsys.readouterr()
     assert run(worktree, "ready") == 0
     assert "#7" not in capsys.readouterr().out
-    assert run(worktree, "route", "2", "--title", " ", "--comment-file", str(comment)) == 1
-    assert github.issues[2]["labels"] == [] and 2 not in github.comments
+    assert run(worktree, "route", "2", "--title", " ", "--routing-file", str(routing)) == 1
+    assert github.issues[2]["labels"] == [] and github.issues[2]["body"] == "Another one."
+
+
+OUTSIDE_BODY = BODY.split("## Requirements")[0].rstrip() + "\n"
+ROUTING = BODY[BODY.index("## Requirements"):].replace(
+    "2. Issue tooling in `scripts/work_tickets.py`.\n",
+    "2. Issue tooling in `scripts/work_tickets.py`.\n3. A routed requirement.\n")
+
+
+def routed_gh(monkeypatch) -> LabelledGh:
+    github = LabelledGh({1: {"number": 1, "title": "Proposal: Make the example work!",
+                             "body": OUTSIDE_BODY, "url": "https://git.example/owner/repo/issues/1",
+                             "labels": []}})
+    monkeypatch.setattr(work_tickets, "run_gh", github)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "today_stamp", lambda: "20261109")
+    return github
+
+
+def test_route_retitles_labels_and_appends_the_routing_section_in_one_edit(
+        worktree, monkeypatch, capsys):
+    github = routed_gh(monkeypatch)
+    routing = worktree / "route.md"
+    routing.write_text(ROUTING, encoding="utf-8")
+
+    assert run(worktree, "route", "1", "--routing-file", str(routing)) == 0
+    assert capsys.readouterr().out == "Routed issue #1 as feat/make-the-example-work-20261109\n"
+    issue = github.issues[1]
+    assert issue["title"] == "feat/make-the-example-work-20261109"
+    assert issue["labels"] == ["work", "ready", "repo:repo"] and 1 not in github.comments
+    assert issue["body"].startswith(OUTSIDE_BODY + "\n" + work_tickets.HANDLED_MARKER + "\n## Routing\n\n"
+                                    "Routed from: Proposal: Make the example work!\n\n### Requirements\n")
+    assert "### Acceptance" in issue["body"] and "## not a heading inside a fence" in issue["body"]
+    assert work_tickets.requirement_items(issue["body"])[3] == ("Routing", "A routed requirement.")
+
+    assert run(worktree, "route", "1", "--routing-file", str(routing)) == 1
+    assert "#1 is routed already" in capsys.readouterr().err
+    assert run(worktree, "route", "1", "--type", "nope", "--routing-file", str(routing)) == 1
+
+
+@pytest.mark.parametrize("rows", [EVIDENCE_ROWS, EVIDENCE_ROWS.replace(
+    "| Acceptance 1", "| Requirement 3 | complete | `abc1234` | `test`: passed |\n| Acceptance 1")],
+    ids=["lacks-row-3", "has-row-3"])
+def test_field_report_check_enforces_the_routed_requirements_and_acceptance(
+        worktree, monkeypatch, capsys, rows):
+    github = routed_gh(monkeypatch)
+    routing = worktree / "route.md"
+    routing.write_text(ROUTING, encoding="utf-8")
+    assert run(worktree, "route", "1", "--routing-file", str(routing)) == 0
+    issue, report = worktree / "issue.md", worktree / "report.md"
+    issue.write_text(github.issues[1]["body"], encoding="utf-8")
+    report.write_text(COMPLETE_REPORT.replace(EVIDENCE_ROWS, rows), encoding="utf-8")
+    capsys.readouterr()
+
+    code = run(worktree, "field-report", "--check", str(report), "--issue-body", str(issue))
+    error = capsys.readouterr().err
+    if rows == EVIDENCE_ROWS:
+        assert code == 1 and 'missing evidence for: Requirement 3 (under "Routing")' in error
+    else:
+        assert code == 0, error
+    report.write_text(COMPLETE_REPORT.replace(EVIDENCE_ROWS, rows).replace(
+        "| Acceptance 2 | complete | `abc1234` | `test`: passed |\n", ""), encoding="utf-8")
+    assert run(worktree, "field-report", "--check", str(report), "--issue-body", str(issue)) == 1
+    assert "Acceptance 2" in capsys.readouterr().err
 
 
 POST_MERGE_BODY = BODY.replace("- [ ] Tooling has tests.", "- [ ] CI is green on main after the merge.")
