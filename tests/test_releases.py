@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -633,18 +634,27 @@ def test_se_runs_the_release_workflow_on_pushes_to_its_integration_branch_only()
     assert f"on:\n  push:\n    branches: [{project['integration_branch']}]\n" in caller
 
 
-def test_the_release_workflow_is_one_copy_whose_only_se_line_is_its_branch():
-    """Consumers copy se's own release-tag.yml and change only its branch, so no other line is se's."""
+def test_the_release_workflow_is_one_copy_whose_only_se_lines_are_its_branch_and_uses():
+    """Consumers copy se's own release-tag.yml and change its branch and its uses, the README's
+    major tag in place of se's own commit, so no other line is se's."""
     branch = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]["integration_branch"]
     caller = (PROJECT / ".github" / "workflows" / "release-tag.yml").read_text(encoding="utf-8")
     own = [line for line in caller.splitlines() if line.strip() == f"branches: [{branch}]"]
     assert len(own) == 1
-    consumer = caller.replace(own[0], "    branches: [<integration branch>]")
-    shared = "uses: mb-89/SE/.github/workflows/release.yml@se"
-    assert shared in consumer
-    for line in consumer.replace(shared, "").splitlines():
-        assert f"[{branch}]" not in line, line
-        assert not line.lstrip().startswith("#") or "set branches to your integration branch" in line, line
+    local = "uses: ./.github/workflows/release.yml"
+    assert caller.count(local) == 1
+    for line in caller.replace(own[0], "").replace(local, "").splitlines():
+        assert f"[{branch}]" not in line and "uses:" not in line, line
+        assert not line.lstrip().startswith("#") or "set branches to your integration branch" in line \
+            or "its own workflow" in line, line
     readme = (PROJECT / "README.md").read_text(encoding="utf-8")
     assert "name: release-tag" not in readme
     assert "](.github/workflows/release-tag.yml)" in readme
+    assert "`mb-89/SE/.github/workflows/release.yml@v<major>`" in readme
+
+
+def test_nothing_calls_an_se_workflow_at_a_branch():
+    """se's workflows are referenced at `@v<major>` (README "Release tags"), never at a branch."""
+    for path in [*(PROJECT / ".github" / "workflows").glob("*.yml"), PROJECT / "README.md"]:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            assert not re.search(r"mb-89/SE/\S+@(se|main)\b", line), f"{path.name}: {line}"
