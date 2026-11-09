@@ -180,6 +180,10 @@ default (`field-report --draft`).
 - **Public** is what a user of the project relies on: its command-line interfaces, its file formats
   and schemas, and its documented module APIs.
 - Otherwise new behaviour is minor and a fix that changes no public interface is patch.
+- **A change to these rules declares its own kind**: a package that changes how release kinds are
+  derived states its kind in its work issue's "Package kind", because its integration runs under
+  the rules it replaces (SE#792 was major by its own new rule, but the old `release-trailer` would
+  have released it as a patch).
 
 ## Rules for all roles
 
