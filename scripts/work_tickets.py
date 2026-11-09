@@ -35,6 +35,9 @@ SECTION_PATTERN = re.compile(r"^##\s+(.+?)\s*$")
 DISPOSITION_PATTERN = re.compile(r"^\s*Disposition:\s*(.*?)\s*$", re.IGNORECASE)
 REQUIREMENT_PATTERN = re.compile(r"^(\d+)\.\s+(.*\S)\s*$")
 REQUIREMENT_SECTIONS = ("Requirements", "Changes after filing")
+# The section `route` appends to an outside issue, owned by the work model's "Outside issues": the
+# work.md sections it lacks, each one heading level down, read as if the body held them itself.
+ROUTING_SECTION = "Routing"
 FRONT_MATTER_PATTERN = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 ISSUE_URL_PATTERN = re.compile(r"^https?://([^/]+)/([^/]+)/([^/]+)/issues/\d+$")
@@ -1250,14 +1253,16 @@ def unread_comments_error(
     )
 
 
-def markdown_sections(body: str) -> dict[str, str]:
+def markdown_sections(body: str, level: int = 2) -> dict[str, str]:
+    """The body's sections at one heading level (`##` by default), heading -> text."""
+    pattern = re.compile(rf"^{'#' * level}\s+(.+?)\s*$")
     sections: dict[str, list[str]] = {}
     current: list[str] | None = None
     fenced = False
     for line in body.splitlines():
         if line.lstrip().startswith("```"):
             fenced = not fenced
-        heading = None if fenced else SECTION_PATTERN.fullmatch(line)
+        heading = None if fenced else pattern.fullmatch(line)
         if heading:
             current = sections.setdefault(heading.group(1).strip().casefold(), [])
         elif current is not None:
@@ -1274,17 +1279,33 @@ def section(sections: dict[str, str], name: str) -> str:
     )
 
 
+def routed_sections(body: str) -> dict[str, str]:
+    """The sections under the body's routing heading, which `route` wrote one level down."""
+    return markdown_sections(section(markdown_sections(body), ROUTING_SECTION), level=3)
+
+
+def issue_sections(body: str) -> dict[str, str]:
+    """An issue's sections as its readers see them: the body's own, then the routed ones."""
+    sections = markdown_sections(body)
+    for name, text in routed_sections(body).items():
+        sections[name] = "\n\n".join(part for part in (sections.get(name, ""), text) if part)
+    return sections
+
+
 def requirement_items(body: str) -> dict[int, tuple[str, str]]:
     """The one parser of an issue's requirements: number -> (section, text).
 
-    Numbered items under "Changes after filing" are requirements too, numbered as written; a
-    number both sections use is one requirement, named by the section that first lists it.
+    Numbered items under "Changes after filing", and under the routing section's requirements,
+    are requirements too, numbered as written; a number two sections use is one requirement,
+    named by the section that first lists it.
     """
     sections = markdown_sections(body)
+    sources = [(name, section(sections, name)) for name in REQUIREMENT_SECTIONS]
+    sources.append((ROUTING_SECTION, section(routed_sections(body), "requirements")))
     items: dict[int, tuple[str, list[str]]] = {}
-    for name in REQUIREMENT_SECTIONS:
+    for name, text in sources:
         current: list[str] | None = None
-        for line in section(sections, name).splitlines():
+        for line in text.splitlines():
             match = REQUIREMENT_PATTERN.fullmatch(line)
             if match:
                 current = items.setdefault(int(match.group(1)), (name, []))[1]
@@ -1303,7 +1324,7 @@ def field_report_evidence_items(body: str) -> dict[str, str]:
     }
     acceptance_items = [
         match.group(2)
-        for line in section(markdown_sections(body), "acceptance").splitlines()
+        for line in section(issue_sections(body), "acceptance").splitlines()
         if (match := CHECKBOX_PATTERN.fullmatch(line)) is not None
     ]
     acceptance = {
@@ -1367,7 +1388,7 @@ def is_discovery_issue(issue: dict[str, object]) -> bool:
 
 def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
     """Derives one ticket per numbered requirement plus the delivery ticket."""
-    sections = markdown_sections(issue["body"])
+    sections = issue_sections(issue["body"])
     requirements = {n: text for n, (_, text) in requirement_items(issue["body"]).items()}
     if not requirements:
         requirements = {1: section(sections, "goal") or issue["title"]}
@@ -1941,7 +1962,7 @@ INTEGRATION_SUBJECT_PATTERN = re.compile(r"Integrate ([^\s:()]+)")
 
 def is_breaking(issue_body: str) -> bool:
     """Whether a work issue marks a breaking change: the word in its Package kind section."""
-    kind = HTML_COMMENT_PATTERN.sub("", section(markdown_sections(issue_body), "Package kind"))
+    kind = HTML_COMMENT_PATTERN.sub("", section(issue_sections(issue_body), "Package kind"))
     return re.search(r"\bbreaking\b", kind, re.IGNORECASE) is not None
 
 
@@ -2270,7 +2291,7 @@ POST_MERGE_PATTERN = re.compile(
 def post_merge_acceptance(body: str) -> list[str]:
     """The work issue's acceptance lines that can only be seen after the merge."""
     return [
-        line.strip() for line in section(markdown_sections(body), "acceptance").splitlines()
+        line.strip() for line in section(issue_sections(body), "acceptance").splitlines()
         if POST_MERGE_PATTERN.search(line)
     ]
 
@@ -2497,7 +2518,7 @@ def repository_label_arguments(root: Path, all_repos: bool) -> list[str]:
 
 
 def issue_ownership(issue: dict[str, object]) -> set[str]:
-    value = section(markdown_sections(str(issue.get("body", ""))), "file ownership")
+    value = section(issue_sections(str(issue.get("body", ""))), "file ownership")
     return {
         line.strip("` -")
         for line in value.splitlines()
@@ -2616,7 +2637,7 @@ def draft_field_report(root: Path, file: Path, pr: int | None) -> int | None:
         body = body.replace("**Pull request:** #<n>", "**Pull request:** none", 1)
     body = (body.replace("<integration branch>", integration_branch(root))
             .replace("<branch>", branch).replace("<commit>", tested_main(root)))
-    requirement = section(markdown_sections(issue["body"]), "user requirement")
+    requirement = section(issue_sections(issue["body"]), "user requirement")
     if requirement:
         body = re.sub(
             r"(^## User requirement[^\n]*\n(?:\s*<!--.*?-->)?\s*\n)>[ \t]*$",
