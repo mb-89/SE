@@ -64,21 +64,30 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   - GitHub's web-flow identity (`GitHub`, `noreply` at `github.com`), the committer of a commit
     made on GitHub, passes as committer, never as author.
   - A commit already published passes by its reasoned commit entry in `.public-check-allow`.
-- Generic patterns, committed in the script: user profile paths (`X:\Users\<name>`, `/home/<name>`,
-  `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and `example.*`,
-  enterprise GitHub hosts (GitHub Enterprise Cloud subdomains), machine names in UNC paths.
+- The public list, `scripts/public-check-terms.toml`: the generic patterns every source is checked
+  against, read from the se module the check runs from: user profile paths (`X:\Users\<name>`,
+  `/home/<name>`, `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and
+  `example.*`, enterprise GitHub hosts (GitHub Enterprise Cloud subdomains), machine names in UNC
+  paths.
   - The fixed addresses services write into commits themselves, `noreply` at `github.com` and at
     `anthropic.com`, name no person and pass.
-- Private deny list for terms that must never be written down here: `~/.se/private-terms.txt`, or the
-  file named by `SE_PRIVATE_TERMS`; one case-insensitive regex per line, `#` comments. It is never
-  committed, and hits name only its line number. Without it the check warns and runs the generic
-  patterns only, as on a public CI host.
+- The local list, `.public-check.local` at the root of each source (a repository or a vault), for
+  terms that must never be written down here. Without it the check warns and runs the public list
+  only, as on a public CI host. `#` starts a comment line; every other line is one of
+  - a case-insensitive regex, a term this source keeps private; hits name only its line number;
+  - `off:<label>  # reason`, which switches the public entries of that label off for this source.
+  - It is never checked in: the check refuses to run while git tracks it, naming `git rm --cached`;
+    `scripts/setup.sh` and `setup.ps1` add it to the source's `.gitignore`.
+- The machine-level list (`~/.se/private-terms.txt`, `SE_PRIVATE_TERMS`) is retired: while one is
+  configured, the check stops and names where its terms go, `<source>/.public-check.local`.
 - One se version per check: every verdict names the se commit that ran it, and a repository that
   pins se (`[modules.se]` in its `se.toml`, [README "Modules"](README.md#modules)) is refused with
   exit code 2 when the running se is not at that pin: another commit than its `ref`, or a version
   outside its `version` range or none readable, naming both; `scripts/se_modules.py sync` brings
   the clone there.
-- False positives: reasoned entries in `.public-check-allow`, whose header owns their format and rules.
+- False positives: a reasoned entry in `.public-check-allow`, whose header owns their format and
+  rules, for one harmless finding (a line, a file, a commit); an `off:` line in the local list for a
+  public entry this source never treats as private.
 - Hooks: run `scripts/setup.ps1` or `scripts/setup.sh` once per clone. They set `core.hooksPath` to
   `.githooks`: pre-commit checks the staged content, commit-msg the message and identity, pre-push
   every pushed commit. A repository that uses se as a module runs `scripts/setup.ps1 -Repo <path>`
