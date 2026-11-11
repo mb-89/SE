@@ -430,11 +430,10 @@ work_tickets.py body-read --worktree WORKTREE [--body-file FILE]
     record the work issue's body as read (intake records it; field-report --check and deliver refuse
     a body changed after it)
 
-work_tickets.py field-report [--worktree WORKTREE] (--file FILE | --check FILE)
+work_tickets.py field-report [--worktree WORKTREE] (--draft FILE | --check FILE)
                              [--issue-body FILE] [--comment-count N] [--newest-comment ID]
-                             [--draft] [--pr PR]
-    create or update the field-report issue from a filled .github/ISSUE_TEMPLATE/field-report.md
-    body
+    draft or check the field report a pull request description carries, in the form of
+    .github/pull_request_template.md
 
 work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo REPO]
     comment a question on an issue and label it escalated
@@ -466,13 +465,13 @@ work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs 
     run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1
     when tests fail, 3 when they pass over the limit
 
-work_tickets.py guard --worktree WORKTREE --branch BRANCH --field-report FIELD_REPORT
+work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE
     require the field report to name removed protected content, against origin/<integration branch>
     as sync fetched it (the local branch without origin)
 
 work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SESSION]
-                        [--tracker TRACKER]
-    sync, push, create or update the pull request and file report
+    sync, check the field report, push, and create or update the pull request whose description
+    carries it; files no issue
 
 work_tickets.py push [--worktree WORKTREE] [branch]
     public check's push gate, then git push -u origin <branch>; retries a transient refusal once a
@@ -485,11 +484,12 @@ work_tickets.py verified [--worktree WORKTREE] remote_ref commit
     same check
 
 work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL
-    print the pull request body deliver writes: Fixes <issue> where all its acceptance shows before
-    the merge, else Refs <issue>
+                        --field-report FILE
+    print the pull request description deliver writes: Fixes <issue> where all its acceptance shows
+    before the merge, else Refs <issue>, then the field report between its markers
 
 work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
-                                [--field-report FILE] [--include-late REASON]
+                                [--pr-description FILE] [--include-late REASON]
                                 branch
     print the Release-kind trailer an integration merge of <branch> carries, from its field report's
     Release kind (a re-integration's from its Re-integration kind); push requires it
@@ -497,8 +497,9 @@ work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
 work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--build-command BUILD_COMMAND]
                           [--include-late REASON] [--check-command JSON]
                           [--check-command-temporary-directory]
-                          field_report
-    validate, merge, test, push and close a field report
+                          pull_request
+    validate the field report a pull request's description carries, merge, test, push and close the
+    work issue
 
 work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
                        [--integrator-session INTEGRATOR_SESSION]
@@ -519,7 +520,8 @@ work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]
     show local worker capacity or cloud unlimited capacity
 
 work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]
-    list open field reports and startable work issues
+    list delivered pull requests (open, to the integration branch, with a complete field report),
+    escalations and startable work issues
 
 work_tickets.py docs [--check]
     write the README's command reference from this registry; with --check, only refuse a README that

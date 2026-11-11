@@ -141,12 +141,12 @@ def test_guard_reports_removed_tests_until_field_report_names_them(worktree: Pat
     assert git(repository, "commit", "-am", "remove protected tests").returncode == 0
     report = repository / "field-report.md"
     report.write_text(
-        "## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n",
+        "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n<!-- se:field-report:end -->\n",
         encoding="utf-8",
     )
 
     guarded = run_helper(
-        "guard", "--branch", "remove-tests", "--field-report", str(report),
+        "guard", "--branch", "remove-tests", "--pr-description", str(report),
         "--worktree", str(repository),
     )
     assert guarded.returncode != 0
@@ -154,13 +154,13 @@ def test_guard_reports_removed_tests_until_field_report_names_them(worktree: Pat
     assert "removed JavaScript" in guarded.stderr
 
     report.write_text(
-        "## Removed behaviour, deleted or weakened tests, and authored prose\n\n"
+        "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\n"
         "- `test_removed_python`: user approved its removal.\n"
-        '- "removed JavaScript": user approved its removal.\n',
+        '- "removed JavaScript": user approved its removal.\n<!-- se:field-report:end -->\n',
         encoding="utf-8",
     )
     approved = run_helper(
-        "guard", "--branch", "remove-tests", "--field-report", str(report),
+        "guard", "--branch", "remove-tests", "--pr-description", str(report),
         "--worktree", str(repository),
     )
     assert approved.returncode == 0, approved.stderr
@@ -187,12 +187,12 @@ def test_guard_compares_against_the_fetched_remote_integration_branch(worktree: 
     assert git(clone, "checkout", "-q", "-b", "feature", "origin/main").returncode == 0
     report = clone / "field-report.md"
     report.write_text(
-        "## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n",
+        "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n<!-- se:field-report:end -->\n",
         encoding="utf-8",
     )
 
     guarded = run_helper(
-        "guard", "--branch", "feature", "--field-report", str(report), "--worktree", str(clone),
+        "guard", "--branch", "feature", "--pr-description", str(report), "--worktree", str(clone),
     )
 
     assert guarded.returncode == 0, guarded.stderr
@@ -238,12 +238,12 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     assert git(repository, "commit", "-m", "move and remove prose").returncode == 0
     report = repository / "field-report.md"
     report.write_text(
-        "## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n",
+        "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n<!-- se:field-report:end -->\n",
         encoding="utf-8",
     )
 
     guarded = run_helper(
-        "guard", "--branch", "remove-prose", "--field-report", str(report),
+        "guard", "--branch", "remove-prose", "--pr-description", str(report),
         "--worktree", str(repository),
     )
     assert guarded.returncode != 0
@@ -251,12 +251,12 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     assert "This sentence is moved." not in guarded.stderr
 
     report.write_text(
-        "## Removed behaviour, deleted or weakened tests, and authored prose\n\n"
-        "- `docs/guide.md: This sentence is removed.`\n",
+        "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\n"
+        "- `docs/guide.md: This sentence is removed.`\n<!-- se:field-report:end -->\n",
         encoding="utf-8",
     )
     approved = run_helper(
-        "guard", "--branch", "remove-prose", "--field-report", str(report),
+        "guard", "--branch", "remove-prose", "--pr-description", str(report),
         "--worktree", str(repository),
     )
     assert approved.returncode == 0, approved.stderr
@@ -299,12 +299,12 @@ def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
     assert git(repository, "commit", "-am", "rewrap authored prose").returncode == 0
     report = repository / "field-report.md"
     report.write_text(
-        "## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n",
+        "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n<!-- se:field-report:end -->\n",
         encoding="utf-8",
     )
 
     guarded = run_helper(
-        "guard", "--branch", "rewrap-prose", "--field-report", str(report),
+        "guard", "--branch", "rewrap-prose", "--pr-description", str(report),
         "--worktree", str(repository),
     )
     assert guarded.returncode == 0, guarded.stderr
