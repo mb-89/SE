@@ -1,7 +1,9 @@
 """The decision deck command (scripts/deck.py) and its Claude-app answers bundle (scripts/deck_answers.js).
 
-The warning refusal, the answers summary and the bundle run on fakes; one end-to-end test builds a
-deck with the real obs, serves it with `deck serve --wait`, sends from a browser and reads the answers.
+The warning refusal, the answers summary and the bundle's ways out run on fakes; one end-to-end test
+builds a deck with the real obs, serves it with `deck serve --wait`, sends from a browser and reads the
+answers, and one opens a real deck on a fake of the Claude app's runtime that appears late, for the draft
+kept over a reload and the notice beside Send.
 Every deck the tests build with the real obs is built once per session, all at once (`decks`), and the
 browser tests share one page per worker (`page`).
 """
@@ -178,6 +180,47 @@ const actions = {
         await page.locator("[data-bless-pill]", {hasText: "sent"}).waitFor({timeout: 10000});
         return null;
     },
+    // A deck opened in a fresh tab of its own, where the Claude app's runtime is a fake that appears
+    // only after the page loaded (`claude` is set on load): `files` and `comment` are what
+    // artifact.publish and comments.sendToClaude do, ok or a rejection code.
+    claude: async (page, {path, files, comment}) => {
+        const context = await page.context().browser().newContext();
+        try {
+            const tab = await context.newPage();
+            await tab.addInitScript(({files, comment}) => {
+                const refusal = code => Object.assign(new Error(code), {code});
+                globalThis.seCalls = {published: [], comments: []};
+                addEventListener("load", () => { globalThis.claude = {use: async name => (name === "artifact" ? {
+                    publish: async written => { if (files !== "ok") throw refusal(files); seCalls.published.push(written); return {version: "v2"}; },
+                } : name === "comments" ? {
+                    anchorFor: async () => ({kind: "element"}),
+                    sendToClaude: async target => { if (comment !== "ok") throw refusal(comment); seCalls.comments.push(target); return {threadId: "t1"}; },
+                } : null)}; });
+            }, {files, comment});
+            await tab.goto(`file://${path}#cache`);
+            await tab.waitForFunction(() => document.documentElement.dataset.artifactStatus === "ready");
+            await tab.locator('[data-bless-key="decline"]:visible').click();
+            await tab.locator("[data-bless-comment]").fill("Too slow.");
+            await tab.locator("[data-bless-comment]").press("Enter");
+            // Reload: the draft comes back when the chapter opens again.
+            await tab.reload();
+            await tab.waitForFunction(() => document.documentElement.dataset.artifactStatus === "ready");
+            await tab.evaluate(() => obsArtifact.activateChapter("cache"));
+            await tab.waitForFunction(() => obsBless.verdicts().cache?.comment === "Too slow.", null, {timeout: 10000});
+            const restored = await tab.evaluate(() => obsBless.verdicts());
+            await tab.locator("[data-bless-send]").click();
+            await tab.locator("[data-se-answers-notice]").waitFor();
+            return {restored, pill: await tab.locator("[data-bless-pill]").innerText(),
+                    notice: await tab.evaluate(() => {
+                        const box = document.querySelector("[data-se-answers-notice]");
+                        return {state: box.dataset.seAnswersNotice, besideSend: box.previousElementSibling?.matches("[data-bless-send]"),
+                                message: box.querySelector("p").textContent, text: box.querySelector("textarea")?.value ?? null};
+                    }),
+                    calls: await tab.evaluate(() => seCalls)};
+        } finally {
+            await context.close();
+        }
+    },
 };
 (async () => {
     const browser = await chromium.launch();
@@ -271,42 +314,135 @@ def test_answers_parse_into_the_summary():
         deck.summary({"answers": []})
 
 
+# The answers bundle on a fake of obs-html and of the Claude app's runtime, one case per run: the
+# runtime's modes are what `artifact.publish` and `comments.sendToClaude` do (ok, or a rejection code).
 BUNDLE_DOUBLE = """
 const bundle = require("fs").readFileSync(process.argv[1], "utf8");
-const calls = {application: null, sink: null, published: []};
-const run = (claude) => {
-    calls.sink = null;
-    globalThis.obsArtifact = {
-        registerApplication: application => { calls.application = [application.id, application.actions]; },
-        trustedExtension: namespace => ({register: sink => { calls.sink = {namespace, ...sink}; }}),
-    };
-    globalThis.claude = claude;
-    eval(bundle);
+const [payload, mode] = [JSON.parse(process.argv[2]), JSON.parse(process.argv[3])];
+const element = () => {
+    const node = {dataset: {}, style: {}, children: [], setAttribute() {}, addEventListener() {},
+                  after() {}, prepend: child => node.children.unshift(child),
+                  replaceChildren: (...children) => { node.children = children; }};
+    return node;
 };
+const body = element();
+const calls = {application: null, sink: null, published: [], comments: []};
+globalThis.document = {body, title: "Deck", querySelector: () => null, addEventListener() {},
+                       createElement: element};
+globalThis.obsArtifact = {
+    registerApplication: application => { calls.application = [application.id, application.actions]; },
+    trustedExtension: namespace => ({register: sink => { calls.sink = {namespace, ...sink}; }}),
+};
+const refusal = code => Object.assign(new Error(`refused: ${code}`), {code});
+const claude = {use: async name => {
+    if (name === "artifact") return {publish: async files => {
+        if (mode.files !== "ok") throw refusal(mode.files);
+        calls.published.push(files);
+        return {version: "v2"};
+    }};
+    if (name === "comments") return {
+        anchorFor: async node => ({element: node === body ? "body" : "other"}),
+        sendToClaude: async target => {
+            if (mode.comment !== "ok") throw refusal(mode.comment);
+            calls.comments.push(target);
+            return {threadId: "t1", commentId: "c1"};
+        },
+    };
+    return null;
+}};
+if (!mode.late) globalThis.claude = claude;
+eval(bundle);
 (async () => {
-    run(undefined);
-    const local = {application: calls.application, sink: calls.sink};
-    run({use: async name => name === "artifact"
-        ? {publish: async files => { calls.published.push(files); return {version: "v2"}; }} : null});
-    const result = await calls.sink.send(JSON.parse(process.argv[2]));
-    console.log(JSON.stringify({local, namespace: calls.sink.namespace, id: calls.sink.id, result,
-                                published: calls.published}));
+    const registered = calls.sink !== null;  // Registered at the first run, with or without claude.
+    if (mode.late && !mode.never) globalThis.claude = claude;
+    let result = null, error = null;
+    try { result = await calls.sink.send(payload); }
+    catch (failure) { error = {message: failure.message, code: failure.code, failed: failure.failed}; }
+    const shown = body.children.map(box => ({state: box.dataset.seAnswersNotice,
+        text: box.children.map(child => child.textContent ?? child.value)}));
+    console.log(JSON.stringify({registered, application: calls.application, namespace: calls.sink.namespace,
+                                id: calls.sink.id, result, error, shown, published: calls.published,
+                                comments: calls.comments}));
 })();
 """
 
 
-def test_the_bundle_saves_the_payload_through_the_files_form():
+def _bundle(**mode: object) -> dict:
     if shutil.which("node") is None:
         pytest.skip("node is not installed")
-    result = subprocess.run(["node", "-e", BUNDLE_DOUBLE, str(SCRIPTS / "deck_answers.js"), json.dumps(PAYLOAD)],
-                            capture_output=True, text=True, check=True)
-    calls = json.loads(result.stdout)
-    # Outside the Claude app it registers no sink, so obs-html serve takes the answers.
-    assert calls["local"] == {"application": [deck.BUNDLE_ID, []], "sink": None}
+    result = subprocess.run(["node", "-e", BUNDLE_DOUBLE, str(SCRIPTS / "deck_answers.js"), json.dumps(PAYLOAD),
+                             json.dumps(mode)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def test_the_bundle_saves_answers_json_and_sends_the_comment_to_claude():
+    calls = _bundle(files="ok", comment="ok")
+    assert calls["application"] == [deck.BUNDLE_ID, []]
     assert (calls["namespace"], calls["id"]) == ("obsHtml.answers", "claude-artifact")
-    assert calls["result"] == {"written": "answers.json", "version": "v2"}
+    assert calls["result"] == {"ways": ["answers.json", "comment"], "failed": {}, "written": "answers.json",
+                               "version": "v2", "comment": {"threadId": "t1"}}
     assert [list(files) for files in calls["published"]] == [["answers.json"]]
     assert json.loads(calls["published"][0]["answers.json"]) == PAYLOAD
+    [comment] = calls["comments"]
+    assert comment["anchor"] == {"element": "body"}
+    assert comment["text"].splitlines()[1:3] == ["- record: pick C: C needs no second place.", "- swipe: bless"]
+    assert json.loads(comment["text"].split("answers.json:\n", 1)[1]) == PAYLOAD
+    assert len(comment["text"].encode()) <= 4096
+    assert calls["shown"] == [{"state": "sent", "text": ["Sent: answers.json saved and comment sent to Claude."]}]
+
+
+def test_a_refused_files_form_still_reaches_claude_through_the_comment():
+    calls = _bundle(files="capability_disabled", comment="ok")
+    assert calls["error"] is None
+    assert calls["result"] == {"ways": ["comment"], "failed": {"answers.json": "capability_disabled"},
+                               "comment": {"threadId": "t1"}}
+    assert calls["shown"][0]["text"] == ["Sent: comment sent to Claude. Not saved as answers.json (capability_disabled)."]
+
+
+def test_when_both_ways_fail_the_notice_says_so_with_the_codes_and_the_answers_to_copy():
+    calls = _bundle(files="capability_disabled", comment="claude_unavailable")
+    assert calls["result"] is None
+    assert calls["error"]["code"] == "not_sent"
+    assert calls["error"]["failed"] == {"answers.json": "capability_disabled", "comment": "claude_unavailable"}
+    [shown] = calls["shown"]
+    message, text = shown["text"]
+    assert shown["state"] == "failed"
+    assert message.startswith("Not sent: saving answers.json failed with capability_disabled")
+    assert "claude_unavailable" in message and "Sent:" not in message
+    assert json.loads(text) == PAYLOAD
+
+
+def test_a_claude_runtime_that_appears_after_the_first_run_takes_the_answers():
+    calls = _bundle(files="ok", comment="ok", late=True)
+    assert calls["registered"]
+    assert calls["result"]["ways"] == ["answers.json", "comment"]
+
+
+def test_without_claude_or_a_server_send_rejects_so_the_text_to_copy_shows():
+    calls = _bundle(files="ok", comment="ok", late=True, never=True)
+    assert calls["registered"] and calls["result"] is None
+    assert "sending is not available here" in calls["error"]["message"]
+
+
+@pytest.mark.parametrize("files, comment", [("capability_disabled", "ok"), ("capability_disabled", "claude_unavailable")])
+def test_a_deck_keeps_the_draft_over_a_reload_and_sends_through_a_late_claude(decks, page, files, comment):
+    built, artifact = decks["send"]
+    assert built.returncode == 0, built.stderr
+    shown = page("claude", path=str(artifact), files=files, comment=comment)
+    assert shown["restored"] == {"cache": {"verdict": "decline", "comment": "Too slow."}}
+    if comment == "ok":
+        assert shown["notice"] == {"state": "sent", "besideSend": True, "text": None,
+                                   "message": "Sent: comment sent to Claude. Not saved as answers.json (capability_disabled)."}
+        assert "sent" in shown["pill"].lower()
+        [sent] = shown["calls"]["comments"]
+        assert "- cache: decline: Too slow." in sent["text"].splitlines()
+    else:
+        notice = shown["notice"]
+        assert (notice["state"], notice["besideSend"]) == ("failed", True)
+        assert "capability_disabled" in notice["message"] and "claude_unavailable" in notice["message"]
+        assert json.loads(notice["text"])["verdicts"][0]["comment"] == "Too slow."
+        assert "sent" not in shown["pill"].lower()
 
 
 def test_build_serve_wait_and_send_from_the_browser_print_the_answers(decks, page):
