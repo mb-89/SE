@@ -352,7 +352,8 @@ A worker splits its work issue into local tickets in its worktree:
 
 ## Tests
 
-This section is the one statement of how tests are written (SE's principle 8, fast tests); work
+This section is the one statement of how tests are written
+([tst-002](references/rules.md#tst-002-fast-tests), fast tests); work
 issues point here and never restate it. The project's suite and its time budget are `[tests]` in
 `se.toml` ([Test budget](../../README.md#test-budget)), which the integration gate enforces.
 

@@ -132,6 +132,15 @@ def test_rules_followed_only_by_judgment_are_listed_without_failing(tmp_path, ca
     assert "1 rule(s) followed by judgment only" in out
 
 
+def test_a_frozen_line_does_not_count_as_a_live_implementation(tmp_path, capsys):
+    frozen = rule(implementation="by judgment.\n  - Go line (frozen): the battery's `x` rule.")
+    code, out = run(tmp_path, capsys, book(("gen", [frozen]), ("p-go", [
+        rule("p-go-001", implementation="x.\n  - Go line (frozen): the battery's `y` rule.")])))
+    assert code == 0, out
+    assert "by judgment only: gen-001 A rule" in out
+    assert "p-go-001" not in out
+
+
 def test_a_missing_book_is_a_setup_error(tmp_path, capsys):
     assert rule_book.main(["--book", str(tmp_path / "none.md")]) == 2
     assert "cannot read the rule book" in capsys.readouterr().err
