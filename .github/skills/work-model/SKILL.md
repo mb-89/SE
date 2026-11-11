@@ -1,6 +1,6 @@
 ---
 name: work-model
-description: 'The shared rules of how we work, for every role (SE, worker, integrator): one work issue in, a pull request plus a field-report issue out; the box; escalation; freshness, dependencies and scheduling; worktrees; local tickets and notes; what a project provides. Load it whenever you act as SE, worker or integrator, write or read work, field-report or retro issues, or use <se>/scripts/work_tickets.py.'
+description: 'The shared rules of how we work, for every role (SE, worker, integrator): one work issue in, a pull request out whose description is the field report; the box; escalation; freshness, dependencies and scheduling; worktrees; local tickets and notes; what a project provides. Load it whenever you act as SE, worker or integrator, write or read work or retro issues or field reports, or use <se>/scripts/work_tickets.py.'
 ---
 <!-- Generated from src/skills/work-model/SKILL.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 
@@ -26,10 +26,19 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 - **The box**: a worker changes only its own worktree. Any other checkout it reads (for example a
   related repository its tests use) is read-only. Everything comes in through its work issue
   (re-read with its comments before each ticket, so it can change in flight) and goes out through
-  its pull request and its field-report issue. What it needs outside the box goes into the field
+  its pull request, whose description is its field report. What it needs outside the box goes into the field
   report.
-- **Out**: a pushed branch, a pull request to the integration branch, a field-report issue from `field-report.md`
-  (title `field-report: <branch>`, label `field-report`) and one notification to the integrator.
+- **Out**: a pushed branch, a pull request to the integration branch whose description is the
+  field report, and one notification to the integrator. No field-report issue is filed: one piece
+  of work is one issue, the work issue, which the integrator closes once the work is integrated.
+  - The report's one form is the pull request template,
+    [`.github/pull_request_template.md`](../../pull_request_template.md). The report
+    sits between its `<!-- se:field-report -->` and `<!-- se:field-report:end -->` lines.
+  - `field-report --draft` writes it there, and every reader (`field-report --check`, `guard`,
+    `release-trailer`, `integrate`, `queue`) finds it there. A description without them holds no
+    report and is refused.
+  - Field-report issues filed before this are history: they keep their `field-report` label and
+    are not migrated; nothing new gets that label.
   - The field report holds what was not done, decisions with confidence, spec gaps, a short retro
     and tickets for other repositories.
   - Each "Tickets for other repositories" entry is one reusable capability and lists every source
@@ -59,18 +68,20 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 - Issues are read and written with `gh`, bodies through `--body-file`; where the host offers no
   `gh`, see [Without gh](#without-gh). Branches and the integration branch are pushed; a release
   needs the human's approval, obtained by SE.
-- Retros use `retro.md`; each improvement names the agent definition, template, skill or script
-  it changes, and becomes an ordinary work issue.
+- Retros use `retro.md` and read the field reports in the pull request descriptions of the
+  window's closed work issues; each improvement names the agent definition, template, skill or
+  script it changes, and becomes an ordinary work issue.
 
 ## Issues
 
-An issue is one package of work: its title is its branch name, and it ends as one merge with one
-field report.
+An issue is one package of work: its title is its branch name, and it ends as one merge whose
+pull request carries its field report.
 
 - **Sizes**: tiny, small or medium. A topic bigger than medium becomes several issues, worked in
   order.
-- **Kinds**: a work issue, a field report (the two of [Roles and flow](#roles-and-flow)), work
-  from outside ([Outside issues](#outside-issues)) and a backlog issue (below).
+- **Kinds**: a work issue ([Roles and flow](#roles-and-flow)), work from outside
+  ([Outside issues](#outside-issues)) and a backlog issue (below). A field report is no issue: it
+  is the description of the work's pull request.
 - **Decisions are never issues**: they go to the person as a deck, as the
   [escalation ladder](#escalation-ladder) says.
 - **Labels**: SE labels work itself; the person never labels anything. SE files a work issue with
@@ -117,9 +128,8 @@ other source. It arrives unlabelled and nothing is asked of whoever files it; th
 own issues apart instead, and SE labels it once it routes it ([Issues](#issues)):
 
 - Every issue the fleet files carries the hidden marker `<!-- se:fleet -->` in its body: the issue
-  templates hold it, filing a field report writes it, and `work_tickets.py field-report --check`
-  adds it to a report without it, so a report filed by hand is marked too. An issue labelled
-  `field-report` counts as marked.
+  templates hold it, and `file` and `backlog file` add it. An issue labelled `field-report` (one of
+  the old field-report issues) counts as marked.
 - `se.toml` `[outside]` names each repository SE watches with its cut-off, the last issue number
   that existed before the marker (`"<host>/<owner>/<repo>" = <number>`); issues up to it are known,
   never outside issues.
@@ -261,10 +271,15 @@ Pull requests built on an old `main` cause most integration trouble.
   issue.
 - After each integration the integrator starts every startable work issue that has no branch yet
   and whose file ownership does not clash with running workers, and starts its session itself.
-- Nobody watches for field reports. Triggers: the worker's delivery notification (its only message
+- Nobody watches for deliveries. Triggers: the worker's delivery notification (its only message
   to another agent, never a question); `work_tickets.py queue` at the start of every integrator and
-  SE turn, so a missed notification is handled as soon as either session is talked to;
-  in the cloud only, scheduled triggers and Actions workflows on the `field-report` label.
+  SE turn, so a missed notification is handled as soon as either session is talked to; in the
+  cloud only, scheduled triggers.
+- **Delivered, waiting for integration** is an open pull request to the integration branch whose
+  description carries a complete field report (one that follows its form); `queue` lists them.
+- **Closing**: `integrate` closes the work issue with a comment that links the pull request and
+  the release. Where acceptance can only be seen after the merge, the issue stays open and the
+  comment names what it waits for.
 - Capacity limits apply only to local workers (CPU cores and memory minus running workers). Cloud
   workers have none. File clashes and the serial merge queue apply everywhere.
 - An integrated worker session is deleted once its branch is on `main` and its worktree is
@@ -418,11 +433,12 @@ as a project's public rule may require; se's public check refuses attribution tr
 ([Public safety](../../../AGENTS.md#public-safety)).
 
 The `--repo` resolution order is argument, `[trackers]`, then `origin`. A tracker is selected by
-the repository name and is where that repository's work issues and field reports live.
+the repository name and is where that repository's work issues live; its pull requests, and the
+field reports their descriptions carry, live on `origin`.
 
-Work issues and field reports carry `repo:<name>` for their repository; `ready`, `capacity`, and
-`queue` filter to that label by default. Pass `--all-repos` to those commands to include tracker
-issues for every repository instead. New worktrees default to the sibling `<checkout>.worktrees`
+Work issues carry `repo:<name>` for their repository; `ready`, `capacity`, and `queue` filter to
+that label by default. Pass `--all-repos` to those commands to include tracker issues for every
+repository instead. New worktrees default to the sibling `<checkout>.worktrees`
 folder unless `--worktree-root` or `[worktree_roots]` overrides it.
 
 ### Mirrors
@@ -481,8 +497,8 @@ is its reusable part, imported from the project's se module.
 Where the host offers no `gh` (Claude's cloud), a role still follows its procedure; this section
 owns what changes. A `gh` that is installed but fails `gh auth status` counts as no `gh`.
 
-- **GitHub through the host's tools**: issues, comments, pull requests and field reports are read
-  and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same
+- **GitHub through the host's tools**: issues, comments and pull requests (their descriptions
+  carrying the field reports) are read and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same
   titles, labels, bodies and footers the commands would write.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
   `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push`, `verified`,
@@ -497,32 +513,37 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     tools read.
   - `intake --outside`: read each `[outside]` repository's open issues and their comments, and
     keep those [Outside issues](#outside-issues) leaves.
-  - `deliver`: `sync`; `push`; open the pull request to the integration
-    branch, titled like the work issue, with the body `pr-body --issue-body <file> --issue-url
-    <url>` prints; file the field report, titled `field-report: <branch>`,
-    label `field-report`; send the notification.
-    - The field report comes from `field-report.md`, filled in by hand (`field-report --draft`
-      needs `intake`'s snapshot), and passes `field-report --check .se/work/field-report.md
-      --worktree <worktree> --issue-body <file> --comment-count <n> --newest-comment <id>` (the
-      work issue's body saved to `<file>`, its comments as the GitHub tools read them now).
+  - `deliver`: `sync`; `push`; open the pull request to the integration branch, titled like the
+    work issue, with the description `pr-body --issue-body <file> --issue-url <url>
+    --field-report .se/work/field-report.md` prints (the closing line, then the report between
+    its markers); send the notification. No issue is filed.
+    - The field report comes from `field-report.md`, the template copied with its markers and
+      filled in by hand (`field-report --draft` needs `intake`'s snapshot).
+    - It passes `field-report --check .se/work/field-report.md --worktree <worktree> --issue-body
+      <file> --comment-count <n> --newest-comment <id>` (the work issue's body saved to `<file>`,
+      its comments as the GitHub tools read them now).
     - That check runs after `sync` and before `push`: it fills the report's Branch tip from the
       branch.
-    - A commit after delivery changes the tip: run the check again and update the filed report
-      in place.
-    - A refused report is fixed and checked again, never filed.
+    - A commit after delivery changes the tip: run the check again and update the pull request's
+      description in place.
+    - A refused report is fixed and checked again, never delivered.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
     like the work issue and based on the integration branch.
-  - `integrate`: merge the pull request's branch into the newest integration branch locally,
-    with the message `integrate` writes (`Integrate <branch>: <summary>`, plus the trailer
-    `work_tickets.py release-trailer <branch> --issue-body <file> --field-report <file>` prints,
-    which [releases](../../../README.md#project-settings) require).
+  - `integrate`: save the pull request's description to a file and check it with `field-report
+    --check <file> --issue-body <file>`.
+    - Merge the pull request's branch into the newest integration branch locally, with the message
+      `integrate` writes (`Integrate <branch>: <summary>`, plus the trailer `work_tickets.py
+      release-trailer <branch> --issue-body <file> --pr-description <file>` prints, which
+      [releases](../../../README.md#project-settings) require).
     - That command refuses, as `integrate` does, a branch with commits after the report's
       Branch tip, naming them; merge only once the report is updated, or state why they are
       included with `--include-late <reason>` and in the `Integrated in …` comment.
     - Then run the complete suite with `work_tickets.py suite` and, unless `se.toml` sets
       `public_check = false`, the public check (`public_check.py --rev HEAD --range
       <pre-merge>..HEAD`), refusing on a failure; both record the verdicts `push` needs.
-    - Then `push <integration branch>`, and close the issues with the `Integrated in …` comment.
+    - Then `push <integration branch>`, and close the work issue with the `Integrated in …`
+      comment, which links the pull request and the release (or names the post-merge acceptance
+      it stays open for).
 - **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
   approval prompt no one answers; a role works with the repositories its session started with.
 - **Commit trailers**: the project's [`commit_trailer`](#what-the-project-provides) wins over a
@@ -533,10 +554,10 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
 - **Retries after a server error**: after a 5xx from GitHub, read before retrying any write, not
   only a create (the object may exist); where closing with a state reason fails, close without
   one (GitHub's default reason is completed).
-- **Delivery fallback**: an output whose write keeps failing after those retries goes in full into
-  the next output that can be written, and a short placeholder points to it: where the field-report
-  issue cannot be created with the report, the full report goes into the pull request body, a short
-  field-report issue links it, and the delivery notice names the pull request.
+- **Delivery fallback**: where the pull request cannot be opened with the report as its
+  description after those retries, open it with the closing line alone, then write the full
+  description (`pr-body`'s output) by editing the pull request; the delivery notice names the pull
+  request.
 - **The session prompt carries only** the agent, the work issue, the branch (the session's outcome
   branch, which replaces the worktree) and the integrator session to notify; everything else is in
   the role files, this skill and the project's `AGENTS.md`:
