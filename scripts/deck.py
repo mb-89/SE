@@ -13,6 +13,11 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       and `## The problem`, in that order, before its fence (the decision skill's note shape), and on
       any obs warning. It warns, building all the same, of each option without `success` and each
       mark off the datum without `because` (the decision skill's fence fields), naming the note and the option.
+      In the Claude app, publish the deck with the Artifact tool and `capabilities: {artifact: {},
+      comments: {}}`: `artifact` lets Send save answers.json (the record the session reads), and the
+      full-form `comments` lets it also send the answers to Claude as a comment, which wakes the
+      watching session where answers.json is refused. Send succeeds when either works; a deck published
+      without them shows the answers as text to copy. The bundle's header owns how Send uses them.
   serve HTML --wait [--timeout S]   Serves the deck with obs-html serve: prints the URL to open first,
       then, once the person sends, the answers payload as one JSON line (also written to answers.json
       beside HTML). For Claude Code, Copilot and any local browser.

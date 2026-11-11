@@ -125,10 +125,14 @@ what was decided without the person and their [tasks](#tasks-for-the-person), be
 1. Write the decision notes and their manifest into a scratch directory `<notes>`, then run
    `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html`.
 2. Hand the deck to the person where they are, and wait for their answers:
-   - **The Claude app** (cloud and mobile): publish `<deck>.html` with the Artifact tool and
-     `capabilities: {artifact: {}}`, and send the person its link. Their Send publishes
-     `answers.json` into the artifact, which wakes this session; read it with the Artifact
-     tool's `read` and `path: "answers.json"`.
+   - **The Claude app** (cloud and mobile): publish `<deck>.html` with the Artifact tool and the
+     capabilities `deck.py --help` names, `artifact` and full-form `comments`, and send the person
+     its link.
+     - Their Send saves `answers.json` into the artifact and sends the answers to Claude as a
+       comment; either wakes this session.
+     - Read `answers.json` with the Artifact tool's `read` and `path: "answers.json"`. Where it is
+       missing or older than the comment, take the payload from the comment's `answers.json:` part,
+       or from its lines where the payload did not fit.
    - **Claude Code and Copilot** (local): run
      `uv run python <se>/scripts/deck.py serve <deck>.html --wait --timeout <seconds>` and send the
      person the URL it prints first; it ends with their answers.
