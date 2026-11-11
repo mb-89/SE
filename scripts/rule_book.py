@@ -31,6 +31,7 @@ SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
 MAPPING = re.compile(r"^\|\s*(?P<number>\d+)\s*\|\s*(?P<id>[^|\s]+)\s*\|")
 LINK = re.compile(r"\]\([^)]+\)")
 JUDGMENT = re.compile(r"\bby judgment\b", re.IGNORECASE)
+FROZEN = re.compile(r"^[^:]*\(frozen\):")
 
 
 @dataclass
@@ -45,8 +46,9 @@ class Rule:
 
     @property
     def judgment_only(self) -> bool:
-        return bool(self.implementations) and all(
-            JUDGMENT.search(item) and not LINK.search(item) for item in self.implementations)
+        """Every live implementation is "by judgment"; a frozen line's implementations are not live."""
+        live = [item for item in self.implementations if not FROZEN.match(item)]
+        return bool(live) and all(JUDGMENT.search(item) and not LINK.search(item) for item in live)
 
 
 def area_problems() -> list[str]:

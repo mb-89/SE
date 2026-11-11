@@ -31,10 +31,553 @@ section, followed by:
 - **Without it:** what we lose if the rule is dropped;
 - **Prevents:** the kinds of defects it prevents, named as defect classes, not single incidents;
 - **Implementations:** one item per language or project, each linking the check, script or skill
-  passage that does it, or saying "by judgment";
+  passage that does it, or saying "by judgment"; an item labelled `Go line (frozen):` records how
+  the frozen Go line did it and does not count as a live implementation;
 - **Related:** the ids of related rules, or "none";
 - **Retired:** only on a retired rule, the reason.
 
 The check refuses a malformed id, a project id without `p-`, a duplicate or reused retired id, a
 rule outside its section and a rule missing any of these fields; it lists, without failing, every
 rule whose only implementation is "by judgment".
+
+## gen: everything we do
+
+### gen-001 Mechanize first
+
+Every step that can be a deterministic, tested command is one, and agents keep only judgment.
+
+- **Why:** a command does the same thing every time and its tests say so; an agent following prose
+  does it a little differently each time.
+- **Without it:** repeated procedures stay prose, and each run of them is a new chance to skip a
+  step.
+- **Prevents:** a step skipped or done differently by hand; a procedure whose prose and practice
+  drift apart.
+- **Implementations:**
+  - se: the work model's [Mechanical first](../SKILL.md#rules-for-all-roles), the commands of
+    [`<se>/scripts/work_tickets.py`](../../../../scripts/work_tickets.py) with their tests.
+  - Go line (frozen): the retro counted `by-hand` answers and scripts in `src/scripts/`.
+- **Related:** gen-002, wrk-006
+
+### gen-002 Single point of truth
+
+Every fact has one owner, and everything else links to it or is generated from it.
+
+- **Why:** a fact written twice drifts, and nobody can tell which copy is right.
+- **Without it:** every change to a fact must find all its copies, and the ones it misses
+  contradict it.
+- **Prevents:** drift between two copies; a change applied in one place and missed in another.
+- **Implementations:**
+  - se: [`AGENTS.md`](../../../../AGENTS.md) ("SPOT everywhere");
+    [`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py) generates both host layouts from
+    `src/`, and `tests/test_se_plugin.py` fails until they
+    match; otherwise by judgment in review.
+  - Go line (frozen): `se overhaul read` listed duplicates and near-duplicates.
+- **Related:** des-005, doc-001, gen-005
+
+### gen-003 Fail open for advice, closed for enforcement
+
+Logging and help never block, and a check that guards something refuses when it cannot decide.
+
+- **Why:** advice that blocks stops work for nothing, and a guard that passes when unsure guards
+  nothing.
+- **Without it:** a broken log stops a release, or a gate that could not see the commits lets them
+  through.
+- **Prevents:** a gate that passes what it could not check; work blocked by an optional helper.
+- **Implementations:**
+  - se: [`<se>/scripts/public_check.py`](../../../../scripts/public_check.py) exits 2 on a setup
+    error, on a shallow clone that hides commits and on a running se off its pin
+    ([Public safety](../../../../AGENTS.md#public-safety)); `field-report --check` refuses a report
+    it cannot match to the issue.
+- **Related:** wrk-006
+
+### gen-004 Blameless
+
+Fix what produced a bad outcome (a rule, a tool, a prompt), never just the outcome.
+
+- **Why:** an outcome fixed by hand comes back; the rule or tool that produced it is still there.
+- **Without it:** the same defect recurs with every package that meets the same cause.
+- **Prevents:** a recurring defect whose cause is never fixed; blame in place of a fix.
+- **Implementations:**
+  - se: the field report's Retro, whose proposed improvement names a target file and the change
+    ([pull request template](../../../../.github/pull_request_template.md)); otherwise by judgment.
+- **Related:** gen-001, gen-005
+
+### gen-005 Consistency
+
+The system agrees with itself: every part fits the parts that rely on it, and no prose describes
+behaviour other than what the code does.
+
+- **Why:** a reader trusts what they read; a part that disagrees with another misleads whoever
+  reads it.
+- **Without it:** documentation, generated files and code drift apart until none of them can be
+  trusted.
+- **Prevents:** prose that describes behaviour the code does not have; a generated file out of date
+  with its source; a link to an anchor that no longer exists.
+- **Implementations:**
+  - se: `tests/test_se_plugin.py` (generated layouts match
+    their source), `tests/test_agent_definitions.py`
+    (every link and anchor resolves), this book's check; the reviewer, by judgment, for its change.
+  - Go line (frozen): the battery's mechanical checks and generated manifests; the retro and the
+    overhaul.
+- **Related:** gen-002, doc-001
+
+## des: software design
+
+### des-001 Locality
+
+One change happens in one place, and the system picks it up everywhere by registration, never by
+hand-kept lists.
+
+- **Why:** understanding or making a change should mean reading one place.
+- **Without it:** every addition needs edits in several lists, and a missed list is a silent bug.
+- **Prevents:** shotgun surgery; a hand-kept list that misses a new entry.
+- **Implementations:**
+  - se: [`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py) finds every agent and skill
+    under `src/` by itself; otherwise by judgment.
+  - Go line (frozen): `se overhaul read` counted files touched per change.
+- **Related:** des-002, des-008
+
+### des-002 Modularity
+
+Behaviour lives in modules with a small contract, so a change to one module needs only that
+module and its contract.
+
+- **Why:** a contract is smaller than the whole system; an agent that needs only it works faster
+  and breaks less.
+- **Without it:** every change needs the whole system in the head of whoever makes it.
+- **Prevents:** a change that breaks a far part of the system; a framework that depends on an
+  application.
+- **Implementations:**
+  - se: projects use se and obs as pinned modules ([README "Modules"](../../../../README.md#modules));
+    framework and application repositories are kept apart
+    ([Rules for all roles](../SKILL.md#rules-for-all-roles)).
+  - Go line (frozen): v5's index and modules registering with a small core.
+- **Related:** des-001, des-003
+
+### des-003 Thin adapters
+
+The logic lives in one place, and each host adapter is thin and generated from it.
+
+- **Why:** a host is a way in, not a second implementation; logic in an adapter is logic written
+  twice.
+- **Without it:** each host behaves a little differently, and fixes reach only one of them.
+- **Prevents:** drift between host layouts; behaviour that exists only on one host.
+- **Implementations:**
+  - se: one source in `src/`, generated into the Copilot layout and the Claude Code plugin by
+    [`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py); the
+    [adapter sync contract](../SKILL.md#adapter-sync-contract).
+  - Go line (frozen): the Go program owned the logic; the plugin, the CLI and the generated UI were
+    thin.
+- **Related:** gen-002, des-002
+
+### des-004 One door per outside thing
+
+Each outside thing (processes, disk, the network, GitHub) is reached through one door, and a run
+reads its inputs once, computes, then writes its outputs.
+
+- **Why:** one door is one place to fake, to measure and to fix; inputs read at different times
+  disagree, and reading again what a run already has is slow.
+- **Without it:** outside calls spread through the code, tests need the real world, and a run acts
+  on a mix of old and new state.
+- **Prevents:** a test that needs a real service; a run that acts on inputs read at different
+  times; one call per item where one batched read would do.
+- **Implementations:**
+  - se: [`<se>/scripts/work_tickets.py`](../../../../scripts/work_tickets.py) reaches GitHub only
+    through its `run_gh` functions, and without `gh` a role uses the host's GitHub tools
+    ([Without gh](../SKILL.md#without-gh)); otherwise by judgment.
+  - Go line (frozen): the battery's `io-module` and `programs` rules (`proc.Programs`; GitHub
+    through its own HTTP client, never `gh`); a box's take, local work and land.
+- **Related:** tst-001, des-009
+
+### des-005 Once and only once
+
+Generalize repeated code at the third repetition, not the second, since a little copying is better
+than a little dependency.
+
+- **Why:** a fact in code has one owner like any other, but a premature abstraction costs more than
+  the copy it removes.
+- **Without it:** either copies drift, or every pair of similar lines grows a shared helper nobody
+  can change.
+- **Prevents:** duplicated and near-duplicated code; an abstraction with one real user.
+- **Implementations:**
+  - se: by judgment, the reviewer for its change.
+  - Go line (frozen): `se overhaul read` listed duplicates and near-duplicates.
+- **Related:** gen-002, des-006
+
+### des-006 KISS and YAGNI
+
+Build nothing for a second user or a case that does not exist yet.
+
+- **Why:** speculative generality is code to read, test and keep that serves nobody.
+- **Without it:** the code grows options and layers whose only effect is to slow every change.
+- **Prevents:** speculative generality; unused surfaces; a one-user abstraction.
+- **Implementations:**
+  - se: by judgment, the reviewer for its change.
+  - Go line (frozen): `se overhaul read` listed one-user abstractions and unused surfaces.
+- **Related:** des-005, des-015
+
+### des-007 Single responsibility
+
+Each function and module does one thing, keeps its concerns apart and either answers a question or
+changes state, not both.
+
+- **Why:** a part that does one thing can be named, tested and replaced on its own.
+- **Without it:** parts grow until a change to one concern breaks another.
+- **Prevents:** long functions and large modules; divergent change; a query with a side effect.
+- **Implementations:**
+  - se: by judgment, the reviewer for its change.
+  - Go line (frozen): `se overhaul read` listed the longest functions and files.
+- **Related:** des-008, des-014
+
+### des-008 Open for extension by registration
+
+New behaviour is added by registering it, I/O stays behind small interfaces, and an interface is
+as small as its users need.
+
+- **Why:** registration keeps a change in one place, and a small interface is a strong abstraction.
+- **Without it:** each extension edits the core, and wide interfaces tie every user to every
+  method.
+- **Prevents:** a core edited for every extension; an interface whose users each need a different
+  part of it.
+- **Implementations:**
+  - se: by judgment, the reviewer for its change.
+  - Go line (frozen): the battery's `io-module` rule.
+- **Related:** des-001, des-004
+
+### des-009 Functional core, imperative shell
+
+The computing between reading inputs and writing outputs is pure and works on what was read.
+
+- **Why:** pure code is tested without fakes, and its result depends only on its inputs.
+- **Without it:** logic and I/O mix, and every test of the logic needs the outside world.
+- **Prevents:** logic that can be tested only against a real service; results that depend on when
+  they were computed.
+- **Implementations:**
+  - se: by judgment, the reviewer for its change.
+- **Related:** des-004, tst-002
+
+### des-010 Fail fast
+
+Wrong input is refused at the edge, with where it came from and the remedy.
+
+- **Why:** an error found where it enters is cheap to explain; found later, it hides its cause.
+- **Without it:** bad input travels inward and fails far from where it came in.
+- **Prevents:** an error reported far from its cause; a message that names neither source nor
+  remedy.
+- **Implementations:**
+  - se: every error message names its source and, where possible, the remedy
+    ([Rules for all roles](../SKILL.md#rules-for-all-roles)); otherwise by judgment.
+- **Related:** gen-003
+
+### des-011 Clear is better than clever
+
+Write the code a reader understands at first reading.
+
+- **Why:** code is read far more often than it is written, mostly by someone else.
+- **Without it:** every change starts with deciphering, and the cleverness hides bugs.
+- **Prevents:** code that only its author understands; bugs hidden in a compact trick.
+- **Implementations:**
+  - se: by judgment, the reviewer for its change.
+- **Related:** doc-002
+
+### des-012 Reuse before you write
+
+Before building a check, a skill or an agent, look for one that exists and integrate it.
+
+- **Why:** a maintained tool is tested by its other users; a rewrite starts with none.
+- **Without it:** se grows its own copies of tools others maintain better.
+- **Prevents:** a home-grown copy of a published tool; maintenance spent on solved problems.
+- **Implementations:**
+  - se: by judgment, the reviewer for its change.
+  - Go line (frozen): the overhaul's `looked_at.outside`.
+- **Related:** des-006
+
+### des-013 Patterns where they fit
+
+Use a known pattern where the code has its shape: strategy, table-driven code, template method,
+registry, adapter, command and state machine.
+
+- **Why:** a known pattern is a shape the reader already understands.
+- **Without it:** the same problems are solved in new ways each time, each one to learn.
+- **Prevents:** a switch on a kind repeated across the code; a lifecycle kept in scattered flags.
+- **Implementations:**
+  - se: by judgment, the reviewer for its change.
+  - Go line (frozen): `se overhaul read` listed switches on a kind.
+- **Related:** des-003, des-008
+
+### des-014 Find the smells
+
+Find and remove the known smells: shotgun surgery, divergent change, duplicated code, long function,
+large module, long parameter list, data clumps, primitive obsession, feature envy and switch on a
+kind.
+
+- **Why:** a smell is a cheap sign of a design problem, visible before it causes a defect.
+- **Without it:** design problems are found only when a change breaks on them.
+- **Prevents:** the design defects each smell signals, found late.
+- **Implementations:**
+  - se: by judgment, the reviewer for its change.
+  - Go line (frozen): `se overhaul read` listed files touched per change, duplicates, longest
+    functions, files and parameter lists, sizes and switches on a kind.
+- **Related:** des-001, des-005, des-007
+
+### des-015 The less code, the less to maintain
+
+Remove code nothing reaches, code for a state that no longer occurs and code that restates what
+another place holds.
+
+- **Why:** every line is read, tested and kept; a line that does nothing still costs that.
+- **Without it:** dead code accumulates and misleads readers about what the system does.
+- **Prevents:** dead code; code for a retired state; a second copy of a fact in code.
+- **Implementations:**
+  - se: "No backwards compatibility unless asked" ([`AGENTS.md`](../../../../AGENTS.md)); otherwise
+    by judgment.
+  - Go line (frozen): the battery's `deadcode -test`; `se overhaul read`'s pruning facts.
+- **Related:** des-006, gen-002
+
+## tst: testing and quality
+
+### tst-001 Fakes that behave
+
+Every outside service the code reaches has a fake that behaves like it, and the real service is
+called only in its own contract tests and once for each affected command at delivery.
+
+- **Why:** a fake that does not behave like the service tests the fake; only the real call shows
+  what the service refuses.
+- **Without it:** tests pass on fakes while the real service refuses the same call.
+- **Prevents:** a change that passes on fakes and fails against the real service.
+- **Implementations:**
+  - se: the work model's [Tests](../SKILL.md#tests); the worker runs the affected real command once
+    against the real service ([worker procedure](../../../agents/worker.md#procedure)).
+  - Go line (frozen): the battery's `fake-contract` rule ran one contract suite against fake and
+    real.
+- **Related:** des-004, tst-002
+
+### tst-002 Fast tests
+
+Test a behaviour once, at the outermost interface, on fakes, with no wall clock and no sleeping,
+in parallel.
+
+- **Why:** a fast suite runs on every change; a slow one is skipped.
+- **Without it:** the suite grows slow and flaky until people stop running it.
+- **Prevents:** a flaky test that depends on timing; a behaviour tested many times at many levels; a
+  suite too slow to run on every change.
+- **Implementations:**
+  - se: the work model's [Tests](../SKILL.md#tests); the suite runs in parallel
+    (`pyproject.toml`).
+  - Go line (frozen): the battery's `fast-test` rule; `se overhaul read`'s test ratio.
+- **Related:** tst-001, tst-003
+
+### tst-003 Measured performance, no blind waits
+
+Durations are measured against declared budgets, and anything a person waits on gives feedback
+within one second.
+
+- **Why:** what is not measured grows unnoticed, and a person who waits blind cannot tell slow from
+  stuck.
+- **Without it:** the suite and the commands slow down a little with each change, and nobody sees it
+  until it hurts.
+- **Prevents:** a slow regression nobody notices; a command that leaves a person waiting with no
+  feedback.
+- **Implementations:**
+  - se: the suite's budget in `se.toml` `[tests]` ([Test budget](../../../../README.md#test-budget)),
+    enforced by `integrate`, and `work_tickets.py suite --compare`; feedback within a second, by
+    judgment.
+  - Go line (frozen): `spec/budgets.yaml`, interactive and batch command classes, and answers from
+    the daemon's snapshot.
+- **Related:** tst-002
+
+### tst-004 Every mechanical rule is a check
+
+A rule that can be checked mechanically is a check in the suite, and nothing reaches the
+integration branch past a failing one.
+
+- **Why:** a check holds a rule on every change; prose holds it only when someone remembers.
+- **Without it:** rules are followed until they are forgotten.
+- **Prevents:** a rule broken because nobody remembered it; a change that passes locally and fails
+  in CI.
+- **Implementations:**
+  - se: the suite (`uv run pytest -q`) that `integrate` runs before each integration push, the
+    [public check](../../../../AGENTS.md#public-safety) on every push, and this book's check.
+  - Go line (frozen): the battery, with SE's own rules as checks.
+- **Related:** gen-001, wrk-006
+
+## doc: documentation and surfaces
+
+### doc-001 Talk only about what you own
+
+Each element either owns content and talks only about itself, or is a generated map that points at
+owners.
+
+- **Why:** a hand-written description of what something else owns drifts from it.
+- **Without it:** a reader finds two descriptions of one thing that disagree.
+- **Prevents:** drift between two copies; prose that restates a rule it does not own.
+- **Implementations:**
+  - se: generated layouts name their source
+    ([`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py)); every place that names a rule
+    links to it in this book; otherwise by judgment in review.
+  - Go line (frozen): manifests regenerated identically, and every command, path and link named in
+    prose existed (`se help manifest`).
+- **Related:** gen-002, doc-002
+
+### doc-002 Write for your reader
+
+Before writing prose, name who reads it and what they need, and put the bottom line first.
+
+- **Why:** prose serves a reader; prose for nobody in particular serves nobody.
+- **Without it:** documents grow detail their readers do not need and bury what they do.
+- **Prevents:** the key line buried under detail; prose that serves no named reader; explanation
+  that repeats what another place owns.
+- **Implementations:**
+  - se: a `Reader:` line under the title of a skill or reference, by judgment.
+  - Go line (frozen): the battery checked each prose file's `Reader:` line.
+- **Related:** doc-001
+
+## wrk: work and fleet
+
+### wrk-001 GitHub is the only shared state
+
+What a later session needs lives on GitHub, never only in a session or on a machine.
+
+- **Why:** sessions and containers end; GitHub stays.
+- **Without it:** work, decisions and reports die with the session that made them.
+- **Prevents:** a decision or report lost with its session; a later session that cannot see what an
+  earlier one did.
+- **Implementations:**
+  - se: work issues, and pull requests whose descriptions are the field reports
+    ([Roles and flow](../SKILL.md#roles-and-flow)); local tickets only as a worker's scratch
+    ([Local tickets and notes](../SKILL.md#local-tickets-and-notes)).
+- **Related:** wrk-002
+
+### wrk-002 One work system
+
+Work is a GitHub issue and an issue is always work, while reports, questions and findings travel in
+their own outputs.
+
+- **Why:** one queue can be counted, ordered and closed; an issue that is not work clogs it.
+- **Without it:** work hides in messages and the queue fills with reports that change nothing.
+- **Prevents:** work lost in a message; an issue that asks or reports instead of naming work.
+- **Implementations:**
+  - se: the work issue template and `work_tickets.py` (`file`, `route`, `intake`)
+    ([Issues](../SKILL.md#issues)); the field report is the pull request's description, never an
+    issue.
+  - Go line (frozen): issues created only through `se issue new`; the retro's rule checks.
+- **Related:** wrk-001, dec-011
+
+### wrk-003 Every session starts at the newest integration branch
+
+Both the code being worked on and the se that runs the session start at the newest integration
+branch, or at the pin the project sets.
+
+- **Why:** work on an old base meets conflicts and rules that have already changed.
+- **Without it:** sessions act on stale code and stale rules, and their results conflict.
+- **Prevents:** work done on a stale base; a check run by another se version than the project pins.
+- **Implementations:**
+  - se: `work_tickets.py sync` merges the newest integration branch before intake and every ticket;
+    the public check refuses an se off the project's pin
+    ([Public safety](../../../../AGENTS.md#public-safety)).
+- **Related:** wrk-001
+
+### wrk-004 The fleet works, sessions discuss
+
+An interactive session with a person is for deciding what to build and how, and clear work goes
+to the fleet as a work issue.
+
+- **Why:** the person's time goes to what only they can decide; work that is clear needs no person.
+- **Without it:** the conversation stalls while the session does work the fleet could do.
+- **Prevents:** a person waiting on work an agent could do alone; work done outside the queue.
+- **Implementations:**
+  - se: SE dispatches through integrators and never starts workers directly
+    ([catch-up](../../catch-up/SKILL.md)); otherwise by judgment.
+- **Related:** dec-011, wrk-002
+
+### wrk-005 Steer before, check at the push
+
+What an agent gets is settled before it starts, and what must hold is checked when the work is
+pushed, with nothing steering it in between.
+
+- **Why:** an agent works best on a complete brief, and a check at the push sees the whole change.
+- **Without it:** agents are interrupted mid-work by refusals that see only part of the change.
+- **Prevents:** a brief completed piecemeal during the work; a rule enforced on half a change.
+- **Implementations:**
+  - se: the session prompt names the agent and its work issue, and the agent reads its definition
+    and `AGENTS.md`; the hooks, `work_tickets.py push` and `integrate` check at the push
+    ([Public safety](../../../../AGENTS.md#public-safety)).
+  - Go line (frozen): `se issue pull --take` handed the issue's skills over; `se issue land`.
+- **Related:** wrk-006, tst-004
+
+### wrk-006 Gates at the push are commands
+
+Every push goes through a command that runs its gates, and a gate is never bypassed.
+
+- **Why:** a gate that can be skipped by hand is skipped when it is inconvenient.
+- **Without it:** a push that the hooks would refuse reaches the integration branch.
+- **Prevents:** a change that passes locally and fails in CI; a hook bypassed with `--no-verify`.
+- **Implementations:**
+  - se: `work_tickets.py push` (never `git push` by hand) and `deliver`
+    ([worker procedure](../../../agents/worker.md#procedure)); pre-push hooks and CI
+    ([Public safety](../../../../AGENTS.md#public-safety)).
+- **Related:** wrk-005
+
+## dec: decisions
+
+### dec-011 Persons decide, agents execute
+
+Anything controversial goes to a person, and everything else flows without one.
+
+- **Why:** a person's time is the scarce resource; spending it on what an agent may decide wastes
+  it, and an agent taking a person's decision takes their authority.
+- **Without it:** either every step waits on a person, or agents decide what only the person may.
+- **Prevents:** a one-way decision taken without the person; a person asked about what an agent
+  could decide.
+- **Implementations:**
+  - se: the [escalation ladder](../SKILL.md#escalation-ladder); decisions reach the person as
+    decision notes in a deck ([decision skill](../../decision/SKILL.md)), never as issues.
+  - Go line (frozen): the retro counted `se-person` answers.
+- **Related:** wrk-004
+
+## p-go: the Go line on main (frozen)
+
+### p-go-001 The rule of five
+
+A surface a person sees (the root, `spec/` and `src/`) holds at most five visible files and five
+visible folders.
+
+- **Why:** a person looking at the project sees what is there for them, not the tools it is built
+  with.
+- **Without it:** the surface fills with build files and the person cannot find their way in.
+- **Prevents:** a surface cluttered with tooling; a cluttered root that only grows.
+- **Implementations:**
+  - Go line (frozen): the battery's `rule-of-five` rule, configured in
+    `src/internal/rules/five.yaml`, with an allowlist that only shrinks.
+- **Related:** doc-002
+
+## Old principle numbers
+
+The 22 design principles that came over from `main` and the rules they became.
+
+| Principle | Rule | Name |
+|---|---|---|
+| 1 | gen-001 | Mechanize first |
+| 2 | gen-002 | Single point of truth |
+| 3 | des-001 | Locality |
+| 4 | des-002 | Modularity |
+| 5 | des-003 | Thin adapters |
+| 6 | des-004 | One door per outside thing |
+| 7 | tst-001 | Fakes that behave |
+| 8 | tst-002 | Fast tests |
+| 9 | tst-003 | Measured performance, no blind waits |
+| 10 | tst-004 | Every mechanical rule is a check |
+| 11 | wrk-001 | GitHub is the only shared state |
+| 12 | wrk-002 | One work system |
+| 13 | wrk-003 | Every session starts at the newest integration branch |
+| 14 | gen-003 | Fail open for advice, closed for enforcement |
+| 15 | dec-011 | Persons decide, agents execute |
+| 16 | gen-004 | Blameless |
+| 17 | gen-005 | Consistency |
+| 18 | doc-001 | Talk only about what you own |
+| 19 | doc-002 | Write for your reader |
+| 20 | wrk-004 | The fleet works, sessions discuss |
+| 21 | p-go-001 | The rule of five |
+| 22 | wrk-005 | Steer before, check at the push |
+
+The principles file's "How code is written" became `des-005` to `des-015`.

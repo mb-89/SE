@@ -190,10 +190,10 @@ def test_se_and_catch_up_link_to_the_shared_dispatch_rule():
     assert "(../work-model/SKILL.md#roles-and-flow)" in catch_up
 
 
-def test_outside_issue_routine_and_consistency_item_link_the_principles():
-    assert "SE's [design principles](../skills/work-model/references/principles.md)" in normalized(
+def test_outside_issue_routine_and_consistency_item_link_the_rule_book():
+    assert "SE's [rule book](../skills/work-model/references/rules.md)" in normalized(
         AGENTS / "se.md")
-    assert ("**Consistency:** does it contradict a [principle](../work-model/references/principles.md)"
+    assert ("**Consistency:** does it contradict a [rule](../work-model/references/rules.md)"
             in normalized(DECISION))
 
 

@@ -73,7 +73,7 @@ At the start and with every turn-start check, run `work_tickets.py intake --outs
 <main checkout>` (the work model's [Outside issues](../skills/work-model/SKILL.md#outside-issues)).
 This routine is its one statement; for each issue it lists:
 
-1. Check the issue against SE's [design principles](../skills/work-model/references/principles.md),
+1. Check the issue against SE's [rule book](../skills/work-model/references/rules.md),
    the project's spec and design notes, and the recorded decisions (decision notes, answered
    escalations, the issues they closed).
 2. Nothing contradicted: route it to that repository's integrator as a work issue with
@@ -88,7 +88,7 @@ This routine is its one statement; for each issue it lists:
      the person never labels them, so without SE's labels the queue (`ready`, `start`) finds no
      routed issue, and the label is the GitHub record that this check passed.
 3. Something contradicted: do not route it. Comment, with `<!-- se:handled -->`, what it
-   contradicts (the principle, spec passage or decision, linked) and that it waits on the person;
+   contradicts (the rule, spec passage or decision, linked) and that it waits on the person;
    bring it to the person as a decision note in the deck, as the
    [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder) says, never as an issue.
    Apply the answer as any other decision.
