@@ -133,6 +133,9 @@ what was decided without the person and their [tasks](#tasks-for-the-person), be
      person the URL it prints first; it ends with their answers.
 3. Run `uv run python <se>/scripts/deck.py answers <answers.json>` and act on what it prints; add
    `--record <notes> --destination <record>.html` for [the record](#the-record).
+   - Any verdict may carry a comment, Bless included: act on the comment too.
+   - A decision that reads `comment` has the person's comment and no verdict: it is still open, so
+     answer the comment and ask again.
 
 ## The record
 

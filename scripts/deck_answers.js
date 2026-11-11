@@ -7,15 +7,19 @@
 // At Send, in the Claude app, the answers leave two ways, started in this order and both awaited:
 //   (a) `answers.json` through the `artifact` capability's files form: the record the session reads;
 //   (b) a comment to Claude through the `comments` capability's `sendToClaude`, anchored to the page:
-//       each decision's verdict and comment, which wakes the watching session even where (a) is refused.
+//       each decision's verdict (or "comment" where it has none) and comment, which wakes the watching
+//       session even where (a) is refused.
 // (b) starts without waiting for (a), since sendToClaude needs the person's recent gesture. Send succeeds
 // when either way does; the result names each way and the error code of each that failed. Where neither
 // does, it rejects, so obs-html shows the answers as text, and a notice beside Send says so with the codes.
 // Without the Claude app it posts to obs-html serve where that served the page, else it rejects with
 // "sending is not available here" and obs-html shows the text to copy.
 //
-// Nothing is lost on a reload: every change of a verdict or comment is kept in sessionStorage per chapter
-// version, and a chapter's draft comes back when the person opens that chapter again.
+// The drafts are obs-html's: it keeps each chapter's verdict, pick and comment in sessionStorage and
+// restores them at load, until a sink confirms the send (obs's adapters/html/spec/capabilities/bless.md,
+// Drafts). This bundle keeps and restores none: its store would be the same tab's sessionStorage, so no
+// scope remains (a new tab, a webview) where it could restore what obs-html cannot. It only confirms a
+// send by resolving, and rejects where nothing was sent, so the drafts stay.
 (root => {
     "use strict";
     const artifact = root.obsArtifact;
@@ -24,66 +28,9 @@
 
     let data = {};
     try { data = JSON.parse(document.querySelector("[data-artifact-data]")?.textContent || "{}"); } catch { data = {}; }
-    const asking = new Map((data.notes || []).filter(note => note.bless && !note.bless.answer)
-        .map(note => [note.slug, {version: note.bless.version, title: note.title || note.slug}]));
     const deckTitle = data.document?.title ?? document.title;
 
-    // The draft: chapter -> {version, verdict, comment, pick}, this tab only (sessionStorage).
-    const DRAFT = `se-answers-draft:${deckTitle}`;
-    const readDraft = () => {
-        try { return JSON.parse(root.sessionStorage.getItem(DRAFT) || "{}") || {}; } catch { return {}; }
-    };
-    const touched = new Set();  // Chapters whose verdict in obsBless is the draft's truth in this load.
-    let restoring = false;
-    const saveDraft = () => {
-        const bless = root.obsBless;
-        if (!bless || restoring) return;
-        const verdicts = bless.verdicts(), draft = readDraft();
-        for (const slug of touched) {
-            const verdict = verdicts[slug];
-            if (verdict?.verdict && asking.has(slug)) {
-                draft[slug] = {version: asking.get(slug).version, verdict: verdict.verdict,
-                    ...(verdict.comment ? {comment: verdict.comment} : {}), ...(verdict.pick ? {pick: verdict.pick} : {})};
-            } else delete draft[slug];
-        }
-        try { root.sessionStorage.setItem(DRAFT, JSON.stringify(draft)); } catch { /* No storage here: nothing to keep. */ }
-    };
-    const activeSlug = () => document.querySelector("[data-active-chapter]")?.dataset.chapter;
-    // Bring back the active chapter's draft through obs-html's own controls (bless.js), once per load.
-    const restore = slug => {
-        const bless = root.obsBless;
-        if (!bless || !asking.has(slug) || touched.has(slug)) return;
-        touched.add(slug);
-        const saved = readDraft()[slug];
-        if (!saved || saved.version !== asking.get(slug).version || bless.verdicts()[slug]) return;
-        restoring = true;
-        try {
-            if (saved.verdict === "pick" && saved.pick) bless.pick(saved.pick.figure, saved.pick.option);
-            else document.querySelector(`[data-bless-key="${saved.verdict}"]`)?.click();
-            const comment = document.querySelector("[data-bless-comment]");
-            if (saved.comment && comment) {
-                comment.value = saved.comment;
-                comment.dispatchEvent(new root.Event("input", {bubbles: true}));
-                comment.dispatchEvent(new root.KeyboardEvent("keydown", {key: "Enter", bubbles: true}));
-                comment.blur();
-            }
-        } finally {
-            restoring = false;
-        }
-    };
-    document.addEventListener("obs-chapter-change", ({detail}) => restore(detail?.slug));
-    document.addEventListener("obs-bless-change", ({detail}) => {
-        if (detail?.chapter) touched.add(detail.chapter);
-        saveDraft();
-        warm();
-    });
-    document.addEventListener("input", event => {
-        if (!event.target?.matches?.("[data-bless-comment]")) return;
-        const slug = activeSlug();
-        if (slug) touched.add(slug);
-        saveDraft();
-    });
-    Promise.resolve(artifact.whenChapterReady?.()).then(() => restore(activeSlug()), () => {});
+    document.addEventListener("obs-bless-change", () => warm());
 
     // The Claude app's runtime, looked up now: it may appear after this bundle first ran.
     const claude = () => (typeof root.claude?.use === "function" ? root.claude : null);
@@ -103,7 +50,8 @@
         const lines = [`Answers from the decision deck "${deckTitle}" (se-answers):`];
         for (const item of payload.verdicts || []) {
             const pick = item.pick ? ` ${item.pick.option === "none" ? "none of the above" : item.pick.option}` : "";
-            lines.push(`- ${item.chapter}: ${item.verdict}${pick}${item.comment ? `: ${item.comment}` : ""}`);
+            // An entry may carry a comment and no verdict (obs's answers schema): it reads "comment".
+            lines.push(`- ${item.chapter}: ${item.verdict ?? "comment"}${pick}${item.comment ? `: ${item.comment}` : ""}`);
         }
         lines.push("The full payload is answers.json in this artifact where it could be saved.");
         let text = clean(lines.join("\n"));
@@ -173,7 +121,6 @@
     artifact.trustedExtension("obsHtml.answers").register({
         id: "claude-artifact",
         send: async payload => {
-            saveDraft();
             const runtime = claude();
             if (!runtime) {
                 const address = root.ObsHtmlAnswers?.server?.();

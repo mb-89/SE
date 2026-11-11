@@ -23,6 +23,7 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       beside HTML). For Claude Code, Copilot and any local browser.
   answers ANSWERS [--record FOLDER --destination HTML]   Prints, per decision, what to act on: the
       verdict, the picked option, the comment and the weights, marks and rulings the person changed.
+      An entry with a comment and no verdict reads `<chapter>: comment`: the decision is still open.
       With --record it also builds FOLDER again with the answers (obs-document --answers): that
       artifact is the decision's record.
 
@@ -216,9 +217,11 @@ def summary(payload: object) -> str:
         raise ValueError("the payload is no object with a verdicts list (obs's src/obs/answers.schema.json)")
     blocks = []
     for number, verdict in enumerate(payload["verdicts"], 1):
-        if not isinstance(verdict, dict) or not {"chapter", "verdict"} <= verdict.keys():
-            raise ValueError(f"verdict {number} has no chapter and verdict")
-        head = f"{verdict['chapter']}: {verdict['verdict']}"
+        commented = isinstance(verdict, dict) and isinstance(verdict.get("comment"), str) and verdict["comment"].strip()
+        if not isinstance(verdict, dict) or "chapter" not in verdict or not (verdict.get("verdict") or commented):
+            raise ValueError(f"verdict {number} has no chapter, or neither a verdict nor a comment")
+        # An entry with a comment and no verdict answers nothing: the decision is still open.
+        head = f"{verdict['chapter']}: {verdict.get('verdict') or 'comment'}"
         if verdict.get("pick"):
             head += f" {verdict['pick']['option']} (figure {verdict['pick']['figure']})"
         lines = [head]
