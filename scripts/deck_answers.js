@@ -15,6 +15,9 @@
 // Without the Claude app it posts to obs-html serve where that served the page, else it rejects with
 // "sending is not available here" and obs-html shows the text to copy.
 //
+// The deck's title and decisions come from `globalThis.seDeck`, which deck.py writes in front of this file
+// (scripts/deck.py's `_bundle` owns its fields), never from obs-html's embedded page data.
+//
 // The drafts are obs-html's: it keeps each chapter's verdict, pick and comment in sessionStorage and
 // restores them at load, until a sink confirms the send (obs's adapters/html/spec/capabilities/bless.md,
 // Drafts). This bundle keeps and restores none: its store would be the same tab's sessionStorage, so no
@@ -26,9 +29,19 @@
     const document = root.document;
     artifact.registerApplication({id: "se-answers", actions: []});
 
-    let data = {};
-    try { data = JSON.parse(document.querySelector("[data-artifact-data]")?.textContent || "{}"); } catch { data = {}; }
-    const deckTitle = data.document?.title ?? document.title;
+    // The deck's own data, which `scripts/deck.py build` writes in front of this bundle: its title and its
+    // decisions (the chapter ids with a pugh fence). Without it the bundle says so once and keeps working,
+    // with the page's title and no decisions.
+    const deck = root.seDeck;
+    const readable = typeof deck?.title === "string" && Array.isArray(deck?.decisions) &&
+        deck.decisions.every(id => typeof id === "string");
+    if (!readable) {
+        root.console?.warn("se-answers: this deck carries no readable deck data (globalThis.seDeck); " +
+            "the comment to Claude names the page's title and lists no unanswered decisions. " +
+            "Build the deck with scripts/deck.py build.");
+    }
+    const deckTitle = readable ? deck.title : document.title;
+    const decisions = readable ? deck.decisions : [];
 
     document.addEventListener("obs-bless-change", () => warm());
 
@@ -53,6 +66,8 @@
             // An entry may carry a comment and no verdict (obs's answers schema): it reads "comment".
             lines.push(`- ${item.chapter}: ${item.verdict ?? "comment"}${pick}${item.comment ? `: ${item.comment}` : ""}`);
         }
+        const answered = new Set((payload.verdicts || []).map(item => item.chapter));
+        for (const id of decisions) if (!answered.has(id)) lines.push(`- ${id}: no answer`);
         lines.push("The full payload is answers.json in this artifact where it could be saved.");
         let text = clean(lines.join("\n"));
         const full = `${text}\n\nanswers.json:\n${JSON.stringify(payload)}`;

@@ -46,14 +46,15 @@ def child_environment() -> dict[str, str]:
     return environment
 
 
-def obs_document(obs: Path, arguments: list[str], tool: str) -> int:
-    """Run obs-document with ``arguments`` through the html adapter; 1 on a failure or any warning.
+def obs_document(obs: Path, arguments: list[str], tool: str, adapter: bool = True) -> int:
+    """Run obs-document with ``arguments`` through the html adapter (without it, unless ``adapter``: a
+    parse into ``--document`` only); 1 on a failure or any warning.
 
     Each warning is printed to stderr under ``tool``'s name; scripts/deck.py shares this run.
     """
     result = subprocess.run(
-        ["uv", "run", "--quiet", "--project", str(obs), "obs-document", "--adapter", "html",
-         "--adapter-config", str(obs / "adapters.json"), *arguments],
+        ["uv", "run", "--quiet", "--project", str(obs), "obs-document",
+         *(["--adapter", "html", "--adapter-config", str(obs / "adapters.json")] if adapter else []), *arguments],
         cwd=ROOT, capture_output=True, text=True, env=child_environment(),
     )
     output = result.stdout + result.stderr
