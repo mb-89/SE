@@ -10,7 +10,10 @@ browser tests share one page per worker (`page`).
 
 from __future__ import annotations
 
+import base64
+import gzip
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -298,7 +301,10 @@ PAYLOAD = {"verdicts": [
      "figures": {"record--figure-1": {"weights": {"places": 1}, "marks": {"B": {"places": -1}},
                                       "rulings": {"A": {"ruling": "could", "tripwire": "a second place"}},
                                       "winner": "B"}}},
-    {"chapter": "swipe", "version": "1" * 64, "verdict": "bless"}]}
+    {"chapter": "swipe", "version": "1" * 64, "verdict": "bless"},
+    # obs 2.1: a Bless may carry a comment, and a comment may stand with no verdict.
+    {"chapter": "keep", "version": "2" * 64, "verdict": "bless", "comment": "Fine as it is."},
+    {"chapter": "later", "version": "3" * 64, "comment": "Only a thought."}]}
 
 
 def test_answers_parse_into_the_summary():
@@ -309,9 +315,49 @@ def test_answers_parse_into_the_summary():
         "  record--figure-1 marks of B: places -1\n"
         "  record--figure-1 ruling on A: could, tripwire: a second place\n"
         "  record--figure-1 winner with these changes: B\n"
-        "swipe: bless")
+        "swipe: bless\n"
+        "keep: bless\n"
+        "  comment: Fine as it is.\n"
+        "later: comment\n"
+        "  comment: Only a thought.")
     with pytest.raises(ValueError, match="verdicts list"):
         deck.summary({"answers": []})
+
+
+@pytest.mark.parametrize("entry", [{"version": "0" * 64, "verdict": "bless"}, {"chapter": "one", "version": "0" * 64},
+                                   {"chapter": "one", "version": "0" * 64, "comment": " "}],
+                         ids=["no-chapter", "neither-verdict-nor-comment", "blank-comment"])
+def test_an_entry_without_a_chapter_or_without_both_a_verdict_and_a_comment_is_malformed(entry):
+    with pytest.raises(ValueError, match="verdict 1 has no chapter, or neither a verdict nor a comment"):
+        deck.summary({"verdicts": [entry]})
+
+
+def _requests(artifact: Path) -> dict[str, dict]:
+    """The bless request of each asking chapter in a built deck, from its embedded data (base64 of gzip)."""
+    embedded = re.search(r"<[^<>]*\bdata-artifact-data\b[^<>]*>([^<]*)<", artifact.read_text(encoding="utf-8"))
+    data = json.loads(gzip.decompress(base64.b64decode("".join(embedded[1].split()))))
+    return {note["slug"]: note["bless"] for note in data["notes"] if note.get("bless")}
+
+
+def test_answers_in_the_obs_2_1_shape_print_and_record_through_deck_answers(decks, tmp_path):
+    # A Bless with a comment and a comment with no verdict, at the built deck's own chapter versions.
+    built, artifact = decks["send"]
+    assert built.returncode == 0, built.stderr
+    version = {slug: request["version"] for slug, request in _requests(artifact).items()}
+    answers = tmp_path / "answers.json"
+    answers.write_text(json.dumps({"verdicts": [
+        {"chapter": "cache", "version": version["cache"], "verdict": "bless", "comment": "Fine as it is."},
+        {"chapter": "queue", "version": version["queue"], "comment": "Only a thought."}]}), encoding="utf-8")
+    record = tmp_path / "record.html"
+    shown = subprocess.run([sys.executable, str(SCRIPTS / "deck.py"), "answers", str(answers),
+                            "--record", str(artifact.parent / "decisions"), "--destination", str(record)],
+                           capture_output=True, text=True)
+    assert shown.returncode == 0, shown.stderr
+    assert shown.stdout.splitlines()[:4] == ["cache: bless", "  comment: Fine as it is.", "queue: comment",
+                                             "  comment: Only a thought."]
+    recorded = _requests(record)
+    assert recorded["cache"]["answer"]["comment"] == "Fine as it is."
+    assert "answer" not in recorded["queue"] and recorded["queue"]["comment"]["comment"] == "Only a thought."
 
 
 # The answers bundle on a fake of obs-html and of the Claude app's runtime, one case per run: the
@@ -386,7 +432,8 @@ def test_the_bundle_saves_answers_json_and_sends_the_comment_to_claude():
     assert json.loads(calls["published"][0]["answers.json"]) == PAYLOAD
     [comment] = calls["comments"]
     assert comment["anchor"] == {"element": "body"}
-    assert comment["text"].splitlines()[1:3] == ["- record: pick C: C needs no second place.", "- swipe: bless"]
+    assert comment["text"].splitlines()[1:5] == ["- record: pick C: C needs no second place.", "- swipe: bless",
+                                                 "- keep: bless: Fine as it is.", "- later: comment: Only a thought."]
     assert json.loads(comment["text"].split("answers.json:\n", 1)[1]) == PAYLOAD
     assert len(comment["text"].encode()) <= 4096
     assert calls["shown"] == [{"state": "sent", "text": ["Sent: answers.json saved and comment sent to Claude."]}]

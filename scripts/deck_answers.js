@@ -7,7 +7,8 @@
 // At Send, in the Claude app, the answers leave two ways, started in this order and both awaited:
 //   (a) `answers.json` through the `artifact` capability's files form: the record the session reads;
 //   (b) a comment to Claude through the `comments` capability's `sendToClaude`, anchored to the page:
-//       each decision's verdict and comment, which wakes the watching session even where (a) is refused.
+//       each decision's verdict (or "comment" where it has none) and comment, which wakes the watching
+//       session even where (a) is refused.
 // (b) starts without waiting for (a), since sendToClaude needs the person's recent gesture. Send succeeds
 // when either way does; the result names each way and the error code of each that failed. Where neither
 // does, it rejects, so obs-html shows the answers as text, and a notice beside Send says so with the codes.
@@ -103,7 +104,8 @@
         const lines = [`Answers from the decision deck "${deckTitle}" (se-answers):`];
         for (const item of payload.verdicts || []) {
             const pick = item.pick ? ` ${item.pick.option === "none" ? "none of the above" : item.pick.option}` : "";
-            lines.push(`- ${item.chapter}: ${item.verdict}${pick}${item.comment ? `: ${item.comment}` : ""}`);
+            // An entry may carry a comment and no verdict (obs's answers schema): it reads "comment".
+            lines.push(`- ${item.chapter}: ${item.verdict ?? "comment"}${pick}${item.comment ? `: ${item.comment}` : ""}`);
         }
         lines.push("The full payload is answers.json in this artifact where it could be saved.");
         let text = clean(lines.join("\n"));
