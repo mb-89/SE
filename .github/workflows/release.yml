@@ -1,6 +1,7 @@
 # Tags each release: v<version> of every se.toml [project] version on the integration branch, and
-# moves v<major> to the newest release of each major (README "Release tags"). Reusable: a repository
-# calls it with the short file that section shows, as se does in release-tag.yml.
+# moves v<major> of the current version to that major's newest release (README "Release tags").
+# Reusable: a repository calls it with the short file that section shows, as se does in
+# release-tag.yml.
 name: release
 
 on:
@@ -21,7 +22,7 @@ jobs:
         run: |
           # Tags every version se.toml carried on the integration branch's first-parent history on
           # the first commit that carried it, where the tag is missing; an existing tag never moves. The
-          # one moving tag, v<major>, then names the newest release of that major.
+          # one moving tag, v<major> of the version se.toml carries, then names that major's newest release.
           import os, re, subprocess, sys, tomllib
 
           def git(*arguments):
@@ -62,13 +63,18 @@ jobs:
                   tagged[tag] = commit
                   created.append(f"refs/tags/{tag}")
                   print(f"Release {tag}: tagged {commit[:7]}")
-          newest = {}
+          # Only this release's major tag moves: an older major's tag was its own release's to push, so
+          # a refused one (a tag ruleset) never fails a later release.
+          current = version("HEAD")
+          major = None if current is None else int(current.split(".")[0])
+          newest = None
           for name, commit in tagged.items():
               number = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", name)
-              if number is not None:
+              if number is not None and int(number.group(1)) == major:
                   release = (tuple(int(part) for part in number.groups()), name, commit)
-                  newest[release[0][0]] = max(newest.get(release[0][0], release), release)
-          for major, (_, name, commit) in sorted(newest.items()):
+                  newest = max(newest or release, release)
+          if newest is not None:
+              _, name, commit = newest
               tag = f"v{major}"
               if tagged.get(tag) == commit:
                   print(f"Release {tag}: tagged already on {commit[:7]} ({name})")
@@ -76,5 +82,15 @@ jobs:
                   git("tag", "--force", tag, commit)
                   created.append(f"+refs/tags/{tag}")
                   print(f"Release {tag}: moved to {commit[:7]} ({name})")
-          if created:
-              git("push", "origin", *created)
+          # Each ref on its own, so one refused ref is named and the others still land.
+          refused = 0
+          for ref in created:
+              pushed = subprocess.run(["git", "push", "origin", ref], capture_output=True, text=True)
+              if pushed.returncode != 0:
+                  refused += 1
+                  reason = " ".join(line.strip() for line in pushed.stderr.splitlines()
+                                    if line.strip().startswith(("remote:", "!", "error:"))) or pushed.stderr.strip()
+                  print(f"::error::Release: origin refused {ref.lstrip('+')} ({reason}); allow this workflow "
+                        "to push it, as the repository's tag rulesets (Settings > Rules > Rulesets) decide, "
+                        "then rerun this job")
+          sys.exit(1 if refused else 0)

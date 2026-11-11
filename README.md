@@ -232,8 +232,12 @@ not tags (Claude's cloud sessions).
   every version `se.toml` carried without a tag, `v<version>` on the first commit that carried it,
   so a missed release is backfilled; a second run changes nothing.
 - An existing tag never moves: where it names another commit, the run warns and leaves it. The one
-  exception is the major tag `v<major>` (`v2`): each run creates or force-updates it to the newest
-  release of that major, so others follow se's reusable workflows by major version.
+  exception is the major tag `v<major>` (`v2`) of the version `se.toml` carries: each run creates
+  or force-updates it to the newest release of that major, so others follow se's reusable workflows
+  by major version. An older major's tag is its own releases' to push; a run never creates or moves
+  it.
+- Each tag is pushed on its own: a refused one fails the run with one line naming the tag, origin's
+  reason and the remedy (the repository's tag rulesets), and the others still land.
 - Without `release`, `push` pushes the tags itself; another value is refused, naming the file.
 
 A repository turns it on with `release = "workflow"` and a copy of se's own
