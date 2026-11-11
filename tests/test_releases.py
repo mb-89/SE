@@ -610,7 +610,7 @@ def test_the_workflow_never_moves_an_existing_tag(checkout):
     assert origin_tag(checkout, "v1.3.0") == stray
 
 
-def test_the_workflow_creates_each_major_tag_on_the_newest_release_of_that_major(checkout):
+def test_the_workflow_creates_the_major_tag_of_its_own_release_only(checkout):
     missed_release(checkout)
     older = git(checkout, "rev-parse", "v1.2.3")
     git(checkout, "tag", "v0.9.0", older)
@@ -620,7 +620,56 @@ def test_the_workflow_creates_each_major_tag_on_the_newest_release_of_that_major
     newest = origin_tag(checkout, "v1.3.1")
     assert f"Release v1: moved to {newest[:7]} (v1.3.1)" in result.stdout
     assert origin_tag(checkout, "v1") == newest
-    assert origin_tag(checkout, "v0") == older
+    assert "v0" not in origin_tags(checkout)
+
+
+def next_major(checkout: Path) -> None:
+    """se since 4.0: older majors released without their major tag, the newest release 4.4.0 untagged."""
+    git(checkout, "tag", "v3.1.0", "v1.2.3")
+    git(checkout, "push", "-q", "origin", "v3.1.0")
+    by_workflow(checkout, "4.4.0")
+    git(checkout, "push", "-q", "origin", "main")
+
+
+def received(checkout: Path) -> list[str]:
+    """Each ref origin received, one line per push, from its pre-receive hook's log."""
+    log = checkout.parent / "received.log"
+    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+def hook_origin(checkout: Path, refused: str = "") -> None:
+    """Origin logs each push's refs and, like a tag ruleset, refuses the ref `refused`."""
+    hook = checkout.parent / "origin.git" / "hooks" / "pre-receive"
+    hook.write_text(
+        "#!/bin/sh\nrefs=''\nwhile read old new ref; do refs=\"$refs $ref\"; done\n"
+        f"echo $refs >> '{(checkout.parent / 'received.log').as_posix()}'\n"
+        + (f"case \"$refs \" in *' {refused} '*) echo 'Cannot create {refused}: a tag ruleset forbids it' >&2;"
+           " exit 1;; esac\n" if refused else ""),
+        encoding="utf-8")
+    hook.chmod(0o755)
+
+
+def test_a_release_pushes_exactly_its_version_tag_and_its_major_tag_each_on_its_own(checkout):
+    next_major(checkout)
+    hook_origin(checkout)
+    result = run_workflow(checkout)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert received(checkout) == ["refs/tags/v4.4.0", "refs/tags/v4"]
+    assert origin_tag(checkout, "v4") == origin_tag(checkout, "v4.4.0") == git(checkout, "rev-parse", "HEAD")
+    assert not {"v1", "v3"} & set(origin_tags(checkout))
+
+
+def test_a_refused_ref_fails_the_run_naming_it_and_the_remedy_and_the_others_land(checkout):
+    next_major(checkout)
+    hook_origin(checkout, "refs/tags/v4")
+    result = run_workflow(checkout)
+    assert result.returncode == 1, result.stderr + result.stdout
+    errors = [line for line in result.stdout.splitlines() if line.startswith("::error::")]
+    assert len(errors) == 1, result.stdout
+    assert errors[0].startswith("::error::Release: origin refused refs/tags/v4 (")
+    assert "a tag ruleset forbids it" in errors[0]
+    assert "tag rulesets" in errors[0] and "rerun" in errors[0]
+    assert "v4.4.0" in origin_tags(checkout) and "v4" not in origin_tags(checkout)
 
 
 def test_the_workflow_force_updates_a_major_tag_behind_its_newest_release(checkout):
