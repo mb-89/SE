@@ -366,7 +366,8 @@ in parallel.
 - **Implementations:**
   - se: the work model's [Tests](../SKILL.md#tests); the suite runs in parallel
     (`pyproject.toml`).
-  - Go line (frozen): the battery's `fast-test` rule; `se overhaul read`'s test ratio.
+  - Go line (frozen): the battery's `fast-test` rule; `se overhaul read`'s test ratio, test code
+    at or under code size.
 - **Related:** tst-001, tst-003
 
 ### tst-003 Measured performance, no blind waits
@@ -423,7 +424,8 @@ owners.
 
 ### doc-002 Write for your reader
 
-Before writing prose, name who reads it and what they need, and put the bottom line first.
+Before writing prose, name who reads it and what they need, put the bottom line first and give
+detail further down, only as far as that reader needs.
 
 - **Why:** prose serves a reader; prose for nobody in particular serves nobody.
 - **Without it:** documents grow detail their readers do not need and bury what they do.
@@ -461,7 +463,8 @@ their own outputs.
 - **Implementations:**
   - se: the work issue template and `work_tickets.py` (`file`, `route`, `intake`)
     ([Issues](../SKILL.md#issues)); the field report is the pull request's description, never an
-    issue.
+    issue; a worker acts on its work issue and its comments, not on messages
+    ([the box](../../../agents/worker.md#the-box)).
   - Go line (frozen): issues created only through `se issue new`; the retro's rule checks.
 - **Related:** wrk-001, dec-011
 
