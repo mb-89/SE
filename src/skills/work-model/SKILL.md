@@ -351,7 +351,8 @@ A worker splits its work issue into local tickets in its worktree:
 
 ## Tests
 
-This section is the one statement of how tests are written (SE's principle 8, fast tests); work
+This section is the one statement of how tests are written
+([tst-002](references/rules.md#tst-002-fast-tests), fast tests); work
 issues point here and never restate it. The project's suite and its time budget are `[tests]` in
 `se.toml` ([Test budget](../../../README.md#test-budget)), which the integration gate enforces.
 
@@ -410,7 +411,8 @@ commit_trailer = "<trailer line>" # optional; none by default
 integrator_session = "<session>"
 ```
 
-**Commit identity and public check**: every role commits as `public_identity` where the machine
+**Commit identity and public check**
+([pub-002](references/rules.md#pub-002-a-generic-commit-identity)): every role commits as `public_identity` where the machine
 sets it (the [Modules guide](../../../README.md#machine-local-selocaltoml) owns what it pins), else
 as the project's `identity` in its `se.toml` ([Project settings](../../../README.md#project-settings)).
 Claude's cloud has no `~/.se/local.toml`, so there the project's identity applies. No session prompt
@@ -420,8 +422,8 @@ repeats any of this section's rules:
   checkout's git config (`user.name`, `user.email`), so merges carry it as well as commits.
 - A fresh clone, such as a cloud session's, runs the project's setup command before its first
   commit, so the project's hooks run its public check on every commit and push.
-- Commit messages carry no tracker numbers (`#<n>`, `GH-<n>`, an issue or pull request URL): a
-  commit outlives its tracker. se's public check refuses them in its commit gates
+- Commit messages carry no tracker numbers
+  ([pub-004](references/rules.md#pub-004-no-tracker-references-in-commit-messages)). se's public check refuses them in its commit gates
   ([Public safety](../../../AGENTS.md#public-safety)), and `integrate` writes its merge messages
   without them where the project's public check is on.
 
@@ -429,7 +431,8 @@ repeats any of this section's rules:
 sets it on its machine, every role adds it as the last line of
 each commit it makes, and `integrate` adds it to its merge commits. Unset, commits carry no trailer,
 as a project's public rule may require; se's public check refuses attribution trailers
-([Public safety](../../../AGENTS.md#public-safety)).
+([pub-003](references/rules.md#pub-003-no-attribution-trailers),
+[Public safety](../../../AGENTS.md#public-safety)).
 
 The `--repo` resolution order is argument, `[trackers]`, then `origin`. A tracker is selected by
 the repository name and is where that repository's work issues live; its pull requests, and the
