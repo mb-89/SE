@@ -107,6 +107,10 @@ default limit fails it. The suite runs the build (`tests/test_docs.py`),
 and the workflow `.github/workflows/docs.yml` builds and publishes it to GitHub Pages on each push
 to `se`; a failed build publishes nothing, so the previous artifact stays.
 
+The Timeline, <https://mb-89.github.io/SE/timeline.html>, builds itself from the issues and
+releases of the repositories in `se.toml` `[timeline]`; [scripts/timeline.py](scripts/timeline.py)
+owns what shows where, and the same workflow rebuilds it hourly and on each issue event.
+
 ## Modules
 
 A repository pulls its dependencies (se itself, format tools, styles, other repositories) as modules
