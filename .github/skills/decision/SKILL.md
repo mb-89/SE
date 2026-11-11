@@ -118,7 +118,9 @@ A deck may also carry record chapters, notes without a bless request and without
 what was decided without the person and their [tasks](#tasks-for-the-person), beside at least one decision.
 
 1. Write the decision notes and their manifest into a scratch directory `<notes>`, then run
-   `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html`.
+   `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html`. Its chapters and
+   their versions are in `<deck>.document.json` beside it, the obs Document it was built from; never
+   decode the built page for them.
 2. Hand the deck to the person where they are, and wait for their answers:
    - **The Claude app** (cloud and mobile): publish `<deck>.html` with the Artifact tool and the
      capabilities `deck.py --help` names, `artifact` and full-form `comments`, and send the person

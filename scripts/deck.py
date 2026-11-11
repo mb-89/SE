@@ -4,15 +4,17 @@ Reader: the agent that asks the person for decisions, and whoever changes this c
 skill (src/skills/decision/SKILL.md) says when to use it; this file owns what each subcommand does.
 
   build FOLDER --destination HTML   FOLDER holds the decision notes and their manifest (obs's
-      `manifest.md`, or what the folder's cfg.json names). obs builds them into one HTML artifact in one
-      call, with se's answers bundle (scripts/deck_answers.js) as its trusted runtime bundle, in obs's
-      screens layout (one chapter per phone screen) unless the manifest sets `obsHtml.layout`. A chapter
+      `manifest.md`, or what the folder's cfg.json names). obs parses them, then builds them into one
+      HTML artifact, with se's answers bundle (scripts/deck_answers.js) as its trusted runtime bundle, in
+      obs's screens layout (one chapter per phone screen) unless the manifest sets `obsHtml.layout`. A chapter
       asks for a bless (`obs: {bless: pending}`) or is a record: what was decided without the person, or
       their tasks. It fails on a deck where no chapter asks, on a decision (a `pugh` fence) that does
       not ask, outside a record built with the answers, on a decision without `## Current situation`
       and `## The problem`, in that order, before its fence (the decision skill's note shape), and on
-      any obs warning. It warns, building all the same, of each option without `success` and each
-      mark off the datum without `because` (the decision skill's fence fields), naming the note and the option.
+      any obs warning. It writes the obs Document the deck was built from beside it, `<deck>.document.json`
+      (its chapters, their versions and answers): read that, never the built page. It warns, building all
+      the same, of each option without `success` and each mark off the datum without `because` (the
+      decision skill's fence fields), naming the note and the option.
       In the Claude app, publish the deck with the Artifact tool and `capabilities: {artifact: {},
       comments: {}}`: `artifact` lets Send save answers.json (the record the session reads), and the
       full-form `comments` lets it also send the answers to Claude as a comment, which wakes the
@@ -51,8 +53,17 @@ BUNDLE_ID = "se-answers"  # The id deck_answers.js registers with.
 BUNDLE_FILE = f"{BUNDLE_ID}.js"
 
 
+def document_path(destination: Path) -> Path:
+    """Where ``build`` writes the obs Document a deck at ``destination`` was built from: ``<deck>.document.json``."""
+    return destination.with_suffix(".document.json")
+
+
 def build(folder: Path, destination: Path, answers: Path | None = None) -> int:
-    """Build ``folder`` into ``destination`` with the answers bundle; with ``answers``, the record."""
+    """Build ``folder`` into ``destination`` with the answers bundle; with ``answers``, the record.
+
+    obs parses the notes into a Document first; its chapters decide the refusals and give the bundle its
+    data (``_bundle``). The deck's build writes its own Document beside it (``document_path``), so tests
+    and agents read its chapters and versions there, never from the built page."""
     if not folder.is_dir():
         print(f"deck: {folder} is no folder of decision notes", file=sys.stderr)
         return 2
@@ -60,29 +71,47 @@ def build(folder: Path, destination: Path, answers: Path | None = None) -> int:
         print(f"deck: {folder / BUNDLE_FILE} is se's bundle name; rename that file", file=sys.stderr)
         return 1
     obs = obs_dir()
+    recorded = ["--answers", str(answers.resolve())] if answers else []
+    written = document_path(destination)
     with tempfile.TemporaryDirectory() as scratch:
         vault = Path(scratch) / folder.name
         shutil.copytree(folder, vault, ignore=shutil.ignore_patterns(".*"))
-        shutil.copyfile(BUNDLE, vault / BUNDLE_FILE)
         _screens(vault)
-        document = Path(scratch) / "document.json"
+        parsed = Path(scratch) / "document.json"
+        code = obs_document(obs, ["--source", str(vault), "--document", str(parsed), *recorded], "deck",
+                            adapter=False)
+        if code:
+            return code
+        document = json.loads(parsed.read_text(encoding="utf-8"))
+        chapters = document["chapters"]
+        for warning in _warnings(chapters):
+            print(f"deck: warning: {warning}", file=sys.stderr)
+        refusal = _refusal(chapters, recorded=answers is not None)
+        if refusal:
+            destination.unlink(missing_ok=True)
+            written.unlink(missing_ok=True)
+            print(f"deck: {refusal}", file=sys.stderr)
+            return 1
+        (vault / BUNDLE_FILE).write_text(_bundle(document), encoding="utf-8")
         code = obs_document(obs, [
-            "--source", str(vault), "--document", str(document), "--destination", str(destination.resolve()),
-            "--adapter-option", f"trusted-runtime-bundle={BUNDLE_ID}={BUNDLE_FILE}",
-            *(["--answers", str(answers.resolve())] if answers else []),
+            "--source", str(vault), "--document", str(parsed), "--destination", str(destination.resolve()),
+            "--adapter-option", f"trusted-runtime-bundle={BUNDLE_ID}={BUNDLE_FILE}", *recorded,
         ], "deck")
         if code:
             return code
-        chapters = json.loads(document.read_text(encoding="utf-8"))["chapters"]
-    for warning in _warnings(chapters):
-        print(f"deck: warning: {warning}", file=sys.stderr)
-    refusal = _refusal(chapters, recorded=answers is not None)
-    if refusal:
-        destination.unlink(missing_ok=True)
-        print(f"deck: {refusal}", file=sys.stderr)
-        return 1
-    print(f"deck: built {destination}")
+        shutil.copyfile(parsed, written)
+    print(f"deck: built {destination}, its Document {written}")
     return 0
+
+
+def _bundle(document: dict) -> str:
+    """The answers bundle with the deck's own data in front, ``globalThis.seDeck``: the deck's ``title`` and
+    its ``decisions``, the ids of the chapters with a ``pugh`` fence (deck_answers.js reads it)."""
+    data = {"title": document["manifest"]["title"],
+            "decisions": [chapter["id"] for chapter in document["chapters"] if _holds_pugh(chapter["content"])]}
+    # JSON in a script: "<" escaped, so no "</script" or "<!--" ends or changes it.
+    text = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
+    return f"globalThis.seDeck = Object.freeze({text});\n" + BUNDLE.read_text(encoding="utf-8")
 
 
 def _screens(vault: Path) -> None:
