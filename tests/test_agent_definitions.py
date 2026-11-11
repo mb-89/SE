@@ -12,8 +12,11 @@ SKILL = SOURCE / "skills" / "catch-up" / "SKILL.md"
 WORK_MODEL = SOURCE / "skills" / "work-model" / "SKILL.md"
 DECISION = SOURCE / "skills" / "decision" / "SKILL.md"
 ROLES = ("se", "worker", "integrator")
-# The authored prose: the agent and skill sources and the issue templates (generated layouts excluded).
-PROSE = sorted([*SOURCE.rglob("*.md"), *(GITHUB / "ISSUE_TEMPLATE").glob("*.md")])
+# The authored prose: the agent and skill sources, the issue templates and the pull request template
+# (generated layouts excluded).
+# The field report's form, the pull request template.
+REPORT_TEMPLATE = GITHUB / "pull_request_template.md"
+PROSE = sorted([*SOURCE.rglob("*.md"), *(GITHUB / "ISSUE_TEMPLATE").glob("*.md"), REPORT_TEMPLATE])
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
 
@@ -103,7 +106,7 @@ def test_integrator_restarts_only_workers_whose_events_show_a_prompt():
 
 def test_partial_deliveries_define_blockers_and_review_responses():
     rules = normalized(WORK_MODEL)
-    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    report = normalized(REPORT_TEMPLATE)
     assert "A partial-delivery blocker is only work outside the worker's box" in rules
     assert "tests of the package's own code are never blockers" in rules.casefold()
     assert "throw-away tracker issues for live acceptance runs" in rules
@@ -111,19 +114,19 @@ def test_partial_deliveries_define_blockers_and_review_responses():
     assert "## Review responses" in report
     assert "answers every review point" in report
     assert "## Removed behaviour, deleted or weakened tests, and authored prose" in report
-    assert "(../skills/work-model/SKILL.md#rules-for-all-roles)" in report
+    assert "(skills/work-model/SKILL.md#rules-for-all-roles)" in report
 
 
 def test_field_report_template_has_requirement_evidence_table():
-    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    report = normalized(REPORT_TEMPLATE)
     assert "one row per work-issue requirement and acceptance item" in report
     assert 'numbered items under "Changes after filing" are requirements, by their number' in report
     assert "| Work issue item | Result | Commits | Evidence |" in report
-    assert "(../agents/worker.agent.md#procedure)" in report
+    assert "(agents/worker.agent.md#procedure)" in report
 
 
 def test_field_report_template_names_the_integration_branch_it_was_tested_against():
-    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    report = normalized(REPORT_TEMPLATE)
     assert "**Tested against `<integration branch>`:** `<commit>`" in report
     assert "Tested against main" not in report
 
@@ -525,13 +528,13 @@ def test_the_work_template_checks_that_acceptance_on_existing_content_is_measura
 
 
 def test_the_field_report_has_a_fixed_line_for_commit_groupings_under_delivered():
-    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    report = normalized(REPORT_TEMPLATE)
     delivered = report.split("## Delivered", 1)[1].split("## Not delivered", 1)[0]
     assert "**Commit groupings:** None <!-- or, per grouping the worker's commit rule allows" in delivered
 
 
 def test_the_field_report_replaces_evidence_the_host_cannot_carry_with_its_command():
-    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    report = normalized(REPORT_TEMPLATE)
     assert ("Evidence the host cannot carry is replaced by the command that reproduces it: where images cannot "
             "be attached, each screenshot's row names the command that takes it again.") in report
 
@@ -615,7 +618,7 @@ def test_the_worker_reports_the_suite_time_before_and_after_and_slow_new_tests()
     worker = normalized(AGENTS / "worker.md")
     assert "(../skills/work-model/SKILL.md#tests)" in worker
     assert "work_tickets.py suite" in worker
-    template = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    template = normalized(REPORT_TEMPLATE)
     assert "**Suite time:**" in template
 
 
