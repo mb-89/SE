@@ -2,5 +2,5 @@
 # Written by sync and update; commit it, never edit it.
 
 [modules.obs]
-version = "2.0.5"
-ref = "8c289a800c735fa7b40c81307dd4d5847c0d54a4"
+version = "2.1.0"
+ref = "fbc641f81dc06a8d4c3d46f36594d8c57a37bc49"
