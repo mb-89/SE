@@ -4,6 +4,7 @@ import importlib.util
 import json
 import re
 import shutil
+import subprocess
 import sys
 import tomllib
 
@@ -34,6 +35,38 @@ def checkout(tmp_path_factory):
 
 def test_the_committed_layouts_match_their_source(capsys):
     assert se_plugin.main(["check"]) == 0, capsys.readouterr().err
+
+
+def suite_run(checkout: Path) -> subprocess.CompletedProcess:
+    """A pytest run in the copy, with se's conftest.py and one probe test, as the suite runs."""
+    shutil.copytree(ROOT / "tests", checkout / "tests", dirs_exist_ok=True,
+                    ignore=lambda folder, names: [name for name in names if name != "conftest.py"])
+    (checkout / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    (checkout / "tests" / "test_probe.py").write_text(
+        "from pathlib import Path\n"
+        "def test_the_layout_has_the_change():\n"
+        "    root = Path(__file__).resolve().parents[1]\n"
+        "    for layout in ('skills', '.github/skills'):\n"
+        "        text = (root / layout / 'work-model' / 'SKILL.md').read_text(encoding='utf-8')\n"
+        "        assert 'unbuilt change' in text\n", encoding="utf-8")
+    return subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                           "tests/test_probe.py"],
+                          cwd=checkout, capture_output=True, text=True, check=False)
+
+
+def test_the_suite_builds_an_unbuilt_source_change_before_its_tests(tmp_path):
+    shutil.copytree(ROOT / "src", tmp_path / "src")
+    shutil.copytree(ROOT / "scripts", tmp_path / "scripts",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy(ROOT / "se.toml", tmp_path)
+    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 0
+    source = tmp_path / "src" / "skills" / "work-model" / "SKILL.md"
+    source.write_text(source.read_text(encoding="utf-8") + "\nAn unbuilt change.\n", encoding="utf-8")
+    assert se_plugin.differences(tmp_path)
+    result = suite_run(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "se_plugin.py build: wrote skills/work-model/SKILL.md" in result.stdout
+    assert se_plugin.differences(tmp_path) == []
 
 
 def test_check_refuses_a_hand_edit_and_passes_after_rebuild(checkout, capsys):

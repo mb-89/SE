@@ -13,7 +13,9 @@
   matter keys prefixed `copilot.` or `claude.` go only into that host's layout.
 - `uv run python scripts/se_plugin.py build` generates everything else from it: the Copilot layout
   (`.github/agents/`, `.github/skills/`) and the Claude Code plugin (`agents/`, `skills/`,
-  `.claude-plugin/`). Never edit those by hand; `tests/test_se_plugin.py` fails until they match.
+  `.claude-plugin/`). Never edit those by hand; `tests/test_se_plugin.py` checks they match.
+- Every pytest run builds them first (`tests/conftest.py`, naming each file it wrote), so no suite
+  tests stale layouts and nobody runs the build by hand before it; commit what it wrote.
 - Installing SE is the README's [Install](README.md#install).
 
 ## Tests
