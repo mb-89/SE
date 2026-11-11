@@ -1,6 +1,6 @@
 ---
 name: catch-up
-description: 'Catch up on a repository and drive it to a finished, committed state as SE. Use when: catching up, resuming after a break or handover, "where are we", "what is still open", "continue the work", "finish this", "get it to a finished state". Reads handover, git, issue and session history, turns every worktree-able package into a work issue with an independent worker session, files work for other repositories as issues there, presents user decisions and escalations with the decision skill, applies answers, has a dedicated integrator merge field-reported pull requests, rebuild and release, and updates the handover.'
+description: 'Catch up on a repository and drive it to a finished, committed state as SE. Use when: catching up, resuming after a break or handover, "where are we", "what is still open", "continue the work", "finish this", "get it to a finished state". Reads handover, git, issue and session history, turns every worktree-able package into a work issue with an independent worker session, files work for other repositories as issues there, presents user decisions and escalations with the decision skill, applies answers, has a dedicated integrator merge delivered pull requests (each carrying its field report), rebuild and release, and updates the handover.'
 argument-hint: 'Optional focus, e.g. "only the documentation" or "finish release 1.2"'
 ---
 
@@ -31,8 +31,8 @@ project's commands and hot files by the project's `AGENTS.md`.
 - To change a running worker's task, edit its work issue or comment on it; workers re-read it before
   each ticket. `send_message` with `delivery: "steer"` only for urgent corrections (wrong paths,
   boundary violations).
-- Look at workers only when the user asks ("status") or a field-report issue appears: `gh issue list
-  --label field-report`, `list_sessions`, then the git state of their branch.
+- Look at workers only when the user asks ("status") or a pull request is delivered (`queue` lists
+  the open ones with a complete field report): `list_sessions`, then the git state of their branch.
 - **In autopilot, put everything the user must read into the `task_complete` summary.** Text written
   before the call may not be shown.
 - **Every turn ends with exactly one of these, never neither:**
@@ -63,8 +63,9 @@ project's commands and hot files by the project's `AGENTS.md`.
      repository, then their last `turns`; `list_sessions` for running agent-host sessions;
    - per worktree: newest file write outside dependency, `.git` and output folders, last commit
      time, uncommitted files, tickets in `.se/work/{todo,held}`, field reports in `.se/work/notes`;
-   - issues: open `work`, `field-report` and `escalated` issues per repository
-     (`gh issue list --repo <host>/<owner>/<repo> --label <label> --json number,title`).
+   - issues: open `work` and `escalated` issues per repository
+     (`gh issue list --repo <host>/<owner>/<repo> --label <label> --json number,title`), and the
+     open pull requests to the integration branch, whose descriptions carry the field reports;
 2. **Classify every worktree** before anything else; a worktree is not a worker:
    - **Live**: files or commits changed in the last ~30 min, or a running session owns it. If another
      SE session owns it (for example the workers of a related repository), leave it alone, but record
@@ -77,8 +78,8 @@ project's commands and hot files by the project's `AGENTS.md`.
      - dispatch a worker into that same worktree that first merges `main`, then finishes the field
        report's next steps.
    - **Finished, not integrated**: idle, ticket in `done/`, branch ahead of `main`, but no
-     field-report issue. `queue` cannot see it: ask the integrator to integrate the branch, in
-     shared-file order.
+     pull request with a complete field report. `queue` cannot see it: ask the integrator to
+     integrate the branch, in shared-file order.
    - **Stale, superseded**: its work is merged or reimplemented elsewhere (check `git branch --no-merged`,
      `git log --grep`, the files on `main`). Leave it; list it for a removal decision, or feed its
      prototype into the package that now owns the topic.
@@ -110,7 +111,7 @@ project's commands and hot files by the project's `AGENTS.md`.
      carrying only the task, filed with `work_tickets.py file --title <branch> --body-file <filled
      template> --repo <target repository>`, which labels it as the work model's
      [Issues](../work-model/SKILL.md#issues) says.
-     - Generic rules (the box, paths, delivery, field-report format) live in the worker definition
+     - Generic rules (the box, paths, delivery, the field report's form) live in the worker definition
        and are never repeated in issues.
      - Name blockers in its "Blocked by" field and pass each as `--blocked-by <m>`, so `file`
        links them as native dependencies before it adds `ready`; then notify that repository's
@@ -130,7 +131,8 @@ project's commands and hot files by the project's `AGENTS.md`.
    say; start each of your own turns with the same `queue` check. You tell it the order when shared
    files are involved (owners first) and anything to watch.
 
-   File each field report's "Tickets for other repositories" as issues in that repository.
+   File each field report's "Tickets for other repositories" (in its pull request's description)
+   as issues in that repository.
    Escalated issues are decisions: present them to the user as decisions (step 7).
 9. **Close**: when everything is integrated, ask the user to approve the release; the integrator
    releases (version, tag, push). Update the single open `handover` issue (state, open issues,

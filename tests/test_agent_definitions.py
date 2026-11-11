@@ -487,10 +487,9 @@ CLOUD_RULES = (
     "`CLAUDE.md`), the role files and the project's `AGENTS.md` on the integration branch are the rules.",
     "**Retries after a server error**: after a 5xx from GitHub, read before retrying any write, not only a "
     "create (the object may exist); where closing with a state reason fails, close without one",
-    "**Delivery fallback**: an output whose write keeps failing after those retries goes in full into the next "
-    "output that can be written, and a short placeholder points to it: where the field-report issue cannot be "
-    "created with the report, the full report goes into the pull request body, a short field-report issue "
-    "links it, and the delivery notice names the pull request.",
+    "**Delivery fallback**: where the pull request cannot be opened with the report as its description after "
+    "those retries, open it with the closing line alone, then write the full description (`pr-body`'s output) by "
+    "editing the pull request; the delivery notice names the pull request.",
 )
 
 
@@ -588,8 +587,9 @@ def test_the_work_model_tells_issue_writers_what_renames_and_docs_issues_name():
 
 def test_the_integrator_reconciles_from_github_and_treats_a_missing_message_as_late():
     integrator = normalized(AGENTS / "integrator.md")
-    assert ("A worker's delivery message can arrive minutes late: reconcile from GitHub first and treat a "
-            "missing message as late, not lost.") in integrator
+    assert ("A worker's delivery message can arrive minutes late, or never where the worker's prompt named no "
+            "integrator: reconcile from GitHub first (`queue`) and treat a missing message as late, not lost."
+            ) in integrator
 
 
 TEST_RULES = (
@@ -699,3 +699,25 @@ def test_the_outside_issue_routine_is_stated_once_in_the_se_agent():
     model = normalized(WORK_MODEL).split("## Outside issues", 1)[1].split("## ", 1)[0]
     assert "(../../agents/se.md#outside-issues)" in model and "Something contradicted" not in model
     assert sum("Something contradicted" in normalized(path) for path in PROSE) == 1
+
+
+def test_no_prose_files_finds_or_closes_a_field_report_issue():
+    """One issue per piece of work: the field report is the pull request's description."""
+    for path in PROSE:
+        text = normalized(path)
+        for phrase in ("--label field-report", "label `field-report`", "field report #<n>",
+                       "integrate <field-report>", "--field-report <file>", "field-report: <branch>"):
+            assert phrase not in text, (path, phrase)
+        for sentence in re.findall(r"[^.]*field-report issue[^.]*\.", text, re.IGNORECASE):
+            assert path == WORK_MODEL and ("No field-report issue is filed" in sentence
+                                           or "history" in sentence or "old field-report" in sentence
+                                           ), (path, sentence)
+    rules = normalized(WORK_MODEL)
+    assert "a pull request to the integration branch whose description is the field report" in rules
+    assert "between its `<!-- se:field-report -->` and `<!-- se:field-report:end -->` lines" in rules
+    assert ("Field-report issues filed before this are history: they keep their `field-report` label "
+            "and are not migrated; nothing new gets that label.") in rules
+    assert "`integrate` closes the work issue with a comment that links the pull request and the release" in rules
+    assert "read the field reports in the pull request descriptions of the window's closed work issues" in rules
+    for role in ("worker", "integrator", "se"):
+        assert "field-report issue" not in normalized(AGENTS / f"{role}.md").casefold(), role

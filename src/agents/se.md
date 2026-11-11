@@ -50,7 +50,9 @@ its tools.
   `work_tickets.py backlog file` and found with `backlog list --search <text>`, as the work model's
   [Issues](../skills/work-model/SKILL.md#issues) says.
 - **Retro issues** from [retro.md](../../.github/ISSUE_TEMPLATE/retro.md) over several packages or a session;
-  each improvement names the agent definition, template or rule it changes.
+  each improvement names the agent definition, template or rule it changes. The retro reads the
+  field reports in the pull request descriptions of the window's closed work issues (older ones,
+  from before reports moved there, in their `field-report` issues).
 - **Sessions**: one worker per work issue in its own fresh worktree from the newest `main` (the work
   model's [Worktrees](../skills/work-model/SKILL.md#worktrees)), started as an independent session
   whose prompt names only the worker agent, the issue, the worktree and the integrator session.

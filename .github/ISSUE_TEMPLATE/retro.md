@@ -6,7 +6,7 @@ labels: retro
 ---
 <!-- se:fleet -->
 
-**Scope:** <!-- work issues, field reports and sessions covered, e.g. #2, #5–#9 -->
+**Scope:** <!-- work issues closed in the window, their pull requests (whose descriptions carry the field reports) and sessions covered, e.g. #2, #5–#9 -->
 
 ## What went well
 
