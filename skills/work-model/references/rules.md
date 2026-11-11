@@ -70,8 +70,8 @@ Every fact has one owner, and everything else links to it or is generated from i
 - **Implementations:**
   - se: [`AGENTS.md`](../../../AGENTS.md) ("SPOT everywhere");
     [`<se>/scripts/se_plugin.py`](../../../scripts/se_plugin.py) generates both host layouts from
-    `src/`, and `tests/test_se_plugin.py` fails until they
-    match; otherwise by judgment in review.
+    `src/`, every pytest run builds them first (`tests/conftest.py`), and
+    `tests/test_se_plugin.py` checks they match; otherwise by judgment in review.
   - Go line (frozen): `se overhaul read` listed duplicates and near-duplicates.
 - **Related:** des-005, doc-001, gen-005
 
@@ -115,8 +115,8 @@ behaviour other than what the code does.
 - **Prevents:** prose that describes behaviour the code does not have; a generated file out of date
   with its source; a link to an anchor that no longer exists.
 - **Implementations:**
-  - se: `tests/test_se_plugin.py` (generated layouts match
-    their source), `tests/test_agent_definitions.py`
+  - se: the suite builds the generated layouts before its tests (`tests/conftest.py`), and
+    `tests/test_se_plugin.py` checks they match their source; `tests/test_agent_definitions.py`
     (every link and anchor resolves), [this book's check](../../../scripts/rule_book.py); the
     reviewer, by judgment, for its change.
   - Go line (frozen): the battery's mechanical checks and generated manifests; the retro and the
