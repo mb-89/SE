@@ -10,10 +10,7 @@ browser tests share one page per worker (`page`).
 
 from __future__ import annotations
 
-import base64
-import gzip
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -45,7 +42,8 @@ def _folder(tmp_path: Path, notes: dict[str, str], manifest: str | None = None) 
 def test_build_refuses_on_an_obs_warning(tmp_path, monkeypatch, capsys):
     # A fake obs-document that builds and warns.
     def fake_run(command, **_):
-        Path(command[command.index("--destination") + 1]).write_text("<html>", encoding="utf-8")
+        if "--destination" in command:
+            Path(command[command.index("--destination") + 1]).write_text("<html>", encoding="utf-8")
         return subprocess.CompletedProcess(command, 0, "", "obs-document: warning: one: long paragraph\n")
 
     monkeypatch.setattr(deck, "obs_dir", lambda: tmp_path)
@@ -168,6 +166,15 @@ const actions = {
         return {layout: await page.evaluate(() => document.documentElement.dataset.layout),
                 options: await page.locator('.figure-pugh-ready [data-pugh-option] summary').allInnerTexts()};
     },
+    // A deck's chapters as obs-html opened them (no home page, no records): each slug and its bless
+    // request's version.
+    chapters: async (page, {path}) => {
+        await page.goto(`file://${path}`);
+        await page.waitForFunction(() => document.documentElement.dataset.artifactStatus === "ready");
+        return await page.evaluate(() => JSON.parse(document.querySelector("[data-artifact-data]").textContent)
+            .notes.filter(note => obsArtifact.isDocument(note) && note.slug !== "home")
+            .map(note => [note.slug, note.bless?.version ?? null]));
+    },
     // A served deck whose `chapters` are blessed one by one (a verdict never walks on), then sent.
     send: async (page, {url, chapters}) => {
         await page.setViewportSize({width: 1280, height: 720});
@@ -185,12 +192,16 @@ const actions = {
     },
     // A deck opened in a fresh tab of its own, where the Claude app's runtime is a fake that appears
     // only after the page loaded (`claude` is set on load): `files` and `comment` are what
-    // artifact.publish and comments.sendToClaude do, ok or a rejection code.
+    // artifact.publish and comments.sendToClaude do, ok or a rejection code. The page's own title
+    // reads "Fallback", so a comment that names the deck's title took it from the deck.
     claude: async (page, {path, files, comment}) => {
         const context = await page.context().browser().newContext();
         try {
             const tab = await context.newPage();
+            const warnings = [];
+            tab.on("console", message => { if (message.text().startsWith("se-answers:")) warnings.push(message.text()); });
             await tab.addInitScript(({files, comment}) => {
+                Object.defineProperty(Document.prototype, "title", {get: () => "Fallback", configurable: true});
                 const refusal = code => Object.assign(new Error(code), {code});
                 globalThis.seCalls = {published: [], comments: []};
                 addEventListener("load", () => { globalThis.claude = {use: async name => (name === "artifact" ? {
@@ -219,7 +230,7 @@ const actions = {
             const restored = await tab.evaluate(() => obsBless.verdicts());
             await tab.locator("[data-bless-send]").click();
             await tab.locator("[data-se-answers-notice]").waitFor();
-            return {restored, pill: await tab.locator("[data-bless-pill]").innerText(),
+            return {restored, warnings, pill: await tab.locator("[data-bless-pill]").innerText(),
                     notice: await tab.evaluate(() => {
                         const box = document.querySelector("[data-se-answers-notice]");
                         return {state: box.dataset.seAnswersNotice, besideSend: box.previousElementSibling?.matches("[data-bless-send]"),
@@ -338,11 +349,48 @@ def test_an_entry_without_a_chapter_or_without_both_a_verdict_and_a_comment_is_m
         deck.summary({"verdicts": [entry]})
 
 
+def _chapters(chapters: list[dict]) -> list[dict]:
+    """The chapters of a Document and their children, in order."""
+    return [item for chapter in chapters for item in [chapter, *_chapters(chapter.get("children", []))]]
+
+
 def _requests(artifact: Path) -> dict[str, dict]:
-    """The bless request of each asking chapter in a built deck, from its embedded data (base64 of gzip)."""
-    embedded = re.search(r"<[^<>]*\bdata-artifact-data\b[^<>]*>([^<]*)<", artifact.read_text(encoding="utf-8"))
-    data = json.loads(gzip.decompress(base64.b64decode("".join(embedded[1].split()))))
-    return {note["slug"]: note["bless"] for note in data["notes"] if note.get("bless")}
+    """The bless request of each asking chapter in a built deck, from the Document `deck.py build` wrote beside it."""
+    document = json.loads(deck.document_path(artifact).read_text(encoding="utf-8"))
+    return {chapter["id"]: chapter["bless"] for chapter in _chapters(document["chapters"]) if chapter.get("bless")}
+
+
+def test_build_writes_the_document_beside_the_deck_and_it_matches_the_built_chapters(decks, page):
+    built, artifact = decks["send"]
+    assert built.returncode == 0, built.stderr
+    written = deck.document_path(artifact)
+    assert written == artifact.parent / "deck.document.json"
+    assert f"its Document {written}" in built.stdout
+    document = json.loads(written.read_text(encoding="utf-8"))
+    assert document["manifest"]["title"] == "Decisions"
+    expected = [[chapter["id"], chapter.get("bless", {}).get("version")] for chapter in _chapters(document["chapters"])]
+    assert [slug for slug, _ in expected] == ["cache", "queue"]
+    assert all(version for _, version in expected)
+    # The built deck's chapters as obs-html opens them, against the Document.
+    assert page("chapters", path=str(artifact)) == expected
+
+
+def test_a_refused_deck_leaves_no_document(decks):
+    result, destination = decks["only-records"]
+    assert result.returncode == 1, result.stderr
+    assert not deck.document_path(destination).exists()
+
+
+def test_the_bundle_data_is_the_decks_title_and_decisions_and_cannot_end_its_script():
+    document = {"manifest": {"title": "A </script><!-- deck"}, "chapters": [
+        {"id": "pick", "content": [{"type": "pugh", "children": []}], "children": []},
+        {"id": "done", "content": [{"type": "paragraph", "children": []}], "children": []}]}
+    text = deck._bundle(document)
+    head, rest = text.split("\n", 1)
+    assert rest == deck.BUNDLE.read_text(encoding="utf-8")
+    assert "<" not in head
+    data = json.loads(head.removeprefix("globalThis.seDeck = Object.freeze(").removesuffix(");"))
+    assert data == {"title": "A </script><!-- deck", "decisions": ["pick"]}
 
 
 def test_answers_in_the_obs_2_1_shape_print_and_record_through_deck_answers(decks, tmp_path):
@@ -378,7 +426,9 @@ const element = () => {
     return node;
 };
 const body = element();
-const calls = {application: null, sink: null, published: [], comments: []};
+const calls = {application: null, sink: null, published: [], comments: [], warnings: []};
+globalThis.console = {...console, warn: message => calls.warnings.push(message)};
+if (mode.deck) globalThis.seDeck = mode.deck;
 globalThis.document = {body, title: "Deck", querySelector: () => null, addEventListener() {},
                        createElement: element};
 globalThis.obsArtifact = {
@@ -414,7 +464,7 @@ eval(bundle);
         text: box.children.map(child => child.textContent ?? child.value)}));
     console.log(JSON.stringify({registered, application: calls.application, namespace: calls.sink.namespace,
                                 id: calls.sink.id, result, error, shown, published: calls.published,
-                                comments: calls.comments}));
+                                comments: calls.comments, warnings: calls.warnings}));
 })();
 """
 
@@ -443,6 +493,28 @@ def test_the_bundle_saves_answers_json_and_sends_the_comment_to_claude():
     assert json.loads(comment["text"].split("answers.json:\n", 1)[1]) == PAYLOAD
     assert len(comment["text"].encode()) <= 4096
     assert calls["shown"] == [{"state": "sent", "text": ["Sent: answers.json saved and comment sent to Claude."]}]
+
+
+def test_the_bundle_takes_the_title_and_the_open_decisions_from_the_decks_data():
+    calls = _bundle(files="ok", comment="ok", deck={"title": "Storage", "decisions": ["record", "open"]})
+    assert calls["warnings"] == []
+    [comment] = calls["comments"]
+    lines = comment["text"].splitlines()
+    assert lines[0] == 'Answers from the decision deck "Storage" (se-answers):'
+    assert lines[5] == "- open: no answer"
+    assert "- record: no answer" not in lines
+
+
+@pytest.mark.parametrize("data", [None, {"title": "Storage"}, {"title": 1, "decisions": []}],
+                         ids=["none", "no-decisions", "no-title"])
+def test_without_readable_deck_data_the_bundle_says_so_once_and_still_sends(data):
+    calls = _bundle(files="ok", comment="ok", **({"deck": data} if data else {}))
+    [warning] = calls["warnings"]
+    assert warning.startswith("se-answers: this deck carries no readable deck data (globalThis.seDeck)")
+    assert calls["result"]["ways"] == ["answers.json", "comment"]
+    [comment] = calls["comments"]
+    assert comment["text"].splitlines()[0] == 'Answers from the decision deck "Deck" (se-answers):'
+    assert "no answer" not in comment["text"]
 
 
 def test_a_refused_files_form_still_reaches_claude_through_the_comment():
@@ -483,12 +555,14 @@ def test_a_deck_keeps_the_draft_over_a_reload_and_sends_through_a_late_claude(de
     built, artifact = decks["send"]
     assert built.returncode == 0, built.stderr
     shown = page("claude", path=str(artifact), files=files, comment=comment)
+    assert shown["warnings"] == []  # The bundle read the deck's data.
     assert shown["restored"] == {"cache": {"verdict": "decline", "comment": "Too slow."}, "queue": {"comment": "Later."}}
     if comment == "ok":
         assert shown["notice"] == {"state": "sent", "besideSend": True, "text": None,
                                    "message": "Sent: comment sent to Claude. Not saved as answers.json (capability_disabled)."}
         assert "sent" in shown["pill"].lower()
         [sent] = shown["calls"]["comments"]
+        assert sent["text"].splitlines()[0] == 'Answers from the decision deck "Decisions" (se-answers):'
         assert {"- cache: decline: Too slow.", "- queue: comment: Later."} <= set(sent["text"].splitlines())
     else:
         notice = shown["notice"]
