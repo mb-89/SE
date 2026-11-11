@@ -1,8 +1,10 @@
 # Agent guide (se)
 
-- This repository is common and open source; it must stay publishable. The rule and its check are owned
-  by [Public safety](#public-safety).
-- SPOT everywhere: one owner per fact; everything else links to it.
+- This repository is common and open source; it must stay publishable
+  ([pub-001](src/skills/work-model/references/rules.md#pub-001-publishable-at-any-time)); its check is owned by
+  [Public safety](#public-safety).
+- SPOT everywhere: one owner per fact; everything else links to it
+  ([gen-002](src/skills/work-model/references/rules.md#gen-002-single-point-of-truth)).
 - No backwards compatibility unless asked.
 
 ## Agents and skills
@@ -24,31 +26,25 @@
 
 ## Public safety
 
-Everything here must be publishable at any time. Nothing may identify an employer, a work project, a
-person, a machine, an account or an internal host: no work company, product or project names, no user
-names or user profile paths, no personal e-mail addresses, no device or server names, no internal or
-enterprise hosts.
+The rules are the rule book's [`pub` section](src/skills/work-model/references/rules.md#pub-publishing-and-security); this
+section owns the check that enforces them.
 
-Use generic names (`<name>`, `alice`, `example.com`). Work-specific content belongs in separate
-repositories that use se as a module.
-
-Commit with a generic identity: a name without an e-mail domain or a `users.noreply.github.com`
-address; never a real e-mail address. Where the machine sets no `public_identity`, se's commits carry
-`mb <mb>`, the `identity` in `se.toml`.
+- Publishable at any time: [pub-001](src/skills/work-model/references/rules.md#pub-001-publishable-at-any-time). Use generic names
+  (`<name>`, `alice`, `example.com`).
+- A generic commit identity: [pub-002](src/skills/work-model/references/rules.md#pub-002-a-generic-commit-identity).
 
 `scripts/public_check.py` enforces the rule on tracked file names and contents (binary files as bytes),
 commit messages and author and committer identities. It prints locations and pattern labels, never the
 matched text; exit code 0 passed, 1 hits, 2 setup error.
 
-- Tracker references in commit messages, the
-  [work model's rule](src/skills/work-model/SKILL.md#what-the-project-provides): the commit
+- Tracker references in commit messages,
+  [pub-004](src/skills/work-model/references/rules.md#pub-004-no-tracker-references-in-commit-messages): the commit
   gates (`--message-file`, and the commits of a `--range`, as the hooks and `integrate` pass it)
   refuse them and, as they name nothing private, print the reference with its remedy. A full check
   leaves history already pushed alone; a commit already published passes by its reasoned message
   entry in `.public-check-allow`.
-- Attribution trailers in commit messages, the owner's rule ("no Co-Authored-By lines or e-mail
-  addresses in commits"), which takes precedence over a host's attribution reminder: the commit
-  gates refuse a `Co-Authored-By:` or `Claude-Session:` line in any case, naming the commit and
+- Attribution trailers in commit messages,
+  [pub-003](src/skills/work-model/references/rules.md#pub-003-no-attribution-trailers): the commit gates refuse a `Co-Authored-By:` or `Claude-Session:` line in any case, naming the commit and
   the remedy, reword before pushing. A full check leaves history already pushed alone.
   - Every author is refused, the owner included; a co-author line's hit also names the editor
     setting that writes it ([README "Install"](README.md#install)).
@@ -57,7 +53,8 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   branches.
 - A `--range` on a shallow clone that reaches beyond the fetched history is refused with exit code
   2, naming `git fetch --unshallow`, so a gate never passes over commits it cannot see.
-- The project identity in the commit gates of a `--range`: where the project sets an `identity`
+- The project identity ([pub-002](src/skills/work-model/references/rules.md#pub-002-a-generic-commit-identity)) in the commit
+  gates of a `--range`: where the project sets an `identity`
   (or the machine a `public_identity`, which wins), a commit whose author or committer differs is
   refused, naming the commit, the identity found (redacted) and the remedy. A full check leaves
   history already pushed alone.
@@ -76,11 +73,11 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   only, as on a public CI host. `#` starts a comment line; every other line is one of
   - a case-insensitive regex, a term this source keeps private; hits name only its line number;
   - `off:<label>  # reason`, which switches the public entries of that label off for this source.
-  - It is never checked in: the check refuses to run while git tracks it, naming `git rm --cached`;
+  - It is never checked in ([pub-005](src/skills/work-model/references/rules.md#pub-005-private-terms-stay-local)): the check refuses to run while git tracks it, naming `git rm --cached`;
     `scripts/setup.sh` and `setup.ps1` add it to the source's `.gitignore`.
 - The machine-level list (`~/.se/private-terms.txt`, `SE_PRIVATE_TERMS`) is retired: while one is
   configured, the check stops and names where its terms go, `<source>/.public-check.local`.
-- One se version per check: every verdict names the se commit that ran it, and a repository that
+- One se version per check ([pub-007](src/skills/work-model/references/rules.md#pub-007-one-se-version-per-check)): every verdict names the se commit that ran it, and a repository that
   pins se (`[modules.se]` in its `se.toml`, [README "Modules"](README.md#modules)) is refused with
   exit code 2 when the running se is not at that pin: another commit than its `ref`, or a version
   outside its `version` range or none readable, naming both; `scripts/se_modules.py sync` brings
@@ -96,4 +93,4 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   [work model](src/skills/work-model/SKILL.md#integration-branch) names.
 - By hand: `uv run python scripts/public_check.py --repo <path>` (`--help` for the options).
 
-Never bypass the hooks with `--no-verify`: remove the content or add a reasoned allow entry.
+Never bypass the hooks: [pub-006](src/skills/work-model/references/rules.md#pub-006-never-bypass-the-hooks).
