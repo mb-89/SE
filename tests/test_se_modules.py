@@ -613,6 +613,20 @@ def test_an_existing_clone_follows_tags_the_upstream_moved(released, capsys):
     assert git(released.cache, "rev-parse", "refs/tags/v1.4.2") == moved["v1.4.2"]
 
 
+def test_the_fetch_prunes_branches_deleted_upstream(released, capsys):
+    git(released.upstream, "branch", "topic")
+    assert run(released, capsys, "sync")[0] == 0
+    se_modules.fetch(released.cache)
+    assert has_ref(released.cache, "refs/remotes/origin/topic")
+    git(released.upstream, "branch", "-D", "topic")
+    se_modules.fetch(released.cache)
+    assert not has_ref(released.cache, "refs/remotes/origin/topic")
+
+
+def has_ref(repo: Path, ref: str) -> bool:
+    return se_modules.git_ok(repo, "show-ref", "--verify", "--quiet", ref)
+
+
 def test_a_lock_naming_a_moved_tag_syncs_in_an_existing_clone(released, capsys):
     assert run(released, capsys, "sync")[0] == 0
     old = released.tags["v1.10.1"]
