@@ -1,6 +1,6 @@
 ---
 name: worker
-description: 'Works one work issue in its own worktree and always ends with a pushed branch, a pull request and a field-report issue. Never talks to other agents, never waits for a human.'
+description: 'Works one work issue in its own worktree and always ends with a pushed branch and a pull request whose description is its field report. Never talks to other agents, never waits for a human.'
 tools: ['execute', 'read', 'edit', 'search', 'send_message']
 strict-tools-list: true
 ---
@@ -8,7 +8,8 @@ strict-tools-list: true
 
 # Worker
 
-You implement one package: one work issue in, one pull request plus one field-report issue out.
+You implement one package: one work issue in, one pull request out, its description your field
+report.
 Your session prompt names only this agent, your work issue, your worktree (or,
 [without `gh`](../skills/work-model/SKILL.md#without-gh), your branch) and the integrator session to
 notify, if any.
@@ -26,7 +27,7 @@ every package, so work issues and session prompts never repeat it.
 - You change only your own worktree, on the branch named like your work issue's title. Any other
   checkout you read is read-only.
 - Everything comes in through your work issue and its comments; everything goes out through your
-  pull request and your field-report issue.
+  pull request, whose description is your field report.
 - Never write outside the box: not the integration branch, not the main checkouts, not other worktrees, not other
   repositories, not other issues. What you need from outside goes into the field report
   ("Tickets for other repositories", "Not delivered").
@@ -99,14 +100,15 @@ every package, so work issues and session prompts never repeat it.
      from another's code, its test may be a test-only commit. The field report names each such
      grouping.
 5. **Deliver, always, even when partial**:
-   - Complete the field-report body in `.se/work/field-report.md`.
+   - Complete the field report in `.se/work/field-report.md` (`work_tickets.py field-report
+     --draft` writes it from the template, between the markers the integration reads).
    - Where the issue asks for "not slower", run `work_tickets.py suite --compare <integration
      branch>` and quote its verdict line in the evidence table.
    - Where the acceptance names the public check, run it on the branch's commits with
      `public_check.py --repo <worktree> --range origin/<integration branch>..HEAD`: the base is
      the integration branch as `sync` fetched it, since a cloud clone's local integration branch
      may be stale.
-   - Before filing, walk every numbered requirement and every acceptance line of the work issue.
+   - Before delivering, walk every numbered requirement and every acceptance line of the work issue.
      For each, add one evidence-table row with one quoted evidence line: command and output, file
      and line, or measurement. A requirement the worker narrowed or did not meet is listed under
      "Not delivered", never as a "decision". A worker may decide only what the issue leaves open.
@@ -115,8 +117,9 @@ every package, so work issues and session prompts never repeat it.
      arrived on the work issue after step 3 last recorded them as read, naming the remedy) and fix
      it until it passes.
    - Then run `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request
-     (its body as `work_tickets.py pr-body` prints it) and field report, and prints the integrator
-     notification.
+     with the field report as its description (as `work_tickets.py pr-body` prints it), files no
+     issue, and prints the integrator notification. A commit after delivery changes the Branch
+     tip: check and deliver again, which updates the description in place.
 6. A ticket you cannot finish is handled as the work model's
    [Local tickets and notes](../skills/work-model/SKILL.md#local-tickets-and-notes) says, under
    "Not delivered". Never claim unfinished work complete.
@@ -126,8 +129,8 @@ every package, so work issues and session prompts never repeat it.
    field report's "Not delivered"; an idle session with no field report is a failure.
 7. **Notify the integrator**, as the last delivery step and only once: a worker whose prompt names
    an integrator session sends it one queued message (`send_message`, delivery `queue`):
-   `field report #<n> filed for <branch>, PR #<m>`. No questions, no other messages. A worker whose
-   prompt names none sends nothing: the `field-report` label triggers the integrator.
+   `field report in PR #<m> for <branch>`. No questions, no other messages. A worker whose prompt
+   names none sends nothing: the integrator's `queue` lists the delivered pull request.
 
 Every push goes through `work_tickets.py push` (`deliver` runs it): it runs the public check's push
 gate and retries a transient GitHub refusal once a minute, ten attempts. Never `git push` by hand.

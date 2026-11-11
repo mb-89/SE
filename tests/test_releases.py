@@ -184,7 +184,8 @@ def test_the_declared_kind_wins_over_the_branch_prefix(checkout, capsys):
 
 
 @pytest.mark.parametrize(("report", "refusal"), [
-    (None, "no field report given; pass --field-report <file>"),
+    (None, "no field report given; pass --pr-description <file>, the pull request description "
+           "that carries it"),
     ("**Branch tip:** `abc1234`\n", "Release kind is missing; write **Release kind:**"),
     ("**Release kind:** big — x\n", "Release kind 'big' must be one of patch, minor, major"),
     ("**Release kind:** minor\n", "Release kind needs a one-line reason after the kind"),
@@ -218,7 +219,7 @@ def test_a_breaking_removal_declared_major_releases_major(checkout):
 def test_a_breaking_package_integrated_by_hand_releases_major(checkout, capsys):
     tip = commit_on(checkout, "fix/topic-20261106", "reported")
     assert release_trailer(checkout, "fix/topic-20261106", True,
-                           "--field-report", report_at(checkout, tip, "major")) == 0
+                           "--pr-description", report_at(checkout, tip, "major")) == 0
     trailer = capsys.readouterr().out.strip()
     assert trailer == "Release-kind: major"
     integrate(checkout, "fix/topic-20261106", trailer=trailer)
@@ -241,8 +242,8 @@ def test_a_merge_whose_kind_cannot_be_told_is_refused_with_the_remedy(checkout, 
     error = capsys.readouterr().err
     assert f"Cannot release merge {before[:7]} (Integrate fix/topic-20261106: work): it {stated}" in error
     assert ("Reword the merge to end with one trailer Release-kind: major|minor|patch, as "
-            "work_tickets.py release-trailer <branch> --issue-body <file> --field-report <file> "
-            "prints it") in error
+            "work_tickets.py release-trailer <branch> --issue-body <file> --pr-description <file> "
+            "prints it from the field report in the pull request description") in error
 
 
 def test_a_second_integration_of_a_branch_releases_a_patch_and_the_first_its_kind(checkout):
@@ -268,16 +269,28 @@ def test_a_re_integration_releases_the_kind_its_own_report_states(checkout, caps
 
 
 def report_at(root: Path, tip: str, kind: str = "patch") -> str:
-    path = root.parent / "report.md"
-    path.write_text(f"**Branch tip:** `{tip}`  **Re-integration kind:** patch\n{declared(kind)}",
-                    encoding="utf-8")
+    """A pull request description whose field report describes the branch at `tip`."""
+    path = root.parent / "description.md"
+    path.write_text(f"Fixes https://git.example/owner/repo/issues/5\n\n{work_tickets.REPORT_BEGIN}\n"
+                    f"**Branch tip:** `{tip}`  **Re-integration kind:** patch\n{declared(kind)}"
+                    f"{work_tickets.REPORT_END}\n", encoding="utf-8")
     return str(path)
+
+
+def test_release_trailer_refuses_a_pull_request_description_without_a_report(checkout, capsys):
+    tip = commit_on(checkout, "fix/topic-20261106", "reported")
+    path = Path(report_at(checkout, tip))
+    path.write_text(path.read_text(encoding="utf-8").replace(work_tickets.REPORT_END, ""),
+                    encoding="utf-8")
+    assert release_trailer(checkout, "fix/topic-20261106", False, "--pr-description", str(path)) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "holds no field report" in captured.err
 
 
 def test_release_trailer_passes_a_branch_at_its_reported_tip(checkout, capsys):
     tip = commit_on(checkout, "fix/topic-20261106", "reported")
     assert release_trailer(checkout, "fix/topic-20261106", False,
-                           "--field-report", report_at(checkout, tip)) == 0
+                           "--pr-description", report_at(checkout, tip)) == 0
     assert capsys.readouterr().out.strip() == "Release-kind: patch"
 
 
@@ -286,7 +299,7 @@ def test_release_trailer_reads_a_branch_only_origin_has(checkout, capsys):
     git(checkout, "push", "-q", "origin", "fix/topic-20261106")
     git(checkout, "branch", "-q", "-D", "fix/topic-20261106")
     report = report_at(checkout, tip)
-    assert release_trailer(checkout, "fix/topic-20261106", False, "--field-report", report) == 0
+    assert release_trailer(checkout, "fix/topic-20261106", False, "--pr-description", report) == 0
     assert capsys.readouterr().out.strip() == "Release-kind: patch"
 
 
@@ -295,16 +308,16 @@ def test_release_trailer_prefers_the_local_branch_to_origin(checkout, capsys):
     git(checkout, "push", "-q", "origin", "fix/topic-20261106")
     local = commit_on(checkout, "fix/topic-20261106", "local only")
     assert release_trailer(checkout, "fix/topic-20261106", False,
-                           "--field-report", report_at(checkout, local)) == 0
+                           "--pr-description", report_at(checkout, local)) == 0
     assert capsys.readouterr().out.strip() == "Release-kind: patch"
     assert release_trailer(checkout, "fix/topic-20261106", False,
-                           "--field-report", report_at(checkout, pushed)) == 1
+                           "--pr-description", report_at(checkout, pushed)) == 1
     assert "- " + local[:7] + " local only" in capsys.readouterr().err
 
 
 def test_release_trailer_without_the_branch_names_both_refs_and_the_fetch(checkout, capsys):
     report = report_at(checkout, git(checkout, "rev-parse", "HEAD"))
-    assert release_trailer(checkout, "fix/topic-20261106", False, "--field-report", report) == 1
+    assert release_trailer(checkout, "fix/topic-20261106", False, "--pr-description", report) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
     assert ("Cannot find branch fix/topic-20261106: neither fix/topic-20261106 nor "
@@ -320,14 +333,14 @@ def test_release_trailer_refuses_a_commit_after_the_reported_tip_naming_it(check
     git(checkout, "merge", "-q", "--no-ff", "-m", "sync main", "main")  # a sync adds nothing late
     git(checkout, "switch", "-q", "main")
     report = report_at(checkout, tip)
-    assert release_trailer(checkout, "fix/topic-20261106", False, "--field-report", report) == 1
+    assert release_trailer(checkout, "fix/topic-20261106", False, "--pr-description", report) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
     assert (f"Branch fix/topic-20261106 has commits after the field report's Branch tip "
             f"{tip[:12]}:\n- {late[:7]} pushed after delivery\nNothing was merged.") in captured.err
     assert "the worker updates the field report in place" in captured.err
     assert "--include-late <reason>" in captured.err
-    assert release_trailer(checkout, "fix/topic-20261106", False, "--field-report", report,
+    assert release_trailer(checkout, "fix/topic-20261106", False, "--pr-description", report,
                            "--include-late", "the late commit fixes a typo the review asked for") == 0
     captured = capsys.readouterr()
     assert captured.out.strip() == "Release-kind: patch"
