@@ -329,7 +329,8 @@ def is_populated(clone: Path) -> bool:
 
 
 def fetch(clone: Path) -> None:
-    git(clone, "fetch", "--quiet", "--prune", "--tags", "origin")
+    """Fetch branches and tags; `--force` follows tags the upstream moved, the lock still pins the commit."""
+    git(clone, "fetch", "--quiet", "--force", "--prune", "--tags", "origin")
 
 
 def ensure_commit(source: Source, sha: str) -> None:

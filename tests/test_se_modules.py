@@ -587,6 +587,57 @@ def test_a_changed_range_is_resolved_again(released, capsys):
     assert locked(released) == {"lib": ("1.4.2", released.tags["v1.4.2"])}
 
 
+def rewrite_history(upstream: Path) -> dict[str, str]:
+    """Move every tag of `upstream` to a new commit with the same tree, as a history rewrite does."""
+    moved = {}
+    for tag in git(upstream, "tag", "--list").splitlines():
+        old = git(upstream, "rev-parse", f"refs/tags/{tag}^{{commit}}")
+        moved[tag] = git(upstream, "commit-tree", f"{old}^{{tree}}", "-m", f"{tag} rewritten")
+        git(upstream, "tag", "-f", tag, moved[tag])
+    git(upstream, "update-ref", "refs/heads/main", moved["v1.11.0-rc1"])
+    git(upstream, "gc", "-q", "--prune=now")
+    return moved
+
+
+def test_an_existing_clone_follows_tags_the_upstream_moved(released, capsys):
+    assert run(released, capsys, "sync")[0] == 0
+    moved = rewrite_history(released.upstream)
+    se_modules.fetch(released.cache)
+    assert git(released.cache, "rev-parse", "refs/tags/v1.10.1") == moved["v1.10.1"]
+    assert run(released, capsys, "sync")[0] == 0
+    assert git(released.cache, "rev-parse", "HEAD") == released.tags["v1.10.1"], "the lock pins the commit"
+    code, out = run(released, capsys, "update", "lib")
+    assert code == 0, out
+    assert locked(released) == {"lib": ("1.10.1", moved["v1.10.1"])}
+    assert git(released.cache, "rev-parse", "HEAD") == moved["v1.10.1"]
+    assert git(released.cache, "rev-parse", "refs/tags/v1.4.2") == moved["v1.4.2"]
+
+
+def test_the_fetch_prunes_branches_deleted_upstream(released, capsys):
+    git(released.upstream, "branch", "topic")
+    assert run(released, capsys, "sync")[0] == 0
+    se_modules.fetch(released.cache)
+    assert has_ref(released.cache, "refs/remotes/origin/topic")
+    git(released.upstream, "branch", "-D", "topic")
+    se_modules.fetch(released.cache)
+    assert not has_ref(released.cache, "refs/remotes/origin/topic")
+
+
+def has_ref(repo: Path, ref: str) -> bool:
+    return se_modules.git_ok(repo, "show-ref", "--verify", "--quiet", ref)
+
+
+def test_a_lock_naming_a_moved_tag_syncs_in_an_existing_clone(released, capsys):
+    assert run(released, capsys, "sync")[0] == 0
+    old = released.tags["v1.10.1"]
+    moved = rewrite_history(released.upstream)
+    lock = released.root / se_modules.LOCK
+    lock.write_text(lock.read_text().replace(old, moved["v1.10.1"]))
+    code, out = run(released, capsys, "sync")
+    assert code == 0, out
+    assert git(released.cache, "rev-parse", "HEAD") == moved["v1.10.1"]
+
+
 def test_a_range_no_tag_matches_is_an_error_naming_the_remedy(released, capsys):
     released.manifest.write_text(released.manifest.read_text().replace("^1.4", "^3"))
     code, out = run(released, capsys, "sync")
