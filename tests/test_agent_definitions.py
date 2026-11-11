@@ -11,6 +11,7 @@ AGENTS = SOURCE / "agents"
 SKILL = SOURCE / "skills" / "catch-up" / "SKILL.md"
 WORK_MODEL = SOURCE / "skills" / "work-model" / "SKILL.md"
 DECISION = SOURCE / "skills" / "decision" / "SKILL.md"
+RULE_BOOK = SOURCE / "skills" / "work-model" / "references" / "rules.md"
 ROLES = ("se", "worker", "integrator")
 # The authored prose: the agent and skill sources, the issue templates and the pull request template
 # (generated layouts excluded).
@@ -193,8 +194,10 @@ def test_se_and_catch_up_link_to_the_shared_dispatch_rule():
 def test_outside_issue_routine_and_consistency_item_link_the_rule_book():
     assert "SE's [rule book](../skills/work-model/references/rules.md)" in normalized(
         AGENTS / "se.md")
-    assert ("**Consistency:** does it contradict a [rule](../work-model/references/rules.md)"
+    assert ("**Consistency:** [dec-009](../work-model/references/rules.md#dec-009-consistency)"
             in normalized(DECISION))
+    assert "A decision names the rule or earlier decision it contradicts and the one it replaces." in (
+        normalized(RULE_BOOK))
 
 
 MARKDOWN = PROSE
@@ -456,11 +459,16 @@ def test_agents_md_names_the_focused_and_complete_test_commands():
 
 def test_the_work_model_owns_where_the_commit_identity_and_the_public_check_come_from():
     provides = normalized(WORK_MODEL).split("## What the project provides", 1)[1]
-    assert "**Commit identity and public check**: every role commits as `public_identity`" in provides
+    assert ("**Commit identity and public check** "
+            "([pub-002](references/rules.md#pub-002-a-generic-commit-identity)): every role commits as "
+            "`public_identity`") in provides
     assert "else as the project's `identity` in its `se.toml`" in provides
     assert "`work_tickets.py sync`, which every role runs at the start, writes whichever applies" in provides
     assert "runs the project's setup command before its first commit" in provides
-    assert "se's commits carry `mb <mb>`, the `identity` in `se.toml`" in normalized(ROOT / "AGENTS.md")
+    assert "else the project's `identity` (`mb <mb>` for se), and never a real e-mail address" in normalized(
+        RULE_BOOK)
+    assert "[pub-002](src/skills/work-model/references/rules.md#pub-002-a-generic-commit-identity)" in normalized(
+        ROOT / "AGENTS.md")
     assert "[commit identity](../skills/work-model/SKILL.md#what-the-project-provides)" in normalized(
         AGENTS / "worker.md")
 

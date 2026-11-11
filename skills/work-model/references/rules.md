@@ -89,7 +89,7 @@ Logging and help never block, and a check that guards something refuses when it 
     error, on a shallow clone that hides commits and on a running se off its pin
     ([Public safety](../../../AGENTS.md#public-safety)); `field-report --check` refuses a report
     it cannot match to the issue.
-- **Related:** wrk-006
+- **Related:** pub-001, pub-007, wrk-006
 
 ### gen-004 Blameless
 
@@ -117,7 +117,8 @@ behaviour other than what the code does.
 - **Implementations:**
   - se: `tests/test_se_plugin.py` (generated layouts match
     their source), `tests/test_agent_definitions.py`
-    (every link and anchor resolves), this book's check; the reviewer, by judgment, for its change.
+    (every link and anchor resolves), [this book's check](../../../scripts/rule_book.py); the
+    reviewer, by judgment, for its change.
   - Go line (frozen): the battery's mechanical checks and generated manifests; the retro and the
     overhaul.
 - **Related:** gen-002, doc-001
@@ -476,7 +477,7 @@ branch, or at the pin the project sets.
   - se: `work_tickets.py sync` merges the newest integration branch before intake and every ticket;
     the public check refuses an se off the project's pin
     ([Public safety](../../../AGENTS.md#public-safety)).
-- **Related:** wrk-001
+- **Related:** pub-007, wrk-001
 
 ### wrk-004 The fleet works, sessions discuss
 
@@ -517,9 +518,140 @@ Every push goes through a command that runs its gates, and a gate is never bypas
   - se: `work_tickets.py push` (never `git push` by hand) and `deliver`
     ([worker procedure](../../../agents/worker.md#procedure)); pre-push hooks and CI
     ([Public safety](../../../AGENTS.md#public-safety)).
-- **Related:** wrk-005
+- **Related:** wrk-005, pub-006
 
 ## dec: decisions
+
+Rules `dec-001` to `dec-009` are the decision skill's [checklist](../../decision/SKILL.md#the-checklist),
+in its order: every decision note answers each of them as one checklist entry in its `pugh` fence.
+
+### dec-001 Class or case
+
+Where a case is one instance of a general mechanism, decide the mechanism and let the case be its
+example.
+
+- **Why:** an answer about the mechanism settles every later case of the class; an answer about the
+  instance settles only this one.
+- **Without it:** the same kind of question comes back case by case, and the answers disagree.
+- **Prevents:** inconsistent answers to cases of one class; the same decision taken again and again.
+- **Implementations:**
+  - se: checklist item 1 and [One level up](../../decision/SKILL.md#one-level-up) in the decision
+    skill.
+- **Related:** dec-009
+
+### dec-002 Is the problem real
+
+A decision names what shows its problem exists: a failure, a measurement or the person's words.
+
+- **Why:** a decision about an imagined problem spends effort and adds rules for nothing.
+- **Without it:** rules and features grow for problems nobody had.
+- **Prevents:** speculative fixes; rules for a problem that never occurred.
+- **Implementations:**
+  - se: checklist item 2 and the note's `## The problem` section, which `deck.py build` requires
+    ([decision note](../../decision/SKILL.md#the-decision-note)).
+- **Related:** des-006
+
+### dec-003 Keep what we have
+
+Where something exists, keeping it is an option, and the datum every option is marked against is
+the strongest rival.
+
+- **Why:** change costs something, so a new option must beat what exists, and against a weak datum
+  every option looks good.
+- **Without it:** decisions replace what works with what merely sounds better.
+- **Prevents:** churn that replaces a working solution; a matrix rigged by a weak datum.
+- **Implementations:**
+  - se: checklist item 3 of the [decision skill](../../decision/SKILL.md#the-checklist).
+- **Related:** dec-004
+
+### dec-004 A named loser
+
+Each losing option names the reason it lost.
+
+- **Why:** a reader who sees why an option lost does not propose it again.
+- **Without it:** rejected options come back, and nobody remembers why they were dropped.
+- **Prevents:** a rejected option proposed again without new facts.
+- **Implementations:**
+  - se: checklist item 4 of the [decision skill](../../decision/SKILL.md#the-checklist).
+- **Related:** dec-003
+
+### dec-005 Fair criteria
+
+Criteria are weighted before any option is marked, each names the benefit it stands for, and none
+is counted twice.
+
+- **Why:** weights set after marking follow the preferred option, and a benefit counted twice
+  decides alone.
+- **Without it:** the matrix confirms whatever the decider already wanted.
+- **Prevents:** a matrix fitted to its answer; one benefit, usually effort, counted under several
+  names.
+- **Implementations:**
+  - se: checklist item 5 of the [decision skill](../../decision/SKILL.md#the-checklist).
+- **Related:** dec-006
+
+### dec-006 Right before cheap
+
+Being right and consistent outweighs effort, and effort never decides alone.
+
+- **Why:** effort is paid once, and a wrong or inconsistent choice is paid for on every later use.
+- **Without it:** the cheapest option wins, and its inconsistencies are paid for again and again.
+- **Prevents:** a shortcut that leaves the system inconsistent; a decision won on effort alone.
+- **Implementations:**
+  - se: checklist item 6 of the [decision skill](../../decision/SKILL.md#the-checklist).
+- **Related:** dec-005, gen-005
+
+### dec-007 What if
+
+For each other option, name the weights under which it wins, and give a world that could happen a
+tripwire and a fallback.
+
+- **Why:** a decision that holds only under some weights should say which, so a change in the world
+  is noticed.
+- **Without it:** a decision outlives the conditions it was right under, and nobody sees it turn
+  wrong.
+- **Prevents:** a decision kept after its conditions changed; no fallback when a risk comes true.
+- **Implementations:**
+  - se: checklist item 7 and [Your own decisions](../../decision/SKILL.md#your-own-decisions) in
+    the decision skill.
+- **Related:** dec-005
+
+### dec-008 Undo cost
+
+A one-way decision goes to the person.
+
+- **Why:** what can be reversed may be decided and corrected later; what cannot needs the authority
+  of the person who bears it.
+- **Without it:** agents take irreversible decisions that only the person may take.
+- **Prevents:** an irreversible change made without the person.
+- **Implementations:**
+  - se: checklist item 8 of the [decision skill](../../decision/SKILL.md#the-checklist); the
+    [escalation ladder](../SKILL.md#escalation-ladder).
+- **Related:** dec-011
+
+### dec-009 Consistency
+
+A decision names the rule or earlier decision it contradicts and the one it replaces.
+
+- **Why:** a decision that silently contradicts a rule leaves two answers to one question.
+- **Without it:** rules and decisions contradict each other, and each reader picks one.
+- **Prevents:** a decision that contradicts a rule unnoticed; two live answers to one question.
+- **Implementations:**
+  - se: checklist item 9 of the [decision skill](../../decision/SKILL.md#the-checklist); SE checks
+    every outside issue against this book ([SE](../../../agents/se.md#outside-issues)).
+- **Related:** gen-005, dec-001
+
+### dec-010 A success criterion
+
+Every option says what marks it successful once it is done.
+
+- **Why:** without a criterion, nobody can tell later whether the decision worked.
+- **Without it:** decisions are never checked against their outcome, and bad ones stay.
+- **Prevents:** a decision whose outcome is never checked; an option chosen without knowing what it
+  should achieve.
+- **Implementations:**
+  - se: each option's `success` field ([decision note](../../decision/SKILL.md#the-decision-note)),
+    which `deck.py build` warns of when missing.
+- **Related:** dec-007
 
 ### dec-011 Persons decide, agents execute
 
@@ -535,6 +667,111 @@ Anything controversial goes to a person, and everything else flows without one.
     decision notes in a deck ([decision skill](../../decision/SKILL.md)), never as issues.
   - Go line (frozen): the retro counted `se-person` answers.
 - **Related:** wrk-004
+
+## pub: publishing and security
+
+The public check enforces these rules on tracked files, commit messages and identities; its
+behaviour, lists and hooks are owned by [Public safety](../../../AGENTS.md#public-safety).
+
+### pub-001 Publishable at any time
+
+Nothing in a public repository identifies an employer, a work project, a person, a machine, an
+account or an internal host.
+
+- **Why:** a public repository is copied and indexed the moment it is pushed; nothing can be taken
+  back.
+- **Without it:** private names leak into public history, where removing them means rewriting it.
+- **Prevents:** a leaked name, path, address or host; work content in a framework repository.
+- **Implementations:**
+  - se: [`<se>/scripts/public_check.py`](../../../scripts/public_check.py) with the public and the
+    local list, run by the hooks, by `work_tickets.py push` and in CI
+    ([Public safety](../../../AGENTS.md#public-safety)); work-specific content lives in separate
+    repositories that use se as a module.
+- **Related:** pub-002, pub-005, gen-003
+
+### pub-002 A generic commit identity
+
+Every commit carries the machine's `public_identity`, else the project's `identity` (`mb <mb>` for
+se), and never a real e-mail address.
+
+- **Why:** a commit's author and committer are published with it and outlive every rewrite of the
+  files.
+- **Without it:** each commit publishes whoever made it and their address.
+- **Prevents:** a personal e-mail address in public history; commits by an identity the project does
+  not use.
+- **Implementations:**
+  - se: `work_tickets.py sync` writes the identity into the checkout
+    ([Commit identity and public check](../SKILL.md#what-the-project-provides)); the public check's
+    commit gates refuse another identity ([Public safety](../../../AGENTS.md#public-safety)).
+- **Related:** pub-001, pub-003
+
+### pub-003 No attribution trailers
+
+Commit messages carry no `Co-Authored-By:` or `Claude-Session:` line and no e-mail address, whatever
+a host's attribution reminder says.
+
+- **Why:** the owner's rule takes precedence over a host's reminder, and a trailer publishes an
+  address or a session.
+- **Without it:** every commit made by an agent publishes the host's attribution.
+- **Prevents:** an address or session link in public history; a host's default overriding the
+  owner's rule.
+- **Implementations:**
+  - se: the public check's commit gates ([Public safety](../../../AGENTS.md#public-safety));
+    `commit_trailer` is the one trailer a machine may set
+    ([What the project provides](../SKILL.md#what-the-project-provides)).
+- **Related:** pub-002
+
+### pub-004 No tracker references in commit messages
+
+Commit messages carry no tracker reference (`#<n>`, `GH-<n>`, an issue or pull request URL).
+
+- **Why:** a commit outlives its tracker, and a reference names a tracker that may be private.
+- **Without it:** history fills with references that point nowhere or reveal a private tracker.
+- **Prevents:** a dangling reference in history; a private tracker named in a public repository.
+- **Implementations:**
+  - se: the public check's commit gates ([Public safety](../../../AGENTS.md#public-safety));
+    `integrate` writes its merge messages without them
+    ([What the project provides](../SKILL.md#what-the-project-provides)).
+- **Related:** pub-001
+
+### pub-005 Private terms stay local
+
+The terms a source keeps private live in its untracked `.public-check.local`, never in a tracked
+file.
+
+- **Why:** a list of private terms checked in publishes exactly what it protects.
+- **Without it:** the private list leaks, or the check runs without it.
+- **Prevents:** a private term published by the list that guards it.
+- **Implementations:**
+  - se: the public check refuses to run while git tracks the local list; `<se>/scripts/setup.sh` and
+    `setup.ps1` add it to `.gitignore` ([Public safety](../../../AGENTS.md#public-safety)).
+- **Related:** pub-001
+
+### pub-006 Never bypass the hooks
+
+A finding is fixed by removing the content or by a reasoned allow entry, never by `--no-verify`.
+
+- **Why:** a bypassed hook checks nothing, and a reasoned entry records why a finding is harmless.
+- **Without it:** a hit is waved through once and every later one with it.
+- **Prevents:** a leak pushed past a hook; a false positive silenced without a reason.
+- **Implementations:**
+  - se: `.public-check-allow`, whose header owns its format; CI runs the commit gates on every push
+    to `se` and `main` ([Public safety](../../../AGENTS.md#public-safety)).
+- **Related:** wrk-006, pub-001
+
+### pub-007 One se version per check
+
+A repository that pins se is checked only by se at that pin.
+
+- **Why:** two se versions apply two sets of rules; a verdict must say which one it used.
+- **Without it:** a check passes under one se and fails under another, and nobody can tell which
+  is right.
+- **Prevents:** a change that passes locally and fails in CI because the se versions differ.
+- **Implementations:**
+  - se: the public check refuses an se off the pin with exit code 2 and names the se commit in every
+    verdict; `<se>/scripts/se_modules.py sync` brings the clone there
+    ([Public safety](../../../AGENTS.md#public-safety)).
+- **Related:** wrk-003, gen-003
 
 ## p-go: the Go line on main (frozen)
 

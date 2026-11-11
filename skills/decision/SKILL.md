@@ -40,7 +40,8 @@ it, and which solutions there are.
   - The datum is the strongest rival; every other option is marked against it. "Keep what we have"
     is an option whenever something exists.
   - Every option says what it is and its own wins and losses.
-  - Every option carries `success`, its success criterion: what marks it successful once done.
+  - Every option carries `success`, its success criterion
+    ([dec-010](../work-model/references/rules.md#dec-010-a-success-criterion)).
   - Every mark carries its reason, `{mark, because}`; the datum's marks, against itself, need none.
   - Every option carries `short`, its short name: one word where possible, at most five. The
     field is obs's, owned by
@@ -60,24 +61,18 @@ The aim is no failed item: a failed item's answer says what would fix it. The wo
 
 ## The checklist
 
-The decider answers every item before it decides or asks:
+The decider answers every item before it decides or asks; each is a rule of the
+[rule book](../work-model/references/rules.md#dec-decisions):
 
-1. **Class or case:** is this one case of a general mechanism? If so, decide the mechanism.
-2. **Is the problem real:** what shows it exists: a failure, a measurement, the person's words?
-3. **Keep what we have:** is "keep what we have" an option, and is the datum the strongest rival?
-4. **A named loser:** each losing option with the reason it lost.
-5. **Fair criteria:** nothing counted twice, and weights set before the options were marked. Does
-   each criterion name the benefit it stands for? Do any two measure the same thing? If they do,
-   merge them. Effort-type criteria (time, your effort, our effort) are one criterion unless their
-   benefits differ and the note says how.
-6. **Right before cheap:** being right and consistent outweighs effort, and effort never decides
-   alone: does an option win only on effort?
-7. **What if:** for each other option, the weights under which it wins, with no bound. Is that a
-   world that could happen, or nonsense? A world that could happen gets a sign to watch (a
-   tripwire) and a fallback.
-8. **Undo cost:** easy to reverse, or one-way? A one-way decision goes to the person.
-9. **Consistency:** does it contradict a [rule](../work-model/references/rules.md) or an
-   earlier decision? Which one does it replace?
+1. **Class or case:** [dec-001](../work-model/references/rules.md#dec-001-class-or-case)
+2. **Is the problem real:** [dec-002](../work-model/references/rules.md#dec-002-is-the-problem-real)
+3. **Keep what we have:** [dec-003](../work-model/references/rules.md#dec-003-keep-what-we-have)
+4. **A named loser:** [dec-004](../work-model/references/rules.md#dec-004-a-named-loser)
+5. **Fair criteria:** [dec-005](../work-model/references/rules.md#dec-005-fair-criteria)
+6. **Right before cheap:** [dec-006](../work-model/references/rules.md#dec-006-right-before-cheap)
+7. **What if:** [dec-007](../work-model/references/rules.md#dec-007-what-if)
+8. **Undo cost:** [dec-008](../work-model/references/rules.md#dec-008-undo-cost)
+9. **Consistency:** [dec-009](../work-model/references/rules.md#dec-009-consistency)
 
 Items 1, 2, 5 and 7 are about the decision as a whole and name no option; items 3, 4, 6, 8 and 9
 name the letters of the options they fail.
