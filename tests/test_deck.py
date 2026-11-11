@@ -2,8 +2,8 @@
 
 The warning refusal, the answers summary and the bundle's ways out run on fakes; one end-to-end test
 builds a deck with the real obs, serves it with `deck serve --wait`, sends from a browser and reads the
-answers, and one opens a real deck on a fake of the Claude app's runtime that appears late, for the draft
-kept over a reload and the notice beside Send.
+answers, and one opens a real deck on a fake of the Claude app's runtime that appears late, for the drafts
+obs-html keeps over a reload (a comment with no verdict among them) and the notice beside Send.
 Every deck the tests build with the real obs is built once per session, all at once (`decks`), and the
 browser tests share one page per worker (`page`).
 """
@@ -205,11 +205,17 @@ const actions = {
             await tab.locator('[data-bless-key="decline"]:visible').click();
             await tab.locator("[data-bless-comment]").fill("Too slow.");
             await tab.locator("[data-bless-comment]").press("Enter");
-            // Reload: the draft comes back when the chapter opens again.
+            // A comment with no verdict, through obs-html's Comment key.
+            await tab.evaluate(() => obsArtifact.activateChapter("queue"));
+            await tab.locator("[data-bless-comment-key]:visible").click();
+            await tab.locator("[data-bless-comment]").fill("Later.");
+            await tab.locator("[data-bless-comment]").press("Escape");
+            // Reload: obs-html brings every chapter's draft back by itself (se's bundle restores none).
             await tab.reload();
             await tab.waitForFunction(() => document.documentElement.dataset.artifactStatus === "ready");
             await tab.evaluate(() => obsArtifact.activateChapter("cache"));
-            await tab.waitForFunction(() => obsBless.verdicts().cache?.comment === "Too slow.", null, {timeout: 10000});
+            await tab.waitForFunction(() => obsBless.verdicts().cache?.comment === "Too slow." &&
+                obsBless.verdicts().queue?.comment === "Later.", null, {timeout: 10000});
             const restored = await tab.evaluate(() => obsBless.verdicts());
             await tab.locator("[data-bless-send]").click();
             await tab.locator("[data-se-answers-notice]").waitFor();
@@ -477,18 +483,21 @@ def test_a_deck_keeps_the_draft_over_a_reload_and_sends_through_a_late_claude(de
     built, artifact = decks["send"]
     assert built.returncode == 0, built.stderr
     shown = page("claude", path=str(artifact), files=files, comment=comment)
-    assert shown["restored"] == {"cache": {"verdict": "decline", "comment": "Too slow."}}
+    assert shown["restored"] == {"cache": {"verdict": "decline", "comment": "Too slow."}, "queue": {"comment": "Later."}}
     if comment == "ok":
         assert shown["notice"] == {"state": "sent", "besideSend": True, "text": None,
                                    "message": "Sent: comment sent to Claude. Not saved as answers.json (capability_disabled)."}
         assert "sent" in shown["pill"].lower()
         [sent] = shown["calls"]["comments"]
-        assert "- cache: decline: Too slow." in sent["text"].splitlines()
+        assert {"- cache: decline: Too slow.", "- queue: comment: Later."} <= set(sent["text"].splitlines())
     else:
         notice = shown["notice"]
         assert (notice["state"], notice["besideSend"]) == ("failed", True)
         assert "capability_disabled" in notice["message"] and "claude_unavailable" in notice["message"]
-        assert json.loads(notice["text"])["verdicts"][0]["comment"] == "Too slow."
+        version = {slug: request["version"] for slug, request in _requests(artifact).items()}
+        assert json.loads(notice["text"])["verdicts"] == [
+            {"chapter": "cache", "version": version["cache"], "verdict": "decline", "comment": "Too slow."},
+            {"chapter": "queue", "version": version["queue"], "comment": "Later."}]
         assert "sent" not in shown["pill"].lower()
 
 
