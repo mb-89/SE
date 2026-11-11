@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_docs  # noqa: E402
+import se_plugin  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -79,8 +80,28 @@ REPORTS_VARIABLE = "SE_TEST_REPORTS"
 setup_seconds: dict[tuple[str, str], float] = {}  # (test, worker): the controller's setup times
 
 
+# The suite builds the plugin layouts from src/ before its tests (AGENTS.md "Agents and skills"), so
+# no run tests stale generated files and nobody has to remember `se_plugin.py build`; on the
+# controller only, before pytest-xdist starts its workers.
+built_layouts = pytest.StashKey[list[str]]()
+
+
+def build_plugin_layouts(config: pytest.Config) -> None:
+    try:
+        config.stash[built_layouts] = [str(path) for path in se_plugin.build(ROOT)]
+    except se_plugin.SourceError as error:
+        raise pytest.UsageError(f"se_plugin.py build: {error}; fix the source in src/") from error
+
+
+def pytest_terminal_summary(terminalreporter, config: pytest.Config) -> None:
+    for path in config.stash.get(built_layouts, []):
+        terminalreporter.write_line(f"se_plugin.py build: wrote {path}")
+
+
 @pytest.hookimpl(tryfirst=True)  # before junitxml opens its report
 def pytest_configure(config: pytest.Config) -> None:
+    if not hasattr(config, "workerinput"):
+        build_plugin_layouts(config)
     reports = os.environ.get(REPORTS_VARIABLE)
     if reports and not config.option.xmlpath and not hasattr(config, "workerinput"):
         config.option.xmlpath = str(Path(reports) / "se.xml")
