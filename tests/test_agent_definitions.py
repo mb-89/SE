@@ -12,8 +12,11 @@ SKILL = SOURCE / "skills" / "catch-up" / "SKILL.md"
 WORK_MODEL = SOURCE / "skills" / "work-model" / "SKILL.md"
 DECISION = SOURCE / "skills" / "decision" / "SKILL.md"
 ROLES = ("se", "worker", "integrator")
-# The authored prose: the agent and skill sources and the issue templates (generated layouts excluded).
-PROSE = sorted([*SOURCE.rglob("*.md"), *(GITHUB / "ISSUE_TEMPLATE").glob("*.md")])
+# The authored prose: the agent and skill sources, the issue templates and the pull request template
+# (generated layouts excluded).
+# The field report's form, the pull request template.
+REPORT_TEMPLATE = GITHUB / "pull_request_template.md"
+PROSE = sorted([*SOURCE.rglob("*.md"), *(GITHUB / "ISSUE_TEMPLATE").glob("*.md"), REPORT_TEMPLATE])
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
 
@@ -103,7 +106,7 @@ def test_integrator_restarts_only_workers_whose_events_show_a_prompt():
 
 def test_partial_deliveries_define_blockers_and_review_responses():
     rules = normalized(WORK_MODEL)
-    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    report = normalized(REPORT_TEMPLATE)
     assert "A partial-delivery blocker is only work outside the worker's box" in rules
     assert "tests of the package's own code are never blockers" in rules.casefold()
     assert "throw-away tracker issues for live acceptance runs" in rules
@@ -111,19 +114,19 @@ def test_partial_deliveries_define_blockers_and_review_responses():
     assert "## Review responses" in report
     assert "answers every review point" in report
     assert "## Removed behaviour, deleted or weakened tests, and authored prose" in report
-    assert "(../skills/work-model/SKILL.md#rules-for-all-roles)" in report
+    assert "(skills/work-model/SKILL.md#rules-for-all-roles)" in report
 
 
 def test_field_report_template_has_requirement_evidence_table():
-    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    report = normalized(REPORT_TEMPLATE)
     assert "one row per work-issue requirement and acceptance item" in report
     assert 'numbered items under "Changes after filing" are requirements, by their number' in report
     assert "| Work issue item | Result | Commits | Evidence |" in report
-    assert "(../agents/worker.agent.md#procedure)" in report
+    assert "(agents/worker.agent.md#procedure)" in report
 
 
 def test_field_report_template_names_the_integration_branch_it_was_tested_against():
-    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    report = normalized(REPORT_TEMPLATE)
     assert "**Tested against `<integration branch>`:** `<commit>`" in report
     assert "Tested against main" not in report
 
@@ -484,10 +487,9 @@ CLOUD_RULES = (
     "`CLAUDE.md`), the role files and the project's `AGENTS.md` on the integration branch are the rules.",
     "**Retries after a server error**: after a 5xx from GitHub, read before retrying any write, not only a "
     "create (the object may exist); where closing with a state reason fails, close without one",
-    "**Delivery fallback**: an output whose write keeps failing after those retries goes in full into the next "
-    "output that can be written, and a short placeholder points to it: where the field-report issue cannot be "
-    "created with the report, the full report goes into the pull request body, a short field-report issue "
-    "links it, and the delivery notice names the pull request.",
+    "**Delivery fallback**: where the pull request cannot be opened with the report as its description after "
+    "those retries, open it with the closing line alone, then write the full description (`pr-body`'s output) by "
+    "editing the pull request; the delivery notice names the pull request.",
 )
 
 
@@ -525,13 +527,13 @@ def test_the_work_template_checks_that_acceptance_on_existing_content_is_measura
 
 
 def test_the_field_report_has_a_fixed_line_for_commit_groupings_under_delivered():
-    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    report = normalized(REPORT_TEMPLATE)
     delivered = report.split("## Delivered", 1)[1].split("## Not delivered", 1)[0]
     assert "**Commit groupings:** None <!-- or, per grouping the worker's commit rule allows" in delivered
 
 
 def test_the_field_report_replaces_evidence_the_host_cannot_carry_with_its_command():
-    report = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    report = normalized(REPORT_TEMPLATE)
     assert ("Evidence the host cannot carry is replaced by the command that reproduces it: where images cannot "
             "be attached, each screenshot's row names the command that takes it again.") in report
 
@@ -585,8 +587,9 @@ def test_the_work_model_tells_issue_writers_what_renames_and_docs_issues_name():
 
 def test_the_integrator_reconciles_from_github_and_treats_a_missing_message_as_late():
     integrator = normalized(AGENTS / "integrator.md")
-    assert ("A worker's delivery message can arrive minutes late: reconcile from GitHub first and treat a "
-            "missing message as late, not lost.") in integrator
+    assert ("A worker's delivery message can arrive minutes late, or never where the worker's prompt named no "
+            "integrator: reconcile from GitHub first (`queue`) and treat a missing message as late, not lost."
+            ) in integrator
 
 
 TEST_RULES = (
@@ -615,7 +618,7 @@ def test_the_worker_reports_the_suite_time_before_and_after_and_slow_new_tests()
     worker = normalized(AGENTS / "worker.md")
     assert "(../skills/work-model/SKILL.md#tests)" in worker
     assert "work_tickets.py suite" in worker
-    template = normalized(GITHUB / "ISSUE_TEMPLATE" / "field-report.md")
+    template = normalized(REPORT_TEMPLATE)
     assert "**Suite time:**" in template
 
 
@@ -696,3 +699,25 @@ def test_the_outside_issue_routine_is_stated_once_in_the_se_agent():
     model = normalized(WORK_MODEL).split("## Outside issues", 1)[1].split("## ", 1)[0]
     assert "(../../agents/se.md#outside-issues)" in model and "Something contradicted" not in model
     assert sum("Something contradicted" in normalized(path) for path in PROSE) == 1
+
+
+def test_no_prose_files_finds_or_closes_a_field_report_issue():
+    """One issue per piece of work: the field report is the pull request's description."""
+    for path in PROSE:
+        text = normalized(path)
+        for phrase in ("--label field-report", "label `field-report`", "field report #<n>",
+                       "integrate <field-report>", "--field-report <file>", "field-report: <branch>"):
+            assert phrase not in text, (path, phrase)
+        for sentence in re.findall(r"[^.]*field-report issue[^.]*\.", text, re.IGNORECASE):
+            assert path == WORK_MODEL and ("No field-report issue is filed" in sentence
+                                           or "history" in sentence or "old field-report" in sentence
+                                           ), (path, sentence)
+    rules = normalized(WORK_MODEL)
+    assert "a pull request to the integration branch whose description is the field report" in rules
+    assert "between its `<!-- se:field-report -->` and `<!-- se:field-report:end -->` lines" in rules
+    assert ("Field-report issues filed before this are history: they keep their `field-report` label "
+            "and are not migrated; nothing new gets that label.") in rules
+    assert "`integrate` closes the work issue with a comment that links the pull request and the release" in rules
+    assert "read the field reports in the pull request descriptions of the window's closed work issues" in rules
+    for role in ("worker", "integrator", "se"):
+        assert "field-report issue" not in normalized(AGENTS / f"{role}.md").casefold(), role

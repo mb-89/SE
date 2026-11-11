@@ -17,6 +17,7 @@ authored_content = [
     "AGENTS.md",
     "README.md",
     ".github/ISSUE_TEMPLATE/*.md",
+    ".github/pull_request_template.md",
     "src/**/*.md",
     "docs.md",
 ]

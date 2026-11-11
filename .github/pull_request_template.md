@@ -1,15 +1,11 @@
----
-name: Field report
-about: What a worker delivered and did not deliver. One per work issue, created by the worker at the end.
-title: "field-report: <branch>"
-labels: field-report
----
-<!-- se:fleet -->
+<!-- se:field-report -->
+<!-- The worker's field report, the description of its pull request: one per work issue, written by
+     the worker at delivery between the se:field-report markers, which the integration reads. -->
 
-**Work issue:** #<n>  **Pull request:** #<n>  **Branch:** `<branch>`  **Result:** complete | partial
+**Work issue:** #<n>  **Branch:** `<branch>`  **Result:** complete | partial
 **Tested against `<integration branch>`:** `<commit>` <!-- the integration-branch commit merged last before the pull request -->
 **Branch tip:** `<tip>` <!-- the branch commit this report describes; field-report --check --worktree <worktree> fills it from the branch -->
-**Release kind:** <kind> — <reason> <!-- patch, minor or major and a one-line reason: what changed decides it, as the [work model's Release kind](../skills/work-model/SKILL.md#release-kind) says; field-report --draft proposes the branch prefix's -->
+**Release kind:** <kind> — <reason> <!-- patch, minor or major and a one-line reason: what changed decides it, as the [work model's Release kind](skills/work-model/SKILL.md#release-kind) says; field-report --draft proposes the branch prefix's -->
 **Re-integration kind:** patch <!-- what a later integration of this branch releases once its first merge is on the integration branch: patch, minor or major -->
 
 ## User requirement (quoted back)
@@ -18,7 +14,7 @@ labels: field-report
 
 ## Delivered
 
-<!-- Follow the [worker evidence rule](../agents/worker.agent.md#procedure).
+<!-- Follow the [worker evidence rule](agents/worker.agent.md#procedure).
      Add one row per work-issue requirement and acceptance item; numbered items under "Changes
      after filing" are requirements, by their number, as are those under "Routing". Evidence
      the host cannot carry is replaced by the command that reproduces it: where images cannot
@@ -30,7 +26,7 @@ labels: field-report
 **Commit groupings:** None <!-- or, per grouping the worker's commit rule allows: the commits, the
 requirements they share, and why (one function changed together, or a test-only commit) -->
 
-**Suite time:** None <!-- where the change adds tests, the [test rules](../skills/work-model/SKILL.md#tests):
+**Suite time:** None <!-- where the change adds tests, the [test rules](skills/work-model/SKILL.md#tests):
      `work_tickets.py suite` before and after, and each new test over 2 s with its reason -->
 
 ## Not delivered
@@ -39,10 +35,10 @@ requirements they share, and why (one function changed together, or a test-only 
 
 ## Removed behaviour, deleted or weakened tests, and authored prose
 
-<!-- Follow the [capability-preservation rule](../skills/work-model/SKILL.md#rules-for-all-roles).
+<!-- Follow the [capability-preservation rule](skills/work-model/SKILL.md#rules-for-all-roles).
      Each removed or renamed public item and each newly required field gets its own line
      "**Breaking:** <item>", which makes the Release kind major
-     ([work model](../skills/work-model/SKILL.md#release-kind)). "None" otherwise. -->
+     ([work model](skills/work-model/SKILL.md#release-kind)). "None" otherwise. -->
 
 ## Review responses
 
@@ -68,7 +64,7 @@ requirements they share, and why (one function changed together, or a test-only 
 <!-- One block per ticket, ready for SE to file as a work issue there:
      ### <repo>: <title> / Goal / Requirements / Acceptance. Generic findings from an
      application become framework tickets and must not name the application. See the
-     [work model](../skills/work-model/SKILL.md#roles-and-flow) for the entry granularity and
+     [work model](skills/work-model/SKILL.md#roles-and-flow) for the entry granularity and
      source-file requirement. "None" otherwise. -->
 
 ## Retro
@@ -78,3 +74,5 @@ requirements they share, and why (one function changed together, or a test-only 
 - **Went well:**
 - **Cost time:**
 - **Proposed improvement:** <!-- target file and the change -->
+
+<!-- se:field-report:end -->

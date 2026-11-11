@@ -1,4 +1,5 @@
-"""work_tickets.py reads work issues and writes field reports through gh (mocked here)."""
+"""work_tickets.py reads work issues and pull requests, and writes pull requests whose descriptions
+carry the field report, through gh (mocked here)."""
 import importlib.util
 import io
 import json
@@ -56,7 +57,9 @@ EVIDENCE_ROWS = """| Requirement 1 | complete | `abc1234` | `test`: passed |
 | Acceptance 2 | complete | `abc1234` | `test`: passed |"""
 
 
-COMPLETE_REPORT = """**Work issue:** #5  **Pull request:** #7  **Branch:** `feature/example-20261104`  **Result:** complete
+BEGIN, END = work_tickets.REPORT_BEGIN, work_tickets.REPORT_END
+COMPLETE_REPORT = BEGIN + """
+**Work issue:** #5  **Branch:** `feature/example-20261104`  **Result:** complete
 **Tested against `main`:** `abc1234`
 **Branch tip:** `abc1234`  **Re-integration kind:** patch
 **Release kind:** minor — adds an example command
@@ -105,7 +108,7 @@ None
 - **Went well:** the tests.
 - **Cost time:** nothing.
 - **Proposed improvement:** none.
-"""
+""" + END + "\n"
 
 
 TIP = "fedcba9876543210fedcba9876543210fedcba98"
@@ -121,10 +124,10 @@ def fill_evidence_rows(report: str) -> str:
         "<reason>", "adds an example command")
 
 
-def draft_complete_field_report(worktree: Path, pr: int | None = None) -> Path:
+def draft_complete_field_report(worktree: Path) -> Path:
     report = worktree / ".se" / "work" / "field-report.md"
     report.parent.mkdir(parents=True, exist_ok=True)
-    work_tickets.draft_field_report(worktree, report, pr)
+    work_tickets.draft_field_report(worktree, report)
     report.write_text(
         fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
             "**Result:** complete | partial", "**Result:** complete"
@@ -165,6 +168,8 @@ class FakeGh:
                 if self.pull_request is not None and self.pull_request_state == "open"
                 else []
             )
+        if command == ["pr", "view"]:
+            return json.dumps(self.pull_request)
         if command == ["pr", "create"]:
             self.pull_request = {"number": 7, "url": "https://git.example/owner/repo/pull/7"}
             return self.pull_request["url"] + "\n"
@@ -367,13 +372,17 @@ def test_refresh_needs_an_issue_until_one_is_recorded(worktree, gh, capsys):
     assert "unchanged" in capsys.readouterr().out
 
 
-def test_field_report_fills_the_template_and_creates_a_labelled_issue(worktree, gh, capsys):
+def test_field_report_draft_writes_the_template_between_its_markers_and_files_no_issue(
+        worktree, gh, capsys):
     gh.issue["labels"] = [{"name": "work"}, {"name": "repo:example"}, {"name": "discovery"}]
     run(worktree, "intake", "--issue", "5")
+    gh.calls.clear()
     report = worktree / "report.md"
-    assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
+    assert run(worktree, "field-report", "--draft", str(report)) == 0
     draft = report.read_text(encoding="utf-8")
-    assert "**Work issue:** #5  **Pull request:** #7  **Branch:** `feature/example-20261104`" in draft
+    assert draft.startswith(BEGIN + "\n") and draft.rstrip().endswith(END)
+    assert "**Work issue:** #5  **Branch:** `feature/example-20261104`" in draft
+    assert "Pull request:" not in draft  # the report is the pull request's own description
     assert "**Tested against `main`:** `abc1234`" in draft
     assert "**Release kind:** minor — <reason>" in draft  # the prefix only proposes the kind
     assert '## User requirement (quoted back)\n\n> make it "work", please\n' in draft
@@ -387,23 +396,8 @@ def test_field_report_fills_the_template_and_creates_a_labelled_issue(worktree, 
         encoding="utf-8",
     )
 
-    assert run(worktree, "field-report", "--file", str(report)) == 0
-    create = gh.calls[-1]
-    assert create[:5] == ["issue", "create", "--title", f"field-report: {BRANCH}", "--label"]
-    assert create[5] == "field-report" and "--body-file" in create
-    assert "repo:example" in create
-    assert create[create.index("--repo") + 1] == "git.example/owner/repo"
-    body = gh.bodies[-1]
-    assert body.startswith(work_tickets.FLEET_MARKER + "\n**Work issue:** #5")
-    body = body.removeprefix(work_tickets.FLEET_MARKER)
-    assert "<!--" not in body and "\n\n\n" not in body
-    assert "Field report created: https://git.example/owner/repo/issues/8" in capsys.readouterr().out
-
-    gh.open_reports = [{"number": 8, "title": f"field-report: {BRANCH}",
-                        "url": "https://git.example/owner/repo/issues/8"}]
-    assert run(worktree, "field-report", "--file", str(report)) == 0
-    assert gh.calls[-1][:3] == ["issue", "edit", "8"] and "--body-file" in gh.calls[-1]
-    assert "Field report updated" in capsys.readouterr().out
+    assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
+    assert all(call[:2] == ["issue", "view"] for call in gh.calls)  # reads only; no issue filed
 
 
 def test_field_report_draft_names_the_configured_integration_branch_and_its_commit(
@@ -419,7 +413,7 @@ def test_field_report_draft_names_the_configured_integration_branch_and_its_comm
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
 
-    assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
+    assert run(worktree, "field-report", "--draft", str(report)) == 0
     assert f"**Tested against `se`:** `{commit}`" in report.read_text(encoding="utf-8")
 
 
@@ -428,47 +422,46 @@ def test_field_report_draft_uses_the_se_template_when_project_has_none(worktree,
     gh.pull_request = None
     report = worktree / "report.md"
 
-    assert not (worktree / ".github" / "ISSUE_TEMPLATE" / "field-report.md").exists()
-    assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
+    assert not (worktree / ".github" / "pull_request_template.md").exists()
+    assert run(worktree, "field-report", "--draft", str(report)) == 0
     draft = report.read_text(encoding="utf-8")
-    assert "**Pull request:** none" in draft and "## Delivered" in draft
+    assert BEGIN in draft and "## Delivered" in draft
 
 
-def test_field_report_refuses_unfilled_or_unlinked_reports(worktree, gh, monkeypatch, capsys):
+def test_field_report_refuses_unfilled_or_unmarked_reports(worktree, gh, monkeypatch, capsys):
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
-    report.write_text("**Work issue:** #<n>  **Branch:** `<branch>` "
-                      "`<integration branch>` `<commit>`\n", encoding="utf-8")
-    assert run(worktree, "field-report", "--file", str(report)) == 1
+    unfilled = "**Work issue:** #<n>  **Branch:** `<branch>` `<integration branch>` `<commit>`\n"
+    report.write_text(f"{BEGIN}\n{unfilled}{END}\n", encoding="utf-8")
+    assert run(worktree, "field-report", "--check", str(report)) == 1
     error = capsys.readouterr().err
     assert "unfilled placeholder #<n>" in error and "unfilled placeholder <branch>" in error
     assert "unfilled placeholder <commit>" in error
     assert "unfilled placeholder <integration branch>" in error
-    assert "does not link work issue #5" in error and "does not link pull request #7" in error
-    assert not any(call[:2] == ["issue", "create"] for call in gh.calls)
+
+    report.write_text(COMPLETE_REPORT.replace(BEGIN, ""), encoding="utf-8")
+    assert run(worktree, "field-report", "--check", str(report)) == 1
+    assert (f"Field report report.md holds no field report: the report goes between the lines "
+            f"{BEGIN} and {END}") in capsys.readouterr().err
 
     monkeypatch.setattr(work_tickets, "current_branch", lambda root: "main")
-    assert run(worktree, "field-report", "--file", str(report)) == 1
+    assert run(worktree, "field-report", "--draft", str(worktree / "other.md")) == 1
     assert "does not match the work issue title" in capsys.readouterr().err
 
 
 def test_field_report_refuses_a_placeholder_added_to_its_template(
     worktree, gh, monkeypatch, tmp_path, capsys
 ):
-    templates = tmp_path / "templates"
-    shutil.copytree(work_tickets.TEMPLATES, templates)
-    template = templates / "field-report.md"
-    text = template.read_text(encoding="utf-8")
-    template.write_text(text.replace("**Result:**", "**Reviewed on:** <date>  **Result:**", 1),
-                        encoding="utf-8")
-    monkeypatch.setattr(work_tickets, "TEMPLATES", templates)
+    text = work_tickets.field_report_template()
+    monkeypatch.setattr(work_tickets, "field_report_template", lambda: text.replace(
+        "**Result:**", "**Reviewed on:** <date>  **Result:**", 1))
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
-    report.write_text("**Work issue:** #5  **Pull request:** #7  **Reviewed on:** <date>  "
+    report.write_text(f"{BEGIN}\n**Work issue:** #5  **Reviewed on:** <date>  "
                       "**Result:** complete\n\n## Delivered\n\n"
                       "| Work issue item | Result | Commits | Evidence |\n|---|---|---|---|\n"
-                      + EVIDENCE_ROWS + "\n", encoding="utf-8")
-    assert run(worktree, "field-report", "--file", str(report)) == 1
+                      + EVIDENCE_ROWS + f"\n{END}\n", encoding="utf-8")
+    assert run(worktree, "field-report", "--check", str(report)) == 1
     assert "unfilled placeholder <date>" in capsys.readouterr().err
 
 
@@ -478,8 +471,7 @@ def test_field_report_may_mention_placeholders_below_its_header(worktree, gh, ca
     report.write_text(COMPLETE_REPORT.replace(
         "## Spec gaps\n\nNone.", "## Spec gaps\n\nThe draft fills `#<n>`, `<branch>` and `<commit>`."
     ), encoding="utf-8")
-    assert run(worktree, "field-report", "--file", str(report)) == 0, capsys.readouterr().err
-    assert gh.calls[-1][:2] == ["issue", "create"]
+    assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
 
 
 @pytest.mark.parametrize(("result", "accepted"), [
@@ -498,13 +490,10 @@ def test_field_report_requires_an_exact_result_header(worktree, gh, capsys, resu
         encoding="utf-8",
     )
 
-    assert run(worktree, "field-report", "--file", str(report)) == (0 if accepted else 1)
-    if accepted:
-        assert any(call[:2] == ["issue", "create"] for call in gh.calls)
-    else:
+    assert run(worktree, "field-report", "--check", str(report)) == (0 if accepted else 1)
+    if not accepted:
         assert "header (above the first section): Result must be exactly complete or partial" in (
             capsys.readouterr().err)
-        assert not any(call[:2] == ["issue", "create"] for call in gh.calls)
 
 
 @pytest.mark.parametrize(("row", "replacement", "named"), [
@@ -516,18 +505,18 @@ def test_field_report_refuses_missing_or_empty_evidence(
         worktree, gh, capsys, row, replacement, named):
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
-    assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
+    assert run(worktree, "field-report", "--draft", str(report)) == 0
     report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
         row, replacement), encoding="utf-8")
 
-    assert run(worktree, "field-report", "--file", str(report)) == 1
+    assert run(worktree, "field-report", "--check", str(report)) == 1
     assert named in capsys.readouterr().err
 
 
 def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
-    assert run(worktree, "field-report", "--draft", "--file", str(report)) == 0
+    assert run(worktree, "field-report", "--draft", str(report)) == 0
     report.write_text(
         fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
             "**Result:** complete | partial", "**Result:** partial"
@@ -537,7 +526,7 @@ def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
         encoding="utf-8",
     )
 
-    assert run(worktree, "field-report", "--file", str(report)) == 0, capsys.readouterr().err
+    assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
 
 
 
@@ -545,8 +534,7 @@ def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
     (lambda report: report, None),
     (lambda report: report.replace("  **Result:** complete", ""),
      'header (above the first section): missing "**Result:**"; the template\'s line: '
-     "**Work issue:** #<n>  **Pull request:** #<n>  **Branch:** `<branch>`  "
-     "**Result:** complete | partial"),
+     "**Work issue:** #<n>  **Branch:** `<branch>`  **Result:** complete | partial"),
     (lambda report: report.replace("**Tested against `main`:** `abc1234`\n", ""),
      'header (above the first section): missing "**Tested against `<integration branch>`:**"'),
     (lambda report: report.replace(
@@ -596,7 +584,7 @@ def test_field_report_check_validates_against_the_template_without_github(
     else:
         assert code == 1
         assert "Field report report.md does not follow the template" in captured.err
-        assert "the se checkout's .github/ISSUE_TEMPLATE/field-report.md:" in captured.err
+        assert "the se checkout's .github/pull_request_template.md:" in captured.err
         assert str(work_tickets.TEMPLATES) not in captured.err
         assert message in captured.err
 
@@ -712,22 +700,35 @@ def test_field_report_check_needs_no_worktree_and_names_the_option_where_it_need
     assert ("pass --issue-body <file>, or --worktree <worktree> to read intake's snapshot"
             in capsys.readouterr().err)
 
-    assert work_tickets.main(["field-report", "--file", str(report)]) == 1
-    assert "field-report --file needs --worktree <worktree>" in capsys.readouterr().err
+    assert work_tickets.main(["field-report", "--draft", str(report)]) == 1
+    assert "field-report --draft needs --worktree <worktree>" in capsys.readouterr().err
 
-def test_validate_field_report_requires_template_sections_and_references(worktree, gh, monkeypatch):
-    report = work_tickets.fetch_issue(worktree, 8, "git.example/owner/repo")
-    report["body"] = "**Work issue:** #5  **Pull request:** #7\n\n## Delivered\nComplete."
-    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
 
+def test_the_integration_reads_the_report_from_the_pull_request_description(worktree, gh):
+    def described(body: str) -> None:
+        gh.pull_request = {"number": 7, "url": "https://git.example/owner/repo/pull/7",
+                           "headRefName": BRANCH, "headRefOid": TIP, "body": body}
+
+    described(f"Fixes {URL}\n\nNo report here.\n")
+    with pytest.raises(work_tickets.QueueError,
+                       match="The description of pull request #7 holds no field report"):
+        work_tickets.pull_request_report(worktree, 7, "git.example/owner/repo")
+
+    described(f"Fixes {URL}\n\n{BEGIN}\n**Work issue:** #5\n\n## Delivered\nComplete.\n{END}\n")
     with pytest.raises(work_tickets.QueueError, match='missing section "## Review responses"'):
-        work_tickets.validate_field_report(worktree, 8, "git.example/owner/repo")
+        work_tickets.pull_request_report(worktree, 7, "git.example/owner/repo")
 
-    report["body"] = COMPLETE_REPORT
-    validated, work_issue, work, pull = work_tickets.validate_field_report(
-        worktree, 8, "git.example/owner/repo"
-    )
-    assert validated is report and work_issue is report and (work, pull) == (5, 7)
+    described(f"Fixes {URL}\n\n{BEGIN}\n## Delivered\n{END}\n")
+    with pytest.raises(work_tickets.QueueError, match="names no work issue"):
+        work_tickets.pull_request_report(worktree, 7, "git.example/owner/repo")
+
+    described(f"Fixes {URL}\n\n{COMPLETE_REPORT}")
+    pull, report, work_issue, work = work_tickets.pull_request_report(
+        worktree, 7, "git.example/owner/repo")
+    assert pull["headRefName"] == BRANCH and work == 5 and work_issue["number"] == 5
+    assert report.startswith("**Work issue:** #5") and BEGIN not in report
+    assert ["pr", "view", "7"] == gh.calls[0][:3] and not any(
+        call[:2] == ["issue", "create"] for call in gh.calls)
 
 
 def test_escalate_comments_through_a_body_file_and_labels(worktree, gh):
@@ -1064,16 +1065,22 @@ def test_deliver_is_idempotent_and_prints_configured_notification(
     assert run(worktree, "deliver") == 0
     assert ["git", "-C", str(worktree), "push", "-u", "origin", BRANCH] in pushes
     assert any(call[:2] == ["pr", "create"] for call in gh.calls)
-    assert any(call[:2] == ["issue", "create"] for call in gh.calls)
-    assert "Notify ahp-session:/integrator: field report https://git.example/owner/repo/issues/8" in (
+    assert not any(call[:2] in (["issue", "create"], ["issue", "edit"]) for call in gh.calls)
+    assert f"Notify ahp-session:/integrator: field report in PR #7 for {BRANCH}" in (
         capsys.readouterr().out
     )
+    description = gh.bodies[-1]
+    assert description.startswith(f"Fixes {URL}\n\n{BEGIN}\n**Work issue:** #5")
+    assert description.endswith(f"{END}\n") and "<!--" not in description.replace(
+        BEGIN, "").replace(END, "") and "\n\n\n" not in description
+    assert f"**Branch tip:** `{TIP}`" in description
 
     assert run(worktree, "deliver", "--integrator-session", "ahp-session:/other") == 0
     assert sum(call[:2] == ["pr", "create"] for call in gh.calls) == 1
-    assert any(call[:2] == ["pr", "edit"] for call in gh.calls)
-    assert any(call[:2] == ["issue", "edit"] for call in gh.calls)
-    assert "Notify ahp-session:/other:" in capsys.readouterr().out
+    edit = next(call for call in gh.calls if call[:2] == ["pr", "edit"])
+    assert edit[2] == "7" and gh.bodies[-1] == description
+    assert not any(call[:2] == ["issue", "create"] for call in gh.calls)
+    assert "Notify ahp-session:/other: field report in PR #7" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -1098,23 +1105,8 @@ def test_deliver_uses_only_an_open_pull_request(
     assert any(call[:2] == ["pr", "create"] for call in gh.calls) is creates
 
 
-def test_deliver_updates_a_pre_pull_request_draft(worktree, gh, monkeypatch, capsys):
-    run(worktree, "intake", "--issue", "5")
-    gh.pull_request = None
-    report = draft_complete_field_report(worktree)
-    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
-    monkeypatch.setattr(
-        work_tickets.subprocess, "run",
-        lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
-    )
-
-    assert run(worktree, "deliver") == 0
-    assert "**Pull request:** #7" in report.read_text(encoding="utf-8")
-    assert "Notify <integrator session>: field report" in capsys.readouterr().out
-
-
-def test_deliver_uses_origin_for_the_pull_request_and_tracker_for_the_report(
-        worktree, gh, monkeypatch):
+def test_deliver_writes_the_report_into_the_pull_request_on_origin_and_files_no_issue(
+        worktree, gh, monkeypatch, capsys):
     run(worktree, "intake", "--issue", "5")
     gh.pull_request = None
     draft_complete_field_report(worktree)
@@ -1125,36 +1117,28 @@ def test_deliver_uses_origin_for_the_pull_request_and_tracker_for_the_report(
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
 
-    assert run(worktree, "deliver", "--tracker", "tracker.example/owner/tracker") == 0
+    assert run(worktree, "deliver") == 0
     pr_create = next(call for call in gh.calls if call[:2] == ["pr", "create"])
-    report_create = next(call for call in gh.calls if call[:2] == ["issue", "create"])
     assert pr_create[pr_create.index("--repo") + 1] == "source.example/owner/source"
-    assert report_create[report_create.index("--repo") + 1] == "tracker.example/owner/tracker"
+    assert BEGIN in gh.bodies[-1]
+    assert not any(call[0] == "issue" and call[1] != "view" for call in gh.calls)
 
 
-def test_deliver_without_origin_files_report_on_the_given_tracker(
-        worktree, gh, monkeypatch, capsys):
+def test_deliver_without_origin_refuses_naming_the_remedy(worktree, gh, monkeypatch, capsys):
     run(worktree, "intake", "--issue", "5")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
 
-    assert run(worktree, "deliver", "--tracker", "tracker.example/owner/tracker") == 0
-    report = (worktree / ".se" / "work" / "field-report.md").read_text(encoding="utf-8")
-    assert "**Pull request:** none" in report
-    assert not any(call[0] == "pr" for call in gh.calls)
-    assert any(
-        call[:2] == ["issue", "create"]
-        and call[call.index("--repo") + 1] == "tracker.example/owner/tracker"
-        for call in gh.calls
-    )
-    assert "Notify <integrator session>: field report" in capsys.readouterr().out
+    assert run(worktree, "deliver") == 1
+    assert "has no origin remote" in capsys.readouterr().err
+    assert not any(call[0] == "pr" or call[:2] == ["issue", "create"] for call in gh.calls)
 
 
 def test_deliver_refuses_report_without_evidence(worktree, gh, monkeypatch, capsys):
     run(worktree, "intake", "--issue", "5")
     report = worktree / ".se" / "work" / "field-report.md"
-    work_tickets.draft_field_report(worktree, report, 7)
+    work_tickets.draft_field_report(worktree, report)
     report.write_text(
         report.read_text(encoding="utf-8").replace(
             "**Result:** complete | partial", "**Result:** complete"
@@ -1169,7 +1153,7 @@ def test_deliver_refuses_report_without_evidence(worktree, gh, monkeypatch, caps
 
     assert run(worktree, "deliver") == 1
     assert "missing evidence for: Requirement 1" in capsys.readouterr().err
-    assert not any(call[:2] == ["issue", "create"] for call in gh.calls)
+    assert not any(call[0] == "pr" and call[1] != "list" for call in gh.calls)
 
 
 def test_deliver_refuses_a_report_with_an_invalid_result(worktree, gh, monkeypatch, capsys):
@@ -1191,7 +1175,8 @@ def test_deliver_refuses_a_report_with_an_invalid_result(worktree, gh, monkeypat
     )
 
     assert run(worktree, "deliver") == 1
-    assert "header Result must be exactly complete or partial" in capsys.readouterr().err
+    assert "header (above the first section): Result must be exactly complete or partial" in (
+        capsys.readouterr().err)
     assert not pushes
 
 
@@ -1400,23 +1385,38 @@ def test_capacity_counts_running_work_issues(worktree, monkeypatch):
     assert work_tickets.capacity(worktree, "git.example/owner/repo") == 2
 
 
-def test_queue_lists_open_reports_escalations_and_startable_work(worktree, monkeypatch):
-    reports = [{"number": 8, "title": "field-report: feature/one", "url": "https://example/8"}]
+def test_queue_lists_delivered_pull_requests_escalations_and_startable_work(worktree, monkeypatch):
+    def pull(number: int, body: str) -> dict:
+        return {"number": number, "title": f"feature/n{number}", "url": f"https://example/{number}",
+                "body": body}
+
+    delivered = pull(7, f"Fixes {URL}\n\n{COMPLETE_REPORT}")
+    pulls = [delivered,
+             pull(10, f"Fixes {URL}\n"),  # no report: not delivered
+             pull(11, f"Fixes {URL}\n\n{BEGIN}\n**Work issue:** #5\n{END}\n"),  # incomplete
+             pull(12, None)]
     escalations = [{"number": 9, "title": "blocked release", "url": "https://example/9"}]
     ready = [{"number": 1, "title": "feature/one"}]
-    monkeypatch.setattr(
-        work_tickets,
-        "run_gh",
-        lambda root, args: json.dumps(escalations if "escalated" in args else reports),
-    )
+    calls: list[list[str]] = []
+
+    def gh(root, args):
+        calls.append(args)
+        return json.dumps(pulls if args[:2] == ["pr", "list"] else escalations)
+
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     synced: list[Path] = []
     monkeypatch.setattr(work_tickets, "sync", lambda root: synced.append(root) or "abc1234")
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, all_repos: ready)
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, all_repos: 2)
     assert work_tickets.queue(worktree, "git.example/owner/repo") == (
-        reports, escalations, ready, 2
+        [delivered], escalations, ready, 2
     )
     assert synced == [worktree]
+    listing = next(call for call in calls if call[:2] == ["pr", "list"])
+    assert listing[listing.index("--base") + 1] == "main"
+    assert listing[listing.index("--state") + 1] == "open"
+    assert not any("field-report" in call for call in calls)  # no field-report issue is read
 
 
 def test_queue_filters_to_current_repository_unless_all_repositories(worktree, monkeypatch):
@@ -1430,7 +1430,8 @@ def test_queue_filters_to_current_repository_unless_all_repositories(worktree, m
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, all_repos: [])
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, all_repos: 2)
     work_tickets.queue(worktree, "git.example/owner/repo")
-    assert all("repo:worktree" in call for call in calls)
+    issues = [call for call in calls if call[0] == "issue"]
+    assert issues and all("repo:worktree" in call for call in issues)
     calls.clear()
     work_tickets.queue(worktree, "git.example/owner/repo", all_repos=True)
     assert all(not any(value.startswith("repo:") for value in call) for call in calls)
@@ -1658,7 +1659,8 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     def gh_call(root, args):
         calls.append(args)
         if args[:2] == ["pr", "view"]:
-            return json.dumps({"headRefName": "feature/worker", "headRefOid": head})
+            return json.dumps({"headRefName": "feature/worker", "headRefOid": head, "body": report["body"],
+                           "url": "https://git.example/owner/repo/pull/7"})
         return ""
     monkeypatch.setattr(
         work_tickets, "run_gh",
@@ -1689,7 +1691,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
         work_tickets, "start", lambda root, number, repo, directory, create: started.append(number)
     )
 
-    commit = work_tickets.integrate(main_checkout, 8, None, "build", [["check"]])
+    commit = work_tickets.integrate(main_checkout, 7, None, "build", [["check"]])
     assert (main_checkout / "worker.txt").is_file()
     assert subprocess.run(
         ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
@@ -1700,7 +1702,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
         ["git", "-C", str(main_checkout), "log", "-1", "--format=%B"],
         capture_output=True, text=True, check=False,
     ).stdout
-    assert "work issue #5, field report #8, PR #7" in message
+    assert "work issue #5, PR #7" in message
     assert message.rstrip().endswith("Co-authored-by: Agent <agent@users.noreply.github.com>")
     assert commands == [
         ("suite", "Complete suite"), ("build", "Output regeneration")
@@ -1712,11 +1714,12 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     assert "Cleanup: worker worktree removed" in output
     assert "Started: 1" in output
     closes = [call for call in calls if call[:2] == ["issue", "close"]]
-    assert closes == [
-        ["issue", "close", "5", "--repo", "git.example/owner/tracker"],
-        ["issue", "close", "8", "--repo", "git.example/owner/tracker"],
-    ]
-    assert all("PR #7. Suite: 214 passed." in body for body in bodies)
+    assert closes == [["issue", "close", "5", "--repo", "git.example/owner/tracker"]]  # only the work issue
+    assert not any(call[0] == "issue" and call[1] in ("create", "list") for call in calls)
+    assert [call[:3] for call in calls if call[:2] == ["issue", "comment"]] == [["issue", "comment", "5"]]
+    assert bodies == [
+        f"Integrated in {commit} from https://git.example/owner/repo/pull/7. Release: none. "
+        "Suite: 214 passed.\n"]
     assert not worker.exists()
     assert subprocess.run(
         ["git", "-C", str(main_checkout), "rev-parse", "--verify", "feature/worker"],
@@ -1799,7 +1802,8 @@ def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch)
     monkeypatch.setattr(
         work_tickets,
         "run_gh",
-        lambda root, args: json.dumps({"headRefName": "feature/discovery", "headRefOid": head})
+        lambda root, args: json.dumps({"headRefName": "feature/discovery", "headRefOid": head, "body": report["body"],
+                           "url": "https://git.example/owner/repo/pull/7"})
         if args[:2] == ["pr", "view"] else "",
     )
     monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: "")
@@ -1814,7 +1818,7 @@ def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch)
     )
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
 
-    commit = work_tickets.integrate(main_checkout, 8, None, None)
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
     assert commit
     assert subprocess.run(
         ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
@@ -1843,7 +1847,8 @@ def test_integrate_failure_restores_pre_merge_main_and_escalates(
     def gh_call(root, args):
         calls.append(args)
         if args[:2] == ["pr", "view"]:
-            return json.dumps({"headRefName": "feature/failure", "headRefOid": head})
+            return json.dumps({"headRefName": "feature/failure", "headRefOid": head, "body": report["body"],
+                           "url": "https://git.example/owner/repo/pull/7"})
         return ""
     monkeypatch.setattr(work_tickets, "run_gh", gh_call)
     monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args))
@@ -1859,7 +1864,7 @@ def test_integrate_failure_restores_pre_merge_main_and_escalates(
 
     with pytest.raises(work_tickets.QueueError, match=failed_step):
         work_tickets.integrate(
-            main_checkout, 8, None, "build",
+            main_checkout, 7, None, "build",
             [["check"]] if failed_step == "Project check" else None,
         )
     after = subprocess.run(
@@ -1875,8 +1880,8 @@ def test_integrate_failure_restores_pre_merge_main_and_escalates(
         capture_output=True, text=True, check=False,
     ).stdout.strip()
     assert not any(call[:3] == ["git", "-C", str(main_checkout)] for call in calls)
-    assert any(call[:3] == ["issue", "comment", "8"] for call in calls)
-    assert any(call[:5] == ["issue", "edit", "8", "--add-label", "escalated"] for call in calls)
+    assert any(call[:3] == ["issue", "comment", "5"] for call in calls)  # the work issue
+    assert any(call[:5] == ["issue", "edit", "5", "--add-label", "escalated"] for call in calls)
     assert not any(call[:2] == ["issue", "close"] for call in calls)
 
 
@@ -1929,7 +1934,8 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     def gh_call(root, args):
         calls.append(args)
         if args[:2] == ["pr", "view"]:
-            return json.dumps({"headRefName": "feature/worker", "headRefOid": head})
+            return json.dumps({"headRefName": "feature/worker", "headRefOid": head, "body": report["body"],
+                           "url": "https://git.example/owner/repo/pull/7"})
         return ""
     monkeypatch.setattr(
         work_tickets, "run_gh",
@@ -1964,7 +1970,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
 
     if check_fails:
         with pytest.raises(work_tickets.QueueError, match="Project check failed"):
-            work_tickets.integrate(main_checkout, 8, None, "build", [["check"]])
+            work_tickets.integrate(main_checkout, 7, None, "build", [["check"]])
         mirror_head = subprocess.run(
             ["git", "--git-dir", str(mirror), "rev-parse", "main"],
             capture_output=True, text=True, check=False,
@@ -1973,7 +1979,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
         assert mirror_head.stdout.strip() == mirror_baseline
         return
 
-    commit = work_tickets.integrate(main_checkout, 8, None, "build", [["check"]])
+    commit = work_tickets.integrate(main_checkout, 7, None, "build", [["check"]])
     assert (main_checkout / "worker.txt").is_file()
     assert subprocess.run(
         ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
@@ -2008,11 +2014,9 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
         capture_output=True, text=True, check=False,
     ).stdout.strip()
     closes = [call for call in calls if call[:2] == ["issue", "close"]]
-    assert closes == [
-        ["issue", "close", "5", "--repo", "git.example/owner/tracker"],
-        ["issue", "close", "8", "--repo", "git.example/owner/tracker"],
-    ]
-    assert all("PR #7. Suite: 214 passed." in body for body in bodies)
+    assert closes == [["issue", "close", "5", "--repo", "git.example/owner/tracker"]]
+    assert all("from https://git.example/owner/repo/pull/7. Release: none. Suite: 214 passed."
+               in body for body in bodies)
     assert not worker.exists()
     assert subprocess.run(
         ["git", "--git-dir", str(mirror), "show-ref", "--verify", "refs/heads/feature/worker"],
@@ -2064,7 +2068,7 @@ def test_public_merge_message_rejects_tracker_references_and_host_addresses(
 
     with pytest.raises(work_tickets.QueueError, match="cannot contain"):
         work_tickets.integration_merge_message(
-            main_checkout, "feature/worker", 5, 8, 7, True
+            main_checkout, "feature/worker", 5, 7, True
         )
 
 
@@ -2087,13 +2091,14 @@ def test_integrate_conflict_aborts_without_escalating(main_checkout, monkeypatch
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
-    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: calls.append(args) or (json.dumps({"headRefName": "feature/conflict", "headRefOid": head}) if args[:2] == ["pr", "view"] else ""))
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: calls.append(args) or (json.dumps({"headRefName": "feature/conflict", "headRefOid": head, "body": report["body"],
+                           "url": "https://git.example/owner/repo/pull/7"}) if args[:2] == ["pr", "view"] else ""))
     monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args))
     with pytest.raises(work_tickets.QueueError, match="shared.txt"):
-        work_tickets.integrate(main_checkout, 8, None, None)
+        work_tickets.integrate(main_checkout, 7, None, None)
     assert not subprocess.run(["git", "-C", str(main_checkout), "status", "--porcelain"], capture_output=True, text=True).stdout.strip()
-    assert not any(call[:3] == ["issue", "comment", "8"] for call in calls)
-    assert not any(call[:5] == ["issue", "edit", "8", "--add-label", "escalated"] for call in calls)
+    assert not any(call[:3] == ["issue", "comment", "5"] for call in calls)
+    assert not any(call[:5] == ["issue", "edit", "5", "--add-label", "escalated"] for call in calls)
     assert not any(call[:2] == ["issue", "close"] for call in calls)
 
 
@@ -2111,25 +2116,28 @@ def test_integrate_keeps_worktree_when_cleanup_refuses(main_checkout, monkeypatc
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
-    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: calls.append(args) or (json.dumps({"headRefName": "feature/blocked", "headRefOid": head}) if args[:2] == ["pr", "view"] else ""))
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: calls.append(args) or (json.dumps({"headRefName": "feature/blocked", "headRefOid": head, "body": report["body"],
+                           "url": "https://git.example/owner/repo/pull/7"}) if args[:2] == ["pr", "view"] else ""))
     monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args))
     monkeypatch.setattr(work_tickets, "run_project_command", lambda root, command, description: None)
     monkeypatch.setattr(work_tickets, "run_suite", lambda root: suite_passed(root, "passed"))
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
 
-    work_tickets.integrate(main_checkout, 8, None, None)
+    work_tickets.integrate(main_checkout, 7, None, None)
     assert worker.exists()
     assert "worker worktree was not removed" in capsys.readouterr().err
-    assert [call[2] for call in calls if call[:2] == ["issue", "close"]] == ["5", "8"]
+    assert [call[2] for call in calls if call[:2] == ["issue", "close"]] == ["5"]
 
-def integration_fakes(monkeypatch, head: str) -> list[list[str]]:
-    report = {"body": reported_at(head)}
+def integration_fakes(monkeypatch, head: str, reported: str | None = None) -> list[list[str]]:
+    """Fakes for integrating PR #7 at `head`, its description's report at `reported` (`head`)."""
+    report = {"body": reported_at(reported or head)}
     calls: list[list[str]] = []
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
     monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: calls.append(args) or (
-        json.dumps({"headRefName": "feature/worker", "headRefOid": head})
+        json.dumps({"headRefName": "feature/worker", "headRefOid": head, "body": report["body"],
+                           "url": "https://git.example/owner/repo/pull/7"})
         if args[:2] == ["pr", "view"] else ""))
     monkeypatch.setattr(
         work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args) or "")
@@ -2156,15 +2164,13 @@ def test_integrate_refuses_commits_after_the_reported_tip_unless_their_inclusion
                           capture_output=True, text=True, check=True).stdout.strip()
     git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
     monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
-    calls = integration_fakes(monkeypatch, head)
-    monkeypatch.setattr(work_tickets, "fetch_issue",
-                        lambda root, number, repo: {"body": reported_at(reported)})
+    calls = integration_fakes(monkeypatch, head, reported)
     bodies: list[str] = []
     monkeypatch.setattr(work_tickets, "run_gh_with_body",
                         lambda root, args, body: calls.append(args) or bodies.append(body) or "")
 
     with pytest.raises(work_tickets.QueueError) as refused:
-        work_tickets.integrate(main_checkout, 8, None, None)
+        work_tickets.integrate(main_checkout, 7, None, None)
     assert (f"Branch feature/worker has commits after the field report's Branch tip "
             f"{reported[:12]}:\n- {head[:7]} pushed after delivery\nNothing was merged.") in str(
                 refused.value)
@@ -2173,9 +2179,9 @@ def test_integrate_refuses_commits_after_the_reported_tip_unless_their_inclusion
                            reported, "HEAD"], capture_output=True, check=False).returncode == 1
     assert not bodies
 
-    work_tickets.integrate(main_checkout, 8, None, None, included="it fixes a typo the review asked for")
+    work_tickets.integrate(main_checkout, 7, None, None, included="it fixes a typo the review asked for")
     assert all("Includes 1 commit(s) after the field report's Branch tip: it fixes a typo the "
-               "review asked for" in body for body in bodies) and len(bodies) == 2
+               "review asked for" in body for body in bodies) and len(bodies) == 1
 
 
 @pytest.mark.parametrize("leak", [False, True], ids=["clean", "leak"])
@@ -2215,10 +2221,10 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(
     assert work_tickets.integration_branch(main_checkout) == "se"
     if leak:
         with pytest.raises(work_tickets.QueueError, match="Public check failed.*nothing was pushed"):
-            work_tickets.integrate(main_checkout, 8, None, None)
+            work_tickets.integrate(main_checkout, 7, None, None)
         assert not origin_contains("refs/heads/se")
         return
-    work_tickets.integrate(main_checkout, 8, None, None)
+    work_tickets.integrate(main_checkout, 7, None, None)
 
     assert origin_contains("refs/heads/se")
     assert not origin_contains("refs/heads/main")
@@ -2233,7 +2239,7 @@ def test_integrate_refuses_a_checkout_off_the_integration_branch(main_checkout, 
     integration_fakes(monkeypatch, "0" * 40)
 
     with pytest.raises(work_tickets.QueueError, match="not on the integration branch se.*switch se"):
-        work_tickets.integrate(main_checkout, 8, None, None)
+        work_tickets.integrate(main_checkout, 7, None, None)
 
 
 def test_integration_branch_defaults_to_main_and_rejects_an_empty_name(worktree):
@@ -2859,23 +2865,17 @@ def outside_answer(repo: list[dict], other: list[dict], more: bool = False) -> s
     return json.dumps({"data": {"r0": repository(repo), "r1": repository(other)}})
 
 
-def test_fleet_issues_carry_the_marker_and_check_adds_it_to_a_report_by_hand(worktree, gh, capsys):
-    for name in ("work", "field-report", "retro"):
+def test_fleet_issues_carry_the_marker_and_the_field_report_is_no_issue(worktree, gh, capsys):
+    for name in ("work", "retro"):
         _, body = work_tickets.issue_template(name)
         assert work_tickets.FLEET_MARKER in body, name
+    assert not (work_tickets.TEMPLATES / "field-report.md").exists()
     run(worktree, "intake", "--issue", "5")
-    report = draft_complete_field_report(worktree)
-    assert work_tickets.FLEET_MARKER in report.read_text(encoding="utf-8")
-    assert run(worktree, "field-report", "--file", str(report)) == 0
-    assert gh.bodies[-1].startswith(work_tickets.FLEET_MARKER + "\n**Work issue:** #5")
-
     by_hand = worktree / "by-hand.md"
     by_hand.write_text(COMPLETE_REPORT, encoding="utf-8")
     assert run(worktree, "field-report", "--check", str(by_hand)) == 0
-    assert by_hand.read_text(encoding="utf-8") == work_tickets.FLEET_MARKER + "\n" + reported_at(TIP)
-    assert "added the fleet marker" in capsys.readouterr().out
-    assert run(worktree, "field-report", "--check", str(by_hand)) == 0
-    assert by_hand.read_text(encoding="utf-8").count(work_tickets.FLEET_MARKER) == 1
+    assert by_hand.read_text(encoding="utf-8") == reported_at(TIP)  # only the tip is filled in
+    assert "marker" not in capsys.readouterr().out
 
 
 def test_intake_outside_lists_each_unmarked_unhandled_issue_once_from_one_query(
@@ -3165,8 +3165,17 @@ def test_deliver_names_the_issue_with_a_closing_keyword_only_for_pre_merge_accep
 def test_pr_body_prints_the_form_deliver_writes(tmp_path, capsys, body, keyword):
     issue_body = tmp_path / "issue.md"
     issue_body.write_text(body, encoding="utf-8")
-    assert work_tickets.main(["pr-body", "--issue-body", str(issue_body), "--issue-url", URL]) == 0
-    assert capsys.readouterr().out == f"{keyword} {URL}\n\nWork issue #5.\n"
+    report = tmp_path / "report.md"
+    report.write_text(COMPLETE_REPORT.replace("## Spec gaps", "<!-- a template comment -->\n## Spec gaps"),
+                      encoding="utf-8")
+    assert work_tickets.main(["pr-body", "--issue-body", str(issue_body), "--issue-url", URL,
+                              "--field-report", str(report)]) == 0
+    assert capsys.readouterr().out == f"{keyword} {URL}\n\n{COMPLETE_REPORT}"
+
+    report.write_text("no markers\n", encoding="utf-8")
+    assert work_tickets.main(["pr-body", "--issue-body", str(issue_body), "--issue-url", URL,
+                              "--field-report", str(report)]) == 1
+    assert "holds no field report" in capsys.readouterr().err
 
 
 def test_integrate_leaves_an_issue_with_post_merge_acceptance_open_and_reports_github_states(
@@ -3190,7 +3199,8 @@ def test_integrate_leaves_an_issue_with_post_merge_acceptance_open_and_reports_g
     def gh_call(root, args):
         calls.append(args)
         if args[:2] == ["pr", "view"]:
-            return json.dumps({"headRefName": "feature/worker", "headRefOid": head})
+            return json.dumps({"headRefName": "feature/worker", "headRefOid": head, "body": report["body"],
+                           "url": "https://git.example/owner/repo/pull/7"})
         if args[:2] == ["issue", "close"]:
             closed.add(args[2])
         if args[:2] == ["issue", "view"]:
@@ -3200,13 +3210,13 @@ def test_integrate_leaves_an_issue_with_post_merge_acceptance_open_and_reports_g
     monkeypatch.setattr(work_tickets, "run_gh_with_body",
                         lambda root, args, body: calls.append(args) or bodies.append(body) or "")
 
-    work_tickets.integrate(main_checkout, 8, None, None)
-    assert [call[2] for call in calls if call[:2] == ["issue", "close"]] == ["8"]
+    work_tickets.integrate(main_checkout, 7, None, None)
+    assert [call[2] for call in calls if call[:2] == ["issue", "close"]] == []
+    assert len(bodies) == 1 and "from https://git.example/owner/repo/pull/7. Release: none." in bodies[0]
     assert "Stays open until this acceptance is seen after the merge: " \
            "- [ ] CI is green on main after the merge." in bodies[0]
     output = capsys.readouterr().out
     assert "Issue #5: OPEN on GitHub after the merge" in output
-    assert "Issue #8: CLOSED on GitHub after the merge" in output
     assert "Close #5 once its post-merge acceptance is seen" in output
 
 
@@ -3230,3 +3240,126 @@ def test_field_report_check_refuses_a_release_kind_it_cannot_release(
     issue.write_text(BODY, encoding="utf-8")
     assert work_tickets.main(["field-report", "--check", str(report), "--issue-body", str(issue)]) == 1
     assert refusal in capsys.readouterr().err
+
+
+def test_integrate_closes_the_work_issue_with_a_comment_linking_the_pull_request_and_release(
+        main_checkout, monkeypatch):
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    head = subprocess.run(["git", "-C", str(worker), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    calls = integration_fakes(monkeypatch, head)
+    bodies: list[str] = []
+    monkeypatch.setattr(work_tickets, "run_gh_with_body",
+                        lambda root, args, body: calls.append(args) or bodies.append(body) or "")
+    monkeypatch.setattr(work_tickets, "push", lambda root, branch: "v1.3.0")
+
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+    assert bodies == [f"Integrated in {commit} from https://git.example/owner/repo/pull/7. "
+                      "Release: https://git.example/owner/repo/releases/tag/v1.3.0. Suite: 1 passed.\n"]
+    assert [call[:3] for call in calls if call[:2] == ["issue", "close"]] == [["issue", "close", "5"]]
+
+
+class FlowGh:
+    """GitHub for a whole worker-to-integrator run: one work issue and the pull requests made."""
+
+    def __init__(self) -> None:
+        self.issue = {"number": 5, "title": BRANCH, "body": BODY, "url": URL, "state": "OPEN",
+                      "updatedAt": "2026-11-04T10:00:00Z", "comments": [], "labels": []}
+        self.pulls: list[dict] = []
+        self.calls: list[list[str]] = []
+
+    def body(self, arguments: list[str]) -> str:
+        return Path(arguments[arguments.index("--body-file") + 1]).read_text(encoding="utf-8")
+
+    def __call__(self, root: Path, arguments: list[str]) -> str:
+        self.calls.append(arguments)
+        command = arguments[:2]
+        if command == ["issue", "view"] and "--jq" in arguments:
+            return self.issue["state"] + "\n"
+        if command == ["issue", "view"]:
+            return json.dumps(self.issue)
+        if command == ["issue", "close"]:
+            self.issue["state"] = "CLOSED"
+        if command == ["issue", "comment"]:
+            self.issue["comments"].append({"id": "C9", "body": self.body(arguments)})
+        if command == ["pr", "list"]:
+            return json.dumps([pull for pull in self.pulls if pull["state"] == "open"])
+        if command == ["pr", "create"]:
+            self.pulls.append({"number": 7, "title": arguments[arguments.index("--title") + 1],
+                               "url": "https://git.example/owner/repo/pull/7", "state": "open",
+                               "headRefName": arguments[arguments.index("--head") + 1],
+                               "body": self.body(arguments)})
+            return self.pulls[-1]["url"] + "\n"
+        if command == ["pr", "edit"]:
+            self.pulls[0]["body"] = self.body(arguments)
+        if command == ["pr", "view"]:
+            return json.dumps(self.pulls[0])
+        if command == ["issue", "list"]:
+            return "[]"
+        return ""
+
+
+def test_dry_run_of_the_worker_to_integrator_flow_files_no_field_report_issue(
+        main_checkout, monkeypatch, capsys):
+    """Acceptance: draft, check, deliver, queue, release kind and integrate on fakes, from one work
+    issue to its closing comment, with no field-report issue anywhere."""
+    gh = FlowGh()
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", BRANCH, str(worker))
+    (worker / "tool.txt").write_text("tool\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "tool.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "Install every tool")
+
+    # The worker: intake, draft, fill in, check, deliver.
+    assert run(worker, "intake", "--issue", "5") == 0
+    report = worker / ".se" / "work" / "field-report.md"
+    assert run(worker, "field-report", "--draft", str(report)) == 0
+    report.write_text(fill_evidence_rows(report.read_text(encoding="utf-8")).replace(
+        "**Result:** complete | partial", "**Result:** complete"), encoding="utf-8")
+    assert run(worker, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
+    monkeypatch.setattr(work_tickets, "push",
+                        lambda root, branch: git_ok("-C", str(root), "push", "-q", "origin", branch))
+    assert run(worker, "deliver") == 0
+    assert f"field report in PR #7 for {BRANCH}" in capsys.readouterr().out
+    description = gh.pulls[0]["body"]
+    assert description.startswith(f"Fixes {URL}\n\n{BEGIN}\n") and description.endswith(f"{END}\n")
+
+    # The integrator: the queue, the release kind from the description, the merge.
+    git_ok("-C", str(main_checkout), "fetch", "-q", "origin")
+    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, all_repos=False: [])
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, all_repos=False: None)
+    delivered, _, _, _ = work_tickets.queue(main_checkout, "git.example/owner/repo")
+    assert [pull["number"] for pull in delivered] == [7]
+    saved = main_checkout.parent / "description.md"
+    saved.write_text(description, encoding="utf-8")
+    issue = main_checkout.parent / "issue.md"
+    issue.write_text(BODY, encoding="utf-8")
+    assert work_tickets.main(["field-report", "--check", str(saved), "--issue-body", str(issue)]) == 0
+    assert work_tickets.main(["release-trailer", BRANCH, "--issue-body", str(issue),
+                              "--pr-description", str(saved), "--worktree", str(main_checkout)]) == 0
+    assert capsys.readouterr().out.strip().endswith("Release-kind: minor")
+    gh.pulls[0]["headRefOid"] = subprocess.run(
+        ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True,
+        check=True).stdout.strip()
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root: suite_passed(root, "1 passed"))
+    monkeypatch.setattr(work_tickets, "push", lambda root, branch: "v1.1.0")
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+
+    assert gh.issue["state"] == "CLOSED"
+    assert gh.issue["comments"][-1]["body"].startswith(
+        f"Integrated in {commit} from https://git.example/owner/repo/pull/7. "
+        "Release: https://git.example/owner/repo/releases/tag/v1.1.0.")
+    assert "Release-kind: minor" in subprocess.run(
+        ["git", "-C", str(main_checkout), "log", "-1", "--format=%B"], capture_output=True,
+        text=True, check=True).stdout
+    assert not any(call[:2] == ["issue", "create"] or "field-report" in call for call in gh.calls)

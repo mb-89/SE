@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage the Markdown-backed worker ticket queue and its work and field-report issues."""
+"""Manage the Markdown-backed worker ticket queue, its work issues and the field reports in pull requests."""
 
 from __future__ import annotations
 
@@ -73,10 +73,16 @@ BODY_READ = "body-read.json"
 # The issue templates belong to se, wherever a project keeps it; messages name them relative to it.
 TEMPLATE_DIRECTORY = ".github/ISSUE_TEMPLATE"
 TEMPLATES = Path(__file__).resolve().parents[1] / TEMPLATE_DIRECTORY
+# The field report's one form, the pull request template a worker's pull request description is
+# drawn from; the report sits between REPORT_BEGIN and REPORT_END, where the integration reads it.
+FIELD_REPORT_TEMPLATE = ".github/pull_request_template.md"
+REPORT_BEGIN = "<!-- se:field-report -->"
+REPORT_END = "<!-- se:field-report:end -->"
 DELIVERY_TICKET = "delivery"
 # The fleet's marks on GitHub, owned by the work model's "Outside issues": every issue the fleet
-# files carries FLEET_MARKER (as does every issue labelled FLEET_LABEL), and the comment that
-# records an outside issue as handled carries HANDLED_MARKER.
+# files carries FLEET_MARKER (as does every issue labelled FLEET_LABEL, the field-report issues of
+# before field reports moved into pull requests, kept as history), and the comment that records an
+# outside issue as handled carries HANDLED_MARKER.
 FLEET_MARKER = "<!-- se:fleet -->"
 HANDLED_MARKER = "<!-- se:handled -->"
 FLEET_LABEL = "field-report"
@@ -1439,8 +1445,8 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
             "- [ ] Discovery evidence is complete and linked from the field report.\n"
             if discovery else f"{acceptance}\n"
         )
-        + "- [ ] Branch pushed, pull request to the integration branch opened, field-report issue "
-          "created.\n\n"
+        + "- [ ] Branch pushed, pull request to the integration branch opened with the field "
+          "report as its description.\n\n"
         "## Evidence\n"
     )))
     return tickets
@@ -1700,6 +1706,38 @@ def template_labels(value: str) -> list[str]:
     return [label.strip().strip("\"'") for label in value.strip("[]").split(",") if label.strip()]
 
 
+FIELD_REPORT_TEMPLATE_NAME = f"the se checkout's {FIELD_REPORT_TEMPLATE}"
+
+
+def field_report_template() -> str:
+    """The pull request template, the field report's one form, markers included."""
+    path = Path(__file__).resolve().parents[1] / FIELD_REPORT_TEMPLATE
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise QueueError(f"Field-report template not found: {FIELD_REPORT_TEMPLATE_NAME}: {error}") from error
+
+
+def report_in(text: str, where: str) -> str:
+    """The field report a pull request description (or a file holding one) carries between its
+    markers; refused where it carries none."""
+    begin = text.find(REPORT_BEGIN)
+    end = text.find(REPORT_END, begin + len(REPORT_BEGIN)) if begin >= 0 else -1
+    if begin < 0 or end < 0:
+        raise QueueError(
+            f"{where} holds no field report: the report goes between the lines {REPORT_BEGIN} and "
+            f"{REPORT_END} of the pull request description, as {FIELD_REPORT_TEMPLATE_NAME} has "
+            "them; field-report --draft --worktree <worktree> writes them"
+        )
+    return text[begin + len(REPORT_BEGIN):end].strip("\n") + "\n"
+
+
+def marked_report(report: str) -> str:
+    """`report` without its template comments, between the markers, as a description carries it."""
+    cleaned = re.sub(r"\n{3,}", "\n\n", HTML_COMMENT_PATTERN.sub("", report)).strip()
+    return f"{REPORT_BEGIN}\n{cleaned}\n{REPORT_END}\n"
+
+
 def published_ref(root: Path, ref: str) -> str:
     """`origin/<ref>` where `ref` names a branch origin has, as `sync` fetched it; `ref` otherwise.
 
@@ -1815,10 +1853,9 @@ def authored_content_matches(path: str, glob: str) -> bool:
     return re.fullmatch(pattern, path) is not None
 
 
-def guard(root: Path, branch: str, field_report: Path) -> list[str]:
-    if not field_report.is_file():
-        raise QueueError(f"Field report is not a regular file: {field_report}")
-    report = read_file(field_report, "field report")
+def guard(root: Path, branch: str, report: str) -> list[str]:
+    """The tests and authored sentences `branch` removes, refused where the field report `report`
+    does not name each under its Removed behaviour."""
     removed_tests = deleted_tests(root, branch)
     removed_sentences = deleted_authored_sentences(root, branch)
     named = "\n".join(section_content(report, REMOVED_SECTION))
@@ -1851,11 +1888,6 @@ def open_pull_request_number(root: Path, repo: str, branch: str) -> int | None:
         ]
     ))
     return int(data[0]["number"]) if data else None
-
-
-def report_pull_request(root: Path, issue: dict[str, object], branch: str) -> int | None:
-    remote = remote_repo(root)
-    return open_pull_request_number(root, remote, branch) if remote is not None else None
 
 
 PUSH_ATTEMPTS = 10
@@ -1957,8 +1989,8 @@ RELEASE_ORDER = ("patch", "minor", "major")
 RELEASE_TRAILER = "Release-kind"
 RELEASE_TRAILER_PATTERN = re.compile(rf"^{RELEASE_TRAILER}:[ \t]*(\S*)[ \t]*$", re.MULTILINE)
 RELEASE_TRAILER_HELP = (
-    "work_tickets.py release-trailer <branch> --issue-body <file> --field-report <file> prints it "
-    "from the field report"
+    "work_tickets.py release-trailer <branch> --issue-body <file> --pr-description <file> prints "
+    "it from the field report in the pull request description"
 )
 INTEGRATION_SUBJECT_PATTERN = re.compile(r"Integrate ([^\s:()]+)")
 
@@ -2008,7 +2040,8 @@ def release_kind_problems(report_body: str, issue_body: str | None) -> list[str]
 
 def declared_release_kind(branch: str, report_body: str | None, issue_body: str) -> str:
     """The kind a first integration of `branch` releases: its field report's Release kind."""
-    problems = (["no field report given; pass --field-report <file>"] if report_body is None
+    problems = (["no field report given; pass --pr-description <file>, the pull request "
+                 "description that carries it"] if report_body is None
                 else release_kind_problems(report_body, issue_body))
     if problems:
         raise QueueError(f"Cannot release {branch}: " + "; ".join(problems) + "; nothing was merged")
@@ -2064,7 +2097,8 @@ def reported_tip(report_body: str) -> str:
     if match is None:
         raise QueueError(
             "Field report names no Branch tip; the worker runs field-report --check --worktree "
-            "<worktree>, which fills it from the branch, and files the report again; nothing was merged"
+            "<worktree>, which fills it from the branch, and delivers again, which updates the pull "
+            "request description; nothing was merged"
         )
     return match[1]
 
@@ -2089,9 +2123,9 @@ def check_branch_tip(root: Path, report_body: str, branch: str, head: str,
             f"Branch {branch} has commits after the field report's Branch tip "
             f"{reported_tip(report_body)[:12]}:\n" + "\n".join(f"- {commit}" for commit in late)
             + "\nNothing was merged. Either the worker updates the field report in place "
-            "(field-report --check --worktree <worktree> fills the new tip; deliver files it "
-            "again), or the integrator states why the extra commits are included with "
-            "--include-late <reason>"
+            "(field-report --check --worktree <worktree> fills the new tip; deliver writes it "
+            "into the pull request description again), or the integrator states why the extra "
+            "commits are included with --include-late <reason>"
         )
     return late
 
@@ -2296,13 +2330,14 @@ def release(root: Path, branch: str) -> str | None:
     return tag
 
 
-def push(root: Path, branch: str | None = None) -> str:
+def push(root: Path, branch: str | None = None) -> str | None:
     """Gate `branch` (default: the current one), then push it to origin with its upstream set; the
     integration branch is released first and its new tag pushed with it, unless the release
-    workflow pushes the tags (`project.release = "workflow"`)."""
+    workflow pushes the tags (`project.release = "workflow"`). Returns the release's tag, None
+    where nothing is released."""
     required_identity(root, "push")
     branch = branch or current_branch(root)
-    tag = release(root, branch) if branch == integration_branch(root) else None
+    released = tag = release(root, branch) if branch == integration_branch(root) else None
     if tag and release_by_workflow(root):
         workflow_tags(tag)
         tag = None
@@ -2310,7 +2345,7 @@ def push(root: Path, branch: str | None = None) -> str:
     if branch == integration_branch(root):
         guard_pushed_tree(root, branch)
     git_push(root, ["-u", "origin", branch, *((f"refs/tags/{tag}",) if tag else ())])
-    return branch
+    return released
 
 
 # Acceptance that can only be seen after the merge: a run, release or deployment on the integration
@@ -2330,51 +2365,49 @@ def post_merge_acceptance(body: str) -> list[str]:
     ]
 
 
-def pull_request_body(issue: dict[str, object]) -> str:
-    """The pull request body: `Fixes <issue>` where all its acceptance shows before the merge, else
-    `Refs <issue>`, so GitHub never closes an issue before its acceptance can be seen."""
+def pull_request_body(issue: dict[str, object], report: str) -> str:
+    """The pull request description: `Fixes <issue>` where all its acceptance shows before the
+    merge, else `Refs <issue>`, so GitHub never closes an issue before its acceptance can be seen;
+    then the field report `report` between its markers, without the template's comments."""
     keyword = "Refs" if post_merge_acceptance(str(issue.get("body", ""))) else "Fixes"
-    return f"{keyword} {issue['url']}\n\nWork issue #{issue['number']}.\n"
+    return f"{keyword} {issue['url']}\n\n{marked_report(report)}"
 
 
-def deliver(root: Path, tracker: str | None = None) -> str:
+def deliver(root: Path) -> int:
+    """Sync, check the field report, push, and open or update the pull request whose description
+    carries the report; returns the pull request's number. No issue is filed."""
     issue = required_snapshot(root)
     check_issue_read(root, None, None, str(issue["url"]))
     branch = delivery_branch(root, issue)
     sync(root)
-    report = root / ".se" / "work" / "field-report.md"
-    if not report.exists():
-        draft_field_report(root, report, None)
-    validate_field_report_result(report)
+    file = root / ".se" / "work" / "field-report.md"
+    if not file.exists():
+        draft_field_report(root, file)
+    report = checked_report(root, file, str(issue["body"]))
+    if f"#{issue['number']}" not in report and str(issue["url"]) not in report:
+        raise field_report_error(file.name, [f"does not link work issue #{issue['number']}"])
     remote = remote_repo(root)
-    if remote is not None:
-        push(root, branch)
-        pr = open_pull_request_number(root, remote, branch)
-        body = pull_request_body(issue)
-        if pr is None:
-            output = run_gh_with_body(
-                root,
-                ["pr", "create", "--base", integration_branch(root), "--head", branch, "--title", branch,
-                 *repo_arguments(remote)],
-                body,
-            )
-            match = re.search(r"/pull/(\d+)\b", output)
-            if match is None:
-                raise QueueError("Pull request creation did not return a pull request URL")
-            pr = int(match.group(1))
-        else:
-            run_gh_with_body(
-                root, ["pr", "edit", str(pr), "--title", branch, *repo_arguments(remote)], body,
-            )
-    else:
-        pr = None
-
-    if pr is not None:
-        body = report.read_text(encoding="utf-8")
-        body = body.replace("**Pull request:** none", f"**Pull request:** #{pr}", 1)
-        report.write_text(body, encoding="utf-8", newline="\n")
-    _, report_url = file_field_report(root, report, pr, tracker)
-    return report_url
+    if remote is None:
+        raise QueueError(
+            f"deliver: {root} has no origin remote to push {branch} to and open its pull request "
+            "on; add it with git remote add origin <url>"
+        )
+    push(root, branch)
+    pr = open_pull_request_number(root, remote, branch)
+    body = pull_request_body(issue, report)
+    if pr is None:
+        output = run_gh_with_body(
+            root,
+            ["pr", "create", "--base", integration_branch(root), "--head", branch, "--title", branch,
+             *repo_arguments(remote)],
+            body,
+        )
+        match = re.search(r"/pull/(\d+)\b", output)
+        if match is None:
+            raise QueueError("Pull request creation did not return a pull request URL")
+        return int(match.group(1))
+    run_gh_with_body(root, ["pr", "edit", str(pr), "--title", branch, *repo_arguments(remote)], body)
+    return pr
 
 
 def block(root: Path, number: int, blocker: int, repo: str | None) -> None:
@@ -2627,21 +2660,35 @@ def capacity(root: Path, repo: str | None, all_repos: bool = False) -> int | Non
     return max(0, slots - len(active))
 
 
+def delivered_pull_requests(root: Path, repo: str) -> list[dict[str, object]]:
+    """Delivered, waiting for integration: the open pull requests to the integration branch whose
+    description carries a complete field report, one that follows its form."""
+    pulls = json.loads(run_gh(root, [
+        "pr", "list", "--state", "open", "--base", integration_branch(root),
+        "--json", "number,title,url,body", "--limit", "200", *repo_arguments(remote_repo(root) or repo),
+    ]))
+    delivered = []
+    for pull in pulls:
+        try:
+            report = report_in(str(pull.get("body") or ""), f"pull request #{pull['number']}")
+        except QueueError:
+            continue
+        if not field_report_problems(report, None):
+            delivered.append(pull)
+    return delivered
+
+
 def queue(
     root: Path, repo: str, all_repos: bool = False
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], int | None]:
     sync(root)
     labels = repository_label_arguments(root, all_repos)
-    reports = json.loads(run_gh(root, [
-        "issue", "list", "--state", "open", "--label", "field-report",
-        "--json", "number,title,url", "--limit", "200", *labels, *repo_arguments(repo),
-    ]))
     escalations = json.loads(run_gh(root, [
         "issue", "list", "--state", "open", "--label", "escalated",
         "--json", "number,title,url", "--limit", "200", *labels, *repo_arguments(repo),
     ]))
     return (
-        reports,
+        delivered_pull_requests(root, repo),
         escalations,
         ready_issues(root, repo, all_repos),
         capacity(root, repo, all_repos),
@@ -2655,20 +2702,12 @@ def quoted(text: str) -> str:
     return "\n".join(f"> {line}".rstrip() for line in lines)
 
 
-def draft_field_report(root: Path, file: Path, pr: int | None) -> int | None:
+def draft_field_report(root: Path, file: Path) -> None:
+    """Write the field-report template, markers included, to `file` with the work issue, branch,
+    integration-branch commit, branch tip, proposed release kind and user requirement filled in."""
     issue = required_snapshot(root)
     branch = delivery_branch(root, issue)
-    if pr is None:
-        try:
-            pr = report_pull_request(root, issue, branch)
-        except QueueError:
-            pr = None
-    _, body = issue_template("field-report")
-    body = body.replace("#<n>", f"#{issue['number']}", 1)
-    if pr is not None:
-        body = body.replace("#<n>", f"#{pr}", 1)
-    else:
-        body = body.replace("**Pull request:** #<n>", "**Pull request:** none", 1)
+    body = field_report_template().replace("#<n>", f"#{issue['number']}", 1)
     kind = default_release_kind(branch, str(issue["body"]))
     if kind is not None:
         body = body.replace("**Release kind:** <kind>", f"**Release kind:** {kind}", 1)
@@ -2691,7 +2730,6 @@ def draft_field_report(root: Path, file: Path, pr: int | None) -> int | None:
         )
     with file.open("x", encoding="utf-8", newline="\n") as stream:
         stream.write(with_branch_tip(root, body.lstrip("\n")))
-    return pr
 
 
 def ordered_sections(body: str) -> list[tuple[str, list[str]]]:
@@ -2721,14 +2759,15 @@ def label_pattern(label: str) -> re.Pattern[str]:
 
 
 def field_report_problems(body: str, issue_body: str | None) -> list[str]:
-    """Where `body` departs from the field-report template, the one owner of its form.
+    """Where the field report `body` departs from the pull request template, the one owner of its
+    form (the report between the markers).
 
     Every section the template has, every bold field label it writes (`**Result:**`,
     `**Commit groupings:**`), every table's header row and width, the header's placeholders and
     Result, and, given the work issue's body, the evidence gate. A section whose template text
     allows "None" may say only that.
     """
-    _, template = issue_template("field-report")
+    template = report_in(field_report_template(), FIELD_REPORT_TEMPLATE_NAME)
     report = {heading.casefold(): lines for heading, lines in ordered_sections(body)}
     problems: list[str] = []
     for heading, raw in ordered_sections(template):
@@ -2802,7 +2841,7 @@ def table_problems(where: str, template_header: str, text: str) -> list[str]:
 
 def field_report_error(name: str, problems: list[str]) -> QueueError:
     return QueueError(
-        f"Field report {name} does not follow the template {template_name('field-report')}:\n"
+        f"Field report {name} does not follow the template {FIELD_REPORT_TEMPLATE_NAME}:\n"
         + "\n".join(f"- {problem}" for problem in problems)
     )
 
@@ -2847,17 +2886,31 @@ def check_issue_read(
             raise error
 
 
+def checked_report(root: Path | None, file: Path, issue_body: str) -> str:
+    """The field report `file` carries between its markers (a worker's draft or a whole pull
+    request description), refused where it departs from its template or misses evidence against
+    `issue_body`. In a worktree its Branch tip is first set to the branch's commit and written back."""
+    text = read_file(file, "field report")
+    if root is not None:
+        text = with_branch_tip(root, text)
+    report = report_in(text, f"Field report {file.name}")
+    problems = field_report_problems(report, issue_body)
+    if problems:
+        raise field_report_error(file.name, problems)
+    if root is not None:
+        file.write_text(text, encoding="utf-8", newline="\n")
+    return report
+
+
 def check_field_report(
     root: Path | None, file: Path, issue_body_file: Path | None,
     comments: dict[str, object] | None = None,
-) -> bool:
-    """Validate a field-report file against the template without writing GitHub or, given the
-    issue body, without a worktree; in a worktree with a comments-read or body-read record, also
-    refuse comments that arrived after it and a body changed since (read with gh, unless
-    `comments` and the issue body file give them). In a worktree
-    its Branch tip is first set to the branch's commit. A passing report without the fleet marker
-    gets it, so one filed by hand is marked too; returns whether it was added."""
-    body = read_file(file, "field report")
+) -> None:
+    """Validate a field report, the one a pull request description carries between its markers,
+    against the template without writing GitHub or, given the issue body, without a worktree; in a
+    worktree with a comments-read or body-read record, also refuse comments that arrived after it
+    and a body changed since (read with gh, unless `comments` and the issue body file give them).
+    In a worktree its Branch tip is first set to the branch's commit."""
     if issue_body_file is not None:
         issue_body = read_file(issue_body_file, "work issue body")
     elif root is None:
@@ -2873,20 +2926,14 @@ def check_field_report(
                 "run intake, or save the work issue's body to a file and pass --issue-body <file>"
             )
         issue_body = str(snapshot["body"])
-    if root is not None:
-        body = with_branch_tip(root, body)
-    problems = field_report_problems(body, issue_body)
-    if problems:
-        raise field_report_error(file.name, problems)
+    report = checked_report(root, file, issue_body)
     if root is not None and (comments is not None or load_comments_read(root) is not None
                              or load_body_read(root) is not None):
         snapshot = load_snapshot(root)
-        named = WORK_ISSUE_PATTERN.search(body)
+        named = WORK_ISSUE_PATTERN.search(report)
         issue = (str(snapshot["url"]) if snapshot is not None
                  else f"#{named[1]}" if named else "named in the field report")
         check_issue_read(root, comments, None if issue_body_file is None else issue_body, issue)
-    file.write_text(fleet_marked(body), encoding="utf-8", newline="\n")
-    return FLEET_MARKER not in body
 
 
 def branch_tip(root: Path) -> str | None:
@@ -2910,57 +2957,12 @@ def fleet_marked(body: str) -> str:
 
 
 def field_report_placeholders() -> list[str]:
-    """The placeholders in field-report.md's header, its one owner: `<name>` or `#<name>`."""
-    _, template = issue_template("field-report")
+    """The placeholders in the field report's header, its template the one owner: `<name>` or
+    `#<name>`."""
+    template = report_in(field_report_template(), FIELD_REPORT_TEMPLATE_NAME)
     header = re.split(r"^## ", HTML_COMMENT_PATTERN.sub("", template), maxsplit=1,
                       flags=re.MULTILINE)[0]
     return list(dict.fromkeys(re.findall(r"#?<[^<>\n]+>", header)))
-
-
-def file_field_report(
-    root: Path, file: Path, pr: int | None, tracker: str | None = None
-) -> tuple[str, str]:
-    issue = required_snapshot(root)
-    branch = delivery_branch(root, issue)
-    meta, _ = issue_template("field-report")
-    title = meta.get("title", "").replace("<branch>", branch)
-    labels = template_labels(meta.get("labels", ""))
-    labels.extend(sorted(label for label in issue_labels(issue) if label.startswith("repo:")))
-    body = read_file(file, "field report")
-    body = fleet_marked(with_branch_tip(
-        root, re.sub(r"\n{3,}", "\n\n", HTML_COMMENT_PATTERN.sub("", body)).strip() + "\n"))
-    if pr is None:
-        pr = report_pull_request(root, issue, branch)
-    problems = field_report_problems(body, str(issue["body"]))
-    if f"#{issue['number']}" not in body and issue["url"] not in body:
-        problems.append(f"does not link work issue #{issue['number']}")
-    if pr is not None and not re.search(rf"(?:#|/pull/){pr}\b", body):
-        problems.append(f"does not link pull request #{pr}")
-    if problems:
-        raise field_report_error(file.name, problems)
-    repo = repo_arguments(tracker or issue["repo"])
-    open_reports = json.loads(run_gh(root, [
-        "issue", "list", "--state", "open", "--json", "number,title,url", "--limit", "200",
-        *(argument for label in labels for argument in ("--label", label)), *repo,
-    ]))
-    existing = next((report for report in open_reports if report["title"] == title), None)
-    if existing is not None:
-        run_gh_with_body(root, ["issue", "edit", str(existing["number"]), *repo], body)
-        return "updated", existing["url"]
-    output = run_gh_with_body(root, [
-        "issue", "create", "--title", title,
-        *(argument for label in labels for argument in ("--label", label)), *repo,
-    ], body)
-    return "created", output.strip().splitlines()[-1] if output.strip() else title
-
-
-def validate_field_report_result(file: Path) -> None:
-    body = read_file(file, "field report")
-    header = re.split(r"^## ", body, maxsplit=1, flags=re.MULTILINE)[0]
-    if FIELD_REPORT_RESULT_PATTERN.search(header) is None:
-        raise QueueError(
-            f"Field report {file.name}: header Result must be exactly complete or partial"
-        )
 
 
 def ensure_labels(root: Path, repo: str, labels: list[str]) -> None:
@@ -3113,30 +3115,29 @@ def escalate(root: Path, number: int, file: Path, repo: str | None) -> None:
     run_gh(root, ["issue", "edit", str(number), "--add-label", "escalated", *repo_arguments(repo)])
 
 
-def field_report_references(body: str) -> tuple[int, int]:
-    work = WORK_ISSUE_PATTERN.search(body)
-    pull = re.search(r"\bPull request:\*{0,2}\s*#(\d+)\b", body, re.IGNORECASE)
-    if work is None or pull is None:
-        missing = []
-        if work is None:
-            missing.append("Work issue")
-        if pull is None:
-            missing.append("Pull request")
-        raise QueueError("Field report is missing " + " and ".join(missing) + " reference")
-    return int(work.group(1)), int(pull.group(1))
-
-
-def validate_field_report(
-    root: Path, number: int, repo: str
-) -> tuple[dict[str, object], dict[str, object], int, int]:
-    """The field report, its work issue and their numbers, refused where the report is incomplete."""
-    report = fetch_issue(root, number, repo)
-    work, pull = field_report_references(str(report["body"]))
-    work_issue = fetch_issue(root, work, repo)
-    problems = field_report_problems(str(report["body"]), str(work_issue["body"]))
+def pull_request_report(
+    root: Path, pull_number: int, tracker: str
+) -> tuple[dict[str, object], str, dict[str, object], int]:
+    """The pull request, the field report its description carries, its work issue and that
+    issue's number; refused where the description has no report, the report names no work issue,
+    or it departs from its template or misses evidence."""
+    pull = json.loads(run_gh(root, [
+        "pr", "view", str(pull_number), "--json", "number,url,body,headRefName,headRefOid",
+        *repo_arguments(remote_repo(root) or tracker),
+    ]))
+    where = f"pull request #{pull_number}"
+    report = report_in(str(pull.get("body") or ""), f"The description of {where}")
+    work = WORK_ISSUE_PATTERN.search(report)
+    if work is None:
+        raise QueueError(
+            f"The field report in {where} names no work issue; the worker writes "
+            "**Work issue:** #<n> in its header and delivers again"
+        )
+    work_issue = fetch_issue(root, int(work[1]), tracker)
+    problems = field_report_problems(report, str(work_issue["body"]))
     if problems:
-        raise field_report_error(f"#{number}", problems)
-    return report, work_issue, work, pull
+        raise field_report_error(f"in {where}", problems)
+    return pull, report, work_issue, int(work[1])
 
 
 def run_project_command(root: Path, command: str, description: str) -> str:
@@ -3728,6 +3729,15 @@ def delete_merged_branch(root: Path, branch: str, head: str) -> None:
         print("Cleanup: origin merged branch deleted")
 
 
+def release_line(pull_url: str, tag: str | None) -> str:
+    """The closing comment's release: the release page of `tag` beside the pull request at
+    `pull_url`, the tag alone without its URL, or none."""
+    if not tag:
+        return "Release: none."
+    project, separator, _ = pull_url.rpartition("/pull/")
+    return f"Release: {project}/releases/tag/{tag}." if separator else f"Release: {tag}."
+
+
 def restore_pre_merge(root: Path, commit: str) -> None:
     restored = run_git(root, "reset", "--hard", commit)
     if restored.returncode != 0:
@@ -3736,10 +3746,10 @@ def restore_pre_merge(root: Path, commit: str) -> None:
 
 
 def integration_merge_message(
-    root: Path, branch: str, work_number: int, report_number: int, pull_number: int, public: bool
+    root: Path, branch: str, work_number: int, pull_number: int, public: bool
 ) -> str:
     if not public:
-        return f"Integrate {branch} (work issue #{work_number}, field report #{report_number}, PR #{pull_number})"
+        return f"Integrate {branch} (work issue #{work_number}, PR #{pull_number})"
     summary = run_git(root, "log", "--no-merges", "-1", "--format=%s", f"{integration_branch(root)}..{branch}")
     if summary.returncode != 0 or not summary.stdout.strip():
         detail = failure_detail(summary)
@@ -3847,34 +3857,22 @@ def guard_public_push(root: Path, mirror: Mirror) -> None:
 
 def integrate(
     root: Path,
-    report_number: int,
+    pull_number: int,
     repo: str | None,
     build_command: str | None,
     check_commands: list[list[str]] | None = None,
     check_temporary_working_directory: bool = False,
     included: str | None = None,
 ) -> str:
-    """Merge a completed worker branch and perform the mechanical integration steps; `included`
-    states why commits after the field report's Branch tip are merged too."""
+    """Merge a delivered pull request's branch, the field report its description carries, and
+    perform the mechanical integration steps, closing the work issue; `included` states why commits
+    after the field report's Branch tip are merged too."""
     tracker = resolve_repo(root, repo)
-    report, work_issue, work_number, pull_number = validate_field_report(root, report_number, tracker)
-    project_repo = remote_repo(root) or tracker
-    pull = json.loads(run_gh(root, [
-        "pr", "view", str(pull_number), "--json", "headRefName,headRefOid",
-        *repo_arguments(project_repo),
-    ]))
+    pull, report, work_issue, work_number = pull_request_report(root, pull_number, tracker)
     branch = str(pull.get("headRefName", ""))
     if not branch:
         raise QueueError(f"Pull request #{pull_number} has no head branch")
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", newline="\n", suffix=".md", delete=False
-    ) as stream:
-        stream.write(str(report["body"]))
-        report_path = Path(stream.name)
-    try:
-        guard(root, branch, report_path)
-    finally:
-        report_path.unlink(missing_ok=True)
+    guard(root, branch, report)
 
     target = integration_branch(root)
     if current_branch(root) != target:
@@ -3887,12 +3885,12 @@ def integrate(
     if previous.returncode != 0 or not previous.stdout.strip():
         raise QueueError(f"Cannot determine the pre-merge {target}")
     head = str(pull.get("headRefOid", ""))
-    late = check_branch_tip(root, str(report["body"]), branch, head or branch, included)
+    late = check_branch_tip(root, report, branch, head or branch, included)
     mirrors = configured_mirrors(root)
     trailer = config_value("commit_trailer", remote_repo(root), None)
-    kind = release_trailer(root, branch, str(work_issue["body"]), str(report["body"]))
+    kind = release_trailer(root, branch, str(work_issue["body"]), report)
     merged = run_git(root, "merge", "--no-ff", "-m", integration_merge_message(
-                root, branch, work_number, report_number, pull_number,
+                root, branch, work_number, pull_number,
                 public_check_enabled(root) or any(mirror.public for mirror in mirrors),
             ), "-m", kind, *(("-m", trailer) if trailer else ()), branch)
     if merged.returncode != 0:
@@ -3903,7 +3901,7 @@ def integrate(
     contained = run_git(root, "merge-base", "--is-ancestor", head, target)
     if not head or contained.returncode != 0:
         reason = f"merged {target} does not contain the pull request head"
-        integration_escalation(root, report_number, tracker, reason)
+        integration_escalation(root, work_number, tracker, reason)
         raise QueueError(reason)
 
     has_public_mirror = any(mirror.public for mirror in mirrors)
@@ -3917,10 +3915,10 @@ def integrate(
             run_public_check(root, previous.stdout.strip())
     except QueueError as error:
         restore_pre_merge(root, previous.stdout.strip())
-        integration_escalation(root, report_number, tracker, str(error))
+        integration_escalation(root, work_number, tracker, str(error))
         raise
 
-    push(root, target)
+    tag = push(root, target)
     for mirror in mirrors:
         if mirror.public and check_commands:
             run_project_checks(root, check_commands, check_temporary_working_directory)
@@ -3932,26 +3930,24 @@ def integrate(
     extra = (f"Includes {len(late)} commit(s) after the field report's Branch tip: {included}\n"
              if late else "")
     pending = post_merge_acceptance(str(work_issue.get("body", "")))
-    for issue in (work_number, report_number):
-        stays_open = issue == work_number and bool(pending)
-        waits = ("Stays open until this acceptance is seen after the merge: "
-                 + "; ".join(pending) + "\n") if stays_open else ""
-        run_gh_with_body(
-            root, ["issue", "comment", str(issue), *repo_arguments(tracker)],
-            f"Integrated in {commit} from PR #{pull_number}. Suite: {suite_result}.\n{extra}{waits}",
-        )
-        run_gh(root, [
-            "issue", "edit", str(issue), "--remove-label", "in-progress",
-            *repo_arguments(tracker),
-        ])
-        if not stays_open:
-            run_gh(root, ["issue", "close", str(issue), *repo_arguments(tracker)])
-    for issue in (work_number, report_number):
-        state = run_gh(root, [
-            "issue", "view", str(issue), "--json", "state", "--jq", ".state",
-            *repo_arguments(tracker),
-        ]).strip() or "unreadable"
-        print(f"Issue #{issue}: {state} on GitHub after the merge")
+    waits = ("Stays open until this acceptance is seen after the merge: "
+             + "; ".join(pending) + "\n") if pending else ""
+    run_gh_with_body(
+        root, ["issue", "comment", str(work_number), *repo_arguments(tracker)],
+        f"Integrated in {commit} from {pull.get('url') or f'PR #{pull_number}'}. "
+        f"{release_line(str(pull.get('url') or ''), tag)} Suite: {suite_result}.\n{extra}{waits}",
+    )
+    run_gh(root, [
+        "issue", "edit", str(work_number), "--remove-label", "in-progress",
+        *repo_arguments(tracker),
+    ])
+    if not pending:
+        run_gh(root, ["issue", "close", str(work_number), *repo_arguments(tracker)])
+    state = run_gh(root, [
+        "issue", "view", str(work_number), "--json", "state", "--jq", ".state",
+        *repo_arguments(tracker),
+    ]).strip() or "unreadable"
+    print(f"Issue #{work_number}: {state} on GitHub after the merge")
     if pending:
         print(f"Close #{work_number} once its post-merge acceptance is seen: {'; '.join(pending)}")
     try:
@@ -4224,18 +4220,25 @@ def run_body_read(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker's draft: the "
+                       "field report between its se:field-report markers")
+
+
 @command("field-report",
-         "create or update the field-report issue from a filled "
-         ".github/ISSUE_TEMPLATE/field-report.md body",
+         f"draft or check the field report a pull request description carries, in the form of "
+         f"{FIELD_REPORT_TEMPLATE}",
          arg("--worktree",
              help="path to the selected worktree; needed except by --check with --issue-body"),
          Exclusive((
-             arg("--file", type=Path, help="Markdown body file"),
+             arg("--draft", type=Path, metavar="FILE",
+                 help="write the template, markers included, to FILE with work issue, branch, "
+                      "tested commit, branch tip, release kind and user requirement filled in"),
              arg("--check", type=Path, metavar="FILE",
-                 help="only validate FILE against the template, without writing GitHub: its "
-                      "header lines, sections, tables, field labels, placeholders and evidence "
-                      "gate, and, in a worktree with a comments-read or body-read record, refuse "
-                      "comments after it and a changed body"),
+                 help="only validate the report in FILE (" + PR_DESCRIPTION_HELP + ") against "
+                      "the template, without writing GitHub: its header lines, sections, tables, "
+                      "field labels, placeholders and evidence gate, and, in a worktree with a "
+                      "comments-read or body-read record, refuse comments after it and a changed "
+                      "body; refuses a FILE without the markers"),
          ), required=True),
          arg("--issue-body", type=Path, metavar="FILE",
              help="with --check: the work issue's body as your GitHub tools read it now, for the "
@@ -4246,32 +4249,21 @@ def run_body_read(root: Path, args: argparse.Namespace) -> int:
                   "default: read with gh"),
          arg("--newest-comment", metavar="ID",
              help="with --check: the id of the work issue's newest comment, as your GitHub tools "
-                  "read it now ('' for none)"),
-         arg("--draft", action="store_true",
-             help="write the template body with work issue, pull request, branch and user "
-                  "requirement filled in to --file instead"),
-         arg("--pr", type=int, help="pull request number; default: the branch's"))
+                  "read it now ('' for none)"))
 def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
     if args.check is not None:
-        if args.draft:
-            raise QueueError("field-report: --check and --draft exclude each other")
         if (args.comment_count is None) != (args.newest_comment is None):
             raise QueueError(
                 "field-report --check: --comment-count and --newest-comment go together")
         comments = None if args.comment_count is None else {
             "count": args.comment_count, "newest": args.newest_comment}
-        marked = check_field_report(root, args.check, args.issue_body, comments)
-        print(f"Field report {args.check.name} follows the template"
-              + ("; added the fleet marker" if marked else ""))
+        check_field_report(root, args.check, args.issue_body, comments)
+        print(f"Field report {args.check.name} follows the template")
     elif root is None:
-        mode = "--draft" if args.draft else "--file"
-        raise QueueError(f"field-report {mode} needs --worktree <worktree>, the worker's checkout")
-    elif args.draft:
-        pr = draft_field_report(root, args.file, args.pr)
-        print(f"Drafted {args.file}" + ("" if pr else "; no pull request found yet"))
+        raise QueueError("field-report --draft needs --worktree <worktree>, the worker's checkout")
     else:
-        action, url = file_field_report(root, args.file, args.pr)
-        print(f"Field report {action}: {url}")
+        draft_field_report(root, args.draft)
+        print(f"Drafted {args.draft}")
     return 0
 
 
@@ -4379,10 +4371,11 @@ def run_suite_command(root: Path, args: argparse.Namespace) -> int:
                   "origin)",
          WORKTREE,
          arg("--branch", required=True, help="branch to compare with the integration branch"),
-         arg("--field-report", required=True, type=Path,
-             help="field report containing approved removed behaviour and tests"))
+         arg("--pr-description", required=True, type=Path, metavar="FILE",
+             help=PR_DESCRIPTION_HELP + ", naming approved removed behaviour and tests"))
 def run_guard(root: Path, args: argparse.Namespace) -> int:
-    removed = guard(root, args.branch, args.field_report)
+    file = args.pr_description
+    removed = guard(root, args.branch, report_in(read_file(file, "field report"), str(file)))
     if removed:
         for name in removed:
             print(f"Field report names removed protected content: {name}")
@@ -4391,16 +4384,16 @@ def run_guard(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("deliver", "sync, push, create or update the pull request and file report",
+@command("deliver", "sync, check the field report, push, and create or update the pull request "
+                    "whose description carries it; files no issue",
          WORKTREE,
-         arg("--integrator-session", help=f"{SESSION_HELP} to notify"),
-         arg("--tracker",
-             help="field-report tracker [HOST/]OWNER/REPO; default: the work issue tracker"))
+         arg("--integrator-session", help=f"{SESSION_HELP} to notify"))
 def run_deliver(root: Path, args: argparse.Namespace) -> int:
     session = config_value(
         "integrator_session", str(required_snapshot(root)["repo"]), args.integrator_session)
-    report_url = deliver(root, args.tracker)
-    print(f"Notify {session or '<integrator session>'}: field report {report_url}")
+    pr = deliver(root)
+    print(f"Notify {session or '<integrator session>'}: field report in PR #{pr} for "
+          f"{current_branch(root)}")
     return 0
 
 
@@ -4427,20 +4420,21 @@ def run_verified(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("pr-body", "print the pull request body deliver writes: Fixes <issue> where all its "
-                    "acceptance shows before the merge, else Refs <issue>",
+@command("pr-body", "print the pull request description deliver writes: Fixes <issue> where all "
+                    "its acceptance shows before the merge, else Refs <issue>, then the field "
+                    "report between its markers",
          OPTIONAL_WORKTREE, ISSUE_BODY,
-         arg("--issue-url", required=True, help="the work issue's URL, ending in /issues/<n>"))
+         arg("--issue-url", required=True, help="the work issue's URL, ending in /issues/<n>"),
+         arg("--field-report", required=True, type=Path, metavar="FILE",
+             help="the checked field report: " + PR_DESCRIPTION_HELP))
 def run_pr_body(root: Path, args: argparse.Namespace) -> int:
     number = re.search(r"/issues/(\d+)/?$", args.issue_url)
     if number is None:
         raise QueueError(f"pr-body: --issue-url {args.issue_url!r} does not end in /issues/<n>")
-    try:
-        body = args.issue_body.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as error:
-        raise QueueError(f"pr-body: cannot read {args.issue_body}: {error}") from error
-    print(pull_request_body({"number": number.group(1), "url": args.issue_url, "body": body}),
-          end="")
+    body = read_file(args.issue_body, "work issue body")
+    report = report_in(read_file(args.field_report, "field report"), str(args.field_report))
+    print(pull_request_body({"number": number.group(1), "url": args.issue_url, "body": body},
+                            report), end="")
     return 0
 
 
@@ -4450,18 +4444,15 @@ def run_pr_body(root: Path, args: argparse.Namespace) -> int:
          OPTIONAL_WORKTREE,
          arg("branch", help="the integrated branch: the local branch, else origin/<branch>"),
          ISSUE_BODY,
-         arg("--field-report", type=Path, metavar="FILE",
-             help="file holding the field report, required on a first integration: its Release "
-                  "kind; refuses commits on <branch> after its Branch tip, and gives a "
-                  "re-integration its Re-integration kind (default patch)"),
+         arg("--pr-description", type=Path, metavar="FILE",
+             help=PR_DESCRIPTION_HELP + "; required on a first integration: its Release kind; "
+                  "refuses commits on <branch> after its Branch tip, and gives a re-integration "
+                  "its Re-integration kind (default patch)"),
          INCLUDE_LATE)
 def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
-    try:
-        body = args.issue_body.read_text(encoding="utf-8")
-        report = (None if args.field_report is None
-                  else args.field_report.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError) as error:
-        raise QueueError(f"Cannot read {error.filename or 'an input file'}: {error}") from error
+    body = read_file(args.issue_body, "work issue body")
+    file = args.pr_description
+    report = None if file is None else report_in(read_file(file, "pull request description"), str(file))
     if report is not None:
         late = check_branch_tip(root, report, args.branch,
                                 branch_head(root, args.branch), args.include_late)
@@ -4472,9 +4463,10 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("integrate", "validate, merge, test, push and close a field report",
+@command("integrate", "validate the field report a pull request's description carries, merge, "
+                      "test, push and close the work issue",
          WORKTREE,
-         arg("field_report", type=int, help="field-report issue number"),
+         arg("pull_request", type=int, help="the delivered pull request's number"),
          REPO,
          arg("--build-command", help="project's output regeneration command"),
          INCLUDE_LATE,
@@ -4486,10 +4478,10 @@ def run_integrate(root: Path, args: argparse.Namespace) -> int:
     if args.check_command_temporary_directory and not args.check_command:
         raise QueueError("--check-command-temporary-directory requires --check-command")
     commit = integrate(
-        root, args.field_report, args.repo, args.build_command,
+        root, args.pull_request, args.repo, args.build_command,
         args.check_command, args.check_command_temporary_directory, args.include_late,
     )
-    print(f"Integrated field report #{args.field_report} in {commit}")
+    print(f"Integrated pull request #{args.pull_request} in {commit}")
     return 0
 
 
@@ -4550,13 +4542,14 @@ def run_capacity(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("queue", "list open field reports and startable work issues", *TRACKER_QUERY)
+@command("queue", "list delivered pull requests (open, to the integration branch, with a complete "
+                  "field report), escalations and startable work issues", *TRACKER_QUERY)
 def run_queue(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
     ready = ready_issues(root, repo, args.all_repos)
-    reports, escalations, _, slots = queue(root, repo, args.all_repos)
-    for report in reports:
-        print(f"field-report #{report['number']} {report['title']} {report['url']}")
+    delivered, escalations, _, slots = queue(root, repo, args.all_repos)
+    for pull in delivered:
+        print(f"delivered PR #{pull['number']} {pull['title']} {pull['url']}")
     for escalation in escalations:
         print(f"escalated #{escalation['number']} {escalation['title']} {escalation['url']}")
     print("Capacity: unlimited (cloud)" if slots is None else f"Capacity: {slots}")

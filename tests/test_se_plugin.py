@@ -25,6 +25,7 @@ def checkout(tmp_path_factory):
     shutil.copytree(ROOT / "src", root / "src")
     shutil.copytree(ROOT / "scripts", root / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(ROOT / ".github" / "ISSUE_TEMPLATE", root / ".github" / "ISSUE_TEMPLATE")
+    shutil.copy(ROOT / ".github" / "pull_request_template.md", root / ".github")
     for name in ("README.md", "AGENTS.md"):
         shutil.copy(ROOT / name, root)
     assert se_plugin.main(["build", "--root", str(root)]) == 0
