@@ -50,12 +50,13 @@ REMOVED_PYTHON_TEST_PATTERN = re.compile(r"^-\s*def\s+(test_[A-Za-z0-9_]+)\s*\("
 REMOVED_JAVASCRIPT_TEST_PATTERN = re.compile(
     r"""^-\s*(?:test|it)\s*\(\s*(?P<quote>["'`])(?P<name>.*?)(?P=quote)"""
 )
-SENTENCE_PATTERN = re.compile(r"[^.!?]+[.!?]+(?:[\"')\]]+)?")
-PROTECTED_SENTENCE_CONTENT_PATTERN = re.compile(
-    r"```.*?```|`[^`\n]*`|https?://[^\s`<>()]+|\b[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+\b",
-    re.DOTALL,
-)
+# A sentence ends at ".", "!" or "?" (and any closing quotes or brackets) followed by whitespace
+# or the end of the text, so a dot inside a path, file name or version never ends one.
+SENTENCE_PATTERN = re.compile(r"\S.*?[.!?]+[\"')\]]*(?=\s|$)")
+PROTECTED_SENTENCE_CONTENT_PATTERN = re.compile(r"```.*?```|`[^`\n]*`|https?://[^\s`<>()]+", re.DOTALL)
 PROTECTED_DOT = "\uE000"
+PROTECTED_BANG = "\uE001"
+PROTECTED_QUESTION = "\uE002"
 FIELD_REPORT_RESULT_PATTERN = re.compile(r"\*\*Result:\*\*\s*(complete|partial)\s*(?:\n|$)")
 BRANCH_TIP_FIELD = re.compile(r"(\*\*Branch tip:\*\*[ \t]*)(`[^`\n]*`|\S*)")
 BRANCH_TIP_PATTERN = re.compile(r"\*\*Branch tip:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
@@ -1770,6 +1771,28 @@ def deleted_tests(root: Path, branch: str) -> list[str]:
     return found
 
 
+def authored_sentences(text: str) -> list[str]:
+    """The sentences of authored `text`, whitespace collapsed: the one splitter of the guard, at
+    landing and at delivery. Code spans, fenced blocks and URLs stay whole with their sentence."""
+    normalized = re.sub(r"\s+", " ", HTML_COMMENT_PATTERN.sub("", text)).strip()
+
+    def protect_dots(match: re.Match[str]) -> str:
+        protected = match.group()
+        trailing = protected[len(protected.rstrip(".!?")):]
+        body = protected[:len(protected) - len(trailing)] if trailing else protected
+        return body.replace(".", PROTECTED_DOT).replace("!", PROTECTED_BANG).replace(
+            "?", PROTECTED_QUESTION
+        ) + trailing
+
+    protected = PROTECTED_SENTENCE_CONTENT_PATTERN.sub(protect_dots, normalized)
+    return [
+        sentence.replace(PROTECTED_DOT, ".").replace(PROTECTED_BANG, "!").replace(
+            PROTECTED_QUESTION, "?"
+        ).strip()
+        for sentence in SENTENCE_PATTERN.findall(protected)
+    ]
+
+
 def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
     globs = authored_content_globs(root)
     if not globs:
@@ -1814,30 +1837,16 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
             raise QueueError(f"Cannot read {path} at {revision}: {detail}")
         return result.stdout
 
-    def sentences(text: str) -> list[str]:
-        normalized = re.sub(r"\s+", " ", HTML_COMMENT_PATTERN.sub("", text)).strip()
-        def protect_dots(match: re.Match[str]) -> str:
-            protected = match.group()
-            trailing = protected[len(protected.rstrip(".!?")):]
-            body = protected[:len(protected) - len(trailing)] if trailing else protected
-            return body.replace(".", PROTECTED_DOT) + trailing
-
-        protected = PROTECTED_SENTENCE_CONTENT_PATTERN.sub(protect_dots, normalized)
-        return [
-            sentence.replace(PROTECTED_DOT, ".").strip()
-            for sentence in SENTENCE_PATTERN.findall(protected)
-        ]
-
     new_sentences = {
         sentence
         for path, revision in new_files
-        for sentence in sentences(content(path, revision))
+        for sentence in authored_sentences(content(path, revision))
     }
     found: list[str] = []
     for path, revision in old_files:
         if path is None:
             continue
-        for sentence in sentences(content(path, revision)):
+        for sentence in authored_sentences(content(path, revision)):
             removed = f"{path}: {sentence}"
             if sentence not in new_sentences and removed not in found:
                 found.append(removed)
@@ -1860,7 +1869,7 @@ def guard(root: Path, branch: str, report: str) -> list[str]:
     branch = branch_head(root, branch)
     removed_tests = deleted_tests(root, branch)
     removed_sentences = deleted_authored_sentences(root, branch)
-    named = "\n".join(section_content(report, REMOVED_SECTION))
+    named = re.sub(r"\s+", " ", "\n".join(section_content(report, REMOVED_SECTION)))
     missing = [
         *[name for name in removed_tests if name not in named],
         *[sentence for sentence in removed_sentences if sentence not in named],
