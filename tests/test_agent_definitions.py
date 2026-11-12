@@ -12,7 +12,7 @@ SKILL = SOURCE / "skills" / "catch-up" / "SKILL.md"
 WORK_MODEL = SOURCE / "skills" / "work-model" / "SKILL.md"
 DECISION = SOURCE / "skills" / "decision" / "SKILL.md"
 RULE_BOOK = SOURCE / "skills" / "work-model" / "references" / "rules.md"
-ROLES = ("se", "worker", "integrator")
+ROLES = ("se", "worker", "integrator", "reviewer")
 # The authored prose: the agent and skill sources, the issue templates and the pull request template
 # (generated layouts excluded).
 # The field report's form, the pull request template.
@@ -42,7 +42,7 @@ def test_worker_agent_tools_exclude_input_and_workspace_prompts():
     assert "set_workspace" not in front_matter
 
 
-@pytest.mark.parametrize("role", ("worker", "integrator"))
+@pytest.mark.parametrize("role", ("worker", "integrator", "reviewer"))
 def test_non_se_agents_remove_workspace_switching_advice(role):
     text = (AGENTS / f"{role}.md").read_text(encoding="utf-8")
     assert "set_workspace if available" not in text
@@ -63,7 +63,7 @@ def test_skill_links_every_agent_definition():
         assert f"(../../agents/{role}.md)" in text
 
 
-@pytest.mark.parametrize("role", ("worker", "integrator"))
+@pytest.mark.parametrize("role", ("worker", "integrator", "reviewer"))
 def test_non_se_roles_ban_input_prompts_and_escalate(role):
     text = normalized(AGENTS / f"{role}.md")
     assert "never call `ask_user`" in text.casefold()
@@ -76,11 +76,29 @@ def test_only_se_talks_to_the_human():
     dispatcher = normalized(AGENTS / "se.md")
     assert "only session the human talks to" in dispatcher
     assert "only role that may ask the human with `ask_user`" in dispatcher
-    for role in ("worker", "integrator"):
+    for role in ("worker", "integrator", "reviewer"):
         assert "ask the human" not in normalized(AGENTS / f"{role}.md")
     rules = normalized(WORK_MODEL)
     assert "Only SE talks to the human" in rules
     assert "to the human at the top level" not in rules
+
+
+def test_reviewer_finds_verifies_and_judges_in_order_and_files_one_comment():
+    reviewer = normalized(AGENTS / "reviewer.md")
+    steps = ["`review.py brief <n>`", "**The riskiest part first.**", "**Find, in two passes**",
+             "**Verify each candidate**", "`review.py brief <n> --claims`",
+             "**Judge each verified finding**", "`review.py file <n> --report <file>`"]
+    positions = [reviewer.find(step) for step in steps]
+    assert -1 not in positions and positions == sorted(positions), dict(zip(steps, positions))
+    for rule in ("You never write the branch", "never waits for a human", "You file no issue",
+                 "Your one output is the review comment `review.py file` posts",
+                 "You run a model no weaker than the worker's"):
+        assert rule in reviewer, rule
+    front_matter = (AGENTS / "reviewer.md").read_text(encoding="utf-8").split("---")[1]
+    assert "claude.model: inherit" in front_matter
+    copilot = (GITHUB / "agents" / "reviewer.agent.md").read_text(encoding="utf-8").split("---")[1]
+    assert "tools: ['execute', 'read', 'search', 'send_message']" in copilot  # no edit tool
+    assert "strict-tools-list: true" in copilot
 
 
 def test_worker_instructions_require_utf8_file_writes_in_windows_powershell():

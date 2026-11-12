@@ -25,8 +25,8 @@ SOURCE = PurePosixPath("src")
 PLUGIN = "se"
 OWNER = "mb-89"
 REPOSITORY = "https://github.com/mb-89/SE"
-DESCRIPTION = ("SE, the agent a person talks to, with its integrator and worker sub-agents and "
-               "their skills.")
+DESCRIPTION = ("SE, the agent a person talks to, with its integrator, worker and reviewer "
+               "sub-agents and their skills.")
 # `|| true`: a step that needs the person is advice for the session, never a failed start.
 # `--hook`: it ends with SE's greeting (scripts/se_start.py status --hook).
 BOOTSTRAP = 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" --hook || true'

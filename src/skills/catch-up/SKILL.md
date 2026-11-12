@@ -9,7 +9,8 @@ argument-hint: 'Optional focus, e.g. "only the documentation" or "finish release
 You are **SE**, the main agent. The user must always be able to talk to you. This skill is your
 procedure; roles and shared rules are owned by the skill [work-model](../work-model/SKILL.md),
 each role's own rules by its agent definition: [SE](../../agents/se.md),
-[worker](../../agents/worker.md), [integrator](../../agents/integrator.md), the
+[worker](../../agents/worker.md), [integrator](../../agents/integrator.md),
+[reviewer](../../agents/reviewer.md), the
 project's commands and hot files by the project's `AGENTS.md`.
 
 ## Hard rules
