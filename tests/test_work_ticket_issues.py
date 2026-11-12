@@ -2030,7 +2030,10 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
     # On github.com, so the mirror guard knows the owner whose squash commits GitHub writes.
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "github.com/owner/repo")
-    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
+    # The work issue's Goal names the work; the branch's last commit subject ("worker") does not.
+    issue = {"body": "## Goal\n\nShip the worker file to main (SE#3, PR #4). It matters.\n\n"
+                     + report["body"]}
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: issue)
     def gh_call(root, args):
         calls.append(args)
         if args[:2] == ["pr", "view"]:
@@ -2087,7 +2090,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
         ["git", "-C", str(main_checkout), "log", "-1", "--format=%B"],
         capture_output=True, text=True, check=False,
     ).stdout
-    assert "Integrate feature/worker: worker" in message
+    assert message.startswith("Integrate feature/worker: Ship the worker file to main.\n\n")
     assert "\n\nRelease-kind: minor\n" in message  # the trailer push releases by
     assert "#" not in message
     assert "git.example" not in message
@@ -2155,18 +2158,16 @@ def test_public_mirror_guard_rejects_references_and_mismatched_identities(
         )
 
 
-@pytest.mark.parametrize("subject", ["worker #12", "https://example.invalid/worker"])
-def test_public_merge_message_rejects_tracker_references_and_host_addresses(
-        main_checkout, monkeypatch, subject):
-    def summary(arguments, **kwargs):
-        return subprocess.CompletedProcess(arguments, 0, subject + "\n", "")
+@pytest.mark.parametrize("goal", ["Ship the worker, see #12.", "Ship https://example.invalid/worker."])
+def test_public_merge_message_leaves_out_a_goal_with_tracker_references_or_host_addresses(goal):
+    body = f"## Goal\n\n{goal}\n"
+    assert work_tickets.integration_merge_message("feature/worker", 5, 7, True, body) == (
+        "Integrate feature/worker")
 
-    monkeypatch.setattr(work_tickets.subprocess, "run", summary)
 
+def test_public_merge_message_rejects_a_branch_with_a_host_address():
     with pytest.raises(work_tickets.QueueError, match="cannot contain"):
-        work_tickets.integration_merge_message(
-            main_checkout, "feature/worker", 5, 7, True
-        )
+        work_tickets.integration_merge_message("feature/a@b", 5, 7, True, "## Goal\n\nShip it.\n")
 
 
 def test_integrate_conflict_aborts_without_escalating(main_checkout, monkeypatch):
@@ -2345,6 +2346,13 @@ def delivered_worker(main_checkout: Path, monkeypatch) -> tuple[str, list[list[s
     return head, integration_fakes(monkeypatch, head)
 
 
+# The landing pull request's description for PR #7 of work issue #5: it names both and carries the
+# marker by which CI's field-report step reads the report from PR #7 (README "Landing on main").
+LANDING_BODY = ("Refs https://git.example/owner/tracker/issues/5\n\n"
+                "Lands https://git.example/owner/repo/pull/7, whose description is the field report."
+                "\n\n<!-- se:field-report-in 7 -->\n")
+
+
 def origin_main(checkout: Path) -> str:
     return subprocess.run(["git", "--git-dir", str(checkout.parent / "origin.git"), "rev-parse",
                            "refs/heads/main"], capture_output=True, text=True, check=True).stdout.strip()
@@ -2368,7 +2376,7 @@ def test_integrate_lands_through_a_squash_pull_request_after_waiting_for_check(
         "comment", "close_pull"]
     assert github.calls[1] == ("create_pull", landing, "main", title)
     pull = github.pulls[0]
-    assert pull["body"] == reported_at(head)  # the worker's description: its field report
+    assert pull["body"] == LANDING_BODY  # a link to the work pull request, whose description is the report
     assert waits == [30, 30]  # two polls before the run completed
     _, number, sha, squash_title, message = github.calls[5]
     assert (number, squash_title, message) == (20, title, "Release-kind: minor")
@@ -2403,7 +2411,7 @@ def test_integrate_reuses_the_open_landing_pull_request(main_checkout, monkeypat
 
     assert [call[0] for call in github.calls][:3] == ["open_pull", "update_pull", "check_run"]
     assert github.pulls == [github.pulls[0]] and github.pulls[0]["merged"]
-    assert github.pulls[0]["body"] == reported_at(head)
+    assert github.pulls[0]["body"] == LANDING_BODY
     assert "Landing pull request reused: https://git.example/owner/repo/pull/31" in capsys.readouterr().out
 
 
@@ -2554,7 +2562,7 @@ def test_integrate_hands_off_a_plan_of_github_steps_where_gh_is_not_signed_in(
         "create_pull_request", "pull_request_read", "merge_pull_request"]
     opened, checked, merged = (step["arguments"] for step in plan["steps"])
     assert opened == {"owner": "owner", "repo": "repo", "head": landing, "base": "main",
-                      "title": title, "body": reported_at(head)}
+                      "title": title, "body": LANDING_BODY}
     assert checked == {"owner": "owner", "repo": "repo", "method": "get_check_runs",
                        "pullNumber": "<pull number from step 1>"}
     assert merged == {"owner": "owner", "repo": "repo", "pullNumber": "<pull number from step 1>",
@@ -2570,6 +2578,42 @@ def test_integrate_hands_off_a_plan_of_github_steps_where_gh_is_not_signed_in(
     assert "Run the plan's steps, then its last line for pull request #7" in out
     assert subprocess.run(["git", "-C", str(main_checkout), "branch", "--show-current"],
                           capture_output=True, text=True, check=True).stdout.strip() == "main"
+
+
+def test_the_hand_off_plan_titles_by_the_goal_and_links_a_report_over_the_body_limit(
+        main_checkout, monkeypatch, github):
+    """The plan runs unedited: its title names the work issue's Goal, not the branch's last commit
+    subject, and its body stays small while the field report exceeds GitHub's body limit."""
+    head, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    saved = main_checkout.parent / "saved"
+    report = reported_at(head).replace("## Spec gaps\n\nNone.",
+                                       "## Spec gaps\n\n" + "A long finding. " * 5000)
+    assert len(report) > 65536  # GitHub's limit on a pull request body
+    (saved / "pr.md").write_text(report, encoding="utf-8")
+    (saved / "issue.md").write_text(
+        "## Goal\n\nLand the worker file on main (SE#3, PR #4). Why it matters.\n\n" + report,
+        encoding="utf-8")
+
+    assert run(main_checkout, *arguments) == 0
+
+    title = "Integrate feature/worker: Land the worker file on main. (work issue #5, PR #7)"
+    assert "Add the worker file" not in title  # the branch's last commit subject, unrelated
+    plan = json.loads((main_checkout / ".se" / "handoff" / "feature-worker.json")
+                      .read_text(encoding="utf-8"))["plan"]
+    opened, _, merged = (step["arguments"] for step in plan["steps"])
+    assert (opened["title"], merged["commit_title"]) == (title, title)
+    assert opened["body"] == LANDING_BODY and len(opened["body"]) < 1024
+
+
+@pytest.mark.parametrize(("goal", "summary"), [
+    ("The first landing (SE#851, PR #853) showed two flaws. Fix both.",
+     "The first landing showed two flaws."),
+    ("<!-- template comment -->\nShip   it\nnow", "Ship it now"),
+    ("See #12 for the cause.", ""),  # a tracker reference outside an aside: no summary
+    ("", ""),
+])
+def test_the_goal_summary_is_the_goal_s_first_sentence_without_tracker_asides(goal, summary):
+    assert work_tickets.goal_summary(f"## Goal\n\n{goal}\n\n## Package kind\n\npatch\n") == summary
 
 
 def test_integrate_read_back_checks_the_landing_through_git_and_hands_off_the_close_out(

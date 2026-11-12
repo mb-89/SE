@@ -3755,19 +3755,51 @@ def release_line(pull_url: str, tag: str | None) -> str:
     return f"Release: {project}/releases/tag/{tag}." if separator else f"Release: {tag}."
 
 
+GOAL_SECTION = "goal"
+# A parenthesised aside that names a tracker item, `(SE#851, PR #853)`: dropped from a summary.
+TRACKER_ASIDE = re.compile(r"\s*\([^()]*#\d+[^()]*\)")
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def goal_summary(issue_body: str) -> str:
+    """The first sentence of the work issue's Goal, without its tracker asides: what the work is,
+    as the landing's title names it; "" where the Goal is missing or names no more than that."""
+    goal = re.sub(r"<!--.*?-->", "", section(markdown_sections(issue_body), GOAL_SECTION),
+                  flags=re.DOTALL)
+    text = " ".join(goal.split())
+    if not text:
+        return ""
+    sentence = TRACKER_ASIDE.sub("", SENTENCE_END.split(text, maxsplit=1)[0]).strip()
+    if tracker_references(sentence) or PUBLIC_HOST_PATTERN.search(sentence):
+        return ""
+    return one_line(sentence)
+
+
 def integration_merge_message(
-    root: Path, branch: str, work_number: int, pull_number: int, public: bool
+    branch: str, work_number: int, pull_number: int, public: bool, issue_body: str
 ) -> str:
+    """The integration's title, the landing pull request's and the squash commit's: `Integrate
+    <branch>: <the first sentence of the work issue's Goal>`, never a commit's subject; without
+    a public check it also names the work issue and pull request."""
+    summary = goal_summary(issue_body)
+    title = f"Integrate {branch}" + (f": {summary}" if summary else "")
     if not public:
-        return f"Integrate {branch} (work issue #{work_number}, PR #{pull_number})"
-    summary = run_git(root, "log", "--no-merges", "-1", "--format=%s", f"{integration_branch(root)}..{branch}")
-    if summary.returncode != 0 or not summary.stdout.strip():
-        detail = failure_detail(summary)
-        raise QueueError(f"Cannot read the summary for {branch}: {detail}")
-    message = f"Integrate {branch}: {one_line(summary.stdout)}"
-    if tracker_references(message) or PUBLIC_HOST_PATTERN.search(message):
+        return f"{title} (work issue #{work_number}, PR #{pull_number})"
+    if tracker_references(title) or PUBLIC_HOST_PATTERN.search(title):
         raise QueueError("Public merge messages cannot contain tracker references or host addresses")
-    return message
+    return title
+
+
+FIELD_REPORT_IN = "<!-- se:field-report-in {number} -->"
+
+
+def landing_description(work_pull_url: str, work_pull_number: int, issue_url: str) -> str:
+    """The landing pull request's description: short enough for any tool argument, it names the
+    work issue and the work pull request whose description is the field report, and the marker
+    CI's field-report step reads that report by (.github/workflows/check.yml)."""
+    return (f"Refs {issue_url}\n\n"
+            f"Lands {work_pull_url}, whose description is the field report.\n\n"
+            + FIELD_REPORT_IN.format(number=work_pull_number) + "\n")
 
 
 def parsed_identity(configured: object, source: str) -> tuple[str, str]:
@@ -3986,6 +4018,11 @@ def owner_repo(repo: str) -> dict[str, str]:
 def pull_url(repo: str, number: int) -> str:
     host = repo_host(repo) or "github.com"
     return "https://" + f"{host}/{api_repo(repo)}/pull/{number}"
+
+
+def issue_url(repo: str, number: int) -> str:
+    host = repo_host(repo) or "github.com"
+    return "https://" + f"{host}/{api_repo(repo)}/issues/{number}"
 
 
 def tracker_actions(root: Path, repo: str) -> dict[str, Action]:
@@ -4344,8 +4381,9 @@ def integrate(
     trailer = config_value("commit_trailer", remote, None)
     kind = release_trailer(root, branch, str(work_issue["body"]), report)
     title = integration_merge_message(
-        root, branch, work_number, pull_number,
+        branch, work_number, pull_number,
         public_check_enabled(root) or any(mirror.public for mirror in mirrors),
+        str(work_issue.get("body") or ""),
     )
     message = "\n\n".join((kind, *((trailer,) if trailer else ())))
     landing = f"{LANDING_PREFIX}{branch}"
@@ -4388,8 +4426,11 @@ def integrate(
         }
         then = (f"work_tickets.py integrate --read-back {branch} --landing-pull <pull number from "
                 f"step 1> --check-run <check run url from step 2> --worktree {root}")
-        plan = landing_plan(remote, landing, target, base, landed, title, message,
-                            str(pull.get("body") or ""), then)
+        description = landing_description(
+            str(pull.get("url") or pull_url(remote, pull_number)), pull_number,
+            issue_url(tracker, work_number))
+        plan = landing_plan(remote, landing, target, base, landed, title, message, description,
+                            then)
         if handing_off:
             path = handoff_path(root, branch)
             path.parent.mkdir(parents=True, exist_ok=True)

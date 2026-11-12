@@ -1169,6 +1169,37 @@ def test_ci_checks_a_pull_requests_field_report_against_its_work_issue(
         assert made == [] and "no field report in the description" in result.stdout
 
 
+def test_ci_checks_a_landing_pull_requests_field_report_in_the_work_pull_request(
+        tmp_path: Path) -> None:
+    calls = tmp_path / "calls.txt"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    report = "Fixes https://github.com/alice/example/issues/5\n\n<!-- se:field-report -->\nreport"
+    gh = (f'echo "gh $*" >> \'{calls}\'\n'
+          f'case "$2" in */pulls/7) printf \'%s\\n\' \'{report}\';; *) echo "issue body";; esac\n')
+    for name, script in {"gh": gh, "uv": f'echo "uv $*" >> \'{calls}\'\n'}.items():
+        (bin_dir / name).write_text("#!/bin/sh\n" + script, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    body = work_tickets_landing_description()
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PR_BODY": body,
+           "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example"}
+    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env,
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls.read_text(encoding="utf-8").splitlines()[:2] == [
+        "gh api repos/alice/example/pulls/7 --jq .body",
+        "gh api repos/alice/example/issues/5 --jq .body"]
+    assert "the landing's report is the description of pull request 7" in result.stdout
+    assert (tmp_path / "pr-body.md").read_text(encoding="utf-8").endswith("report\n")
+
+
+def work_tickets_landing_description() -> str:
+    """The landing description integrate writes, for work pull request 7 of work issue 5."""
+    import work_tickets  # scripts/ is on the path (tests/conftest.py)
+    return work_tickets.landing_description("https://github.com/alice/example/pull/7", 7,
+                                      "https://github.com/alice/example/issues/5")
+
+
 def test_ci_refuses_a_field_report_that_names_no_work_issue(tmp_path: Path) -> None:
     env = {**os.environ, "PR_BODY": "<!-- se:field-report -->\nreport\n", "RUNNER_TEMP": str(tmp_path),
            "REPOSITORY": "alice/example"}
