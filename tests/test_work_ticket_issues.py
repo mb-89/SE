@@ -3854,6 +3854,67 @@ def test_integrate_leaves_an_issue_with_post_merge_acceptance_open_and_reports_g
     assert "Close #5 once its post-merge acceptance is seen" in output
 
 
+def test_integrate_leaves_an_issue_with_open_points_of_the_landed_head_open(
+        main_checkout, monkeypatch, capsys):
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    head = subprocess.run(["git", "-C", str(worker), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    calls = integration_fakes(monkeypatch, head)
+    report = {"body": reported_at(head)}
+    body = work_tickets.with_open_points(BODY, head, ["Name it"])
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: (
+        {"body": body} if number == 5 else report))
+    bodies: list[str] = []
+
+    def gh_call(root, args):
+        calls.append(args)
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({"headRefName": "feature/worker", "headRefOid": head,
+                               "body": report["body"], "url": "https://git.example/owner/repo/pull/7"})
+        if args[:2] == ["issue", "view"]:
+            return "OPEN\n"
+        return ""
+    monkeypatch.setattr(work_tickets, "run_gh", gh_call)
+    monkeypatch.setattr(work_tickets, "run_gh_with_body",
+                        lambda root, args, body: calls.append(args) or bodies.append(body) or "")
+
+    work_tickets.integrate(main_checkout, 7, None, None)
+    assert [call[2] for call in calls if call[:2] == ["issue", "close"]] == []
+    assert ("Stays open for the review's open points, which a worker takes on this issue: "
+            "3. Name it") in bodies[0]
+    assert "#5 stays open for the review's open points" in capsys.readouterr().out
+
+
+def test_open_points_are_requirements_of_every_delivery_but_the_head_they_passed():
+    sha, later = "a" * 40, "b" * 40
+    body = work_tickets.with_open_points(BODY, sha, ["Name the\nmagic number", "Test it"])
+    items = work_tickets.requirement_items(body)
+    assert items[3] == ("Changes after filing", "Name the magic number")
+    assert items[4][1] == "Test it"
+    assert items[2][1] == "Issue tooling in `scripts/work_tickets.py`."
+    assert work_tickets.open_points(body, sha[:7]) == ["3. Name the magic number", "4. Test it"]
+    assert work_tickets.open_points(body, later) == []
+
+    assert work_tickets.field_report_problems(reported_at(sha[:7]), body) == []
+    problems = work_tickets.field_report_problems(reported_at(later), body)
+    assert any("Requirement 3" in problem for problem in problems)
+    assert any("Requirement 4" in problem for problem in problems)
+
+    filed = BODY.replace("## Verification", "## Changes after filing\n\n3. Added later.\n\n"
+                                            "## Verification")
+    again = work_tickets.with_open_points(filed, sha, ["Name it"])
+    assert again.index("4. Name it") < again.index("## Verification")
+    assert work_tickets.requirement_items(again)[3][1] == "Added later."
+    assert "## not a heading inside a fence" in again and again.endswith("```\n")
+    assert "<!-- se:open-points:end -->\n\n## Verification" in again
+
+
 @pytest.mark.parametrize(("old", "new", "refusal"), [
     ("**Release kind:** minor — adds an example command\n", "",
      'missing "**Release kind:**"'),

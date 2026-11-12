@@ -112,6 +112,12 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
 5. **Close** through `integrate`: it closes the work pull request with a line naming the landing
    one, and the work issue with a comment that links both pull requests, the `check` run and the
    release; then hand the field report's "Tickets for other repositories" to SE.
+   - A work issue whose review passed it with open points (`review.py file`) stays open:
+     `integrate` leaves it open and names the open points. Start a worker on that same issue for
+     them; its next landing closes it.
+   - A pull request whose review declined it does not land: the review escalated its work issue
+     to SE; send SE the line `review.py file` printed, one rank up, as the work model's
+     [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder) says.
    - A work issue whose acceptance can only be seen after the merge (a CI run on the integration
      branch, a release, a deployment) stays open: its pull request names it with `Refs`, not a
      closing keyword (`work_tickets.py pr-body`), and the closing comment names what it waits for.

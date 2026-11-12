@@ -69,6 +69,8 @@ its tools.
     it prints.
   - In the cloud `refs apply` hands its GitHub steps off as a plan and reads back with
     `--read-back` (the work model's [Without gh](../skills/work-model/SKILL.md#without-gh)).
+  - A pull request a review declined (`review.py file`) comes escalated on its work issue: re-scope
+    the issue yourself, or take it to the person as a decision.
 - **Reports** (a review comment, a retro, an overhaul, a check) carry findings, never issues: you
   alone turn them into work, after reading the report. Bundle related findings into one work
   issue, and send rule or principle changes to the person's decision deck, never as separate
