@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import socket
+import subprocess
 from datetime import datetime, timezone
 
 import pytest
@@ -310,3 +312,34 @@ def test_undated_ready_issues_stay_next_and_other_places_ignore_the_line():
     assert page["places"]["needs-you"]["o/b"] == []
     assert [entry["number"] for entry in page["places"]["backlog"]["o/a"]] == [17]
     assert [entry["number"] for entry in page["days"]["2026-11-11"]["o/a"]["issues"]] == [18]
+
+
+PHONE = """
+const {chromium} = require("playwright");
+(async () => {
+    const browser = await chromium.launch();
+    try {
+        const page = await browser.newPage({viewport: {width: 390, height: 844}});
+        await page.goto("file://" + process.argv[1]);
+        const closed = await page.evaluate(() => document.documentElement.scrollWidth);
+        await page.evaluate(() => document.querySelectorAll("details").forEach(box => { box.open = true; }));
+        const open = await page.evaluate(() => document.documentElement.scrollWidth);
+        console.log(JSON.stringify({closed, open}));
+    } finally {
+        await browser.close();
+    }
+})();
+"""
+
+
+def test_the_page_has_no_horizontal_scroll_on_a_390_px_phone(tmp_path):
+    if shutil.which("node") is None or subprocess.run(["node", "-e", "require('playwright')"],
+                                                      capture_output=True).returncode:
+        pytest.skip("node with playwright is not installed")
+    snap = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    snap["repositories"]["o/a"]["issues"][0]["title"] = "a-very-long-title-without-any-break-" * 4
+    destination = tmp_path / "timeline.html"
+    destination.write_text(timeline.render(timeline.model(snap)), encoding="utf-8")
+    result = subprocess.run(["node", "-e", PHONE, str(destination)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"closed": 390, "open": 390}
