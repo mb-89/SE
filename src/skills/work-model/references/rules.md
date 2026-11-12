@@ -55,7 +55,8 @@ Every step that can be a deterministic, tested command is one, and agents keep o
 - **Implementations:**
   - se: the work model's [Mechanical first](../SKILL.md#rules-for-all-roles), the commands of
     [`<se>/scripts/work_tickets.py`](../../../../scripts/work_tickets.py) with their tests.
-  - Go line (frozen): the retro counted `by-hand` answers and scripts in `src/scripts/`.
+  - Go line (frozen): the retro counted `by-hand` answers and the scripts in the Go line's
+    src/scripts/ directory.
 - **Related:** gen-002, wrk-006
 
 ### gen-002 Single point of truth
@@ -834,7 +835,7 @@ visible folders.
 - **Prevents:** a surface cluttered with tooling; a cluttered root that only grows.
 - **Implementations:**
   - Go line (frozen): the battery's `rule-of-five` rule, configured in
-    `src/internal/rules/five.yaml`, with an allowlist that only shrinks.
+    the Go line's src/internal/rules/five.yaml, with an allowlist that only shrinks.
 - **Related:** doc-002
 
 ## Old principle numbers

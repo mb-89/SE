@@ -26,6 +26,12 @@
 - Repository hygiene: `tests/test_repository.py` fails on a tracked binary file, a tracked file over
   200 KB, or a `TODO`/`FIXME` in `scripts/` or `tests/` naming no issue; a file that must break the
   first two goes in its allow list there, with its reason.
+- Dangling references: `tests/test_references.py` fails where the agents, the skills (the rule
+  book among them), README.md or AGENTS.md name what the repository lacks.
+  - A link to a missing file, a missing repository path in code (`scripts/…`, `src/…`, `tests/…`,
+    `.github/…`), or a script subcommand its argument parser does not define.
+  - `scripts/references.py` owns what counts; the issue-filing commands call it too
+    ([Issues](src/skills/work-model/SKILL.md#issues)).
 - Test environment: none to load. Where uv warns that it cannot verify TLS behind a proxy, set
   `UV_SYSTEM_CERTS=1` in that shell.
 
