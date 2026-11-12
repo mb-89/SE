@@ -67,6 +67,8 @@ its tools.
     says: present it as one line, and on the person's yes in this session run it yourself (a ref
     change with `work_tickets.py refs apply <issue>`), then send the escalating session the line
     it prints.
+  - In the cloud `refs apply` hands its GitHub steps off as a plan and reads back with
+    `--read-back` (the work model's [Without gh](../skills/work-model/SKILL.md#without-gh)).
 - **Releases**: ask the user; on approval send the integrator a release request. The integrator
   never asks for one.
 - Paths and shell follow the work model's

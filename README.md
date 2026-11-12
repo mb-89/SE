@@ -272,8 +272,32 @@ does all of it:
 6. It closes the work pull request with a line naming the landing one, closes the work issue and
    cleans up.
 
-GitHub sits behind one door, the class `GitHub` in `work_tickets.py` (`gh api`), which the tests
-replace with a fake.
+Steps 2 to 4 and the GitHub half of step 6 are one plan: numbered GitHub steps, each a tool of the
+host's GitHub tools (the GitHub MCP server's names) with its arguments, and later steps taking what
+earlier ones give (`<pull number from step 1>`). Both paths run that one plan:
+
+- **Where `gh` is signed in**, `integrate` runs it itself through one door, the class `GitHub` in
+  `work_tickets.py` (`gh api`), which the tests replace with a fake.
+- **Where it is not** (Claude's cloud, where `gh` has no account), `integrate` hands it off:
+  - `integrate <pull request> --pr-description <file> --issue-body <file> --branch <head branch>`,
+    from what the session's GitHub tools read, does step 1, pushes `land/<branch>`, keeps what the
+    read-back needs in `.se/handoff/` and prints the plan.
+  - The plan: `create_pull_request` (or `update_pull_request` on the one `list_pull_requests`
+    finds open), `pull_request_read` `get_check_runs` until `check` passes, and
+    `merge_pull_request` with `merge_method` squash, the exact title and message and
+    `expectedHeadSha` at the landing head;
+  - the session runs those steps with its GitHub tools;
+  - `integrate --read-back <branch> --landing-pull <number> --check-run <url>` then reads step 5
+    back through `git fetch` alone (origin's integration branch one commit on the tested base,
+    with the tested tree), finishes everything local of step 6 and prints its close-out plan:
+    the work pull request's comment and close, and the work issue's comment, label and close.
+- A failure on the way prints the escalation as a plan too: the comment and the `escalated`
+  label.
+
+The same split holds for `refs request` and `refs apply` (the work model's
+[Steps only the person approves](src/skills/work-model/SKILL.md#steps-only-the-person-approves)):
+without a signed-in `gh` each prints its comment, dispatch and run steps, and `--read-back` checks
+the refs through `git ls-remote` and prints the rest.
 
 The squash commit carries the release's `se.toml` version, so the release workflow tags it and the
 docs workflow publishes it, as both run on every push to `main`. GitHub commits it for the merging

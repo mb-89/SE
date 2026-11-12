@@ -3981,7 +3981,8 @@ def owner_repo(repo: str) -> dict[str, str]:
 
 
 def pull_url(repo: str, number: int) -> str:
-    return f"https://{repo_host(repo) or 'github.com'}/{api_repo(repo)}/pull/{number}"
+    host = repo_host(repo) or "github.com"
+    return "https://" + f"{host}/{api_repo(repo)}/pull/{number}"
 
 
 def tracker_actions(root: Path, repo: str) -> dict[str, Action]:
@@ -4492,7 +4493,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print("Cleanup: worker worktree retained")
     delete_merged_branch(root, branch, str(state["head"]), landed)
     if door is None:
-        print("Started: none here; SE starts what is unblocked with the host's session tool")
+        print(f"Started: none here; start what is unblocked with the host's session tool ({WITHOUT_GH})")
         return short
     started = 0
     for candidate in ready_issues(root, tracker):
