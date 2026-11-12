@@ -22,6 +22,7 @@ from collections import Counter
 from contextlib import contextmanager
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -5268,6 +5269,307 @@ def refs_apply_read_back(root: Path, number: int, triples: list[tuple[str, str, 
     return f"{after}refs applied on #{number} ({url}): verify and close out"
 
 
+
+# The fleet check: one read of GitHub and origin's branches that lists every stuck or stray piece
+# of work with its remedy, and says healthy otherwise. It only reads.
+
+FLEET_KINDS = ("no branch", "quiet branch", "failed check", "conflict", "stray branch",
+               "impossible block", "block cycle", "waiting on the person")
+FLEET_LEASE_HOURS = 3
+FAILED_CONCLUSIONS = frozenset({"failure", "timed_out", "cancelled", "startup_failure",
+                                "action_required"})
+BLOCKER_PATTERN = re.compile(r"(?<![\w/.-])#(\d+)\b")
+FLEET_PAGES = 5
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One thing the fleet check found: its kind, its issue, its pull request and branch where
+    there are some, what is wrong, the remedy and the open issues it holds up."""
+
+    kind: str
+    issue: int
+    what: str
+    remedy: str
+    pull: int | None = None
+    branch: str | None = None
+    holds: tuple[int, ...] = ()
+
+
+def fleet_lease(root: Path) -> timedelta:
+    """`[fleet] lease_hours` in se.toml: how long in-progress work may go without a push to its
+    branch; built in FLEET_LEASE_HOURS."""
+    hours = se_table(root, "fleet").get("lease_hours", FLEET_LEASE_HOURS)
+    if isinstance(hours, bool) or not isinstance(hours, (int, float)) or hours <= 0:
+        raise QueueError(f"fleet.lease_hours in {root / 'se.toml'} must be a positive number of "
+                         "hours; fix it or remove it for the built-in 3")
+    return timedelta(hours=hours)
+
+
+def fleet_issue(raw: dict[str, object]) -> dict[str, object]:
+    """An issue as the fleet check reads it, from gh's, the REST API's or the GitHub tools' form:
+    number, title, state and state reason in lower case, label names, body and url."""
+    labels = {str(label.get("name", "")) if isinstance(label, dict) else str(label)
+              for label in raw.get("labels") or []}
+    reason = raw.get("state_reason") or raw.get("stateReason") or ""
+    return {"number": int(raw["number"]), "title": str(raw.get("title") or ""),
+            "state": str(raw.get("state") or "").lower(), "reason": str(reason).lower(),
+            "labels": labels, "body": str(raw.get("body") or ""),
+            "url": str(raw.get("html_url") or raw.get("url") or "")}
+
+
+def fleet_pull(raw: dict[str, object]) -> dict[str, object]:
+    """A pull request as the fleet check reads it: number, head branch, description, mergeable
+    state and the conclusion of its `check` run, in lower case."""
+    head = raw.get("head") if isinstance(raw.get("head"), dict) else {}
+    return {"number": int(raw["number"]),
+            "head": str(head.get("ref") or raw.get("headRefName") or ""),
+            "body": str(raw.get("body") or ""),
+            "mergeable": str(raw.get("mergeable_state") or raw.get("mergeStateStatus") or "").lower(),
+            "check": str(raw.get("check") or "").lower()}
+
+
+def blockers_of(issue: dict[str, object]) -> list[int]:
+    """The issues of the same repository its body's `## Blocked by` names."""
+    blocked = section(issue_sections(str(issue["body"])), "blocked by")
+    return sorted({int(number) for number in BLOCKER_PATTERN.findall(blocked)})
+
+
+def fleet_branches(root: Path) -> dict[str, datetime]:
+    """Origin's branches, each with the committer time of its tip, fetched with git."""
+    checked_git(root, "fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*")
+    listed = checked_git(root, "for-each-ref", "--format=%(refname:lstrip=3)%09%(committerdate:iso-strict)",
+                         "refs/remotes/origin/")
+    branches = {}
+    for line in listed.splitlines():
+        name, _, when = line.partition("\t")
+        if name and name != "HEAD" and when:
+            branches[name] = datetime.fromisoformat(when)
+    return branches
+
+
+def unlisted(data: object, key: str) -> list[dict[str, object]]:
+    """The items of a list the GitHub tools gave, bare or under `key`."""
+    if isinstance(data, dict):
+        data = data.get(key, [])
+    if not isinstance(data, list):
+        raise QueueError(f"Expected a JSON list of {key}")
+    return [item for item in data if isinstance(item, dict)]
+
+
+class Fleet:
+    """The fleet check's door through gh: issues of the tracker `repo`, the open pull requests to
+    the integration branch `base` with their `check` run, origin's branches through git."""
+
+    def __init__(self, root: Path, repo: str, base: str) -> None:
+        self.root, self.base, self.github = root, base, GitHub(root, repo)
+
+    def issues(self, state: str) -> list[dict[str, object]]:
+        found = []
+        query = "&labels=work&sort=updated" if state == "closed" else ""
+        for page in range(1, FLEET_PAGES + 1):
+            items = self.github.api(f"issues?state={state}{query}&per_page=100&page={page}")
+            found += [item for item in items if "pull_request" not in item]
+            if len(items) < 100 or state == "closed":
+                break
+        return found
+
+    def issue(self, number: int) -> dict[str, object] | None:
+        try:
+            return self.github.api(f"issues/{number}")
+        except QueueError:
+            return None
+
+    def pulls(self) -> list[dict[str, object]]:
+        pulls = []
+        for listed in self.github.api(f"pulls?state=open&base={self.base}&per_page=100"):
+            pull = self.github.pull(int(listed["number"]))
+            run = self.github.check_run(str(pull["head"]["sha"]), CHECK_NAME)
+            pulls.append({**pull, "check": (run or {}).get("conclusion") or ""})
+        return pulls
+
+    def branches(self) -> dict[str, datetime]:
+        return fleet_branches(self.root)
+
+
+class FileFleet:
+    """The fleet check's door without gh: what the session's GitHub tools read, from files."""
+
+    def __init__(self, root: Path, open_issues: Path, closed_issues: Path, pulls: Path) -> None:
+        self.root = root
+        self.listed = {state: unlisted(json.loads(read_file(file, f"{state} issues")), "issues")
+                       for state, file in (("open", open_issues), ("closed", closed_issues))}
+        self.pull_list = unlisted(json.loads(read_file(pulls, "pull requests")), "pull_requests")
+
+    def issues(self, state: str) -> list[dict[str, object]]:
+        return self.listed[state]
+
+    def issue(self, number: int) -> dict[str, object] | None:
+        return None
+
+    def pulls(self) -> list[dict[str, object]]:
+        return self.pull_list
+
+    def branches(self) -> dict[str, datetime]:
+        return fleet_branches(self.root)
+
+
+def fleet_plan(repo: str, base: str) -> Plan:
+    where = owner_repo(repo)
+    return Plan("fleet check", (
+        Step("open", "list_issues", {**where, "state": "OPEN", "perPage": 100},
+             note="every page; save the issues, with their bodies and labels, as one JSON list",
+             gives=("open issues file",)),
+        Step("closed", "list_issues", {**where, "state": "CLOSED", "labels": ["work"],
+                                       "orderBy": "UPDATED_AT", "direction": "DESC",
+                                       "perPage": 100},
+             note="first page; list_issues gives no state_reason, so replace each closed "
+                  "issue an open issue's Blocked by names with what issue_read get gives (its "
+                  "state_reason) and add those in neither list; save as one JSON list",
+             gives=("closed issues file",)),
+        Step("pulls", "list_pull_requests", {**where, "state": "open", "base": base,
+                                             "perPage": 100},
+             note="then pull_request_read get for each (its mergeable_state) and get_check_runs "
+                  "on its head; save each pull request with \"check\": the conclusion of its "
+                  f"{CHECK_NAME} run, as one JSON list", gives=("pulls file",)),
+    ), then="work_tickets.py fleet-check --open-issues <open issues file> --closed-issues "
+            "<closed issues file> --pulls <pulls file>")
+
+
+def fleet_findings(door: object, now: datetime, lease: timedelta, repository: str
+                   ) -> list[Finding]:
+    """What is stuck or stray in the fleet `door` reads, in FLEET_KINDS order, lowest issue first
+    within a kind; `repository` is the checkout's name, whose `repo:` label (or none) marks the
+    issues whose branches live on this origin."""
+    open_issues = {issue["number"]: issue for issue in map(fleet_issue, door.issues("open"))}
+    closed = {issue["number"]: issue for issue in map(fleet_issue, door.issues("closed"))}
+    pulls = [fleet_pull(pull) for pull in door.pulls()]
+    branches = door.branches()
+    found: list[Finding] = []
+
+    def here(issue: dict[str, object]) -> bool:
+        labels = {label.lower() for label in issue["labels"] if label.lower().startswith("repo:")}
+        return not labels or f"repo:{repository.lower()}" in labels
+
+    # In-progress work: a branch and a push within the lease, a delivered pull request that is green
+    # and merges.
+    for number, issue in open_issues.items():
+        if IN_PROGRESS_LABEL not in issue["labels"] or not here(issue):
+            continue
+        branch = issue["title"]
+        if branch not in branches:
+            found.append(Finding(
+                "no branch", number, f"in progress, but origin has no branch {branch}",
+                f"start a worker on #{number} (work_tickets.py start), or take in-progress off "
+                "and label it ready", branch=branch))
+        elif now - branches[branch] > lease:
+            hours = int((now - branches[branch]).total_seconds() // 3600)
+            found.append(Finding(
+                "quiet branch", number,
+                f"no push to {branch} for {hours} hours, over the lease of "
+                f"{lease.total_seconds() / 3600:g}",
+                f"read its worker's session; where it stopped, start a worker again on {branch}, "
+                "which syncs and delivers what it has", branch=branch))
+    for pull in pulls:
+        report = REPORT_BEGIN in pull["body"]
+        work = WORK_ISSUE_PATTERN.search(pull["body"])
+        number = int(work[1]) if work else next(
+            (n for n, issue in open_issues.items() if issue["title"] == pull["head"]), 0)
+        if not report:
+            continue
+        if pull["check"] in FAILED_CONCLUSIONS:
+            found.append(Finding(
+                "failed check", number, f"{CHECK_NAME} concluded {pull['check']} on {pull['head']}",
+                f"a worker on {pull['head']} syncs, makes {CHECK_NAME} pass and delivers again",
+                pull=pull["number"], branch=pull["head"]))
+        if pull["mergeable"] in {"dirty", "conflicting"}:
+            found.append(Finding(
+                "conflict", number, f"{pull['head']} conflicts with the integration branch",
+                f"a worker on {pull['head']} runs work_tickets.py sync (merge origin/main, never "
+                "rebase), resolves and delivers again", pull=pull["number"], branch=pull["head"]))
+
+    # Branches of closed issues, unless an open issue or pull request still uses the name.
+    in_use = {issue["title"] for issue in open_issues.values()} | {pull["head"] for pull in pulls}
+    for number, issue in closed.items():
+        branch = issue["title"]
+        if branch in branches and branch not in in_use and here(issue):
+            found.append(Finding(
+                "stray branch", number, f"#{number} is closed, but origin still has {branch}",
+                f"git push origin --delete {branch}, once nothing on it is wanted", branch=branch))
+
+    # Blocks: by an issue closed as not planned, or by itself through a cycle.
+    blocked = {number: blockers_of(issue) for number, issue in open_issues.items()}
+    for number, blockers in blocked.items():
+        for blocker in blockers:
+            if blocker in open_issues:
+                continue
+            issue = closed.get(blocker)
+            if issue is None:
+                raw = door.issue(blocker)
+                issue = fleet_issue(raw) if raw else None
+                if issue is not None:
+                    closed[blocker] = issue
+            if issue is not None and issue["reason"] == "not_planned":
+                found.append(Finding(
+                    "impossible block", number, f"blocked by #{blocker}, closed as not planned",
+                    f"take #{blocker} out of #{number}'s Blocked by and its dependency, or close "
+                    f"#{number} too"))
+    cycles: set[int] = set()
+    for start in sorted(blocked):
+        path, seen = [start], {start}
+        while path:
+            following = [b for b in blocked.get(path[-1], []) if b in blocked]
+            if start in following:
+                if start not in cycles:
+                    cycles.update(path)
+                    loop = " -> ".join(f"#{n}" for n in [*path, start])
+                    found.append(Finding(
+                        "block cycle", start, f"blocked by itself: {loop}",
+                        "SE decides which of them does not block the other and takes that block "
+                        "out"))
+                break
+            step = next((b for b in following if b not in seen), None)
+            if step is None:
+                break
+            path.append(step)
+            seen.add(step)
+
+    # What waits on the person, and the open issues it holds up.
+    for number, issue in open_issues.items():
+        if PERSON_LABEL not in issue["labels"]:
+            continue
+        holds, queue_ = set(), [number]
+        while queue_:
+            current = queue_.pop()
+            for waiting, blockers in blocked.items():
+                if current in blockers and waiting not in holds and waiting != number:
+                    holds.add(waiting)
+                    queue_.append(waiting)
+        held = ", ".join(f"#{n}" for n in sorted(holds))
+        found.append(Finding(
+            "waiting on the person", number,
+            f"waits for the person ({PERSON_LABEL})" + (f", holding up {held}" if held else ""),
+            "SE presents it to the person with the decision skill", holds=tuple(sorted(holds))))
+
+    rank = {kind: index for index, kind in enumerate(FLEET_KINDS)}
+    return sorted(found, key=lambda finding: (rank[finding.kind], finding.issue))
+
+
+def fleet_report(found: list[Finding], as_json: bool) -> str:
+    if as_json:
+        return json.dumps({"healthy": not found, "findings": [
+            {"kind": f.kind, "issue": f.issue, "pull": f.pull, "branch": f.branch, "what": f.what,
+             "remedy": f.remedy, "holds": list(f.holds)} for f in found]}, indent=2)
+    if not found:
+        return "healthy"
+    lines = []
+    for finding in found:
+        pull = f" PR #{finding.pull}" if finding.pull else ""
+        lines += [f"{finding.kind} #{finding.issue}{pull}: {finding.what}",
+                  f"  remedy: {finding.remedy}"]
+    return "\n".join(lines)
+
+
 @dataclass(frozen=True)
 class Arg:
     """One argument, as argparse's add_argument takes it."""
@@ -5963,6 +6265,34 @@ def run_queue(root: Path, args: argparse.Namespace) -> int:
     for issue in ready:
         print(f"ready #{issue['number']} {issue['title']}")
     return 0
+
+
+@command("fleet-check", "list every stuck or stray piece of work, each with its issue, pull request "
+                        "and remedy: in-progress work without a branch or a push within the lease, "
+                        "a delivered pull request whose check failed or that conflicts, a branch "
+                        "of a closed issue, a block by an issue closed as not planned or by itself, "
+                        "an se-person issue and what it holds up; 'healthy' and exit code 0 when "
+                        "there is none, exit code 1 otherwise. It only reads. Without gh it prints "
+                        "its GitHub plan and takes the answers from files",
+         OPTIONAL_WORKTREE, REPO, JSON_OUTPUT,
+         arg("--open-issues", type=Path, help="without gh: the open issues the plan read"),
+         arg("--closed-issues", type=Path, help="without gh: the closed issues the plan read"),
+         arg("--pulls", type=Path, help="without gh: the open pull requests the plan read"))
+def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
+    repo = resolve_repo(root, args.repo)
+    base = integration_branch(root)
+    files = (args.open_issues, args.closed_issues, args.pulls)
+    if hand_off():
+        if not all(files):
+            print(fleet_plan(repo, base).text())
+            return 0
+        door = FileFleet(root, *files)
+    else:
+        door = Fleet(root, repo, base)
+    found = fleet_findings(door, datetime.now(timezone.utc), fleet_lease(root),
+                           repository_name(root))
+    print(fleet_report(found, args.json))
+    return 1 if found else 0
 
 
 README = Path(__file__).resolve().parents[1] / "README.md"

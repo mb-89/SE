@@ -581,6 +581,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   do everything local, print their GitHub steps as a plan of tool names and arguments, and
   check the result through git with `--read-back` (README
   [Landing on main](../../README.md#landing-on-main)).
+  - `fleet-check` prints its reading plan and takes the lists the GitHub tools read as files
+    (README [Fleet check](../../README.md#fleet-check)).
   - `file`, `backlog file` and `route` print their [dedupe](#issues) plan: the search, the
     conditions and the filing step. `route` takes the issue as the tools read it, `--issue-title
     <title> --issue-body <file>`; `file --blocked-by` needs gh.

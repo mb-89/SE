@@ -1300,3 +1300,152 @@ def test_the_workflows_door_speaks_the_actions_api(monkeypatch, tmp_path):
         (["api", "-X", "GET", "repos/owner/repo/actions/runs/41/jobs"], None),
         (["api", "-X", "GET", "repos/owner/repo/actions/jobs/7/logs"], None),
     ]
+
+
+NOW = work_tickets.datetime(2026, 11, 12, 12, 0, tzinfo=work_tickets.timezone.utc)
+
+
+def fleet_issue(number: int, title: str, *labels: str, state: str = "open", reason: str = "",
+                blocked_by: tuple[int, ...] = ()) -> dict:
+    blockers = "\n".join(f"#{blocker}" for blocker in blocked_by) or "None"
+    return {"number": number, "title": title, "state": state, "state_reason": reason,
+            "labels": [{"name": label} for label in labels],
+            "body": f"## Goal\n\nWork.\n\n## Blocked by\n\n{blockers}\n",
+            "html_url": f"https://github.com/owner/repo/issues/{number}"}
+
+
+def fleet_pull(number: int, head: str, issue: int, mergeable: str = "clean",
+               check: str = "success") -> dict:
+    body = (f"{work_tickets.REPORT_BEGIN}\n**Work issue:** #{issue}\n{work_tickets.REPORT_END}\n")
+    return {"number": number, "head": {"ref": head, "sha": f"{number:040d}"}, "body": body,
+            "mergeable_state": mergeable, "check": check,
+            "html_url": f"https://github.com/owner/repo/pull/{number}"}
+
+
+class FakeFleet:
+    """The fleet check's door: issues, pull requests and origin's branches, held in memory."""
+
+    def __init__(self, issues: list[dict], pulls: list[dict] = (),
+                 branches: dict[str, object] | None = None) -> None:
+        self.issue_list, self.pull_list = list(issues), list(pulls)
+        self.branch_times = dict(branches or {})
+        self.calls: list[str] = []
+
+    def __call__(self, root: Path, repo: str, base: str) -> "FakeFleet":
+        return self
+
+    def issues(self, state: str) -> list[dict]:
+        self.calls.append(f"issues {state}")
+        return [issue for issue in self.issue_list if issue["state"] == state]
+
+    def issue(self, number: int) -> dict | None:
+        self.calls.append(f"issue {number}")
+        return next((issue for issue in self.issue_list if issue["number"] == number), None)
+
+    def pulls(self) -> list[dict]:
+        return list(self.pull_list)
+
+    def branches(self) -> dict[str, object]:
+        return dict(self.branch_times)
+
+
+def fleet_findings(door: FakeFleet, tmp_path: Path) -> list:
+    return work_tickets.fleet_findings(door, NOW, work_tickets.timedelta(hours=3), "repo")
+
+
+def test_fleet_check_is_healthy_on_a_clean_fleet(tmp_path: Path) -> None:
+    fresh = NOW - work_tickets.timedelta(minutes=20)
+    door = FakeFleet(
+        [fleet_issue(1, "feat/a", "work", "in-progress"), fleet_issue(2, "feat/b", "work", "ready"),
+         fleet_issue(3, "feat/c", "work", state="closed", reason="completed"),
+         fleet_issue(4, "feat/d", "work", "ready", blocked_by=(2,)),
+         fleet_issue(5, "feat/elsewhere", "work", "in-progress", "repo:other")],
+        [fleet_pull(10, "feat/a", 1)], {"main": fresh, "feat/a": fresh})
+    assert fleet_findings(door, tmp_path) == []
+    assert work_tickets.fleet_report([], as_json=False) == "healthy"
+    assert json.loads(work_tickets.fleet_report([], as_json=True)) == {"healthy": True, "findings": []}
+
+
+def test_fleet_check_finds_each_kind_once_with_its_remedy(tmp_path: Path) -> None:
+    old = NOW - work_tickets.timedelta(hours=5)
+    fresh = NOW - work_tickets.timedelta(minutes=5)
+    door = FakeFleet(
+        [fleet_issue(1, "feat/no-branch", "work", "in-progress", "repo:REPO"),
+         fleet_issue(2, "feat/quiet", "work", "in-progress"),
+         fleet_issue(3, "feat/red", "work", "in-progress"),
+         fleet_issue(4, "feat/conflict", "work", "in-progress"),
+         fleet_issue(5, "feat/landed", "work", state="closed", reason="completed"),
+         fleet_issue(6, "feat/dropped", "work", state="closed", reason="not_planned"),
+         fleet_issue(7, "feat/waits-on-dropped", "work", "ready", blocked_by=(6,)),
+         fleet_issue(8, "feat/cycle-a", "work", "ready", blocked_by=(9,)),
+         fleet_issue(9, "feat/cycle-b", "work", "ready", blocked_by=(8,)),
+         fleet_issue(11, "Which name?", "se-person"),
+         fleet_issue(12, "feat/after-answer", "work", "ready", blocked_by=(11,)),
+         fleet_issue(13, "feat/after-that", "work", "ready", blocked_by=(12,))],
+        [fleet_pull(20, "feat/red", 3, check="failure"),
+         fleet_pull(21, "feat/conflict", 4, mergeable="dirty")],
+        {"main": fresh, "feat/quiet": old, "feat/red": fresh, "feat/conflict": fresh,
+         "feat/landed": old})
+    found = fleet_findings(door, tmp_path)
+    by_kind = {finding.kind: finding for finding in found}
+    assert [finding.kind for finding in found] == list(work_tickets.FLEET_KINDS)
+    assert (by_kind["no branch"].issue, by_kind["no branch"].branch) == (1, "feat/no-branch")
+    assert "start" in by_kind["no branch"].remedy
+    assert by_kind["quiet branch"].issue == 2 and "5 hours" in by_kind["quiet branch"].what
+    assert (by_kind["failed check"].issue, by_kind["failed check"].pull) == (3, 20)
+    assert "check" in by_kind["failed check"].remedy
+    assert (by_kind["conflict"].issue, by_kind["conflict"].pull) == (4, 21)
+    assert "merge origin/main" in by_kind["conflict"].remedy and "never rebase" in by_kind["conflict"].remedy
+    assert (by_kind["stray branch"].issue, by_kind["stray branch"].branch) == (5, "feat/landed")
+    assert "git push origin --delete feat/landed" in by_kind["stray branch"].remedy
+    assert by_kind["impossible block"].issue == 7 and "#6" in by_kind["impossible block"].what
+    assert by_kind["block cycle"].issue == 8 and "#8 -> #9 -> #8" in by_kind["block cycle"].what
+    assert (by_kind["waiting on the person"].issue, by_kind["waiting on the person"].holds) == (11, (12, 13))
+    report = work_tickets.fleet_report(found, as_json=False)
+    assert "conflict #4 PR #21" in report and "remedy:" in report
+    data = json.loads(work_tickets.fleet_report(found, as_json=True))
+    assert data["healthy"] is False and data["findings"][3]["pull"] == 21
+    # A closed blocker outside the lists is read once, through the door.
+    assert door.calls.count("issue 6") == 0
+
+
+def test_fleet_check_reads_a_blocker_it_did_not_list_through_the_door(tmp_path: Path) -> None:
+    door = FakeFleet([fleet_issue(7, "feat/waits", "work", "ready", blocked_by=(6,))])
+    door.issue_list.append(fleet_issue(6, "feat/old", "work", state="closed", reason="not_planned"))
+    door.issues = lambda state: [issue for issue in door.issue_list
+                                 if issue["state"] == state and issue["number"] != 6]
+    found = fleet_findings(door, tmp_path)
+    assert [(finding.kind, finding.issue) for finding in found] == [("impossible block", 7)]
+    assert door.calls == ["issue 6"]
+
+
+def test_fleet_check_command_prints_findings_and_exits_one(tmp_path: Path, monkeypatch, capsys) -> None:
+    door = FakeFleet([fleet_issue(1, "feat/no-branch", "work", "in-progress")], branches={})
+    monkeypatch.setattr(work_tickets, "Fleet", door)
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "fleet_branches", lambda root: {})
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "github.com/owner/repo")
+    assert work_tickets.main(["fleet-check", "--worktree", str(tmp_path), "--repo", "owner/repo"]) == 1
+    assert "no branch #1" in capsys.readouterr().out
+
+
+def test_fleet_check_without_gh_prints_its_plan_then_reads_the_answers(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "fleet_branches", lambda root: {"feat/landed": NOW})
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "github.com/owner/repo")
+    arguments = ["fleet-check", "--worktree", str(tmp_path), "--repo", "owner/repo"]
+    assert work_tickets.main(arguments) == 0
+    plan = capsys.readouterr().out
+    assert "GitHub plan: fleet check" in plan and "list_issues" in plan
+    assert "pull_request_read" in plan and "--open-issues" in plan
+    open_file, closed_file, pulls_file = (tmp_path / name for name in ("open.json", "closed.json", "pulls.json"))
+    open_file.write_text(json.dumps({"issues": []}), encoding="utf-8")
+    closed_file.write_text(json.dumps([{**fleet_issue(5, "feat/landed", "work", state="closed"),
+                                        "state": "CLOSED", "state_reason": "COMPLETED",
+                                        "labels": ["work"]}]), encoding="utf-8")
+    pulls_file.write_text("[]", encoding="utf-8")
+    assert work_tickets.main([*arguments, "--open-issues", str(open_file), "--closed-issues",
+                              str(closed_file), "--pulls", str(pulls_file), "--json"]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert [(item["kind"], item["issue"]) for item in data["findings"]] == [("stray branch", 5)]
