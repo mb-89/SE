@@ -133,6 +133,10 @@ every package, so work issues and session prompts never repeat it.
    **Never end your turn without delivering.** Your turn ends only after step 7. If you stop working
    for any reason (blocked, out of ideas, unsure), deliver what you have and name the blocker in the
    field report's "Not delivered"; an idle session with no field report is a failure.
+
+   The plugin's Stop hook holds you to it ([README "Stop hook"](../README.md#stop-hook)): it
+   refuses your turn's end until an open pull request carries a field report that passes the check
+   at the branch tip, and its refusal names what is missing.
 7. **Notify the integrator**, as the last delivery step and only once: a worker whose prompt names
    an integrator session sends it one queued message (`send_message`, delivery `queue`):
    `field report in PR #<m> for <branch>`. No questions, no other messages. A worker whose prompt

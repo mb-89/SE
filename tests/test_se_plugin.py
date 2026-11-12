@@ -134,6 +134,16 @@ def test_the_plugin_manifests_install_the_whole_checkout_and_bootstrap_it(checko
     assert (ROOT / "scripts" / "bootstrap.sh").is_file()
 
 
+def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
+    plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    for event in ("Stop", "SubagentStop"):
+        [entry] = plugin["hooks"][event]
+        [hook] = entry["hooks"]
+        assert hook["type"] == "command"
+        assert '"${CLAUDE_PLUGIN_ROOT}/scripts/work_tickets.py" stop-check' in hook["command"]
+        assert hook["command"].endswith("|| true")  # a hook that cannot run lets the turn end
+
+
 def test_the_readme_installs_the_plugin_the_marketplace_declares():
     marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
     readme = (ROOT / "README.md").read_text(encoding="utf-8").split("## Install", 1)[1].split("\n## ", 1)[0]
