@@ -668,7 +668,24 @@ Anything controversial goes to a person, and everything else flows without one.
   - se: the [escalation ladder](../SKILL.md#escalation-ladder); decisions reach the person as
     decision notes in a deck ([decision skill](../../decision/SKILL.md)), never as issues.
   - Go line (frozen): the retro counted `se-person` answers.
-- **Related:** wrk-004
+- **Related:** wrk-004, dec-012
+
+### dec-012 Only SE asks the person
+
+Every question and approval for the person goes through SE, and no other role's procedure has a
+step that needs the person in its session.
+
+- **Why:** the person talks to one session, and a host counts an approval only in the session it
+  was given; a step another role needs approved must therefore run in SE's session.
+- **Without it:** the person is sent into integrator and worker sessions they do not monitor, and
+  a step waits there for a yes, or runs under a relayed one.
+- **Prevents:** a person asked outside SE's session; a one-way step stuck on an approval no one
+  gives; a one-way step run on an approval given elsewhere.
+- **Implementations:**
+  - se: [Steps only the person approves](../SKILL.md#steps-only-the-person-approves) in the work
+    model; `work_tickets.py refs request` and `refs apply`; `tests/test_agent_definitions.py`
+    refuses a non-SE agent or skill file that sends the person to its session.
+- **Related:** dec-008, dec-011
 
 ## pub: publishing and security
 
