@@ -720,3 +720,28 @@ def test_nothing_calls_an_se_workflow_at_a_branch():
     for path in [*(PROJECT / ".github" / "workflows").glob("*.yml"), PROJECT / "README.md"]:
         for line in path.read_text(encoding="utf-8").splitlines():
             assert not re.search(r"mb-89/SE/\S+@(se|main)\b", line), f"{path.name}: {line}"
+
+
+def test_the_squash_commit_onto_an_unrelated_main_releases_its_version_and_major_only(checkout):
+    """se becoming main: main's first-parent history holds a line that never had an se.toml, then
+    one squash commit with se's tree at a new major; se's own tags stay where they are."""
+    hook_origin(checkout)
+    old = origin_tag(checkout, "v1.2.3")
+    git(checkout, "push", "-q", "origin", "main:se")
+    git(checkout, "switch", "-q", "--orphan", "go")
+    for name in ("go.mod", "main.go"):
+        (checkout / name).write_text(name, encoding="utf-8")
+        git(checkout, "add", name)
+        git(checkout, "commit", "-q", "-m", f"Add {name}")
+    git(checkout, "rm", "-q", "go.mod", "main.go")
+    git(checkout, "checkout", "-q", "main", "--", ".")
+    (checkout / "se.toml").write_text(settings("2.0.0") + 'release = "workflow"\n', encoding="utf-8")
+    git(checkout, "add", ".")
+    git(checkout, "commit", "-q", "-m", "se becomes main")
+    squash = git(checkout, "rev-parse", "HEAD")
+    git(checkout, "push", "-q", "--force", "origin", "go:main")
+    result = run_workflow(checkout)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert received(checkout)[-2:] == ["refs/tags/v2.0.0", "refs/tags/v2"]
+    assert origin_tag(checkout, "v2.0.0") == origin_tag(checkout, "v2") == squash
+    assert origin_tag(checkout, "v1.2.3") == old and "v1" not in origin_tags(checkout)
