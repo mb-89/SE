@@ -259,12 +259,20 @@ does all of it:
    `Integrate <branch>` merge with its `Release-kind` trailer), runs the complete suite, the
    output regeneration, the project checks and the public check, and releases there.
 2. It pushes `land/<branch>` and opens a pull request of it into the integration branch, or reuses
-   the one still open from an earlier attempt, with the work pull request's description, the
-   field report, as its description.
+   the one still open from an earlier attempt.
+   - Its title is the merge's title, `Integrate <branch>: <the first sentence of the work issue's
+     Goal>`, never a commit's subject. Tracker asides such as `(PR #<n>)` are dropped; without a
+     usable Goal it is `Integrate <branch>` alone.
+   - Its description is always a link, never the report, so it fits GitHub's body limit and any
+     tool argument whatever the report's size: `Refs <work issue>`, the work pull request, and the
+     marker `<!-- se:field-report-in <n> -->`.
+   - The check's field-report step reads that marker and checks the description of work pull
+     request `<n>`, the field report, against its work issue
+     ([AGENTS.md "Public safety"](AGENTS.md#public-safety)).
 3. It waits for the check `check` on the landing head, polling every 30 s for up to an hour; a
    conclusion other than success merges nothing and escalates.
 4. It squash-merges at exactly that head with the merge's message as the commit title and message,
-   so the squash commit carries `Integrate <branch>: <title>` and the `Release-kind` trailer, and
+   so the squash commit carries `Integrate <branch>: <goal>` and the `Release-kind` trailer, and
    no ` (#<number>)` or `Co-authored-by:` line GitHub's defaults would add. Where origin's
    integration branch moved while it waited, it merges nothing: integrate again.
 5. It reads the merge back: the pull request merged at that commit, which is origin's integration

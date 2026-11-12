@@ -55,7 +55,9 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   fails there; `check` is the check `main`'s ruleset requires.
   - The same job runs every other check an integration runs: `se_plugin.py check`,
     `work_tickets.py docs --check`, `field-report --check` of a pull request's description
-    against its work issue where it carries a report, and `work_tickets.py suite` in budget.
+    against its work issue where it carries a report (a landing pull request's, from the work
+    pull request it links, README [Landing on main](README.md#landing-on-main)), and
+    `work_tickets.py suite` in budget.
 - A `--range` on a shallow clone that reaches beyond the fetched history is refused with exit code
   2, naming `git fetch --unshallow`, so a gate never passes over commits it cannot see.
 - The project identity ([pub-002](src/skills/work-model/references/rules.md#pub-002-a-generic-commit-identity)) in the commit

@@ -64,9 +64,16 @@ jobs:
         run: |
           # A worker's pull request carries its field report; it is checked against its work issue,
           # the issue its first line `Fixes|Refs <issue url>` names. A pull request without the
-          # report's marker (a landing or switch pull request) has none to check.
+          # report's marker (a switch pull request) has none to check. A landing pull request
+          # carries `<!-- se:field-report-in <n> -->` instead: the report is the description of the
+          # work pull request <n>, read from there (README "Landing on main").
           body="$RUNNER_TEMP/pr-body.md"
           printf '%s\n' "$PR_BODY" > "$body"
+          work=$(sed -nE 's#^<!-- se:field-report-in ([0-9]+) -->[[:space:]]*$#\1#p' "$body" | head -n 1)
+          if [ -n "$work" ]; then
+            echo "field-report: the landing's report is the description of pull request $work"
+            gh api "repos/$REPOSITORY/pulls/$work" --jq .body > "$body"
+          fi
           if ! grep -q '<!-- se:field-report -->' "$body"; then
             echo "field-report: no field report in the description, nothing to check"
             exit 0
