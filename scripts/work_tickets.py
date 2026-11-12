@@ -3890,16 +3890,19 @@ class GitHub:
     def __init__(self, root: Path, repo: str) -> None:
         self.root, self.slug, self.host = root, api_repo(repo), repo_host(repo)
 
-    def api(self, path: str, method: str = "GET", data: dict[str, object] | None = None) -> object:
+    def text(self, path: str, method: str = "GET", data: dict[str, object] | None = None) -> str:
+        """The raw response to `method` on `repos/<repo>/<path>`, with `data` as its JSON body."""
         arguments = ["api", "-X", method, f"repos/{self.slug}/{path}",
                      *(("--hostname", self.host) if self.host and self.host != "github.com" else ())]
         if data is None:
-            output = run_gh(self.root, arguments)
-        else:
-            with tempfile.TemporaryDirectory() as directory:
-                body = Path(directory) / "body.json"
-                body.write_text(json.dumps(data), encoding="utf-8")
-                output = run_gh(self.root, [*arguments, "--input", str(body)])
+            return run_gh(self.root, arguments)
+        with tempfile.TemporaryDirectory() as directory:
+            body = Path(directory) / "body.json"
+            body.write_text(json.dumps(data), encoding="utf-8")
+            return run_gh(self.root, [*arguments, "--input", str(body)])
+
+    def api(self, path: str, method: str = "GET", data: dict[str, object] | None = None) -> object:
+        output = self.text(path, method, data)
         return json.loads(output) if output.strip() else {}
 
     def pull(self, number: int) -> dict[str, object]:
@@ -4173,6 +4176,203 @@ def integrate(
         started += 1
     print(f"Started: {started}")
     return short
+
+
+REF_WORKFLOW = "ref-maintenance.yml"
+REFS_REQUEST_MARKER = "<!-- se:refs-request -->"
+REFS_DRY_RUN_MARKER = "<!-- se:refs-dry-run -->"
+REFS_APPLIED_MARKER = "<!-- se:refs-applied -->"
+REFS_REQUEST_ID_PATTERN = re.compile(r"<!-- se:refs-request-id (\d+) -->")
+REFS_BLOCK_PATTERN = re.compile(r"```text\n(.*?)```", re.DOTALL)
+ZERO_SHA = "0" * 40
+SHA_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
+RUN_POLL_SECONDS = 10
+RUN_POLLS = 90  # fifteen minutes: the run pushes refs, a queued runner may add some
+TIMESTAMP_PATTERN = re.compile(r"^\S*\d{4}-\d\d-\d\dT[\d:.]+Z ")
+DRY_RUN_LINE_PATTERN = re.compile(r"^(?:set |delete |::error::|To |[ +*=!-]\t|Done$|error: |! )")
+
+
+class Workflows(GitHub):
+    """The door to the issue comments, labels and workflow runs `refs` uses, through `gh api`;
+    tests replace it with a fake."""
+
+    def comments(self, number: int) -> list[dict[str, object]]:
+        found: list[dict[str, object]] = []
+        page = 1
+        while True:
+            batch = self.api(f"issues/{number}/comments?per_page=100&page={page}")
+            found.extend(batch)
+            if len(batch) < 100:
+                return found
+            page += 1
+
+    def comment(self, number: int, body: str) -> dict[str, object]:
+        return self.api(f"issues/{number}/comments", "POST", {"body": body})
+
+    def add_label(self, number: int, label: str) -> None:
+        self.api(f"issues/{number}/labels", "POST", {"labels": [label]})
+
+    def remove_label(self, number: int, label: str) -> None:
+        try:
+            self.api(f"issues/{number}/labels/{label}", "DELETE")
+        except QueueError:
+            pass  # a label already gone is the state asked for
+
+    def newest_run(self, workflow: str) -> int:
+        """The id of the newest workflow_dispatch run of `workflow`, 0 before any."""
+        runs = self.api(f"actions/workflows/{workflow}/runs?event=workflow_dispatch&per_page=1")
+        listed = runs.get("workflow_runs") or []
+        return int(listed[0]["id"]) if listed else 0
+
+    def dispatch(self, workflow: str, ref: str, inputs: dict[str, str]) -> None:
+        self.api(f"actions/workflows/{workflow}/dispatches", "POST", {"ref": ref, "inputs": inputs})
+
+    def run(self, run_id: int) -> dict[str, object]:
+        return self.api(f"actions/runs/{run_id}")
+
+    def run_log(self, run_id: int) -> str:
+        """The log of the run's first job: the one job ref-maintenance has."""
+        jobs = self.api(f"actions/runs/{run_id}/jobs").get("jobs") or []
+        return self.text(f"actions/jobs/{jobs[0]['id']}/logs") if jobs else ""
+
+
+def parse_triples(text: str) -> list[tuple[str, str, str]]:
+    """Whitespace-separated `<old-sha> <new-sha> <ref>` triples, checked as ref-maintenance checks
+    them, so a malformed request fails here and not in a run."""
+    words = text.split()
+    if not words or len(words) % 3:
+        raise QueueError(
+            "The triples must be whitespace-separated <old-sha> <new-sha> <ref>; got "
+            f"{len(words)} words")
+    triples = [tuple(words[index:index + 3]) for index in range(0, len(words), 3)]
+    for old, new, ref in triples:
+        for sha in (old, new):
+            if not SHA_PATTERN.match(sha):
+                raise QueueError(f"{ref}: '{sha}' is not a full 40-character lowercase sha")
+        if not ref.startswith(("refs/heads/", "refs/tags/")):
+            raise QueueError(f"{ref}: only refs/heads/... and refs/tags/... are maintained")
+    if len({ref for _, _, ref in triples}) != len(triples):
+        raise QueueError("Each ref may appear in one triple only")
+    return triples
+
+
+def triples_text(triples: list[tuple[str, str, str]]) -> str:
+    return "".join(f"{old} {new} {ref}\n" for old, new, ref in triples)
+
+
+def triple_line(old: str, new: str, ref: str) -> str:
+    if new == ZERO_SHA:
+        return f"delete {ref} (now {old[:12]})"
+    if old == ZERO_SHA:
+        return f"create {ref} at {new[:12]}"
+    return f"move {ref} {old[:12]} -> {new[:12]}"
+
+
+def run_workflow(door: Workflows, ref: str, triples: list[tuple[str, str, str]], dry_run: bool
+                 ) -> dict[str, object]:
+    """Dispatch ref-maintenance on `ref` with the triples and wait for its run; the finished run.
+    The workflow's concurrency group queues runs in order, so the first run newer than the newest
+    before the dispatch is this one."""
+    before = door.newest_run(REF_WORKFLOW)
+    door.dispatch(REF_WORKFLOW, ref, {"updates": triples_text(triples),
+                                      "dry_run": "true" if dry_run else "false"})
+    run_id = 0
+    for poll in range(1, RUN_POLLS + 1):
+        if not run_id:
+            newest = door.newest_run(REF_WORKFLOW)
+            run_id = newest if newest > before else 0
+        if run_id:
+            run = door.run(run_id)
+            if run.get("status") == "completed":
+                return run
+        state = "not started" if not run_id else str(run.get("status"))
+        print(f"ref-maintenance: {state} (poll {poll}/{RUN_POLLS}); waiting {RUN_POLL_SECONDS} s")
+        wait(RUN_POLL_SECONDS)
+    raise QueueError(
+        f"ref-maintenance did not finish within {RUN_POLLS * RUN_POLL_SECONDS // 60} minutes; "
+        "look at the repository's Actions runs, then run the command again")
+
+
+def dry_run_lines(log: str) -> list[str]:
+    """The lines of a ref-maintenance log that say what the push did or would do."""
+    lines = (TIMESTAMP_PATTERN.sub("", line).rstrip() for line in log.splitlines())
+    return [line for line in lines if DRY_RUN_LINE_PATTERN.match(line)]
+
+
+def refs_request(root: Path, number: int, file: Path, repo: str | None) -> str:
+    """Post the triples on issue `number`, run ref-maintenance's dry run with them, post its
+    output and label the issue escalated; the one-line escalation for SE. A dry run that fails is
+    posted and refused, and nothing is escalated."""
+    repo = resolve_repo(root, repo)
+    triples = parse_triples(read_text_file(file, "triples"))
+    door = Workflows(root, repo)
+    lines = "\n".join(f"- {triple_line(*triple)}" for triple in triples)
+    request = door.comment(number, (
+        f"{REFS_REQUEST_MARKER}\nOne-way ref change for `ref-maintenance`, prepared by the "
+        f"integrator:\n\n{lines}\n\n```text\n{triples_text(triples)}```\n"))
+    run = run_workflow(door, integration_branch(root), triples, dry_run=True)
+    conclusion, url = str(run.get("conclusion")), str(run.get("html_url") or "")
+    output = "\n".join(dry_run_lines(door.run_log(int(run["id"])))) or "(no push lines in the log)"
+    door.comment(number, (
+        f"{REFS_DRY_RUN_MARKER}\n<!-- se:refs-request-id {request['id']} -->\n"
+        f"Dry run of `ref-maintenance`: {conclusion} ({url})\n\n```text\n{output}\n```\n"))
+    if conclusion != "success":
+        raise QueueError(
+            f"The dry run concluded {conclusion} ({url}); nothing was escalated. Fix the triples or "
+            "push the commits they need, then run refs request again")
+    door.add_label(number, "escalated")
+    return (f"escalated #{number}: apply the ref change ({len(triples)} ref(s), dry run passed)? "
+            f"On yes: work_tickets.py refs apply {number}")
+
+
+def posted_request(door: Workflows, number: int) -> tuple[list[tuple[str, str, str]], int]:
+    """The triples of the newest refs request on the issue, refused unless its dry run passed."""
+    comments = door.comments(number)
+    requests = [comment for comment in comments
+                if str(comment.get("body") or "").startswith(REFS_REQUEST_MARKER)]
+    if not requests:
+        raise QueueError(f"#{number} carries no refs request; the integrator posts one with refs request")
+    request = requests[-1]
+    block = REFS_BLOCK_PATTERN.search(str(request.get("body")))
+    triples = parse_triples(block.group(1) if block else "")
+    dry_runs = [comment for comment in comments
+                if str(comment.get("body") or "").startswith(REFS_DRY_RUN_MARKER)
+                and (match := REFS_REQUEST_ID_PATTERN.search(str(comment.get("body"))))
+                and int(match.group(1)) == int(request["id"])]
+    if not dry_runs or ": success (" not in str(dry_runs[-1].get("body")):
+        raise QueueError(
+            f"The newest refs request on #{number} has no passed dry run; the integrator runs refs "
+            "request again")
+    return triples, int(request["id"])
+
+
+def remote_refs(root: Path, refs: list[str]) -> dict[str, str]:
+    listed = checked_git(root, "ls-remote", "origin", *refs)
+    return {name: sha for sha, name in (line.split("\t", 1) for line in listed.splitlines() if line)}
+
+
+def refs_apply(root: Path, number: int, repo: str | None) -> str:
+    """For SE, on the person's yes: run ref-maintenance for real with the triples posted on issue
+    `number`, read the refs back from origin and post the result; the line for the integrator."""
+    repo = resolve_repo(root, repo)
+    door = Workflows(root, repo)
+    triples, request_id = posted_request(door, number)
+    run = run_workflow(door, integration_branch(root), triples, dry_run=False)
+    conclusion, url = str(run.get("conclusion")), str(run.get("html_url") or "")
+    found = remote_refs(root, [ref for _, _, ref in triples]) if conclusion == "success" else {}
+    wrong = [ref for _, new, ref in triples if found.get(ref, ZERO_SHA) != new]
+    applied = conclusion == "success" and not wrong
+    mismatch = f"; not as requested on origin: {', '.join(wrong)}" if conclusion == "success" and wrong else ""
+    door.comment(number, (
+        f"{REFS_APPLIED_MARKER}\n<!-- se:refs-request-id {request_id} -->\n"
+        f"`ref-maintenance` run: {conclusion} ({url}); refs "
+        f"{'applied' if applied else 'not applied'}{mismatch}\n"))
+    if not applied:
+        raise QueueError(
+            f"The ref change on #{number} was not applied: run {conclusion} ({url}){mismatch}; "
+            "read the run, then bring it to the person again")
+    door.remove_label(number, "escalated")
+    return f"refs applied on #{number} ({url}): verify and close out"
 
 
 @dataclass(frozen=True)
@@ -4542,6 +4742,33 @@ def run_backlog_list(root: Path, args: argparse.Namespace) -> int:
         print(f"Backlog issues ({len(found)}):")
         for issue in found:
             print(f"  #{issue['number']} {issue['title']} {issue['url']}")
+    return 0
+
+
+REFS = command_group(
+    "refs", "one-way ref changes through the repository's ref-maintenance workflow: the integrator "
+            "requests, SE applies on the person's yes", dest="refs_action")
+
+
+@command("request", "for the integrator: post the triples on the issue, run ref-maintenance's dry "
+                    "run, post its output and label the issue escalated; prints the line for SE",
+         WORKTREE,
+         arg("issue", type=int, help="the work issue the ref change belongs to"),
+         arg("--triples-file", required=True, type=Path,
+             help="whitespace-separated <old-sha> <new-sha> <ref> triples; all zeros as new deletes"),
+         REPO, parent=REFS)
+def run_refs_request(root: Path, args: argparse.Namespace) -> int:
+    print(refs_request(root, args.issue, args.triples_file, args.repo))
+    return 0
+
+
+@command("apply", "for SE, on the person's yes: run ref-maintenance for real with "
+                  "the triples the issue's newest request posted, read the refs back and post the "
+                  "result; prints the line for the integrator",
+         WORKTREE, arg("issue", type=int, help="the issue carrying the refs request"),
+         REPO, parent=REFS)
+def run_refs_apply(root: Path, args: argparse.Namespace) -> int:
+    print(refs_apply(root, args.issue, args.repo))
     return 0
 
 

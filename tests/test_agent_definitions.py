@@ -405,12 +405,17 @@ def commands_that_need_no_gh() -> set[str]:
         return {call.func.id for call in ast.walk(node)
                 if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)}
 
+    # A class reaches gh when one of its methods, or a base class, does: calling it opens a door.
+    classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+    bases = {name: {base.id for base in node.bases if isinstance(base, ast.Name)}
+             for name, node in classes.items()}
+    callables = {**functions, **classes}
     reaches_gh = {"run_gh"}
     grown = True
     while grown:
         grown = False
-        for name, function in functions.items():
-            if name not in reaches_gh and called(function) & reaches_gh:
+        for name, node in callables.items():
+            if name not in reaches_gh and (called(node) | bases.get(name, set())) & reaches_gh:
                 reaches_gh.add(name)
                 grown = True
     commands: set[str] = set()
