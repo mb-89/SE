@@ -237,6 +237,28 @@ def test_without_a_closed_retro_the_window_is_the_whole_history(checkout):
     assert {check.name: check for check in found.checks}["outside-pr"].checked == 5
 
 
+def test_the_landed_count_is_the_collects_and_reads_only_the_lists(checkout):
+    """The start's count of work landed since the last retro (se_start.py check) is the next
+    retro's window, counted as collect counts it, from the two lists alone."""
+    door = FakeDoor(answers(checkout))
+    assert retro.landed_since_retro(door, REPO, "main") == collected(checkout).sizes["landed"] == 2
+    assert door.reads == ["issues.json", "pulls.json"]
+
+    given = answers(checkout)
+    given["issues.json"].append(issue(31, "docs/retro-20261105", "2026-11-05T00:00:00Z",
+                                      labels=("retro",)))
+    assert retro.landed_since_retro(FakeDoor(given), REPO, "main") == 0
+
+
+def test_a_retro_is_due_after_ten_landed_issues_or_what_se_toml_sets(tmp_path):
+    assert retro.due_after(tmp_path) == retro.DUE_AFTER == 10
+    (tmp_path / "se.toml").write_text("[retro]\ndue_after = 4\n", encoding="utf-8")
+    assert retro.due_after(tmp_path) == 4
+    (tmp_path / "se.toml").write_text("[retro]\ndue_after = 0\n", encoding="utf-8")
+    with pytest.raises(retro.QueueError, match="retro.due_after .* positive whole number"):
+        retro.due_after(tmp_path)
+
+
 def test_the_draft_ends_in_the_block_that_parses_back(checkout):
     found = collected(checkout)
     text = retro.draft(found)
