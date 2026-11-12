@@ -92,6 +92,9 @@ pull request carries its field report.
     `start` take only `work` + `ready`, never a `backlogged`, `field-report` or `in-progress`
     issue.
   - `file --blocked-by <n>` links the blockers before it adds `ready`.
+- **Planned**: optional. An open issue whose body has a line of its own `Planned: yyyy-mm-dd` is
+  planned for that day; the Timeline (`<se>/scripts/timeline.py`) shows it on that day, or on Today
+  marked late once the day has passed.
 - **Backlog**: a far-out idea that is not ready work is an issue labelled `backlogged` and
   `se-person`, filed and found by SE with `work_tickets.py backlog file` and `backlog list
   --search <text>` (title and body).

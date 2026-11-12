@@ -1,0 +1,188 @@
+{
+ "read_at": "2026-11-12T15:00:00+00:00",
+ "repositories": {
+  "o/a": {
+   "issues": [
+    {
+     "number": 10,
+     "title": "issue 10",
+     "url": "https://github.com/o/a/issues/10",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "ready",
+      "work"
+     ],
+     "body": "<!-- se:fleet -->\n\nPlanned: 2026-11-13\n\n## Goal\n\nPlanned work.\n"
+    },
+    {
+     "number": 11,
+     "title": "issue 11",
+     "url": "https://github.com/o/a/issues/11",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "ready",
+      "work"
+     ],
+     "body": "<!-- se:fleet -->\n\nPlanned: 2026-11-13\n\n## Goal\n\nPlanned work.\n"
+    },
+    {
+     "number": 13,
+     "title": "issue 13",
+     "url": "https://github.com/o/a/issues/13",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "ready",
+      "work"
+     ],
+     "body": "<!-- se:fleet -->\n\nPlanned: 2026-11-10\n\n## Goal\n\nPlanned work.\n"
+    },
+    {
+     "number": 14,
+     "title": "issue 14",
+     "url": "https://github.com/o/a/issues/14",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "in-progress",
+      "work"
+     ],
+     "body": "<!-- se:fleet -->\n\nPlanned: 2026-11-12\n\n## Goal\n\nPlanned work.\n"
+    },
+    {
+     "number": 15,
+     "title": "issue 15",
+     "url": "https://github.com/o/a/issues/15",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "ready",
+      "work"
+     ],
+     "body": "## Goal\n\nThe goal.\n"
+    },
+    {
+     "number": 16,
+     "title": "issue 16",
+     "url": "https://github.com/o/a/issues/16",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "ready",
+      "work"
+     ],
+     "body": "Planned: someday\n\n## Goal\n\nNo date.\n"
+    },
+    {
+     "number": 17,
+     "title": "issue 17",
+     "url": "https://github.com/o/a/issues/17",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "backlogged",
+      "se-person"
+     ],
+     "body": "<!-- se:fleet -->\n\nPlanned: 2026-11-20\n\n## Goal\n\nPlanned work.\n"
+    },
+    {
+     "number": 18,
+     "title": "issue 18",
+     "url": "https://github.com/o/a/issues/18",
+     "state": "closed",
+     "state_reason": "completed",
+     "closed_at": "2026-11-11T10:00:00Z",
+     "labels": [
+      "work"
+     ],
+     "body": "<!-- se:fleet -->\n\nPlanned: 2026-11-11\n\n## Goal\n\nPlanned work.\n"
+    },
+    {
+     "number": 19,
+     "title": "issue 19",
+     "url": "https://github.com/o/a/issues/19",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "ready",
+      "work"
+     ],
+     "body": "## Goal\n\nWas Planned: 2026-11-13 in a sentence.\n"
+    },
+    {
+     "number": 20,
+     "title": "issue 20",
+     "url": "https://github.com/o/a/issues/20",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "ready",
+      "work"
+     ],
+     "body": "<!-- se:fleet -->\n\nPlanned: 2026-02-30\n\n## Goal\n\nPlanned work.\n"
+    },
+    {
+     "number": 21,
+     "title": "issue 21",
+     "url": "https://github.com/o/a/issues/21",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "ready",
+      "work"
+     ],
+     "body": "<!-- se:fleet -->\n\nPlanned: 2027-01-05\n\n## Goal\n\nPlanned work.\n"
+    }
+   ],
+   "releases": [
+    {
+     "tag": "v1.0.0",
+     "url": "https://github.com/o/a/releases/tag/v1.0.0",
+     "published_at": "2026-11-11T12:00:00Z"
+    }
+   ]
+  },
+  "o/b": {
+   "issues": [
+    {
+     "number": 12,
+     "title": "issue 12",
+     "url": "https://github.com/o/b/issues/12",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "se-person"
+     ],
+     "body": "<!-- se:fleet -->\n\nPlanned: 2026-11-14\n\n## Goal\n\nPlanned work.\n"
+    },
+    {
+     "number": 30,
+     "title": "issue 30",
+     "url": "https://github.com/o/b/issues/30",
+     "state": "open",
+     "state_reason": null,
+     "closed_at": null,
+     "labels": [
+      "ready",
+      "work"
+     ],
+     "body": "<!-- se:fleet -->\n\nPlanned: 2026-11-13\n\n## Goal\n\nPlanned work.\n"
+    }
+   ],
+   "releases": []
+  }
+ }
+}

@@ -16,11 +16,14 @@ The page builds itself from GitHub, so nobody maintains it: one read, then pure.
   - open and `ready`: Next;
   - open and `se-person`: Needs you;
   - any other open issue: hidden.
+  An open issue of Today, Next or Needs you whose body plans it (`planned`, a line `Planned:
+  yyyy-mm-dd`) goes to that day instead: after today, a planned day; today or before, Today, marked
+  "late" when the day has passed.
   An open issue labelled `se-person` and not `backlogged` is marked "needs you" wherever it shows.
   A release is a tag `v<major>.<minor>.<patch>`, a marker on the day (UTC) it was tagged.
 - Show: top to bottom, one lane per repository: each past day with an event is one stop per lane
-  (a count and a short label, the release if there was one), then the Today line, Needs you and
-  Next; tapping a stop lists its issues, tapping an issue shows the first paragraph of its Goal and
+  (a filled dot, a count and a short label, the release if there was one), then the Today line,
+  each planned day with an issue as one hollow stop per lane, Needs you and Next; tapping a stop lists its issues, tapping an issue shows the first paragraph of its Goal and
   its link.
 
 Exit code 0: written; 1: GitHub refused the read; 2: setup error. The README section
@@ -39,7 +42,7 @@ import tomllib
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -214,6 +217,21 @@ def goal(body: str) -> str:
     return ""
 
 
+# The one line that plans an issue (work model "Issues"): `Planned: yyyy-mm-dd` on a line of its own.
+PLANNED = re.compile(r"^Planned:[ \t]*(\d{4}-\d{2}-\d{2})[ \t]*$", flags=re.M)
+
+
+def planned(body: str) -> str | None:
+    """The day an issue's body plans it for, from its first `Planned: yyyy-mm-dd` line; None without one."""
+    match = PLANNED.search(body.replace("\r\n", "\n"))
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(match[1]).isoformat()
+    except ValueError:
+        return None
+
+
 def day(timestamp: str) -> str:
     return datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(timezone.utc).date().isoformat()
 
@@ -221,27 +239,35 @@ def day(timestamp: str) -> str:
 def model(snapshot: dict) -> dict:
     """The page's content from the snapshot alone: lanes, past days, the open places and the backlog."""
     lanes = list(snapshot["repositories"])
+    today = day(snapshot["read_at"])
     days: dict[str, dict[str, dict]] = {}
+    ahead: dict[str, dict[str, dict]] = {}
     places: dict[str, dict[str, list]] = {key: {lane: [] for lane in lanes}
                                           for key in ("today", "needs-you", "next", "backlog")}
 
-    def stop(date: str, lane: str) -> dict:
-        return days.setdefault(date, {}).setdefault(lane, {"issues": [], "releases": []})
+    def stop(date: str, lane: str, into: dict = days) -> dict:
+        return into.setdefault(date, {}).setdefault(lane, {"issues": [], "releases": []})
 
     for lane, data in snapshot["repositories"].items():
         for issue in data["issues"]:
             where = place(issue)
             if where is None:
                 continue
-            entry = {**issue, "needs_you": needs_you(issue), "goal": goal(issue["body"])}
+            entry = {**issue, "needs_you": needs_you(issue), "goal": goal(issue["body"]), "late": False}
+            plan = planned(issue["body"]) if where in ("today", "next", "needs-you") else None
             if where == "done":
                 stop(day(issue["closed_at"]), lane)["issues"].append(entry)
+            elif plan and plan > today:
+                stop(plan, lane, ahead)["issues"].append(entry)
+            elif plan:
+                entry["late"] = plan < today
+                places["today"][lane].append(entry)
             else:
                 places[where][lane].append(entry)
         for release in data["releases"]:
             if release.get("published_at"):
                 stop(day(release["published_at"]), lane)["releases"].append(release)
-    for stops in days.values():
+    for stops in [*days.values(), *ahead.values()]:
         for entry in stops.values():
             entry["issues"].sort(key=lambda issue: issue["number"])
             entry["releases"].sort(key=lambda release: (release["published_at"],
@@ -249,8 +275,8 @@ def model(snapshot: dict) -> dict:
     for lists in places.values():
         for entries in lists.values():
             entries.sort(key=lambda issue: -issue["number"])
-    return {"read_at": snapshot["read_at"], "today": day(snapshot["read_at"]), "lanes": lanes,
-            "days": dict(sorted(days.items())), "places": places}
+    return {"read_at": snapshot["read_at"], "today": today, "lanes": lanes,
+            "days": dict(sorted(days.items())), "planned": dict(sorted(ahead.items())), "places": places}
 
 
 # --- Show -------------------------------------------------------------------------------------
@@ -308,7 +334,10 @@ a { color: var(--accent); }
 .today > summary { border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
   background: var(--accent-soft); }
 .today .when, .today .dot { color: var(--accent); border-color: var(--accent); font-weight: bold; }
+.past .dot { background: var(--text); }
 .open .dot { border-style: dashed; }
+.planned .when { font-style: italic; }
+.lane .mark { flex-shrink: 0; margin-left: 0; }
 .needs .dot { border-color: var(--accent); }
 .backlog h3 { font: bold 0.95rem var(--font-interface); margin: 1rem 0 0.25rem; }
 @media (max-width: 30rem) {
@@ -328,8 +357,13 @@ def lane_name(name: str) -> str:
     return name.split("/", 1)[1]
 
 
+def marks(issue: dict) -> str:
+    return (('<span class="mark">needs you</span>' if issue["needs_you"] else "")
+            + ('<span class="mark">late</span>' if issue.get("late") else ""))
+
+
 def issue_item(issue: dict) -> str:
-    mark = '<span class="mark">needs you</span>' if issue["needs_you"] else ""
+    mark = marks(issue)
     paragraph = f"<p>{esc(issue['goal'])}</p>" if issue["goal"] else ""
     return (f'<li><details class="issue"><summary>#{issue["number"]} {esc(issue["title"])}{mark}</summary>'
             f'{paragraph}<a class="link" href="{esc(issue["url"])}">Open #{issue["number"]} on GitHub</a>'
@@ -345,10 +379,12 @@ def stop_cell(issues: list[dict], releases: list[dict]) -> str:
     else:
         label = issues[-1]["title"]
     marked = ' needs' if any(issue["needs_you"] for issue in issues) else ""
+    late = any(issue.get("late") for issue in issues)
     kind = " release" if releases else ""
     count = f'<span class="count">{len(issues)}</span>' if issues else ""
-    return (f'<span class="lane{kind}{marked}"><span class="dot"></span>{count}'
-            f'<span class="label">{esc(label)}</span></span>')
+    mark = '<span class="mark">late</span>' if late else ""
+    return (f'<span class="lane{kind}{marked}{" late" if late else ""}"><span class="dot"></span>{count}'
+            f'{mark}<span class="label">{esc(label)}</span></span>')
 
 
 def issue_list(lanes: list[str], stops: dict[str, dict]) -> str:
@@ -383,17 +419,23 @@ def render(page: dict) -> str:
     lanes = page["lanes"]
     parts = [f'<div class="lanes"><span></span>{"".join(f"<span>{esc(lane_name(lane))}</span>" for lane in lanes)}</div>']
     year = None
-    for date, stops in page["days"].items():
-        if date[:4] != year:
-            year = date[:4]
-            parts.append(f'<div class="year">{year}</div>')
-        parts.append(row("past", short_date(date), lanes, stops))
+
+    def dated(css: str, days: dict[str, dict]) -> None:
+        nonlocal year
+        for date, stops in days.items():
+            if date[:4] != year:
+                year = date[:4]
+                parts.append(f'<div class="year">{year}</div>')
+            parts.append(row(css, short_date(date), lanes, stops))
+
+    dated("past", page["days"])
 
     def open_row(key: str, title: str, css: str, ident: str = "") -> str:
         stops = {lane: {"issues": issues, "releases": []} for lane, issues in page["places"][key].items()}
         return row(f"open {css}", title, lanes, stops, ident=ident)
 
     parts.append(open_row("today", "Today", "today", "today"))
+    dated("open planned", page["planned"])
     parts.append(open_row("needs-you", "Needs you", "needs"))
     parts.append(open_row("next", "Next", "next"))
     backlog = []
