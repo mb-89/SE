@@ -53,6 +53,9 @@ its tools.
   each improvement names the agent definition, template or rule it changes. The retro reads the
   field reports in the pull request descriptions of the window's closed work issues (older ones,
   from before reports moved there, in their `field-report` issues).
+  - It runs as the template says, `retro.py collect` then `retro.py file`, which closes the retro
+    issue with its report ([README](../../README.md#work-commands)). A work issue you file from it
+    names each finding it takes as `retro #<n> finding <k>`, so the next retro scores it.
 - **Sessions**: one worker per work issue in its own fresh worktree from the newest `main` (the work
   model's [Worktrees](../skills/work-model/SKILL.md#worktrees)), started as an independent session
   whose prompt names only the worker agent, the issue, the worktree and the integrator session.
