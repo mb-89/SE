@@ -103,7 +103,7 @@ place for it, with the reason), **port the idea** (rebuilt for today's model), *
 | `se rules`: `go-in-src`, `io-module`, `module-imports`, `library-users`, `plugin-clock`, `fake-contract`, `test-package`, `test-swap`, `fast-test`, `rule-of-five`, `programs`, `help-sentences`, `budgeted` | Go and index layout rules | the suite's budget; test rules in the work model | obsolete with the Go code | M |
 | `se rules`: `agents`, `manifest`, `reader` | agents' models, generated sections, a reader line per spec | `se_plugin.py check`, `work_tickets.py docs --check`, agent-definition tests | covered | S |
 | `se rules`: `repo-path`, `se-command` | no path or command that does not exist | nothing | open as SE#755 | S |
-| `se rules`: `no-binary`, `large-file`, `todo-issue` | no tracked binaries, no oversized files, no TODO without an issue | nothing | port the idea (#882) | S |
+| `se rules`: `no-binary`, `large-file`, `todo-issue` | no tracked binaries, no oversized files, no TODO without an issue | `tests/test_repository.py`, with reasoned allow lists | ported (#882) | S |
 
 ## Start on invoke
 
