@@ -303,7 +303,7 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     assert "docs/guide.md: This sentence is removed." in approved.stdout
 
 
-def test_guard_keeps_dots_in_protected_content_with_its_sentence(worktree: Path) -> None:
+def test_guard_keeps_dots_in_protected_content_whole(worktree: Path) -> None:
     repository, guide = authored_repository(
         worktree.parent / "guard-protected-content-case", "remove-protected-content",
         "Deleting `pyproject.toml` keeps this sentence whole.\n"
@@ -321,8 +321,63 @@ def test_guard_keeps_dots_in_protected_content_with_its_sentence(worktree: Path)
     assert removed == [
         "docs/guide.md: Deleting `pyproject.toml` keeps this sentence whole.",
         "docs/guide.md: Visit https://example.com/path.name before removal.",
-        "docs/guide.md: ```powershell uv run python scripts/work_tickets.py ``` "
-        "The fenced block stays with this sentence.",
+        "docs/guide.md: ```powershell uv run python scripts/work_tickets.py ```",
+        "docs/guide.md: The fenced block stays with this sentence.",
+    ]
+
+
+OBS_627_GUIDE = (
+    "Run the check before landing.\n\n"
+    "```sh\n"
+    "uv run python scripts/work_tickets.py guard\n"
+    "```\n\n"
+    "## Landing\n\n"
+    "The integrator lands it.\n"
+)
+OBS_627_INSERTED = "A paragraph between the block and the heading. It has two sentences.\n\n"
+
+
+@pytest.mark.parametrize(("base", "branch", "removed"), [
+    # obs#627: a paragraph inserted between a fenced block and a heading removes nothing.
+    (OBS_627_GUIDE, OBS_627_GUIDE.replace("## Landing", OBS_627_INSERTED + "## Landing"), []),
+    # The same paragraph taken out again is reported alone.
+    (OBS_627_GUIDE.replace("## Landing", OBS_627_INSERTED + "## Landing"), OBS_627_GUIDE,
+     ["A paragraph between the block and the heading.", "It has two sentences."]),
+])
+def test_guard_reports_only_the_paragraph_changed_between_two_unchanged_blocks(
+    worktree: Path, base: str, branch: str, removed: list[str],
+) -> None:
+    repository, guide = authored_repository(
+        worktree.parent / f"guard-structure-case-{len(removed)}", "change-paragraph", base,
+    )
+    guide.write_text(branch, encoding="utf-8")
+    assert git(repository, "commit", "-am", "change one paragraph").returncode == 0
+
+    assert work_tickets.deleted_authored_sentences(repository, "change-paragraph") == [
+        f"docs/guide.md: {sentence}" for sentence in removed
+    ]
+
+
+def test_authored_sentences_end_at_fences_headings_and_block_ids() -> None:
+    text = (
+        "Before the fence has no dot\n"
+        "~~~text\n"
+        "a. b\n"
+        "~~~\n"
+        "After the fence\n"
+        "# A heading. With a dot\n"
+        "Under the heading\n"
+        "^block-id-1\n"
+        "After the block id.\n"
+    )
+    assert work_tickets.authored_sentences(text) == [
+        "Before the fence has no dot",
+        "~~~text a. b ~~~",
+        "After the fence",
+        "# A heading. With a dot",
+        "Under the heading",
+        "^block-id-1",
+        "After the block id.",
     ]
 
 
