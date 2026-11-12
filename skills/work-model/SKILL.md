@@ -139,6 +139,9 @@ no procedure but SE's sends the person to a session.
      apply <issue>`, which runs the workflow for real with the posted triples, reads the refs back
      from origin and posts the result; SE sends the integrator the line it prints.
   3. The integrator verifies the refs (`git ls-remote origin`) and closes out.
+
+  Without a signed-in `gh` both commands hand their GitHub steps to the session as a plan and
+  read the refs back with `--read-back` ([Without gh](#without-gh)).
 - **Every other step only the person may approve** (a setting, an environment, a permission, a
   push to a protected branch) is escalated the same way: the escalation names the step and its
   exact command or setting. SE runs it on the person's yes, or names the one setting the person
@@ -534,7 +537,13 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push`, `verified`,
   `comments-read`, `body-read --body-file`, `release-trailer`, `pr-body`, `docs` and
   `field-report --check`.
-  Every other command fails, naming itself, the missing `gh` and this section.
+- **Commands that hand off** their GitHub steps: `integrate`, `refs request` and `refs apply`
+  do everything local, print their GitHub steps as a plan of tool names and arguments, and
+  check the result through git with `--read-back` (README
+  [Landing on main](../../README.md#landing-on-main)).
+  - The session runs each plan's steps in order with its GitHub tools, then the plan's `Then:`
+    line.
+- **Every other command** fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
   for example:
   - `intake` and `refresh`: read the issue and its comments; `create` one ticket per numbered
@@ -559,29 +568,21 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     - A refused report is fixed and checked again, never delivered.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
     like the work issue and based on the integration branch.
-  - `integrate`: save the pull request's description to a file and check it with `field-report
-    --check <file> --issue-body <file>`.
-    - Land it as `integrate` does ([Landing on main](../../README.md#landing-on-main)): on
-      `land/<branch>` from origin's newest integration branch, merge the pull request's branch
-      with the message `integrate` writes (`Integrate <branch>: <summary>`, plus the trailer
-      `work_tickets.py release-trailer <branch> --issue-body <file> --pr-description <file>`
-      prints, which [releases](../../README.md#project-settings) require).
-    - That command refuses, as `integrate` does, a branch with commits after the report's
-      Branch tip, naming them; merge only once the report is updated, or state why they are
-      included with `--include-late <reason>` and in the `Integrated in …` comment.
-    - Then run the complete suite with `work_tickets.py suite` and, unless `se.toml` sets
-      `public_check = false`, the public check (`public_check.py --rev HEAD --range
-      <integration branch>..HEAD`), refusing on a failure; both record the verdicts `push` needs.
-    - Then `push land/<branch>`, which releases on it and pushes it; with the GitHub tools open
-      (or reuse) its pull request into the integration branch with the work pull request's
-      description, wait until its `check` passes, and squash-merge it at that head with the merge
-      commit's subject as the title and the rest of its message (the `Release-kind` trailer) as
-      the message.
-    - Read the merge back: the pull request merged, its merge commit origin's integration
-      branch, with the tree of `land/<branch>`; fast-forward the checkout to it.
-    - Then close the work pull request with a line naming the landing one, and the work issue
-      with the `Integrated in …` comment, which links both pull requests and the release (or
-      names the post-merge acceptance it stays open for).
+  - `integrate`: the hand-off, the cloud path of [Landing on main](../../README.md#landing-on-main).
+    - Save the pull request's description and its work issue's body to files, then run
+      `integrate <pull request> --pr-description <file> --issue-body <file> --branch <its head
+      branch>`.
+    - It checks the report, merges on `land/<branch>`, runs the complete suite, the checks and
+      the public check, releases, pushes `land/<branch>` and prints the landing plan.
+    - Its refusals (late commits, a failed check) are those with `gh`; `--include-late <reason>`
+      states why late commits are included.
+    - Run the plan's steps; anything but a passed `check` merges nothing.
+    - Then `integrate --read-back <branch> --landing-pull <number> --check-run <url>`: it reads
+      the landing back through git, fast-forwards the checkout, cleans up and prints the
+      close-out plan; run its steps. It starts no session: start what is unblocked as `start`
+      above says.
+  - `refs request` and `refs apply`: the same hand-off. `refs apply` takes the issue's comments
+    as the GitHub tools read them, saved as a JSON list, with `--comments-file <file>`.
 - **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
   approval prompt no one answers; a role works with the repositories its session started with.
 - **Commit trailers**: the project's [`commit_trailer`](#what-the-project-provides) wins over a
