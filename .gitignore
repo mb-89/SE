@@ -1,4 +1,6 @@
-.se/.runtime/
-src/plugin/.claude-plugin/types/
-src/plugin/bin/
-src/se
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.se/
+.public-check.local

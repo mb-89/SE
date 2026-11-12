@@ -1,0 +1,43 @@
+[project]
+# The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
+version = "5.0.0"
+# Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
+release = "workflow"
+# Regenerates what copies the version (the plugin manifests) into each release commit.
+release_build = ["uv", "run", "python", "scripts/se_plugin.py", "build"]
+# The commit identity sync sets where the machine sets no public_identity (README "Project settings").
+identity = "mb <mb>"
+# Every push to the integration branch runs se's public check first (README "Project settings").
+public_check = true
+# Where the documentation built from docs.md is published (README "Documentation").
+docs_url = "https://mb-89.github.io/SE/"
+authored_content = [
+    "AGENTS.md",
+    "README.md",
+    ".github/ISSUE_TEMPLATE/*.md",
+    ".github/pull_request_template.md",
+    "src/**/*.md",
+    "docs.md",
+]
+
+# The complete suite and its time budget; work_tickets.py integrate holds every integration to it
+# (README "Test budget").
+[tests]
+command = ["uv", "run", "pytest", "-q"]
+target_seconds = 60
+limit_seconds = 120
+
+# obs builds the documentation (README "Documentation").
+[modules.obs]
+url = "https://github.com/mb-89/obs.git"
+version = "^2.0"
+
+# The repositories the Timeline page shows, one lane each (scripts/timeline.py).
+[timeline]
+repositories = ["mb-89/SE", "mb-89/obs"]
+
+# The repositories SE watches for outside issues, each with the last issue number that existed
+# before the fleet marked its own (work model "Outside issues").
+[outside]
+"github.com/mb-89/SE" = 690
+"github.com/mb-89/obs" = 459

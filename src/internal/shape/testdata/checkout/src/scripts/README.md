@@ -1,3 +1,0 @@
-# Scripts
-
-Reader: the fixture.
