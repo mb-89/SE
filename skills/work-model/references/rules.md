@@ -768,7 +768,8 @@ a host's attribution reminder says.
 
 ### pub-004 No tracker references in commit messages
 
-Commit messages carry no tracker reference (`#<n>`, `GH-<n>`, an issue or pull request URL).
+Commit messages carry no tracker reference (`#<n>`, `<repo>#<n>`, `<owner>/<repo>#<n>`, `GH-<n>`,
+an issue or pull request URL).
 
 - **Why:** a commit outlives its tracker, and a reference names a tracker that may be private.
 - **Without it:** history fills with references that point nowhere or reveal a private tracker.
