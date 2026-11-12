@@ -3487,9 +3487,29 @@ def open_issues(root: Path, repo: str) -> list[dict[str, object]]:
     ]) or "[]")
 
 
+SE_ROOT = Path(__file__).resolve().parents[1]
+
+
+def refuse_dangling(repo: str, command: str, body: str) -> None:
+    """Refuse an issue body that names a missing se command or subcommand, unless one of its
+    Requirements says it is new work of that issue (one owner: references.dangling). A bare `scripts/…` path names se's
+    own scripts only in an issue of se's own repository; elsewhere it may be that repository's."""
+    own = remote_repo(SE_ROOT)
+    found = sibling("references").dangling(
+        body, SE_ROOT, paths=False, created=True,
+        bare_scripts=own is not None and api_repo(own).lower() == api_repo(repo).lower())
+    if found:
+        raise QueueError(
+            f"{command}: the body names what se does not have; correct it, or say in its "
+            "Requirements that it is new work of this issue (\"new\", \"add\" or \"create\"):\n"
+            + "\n".join(f"  {finding}" for finding in found))
+
+
 def filed_once(root: Path, repo: str, command: str, title: str, body: str, filing: Step,
                existing: int | None = None) -> Filed:
-    """Run the dedupe plan around `filing` through gh, or print it where gh is not signed in."""
+    """Run the dedupe plan around `filing` through gh, or print it where gh is not signed in; a
+    body naming a missing se command is refused first (`refuse_dangling`)."""
+    refuse_dangling(repo, command, body)
     plan = filing_plan(repo, command, title, body, filing, existing)
     if hand_off():
         print(plan.text())

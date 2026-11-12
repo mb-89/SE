@@ -96,6 +96,11 @@ pull request carries its field report.
     `start` take only `work` + `ready`, never a `backlogged`, `field-report` or `in-progress`
     issue.
   - `file --blocked-by <n>` links the blockers before it adds `ready`.
+- **No dangling references**: `file`, `backlog file` and `route` refuse a body that names an se
+  command or subcommand, or an se script file, that se does not have, naming each.
+  - It passes where one of the body's Requirements names it as new ("new", "add", "create").
+  - A script path without the `<se>/` root counts as se's only in an issue of se's own repository.
+  - `<se>/scripts/references.py` owns the check; each script's parser is its command registry.
 - **Dedupe before filing**: an issue is filed once per purpose.
   - Sameness: two open issues of one repository are twins when their titles match once a
     trailing `-yyyymmdd` is dropped and their `Routed from:` lines match (a routed issue has one,
