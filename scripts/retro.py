@@ -14,6 +14,9 @@ draft with
 - the rule checks (RULE_CHECKS), each broken one with what broke it;
 - the previous retro's sizes, where its block is found;
 
+- the previous retro's findings, each scored: the work issues of the window that name it
+  (`retro #<n> finding <k>`), whether one closed, and whether the rule check it names broke again
+  (recurred);
 
 and ends in a JSON block under BLOCK_MARKER (JSON is YAML too), which `read_block` parses back for
 `retro.py file` and later collects. The judge fills the block's `findings`, `classes` and
@@ -69,6 +72,8 @@ Step, Plan = work_tickets.Step, work_tickets.Plan
 BLOCK_MARKER = "<!-- se:retro-yaml -->"
 REPORT_MARKER = "<!-- se:retro-report -->"
 JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->"
+# A work issue names each retro finding it takes as `retro #<n> finding <k>`.
+FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
 FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check")
 CLASS_FIELDS = ("name", "fix")
 JUDGMENT = ("findings", "classes", "went_well")
@@ -430,6 +435,7 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
             if not issue.closed_at:
                 read = issue_of(door.issue(issue.number))
                 issue.closed_at, issue.state_reason = read.closed_at, read.state_reason
+                issue.body = issue.body or read.body
         return not door.missing
 
     if not completed([issue for issue in issues if is_retro(issue) and issue.number != number]):
@@ -541,6 +547,7 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         previous = blocks[-1] if blocks else None
         if door.missing:
             return None
+    scored = scored_findings(previous, last.number if last else 0, window, checks)
     sizes = {"closed": len(closed), "landed": sum(item.landed for item in closed),
              "duplicates": sum(item.duplicate for item in closed),
              "escalated": sum(item.escalations > 0 for item in closed)}
@@ -548,8 +555,33 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         Window(number, last.closed_at if last else None, last.number if last else None,
                now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
         sizes, closed, list(checks.values()),
-        {"retro": last.number, "sizes": previous.get("sizes")}
+        {"retro": last.number, "sizes": previous.get("sizes"), "findings": scored}
         if previous else None)
+
+
+def scored_findings(previous: dict | None, retro: int, window: list[Issue],
+                    checks: dict[str, RuleCheck]) -> list[dict]:
+    """Each finding of the previous retro's block, scored against this window: the work issues
+    closed in it that name the finding (`retro #<retro> finding <k>`), its state (closed where one
+    of them closed as completed, else the reason they closed with, else none) and whether the rule
+    check it names broke again (recurred)."""
+    found: list[dict] = []
+    for index, finding in enumerate((previous or {}).get("findings") or [], 1):
+        if not isinstance(finding, dict):
+            continue
+        number = int(finding.get("finding") or index)
+        naming = [issue for issue in window
+                  if any(int(match[1]) == retro and int(match[2]) == number
+                         for match in FINDING_REFERENCE.finditer(issue.body))]
+        reasons = [issue.state_reason or "completed" for issue in naming]
+        state = ("closed" if "completed" in reasons else reasons[0] if reasons else "none")
+        check = str(finding.get("check") or "")
+        found.append({"finding": number, "title": str(finding.get("title") or ""),
+                      "class": str(finding.get("class") or ""), "kind": finding.get("kind"),
+                      "check": check, "issues": [issue.number for issue in naming],
+                      "state": state,
+                      "recurred": bool(check) and check in checks and not checks[check].kept})
+    return found
 
 
 def draft(found: Collected) -> str:
@@ -570,6 +602,20 @@ def draft(found: Collected) -> str:
     else:
         lines += ["| size | this window |", "|---|---|"]
         lines += [f"| {name} | {value} |" for name, value in found.sizes.items()]
+    scored = (found.previous or {}).get("findings") or []
+    if found.previous:
+        lines += ["", f"## The findings of retro #{found.previous['retro']}", ""]
+    if scored:
+        lines += ["| finding | class | kind | issues | state | recurred |",
+                  "|---|---|---|---|---|---|"]
+        for item in scored:
+            issues = ", ".join(f"#{number}" for number in item["issues"]) or "none"
+            recurred = (("yes" if item["recurred"] else "no") + f" ({item['check']})"
+                        if item["check"] else "no check named")
+            lines.append(f"| {item['finding']}. {item['title']} | {item['class']} | "
+                         f"{item['kind'] or ''} | {issues} | {item['state']} | {recurred} |")
+    elif found.previous:
+        lines.append("None.")
     lines += ["", "## Landed issues", ""]
     landed = [item for item in found.issues if item.landed]
     if landed:
@@ -637,6 +683,8 @@ def judgment_problems(block: dict) -> list[str]:
         elif not review.words(given.get("fix")):
             problems.append(f'class "{name}" has no fix')
         classes[name] = review.words(given.get("fix"))
+    recurred = {item.get("check") for item in ((block.get("previous") or {}).get("findings") or [])
+                if isinstance(item, dict) and item.get("recurred")}
     for index, given in enumerate(lists["findings"], 1):
         if not isinstance(given, dict):
             problems.append(f"finding {index} is not an object with {', '.join(FINDING_FIELDS)}")
@@ -669,6 +717,9 @@ def judgment_problems(block: dict) -> list[str]:
         if home == RULE_BOOK and controversial is not True:
             problems.append(f"{name} changes a rule (its home is the rule book), so it is "
                             "controversial, with its why")
+        elif check and check in recurred and controversial is not True:
+            problems.append(f'{name} names the check "{check}", which recurred after the '
+                            "previous retro's fix, so it is controversial, with its why")
         elif controversial is True and not review.words(given.get("why")):
             problems.append(f"{name} is controversial without a why")
     if not [entry for entry in lists["went_well"] if review.words(entry)]:

@@ -726,7 +726,10 @@ with the field report of the work pull request its landing pull request names
 - the rule checks, each broken one with what broke it: every landing pull request names a work
   issue open when it merged (`work-issue`), its `check` passed (`check`), no commit reached the
   integration branch outside a pull request (`outside-pr`), every closed work issue has a field
-  report (`field-report`).
+  report (`field-report`);
+- the previous retro's findings, from its report's block, each with the work issues of the window
+  that name it (`retro #<n> finding <k>`), its state (`closed` where one closed as completed) and
+  whether the rule check it names broke again (recurred).
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
 commands read. `--json` prints the block's data alone.
@@ -744,8 +747,8 @@ fills the draft's block:
 - `went_well`, what went well.
 
 It refuses, writing nothing, an incomplete judgment: a finding without one of those, a class
-without a fix, a controversial finding without a why, a finding on the rule book that is not
-controversial, nothing that went well.
+without a fix, a controversial finding without a why, a finding on the rule book, or on a check that
+recurred, that is not controversial, nothing that went well.
 
 It files no issue
 ([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):

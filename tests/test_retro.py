@@ -189,7 +189,7 @@ def test_the_window_gives_the_sizes_and_the_per_issue_counts(checkout):
                                     "A second item that wraps."]
     assert by[12].not_delivered == []
     assert found.previous == {"retro": 5, "sizes": {"closed": 7, "landed": 5, "duplicates": 0,
-                                                     "escalated": 3}}
+                                                     "escalated": 3}, "findings": []}
 
 
 def test_each_rule_check_names_what_broke_it_and_keeps_the_rest(checkout):
@@ -421,6 +421,16 @@ def test_file_refuses_another_retros_draft_and_a_draft_without_its_block(checkou
         retro.judged("# Retro draft for #30\n", 30)
 
 
+def test_a_finding_on_a_recurred_check_is_controversial(checkout):
+    draft = judged_draft(checkout)
+    block = retro.read_block(draft)
+    block["previous"]["findings"] = [{"finding": 1, "check": "field-report", "recurred": True}]
+    text = draft[:draft.rfind(retro.BLOCK_MARKER)] + retro.BLOCK_MARKER + "\n```yaml\n" + \
+        json.dumps(block) + "\n```\n"
+    with pytest.raises(work_tickets.QueueError, match="recurred after the previous retro's fix"):
+        retro.judged(text, 30)
+
+
 class FakeTracker:
     """The issue writes of the gh door, recorded."""
 
@@ -478,3 +488,43 @@ def test_file_without_gh_prints_the_comment_and_the_close(checkout, tmp_path, mo
             '"repo": "repo", "state": "closed", "state_reason": "completed"}') in out
     assert "create" not in out.replace("created", "")
 
+
+def test_the_next_collect_scores_the_previous_findings(checkout, tmp_path, monkeypatch):
+    """Retro #5's posted report held three findings; in the window #11 took finding 1 and
+    closed, #12 took finding 2 and closed, and the check finding 2 names broke again."""
+    tracker = FakeTracker()
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    given = answers(checkout)
+    block = retro.read_block(given["comments-5.json"][0]["body"])
+    block.update(window={"retro": 5}, classes=[{"name": "C", "fix": "F"}],
+                 went_well=["Something went well."], findings=[
+                     finding(**{"class": "C", "title": "Name the fake door in every test"}),
+                     finding(**{"class": "C", "check": "check",
+                                "title": "Run the check job on every landing"}),
+                     finding(**{"class": "C", "title": "A finding nobody took up yet"})])
+    draft = tmp_path / "draft-5.md"
+    draft.write_text("# Retro draft for #5\n\n" + retro.BLOCK_MARKER + "\n```yaml\n"
+                     + json.dumps(block) + "\n```\n", encoding="utf-8")
+    assert retro.main(["file", "5", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    given["comments-5.json"] = [{"body": tracker.calls[0][1]["body"]}]
+    for item in given["issues.json"]:
+        if item["number"] == 11:
+            item["body"] = "Takes retro #5 finding 1."
+        if item["number"] == 12:
+            item["body"] = "Takes Retro #5 finding 2 and retro #4 finding 3."
+
+    found = collected(checkout, given)
+    assert found.previous["findings"] == [
+        {"finding": 1, "title": "Name the fake door in every test", "class": "C", "kind": "work",
+         "check": "", "issues": [11], "state": "closed", "recurred": False},
+        {"finding": 2, "title": "Run the check job on every landing", "class": "C",
+         "kind": "work", "check": "check", "issues": [12], "state": "closed", "recurred": True},
+        {"finding": 3, "title": "A finding nobody took up yet", "class": "C", "kind": "work",
+         "check": "", "issues": [], "state": "none", "recurred": False}]
+    text = retro.draft(found)
+    assert "## The findings of retro #5" in text
+    assert "| 2. Run the check job on every landing | C | work | #12 | closed | yes (check) |" in text
+    assert "| 3. A finding nobody took up yet | C | work | none | none | no check named |" in text
+    assert retro.read_block(text)["findings"] == []
