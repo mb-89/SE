@@ -734,3 +734,27 @@ commands read. `--json` prints the block's data alone.
 Without gh it prints the GitHub steps whose
 answers are still missing, round by round, and reads the answers from the files the session saved
 into `--answers <dir>` ([Without gh](src/skills/work-model/SKILL.md#without-gh)).
+
+`uv run python scripts/retro.py file <retro issue> --draft FILE` files a judged retro. The judge
+fills the draft's block:
+
+- `findings`, each with `title` (five words or more), `body`, `class`, `home` (the file it
+  changes), `controversial` with its `why`, and optionally `check` (a rule check);
+- `classes`, each with `name` and `fix`;
+- `went_well`, what went well.
+
+It refuses, writing nothing, an incomplete judgment: a finding without one of those, a class
+without a fix, a controversial finding without a why, a finding on the rule book that is not
+controversial, nothing that went well.
+
+It files no issue
+([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
+it posts the report as the retro issue's closing comment and closes the issue. The report opens
+with `<!-- se:retro-report -->`, then the facts and the block follow. It lists each finding,
+numbered, with its class's fix, its home and its kind:
+
+- `work`: SE bundles these into as few work issues as the work needs, each naming
+  `retro #<n> finding <k>` for every finding it takes;
+- `decision`: for the owner's decision list.
+
+Without gh it prints the comment and the close as a plan.
