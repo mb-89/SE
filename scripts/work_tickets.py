@@ -2599,6 +2599,72 @@ def is_worker_agent(event: dict[str, object]) -> bool:
     return isinstance(agent, str) and agent.rsplit(":", 1)[-1] == WORKER_AGENT
 
 
+# Where a worker sub-agent works: the checkout its prompt names, else the one whose ticket queue its
+# transcript last touched (a path into `.se/work/`, or `--worktree <path>`).
+PROMPT_PATH = re.compile(r"(?:[A-Za-z]:)?[\\/][^\s\"'`<>|*?()\[\]{},;]+")
+QUEUE_TOUCH = re.compile(
+    r"((?:[A-Za-z]:)?[\\/][^\s\"'`<>|*?]*?)[\\/]\.se[\\/]work(?![\w.-])"
+    r"|--worktree[= ]+[\"']?((?:[A-Za-z]:)?[\\/][^\s\"'`<>|*?]+)")
+
+
+def transcript_entries(path: object) -> list[dict[str, object]]:
+    """The entries of a Claude Code transcript (JSON lines); [] where it cannot be read."""
+    if not isinstance(path, str) or not path:
+        return []
+    try:
+        lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    entries = []
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict):
+            entries.append(entry)
+    return entries
+
+
+def texts_of(value: object) -> list[str]:
+    """Every string in a JSON value, in order."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in texts_of(item)]
+    if isinstance(value, list):
+        return [text for item in value for text in texts_of(item)]
+    return []
+
+
+def work_checkout(candidate: str) -> Path | None:
+    """The checkout holding `candidate` where its ticket queue is for a work issue."""
+    path = Path(candidate.rstrip(".:"))
+    try:
+        top = checkout_top(path) if path.is_absolute() else None
+    except OSError:
+        return None
+    return top if top is not None and has_work_issue(top) else None
+
+
+def subagent_checkout(event: dict[str, object]) -> Path | None:
+    """The checkout a worker sub-agent works in, from the sub-agent itself: a checkout its prompt
+    (its transcript's first user entry) names, else the one whose ticket queue its transcript last
+    touched; None where neither names a checkout whose queue is for a work issue."""
+    entries = transcript_entries(event.get("agent_transcript_path"))
+    prompt = next((entry for entry in entries if entry.get("type") == "user"), None)
+    for text in texts_of((prompt or {}).get("message")):
+        for candidate in PROMPT_PATH.findall(text):
+            if (found := work_checkout(candidate)) is not None:
+                return found
+    for entry in reversed(entries):
+        for text in reversed(texts_of(entry.get("message"))):
+            for queue_path, worktree in reversed(QUEUE_TOUCH.findall(text)):
+                if (found := work_checkout(queue_path or worktree)) is not None:
+                    return found
+    return None
+
+
 def delivered_pull_path(root: Path) -> Path:
     return root / ".se" / "work" / DELIVERED_PULL
 
@@ -2711,6 +2777,11 @@ def stop_verdict(path: Path, event: dict[str, object], count: bool = True) -> St
         return StopVerdict()
     root = checkout_top(path)
     if root is None or not has_work_issue(root):
+        if event.get("hook_event_name") == "SubagentStop":
+            return StopVerdict(note=(
+                "se Stop hook: cannot judge the worker sub-agent's delivery, so it may end: "
+                "neither its prompt nor its transcript names a checkout whose ticket queue is for "
+                f"a work issue, and its working directory {path} holds none"))
         return StopVerdict()
     try:
         branch = current_branch(root)
@@ -6584,8 +6655,10 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
                        "Anywhere else, for a sub-agent that is no worker, and where it cannot "
                        "judge (no gh and no recorded pull request) it lets the turn end. It reads "
                        "the hook's JSON on stdin and answers the hook's JSON on stdout",
-         arg("--worktree", help="the checkout to judge; default: the hook's cwd, else the "
-                                "current directory"),
+         arg("--worktree", help="the checkout to judge; default: for a worker sub-agent the "
+                                "checkout its prompt names, else the one whose ticket queue its "
+                                "transcript last touched; else the hook's cwd, else the current "
+                                "directory"),
          arg("--pull", type=int, metavar="NUMBER",
              help="without gh: record the pull request your GitHub tools opened, the hook's "
                   "answer file, then say whether the hook passes; exit code 1 where it would "
@@ -6611,7 +6684,9 @@ def run_stop_check(root: Path | None, args: argparse.Namespace) -> int:
         return 0
     event = hook_event()
     cwd = event.get("cwd")
-    path = root or (Path(cwd) if isinstance(cwd, str) and cwd else Path.cwd())
+    own = (subagent_checkout(event) if root is None and event.get("hook_event_name") ==
+           "SubagentStop" and is_worker_agent(event) else None)
+    path = root or own or (Path(cwd) if isinstance(cwd, str) and cwd else Path.cwd())
     output = stop_verdict(path, event).hook_output()
     if output:
         print(output)

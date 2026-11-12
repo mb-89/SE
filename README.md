@@ -406,7 +406,12 @@ ends only with its work issue delivered:
   missing and the commands that deliver.
 - `refusals` is how often in a row it refuses, built in 5; then it lets the turn end and says so,
   and counts afresh. A passing stop resets the count.
-- A `SubagentStop` is judged only for a worker sub-agent (`worker`, `se:worker`).
+- A `SubagentStop` is judged only for a worker sub-agent (`worker`, `se:worker`), in the checkout
+  it works in, one whose queue is for a work issue:
+  - one its prompt names, else the one whose ticket queue its transcript (the event's
+    `agent_transcript_path`) last touched, a path into `.se/work/` or a `--worktree`;
+  - only where neither names one, the hook's `cwd`; where that holds none either, it lets the
+    sub-agent end and says why.
 - Anywhere else (SE's own session, a person's session) it never refuses. Where it cannot judge it
   lets the turn end and says why: advice fails open.
 - Without gh it judges by the answer file `.se/work/pull-request.json`, which

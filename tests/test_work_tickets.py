@@ -1647,3 +1647,61 @@ def test_stop_check_refuses_at_most_its_cap_in_a_row(tmp_path, monkeypatch, caps
     assert "(1 of 2 in a row)" in stop_hook(root, monkeypatch, capsys)["reason"]  # counted afresh
     (root / "se.toml").unlink()
     assert work_tickets.stop_refusals(root) == 5  # built in
+
+
+def subagent_transcript(path: Path, prompt: str, *commands: str) -> Path:
+    """A sub-agent's transcript: its prompt, then one Bash call per command."""
+    entries = [{"type": "user", "message": {"role": "user", "content": prompt}}]
+    entries += [{"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "name": "Bash", "input": {"command": command}}]}}
+                for command in commands]
+    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+    return path
+
+
+def test_stop_check_judges_a_worker_sub_agent_in_the_worktree_its_prompt_names(
+        tmp_path, monkeypatch, capsys):
+    worktree = stop_checkout(tmp_path / "worktree", monkeypatch)
+    session = stop_checkout(tmp_path / "session", monkeypatch, queue=False)  # the hook's cwd
+    other = stop_checkout(tmp_path / "other", monkeypatch)
+    fake_pull_requests(monkeypatch, worktree, None)
+    transcript = subagent_transcript(
+        tmp_path / "agent.jsonl", f"Work issue #5. Your worktree: {worktree}.",
+        f"cat {other}/.se/work/todo/1.md")
+    answer = stop_hook(session, monkeypatch, capsys, "SubagentStop", agent_type="se:worker",
+                       agent_transcript_path=str(transcript))
+    assert answer["decision"] == "block"
+    assert f"--worktree {worktree}" in answer["reason"]
+    assert (worktree / ".se" / "work" / work_tickets.STOP_COUNT).exists()
+    assert not (other / ".se" / "work" / work_tickets.STOP_COUNT).exists()
+
+
+def test_stop_check_judges_a_worker_sub_agent_in_the_queue_its_transcript_last_touched(
+        tmp_path, monkeypatch, capsys):
+    first = stop_checkout(tmp_path / "first", monkeypatch)
+    last = stop_checkout(tmp_path / "last", monkeypatch)
+    session = stop_checkout(tmp_path / "session", monkeypatch, queue=False)
+    fake_pull_requests(monkeypatch, last, None)
+    transcript = subagent_transcript(
+        tmp_path / "agent.jsonl", "Work issue #5, no path named.",
+        f"uv run python scripts/work_tickets.py status --worktree {first}",
+        f"ls {last}/.se/work/todo", "git status")
+    answer = stop_hook(session, monkeypatch, capsys, "SubagentStop", agent_type="worker",
+                       agent_transcript_path=str(transcript))
+    assert f"--worktree {last}" in answer["reason"]
+
+
+def test_stop_check_falls_back_to_the_cwd_and_says_why_it_cannot_judge_a_worker_sub_agent(
+        tmp_path, monkeypatch, capsys):
+    cwd = stop_checkout(tmp_path / "cwd", monkeypatch)
+    fake_pull_requests(monkeypatch, cwd, None)
+    transcript = subagent_transcript(tmp_path / "agent.jsonl", "Work in /nowhere/at/all.", "ls /tmp")
+    event = {"agent_type": "se:worker", "agent_transcript_path": str(transcript)}
+    assert stop_hook(cwd, monkeypatch, capsys, "SubagentStop", **event)["decision"] == "block"
+    session = stop_checkout(tmp_path / "session", monkeypatch, queue=False)
+    note = stop_hook(session, monkeypatch, capsys, "SubagentStop", **event)["systemMessage"]
+    assert "cannot judge the worker sub-agent's delivery" in note
+    assert "neither its prompt nor its transcript names a checkout" in note and str(session) in note
+    missing = {**event, "agent_transcript_path": str(tmp_path / "gone.jsonl")}
+    assert "cannot judge" in stop_hook(session, monkeypatch, capsys, "SubagentStop", **missing)[
+        "systemMessage"]
