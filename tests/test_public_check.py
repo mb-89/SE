@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -934,11 +935,11 @@ def test_the_range_gate_refuses_unpushed_trailers_and_leaves_published_ones(
     assert "git commit --amend" in hits[0]
 
 
-CI_WORKFLOW = SE_ROOT / ".github" / "workflows" / "public-check.yml"
+CI_WORKFLOW = SE_ROOT / ".github" / "workflows" / "check.yml"
 
 
 def ci_script() -> str:
-    """The shell the public-check workflow runs, its one `run: |` block, calling this se's check."""
+    """The shell the check workflow's gate runs, its one `run: |` block, calling this se's check."""
     lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
     start = next(index for index, line in enumerate(lines) if line.strip() == "run: |") + 1
     block = []
@@ -964,12 +965,15 @@ def owner_push(repo: Path, tmp_path: Path, message: str) -> tuple[str, str]:
     return before, git(repo, "rev-parse", "HEAD").stdout.strip()
 
 
-def run_ci(tmp_path: Path, before: str, after: str) -> subprocess.CompletedProcess[str]:
-    """The workflow's step as its runner runs it: in a fresh full clone, on a push to main."""
+def run_ci(tmp_path: Path, before: str, after: str,
+           base_ref: str = "") -> subprocess.CompletedProcess[str]:
+    """The workflow's gate step as its runner runs it, in a fresh full clone: on a push to main,
+    or with `base_ref` on a pull request into that branch, whose head is `after`."""
     runner = tmp_path / "runner"
     shutil.rmtree(runner, ignore_errors=True)
     git(tmp_path, "clone", "-q", "-b", "main", str(tmp_path / "remote.git"), str(runner))
-    env = {**os.environ, "BEFORE": before, "AFTER": after, "BRANCH": "main"}
+    env = {**os.environ, "BEFORE": before, "AFTER": after, "BRANCH": base_ref or "main",
+           "BASE_REF": base_ref}
     return subprocess.run(["bash", "-e", "-c", ci_script()], cwd=runner, env=env,
                           capture_output=True, text=True, check=False)
 
@@ -999,3 +1003,29 @@ def test_ci_passes_an_allow_listed_co_author_commit(repo: Path, tmp_path: Path) 
 def test_ci_passes_a_clean_push(repo: Path, tmp_path: Path) -> None:
     before, after = owner_push(repo, tmp_path, "Fix the build")
     assert run_ci(tmp_path, before, after).returncode == 0
+
+
+def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    assert re.search(r"(?m)^jobs:\n  check:\n", workflow), "main's ruleset requires a job named check"
+    assert re.search(r"(?m)^on:\n  pull_request:\n  push:\n    branches: \[main\]$", workflow)
+    gate, suite = workflow.index("public_check.py --rev"), workflow.index("run: uv run pytest -q")
+    assert gate < suite, "one job: the gate, then the complete suite"
+
+
+@pytest.mark.parametrize("message, refused", [("Fix the build", False),
+                                              ("Fix the build\n\nco-authored-by: Copilot", True)])
+def test_ci_gates_the_commits_of_a_pull_request(repo: Path, tmp_path: Path, message: str,
+                                                refused: bool) -> None:
+    owner_push(repo, tmp_path, "On main")
+    git(repo, "checkout", "-q", "-b", "topic")
+    commit(repo, {"b.txt": "b\n"}, message)
+    git(repo, "push", "-q", "origin", "topic")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    result = run_ci(tmp_path, "", head, base_ref="main")
+    assert "gating refs/remotes/origin/main.." in result.stdout
+    assert "the commits of the pull request into main" in result.stdout
+    assert " files, 1 commits, se " in result.stdout  # the PR's one commit, not main's
+    hits = [line for line in result.stdout.splitlines() if "attribution-trailer" in line]
+    assert [hit.split(": ", 1)[0] for hit in hits] == ([f"commit {head[:12]} message:3"] if refused else [])
+    assert result.returncode == (1 if refused else 0), result.stdout

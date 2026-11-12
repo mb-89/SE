@@ -12,8 +12,8 @@ list (~/.se/private-terms.txt, SE_PRIVATE_TERMS), stop the check with their reme
 The commit gates (a message file, the commits of a --range) also refuse tracker references and
 attribution trailers (`Co-Authored-By:`, `Claude-Session:`) in messages, from every author,
 naming the reference or trailer and the remedy; a full check leaves old history to them. CI runs
-the --range gate on every push to the integration branch (.github/workflows/public-check.yml). The
-commits of a --range must also carry the project identity (se.toml [project] identity, unless the
+the --range gate on every pull request and every push to the integration branch
+(.github/workflows/check.yml). The commits of a --range must also carry the project identity (se.toml [project] identity, unless the
 machine sets public_identity), where one is set; GitHub's web-flow identity, the committer of a
 commit made on GitHub, passes as committer. A hit names the identity found, redacted. A
 `commit:<full sha> author|committer` entry in .public-check-allow allows the identity in that role
