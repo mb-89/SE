@@ -3551,6 +3551,12 @@ def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeyp
     assert "#7" not in capsys.readouterr().out
     assert run(worktree, "route", "2", "--title", " ", "--routing-file", str(routing)) == 1
     assert github.issues[2]["labels"] == [] and github.issues[2]["body"] == "Another one."
+    capsys.readouterr()
+
+    assert run(worktree, "file", "--title", "docs/overhaul-20261106", "--body-file", str(body),
+               "--label", "discovery") == 0
+    assert github.issues[8]["labels"] == ["work", "ready", "repo:repo", "discovery"]
+    assert "discovery" in github.labels
 
 
 OUTSIDE_BODY = BODY.split("## Requirements")[0].rstrip() + "\n"

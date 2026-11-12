@@ -542,6 +542,9 @@ a report.
     door, which `tests/test_issue_creation.py` checks.
   - se: `review.py file` posts one comment on the reviewed pull request and files no issue
     (README [Work commands](../../../../README.md#work-commands)).
+  - se: `retro.py file` and `overhaul.py file` post one report on their own issue and close it,
+    filing no issue; an overhaul's rule changes are marked for the owner's decision list
+    (README [Work commands](../../../../README.md#work-commands)).
   - se: SE, reading a report, bundles related findings into one work issue and sends rule or
     principle changes to the owner's decision list, never as separate issues
     ([Issues](../SKILL.md#issues)).

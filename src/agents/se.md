@@ -56,6 +56,11 @@ its tools.
   - It runs as the template says, `retro.py collect` then `retro.py file`, which closes the retro
     issue with its report ([README](../../README.md#work-commands)). A work issue you file from it
     names each finding it takes as `retro #<n> finding <k>`, so the next retro scores it.
+- **Overhaul issues**, rarely, to ask whether the design is still right: `overhaul.py new` files
+  one from [overhaul.md](../../.github/ISSUE_TEMPLATE/overhaul.md), and it runs as the template
+  says, `overhaul.py read` then `overhaul.py file`, which closes it with its report
+  ([README](../../README.md#work-commands)). A work issue you file from it names each finding it
+  takes as `overhaul #<n> finding <k>`, so the next overhaul scores it.
 - **Sessions**: one worker per work issue in its own fresh worktree from the newest `main` (the work
   model's [Worktrees](../skills/work-model/SKILL.md#worktrees)), started as an independent session
   whose prompt names only the worker agent, the issue, the worktree and the integrator session.
