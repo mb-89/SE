@@ -202,7 +202,8 @@ than a little dependency.
   can change.
 - **Prevents:** duplicated and near-duplicated code; an abstraction with one real user.
 - **Implementations:**
-  - se: by judgment, the reviewer for its change.
+  - se: by judgment, the reviewer for its change; an overhaul reads the duplicate blocks and
+    near-duplicate functions [`<se>/scripts/overhaul.py facts`](../../../../scripts/overhaul.py) lists.
   - Go line (frozen): `se overhaul read` listed duplicates and near-duplicates.
 - **Related:** gen-002, des-006
 
@@ -214,7 +215,8 @@ Build nothing for a second user or a case that does not exist yet.
 - **Without it:** the code grows options and layers whose only effect is to slow every change.
 - **Prevents:** speculative generality; unused surfaces; a one-user abstraction.
 - **Implementations:**
-  - se: by judgment, the reviewer for its change.
+  - se: by judgment, the reviewer for its change; an overhaul reads the script commands no
+    authored text names, which [`<se>/scripts/overhaul.py facts`](../../../../scripts/overhaul.py) lists.
   - Go line (frozen): `se overhaul read` listed one-user abstractions and unused surfaces.
 - **Related:** des-005, des-015
 
@@ -227,7 +229,8 @@ changes state, not both.
 - **Without it:** parts grow until a change to one concern breaks another.
 - **Prevents:** long functions and large modules; divergent change; a query with a side effect.
 - **Implementations:**
-  - se: by judgment, the reviewer for its change.
+  - se: by judgment, the reviewer for its change; an overhaul reads the longest functions, files
+    and parameter lists [`<se>/scripts/overhaul.py facts`](../../../../scripts/overhaul.py) lists.
   - Go line (frozen): `se overhaul read` listed the longest functions and files.
 - **Related:** des-008, des-014
 
@@ -317,7 +320,8 @@ kind.
 - **Without it:** design problems are found only when a change breaks on them.
 - **Prevents:** the design defects each smell signals, found late.
 - **Implementations:**
-  - se: by judgment, the reviewer for its change.
+  - se: by judgment, the reviewer for its change; an overhaul reads the sizes, duplicates and
+    longest pieces [`<se>/scripts/overhaul.py facts`](../../../../scripts/overhaul.py) lists.
   - Go line (frozen): `se overhaul read` listed files touched per change, duplicates, longest
     functions, files and parameter lists, sizes and switches on a kind.
 - **Related:** des-001, des-005, des-007
@@ -332,7 +336,7 @@ another place holds.
 - **Prevents:** dead code; code for a retired state; a second copy of a fact in code.
 - **Implementations:**
   - se: "No backwards compatibility unless asked" ([`AGENTS.md`](../../../../AGENTS.md)); otherwise
-    by judgment.
+    by judgment, from what [`<se>/scripts/overhaul.py facts`](../../../../scripts/overhaul.py) finds nothing but tests reaches.
   - Go line (frozen): the battery's `deadcode -test`; `se overhaul read`'s pruning facts.
 - **Related:** des-006, gen-002
 

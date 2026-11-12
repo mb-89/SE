@@ -765,3 +765,23 @@ numbered, with its class's fix, its home and its kind:
 - `decision`: for the owner's decision list.
 
 Without gh it prints the comment and the close as a plan.
+
+`uv run python scripts/overhaul.py facts [--json] [--repo PATH]` is an overhaul's pruning facts,
+read from the checkout (default: the current directory). It only reads, uses the standard library
+alone and judges nothing: each fact is a candidate the overhaul judges by the rule book's
+[des-015](src/skills/work-model/references/rules.md#des-015-the-less-code-the-less-to-maintain)
+and its neighbours. It lists:
+
+- the functions, classes and methods in `scripts/` that nothing but tests reaches, each marked with
+  whether the tests reach it: a name-based call graph (`ast`) from each script's import-time code,
+  the handlers a decorator registers by name and the names authored text writes as code (a
+  documented interface such as `preflight`); it errs towards missing dead code, never towards
+  naming live code;
+- duplicate blocks, six or more lines written alike in two places, and near-duplicate functions,
+  75% or more of their shape (names and literals aside) alike;
+- the lines of code and of tests per script, a test file counting for the script it imports or runs;
+- the ten longest functions, files and parameter lists, and the ten files untouched longest (git);
+- each script command (argparse's and `work_tickets.py`'s registry) that no line of the authored
+  text (`se.toml` `authored_content`) names after its script.
+
+`--json` prints the same facts as data.
