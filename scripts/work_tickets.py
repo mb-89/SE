@@ -2909,7 +2909,9 @@ def check_issue_read(
 def checked_report(root: Path | None, file: Path, issue_body: str) -> str:
     """The field report `file` carries between its markers (a worker's draft or a whole pull
     request description), refused where it departs from its template or misses evidence against
-    `issue_body`. In a worktree its Branch tip is first set to the branch's commit and written back."""
+    `issue_body`. In a worktree its Branch tip is first set to the branch's commit and written back,
+    and `integrate`'s guard runs against the checked-out branch, so a delivery shows the refusal
+    the landing would."""
     text = read_file(file, "field report")
     if root is not None:
         text = with_branch_tip(root, text)
@@ -2918,6 +2920,9 @@ def checked_report(root: Path | None, file: Path, issue_body: str) -> str:
     if problems:
         raise field_report_error(file.name, problems)
     if root is not None:
+        branch = current_branch(root)
+        if branch:
+            guard(root, branch, report)
         file.write_text(text, encoding="utf-8", newline="\n")
     return report
 
@@ -5143,7 +5148,8 @@ PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker
                       "the template, without writing GitHub: its header lines, sections, tables, "
                       "field labels, placeholders and evidence gate, and, in a worktree with a "
                       "comments-read or body-read record, refuse comments after it and a changed "
-                      "body; refuses a FILE without the markers"),
+                      "body; in a worktree also integrate's guard against its branch; refuses a "
+                      "FILE without the markers"),
          ), required=True),
          arg("--issue-body", type=Path, metavar="FILE",
              help="with --check: the work issue's body as your GitHub tools read it now, for the "
