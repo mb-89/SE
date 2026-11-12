@@ -144,6 +144,22 @@ def test_the_readme_installs_the_plugin_the_marketplace_declares():
         assert f"`{plugin}:{agent}`" in readme
 
 
+def test_the_cloud_install_clones_the_plugin_and_each_role_prompt_names_a_built_file(checkout):
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    cloud = readme.split("### Claude Code cloud\n", 1)[1].split("\n## ", 1)[0]
+    script = cloud.split("```bash\n", 1)[1].split("```", 1)[0]
+    assert "git clone --depth 1 -b se https://github.com/mb-89/SE ~/.claude/skills/se ||" in script
+    row = next(line for line in readme.splitlines() if line.startswith("| Claude Code cloud"))
+    for kind in ("agents", "skills"):
+        for name in sorted(path.stem for path in (ROOT / "src" / kind).iterdir()):
+            assert f"`se:{name}`" in row, name
+    work_model = (ROOT / "src" / "skills" / "work-model" / "SKILL.md").read_text(encoding="utf-8")
+    prompts = re.findall(r"Act as the \w+ agent defined in <se>/(\S+?\.md)", cloud + work_model)
+    assert {"github/agents/se.agent.md", "github/agents/worker.agent.md"} <= {p.lstrip(".") for p in prompts}
+    for path in prompts:
+        assert (checkout / path).is_file(), path
+
+
 @pytest.mark.parametrize("named", ("`uv run python scripts/deck.py build`", "<se checkout>/scripts/se_start.py",
                                    "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh"))
 def test_a_source_naming_a_script_without_ses_root_is_refused(checkout, capsys, named):
