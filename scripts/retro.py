@@ -100,6 +100,8 @@ RULE_CHECKS = {
     "outside-pr": "no commit reached the integration branch outside a pull request",
     "field-report": "every closed work issue has a field report",
 }
+# A retro is due once this many work issues landed since the last one (se.toml [retro] due_after).
+DUE_AFTER = 10
 RETRO_KEYS = ("Went well", "Cost time", "Proposed improvement")
 EMPTY = {"", "none", "none.", "-", "n/a"}
 
@@ -418,15 +420,29 @@ def first_parent_commits(root: Path, ref: str) -> list[tuple[str, str, str]]:
     return [tuple(line.split("\t", 2)) for line in output.splitlines() if line.count("\t") >= 2]
 
 
-def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
-            now: datetime) -> Collected | None:
-    """The window of retro `number` read through `door`; None where the door is still missing
-    answers (`door.missing`)."""
+@dataclass
+class Read:
+    """What a window's reads give: the closed issues, the pull requests, the last closed retro
+    other than the one collecting, and the work issues closed after it closed."""
+
+    issues: list[Issue]
+    pulls: list[Pull]
+    last: Issue | None
+    window: list[Issue]
+
+    def in_window(self, value: str) -> bool:
+        moment = when(value)
+        since = when(self.last.closed_at) if self.last else None
+        return moment is not None and (since is None or moment > since)
+
+
+def read_window(door, number: int) -> Read | None:
+    """The window of retro `number` (0: of the next retro) read through `door`; None where the
+    door is still missing answers (`door.missing`)."""
     issues = [issue_of(item) for item in door.closed_issues()]
     pulls = [pull_of(item) for item in door.pulls()]
     if door.missing:
         return None
-    by_number = {issue.number: issue for issue in issues}
 
     def completed(chosen: list[Issue]) -> bool:
         """Each of `chosen` with its close time and reason, read one by one where the list
@@ -444,19 +460,66 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
               and when(issue.closed_at)]
     last = max(retros, key=lambda issue: when(issue.closed_at), default=None)
     since = when(last.closed_at) if last else None
-
-    def in_window(value: str) -> bool:
-        moment = when(value)
-        return moment is not None and (since is None or moment > since)
-
     # An issue closed in the window was updated in it: only those are read one by one.
     if not completed([issue for issue in issues if WORK_LABEL in issue.labels
                       and not is_retro(issue) and (since is None or not issue.updated_at
                                                    or when(issue.updated_at) > since)]):
         return None
-    window = sorted((issue for issue in issues if WORK_LABEL in issue.labels
-                     and not is_retro(issue) and in_window(issue.closed_at)),
-                    key=lambda issue: issue.number)
+    found = Read(issues, pulls, last, [])
+    found.window = sorted((issue for issue in issues if WORK_LABEL in issue.labels
+                           and not is_retro(issue) and found.in_window(issue.closed_at)),
+                          key=lambda issue: issue.number)
+    return found
+
+
+def landing_of(issue: Issue, naming: list[Pull], branch: str) -> Pull | None:
+    """The newest pull request of `naming` (those naming `issue`) merged into `branch`."""
+    return next((pull for pull in sorted(naming, key=lambda p: -p.number)
+                 if pull.merged_at and pull.base == branch), None)
+
+
+def is_duplicate(issue: Issue) -> bool:
+    return issue.state_reason == "duplicate" or "duplicate" in issue.labels
+
+
+def landed(issue: Issue, landing: Pull | None) -> bool:
+    """Whether a work issue of the window landed: a pull request naming it merged into the
+    integration branch, and it closed neither as a duplicate nor as not planned."""
+    return landing is not None and not is_duplicate(issue) and issue.state_reason != "not_planned"
+
+
+def landed_since_retro(door, tracker: str, branch: str) -> int | None:
+    """How many work issues landed in the next retro's window, read through `door`; None where
+    the door is still missing answers."""
+    found = read_window(door, 0)
+    if found is None:
+        return None
+    references = {pull.number: reference(pull, tracker) for pull in found.pulls}
+    return sum(landed(issue, landing_of(issue, [pull for pull in found.pulls
+                                                if references[pull.number] == issue.number],
+                                        branch))
+               for issue in found.window)
+
+
+def due_after(root: Path) -> int:
+    """`[retro] due_after` in se.toml: how many landed work issues make a retro due; built in
+    DUE_AFTER."""
+    count = work_tickets.se_table(root, "retro").get("due_after", DUE_AFTER)
+    if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+        raise QueueError(f"retro.due_after in {root / 'se.toml'} must be a positive whole number; "
+                         f"fix it or remove it for the built-in {DUE_AFTER}")
+    return count
+
+
+def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
+            now: datetime) -> Collected | None:
+    """The window of retro `number` read through `door`; None where the door is still missing
+    answers (`door.missing`)."""
+    read = read_window(door, number)
+    if read is None:
+        return None
+    issues, pulls, last, window, in_window = read.issues, read.pulls, read.last, read.window, read.in_window
+    by_number = {issue.number: issue for issue in issues}
     pull_numbers = {pull.number: pull for pull in pulls}
     merged = [pull for pull in pulls if pull.merged_at]
     references = {pull.number: reference(pull, tracker) for pull in pulls}
@@ -472,8 +535,7 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
             found = SUITE_TIME.search(body) if body.lstrip().startswith(INTEGRATED) else None
             suite = float(found[1]) if found else suite
         naming = [pull for pull in pulls if references[pull.number] == issue.number]
-        landing = next((pull for pull in sorted(naming, key=lambda p: -p.number)
-                        if pull.merged_at and pull.base == branch), None)
+        landing = landing_of(issue, naming, branch)
         report_pull = None
         if landing is not None:
             marker = REPORT_IN.search(landing.body)
@@ -483,11 +545,11 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
             report_pull = next((pull for pull in sorted(naming, key=lambda p: -p.number)
                                 if report_of(pull.body)), None)
         report = report_of(report_pull.body) if report_pull else None
-        duplicate = issue.state_reason == "duplicate" or "duplicate" in issue.labels
+        duplicate = is_duplicate(issue)
         closed.append(Closed(
             number=issue.number, title=issue.title, state_reason=issue.state_reason or "completed",
             duplicate=duplicate,
-            landed=landing is not None and not duplicate and issue.state_reason != "not_planned",
+            landed=landed(issue, landing),
             refused=refused, escalations=escalations, suite_seconds=suite,
             landing_pull=landing.number if landing else None,
             report_pull=report_pull.number if report_pull else None,

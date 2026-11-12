@@ -97,6 +97,15 @@ uv run python <se>/scripts/se_start.py refresh
 - `check` reads the version tags of SE's own remote and of every module's remote, once each and in
   parallel. A failed read is named in the greeting with its remote, its cause and the command to see
   it; the greeting still appears.
+- What is due in the work: where gh is signed in, `check` also counts the work issues landed since
+  the last retro (the window of [`retro.py collect`](#work-commands)) and runs the
+  [fleet check](#fleet-check), and caches both.
+  - The greeting then names a retro that is [due](#retro-due) and the fleet's findings by kind and
+    issue, one line each with the command to run, and a part whose read failed with its cause.
+  - `status` reads them from the cache only.
+  - Without gh (Claude's cloud, where no token reaches SE's code) the greeting names neither; the
+    [se agent](src/agents/se.md) runs the fleet check's plan at its first turn instead.
+  - `refresh` reads no work: its checks keep the cached lines.
 - What is due: the highest version a module's `version` range admits above its locked one, and for
   SE the highest version of its major. A newer version outside the range is shown apart and never
   applied.
@@ -362,6 +371,17 @@ writes them.
 
 Without gh it prints its GitHub plan; the session runs it with its GitHub tools, saves the three
 lists as JSON and passes them as `--open-issues`, `--closed-issues` and `--pulls`.
+
+### Retro due
+
+```toml
+[retro]
+due_after = 10
+```
+
+A retro is due once `due_after` work issues landed since the last closed retro issue, built in 10;
+the [start greeting](#start-and-refresh) names it. `scripts/retro.py` owns the count and the
+setting.
 
 ### Stop hook
 

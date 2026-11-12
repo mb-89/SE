@@ -7,6 +7,7 @@ import importlib.util
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -60,6 +61,18 @@ class Spawns(list):
         self.append(argv)
 
 
+class Work(list):
+    """The fake work check: records each project it reads and answers `found` (None: no gh)."""
+
+    def __init__(self, found: dict | None = None):
+        super().__init__()
+        self.found = found
+
+    def __call__(self, root):
+        self.append(root)
+        return self.found
+
+
 def plugin(path: Path, version: str = "1.2.0", *, origin: str | None = SE_URL) -> Path:
     """A fixture plugin: three agents (SE and two sub-agents) and two skills in its Claude layout."""
     write(path / "se.toml", f'[project]\nversion = "{version}"\ndocs_url = "https://docs.example.com/se/"\n')
@@ -111,7 +124,7 @@ ref = "{SHA}"
     tags = {SE_URL: ["v1.2.0", "v1.3.0", "v2.0.0"], LIB_URL: ["v1.2.0", "v1.4.1", "v2.0.0"],
             TOOL_URL: ["v2.0.3", "v2.1.0"], OBS_URL: ["v0.9.0"]}
     remotes = Remotes(clock, tags)
-    world = se_start.World(clock=clock, remote=remotes, spawn=Spawns())
+    world = se_start.World(clock=clock, remote=remotes, spawn=Spawns(), work=Work())
     return dict(se=se, project=project, config=config, cache=tmp_path / "cache.json",
                 clock=clock, remotes=remotes, world=world)
 
@@ -277,6 +290,109 @@ def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, mon
     assert "SE root" not in data["systemMessage"]
 
 
+# What is due in the work: a retro and the fleet's findings, from the cache (work issue
+# "start names what's due").
+
+DUE = {"retro": {"landed": 12, "due_after": 10},
+       "fleet": {"findings": [{"kind": "failed check", "issue": 7}, {"kind": "stray branch", "issue": 3},
+                              {"kind": "stray branch", "issue": 5}]}}
+
+
+def seed(s, work):
+    """A fresh cache from an earlier check: every remote up to date, and `work`."""
+    s["remotes"].tags = {SE_URL: ["v1.2.0"], LIB_URL: ["v1.2.0"], TOOL_URL: ["v2.0.3"]}
+    remotes = se_start.run_check({SE_URL, LIB_URL, TOOL_URL, OBS_URL}, s["remotes"])
+    se_start.Cache(s["clock"].now, None, remotes, work).write(s["cache"])
+    s["remotes"].calls.clear()
+
+
+def work_lines(lines):
+    return [line for line in lines if line.startswith(("Retro", "Fleet"))]
+
+
+def test_a_due_retro_and_the_fleets_findings_appear_from_a_seeded_cache(setup):
+    seed(setup, DUE)
+    se = setup["se"].as_posix()
+    expected = [
+        "Retro due: 12 work issues landed since the last retro (due after 10); file one from "
+        f".github/ISSUE_TEMPLATE/retro.md, then run: uv run python {se}/scripts/retro.py collect "
+        "<retro issue> --out <draft>",
+        "Fleet: 3 findings (failed check #7; stray branch #3, #5); see each with its remedy: "
+        f"uv run python {se}/scripts/work_tickets.py fleet-check --worktree {setup['project'].as_posix()}",
+    ]
+    rep = report(setup)
+    assert se_start.greeting(rep, setup["se"])[1:] == expected
+    assert work_lines(se_start.full(rep, setup["se"])) == expected
+    assert setup["remotes"].calls == [] and setup["world"].work == [] and setup["world"].spawn == []
+
+
+@pytest.mark.parametrize("work", [None, {"retro": {"landed": 9, "due_after": 10}, "fleet": {"findings": []}}])
+def test_the_lines_are_absent_without_gh_without_a_cache_or_with_nothing_due(setup, work):
+    assert work_lines(se_start.greeting(report(setup), setup["se"])) == []  # no cache yet
+    seed(setup, work)
+    lines = se_start.greeting(report(setup), setup["se"])
+    assert work_lines(lines) == [] and len(lines) == 1
+
+
+def test_a_failed_read_names_its_part_and_the_remedy(setup):
+    seed(setup, {"retro": {"error": "gh api failed: HTTP 502"}, "fleet": {"findings": []}})
+    assert work_lines(se_start.greeting(report(setup), setup["se"])) == [
+        "Retro check not done: gh api failed: HTTP 502; run it by hand to see the cause: "
+        f"uv run python {setup['se'].as_posix()}/scripts/se_start.py check"]
+
+
+def test_status_reads_the_seeded_cache_within_its_budget(setup):
+    seed(setup, DUE)
+    started = time.perf_counter()
+    lines = se_start.greeting(report(setup), setup["se"])
+    assert time.perf_counter() - started < se_start.BUDGET
+    assert len(work_lines(lines)) == 2 and setup["world"].work == []
+
+
+def test_check_caches_the_work_and_refreshs_checks_keep_it(setup):
+    setup["world"].work.found = DUE
+    setup["remotes"].tags = {SE_URL: ["v1.2.0"], LIB_URL: ["v1.2.0"], TOOL_URL: ["v2.0.3"]}  # nothing moves
+    report(setup, "check")
+    assert setup["world"].work == [setup["project"]]
+    assert se_start.Cache.read(setup["cache"]).work == DUE
+    se_start.refresh(setup["se"], setup["project"], setup["config"], setup["cache"], setup["world"])
+    assert setup["world"].work == [setup["project"]]  # refresh reads no work
+    assert se_start.Cache.read(setup["cache"]).work == DUE
+
+
+def test_without_gh_the_work_check_reads_nothing(tmp_path, monkeypatch):
+    work_tickets = se_start._load("work_tickets")
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "Fleet", lambda *a: pytest.fail("no read without gh"))
+    assert se_start.work_check(project) is None
+    assert se_start.work_check(None) is None
+
+
+def test_with_gh_each_part_keeps_its_answer_when_the_other_fails(tmp_path, monkeypatch):
+    work_tickets, retro = se_start._load("work_tickets"), se_start._load("retro")
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "github.com/owner/repo")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "github.com/owner/repo")
+    monkeypatch.setattr(work_tickets, "repository_name", lambda root: "repo")
+    monkeypatch.setattr(work_tickets, "Fleet", lambda root, repo, base: (root, repo, base))
+    monkeypatch.setattr(work_tickets, "fleet_findings", lambda door, now, lease, name: [
+        work_tickets.Finding("stray branch", 3, "closed", "delete it", branch="feat/x")])
+
+    def no_door(*args):
+        raise work_tickets.QueueError("gh api issues failed: HTTP 502")
+
+    monkeypatch.setattr(retro, "GhDoor", no_door)
+    assert se_start.work_check(project) == {"retro": {"error": "gh api issues failed: HTTP 502"},
+                                            "fleet": {"findings": [{"kind": "stray branch", "issue": 3}]}}
+    monkeypatch.setattr(retro, "GhDoor", lambda *args: "door")
+    monkeypatch.setattr(retro, "landed_since_retro", lambda door, repo, branch: 11)
+    assert se_start.work_check(project)["retro"] == {"landed": 11, "due_after": 10}
+
+
 # Requirement 3: refresh moves only what is due, real git repositories.
 
 
@@ -340,7 +456,7 @@ def repos(tmp_path, isolated_git):
         se_modules.write_lock(project, name, "1.0.0", git(remote, "rev-parse", "v1.0.0"))
     assert se_modules.main(["--root", str(project), "--local", str(config), "sync"]) == 0
     clock = Clock()
-    world = se_start.World(clock=clock, spawn=Spawns())
+    world = se_start.World(clock=clock, spawn=Spawns(), work=Work())
     return dict(se=se, project=project, config=config, cache=tmp_path / "cache.json", world=world,
                 remotes=remotes, upstream=upstream)
 
@@ -450,7 +566,7 @@ def as_plugin(repos, tmp_path, monkeypatch, serves: str) -> FakeClaude:
     fake = FakeClaude(repos, se_start.plugin_registry(), [
         {"id": "se@se", "version": "1.0.0", "scope": "user", "enabled": True, "installPath": str(repos["se"])}],
         serves)
-    repos["world"] = se_start.World(clock=repos["world"].clock, spawn=Spawns(), claude=fake)
+    repos["world"] = se_start.World(clock=repos["world"].clock, spawn=Spawns(), claude=fake, work=Work())
     return fake
 
 
@@ -508,3 +624,4 @@ def test_se_at_a_local_path_is_never_touched(repos):
     assert "SE: local, not touched" in lines
     assert not any(line.startswith("SE: ") and "->" in line for line in lines)
     assert git(repos["se"], "rev-parse", "HEAD") == head
+
