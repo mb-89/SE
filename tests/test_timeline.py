@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import socket
+import subprocess
 from datetime import datetime, timezone
 
 import pytest
@@ -250,3 +252,94 @@ def test_a_refused_read_writes_nothing(tmp_path, capsys):
     assert timeline.main(["--destination", str(destination)], post=refuse) == 1
     assert not destination.exists()
     assert "502" in capsys.readouterr().err
+
+
+# --- Planned days (work issue "timeline shows planned days") ---
+
+FIXTURE = timeline.ROOT / "tests" / "fixtures" / "timeline-planned.json"
+
+
+def fixture_page() -> dict:
+    return timeline.model(json.loads(FIXTURE.read_text(encoding="utf-8")))
+
+
+def planned_on(page: dict, lane: str) -> dict[str, list[int]]:
+    return {date: [entry["number"] for entry in stops[lane]["issues"]]
+            for date, stops in page["planned"].items() if lane in stops}
+
+
+@pytest.mark.parametrize(("body", "date"), [
+    ("Planned: 2026-11-13\n", "2026-11-13"),
+    ("<!-- se:fleet -->\r\n\r\nPlanned:  2026-11-13  \r\n\r\n## Goal\r\n", "2026-11-13"),
+    ("Planned: someday\n", None),
+    ("Planned: 2026-02-30\n", None),
+    ("Was Planned: 2026-11-13 in a sentence.\n", None),
+    ("Planned: 2026-11-13 maybe\n", None),
+    ("", None),
+])
+def test_the_planned_line_is_parsed_in_one_place(body, date):
+    assert timeline.planned(body) == date
+
+
+def test_an_open_issue_planned_after_today_is_a_stop_on_that_day_in_its_lane():
+    page = fixture_page()
+    assert planned_on(page, "o/a") == {"2026-11-13": [10, 11], "2027-01-05": [21]}
+    assert planned_on(page, "o/b") == {"2026-11-13": [30], "2026-11-14": [12]}
+    assert list(page["planned"]) == ["2026-11-13", "2026-11-14", "2027-01-05"]
+    assert page["planned"]["2026-11-14"]["o/b"]["issues"][0]["needs_you"] is True
+    html = timeline.render(page)
+    rows = re.findall(r'<details class="row open planned">.*?</details></li></ul></div></details>', html, flags=re.S)
+    assert [re.search(r'<span class="when">(.*?)</span>', row)[1] for row in rows] == ["13 Nov", "14 Nov", "5 Jan"]
+    assert '<span class="count">2</span><span class="label">issue 11</span>' in rows[0]
+    assert html.index('id="today"') < html.index(">13 Nov<") < html.index(">5 Jan<") < html.index("Needs you")
+    assert html.index(">14 Nov<") < html.index('<div class="year">2027</div>') < html.index(">5 Jan<")
+
+
+def test_a_planned_date_in_the_past_on_an_open_issue_is_today_marked_late():
+    page = fixture_page()
+    today = {entry["number"]: entry["late"] for entry in page["places"]["today"]["o/a"]}
+    assert today == {13: True, 14: False}
+    html = timeline.render(page)
+    row = re.search(r'<details class="row open today" id="today">.*?</details></li></ul></div></details>', html, flags=re.S)[0]
+    assert '<span class="lane late">' in row
+    assert row.count('<span class="mark">late</span>') == 2  # the stop and issue #13
+    assert "#14 issue 14</summary>" in row
+
+
+def test_undated_ready_issues_stay_next_and_other_places_ignore_the_line():
+    page = fixture_page()
+    assert [entry["number"] for entry in page["places"]["next"]["o/a"]] == [20, 19, 16, 15]
+    assert page["places"]["needs-you"]["o/b"] == []
+    assert [entry["number"] for entry in page["places"]["backlog"]["o/a"]] == [17]
+    assert [entry["number"] for entry in page["days"]["2026-11-11"]["o/a"]["issues"]] == [18]
+
+
+PHONE = """
+const {chromium} = require("playwright");
+(async () => {
+    const browser = await chromium.launch();
+    try {
+        const page = await browser.newPage({viewport: {width: 390, height: 844}});
+        await page.goto("file://" + process.argv[1]);
+        const closed = await page.evaluate(() => document.documentElement.scrollWidth);
+        await page.evaluate(() => document.querySelectorAll("details").forEach(box => { box.open = true; }));
+        const open = await page.evaluate(() => document.documentElement.scrollWidth);
+        console.log(JSON.stringify({closed, open}));
+    } finally {
+        await browser.close();
+    }
+})();
+"""
+
+
+def test_the_page_has_no_horizontal_scroll_on_a_390_px_phone(tmp_path):
+    if shutil.which("node") is None or subprocess.run(["node", "-e", "require('playwright')"],
+                                                      capture_output=True).returncode:
+        pytest.skip("node with playwright is not installed")
+    snap = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    snap["repositories"]["o/a"]["issues"][0]["title"] = "a-very-long-title-without-any-break-" * 4
+    destination = tmp_path / "timeline.html"
+    destination.write_text(timeline.render(timeline.model(snap)), encoding="utf-8")
+    result = subprocess.run(["node", "-e", PHONE, str(destination)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"closed": 390, "open": 390}
