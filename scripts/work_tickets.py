@@ -35,6 +35,13 @@ SECTION_PATTERN = re.compile(r"^##\s+(.+?)\s*$")
 DISPOSITION_PATTERN = re.compile(r"^\s*Disposition:\s*(.*?)\s*$", re.IGNORECASE)
 REQUIREMENT_PATTERN = re.compile(r"^(\d+)\.\s+(.*\S)\s*$")
 REQUIREMENT_SECTIONS = ("Requirements", "Changes after filing")
+# A review's open points (`review.py file`, verdict "pass with open points"): numbered requirements
+# under "Changes after filing" between these markers, which name the head commit the review passed.
+# That commit lands without them; every later delivery on the issue delivers them.
+OPEN_POINTS_END = "<!-- se:open-points:end -->"
+OPEN_POINTS_PATTERN = re.compile(
+    r"^<!-- se:open-points ([0-9a-f]{40}) -->\n(.*?)^<!-- se:open-points:end -->[ \t]*(?:\n|\Z)",
+    re.MULTILINE | re.DOTALL)
 # The section `route` appends to an outside issue, owned by the work model's "Outside issues": the
 # work.md sections it lacks, each one heading level down, read as if the body held them itself.
 ROUTING_SECTION = "Routing"
@@ -1325,6 +1332,51 @@ def requirement_items(body: str) -> dict[int, tuple[str, str]]:
     return {
         number: (name, "\n".join(lines).strip()) for number, (name, lines) in items.items()
     }
+
+
+def same_commit(one: str, other: str) -> bool:
+    """Whether two commit names, either abbreviated, name the same commit."""
+    return bool(one) and bool(other) and (one.startswith(other) or other.startswith(one))
+
+
+def without_open_points(body: str, tip: str | None) -> str:
+    """`body` without the open points a review left on commit `tip`: that commit lands without
+    them, as work for after it, not as requirements it delivers."""
+    if not tip:
+        return body
+    return OPEN_POINTS_PATTERN.sub(lambda match: "" if same_commit(match[1], tip) else match[0],
+                                   body)
+
+
+def open_points(body: str, tip: str | None) -> list[str]:
+    """The open points a review left on commit `tip`, as their `<n>. <text>` lines."""
+    return [line.strip() for match in OPEN_POINTS_PATTERN.finditer(body)
+            if tip and same_commit(match[1], tip)
+            for line in match[2].splitlines() if REQUIREMENT_PATTERN.fullmatch(line.strip())]
+
+
+def with_open_points(body: str, head: str, points: list[str]) -> str:
+    """`body` with `points` numbered after its last requirement, in one open-points block naming
+    commit `head` at the end of "Changes after filing", which is added where the body has none.
+    Each point names its own source: the block's markers are comments, and any other line in it
+    would read as part of a requirement."""
+    first = max(requirement_items(body), default=0) + 1
+    block = [f"<!-- se:open-points {head} -->",
+             *(f"{number}. {' '.join(point.split())}" for number, point in enumerate(points, first)),
+             OPEN_POINTS_END]
+    lines = body.rstrip("\n").split("\n")
+    start = next((index for index, line in enumerate(lines)
+                  if (match := SECTION_PATTERN.match(line))
+                  and match[1].casefold() == REQUIREMENT_SECTIONS[1].casefold()), None)
+    if start is None:
+        return "\n".join([*lines, "", f"## {REQUIREMENT_SECTIONS[1]}", "", *block]) + "\n"
+    end = next((index for index in range(start + 1, len(lines))
+                if SECTION_PATTERN.match(lines[index])), len(lines))
+    last = end
+    while last > start + 1 and not lines[last - 1].strip():
+        last -= 1
+    rest = ["", *lines[end:]] if end < len(lines) else []
+    return "\n".join([*lines[:last], "", *block, *rest]) + "\n"
 
 
 def field_report_evidence_items(body: str) -> dict[str, str]:
@@ -2798,6 +2850,9 @@ def field_report_problems(body: str, issue_body: str | None) -> list[str]:
     """
     template = report_in(field_report_template(), FIELD_REPORT_TEMPLATE_NAME)
     report = {heading.casefold(): lines for heading, lines in ordered_sections(body)}
+    if issue_body is not None:
+        tip = BRANCH_TIP_PATTERN.search("\n".join(report.get("", [])))
+        issue_body = without_open_points(issue_body, tip[1] if tip else None)
     problems: list[str] = []
     for heading, raw in ordered_sections(template):
         where = "header (above the first section)" if not heading else f'section "## {heading}"'
@@ -4674,6 +4729,7 @@ def integrate(
             "pull_number": pull_number, "pull_url": str(pull.get("url") or ""),
             "work_number": work_number, "suite": suite_result, "late": late,
             "included": included, "pending": post_merge_acceptance(str(work_issue.get("body", ""))),
+            "open_points": open_points(str(work_issue.get("body", "")), reported_tip(report)),
             "check_commands": check_commands,
             "check_temporary_working_directory": check_temporary_working_directory,
         }
@@ -4757,15 +4813,19 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     extra = (f"Includes {len(late)} commit(s) after the field report's Branch tip: {included}\n"
              if late else "")
     pending = list(state.get("pending") or [])
+    points = list(state.get("open_points") or [])
     waits = ("Stays open until this acceptance is seen after the merge: "
              + "; ".join(pending) + "\n") if pending else ""
+    if points:
+        waits += ("Stays open for the review's open points, which a worker takes on this issue: "
+                  + "; ".join(points) + "\n")
     comment = (
         f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
         f"{landing_url} (check: {run_url}). {release_line(landing_url, tag)} "
         f"Suite: {suite_result}.\n{extra}{waits}")
     plan = closeout_plan(remote, tracker, pull_number, work_number,
                          f"Landed on {target} in {commit[:12]} through {landing_url}.",
-                         comment, pending)
+                         comment, [*pending, *points])
     if door is None:
         print(plan.text())
     else:
@@ -4781,6 +4841,9 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print(f"Issue #{work_number}: {state_read} on GitHub after the merge")
     if pending:
         print(f"Close #{work_number} once its post-merge acceptance is seen: {'; '.join(pending)}")
+    if points:
+        print(f"#{work_number} stays open for the review's open points; start a worker on it for "
+              f"them: {'; '.join(points)}")
     branch, landed = str(state["branch"]), str(state["landed"])
     try:
         remove_worker_worktree(root, branch, landed)
