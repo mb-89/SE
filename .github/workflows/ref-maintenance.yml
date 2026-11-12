@@ -1,0 +1,87 @@
+# Ref maintenance the owner triggers by hand (workflow_dispatch, through the GitHub API): update,
+# force-update or delete branches and tags of this repository with the workflow's token, which
+# cloud sessions' git pushes cannot do (they get HTTP 403 on deleting or force-updating a ref).
+#
+# `updates` holds whitespace-separated triples `<old-sha> <new-sha> <ref>`, like
+# `git update-ref --stdin`: <ref> is a full name (refs/heads/... or refs/tags/...), <old-sha> the
+# sha the ref must still hold (a lease; all zeros for a ref that must not exist yet) and <new-sha>
+# the sha it moves to (all zeros deletes it). A <new-sha> must already be on the remote, for
+# example pushed first to a branch whose deletion is a triple of the same run.
+#
+# Every triple goes out in one atomic push with a lease per ref: either every ref changes or none
+# does. `dry_run` (the default) only shows what the push would do.
+name: ref-maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      updates:
+        description: "Whitespace-separated triples <old-sha> <new-sha> <ref>; all zeros as new deletes"
+        required: true
+        type: string
+      dry_run:
+        description: "Show the push without changing any ref"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ref-maintenance
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Push the updates atomically, each ref under its lease
+        env:
+          UPDATES: ${{ inputs.updates }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          zero=0000000000000000000000000000000000000000
+          read -ra words <<< "$(printf '%s' "$UPDATES" | tr '\n\r\t' '   ')"
+          if (( ${#words[@]} == 0 || ${#words[@]} % 3 != 0 )); then
+            echo "::error::updates must be whitespace-separated triples <old-sha> <new-sha> <ref>; got ${#words[@]} words"
+            exit 1
+          fi
+          git fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
+          args=()
+          for (( i = 0; i < ${#words[@]}; i += 3 )); do
+            old=${words[i]} new=${words[i+1]} ref=${words[i+2]}
+            for sha in "$old" "$new"; do
+              if [[ ! $sha =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error::$ref: '$sha' is not a full 40-character sha"
+                exit 1
+              fi
+            done
+            if [[ $ref != refs/heads/* && $ref != refs/tags/* ]]; then
+              echo "::error::$ref: only refs/heads/... and refs/tags/... are maintained here"
+              exit 1
+            fi
+            if [[ $old == "$zero" ]]; then
+              args+=("--force-with-lease=$ref:")
+            else
+              args+=("--force-with-lease=$ref:$old")
+            fi
+            if [[ $new == "$zero" ]]; then
+              args+=(":$ref")
+              echo "delete $ref (lease $old)"
+            else
+              if ! git cat-file -e "$new^{commit}" 2>/dev/null; then
+                echo "::error::$ref: $new is not a commit on the remote; push it first"
+                exit 1
+              fi
+              args+=("$new:$ref")
+              echo "set    $ref $old -> $new"
+            fi
+          done
+          dry=()
+          if [[ $DRY_RUN == true ]]; then dry=(--dry-run); fi
+          git push --atomic --porcelain "${dry[@]}" origin "${args[@]}"

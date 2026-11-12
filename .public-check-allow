@@ -1,0 +1,5 @@
+# Exceptions for se's scripts/public_check.py on the frozen Go line (this branch becomes the tag
+# archive/go-line). One entry per line, each with its reason after '#'.
+src/internal/issues/landing_test.go:226  # a one-letter placeholder home directory in a path test fixture, no real user
+src/internal/issues/landing_test.go:227  # a one-letter placeholder home directory in a path test fixture, no real user
+src/internal/issues/landing_test.go:230  # a one-letter placeholder home directory in a path test fixture, no real user
