@@ -644,8 +644,8 @@ def test_the_worker_delivery_measures_not_slower_with_one_command():
 
 CHECKLIST = ("Class or case", "Is the problem real", "Keep what we have", "A named loser", "Fair criteria",
              "Right before cheap", "What if", "Undo cost", "Consistency")
-LADDER = ("worker, then integrator", "One level per loop", "Straight to the person",
-          "as a deck, not as issues")
+LADDER = ("worker, then integrator", "One rank at a time", "One level per loop",
+          "Marked for the person", "as a deck, not as issues")
 POINTERS = {AGENTS / "se.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
             AGENTS / "worker.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
             AGENTS / "integrator.md": "(../skills/work-model/SKILL.md#escalation-ladder)",
