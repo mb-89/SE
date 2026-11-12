@@ -690,3 +690,29 @@ Each finding, blocking ones first, becomes a work issue titled `fix/<finding>-<y
 The verdict is one comment on the pull request, opening with `<!-- se:review -->`, ending in a JSON
 block the retro reads. Without gh it prints each filing plan, then, given the answers with
 `--filed <file>`, the verdict's step.
+
+`scripts/retro.py` holds the retro commands, which load `work_tickets.py` for its GitHub door.
+`uv run python scripts/retro.py collect <retro issue> [--out FILE] [--json]` is a retro's
+mechanical half.
+
+Its window is every work issue closed since the last closed retro issue (titled
+`docs/retro-...` or labelled `retro`) closed, or the whole history where none has. Each issue comes
+with the field report of the work pull request its landing pull request names
+(`<!-- se:field-report-in <n> -->`). The draft holds:
+
+- the sizes: closed, landed, duplicates, escalated, beside the previous retro's where its block is
+  found;
+- per landed issue the deliveries `integrate` refused (its `Integration stopped:` comments), its
+  escalations (those, or the `escalated` label) and the suite time of its `Integrated in` comment;
+- the field reports' Retro entries and "Not delivered" items, grouped;
+- the rule checks, each broken one with what broke it: every landing pull request names a work
+  issue open when it merged (`work-issue`), its `check` passed (`check`), no commit reached the
+  integration branch outside a pull request (`outside-pr`), every closed work issue has a field
+  report (`field-report`).
+
+It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
+commands read. `--json` prints the block's data alone.
+
+Without gh it prints the GitHub steps whose
+answers are still missing, round by round, and reads the answers from the files the session saved
+into `--answers <dir>` ([Without gh](src/skills/work-model/SKILL.md#without-gh)).
