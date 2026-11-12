@@ -684,7 +684,7 @@ step that needs the person in its session.
 - **Implementations:**
   - se: [Steps only the person approves](../SKILL.md#steps-only-the-person-approves) in the work
     model; `work_tickets.py refs request` and `refs apply`; `tests/test_agent_definitions.py`
-    refuses a non-SE agent or skill file that sends the person to its session.
+    refuses a non-SE agent or skill file that has the person act outside SE's session.
 - **Related:** dec-008, dec-011
 
 ## pub: publishing and security

@@ -734,3 +734,61 @@ def test_no_prose_files_finds_or_closes_a_field_report_issue():
     assert "read the field reports in the pull request descriptions of the window's closed work issues" in rules
     for role in ("worker", "integrator", "se"):
         assert "field-report issue" not in normalized(AGENTS / f"{role}.md").casefold(), role
+
+
+# Only SE asks the person (rule-book dec-012): no other role's file sends the person to its session.
+SE_FILES = {AGENTS / "se.md", *(SOURCE / "skills" / "catch-up").rglob("*.md")}
+NON_SE_FILES = sorted({*AGENTS.glob("*.md"), *(SOURCE / "skills").rglob("*.md")} - SE_FILES)
+PERSON = re.compile(r"\b(?:person|owner|human|user)(?:'s)?\b", re.IGNORECASE)
+OWN_SESSION = re.compile(
+    r"\b(?:this|its|your|my|their|own|(?:the|a|an) (?:worker|integrator)'s) session\b"
+    r"|\bhere\b", re.IGNORECASE)
+ACTS = re.compile(r"\b(?:approv\w*|yes|confirm\w*|ask\w*|answer\w*|act|acts|consent\w*|decid\w*|"
+                  r"accept\w*|send\w*|go|goes|come|comes|open\w*|switch\w*|type\w*|give\w*)\b",
+                  re.IGNORECASE)
+NEGATED = re.compile(r"\b(?:never|not|no|nor)\b|n't\b", re.IGNORECASE)
+
+
+def sends_the_person_here(text: str) -> list[str]:
+    """The sentences that tell or ask the person to act in the writing role's own session."""
+    sentences = re.split(r"(?<=[.!?:;])\s+", " ".join(text.split()))
+    return [sentence for sentence in sentences
+            if PERSON.search(sentence) and OWN_SESSION.search(sentence)
+            and ACTS.search(sentence) and not NEGATED.search(sentence)]
+
+
+@pytest.mark.parametrize("path", NON_SE_FILES, ids=lambda path: path.relative_to(SOURCE).as_posix())
+def test_no_role_but_se_sends_the_person_to_its_session(path):
+    assert sends_the_person_here(path.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize("text", [
+    "The owner's yes counts only when given in this session.",
+    "Ask the person to approve the force-push in your session.",
+    "Wait until the human confirms here, then push.",
+    "Send the user to the integrator's session to switch the setting.",
+])
+def test_the_own_session_check_flags_a_step_that_needs_the_person_there(text):
+    assert sends_the_person_here(text) == [text]
+
+
+@pytest.mark.parametrize("text", [
+    "Never send the person to this session.",
+    "SE runs it on the person's yes, or names the one setting the person changes.",
+    "A host counts a person's approval only in the session it was given.",
+    "Do not judge a worker by its session status right after starting it.",
+])
+def test_the_own_session_check_passes_pointers_to_se(text):
+    assert sends_the_person_here(text) == []
+
+
+def test_se_runs_the_steps_only_the_person_approves():
+    rules = normalized(WORK_MODEL)
+    assert "### Steps only the person approves" in WORK_MODEL.read_text(encoding="utf-8")
+    for step in ("`work_tickets.py refs request <issue> --triples-file <file>`",
+                 "`work_tickets.py refs apply <issue>`", "SE runs it on the person's yes"):
+        assert step in rules, step
+    for role in ("integrator", "worker", "se"):
+        assert "(../skills/work-model/SKILL.md#steps-only-the-person-approves)" in normalized(
+            AGENTS / f"{role}.md"), role
+    assert "on the person's yes in this session run it yourself" in normalized(AGENTS / "se.md")
