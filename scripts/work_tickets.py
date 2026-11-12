@@ -3772,7 +3772,7 @@ def goal_summary(issue_body: str) -> str:
     sentence = TRACKER_ASIDE.sub("", SENTENCE_END.split(text, maxsplit=1)[0]).strip()
     if tracker_references(sentence) or PUBLIC_HOST_PATTERN.search(sentence):
         return ""
-    return one_line(sentence)
+    return one_line(sentence, 120)
 
 
 def integration_merge_message(
