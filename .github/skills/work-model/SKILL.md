@@ -78,6 +78,10 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 An issue is one package of work: its title is its branch name, and it ends as one merge whose
 pull request carries its field report.
 
+- **One piece of work, one issue**: no command files issues on its own; reviews, retros, overhauls
+  and checks report on the issue or pull request they concern, and only SE files
+  ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
+
 - **Sizes**: tiny, small or medium. A topic bigger than medium becomes several issues, worked in
   order.
 - **Kinds**: a work issue ([Roles and flow](#roles-and-flow)), work from outside
@@ -123,6 +127,12 @@ integrator (integrators may nest, each escalating to the one that started it), t
 then person. Every level decides, and writes what it sends up, as the
 [decision skill](../decision/SKILL.md) says.
 
+- **One rank at a time**: what does not work goes up one rank, never two. A worker that cannot
+  proceed goes to its integrator; an integrator that cannot resolve it, or a review that declines
+  a pull request (README [Work commands](../../../README.md#work-commands), `review.py file`),
+  goes to SE; SE goes to the person. A rank is skipped only where the rank below cannot act at
+  all, as for [steps only the person approves](#steps-only-the-person-approves).
+
 - **One level per loop**: a loop climbs one level each time it would repeat. A point that has gone
   around once at one level (a merge refused and sent back, the same open point raised again) goes
   to the next level up instead of around again.
@@ -130,9 +140,9 @@ then person. Every level decides, and writes what it sends up, as the
   with `work_tickets.py escalate` (label `escalated`, the decision note linked in the comment)
   and, at the top level, one message to SE. The answer comes back as an issue comment
   or a new request, never as a reply anyone waits for.
-- **Straight to the person**: a level that is sure a person must decide (a one-way decision, a
-  removed capability) may mark it "for the person", and the levels above pass it on without
-  deciding it. That is allowed, not preferred.
+- **Marked for the person**: a level that is sure a person must decide (a one-way decision, a
+  removed capability) may mark it "for the person"; it still goes up one rank, and the levels
+  above pass it on without deciding it. That is allowed, not preferred.
 - **The person gets decisions as a deck, not as issues**: SE brings the person the open
   decision notes together as one deck. Not everything that reaches the person is an escalated
   issue: a decision from SE's own discussion with the person joins the deck directly.

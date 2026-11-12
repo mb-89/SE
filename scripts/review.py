@@ -8,13 +8,22 @@ reviewer most. `--claims` adds it under a heading that calls it claims to check,
 for once the reviewer's findings are verified.
 
 `review.py file <pull request> --report <file>` checks the reviewer's report (JSON, REPORT_FIELDS)
-and refuses a rubber stamp, writing nothing: a pass with an acceptance item lacking evidence or with
-a blocking finding, a fail without one, a report without its "checked and clean" list, a finding
-without evidence, place or judgment, an unknown field. Only damage blocks (the product made worse,
-or against what it is about). Each finding, blocking ones first, becomes a work issue through
-work_tickets.py's `file` and its dedupe, at most `max_filed` (se.toml `[review]`, MAX_FILED) of
-them, the rest counted; the verdict is one comment on the pull request, opening with
-VERDICT_MARKER, with a JSON block the retro reads.
+and posts it as ONE comment on the reviewed pull request, opening with VERDICT_MARKER, with a JSON
+block the retro reads; it files no issue (rule book wrk-007: no command files issues on its own).
+There is no quota: a review without findings is a pass. What it refuses, writing nothing, is a
+verdict without its evidence (no "checked and clean" list, an acceptance item of a landing verdict
+without evidence, a finding without evidence, place or judgment), a verdict its findings contradict,
+an unknown field, and a review of another commit than the pull request's head. The verdicts:
+
+- pass: the change lands as is;
+- pass with open points: the change lands; the findings are added, as numbered open points, to the
+  work issue's "Changes after filing" (work_tickets.py's `with_open_points`), so the issue stays
+  open after the landing and goes back to a worker;
+- decline: a blocking finding, the change is fundamentally wrong and does not land; the work issue
+  is escalated one rank, to SE, with the review comment.
+
+On a pull request that is no longer open (landed), the comment alone is written: it waits there for
+SE, which decides what becomes work.
 
 GitHub is read through work_tickets.py's door (gh). Where gh is not signed in (Claude's cloud) the
 command prints its GitHub steps as a plan for the session's GitHub tools and reads their answers
@@ -366,37 +375,45 @@ def run_brief(args: argparse.Namespace) -> int:
         sys.stdout.write(text(found))
     return 0
 
-# `review.py file`: the reviewer's report, checked, its findings filed and its verdict posted.
+# `review.py file`: the reviewer's report, checked, and its one comment on the pull request.
 
 VERDICT_MARKER = "<!-- se:review -->"
-MAX_FILED = 5
-VERDICTS = ("pass", "fail")
+PASS, OPEN_POINTS, DECLINE = "pass", "pass with open points", "decline"
+VERDICTS = (PASS, OPEN_POINTS, DECLINE)
 # The report's fields: what each holds. Every field is required, and no other is accepted, so a
 # typo never drops a section.
-REPORT_FIELDS = {"verdict": "pass or fail", "acceptance": "each acceptance item of the work issue "
-                 "with its evidence", "findings": "the verified findings",
+REPORT_FIELDS = {"verdict": " or ".join(VERDICTS),
+                 "head": "the commit reviewed, the head the brief named",
+                 "acceptance": "each acceptance item of the work issue with its evidence",
+                 "findings": "the verified findings (empty where none was found)",
                  "clean": 'the "checked and clean" list: what was examined and found sound'}
 ACCEPTANCE_FIELDS = ("item", "evidence")
 FINDING_FIELDS = ("title", "evidence", "place", "blocking", "why")
+# The reads `review.py file` needs, from ANSWERS, without gh.
+FILE_ANSWERS = ("pull", "issue")
 
 
 @dataclass
 class Finding:
-    """One verified finding: its evidence, its place and its judgment (`blocking`, `why`); the
-    work issue it became, the open twin that answered it, or neither where it was past the cap."""
+    """One verified finding: its evidence, its place and its judgment (`blocking`, `why`)."""
 
     title: str
     evidence: str
     place: str
     blocking: bool
     why: str
-    issue: int | None = None
-    twin: int | None = None
+
+    def point(self, number: int, head: str) -> str:
+        """The finding as one open point of the work issue, naming the review it came from."""
+        return (f"{self.title}, at {self.place} (open point of the review of pull request "
+                f"#{number}, which passed `{head[:12]}`). Evidence: {self.evidence}. "
+                f"Judgment: {self.why}")
 
 
 @dataclass
 class Report:
     verdict: str
+    head: str
     acceptance: list[dict]
     findings: list[Finding]
     clean: list[str]
@@ -415,18 +432,24 @@ def words(value: object) -> str:
 
 def checked_report(given: object) -> Report:
     """`given`, the report as JSON reads it, checked against the review rules; every refusal is
-    raised before anything is written."""
+    raised before anything is written. There is no quota: a pass without findings is a pass. What
+    is refused is a verdict without its evidence, and a verdict its findings contradict."""
     if not isinstance(given, dict):
         raise QueueError("The report is a JSON object with the fields "
                          f"{', '.join(REPORT_FIELDS)}")
     unknown(given, REPORT_FIELDS, "The report")
     verdict = given.get("verdict")
     if verdict not in VERDICTS:
-        raise QueueError(f"The report's verdict is pass or fail, not {verdict!r}")
+        raise QueueError(f"The report's verdict is {', '.join(VERDICTS[:-1])} or {VERDICTS[-1]}, "
+                         f"not {verdict!r}")
+    head = words(given.get("head"))
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise QueueError("The report names no head: the full commit the brief named, which the "
+                         "review checked")
     clean = given.get("clean")
     if not isinstance(clean, list) or not clean or not all(words(entry) for entry in clean):
         raise QueueError('The report has no "checked and clean" list, or an empty entry in it: '
-                         "name what was examined and found sound, so a rubber stamp shows")
+                         "name what was examined and found sound, the evidence for the verdict")
     acceptance = given.get("acceptance")
     if not isinstance(acceptance, list) or not acceptance:
         raise QueueError("The report names no acceptance item: give each acceptance item of the "
@@ -441,7 +464,7 @@ def checked_report(given: object) -> Report:
         items.append({"item": words(entry.get("item")), "evidence": words(entry.get("evidence"))})
     findings_given = given.get("findings")
     if not isinstance(findings_given, list):
-        raise QueueError("The report's findings are a list (empty where none was verified)")
+        raise QueueError("The report's findings are a list (empty where none was found)")
     findings: list[Finding] = []
     for entry in findings_given:
         if not isinstance(entry, dict):
@@ -463,17 +486,25 @@ def checked_report(given: object) -> Report:
         findings.append(Finding(title, words(entry["evidence"]), words(entry["place"]),
                                 entry["blocking"], words(entry["why"])))
     blocking = sum(found.blocking for found in findings)
-    if verdict == "pass":
+    if verdict == DECLINE:
+        if not blocking:
+            raise QueueError("A decline needs the evidence that the change is fundamentally wrong: "
+                             "a verified blocking finding; this report has none")
+    else:
         lacking = [item["item"] for item in items if not item["evidence"]]
         if lacking:
-            raise QueueError(f'A pass needs evidence for every acceptance item, and "{lacking[0]}" '
-                             "has none")
+            raise QueueError(f'A {verdict} lands the change, so every acceptance item needs its '
+                             f'evidence, and "{lacking[0]}" has none')
         if blocking:
-            raise QueueError(f"A pass has no blocking finding; this report has {blocking}")
-    elif not blocking:
-        raise QueueError("A fail needs a verified blocking finding; this report has none, so it "
-                         "passes")
-    return Report(verdict, items, findings, [words(entry) for entry in clean])
+            raise QueueError(f"A blocking finding means the change does not land: this report "
+                             f"has {blocking}, so its verdict is {DECLINE}")
+        if verdict == PASS and findings:
+            raise QueueError(f"A {PASS} lands the change as is, and this report has "
+                             f"{len(findings)} finding(s) to address: its verdict is {OPEN_POINTS}")
+        if verdict == OPEN_POINTS and not findings:
+            raise QueueError(f"A {OPEN_POINTS} lists its open points as findings, and this report "
+                             f"has none: its verdict is {PASS}")
+    return Report(verdict, head, items, findings, [words(entry) for entry in clean])
 
 
 def read_report(path: Path) -> Report:
@@ -484,48 +515,17 @@ def read_report(path: Path) -> Report:
     return checked_report(given)
 
 
-def max_filed(root: Path) -> int:
-    """se.toml `[review] max_filed`: how many findings one review files; MAX_FILED without it."""
-    value = work_tickets.se_table(root, "review").get("max_filed", MAX_FILED)
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise QueueError(f"[review] max_filed in {root / 'se.toml'} is {value!r}; set it to a "
-                         "whole number of findings, 0 or more, or remove it")
-    return value
-
-
-def to_file(found: Report, cap: int) -> list[Finding]:
-    """The findings filed, blocking ones first, at most `cap`."""
-    ordered = sorted(found.findings, key=lambda item: not item.blocking)
-    return ordered[:cap]
-
-
-def finding_title(found: Finding) -> str:
-    """The branch name a finding's work issue is titled with; its date never makes a twin new."""
-    return f"fix/{work_tickets.slug(found.title)}-{work_tickets.today_stamp()}"
-
-
-def finding_body(found: Finding, number: int, url: str) -> str:
-    judged = ("Blocking: letting the work through does damage." if found.blocking
-              else "Not blocking: bad but fixable, an open point.")
-    return work_tickets.fleet_marked(
-        f"## Goal\n\n{found.title}\n\nA verified finding of the review of pull request #{number} "
-        f"({url}). {judged}\n\n## Package kind\n\nStandard.\n\n## Requirements\n\n"
-        f"1. {found.title}, at {found.place}.\n\n## Finding\n\n**Place:** {found.place}\n\n"
-        f"**Evidence:** {found.evidence}\n\n**Judgment:** {found.why}\n\n## Acceptance\n\n"
-        f"- [ ] A regression test shows the finding at {found.place}, and the fix makes it pass.\n")
-
-
-def verdict_data(number: int, found: Report, cap: int, unfiled: int) -> dict:
-    return {"pull": number, "verdict": found.verdict, "max_filed": cap, "unfiled": unfiled,
+def verdict_data(number: int, found: Report, landed: bool) -> dict:
+    return {"pull": number, "verdict": found.verdict, "head": found.head, "landed": landed,
             "acceptance": found.acceptance, "findings": [asdict(item) for item in found.findings],
             "clean": found.clean}
 
 
-def verdict_comment(number: int, found: Report, cap: int) -> str:
-    """The verdict as it is posted on the pull request: what a person reads, then the JSON block
+def verdict_comment(number: int, found: Report, landed: bool) -> str:
+    """The review, the one comment on the pull request: what a person reads, then the JSON block
     the retro reads."""
-    unfiled = sum(item.issue is None and item.twin is None for item in found.findings)
-    lines = [VERDICT_MARKER, f"## Review of pull request #{number}: {found.verdict.upper()}", "",
+    lines = [VERDICT_MARKER, f"## Review of pull request #{number}: {found.verdict}", "",
+             f"The brief: `review.py brief {number}`, at the head `{found.head}`.", "",
              "### Acceptance"]
     for item in found.acceptance:
         lines += [f"- {item['item']}", f"  Evidence: {item['evidence'] or '_no evidence_'}"]
@@ -533,82 +533,136 @@ def verdict_comment(number: int, found: Report, cap: int) -> str:
     if not found.findings:
         lines.append("None.")
     for item in found.findings:
-        became = (f"#{item.issue}" if item.issue is not None else
-                  f"answered on its open twin #{item.twin}" if item.twin is not None else
-                  f"not filed, past the first {cap}")
-        lines += [f"- **{item.title}** ({'blocking' if item.blocking else 'not blocking'}, "
-                  f"{became})", f"  Place: {item.place}", f"  Evidence: {item.evidence}",
+        lines += [f"- **{item.title}** ({'blocking' if item.blocking else 'not blocking'})",
+                  f"  Place: {item.place}", f"  Evidence: {item.evidence}",
                   f"  Judgment: {item.why}"]
-    if unfiled:
-        lines += ["", f"{unfiled} more finding(s) counted, not filed (se.toml [review] max_filed "
-                      f"is {cap})."]
     lines += ["", "### Checked and clean", *(f"- {entry}" for entry in found.clean), "",
-              fenced(json.dumps(verdict_data(number, found, cap, unfiled), indent=2,
+              "### What follows", what_follows(number, found, landed), "",
+              fenced(json.dumps(verdict_data(number, found, landed), indent=2,
                                 ensure_ascii=False), "json")]
     return "\n".join(lines) + "\n"
 
 
-def filed_answers(path: Path, expected: int) -> list[dict]:
-    """The session's answers to the filing plans, one per finding filed: `{"number": n}` for the
-    work issue filed, `{"twin": n}` for the open twin that answered it."""
-    try:
-        given = json.loads(work_tickets.read_file(path, "the filing answers"))
-    except json.JSONDecodeError as error:
-        raise QueueError(f"The filing answers {path} are not JSON: {error}") from error
-    if not isinstance(given, list) or not all(
-            isinstance(entry, dict) and len(entry) == 1 and set(entry) <= {"number", "twin"}
-            and isinstance(next(iter(entry.values())), int) for entry in given):
-        raise QueueError(f"The filing answers {path} are a JSON list, one entry per filing plan "
-                         'in order: {"number": <the issue filed>} or {"twin": <the twin answered>}')
-    if len(given) != expected:
-        raise QueueError(f"The report has {expected} findings to file, and --filed answers "
-                         f"{len(given)}; give one answer per filing plan")
-    return given
+def what_follows(number: int, found: Report, landed: bool) -> str:
+    if landed:
+        return (f"Pull request #{number} is no longer open, so this report waits here for SE, "
+                "which decides what becomes work.")
+    if found.verdict == PASS:
+        return "The change lands as is."
+    if found.verdict == OPEN_POINTS:
+        return ("The change lands; the findings are open points under the work issue's "
+                '"Changes after filing", which stays open until a worker lands them.')
+    return ("The change does not land: the work issue is escalated to SE with this report, which "
+            "re-scopes the issue or takes it to the owner.")
+
+
+def escalation(number: int, url: str) -> str:
+    return (f"Declined by the review of pull request #{number} ({url}): the change is "
+            "fundamentally wrong and does not land. The review comment there holds the findings; "
+            "SE re-scopes this issue or takes it to the owner.\n")
+
+
+def file_plan(remote: str, number: int, then: str) -> Plan:
+    steps = tuple(step for step in plan(remote, number, False, then).steps
+                  if step.action in FILE_ANSWERS)
+    return Plan(f"the reads of the review of pull request #{number}", steps, then)
+
+
+def file_steps(pull_repo: str, issue_repo: str, number: int, issue_number: int, comment: str,
+               body: str | None, declined: bool) -> Plan:
+    """The writes: the one comment on the pull request, then the work issue's open points or its
+    escalation."""
+    issues = work_tickets.owner_repo(issue_repo)
+    steps = [Step("comment_pull", "add_issue_comment", {
+        **work_tickets.owner_repo(pull_repo), "issue_number": number, "body": comment})]
+    if body is not None:
+        steps.append(Step("edit_body", "issue_write", {
+            **issues, "method": "update", "issue_number": issue_number, "body": body}))
+    if declined:
+        steps += [Step("comment_issue", "add_issue_comment", {
+            **issues, "issue_number": issue_number,
+            "body": escalation(number, work_tickets.pull_url(pull_repo, number))}),
+            work_tickets.label_step(issue_repo, issue_number, "escalated", add=True)]
+    return Plan(f"the review of pull request #{number}", tuple(steps))
 
 
 def run_file(args: argparse.Namespace) -> int:
     root = work_tickets.worktree_root(args.worktree)
-    repo = work_tickets.resolve_repo(root, args.repo)
+    remote = args.repo or work_tickets.remote_repo(root)
+    if remote is None:
+        raise QueueError(f"review.py file: {root} has no origin remote on GitHub; pass --repo "
+                         "[HOST/]OWNER/REPO")
     found = read_report(args.report)
-    cap = max_filed(root)
-    number, url = args.pull_request, work_tickets.pull_url(repo, args.pull_request)
-    filing = to_file(found, cap)
-    labels = work_tickets.work_labels(root, repo)
+    number, url = args.pull_request, work_tickets.pull_url(remote, args.pull_request)
+    given = {name: getattr(args, name) for name in FILE_ANSWERS if getattr(args, name) is not None}
     handed_off = work_tickets.hand_off()
-    if handed_off and args.filed is None:
-        for item in filing:
-            title, body = finding_title(item), finding_body(item, number, url)
-            print(work_tickets.filing_plan(repo, "file", title, body, work_tickets.work_issue_filing(
-                repo, title, body, labels)).text())
-            print()
-        print(f"Then: review.py file {number} --report {args.report} --filed <file> --worktree "
-              f"{root}{f' --repo {args.repo}' if args.repo else ''}, the file a JSON list with one "
-              'answer per plan above, in order: {"number": <the issue filed>} or '
-              '{"twin": <the twin answered, or the lower twin the new issue was closed as a '
-              'duplicate of>}')
+    if given:
+        missing = [name for name in FILE_ANSWERS if name not in given]
+        if missing:
+            raise QueueError("review.py file reads the session's answers from files: also pass "
+                             + ", ".join("--" + name for name in missing))
+        door = FileDoor(given)
+    elif handed_off:
+        then = (f"review.py file {number} --report {args.report} --pull <file> --issue <file> "
+                f"--worktree {root}{f' --repo {args.repo}' if args.repo else ''}")
+        print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools "
+              "and passes their answers as files:")
+        print(file_plan(remote, number, then).text())
         return 0
-    if args.filed is not None:
-        for item, answer in zip(filing, filed_answers(args.filed, len(filing))):
-            item.issue, item.twin = answer.get("number"), answer.get("twin")
     else:
-        for item in filing:
-            title, body = finding_title(item), finding_body(item, number, url)
-            outcome = work_tickets.filed_once(root, repo, "file", title, body,
-                                              work_tickets.work_issue_filing(repo, title, body,
-                                                                             labels))
-            item.issue = None if outcome.duplicate else outcome.number
-            item.twin = outcome.twin if outcome.twin is not None else outcome.lower
-            print(outcome.line(repo, "work issue"))
-    comment = verdict_comment(number, found, cap)
+        door = GhDoor(root, remote)
+    pull = door.pull(number)
+    head = str((pull.get("head") or {}).get("sha") or "")
+    if head and head != found.head:
+        raise QueueError(f"Pull request #{number} is at {head[:12]}, and the review is of "
+                         f"{found.head[:12]}: review the new head (review.py brief {number})")
+    reference = issue_reference(str(pull.get("body") or ""), remote)
+    if reference is None:
+        raise QueueError(f"Pull request #{number}'s description names no work issue; its first "
+                         "line names it as Fixes|Refs <issue url> (work_tickets.py pr-body)")
+    issue_repo, issue_number = reference
+    landed = str(pull.get("state") or "open").lower() != "open"
+    body = None
+    if found.verdict == OPEN_POINTS and not landed:
+        issue = door.issue(issue_repo, issue_number)
+        if int(issue.get("number") or 0) != issue_number:
+            raise QueueError(f"The work issue answer is #{issue.get('number')}, but pull request "
+                             f"#{number} names #{issue_number}; save issue #{issue_number}")
+        body = work_tickets.with_open_points(
+            str(issue.get("body") or ""), found.head,
+            [item.point(number, found.head) for item in found.findings])
+    steps = file_steps(remote, issue_repo, number, issue_number,
+                       verdict_comment(number, found, landed), body,
+                       found.verdict == DECLINE and not landed)
     if handed_off:
-        print(Plan(f"the verdict on pull request #{number}", (Step(
-            "comment", "add_issue_comment", {**work_tickets.owner_repo(repo),
-                                             "issue_number": number, "body": comment}),)).text())
-        return 0
-    work_tickets.run_gh_with_body(root, ["pr", "comment", str(number),
-                                         *work_tickets.repo_arguments(repo)], comment)
-    print(f"Posted the verdict on pull request #{number}: {found.verdict}")
+        print(steps.text())
+    else:
+        actions = work_tickets.tracker_actions(root, issue_repo)
+        work_tickets.run_plan(steps, {
+            **actions,
+            "comment_pull": lambda arguments, _: work_tickets.run_gh_with_body(
+                root, ["pr", "comment", str(number), *work_tickets.repo_arguments(remote)],
+                str(arguments["body"])) and None,
+            "edit_body": lambda arguments, _: work_tickets.run_gh_with_body(
+                root, ["issue", "edit", str(issue_number),
+                       *work_tickets.repo_arguments(issue_repo)], str(arguments["body"])) and None})
+        print(f"Posted the review on pull request #{number}: {found.verdict}")
+    print(outcome_line(number, url, found, landed, issue_number))
     return 0
+
+
+def outcome_line(number: int, url: str, found: Report, landed: bool, issue_number: int) -> str:
+    """What follows, for whoever ran the review; on a decline, the one line the integrator sends
+    SE."""
+    if landed:
+        return f"#{number} is no longer open: the report waits on it for SE, nothing else written"
+    if found.verdict == OPEN_POINTS:
+        return (f"#{issue_number} has {len(found.findings)} open point(s) under \"Changes after "
+                "filing\" and stays open after the landing")
+    if found.verdict == DECLINE:
+        return (f"escalated #{issue_number}: the review declined pull request #{number} ({url}); "
+                "re-scope the issue or take it to the owner")
+    return f"#{number} passes: it lands as is"
 
 
 def parser() -> argparse.ArgumentParser:
@@ -632,21 +686,24 @@ def parser() -> argparse.ArgumentParser:
                                    metavar="FILE", help=f"without gh: {what}, as JSON")
     brief_command.set_defaults(run=run_brief)
     file_command = commands.add_parser(
-        "file", help="check a review report, file its findings and post its verdict",
-        description="Check the reviewer's report (JSON) against the review rules, refusing a "
-                    "rubber stamp and writing nothing; file each finding as a work issue "
-                    "(work_tickets.py file, its dedupe included), at most se.toml [review] "
-                    f"max_filed (built-in {MAX_FILED}); post the verdict on the pull request.")
+        "file", help="check a review report and post it as one comment on the pull request",
+        description="Check the reviewer's report (JSON), refusing a verdict without its evidence "
+                    "and writing nothing; a review without findings is a pass, there is no quota. "
+                    "Post the report as one comment on the pull request and file no issue: a "
+                    f"{OPEN_POINTS} adds the findings to the work issue's \"Changes after "
+                    f"filing\", a {DECLINE} escalates the work issue to SE; on a pull request "
+                    "that is no longer open the comment alone waits for SE.")
     file_command.add_argument("pull_request", type=int, help="the reviewed pull request's number")
     file_command.add_argument("--report", type=Path, required=True, metavar="FILE",
                               help="the review report, as JSON: " + "; ".join(
                                   f"{name}: {what}" for name, what in REPORT_FIELDS.items()))
-    file_command.add_argument("--filed", type=Path, metavar="FILE",
-                              help="without gh: the answers to the filing plans, as JSON")
+    for name in FILE_ANSWERS:
+        file_command.add_argument(f"--{name}", dest=name, type=Path, metavar="FILE",
+                                  help=f"without gh: {ANSWERS[name]}, as JSON")
     file_command.add_argument("--worktree", default=".",
                               help="the checkout of the reviewed repository (default: .)")
     file_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the pull request "
-                                             "(default: the tracker or origin remote)")
+                                             "(default: the origin remote)")
     file_command.set_defaults(run=run_file)
     return top
 

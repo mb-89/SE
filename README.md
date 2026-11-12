@@ -667,29 +667,44 @@ them claims to check, never evidence. Without gh it prints its GitHub steps as a
 the answers from files ([Without gh](src/skills/work-model/SKILL.md#without-gh)).
 
 `uv run python scripts/review.py file <pull request> --report <file>` keeps a reviewer's findings
-out of the chat. It reads the review report as JSON:
+out of the chat and out of the queue: it posts the review as one comment on the reviewed pull
+request and files no issue
+([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
+It reads the review report as JSON:
 
-- `verdict`: `pass` or `fail`;
+- `verdict`: `pass`, `pass with open points` or `decline`;
+- `head`: the commit reviewed, the head the brief named;
 - `acceptance`: each acceptance item of the work issue, `{"item", "evidence"}`;
-- `findings`: each verified finding, `{"title", "evidence", "place", "blocking", "why"}`; only
-  damage blocks: the product made worse, or against what it is about;
+- `findings`: each verified finding, `{"title", "evidence", "place", "blocking", "why"}`, empty
+  where none was found; only damage blocks: the product made worse, or against what it is about;
 - `clean`: the "checked and clean" list, what was examined and found sound.
 
-It refuses, writing nothing:
+There is no quota: a review without findings is a pass. What it refuses, writing nothing, is a
+verdict without its evidence or one its findings contradict:
 
-- a report with an unknown field;
-- a pass with an acceptance item lacking evidence, or with a blocking finding;
-- a fail without a blocking finding;
-- a report without its "checked and clean" list;
-- a finding without evidence, place or judgment.
+- a report with an unknown field, or without its "checked and clean" list;
+- a finding without evidence, place or judgment;
+- a pass or pass with open points with an acceptance item lacking evidence, or with a blocking
+  finding (that is a decline);
+- a pass with findings (that is a pass with open points), and a pass with open points without any;
+- a decline without a blocking finding;
+- a review of another commit than the pull request's head.
 
-Each finding, blocking ones first, becomes a work issue titled `fix/<finding>-<yyyymmdd>` through
-`work_tickets.py file` and its dedupe, so a finding whose twin is open files nothing. At most
-`max_filed` are filed (`se.toml` `[review]`, built-in 5); the rest are counted.
+What each verdict writes besides the comment:
 
-The verdict is one comment on the pull request, opening with `<!-- se:review -->`, ending in a JSON
-block the retro reads. Without gh it prints each filing plan, then, given the answers with
-`--filed <file>`, the verdict's step.
+- **pass**: nothing; the change lands as is.
+- **pass with open points**: the findings, as numbered open points, at the end of the work issue's
+  "Changes after filing", marked with the head they passed. That head lands without them, so the
+  issue stays open after the landing (`integrate` says so) and goes back to a worker on the same
+  issue, whose next delivery delivers them.
+- **decline**: the work issue is escalated one rank, to SE: a comment and the label `escalated`.
+  The command prints the line the integrator sends SE, which re-scopes the issue or takes it to the
+  owner.
+
+On a pull request that is no longer open, the comment alone is written: it waits there for SE.
+The comment opens with `<!-- se:review -->` and ends in a JSON block the retro reads. Without gh it
+prints its reads as a plan, then, given the answers with `--pull <file> --issue <file>`, its
+writes.
 
 `scripts/retro.py` holds the retro commands, which load `work_tickets.py` for its GitHub door.
 `uv run python scripts/retro.py collect <retro issue> [--out FILE] [--json]` is a retro's
