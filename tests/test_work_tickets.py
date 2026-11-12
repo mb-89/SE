@@ -1449,3 +1449,152 @@ def test_fleet_check_without_gh_prints_its_plan_then_reads_the_answers(
                               str(closed_file), "--pulls", str(pulls_file), "--json"]) == 1
     data = json.loads(capsys.readouterr().out)
     assert [(item["kind"], item["issue"]) for item in data["findings"]] == [("stray branch", 5)]
+
+
+# The Stop hook: `stop-check` holds a worker's turn to a delivered pull request.
+
+def stop_checkout(case_root: Path, monkeypatch, *, queue: bool = True) -> Path:
+    """A worker's checkout on its branch, its ticket queue for a work issue unless `queue` is
+    false; gh is not usable until a test fakes it."""
+    root = case_root / "stop"
+    root.mkdir(parents=True)
+    assert git(root, "init", "-q", "-b", "main").returncode == 0
+    for key, value in (("user.name", "Worker test"), ("user.email", "worker-test@example.invalid")):
+        assert git(root, "config", key, value).returncode == 0
+    (root / ".gitignore").write_text("/.se/\n", encoding="utf-8")
+    assert git(root, "add", ".").returncode == 0
+    assert git(root, "commit", "-q", "-m", "baseline").returncode == 0
+    assert git(root, "checkout", "-q", "-b", "feat/example-20261112").returncode == 0
+    if queue:
+        (root / ".se" / "work").mkdir(parents=True)
+        (root / ".se" / "work" / "body-read.json").write_text('{"sha256": "0"}\n', encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: False)
+    return root
+
+
+def stop_hook(root: Path, monkeypatch, capsys, event: str = "Stop", **extra: str) -> dict:
+    """Run stop-check as the plugin's hook runs it in `root`; its JSON answer, {} for none."""
+    payload = {"hook_event_name": event, "cwd": str(root), "stop_hook_active": False, **extra}
+    monkeypatch.setattr(sys, "stdin", __import__("io").StringIO(json.dumps(payload)))
+    assert work_tickets.main(["stop-check"]) == 0
+    output = capsys.readouterr().out.strip()
+    return json.loads(output) if output else {}
+
+
+def delivered_description(root: Path) -> str:
+    """A pull request description whose field report passes field-report --check at the tip."""
+    from test_work_ticket_issues import COMPLETE_REPORT
+    tip = git(root, "rev-parse", "HEAD").stdout.strip()
+    return "Fixes https://git.example/owner/repo/issues/5\n\n" + COMPLETE_REPORT.replace(
+        "**Branch tip:** `abc1234`", f"**Branch tip:** `{tip}`")
+
+
+def fake_pull_requests(monkeypatch, root: Path, body: str | None) -> list[list[str]]:
+    """gh signed in, answering one open pull request with `body`, or none where it is None."""
+    calls: list[list[str]] = []
+
+    def gh(_: Path, arguments: list[str]) -> str:
+        calls.append(arguments)
+        if arguments[:2] == ["pr", "list"]:
+            return json.dumps([] if body is None else [{"number": 7, "url": "u"}])
+        if arguments[:2] == ["pr", "view"]:
+            return json.dumps({"body": body})
+        raise AssertionError(arguments)
+
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda _: "git.example/owner/repo")
+    return calls
+
+
+def test_stop_check_refuses_a_worker_without_a_pull_request_naming_the_commands(
+        tmp_path, monkeypatch, capsys):
+    root = stop_checkout(tmp_path, monkeypatch)
+    fake_pull_requests(monkeypatch, root, None)
+    answer = stop_hook(root, monkeypatch, capsys)
+    assert answer["decision"] == "block"
+    reason = answer["reason"]
+    assert "(1 of 5 in a row)" in reason
+    assert "Branch feat/example-20261112 has no open pull request to main" in reason
+    assert "field-report --check" in reason and "deliver --worktree" in reason
+    assert "stop-check --pull <number> --pr-description <file>" in reason
+
+
+def test_stop_check_passes_a_worker_whose_pull_request_carries_a_passing_report(
+        tmp_path, monkeypatch, capsys):
+    root = stop_checkout(tmp_path, monkeypatch)
+    calls = fake_pull_requests(monkeypatch, root, delivered_description(root))
+    assert stop_hook(root, monkeypatch, capsys) == {}
+    assert [call[:2] for call in calls] == [["pr", "list"], ["pr", "view"]]
+
+
+def test_stop_check_refuses_a_report_that_fails_the_check_or_lags_the_branch(
+        tmp_path, monkeypatch, capsys):
+    root = stop_checkout(tmp_path, monkeypatch)
+    fake_pull_requests(monkeypatch, root, "Fixes the issue, no report")
+    reason = stop_hook(root, monkeypatch, capsys)["reason"]
+    assert "holds no field report" in reason
+    fake_pull_requests(monkeypatch, root, delivered_description(root))
+    (root / "late.txt").write_text("late\n", encoding="utf-8")
+    assert git(root, "add", ".").returncode == 0
+    assert git(root, "commit", "-q", "-m", "late").returncode == 0
+    reason = stop_hook(root, monkeypatch, capsys)["reason"]
+    assert "(2 of 5 in a row)" in reason
+    assert "a commit after delivery needs the check and the delivery again" in reason
+
+
+def test_stop_check_without_gh_judges_by_the_recorded_pull_request_and_else_fails_open(
+        tmp_path, monkeypatch, capsys):
+    root = stop_checkout(tmp_path, monkeypatch)
+    answer = stop_hook(root, monkeypatch, capsys)
+    assert "decision" not in answer
+    assert "cannot judge" in answer["systemMessage"] and "gh is not usable" in answer["systemMessage"]
+
+    description = tmp_path / "description.md"
+    description.write_text("Fixes it\n", encoding="utf-8")
+    assert work_tickets.main(["stop-check", "--pull", "7", "--pr-description", str(description),
+                              "--worktree", str(root)]) == 1
+    assert "the Stop hook would refuse" in capsys.readouterr().err
+    assert stop_hook(root, monkeypatch, capsys)["decision"] == "block"
+
+    description.write_text(delivered_description(root), encoding="utf-8")
+    assert work_tickets.main(["stop-check", "--pull", "7", "--pr-description", str(description),
+                              "--worktree", str(root)]) == 0
+    assert "the Stop hook passes" in capsys.readouterr().out
+    assert stop_hook(root, monkeypatch, capsys) == {}
+    assert not (root / ".se" / "work" / work_tickets.STOP_COUNT).exists()  # a pass resets the count
+
+
+def test_stop_check_never_refuses_without_a_work_issue_queue_or_for_other_agents(
+        tmp_path, monkeypatch, capsys):
+    root = stop_checkout(tmp_path, monkeypatch, queue=False)
+    fake_pull_requests(monkeypatch, root, None)
+    assert stop_hook(root, monkeypatch, capsys) == {}  # SE's or a person's session
+    (root / ".se" / "work" / "todo").mkdir(parents=True)
+    assert stop_hook(root, monkeypatch, capsys) == {}  # a queue, but for no work issue
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    assert stop_hook(outside, monkeypatch, capsys) == {}  # no checkout at all
+
+    worker = stop_checkout(tmp_path / "worker", monkeypatch)
+    fake_pull_requests(monkeypatch, worker, None)
+    assert stop_hook(worker, monkeypatch, capsys, "SubagentStop", agent_type="Explore") == {}
+    assert stop_hook(worker, monkeypatch, capsys, "SubagentStop") == {}  # an unnamed sub-agent
+    blocked = stop_hook(worker, monkeypatch, capsys, "SubagentStop", agent_type="se:worker")
+    assert blocked["decision"] == "block"
+    assert git(worker, "checkout", "-q", "main").returncode == 0
+    assert stop_hook(worker, monkeypatch, capsys) == {}  # the integration branch: no worker's
+
+
+def test_stop_check_refuses_at_most_its_cap_in_a_row(tmp_path, monkeypatch, capsys):
+    root = stop_checkout(tmp_path, monkeypatch)
+    (root / "se.toml").write_text("[stop]\nrefusals = 2\n", encoding="utf-8")
+    fake_pull_requests(monkeypatch, root, None)
+    assert "(1 of 2 in a row)" in stop_hook(root, monkeypatch, capsys)["reason"]
+    assert "(2 of 2 in a row)" in stop_hook(root, monkeypatch, capsys)["reason"]
+    released = stop_hook(root, monkeypatch, capsys)
+    assert "decision" not in released
+    assert "refused 2 times in a row; the turn may end undelivered" in released["systemMessage"]
+    assert "(1 of 2 in a row)" in stop_hook(root, monkeypatch, capsys)["reason"]  # counted afresh
+    (root / "se.toml").unlink()
+    assert work_tickets.stop_refusals(root) == 5  # built in

@@ -73,7 +73,7 @@ place for it, with the reason), **port the idea** (rebuilt for today's model), *
 | stuck work, lease, takeovers (`stuck.go`, `takeover.go`) | a quiet claim is taken over after its lease | the integrator restarts a stuck worker from its session events | port the idea as part of fleet check (#880) | M |
 | routine and fan-out (`SE work`, `SE_ROUTINE_FIRE_URL`) | starts boxes on merges, every 4 hours, and when boxes are full | the integrator starts workers with `create_session`; scheduled tasks | obsolete | M |
 | pause switch (`fleet.box/config/paused`) | a take reads it and starts nothing | nothing | open as SE#756 | S |
-| Stop hook (`hook stop`, `hook prompt`, `stop.yaml`) | refuses a box's stop while an issue it took is open | a sentence in the worker's procedure | port the idea (#881) | M |
+| Stop hook (`hook stop`, `hook prompt`, `stop.yaml`) | refuses a box's stop while an issue it took is open | `work_tickets.py stop-check`, the plugin's Stop and SubagentStop hook (README "Stop hook") | ported as an idea (#881): it holds a worker to a delivered pull request | M |
 | `fleet check`, `fleet fix` | every stuck or stray piece of work, with its remedy | the integrator's judgment | port the idea (#880); `fix` pruned | M |
 | `fleet prune` | deletes stray `issue-<n>` and `claude/*` branches | `integrate` deletes the branch it landed | covered; branches of closed issues reported by #880 | S |
 | `fleet refresh` | merges main into every open manifest branch | nothing | obsolete with manifests | S |

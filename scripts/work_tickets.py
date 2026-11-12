@@ -2542,6 +2542,210 @@ def deliver(root: Path) -> int:
     return pr
 
 
+# The Stop hook: a worker's turn ends only with its work issue delivered (README "Stop hook").
+STOP_REFUSALS = 5
+STOP_COUNT = "stop-refusals.json"
+DELIVERED_PULL = "pull-request.json"
+WORKER_AGENT = "worker"
+
+
+class CannotJudge(QueueError):
+    """The Stop hook cannot tell whether the work is delivered; it lets the turn end."""
+
+
+@dataclass(frozen=True)
+class StopVerdict:
+    """What the Stop hook answers: `block`, the reason the agent reads, or a pass; `note` says
+    why a pass let the turn end where that needs saying."""
+
+    block: str | None = None
+    note: str | None = None
+
+    def hook_output(self) -> str:
+        """The hook's JSON on stdout: a block with its reason, a pass with its note, or nothing."""
+        if self.block is not None:
+            return json.dumps({"decision": "block", "reason": self.block})
+        return json.dumps({"systemMessage": self.note}) if self.note else ""
+
+
+def stop_refusals(root: Path) -> int:
+    """`[stop] refusals` in se.toml: how often in a row the Stop hook refuses; built in 5."""
+    value = se_table(root, "stop").get("refusals", STOP_REFUSALS)
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise QueueError(f"stop.refusals in {root / 'se.toml'} must be a positive whole number; "
+                         f"fix it or remove it for the built-in {STOP_REFUSALS}")
+    return value
+
+
+def checkout_top(path: Path) -> Path | None:
+    """The top of the git checkout holding `path`; None outside one."""
+    if not path.is_dir():
+        return None
+    result = run_git(path, "rev-parse", "--show-toplevel")
+    return Path(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip() else None
+
+
+def has_work_issue(root: Path) -> bool:
+    """Whether the checkout's ticket queue is for a work issue: intake's snapshot, or what the
+    worker recorded as read of it without gh (comments-read, body-read)."""
+    work = root / ".se" / "work"
+    return any((work / name).is_file() for name in (ISSUE_SNAPSHOT, COMMENTS_READ, BODY_READ))
+
+
+def is_worker_agent(event: dict[str, object]) -> bool:
+    """Whether a SubagentStop's sub-agent is a worker (`worker`, `se:worker`); a sub-agent the
+    event does not name is not judged."""
+    agent = event.get("agent_type")
+    return isinstance(agent, str) and agent.rsplit(":", 1)[-1] == WORKER_AGENT
+
+
+def delivered_pull_path(root: Path) -> Path:
+    return root / ".se" / "work" / DELIVERED_PULL
+
+
+def record_delivered_pull(root: Path, number: int, description: Path) -> None:
+    """Keep the pull request the session's GitHub tools opened, the Stop hook's answer file
+    without gh: its number, its description as they read it, and the branch it is from."""
+    body = read_file(description, "pull request description")
+    path = delivered_pull_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"number": number, "branch": current_branch(root), "body": body},
+                               indent=2) + "\n", encoding="utf-8", newline="\n")
+
+
+def delivered_pull(root: Path, branch: str) -> tuple[int, str] | None:
+    """The branch's open pull request to the integration branch and its description: read with
+    gh, or without gh from the answer file `stop-check --pull` keeps; None where there is none.
+    Refused as unjudgeable without gh and without an answer file for the branch."""
+    if gh_usable():
+        remote = remote_repo(root)
+        if remote is None:
+            raise CannotJudge(f"{root} has no origin remote to look for the pull request on")
+        number = open_pull_request_number(root, remote, branch)
+        if number is None:
+            return None
+        data = json.loads(run_gh(root, ["pr", "view", str(number), "--json", "body",
+                                        *repo_arguments(remote)]))
+        return number, str(data.get("body") or "")
+    path = delivered_pull_path(root)
+    try:
+        recorded = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        recorded = None
+    if not isinstance(recorded, dict) or recorded.get("branch") != branch:
+        raise CannotJudge(
+            "gh is not usable and no pull request is recorded for this branch (stop-check --pull "
+            "<number> --pr-description <file> records the one your GitHub tools opened)")
+    return int(recorded["number"]), str(recorded.get("body") or "")
+
+
+def script_command(root: Path, words: str) -> str:
+    """`words` as the command line that runs this script on the checkout `root`."""
+    return f"uv run python {Path(__file__).resolve()} {words} --worktree {root}"
+
+
+def delivery_problem(root: Path, branch: str) -> str | None:
+    """What keeps the branch from being delivered, with the commands that deliver it; None where an
+    open pull request carries a field report that passes field-report --check at the branch tip."""
+    report_file = root / ".se" / "work" / "field-report.md"
+    check = script_command(root, f"field-report --check {report_file}")
+    deliver_line = (
+        f"check it with `{check}` and deliver with `{script_command(root, 'deliver')}`; without "
+        f"gh, open or update the pull request with your GitHub tools as {WITHOUT_GH} says and "
+        f"record it with `{script_command(root, 'stop-check --pull <number> --pr-description <file>')}`."
+        " A worker that cannot finish delivers what it has, naming the rest under Not delivered"
+    )
+    pull = delivered_pull(root, branch)
+    if pull is None:
+        return (f"Branch {branch} has no open pull request to {integration_branch(root)}: the work "
+                f"issue is not delivered. Complete {report_file}, {deliver_line}.")
+    number, body = pull
+    try:
+        report = report_in(body, f"Pull request #{number}'s description")
+    except QueueError as error:
+        return f"{error}. Complete {report_file}, {deliver_line}."
+    snapshot = load_snapshot(root)
+    problems = field_report_problems(report, None if snapshot is None else str(snapshot["body"]))
+    match = BRANCH_TIP_PATTERN.search(report)
+    tip = branch_tip(root)
+    if match is None or tip is None or not same_commit(match[1], tip):
+        problems.append(f"its Branch tip is not the branch's commit {(tip or '')[:12]}: "
+                        "a commit after delivery needs the check and the delivery again")
+    if not problems:
+        try:
+            guard(root, branch, report)
+        except QueueError as error:
+            problems.append(str(error))
+    if not problems:
+        return None
+    return (f"Pull request #{number}'s field report does not pass field-report --check:\n"
+            + "\n".join(f"- {problem}" for problem in problems)
+            + f"\nFix {report_file}, {deliver_line}.")
+
+
+def stop_count_path(root: Path) -> Path:
+    return root / ".se" / "work" / STOP_COUNT
+
+
+def stop_count(root: Path) -> int:
+    try:
+        value = json.loads(stop_count_path(root).read_text(encoding="utf-8")).get("refused", 0)
+    except (OSError, UnicodeError, ValueError, AttributeError):
+        return 0
+    return value if isinstance(value, int) and value > 0 else 0
+
+
+def set_stop_count(root: Path, count: int) -> None:
+    path = stop_count_path(root)
+    if count <= 0:
+        path.unlink(missing_ok=True)
+        return
+    path.write_text(json.dumps({"refused": count}) + "\n", encoding="utf-8", newline="\n")
+
+
+def stop_verdict(path: Path, event: dict[str, object], count: bool = True) -> StopVerdict:
+    """The Stop hook's verdict for the checkout holding `path`: refuse while a worker's work issue
+    is not delivered, at most `[stop] refusals` times in a row; everywhere else, and where it cannot
+    judge, let the turn end (advice fails open). `count` false judges without counting."""
+    if event.get("hook_event_name") == "SubagentStop" and not is_worker_agent(event):
+        return StopVerdict()
+    root = checkout_top(path)
+    if root is None or not has_work_issue(root):
+        return StopVerdict()
+    try:
+        branch = current_branch(root)
+        if not branch or branch == integration_branch(root):
+            return StopVerdict()
+        problem = delivery_problem(root, branch)
+        cap = stop_refusals(root)
+    except Exception as error:  # advice fails open, whatever broke
+        return StopVerdict(note=f"se Stop hook: cannot judge the delivery, so the turn may end: "
+                                f"{one_line(str(error), 300)}")
+    if not count:
+        return StopVerdict(block=problem)
+    if problem is None:
+        set_stop_count(root, 0)
+        return StopVerdict()
+    refused = stop_count(root) + 1
+    if refused > cap:
+        set_stop_count(root, 0)
+        return StopVerdict(note=f"se Stop hook: refused {cap} times in a row; the turn may end "
+                                f"undelivered: {one_line(problem, 300)}")
+    set_stop_count(root, refused)
+    return StopVerdict(block=f"se Stop hook ({refused} of {cap} in a row): {problem}")
+
+
+def hook_event() -> dict[str, object]:
+    """The hook's JSON on stdin; {} where there is none."""
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return {}
+        data = json.loads(sys.stdin.read() or "{}")
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def block(root: Path, number: int, blocker: int, repo: str | None) -> None:
     issue = fetch_issue(root, number, resolve_repo(root, repo))
     target_repo = issue["repo"]
@@ -6293,6 +6497,48 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
                            repository_name(root))
     print(fleet_report(found, args.json))
     return 1 if found else 0
+
+
+@command("stop-check", "the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue "
+                       "is for a work issue, refuse the turn's end while its branch has no open "
+                       "pull request whose description carries a field report that passes "
+                       "field-report --check at the branch tip, naming what is missing and the "
+                       "commands; at most [stop] refusals times in a row (se.toml, built in 5). "
+                       "Anywhere else, for a sub-agent that is no worker, and where it cannot "
+                       "judge (no gh and no recorded pull request) it lets the turn end. It reads "
+                       "the hook's JSON on stdin and answers the hook's JSON on stdout",
+         arg("--worktree", help="the checkout to judge; default: the hook's cwd, else the "
+                                "current directory"),
+         arg("--pull", type=int, metavar="NUMBER",
+             help="without gh: record the pull request your GitHub tools opened, the hook's "
+                  "answer file, then say whether the hook passes; exit code 1 where it would "
+                  "refuse"),
+         arg("--pr-description", type=Path, metavar="FILE",
+             help="with --pull: its description as your GitHub tools read it"))
+def run_stop_check(root: Path | None, args: argparse.Namespace) -> int:
+    if args.pull is not None:
+        if args.pr_description is None:
+            raise QueueError("stop-check --pull needs --pr-description <file>")
+        path = root or Path.cwd()
+        top = checkout_top(path)
+        if top is None:
+            raise QueueError(f"stop-check --pull: {path} is not in a git checkout")
+        record_delivered_pull(top, args.pull, args.pr_description)
+        verdict = stop_verdict(top, {}, count=False)
+        if verdict.block is not None:
+            print(f"Recorded pull request #{args.pull}; the Stop hook would refuse:\n"
+                  f"{verdict.block}", file=sys.stderr)
+            return 1
+        print(f"Recorded pull request #{args.pull}; the Stop hook passes"
+              + (f" ({verdict.note})" if verdict.note else ""))
+        return 0
+    event = hook_event()
+    cwd = event.get("cwd")
+    path = root or (Path(cwd) if isinstance(cwd, str) and cwd else Path.cwd())
+    output = stop_verdict(path, event).hook_output()
+    if output:
+        print(output)
+    return 0
 
 
 README = Path(__file__).resolve().parents[1] / "README.md"
