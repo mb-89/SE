@@ -293,7 +293,7 @@ def test_roles_say_integration_branch_and_link_its_owner(role):
 def test_work_model_owns_the_integration_branch_setting():
     text = normalized(WORK_MODEL)
     assert "## Integration branch" in text
-    assert 'integration_branch = "se"' in text and "It is `main` unless" in text
+    assert 'integration_branch = "next"' in text and "It is `main` unless" in text
 
 
 def test_messages_travel_only_up_and_down_the_tree():
