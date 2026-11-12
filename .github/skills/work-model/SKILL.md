@@ -154,7 +154,7 @@ merges and opens its pull request against. It is `main` unless the project names
 
 ```toml
 [project]
-integration_branch = "se"
+integration_branch = "next"
 ```
 
 `work_tickets.py` reads it from there for `sync`, `start`, `deliver`, `guard` and `integrate`;

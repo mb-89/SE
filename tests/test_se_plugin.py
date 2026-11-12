@@ -138,7 +138,7 @@ def test_the_readme_installs_the_plugin_the_marketplace_declares():
     marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
     readme = (ROOT / "README.md").read_text(encoding="utf-8").split("## Install", 1)[1].split("\n## ", 1)[0]
     plugin = marketplace["plugins"][0]["name"]
-    assert f"`claude plugin install {plugin} --marketplace mb-89/SE#se`" in readme
+    assert f"`claude plugin install {plugin} --marketplace mb-89/SE`" in readme
     assert f"`{plugin}@{marketplace['name']}`" in readme
     for agent in sorted(path.stem for path in (ROOT / "src" / "agents").glob("*.md")):
         assert f"`{plugin}:{agent}`" in readme
@@ -148,7 +148,8 @@ def test_the_cloud_install_clones_the_plugin_and_each_role_prompt_names_a_built_
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     cloud = readme.split("### Claude Code cloud\n", 1)[1].split("\n## ", 1)[0]
     script = cloud.split("```bash\n", 1)[1].split("```", 1)[0]
-    assert "git clone --depth 1 -b se https://github.com/mb-89/SE ~/.claude/skills/se ||" in script
+    assert "git clone --depth 1 https://github.com/mb-89/SE ~/.claude/skills/se ||" in script
+    assert "-b se" not in readme and "#se`" not in readme  # se replaced main: no command names it
     row = next(line for line in readme.splitlines() if line.startswith("| Claude Code cloud"))
     for kind in ("agents", "skills"):
         for name in sorted(path.stem for path in (ROOT / "src" / kind).iterdir()):

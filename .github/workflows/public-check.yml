@@ -1,11 +1,11 @@
 # The public check's commit gate on every push to the integration branch, the owner's direct pushes
-# included (AGENTS.md "Public safety"). Make this check required in the branch protection of se and
-# main, so a push the hooks did not see still fails here.
+# included (AGENTS.md "Public safety"). Make this check required in the branch protection of main,
+# so a push the hooks did not see still fails here.
 name: public-check
 
 on:
   push:
-    branches: [se, main]
+    branches: [main]
 
 permissions:
   contents: read

@@ -693,13 +693,13 @@ def test_the_workflow_tags_nothing_on_another_branch(checkout):
 def test_se_runs_the_release_workflow_on_pushes_to_its_integration_branch_only():
     project = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]
     caller = (PROJECT / ".github" / "workflows" / "release-tag.yml").read_text(encoding="utf-8")
-    assert f"on:\n  push:\n    branches: [{project['integration_branch']}]\n" in caller
+    assert f"on:\n  push:\n    branches: [{project.get('integration_branch', 'main')}]\n" in caller
 
 
 def test_the_release_workflow_is_one_copy_whose_only_se_lines_are_its_branch_and_uses():
     """Consumers copy se's own release-tag.yml and change its branch and its uses, the README's
     major tag in place of se's own commit, so no other line is se's."""
-    branch = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]["integration_branch"]
+    branch = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"].get("integration_branch", "main")
     caller = (PROJECT / ".github" / "workflows" / "release-tag.yml").read_text(encoding="utf-8")
     own = [line for line in caller.splitlines() if line.strip() == f"branches: [{branch}]"]
     assert len(own) == 1

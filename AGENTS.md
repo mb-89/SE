@@ -51,8 +51,7 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   - Every author is refused, the owner included; a co-author line's hit also names the editor
     setting that writes it ([README "Install"](README.md#install)).
 - CI: `.github/workflows/public-check.yml` runs the commit gates of a `--range` on every push to
-  `se` and `main`, so a push the hooks did not see fails there; it is the required check of both
-  branches.
+  `main`, so a push the hooks did not see fails there; it is the branch's required check.
 - A `--range` on a shallow clone that reaches beyond the fetched history is refused with exit code
   2, naming `git fetch --unshallow`, so a gate never passes over commits it cannot see.
 - The project identity ([pub-002](src/skills/work-model/references/rules.md#pub-002-a-generic-commit-identity)) in the commit
@@ -94,5 +93,8 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
 - Pushes of the integration branch: pre-push and `work_tickets.py push` also need the verdicts the
   [work model](src/skills/work-model/SKILL.md#integration-branch) names.
 - By hand: `uv run python scripts/public_check.py --repo <path>` (`--help` for the options).
+- History already pushed that the commit gates refuse is rewritten once, on a fresh clone, by
+  `scripts/rewrite_history.py --repo <clone>`, whose docstring owns what it changes; it pushes
+  nothing.
 
 Never bypass the hooks: [pub-006](src/skills/work-model/references/rules.md#pub-006-never-bypass-the-hooks).
