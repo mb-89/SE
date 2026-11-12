@@ -523,6 +523,27 @@ Every push goes through a command that runs its gates, and a gate is never bypas
     ([Public safety](../../../AGENTS.md#public-safety)).
 - **Related:** wrk-005, pub-006
 
+### wrk-007 One piece of work, one issue; no command files issues on its own
+
+Each piece of work has exactly one issue, a review, retro, overhaul or check writes one report on
+the issue or pull request it concerns, and only the `se` role files new issues, after reading such
+a report.
+
+- **Why:** an issue is chosen work; a finding becomes work only when someone weighs it against the
+  rest, and related findings are one package, not one issue each.
+- **Without it:** the old fleet minted an issue per finding and flooded the queue: every review,
+  retro and check filed its own, and the queue held more reports than work.
+- **Prevents:** issue spam; twins of one piece of work; work nobody chose.
+- **Implementations:**
+  - se: `work_tickets.py file`, `backlog file` and `route` are the only paths to the issue-create
+    door, which `tests/test_issue_creation.py` checks.
+  - se: `review.py file` posts one comment on the reviewed pull request and files no issue
+    (README [Work commands](../../../README.md#work-commands)).
+  - se: SE, reading a report, bundles related findings into one work issue and sends rule or
+    principle changes to the owner's decision list, never as separate issues
+    ([Issues](../SKILL.md#issues)).
+- **Related:** wrk-002, dec-011
+
 ## dec: decisions
 
 Rules `dec-001` to `dec-009` are the decision skill's [checklist](../../decision/SKILL.md#the-checklist),

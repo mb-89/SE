@@ -78,6 +78,10 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 An issue is one package of work: its title is its branch name, and it ends as one merge whose
 pull request carries its field report.
 
+- **One piece of work, one issue**: no command files issues on its own; reviews, retros, overhauls
+  and checks report on the issue or pull request they concern, and only SE files
+  ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
+
 - **Sizes**: tiny, small or medium. A topic bigger than medium becomes several issues, worked in
   order.
 - **Kinds**: a work issue ([Roles and flow](#roles-and-flow)), work from outside

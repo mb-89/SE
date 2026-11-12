@@ -161,9 +161,9 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
   request`, a setting, a permission) is prepared and escalated as the work model's
   [Steps only the person approves](../skills/work-model/SKILL.md#steps-only-the-person-approves)
   says; SE runs it.
-- When escalations or merge problems show a pattern, file a retro issue from
-  [retro.md](../.github/ISSUE_TEMPLATE/retro.md) whose improvements name the agent definition, template or
-  rule they change.
+- When escalations or merge problems show a pattern, name it in your report to SE, with the
+  agent definition, template or rule it would change; SE files the retro issue
+  ([wrk-007](../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - Report per integration, as a statement, never a question: squash commit, landing pull request
   and its `check` run, suite result, output
   check, each issue's GitHub state as `integrate` read it after the merge (never as intended),
