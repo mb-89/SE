@@ -86,6 +86,10 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
    - It lands the result through a squash pull request (README
      [Landing on main](../README.md#landing-on-main)), then closes the work issue, cleans up
      and starts work.
+   - In the cloud, where `gh` is not signed in, it hands off: it pushes `land/<branch>` and prints
+     the GitHub steps as a plan, you run them, and `integrate --read-back
+     <branch>` checks the landing through git and prints the close-out plan
+     ([Without gh](../skills/work-model/SKILL.md#without-gh)).
    - A suite over its limit is refused: escalate it to the worker with the gate's remedy.
    - Commits on the branch after the report's Branch tip are refused, named: escalate them to the
      worker to update the report in the pull request description, or include them with
@@ -103,8 +107,7 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
    project's public check included unless `se.toml` sets `public_check = false`, then waits for
    `check`, squash-merges and reads the merged commit back. Nothing is pushed to the integration
    branch directly.
-   - Every push goes through `work_tickets.py` (`integrate`, or `push land/<branch>` without
-     `gh`), which retries a transient GitHub refusal once a minute, ten attempts; never `git push`
+   - Every push goes through `work_tickets.py` (`integrate`), which retries a transient GitHub refusal once a minute, ten attempts; never `git push`
      by hand, and never tell a worker to retry.
 5. **Close** through `integrate`: it closes the work pull request with a line naming the landing
    one, and the work issue with a comment that links both pull requests, the `check` run and the

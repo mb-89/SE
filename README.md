@@ -272,8 +272,32 @@ does all of it:
 6. It closes the work pull request with a line naming the landing one, closes the work issue and
    cleans up.
 
-GitHub sits behind one door, the class `GitHub` in `work_tickets.py` (`gh api`), which the tests
-replace with a fake.
+Steps 2 to 4 and the GitHub half of step 6 are one plan: numbered GitHub steps, each a tool of the
+host's GitHub tools (the GitHub MCP server's names) with its arguments, and later steps taking what
+earlier ones give (`<pull number from step 1>`). Both paths run that one plan:
+
+- **Where `gh` is signed in**, `integrate` runs it itself through one door, the class `GitHub` in
+  `work_tickets.py` (`gh api`), which the tests replace with a fake.
+- **Where it is not** (Claude's cloud, where `gh` has no account), `integrate` hands it off:
+  - `integrate <pull request> --pr-description <file> --issue-body <file> --branch <head branch>`,
+    from what the session's GitHub tools read, does step 1, pushes `land/<branch>`, keeps what the
+    read-back needs in `.se/handoff/` and prints the plan.
+  - The plan: `create_pull_request` (or `update_pull_request` on the one `list_pull_requests`
+    finds open), `pull_request_read` `get_check_runs` until `check` passes, and
+    `merge_pull_request` with `merge_method` squash, the exact title and message and
+    `expectedHeadSha` at the landing head;
+  - the session runs those steps with its GitHub tools;
+  - `integrate --read-back <branch> --landing-pull <number> --check-run <url>` then reads step 5
+    back through `git fetch` alone (origin's integration branch one commit on the tested base,
+    with the tested tree), finishes everything local of step 6 and prints its close-out plan:
+    the work pull request's comment and close, and the work issue's comment, label and close.
+- A failure on the way prints the escalation as a plan too: the comment and the `escalated`
+  label.
+
+The same split holds for `refs request` and `refs apply` (the work model's
+[Steps only the person approves](src/skills/work-model/SKILL.md#steps-only-the-person-approves)):
+without a signed-in `gh` each prints its comment, dispatch and run steps, and `--read-back` checks
+the refs through `git ls-remote` and prints the rest.
 
 The squash commit carries the release's `se.toml` version, so the release workflow tags it and the
 docs workflow publishes it, as both run on every push to `main`. GitHub commits it for the merging
@@ -526,13 +550,21 @@ work_tickets.py backlog list --worktree WORKTREE [--search SEARCH] [--repo REPO]
     list the open backlog issues, or those whose title or body matches --search
 
 work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--repo REPO]
+                             [--read-back] [--request-id REQUEST_ID] [--run-url RUN_URL]
+                             [--conclusion CONCLUSION] [--log-file LOG_FILE]
                              issue
     for the integrator: post the triples on the issue, run ref-maintenance's dry run, post its
-    output and label the issue escalated; prints the line for SE
+    output and label the issue escalated; prints the line for SE. Where gh is not signed in it
+    prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the
+    refs and finishes
 
-work_tickets.py refs apply --worktree WORKTREE [--repo REPO] issue
+work_tickets.py refs apply --worktree WORKTREE [--repo REPO] [--comments-file COMMENTS_FILE]
+                           [--read-back] [--run-url RUN_URL] [--conclusion CONCLUSION]
+                           issue
     for SE, on the person's yes: run ref-maintenance for real with the triples the issue's newest
-    request posted, read the refs back and post the result; prints the line for the integrator
+    request posted, read the refs back and post the result; prints the line for the integrator.
+    Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools;
+    --read-back then checks the refs and finishes
 
 work_tickets.py sync --worktree WORKTREE
     merge the newest integration branch (se.toml project.integration_branch, default main) from
@@ -571,12 +603,17 @@ work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
     print the Release-kind trailer an integration merge of <branch> carries, from its field report's
     Release kind (a re-integration's from its Re-integration kind); push requires it
 
-work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--build-command BUILD_COMMAND]
-                          [--include-late REASON] [--check-command JSON]
-                          [--check-command-temporary-directory]
-                          pull_request
+work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE]
+                          [--issue-body FILE] [--branch BRANCH] [--read-back BRANCH]
+                          [--landing-pull LANDING_PULL] [--check-run CHECK_RUN]
+                          [--build-command BUILD_COMMAND] [--include-late REASON]
+                          [--check-command JSON] [--check-command-temporary-directory]
+                          [pull_request]
     validate the field report a pull request's description carries, merge it on land/<branch>, test,
-    land it through a squash pull request once check passes, and close the work issue
+    land it through a squash pull request once check passes, and close the work issue. Where gh is
+    not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's
+    GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-
+    out
 
 work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
                        [--integrator-session INTEGRATOR_SESSION]

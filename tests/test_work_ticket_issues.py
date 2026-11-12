@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ sys.modules.setdefault("work_tickets", work_tickets)
 SPEC.loader.exec_module(work_tickets)
 TESTED_MAIN = work_tickets.tested_main
 REAL_GITHUB = work_tickets.GitHub
+REAL_HAND_OFF = work_tickets.hand_off
 
 BRANCH = "feature/example-20261104"
 URL = "https://git.example/owner/repo/issues/5"
@@ -1514,8 +1516,12 @@ class FakeGitHub:
         pull.update(title=title, body=body)
         return pull
 
-    def close_pull(self, number: int, comment: str) -> None:
-        self.calls.append(("close_pull", number, comment))
+    def comment(self, number: int, body: str) -> dict:
+        self.calls.append(("comment", number, body))
+        return {"id": 1}
+
+    def close_pull(self, number: int) -> None:
+        self.calls.append(("close_pull", number))
 
     def check_run(self, sha: str, name: str) -> dict | None:
         self.calls.append(("check_run", sha, name))
@@ -1553,6 +1559,7 @@ def github(monkeypatch) -> FakeGitHub:
     """Every integration lands through the fake GitHub; no test reaches the real one."""
     fake = FakeGitHub()
     monkeypatch.setattr(work_tickets, "GitHub", fake)
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)  # gh signed in: the local runner
     monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
     return fake
 
@@ -2358,7 +2365,7 @@ def test_integrate_lands_through_a_squash_pull_request_after_waiting_for_check(
     title = "Integrate feature/worker (work issue #5, PR #7)"  # without a public check
     assert [call[0] for call in github.calls] == [
         "open_pull", "create_pull", "check_run", "check_run", "check_run", "squash", "pull",
-        "close_pull"]
+        "comment", "close_pull"]
     assert github.calls[1] == ("create_pull", landing, "main", title)
     pull = github.pulls[0]
     assert pull["body"] == reported_at(head)  # the worker's description: its field report
@@ -2372,8 +2379,10 @@ def test_integrate_lands_through_a_squash_pull_request_after_waiting_for_check(
     tree = lambda ref: subprocess.run(["git", "-C", str(main_checkout), "rev-parse", f"{ref}^{{tree}}"],
                                       capture_output=True, text=True, check=True).stdout.strip()
     assert tree("main") == tree(sha)  # the tree the checks passed
-    assert github.calls[-1] == ("close_pull", 7, f"Landed on main in {origin_main(main_checkout)[:12]} "
-                                "through https://git.example/owner/repo/pull/20.")
+    assert github.calls[-2:] == [
+        ("comment", 7, f"Landed on main in {origin_main(main_checkout)[:12]} "
+                       "through https://git.example/owner/repo/pull/20."),
+        ("close_pull", 7)]
     out = capsys.readouterr().out
     assert "Landing pull request opened: https://git.example/owner/repo/pull/20" in out
     assert "Check check: not started" in out and "Check check: in_progress" in out
@@ -2475,7 +2484,8 @@ def test_the_door_speaks_github_s_rest_api_through_gh(tmp_path, monkeypatch):
     assert door.create_pull("land/x", "main", "T", "B") == {"number": 9}
     assert door.check_run("abc", "check") == {"id": 2, "status": "completed"}
     assert door.squash(9, "abc", "T", "M") == "abc"
-    door.close_pull(7, "Landed")
+    door.comment(7, "Landed")
+    door.close_pull(7)
     assert [(arguments[2], arguments[3], sent) for arguments, sent in calls] == [
         ("GET", "repos/owner/repo/pulls?state=open&head=owner:land/x&base=main", None),
         ("POST", "repos/owner/repo/pulls", {"head": "land/x", "base": "main", "title": "T", "body": "B"}),
@@ -2485,6 +2495,154 @@ def test_the_door_speaks_github_s_rest_api_through_gh(tmp_path, monkeypatch):
         ("POST", "repos/owner/repo/issues/7/comments", {"body": "Landed"}),
         ("PATCH", "repos/owner/repo/pulls/7", {"state": "closed"}),
     ]
+
+
+# The hand-off: where gh is not signed in, integrate prints its GitHub steps as a plan, the
+# session runs them with its own GitHub tools, and --read-back checks the result through git.
+
+
+def handed_off_worker(main_checkout: Path, monkeypatch, github) -> tuple[str, list[str]]:
+    """feature/worker delivered as PR #7 with gh not signed in; (head, the integrate arguments
+    the session passes: the description and issue body it saved, the head branch)."""
+    head, _ = delivered_worker(main_checkout, monkeypatch)
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+    monkeypatch.setattr(work_tickets, "run_gh_with_body",
+                        lambda root, args, body: pytest.fail(f"gh {args}"))
+    saved = main_checkout.parent / "saved"
+    saved.mkdir()
+    (saved / "pr.md").write_text(reported_at(head), encoding="utf-8")
+    (saved / "issue.md").write_text(reported_at(head), encoding="utf-8")
+    return head, ["integrate", "7", "--pr-description", str(saved / "pr.md"),
+                  "--issue-body", str(saved / "issue.md"), "--branch", "feature/worker"]
+
+
+def session_squash(checkout: Path, ref: str, tree_of: str | None = None) -> str:
+    """What the session's merge_pull_request does: one squash commit of `ref` (or of the tree of
+    `tree_of`) on origin's main, written for the owner by GitHub's web-flow identity."""
+    origin = checkout.parent / "origin.git"
+    def git(*arguments: str, env: dict | None = None) -> str:
+        return subprocess.run(["git", "--git-dir", str(origin), *arguments], capture_output=True,
+                              text=True, check=True, env=env).stdout.strip()
+    main = git("rev-parse", "refs/heads/main")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "owner",
+           "GIT_AUTHOR_EMAIL": "1+owner@users.noreply.github.com",
+           "GIT_COMMITTER_NAME": "GitHub", "GIT_COMMITTER_EMAIL": "noreply" + "@github.com"}
+    commit = git("commit-tree", f"{tree_of or ref}^{{tree}}", "-p", main, "-m", "squash", env=env)
+    git("update-ref", "refs/heads/main", commit, main)
+    return commit
+
+
+def test_integrate_hands_off_a_plan_of_github_steps_where_gh_is_not_signed_in(
+        main_checkout, monkeypatch, github, capsys):
+    head, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    base = origin_main(main_checkout)
+
+    assert run(main_checkout, *arguments) == 0
+
+    out = capsys.readouterr().out
+    assert github.calls == []  # nothing reached GitHub: the session runs the steps
+    landing = "land/feature/worker"
+    origin = main_checkout.parent / "origin.git"
+    landed = subprocess.run(["git", "--git-dir", str(origin), "rev-parse", f"refs/heads/{landing}"],
+                            capture_output=True, text=True, check=True).stdout.strip()
+    assert origin_main(main_checkout) == base  # main itself is GitHub's to move
+    title = "Integrate feature/worker (work issue #5, PR #7)"
+    plan = json.loads((main_checkout / ".se" / "handoff" / "feature-worker.json")
+                      .read_text(encoding="utf-8"))["plan"]
+    assert [step["tool"] for step in plan["steps"]] == [
+        "create_pull_request", "pull_request_read", "merge_pull_request"]
+    opened, checked, merged = (step["arguments"] for step in plan["steps"])
+    assert opened == {"owner": "owner", "repo": "repo", "head": landing, "base": "main",
+                      "title": title, "body": reported_at(head)}
+    assert checked == {"owner": "owner", "repo": "repo", "method": "get_check_runs",
+                       "pullNumber": "<pull number from step 1>"}
+    assert merged == {"owner": "owner", "repo": "repo", "pullNumber": "<pull number from step 1>",
+                      "merge_method": "squash", "commit_title": title,
+                      "commit_message": "Release-kind: minor", "expectedHeadSha": landed}
+    assert "update_pull_request that one" in plan["steps"][0]["note"]
+    assert f"check run check on {landed} completes" in plan["steps"][1]["note"]
+    assert f"still {base}" in plan["steps"][2]["note"]
+    assert plan["then"].startswith("work_tickets.py integrate --read-back feature/worker "
+                                   "--landing-pull <pull number from step 1> --check-run")
+    assert "GitHub plan: land land/feature/worker on main\n1. create_pull_request " in out
+    assert '"expectedHeadSha": "' + landed + '"' in out
+    assert "Run the plan's steps, then its last line for pull request #7" in out
+    assert subprocess.run(["git", "-C", str(main_checkout), "branch", "--show-current"],
+                          capture_output=True, text=True, check=True).stdout.strip() == "main"
+
+
+def test_integrate_read_back_checks_the_landing_through_git_and_hands_off_the_close_out(
+        main_checkout, monkeypatch, github, capsys):
+    head, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    landing = "land/feature/worker"
+    commit = session_squash(main_checkout, f"refs/heads/{landing}")
+    capsys.readouterr()
+
+    assert run(main_checkout, "integrate", "--read-back", "feature/worker", "--landing-pull", "20",
+               "--check-run", "https://git.example/owner/repo/runs/4") == 0
+
+    out = capsys.readouterr().out
+    assert squashed_onto_origin(main_checkout, commit)
+    assert f"Landed: {commit[:12]} on main" in out
+    assert "GitHub plan: close out #5\n" in out
+    assert ('1. add_issue_comment {"body": "Landed on main in ' + commit[:12]
+            + ' through https://git.example/owner/repo/pull/20.", "issue_number": 7') in out
+    assert '2. update_pull_request {"owner": "owner", "pullNumber": 7, "repo": "repo", "state": "closed"}' in out
+    assert ('3. add_issue_comment {"body": "Integrated in ' in out
+            and "landed through https://git.example/owner/repo/pull/20 "
+                "(check: https://git.example/owner/repo/runs/4)" in out)
+    assert '"repo": "tracker"' in out  # the work issue lives in the tracker
+    assert "<the issue's labels without in-progress>" in out
+    assert '5. issue_write {"issue_number": 5, "method": "update", "owner": "owner", "repo": ' \
+           '"tracker", "state": "closed", "state_reason": "completed"}' in out
+    assert "Started: none here" in out
+    assert not (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()
+    assert github.calls == []
+
+
+@pytest.mark.parametrize("landing, message", [
+    (None, "is still .*the squash merge has not landed"),
+    ("other tree", "its tree is not the tree of"),
+])
+def test_integrate_read_back_refuses_a_main_that_is_not_the_tested_landing(
+        main_checkout, monkeypatch, github, capsys, landing, message):
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    if landing:
+        session_squash(main_checkout, "refs/heads/main", tree_of="refs/heads/main~1")
+    capsys.readouterr()
+
+    assert run(main_checkout, "integrate", "--read-back", "feature/worker", "--landing-pull", "20",
+               "--check-run", "https://git.example/owner/repo/runs/4") == 1
+
+    assert re.search(message, capsys.readouterr().err)
+    assert (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()  # read back again
+
+
+def test_integrate_chooses_the_hand_off_where_gh_is_not_signed_in(
+        main_checkout, monkeypatch, github, capsys):
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: False)
+    assert REAL_HAND_OFF() is True
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    assert REAL_HAND_OFF() is False
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+
+    assert run(main_checkout, "integrate", "7") == 1
+    error = capsys.readouterr().err
+    assert "hands its GitHub steps to the session, as gh is not signed in" in error
+    assert "--pr-description <file> --issue-body <file> --branch" in error
+    assert github.calls == []
+
+
+def test_a_hand_off_escalation_is_a_plan_too(capsys):
+    plan = work_tickets.escalation_plan("github.com/owner/tracker", 5, "conflicts")
+    assert [step.tool for step in plan.steps] == ["add_issue_comment", "issue_write"]
+    assert plan.steps[0].arguments == {"owner": "owner", "repo": "tracker", "issue_number": 5,
+                                       "body": "Integration stopped: conflicts\n"}
+    assert plan.steps[1].arguments["labels"] == "<the issue's labels with escalated>"
 
 
 def test_integrate_refuses_a_checkout_off_the_integration_branch(main_checkout, monkeypatch):
