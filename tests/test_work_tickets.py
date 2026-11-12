@@ -200,6 +200,45 @@ def test_guard_compares_against_the_fetched_remote_integration_branch(worktree: 
     assert "No removed protected content found." in guarded.stdout
 
 
+def test_guard_reads_a_branch_the_clone_only_fetched_and_names_the_fetch_otherwise(
+        worktree: Path) -> None:
+    upstream = worktree.parent / "guard-upstream"
+    upstream.mkdir()
+    assert git(upstream, "init", "-b", "main").returncode == 0
+    assert git(upstream, "config", "user.name", "Guard test").returncode == 0
+    assert git(upstream, "config", "user.email", "guard-test@example.invalid").returncode == 0
+    (upstream / "test_example.py").write_text("def test_removed_on_feature():\n    pass\n",
+                                              encoding="utf-8")
+    assert git(upstream, "add", ".").returncode == 0
+    assert git(upstream, "commit", "-m", "baseline tests").returncode == 0
+    assert git(upstream, "checkout", "-q", "-b", "feature").returncode == 0
+    assert git(upstream, "rm", "-q", "test_example.py").returncode == 0
+    assert git(upstream, "commit", "-m", "remove a test").returncode == 0
+    clone = worktree.parent / "guard-clone"
+    assert git(worktree.parent, "clone", "-q", "-b", "main", str(upstream), str(clone)).returncode == 0
+    report = clone / "field-report.md"
+    report.write_text(
+        "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n<!-- se:field-report:end -->\n",
+        encoding="utf-8",
+    )
+
+    # Only origin/feature exists, as in an integrator's cloud clone: the guard reads it.
+    guarded = run_helper(
+        "guard", "--branch", "feature", "--pr-description", str(report), "--worktree", str(clone),
+    )
+    assert guarded.returncode != 0
+    assert "test_removed_on_feature" in guarded.stderr
+    assert "ambiguous argument" not in guarded.stderr
+
+    # Neither feature nor origin/feature: the refusal names the fetch, not git's bare error.
+    missing = run_helper(
+        "guard", "--branch", "other", "--pr-description", str(report), "--worktree", str(clone),
+    )
+    assert missing.returncode != 0
+    assert "Cannot find branch other" in missing.stderr and "fetch origin other" in missing.stderr
+    assert "ambiguous argument" not in missing.stderr
+
+
 def test_authored_content_globs_ignores_pyproject_settings(worktree: Path) -> None:
     (worktree / "pyproject.toml").write_text(
         "[tool.se]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"

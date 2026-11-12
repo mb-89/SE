@@ -1854,8 +1854,10 @@ def authored_content_matches(path: str, glob: str) -> bool:
 
 
 def guard(root: Path, branch: str, report: str) -> list[str]:
-    """The tests and authored sentences `branch` removes, refused where the field report `report`
-    does not name each under its Removed behaviour."""
+    """The tests and authored sentences `branch` (the local branch, else `origin/<branch>`)
+    removes, refused where the field report `report` does not name each under its Removed
+    behaviour."""
+    branch = branch_head(root, branch)
     removed_tests = deleted_tests(root, branch)
     removed_sentences = deleted_authored_sentences(root, branch)
     named = "\n".join(section_content(report, REMOVED_SECTION))
@@ -2082,14 +2084,15 @@ def release_trailer(root: Path, branch: str, issue_body: str, report_body: str |
 
 
 def branch_head(root: Path, branch: str) -> str:
-    """The ref `release-trailer` reads `branch` at: the local branch where the clone has one, else
-    `origin/<branch>`, the ref an integrator clone that only fetched it has; refused with neither."""
+    """The ref `release-trailer`, `guard` and `integrate` read `branch` at: the local branch where
+    the clone has one, else `origin/<branch>`, the ref an integrator clone that only fetched it
+    has; refused with neither."""
     for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}"):
         if run_git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode == 0:
             return ref.removeprefix("refs/heads/").removeprefix("refs/remotes/")
     raise QueueError(
         f"Cannot find branch {branch}: neither {branch} nor origin/{branch} exists in {root}; "
-        f"fetch it with git -C {root} fetch origin {branch}, then run release-trailer again"
+        f"fetch it with git -C {root} fetch origin {branch}, then run the command again"
     )
 
 
