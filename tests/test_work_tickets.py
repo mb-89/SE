@@ -326,6 +326,66 @@ def test_guard_keeps_dots_in_protected_content_with_its_sentence(worktree: Path)
     ]
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "Each role follows its agent file (.github/agents/worker.agent.md) and the work model.",
+            ["Each role follows its agent file (.github/agents/worker.agent.md) and the work model."],
+        ),
+        (
+            "See [the work model](../skills/work-model/SKILL.md#tests) for the rules.",
+            ["See [the work model](../skills/work-model/SKILL.md#tests) for the rules."],
+        ),
+        (
+            "SE v5.3.0 reads se.toml at start.",
+            ["SE v5.3.0 reads se.toml at start."],
+        ),
+        (
+            "The first sentence ends here. (The second one ends in brackets.) A third! A `x? y` fourth?",
+            [
+                "The first sentence ends here.",
+                "(The second one ends in brackets.)",
+                "A third!",
+                "A `x? y` fourth?",
+            ],
+        ),
+    ],
+)
+def test_authored_sentences_split_only_where_a_sentence_ends(
+    text: str, expected: list[str],
+) -> None:
+    assert work_tickets.authored_sentences(text) == expected
+
+
+def test_guard_accepts_the_whole_sentence_with_a_path_quoted_across_lines(worktree: Path) -> None:
+    sentence = (
+        "Each role follows its agent file (.github/agents/worker.agent.md) and the work model."
+    )
+    repository, guide = authored_repository(
+        worktree.parent / "guard-path-sentence-case", "remove-path-sentence",
+        f"{sentence}\nThis sentence stays.\n",
+    )
+    guide.write_text("This sentence stays.\n", encoding="utf-8")
+    assert git(repository, "commit", "-am", "remove a sentence holding a path").returncode == 0
+
+    assert work_tickets.deleted_authored_sentences(repository, "remove-path-sentence") == [
+        f"docs/guide.md: {sentence}",
+    ]
+    report = repository / "field-report.md"
+    report.write_text(
+        "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\n"
+        "- docs/guide.md: Each role follows its agent file\n"
+        "  (.github/agents/worker.agent.md) and the work model.\n<!-- se:field-report:end -->\n",
+        encoding="utf-8",
+    )
+    approved = run_helper(
+        "guard", "--branch", "remove-path-sentence", "--pr-description", str(report),
+        "--worktree", str(repository),
+    )
+    assert approved.returncode == 0, approved.stderr
+
+
 def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
     repository, guide = authored_repository(
         worktree.parent / "rewrapped-content-case", "rewrap-prose",
