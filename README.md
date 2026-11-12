@@ -547,7 +547,7 @@ work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo R
     comment a question on an issue and label it escalated
 
 work_tickets.py file --worktree WORKTREE --title TITLE --body-file BODY_FILE [--blocked-by N]
-                     [--repo REPO]
+                     [--label LABEL] [--repo REPO]
     for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only
     once its blockers are linked
 
@@ -766,6 +766,55 @@ numbered, with its class's fix, its home and its kind:
 - `decision`: for the owner's decision list.
 
 Without gh it prints the comment and the close as a plan.
+
+`scripts/overhaul.py` holds the overhaul commands, which ask, rarely, whether the design is still
+right. SE starts one and runs it as its issue says, `read`, the judgment, then `file`.
+
+`uv run python scripts/overhaul.py new` files the overhaul issue, `docs/overhaul-<yyyymmdd>`
+labelled `discovery` beside the work labels, with the body of
+[the overhaul template](.github/ISSUE_TEMPLATE/overhaul.md), through `work_tickets.py file`'s
+filing path (`file --label discovery`): once, so an open overhaul answers a second `new`.
+
+`uv run python scripts/overhaul.py read <overhaul issue> [--out FILE] [--json]` writes the draft:
+
+- every live rule of the rule book with what checks it, read from its implementations: a test (it
+  names the tests or the suite), judgment ("by judgment"), a check (it links a script, or names
+  neither);
+- the retros closed since the last closed overhaul (titled `docs/overhaul-...`), or in the whole
+  history where none has, each from its report's block: its sizes, its broken rule checks, its
+  findings by kind and how many of the previous retro's findings closed or recurred, and the
+  finding classes more than one of them named;
+- the previous overhaul's findings, each with the issues that name it
+  (`overhaul #<n> finding <k>`) and their state (`closed`, `open` or `none`);
+- the pruning facts (`facts`, below), beside the previous overhaul's counts.
+
+It ends in a JSON block under `<!-- se:overhaul-yaml -->`, which the next overhaul reads. Without
+gh it prints its reads round by round and takes the answers from `--answers <dir>`, as `retro.py
+collect` does.
+
+`uv run python scripts/overhaul.py file <overhaul issue> --draft FILE` files a judged overhaul. The
+judge fills the draft's block:
+
+- `verdicts`, one per rule: `rule`, `strays` (`none`, `slightly`, `far`) and `how`;
+- `looked_at`, every part answered (`outside`, `consistency`, `rules`, `retro`, `speed`,
+  `mechanize`, `removal`; "nothing to change" is an answer);
+- `findings`, each with `title` (five words or more), `body`, `rule` (a rule's id, or `new`),
+  `place` (the file it changes), `controversial` with its `why`, and optionally `sources`;
+- `went_well`.
+
+It refuses, writing nothing, an incomplete judgment: a rule without a verdict, an empty
+`looked_at` part, a finding without a rule of the book, a place or a body, a controversial finding
+without a why, nothing that went well.
+
+It files no issue
+([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
+it posts the report, opening with `<!-- se:overhaul-report -->`, as the overhaul issue's closing
+comment and closes the issue. Without gh it prints the comment and the close as a plan. Each
+finding is
+
+- `work`, for SE to bundle into work issues naming `overhaul #<n> finding <k>`, or
+- `decision`, for the owner's decision list; a rule change (its place is the rule book, or its
+  rule is `new`) is always a decision.
 
 `uv run python scripts/overhaul.py facts [--json] [--repo PATH]` is an overhaul's pruning facts,
 read from the checkout (default: the current directory). It only reads, uses the standard library

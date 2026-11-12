@@ -394,20 +394,20 @@ class Collected:
                 "previous": self.previous, **{name: [] for name in JUDGMENT}}
 
 
-def read_block(text: str) -> dict | None:
-    """The data of the last block under BLOCK_MARKER in `text`; None where it has none."""
-    at = text.rfind(BLOCK_MARKER)
+def read_block(text: str, marker: str = BLOCK_MARKER) -> dict | None:
+    """The data of the last block under `marker` in `text`; None where it has none."""
+    at = text.rfind(marker)
     if at < 0:
         return None
     match = re.search(r"^(`{3,})[^\n]*\n(.*?)^\1[ \t]*$", text[at:], re.MULTILINE | re.DOTALL)
     if match is None:
-        raise QueueError(f"The {BLOCK_MARKER} block has no fenced block under it")
+        raise QueueError(f"The {marker} block has no fenced block under it")
     try:
         data = json.loads(match[2])
     except json.JSONDecodeError as error:
-        raise QueueError(f"The {BLOCK_MARKER} block is not JSON: {error}") from error
+        raise QueueError(f"The {marker} block is not JSON: {error}") from error
     if not isinstance(data, dict):
-        raise QueueError(f"The {BLOCK_MARKER} block is not an object")
+        raise QueueError(f"The {marker} block is not an object")
     return data
 
 
@@ -660,6 +660,20 @@ def draft(found: Collected) -> str:
     return "\n".join(lines) + "\n"
 
 
+def finding_basics(given: dict, index: int, fields: tuple[str, ...]) -> tuple[str, list[str]]:
+    """Finding `index`'s name and what keeps its shared parts from being complete: a field not
+    in `fields`, a title of fewer than TITLE_WORDS words, no body."""
+    title = review.words(given.get("title"))
+    name = f'finding {index} ("{title}")' if title else f"finding {index}"
+    problems = [f"{name} has the unknown field {extra}"
+                for extra in sorted(set(given) - set(fields))[:1]]
+    if len(title.split()) < TITLE_WORDS:
+        problems.append(f"{name} needs a title of {TITLE_WORDS} words or more that names the fix")
+    if not review.words(given.get("body")):
+        problems.append(f"{name} has no body")
+    return name, problems
+
+
 def judgment_problems(block: dict) -> list[str]:
     """What keeps the judgment in `block` from being complete; none where it is."""
     problems: list[str] = []
@@ -689,16 +703,8 @@ def judgment_problems(block: dict) -> list[str]:
         if not isinstance(given, dict):
             problems.append(f"finding {index} is not an object with {', '.join(FINDING_FIELDS)}")
             continue
-        title = review.words(given.get("title"))
-        name = f'finding {index} ("{title}")' if title else f"finding {index}"
-        extra = sorted(set(given) - set(FINDING_FIELDS))
-        if extra:
-            problems.append(f"{name} has the unknown field {extra[0]}")
-        if len(title.split()) < TITLE_WORDS:
-            problems.append(f"{name} needs a title of {TITLE_WORDS} words or more that names "
-                            "the fix")
-        if not review.words(given.get("body")):
-            problems.append(f"{name} has no body")
+        name, found = finding_basics(given, index, FINDING_FIELDS)
+        problems += found
         kind = review.words(given.get("class"))
         if not kind:
             problems.append(f"{name} has no class")
@@ -751,11 +757,13 @@ def judged(text: str, number: int) -> dict:
     return {**block, "findings": findings}
 
 
-def facts_of(text: str) -> str:
-    """The draft's facts: its text between the title and the block, without the judging note,
-    its headings two levels down, under the report's "The facts"."""
-    head = text[:text.rfind(BLOCK_MARKER)]
-    head = re.sub(rf"{re.escape(JUDGE_BEGIN)}.*?{re.escape(JUDGE_END)}", "", head,
+def facts_of(text: str, marker: str = BLOCK_MARKER,
+             judge: tuple[str, str] = (JUDGE_BEGIN, JUDGE_END)) -> str:
+    """The draft's facts: its text between the title and the block under `marker`, without the
+    judging note between `judge`'s markers, its headings two levels down, under the report's
+    "The facts"."""
+    head = text[:text.rfind(marker)]
+    head = re.sub(rf"{re.escape(judge[0])}.*?{re.escape(judge[1])}", "", head,
                   flags=re.DOTALL)
     lines = head.strip().splitlines()
     if lines and lines[0].startswith("# "):
@@ -797,10 +805,10 @@ def report(text: str, block: dict, number: int) -> str:
     return "\n".join(lines) + "\n"
 
 
-def file_steps(tracker: str, number: int, comment: str) -> Plan:
-    """The writes: the report as the retro issue's closing comment, then the close."""
+def file_steps(tracker: str, number: int, comment: str, what: str = "retro") -> Plan:
+    """The writes: the report as the `what` issue's closing comment, then the close."""
     issues = work_tickets.owner_repo(tracker)
-    return Plan(f"the report of retro #{number}", (
+    return Plan(f"the report of {what} #{number}", (
         Step("comment_issue", "add_issue_comment", {**issues, "issue_number": number,
                                                     "body": comment}),
         Step("close_issue", "issue_write", {**issues, "method": "update", "issue_number": number,
