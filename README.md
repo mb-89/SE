@@ -344,6 +344,25 @@ and in `uses`, which calls `mb-89/SE/.github/workflows/release.yml@v<major>`.
 Other repositories reference se's reusable workflows and actions at `@v<major>`, never at a branch,
 so a breaking change reaches them only with the major they choose.
 
+### Fleet check
+
+```toml
+[fleet]
+lease_hours = 3
+```
+
+`work_tickets.py fleet-check` lists what is stuck or stray, each with its remedy (its `--help`
+names the kinds), and says `healthy` otherwise; it only reads.
+
+`lease_hours` is how long in-progress work may go without a push to its branch, built in 3. The
+time of a push is the committer time of the branch's tip, as git fetches it.
+
+Blocks are the `## Blocked by` section of each open issue's body, where `work_tickets.py block`
+writes them.
+
+Without gh it prints its GitHub plan; the session runs it with its GitHub tools, saves the three
+lists as JSON and passes them as `--open-issues`, `--closed-issues` and `--pulls`.
+
 ### Test budget
 
 ```toml
@@ -653,6 +672,16 @@ work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]
 work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]
     list delivered pull requests (open, to the integration branch, with a complete field report),
     escalations and startable work issues
+
+work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json]
+                            [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES]
+                            [--pulls PULLS]
+    list every stuck or stray piece of work, each with its issue, pull request and remedy: in-
+    progress work without a branch or a push within the lease, a delivered pull request whose check
+    failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned
+    or by itself, an se-person issue and what it holds up; 'healthy' and exit code 0 when there is
+    none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the
+    answers from files
 
 work_tickets.py docs [--check]
     write the README's command reference from this registry; with --check, only refuse a README that
