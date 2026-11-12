@@ -6,39 +6,19 @@ labels: retro
 ---
 <!-- se:fleet -->
 
-**Scope:** <!-- work issues closed in the window, their pull requests (whose descriptions carry the field reports) and sessions covered, e.g. #2, #5–#9 -->
+**Scope:** <!-- the window: work issues closed since the last closed retro issue closed -->
 
-## What went well
+## How this retro runs
 
-<!-- Keep doing these. -->
+Two commands of se (its README "Work commands"):
 
--
-
-## What cost time
-
-<!-- Each with evidence (issue, commit, session) and the measured or estimated cost. -->
-
-| Finding | Evidence | Cost |
-|---|---|---|
-
-## Root causes
-
-<!-- Classes of error, not single instances: what in the agents, templates, rules or tools allowed it. -->
-
--
-
-## Improvements
-
-<!-- Each improvement names the file that owns it, so it can become a work issue:
-     src/agents/<role>.md, .github/ISSUE_TEMPLATE/<template>.md,
-     src/skills/work-model/SKILL.md, src/skills/catch-up/SKILL.md, scripts/..., or the
-     project's AGENTS.md for project-specific rules. -->
-
-| Improvement | Target file | Status |
-|---|---|---|
-
-## Follow-up
-
-<!-- Work issues opened for the improvements, or decisions for the user. -->
-
--
+1. `uv run python <se>/scripts/retro.py collect <this issue> --out <draft>` writes the draft: the
+   window's sizes, the rule checks, the field reports' Retro and "Not delivered" sections, and the
+   previous retro's findings, scored.
+2. The judge reads the draft and fills its block's `findings`, `classes` and `went_well`. Each
+   finding names its class, its home (the file it changes) and, where it changes a rule, trades
+   one metric for another, the judge is unsure or it recurred, `controversial` with its why.
+3. `uv run python <se>/scripts/retro.py file <this issue> --draft <draft>` checks the judgment,
+   posts the report as this issue's closing comment and closes it. It files no issue: SE reads the
+   report, bundles the `work` findings into work issues (each naming `retro #<n> finding <k>`)
+   and puts the `decision` findings on the owner's decision list.

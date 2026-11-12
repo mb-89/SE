@@ -14,8 +14,18 @@ draft with
 - the rule checks (RULE_CHECKS), each broken one with what broke it;
 - the previous retro's sizes, where its block is found;
 
+- the previous retro's findings, each scored: the work issues of the window that name it
+  (`retro #<n> finding <k>`), whether one closed, and whether the rule check it names broke again
+  (recurred);
+
 and ends in a JSON block under BLOCK_MARKER (JSON is YAML too), which `read_block` parses back for
-`retro.py file` and later collects.
+`retro.py file` and later collects. The judge fills the block's `findings`, `classes` and
+`went_well`.
+
+`retro.py file <retro issue> --draft FILE` refuses an incomplete judgment, writing nothing; it
+files no issue (wrk-007). It posts the report, the judgment with each finding's proposed fix and
+its kind (`work`, which SE bundles into work issues, or `decision`, for the owner's decision
+list), then the facts and the block, as the retro issue's closing comment, and closes the issue.
 
 GitHub is read through work_tickets.py's door (gh). Where gh is not signed in (Claude's cloud) the
 command prints its GitHub steps as a plan for the session's GitHub tools and reads their answers
@@ -60,6 +70,17 @@ QueueError = work_tickets.QueueError
 Step, Plan = work_tickets.Step, work_tickets.Plan
 
 BLOCK_MARKER = "<!-- se:retro-yaml -->"
+REPORT_MARKER = "<!-- se:retro-report -->"
+JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->"
+# A work issue names each retro finding it takes as `retro #<n> finding <k>`.
+FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
+FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check")
+CLASS_FIELDS = ("name", "fix")
+JUDGMENT = ("findings", "classes", "went_well")
+TITLE_WORDS = 5
+# A finding whose home is the rule book changes a rule: controversial.
+RULE_BOOK = "src/skills/work-model/references/rules.md"
+WORK, DECISION = "work", "decision"
 BLOCK_VERSION = 1
 RETRO_LABEL = "retro"
 RETRO_TITLE = "docs/retro-"
@@ -370,7 +391,7 @@ class Collected:
         return {"version": BLOCK_VERSION, "window": asdict(self.window), "sizes": self.sizes,
                 "issues": [asdict(item) for item in self.issues],
                 "rule_checks": [{**asdict(check), "kept": check.kept} for check in self.checks],
-                "previous": self.previous}
+                "previous": self.previous, **{name: [] for name in JUDGMENT}}
 
 
 def read_block(text: str) -> dict | None:
@@ -414,6 +435,7 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
             if not issue.closed_at:
                 read = issue_of(door.issue(issue.number))
                 issue.closed_at, issue.state_reason = read.closed_at, read.state_reason
+                issue.body = issue.body or read.body
         return not door.missing
 
     if not completed([issue for issue in issues if is_retro(issue) and issue.number != number]):
@@ -525,6 +547,7 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         previous = blocks[-1] if blocks else None
         if door.missing:
             return None
+    scored = scored_findings(previous, last.number if last else 0, window, checks)
     sizes = {"closed": len(closed), "landed": sum(item.landed for item in closed),
              "duplicates": sum(item.duplicate for item in closed),
              "escalated": sum(item.escalations > 0 for item in closed)}
@@ -532,7 +555,33 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         Window(number, last.closed_at if last else None, last.number if last else None,
                now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
         sizes, closed, list(checks.values()),
-        {"retro": last.number, "sizes": previous.get("sizes")} if previous else None)
+        {"retro": last.number, "sizes": previous.get("sizes"), "findings": scored}
+        if previous else None)
+
+
+def scored_findings(previous: dict | None, retro: int, window: list[Issue],
+                    checks: dict[str, RuleCheck]) -> list[dict]:
+    """Each finding of the previous retro's block, scored against this window: the work issues
+    closed in it that name the finding (`retro #<retro> finding <k>`), its state (closed where one
+    of them closed as completed, else the reason they closed with, else none) and whether the rule
+    check it names broke again (recurred)."""
+    found: list[dict] = []
+    for index, finding in enumerate((previous or {}).get("findings") or [], 1):
+        if not isinstance(finding, dict):
+            continue
+        number = int(finding.get("finding") or index)
+        naming = [issue for issue in window
+                  if any(int(match[1]) == retro and int(match[2]) == number
+                         for match in FINDING_REFERENCE.finditer(issue.body))]
+        reasons = [issue.state_reason or "completed" for issue in naming]
+        state = ("closed" if "completed" in reasons else reasons[0] if reasons else "none")
+        check = str(finding.get("check") or "")
+        found.append({"finding": number, "title": str(finding.get("title") or ""),
+                      "class": str(finding.get("class") or ""), "kind": finding.get("kind"),
+                      "check": check, "issues": [issue.number for issue in naming],
+                      "state": state,
+                      "recurred": bool(check) and check in checks and not checks[check].kept})
+    return found
 
 
 def draft(found: Collected) -> str:
@@ -553,6 +602,20 @@ def draft(found: Collected) -> str:
     else:
         lines += ["| size | this window |", "|---|---|"]
         lines += [f"| {name} | {value} |" for name, value in found.sizes.items()]
+    scored = (found.previous or {}).get("findings") or []
+    if found.previous:
+        lines += ["", f"## The findings of retro #{found.previous['retro']}", ""]
+    if scored:
+        lines += ["| finding | class | kind | issues | state | recurred |",
+                  "|---|---|---|---|---|---|"]
+        for item in scored:
+            issues = ", ".join(f"#{number}" for number in item["issues"]) or "none"
+            recurred = (("yes" if item["recurred"] else "no") + f" ({item['check']})"
+                        if item["check"] else "no check named")
+            lines.append(f"| {item['finding']}. {item['title']} | {item['class']} | "
+                         f"{item['kind'] or ''} | {issues} | {item['state']} | {recurred} |")
+    elif found.previous:
+        lines.append("None.")
     lines += ["", "## Landed issues", ""]
     landed = [item for item in found.issues if item.landed]
     if landed:
@@ -585,8 +648,182 @@ def draft(found: Collected) -> str:
     entries = [(item.number, text) for item in found.issues for text in item.not_delivered]
     lines += [f"- #{number}: {text}" for number, text in entries] or ["None."]
     block = json.dumps(found.data(), indent=2, ensure_ascii=False)
-    lines += ["", BLOCK_MARKER, review.fenced(block, "yaml")]
+    lines += ["", JUDGE_BEGIN, "## Judgment", "",
+              "The judge fills `findings`, `classes` and `went_well` in the block below, then runs "
+              f"`retro.py file {window.retro} --draft <this file>`: a finding has `title` (five "
+              "words or more), `body`, `class` (a class's `name`), `home` (the file it changes), "
+              "`controversial` (true where it changes a rule, trades one metric for another, the "
+              "judge is unsure, or it recurred after an earlier fix) with its `why`, and "
+              f"optionally `check` (a rule check: {', '.join(RULE_CHECKS)}); a class has `name` "
+              "and `fix`; `went_well` lists what went well. This part is not posted.", JUDGE_END,
+              "", BLOCK_MARKER, review.fenced(block, "yaml")]
     return "\n".join(lines) + "\n"
+
+
+def judgment_problems(block: dict) -> list[str]:
+    """What keeps the judgment in `block` from being complete; none where it is."""
+    problems: list[str] = []
+    lists = {name: block.get(name) for name in JUDGMENT}
+    for name, value in lists.items():
+        if not isinstance(value, list):
+            problems.append(f"`{name}` is not a list")
+    if problems:
+        return problems
+    classes: dict[str, str] = {}
+    for index, given in enumerate(lists["classes"], 1):
+        if not isinstance(given, dict):
+            problems.append(f"class {index} is not an object with {', '.join(CLASS_FIELDS)}")
+            continue
+        extra = sorted(set(given) - set(CLASS_FIELDS))
+        name = review.words(given.get("name"))
+        if extra:
+            problems.append(f"class {index} has the unknown field {extra[0]}")
+        if not name:
+            problems.append(f"class {index} has no name")
+        elif not review.words(given.get("fix")):
+            problems.append(f'class "{name}" has no fix')
+        classes[name] = review.words(given.get("fix"))
+    recurred = {item.get("check") for item in ((block.get("previous") or {}).get("findings") or [])
+                if isinstance(item, dict) and item.get("recurred")}
+    for index, given in enumerate(lists["findings"], 1):
+        if not isinstance(given, dict):
+            problems.append(f"finding {index} is not an object with {', '.join(FINDING_FIELDS)}")
+            continue
+        title = review.words(given.get("title"))
+        name = f'finding {index} ("{title}")' if title else f"finding {index}"
+        extra = sorted(set(given) - set(FINDING_FIELDS))
+        if extra:
+            problems.append(f"{name} has the unknown field {extra[0]}")
+        if len(title.split()) < TITLE_WORDS:
+            problems.append(f"{name} needs a title of {TITLE_WORDS} words or more that names "
+                            "the fix")
+        if not review.words(given.get("body")):
+            problems.append(f"{name} has no body")
+        kind = review.words(given.get("class"))
+        if not kind:
+            problems.append(f"{name} has no class")
+        elif kind not in classes:
+            problems.append(f'{name} names the class "{kind}", which `classes` does not')
+        home = review.words(given.get("home"))
+        if not home:
+            problems.append(f"{name} has no home: the file it changes")
+        controversial = given.get("controversial", False)
+        if not isinstance(controversial, bool):
+            problems.append(f"{name}: controversial is true or false")
+        check = review.words(given.get("check"))
+        if check and check not in RULE_CHECKS:
+            problems.append(f'{name} names the check "{check}", which is no rule check '
+                            f"({', '.join(RULE_CHECKS)})")
+        if home == RULE_BOOK and controversial is not True:
+            problems.append(f"{name} changes a rule (its home is the rule book), so it is "
+                            "controversial, with its why")
+        elif check and check in recurred and controversial is not True:
+            problems.append(f'{name} names the check "{check}", which recurred after the '
+                            "previous retro's fix, so it is controversial, with its why")
+        elif controversial is True and not review.words(given.get("why")):
+            problems.append(f"{name} is controversial without a why")
+    if not [entry for entry in lists["went_well"] if review.words(entry)]:
+        problems.append("`went_well` is empty: record what went well")
+    return problems
+
+
+def judged(text: str, number: int) -> dict:
+    """The block of the draft `text`, its judgment checked; every refusal is raised before
+    anything is written."""
+    block = read_block(text)
+    if block is None:
+        raise QueueError(f"The draft has no {BLOCK_MARKER} block: write it with retro.py collect "
+                         f"{number} --out FILE")
+    retro = (block.get("window") or {}).get("retro")
+    if retro != number:
+        raise QueueError(f"The draft is retro #{retro}'s, not #{number}'s")
+    problems = judgment_problems(block)
+    if problems:
+        raise QueueError(f"The judgment of retro #{number} is not complete, so nothing was "
+                         "written: " + "; ".join(problems))
+    findings = []
+    for index, given in enumerate(block["findings"], 1):
+        controversial = given.get("controversial") is True
+        findings.append({"finding": index, **{key: given[key] for key in FINDING_FIELDS
+                                              if key in given},
+                         "controversial": controversial,
+                         "kind": DECISION if controversial else WORK})
+    return {**block, "findings": findings}
+
+
+def facts_of(text: str) -> str:
+    """The draft's facts: its text between the title and the block, without the judging note,
+    its headings two levels down, under the report's "The facts"."""
+    head = text[:text.rfind(BLOCK_MARKER)]
+    head = re.sub(rf"{re.escape(JUDGE_BEGIN)}.*?{re.escape(JUDGE_END)}", "", head,
+                  flags=re.DOTALL)
+    lines = head.strip().splitlines()
+    if lines and lines[0].startswith("# "):
+        lines = lines[1:]
+    return review.demoted("\n".join(lines)).strip()
+
+
+def report(text: str, block: dict, number: int) -> str:
+    """The retro's report, its closing comment: the judgment, each finding with its proposed fix
+    and kind, what follows, the facts, then the block the next collect reads."""
+    fixes = {entry["name"].strip(): entry["fix"].strip() for entry in block["classes"]}
+    lines = [REPORT_MARKER, f"## Retro #{number}: the report", "", "### Findings"]
+    if not block["findings"]:
+        lines += ["", "None."]
+    for name, fix in fixes.items():
+        members = [item for item in block["findings"] if item["class"].strip() == name]
+        if not members:
+            continue
+        lines += ["", f"#### {name} ({len(members)})", "", f"Fix: {fix}", ""]
+        for item in members:
+            kind = (f"{DECISION}, for the owner's decision list: {item['why'].strip()}"
+                    if item["kind"] == DECISION else f"{WORK}, for SE to bundle")
+            check = f"; check `{item['check']}`" if item.get("check") else ""
+            lines += [f"- **{item['finding']}. {item['title'].strip()}** ({kind}; home "
+                      f"`{item['home'].strip()}`{check})",
+                      "  " + "\n  ".join(item["body"].strip().splitlines())]
+    lines += ["", "### What went well", ""]
+    lines += [f"- {entry.strip()}" for entry in block["went_well"] if review.words(entry)]
+    work = [item["finding"] for item in block["findings"] if item["kind"] == WORK]
+    decisions = [item["finding"] for item in block["findings"] if item["kind"] == DECISION]
+    lines += ["", "### What follows", "",
+              f"This retro filed no issue. SE bundles the {WORK} findings "
+              f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
+              f"needs, each naming `retro #{number} finding <k>` for every finding it takes, so "
+              f"the next retro scores it; the {DECISION} findings "
+              f"({', '.join(map(str, decisions)) or 'none'}) go on the owner's decision list.",
+              "", "### The facts", "", facts_of(text), "", BLOCK_MARKER,
+              review.fenced(json.dumps(block, indent=2, ensure_ascii=False), "yaml")]
+    return "\n".join(lines) + "\n"
+
+
+def file_steps(tracker: str, number: int, comment: str) -> Plan:
+    """The writes: the report as the retro issue's closing comment, then the close."""
+    issues = work_tickets.owner_repo(tracker)
+    return Plan(f"the report of retro #{number}", (
+        Step("comment_issue", "add_issue_comment", {**issues, "issue_number": number,
+                                                    "body": comment}),
+        Step("close_issue", "issue_write", {**issues, "method": "update", "issue_number": number,
+                                            "state": "closed", "state_reason": "completed"})))
+
+
+def run_file(args: argparse.Namespace) -> int:
+    root = work_tickets.worktree_root(args.worktree)
+    tracker = work_tickets.resolve_repo(root, args.repo)
+    text = work_tickets.read_file(args.draft, "the retro draft")
+    block = judged(text, args.retro)
+    steps = file_steps(tracker, args.retro, report(text, block, args.retro))
+    if work_tickets.hand_off():
+        print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
+        print(steps.text())
+    else:
+        work_tickets.run_plan(steps, work_tickets.tracker_actions(root, tracker))
+        print(f"Posted the report of retro #{args.retro} as its closing comment and closed it")
+    kinds = [item["kind"] for item in block["findings"]]
+    print(f"Retro #{args.retro}: {kinds.count(WORK)} {WORK} and {kinds.count(DECISION)} "
+          f"{DECISION} finding(s); no issue filed: SE bundles the {WORK} findings into work "
+          f"issues and puts the {DECISION} findings on the owner's decision list")
+    return 0
 
 
 def run_collect(args: argparse.Namespace) -> int:
@@ -644,6 +881,21 @@ def parser() -> argparse.ArgumentParser:
     collect_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "
                                                 "tracker or origin remote)")
     collect_command.set_defaults(run=run_collect)
+    file_command = commands.add_parser(
+        "file", help="check a judged retro draft and close the retro issue with its report",
+        description="Check the judgment the judge wrote into the draft's block, refusing an "
+                    "incomplete one and writing nothing; post the report (each finding with its "
+                    f"proposed fix and kind, {WORK} or {DECISION}, then the facts and the block) "
+                    "as the retro issue's closing comment and close it. It files no issue: SE "
+                    "reads the report and files the work.")
+    file_command.add_argument("retro", type=int, help="the retro issue's number")
+    file_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
+                              help="the draft retro.py collect wrote, its block judged")
+    file_command.add_argument("--worktree", default=".",
+                              help="the checkout of the repository (default: .)")
+    file_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "
+                                             "tracker or origin remote)")
+    file_command.set_defaults(run=run_file)
     return top
 
 

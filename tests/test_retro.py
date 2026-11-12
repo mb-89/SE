@@ -189,7 +189,7 @@ def test_the_window_gives_the_sizes_and_the_per_issue_counts(checkout):
                                     "A second item that wraps."]
     assert by[12].not_delivered == []
     assert found.previous == {"retro": 5, "sizes": {"closed": 7, "landed": 5, "duplicates": 0,
-                                                     "escalated": 3}}
+                                                     "escalated": 3}, "findings": []}
 
 
 def test_each_rule_check_names_what_broke_it_and_keeps_the_rest(checkout):
@@ -354,3 +354,184 @@ def test_the_gh_door_reads_every_page_and_leaves_out_pull_requests(monkeypatch):
     assert [item["number"] for item in door.closed_issues()][-2:] == [99, 100]
     assert calls == ["issues?state=closed&per_page=100&page=1",
                      "issues?state=closed&per_page=100&page=2"]
+
+
+def judged_draft(checkout: Path, **changes: object) -> str:
+    """The collect's draft of retro #30 with its block judged: two findings of one class, the
+    second controversial; `changes` replace the judgment's lists."""
+    data = collected(checkout).data()
+    data.update({
+        "classes": [{"name": "Lost reports", "fix": "`integrate` refuses a landing without one"}],
+        "findings": [
+            {"title": "Refuse a landing whose work issue has no field report",
+             "body": "#14 closed without one.", "class": "Lost reports",
+             "home": "scripts/work_tickets.py", "controversial": False, "check": "field-report"},
+            {"title": "Make the field report a rule of the rule book",
+             "body": "A rule, not a habit.", "class": "Lost reports",
+             "home": retro.RULE_BOOK, "controversial": True, "why": "it changes a rule"}],
+        "went_well": ["The fake door kept the tests fast."]})
+    data.update(changes)
+    text = retro.draft(collected(checkout))
+    return text[:text.rfind(retro.BLOCK_MARKER)] + retro.BLOCK_MARKER + "\n" + retro.review.fenced(
+        json.dumps(data, indent=2), "yaml") + "\n"
+
+
+def finding(**changes: object) -> dict:
+    return {"title": "Refuse a landing whose work issue has no field report", "body": "#14.",
+            "class": "Lost reports", "home": "scripts/work_tickets.py", "controversial": False,
+            **changes}
+
+
+@pytest.mark.parametrize(("changes", "refusal"), [
+    ({"findings": [finding(title="Refuse lost reports")]},
+     'finding 1 ("Refuse lost reports") needs a title of 5 words or more'),
+    ({"findings": [finding(body="")]}, "has no body"),
+    ({"findings": [finding(**{"class": ""})]}, "has no class"),
+    ({"findings": [finding(**{"class": "Elsewhere"})]},
+     'names the class "Elsewhere", which `classes` does not'),
+    ({"findings": [finding(home="")]}, "has no home: the file it changes"),
+    ({"classes": [{"name": "Lost reports", "fix": " "}], "findings": [finding()]},
+     'class "Lost reports" has no fix'),
+    ({"findings": [finding(controversial=True)]}, "is controversial without a why"),
+    ({"findings": [finding(home=retro.RULE_BOOK)]}, "changes a rule (its home is the rule book)"),
+    ({"findings": [finding(check="speed")]}, 'names the check "speed", which is no rule check'),
+    ({"findings": [finding(issue=40)]}, "has the unknown field issue"),
+    ({"went_well": []}, "`went_well` is empty: record what went well"),
+])
+def test_file_refuses_an_incomplete_judgment_and_writes_nothing(checkout, tmp_path, monkeypatch,
+                                                                changes, refusal):
+    writes = []
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "run_plan", lambda plan, actions: writes.append(plan))
+    draft = tmp_path / "draft.md"
+    draft.write_text(judged_draft(checkout, **changes), encoding="utf-8")
+
+    with pytest.raises(work_tickets.QueueError) as raised:
+        retro.run_file(retro.parser().parse_args(["file", "30", "--draft", str(draft), "--repo",
+                                                  REPO, "--worktree", str(checkout)]))
+    assert "The judgment of retro #30 is not complete, so nothing was written" in str(raised.value)
+    assert refusal in str(raised.value)
+    assert writes == []
+
+
+def test_file_refuses_another_retros_draft_and_a_draft_without_its_block(checkout):
+    with pytest.raises(work_tickets.QueueError, match="The draft is retro #30's, not #31's"):
+        retro.judged(judged_draft(checkout), 31)
+    with pytest.raises(work_tickets.QueueError, match="The draft has no"):
+        retro.judged("# Retro draft for #30\n", 30)
+
+
+def test_a_finding_on_a_recurred_check_is_controversial(checkout):
+    draft = judged_draft(checkout)
+    block = retro.read_block(draft)
+    block["previous"]["findings"] = [{"finding": 1, "check": "field-report", "recurred": True}]
+    text = draft[:draft.rfind(retro.BLOCK_MARKER)] + retro.BLOCK_MARKER + "\n```yaml\n" + \
+        json.dumps(block) + "\n```\n"
+    with pytest.raises(work_tickets.QueueError, match="recurred after the previous retro's fix"):
+        retro.judged(text, 30)
+
+
+class FakeTracker:
+    """The issue writes of the gh door, recorded."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    def actions(self, root, repo):
+        return {name: (lambda arguments, _, name=name: self.calls.append((name, arguments)))
+                for name in ("comment_issue", "close_issue", "add_label", "remove_label")}
+
+
+def test_file_posts_the_report_as_the_closing_comment_and_files_nothing(checkout, tmp_path,
+                                                                        monkeypatch, capsys):
+    tracker = FakeTracker()
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    draft = tmp_path / "draft.md"
+    draft.write_text(judged_draft(checkout), encoding="utf-8")
+
+    assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    assert [name for name, _ in tracker.calls] == ["comment_issue", "close_issue"]
+    assert all(arguments["issue_number"] == 30 for _, arguments in tracker.calls)
+    comment = tracker.calls[0][1]["body"]
+    assert comment.startswith(retro.REPORT_MARKER + "\n## Retro #30: the report\n")
+    assert ("#### Lost reports (2)\n\nFix: `integrate` refuses a landing without one\n" in comment)
+    assert ("- **1. Refuse a landing whose work issue has no field report** (work, for SE to "
+            "bundle; home `scripts/work_tickets.py`; check `field-report`)") in comment
+    assert ("- **2. Make the field report a rule of the rule book** (decision, for the owner's "
+            "decision list: it changes a rule; home `src/skills/work-model/") in comment
+    assert "- The fake door kept the tests fast." in comment
+    assert "This retro filed no issue." in comment and "`retro #30 finding <k>`" in comment
+    assert "### The facts" in comment and "\n#### Sizes\n" in comment
+    assert retro.JUDGE_BEGIN not in comment and "## Judgment" not in comment
+    block = retro.read_block(comment)
+    assert [(item["finding"], item["kind"]) for item in block["findings"]] == [
+        (1, "work"), (2, "decision")]
+    assert block["sizes"]["closed"] == 4 and block["went_well"]
+    out = capsys.readouterr().out
+    assert "1 work and 1 decision finding(s); no issue filed" in out
+
+
+def test_file_without_gh_prints_the_comment_and_the_close(checkout, tmp_path, monkeypatch,
+                                                          capsys):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    draft = tmp_path / "draft.md"
+    draft.write_text(judged_draft(checkout), encoding="utf-8")
+
+    assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    out = capsys.readouterr().out
+    assert "GitHub plan: the report of retro #30" in out
+    assert '1. add_issue_comment {"body": "<!-- se:retro-report -->' in out
+    assert ('2. issue_write {"issue_number": 30, "method": "update", "owner": "owner", '
+            '"repo": "repo", "state": "closed", "state_reason": "completed"}') in out
+    assert "create" not in out.replace("created", "")
+
+
+def test_the_next_collect_scores_the_previous_findings(checkout, tmp_path, monkeypatch):
+    """Retro #5's posted report held three findings; in the window #11 took finding 1 and
+    closed, #12 took finding 2 and closed, and the check finding 2 names broke again."""
+    tracker = FakeTracker()
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    given = answers(checkout)
+    block = retro.read_block(given["comments-5.json"][0]["body"])
+    block.update(window={"retro": 5}, classes=[{"name": "C", "fix": "F"}],
+                 went_well=["Something went well."], findings=[
+                     finding(**{"class": "C", "title": "Name the fake door in every test"}),
+                     finding(**{"class": "C", "check": "check",
+                                "title": "Run the check job on every landing"}),
+                     finding(**{"class": "C", "title": "A finding nobody took up yet"})])
+    draft = tmp_path / "draft-5.md"
+    draft.write_text("# Retro draft for #5\n\n" + retro.BLOCK_MARKER + "\n```yaml\n"
+                     + json.dumps(block) + "\n```\n", encoding="utf-8")
+    assert retro.main(["file", "5", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    given["comments-5.json"] = [{"body": tracker.calls[0][1]["body"]}]
+    for item in given["issues.json"]:
+        if item["number"] == 11:
+            item["body"] = "Takes retro #5 finding 1."
+        if item["number"] == 12:
+            item["body"] = "Takes Retro #5 finding 2 and retro #4 finding 3."
+
+    found = collected(checkout, given)
+    assert found.previous["findings"] == [
+        {"finding": 1, "title": "Name the fake door in every test", "class": "C", "kind": "work",
+         "check": "", "issues": [11], "state": "closed", "recurred": False},
+        {"finding": 2, "title": "Run the check job on every landing", "class": "C",
+         "kind": "work", "check": "check", "issues": [12], "state": "closed", "recurred": True},
+        {"finding": 3, "title": "A finding nobody took up yet", "class": "C", "kind": "work",
+         "check": "", "issues": [], "state": "none", "recurred": False}]
+    text = retro.draft(found)
+    assert "## The findings of retro #5" in text
+    assert "| 2. Run the check job on every landing | C | work | #12 | closed | yes (check) |" in text
+    assert "| 3. A finding nobody took up yet | C | work | none | none | no check named |" in text
+    assert retro.read_block(text)["findings"] == []
+
+
+def test_the_retro_template_names_the_two_commands():
+    template = (Path(__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE"
+                / "retro.md").read_text(encoding="utf-8")
+    assert "scripts/retro.py collect <this issue> --out <draft>" in template
+    assert "scripts/retro.py file <this issue> --draft <draft>" in template
