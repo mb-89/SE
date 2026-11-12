@@ -51,8 +51,11 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   - Every author is refused, the owner included; a co-author line's hit also names the editor
     setting that writes it ([README "Install"](README.md#install)).
 - CI: the job `check` of `.github/workflows/check.yml` runs the commit gates of a `--range` over
-  the commits of every pull request and of every push to `main`, then the complete suite, so a
-  push the hooks did not see fails there; `check` is the check `main`'s ruleset requires.
+  the commits of every pull request and of every push to `main`, so a push the hooks did not see
+  fails there; `check` is the check `main`'s ruleset requires.
+  - The same job runs every other check an integration runs: `se_plugin.py check`,
+    `work_tickets.py docs --check`, `field-report --check` of a pull request's description
+    against its work issue where it carries a report, and `work_tickets.py suite` in budget.
 - A `--range` on a shallow clone that reaches beyond the fetched history is refused with exit code
   2, naming `git fetch --unshallow`, so a gate never passes over commits it cannot see.
 - The project identity ([pub-002](src/skills/work-model/references/rules.md#pub-002-a-generic-commit-identity)) in the commit

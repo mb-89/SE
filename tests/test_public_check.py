@@ -1042,9 +1042,63 @@ def test_ci_passes_a_clean_push(repo: Path, tmp_path: Path) -> None:
 def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     assert re.search(r"(?m)^jobs:\n  check:\n", workflow), "main's ruleset requires a job named check"
-    assert re.search(r"(?m)^on:\n  pull_request:\n  push:\n    branches: \[main\]$", workflow)
-    gate, suite = workflow.index("public_check.py --rev"), workflow.index("run: uv run pytest -q")
-    assert gate < suite, "one job: the gate, then the complete suite"
+    assert re.search(r"(?m)^on:\n  pull_request:\n.*\n  push:\n    branches: \[main\]$", workflow)
+    assert "types: [opened, synchronize, reopened, edited]" in workflow  # an edited report reruns
+    # One job, every check the integration runs; the layouts before the suite, which rebuilds them.
+    steps = ["public_check.py --rev", "scripts/se_plugin.py check", "scripts/work_tickets.py docs --check",
+             "scripts/work_tickets.py field-report --check", "scripts/work_tickets.py suite --worktree ."]
+    assert [workflow.index(step) for step in steps] == sorted(workflow.index(step) for step in steps)
+    assert "pytest" not in workflow, "the suite runs through work_tickets.py suite, within its budget"
+
+
+def field_report_script() -> str:
+    """The shell of the check workflow's field-report step, its second `run: |` block."""
+    lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
+    starts = [index for index, line in enumerate(lines) if line.strip() == "run: |"]
+    block = []
+    for line in lines[starts[1] + 1:]:
+        if line.strip() and not line.startswith(" " * 10):
+            break
+        block.append(line[10:])
+    return "\n".join(block)
+
+
+@pytest.mark.parametrize("first_line, checked", [
+    ("Refs https://github.com/alice/example/issues/7", True),
+    ("Fixes https://github.com/alice/example/issues/7\r", True),
+    ("", False),  # a landing pull request: no field report
+])
+def test_ci_checks_a_pull_requests_field_report_against_its_work_issue(
+        tmp_path: Path, first_line: str, checked: bool) -> None:
+    calls = tmp_path / "calls.txt"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, script in {"gh": f'echo "gh $*" >> \'{calls}\'\necho "issue body"\n',
+                         "uv": f'echo "uv $*" >> \'{calls}\'\n'}.items():
+        (bin_dir / name).write_text("#!/bin/sh\n" + script, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    body = f"{first_line}\n\n<!-- se:field-report -->\nreport\n" if first_line else "Land a branch\n"
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PR_BODY": body,
+           "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example"}
+    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env,
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    made = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+    if checked:
+        assert made[0] == "gh api repos/alice/example/issues/7 --jq .body"
+        assert made[1].startswith("uv run python scripts/work_tickets.py field-report --check ")
+        assert (tmp_path / "issue-body.md").read_text(encoding="utf-8") == "issue body\n"
+    else:
+        assert made == [] and "no field report in the description" in result.stdout
+
+
+def test_ci_refuses_a_field_report_that_names_no_work_issue(tmp_path: Path) -> None:
+    env = {**os.environ, "PR_BODY": "<!-- se:field-report -->\nreport\n", "RUNNER_TEMP": str(tmp_path),
+           "REPOSITORY": "alice/example"}
+    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env,
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 1
+    assert "::error::field-report: the description's first line names no work issue" in result.stdout
 
 
 @pytest.mark.parametrize("message, refused", [("Fix the build", False),
