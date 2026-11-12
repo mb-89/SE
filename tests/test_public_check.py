@@ -866,7 +866,7 @@ SE_LINE_MARKER = "scripts/public_check.py"
 
 def se_line(root: Path) -> str:
     """The history revisions of SE's own line in `root`: every commit reachable from HEAD whose
-    tree carries the public check itself (SE_LINE_MARKER), down to the first one that does not.
+    tree carries the public check itself (SE_LINE_MARKER), stopping at the parents that do not.
 
     main keeps the old Go line below SE's switch commit, by the owner's decision. That line never
     carried the public check, was published before it existed, and publishes an address this
@@ -875,13 +875,14 @@ def se_line(root: Path) -> str:
     structural, so it holds on the rewritten se branch (no Go line), on GitHub's merge ref of a
     pull request into main (a merge of the Go line's tip and the switch commits on top of it) and
     on main after the squash merge (the Go line, then squash commits)."""
-    listing = git(root, "rev-list", "--parents", "HEAD").stdout.split()
-    commits = list(dict.fromkeys(listing))
-    query = "".join(f"{sha}:{SE_LINE_MARKER}\n" for sha in commits)
+    parents = {line.split()[0]: line.split()[1:]
+               for line in git(root, "rev-list", "--parents", "HEAD").stdout.splitlines()}
+    query = "".join(f"{sha}:{SE_LINE_MARKER}\n" for sha in parents)
     found = subprocess.run(["git", "-C", str(root), "cat-file", "--batch-check"], input=query,
                            capture_output=True, text=True, check=True).stdout.splitlines()
-    foreign = [sha for sha, line in zip(commits, found) if line.endswith(" missing")]
-    return " ".join(["HEAD", "--not", *foreign]) if foreign else "HEAD"
+    own = {sha for sha, line in zip(parents, found) if not line.endswith(" missing")}
+    tips = sorted({parent for sha in own for parent in parents[sha] if parent not in own})
+    return " ".join(["HEAD", "--not", *tips]) if tips else "HEAD"
 
 
 def test_se_itself_passes() -> None:
