@@ -3502,6 +3502,56 @@ class LabelledGh:
         raise AssertionError(f"unexpected gh call {arguments}")
 
 
+def test_file_backlog_file_and_route_refuse_a_body_naming_a_missing_command(
+        worktree, gh, capsys):
+    body = worktree / "body.md"
+    routing = worktree / "routing.md"
+    routing.write_text("## Package kind\n\nStandard, small.\n", encoding="utf-8")
+    gh.issue = {"number": 3, "title": "Outside", "url": "https://git.example/owner/repo/issues/3",
+                "body": "Run `work_tickets.py frobnicate` and `<se>/scripts/gone.py`.\n"}
+    body.write_text(gh.issue["body"], encoding="utf-8")
+    for command in (["file", "--title", "feat/x-20261112", "--body-file", str(body)],
+                    ["backlog", "file", "--title", "Idea", "--body-file", str(body)],
+                    ["route", "3", "--title", "feat/y-20261112", "--routing-file", str(routing)]):
+        assert run(worktree, *command) == 1
+        error = capsys.readouterr().err
+        assert f"{' '.join(command[:2 if command[0] == 'backlog' else 1])}: the body names" in error
+        assert "`work_tickets.py frobnicate` names a subcommand" in error
+        assert "`scripts/gone.py` names a file that does not exist" in error
+    assert not [call for call in gh.calls if call[:2] in (["issue", "create"], ["issue", "edit"])
+                and "--body-file" in call]
+
+
+def test_an_issue_body_creating_a_command_and_another_repositorys_scripts_pass(
+        worktree, gh, capsys):
+    body = worktree / "body.md"
+    body.write_text("Background: `work_tickets.py frobnicate` and `scripts/frob.py` do not "
+                    "exist yet.\n\n## Requirements\n\n1. Add `work_tickets.py frobnicate`,\n"
+                    "   which calls the new `scripts/frob.py`.\n\n## Acceptance\n\n- works\n",
+                    encoding="utf-8")
+    assert run(worktree, "file", "--title", "feat/frob-20261112", "--body-file", str(body)) == 0
+    assert "Filed work issue" in capsys.readouterr().out
+
+    body.write_text("Run `scripts/build.py` of that repository, then `work_tickets.py sync`.\n",
+                    encoding="utf-8")
+    assert run(worktree, "file", "--title", "feat/other-20261112", "--body-file", str(body),
+               "--repo", "git.example/owner/other") == 0
+    capsys.readouterr()
+    assert run(worktree, "file", "--title", "feat/own-20261112", "--body-file", str(body)) == 1
+    assert "`scripts/build.py` names a file" in capsys.readouterr().err
+
+
+def test_filing_checks_the_body_with_the_one_reference_function(worktree, gh, monkeypatch):
+    references = work_tickets.sibling("references")
+    seen = []
+    monkeypatch.setattr(references, "dangling", lambda text, *arguments, **options: (
+        seen.append(text) or [references.Finding(1, "work_tickets.py spied", "is spied")]))
+    body = worktree / "body.md"
+    body.write_text("A body.\n", encoding="utf-8")
+    assert run(worktree, "backlog", "file", "--title", "Idea", "--body-file", str(body)) == 1
+    assert seen == [f"{work_tickets.FLEET_MARKER}\nA body.\n"]
+
+
 def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeypatch, capsys):
     github = LabelledGh({
         1: {"number": 1, "title": "Something from the other side", "body": "Please fix it.",

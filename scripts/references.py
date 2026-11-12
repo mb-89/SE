@@ -52,15 +52,18 @@ class Finding:
 
 
 def dangling(text: str, root: Path = ROOT, source: Path | None = None, *,
-             paths: bool = True, scripts: Path | None = None) -> list[Finding]:
+             paths: bool = True, bare_scripts: bool = True,
+             created: bool = False) -> list[Finding]:
     """The references in Markdown `text` that name something missing, in text order.
 
-    `root` is the repository the paths are resolved from and `source` the file the text is read
-    from, for its relative links (no links are checked without it). `scripts` is the directory of
-    the scripts whose commands are checked, `root / "scripts"` by default. With `paths` false only
-    commands are checked, and repository paths only where they name a script (`scripts/<x>.py`).
+    `root` is the repository the paths and commands are resolved from (its `scripts/`), and
+    `source` the file the text is read from, for its relative links (no links are checked without
+    it). With `paths` false only commands are checked, and repository paths only where they name a
+    script (`scripts/…`); with `bare_scripts` false too, a `scripts/…` path only after `<se>/`.
+    With `created`, a reference passes where the text's Requirements say it creates it: one
+    requirement names it and says "new", "add" or "create".
     """
-    scripts = scripts if scripts is not None else root / "scripts"
+    scripts = root / "scripts"
     prose, code = split_code(text)
     found: list[Finding] = []
     if source is not None and paths:
@@ -71,8 +74,45 @@ def dangling(text: str, root: Path = ROOT, source: Path | None = None, *,
     for start, snippet in code:
         tokens = [(match.group(), line_of(text, start + match.start()))
                   for match in re.finditer(r"\S+", snippet)]
-        found += dead_code(tokens, root, scripts, paths)
+        found += dead_code(tokens, root, scripts, paths, bare_scripts)
+    if created:
+        made = requirements(text)
+        found = [finding for finding in found if not creates(made, finding.item)]
     return sorted(found, key=lambda finding: finding.line)
+
+
+CREATING = re.compile(r"\b(new|adds?|added|creates?|created|introduces?)\b", re.IGNORECASE)
+HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
+ITEM = re.compile(r"^[ \t]*(?:\d+[.)]|[-*+])[ \t]+")
+
+
+def requirements(text: str) -> list[str]:
+    """The items of the text's Requirements sections, each with its continuation lines."""
+    items: list[str] = []
+    level = None
+    for line in text.splitlines():
+        heading = HEADING.match(line)
+        if heading:
+            depth = len(heading.group(1))
+            if level is not None and depth <= level:
+                level = None
+            if level is None and heading.group(2).strip().lower() == "requirements":
+                level = depth
+            continue
+        if level is None:
+            continue
+        if ITEM.match(line) or not items:
+            items.append(line)
+        elif line.strip():
+            items[-1] += " " + line.strip()
+    return items
+
+
+def creates(items: list[str], reference: str) -> bool:
+    """Whether one requirement names `reference` (each of its words, a path by its file name) and
+    says it is new, added or created."""
+    words = [Path(word).name if "/" in word else word for word in reference.split()]
+    return any(CREATING.search(item) and all(word in item for word in words) for item in items)
 
 
 def split_code(text: str) -> tuple[str, list[tuple[int, str]]]:
@@ -132,14 +172,16 @@ def dead_link(target: str, source: Path, root: Path, line: int) -> Finding | Non
 
 
 def dead_code(tokens: list[tuple[str, int]], root: Path, scripts: Path,
-              paths: bool) -> list[Finding]:
+              paths: bool, bare_scripts: bool) -> list[Finding]:
     """The dead repository paths and unknown subcommands among one piece of code's `tokens`, each
     with its line: a code span's (which may wrap) or a fenced block line's."""
     found = []
     for index, (raw, line) in enumerate(tokens):
         token = raw.rstrip(TRAILING).lstrip("('\"")
         path = repository_path(token)
-        if path is not None and (paths or path.startswith("scripts/")):
+        script = path is not None and path.startswith("scripts/") and (
+            bare_scripts or token.startswith("<se>/"))
+        if path is not None and (paths or script):
             if not PLACEHOLDER.search(path) and not (root / path).exists():
                 found.append(Finding(line, path, "names a file that does not exist"))
                 continue
