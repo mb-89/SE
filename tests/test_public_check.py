@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -452,6 +453,43 @@ def test_a_commit_made_on_github_passes_only_with_the_project_author(
     git(repo, "add", "README.md")
     env = {**os.environ, **WEB_FLOW, "GIT_AUTHOR_NAME": author, "GIT_AUTHOR_EMAIL": author}
     subprocess.run(["git", "-C", str(repo), "commit", "-qm", "Add readme"], env=env, check=True)
+    result = run_check("--repo", str(repo), "--range", "HEAD^!")
+    hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
+    assert [hit.split(": ", 1)[0].rsplit(" ", 1)[1] for hit in hits] == refused, result.stdout
+    assert result.returncode == (1 if refused else 0), result.stdout
+
+
+NOREPLY = "users.noreply.github.com"
+
+
+@pytest.mark.parametrize("origin, author, committer, refused", [
+    # The squash merge of a pull request into main: GitHub commits it for the owning account.
+    ("https://github.com/alice/example.git", "Alice <123+alice" + AT + NOREPLY + ">", "web-flow", []),
+    ("git" + AT + "github.com:Alice/example.git", "alice <alice" + AT + NOREPLY + ">", "web-flow", []),
+    # Another account's noreply address stays foreign, as does the owner's off GitHub.
+    ("https://github.com/alice/example.git", "Bob <456+bob" + AT + NOREPLY + ">", "web-flow", ["author"]),
+    ("https://github.com/alice/example.git", "Alice <alice" + AT + "example.com>", "web-flow", ["author"]),
+    ("https://github.com/alice/example.git", "Alice <123+alice" + AT + "noreply.github.com.example.com>",
+     "web-flow", ["author"]),
+    ("https://github.com/alice/example.git", "Alice <123+alice" + AT + NOREPLY + ">", "author",
+     ["author", "committer"]),
+    # Without an origin on github.com no account owns the repository.
+    ("", "Alice <123+alice" + AT + NOREPLY + ">", "web-flow", ["author"]),
+])
+def test_a_commit_github_made_for_the_owning_account_passes_the_gate(
+        repo: Path, origin: str, author: str, committer: str, refused: list[str]) -> None:
+    git(repo, "config", "user.name", "mb")
+    git(repo, "config", "user.email", "mb")
+    commit(repo, {"se.toml": PROJECT_IDENTITY})
+    if origin:
+        git(repo, "remote", "add", "origin", origin)
+    (repo / "README.md").write_text("clean\n", encoding="utf-8")
+    git(repo, "add", "README.md")
+    name, email = author[:-1].split(" <")
+    env = {**os.environ, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+           **(WEB_FLOW if committer == "web-flow" else
+              {"GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email})}
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "Squash the topic"], env=env, check=True)
     result = run_check("--repo", str(repo), "--range", "HEAD^!")
     hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
     assert [hit.split(": ", 1)[0].rsplit(" ", 1)[1] for hit in hits] == refused, result.stdout
@@ -934,11 +972,11 @@ def test_the_range_gate_refuses_unpushed_trailers_and_leaves_published_ones(
     assert "git commit --amend" in hits[0]
 
 
-CI_WORKFLOW = SE_ROOT / ".github" / "workflows" / "public-check.yml"
+CI_WORKFLOW = SE_ROOT / ".github" / "workflows" / "check.yml"
 
 
 def ci_script() -> str:
-    """The shell the public-check workflow runs, its one `run: |` block, calling this se's check."""
+    """The shell the check workflow's gate runs, its one `run: |` block, calling this se's check."""
     lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
     start = next(index for index, line in enumerate(lines) if line.strip() == "run: |") + 1
     block = []
@@ -964,12 +1002,15 @@ def owner_push(repo: Path, tmp_path: Path, message: str) -> tuple[str, str]:
     return before, git(repo, "rev-parse", "HEAD").stdout.strip()
 
 
-def run_ci(tmp_path: Path, before: str, after: str) -> subprocess.CompletedProcess[str]:
-    """The workflow's step as its runner runs it: in a fresh full clone, on a push to main."""
+def run_ci(tmp_path: Path, before: str, after: str,
+           base_ref: str = "") -> subprocess.CompletedProcess[str]:
+    """The workflow's gate step as its runner runs it, in a fresh full clone: on a push to main,
+    or with `base_ref` on a pull request into that branch, whose head is `after`."""
     runner = tmp_path / "runner"
     shutil.rmtree(runner, ignore_errors=True)
     git(tmp_path, "clone", "-q", "-b", "main", str(tmp_path / "remote.git"), str(runner))
-    env = {**os.environ, "BEFORE": before, "AFTER": after, "BRANCH": "main"}
+    env = {**os.environ, "BEFORE": before, "AFTER": after, "BRANCH": base_ref or "main",
+           "BASE_REF": base_ref}
     return subprocess.run(["bash", "-e", "-c", ci_script()], cwd=runner, env=env,
                           capture_output=True, text=True, check=False)
 
@@ -999,3 +1040,83 @@ def test_ci_passes_an_allow_listed_co_author_commit(repo: Path, tmp_path: Path) 
 def test_ci_passes_a_clean_push(repo: Path, tmp_path: Path) -> None:
     before, after = owner_push(repo, tmp_path, "Fix the build")
     assert run_ci(tmp_path, before, after).returncode == 0
+
+
+def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    assert re.search(r"(?m)^jobs:\n  check:\n", workflow), "main's ruleset requires a job named check"
+    assert re.search(r"(?m)^on:\n  pull_request:\n.*\n  push:\n    branches: \[main\]$", workflow)
+    assert "types: [opened, synchronize, reopened, edited]" in workflow  # an edited report reruns
+    # One job, every check the integration runs; the layouts before the suite, which rebuilds them.
+    steps = ["public_check.py --rev", "scripts/se_plugin.py check", "scripts/work_tickets.py docs --check",
+             "scripts/work_tickets.py field-report --check", "scripts/work_tickets.py suite --worktree ."]
+    assert [workflow.index(step) for step in steps] == sorted(workflow.index(step) for step in steps)
+    assert "pytest" not in workflow, "the suite runs through work_tickets.py suite, within its budget"
+
+
+def field_report_script() -> str:
+    """The shell of the check workflow's field-report step, its second `run: |` block."""
+    lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
+    starts = [index for index, line in enumerate(lines) if line.strip() == "run: |"]
+    block = []
+    for line in lines[starts[1] + 1:]:
+        if line.strip() and not line.startswith(" " * 10):
+            break
+        block.append(line[10:])
+    return "\n".join(block)
+
+
+@pytest.mark.parametrize("first_line, checked", [
+    ("Refs https://github.com/alice/example/issues/7", True),
+    ("Fixes https://github.com/alice/example/issues/7\r", True),
+    ("", False),  # a landing pull request: no field report
+])
+def test_ci_checks_a_pull_requests_field_report_against_its_work_issue(
+        tmp_path: Path, first_line: str, checked: bool) -> None:
+    calls = tmp_path / "calls.txt"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, script in {"gh": f'echo "gh $*" >> \'{calls}\'\necho "issue body"\n',
+                         "uv": f'echo "uv $*" >> \'{calls}\'\n'}.items():
+        (bin_dir / name).write_text("#!/bin/sh\n" + script, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    body = f"{first_line}\n\n<!-- se:field-report -->\nreport\n" if first_line else "Land a branch\n"
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PR_BODY": body,
+           "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example"}
+    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env,
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    made = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+    if checked:
+        assert made[0] == "gh api repos/alice/example/issues/7 --jq .body"
+        assert made[1].startswith("uv run python scripts/work_tickets.py field-report --check ")
+        assert (tmp_path / "issue-body.md").read_text(encoding="utf-8") == "issue body\n"
+    else:
+        assert made == [] and "no field report in the description" in result.stdout
+
+
+def test_ci_refuses_a_field_report_that_names_no_work_issue(tmp_path: Path) -> None:
+    env = {**os.environ, "PR_BODY": "<!-- se:field-report -->\nreport\n", "RUNNER_TEMP": str(tmp_path),
+           "REPOSITORY": "alice/example"}
+    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env,
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 1
+    assert "::error::field-report: the description's first line names no work issue" in result.stdout
+
+
+@pytest.mark.parametrize("message, refused", [("Fix the build", False),
+                                              ("Fix the build\n\nco-authored-by: Copilot", True)])
+def test_ci_gates_the_commits_of_a_pull_request(repo: Path, tmp_path: Path, message: str,
+                                                refused: bool) -> None:
+    owner_push(repo, tmp_path, "On main")
+    git(repo, "checkout", "-q", "-b", "topic")
+    commit(repo, {"b.txt": "b\n"}, message)
+    git(repo, "push", "-q", "origin", "topic")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    result = run_ci(tmp_path, "", head, base_ref="main")
+    assert "gating refs/remotes/origin/main.." in result.stdout
+    assert "the commits of the pull request into main" in result.stdout
+    assert " files, 1 commits, se " in result.stdout  # the PR's one commit, not main's
+    hits = [line for line in result.stdout.splitlines() if "attribution-trailer" in line]
+    assert [hit.split(": ", 1)[0] for hit in hits] == ([f"commit {head[:12]} message:3"] if refused else [])
+    assert result.returncode == (1 if refused else 0), result.stdout

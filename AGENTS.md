@@ -50,8 +50,12 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   the remedy, reword before pushing. A full check leaves history already pushed alone.
   - Every author is refused, the owner included; a co-author line's hit also names the editor
     setting that writes it ([README "Install"](README.md#install)).
-- CI: `.github/workflows/public-check.yml` runs the commit gates of a `--range` on every push to
-  `main`, so a push the hooks did not see fails there; it is the branch's required check.
+- CI: the job `check` of `.github/workflows/check.yml` runs the commit gates of a `--range` over
+  the commits of every pull request and of every push to `main`, so a push the hooks did not see
+  fails there; `check` is the check `main`'s ruleset requires.
+  - The same job runs every other check an integration runs: `se_plugin.py check`,
+    `work_tickets.py docs --check`, `field-report --check` of a pull request's description
+    against its work issue where it carries a report, and `work_tickets.py suite` in budget.
 - A `--range` on a shallow clone that reaches beyond the fetched history is refused with exit code
   2, naming `git fetch --unshallow`, so a gate never passes over commits it cannot see.
 - The project identity ([pub-002](src/skills/work-model/references/rules.md#pub-002-a-generic-commit-identity)) in the commit
@@ -61,6 +65,9 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   history already pushed alone.
   - GitHub's web-flow identity (`GitHub`, `noreply` at `github.com`), the committer of a commit
     made on GitHub, passes as committer, never as author.
+  - On such a commit, the author may be the account that owns `origin` on `github.com`, by its
+    `users.noreply.github.com` address: the squash merge of a pull request into `main`. Every
+    other account stays foreign.
   - A commit already published passes by its reasoned commit entry in `.public-check-allow`.
 - The public list, `scripts/public-check-terms.toml`: the generic patterns every source is checked
   against, read from the se module the check runs from: user profile paths (`X:\Users\<name>`,

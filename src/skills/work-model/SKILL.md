@@ -158,6 +158,9 @@ integration_branch = "next"
 
 `work_tickets.py` reads it from there for `sync`, `start`, `deliver`, `guard` and `integrate`;
 `integrate` refuses a main checkout that is not on it. Below, `main` means the integration branch.
+Where a ruleset protects it (se's `main`), nothing is pushed to it directly: each integration lands
+as a squash pull request that waits for the required check, as the README's
+[Landing on main](../../../README.md#landing-on-main) says.
 
 Nothing reaches the integration branch without a passing complete suite and, unless `se.toml` sets
 `public_check = false`, a passing public check on exactly the tree pushed:
