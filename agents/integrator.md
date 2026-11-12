@@ -62,6 +62,10 @@ Then work through the steps below for each delivered pull request `queue` lists 
 integration branch, its description carrying a complete field report), owners of shared files
 first, otherwise oldest first, and for "integrate <branch>" requests from SE (its design branch).
 
+When `queue` lists nothing to integrate, run `work_tickets.py fleet-check` once and act on the
+remedies that are yours (restarting a worker you started, deleting a stray branch whose issue
+closed); report the others to SE as they are, filing nothing.
+
 Workers announce a delivery with one queued message (`field report in PR #<m> for <branch>`). A
 worker's delivery message can arrive minutes late, or never where the worker's prompt named no
 integrator: reconcile from GitHub first (`queue`) and treat a missing message as late, not lost.
