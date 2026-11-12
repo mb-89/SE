@@ -1,17 +1,38 @@
 #!/usr/bin/env python3
-"""An overhaul's pruning facts, read from a checkout (README "Work commands").
+"""An overhaul: is the design still right? (README "Work commands").
+
+`overhaul.py new` files the overhaul issue, `docs/overhaul-<yyyymmdd>` labelled `discovery`, with
+the body of `.github/ISSUE_TEMPLATE/overhaul.md`, through `work_tickets.py file`'s filing path:
+once, an open overhaul answering a second `new`.
+
+`overhaul.py read <issue> [--out FILE] [--json] [--answers DIR]` writes the draft the judge starts
+from: every rule of the rule book with what checks it (a test, a check, or judgment); the retros
+closed since the last closed overhaul, from their reports' blocks; the previous overhaul's findings
+and the state of the issues that name them (`overhaul #<n> finding <k>`); and the pruning facts.
+It ends in a JSON block under BLOCK_MARKER whose judgment the judge fills.
+
+`overhaul.py file <issue> --draft FILE` refuses an incomplete judgment, writing nothing; it files
+no issue (wrk-007). It posts the report, each finding with its kind (`work`, which SE bundles, or
+`decision`, for the owner's decision list; a rule change is always a decision), then the facts and
+the block, as the overhaul issue's closing comment, and closes the issue.
+
+GitHub is read and written through work_tickets.py's door (gh); without gh `read` prints its reads
+as a plan for the session's GitHub tools and takes their answers from `--answers DIR`, and `file`
+prints its comment and close as a plan, as the work model's "Without gh" says for `integrate`.
 
 `overhaul.py facts [--json] [--repo PATH]` lists what an overhaul's pruning judgment starts from:
 the functions and classes in `scripts/` that nothing but tests reaches, duplicate and
 near-duplicate blocks, the lines of code and of tests per script, the longest functions, files and
 parameter lists, the files untouched longest, and each script command that no authored text names.
-It only reads, uses the standard library alone and judges nothing: the facts are candidates, the
-overhaul decides."""
+It only reads and judges nothing: the facts are candidates, the overhaul decides.
+
+Standard library only."""
 
 from __future__ import annotations
 
 import argparse
 import ast
+import importlib
 import io
 import json
 import keyword
@@ -21,8 +42,9 @@ import sys
 import time
 import tokenize
 import tomllib
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 # A duplicate block is at least WINDOW lines alike, MEANINGFUL of them with MIN_CHARS characters
@@ -503,20 +525,590 @@ def render(facts: Facts) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    commands = parser.add_subparsers(dest="command", required=True)
-    facts_command = commands.add_parser("facts", help="list the pruning facts of a checkout")
-    facts_command.add_argument("--repo", type=Path, default=Path("."), help="the checkout (default: .)")
-    facts_command.add_argument("--json", action="store_true", help="print the facts as JSON")
-    args = parser.parse_args(argv)
+# The overhaul issue: new, read, file
+
+
+def sibling(name: str):
+    """The script `<name>.py` beside this one, imported when a command needs it: `facts` imports
+    none."""
+    here = str(Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.append(here)
+    return importlib.import_module(name)
+
+
+SE_ROOT = Path(__file__).resolve().parents[1]
+TEMPLATE = SE_ROOT / ".github" / "ISSUE_TEMPLATE" / "overhaul.md"
+BOOK = Path("src") / "skills" / "work-model" / "references" / "rules.md"
+OVERHAUL_TITLE = "docs/overhaul-"
+OVERHAUL_LABEL = "discovery"
+BLOCK_MARKER = "<!-- se:overhaul-yaml -->"
+REPORT_MARKER = "<!-- se:overhaul-report -->"
+JUDGE_BEGIN, JUDGE_END = "<!-- se:overhaul-judge -->", "<!-- se:overhaul-judge:end -->"
+BLOCK_VERSION = 1
+# A work issue names each overhaul finding it takes as `overhaul #<n> finding <k>`.
+FINDING_REFERENCE = re.compile(r"\boverhaul #(\d+) finding (\d+)\b", re.IGNORECASE)
+# What checks a rule, read from its live implementations.
+CHECKED_BY = ("test", "check", "judgment")
+TESTED = re.compile(r"\btests/|\btest_\w+|\bthe suite\b", re.IGNORECASE)
+SCRIPT_LINK = re.compile(r"\]\([^)]*scripts/[^)]*\)")
+JUDGMENT = ("verdicts", "looked_at", "findings", "went_well")
+VERDICT_FIELDS = ("rule", "strays", "how")
+STRAYS = ("none", "slightly", "far")
+# The parts of se the judge looks at besides the rules, each answered ("nothing to change" is an
+# answer): the outside world, the consistency of the whole, the rule book itself, the retros'
+# effect, speed, what to mechanize and what to remove.
+LOOKED_AT = ("outside", "consistency", "rules", "retro", "speed", "mechanize", "removal")
+FINDING_FIELDS = ("title", "body", "rule", "place", "controversial", "why", "sources")
+# A finding's `rule` for a rule the book lacks: a rule change.
+NEW_RULE = "new"
+WORK, DECISION = "work", "decision"
+RULE_CHANGE = "it changes a rule"
+
+
+def template_body() -> tuple[str, str]:
+    """The overhaul issue's title pattern and body, from its template without the front matter."""
+    text = sibling("work_tickets").read_file(TEMPLATE, "the overhaul template")
+    match = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
+    if match is None:
+        raise ValueError(f"{TEMPLATE} has no front matter")
+    title = re.search(r'^title:\s*"?([^"\n]+)"?\s*$', match[1], re.MULTILINE)
+    return (title[1] if title else f"{OVERHAUL_TITLE}<yyyymmdd>"), text[match.end():]
+
+
+def run_new(args: argparse.Namespace) -> int:
+    work_tickets = sibling("work_tickets")
+    root = work_tickets.worktree_root(args.worktree)
+    pattern, body = template_body()
+    title = pattern.replace("<yyyymmdd>", work_tickets.today_stamp())
+    with work_tickets.tempfile.TemporaryDirectory() as directory:
+        file = Path(directory) / "overhaul.md"
+        file.write_text(body, encoding="utf-8")
+        print(work_tickets.file_work_issue(root, title, file, [], args.repo, (OVERHAUL_LABEL,)))
+    return 0
+
+
+def checked_by(rule) -> list[str]:
+    """What checks `rule`, from its live implementations, each naming one kind or more: a test
+    (it names the tests or the suite), judgment ("by judgment"), a check (it links a script, or
+    names neither of the others)."""
+    rule_book = sibling("rule_book")
+    found = set()
+    for item in rule.implementations:
+        if rule_book.FROZEN.match(item):
+            continue
+        kinds = {kind for kind, pattern in (("test", TESTED), ("judgment", rule_book.JUDGMENT))
+                 if pattern.search(item)}
+        found |= kinds | ({"check"} if not kinds or SCRIPT_LINK.search(item) else set())
+    return [kind for kind in CHECKED_BY if kind in found]
+
+
+def book_rules(root: Path) -> list:
+    """The live rules of the checkout's rule book, else se's."""
+    rule_book = sibling("rule_book")
+    path = root / BOOK if (root / BOOK).is_file() else rule_book.BOOK
+    rules, _, _ = rule_book.parse(sibling("work_tickets").read_file(path, "the rule book"))
+    return [rule for rule in rules if rule.retired is None]
+
+
+def is_overhaul(issue) -> bool:
+    return issue.title.startswith(OVERHAUL_TITLE)
+
+
+def door_for(retro, work_tickets, args: argparse.Namespace, root: Path):
+    """The read door: the answer files where given, else gh, else the plan's placeholders."""
+    tracker = work_tickets.resolve_repo(root, args.repo)
+
+    class GhDoor(retro.GhDoor):
+        def open_issues(self) -> list[dict]:
+            return [item for item in self.pages(self.issues_door, "issues?state=open")
+                    if "pull_request" not in item]
+
+    class FileDoor(retro.FileDoor):
+        def open_issues(self) -> list[dict]:
+            name = "open-issues.json"
+            return retro.listed(self.read(name, work_tickets.Step(name, "list_issues", {
+                **work_tickets.owner_repo(self.tracker), "state": "OPEN", "perPage": 100},
+                note=f"Every page; save the issues of all pages as one JSON list to "
+                     f"{self.directory / name}")), "issues", "nodes")
+
+    if args.answers is not None:
+        return FileDoor(args.answers, tracker, tracker)
+    if work_tickets.hand_off():
+        return FileDoor(Path("<dir>"), tracker, tracker)
+    return GhDoor(root, tracker, tracker)
+
+
+def last_block(texts: list[str], marker: str, reader) -> dict | None:
+    """The last block under `marker` among `texts`, read by `reader`."""
+    blocks = [reader(text) for text in texts if marker in text]
+    return blocks[-1] if blocks else None
+
+
+def retro_row(issue, block: dict | None) -> dict:
+    """One retro of the window as its report's block names it."""
+    if block is None:
+        return {"retro": issue.number, "closed_at": issue.closed_at, "block": False}
+    findings = [item for item in block.get("findings") or [] if isinstance(item, dict)]
+    scored = [item for item in ((block.get("previous") or {}).get("findings") or [])
+              if isinstance(item, dict)]
+    return {
+        "retro": issue.number, "closed_at": issue.closed_at, "block": True,
+        "sizes": block.get("sizes") or {},
+        "broken": [str(check.get("name")) for check in block.get("rule_checks") or []
+                   if isinstance(check, dict) and not check.get("kept", True)],
+        "findings": {WORK: sum(item.get("kind") == WORK for item in findings),
+                     DECISION: sum(item.get("kind") == DECISION for item in findings)},
+        "classes": sorted({str(item.get("name")) for item in block.get("classes") or []
+                           if isinstance(item, dict) and item.get("name")}),
+        "previous": {"scored": len(scored),
+                     "closed": sum(item.get("state") == "closed" for item in scored),
+                     "recurred": sum(bool(item.get("recurred")) for item in scored)}}
+
+
+def scored_findings(previous: dict | None, overhaul: int, closed: list, opened: list) -> list[dict]:
+    """Each finding of the previous overhaul's block with the issues that name it
+    (`overhaul #<overhaul> finding <k>`) and their state: closed where one closed as completed,
+    open where one is open, else the reason they closed with, else none."""
+    found: list[dict] = []
+    for index, finding in enumerate((previous or {}).get("findings") or [], 1):
+        if not isinstance(finding, dict):
+            continue
+        number = int(finding.get("finding") or index)
+
+        def names(issue) -> bool:
+            return any(int(match[1]) == overhaul and int(match[2]) == number
+                       for match in FINDING_REFERENCE.finditer(issue.body))
+
+        shut = [issue for issue in closed if names(issue)]
+        still = [issue for issue in opened if names(issue)]
+        reasons = [issue.state_reason or "completed" for issue in shut]
+        state = ("closed" if "completed" in reasons else "open" if still
+                 else reasons[0] if reasons else "none")
+        found.append({"finding": number, "title": str(finding.get("title") or ""),
+                      "rule": str(finding.get("rule") or ""), "kind": finding.get("kind"),
+                      "issues": sorted(issue.number for issue in shut + still), "state": state})
+    return found
+
+
+def fact_counts(facts: Facts) -> dict:
+    """The facts' sizes, which the next overhaul compares."""
+    return {"unreached": len(facts.unreached), "duplicates": len(facts.duplicates),
+            "near": len(facts.near), "lines": sum(row["lines"] for row in facts.sizes),
+            "test_lines": sum(row["test_lines"] for row in facts.sizes),
+            "unnamed": len(facts.unnamed)}
+
+
+@dataclass
+class Gathered:
+    number: int
+    since: str | None
+    since_overhaul: int | None
+    until: str
+    rules: list[dict]
+    retros: list[dict]
+    previous: dict | None
+    facts: Facts
+
+    def data(self) -> dict:
+        return {"version": BLOCK_VERSION, "overhaul": self.number, "since": self.since,
+                "since_overhaul": self.since_overhaul, "until": self.until,
+                "rules": [{key: rule[key] for key in ("id", "name", "checked_by")}
+                          for rule in self.rules],
+                "retros": self.retros, "previous": self.previous,
+                "facts": fact_counts(self.facts),
+                "verdicts": [], "looked_at": {part: "" for part in LOOKED_AT},
+                "findings": [], "went_well": []}
+
+
+def gather(number: int, door, rules: list, facts: Facts, now: datetime) -> Gathered | None:
+    """Overhaul `number`'s draft data, read through `door`; None while the door is still missing
+    answers (`door.missing`)."""
+    retro = sibling("retro")
+    closed = [retro.issue_of(item) for item in door.closed_issues()]
+    opened = [retro.issue_of(item) for item in door.open_issues()]
+    if door.missing:
+        return None
+    for issue in closed:
+        if (is_overhaul(issue) or retro.is_retro(issue)) and not issue.closed_at:
+            read = retro.issue_of(door.issue(issue.number))
+            issue.closed_at, issue.state_reason = read.closed_at, read.state_reason
+            issue.body = issue.body or read.body
+    if door.missing:
+        return None
+    overhauls = [issue for issue in closed if is_overhaul(issue) and issue.number != number
+                 and retro.when(issue.closed_at)]
+    last = max(overhauls, key=lambda issue: retro.when(issue.closed_at), default=None)
+    since = retro.when(last.closed_at) if last else None
+    window = sorted((issue for issue in closed if retro.is_retro(issue)
+                     and retro.when(issue.closed_at)
+                     and (since is None or retro.when(issue.closed_at) > since)),
+                    key=lambda issue: retro.when(issue.closed_at))
+
+    def texts(issue) -> list[str]:
+        return [issue.body, *(str(item.get("body") or "") for item in door.comments(issue.number))]
+
+    rows = [retro_row(issue, last_block(texts(issue), retro.BLOCK_MARKER, retro.read_block))
+            for issue in window]
+    previous_block = last_block(texts(last), BLOCK_MARKER, read_block) if last else None
+    if door.missing:
+        return None
+    previous = None
+    if last is not None:
+        previous = {"overhaul": last.number, "found": previous_block is not None,
+                    "facts": (previous_block or {}).get("facts"),
+                    "findings": scored_findings(previous_block, last.number, closed, opened)}
+    return Gathered(
+        number, last.closed_at if last else None, last.number if last else None,
+        now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        [{"id": rule.id, "name": rule.name, "statement": " ".join(rule.statement),
+          "checked_by": checked_by(rule),
+          "implementations": [item for item in rule.implementations
+                              if not sibling("rule_book").FROZEN.match(item)]}
+         for rule in rules],
+        rows, previous, facts)
+
+
+def read_block(text: str) -> dict | None:
+    """The data of the last block under BLOCK_MARKER in `text`; None where it has none."""
+    return sibling("retro").read_block(text, BLOCK_MARKER)
+
+
+def draft(found: Gathered) -> str:
+    """The draft as the judge reads it, ending in the block `read_block` parses."""
+    review = sibling("review")
+    lines = [f"# Overhaul draft for #{found.number}", ""]
+    if found.since:
+        lines.append(f"Since overhaul #{found.since_overhaul} closed, {found.since}, up to "
+                     f"{found.until}.")
+    else:
+        lines.append(f"The whole history up to {found.until}; no overhaul issue has closed.")
+    kinds = Counter(kind for rule in found.rules for kind in rule["checked_by"])
+    lines += ["", f"## The rule book ({len(found.rules)} rules)", "",
+              "What checks each rule, from its live implementations: "
+              + ", ".join(f"{kinds[kind]} by a {kind}" if kind != "judgment"
+                          else f"{kinds[kind]} by judgment" for kind in CHECKED_BY) + "."]
+    for rule in found.rules:
+        checks = ", ".join(rule["checked_by"]) or "nothing"
+        lines += ["", f"- **{rule['id']} {rule['name']}** (checked by: {checks}): "
+                      f"{rule['statement']}"]
+        lines += [f"  - {item}" for item in rule["implementations"]]
+    lines += ["", "## The retros since the last overhaul", ""]
+    if found.retros:
+        lines += ["| retro | closed | landed | escalated | broken checks | findings (work, "
+                  "decision) | previous findings closed, recurred |", "|---|---|---|---|---|---|---|"]
+        for row in found.retros:
+            if not row["block"]:
+                lines.append(f"| #{row['retro']} | no report block found | | | | | |")
+                continue
+            sizes, previous = row["sizes"], row["previous"]
+            lines.append(
+                f"| #{row['retro']} | {sizes.get('closed', '')} | {sizes.get('landed', '')} | "
+                f"{sizes.get('escalated', '')} | {', '.join(row['broken']) or 'none'} | "
+                f"{row['findings'][WORK]}, {row['findings'][DECISION]} | "
+                f"{previous['closed']} of {previous['scored']}, {previous['recurred']} |")
+        named = Counter(name for row in found.retros if row["block"] for name in row["classes"])
+        repeated = sorted(name for name, count in named.items() if count > 1)
+        lines += ["", "Finding classes more than one retro named: "
+                  + (", ".join(repeated) if repeated else "none") + "."]
+    else:
+        lines.append("None.")
+    if found.previous:
+        number = found.previous["overhaul"]
+        lines += ["", f"## The findings of overhaul #{number}", ""]
+        if not found.previous["found"]:
+            lines.append(f"Overhaul #{number} carries no {BLOCK_MARKER} block.")
+        elif found.previous["findings"]:
+            lines += ["| finding | rule | kind | issues | state |", "|---|---|---|---|---|"]
+            for item in found.previous["findings"]:
+                issues = ", ".join(f"#{issue}" for issue in item["issues"]) or "none"
+                lines.append(f"| {item['finding']}. {item['title']} | {item['rule']} | "
+                             f"{item['kind'] or ''} | {issues} | {item['state']} |")
+        else:
+            lines.append("None.")
+    facts = render(found.facts).split("\n", 1)[1]
+    lines += ["", "## Pruning facts", ""]
+    counted = (found.previous or {}).get("facts")
+    if counted:
+        now = fact_counts(found.facts)
+        lines += [f"Against overhaul #{found.previous['overhaul']}: " + ", ".join(
+            f"{name} {counted.get(name, '?')} then, {value} now" for name, value in now.items())
+            + ".", ""]
+    lines.append(review.demoted(facts, 1).strip())
+    block = json.dumps(found.data(), indent=2, ensure_ascii=False)
+    lines += ["", JUDGE_BEGIN, "## Judgment", "",
+              "The judge reads se itself (the README, the agents and skills, the rule book, the "
+              "scripts), then fills the block below and runs "
+              f"`overhaul.py file {found.number} --draft <this file>`: `verdicts`, one per rule "
+              f"(`rule`, `strays`: {', '.join(STRAYS)}, `how`); `looked_at`, every part answered "
+              f"({', '.join(LOOKED_AT)}; \"nothing to change\" is an answer); `findings`, each "
+              f"with `title` (five words or more, the fix), `body`, `rule` (a rule's id, or "
+              f"`{NEW_RULE}` for one the book lacks), `place` (the file it changes), "
+              "`controversial` with its `why`, and optionally `sources`; `went_well`. A finding "
+              "that changes a rule (its place is the rule book, or its rule is "
+              f"`{NEW_RULE}`) is always a decision for the person. This part is not posted.",
+              JUDGE_END, "", BLOCK_MARKER, review.fenced(block, "yaml")]
+    return "\n".join(lines) + "\n"
+
+
+def changes_rule(finding: dict) -> bool:
+    place = str(finding.get("place") or "").strip().lstrip("./")
+    return place == BOOK.as_posix() or str(finding.get("rule") or "").strip() == NEW_RULE
+
+
+def judgment_problems(block: dict) -> list[str]:
+    """What keeps the judgment in `block` from being complete; none where it is."""
+    words = sibling("review").words
+    problems: list[str] = []
+    if not all(isinstance(block.get(name), list) for name in ("verdicts", "findings", "went_well")):
+        return [f"`{name}` is not a list" for name in ("verdicts", "findings", "went_well")
+                if not isinstance(block.get(name), list)]
+    rules = [str(rule.get("id")) for rule in block.get("rules") or [] if isinstance(rule, dict)]
+    judged: set[str] = set()
+    for index, given in enumerate(block["verdicts"], 1):
+        if not isinstance(given, dict):
+            problems.append(f"verdict {index} is not an object with {', '.join(VERDICT_FIELDS)}")
+            continue
+        rule = words(given.get("rule"))
+        name = f"the verdict on {rule}" if rule else f"verdict {index}"
+        extra = sorted(set(given) - set(VERDICT_FIELDS))
+        if extra:
+            problems.append(f"{name} has the unknown field {extra[0]}")
+        if rule not in rules:
+            problems.append(f"{name} names no rule of the book" if rule else f"{name} has no rule")
+        elif rule in judged:
+            problems.append(f"{rule} has two verdicts")
+        judged.add(rule)
+        if given.get("strays") not in STRAYS:
+            problems.append(f"{name}: strays is one of {', '.join(STRAYS)}")
+        if not words(given.get("how")):
+            problems.append(f"{name} has no how")
+    problems += [f"{rule} has no verdict" for rule in rules if rule not in judged]
+    looked = block.get("looked_at")
+    if not isinstance(looked, dict):
+        problems.append(f"`looked_at` is not an object with {', '.join(LOOKED_AT)}")
+    else:
+        problems += [f"`looked_at` has the unknown part {part}"
+                     for part in sorted(set(looked) - set(LOOKED_AT))]
+        problems += [f"`looked_at.{part}` is empty (\"nothing to change\" is an answer)"
+                     for part in LOOKED_AT if not words(looked.get(part))]
+    for index, given in enumerate(block["findings"], 1):
+        if not isinstance(given, dict):
+            problems.append(f"finding {index} is not an object with {', '.join(FINDING_FIELDS)}")
+            continue
+        name, found = sibling("retro").finding_basics(given, index, FINDING_FIELDS)
+        problems += found
+        rule = words(given.get("rule"))
+        if not rule:
+            problems.append(f"{name} has no rule: a rule's id, or {NEW_RULE}")
+        elif rule != NEW_RULE and rule not in rules:
+            problems.append(f'{name} names the rule "{rule}", which is not in the book')
+        if not words(given.get("place")):
+            problems.append(f"{name} has no place: the file it changes")
+        controversial = given.get("controversial", False)
+        if not isinstance(controversial, bool):
+            problems.append(f"{name}: controversial is true or false")
+        elif controversial and not words(given.get("why")):
+            problems.append(f"{name} is controversial without a why")
+        sources = given.get("sources", [])
+        if not isinstance(sources, list) or not all(words(item) for item in sources):
+            problems.append(f"{name}: sources is a list of the places cited")
+    if not [entry for entry in block["went_well"] if words(entry)]:
+        problems.append("`went_well` is empty: record what went well")
+    return problems
+
+
+def judged(text: str, number: int) -> dict:
+    """The block of the draft `text`, its judgment checked and each finding given its kind; every
+    refusal is raised before anything is written."""
+    work_tickets = sibling("work_tickets")
+    block = read_block(text)
+    if block is None:
+        raise work_tickets.QueueError(f"The draft has no {BLOCK_MARKER} block: write it with "
+                                      f"overhaul.py read {number} --out FILE")
+    if block.get("overhaul") != number:
+        raise work_tickets.QueueError(f"The draft is overhaul #{block.get('overhaul')}'s, not "
+                                      f"#{number}'s")
+    problems = judgment_problems(block)
+    if problems:
+        raise work_tickets.QueueError(f"The judgment of overhaul #{number} is not complete, so "
+                                      "nothing was written: " + "; ".join(problems))
+    findings = []
+    for index, given in enumerate(block["findings"], 1):
+        rule_change = changes_rule(given)
+        controversial = given.get("controversial") is True or rule_change
+        why = sibling("review").words(given.get("why")) or RULE_CHANGE
+        findings.append({"finding": index, **{key: given[key] for key in FINDING_FIELDS
+                                              if key in given},
+                         "controversial": controversial, "rule_change": rule_change,
+                         **({"why": why} if controversial else {}),
+                         "kind": DECISION if controversial else WORK})
+    return {**block, "findings": findings}
+
+
+def report(text: str, block: dict, number: int) -> str:
+    """The overhaul's report, its closing comment: the verdicts, what was looked at, each finding
+    with its kind, what went well, what follows, the facts, then the block the next overhaul
+    reads."""
+    review = sibling("review")
+    one_line = sibling("retro").one_line
+    lines = [REPORT_MARKER, f"## Overhaul #{number}: the report", "", "### Verdicts", "",
+             "| rule | strays | how |", "|---|---|---|"]
+    names = {rule["id"]: rule.get("name", "") for rule in block.get("rules") or []}
+    order = {rule: index for index, rule in enumerate(names)}
+    for verdict in sorted(block["verdicts"], key=lambda item: order.get(item["rule"].strip(), 0)):
+        rule = verdict["rule"].strip()
+        lines.append(f"| {rule} {names.get(rule, '')} | {verdict['strays']} | "
+                     f"{one_line(verdict['how']).replace('|', '/')} |")
+    lines += ["", "### What was looked at", ""]
+    lines += [f"- **{part}**: {one_line(block['looked_at'][part])}" for part in LOOKED_AT]
+    lines += ["", "### Findings", ""]
+    if not block["findings"]:
+        lines.append("None.")
+    for item in block["findings"]:
+        kind = (f"{DECISION}, for the owner's decision list: {item['why'].strip()}"
+                if item["kind"] == DECISION else f"{WORK}, for SE to bundle")
+        change = "; a rule change" if item["rule_change"] else ""
+        lines += [f"- **{item['finding']}. {item['title'].strip()}** ({kind}{change}; rule "
+                  f"{item['rule'].strip()}; place `{item['place'].strip()}`)",
+                  "  " + "\n  ".join(item["body"].strip().splitlines())]
+        lines += [f"  - Source: {source.strip()}" for source in item.get("sources") or []]
+    lines += ["", "### What went well", ""]
+    lines += [f"- {entry.strip()}" for entry in block["went_well"] if review.words(entry)]
+    work = [item["finding"] for item in block["findings"] if item["kind"] == WORK]
+    decisions = [item["finding"] for item in block["findings"] if item["kind"] == DECISION]
+    lines += ["", "### What follows", "",
+              f"This overhaul filed no issue. SE bundles the {WORK} findings "
+              f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
+              f"needs, each naming `overhaul #{number} finding <k>` for every finding it takes, "
+              f"so the next overhaul scores it; the {DECISION} findings "
+              f"({', '.join(map(str, decisions)) or 'none'}), every rule change among them, go "
+              "on the owner's decision list.",
+              "", "### The facts", "", sibling("retro").facts_of(text, BLOCK_MARKER, (JUDGE_BEGIN, JUDGE_END)), "", BLOCK_MARKER,
+              review.fenced(json.dumps(block, indent=2, ensure_ascii=False), "yaml")]
+    return "\n".join(lines) + "\n"
+
+
+def run_file(args: argparse.Namespace) -> int:
+    work_tickets, retro = sibling("work_tickets"), sibling("retro")
+    root = work_tickets.worktree_root(args.worktree)
+    tracker = work_tickets.resolve_repo(root, args.repo)
+    text = work_tickets.read_file(args.draft, "the overhaul draft")
+    block = judged(text, args.overhaul)
+    steps = retro.file_steps(tracker, args.overhaul, report(text, block, args.overhaul),
+                             "overhaul")
+    if work_tickets.hand_off():
+        print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
+        print(steps.text())
+    else:
+        work_tickets.run_plan(steps, work_tickets.tracker_actions(root, tracker))
+        print(f"Posted the report of overhaul #{args.overhaul} as its closing comment and closed it")
+    findings = block["findings"]
+    kinds = [item["kind"] for item in findings]
+    print(f"Overhaul #{args.overhaul}: {kinds.count(WORK)} {WORK} and {kinds.count(DECISION)} "
+          f"{DECISION} finding(s), {sum(item['rule_change'] for item in findings)} of them rule "
+          f"changes; no issue filed: SE bundles the {WORK} findings into work issues and puts the "
+          f"{DECISION} findings on the owner's decision list")
+    return 0
+
+
+def run_read(args: argparse.Namespace) -> int:
+    work_tickets, retro = sibling("work_tickets"), sibling("retro")
+    root = work_tickets.worktree_root(args.worktree)
+    door = door_for(retro, work_tickets, args, root)
+    found = gather(args.overhaul, door, book_rules(root), find(read(root)),
+                   datetime.now(timezone.utc))
+    if found is None:
+        directory = args.answers or Path("<dir>")
+        then = (f"overhaul.py read {args.overhaul} --answers {directory}"
+                f"{f' --out {args.out}' if args.out else ''}{' --json' if args.json else ''}"
+                f"{f' --repo {args.repo}' if args.repo else ''} --worktree {root}")
+        print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools "
+              f"and saves their answers into {directory}:")
+        print(work_tickets.Plan(f"the draft of overhaul #{args.overhaul}", tuple(door.missing),
+                                then).text())
+        return 0
+    output = (json.dumps(found.data(), indent=2, ensure_ascii=False) + "\n" if args.json
+              else draft(found))
+    if args.out:
+        args.out.write_text(output, encoding="utf-8")
+        print(f"Wrote the overhaul draft of #{args.overhaul} to {args.out}: {len(found.rules)} "
+              f"rules, {len(found.retros)} retro(s) since the last overhaul")
+    else:
+        sys.stdout.write(output)
+    return 0
+
+
+def run_facts(args: argparse.Namespace) -> int:
     try:
         facts = find(read(args.repo.resolve()))
     except (OSError, ValueError) as error:
         print(f"error: overhaul.py facts: {error}", file=sys.stderr)
         return 2
-    print(json.dumps(asdict(facts), indent=2) if args.json else render(facts), end="" if not args.json else "\n")
+    print(json.dumps(asdict(facts), indent=2) if args.json else render(facts),
+          end="" if not args.json else "\n")
     return 0
+
+
+def parser() -> argparse.ArgumentParser:
+    top = argparse.ArgumentParser(prog="overhaul.py", description=__doc__.splitlines()[0])
+    commands = top.add_subparsers(dest="command", required=True)
+
+    def github(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--worktree", default=".",
+                             help="the checkout of the repository (default: .)")
+        command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "
+                                            "tracker or origin remote)")
+
+    new_command = commands.add_parser(
+        "new", help="file the overhaul issue through work_tickets.py file",
+        description=f"File the overhaul issue, {OVERHAUL_TITLE}<yyyymmdd> labelled "
+                    f"{OVERHAUL_LABEL}, with the body of .github/ISSUE_TEMPLATE/overhaul.md, "
+                    "through work_tickets.py file: once, an open overhaul answering a second.")
+    github(new_command)
+    new_command.set_defaults(run=run_new)
+    read_command = commands.add_parser(
+        "read", help="write an overhaul's draft",
+        description="Write the draft: every rule with what checks it, the retros since the last "
+                    "overhaul, the previous overhaul's findings with their issues' state, and the "
+                    f"pruning facts, ending in a {BLOCK_MARKER} block for the judgment.")
+    read_command.add_argument("overhaul", type=int, help="the overhaul issue's number")
+    read_command.add_argument("--out", type=Path, metavar="FILE",
+                              help="write the draft to FILE (default: print it)")
+    read_command.add_argument("--json", action="store_true",
+                              help="the block's data as JSON instead of the draft")
+    read_command.add_argument("--answers", type=Path, metavar="DIR",
+                              help="without gh: the directory the session saves the plan's "
+                                   "answers into")
+    github(read_command)
+    read_command.set_defaults(run=run_read)
+    file_command = commands.add_parser(
+        "file", help="check a judged overhaul draft and close the overhaul issue with its report",
+        description="Check the judgment in the draft's block, refusing an incomplete one and "
+                    "writing nothing; post the report (the verdicts, what was looked at, each "
+                    f"finding with its kind, {WORK} or {DECISION}, a rule change always a "
+                    f"{DECISION}, then the facts and the block) as the overhaul issue's closing "
+                    "comment and close it. It files no issue: SE reads the report and files the "
+                    "work.")
+    file_command.add_argument("overhaul", type=int, help="the overhaul issue's number")
+    file_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
+                              help="the draft overhaul.py read wrote, its block judged")
+    github(file_command)
+    file_command.set_defaults(run=run_file)
+    facts_command = commands.add_parser("facts", help="list the pruning facts of a checkout")
+    facts_command.add_argument("--repo", type=Path, default=Path("."), help="the checkout (default: .)")
+    facts_command.add_argument("--json", action="store_true", help="print the facts as JSON")
+    facts_command.set_defaults(run=run_facts)
+    return top
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    try:
+        return args.run(args)
+    except sibling("work_tickets").QueueError as error:
+        print(f"overhaul.py: {error}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
