@@ -2049,9 +2049,10 @@ def declared_release_kind(branch: str, report_body: str | None, issue_body: str)
 
 
 def integrated_before(root: Path, branch: str) -> bool:
-    """Whether a first-parent merge `Integrate <branch>` is already on the integration branch."""
-    subjects = checked_git(root, "log", "--first-parent", "--merges", "--format=%s",
-                           integration_branch(root))
+    """Whether a first-parent integration `Integrate <branch>` is already on the integration
+    branch: the squash commit its landing pull request left, or a merge commit of the older
+    direct path."""
+    subjects = checked_git(root, "log", "--first-parent", "--format=%s", integration_branch(root))
     return any(
         (match := INTEGRATION_SUBJECT_PATTERN.match(subject)) is not None and match[1] == branch
         for subject in subjects.splitlines()
@@ -2192,26 +2193,31 @@ def remote_tags(root: Path) -> dict[str, str]:
     return tags | peeled
 
 
-def integrated_packages(root: Path, branch: str, released: str) -> list[tuple[str, str]]:
-    """(branch, release kind) of each integration merged into `branch` since origin and the commit
-    `released`, the last release's.
+def integrated_packages(root: Path, branch: str, released: str,
+                        upstream_ref: str | None = None) -> list[tuple[str, str]]:
+    """(branch, release kind) of each integration on `branch` since `upstream_ref` (default:
+    origin's `branch`) and the commit `released`, the last release's.
 
-    An integration is a first-parent merge whose subject starts `Integrate <branch>`, the message
-    integrate writes; its kind is its Release-kind trailer, and one without it is refused. Other
-    merges release nothing and are named."""
-    upstream = run_git(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    An integration is a first-parent commit whose subject starts `Integrate <branch>`, the message
+    integrate writes: the merge it builds, or the squash commit that merge landed as; its kind is
+    its Release-kind trailer, and one without it is refused. Other merges release nothing and are
+    named."""
+    upstream = run_git(root, "rev-parse", "--verify", "--quiet",
+                       upstream_ref or f"refs/remotes/origin/{branch}")
     revisions = [f"^{upstream.stdout.strip()}"] if upstream.returncode == 0 else ["--not", "--remotes", "--not"]
     log = checked_git(
-        root, "log", "--first-parent", "--merges", "--format=%H%x00%B%x1e",
+        root, "log", "--first-parent", "--format=%H%x00%P%x00%B%x1e",
         branch, f"^{released}", *revisions,
     )
     packages = []
     for record in filter(str.strip, log.split("\x1e")):
-        commit, _, message = record.strip().partition("\x00")
+        commit, _, rest = record.strip().partition("\x00")
+        parents, _, message = rest.partition("\x00")
         subject = message.splitlines()[0] if message else ""
         match = INTEGRATION_SUBJECT_PATTERN.match(subject)
         if match is None:
-            print(f"Release: merge {commit[:7]} ({one_line(subject)}) is no integration; it bumps nothing")
+            if len(parents.split()) > 1:
+                print(f"Release: merge {commit[:7]} ({one_line(subject)}) is no integration; it bumps nothing")
             continue
         packages.append((match[1], merge_release_kind(commit, subject, message)))
     return list(reversed(packages))
@@ -2282,10 +2288,11 @@ def build_release(root: Path, tag: str) -> list[str]:
     return sorted({"se.toml"} | (changed_paths(root) - before))
 
 
-def release(root: Path, branch: str) -> str | None:
-    """Release what was integrated into `branch`: bump project.version by the packages' highest
-    kind, commit it with what `project.release_build` regenerates and tag `v<version>`; the tag to
-    push, or None where nothing is released.
+def release(root: Path, branch: str, upstream_ref: str | None = None) -> str | None:
+    """Release what was integrated into `branch` since `upstream_ref` (default: origin's
+    `branch`): bump project.version by the packages' highest kind, commit it with what
+    `project.release_build` regenerates and tag `v<version>`; the tag to push, or None where
+    nothing is released.
     Where the release workflow tags, the released versions are origin's tags, and a version without
     its tag there is left for the workflow to tag."""
     by_workflow = release_by_workflow(root)
@@ -2306,9 +2313,10 @@ def release(root: Path, branch: str) -> str | None:
         checked_git(root, "tag", current, branch)
         print(f"Release: {current} tagged, the first tag of project.version")
         return current
-    packages = integrated_packages(root, branch, released)
+    packages = integrated_packages(root, branch, released, upstream_ref)
     if not packages:
-        pushed = run_git(root, "merge-base", "--is-ancestor", released, f"refs/remotes/origin/{branch}")
+        pushed = run_git(root, "merge-base", "--is-ancestor", released,
+                         upstream_ref or f"refs/remotes/origin/{branch}")
         return None if pushed.returncode == 0 else current
     kind = max((kind for _, kind in packages), key=RELEASE_ORDER.index)
     tag = f"v{version_text(bumped(version, kind))}"
@@ -3688,9 +3696,11 @@ def worker_worktree(root: Path, branch: str) -> Path:
     raise QueueError(f"Cannot find the worktree for branch {branch}")
 
 
-def remove_worker_worktree(root: Path, branch: str) -> None:
+def remove_worker_worktree(root: Path, branch: str, landed: str | None = None) -> None:
+    """Remove `branch`'s worker worktree once its commits are in `landed` (default: the
+    integration branch), the tip a squash landing merged."""
     worker = worker_worktree(root, branch)
-    report = status_report(worker, integration_branch(root))
+    report = status_report(worker, landed or integration_branch(root))
     if not report["cleanup_eligible"]:
         reasons = "; ".join(report["cleanup_reasons"])
         raise QueueError(f"Worker worktree is not ready for removal: {reasons}")
@@ -3702,16 +3712,19 @@ def remove_worker_worktree(root: Path, branch: str) -> None:
         raise QueueError(f"Cannot remove worker worktree: {detail}")
 
 
-def delete_merged_branch(root: Path, branch: str, head: str) -> None:
-    target = integration_branch(root)
+def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None = None) -> None:
+    """Delete `branch` locally and on origin once `landed` (default: the integration branch), the
+    tip a squash landing merged, contains its `head`."""
+    target = landed or integration_branch(root)
     contained = run_git(root, "merge-base", "--is-ancestor", head, target)
     if contained.returncode != 0:
         print(
-            f"warning: merged branch was retained because {target} does not contain its tip",
+            f"warning: merged branch was retained because {landed[:12] if landed else target} "
+            "does not contain its tip",
             file=sys.stderr,
         )
         return
-    local = run_git(root, "branch", "-d", branch)
+    local = run_git(root, "branch", "-D", branch)  # contained in `target`, checked above
     if local.returncode != 0:
         detail = failure_detail(local)
         print(f"warning: merged branch was retained locally: {detail}", file=sys.stderr)
@@ -3736,13 +3749,6 @@ def release_line(pull_url: str, tag: str | None) -> str:
         return "Release: none."
     project, separator, _ = pull_url.rpartition("/pull/")
     return f"Release: {project}/releases/tag/{tag}." if separator else f"Release: {tag}."
-
-
-def restore_pre_merge(root: Path, commit: str) -> None:
-    restored = run_git(root, "reset", "--hard", commit)
-    if restored.returncode != 0:
-        detail = failure_detail(restored)
-        raise QueueError(f"Cannot restore the pre-merge {integration_branch(root)}: {detail}")
 
 
 def integration_merge_message(
@@ -3836,6 +3842,9 @@ def public_push_commits(root: Path, mirror: Mirror) -> list[str]:
 
 def guard_public_push(root: Path, mirror: Mirror) -> None:
     expected_name, expected_email = configured_public_identity(root)
+    public_check = sibling("public_check")
+    host, _, path = (remote_repo(root) or "").partition("/")
+    owner = path.split("/", 1)[0].lower() if host.lower() == "github.com" else None
     for commit in public_push_commits(root, mirror):
         details = run_git(root, "show", "-s", "--format=%B%x00%an%x00%ae%x00%cn%x00%ce", commit)
         if details.returncode != 0:
@@ -3847,12 +3856,165 @@ def guard_public_push(root: Path, mirror: Mirror) -> None:
         message, author_name, author_email, committer_name, committer_email = values
         if tracker_references(message):
             raise QueueError(f"Cannot push {commit} to a public mirror: message has a tracker reference")
+        if public_check.made_on_github_by_owner(f"{author_name} <{author_email}>",
+                                                f"{committer_name} <{committer_email}>", owner):
+            continue  # the squash commit of a landing pull request
         if (author_name, author_email) != (expected_name, expected_email):
             raise QueueError(f"Cannot push {commit} to a public mirror: author differs from public_identity")
         if (committer_name, committer_email) != (expected_name, expected_email):
             raise QueueError(
                 f"Cannot push {commit} to a public mirror: committer differs from public_identity"
             )
+
+
+CHECK_NAME = "check"
+CHECK_POLL_SECONDS = 30
+CHECK_POLLS = 120  # an hour: the suite's limit is minutes, a queued runner may add some
+LANDING_PREFIX = "land/"
+
+
+class GitHub:
+    """The door to GitHub's pull requests and check runs for `repo` (`<host>/<owner>/<repo>`),
+    through `gh api`; the one place `integrate` talks to GitHub about landing, so tests replace it
+    with a fake."""
+
+    def __init__(self, root: Path, repo: str) -> None:
+        self.root, self.slug, self.host = root, api_repo(repo), repo_host(repo)
+
+    def api(self, path: str, method: str = "GET", data: dict[str, object] | None = None) -> object:
+        arguments = ["api", "-X", method, f"repos/{self.slug}/{path}",
+                     *(("--hostname", self.host) if self.host and self.host != "github.com" else ())]
+        if data is None:
+            output = run_gh(self.root, arguments)
+        else:
+            with tempfile.TemporaryDirectory() as directory:
+                body = Path(directory) / "body.json"
+                body.write_text(json.dumps(data), encoding="utf-8")
+                output = run_gh(self.root, [*arguments, "--input", str(body)])
+        return json.loads(output) if output.strip() else {}
+
+    def pull(self, number: int) -> dict[str, object]:
+        return self.api(f"pulls/{number}")
+
+    def open_pull(self, head: str, base: str) -> dict[str, object] | None:
+        owner = self.slug.split("/")[0]
+        found = self.api(f"pulls?state=open&head={owner}:{head}&base={base}")
+        return found[0] if found else None
+
+    def create_pull(self, head: str, base: str, title: str, body: str) -> dict[str, object]:
+        return self.api("pulls", "POST", {"head": head, "base": base, "title": title, "body": body})
+
+    def update_pull(self, number: int, title: str, body: str) -> dict[str, object]:
+        return self.api(f"pulls/{number}", "PATCH", {"title": title, "body": body})
+
+    def close_pull(self, number: int, comment: str) -> None:
+        self.api(f"issues/{number}/comments", "POST", {"body": comment})
+        self.api(f"pulls/{number}", "PATCH", {"state": "closed"})
+
+    def check_run(self, sha: str, name: str) -> dict[str, object] | None:
+        """The newest check run `name` on commit `sha`, or None before one exists."""
+        runs = self.api(f"commits/{sha}/check-runs?check_name={name}").get("check_runs") or []
+        return max(runs, key=lambda run: int(run.get("id") or 0)) if runs else None
+
+    def squash(self, number: int, sha: str, title: str, message: str) -> str:
+        """Squash-merge pull request `number` at head `sha` with exactly `title` and `message`;
+        the merged commit's sha."""
+        merged = self.api(f"pulls/{number}/merge", "PUT", {
+            "merge_method": "squash", "sha": sha, "commit_title": title, "commit_message": message,
+        })
+        return str(merged.get("sha") or "")
+
+
+def wait_for_check(door: GitHub, sha: str, pull_url: str) -> str:
+    """Wait for the required check `check` on the landing head `sha`; its run's URL once it
+    succeeds, refused when it concludes otherwise or does not finish within CHECK_POLLS polls."""
+    for poll in range(1, CHECK_POLLS + 1):
+        run = door.check_run(sha, CHECK_NAME)
+        if run is not None and run.get("status") == "completed":
+            url = str(run.get("html_url") or pull_url)
+            if run.get("conclusion") == "success":
+                print(f"Check {CHECK_NAME}: success ({url})")
+                return url
+            raise QueueError(
+                f"The required check {CHECK_NAME} concluded {run.get('conclusion')} on {sha[:12]} "
+                f"({url}); nothing was merged into the integration branch. Read the run, fix the "
+                "cause on the work branch, then integrate again"
+            )
+        state = "not started" if run is None else str(run.get("status"))
+        print(f"Check {CHECK_NAME}: {state} on {sha[:12]} (poll {poll}/{CHECK_POLLS}); "
+              f"waiting {CHECK_POLL_SECONDS} s")
+        wait(CHECK_POLL_SECONDS)
+    raise QueueError(
+        f"The required check {CHECK_NAME} did not finish on {sha[:12]} within "
+        f"{CHECK_POLLS * CHECK_POLL_SECONDS // 60} minutes ({pull_url}); nothing was merged. Look at "
+        "the pull request's checks, then integrate again, which reuses the pull request"
+    )
+
+
+def remote_head(root: Path, branch: str) -> str:
+    listed = checked_git(root, "ls-remote", "origin", f"refs/heads/{branch}").split()
+    return listed[0] if listed else ""
+
+
+def tree_of(root: Path, commit: str) -> str:
+    return checked_git(root, "rev-parse", f"{commit}^{{tree}}").strip()
+
+
+def abandon_landing(root: Path, target: str, landing: str) -> None:
+    """Leave the landing branch: back on the integration branch, the local landing branch gone."""
+    subprocess.run(["git", "-C", str(root), "merge", "--abort"], capture_output=True, check=False)
+    checked_git(root, "switch", "-q", "--discard-changes", target)
+    run_git(root, "branch", "-D", landing)
+
+
+def land(root: Path, door: GitHub, landing: str, target: str, base: str, description: str,
+         title: str, message: str) -> tuple[str, str, str]:
+    """Push `landing`, open or reuse its pull request into `target` with `description`, wait for
+    `check`, squash-merge it with `title` and `message` and read the merged commit back: it must
+    be origin's `target`, on `base`, with the tree tested. (merged sha, pull URL, run URL)."""
+    landed = checked_git(root, "rev-parse", "HEAD").strip()
+    push_gate(root, landing)
+    guard_pushed_tree(root, landing)
+    git_push(root, ["--force", "origin", f"{landing}:refs/heads/{landing}"])
+    pull = door.open_pull(landing, target)
+    if pull is None:
+        pull = door.create_pull(landing, target, title, description)
+        print(f"Landing pull request opened: {pull.get('html_url')}")
+    else:
+        pull = door.update_pull(int(pull["number"]), title, description)
+        print(f"Landing pull request reused: {pull.get('html_url')}")
+    number, url = int(pull["number"]), str(pull.get("html_url") or "")
+    run_url = wait_for_check(door, landed, url)
+    moved = remote_head(root, target)
+    if moved != base:
+        raise QueueError(
+            f"origin's {target} moved from {base[:12]} to {moved[:12] or 'nothing'} while {url} "
+            f"waited; nothing was merged, as a squash onto it would land an untested tree. "
+            "Integrate again, which merges the newest integration branch and reuses the pull request"
+        )
+    merged = door.squash(number, landed, title, message)
+    read = door.pull(number)
+    if not read.get("merged") or str(read.get("merge_commit_sha") or "") != merged or not merged:
+        raise QueueError(
+            f"{url} reads back as merged={read.get('merged')} at "
+            f"{read.get('merge_commit_sha')!r}, not the squash commit {merged!r} the merge "
+            "returned; check the pull request on GitHub before integrating anything else"
+        )
+    checked_git(root, "fetch", "-q", "origin", f"refs/heads/{target}:refs/remotes/origin/{target}")
+    problems = []
+    if remote_head(root, target) != merged:
+        problems.append(f"origin's {target} is not {merged[:12]}")
+    if checked_git(root, "rev-parse", f"{merged}^").strip() != base:
+        problems.append(f"its parent is not {base[:12]}")
+    if tree_of(root, merged) != tree_of(root, landed):
+        problems.append(f"its tree is not the tree of {landed[:12]} that the checks passed")
+    if problems:
+        raise QueueError(
+            f"The squash commit {merged[:12]} of {url} does not read back as tested: "
+            + "; ".join(problems) + ". Check origin's " + target + " before integrating anything else"
+        )
+    print(f"Landed: {merged[:12]} on {target} from {url}")
+    return merged, url, run_url
 
 
 def integrate(
@@ -3864,9 +4026,12 @@ def integrate(
     check_temporary_working_directory: bool = False,
     included: str | None = None,
 ) -> str:
-    """Merge a delivered pull request's branch, the field report its description carries, and
-    perform the mechanical integration steps, closing the work issue; `included` states why commits
-    after the field report's Branch tip are merged too."""
+    """Land a delivered pull request's branch on the integration branch through a squash pull
+    request: merge it into the newest integration branch on `land/<branch>`, run the checks,
+    release, push, open or reuse the landing pull request (the field report its description),
+    wait for `check`, squash-merge and read back the merged commit; then close the work issue,
+    clean up and start what is unblocked. `included` states why commits after the field report's
+    Branch tip are merged too."""
     tracker = resolve_repo(root, repo)
     pull, report, work_issue, work_number = pull_request_report(root, pull_number, tracker)
     branch = str(pull.get("headRefName", ""))
@@ -3880,31 +4045,47 @@ def integrate(
             f"work_tickets.py integrate: {root} is not on the integration branch {target}; "
             f"run git -C {root} switch {target}, or set project.integration_branch in se.toml"
         )
+    remote = remote_repo(root)
+    if remote is None:
+        raise QueueError(
+            f"work_tickets.py integrate: {root} has no origin remote to land {branch} on; add it "
+            "with git remote add origin <url>"
+        )
     sync(root)
-    previous = run_git(root, "rev-parse", "HEAD")
-    if previous.returncode != 0 or not previous.stdout.strip():
-        raise QueueError(f"Cannot determine the pre-merge {target}")
+    base = checked_git(root, "rev-parse", "HEAD").strip()
+    if base != remote_head(root, target):
+        raise QueueError(
+            f"work_tickets.py integrate: {target} in {root} is not origin's {target}; a landing "
+            f"starts from origin's newest {target}, so reset the checkout to it "
+            f"(git -C {root} reset --keep origin/{target}) and integrate again"
+        )
     head = str(pull.get("headRefOid", ""))
     late = check_branch_tip(root, report, branch, head or branch, included)
     mirrors = configured_mirrors(root)
-    trailer = config_value("commit_trailer", remote_repo(root), None)
+    trailer = config_value("commit_trailer", remote, None)
     kind = release_trailer(root, branch, str(work_issue["body"]), report)
-    merged = run_git(root, "merge", "--no-ff", "-m", integration_merge_message(
-                root, branch, work_number, pull_number,
-                public_check_enabled(root) or any(mirror.public for mirror in mirrors),
-            ), "-m", kind, *(("-m", trailer) if trailer else ()), branch)
+    title = integration_merge_message(
+        root, branch, work_number, pull_number,
+        public_check_enabled(root) or any(mirror.public for mirror in mirrors),
+    )
+    message = "\n\n".join((kind, *((trailer,) if trailer else ())))
+    landing = f"{LANDING_PREFIX}{branch}"
+    checked_git(root, "switch", "-q", "-C", landing, base)
+    merged = run_git(root, "merge", "--no-ff", "-m", title, "-m", message, branch_head(root, branch))
     if merged.returncode != 0:
         conflicts = run_git(root, "diff", "--name-only", "--diff-filter=U")
-        subprocess.run(["git", "-C", str(root), "merge", "--abort"], capture_output=True, check=False)
+        abandon_landing(root, target, landing)
         files = ", ".join(line for line in conflicts.stdout.splitlines() if line.strip())
         raise QueueError(f"Cannot merge {branch}; conflicts: {files or 'unknown files'}")
-    contained = run_git(root, "merge-base", "--is-ancestor", head, target)
+    contained = run_git(root, "merge-base", "--is-ancestor", head, landing)
     if not head or contained.returncode != 0:
-        reason = f"merged {target} does not contain the pull request head"
+        abandon_landing(root, target, landing)
+        reason = f"the merged {landing} does not contain the pull request head"
         integration_escalation(root, work_number, tracker, reason)
         raise QueueError(reason)
 
     has_public_mirror = any(mirror.public for mirror in mirrors)
+    door = GitHub(root, remote)
     try:
         suite_result = run_suite(root)
         if build_command:
@@ -3912,20 +4093,36 @@ def integrate(
         if check_commands and not has_public_mirror:
             run_project_checks(root, check_commands, check_temporary_working_directory)
         if public_check_enabled(root):
-            run_public_check(root, previous.stdout.strip())
+            run_public_check(root, base)
+        tag = release(root, landing, f"refs/remotes/origin/{target}")
+        landed_tip = checked_git(root, "rev-parse", "HEAD").strip()
+        commit, landing_url, run_url = land(
+            root, door, landing, target, base, str(pull.get("body") or ""), title, message)
     except QueueError as error:
-        restore_pre_merge(root, previous.stdout.strip())
+        abandon_landing(root, target, landing)
         integration_escalation(root, work_number, tracker, str(error))
         raise
 
-    tag = push(root, target)
+    checked_git(root, "switch", "-q", target)
+    checked_git(root, "merge", "-q", "--ff-only", commit)
+    run_git(root, "branch", "-D", landing)
+    if tag and release_by_workflow(root):
+        workflow_tags(tag)
+    elif tag:
+        checked_git(root, "tag", "-f", tag, commit)
+        git_push(root, ["origin", f"refs/tags/{tag}"])
+    deleted = run_git(root, "push", "origin", f":refs/heads/{landing}")
+    if deleted.returncode != 0:
+        print(f"Cleanup: {landing} left on origin ({failure_detail(deleted)}); the repository's "
+              "automatic head-branch deletion removes it")
+    door.close_pull(pull_number, f"Landed on {target} in {commit[:12]} through {landing_url}.")
     for mirror in mirrors:
         if mirror.public and check_commands:
             run_project_checks(root, check_commands, check_temporary_working_directory)
         if mirror.public:
             guard_public_push(root, mirror)
         git_push(root, [mirror.remote, f"{target}:{mirror.branch}"])
-    commit = run_git(root, "rev-parse", "--short", "HEAD").stdout.strip()
+    short = run_git(root, "rev-parse", "--short", commit).stdout.strip()
     print(f"Suite: {suite_result}")
     extra = (f"Includes {len(late)} commit(s) after the field report's Branch tip: {included}\n"
              if late else "")
@@ -3934,8 +4131,9 @@ def integrate(
              + "; ".join(pending) + "\n") if pending else ""
     run_gh_with_body(
         root, ["issue", "comment", str(work_number), *repo_arguments(tracker)],
-        f"Integrated in {commit} from {pull.get('url') or f'PR #{pull_number}'}. "
-        f"{release_line(str(pull.get('url') or ''), tag)} Suite: {suite_result}.\n{extra}{waits}",
+        f"Integrated in {short} from {pull.get('url') or f'PR #{pull_number}'}, landed through "
+        f"{landing_url} (check: {run_url}). {release_line(landing_url, tag)} "
+        f"Suite: {suite_result}.\n{extra}{waits}",
     )
     run_gh(root, [
         "issue", "edit", str(work_number), "--remove-label", "in-progress",
@@ -3951,12 +4149,12 @@ def integrate(
     if pending:
         print(f"Close #{work_number} once its post-merge acceptance is seen: {'; '.join(pending)}")
     try:
-        remove_worker_worktree(root, branch)
+        remove_worker_worktree(root, branch, landed_tip)
         print("Cleanup: worker worktree removed")
     except QueueError as error:
         print(f"warning: worker worktree was not removed: {error}", file=sys.stderr)
         print("Cleanup: worker worktree retained")
-    delete_merged_branch(root, branch, head)
+    delete_merged_branch(root, branch, head, landed_tip)
     started = 0
     for candidate in ready_issues(root, tracker):
         slots = capacity(root, tracker)
@@ -3965,7 +4163,7 @@ def integrate(
         start(root, int(candidate["number"]), tracker, None, True)
         started += 1
     print(f"Started: {started}")
-    return commit
+    return short
 
 
 @dataclass(frozen=True)
