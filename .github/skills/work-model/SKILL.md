@@ -92,6 +92,19 @@ pull request carries its field report.
     `start` take only `work` + `ready`, never a `backlogged`, `field-report` or `in-progress`
     issue.
   - `file --blocked-by <n>` links the blockers before it adds `ready`.
+- **Dedupe before filing**: an issue is filed once per purpose.
+  - Sameness: two open issues of one repository are twins when their titles match once a
+    trailing `-yyyymmdd` is dropped and their `Routed from:` lines match (a routed issue has one,
+    any other none); `purpose_key` in `work_tickets.py` owns the rule.
+  - The commands that file an issue, or turn one into a work issue, are `file`, `backlog file`
+    and `route`; field reports, escalations and the hand-off plans of `integrate` and `refs` file
+    none.
+  - Each re-reads the open issues just before it writes. On a twin it comments on the twin with
+    what it would have filed, prints the twin's number and files nothing; `route` also closes the
+    issue it was routing as a duplicate of the twin.
+  - After filing it reads again: where a lower-numbered twin is open, two creators raced, and the
+    new issue closes itself as its duplicate (state reason duplicate).
+  - [Without gh](#without-gh) the same steps, the search and its conditions, are its plan.
 - **Planned**: optional. An open issue whose body has a line of its own `Planned: yyyy-mm-dd` is
   planned for that day; the Timeline (`<se>/scripts/timeline.py`) shows it on that day, or on Today
   marked late once the day has passed.
@@ -554,6 +567,9 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   do everything local, print their GitHub steps as a plan of tool names and arguments, and
   check the result through git with `--read-back` (README
   [Landing on main](../../../README.md#landing-on-main)).
+  - `file`, `backlog file` and `route` print their [dedupe](#issues) plan: the search, the
+    conditions and the filing step. `route` takes the issue as the tools read it, `--issue-title
+    <title> --issue-body <file>`; `file --blocked-by` needs gh.
   - The session runs each plan's steps in order with its GitHub tools, then the plan's `Then:`
     line.
 - **Every other command** fails, naming itself, the missing `gh` and this section.

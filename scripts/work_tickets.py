@@ -3036,32 +3036,252 @@ def read_text_file(file: Path, what: str) -> str:
     return text
 
 
+# Dedupe before filing (work model, Issues): every command that files an issue, or turns one into
+# a work issue (`file`, `backlog file`, `route`), re-reads the open issues just before it writes and
+# answers a twin instead of filing one; after filing it reads again and closes the new issue as a
+# duplicate of a lower-numbered twin that raced it. One plan holds the steps: the local runner runs
+# it through gh, the cloud hand-off prints it for the session's GitHub tools.
+
+DATE_SUFFIX_PATTERN = re.compile(r"-\d{8}$")
+ROUTED_FROM_PATTERN = re.compile(r"^Routed from: (.+?)[ \t]*$", re.MULTILINE)
+
+
+def purpose_key(title: str, body: str) -> tuple[str, str | None]:
+    """The purpose of an issue, the one owner of sameness: its title without a trailing
+    `-yyyymmdd` and, for a routed issue, its `Routed from:` line. Two open issues of one
+    repository with the same key are twins."""
+    routed = ROUTED_FROM_PATTERN.search(body)
+    return DATE_SUFFIX_PATTERN.sub("", title.strip()), routed[1] if routed else None
+
+
+def twins(issues: list[dict[str, object]], key: tuple[str, str | None],
+          exclude: int | None = None) -> list[int]:
+    """The numbers of `issues` with purpose `key`, lowest first, without `exclude`."""
+    return sorted(int(str(issue["number"])) for issue in issues
+                  if int(str(issue["number"])) != exclude
+                  and purpose_key(str(issue.get("title") or ""), str(issue.get("body") or "")) == key)
+
+
+def twin_rule(key: tuple[str, str | None]) -> str:
+    """The sameness condition of `key` in words, as a plan's note states it."""
+    stem, routed = key
+    return (f"whose title without a trailing -yyyymmdd is `{stem}` and whose body has "
+            + (f"the line `Routed from: {routed}`" if routed else "no `Routed from:` line"))
+
+
+def comment_quote(text: str) -> str:
+    """`text` as a Markdown quote, without the fleet marker, so a comment shows it as data."""
+    lines = text.replace(FLEET_MARKER, "").strip().splitlines()
+    return "\n".join(f"> {line}".rstrip() for line in lines)
+
+
+def twin_comment(command: str, title: str, body: str, existing: int | None) -> str:
+    """The comment a twin gets instead of a new issue: what `command` would have filed."""
+    what = (f"would have routed #{existing} as" if existing is not None
+            else "would have filed")
+    return (f"Not filed again: `work_tickets.py {command}` {what} a twin of this issue, "
+            f"answered here instead.\n\n**{title}**\n\n{comment_quote(body)}\n")
+
+
+def open_issues_step(action: str, repo: str, key: tuple[str, str | None], note: str,
+                     gives: str) -> Step:
+    return Step(action, "list_issues", {
+        **owner_repo(repo), "state": "OPEN", "perPage": 100, "fields": ["number", "title", "body"]},
+        note=f"Read every open issue (page with `after` until none is left); a twin is one "
+             f"{twin_rule(key)}. {note}", gives=(gives,))
+
+
+def close_duplicate_steps(repo: str, number: object, of: Later, why: str,
+                          condition: str, last: str = "") -> tuple[Step, ...]:
+    """Comment on `number` that it duplicates `of`, then close it with state_reason duplicate;
+    the local runner skips both where `of` is none."""
+    return (
+        Step(f"comment_duplicate:{of.name}", "add_issue_comment", {
+            **owner_repo(repo), "issue_number": number, "body": f"Duplicate of #{of}: {why}.\n"},
+            note=condition),
+        Step(f"close_duplicate:{of.name}", "issue_write", {
+            **owner_repo(repo), "method": "update", "issue_number": number, "state": "closed",
+            "state_reason": "duplicate", "duplicate_of": of}, note=condition + last),
+    )
+
+
+def filing_plan(repo: str, command: str, title: str, body: str, filing: Step,
+                existing: int | None = None) -> Plan:
+    """The dedupe plan around `filing`, the step that files the issue (or, for `route`, turns
+    `existing` into a work issue): read the open issues just before; with a twin, comment on it
+    what would have been filed (and close `existing` as its duplicate) and file nothing; otherwise
+    file, read again, and close the new issue as a duplicate of a lower-numbered twin."""
+    key = purpose_key(title, body)
+    twin = Later("twin", 1)
+    stop = " Then stop: nothing is filed."
+    on_twin: tuple[Step, ...] = (
+        Step("comment_twin", "add_issue_comment", {
+            **owner_repo(repo), "issue_number": twin,
+            "body": twin_comment(command, title, body, existing)},
+            note="Only where step 1 found a twin." + ("" if existing is not None else stop)),
+        *(close_duplicate_steps(repo, existing, twin, "routed as a twin of it",
+                                "Only where step 1 found a twin.", stop) if existing is not None else ()),
+    )
+    at = len(on_twin) + 2
+    number: object = existing if existing is not None else Later("number", at)
+    lower = Later("lower", at + 1)
+    filed = Step(filing.action, filing.tool, filing.arguments,
+                 note=" ".join(part for part in ("Only where step 1 found no twin.", filing.note)
+                               if part), gives=filing.gives)
+    return Plan(f"{command} {title}", (
+        open_issues_step("find_twin", repo, key, (
+            f"Gives the lowest-numbered twin{f' other than #{existing}' if existing else ''}, "
+            "or none."), "twin"),
+        *on_twin,
+        filed,
+        open_issues_step("find_lower", repo, key, (
+            f"Only where step {at} ran: gives the lowest-numbered twin with a lower number than "
+            f"#{number}, or none: two creators raced."), "lower"),
+        *close_duplicate_steps(repo, number, lower, "filed in a race with it",
+                               f"Only where step {at + 1} found a lower twin."),
+    ))
+
+
+@dataclass(frozen=True)
+class Filed:
+    """What a dedupe plan did: the twin it answered, or the issue it filed (`number`, `url`) and
+    the lower twin it then closed it as a duplicate of; all None where it was handed off."""
+
+    twin: int | None = None
+    number: int | None = None
+    url: str = ""
+    lower: int | None = None
+
+    @property
+    def duplicate(self) -> bool:
+        return self.lower is not None
+
+    def line(self, repo: str, what: str) -> str:
+        """The command's answer for `what` it files: the twin's number, the new issue's URL, or
+        the hand-off."""
+        if self.twin is not None:
+            return (f"Not filed: #{self.twin} {issue_url(repo, self.twin)} has the same purpose; "
+                    "commented on it instead")
+        if self.number is None:
+            return f"Run the GitHub plan above to file the {what} once"
+        url = self.url or issue_url(repo, self.number)
+        return f"Filed {what} {url}" + (
+            f", closed as a duplicate of #{self.lower}" if self.lower is not None else "")
+
+
+def open_issues(root: Path, repo: str) -> list[dict[str, object]]:
+    """Every open issue of `repo`, read now, with its title and body."""
+    return json.loads(run_gh(root, [
+        "issue", "list", "--state", "open", "--json", "number,title,body", "--limit", "5000",
+        *repo_arguments(repo),
+    ]) or "[]")
+
+
+def filed_once(root: Path, repo: str, command: str, title: str, body: str, filing: Step,
+               existing: int | None = None) -> Filed:
+    """Run the dedupe plan around `filing` through gh, or print it where gh is not signed in."""
+    plan = filing_plan(repo, command, title, body, filing, existing)
+    if hand_off():
+        print(plan.text())
+        return Filed()
+    key = purpose_key(title, body)
+    state: dict[str, object] = {}
+
+    def find_twin(_: dict[str, object], __: str) -> dict[str, object]:
+        found = twins(open_issues(root, repo), key, existing)
+        state["twin"] = found[0] if found else None
+        return {"twin": state["twin"]}
+
+    def comment_twin(arguments: dict[str, object], _: str) -> None:
+        if state["twin"] is not None:
+            run_gh_with_body(root, ["issue", "comment", str(state["twin"]), *repo_arguments(repo)],
+                             str(arguments["body"]))
+
+    def create(arguments: dict[str, object], _: str) -> dict[str, object] | None:
+        if state["twin"] is not None:
+            return {"number": None}
+        labels = [str(label) for label in arguments["labels"]]  # type: ignore[union-attr]
+        ensure_labels(root, repo, labels)
+        output = run_gh_with_body(root, [
+            "issue", "create", "--title", str(arguments["title"]),
+            *(argument for label in labels for argument in ("--label", label)),
+            *repo_arguments(repo)], str(arguments["body"]))
+        url = output.strip().splitlines()[-1] if output.strip() else ""
+        match = re.search(r"/issues/(\d+)$", url)
+        if match is None:
+            raise QueueError(f"{command}: gh issue create printed no issue URL: {output.strip()!r}")
+        state.update(number=int(match[1]), url=url)
+        return {"number": state["number"]}
+
+    def route(arguments: dict[str, object], _: str) -> None:
+        if state["twin"] is not None:
+            return
+        labels = work_labels(root, repo)
+        ensure_labels(root, repo, labels)
+        run_gh_with_body(root, [
+            "issue", "edit", str(existing), "--title", str(arguments["title"]),
+            *(argument for label in labels for argument in ("--add-label", label)),
+            *repo_arguments(repo)], str(arguments["body"]))
+        state["number"] = existing
+
+    def find_lower(_: dict[str, object], __: str) -> dict[str, object]:
+        number = state.get("number")
+        found = ([twin for twin in twins(open_issues(root, repo), key, int(str(number)))
+                  if twin < int(str(number))] if number is not None else [])
+        state["lower"] = found[0] if found else None
+        return {"lower": state["lower"]}
+
+    def comment_duplicate(arguments: dict[str, object], source: str) -> None:
+        if state[source] is None:
+            return
+        body = re.sub(r"#<[^>]*>", f"#{state[source]}", str(arguments["body"]))
+        run_gh_with_body(root, ["issue", "comment", str(arguments["issue_number"]),
+                                *repo_arguments(repo)], body)
+
+    def close_duplicate(arguments: dict[str, object], source: str) -> None:
+        if state[source] is None:
+            return
+        hostname = repo_host(repo)
+        run_gh(root, ["api", "-X", "PATCH",
+                      f"repos/{api_repo(repo)}/issues/{arguments['issue_number']}",
+                      "-f", "state=closed", "-f", "state_reason=duplicate",
+                      *(("--hostname", hostname) if hostname else ())])
+
+    run_plan(plan, {"find_twin": find_twin, "comment_twin": comment_twin, "create": create,
+                    "route": route, "find_lower": find_lower,
+                    "comment_duplicate": comment_duplicate, "close_duplicate": close_duplicate})
+    number = state.get("number")
+    return Filed(twin=state["twin"],  # type: ignore[arg-type]
+                 number=None if number is None else int(str(number)), url=str(state.get("url", "")),
+                 lower=state.get("lower"))  # type: ignore[arg-type]
+
+
 def file_work_issue(
     root: Path, title: str, file: Path, blockers: list[int], repo: str | None
 ) -> str:
-    """File a work issue with its labels; with blockers, link them first and add `ready` last, so
-    the issue is never startable before its blockers are linked."""
+    """File a work issue with its labels, once (dedupe: work model, Issues); with blockers,
+    link them first and add `ready` last, so the issue is never startable before its blockers are
+    linked. Returns the filed issue's URL, or the line naming the twin it answered."""
     if not title.strip():
         raise QueueError("file needs a title, the branch name")
     body = fleet_marked(read_text_file(file, "work issue body") + "\n")
     labels = work_labels(root, repo)
     repo = resolve_repo(root, repo)
-    ensure_labels(root, repo, labels)
     first = [label for label in labels if not blockers or label != "ready"]
-    output = run_gh_with_body(root, [
-        "issue", "create", "--title", title.strip(),
-        *(argument for label in first for argument in ("--label", label)), *repo_arguments(repo),
-    ], body)
-    url = output.strip().splitlines()[-1] if output.strip() else ""
-    if blockers:
-        match = re.search(r"/issues/(\d+)$", url)
-        if match is None:
-            raise QueueError(f"file: gh issue create printed no issue URL: {output.strip()!r}")
-        number = int(match.group(1))
+    if hand_off() and blockers:
+        raise QueueError(
+            "file --blocked-by links blockers through gh, which is not signed in here; file "
+            "without --blocked-by and link the blockers on GitHub, or run it where gh is signed in")
+    filing = Step("create", "issue_write", {
+        **owner_repo(repo), "method": "create", "title": title.strip(), "body": body,
+        "labels": first}, gives=("number",))
+    outcome = filed_once(root, repo, "file", title.strip(), body, filing)
+    if outcome.number is not None and not outcome.duplicate and blockers:
         for blocker in blockers:
-            block(root, number, blocker, repo)
-        run_gh(root, ["issue", "edit", str(number), "--add-label", "ready", *repo_arguments(repo)])
-    return url or title
+            block(root, outcome.number, blocker, repo)
+        run_gh(root, ["issue", "edit", str(outcome.number), "--add-label", "ready",
+                      *repo_arguments(repo)])
+    return outcome.line(repo, "work issue")
 
 
 def today_stamp() -> str:
@@ -3093,41 +3313,55 @@ def routed_body(body: str, title: str, routing: str) -> str:
 
 
 def route_outside_issue(
-    root: Path, number: int, title: str | None, kind: str, file: Path, repo: str | None
+    root: Path, number: int, title: str | None, kind: str, file: Path, repo: str | None,
+    read: tuple[str, Path] | None = None
 ) -> str:
-    """Route a checked outside issue as a work issue in one edit: its title becomes its branch name
-    (given, or derived from the title), it gets the work labels, and its body gets the routing
-    section, whose handled record `intake --outside` reads as done. Returns the branch name."""
+    """Route a checked outside issue as a work issue in one edit, once
+    (dedupe: work model, Issues): its title becomes its branch name (given, or derived from
+    the title), it gets the work labels, and its body gets the routing section, whose handled
+    record `intake --outside` reads as done. Returns the line naming the result. `read` is the
+    issue's title and a file with its body as the host's GitHub tools read them, where gh is not
+    signed in."""
     routing = read_text_file(file, "routing sections")
     repo = resolve_repo(root, repo)
-    issue = fetch_issue(root, number, repo)
+    if read is None and hand_off():
+        raise QueueError(
+            f"route reads #{number} through gh, which is not signed in here; read the issue with "
+            "the GitHub tools and pass --issue-title <title> --issue-body <file with its body>")
+    issue = (fetch_issue(root, number, repo) if read is None
+             else {"title": read[0], "body": read_file(read[1], "issue body")})
     if section(markdown_sections(str(issue["body"])), ROUTING_SECTION):
         raise QueueError(f"route: #{number} is routed already; edit its {ROUTING_SECTION} section")
     branch = title.strip() if title is not None else routed_branch(str(issue["title"]), kind)
     if not branch:
         raise QueueError("route needs a title, the branch name, or none to derive it")
-    labels = work_labels(root, repo)
-    ensure_labels(root, repo, labels)
-    run_gh_with_body(root, [
-        "issue", "edit", str(number), "--title", branch,
-        *(argument for label in labels for argument in ("--add-label", label)),
-        *repo_arguments(repo),
-    ], routed_body(str(issue["body"]), str(issue["title"]), routing))
-    return branch
+    body = routed_body(str(issue["body"]), str(issue["title"]), routing)
+    filing = Step("route", "issue_write", {
+        **owner_repo(repo), "method": "update", "issue_number": number, "title": branch,
+        "body": body, "labels": f"<the issue's labels with {', '.join(work_labels(root, repo))}>"},
+        note="issue_read get_labels reads the issue's labels; issue_write sets the whole list")
+    outcome = filed_once(root, repo, "route", branch, body, filing, existing=number)
+    if outcome.twin is not None:
+        return outcome.line(repo, branch)
+    if outcome.number is None:
+        return f"Run the GitHub plan above to route #{number} as {branch} once"
+    return f"Routed issue #{number} as {branch}" + (
+        f"; closed as a duplicate of #{outcome.lower}" if outcome.duplicate else "")
 
 
 def backlog_file(root: Path, title: str, file: Path, repo: str | None) -> str:
-    """File a far-out idea as a backlog issue for the person, creating its label where missing."""
+    """File a far-out idea as a backlog issue for the person, once
+    (dedupe: work model, Issues), creating its label where missing."""
     repo = resolve_repo(root, repo)
     body = read_file(file, "backlog body").strip()
     if not title.strip() or not body:
         raise QueueError("backlog file needs a title and a body")
-    ensure_labels(root, repo, [BACKLOG_LABEL])
-    output = run_gh_with_body(root, [
-        "issue", "create", "--title", title.strip(), "--label", BACKLOG_LABEL,
-        "--label", PERSON_LABEL, *repo_arguments(repo),
-    ], fleet_marked(body + "\n"))
-    return output.strip().splitlines()[-1] if output.strip() else title
+    filing = Step("create", "issue_write", {
+        **owner_repo(repo), "method": "create", "title": title.strip(),
+        "body": fleet_marked(body + "\n"), "labels": [BACKLOG_LABEL, PERSON_LABEL]},
+        gives=("number",))
+    return filed_once(root, repo, "backlog file", title.strip(), fleet_marked(body + "\n"),
+                      filing).line(repo, "backlog issue")
 
 
 def backlog_list(root: Path, search: str | None, repo: str | None) -> list[dict[str, object]]:
@@ -5208,7 +5442,7 @@ def run_escalate(root: Path, args: argparse.Namespace) -> int:
              help="a native blocker to link before it is ready, repeatable"),
          REPO)
 def run_file(root: Path, args: argparse.Namespace) -> int:
-    print(f"Filed work issue {file_work_issue(root, args.title, args.body_file, args.blocked_by, args.repo)}")
+    print(file_work_issue(root, args.title, args.body_file, args.blocked_by, args.repo))
     return 0
 
 
@@ -5222,11 +5456,16 @@ def run_file(root: Path, args: argparse.Namespace) -> int:
          arg("--routing-file", required=True, type=Path,
              help="the work.md sections the issue lacks, completed, appended to its body under "
                   f"## {ROUTING_SECTION} with the handled marker"),
+         arg("--issue-title", help="without gh: the issue's title as the GitHub tools read it"),
+         arg("--issue-body", type=Path,
+             help="without gh: a file with the issue's body as the GitHub tools read it"),
          REPO)
 def run_route(root: Path, args: argparse.Namespace) -> int:
-    branch = route_outside_issue(
-        root, args.issue, args.title, args.type, args.routing_file, args.repo)
-    print(f"Routed issue #{args.issue} as {branch}")
+    if (args.issue_title is None) != (args.issue_body is None):
+        raise QueueError("route takes --issue-title and --issue-body together")
+    read = None if args.issue_body is None else (args.issue_title, args.issue_body)
+    print(route_outside_issue(
+        root, args.issue, args.title, args.type, args.routing_file, args.repo, read))
     return 0
 
 
@@ -5241,7 +5480,7 @@ BACKLOG = command_group(
          arg("--body-file", required=True, type=Path, help="Markdown body"),
          REPO, parent=BACKLOG)
 def run_backlog_file(root: Path, args: argparse.Namespace) -> int:
-    print(f"Filed backlog issue {backlog_file(root, args.title, args.body_file, args.repo)}")
+    print(backlog_file(root, args.title, args.body_file, args.repo))
     return 0
 
 
