@@ -62,6 +62,9 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   history already pushed alone.
   - GitHub's web-flow identity (`GitHub`, `noreply` at `github.com`), the committer of a commit
     made on GitHub, passes as committer, never as author.
+  - On such a commit, the author may be the account that owns `origin` on `github.com`, by its
+    `users.noreply.github.com` address: the squash merge of a pull request into `main`. Every
+    other account stays foreign.
   - A commit already published passes by its reasoned commit entry in `.public-check-allow`.
 - The public list, `scripts/public-check-terms.toml`: the generic patterns every source is checked
   against, read from the se module the check runs from: user profile paths (`X:\Users\<name>`,

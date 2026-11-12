@@ -459,6 +459,40 @@ def test_a_commit_made_on_github_passes_only_with_the_project_author(
     assert result.returncode == (1 if refused else 0), result.stdout
 
 
+NOREPLY = "users.noreply.github.com"
+
+
+@pytest.mark.parametrize("origin, author, committer, refused", [
+    # The squash merge of a pull request into main: GitHub commits it for the owning account.
+    ("https://github.com/alice/example.git", "Alice <123+alice" + AT + NOREPLY + ">", "web-flow", []),
+    ("git" + AT + "github.com:Alice/example.git", "alice <alice" + AT + NOREPLY + ">", "web-flow", []),
+    # Another account's noreply address stays foreign, as does the owner's off GitHub.
+    ("https://github.com/alice/example.git", "Bob <456+bob" + AT + NOREPLY + ">", "web-flow", ["author"]),
+    ("https://github.com/alice/example.git", "Alice <123+alice" + AT + NOREPLY + ">", "author",
+     ["author", "committer"]),
+    # Without an origin on github.com no account owns the repository.
+    ("", "Alice <123+alice" + AT + NOREPLY + ">", "web-flow", ["author"]),
+])
+def test_a_commit_github_made_for_the_owning_account_passes_the_gate(
+        repo: Path, origin: str, author: str, committer: str, refused: list[str]) -> None:
+    git(repo, "config", "user.name", "mb")
+    git(repo, "config", "user.email", "mb")
+    commit(repo, {"se.toml": PROJECT_IDENTITY})
+    if origin:
+        git(repo, "remote", "add", "origin", origin)
+    (repo / "README.md").write_text("clean\n", encoding="utf-8")
+    git(repo, "add", "README.md")
+    name, email = author[:-1].split(" <")
+    env = {**os.environ, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+           **(WEB_FLOW if committer == "web-flow" else
+              {"GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email})}
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "Squash the topic"], env=env, check=True)
+    result = run_check("--repo", str(repo), "--range", "HEAD^!")
+    hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
+    assert [hit.split(": ", 1)[0].rsplit(" ", 1)[1] for hit in hits] == refused, result.stdout
+    assert result.returncode == (1 if refused else 0), result.stdout
+
+
 def test_without_a_project_identity_any_generic_identity_passes_the_gate(repo: Path) -> None:
     commit(repo, {"README.md": "clean\n"})
     result = run_check("--repo", str(repo), "--range", "HEAD^!")
