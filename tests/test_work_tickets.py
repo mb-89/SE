@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -784,3 +785,210 @@ def test_docs_check_refuses_a_stale_reference_and_docs_rewrites_it(tmp_path, mon
     assert "work_tickets.py backlog list --worktree WORKTREE" in written
     assert "stale" not in written
     assert work_tickets.main(["docs", "--check"]) == 0
+
+
+# refs request and refs apply: the Actions API faked behind its door, Workflows.
+
+OLD, NEW = "1" * 40, "2" * 40  # replaced by real commits where origin must hold them
+
+
+class FakeWorkflows:
+    """Issue comments, labels and ref-maintenance runs on the bare origin of the checkout it is
+    opened for: a real run (dry_run "false") of a passing `conclusion` moves origin's refs as the
+    workflow's atomic push does, unless `moves` is off."""
+
+    def __init__(self) -> None:
+        self.comments_posted: list[dict] = []
+        self.labels: set[str] = set()
+        self.runs: list[dict] = []
+        self.dispatched: list[tuple] = []
+        self.conclusion = "success"
+        self.moves = True
+        self.log = ("2026-11-12T10:00:00.0000000Z ##[group]Run set -euo pipefail\n"
+                    "2026-11-12T10:00:01.0000000Z set    refs/heads/main a -> b\n"
+                    "2026-11-12T10:00:02.0000000Z To https://git.example/owner/repo\n"
+                    "2026-11-12T10:00:02.0000000Z +\tb:refs/heads/main\ta...b (forced update)\n"
+                    "2026-11-12T10:00:02.0000000Z Done\n")
+        self.origin: Path | None = None
+
+    def __call__(self, root: Path, repo: str) -> "FakeWorkflows":
+        self.origin = Path(git(root, "remote", "get-url", "origin").stdout.strip())
+        return self
+
+    def comments(self, number: int) -> list[dict]:
+        return list(self.comments_posted)
+
+    def comment(self, number: int, body: str) -> dict:
+        self.comments_posted.append({"id": 100 + len(self.comments_posted), "body": body})
+        return self.comments_posted[-1]
+
+    def add_label(self, number: int, label: str) -> None:
+        self.labels.add(label)
+
+    def remove_label(self, number: int, label: str) -> None:
+        self.labels.discard(label)
+
+    def newest_run(self, workflow: str) -> int:
+        return self.runs[-1]["id"] if self.runs else 0
+
+    def dispatch(self, workflow: str, ref: str, inputs: dict) -> None:
+        self.dispatched.append((workflow, ref, inputs))
+        if inputs["dry_run"] == "false" and self.conclusion == "success" and self.moves:
+            words = inputs["updates"].split()
+            for index in range(0, len(words), 3):
+                old, new, name = words[index:index + 3]
+                assert git(self.origin, "update-ref", name, new, old).returncode == 0
+        self.runs.append({"id": 900 + len(self.runs), "status": "completed",
+                          "conclusion": self.conclusion,
+                          "html_url": f"https://git.example/owner/repo/actions/runs/{900 + len(self.runs)}"})
+
+    def run(self, run_id: int) -> dict:
+        return next(run for run in self.runs if run["id"] == run_id)
+
+    def run_log(self, run_id: int) -> str:
+        return self.log
+
+
+@pytest.fixture
+def refs_checkout(tmp_path: Path, monkeypatch) -> tuple[Path, FakeWorkflows, str, str]:
+    """A checkout whose origin holds main and a branch `next` one commit ahead; the fake door."""
+    origin, checkout = tmp_path / "origin.git", tmp_path / "main"
+    assert git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin)).returncode == 0
+    assert git(tmp_path, "clone", "-q", str(origin), str(checkout)).returncode == 0
+    identity = ("-c", "user.name=mb", "-c", "user.email=mb")
+    assert git(checkout, *identity, "commit", "-q", "--allow-empty", "-m", "base").returncode == 0
+    base = git(checkout, "rev-parse", "HEAD").stdout.strip()
+    assert git(checkout, *identity, "commit", "-q", "--allow-empty", "-m", "next").returncode == 0
+    ahead = git(checkout, "rev-parse", "HEAD").stdout.strip()
+    assert git(checkout, "push", "-q", "origin", f"{base}:refs/heads/main",
+               f"{ahead}:refs/heads/next").returncode == 0
+    fake = FakeWorkflows()
+    monkeypatch.setattr(work_tickets, "Workflows", fake)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    return checkout, fake, base, ahead
+
+
+def triples_file(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "triples.txt"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+REPO = "git.example/owner/repo"
+
+
+def test_refs_request_posts_the_triples_runs_the_dry_run_and_escalates(refs_checkout, tmp_path):
+    checkout, fake, base, ahead = refs_checkout
+    triples = f"{base} {ahead} refs/heads/main\n{ahead} {'0' * 40} refs/heads/next\n"
+    line = work_tickets.refs_request(checkout, 5, triples_file(tmp_path, triples), REPO)
+    assert fake.dispatched == [("ref-maintenance.yml", "main",
+                                {"updates": triples, "dry_run": "true"})]
+    request, dry_run = (comment["body"] for comment in fake.comments_posted)
+    assert request.startswith(work_tickets.REFS_REQUEST_MARKER)
+    assert f"```text\n{triples}```" in request
+    assert f"move refs/heads/main {base[:12]} -> {ahead[:12]}" in request
+    assert f"delete refs/heads/next (now {ahead[:12]})" in request
+    assert dry_run.startswith(work_tickets.REFS_DRY_RUN_MARKER)
+    assert "<!-- se:refs-request-id 100 -->" in dry_run
+    assert "Dry run of `ref-maintenance`: success (https://git.example/owner/repo/actions/runs/900)" in dry_run
+    assert "set    refs/heads/main a -> b\nTo https://git.example/owner/repo\n+\tb:refs/heads/main" in dry_run
+    assert "##[group]" not in dry_run
+    assert fake.labels == {"escalated"}
+    assert line == ("escalated #5: apply the ref change (2 ref(s), dry run passed)? "
+                    "On yes: work_tickets.py refs apply 5")
+    # Nothing moved: a dry run only shows the push.
+    assert git(checkout, "ls-remote", "origin", "refs/heads/main").stdout.startswith(base)
+
+
+@pytest.mark.parametrize("text, message", [
+    ("abc def", "got 2 words"),
+    (f"{OLD} {NEW}", "got 2 words"),
+    (f"{OLD} {'2' * 39} refs/heads/main", "is not a full 40-character"),
+    (f"{OLD} {NEW} refs/pull/1/head", "only refs/heads/... and refs/tags/..."),
+    (f"{OLD} {NEW} refs/tags/v1 {NEW} {OLD} refs/tags/v1", "one triple only"),
+])
+def test_refs_request_refuses_malformed_triples_before_any_call(refs_checkout, tmp_path, text, message):
+    checkout, fake, _, _ = refs_checkout
+    with pytest.raises(work_tickets.QueueError, match=re.escape(message)):
+        work_tickets.refs_request(checkout, 5, triples_file(tmp_path, text), REPO)
+    assert fake.comments_posted == [] and fake.dispatched == []
+
+
+def test_refs_request_posts_a_failed_dry_run_and_escalates_nothing(refs_checkout, tmp_path):
+    checkout, fake, base, ahead = refs_checkout
+    fake.conclusion = "failure"
+    fake.log = "2026-11-12T10:00:01Z ::error::refs/heads/main: x is not a commit on the remote; push it first\n"
+    with pytest.raises(work_tickets.QueueError, match="concluded failure .*nothing was escalated"):
+        work_tickets.refs_request(checkout, 5, triples_file(tmp_path, f"{base} {ahead} refs/heads/main"), REPO)
+    assert "::error::refs/heads/main: x is not a commit" in fake.comments_posted[-1]["body"]
+    assert fake.labels == set()
+
+
+def test_refs_apply_runs_the_posted_triples_for_real_and_reads_them_back(refs_checkout, tmp_path):
+    checkout, fake, base, ahead = refs_checkout
+    triples = f"{base} {ahead} refs/heads/main\n{ahead} {'0' * 40} refs/heads/next\n"
+    work_tickets.refs_request(checkout, 5, triples_file(tmp_path, triples), REPO)
+    line = work_tickets.refs_apply(checkout, 5, REPO)
+    assert fake.dispatched[-1] == ("ref-maintenance.yml", "main",
+                                   {"updates": triples, "dry_run": "false"})
+    assert git(checkout, "ls-remote", "origin", "refs/heads/main").stdout.startswith(ahead)
+    assert git(checkout, "ls-remote", "origin", "refs/heads/next").stdout == ""
+    applied = fake.comments_posted[-1]["body"]
+    assert applied.startswith(work_tickets.REFS_APPLIED_MARKER)
+    assert "run: success (https://git.example/owner/repo/actions/runs/901); refs applied" in applied
+    assert fake.labels == set()
+    assert line == "refs applied on #5 (https://git.example/owner/repo/actions/runs/901): verify and close out"
+
+
+def test_refs_apply_refuses_a_request_without_a_passed_dry_run(refs_checkout, tmp_path):
+    checkout, fake, base, ahead = refs_checkout
+    with pytest.raises(work_tickets.QueueError, match="carries no refs request"):
+        work_tickets.refs_apply(checkout, 5, REPO)
+    fake.conclusion = "failure"
+    with pytest.raises(work_tickets.QueueError):
+        work_tickets.refs_request(checkout, 5, triples_file(tmp_path, f"{base} {ahead} refs/heads/main"), REPO)
+    fake.conclusion = "success"
+    with pytest.raises(work_tickets.QueueError, match="no passed dry run"):
+        work_tickets.refs_apply(checkout, 5, REPO)
+    assert [inputs["dry_run"] for _, _, inputs in fake.dispatched] == ["true"]
+
+
+def test_refs_apply_refuses_refs_origin_does_not_hold_as_requested(refs_checkout, tmp_path):
+    checkout, fake, base, ahead = refs_checkout
+    work_tickets.refs_request(checkout, 5, triples_file(tmp_path, f"{base} {ahead} refs/heads/main"), REPO)
+    fake.moves = False
+    with pytest.raises(work_tickets.QueueError, match="not as requested on origin: refs/heads/main"):
+        work_tickets.refs_apply(checkout, 5, REPO)
+    assert "refs not applied; not as requested on origin" in fake.comments_posted[-1]["body"]
+    assert fake.labels == {"escalated"}
+
+
+def test_the_workflows_door_speaks_the_actions_api(monkeypatch, tmp_path):
+    calls: list[tuple[list[str], object]] = []
+
+    def gh(root: Path, arguments: list[str]) -> str:
+        data = None
+        if "--input" in arguments:
+            data = json.loads(Path(arguments[arguments.index("--input") + 1]).read_text(encoding="utf-8"))
+        calls.append((arguments[:4], data))
+        path = arguments[3]
+        if path.endswith("/runs?event=workflow_dispatch&per_page=1"):
+            return json.dumps({"workflow_runs": [{"id": 41}]})
+        if path.endswith("/jobs"):
+            return json.dumps({"jobs": [{"id": 7}]})
+        if path.endswith("/logs"):
+            return "plain log\n"
+        return ""
+
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    door = work_tickets.Workflows(tmp_path, "github.com/owner/repo")
+    assert door.newest_run("ref-maintenance.yml") == 41
+    door.dispatch("ref-maintenance.yml", "main", {"updates": "x", "dry_run": "true"})
+    assert door.run_log(41) == "plain log\n"
+    assert calls == [
+        (["api", "-X", "GET", "repos/owner/repo/actions/workflows/ref-maintenance.yml/runs?event=workflow_dispatch&per_page=1"], None),
+        (["api", "-X", "POST", "repos/owner/repo/actions/workflows/ref-maintenance.yml/dispatches"],
+         {"ref": "main", "inputs": {"updates": "x", "dry_run": "true"}}),
+        (["api", "-X", "GET", "repos/owner/repo/actions/runs/41/jobs"], None),
+        (["api", "-X", "GET", "repos/owner/repo/actions/jobs/7/logs"], None),
+    ]

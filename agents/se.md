@@ -62,6 +62,11 @@ its tools.
 - **Escalations** (label `escalated`) are decisions for the user: bring them to the person as the
   [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder) says, then answer with a
   comment on the escalated issue or a request to the session that escalated.
+  - A step only the person may approve comes prepared, as the work model's
+    [Steps only the person approves](../skills/work-model/SKILL.md#steps-only-the-person-approves)
+    says: present it as one line, and on the person's yes in this session run it yourself (a ref
+    change with `work_tickets.py refs apply <issue>`), then send the escalating session the line
+    it prints.
 - **Releases**: ask the user; on approval send the integrator a release request. The integrator
   never asks for one.
 - Paths and shell follow the work model's
