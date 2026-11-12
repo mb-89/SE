@@ -63,6 +63,9 @@ workers included. So each session's first prompt names its role's file, `<se>` b
 - SE: `Act as the se agent defined in <se>/.github/agents/se.agent.md.`
 - Worker and integrator: the session prompt the work model's
   [Without gh](src/skills/work-model/SKILL.md#without-gh) names.
+- Reviewer, started by SE on "review PR #n": the line
+  `Act as the reviewer agent defined in <se>/.github/agents/reviewer.agent.md.`, then the pull
+  request, its repository and SE's session, one per line.
 
 The greeting needs no permission rule: the plugin's start hook hands it over, and SE opens its
 first message with it. A session whose permission mode asks before commands, and that no one

@@ -101,6 +101,14 @@ def test_reviewer_finds_verifies_and_judges_in_order_and_files_one_comment():
     assert "strict-tools-list: true" in copilot
 
 
+def test_se_starts_a_reviewer_on_request_and_the_integrator_does_not_wait_for_it():
+    dispatcher = normalized(AGENTS / "se.md")
+    assert 'on the person\'s request "review PR #n", start one [reviewer](reviewer.md) session' in dispatcher
+    assert "never a weaker" in dispatcher
+    assert "the integrator's procedure does not wait for it" in dispatcher
+    assert "reviewer" not in normalized(AGENTS / "integrator.md")
+
+
 def test_worker_instructions_require_utf8_file_writes_in_windows_powershell():
     worker = normalized(AGENTS / "worker.md")
     assert "powershell 5.1 redirection `>` writes utf-16" in worker.casefold()
