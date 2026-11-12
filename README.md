@@ -547,7 +547,7 @@ work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo R
     comment a question on an issue and label it escalated
 
 work_tickets.py file --worktree WORKTREE --title TITLE --body-file BODY_FILE [--blocked-by N]
-                     [--repo REPO]
+                     [--label LABEL] [--repo REPO]
     for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only
     once its blockers are linked
 

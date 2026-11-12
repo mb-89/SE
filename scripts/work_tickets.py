@@ -3369,15 +3369,16 @@ def work_issue_filing(repo: str, title: str, body: str, labels: list[str]) -> St
 
 
 def file_work_issue(
-    root: Path, title: str, file: Path, blockers: list[int], repo: str | None
+    root: Path, title: str, file: Path, blockers: list[int], repo: str | None,
+    extra: tuple[str, ...] = ()
 ) -> str:
-    """File a work issue with its labels, once (dedupe: work model, Issues); with blockers,
-    link them first and add `ready` last, so the issue is never startable before its blockers are
-    linked. Returns the filed issue's URL, or the line naming the twin it answered."""
+    """File a work issue with its labels and the `extra` ones, once (dedupe: work model, Issues);
+    with blockers, link them first and add `ready` last, so the issue is never startable before its
+    blockers are linked. Returns the filed issue's URL, or the line naming the twin it answered."""
     if not title.strip():
         raise QueueError("file needs a title, the branch name")
     body = fleet_marked(read_text_file(file, "work issue body") + "\n")
-    labels = work_labels(root, repo)
+    labels = [*work_labels(root, repo), *(label for label in extra if label.strip())]
     repo = resolve_repo(root, repo)
     first = [label for label in labels if not blockers or label != "ready"]
     if hand_off() and blockers:
@@ -5586,9 +5587,12 @@ def run_escalate(root: Path, args: argparse.Namespace) -> int:
              help="the filled .github/ISSUE_TEMPLATE/work.md body"),
          arg("--blocked-by", type=int, action="append", default=[], metavar="N",
              help="a native blocker to link before it is ready, repeatable"),
+         arg("--label", action="append", default=[], metavar="LABEL",
+             help="a further label, such as discovery, repeatable"),
          REPO)
 def run_file(root: Path, args: argparse.Namespace) -> int:
-    print(file_work_issue(root, args.title, args.body_file, args.blocked_by, args.repo))
+    print(file_work_issue(root, args.title, args.body_file, args.blocked_by, args.repo,
+                          tuple(args.label)))
     return 0
 
 
