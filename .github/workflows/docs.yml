@@ -6,7 +6,7 @@ name: docs
 
 on:
   push:
-    branches: [se]
+    branches: [main]
   schedule:
     - cron: "23 * * * *"
   issues:
@@ -27,10 +27,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # Scheduled and issue runs start on the default branch; the site is always built from se.
       - uses: actions/checkout@v4
-        with:
-          ref: se
       - uses: astral-sh/setup-uv@v6
       - name: Build the documentation
         run: |

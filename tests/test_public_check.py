@@ -950,26 +950,26 @@ def ci_script() -> str:
 
 
 def owner_push(repo: Path, tmp_path: Path, message: str) -> tuple[str, str]:
-    """The owner, with the project identity, pushes one commit to se; returns (before, after)."""
+    """The owner, with the project identity, pushes one commit to main; returns (before, after)."""
     git(repo, "config", "user.name", "mb")
     git(repo, "config", "user.email", "mb")
     commit(repo, {"se.toml": PROJECT_IDENTITY})
     remote = tmp_path / "remote.git"
     git(tmp_path, "init", "-q", "--bare", str(remote))
     git(repo, "remote", "add", "origin", str(remote))
-    git(repo, "push", "-q", "origin", "main:se")
+    git(repo, "push", "-q", "origin", "main")
     before = git(repo, "rev-parse", "HEAD").stdout.strip()
     commit(repo, {"a.txt": "a\n"}, message)
-    git(repo, "push", "-q", "origin", "main:se")
+    git(repo, "push", "-q", "origin", "main")
     return before, git(repo, "rev-parse", "HEAD").stdout.strip()
 
 
 def run_ci(tmp_path: Path, before: str, after: str) -> subprocess.CompletedProcess[str]:
-    """The workflow's step as its runner runs it: in a fresh full clone, on a push to se."""
+    """The workflow's step as its runner runs it: in a fresh full clone, on a push to main."""
     runner = tmp_path / "runner"
     shutil.rmtree(runner, ignore_errors=True)
-    git(tmp_path, "clone", "-q", "-b", "se", str(tmp_path / "remote.git"), str(runner))
-    env = {**os.environ, "BEFORE": before, "AFTER": after, "BRANCH": "se"}
+    git(tmp_path, "clone", "-q", "-b", "main", str(tmp_path / "remote.git"), str(runner))
+    env = {**os.environ, "BEFORE": before, "AFTER": after, "BRANCH": "main"}
     return subprocess.run(["bash", "-e", "-c", ci_script()], cwd=runner, env=env,
                           capture_output=True, text=True, check=False)
 
@@ -990,7 +990,7 @@ def test_ci_refuses_the_owners_pushed_co_author_line_naming_its_source_and_remed
 def test_ci_passes_an_allow_listed_co_author_commit(repo: Path, tmp_path: Path) -> None:
     before, listed = owner_push(repo, tmp_path, f"Old work\n\n{CO_AUTHOR}")
     commit(repo, {public_check.ALLOW_FILE: f"commit:{listed} message  # published before the rule\n"})
-    git(repo, "push", "-q", "origin", "main:se")
+    git(repo, "push", "-q", "origin", "main")
     result = run_ci(tmp_path, before, git(repo, "rev-parse", "HEAD").stdout.strip())
     assert result.returncode == 0, result.stdout
     assert "1 allow entries used" in result.stdout

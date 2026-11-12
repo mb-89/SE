@@ -476,15 +476,16 @@ def test_an_updated_plugin_that_does_not_start_leaves_the_old_install_in_use(rep
 
 
 def test_a_cloud_setup_script_clone_is_pulled_like_a_checkout(repos, tmp_path):
-    git(repos["upstream"], "branch", "se", "v1.0.0")
+    git(repos["upstream"], "branch", "release", "v1.0.0")
+    git(repos["upstream"], "symbolic-ref", "HEAD", "refs/heads/release")  # the clone takes the default
     clone = tmp_path / "home" / ".claude" / "skills" / "se"
-    git(tmp_path, "clone", "-q", "--depth", "1", "-b", "se", repos["upstream"].as_uri(), str(clone))
+    git(tmp_path, "clone", "-q", "--depth", "1", repos["upstream"].as_uri(), str(clone))
     repos["se"] = clone
     lines, failed = refresh(repos)
     assert not failed, lines
     assert any(line.startswith("SE: ") and line.endswith(" -> v1.1.0") for line in lines)
     assert se_modules.checkout_version(clone) == (1, 1, 0)
-    assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "se"
+    assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "release"
 
 
 def test_a_copilot_copy_names_the_one_command_and_why(repos, tmp_path, monkeypatch):
