@@ -3392,17 +3392,21 @@ def test_backlog_files_with_both_labels_and_lists_by_title_and_body(worktree, gh
     idea.write_text("A far-out idea.\n", encoding="utf-8")
     assert run(worktree, "backlog", "file", "--title", "Idea: voice input", "--body-file", str(idea)) == 0
     assert capsys.readouterr().out == "Filed backlog issue https://git.example/owner/repo/issues/8\n"
-    listed_labels, label, create = gh.calls[-3:]
+    before, listed_labels, label, person, create, after = gh.calls[-6:]
+    assert before[:2] == after[:2] == ["issue", "list"]
     assert listed_labels[:2] == ["label", "list"] and label[:3] == ["label", "create", "backlogged"]
+    assert person[:3] == ["label", "create", "se-person"]
     assert create[:4] == ["issue", "create", "--title", "Idea: voice input"]
     assert [create[i + 1] for i, a in enumerate(create) if a == "--label"] == ["backlogged", "se-person"]
     assert gh.bodies[-1] == f"{work_tickets.FLEET_MARKER}\nA far-out idea.\n"
 
     labelled = FakeGh()
     monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: (
-        '[{"name": "backlogged"}]' if arguments[:2] == ["label", "list"] else labelled(root, arguments)))
+        '[{"name": "backlogged"}, {"name": "se-person"}]' if arguments[:2] == ["label", "list"]
+        else labelled(root, arguments)))
     assert run(worktree, "backlog", "file", "--title", "Idea: two", "--body-file", str(idea)) == 0
-    assert [call[:2] for call in labelled.calls] == [["issue", "create"]]
+    assert [call[:2] for call in labelled.calls] == [
+        ["issue", "list"], ["issue", "create"], ["issue", "list"]]
     capsys.readouterr()
     monkeypatch.setattr(work_tickets, "run_gh", gh)
 
@@ -3467,7 +3471,12 @@ class LabelledGh:
             wanted = set(values("--label"))
             return json.dumps([
                 {**issue, "labels": [{"name": name} for name in issue["labels"]]}
-                for issue in self.issues.values() if wanted <= set(issue["labels"])])
+                for issue in self.issues.values()
+                if wanted <= set(issue["labels"]) and issue.get("state", "open") == "open"])
+        if arguments[:3] == ["api", "-X", "PATCH"]:
+            issue = self.issues[int(arguments[3].split("/")[4])]
+            issue.update(state=values("-f")[0].split("=")[1], state_reason=values("-f")[1].split("=")[1])
+            return ""
         if arguments[0] == "api":
             path = arguments[1].split("/")
             number = int(path[4])
@@ -3567,6 +3576,173 @@ def test_route_retitles_labels_and_appends_the_routing_section_in_one_edit(
     assert run(worktree, "route", "1", "--routing-file", str(routing)) == 1
     assert "#1 is routed already" in capsys.readouterr().err
     assert run(worktree, "route", "1", "--type", "nope", "--routing-file", str(routing)) == 1
+
+
+def dedupe_gh(monkeypatch) -> LabelledGh:
+    github = LabelledGh({
+        1: {"number": 1, "title": "Proposal: Make the example work!", "body": OUTSIDE_BODY,
+            "url": "https://git.example/owner/repo/issues/1", "labels": []},
+        2: {"number": 2, "title": "feature/twin-20261101", "body": "The first one.",
+            "url": "https://git.example/owner/repo/issues/2", "labels": ["work", "ready", "repo:repo"]},
+        3: {"number": 3, "title": "feature/closed-20261101", "body": "Done long ago.",
+            "url": "https://git.example/owner/repo/issues/3", "labels": [], "state": "closed"},
+    })
+    monkeypatch.setattr(work_tickets, "run_gh", github)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "today_stamp", lambda: "20261109")
+    return github
+
+
+def test_sameness_is_the_title_without_its_date_and_the_routed_from_line():
+    key = work_tickets.purpose_key
+    assert key("feature/twin-20261101", "") == key(" feature/twin-20261112 ", "any body")
+    assert key("feature/twin-20261101", "") != key("feature/twin-2026110", "")
+    assert key("Idea: voice input", "") == ("Idea: voice input", None)
+    routed = "Body.\n\nRouted from: Proposal: one\n\nMore."
+    assert key("feat/one-20261109", routed) == ("feat/one", "Proposal: one")
+    assert key("feat/one-20261109", routed) != key("feat/one-20261110", routed.replace("one\n", "two\n"))
+    assert key("feat/one-20261109", routed) != key("feat/one-20261109", "")
+    issues = [{"number": 9, "title": "feat/one-20261101", "body": routed},
+              {"number": 4, "title": "feat/one-20261102", "body": routed},
+              {"number": 5, "title": "feat/one-20261102", "body": ""}]
+    assert work_tickets.twins(issues, key("feat/one-20261109", routed)) == [4, 9]
+    assert work_tickets.twins(issues, key("feat/one-20261109", routed), exclude=4) == [9]
+
+
+@pytest.mark.parametrize("command", [
+    ["file", "--title", "feature/twin-20261109"],
+    ["backlog", "file", "--title", "feature/twin-20261109"],
+], ids=["file", "backlog-file"])
+def test_filing_a_twin_comments_on_the_open_issue_and_creates_nothing(
+        worktree, monkeypatch, capsys, command):
+    github = dedupe_gh(monkeypatch)
+    body = worktree / "body.md"
+    body.write_text("## Goal\n\nThe same purpose again.\n", encoding="utf-8")
+
+    assert run(worktree, *command, "--body-file", str(body)) == 0
+    assert capsys.readouterr().out == (
+        "Not filed: #2 https://git.example/owner/repo/issues/2 has the same purpose; "
+        "commented on it instead\n")
+    assert sorted(github.issues) == [1, 2, 3]
+    comment, = github.comments[2]
+    assert f"`work_tickets.py {' '.join(command[:-2])}` would have filed" in comment
+    assert "**feature/twin-20261109**\n\n> ## Goal\n>\n> The same purpose again.\n" in comment
+    assert work_tickets.FLEET_MARKER not in comment
+
+
+def test_filing_without_a_twin_creates_and_a_closed_issue_is_no_twin(worktree, monkeypatch, capsys):
+    github = dedupe_gh(monkeypatch)
+    body = worktree / "body.md"
+    body.write_text("A new purpose.\n", encoding="utf-8")
+
+    assert run(worktree, "file", "--title", "feature/closed-20261109", "--body-file", str(body)) == 0
+    assert capsys.readouterr().out == "Filed work issue https://git.example/owner/repo/issues/4\n"
+    assert github.issues[4]["title"] == "feature/closed-20261109"
+    assert github.issues[4].get("state", "open") == "open" and not github.comments
+
+
+def test_a_raced_twin_closes_the_later_issue_as_its_duplicate(worktree, monkeypatch, capsys):
+    github = dedupe_gh(monkeypatch)
+    create = github.__call__
+
+    def racing(root: Path, arguments: list[str]) -> str:
+        if arguments[:2] == ["issue", "create"] and 4 not in github.issues:
+            # Another creator files the same purpose between our read and our create.
+            github.issues[4] = {"number": 4, "title": "feature/raced-20261108", "body": "Theirs.",
+                                "url": "https://git.example/owner/repo/issues/4", "labels": []}
+        return create(root, arguments)
+
+    monkeypatch.setattr(work_tickets, "run_gh", racing)
+    body = worktree / "body.md"
+    body.write_text("Ours.\n", encoding="utf-8")
+
+    assert run(worktree, "file", "--title", "feature/raced-20261109", "--body-file", str(body),
+               "--blocked-by", "2") == 0
+    assert capsys.readouterr().out == (
+        "Filed work issue https://git.example/owner/repo/issues/5, closed as a duplicate of #4\n")
+    assert github.issues[5]["state"] == "closed" and github.issues[5]["state_reason"] == "duplicate"
+    assert github.comments[5] == ["Duplicate of #4: filed in a race with it.\n"]
+    assert github.issues[4].get("state", "open") == "open" and 4 not in github.comments
+    assert 5 not in github.blocked_by and "ready" not in github.issues[5]["labels"]
+
+
+def test_routing_dedupes_by_title_and_routed_from_line(worktree, monkeypatch, capsys):
+    github = dedupe_gh(monkeypatch)
+    routing = worktree / "route.md"
+    routing.write_text(ROUTING, encoding="utf-8")
+    github.issues[7] = {"number": 7, "title": "Proposal: Make the example work!", "body": OUTSIDE_BODY,
+                        "url": "https://git.example/owner/repo/issues/7", "labels": []}
+
+    assert run(worktree, "route", "7", "--routing-file", str(routing)) == 0
+    assert capsys.readouterr().out == "Routed issue #7 as feat/make-the-example-work-20261109\n"
+
+    # The same outside proposal, filed twice, routed again: its twin #7 gets the comment.
+    assert run(worktree, "route", "1", "--routing-file", str(routing)) == 0
+    assert capsys.readouterr().out == (
+        "Not filed: #7 https://git.example/owner/repo/issues/7 has the same purpose; "
+        "commented on it instead\n")
+    comment, = github.comments[7]
+    assert "would have routed #1 as a twin" in comment and "> Routed from: Proposal: Make" in comment
+    assert github.issues[1]["title"] == "Proposal: Make the example work!"
+    assert github.issues[1]["state"] == "closed" and github.issues[1]["state_reason"] == "duplicate"
+    assert github.comments[1] == ["Duplicate of #7: routed as a twin of it.\n"]
+
+    # The same branch name from another proposal is another purpose.
+    github.issues[8] = {"number": 8, "title": "Proposal: make the example work", "body": "Other.",
+                        "url": "https://git.example/owner/repo/issues/8", "labels": []}
+    assert run(worktree, "route", "8", "--routing-file", str(routing)) == 0
+    assert github.issues[8]["title"] == "feat/make-the-example-work-20261109"
+    assert github.issues[8].get("state", "open") == "open"
+
+
+def test_the_cloud_hand_off_prints_the_search_and_the_condition(worktree, monkeypatch, capsys):
+    def no_gh(root: Path, arguments: list[str]) -> str:
+        raise AssertionError(f"no gh call in the hand-off: {arguments}")
+
+    monkeypatch.setattr(work_tickets, "run_gh", no_gh)
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "today_stamp", lambda: "20261109")
+    body = worktree / "body.md"
+    body.write_text("Idea body.\n", encoding="utf-8")
+
+    assert run(worktree, "backlog", "file", "--title", "Idea: voice input", "--body-file", str(body)) == 0
+    out = capsys.readouterr().out
+    plan = out.split("\n")
+    assert plan[0] == "GitHub plan: backlog file Idea: voice input"
+    assert plan[-2] == "Run the GitHub plan above to file the backlog issue once"
+    steps = [line.split(" ", 2)[1] for line in plan if re.match(r"\d+\. ", line)]
+    assert steps == ["list_issues", "add_issue_comment", "issue_write", "list_issues",
+                     "add_issue_comment", "issue_write"]
+    assert '"state": "OPEN"' in out
+    assert ("a twin is one whose title without a trailing -yyyymmdd is `Idea: voice input` and whose "
+            "body has no `Routed from:` line") in out
+    assert "Only where step 1 found a twin. Then stop: nothing is filed." in out
+    assert "Only where step 1 found no twin." in out
+    assert '"issue_number": "<twin from step 1>"' in out
+    assert "lower number than #<number from step 3>" in out
+    assert '"state_reason": "duplicate"' in out and '"duplicate_of": "<lower from step 4>"' in out
+
+    assert run(worktree, "file", "--title", "feature/x-20261109", "--body-file", str(body),
+               "--blocked-by", "2") == 1
+    assert "gh, which is not signed in" in capsys.readouterr().err
+
+    routing = worktree / "route.md"
+    routing.write_text(ROUTING, encoding="utf-8")
+    assert run(worktree, "route", "1", "--routing-file", str(routing)) == 1
+    assert "--issue-title <title> --issue-body <file" in capsys.readouterr().err
+    outside = worktree / "outside.md"
+    outside.write_text(OUTSIDE_BODY, encoding="utf-8")
+    assert run(worktree, "route", "1", "--routing-file", str(routing), "--issue-title",
+               "Proposal: one", "--issue-body", str(outside)) == 0
+    out = capsys.readouterr().out
+    assert [line.split(" ", 2)[1] for line in out.split("\n") if re.match(r"\d+\. ", line)] == [
+        "list_issues", "add_issue_comment", "add_issue_comment", "issue_write", "issue_write",
+        "list_issues", "add_issue_comment", "issue_write"]
+    assert "the line `Routed from: Proposal: one`" in out and "other than #1" in out
+    assert "lower number than #1," in out and "Only where step 4 found a lower twin" not in out
+    assert out.endswith("Run the GitHub plan above to route #1 as feat/one-20261109 once\n")
 
 
 @pytest.mark.parametrize("rows", [EVIDENCE_ROWS, EVIDENCE_ROWS.replace(
