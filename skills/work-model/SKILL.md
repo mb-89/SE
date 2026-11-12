@@ -189,6 +189,16 @@ Nothing is pushed to it directly: `integrate` lands each integration as a squash
 waits for the required check `check`, as the README's
 [Landing on main](../../README.md#landing-on-main) says.
 
+Every pull request into the integration branch names the work it does, so no work is done outside
+the issues dispatch reads:
+
+- Its description names at least one issue of the repository that is open and labelled `work`,
+  with `Refs`, `Closes` or `Fixes` and `#<n>` or the issue's URL; it may name several.
+- A landing pull request passes by its `Lands <work pull request>` line, where that work pull
+  request's description names one.
+- The repository owner's own pull request labelled `housekeeping` is exempt.
+- The job `check` enforces it with `<se>/scripts/pr_issues.py`, through the Actions token.
+
 Nothing reaches the integration branch without a passing complete suite and, unless `se.toml` sets
 `public_check = false`, a passing public check on exactly the tree pushed:
 

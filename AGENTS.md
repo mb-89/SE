@@ -58,6 +58,8 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
     against its work issue where it carries a report (a landing pull request's, from the work
     pull request it links, README [Landing on main](README.md#landing-on-main)), and
     `work_tickets.py suite` in budget.
+  - On a pull request it also runs `pr_issues.py`, the work model's rule that the description
+    names an open work issue ([Integration branch](src/skills/work-model/SKILL.md#integration-branch)).
 - A `--range` on a shallow clone that reaches beyond the fetched history is refused with exit code
   2, naming `git fetch --unshallow`, so a gate never passes over commits it cannot see.
 - The project identity ([pub-002](src/skills/work-model/references/rules.md#pub-002-a-generic-commit-identity)) in the commit

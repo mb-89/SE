@@ -1120,7 +1120,8 @@ def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> 
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     assert re.search(r"(?m)^jobs:\n  check:\n", workflow), "main's ruleset requires a job named check"
     assert re.search(r"(?m)^on:\n  pull_request:\n.*\n  push:\n    branches: \[main\]$", workflow)
-    assert "types: [opened, synchronize, reopened, edited]" in workflow  # an edited report reruns
+    # An edited report reruns, and so does a label change (the issue rule's housekeeping exemption).
+    assert "types: [opened, synchronize, reopened, edited, labeled, unlabeled]" in workflow
     # One job, every check the integration runs; the layouts before the suite, which rebuilds them.
     steps = ["public_check.py --rev", "scripts/se_plugin.py check", "scripts/work_tickets.py docs --check",
              "scripts/work_tickets.py field-report --check", "scripts/work_tickets.py suite --worktree ."]
