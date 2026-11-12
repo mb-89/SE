@@ -218,6 +218,8 @@ def gh(monkeypatch) -> FakeGh:
     monkeypatch.setattr(work_tickets, "tested_main", lambda root: "abc1234")
     monkeypatch.setattr(work_tickets, "branch_tip", lambda root: TIP)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    # The worktree is no git repository; tests/test_work_tickets.py runs the guard on a real one.
+    monkeypatch.setattr(work_tickets, "guard", lambda root, branch, report: [])
     return fake
 
 
@@ -675,6 +677,7 @@ def test_field_report_check_records_the_branch_tip_of_its_worktree(tmp_path, cap
     git_ok("init", "-q", "-b", BRANCH, str(root))
     git_ok("-C", str(root), "-c", "user.name=mb", "-c", "user.email=mb", "commit", "-q",
            "--allow-empty", "-m", "work")
+    git_ok("-C", str(root), "branch", "main")  # the integration branch the check's guard diffs against
     tip = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
                          capture_output=True, text=True, check=True).stdout.strip()
     report, issue = tmp_path / "report.md", tmp_path / "issue.md"

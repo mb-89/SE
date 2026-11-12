@@ -351,6 +351,59 @@ def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
     assert "No removed protected content found." in guarded.stdout
 
 
+def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_request(
+    worktree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    repository, guide = authored_repository(
+        worktree.parent / "deliver-guard-case", "rewrite-prose",
+        "This sentence is rewritten.\nThis sentence stays.\n",
+    )
+    guide.write_text("This sentence is reworded.\nThis sentence stays.\n", encoding="utf-8")
+    assert git(repository, "commit", "-am", "rewrite prose").returncode == 0
+    report = repository / ".se" / "work" / "field-report.md"
+    report.parent.mkdir(parents=True)
+    section = "## Removed behaviour, deleted or weakened tests, and authored prose\n\n"
+    report.write_text(
+        f"<!-- se:field-report -->\n**Work issue:** #1\n{section}None\n<!-- se:field-report:end -->\n",
+        encoding="utf-8",
+    )
+    issue_body = repository / "issue.md"
+    issue_body.write_text("## Acceptance\n\n- [ ] A test.\n", encoding="utf-8")
+    issue = {"number": 1, "title": "rewrite-prose", "url": "https://git.example/o/r/issues/1",
+             "body": issue_body.read_text(encoding="utf-8")}
+    pushed: list[str] = []
+    posted: list[str] = []
+    monkeypatch.setattr(work_tickets, "required_snapshot", lambda root: issue)
+    monkeypatch.setattr(work_tickets, "check_issue_read", lambda *args: None)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: None)
+    monkeypatch.setattr(work_tickets, "field_report_problems", lambda report, body: [])
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/o/r")
+    monkeypatch.setattr(work_tickets, "push", lambda root, branch: pushed.append(branch))
+    monkeypatch.setattr(work_tickets, "open_pull_request_number", lambda *args: None)
+    monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, arguments, body: (
+        posted.append(body) or "https://git.example/o/r/pull/9"))
+    unlisted = "docs/guide.md: This sentence is rewritten."
+    check = ["field-report", "--check", str(report), "--worktree", str(repository),
+             "--issue-body", str(issue_body)]
+
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.deliver(repository)
+    message = str(refused.value)
+    assert message.startswith("Field report must name each deleted or renamed test")
+    assert unlisted in message and "This sentence stays." not in message
+    assert pushed == [] and posted == []
+    assert work_tickets.main(check) == 1
+    assert unlisted in capsys.readouterr().err
+
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(f"{section}None", f"{section}- `{unlisted}`"),
+        encoding="utf-8",
+    )
+    assert work_tickets.main(check) == 0
+    assert work_tickets.deliver(repository) == 9
+    assert pushed == ["rewrite-prose"] and unlisted in posted[0]
+
+
 def test_queue_lifecycle_requires_checklist_and_evidence(worktree: Path) -> None:
     initialize(worktree)
     initialize(worktree)
