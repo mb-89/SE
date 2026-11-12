@@ -207,7 +207,7 @@ differs from it.
 
 `public_check` makes `work_tickets.py integrate` run se's
 [public check](AGENTS.md#public-safety) on the merged tree and every merged commit before it pushes
-the integration branch; on a failure it pushes nothing, restores the pre-merge branch and
+its landing branch; on a failure it pushes nothing, leaves the integration branch as it was and
 escalates. `work_tickets.py push` runs its push gate first.
 
 Default `true`, so a project that never set it is still checked; a project without a public check
@@ -216,14 +216,16 @@ turn it on.
 
 `version = "MAJOR.MINOR.PATCH"` is the project's one semantic version, published as the git tag
 `vMAJOR.MINOR.PATCH` on its integration branch; consumers pin ranges of it
-([`se.toml`](#setoml)). Nobody types it after the first: `work_tickets.py push` of the integration
-branch (which `integrate` runs) releases what was integrated since origin and the last tag.
+([`se.toml`](#setoml)). Nobody types it after the first: `integrate` releases, on its landing
+branch, what was integrated since origin and the last tag, as `work_tickets.py push` of the
+integration branch does.
 
-Each integration is a first-parent merge whose message starts `Integrate <branch>`, as `integrate`
-writes it, and states its kind in the trailer `Release-kind: major|minor|patch`. `integrate` writes
-it, and `work_tickets.py release-trailer` prints it for a merge by hand:
+Each integration is a first-parent commit whose message starts `Integrate <branch>` and states its
+kind in the trailer `Release-kind: major|minor|patch`: the merge `integrate` builds, and on the
+integration branch the squash commit it lands as ([Landing on main](#landing-on-main)).
+`integrate` writes it, and `work_tickets.py release-trailer` prints it:
 
-- on a re-integration (a merge `Integrate <branch>` of the same branch is already on the
+- on a re-integration (an integration `Integrate <branch>` of the same branch is already on the
   integration branch) the field report's "Re-integration kind", `patch` unless it says otherwise;
 - else the field report's "Release kind", which the
   [work model](src/skills/work-model/SKILL.md#release-kind) owns; a missing or unknown kind is
@@ -247,27 +249,36 @@ from the project root. Where it fails, push restores `se.toml`, commits nothing 
 
 #### Landing on main
 
-se's `main` takes no direct push: its ruleset allows no force push and no deletion, keeps the
-history linear, merges pull requests by squash only and requires the check `check`
-([AGENTS.md "Public safety"](AGENTS.md#public-safety)).
+Every integration lands on the integration branch through a squash pull request, which se's `main`
+requires: its ruleset allows no direct push, no force push and no deletion, keeps the history
+linear, merges pull requests by squash only and requires the check `check`
+([AGENTS.md "Public safety"](AGENTS.md#public-safety)). `work_tickets.py integrate <pull request>`
+does all of it:
 
-So each integration lands on `main` as a squash pull request: create it, wait for `check`,
-squash-merge it. Until `work_tickets.py` does this itself (a follow-up issue), the integrator does
-it with the GitHub tools:
+1. It merges the work branch into origin's newest integration branch on `land/<branch>` (the
+   `Integrate <branch>` merge with its `Release-kind` trailer), runs the complete suite, the
+   output regeneration, the project checks and the public check, and releases there.
+2. It pushes `land/<branch>` and opens a pull request of it into the integration branch, or reuses
+   the one still open from an earlier attempt, with the work pull request's description, the
+   field report, as its description.
+3. It waits for the check `check` on the landing head, polling every 30 s for up to an hour; a
+   conclusion other than success merges nothing and escalates.
+4. It squash-merges at exactly that head with the merge's message as the commit title and message,
+   so the squash commit carries `Integrate <branch>: <title>` and the `Release-kind` trailer, and
+   no ` (#<number>)` or `Co-authored-by:` line GitHub's defaults would add. Where origin's
+   integration branch moved while it waited, it merges nothing: integrate again.
+5. It reads the merge back: the pull request merged at that commit, which is origin's integration
+   branch, on the base it tested and with the tree its checks passed.
+6. It closes the work pull request with a line naming the landing one, closes the work issue and
+   cleans up.
 
-1. Make the integration as `integrate` would (the `Integrate <branch>` merge with its
-   `Release-kind` trailer, the suite, the public check, the release commit), on a branch
-   `land/<branch>` from the newest `main`, and push that branch with `work_tickets.py push`.
-2. Open a pull request of `land/<branch>` into `main` and wait until its `check` passes.
-3. Squash-merge it with an explicit commit title and message: the `Integrate <branch>: <title>`
-   line and the rest of the merge message, `Release-kind` trailer included. GitHub's defaults add
-   ` (#<number>)` to the title and may add `Co-authored-by:` lines, which the public check on the
-   push to `main` refuses.
-4. Then close the work issue and clean up as `integrate` would.
+GitHub sits behind one door, the class `GitHub` in `work_tickets.py` (`gh api`), which the tests
+replace with a fake.
 
-The squash commit carries the release's `se.toml` version, so the release workflow tags it. GitHub
-commits it for the merging account (web-flow committer, the account's `users.noreply.github.com`
-author), which the identity gate passes for the account that owns the repository.
+The squash commit carries the release's `se.toml` version, so the release workflow tags it and the
+docs workflow publishes it, as both run on every push to `main`. GitHub commits it for the merging
+account (web-flow committer, the account's `users.noreply.github.com` author), which the identity
+gate and a public mirror's guard pass for the account that owns the repository.
 
 #### Release tags
 
@@ -555,8 +566,8 @@ work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--build-command BUI
                           [--include-late REASON] [--check-command JSON]
                           [--check-command-temporary-directory]
                           pull_request
-    validate the field report a pull request's description carries, merge, test, push and close the
-    work issue
+    validate the field report a pull request's description carries, merge it on land/<branch>, test,
+    land it through a squash pull request once check passes, and close the work issue
 
 work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
                        [--integrator-session INTEGRATOR_SESSION]

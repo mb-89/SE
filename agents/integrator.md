@@ -79,10 +79,13 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
    - Refuse and escalate to SE when it removes a capability or deletes or weakens a protecting test
      without the user's decision recorded in the field report.
 2. **Integrate** the validated pull request with `work_tickets.py integrate <pull request>` (and
-   `--build-command` when the project declares one). It merges into the newest integration branch,
-   checks the report, runs the complete suite against its time budget (`[tests]` in `se.toml`,
-   [Test budget](../README.md#test-budget)), regenerates, pushes, closes the work issue, cleans
-   up and starts work.
+   `--build-command` when the project declares one).
+   - It merges into origin's newest integration branch on `land/<branch>`, checks the report, runs
+     the complete suite against its time budget (`[tests]` in `se.toml`,
+     [Test budget](../README.md#test-budget)) and regenerates.
+   - It lands the result through a squash pull request (README
+     [Landing on main](../README.md#landing-on-main)), then closes the work issue, cleans up
+     and starts work.
    - A suite over its limit is refused: escalate it to the worker with the gate's remedy.
    - Commits on the branch after the report's Branch tip are refused, named: escalate them to the
      worker to update the report in the pull request description, or include them with
@@ -90,18 +93,22 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
      the reason is yours to state.
    - A merge conflict is reported with its files and left for you to resolve mechanically; a
      semantic conflict or work that no longer fits is escalated to the worker.
+   - A `check` that fails on the landing pull request merges nothing and escalates; one that has
+     not finished within the hour, or an integration branch that moved meanwhile, merges nothing:
+     integrate again, which reuses the landing pull request.
 3. **Test and regenerate** through `integrate` using the complete suite and project commands
    declared by `AGENTS.md` (where a pin moves, see
    [suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)); fix only integration breakage.
-4. **Push** through `integrate`, which records the merge result after the checks pass, the
-   project's public check included unless `se.toml` sets `public_check = false`. Every push goes through
-   `work_tickets.py` (`integrate`, or `push` without `gh`), which retries a transient GitHub
-   refusal once a minute, ten attempts; never `git push` by hand, and never tell a worker to retry.
-   - Where a ruleset protects the integration branch, as it does se's, land the integration as a
-     squash pull request instead (create, wait for `check`, squash-merge), as the README's
-     [Landing on main](../README.md#landing-on-main) says.
-5. **Close** through `integrate`: it closes the work issue with a comment that links the pull
-   request and the release; then hand the field report's "Tickets for other repositories" to SE.
+4. **Land** through `integrate`, which pushes the landing branch after the checks pass, the
+   project's public check included unless `se.toml` sets `public_check = false`, then waits for
+   `check`, squash-merges and reads the merged commit back. Nothing is pushed to the integration
+   branch directly.
+   - Every push goes through `work_tickets.py` (`integrate`, or `push land/<branch>` without
+     `gh`), which retries a transient GitHub refusal once a minute, ten attempts; never `git push`
+     by hand, and never tell a worker to retry.
+5. **Close** through `integrate`: it closes the work pull request with a line naming the landing
+   one, and the work issue with a comment that links both pull requests, the `check` run and the
+   release; then hand the field report's "Tickets for other repositories" to SE.
    - A work issue whose acceptance can only be seen after the merge (a CI run on the integration
      branch, a release, a deployment) stays open: its pull request names it with `Refs`, not a
      closing keyword (`work_tickets.py pr-body`), and the closing comment names what it waits for.
@@ -150,6 +157,7 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
 - When escalations or merge problems show a pattern, file a retro issue from
   [retro.md](../.github/ISSUE_TEMPLATE/retro.md) whose improvements name the agent definition, template or
   rule they change.
-- Report per integration, as a statement, never a question: merge commit, suite result, output
+- Report per integration, as a statement, never a question: squash commit, landing pull request
+  and its `check` run, suite result, output
   check, each issue's GitHub state as `integrate` read it after the merge (never as intended),
   escalations, and anything SE must decide or file.
