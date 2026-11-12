@@ -2,6 +2,7 @@
 exactly the tree pushed: `work_tickets.py push` and the pre-push hook refuse alike."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -15,7 +16,10 @@ work_tickets = importlib.util.module_from_spec(SPEC)
 sys.modules.setdefault("work_tickets", work_tickets)
 SPEC.loader.exec_module(work_tickets)
 verdicts = work_tickets.sibling("verdicts")
-SUITE = f'["{Path(sys.executable).as_posix()}", "-c", "import sys; sys.exit(open(\'verdict.txt\').read().strip() != \'pass\')"]'
+# The interpreter by its bare name, found on the PATH the checkout fixture sets: se.toml is
+# committed and public-checked, so it carries no machine path (a runner's /home/<name>/...).
+INTERPRETER = Path(sys.executable)
+SUITE = f'["{INTERPRETER.name}", "-c", "import sys; sys.exit(open(\'verdict.txt\').read().strip() != \'pass\')"]'
 
 
 def git(root: Path, *arguments: str) -> str:
@@ -53,8 +57,15 @@ def checkout(tmp_path: Path, monkeypatch, repositories) -> Path:
     """A clone of a bare origin on main, the integration branch, without hooks; its suite passes
     where verdict.txt says pass."""
     monkeypatch.setattr(work_tickets, "local_config_path", lambda: tmp_path / "no-local.toml")
+    monkeypatch.setenv("PATH", f"{INTERPRETER.parent}{os.pathsep}{os.environ.get('PATH', '')}")
     repositories(build_checkout, tmp_path)
     return tmp_path / "main"
+
+
+def test_the_fixture_commits_no_machine_path(checkout):
+    """A checkout under /home/<name> (a CI runner's) would fail the fixture's own public check."""
+    text = (checkout / "se.toml").read_text(encoding="utf-8")
+    assert INTERPRETER.parent.as_posix() not in text and str(INTERPRETER.parent) not in text
 
 
 def run_suite(root: Path) -> None:
