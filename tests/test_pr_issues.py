@@ -173,3 +173,34 @@ def test_the_check_job_runs_the_rule_on_pull_requests_with_the_actions_token() -
     assert "if: github.event_name == 'pull_request'" in step
     assert "GITHUB_TOKEN: ${{ github.token }}" in step
     assert "issues: read" in text
+
+
+@pytest.mark.parametrize("first_line, number", [
+    ("Refs #627", 627),
+    (f"Refs {ISSUE_URL}/627", 627),
+    (f"Fixes {ISSUE_URL}/627", 627),
+    ("Closes #627", 627),
+    (f"Lands {PULL_URL}/628", 628),
+    ("Refs https://github.com/other/repo/issues/627", None),
+    ("Work on it\nRefs #627", None),  # only the first line names the work issue
+])
+def test_one_parser_names_the_work_issue_for_both_checks(first_line: str, number: int | None,
+                                                         tmp_path: Path,
+                                                         capsys: pytest.CaptureFixture[str]) -> None:
+    assert pr_issues.work_issue(first_line, REPO) == number
+    body = tmp_path / "body.md"
+    body.write_text(f"{first_line}\n\n<!-- se:field-report -->\n", encoding="utf-8")
+    code = pr_issues.main(["--work-issue", str(body), "--repository", REPO], {})
+    assert (code, capsys.readouterr().out.strip()) == ((0, str(number)) if number else (1, ""))
+
+
+@pytest.mark.parametrize("body, passed", [
+    ("Refs #8", True),
+    (f"Refs {ISSUE_URL}/8", True),
+    ("Refs https://github.com/other/repo/issues/8", False),
+])
+def test_pr_issues_takes_the_short_and_the_full_form_of_its_own_repository_only(
+        github: FakeGitHub, tmp_path: Path, body: str, passed: bool,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    github.issue(8, "work")
+    assert run(github, tmp_path, body, capsys=capsys)[0] == (0 if passed else 1)

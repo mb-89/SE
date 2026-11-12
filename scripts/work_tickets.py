@@ -57,9 +57,14 @@ REMOVED_PYTHON_TEST_PATTERN = re.compile(r"^-\s*def\s+(test_[A-Za-z0-9_]+)\s*\("
 REMOVED_JAVASCRIPT_TEST_PATTERN = re.compile(
     r"""^-\s*(?:test|it)\s*\(\s*(?P<quote>["'`])(?P<name>.*?)(?P=quote)"""
 )
-# A sentence ends at ".", "!" or "?" (and any closing quotes or brackets) followed by whitespace
-# or the end of the text, so a dot inside a path, file name or version never ends one.
-SENTENCE_PATTERN = re.compile(r"\S.*?[.!?]+[\"')\]]*(?=\s|$)")
+# A sentence ends at ".", "!" or "?" (and any closing quotes or brackets) followed by whitespace,
+# or at the end of its block, so a dot inside a path, file name or version never ends one.
+SENTENCE_PATTERN = re.compile(r"\S.*?(?:[.!?]+[\"')\]]*(?=\s|$)|$)")
+# Markdown structure that ends a sentence: a fenced block's opening and closing line, a heading
+# line and an Obsidian block-id line (`^id` alone).
+FENCE_LINE_PATTERN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+HEADING_LINE_PATTERN = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
+BLOCK_ID_LINE_PATTERN = re.compile(r"^\s*\^[A-Za-z0-9-]+\s*$")
 PROTECTED_SENTENCE_CONTENT_PATTERN = re.compile(r"```.*?```|`[^`\n]*`|https?://[^\s`<>()]+", re.DOTALL)
 PROTECTED_DOT = "\uE000"
 PROTECTED_BANG = "\uE001"
@@ -1823,10 +1828,46 @@ def deleted_tests(root: Path, branch: str) -> list[str]:
     return found
 
 
+def authored_blocks(text: str) -> list[tuple[bool, str]]:
+    """`text` cut where Markdown structure ends a sentence, as (prose, block) pairs: each fenced
+    block whole, each heading and block-id line alone, and the prose between them."""
+    blocks: list[tuple[bool, str]] = []
+    prose: list[str] = []
+    fence: list[str] = []
+    marker = ""
+
+    def flush() -> None:
+        if prose:
+            blocks.append((True, "\n".join(prose)))
+            prose.clear()
+
+    for line in HTML_COMMENT_PATTERN.sub("", text).splitlines():
+        if marker:
+            fence.append(line)
+            stripped = line.strip()
+            if stripped.startswith(marker) and not stripped.strip(marker[0]):
+                blocks.append((False, "\n".join(fence)))
+                fence.clear()
+                marker = ""
+        elif (opening := FENCE_LINE_PATTERN.match(line)) is not None:
+            flush()
+            fence.append(line)
+            marker = opening[1]
+        elif HEADING_LINE_PATTERN.match(line) or BLOCK_ID_LINE_PATTERN.match(line):
+            flush()
+            blocks.append((False, line))
+        else:
+            prose.append(line)
+    if fence:
+        blocks.append((False, "\n".join(fence)))
+    flush()
+    return blocks
+
+
 def authored_sentences(text: str) -> list[str]:
     """The sentences of authored `text`, whitespace collapsed: the one splitter of the guard, at
-    landing and at delivery. Code spans, fenced blocks and URLs stay whole with their sentence."""
-    normalized = re.sub(r"\s+", " ", HTML_COMMENT_PATTERN.sub("", text)).strip()
+    landing and at delivery. A fenced block, a heading and a block-id line are each one sentence
+    and end the one before them; in prose, code spans and URLs stay whole with their sentence."""
 
     def protect_dots(match: re.Match[str]) -> str:
         protected = match.group()
@@ -1836,13 +1877,22 @@ def authored_sentences(text: str) -> list[str]:
             "?", PROTECTED_QUESTION
         ) + trailing
 
-    protected = PROTECTED_SENTENCE_CONTENT_PATTERN.sub(protect_dots, normalized)
-    return [
-        sentence.replace(PROTECTED_DOT, ".").replace(PROTECTED_BANG, "!").replace(
-            PROTECTED_QUESTION, "?"
-        ).strip()
-        for sentence in SENTENCE_PATTERN.findall(protected)
-    ]
+    sentences: list[str] = []
+    for is_prose, block in authored_blocks(text):
+        normalized = re.sub(r"\s+", " ", block).strip()
+        if not normalized:
+            continue
+        if not is_prose:
+            sentences.append(normalized)
+            continue
+        protected = PROTECTED_SENTENCE_CONTENT_PATTERN.sub(protect_dots, normalized)
+        sentences.extend(
+            sentence.replace(PROTECTED_DOT, ".").replace(PROTECTED_BANG, "!").replace(
+                PROTECTED_QUESTION, "?"
+            ).strip()
+            for sentence in SENTENCE_PATTERN.findall(protected)
+        )
+    return sentences
 
 
 def deleted_authored_sentences(root: Path, branch: str) -> list[str]:

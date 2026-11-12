@@ -416,6 +416,10 @@ A `tier` it cannot import is refused before the suite runs; without `tier`, noth
 glob is relative to the project root. The field report must name every removed sentence in its
 authored-prose section.
 
+A sentence ends at a dot, `!` or `?` before whitespace, and at the start
+and end of a fenced block, at a heading and at a block-id line, so a paragraph added or removed
+between two unchanged blocks is that paragraph alone.
+
 ### Machine-local `~/.se/local.toml`
 
 `public_identity = "Name <email>"` pins the author and committer identity allowed in every
