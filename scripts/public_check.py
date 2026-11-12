@@ -690,8 +690,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                              "on spaces (for example 'A..B' or 'B --not --remotes'); default: "
                              "HEAD. Given, it gates commits: their messages must carry no tracker "
                              "references or attribution trailers either")
-    parser.add_argument("--no-history", action="store_true",
-                        help="skip commit messages and identities")
+    history = parser.add_mutually_exclusive_group()
+    history.add_argument("--history", dest="history",
+                         help="git log revisions whose messages and identities are checked as "
+                              "in a full check, without the gate of --range, split on spaces "
+                              "(for example 'HEAD --not A'); default: HEAD")
+    history.add_argument("--no-history", action="store_true",
+                         help="skip commit messages and identities")
     return parser.parse_args(argv)
 
 
@@ -720,7 +725,9 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
     else:
         files = worktree_files(root)
     scan_files(files, patterns, allow, report)
-    revisions = args.revisions or ("" if args.staged else args.rev or "HEAD")
+    if args.revisions and args.history:
+        raise SetupError("--range and --history exclude each other: a gate or a full check")
+    revisions = args.revisions or args.history or ("" if args.staged else args.rev or "HEAD")
     if not args.no_history and revisions and (args.revisions or has_head(root)):
         if args.revisions:
             check_fetched(root, args.revisions)
