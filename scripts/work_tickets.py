@@ -2341,16 +2341,25 @@ def release(root: Path, branch: str, upstream_ref: str | None = None) -> str | N
 def push(root: Path, branch: str | None = None) -> str | None:
     """Gate `branch` (default: the current one), then push it to origin with its upstream set; the
     integration branch is released first and its new tag pushed with it, unless the release
-    workflow pushes the tags (`project.release = "workflow"`). Returns the release's tag, None
-    where nothing is released."""
+    workflow pushes the tags (`project.release = "workflow"`). A landing branch `land/<branch>`
+    (README "Landing on main") is released the same way against origin's integration branch and,
+    like it, needs the verdicts on its tree; its tag waits for the squash commit. Returns the
+    release's tag, None where nothing is released."""
     required_identity(root, "push")
     branch = branch or current_branch(root)
-    released = tag = release(root, branch) if branch == integration_branch(root) else None
+    target = integration_branch(root)
+    landing = branch.startswith(LANDING_PREFIX)
+    released = tag = (release(root, branch) if branch == target
+                      else release(root, branch, f"refs/remotes/origin/{target}") if landing
+                      else None)
     if tag and release_by_workflow(root):
         workflow_tags(tag)
         tag = None
+    if tag and landing:
+        print(f"Release: tag {tag} once the squash commit is on {target}; it is not pushed now")
+        tag = None
     push_gate(root, branch)
-    if branch == integration_branch(root):
+    if branch == target or landing:
         guard_pushed_tree(root, branch)
     git_push(root, ["-u", "origin", branch, *((f"refs/tags/{tag}",) if tag else ())])
     return released
@@ -4661,8 +4670,9 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("integrate", "validate the field report a pull request's description carries, merge, "
-                      "test, push and close the work issue",
+@command("integrate", "validate the field report a pull request's description carries, merge it "
+                      "on land/<branch>, test, land it through a squash pull request once check "
+                      "passes, and close the work issue",
          WORKTREE,
          arg("pull_request", type=int, help="the delivered pull request's number"),
          REPO,

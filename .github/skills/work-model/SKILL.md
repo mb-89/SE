@@ -159,8 +159,8 @@ integration_branch = "next"
 
 `work_tickets.py` reads it from there for `sync`, `start`, `deliver`, `guard` and `integrate`;
 `integrate` refuses a main checkout that is not on it. Below, `main` means the integration branch.
-Where a ruleset protects it (se's `main`), nothing is pushed to it directly: each integration lands
-as a squash pull request that waits for the required check, as the README's
+Nothing is pushed to it directly: `integrate` lands each integration as a squash pull request that
+waits for the required check `check`, as the README's
 [Landing on main](../../../README.md#landing-on-main) says.
 
 Nothing reaches the integration branch without a passing complete suite and, unless `se.toml` sets
@@ -169,11 +169,12 @@ Nothing reaches the integration branch without a passing complete suite and, unl
 - `work_tickets.py suite` (which `integrate` runs) records its verdict on the tree of the commit
   it ran on, where the checkout holds exactly that commit; `public_check.py --rev <commit>` records
   its verdict on that commit's tree. A failure, or a suite over its limit, records a failure.
-- `work_tickets.py push` and se's pre-push hook (`work_tickets.py verified`) refuse a push of the
-  integration branch without both passing verdicts on its tree, naming the commit and the remedy,
-  so a plain `git push` is refused the same way.
-- The release commit `push` makes (only the version and what `release_build` regenerates) carries
-  its parent's suite verdict.
+- `integrate` refuses to push a landing branch without both passing verdicts on its tree, and
+  reads the squash commit back only with that tree; `work_tickets.py push` and se's pre-push hook
+  (`work_tickets.py verified`) refuse a push of the integration branch itself the same way, naming
+  the commit and the remedy.
+- The release commit (only the version and what `release_build` regenerates) carries its parent's
+  suite verdict.
 - There is no bypass: an emergency push runs `suite` like any other.
 - The verdicts live in the repository's git directory (`se-verdicts/`, `<se>/scripts/verdicts.py`),
   shared by its worktrees.
@@ -281,7 +282,7 @@ Pull requests built on an old `main` cause most integration trouble.
 - **Delivered, waiting for integration** is an open pull request to the integration branch whose
   description carries a complete field report (one that follows its form); `queue` lists them.
 - **Closing**: `integrate` closes the work issue with a comment that links the pull request and
-  the release. Where acceptance can only be seen after the merge, the issue stays open and the
+  the release, and names the landing pull request with its `check` run. Where acceptance can only be seen after the merge, the issue stays open and the
   comment names what it waits for.
 - Capacity limits apply only to local workers (CPU cores and memory minus running workers). Cloud
   workers have none. File clashes and the serial merge queue apply everywhere.
@@ -433,7 +434,7 @@ repeats any of this section's rules:
 
 `commit_trailer` is the one place that names a commit trailer: an environment that requires one
 sets it on its machine, every role adds it as the last line of
-each commit it makes, and `integrate` adds it to its merge commits. Unset, commits carry no trailer,
+each commit it makes, and `integrate` adds it to its merge and squash commits. Unset, commits carry no trailer,
 as a project's public rule may require; se's public check refuses attribution trailers
 ([pub-003](references/rules.md#pub-003-no-attribution-trailers),
 [Public safety](../../../AGENTS.md#public-safety)).
@@ -537,19 +538,27 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     like the work issue and based on the integration branch.
   - `integrate`: save the pull request's description to a file and check it with `field-report
     --check <file> --issue-body <file>`.
-    - Merge the pull request's branch into the newest integration branch locally, with the message
-      `integrate` writes (`Integrate <branch>: <summary>`, plus the trailer `work_tickets.py
-      release-trailer <branch> --issue-body <file> --pr-description <file>` prints, which
-      [releases](../../../README.md#project-settings) require).
+    - Land it as `integrate` does ([Landing on main](../../../README.md#landing-on-main)): on
+      `land/<branch>` from origin's newest integration branch, merge the pull request's branch
+      with the message `integrate` writes (`Integrate <branch>: <summary>`, plus the trailer
+      `work_tickets.py release-trailer <branch> --issue-body <file> --pr-description <file>`
+      prints, which [releases](../../../README.md#project-settings) require).
     - That command refuses, as `integrate` does, a branch with commits after the report's
       Branch tip, naming them; merge only once the report is updated, or state why they are
       included with `--include-late <reason>` and in the `Integrated in …` comment.
     - Then run the complete suite with `work_tickets.py suite` and, unless `se.toml` sets
       `public_check = false`, the public check (`public_check.py --rev HEAD --range
-      <pre-merge>..HEAD`), refusing on a failure; both record the verdicts `push` needs.
-    - Then `push <integration branch>`, and close the work issue with the `Integrated in …`
-      comment, which links the pull request and the release (or names the post-merge acceptance
-      it stays open for).
+      <integration branch>..HEAD`), refusing on a failure; both record the verdicts `push` needs.
+    - Then `push land/<branch>`, which releases on it and pushes it; with the GitHub tools open
+      (or reuse) its pull request into the integration branch with the work pull request's
+      description, wait until its `check` passes, and squash-merge it at that head with the merge
+      commit's subject as the title and the rest of its message (the `Release-kind` trailer) as
+      the message.
+    - Read the merge back: the pull request merged, its merge commit origin's integration
+      branch, with the tree of `land/<branch>`; fast-forward the checkout to it.
+    - Then close the work pull request with a line naming the landing one, and the work issue
+      with the `Integrated in …` comment, which links both pull requests and the release (or
+      names the post-merge acceptance it stays open for).
 - **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
   approval prompt no one answers; a role works with the repositories its session started with.
 - **Commit trailers**: the project's [`commit_trailer`](#what-the-project-provides) wins over a

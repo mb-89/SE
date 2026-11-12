@@ -280,6 +280,23 @@ def test_a_squash_landed_integration_counts_as_integrated_and_releases_its_kind(
         ("feature/topic-20261106", "minor")]
 
 
+def test_push_of_a_landing_branch_releases_against_origin_s_main_and_waits_with_the_tag(
+        checkout, capsys):
+    git(checkout, "switch", "-q", "-c", "land/feature/topic-20261106")
+    integrate(checkout, "feature/topic-20261106")
+    git(checkout, "switch", "-q", "land/feature/topic-20261106")
+    git(checkout, "merge", "-q", "--ff-only", "main")
+    assert push(checkout) == 0
+    origin = checkout.parent / "origin.git"
+    shown = subprocess.run(["git", "--git-dir", str(origin), "show",
+                            "land/feature/topic-20261106:se.toml"], capture_output=True, text=True,
+                           check=True).stdout
+    assert shown == settings("1.3.0")
+    assert "v1.3.0" not in subprocess.run(["git", "--git-dir", str(origin), "tag"],
+                                          capture_output=True, text=True, check=True).stdout
+    assert "Release: tag v1.3.0 once the squash commit is on main" in capsys.readouterr().out
+
+
 def test_a_re_integration_releases_the_kind_its_own_report_states(checkout, capsys):
     integrate(checkout, "fix/topic-20261106")
     report = "**Branch tip:** `abc1234`  **Re-integration kind:** minor\n"
