@@ -14,9 +14,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# The most bytes a tracked file holds outside LARGE_ALLOWED: source stays well under it, a build
+# output, a data dump or a vendored bundle does not.
+MAX_BYTES = 200_000
+
 # Tracked binary files (a NUL byte in the first BINARY_PEEK bytes, git's own test), each with the
 # reason it is tracked.
 BINARY_ALLOWED: dict[str, str] = {}
+
+# Tracked files over MAX_BYTES, each with the reason it is tracked.
+LARGE_ALLOWED: dict[str, str] = {
+    "scripts/work_tickets.py": "the work model's one command; its split is a package of its own",
+    "tests/test_work_ticket_issues.py": "the issue tests of work_tickets.py, which follow its size",
+}
 
 BINARY_PEEK = 8000
 
@@ -46,6 +56,20 @@ def binary_findings(repo: Path, allowed: dict[str, str]) -> list[str]:
     ]
 
 
+def large_findings(repo: Path, allowed: dict[str, str], limit: int = MAX_BYTES) -> list[str]:
+    """Tracked files over `limit` bytes outside `allowed`, and entries of `allowed` naming none."""
+    sizes = {p: (repo / p).stat().st_size for p in tracked(repo)}
+    large = {p for p, size in sizes.items() if size > limit}
+    return [
+        f"{p}: {sizes[p]} bytes, over {limit}; git rm --cached it and ignore it, split it, "
+        "or allow it with a reason"
+        for p in sorted(large - set(allowed))
+    ] + [
+        f"{p}: allowed as large but no tracked file over {limit} bytes; remove the entry"
+        for p in sorted(set(allowed) - large)
+    ]
+
+
 def fixture_repo(tmp_path: Path, files: dict[str, bytes]) -> Path:
     """A git repository in `tmp_path` tracking `files`."""
     repo = tmp_path / "repo"
@@ -70,6 +94,23 @@ def test_a_tracked_binary_file_fails_and_a_stale_entry_too(tmp_path: Path) -> No
     assert binary_findings(repo, {"logo.png": "the logo", "gone.bin": "removed"}) == [
         "tool: a tracked binary file; git rm --cached it and ignore it, or allow it with a reason",
         "gone.bin: allowed as binary but no tracked binary file; remove the entry",
+    ]
+
+
+def test_se_tracks_no_file_over_the_bound_outside_its_allow_list() -> None:
+    assert large_findings(ROOT, LARGE_ALLOWED) == []
+    assert all(reason.strip() for reason in LARGE_ALLOWED.values())
+
+
+def test_a_tracked_file_over_the_bound_fails_and_a_stale_entry_too(tmp_path: Path) -> None:
+    repo = fixture_repo(
+        tmp_path, {"dump.json": b"x" * 201, "kept.json": b"x" * 201, "small.py": b"x" * 200}
+    )
+
+    assert large_findings(repo, {"kept.json": "needed", "small.py": "shrank"}, limit=200) == [
+        "dump.json: 201 bytes, over 200; git rm --cached it and ignore it, split it, "
+        "or allow it with a reason",
+        "small.py: allowed as large but no tracked file over 200 bytes; remove the entry",
     ]
 
 
