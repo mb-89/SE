@@ -70,7 +70,8 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   needs the human's approval, obtained by SE.
 - Retros use `retro.md` and read the field reports in the pull request descriptions of the
   window's closed work issues; each improvement names the agent definition, template, skill or
-  script it changes, and becomes an ordinary work issue.
+  script it changes. The retro's report closes the retro issue and files nothing; SE bundles its
+  findings into work issues ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 
 ## Issues
 

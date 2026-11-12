@@ -528,3 +528,10 @@ def test_the_next_collect_scores_the_previous_findings(checkout, tmp_path, monke
     assert "| 2. Run the check job on every landing | C | work | #12 | closed | yes (check) |" in text
     assert "| 3. A finding nobody took up yet | C | work | none | none | no check named |" in text
     assert retro.read_block(text)["findings"] == []
+
+
+def test_the_retro_template_names_the_two_commands():
+    template = (Path(__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE"
+                / "retro.md").read_text(encoding="utf-8")
+    assert "scripts/retro.py collect <this issue> --out <draft>" in template
+    assert "scripts/retro.py file <this issue> --draft <draft>" in template
