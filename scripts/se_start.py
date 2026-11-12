@@ -1,7 +1,8 @@
 """SE's start: the greeting, whether everything SE uses is up to date, and the one refresh.
 
 `status` answers from what is on disk and the cached update check, never from the network, and
-starts the check in the background when the cache is stale; `check` runs that check; `refresh`
+starts the check in the background when the cache is stale; `check` runs that check, and where gh
+is signed in also counts the work landed since the last retro and runs the fleet check; `refresh`
 moves every module that is due within its range, and SE itself, into place. What each command
 does and where SE runs it is the README section "Start and refresh".
 """
@@ -19,6 +20,7 @@ import time
 import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -213,19 +215,23 @@ class Cache:
     checked_at: float | None = None
     started_at: float | None = None
     remotes: dict[str, dict] = field(default_factory=dict)
+    work: dict | None = None  # what is due in the work (work_check); None: not read (no gh)
 
     @classmethod
     def read(cls, path: Path) -> "Cache":
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            return cls(data.get("checked_at"), data.get("started_at"), dict(data.get("remotes", {})))
+            work = data.get("work")
+            return cls(data.get("checked_at"), data.get("started_at"), dict(data.get("remotes", {})),
+                       work if isinstance(work, dict) else None)
         except (OSError, ValueError, AttributeError):
             return cls()
 
     def write(self, path: Path) -> None:
         """Atomically: a status reading at the same time sees the old or the new check, whole."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"checked_at": self.checked_at, "started_at": self.started_at, "remotes": self.remotes}
+        data = {"checked_at": self.checked_at, "started_at": self.started_at, "remotes": self.remotes,
+                "work": self.work}
         with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False, encoding="utf-8",
                                          suffix=".tmp") as handle:
             json.dump(data, handle, indent=1)
@@ -252,6 +258,40 @@ def run_check(urls: set[str], remote: Callable[[str], list[Version]]) -> dict[st
 
     with ThreadPoolExecutor(max_workers=max(1, min(8, len(urls)))) as pool:
         return dict(zip(sorted(urls), pool.map(one, sorted(urls))))
+
+
+def work_check(root: Path | None) -> dict | None:
+    """What is due in the work of the project at `root`, where gh is signed in: the work issues
+    landed since the last retro (retro.py's window) with the count that makes a retro due, and the
+    fleet check's findings, each part with its error instead where its read failed. None without gh
+    or without a project checkout: in the cloud no token reaches SE's code."""
+    if root is None or not (root / ".git").exists():
+        return None
+    work_tickets = _load("work_tickets")
+    if work_tickets.hand_off():
+        return None
+    retro = _load("retro")
+    failures = (work_tickets.QueueError, OSError, ValueError, subprocess.SubprocessError)
+    work: dict[str, dict] = {}
+    try:
+        repo = work_tickets.resolve_repo(root, None)
+        branch = work_tickets.integration_branch(root)
+    except failures as error:
+        return {"retro": {"error": str(error)}, "fleet": {"error": str(error)}}
+    try:
+        door = retro.GhDoor(root, repo, work_tickets.remote_repo(root) or repo)
+        work["retro"] = {"landed": retro.landed_since_retro(door, repo, branch),
+                         "due_after": retro.due_after(root)}
+    except failures as error:
+        work["retro"] = {"error": str(error)}
+    try:
+        found = work_tickets.fleet_findings(
+            work_tickets.Fleet(root, repo, branch), datetime.now(timezone.utc),
+            work_tickets.fleet_lease(root), work_tickets.repository_name(root))
+        work["fleet"] = {"findings": [{"kind": f.kind, "issue": f.issue} for f in found]}
+    except failures as error:
+        work["fleet"] = {"error": str(error)}
+    return work
 
 
 # The computing: pure, on what was read
@@ -293,6 +333,8 @@ class Report:
     checked_at: float | None
     running: bool
     now: float
+    work: dict | None = None  # the cached work_check
+    root: Path | None = None  # the project
 
     @property
     def errors(self) -> list[str]:
@@ -322,6 +364,37 @@ def greeting(report: Report, se_root: Path) -> list[str]:
     if due:
         lines.append(f"Refresh: {refresh_command(se_root)}")
     lines += _check_lines(report, se_root)
+    return lines + work_lines(report, se_root)
+
+
+def work_lines(report: Report, se_root: Path) -> list[str]:
+    """From the cached work check: one line for a retro that is due and one for the fleet's
+    findings, each with the command to run; a part whose read failed is named with the remedy.
+    Nothing where no work check ran (no gh)."""
+    work = report.work or {}
+    se = se_root.as_posix()
+    lines = []
+    retro = work.get("retro") or {}
+    landed, due_after = retro.get("landed"), retro.get("due_after")
+    if "error" in retro:
+        lines.append(f"Retro check not done: {retro['error']}; {CHECK_REMEDY.format(se=se)}")
+    elif isinstance(landed, int) and isinstance(due_after, int) and landed >= due_after:
+        lines.append(f"Retro due: {_plural(landed, 'work issue')} landed since the last retro "
+                     f"(due after {due_after}); file one from .github/ISSUE_TEMPLATE/retro.md, then "
+                     f"run: uv run python {se}/scripts/retro.py collect <retro issue> --out <draft>")
+    fleet = work.get("fleet") or {}
+    findings = fleet.get("findings") or []
+    if "error" in fleet:
+        lines.append(f"Fleet check not done: {fleet['error']}; {CHECK_REMEDY.format(se=se)}")
+    elif findings:
+        kinds: dict[str, list[str]] = {}
+        for finding in findings:
+            kinds.setdefault(str(finding.get("kind")), []).append(f"#{finding.get('issue')}")
+        where = f" --worktree {report.root.as_posix()}" if report.root else ""
+        lines.append(f"Fleet: {_plural(len(findings), 'finding')} ("
+                     + "; ".join(f"{kind} {', '.join(issues)}" for kind, issues in kinds.items())
+                     + f"); see each with its remedy: uv run python {se}/scripts/work_tickets.py "
+                     f"fleet-check{where}")
     return lines
 
 
@@ -364,7 +437,7 @@ def full(report: Report, se_root: Path) -> list[str]:
         lines.append(f"{item.name}: in use {use}; latest {_v(state.latest)}; {verdict}")
     if any(s.due for s in report.states):
         lines.append(f"Refresh: {refresh_command(se_root)}")
-    return lines + _check_lines(report, se_root)
+    return lines + _check_lines(report, se_root) + work_lines(report, se_root)
 
 
 def _plural(count: int, word: str) -> str:
@@ -391,11 +464,12 @@ def _claude(args: list[str]) -> subprocess.CompletedProcess:
 
 @dataclass(frozen=True)
 class World:
-    """The outside world status, check and refresh reach: the clock, the remotes, the start of a
-    background check, Claude Code's command line. Tests replace each."""
+    """The outside world status, check and refresh reach: the clock, the remotes, the work on
+    GitHub, the start of a background check, Claude Code's command line. Tests replace each."""
 
     clock: Callable[[], float] = time.time
     remote: Callable[[str], list[Version]] = git_tags
+    work: Callable[[Path | None], dict | None] = work_check
     spawn: Callable[[list[str]], None] = _spawn_detached
     claude: Callable[[list[str]], subprocess.CompletedProcess] = _claude
 
@@ -416,17 +490,19 @@ def status(se_root: Path, root: Path | None, local_config: Path | None, cache_pa
         world.spawn(argv + ["check"])
         running = True
     states = [assess(item, cache.remotes if cache.checked_at is not None else None) for item in local.items]
-    return Report(local, states, cache.checked_at, running, now)
+    return Report(local, states, cache.checked_at, running, now, cache.work, root)
 
 
 def check(se_root: Path, root: Path | None, local_config: Path | None, cache_path: Path,
-          world: World) -> Report:
-    """Read every remote once, in parallel, and keep the result in the cache."""
+          world: World, work: bool = True) -> Report:
+    """Read every remote once, in parallel, and, with `work`, what is due in the work
+    (work_check); keep both in the cache. Without `work` the cached work stays."""
     local = read_local(se_root, root, local_config)
     remotes = run_check({item.url for item in local.items if item.url}, world.remote)
+    found = world.work(root) if work else Cache.read(cache_path).work
     now = world.clock()
-    Cache(now, None, remotes).write(cache_path)
-    return Report(local, [assess(item, remotes) for item in local.items], now, False, now)
+    Cache(now, None, remotes, found).write(cache_path)
+    return Report(local, [assess(item, remotes) for item in local.items], now, False, now, found, root)
 
 
 # Refresh: new location first, check that it starts, then switch
@@ -603,7 +679,7 @@ def refresh_module(root: Path, local_config: Path | None, name: str, version: Ve
 def refresh(se_root: Path, root: Path | None, local_config: Path | None, cache_path: Path,
             world: World) -> tuple[list[str], bool]:
     """Check now, then move every item that is due; one item failing leaves the others moving."""
-    report = check(se_root, root, local_config, cache_path, world)
+    report = check(se_root, root, local_config, cache_path, world, work=False)
     lines, failed = [], False
     for state in report.states:
         item = state.item
@@ -634,7 +710,7 @@ def refresh(se_root: Path, root: Path | None, local_config: Path | None, cache_p
     if failed:
         lines.append(f"Try again with: {refresh_command(se_root)}")
     else:
-        check(se_root, root, local_config, cache_path, world)
+        check(se_root, root, local_config, cache_path, world, work=False)
     return lines, failed
 
 
@@ -678,7 +754,8 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--hook", action="store_true", help="the greeting as Claude Code SessionStart JSON")
     status_parser.add_argument("--note", action="append", default=[], help="a line to show above the greeting")
     status_parser.add_argument("--offline", action="store_true", help="never start the update check")
-    commands.add_parser("check", help="read every remote now, in parallel, and cache the result")
+    commands.add_parser("check", help="read every remote now, in parallel, and, where gh is signed in, "
+                        "the work landed since the last retro and the fleet check; cache the result")
     commands.add_parser("refresh", help="move every module due within its range, and SE itself, into place")
     return parser
 

@@ -38,6 +38,11 @@ its tools.
   handed you, else the output of `uv run python <se>/scripts/se_start.py status --greeting`,
   run first. Its lines name what is out of date and the one refresh command; run that command only
   when the person asks ([Start and refresh](../README.md#start-and-refresh)).
+  - Where gh is signed in it also names a retro that is due and the fleet's findings, from the
+    cached background check. Without gh (the cloud) it names neither: at your first turn run
+    `work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints with your
+    GitHub tools, pass the lists back as it says, and present its findings
+    ([Fleet check](../README.md#fleet-check)).
 
 - **Turn-start check**: run `work_tickets.py queue --worktree <main checkout>` to surface field
   reports and startable ready work; local sessions have no scheduled agent.
