@@ -363,6 +363,30 @@ writes them.
 Without gh it prints its GitHub plan; the session runs it with its GitHub tools, saves the three
 lists as JSON and passes them as `--open-issues`, `--closed-issues` and `--pulls`.
 
+### Stop hook
+
+```toml
+[stop]
+refusals = 5
+```
+
+The plugin hands every `Stop` and `SubagentStop` to `work_tickets.py stop-check`, so a worker's turn
+ends only with its work issue delivered:
+
+- Where it refuses: a checkout whose ticket queue (`.se/work/`) is for a work issue (intake's
+  snapshot, or what was recorded as read of it), on a branch other than the integration branch.
+- What it refuses: the stop, while the branch has no open pull request whose description carries a
+  field report that passes `field-report --check` at the branch tip. The refusal names what is
+  missing and the commands that deliver.
+- `refusals` is how often in a row it refuses, built in 5; then it lets the turn end and says so,
+  and counts afresh. A passing stop resets the count.
+- A `SubagentStop` is judged only for a worker sub-agent (`worker`, `se:worker`).
+- Anywhere else (SE's own session, a person's session) it never refuses. Where it cannot judge it
+  lets the turn end and says why: advice fails open.
+- Without gh it judges by the answer file `.se/work/pull-request.json`, which
+  `stop-check --pull <number> --pr-description <file>` writes from the pull request the session's
+  GitHub tools opened; without either, it cannot judge.
+
 ### Test budget
 
 ```toml
@@ -682,6 +706,14 @@ work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json]
     or by itself, an se-person issue and what it holds up; 'healthy' and exit code 0 when there is
     none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the
     answers from files
+
+work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE]
+    the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue,
+    refuse the turn's end while its branch has no open pull request whose description carries a
+    field report that passes field-report --check at the branch tip, naming what is missing and the
+    commands; at most [stop] refusals times in a row (se.toml, built in 5). Anywhere else, for a
+    sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it
+    lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout
 
 work_tickets.py docs [--check]
     write the README's command reference from this registry; with --check, only refuse a README that
