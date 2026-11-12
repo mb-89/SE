@@ -94,7 +94,7 @@ def test_check_refuses_a_generated_file_without_source_and_build_removes_it(chec
 
 
 def test_each_agent_and_skill_has_one_source_and_both_layouts(checkout):
-    for role in ("se", "integrator", "worker"):
+    for role in ("se", "integrator", "worker", "reviewer"):
         assert (checkout / "src" / "agents" / f"{role}.md").is_file()
         assert (checkout / ".github" / "agents" / f"{role}.agent.md").is_file()
         assert (checkout / "agents" / f"{role}.md").is_file()

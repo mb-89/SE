@@ -8,7 +8,7 @@
     {
       "name": "se",
       "source": "./",
-      "description": "SE, the agent a person talks to, with its integrator and worker sub-agents and their skills."
+      "description": "SE, the agent a person talks to, with its integrator, worker and reviewer sub-agents and their skills."
     }
   ]
 }

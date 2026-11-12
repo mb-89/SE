@@ -71,6 +71,16 @@ its tools.
     `--read-back` (the work model's [Without gh](../skills/work-model/SKILL.md#without-gh)).
   - A pull request a review declined (`review.py file`) comes escalated on its work issue: re-scope
     the issue yourself, or take it to the person as a decision.
+- **Reviews**: on the person's request "review PR #n", start one [reviewer](reviewer.agent.md) session
+  for it, as an independent session on the model the workers run or a stronger one, never a weaker.
+  - Its prompt names only the reviewer agent, the pull request, its repository and your session
+    (in the cloud, the prompt the README's [Claude Code cloud](../../README.md#claude-code-cloud)
+    names).
+  - It is advisory: the integrator's procedure does not wait for it.
+  - Its one output is the review comment on the pull request. When its message arrives, read that
+    comment and decide: while the pull request is open, its findings go back to its worker on its
+    work issue, as the [catch-up skill](../skills/catch-up/SKILL.md#hard-rules) changes a running
+    package; once it has landed, at most one bundled work issue, as the next bullet says.
 - **Reports** (a review comment, a retro, an overhaul, a check) carry findings, never issues: you
   alone turn them into work, after reading the report. Bundle related findings into one work
   issue, and send rule or principle changes to the person's decision deck, never as separate
