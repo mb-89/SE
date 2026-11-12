@@ -39,7 +39,7 @@ import tomllib
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -212,6 +212,21 @@ def goal(body: str) -> str:
             paragraph = " ".join(lines)
             return re.sub(r"\*\*|__|`", "", paragraph)
     return ""
+
+
+# The one line that plans an issue (work model "Issues"): `Planned: yyyy-mm-dd` on a line of its own.
+PLANNED = re.compile(r"^Planned:[ \t]*(\d{4}-\d{2}-\d{2})[ \t]*$", flags=re.M)
+
+
+def planned(body: str) -> str | None:
+    """The day an issue's body plans it for, from its first `Planned: yyyy-mm-dd` line; None without one."""
+    match = PLANNED.search(body.replace("\r\n", "\n"))
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(match[1]).isoformat()
+    except ValueError:
+        return None
 
 
 def day(timestamp: str) -> str:

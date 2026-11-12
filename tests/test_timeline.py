@@ -250,3 +250,18 @@ def test_a_refused_read_writes_nothing(tmp_path, capsys):
     assert timeline.main(["--destination", str(destination)], post=refuse) == 1
     assert not destination.exists()
     assert "502" in capsys.readouterr().err
+
+
+# --- Planned days (work issue "timeline shows planned days") ---
+
+@pytest.mark.parametrize(("body", "date"), [
+    ("Planned: 2026-11-13\n", "2026-11-13"),
+    ("<!-- se:fleet -->\r\n\r\nPlanned:  2026-11-13  \r\n\r\n## Goal\r\n", "2026-11-13"),
+    ("Planned: someday\n", None),
+    ("Planned: 2026-02-30\n", None),
+    ("Was Planned: 2026-11-13 in a sentence.\n", None),
+    ("Planned: 2026-11-13 maybe\n", None),
+    ("", None),
+])
+def test_the_planned_line_is_parsed_in_one_place(body, date):
+    assert timeline.planned(body) == date
