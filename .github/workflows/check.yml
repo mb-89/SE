@@ -1,13 +1,14 @@
 # SE's CI, the one check main's ruleset requires by its name `check` (AGENTS.md "Public safety"):
 # on every pull request and every push to the integration branch, every check the integration runs:
 # the public check's commit gate, the generated layouts, the README's command reference, a pull
-# request's field report and the complete suite within its budget. The job passes only when all
-# pass, so a push or pull request the hooks did not see still fails here.
+# request's field report and the complete suite within its budget; on a pull request also the
+# work model's issue rule. The job passes only when all pass, so a push or pull request the hooks
+# did not see still fails here.
 name: check
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   push:
     branches: [main]
 
@@ -49,6 +50,13 @@ jobs:
             echo "::error::public-check (scripts/public_check.py, AGENTS.md 'Public safety') refused $what: amend each named commit as its line says (for a Co-authored-by line, without the line, and turn off the editor's co-author setting, README 'Install'), then push again"
             exit 1
           fi
+      # The work model's issue rule (src/skills/work-model/SKILL.md "Integration branch"): the
+      # description names an open work issue, a landing's through the work pull request it lands.
+      - name: The pull request names an open work issue
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/pr_issues.py
       - uses: astral-sh/setup-uv@v6
       # Before the suite, whose start regenerates the layouts (tests/conftest.py).
       - name: The generated layouts match src/
