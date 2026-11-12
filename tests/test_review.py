@@ -204,3 +204,199 @@ def test_with_gh_the_reads_go_through_work_tickets_door(checkout, monkeypatch):
                      (REPO, f"commits/{head(checkout)}/check-runs?per_page=100"),
                      (REPO, "issues/7/comments?per_page=100"),
                      (REPO, "issues/5/comments?per_page=100")]
+
+
+# `review.py file`: a checked review report, its findings filed as work issues through
+# work_tickets.py's door (a fake gh here), its verdict posted on the pull request.
+
+def report(**changes: object) -> dict:
+    """A passing report with one non-blocking finding; `changes` replace its fields."""
+    return {
+        "verdict": "pass",
+        "acceptance": [{"item": "A feature that returns 42.", "evidence": "feature.py:2 returns 42"}],
+        "findings": [{"title": "Name the magic number", "evidence": "feature.py:2 `return 42`",
+                      "place": "feature.py:2", "blocking": False,
+                      "why": "Bad but fixable: nothing is made worse."}],
+        "clean": ["feature.py: one function, no side effects"],
+        **changes,
+    }
+
+
+def finding(title: str, blocking: bool = False) -> dict:
+    return {"title": title, "evidence": f"{title}: shown by `pytest -k {title}`", "place": "x.py:1",
+            "blocking": blocking, "why": "It damages the product." if blocking else "Fixable."}
+
+
+class IssuesGh:
+    """gh as filing and commenting use it: open issues, labels and comments of one repository."""
+
+    def __init__(self, issues: dict[int, dict] | None = None) -> None:
+        self.issues = issues or {}
+        self.labels: set[str] = set()
+        self.comments: dict[int, list[str]] = {}
+        self.calls: list[list[str]] = []
+
+    def __call__(self, root: Path, arguments: list[str]) -> str:
+        self.calls.append(arguments)
+
+        def value(flag: str) -> str:
+            return arguments[arguments.index(flag) + 1]
+        body = (Path(value("--body-file")).read_text(encoding="utf-8")
+                if "--body-file" in arguments else "")
+        command = arguments[:2]
+        if command == ["label", "list"]:
+            return json.dumps([{"name": name} for name in sorted(self.labels)])
+        if command == ["label", "create"]:
+            self.labels.add(arguments[2])
+            return ""
+        if command == ["issue", "list"]:
+            return json.dumps([issue for issue in self.issues.values() if issue["state"] == "open"])
+        if command == ["issue", "create"]:
+            number = max(self.issues, default=99) + 1
+            self.issues[number] = {"number": number, "title": value("--title"), "body": body,
+                                   "state": "open"}
+            return f"https://github.com/owner/repo/issues/{number}\n"
+        if command in (["issue", "comment"], ["pr", "comment"]):
+            self.comments.setdefault(int(arguments[2]), []).append(body)
+            return ""
+        raise AssertionError(f"unexpected gh {arguments}")
+
+
+@pytest.fixture
+def gh(monkeypatch, tmp_path) -> IssuesGh:
+    fake = IssuesGh()
+    monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "today_stamp", lambda: "20261112")
+    return fake
+
+
+def file_report(tmp_path: Path, given: object, *options: str) -> int:
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(given), encoding="utf-8")
+    (tmp_path / "checkout").mkdir(exist_ok=True)
+    return review.main(["file", "5", "--report", str(path), "--repo", REPO,
+                        "--worktree", str(tmp_path / "checkout"), *options])
+
+
+def verdict_block(comment: str) -> dict:
+    assert comment.startswith(review.VERDICT_MARKER + "\n")
+    return json.loads(comment.split("```json\n", 1)[1].split("\n```", 1)[0])
+
+
+@pytest.mark.parametrize(("given", "refusal"), [
+    (report(verdict="maybe"), "verdict is pass or fail"),
+    (report(extra=1), "unknown field extra"),
+    (report(findings=[{**finding("x"), "severity": "high"}]), "unknown field severity"),
+    (report(acceptance=[{"item": "A feature.", "evidence": " "}]),
+     'A pass needs evidence for every acceptance item, and "A feature." has none'),
+    (report(findings=[finding("Breaks it", blocking=True)]), "A pass has no blocking finding"),
+    (report(verdict="fail"), "A fail needs a verified blocking finding"),
+    ({key: value for key, value in report().items() if key != "clean"},
+     'no "checked and clean" list'),
+    (report(clean=[]), 'no "checked and clean" list'),
+    (report(findings=[{**finding("x"), "evidence": ""}]), 'finding "x" has no evidence'),
+    (report(findings=[{**finding("x"), "why": ""}]), 'finding "x" has no judgment'),
+    (report(findings=[{key: value for key, value in finding("x").items() if key != "blocking"}]),
+     'finding "x" has no judgment'),
+    (report(findings=[{**finding("x"), "place": ""}]), 'finding "x" names no place'),
+    (report(acceptance=[]), "names no acceptance item"),
+    ([], "a JSON object"),
+], ids=["verdict", "unknown-field", "unknown-finding-field", "pass-without-evidence",
+        "pass-with-blocker", "fail-without-blocker", "no-clean-list", "empty-clean-list",
+        "finding-without-evidence", "finding-without-why", "finding-without-blocking",
+        "finding-without-place", "no-acceptance", "not-an-object"])
+def test_a_report_breaking_the_rules_is_refused_and_writes_nothing(
+        gh, tmp_path, capsys, given, refusal):
+    assert file_report(tmp_path, given) == 1
+    assert refusal in capsys.readouterr().err
+    assert gh.calls == []
+
+
+def test_a_pass_files_its_findings_and_posts_the_verdict(gh, tmp_path, capsys):
+    assert file_report(tmp_path, report()) == 0
+
+    issue = gh.issues[100]
+    assert issue["title"] == "fix/name-the-magic-number-20261112"
+    assert work_tickets.FLEET_MARKER in issue["body"] and "feature.py:2" in issue["body"]
+    assert "https://github.com/owner/repo/pull/5" in issue["body"]
+    assert work_tickets.requirement_items(issue["body"])
+    comment, = gh.comments[5]
+    data = verdict_block(comment)
+    assert data["pull"] == 5 and data["verdict"] == "pass" and data["unfiled"] == 0
+    assert data["findings"][0]["issue"] == 100 and data["clean"] == report()["clean"]
+    assert "## Review of pull request #5: PASS" in comment
+    out = capsys.readouterr().out
+    assert "Filed work issue https://github.com/owner/repo/issues/100" in out
+    assert "Posted the verdict on pull request #5" in out
+
+
+def test_a_fail_files_its_blocking_finding_first(gh, tmp_path, capsys):
+    given = report(verdict="fail", findings=[finding("fixable"), finding("damage", blocking=True)])
+    assert file_report(tmp_path, given) == 0
+
+    assert [issue["title"] for issue in gh.issues.values()] == [
+        "fix/damage-20261112", "fix/fixable-20261112"]
+    data = verdict_block(gh.comments[5][0])
+    assert data["verdict"] == "fail"
+    assert [(item["title"], item["issue"]) for item in data["findings"]] == [
+        ("fixable", 101), ("damage", 100)]
+    assert "## Review of pull request #5: FAIL" in gh.comments[5][0]
+
+
+def test_at_most_max_filed_findings_are_filed_and_the_rest_counted(gh, tmp_path, capsys):
+    findings = [finding(f"finding {number}") for number in range(7)]
+    assert file_report(tmp_path, report(findings=findings)) == 0
+    assert len(gh.issues) == review.MAX_FILED == 5
+    data = verdict_block(gh.comments[5][0])
+    assert data["unfiled"] == 2 and data["max_filed"] == 5
+    assert [item["issue"] for item in data["findings"][5:]] == [None, None]
+    assert "2 more finding(s) counted, not filed" in gh.comments[5][0]
+
+    (tmp_path / "checkout" / "se.toml").write_text("[review]\nmax_filed = 1\n", encoding="utf-8")
+    gh.issues.clear()
+    assert file_report(tmp_path, report(findings=findings[:3])) == 0
+    assert len(gh.issues) == 1 and verdict_block(gh.comments[5][1])["unfiled"] == 2
+
+    (tmp_path / "checkout" / "se.toml").write_text("[review]\nmax_filed = -1\n", encoding="utf-8")
+    calls = len(gh.calls)
+    assert file_report(tmp_path, report()) == 1
+    assert "max_filed" in capsys.readouterr().err and len(gh.calls) == calls
+
+
+def test_a_finding_whose_twin_is_open_files_nothing(gh, tmp_path, capsys):
+    gh.issues[7] = {"number": 7, "title": "fix/name-the-magic-number-20261101",
+                    "body": "Filed by an earlier review.", "state": "open"}
+    assert file_report(tmp_path, report()) == 0
+
+    assert sorted(gh.issues) == [7]
+    assert "would have filed" in gh.comments[7][0]
+    data = verdict_block(gh.comments[5][0])
+    assert data["findings"][0]["issue"] is None and data["findings"][0]["twin"] == 7
+    assert "Not filed: #7" in capsys.readouterr().out
+
+
+def test_without_gh_the_plans_are_printed_and_the_answers_read(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "today_stamp", lambda: "20261112")
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: pytest.fail(f"gh {arguments}"))
+    given = report(findings=[finding("one"), finding("two")])
+
+    assert file_report(tmp_path, given) == 0
+    out = capsys.readouterr().out
+    assert "GitHub plan: file fix/one-20261112" in out and "GitHub plan: file fix/two-20261112" in out
+    assert "review.py file 5 --report" in out and "--filed <file>" in out
+
+    answers = tmp_path / "filed.json"
+    answers.write_text(json.dumps([{"number": 12}, {"twin": 3}]), encoding="utf-8")
+    assert file_report(tmp_path, given, "--filed", str(answers)) == 0
+    out = capsys.readouterr().out
+    assert "GitHub plan: the verdict on pull request #5" in out
+    step = json.loads(out.split("1. add_issue_comment ", 1)[1].splitlines()[0])
+    assert step["issue_number"] == 5 and step["owner"] == "owner"
+    data = verdict_block(step["body"])
+    assert [(item["issue"], item["twin"]) for item in data["findings"]] == [(12, None), (None, 3)]
+
+    answers.write_text(json.dumps([{"number": 12}]), encoding="utf-8")
+    assert file_report(tmp_path, given, "--filed", str(answers)) == 1
+    assert "2 findings to file, and --filed answers 1" in capsys.readouterr().err

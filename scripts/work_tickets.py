@@ -3256,6 +3256,13 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
                  lower=state.get("lower"))  # type: ignore[arg-type]
 
 
+def work_issue_filing(repo: str, title: str, body: str, labels: list[str]) -> Step:
+    """The step that files a work issue titled `title` with `labels`, for `filed_once`."""
+    return Step("create", "issue_write", {
+        **owner_repo(repo), "method": "create", "title": title, "body": body, "labels": labels},
+        gives=("number",))
+
+
 def file_work_issue(
     root: Path, title: str, file: Path, blockers: list[int], repo: str | None
 ) -> str:
@@ -3272,10 +3279,8 @@ def file_work_issue(
         raise QueueError(
             "file --blocked-by links blockers through gh, which is not signed in here; file "
             "without --blocked-by and link the blockers on GitHub, or run it where gh is signed in")
-    filing = Step("create", "issue_write", {
-        **owner_repo(repo), "method": "create", "title": title.strip(), "body": body,
-        "labels": first}, gives=("number",))
-    outcome = filed_once(root, repo, "file", title.strip(), body, filing)
+    outcome = filed_once(root, repo, "file", title.strip(), body,
+                         work_issue_filing(repo, title.strip(), body, first))
     if outcome.number is not None and not outcome.duplicate and blockers:
         for blocker in blockers:
             block(root, outcome.number, blocker, repo)
