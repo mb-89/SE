@@ -224,6 +224,9 @@ the issues dispatch reads:
   request's description names one.
 - The repository owner's own pull request labelled `housekeeping` is exempt.
 - The job `check` enforces it with `<se>/scripts/pr_issues.py`, through the Actions token.
+- `pr_issues.py` is the one parser of how a description names its issue: the job's field-report
+  step reads the work issue from the description's first line with it, so both accept the short
+  and the full form.
 
 Nothing reaches the integration branch without a passing complete suite and, unless `se.toml` sets
 `public_check = false`, a passing public check on exactly the tree pushed:

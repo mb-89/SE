@@ -86,9 +86,9 @@ jobs:
             echo "field-report: no field report in the description, nothing to check"
             exit 0
           fi
-          issue=$(sed -nE '1s#^(Fixes|Refs) https://github\.com/[^/]+/[^/]+/issues/([0-9]+)[[:space:]]*$#\2#p' "$body")
-          if [ -z "$issue" ]; then
-            echo "::error::field-report: the description's first line names no work issue (Fixes|Refs <issue url>, as work_tickets.py pr-body writes it)"
+          # pr_issues.py owns how a description names its issue, for this step and the one above.
+          if ! issue=$(python3 scripts/pr_issues.py --work-issue "$body" --repository "$REPOSITORY"); then
+            echo "::error::field-report: the description's first line names no work issue of $REPOSITORY (Fixes|Refs <issue url>, as work_tickets.py pr-body writes it, or Refs #<n>)"
             exit 1
           fi
           gh api "repos/$REPOSITORY/issues/$issue" --jq .body > "$RUNNER_TEMP/issue-body.md"

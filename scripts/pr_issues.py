@@ -16,6 +16,11 @@ A reference is `Refs`, `Closes`, `Fixes` or `Lands`, then `#<n>` or this reposit
 A pull request into another branch is not checked. Exit code 0 passed, 1 refused, 2 setup error
 (no event, no token, the API failing).
 
+`references` is the one parser of how a pull request names its issue. The field-report step of the
+same job uses it too: `--work-issue <file>` prints the number of the issue the first line of the
+description in `<file>` names (`Fixes|Refs <issue url>` as `work_tickets.py pr-body` writes it, or
+the short `Refs #<n>`), exit code 1 where it names none.
+
 Standard library only.
 """
 
@@ -55,6 +60,12 @@ def references(body: str, repository: str) -> list[tuple[str, int]]:
         if pair not in found:
             found.append(pair)
     return found
+
+
+def work_issue(body: str, repository: str) -> int | None:
+    """The number of the issue the first line of `body` names in `repository`; None without one."""
+    found = references(body.split("\n", 1)[0], repository)
+    return found[0][1] if found else None
 
 
 class Api:
@@ -156,8 +167,23 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--repo", type=Path, default=Path("."),
                         help="the checkout whose se.toml names the integration branch")
+    parser.add_argument("--work-issue", type=Path, metavar="FILE",
+                        help="only print the number of the issue the first line of the pull "
+                             "request description in FILE names; exit code 1 where it names none")
+    parser.add_argument("--repository", metavar="OWNER/REPO",
+                        help="with --work-issue: the repository; default GITHUB_REPOSITORY")
     args = parser.parse_args(argv)
     env = os.environ if environ is None else environ
+    if args.work_issue is not None:
+        repository = args.repository or env.get("GITHUB_REPOSITORY")
+        if not repository:
+            print("::error::pr-issues: --work-issue needs --repository or GITHUB_REPOSITORY")
+            return 2
+        number = work_issue(args.work_issue.read_text(encoding="utf-8"), repository)
+        if number is None:
+            return 1
+        print(number)
+        return 0
     try:
         missing = [name for name in ("GITHUB_EVENT_PATH", "GITHUB_TOKEN", "GITHUB_REPOSITORY")
                    if not env.get(name)]

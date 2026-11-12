@@ -1144,6 +1144,8 @@ def field_report_script() -> str:
 @pytest.mark.parametrize("first_line, checked", [
     ("Refs https://github.com/alice/example/issues/7", True),
     ("Fixes https://github.com/alice/example/issues/7\r", True),
+    ("Refs #7", True),  # the short form pr_issues.py accepts too
+    ("Closes https://github.com/Alice/Example/issues/7", True),
     ("", False),  # a landing pull request: no field report
 ])
 def test_ci_checks_a_pull_requests_field_report_against_its_work_issue(
@@ -1158,7 +1160,7 @@ def test_ci_checks_a_pull_requests_field_report_against_its_work_issue(
     body = f"{first_line}\n\n<!-- se:field-report -->\nreport\n" if first_line else "Land a branch\n"
     env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PR_BODY": body,
            "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example"}
-    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env,
+    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     made = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
@@ -1184,7 +1186,7 @@ def test_ci_checks_a_landing_pull_requests_field_report_in_the_work_pull_request
     body = work_tickets_landing_description()
     env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PR_BODY": body,
            "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example"}
-    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env,
+    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert calls.read_text(encoding="utf-8").splitlines()[:2] == [
@@ -1201,10 +1203,14 @@ def work_tickets_landing_description() -> str:
                                       "https://github.com/alice/example/issues/5")
 
 
-def test_ci_refuses_a_field_report_that_names_no_work_issue(tmp_path: Path) -> None:
-    env = {**os.environ, "PR_BODY": "<!-- se:field-report -->\nreport\n", "RUNNER_TEMP": str(tmp_path),
-           "REPOSITORY": "alice/example"}
-    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env,
+@pytest.mark.parametrize("first_line", [
+    "",
+    "Refs https://github.com/bob/other/issues/7",  # another repository's issue
+])
+def test_ci_refuses_a_field_report_that_names_no_work_issue(tmp_path: Path, first_line: str) -> None:
+    env = {**os.environ, "PR_BODY": f"{first_line}\n<!-- se:field-report -->\nreport\n",
+           "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example"}
+    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
                             capture_output=True, text=True, check=False)
     assert result.returncode == 1
     assert "::error::field-report: the description's first line names no work issue" in result.stdout
