@@ -1,7 +1,7 @@
 # se: systematic engineering
 
 A process plugin for AI agents. Its main agent, **SE**, is the one a person talks to; its sub-agents
-are the integrator and the worker. With them come their skills, issue templates and the scripts they
+are the integrator, the worker and the reviewer. With them come their skills, issue templates and the scripts they
 call. It is project-neutral; a project describes its own commands in its `AGENTS.md` and
 pulls se in as a module.
 
@@ -15,9 +15,9 @@ One step per place. What each agent does is in its own file in [src/agents/](src
 
 | Place | Install | Choose SE | Check that it loaded |
 | --- | --- | --- | --- |
-| Claude Code | `claude plugin install se --marketplace mb-89/SE` | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator` and `se:worker` |
-| Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud) | each session's first prompt ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
-| GitHub Copilot in VS Code, in se's own checkout | `git clone https://github.com/mb-89/SE` and open it: VS Code reads its `.github/agents/` and `.github/skills/` | pick `se` in the Agent dropdown of the Chat view | the dropdown lists `se`, `integrator` and `worker`; **Configure Skills** lists `catch-up`, `decision` and `work-model` |
+| Claude Code | `claude plugin install se --marketplace mb-89/SE` | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:reviewer` and `se:worker` |
+| Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud) | each session's first prompt ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
+| GitHub Copilot in VS Code, in se's own checkout | `git clone https://github.com/mb-89/SE` and open it: VS Code reads its `.github/agents/` and `.github/skills/` | pick `se` in the Agent dropdown of the Chat view | the dropdown lists `se`, `integrator`, `reviewer` and `worker`; **Configure Skills** lists `catch-up`, `decision` and `work-model` |
 | GitHub Copilot in VS Code, every repository | **Chat: Install Plugin from Source** with `https://github.com/mb-89/SE` (agent plugins, `chat.plugins.enabled`); or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/` | as above | as above |
 
 SE's skills read files in the plugin's folder and run its scripts with `uv run python`, and that
@@ -63,6 +63,9 @@ workers included. So each session's first prompt names its role's file, `<se>` b
 - SE: `Act as the se agent defined in <se>/.github/agents/se.agent.md.`
 - Worker and integrator: the session prompt the work model's
   [Without gh](src/skills/work-model/SKILL.md#without-gh) names.
+- Reviewer, started by SE on "review PR #n": the line
+  `Act as the reviewer agent defined in <se>/.github/agents/reviewer.agent.md.`, then the pull
+  request, its repository and SE's session, one per line.
 
 The greeting needs no permission rule: the plugin's start hook hands it over, and SE opens its
 first message with it. A session whose permission mode asks before commands, and that no one
