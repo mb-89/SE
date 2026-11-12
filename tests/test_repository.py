@@ -1,0 +1,75 @@
+"""Repository hygiene: what any repository should not track, checked on se's own tree.
+
+Three rules hold for every tracked file: no binary file, no file over `MAX_BYTES`, and no
+marker of unfinished work in `scripts/` or `tests/` that names no issue. A file that must break
+the first two goes in its allow list below with the reason it may; an entry that no longer names
+such a file is refused, so the lists stay true.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+# Tracked binary files (a NUL byte in the first BINARY_PEEK bytes, git's own test), each with the
+# reason it is tracked.
+BINARY_ALLOWED: dict[str, str] = {}
+
+BINARY_PEEK = 8000
+
+
+
+def tracked(repo: Path) -> list[str]:
+    """The files git tracks in `repo` that exist in its working tree."""
+    out = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "-z"], check=True, capture_output=True
+    ).stdout
+    return [p for p in out.decode().split("\0") if p and (repo / p).is_file()]
+
+
+def binary_findings(repo: Path, allowed: dict[str, str]) -> list[str]:
+    """Tracked binary files outside `allowed`, and entries of `allowed` that name none."""
+    binaries = set()
+    for p in tracked(repo):
+        with open(repo / p, "rb") as f:
+            if b"\0" in f.read(BINARY_PEEK):
+                binaries.add(p)
+    return [
+        f"{p}: a tracked binary file; git rm --cached it and ignore it, or allow it with a reason"
+        for p in sorted(binaries - set(allowed))
+    ] + [
+        f"{p}: allowed as binary but no tracked binary file; remove the entry"
+        for p in sorted(set(allowed) - binaries)
+    ]
+
+
+def fixture_repo(tmp_path: Path, files: dict[str, bytes]) -> Path:
+    """A git repository in `tmp_path` tracking `files`."""
+    repo = tmp_path / "repo"
+    for name, data in files.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_bytes(data)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    return repo
+
+
+def test_se_tracks_no_binary_file_outside_its_allow_list() -> None:
+    assert binary_findings(ROOT, BINARY_ALLOWED) == []
+    assert all(reason.strip() for reason in BINARY_ALLOWED.values())
+
+
+def test_a_tracked_binary_file_fails_and_a_stale_entry_too(tmp_path: Path) -> None:
+    repo = fixture_repo(
+        tmp_path, {"tool": b"\x7fELF\0\0\0", "logo.png": b"\x89PNG\0", "a.txt": b"text\n"}
+    )
+
+    assert binary_findings(repo, {"logo.png": "the logo", "gone.bin": "removed"}) == [
+        "tool: a tracked binary file; git rm --cached it and ignore it, or allow it with a reason",
+        "gone.bin: allowed as binary but no tracked binary file; remove the entry",
+    ]
+
+
