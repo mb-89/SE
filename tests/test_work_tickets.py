@@ -1326,9 +1326,11 @@ class FakeFleet:
     """The fleet check's door: issues, pull requests and origin's branches, held in memory."""
 
     def __init__(self, issues: list[dict], pulls: list[dict] = (),
-                 branches: dict[str, object] | None = None) -> None:
+                 branches: dict[str, object] | None = None,
+                 comments: dict[int, list[dict] | None] | None = None) -> None:
         self.issue_list, self.pull_list = list(issues), list(pulls)
         self.branch_times = dict(branches or {})
+        self.comment_lists = dict(comments or {})
         self.calls: list[str] = []
 
     def __call__(self, root: Path, repo: str, base: str) -> "FakeFleet":
@@ -1341,6 +1343,10 @@ class FakeFleet:
     def issue(self, number: int) -> dict | None:
         self.calls.append(f"issue {number}")
         return next((issue for issue in self.issue_list if issue["number"] == number), None)
+
+    def comments(self, number: int) -> list[dict] | None:
+        self.calls.append(f"comments {number}")
+        return self.comment_lists.get(number, [])
 
     def pulls(self) -> list[dict]:
         return list(self.pull_list)
@@ -1409,6 +1415,37 @@ def test_fleet_check_finds_each_kind_once_with_its_remedy(tmp_path: Path) -> Non
     assert door.calls.count("issue 6") == 0
 
 
+def started_comment(ago: object, body: str = "Started: worker session on branch `feat/x`") -> dict:
+    when = (NOW - ago).isoformat().replace("+00:00", "Z")
+    return {"body": body, "created_at": when}
+
+
+def test_fleet_check_lists_a_fresh_in_progress_issue_as_starting_not_stray(tmp_path: Path) -> None:
+    hours = work_tickets.timedelta(hours=1)
+    door = FakeFleet(
+        [fleet_issue(1, "feat/fresh", "work", "in-progress"),
+         fleet_issue(2, "feat/late", "work", "in-progress"),
+         fleet_issue(3, "feat/no-started", "work", "in-progress"),
+         fleet_issue(4, "feat/unread", "work", "in-progress")],
+        comments={1: [started_comment(20 * work_tickets.timedelta(minutes=1))],
+                  2: [started_comment(5 * hours), {"body": "a note", "created_at": "x"}],
+                  3: [{"body": "Integrated in abc", "created_at": NOW.isoformat()}],
+                  4: None})
+    found = fleet_findings(door, tmp_path)
+    assert [(finding.kind, finding.issue) for finding in found] == [
+        ("no branch", 2), ("no branch", 3), ("no branch", 4), ("starting", 1)]
+    by_issue = {finding.issue: finding for finding in found}
+    assert not by_issue[1].stuck and "started 20 minutes ago" in by_issue[1].what
+    assert "5 hours after its Started comment" in by_issue[2].what
+    assert "cannot be counted: it has no Started: comment" in by_issue[3].what
+    assert "cannot be counted: its comments were not read" in by_issue[4].what
+    # Starting alone is healthy, and still listed.
+    starting = [by_issue[1]]
+    assert work_tickets.fleet_report(starting, as_json=False).splitlines()[0] == "healthy"
+    assert "starting #1: started 20 minutes ago" in work_tickets.fleet_report(starting, False)
+    assert json.loads(work_tickets.fleet_report(starting, as_json=True))["healthy"] is True
+
+
 def test_fleet_check_reads_a_blocker_it_did_not_list_through_the_door(tmp_path: Path) -> None:
     door = FakeFleet([fleet_issue(7, "feat/waits", "work", "ready", blocked_by=(6,))])
     door.issue_list.append(fleet_issue(6, "feat/old", "work", state="closed", reason="not_planned"))
@@ -1449,6 +1486,18 @@ def test_fleet_check_without_gh_prints_its_plan_then_reads_the_answers(
                               str(closed_file), "--pulls", str(pulls_file), "--json"]) == 1
     data = json.loads(capsys.readouterr().out)
     assert [(item["kind"], item["issue"]) for item in data["findings"]] == [("stray branch", 5)]
+
+    # The open issues carry their comments, as the plan says: a fresh one is starting, exit code 0.
+    fresh = fleet_issue(1, "feat/fresh", "work", "in-progress")
+    when = work_tickets.datetime.now(work_tickets.timezone.utc) - work_tickets.timedelta(minutes=5)
+    open_file.write_text(json.dumps([{**fresh, "comments": [
+        {"body": "Started: worker session", "createdAt": when.isoformat()}]}]), encoding="utf-8")
+    closed_file.write_text("[]", encoding="utf-8")
+    assert work_tickets.main([*arguments, "--open-issues", str(open_file), "--closed-issues",
+                              str(closed_file), "--pulls", str(pulls_file)]) == 0
+    assert capsys.readouterr().out.splitlines()[:2] == [
+        "healthy", "starting #1: started 5 minutes ago, within the lease of 3 hours; origin has "
+        "no branch feat/fresh yet"]
 
 
 # The Stop hook: `stop-check` holds a worker's turn to a delivered pull request.
