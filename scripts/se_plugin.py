@@ -30,6 +30,11 @@ DESCRIPTION = ("SE, the agent a person talks to, with its integrator, worker and
 # `|| true`: a step that needs the person is advice for the session, never a failed start.
 # `--hook`: it ends with SE's greeting (scripts/se_start.py status --hook).
 BOOTSTRAP = 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" --hook || true'
+# The Stop hook (README "Stop hook"): a worker's turn ends only with its work issue delivered. uv
+# where bootstrap.sh installs it; `--no-project` so no project's environment is synced; `|| true`:
+# a hook that cannot run lets the turn end (advice fails open).
+STOP_CHECK = ('PATH="$HOME/.local/bin:$PATH" uv run --no-project --python ">=3.11" python '
+              '"${CLAUDE_PLUGIN_ROOT}/scripts/work_tickets.py" stop-check || true')
 LINK = re.compile(r"(\]\()([^)\s#]+)((?:#[^)\s]*)?\))")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 # A script path not under `<se>`, the root the start hook names (scripts/se_start.py `root_line`):
@@ -167,7 +172,11 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "author": {"name": OWNER},
         "repository": REPOSITORY,
         "license": "MIT",
-        "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": BOOTSTRAP}]}]},
+        "hooks": {
+            "SessionStart": [{"hooks": [{"type": "command", "command": BOOTSTRAP}]}],
+            "Stop": [{"hooks": [{"type": "command", "command": STOP_CHECK}]}],
+            "SubagentStop": [{"hooks": [{"type": "command", "command": STOP_CHECK}]}],
+        },
     }
     marketplace = {
         "name": PLUGIN,

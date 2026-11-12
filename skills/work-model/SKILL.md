@@ -601,6 +601,9 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     work issue, with the description `pr-body --issue-body <file> --issue-url <url>
     --field-report .se/work/field-report.md` prints (the closing line, then the report between
     its markers); send the notification. No issue is filed.
+    - Once the pull request is open or updated, `stop-check --pull <number> --pr-description
+      <file>` (its description as the GitHub tools read it) records it for the Stop hook
+      ([README "Stop hook"](../../README.md#stop-hook)), which judges without gh by that record.
     - The field report comes from `field-report.md`, the template copied with its markers and
       filled in by hand (`field-report --draft` needs `intake`'s snapshot).
     - It passes `field-report --check .se/work/field-report.md --worktree <worktree> --issue-body
