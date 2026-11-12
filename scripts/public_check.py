@@ -127,7 +127,9 @@ TRACKER_RULE = (
     "rule: commit messages carry no tracker numbers, src/skills/work-model/SKILL.md"
 )
 TRACKER_REFERENCE = re.compile(
-    r"(?<![\w&#])#\d+\b"  # #593, not C#5 or the HTML entity &#39;
+    # obs#627, owner/repo#5: a repository name of two characters or more, so not C#5 or F#6
+    r"(?<![\w./#&-])(?:[A-Za-z0-9][\w.-]*/)?[A-Za-z0-9][\w.-]*[A-Za-z0-9_]#\d+\b"
+    r"|(?<![\w&#])#\d+\b"  # #593, not C#5 or the HTML entity &#39;
     r"|(?i:(?<![\w/-])GH-\d+\b)"  # GH-12, not the branch fix/…-without-gh-20261106
     r"|(?i:\bhttps?://[^\s/]+/[^\s/]+/[^\s/]+/(?:issues|pulls?)/\d+)"
 )
@@ -161,9 +163,9 @@ OWN_REMEDY = {*MESSAGE_RULES, "foreign-identity"}
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
-    """(line, reference) for every tracker reference in a commit message: `#<digits>`, a
-    standalone `GH-<digits>` (not inside a branch name), an issue or pull request URL. The one
-    test both commit gates apply."""
+    """(line, reference) for every tracker reference in a commit message: `#<digits>`,
+    `<repo>#<digits>` and `<owner>/<repo>#<digits>`, a standalone `GH-<digits>` (not inside a
+    branch name), an issue or pull request URL. The one test both commit gates apply."""
     return [
         (text.count("\n", 0, match.start()) + 1, match.group())
         for match in TRACKER_REFERENCE.finditer(text)

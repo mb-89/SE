@@ -2161,11 +2161,19 @@ def test_public_mirror_guard_rejects_references_and_mismatched_identities(
         )
 
 
-@pytest.mark.parametrize("goal", ["Ship the worker, see #12.", "Ship https://example.invalid/worker."])
-def test_public_merge_message_leaves_out_a_goal_with_tracker_references_or_host_addresses(goal):
+@pytest.mark.parametrize(("goal", "title"), [
+    ("Ship the worker, see #" + "12.", "Integrate feature/worker: Ship the worker."),
+    ("Two landing checks trip correct work, as obs" + "#627 showed.",
+     "Integrate feature/worker: Two landing checks trip correct work, as showed."),
+    ("Close the gap SE" + "#874 left open.", "Integrate feature/worker: Close the gap left open."),
+    ("SE" + "#874.", "Integrate feature/worker"),
+    ("Ship https://example.invalid/worker.", "Integrate feature/worker"),
+])
+def test_public_merge_message_strips_tracker_references_and_leaves_out_host_addresses(goal, title):
     body = f"## Goal\n\n{goal}\n"
-    assert work_tickets.integration_merge_message("feature/worker", 5, 7, True, body) == (
-        "Integrate feature/worker")
+    message = work_tickets.integration_merge_message("feature/worker", 5, 7, True, body)
+    assert message == title
+    assert not work_tickets.tracker_references(message)
 
 
 def test_public_merge_message_rejects_a_branch_with_a_host_address():
@@ -2612,10 +2620,15 @@ def test_the_hand_off_plan_titles_by_the_goal_and_links_a_report_over_the_body_l
     ("The first landing (SE#851, PR #853) showed two flaws. Fix both.",
      "The first landing showed two flaws."),
     ("<!-- template comment -->\nShip   it\nnow", "Ship it now"),
-    ("See #12 for the cause.", ""),  # a tracker reference outside an aside: no summary
+    ("See #" + "12 for the cause.", "For the cause."),  # a pointer word goes with its reference
+    ("The landing of obs" + "#627 put a reference on main.", "The landing of put a reference on main."),
+    ("Fix the title builder, found in mb/SE" + "#874.", "Fix the title builder, found."),
+    ("Fix it (see https://github.com/o/r/" + "issues/8), then ship.", "Fix it, then ship."),
+    ("Fix SE" + "#874, obs" + "#627 and #" + "3; ship.", "Fix; ship."),
+    ("Fix obs" + "#627.", ""),  # nothing meaningful left: no summary
     ("", ""),
 ])
-def test_the_goal_summary_is_the_goal_s_first_sentence_without_tracker_asides(goal, summary):
+def test_the_goal_summary_is_the_goal_s_first_sentence_without_tracker_references(goal, summary):
     assert work_tickets.goal_summary(f"## Goal\n\n{goal}\n\n## Package kind\n\npatch\n") == summary
 
 
