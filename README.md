@@ -264,8 +264,9 @@ does all of it:
 2. It pushes `land/<branch>` and opens a pull request of it into the integration branch, or reuses
    the one still open from an earlier attempt.
    - Its title is the merge's title, `Integrate <branch>: <the first sentence of the work issue's
-     Goal>`, never a commit's subject. Tracker asides such as `(PR #<n>)` are dropped; without a
-     usable Goal it is `Integrate <branch>` alone.
+     Goal>`, never a commit's subject. Tracker references (pub-004's forms) are dropped from it,
+     with an aside such as `(PR #<n>)` that holds one, and its punctuation tidied; without a
+     usable Goal, or with fewer than two words left, it is `Integrate <branch>` alone.
    - Its description is always a link, never the report, so it fits GitHub's body limit and any
      tool argument whatever the report's size: `Refs <work issue>`, the work pull request, and the
      marker `<!-- se:field-report-in <n> -->`.
