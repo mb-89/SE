@@ -4114,21 +4114,49 @@ def release_line(pull_url: str, tag: str | None) -> str:
 
 
 GOAL_SECTION = "goal"
-# A parenthesised aside that names a tracker item, `(SE#851, PR #853)`: dropped from a summary.
-TRACKER_ASIDE = re.compile(r"\s*\([^()]*#\d+[^()]*\)")
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+PARENTHESISED = re.compile(r"\s*\([^()]*\)")
+
+
+def without_tracker_references(sentence: str) -> str:
+    """`sentence` without the tracker references the public check finds (pub-004), its
+    punctuation tidied; "" where fewer than two words are left.
+
+    A parenthesised aside that holds one goes whole, `(SE#851, PR #853)`; so does a pointer word
+    before one, `see #12`, and a connective before one that ends its clause, `found in obs#627.`;
+    elsewhere the reference alone goes, with the comma that only listed it."""
+    reference = f"(?:{sibling('public_check').TRACKER_REFERENCE.pattern})"
+    text = PARENTHESISED.sub(
+        lambda aside: "" if tracker_references(aside.group()) else aside.group(), sentence)
+    for form in (
+        rf"\b(?:see|cf\.)\s+{reference}",
+        rf"\s*\b(?:in|from|via|by|after|of|on|at|for|per|with|and|or)\s+{reference}"
+        r"(?=\s*(?:[,;:.!?]|$))",
+        rf"{reference}\s*,\s*",
+        rf"\s*,\s*{reference}",
+        reference,
+    ):
+        text = re.sub(form, "", text, flags=re.IGNORECASE)
+    text = " ".join(text.split())
+    text = re.sub(r"\(\s*\)", "", text)
+    text = re.sub(r"\s+([,;:.!?)])", r"\1", text)
+    text = re.sub(r"[,;:]+(?=[.!?;:,]|$)", "", text)
+    text = text.strip(" ,;:")
+    if len(re.findall(r"[^\W\d_]+", text)) < 2:
+        return ""
+    return text[0].upper() + text[1:]
 
 
 def goal_summary(issue_body: str) -> str:
-    """The first sentence of the work issue's Goal, without its tracker asides: what the work is,
-    as the landing's title names it; "" where the Goal is missing or names no more than that."""
+    """The first sentence of the work issue's Goal, without its tracker references: what the work
+    is, as the landing's title names it; "" where the Goal is missing or names no more than that."""
     goal = re.sub(r"<!--.*?-->", "", section(markdown_sections(issue_body), GOAL_SECTION),
                   flags=re.DOTALL)
     text = " ".join(goal.split())
     if not text:
         return ""
-    sentence = TRACKER_ASIDE.sub("", SENTENCE_END.split(text, maxsplit=1)[0]).strip()
-    if tracker_references(sentence) or PUBLIC_HOST_PATTERN.search(sentence):
+    sentence = without_tracker_references(SENTENCE_END.split(text, maxsplit=1)[0])
+    if not sentence or tracker_references(sentence) or PUBLIC_HOST_PATTERN.search(sentence):
         return ""
     return one_line(sentence, 120)
 

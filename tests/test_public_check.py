@@ -952,6 +952,10 @@ def test_history_and_range_exclude_each_other(repo: Path) -> None:
     ("GH" + "-12", ["GH-12"]),
     ("gh" + "-12", ["gh-12"]),
     ("(GH" + "-12)", ["GH-12"]),
+    ("As obs" + "#627 showed", ["obs#627"]),
+    ("Fix SE" + "#874, then o-1/my.repo" + "#9.", ["SE#874", "o-1/my.repo#9"]),
+    ("(repo" + "#1)", ["repo#1"]),
+    ("F" + "#6 and C" + "#5 stay, as do ab" + "#12x and a/b" + "#c", []),
 ])
 def test_tracker_references(text: str, found: list[str]) -> None:
     assert [match for _, match in public_check.tracker_references(text)] == found
@@ -966,6 +970,17 @@ def test_commit_msg_hook_refuses_a_tracker_reference(hooked: Path) -> None:
     assert "commit messages carry no tracker numbers" in output
     assert "reword the message before committing" in output
     assert git(hooked, "rev-list", "--all", "--count").stdout.strip() == "0"
+
+
+def test_commit_msg_hook_refuses_a_repository_tracker_reference(hooked: Path) -> None:
+    (hooked / "clean.txt").write_text("clean\n", encoding="utf-8")
+    result = try_commit(hooked, "Landing checks, as obs" + "#627 showed")
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "commit message:1: tracker-reference 'obs#627'" in output
+    assert "reword the message before committing" in output
+    assert git(hooked, "rev-list", "--all", "--count").stdout.strip() == "0"
+    assert try_commit(hooked, "Landing checks, as an obs landing showed").returncode == 0
 
 
 def test_commit_msg_hook_accepts_csharp_and_include(hooked: Path) -> None:
@@ -991,12 +1006,14 @@ def test_pre_push_hook_refuses_a_tracker_reference_naming_the_commit(
     assert "git commit --amend" in output and "git rebase -i" in output
 
 
-def test_full_check_leaves_tracker_references_in_old_history_alone(repo: Path) -> None:
-    commit(repo, {"a.txt": "a\n"}, "Old work (" + "#1)")
+@pytest.mark.parametrize("reference", ["#" + "1", "repo#" + "1", "owner/repo#" + "1"])
+def test_full_check_leaves_tracker_references_in_old_history_alone(
+        repo: Path, reference: str) -> None:
+    commit(repo, {"a.txt": "a\n"}, f"Old work ({reference})")
     assert run_check("--repo", str(repo)).returncode == 0
     result = run_check("--repo", str(repo), "--range", "HEAD")
     assert result.returncode == 1
-    assert "tracker-reference '#1'" in result.stdout
+    assert f"tracker-reference '{reference}'" in result.stdout
 
 
 CO_AUTHOR = "Co-Authored-By: Bot <bot" + AT + "example.com>"
