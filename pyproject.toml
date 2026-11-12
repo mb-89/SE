@@ -1,0 +1,22 @@
+[project]
+name = "se"
+version = "0.1.0"
+description = "Systematic engineering: a project-neutral process plugin for AI agents."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# One worker per core (pytest-xdist); a file's tests share one worker and run in order there.
+addopts = "-n auto --dist loadfile"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-xdist>=3.8.0",
+]

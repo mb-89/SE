@@ -1,0 +1,16 @@
+# Exceptions for scripts/public_check.py (rule: AGENTS.md "Public safety").
+# One entry per line, each with its reason after '#':
+#   <path glob>   # reason     covers every hit in the matching files
+#   <path>:<line> # reason     covers the hits on that line only
+#   commit:<full sha> author|committer  # reason
+#                              covers the identity hits of that role on that commit only, for
+#                              history already published; the same identity elsewhere still fails
+#   commit:<full sha> message  # reason
+#                              covers the message hits (tracker references included) of that
+#                              commit only, for history already published; the same text in any
+#                              other commit still fails
+# File entries never cover commit messages. An entry that matches no hit fails a check that has the
+# source's local list (.public-check.local), naming its line and form, so stale exceptions cannot
+# hide a later leak; without the list it is only warned about as unverifiable, as it may cover a
+# local-term hit the run cannot see. A commit entry counts only in the gate of a range that holds
+# its commit, which alone sees its hits.
