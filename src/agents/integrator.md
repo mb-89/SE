@@ -153,6 +153,10 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
   then send SE session one queued message (`send_message`, delivery `queue`):
   `escalated #<n>: <one-line question>`. Do not wait for the answer; continue with the next
   integration.
+- A step only the person may approve (a one-way ref change through `work_tickets.py refs
+  request`, a setting, a permission) is prepared and escalated as the work model's
+  [Steps only the person approves](../skills/work-model/SKILL.md#steps-only-the-person-approves)
+  says; SE runs it.
 - When escalations or merge problems show a pattern, file a retro issue from
   [retro.md](../../.github/ISSUE_TEMPLATE/retro.md) whose improvements name the agent definition, template or
   rule they change.

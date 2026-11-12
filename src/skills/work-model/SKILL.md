@@ -51,7 +51,8 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   - Workers stay in their box; a worker records cross-repository needs in its field report.
 - **Only SE talks to the human.** Workers and integrators never ask the human anything
   and never wait for an answer, an approval or a decision: they decide what they may decide,
-  escalate the rest, and continue with other work or end their turn.
+  escalate the rest, and continue with other work or end their turn. A step only the person may
+  approve is prepared below and run by SE ([Steps only the person approves](#steps-only-the-person-approves)).
 - **Escalation**: what a role may not decide climbs the [escalation ladder](#escalation-ladder).
 - **Asking a working agent**: a person who wants to ask a running worker or integrator something
   asks SE, which sends it a message down the tree. There is no other channel into a running
@@ -119,6 +120,28 @@ then person. Every level decides, and writes what it sends up, as the
   decision notes together as one deck. Not everything that reaches the person is an escalated
   issue: a decision from SE's own discussion with the person joins the deck directly.
   Until the deck command exists, SE shows the notes one after the other.
+
+### Steps only the person approves
+
+The person talks only to SE ([dec-012](references/rules.md#dec-012-only-se-asks-the-person)). A host
+counts a person's approval only in the session it was given, so a step that needs one is run in
+SE's session, never in a worker's or an integrator's: those roles prepare it and escalate it, and
+no procedure but SE's sends the person to a session.
+
+- **One-way ref changes** (force-updating or deleting a branch, moving or deleting a tag) go
+  through the repository's `ref-maintenance` workflow, as triples `<old-sha> <new-sha> <ref>`.
+  1. The integrator pushes the commits the new refs point to, writes the triples to a file and
+     runs `work_tickets.py refs request <issue> --triples-file <file>`: it posts the triples on
+     the issue, runs the workflow's dry run, posts its output and labels the issue `escalated`.
+     It prints the one line the integrator sends SE as its escalation message.
+  2. SE presents that line to the person. On the person's yes, SE runs `work_tickets.py refs
+     apply <issue>`, which runs the workflow for real with the posted triples, reads the refs back
+     from origin and posts the result; SE sends the integrator the line it prints.
+  3. The integrator verifies the refs (`git ls-remote origin`) and closes out.
+- **Every other step only the person may approve** (a setting, an environment, a permission, a
+  push to a protected branch) is escalated the same way: the escalation names the step and its
+  exact command or setting. SE runs it on the person's yes, or names the one setting the person
+  changes.
 
 ## Outside issues
 

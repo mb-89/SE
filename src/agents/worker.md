@@ -34,7 +34,9 @@ every package, so work issues and session prompts never repeat it.
 - You never talk to other agents or wait for a human; the human talks only to SE. The
   one message you send is the single delivery notice in step 7 below. What you may not decide goes
   into the field report as "Not delivered" and climbs the
-  [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder).
+  [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder); so does a step only the
+  person may approve, which SE runs
+  ([Steps only the person approves](../skills/work-model/SKILL.md#steps-only-the-person-approves)).
 
 ## Environment
 

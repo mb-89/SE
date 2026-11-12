@@ -525,6 +525,15 @@ work_tickets.py backlog file --worktree WORKTREE --title TITLE --body-file BODY_
 work_tickets.py backlog list --worktree WORKTREE [--search SEARCH] [--repo REPO]
     list the open backlog issues, or those whose title or body matches --search
 
+work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--repo REPO]
+                             issue
+    for the integrator: post the triples on the issue, run ref-maintenance's dry run, post its
+    output and label the issue escalated; prints the line for SE
+
+work_tickets.py refs apply --worktree WORKTREE [--repo REPO] issue
+    for SE, on the person's yes: run ref-maintenance for real with the triples the issue's newest
+    request posted, read the refs back and post the result; prints the line for the integrator
+
 work_tickets.py sync --worktree WORKTREE
     merge the newest integration branch (se.toml project.integration_branch, default main) from
     origin, or locally without origin
