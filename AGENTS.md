@@ -93,5 +93,8 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
 - Pushes of the integration branch: pre-push and `work_tickets.py push` also need the verdicts the
   [work model](src/skills/work-model/SKILL.md#integration-branch) names.
 - By hand: `uv run python scripts/public_check.py --repo <path>` (`--help` for the options).
+- History already pushed that the commit gates refuse is rewritten once, on a fresh clone, by
+  `scripts/rewrite_history.py --repo <clone>`, whose docstring owns what it changes; it pushes
+  nothing.
 
 Never bypass the hooks: [pub-006](src/skills/work-model/references/rules.md#pub-006-never-bypass-the-hooks).
