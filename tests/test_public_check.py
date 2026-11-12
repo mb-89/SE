@@ -861,10 +861,84 @@ def test_pre_push_hook_checks_pushed_commits(hooked: Path, tmp_path: Path) -> No
     assert f"(2 files, 1 commits, se {SE_HEAD[:7]})" in result.stdout + result.stderr
 
 
+SE_LINE_MARKER = "scripts/public_check.py"
+
+
+def se_line(root: Path) -> str:
+    """The history revisions of SE's own line in `root`: every commit reachable from HEAD whose
+    tree carries the public check itself (SE_LINE_MARKER), stopping at the parents that do not.
+
+    main keeps the old Go line below SE's switch commit, by the owner's decision. That line never
+    carried the public check, was published before it existed, and publishes an address this
+    check refuses; blessing it with an allow entry would bless a real address (pub-002). So SE's
+    self-test checks SE's line only, and the CI gate on main checks every new commit. The rule is
+    structural, so it holds on the rewritten se branch (no Go line), on GitHub's merge ref of a
+    pull request into main (a merge of the Go line's tip and the switch commits on top of it) and
+    on main after the squash merge (the Go line, then squash commits)."""
+    parents = {line.split()[0]: line.split()[1:]
+               for line in git(root, "rev-list", "--parents", "HEAD").stdout.splitlines()}
+    query = "".join(f"{sha}:{SE_LINE_MARKER}\n" for sha in parents)
+    found = subprocess.run(["git", "-C", str(root), "cat-file", "--batch-check"], input=query,
+                           capture_output=True, text=True, check=True).stdout.splitlines()
+    own = {sha for sha, line in zip(parents, found) if not line.endswith(" missing")}
+    tips = sorted({parent for sha in own for parent in parents[sha] if parent not in own})
+    return " ".join(["HEAD", "--not", *tips]) if tips else "HEAD"
+
+
 def test_se_itself_passes() -> None:
-    """se must stay publishable; uses se's local list when the checkout has one."""
-    result = run_check("--repo", str(SE_ROOT))
+    """se must stay publishable; uses se's local list when the checkout has one. History is SE's
+    own line (se_line)."""
+    result = run_check("--repo", str(SE_ROOT), "--history", se_line(SE_ROOT))
     assert result.returncode == 0, result.stdout
+
+
+def foreign_line(repo: Path) -> None:
+    """A line without the public check whose commit publishes an address, as the Go line does."""
+    git(repo, "config", "user.email", "alice" + AT + "corp.test")
+    commit(repo, {"main.go": "package main\n"}, "Old line")
+    git(repo, "config", "user.email", "alice" + AT + "example.com")
+
+
+def test_se_line_leaves_a_foreign_line_below_it_alone(repo: Path) -> None:
+    foreign_line(repo)
+    commit(repo, {SE_LINE_MARKER: "# check\n"}, "Switch to se")
+    assert run_check("--repo", str(repo)).returncode == 1
+    result = run_check("--repo", str(repo), "--history", se_line(repo))
+    assert result.returncode == 0, result.stdout
+    assert "1 commits" in result.stdout
+
+
+def test_se_line_still_refuses_a_foreign_identity_on_it(repo: Path) -> None:
+    foreign_line(repo)
+    commit(repo, {SE_LINE_MARKER: "# check\n"}, "Switch to se")
+    git(repo, "config", "user.email", "bob" + AT + "corp.test")
+    commit(repo, {"README.md": "clean\n"}, "Add readme")
+    result = run_check("--repo", str(repo), "--history", se_line(repo))
+    assert result.returncode == 1
+    assert "author" in result.stdout and "corp.test" not in result.stdout
+    assert "2 commits" in result.stdout
+
+
+def test_se_line_includes_both_sides_of_a_merge_ref(repo: Path) -> None:
+    """GitHub's merge ref of a pull request into main: first parent the Go line's tip, second the
+    switch commits; both the merge and the switch commits are SE's line."""
+    foreign_line(repo)
+    base = git(repo, "rev-parse", "HEAD").stdout.strip()
+    commit(repo, {SE_LINE_MARKER: "# check\n"}, "Switch to se")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    git(repo, "checkout", "-q", "--detach", base)
+    git(repo, "merge", "-q", "--no-ff", "-m", "Merge", head)
+    assert se_line(repo) == f"HEAD --not {base}"
+    result = run_check("--repo", str(repo), "--history", se_line(repo))
+    assert result.returncode == 0, result.stdout
+    assert "2 commits" in result.stdout
+
+
+def test_history_and_range_exclude_each_other(repo: Path) -> None:
+    commit(repo, {"README.md": "clean\n"})
+    result = run_check("--repo", str(repo), "--history", "HEAD", "--range", "HEAD")
+    assert result.returncode == 2
+    assert "--range and --history exclude each other" in result.stdout
 
 
 @pytest.mark.parametrize(("text", "found"), [
