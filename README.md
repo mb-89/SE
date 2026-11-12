@@ -366,11 +366,17 @@ names the kinds), and says `healthy` otherwise; it only reads.
 `lease_hours` is how long in-progress work may go without a push to its branch, built in 3. The
 time of a push is the committer time of the branch's tip, as git fetches it.
 
+An in-progress issue whose branch origin does not have yet is listed as `starting`, which is
+healthy, until the lease has passed since its newest `Started:` comment; then it is `no branch`.
+Where the issue has no such comment, or its comments were not read, the lease cannot be counted:
+it is `no branch` at once, saying why.
+
 Blocks are the `## Blocked by` section of each open issue's body, where `work_tickets.py block`
 writes them.
 
 Without gh it prints its GitHub plan; the session runs it with its GitHub tools, saves the three
-lists as JSON and passes them as `--open-issues`, `--closed-issues` and `--pulls`.
+lists as JSON (each in-progress issue with its comments) and passes them as `--open-issues`,
+`--closed-issues` and `--pulls`.
 
 ### Retro due
 
@@ -400,7 +406,12 @@ ends only with its work issue delivered:
   missing and the commands that deliver.
 - `refusals` is how often in a row it refuses, built in 5; then it lets the turn end and says so,
   and counts afresh. A passing stop resets the count.
-- A `SubagentStop` is judged only for a worker sub-agent (`worker`, `se:worker`).
+- A `SubagentStop` is judged only for a worker sub-agent (`worker`, `se:worker`), in the checkout
+  it works in, one whose queue is for a work issue:
+  - one its prompt names, else the one whose ticket queue its transcript (the event's
+    `agent_transcript_path`) last touched, a path into `.se/work/` or a `--worktree`;
+  - only where neither names one, the hook's `cwd`; where that holds none either, it lets the
+    sub-agent end and says why.
 - Anywhere else (SE's own session, a person's session) it never refuses. Where it cannot judge it
   lets the turn end and says why: advice fails open.
 - Without gh it judges by the answer file `.se/work/pull-request.json`, which
@@ -721,11 +732,12 @@ work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json]
                             [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES]
                             [--pulls PULLS]
     list every stuck or stray piece of work, each with its issue, pull request and remedy: in-
-    progress work without a branch or a push within the lease, a delivered pull request whose check
-    failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned
-    or by itself, an se-person issue and what it holds up; 'healthy' and exit code 0 when there is
-    none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the
-    answers from files
+    progress work without a branch once the lease has passed since its Started comment (listed as
+    starting before) or without a push within the lease, a delivered pull request whose check failed
+    or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by
+    itself, an se-person issue and what it holds up; 'healthy' and exit code 0 when there is none,
+    exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers
+    from files
 
 work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE]
     the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue,

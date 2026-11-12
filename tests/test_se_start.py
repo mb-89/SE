@@ -380,7 +380,8 @@ def test_with_gh_each_part_keeps_its_answer_when_the_other_fails(tmp_path, monke
     monkeypatch.setattr(work_tickets, "repository_name", lambda root: "repo")
     monkeypatch.setattr(work_tickets, "Fleet", lambda root, repo, base: (root, repo, base))
     monkeypatch.setattr(work_tickets, "fleet_findings", lambda door, now, lease, name: [
-        work_tickets.Finding("stray branch", 3, "closed", "delete it", branch="feat/x")])
+        work_tickets.Finding("stray branch", 3, "closed", "delete it", branch="feat/x"),
+        work_tickets.Finding("starting", 4, "started 5 minutes ago", "none")])  # healthy: not named
 
     def no_door(*args):
         raise work_tickets.QueueError("gh api issues failed: HTTP 502")

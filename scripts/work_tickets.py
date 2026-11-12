@@ -2599,6 +2599,72 @@ def is_worker_agent(event: dict[str, object]) -> bool:
     return isinstance(agent, str) and agent.rsplit(":", 1)[-1] == WORKER_AGENT
 
 
+# Where a worker sub-agent works: the checkout its prompt names, else the one whose ticket queue its
+# transcript last touched (a path into `.se/work/`, or `--worktree <path>`).
+PROMPT_PATH = re.compile(r"(?:[A-Za-z]:)?[\\/][^\s\"'`<>|*?()\[\]{},;]+")
+QUEUE_TOUCH = re.compile(
+    r"((?:[A-Za-z]:)?[\\/][^\s\"'`<>|*?]*?)[\\/]\.se[\\/]work(?![\w.-])"
+    r"|--worktree[= ]+[\"']?((?:[A-Za-z]:)?[\\/][^\s\"'`<>|*?]+)")
+
+
+def transcript_entries(path: object) -> list[dict[str, object]]:
+    """The entries of a Claude Code transcript (JSON lines); [] where it cannot be read."""
+    if not isinstance(path, str) or not path:
+        return []
+    try:
+        lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    entries = []
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict):
+            entries.append(entry)
+    return entries
+
+
+def texts_of(value: object) -> list[str]:
+    """Every string in a JSON value, in order."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in texts_of(item)]
+    if isinstance(value, list):
+        return [text for item in value for text in texts_of(item)]
+    return []
+
+
+def work_checkout(candidate: str) -> Path | None:
+    """The checkout holding `candidate` where its ticket queue is for a work issue."""
+    path = Path(candidate.rstrip(".:"))
+    try:
+        top = checkout_top(path) if path.is_absolute() else None
+    except OSError:
+        return None
+    return top if top is not None and has_work_issue(top) else None
+
+
+def subagent_checkout(event: dict[str, object]) -> Path | None:
+    """The checkout a worker sub-agent works in, from the sub-agent itself: a checkout its prompt
+    (its transcript's first user entry) names, else the one whose ticket queue its transcript last
+    touched; None where neither names a checkout whose queue is for a work issue."""
+    entries = transcript_entries(event.get("agent_transcript_path"))
+    prompt = next((entry for entry in entries if entry.get("type") == "user"), None)
+    for text in texts_of((prompt or {}).get("message")):
+        for candidate in PROMPT_PATH.findall(text):
+            if (found := work_checkout(candidate)) is not None:
+                return found
+    for entry in reversed(entries):
+        for text in reversed(texts_of(entry.get("message"))):
+            for queue_path, worktree in reversed(QUEUE_TOUCH.findall(text)):
+                if (found := work_checkout(queue_path or worktree)) is not None:
+                    return found
+    return None
+
+
 def delivered_pull_path(root: Path) -> Path:
     return root / ".se" / "work" / DELIVERED_PULL
 
@@ -2711,6 +2777,11 @@ def stop_verdict(path: Path, event: dict[str, object], count: bool = True) -> St
         return StopVerdict()
     root = checkout_top(path)
     if root is None or not has_work_issue(root):
+        if event.get("hook_event_name") == "SubagentStop":
+            return StopVerdict(note=(
+                "se Stop hook: cannot judge the worker sub-agent's delivery, so it may end: "
+                "neither its prompt nor its transcript names a checkout whose ticket queue is for "
+                f"a work issue, and its working directory {path} holds none"))
         return StopVerdict()
     try:
         branch = current_branch(root)
@@ -5499,6 +5570,9 @@ def refs_apply_read_back(root: Path, number: int, triples: list[tuple[str, str, 
 
 FLEET_KINDS = ("no branch", "quiet branch", "failed check", "conflict", "stray branch",
                "impossible block", "block cycle", "waiting on the person")
+# Listed, but neither stuck nor stray: in-progress work within its lease and still without a branch.
+STARTING = "starting"
+STARTED_PREFIX = "Started:"
 FLEET_LEASE_HOURS = 3
 FAILED_CONCLUSIONS = frozenset({"failure", "timed_out", "cancelled", "startup_failure",
                                 "action_required"})
@@ -5519,10 +5593,15 @@ class Finding:
     branch: str | None = None
     holds: tuple[int, ...] = ()
 
+    @property
+    def stuck(self) -> bool:
+        """Whether it is stuck or stray; a "starting" issue is listed, but healthy."""
+        return self.kind != STARTING
+
 
 def fleet_lease(root: Path) -> timedelta:
     """`[fleet] lease_hours` in se.toml: how long in-progress work may go without a push to its
-    branch; built in FLEET_LEASE_HOURS."""
+    branch, and without a branch from its Started comment on; built in FLEET_LEASE_HOURS."""
     hours = se_table(root, "fleet").get("lease_hours", FLEET_LEASE_HOURS)
     if isinstance(hours, bool) or not isinstance(hours, (int, float)) or hours <= 0:
         raise QueueError(f"fleet.lease_hours in {root / 'se.toml'} must be a positive number of "
@@ -5551,6 +5630,27 @@ def fleet_pull(raw: dict[str, object]) -> dict[str, object]:
             "body": str(raw.get("body") or ""),
             "mergeable": str(raw.get("mergeable_state") or raw.get("mergeStateStatus") or "").lower(),
             "check": str(raw.get("check") or "").lower()}
+
+
+def started_at(comments: object) -> datetime | None | str:
+    """When the newest `Started:` comment of an issue was written, from the comments as gh, the REST
+    API or the GitHub tools give them; a string saying why where it cannot be told."""
+    if not isinstance(comments, list):
+        return "its comments were not read"
+    times = []
+    for comment in comments:
+        if not isinstance(comment, dict):
+            continue
+        if not str(comment.get("body") or "").lstrip().startswith(STARTED_PREFIX):
+            continue
+        when = comment.get("created_at") or comment.get("createdAt")
+        try:
+            times.append(datetime.fromisoformat(str(when).replace("Z", "+00:00")))
+        except ValueError:
+            continue
+    if not times:
+        return f"it has no {STARTED_PREFIX} comment with a time"
+    return max(times)
 
 
 def blockers_of(issue: dict[str, object]) -> list[int]:
@@ -5604,6 +5704,12 @@ class Fleet:
         except QueueError:
             return None
 
+    def comments(self, number: int) -> list[dict[str, object]] | None:
+        try:
+            return self.github.api(f"issues/{number}/comments?per_page=100")
+        except QueueError:
+            return None
+
     def pulls(self) -> list[dict[str, object]]:
         pulls = []
         for listed in self.github.api(f"pulls?state=open&base={self.base}&per_page=100"):
@@ -5631,6 +5737,12 @@ class FileFleet:
     def issue(self, number: int) -> dict[str, object] | None:
         return None
 
+    def comments(self, number: int) -> list[dict[str, object]] | None:
+        listed = next((issue for issue in self.listed["open"]
+                       if str(issue.get("number")) == str(number)), {})
+        comments = listed.get("comments")
+        return comments if isinstance(comments, list) else None
+
     def pulls(self) -> list[dict[str, object]]:
         return self.pull_list
 
@@ -5642,7 +5754,9 @@ def fleet_plan(repo: str, base: str) -> Plan:
     where = owner_repo(repo)
     return Plan("fleet check", (
         Step("open", "list_issues", {**where, "state": "OPEN", "perPage": 100},
-             note="every page; save the issues, with their bodies and labels, as one JSON list",
+             note="every page; for each issue labelled in-progress, add its comments "
+                  "(issue_read get_comments) as \"comments\"; save the issues, with their bodies "
+                  "and labels, as one JSON list",
              gives=("open issues file",)),
         Step("closed", "list_issues", {**where, "state": "CLOSED", "labels": ["work"],
                                        "orderBy": "UPDATED_AT", "direction": "DESC",
@@ -5682,8 +5796,21 @@ def fleet_findings(door: object, now: datetime, lease: timedelta, repository: st
             continue
         branch = issue["title"]
         if branch not in branches:
+            started = started_at(door.comments(number))
+            if isinstance(started, datetime) and now - started <= lease:
+                minutes = max(0, int((now - started).total_seconds() // 60))
+                found.append(Finding(
+                    STARTING, number,
+                    f"started {minutes} minutes ago, within the lease of "
+                    f"{lease.total_seconds() / 3600:g} hours; origin has no branch {branch} yet",
+                    "none: its worker pushes the branch; listed again as no branch once the "
+                    "lease has passed", branch=branch))
+                continue
+            since = (f"{int((now - started).total_seconds() // 3600)} hours after its Started "
+                     "comment" if isinstance(started, datetime)
+                     else f"and the lease cannot be counted: {started}")
             found.append(Finding(
-                "no branch", number, f"in progress, but origin has no branch {branch}",
+                "no branch", number, f"in progress, but origin has no branch {branch}, {since}",
                 f"start a worker on #{number} (work_tickets.py start), or take in-progress off "
                 "and label it ready", branch=branch))
         elif now - branches[branch] > lease:
@@ -5775,18 +5902,18 @@ def fleet_findings(door: object, now: datetime, lease: timedelta, repository: st
             f"waits for the person ({PERSON_LABEL})" + (f", holding up {held}" if held else ""),
             "SE presents it to the person with the decision skill", holds=tuple(sorted(holds))))
 
-    rank = {kind: index for index, kind in enumerate(FLEET_KINDS)}
+    rank = {kind: index for index, kind in enumerate((*FLEET_KINDS, STARTING))}
     return sorted(found, key=lambda finding: (rank[finding.kind], finding.issue))
 
 
 def fleet_report(found: list[Finding], as_json: bool) -> str:
+    """The findings, "healthy" where none is stuck; "starting" issues are listed either way."""
+    stuck = [finding for finding in found if finding.stuck]
     if as_json:
-        return json.dumps({"healthy": not found, "findings": [
+        return json.dumps({"healthy": not stuck, "findings": [
             {"kind": f.kind, "issue": f.issue, "pull": f.pull, "branch": f.branch, "what": f.what,
              "remedy": f.remedy, "holds": list(f.holds)} for f in found]}, indent=2)
-    if not found:
-        return "healthy"
-    lines = []
+    lines = [] if stuck else ["healthy"]
     for finding in found:
         pull = f" PR #{finding.pull}" if finding.pull else ""
         lines += [f"{finding.kind} #{finding.issue}{pull}: {finding.what}",
@@ -6492,8 +6619,9 @@ def run_queue(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("fleet-check", "list every stuck or stray piece of work, each with its issue, pull request "
-                        "and remedy: in-progress work without a branch or a push within the lease, "
-                        "a delivered pull request whose check failed or that conflicts, a branch "
+                        "and remedy: in-progress work without a branch once the lease has passed "
+                        "since its Started comment (listed as starting before) or without a push "
+                        "within the lease, a delivered pull request whose check failed or that conflicts, a branch "
                         "of a closed issue, a block by an issue closed as not planned or by itself, "
                         "an se-person issue and what it holds up; 'healthy' and exit code 0 when "
                         "there is none, exit code 1 otherwise. It only reads. Without gh it prints "
@@ -6516,7 +6644,7 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
     found = fleet_findings(door, datetime.now(timezone.utc), fleet_lease(root),
                            repository_name(root))
     print(fleet_report(found, args.json))
-    return 1 if found else 0
+    return 1 if any(finding.stuck for finding in found) else 0
 
 
 @command("stop-check", "the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue "
@@ -6527,8 +6655,10 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
                        "Anywhere else, for a sub-agent that is no worker, and where it cannot "
                        "judge (no gh and no recorded pull request) it lets the turn end. It reads "
                        "the hook's JSON on stdin and answers the hook's JSON on stdout",
-         arg("--worktree", help="the checkout to judge; default: the hook's cwd, else the "
-                                "current directory"),
+         arg("--worktree", help="the checkout to judge; default: for a worker sub-agent the "
+                                "checkout its prompt names, else the one whose ticket queue its "
+                                "transcript last touched; else the hook's cwd, else the current "
+                                "directory"),
          arg("--pull", type=int, metavar="NUMBER",
              help="without gh: record the pull request your GitHub tools opened, the hook's "
                   "answer file, then say whether the hook passes; exit code 1 where it would "
@@ -6554,7 +6684,9 @@ def run_stop_check(root: Path | None, args: argparse.Namespace) -> int:
         return 0
     event = hook_event()
     cwd = event.get("cwd")
-    path = root or (Path(cwd) if isinstance(cwd, str) and cwd else Path.cwd())
+    own = (subagent_checkout(event) if root is None and event.get("hook_event_name") ==
+           "SubagentStop" and is_worker_agent(event) else None)
+    path = root or own or (Path(cwd) if isinstance(cwd, str) and cwd else Path.cwd())
     output = stop_verdict(path, event).hook_output()
     if output:
         print(output)

@@ -288,7 +288,8 @@ def work_check(root: Path | None) -> dict | None:
         found = work_tickets.fleet_findings(
             work_tickets.Fleet(root, repo, branch), datetime.now(timezone.utc),
             work_tickets.fleet_lease(root), work_tickets.repository_name(root))
-        work["fleet"] = {"findings": [{"kind": f.kind, "issue": f.issue} for f in found]}
+        work["fleet"] = {"findings": [{"kind": f.kind, "issue": f.issue} for f in found
+                                      if f.stuck]}
     except failures as error:
         work["fleet"] = {"error": str(error)}
     return work
