@@ -403,18 +403,18 @@ def test_field_report_draft_writes_the_template_between_its_markers_and_files_no
 def test_field_report_draft_names_the_configured_integration_branch_and_its_commit(
         worktree, gh, monkeypatch):
     monkeypatch.setattr(work_tickets, "tested_main", TESTED_MAIN)
-    git_ok("init", "-q", "-b", "se", str(worktree))
+    git_ok("init", "-q", "-b", "next", str(worktree))
     git_ok("-C", str(worktree), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
            "commit", "-q", "--allow-empty", "-m", "base")
     commit = subprocess.run(["git", "-C", str(worktree), "rev-parse", "--short", "HEAD"],
                             capture_output=True, text=True, check=True).stdout.strip()
     git_ok("-C", str(worktree), "switch", "-q", "-c", BRANCH)
-    (worktree / "se.toml").write_text('[project]\nintegration_branch = "se"\n', encoding="utf-8")
+    (worktree / "se.toml").write_text('[project]\nintegration_branch = "next"\n', encoding="utf-8")
     run(worktree, "intake", "--issue", "5")
     report = worktree / "report.md"
 
     assert run(worktree, "field-report", "--draft", str(report)) == 0
-    assert f"**Tested against `se`:** `{commit}`" in report.read_text(encoding="utf-8")
+    assert f"**Tested against `next`:** `{commit}`" in report.read_text(encoding="utf-8")
 
 
 def test_field_report_draft_uses_the_se_template_when_project_has_none(worktree, gh):
@@ -2189,12 +2189,12 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(
         main_checkout, monkeypatch, leak):
     origin = main_checkout.parent / "origin.git"
     git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
-    git_ok("-C", str(main_checkout), "switch", "-q", "-c", "se")
+    git_ok("-C", str(main_checkout), "switch", "-q", "-c", "next")
     (main_checkout / "se.toml").write_text(
-        IDENTITY + 'integration_branch = "se"\npublic_check = true\n', encoding="utf-8")
+        IDENTITY + 'integration_branch = "next"\npublic_check = true\n', encoding="utf-8")
     git_ok("-C", str(main_checkout), "add", "se.toml")
-    git_ok("-C", str(main_checkout), "commit", "-q", "-m", "integrate into se")
-    git_ok("-C", str(main_checkout), "push", "-q", "-u", "origin", "se")
+    git_ok("-C", str(main_checkout), "commit", "-q", "-m", "integrate into next")
+    git_ok("-C", str(main_checkout), "push", "-q", "-u", "origin", "next")
     main_before = subprocess.run(
         ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
         capture_output=True, text=True, check=False,
@@ -2218,15 +2218,15 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(
             capture_output=True, check=False,
         ).returncode == 0
 
-    assert work_tickets.integration_branch(main_checkout) == "se"
+    assert work_tickets.integration_branch(main_checkout) == "next"
     if leak:
         with pytest.raises(work_tickets.QueueError, match="Public check failed.*nothing was pushed"):
             work_tickets.integrate(main_checkout, 7, None, None)
-        assert not origin_contains("refs/heads/se")
+        assert not origin_contains("refs/heads/next")
         return
     work_tickets.integrate(main_checkout, 7, None, None)
 
-    assert origin_contains("refs/heads/se")
+    assert origin_contains("refs/heads/next")
     assert not origin_contains("refs/heads/main")
     assert subprocess.run(
         ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
@@ -2235,10 +2235,10 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(
 
 
 def test_integrate_refuses_a_checkout_off_the_integration_branch(main_checkout, monkeypatch):
-    (main_checkout / "se.toml").write_text('[project]\nintegration_branch = "se"\n', encoding="utf-8")
+    (main_checkout / "se.toml").write_text('[project]\nintegration_branch = "next"\n', encoding="utf-8")
     integration_fakes(monkeypatch, "0" * 40)
 
-    with pytest.raises(work_tickets.QueueError, match="not on the integration branch se.*switch se"):
+    with pytest.raises(work_tickets.QueueError, match="not on the integration branch next.*switch next"):
         work_tickets.integrate(main_checkout, 7, None, None)
 
 

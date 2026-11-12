@@ -16,7 +16,7 @@ past 999.
   (documentation and surfaces), `wrk` (work and fleet), `dec` (decisions), `pub` (publishing and
   security). No area starts with `p-`.
 - **Projects:** each project has its own section, `p-` and its short name in lowercase letters and
-  digits: `p-se`, `p-obs`, `p-go` for the Go line on `main`. Any number of projects can be added.
+  digits: `p-se`, `p-obs`, `p-go` for the frozen Go line. Any number of projects can be added.
 - **Never reused:** a retired rule keeps its id and says why it was retired.
 - **Assigned by integrators:** a worker that needs a new rule proposes it with a placeholder name
   in its field report; the integrator gives it the next free number of its section.
@@ -758,7 +758,7 @@ A finding is fixed by removing the content or by a reasoned allow entry, never b
 - **Prevents:** a leak pushed past a hook; a false positive silenced without a reason.
 - **Implementations:**
   - se: `.public-check-allow`, whose header owns its format; CI runs the commit gates on every push
-    to `se` and `main` ([Public safety](../../../../AGENTS.md#public-safety)).
+    to `main` ([Public safety](../../../../AGENTS.md#public-safety)).
 - **Related:** wrk-006, pub-001
 
 ### pub-007 One se version per check

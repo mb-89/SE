@@ -11,15 +11,13 @@ License: MIT, see [LICENSE](LICENSE).
 
 ## Install
 
-One step per place. The `se` branch is where SE lives until it replaces `main`, so the commands name
-it (`#se`, `-b se`); once it is `main`, they drop it. What each agent does is in its own file in
-[src/agents/](src/agents/).
+One step per place. What each agent does is in its own file in [src/agents/](src/agents/).
 
 | Place | Install | Choose SE | Check that it loaded |
 | --- | --- | --- | --- |
-| Claude Code | `claude plugin install se --marketplace mb-89/SE#se` | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator` and `se:worker` |
+| Claude Code | `claude plugin install se --marketplace mb-89/SE` | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator` and `se:worker` |
 | Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud) | each session's first prompt ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
-| GitHub Copilot in VS Code, in se's own checkout | `git clone -b se https://github.com/mb-89/SE` and open it: VS Code reads its `.github/agents/` and `.github/skills/` | pick `se` in the Agent dropdown of the Chat view | the dropdown lists `se`, `integrator` and `worker`; **Configure Skills** lists `catch-up`, `decision` and `work-model` |
+| GitHub Copilot in VS Code, in se's own checkout | `git clone https://github.com/mb-89/SE` and open it: VS Code reads its `.github/agents/` and `.github/skills/` | pick `se` in the Agent dropdown of the Chat view | the dropdown lists `se`, `integrator` and `worker`; **Configure Skills** lists `catch-up`, `decision` and `work-model` |
 | GitHub Copilot in VS Code, every repository | **Chat: Install Plugin from Source** with `https://github.com/mb-89/SE` (agent plugins, `chat.plugins.enabled`); or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/` | as above | as above |
 
 SE's skills read files in the plugin's folder and run its scripts with `uv run python`, and that
@@ -51,7 +49,7 @@ built, touches no repository and holds no secret:
 
 ```bash
 rm -rf ~/.claude/skills/se
-git clone --depth 1 -b se https://github.com/mb-89/SE ~/.claude/skills/se || echo "SE: clone failed, this session starts without SE" >&2
+git clone --depth 1 https://github.com/mb-89/SE ~/.claude/skills/se || echo "SE: clone failed, this session starts without SE" >&2
 ```
 
 It replaces any older SE line (a clone into `/opt/se` that runs `src/build.sh`). A failed clone
@@ -132,7 +130,7 @@ uv run python scripts/build_docs.py --destination <file outside the repository>.
 Any obs warning fails the build, so a broken link, a missing note or a paragraph longer than obs's
 default limit fails it. The suite runs the build (`tests/test_docs.py`),
 and the workflow `.github/workflows/docs.yml` builds and publishes it to GitHub Pages on each push
-to `se`; a failed build publishes nothing, so the previous artifact stays.
+to `main`; a failed build publishes nothing, so the previous artifact stays.
 
 The Timeline, <https://mb-89.github.io/SE/timeline.html>, builds itself from the issues and
 releases of the repositories in `se.toml` `[timeline]`; [scripts/timeline.py](scripts/timeline.py)
@@ -269,7 +267,7 @@ not tags (Claude's cloud sessions).
 
 A repository turns it on with `release = "workflow"` and a copy of se's own
 [`.github/workflows/release-tag.yml`](.github/workflows/release-tag.yml), changed only in
-`branches` to name its integration branch (se's names `se`), so that worker branches run nothing,
+`branches` to name its integration branch (se's names `main`), so that worker branches run nothing,
 and in `uses`, which calls `mb-89/SE/.github/workflows/release.yml@v<major>`.
 
 Other repositories reference se's reusable workflows and actions at `@v<major>`, never at a branch,

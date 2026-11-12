@@ -4,7 +4,7 @@ name: release-tag
 
 on:
   push:
-    branches: [se]
+    branches: [main]
 
 permissions:
   contents: write
