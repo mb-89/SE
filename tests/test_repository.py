@@ -30,6 +30,11 @@ LARGE_ALLOWED: dict[str, str] = {
 
 BINARY_PEEK = 8000
 
+# The markers are spelled in two halves, so this file does not break its own rule.
+MARKER = re.compile(r"\b(?:" + "TO" + "DO" + "|" + "FIX" + "ME" + r")\b")
+# An issue a marker names: `#<n>`, `<repo>#<n>` or an issue URL.
+ISSUE = re.compile(r"#\d+|/issues/\d+")
+MARKED_DIRS = ("scripts/", "tests/")
 
 
 def tracked(repo: Path) -> list[str]:
@@ -68,6 +73,21 @@ def large_findings(repo: Path, allowed: dict[str, str], limit: int = MAX_BYTES) 
         f"{p}: allowed as large but no tracked file over {limit} bytes; remove the entry"
         for p in sorted(set(allowed) - large)
     ]
+
+
+def marker_findings(repo: Path) -> list[str]:
+    """Lines in `scripts/` and `tests/` whose marker of unfinished work names no issue."""
+    found = []
+    for p in tracked(repo):
+        if not p.startswith(MARKED_DIRS):
+            continue
+        data = (repo / p).read_bytes()
+        if b"\0" in data[:BINARY_PEEK]:
+            continue
+        for number, line in enumerate(data.decode(errors="replace").splitlines(), 1):
+            if MARKER.search(line) and not ISSUE.search(line):
+                found.append(f"{p}:{number}: names no issue; write the issue that owns it, #<n>")
+    return found
 
 
 def fixture_repo(tmp_path: Path, files: dict[str, bytes]) -> Path:
@@ -114,3 +134,22 @@ def test_a_tracked_file_over_the_bound_fails_and_a_stale_entry_too(tmp_path: Pat
     ]
 
 
+def test_se_has_no_marker_without_an_issue_in_scripts_or_tests() -> None:
+    assert marker_findings(ROOT) == []
+
+
+def test_a_marker_without_an_issue_fails(tmp_path: Path) -> None:
+    todo, fixme = "TO" + "DO", "FIX" + "ME"
+    repo = fixture_repo(
+        tmp_path,
+        {
+            "scripts/a.py": f"# {todo}: retry\n# {todo}(#12): owned\n".encode(),
+            "tests/b.py": f"x = 1  # {fixme} later\n# {fixme} example.com/o/r/issues/7\n".encode(),
+            "docs/c.md": f"{todo}: outside the rule's directories\n".encode(),
+        },
+    )
+
+    assert marker_findings(repo) == [
+        "scripts/a.py:1: names no issue; write the issue that owns it, #<n>",
+        "tests/b.py:1: names no issue; write the issue that owns it, #<n>",
+    ]
