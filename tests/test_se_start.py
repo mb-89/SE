@@ -625,3 +625,9 @@ def test_se_at_a_local_path_is_never_touched(repos):
     assert not any(line.startswith("SE: ") and "->" in line for line in lines)
     assert git(repos["se"], "rev-parse", "HEAD") == head
 
+
+def test_without_gh_the_se_agent_runs_the_fleet_checks_plan_at_its_first_turn():
+    text = (ROOT / "src" / "agents" / "se.md").read_text(encoding="utf-8")
+    greeting = text[text.index("- **Greeting**"):text.index("- **Turn-start check**")]
+    assert "Without gh (the cloud) it names neither: at your first turn run" in greeting
+    assert "`work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints" in greeting
