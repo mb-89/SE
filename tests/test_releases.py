@@ -257,6 +257,46 @@ def test_a_second_integration_of_a_branch_releases_a_patch_and_the_first_its_kin
     assert released(checkout) == ("1.3.1", "v1.3.1")
 
 
+def squash_on_origin(root: Path, branch: str, text: str, trailer: str) -> None:
+    """Land `branch` as a squash pull request does: one commit on origin's main with the
+    `Integrate <branch>` subject and `trailer`, then fetched and fast-forwarded into main."""
+    commit_on(root, branch, text)
+    tree = git(root, "rev-parse", f"{branch}^{{tree}}")
+    squash = git(root, "commit-tree", tree, "-p", "main", "-m", f"Integrate {branch}: work",
+                 "-m", trailer)
+    git(root, "push", "-q", "origin", f"{squash}:refs/heads/main")
+    git(root, "fetch", "-q", "origin")
+    git(root, "merge", "-q", "--ff-only", "origin/main")
+
+
+def test_a_squash_landed_integration_counts_as_integrated_and_releases_its_kind(checkout):
+    squash_on_origin(checkout, "feature/topic-20261106", "work", "Release-kind: minor")
+    # A later integration of the same branch is a re-integration: the squash commit counts.
+    assert work_tickets.integrated_before(checkout, "feature/topic-20261106")
+    assert work_tickets.release_trailer(
+        checkout, "feature/topic-20261106", issue_body(False), declared("minor")) == "Release-kind: patch"
+    # The squash commit's trailer is the kind a release counts, as the merge commit's was.
+    assert work_tickets.integrated_packages(checkout, "main", "v1.2.3", "refs/tags/v1.2.3") == [
+        ("feature/topic-20261106", "minor")]
+
+
+def test_push_of_a_landing_branch_releases_against_origin_s_main_and_waits_with_the_tag(
+        checkout, capsys):
+    git(checkout, "switch", "-q", "-c", "land/feature/topic-20261106")
+    integrate(checkout, "feature/topic-20261106")
+    git(checkout, "switch", "-q", "land/feature/topic-20261106")
+    git(checkout, "merge", "-q", "--ff-only", "main")
+    assert push(checkout) == 0
+    origin = checkout.parent / "origin.git"
+    shown = subprocess.run(["git", "--git-dir", str(origin), "show",
+                            "land/feature/topic-20261106:se.toml"], capture_output=True, text=True,
+                           check=True).stdout
+    assert shown == settings("1.3.0")
+    assert "v1.3.0" not in subprocess.run(["git", "--git-dir", str(origin), "tag"],
+                                          capture_output=True, text=True, check=True).stdout
+    assert "Release: tag v1.3.0 once the squash commit is on main" in capsys.readouterr().out
+
+
 def test_a_re_integration_releases_the_kind_its_own_report_states(checkout, capsys):
     integrate(checkout, "fix/topic-20261106")
     report = "**Branch tip:** `abc1234`  **Re-integration kind:** minor\n"

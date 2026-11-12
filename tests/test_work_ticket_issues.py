@@ -3,6 +3,7 @@ carry the field report, through gh (mocked here)."""
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -17,6 +18,7 @@ work_tickets = importlib.util.module_from_spec(SPEC)
 sys.modules.setdefault("work_tickets", work_tickets)
 SPEC.loader.exec_module(work_tickets)
 TESTED_MAIN = work_tickets.tested_main
+REAL_GITHUB = work_tickets.GitHub
 
 BRANCH = "feature/example-20261104"
 URL = "https://git.example/owner/repo/issues/5"
@@ -1466,6 +1468,95 @@ def git_ok(*arguments: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
+class FakeGitHub:
+    """GitHub's pull requests and check runs on the bare origin of the checkout it is opened for:
+    `squash` writes the squash commit onto origin's main as GitHub does, for the owning account
+    (`owner`'s noreply author, the web-flow committer). `checks` are the check runs `check_run`
+    returns, one per poll, the last one repeated."""
+
+    def __init__(self) -> None:
+        self.pulls: list[dict] = []
+        self.calls: list[tuple] = []
+        self.checks: list[dict | None] = [{"id": 1, "status": "completed", "conclusion": "success",
+                                           "html_url": "https://git.example/owner/repo/runs/1"}]
+        self.origin: Path | None = None
+
+    def __call__(self, root: Path, repo: str) -> "FakeGitHub":
+        self.origin = Path(subprocess.run(
+            ["git", "-C", str(root), "remote", "get-url", "origin"], capture_output=True,
+            text=True, check=True).stdout.strip())
+        return self
+
+    def git(self, *arguments: str, env: dict | None = None) -> str:
+        return subprocess.run(["git", "--git-dir", str(self.origin), *arguments],
+                              capture_output=True, text=True, check=True, env=env).stdout.strip()
+
+    def pull(self, number: int) -> dict:
+        self.calls.append(("pull", number))
+        return next(pull for pull in self.pulls if pull["number"] == number)
+
+    def open_pull(self, head: str, base: str) -> dict | None:
+        self.calls.append(("open_pull", head, base))
+        return next((pull for pull in self.pulls if pull["state"] == "open"
+                     and (pull["head"], pull["base"]) == (head, base)), None)
+
+    def create_pull(self, head: str, base: str, title: str, body: str) -> dict:
+        self.calls.append(("create_pull", head, base, title))
+        number = 20 + len(self.pulls)
+        self.pulls.append({"number": number, "head": head, "base": base, "title": title,
+                           "body": body, "state": "open", "merged": False,
+                           "html_url": f"https://git.example/owner/repo/pull/{number}"})
+        return self.pulls[-1]
+
+    def update_pull(self, number: int, title: str, body: str) -> dict:
+        self.calls.append(("update_pull", number, title))
+        pull = next(pull for pull in self.pulls if pull["number"] == number)
+        pull.update(title=title, body=body)
+        return pull
+
+    def close_pull(self, number: int, comment: str) -> None:
+        self.calls.append(("close_pull", number, comment))
+
+    def check_run(self, sha: str, name: str) -> dict | None:
+        self.calls.append(("check_run", sha, name))
+        return self.checks.pop(0) if len(self.checks) > 1 else self.checks[0]
+
+    def squash(self, number: int, sha: str, title: str, message: str) -> str:
+        self.calls.append(("squash", number, sha, title, message))
+        pull = next(pull for pull in self.pulls if pull["number"] == number)
+        assert self.git("rev-parse", f"refs/heads/{pull['head']}") == sha
+        main = self.git("rev-parse", f"refs/heads/{pull['base']}")
+        env = {**os.environ, "GIT_AUTHOR_NAME": "owner",
+               "GIT_AUTHOR_EMAIL": "1+owner@users.noreply.github.com",
+               "GIT_COMMITTER_NAME": "GitHub", "GIT_COMMITTER_EMAIL": "noreply" + "@github.com"}
+        commit = self.git("commit-tree", f"{sha}^{{tree}}", "-p", main, "-m", title, "-m", message,
+                          env=env)
+        self.git("update-ref", f"refs/heads/{pull['base']}", commit, main)
+        pull.update(state="closed", merged=True, merge_commit_sha=commit)
+        return commit
+
+
+def squashed_onto_origin(checkout: Path, commit: str) -> bool:
+    """Whether `commit` is origin's main and the checkout's, one squash commit GitHub wrote for
+    the owner on top of the main it was tested on."""
+    def git(*arguments: str) -> str:
+        return subprocess.run(["git", "-C", str(checkout), *arguments], capture_output=True,
+                              text=True, check=True).stdout.strip()
+    full = git("rev-parse", commit)
+    return (full == git("rev-parse", "origin/main") == git("rev-parse", "main")
+            and len(git("rev-list", "--parents", "-1", full).split()) == 2
+            and git("log", "-1", "--format=%an %ce", full) == "owner noreply@github.com")
+
+
+@pytest.fixture(autouse=True)
+def github(monkeypatch) -> FakeGitHub:
+    """Every integration lands through the fake GitHub; no test reaches the real one."""
+    fake = FakeGitHub()
+    monkeypatch.setattr(work_tickets, "GitHub", fake)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    return fake
+
+
 def suite_passed(root: Path, result: str | None) -> str | None:
     """A fake suite's pass on HEAD: its verdict recorded as run_suite records it; `result`."""
     work_tickets.sibling("verdicts").record(root, "suite", "HEAD", True)
@@ -1701,10 +1792,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
 
     commit = work_tickets.integrate(main_checkout, 7, None, "build", [["check"]])
     assert (main_checkout / "worker.txt").is_file()
-    assert subprocess.run(
-        ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
-        capture_output=True, check=False,
-    ).returncode == 0
+    assert squashed_onto_origin(main_checkout, commit)
     assert commit and started == [9]
     message = subprocess.run(
         ["git", "-C", str(main_checkout), "log", "-1", "--format=%B"],
@@ -1726,8 +1814,8 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     assert not any(call[0] == "issue" and call[1] in ("create", "list") for call in calls)
     assert [call[:3] for call in calls if call[:2] == ["issue", "comment"]] == [["issue", "comment", "5"]]
     assert bodies == [
-        f"Integrated in {commit} from https://git.example/owner/repo/pull/7. Release: none. "
-        "Suite: 214 passed.\n"]
+        f"Integrated in {commit} from https://git.example/owner/repo/pull/7, landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). "
+        "Release: none. Suite: 214 passed.\n"]
     assert not worker.exists()
     assert subprocess.run(
         ["git", "-C", str(main_checkout), "rev-parse", "--verify", "feature/worker"],
@@ -1827,11 +1915,7 @@ def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch)
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
 
     commit = work_tickets.integrate(main_checkout, 7, None, None)
-    assert commit
-    assert subprocess.run(
-        ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
-        capture_output=True, check=False,
-    ).returncode == 0
+    assert commit and squashed_onto_origin(main_checkout, commit)
     assert commands == [("suite", "Complete suite")]
     assert not worker.exists()
 
@@ -1937,7 +2021,8 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     checks: list[tuple[list[list[str]], bool]] = []
     guarded: list[tuple[str, Path]] = []
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
-    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    # On github.com, so the mirror guard knows the owner whose squash commits GitHub writes.
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "github.com/owner/repo")
     monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
     def gh_call(root, args):
         calls.append(args)
@@ -1989,10 +2074,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
 
     commit = work_tickets.integrate(main_checkout, 7, None, "build", [["check"]])
     assert (main_checkout / "worker.txt").is_file()
-    assert subprocess.run(
-        ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "main"],
-        capture_output=True, check=False,
-    ).returncode == 0
+    assert squashed_onto_origin(main_checkout, commit)
     assert commit and started == [9]
     message = subprocess.run(
         ["git", "-C", str(main_checkout), "log", "-1", "--format=%B"],
@@ -2023,8 +2105,8 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     ).stdout.strip()
     closes = [call for call in calls if call[:2] == ["issue", "close"]]
     assert closes == [["issue", "close", "5", "--repo", "git.example/owner/tracker"]]
-    assert all("from https://git.example/owner/repo/pull/7. Release: none. Suite: 214 passed."
-               in body for body in bodies)
+    assert all("from https://git.example/owner/repo/pull/7, landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). Release: none. "
+               "Suite: 214 passed." in body for body in bodies)
     assert not worker.exists()
     assert subprocess.run(
         ["git", "--git-dir", str(mirror), "show-ref", "--verify", "refs/heads/feature/worker"],
@@ -2222,7 +2304,7 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(
 
     def origin_contains(ref: str) -> bool:
         return subprocess.run(
-            ["git", "--git-dir", str(origin), "merge-base", "--is-ancestor", head, ref],
+            ["git", "--git-dir", str(origin), "cat-file", "-e", f"{ref}:worker.txt"],
             capture_output=True, check=False,
         ).returncode == 0
 
@@ -2240,6 +2322,169 @@ def test_integrate_writes_the_configured_integration_branch_and_leaves_main(
         ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
         capture_output=True, text=True, check=False,
     ).stdout.strip() == main_before
+
+
+def delivered_worker(main_checkout: Path, monkeypatch) -> tuple[str, list[list[str]]]:
+    """A worker branch feature/worker pushed to origin and delivered as PR #7; (head, gh calls)."""
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "Add the worker file")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    head = subprocess.run(["git", "-C", str(worker), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    return head, integration_fakes(monkeypatch, head)
+
+
+def origin_main(checkout: Path) -> str:
+    return subprocess.run(["git", "--git-dir", str(checkout.parent / "origin.git"), "rev-parse",
+                           "refs/heads/main"], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_integrate_lands_through_a_squash_pull_request_after_waiting_for_check(
+        main_checkout, monkeypatch, github, capsys):
+    head, calls = delivered_worker(main_checkout, monkeypatch)
+    pending = {"id": 1, "status": "in_progress", "conclusion": None}
+    github.checks = [None, pending, {"id": 2, "status": "completed", "conclusion": "success",
+                                     "html_url": "https://git.example/owner/repo/runs/2"}]
+    waits: list[int] = []
+    monkeypatch.setattr(work_tickets, "wait", waits.append)
+
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+
+    landing = "land/feature/worker"
+    title = "Integrate feature/worker (work issue #5, PR #7)"  # without a public check
+    assert [call[0] for call in github.calls] == [
+        "open_pull", "create_pull", "check_run", "check_run", "check_run", "squash", "pull",
+        "close_pull"]
+    assert github.calls[1] == ("create_pull", landing, "main", title)
+    pull = github.pulls[0]
+    assert pull["body"] == reported_at(head)  # the worker's description: its field report
+    assert waits == [30, 30]  # two polls before the run completed
+    _, number, sha, squash_title, message = github.calls[5]
+    assert (number, squash_title, message) == (20, title, "Release-kind: minor")
+    assert squashed_onto_origin(main_checkout, commit)
+    body = subprocess.run(["git", "-C", str(main_checkout), "log", "-1", "--format=%B"],
+                          capture_output=True, text=True, check=True).stdout
+    assert body.rstrip() == f"{title}\n\nRelease-kind: minor"  # what the merge commit carried, no (#20)
+    tree = lambda ref: subprocess.run(["git", "-C", str(main_checkout), "rev-parse", f"{ref}^{{tree}}"],
+                                      capture_output=True, text=True, check=True).stdout.strip()
+    assert tree("main") == tree(sha)  # the tree the checks passed
+    assert github.calls[-1] == ("close_pull", 7, f"Landed on main in {origin_main(main_checkout)[:12]} "
+                                "through https://git.example/owner/repo/pull/20.")
+    out = capsys.readouterr().out
+    assert "Landing pull request opened: https://git.example/owner/repo/pull/20" in out
+    assert "Check check: not started" in out and "Check check: in_progress" in out
+    assert subprocess.run(["git", "-C", str(main_checkout), "rev-parse", "--verify", landing],
+                          capture_output=True, check=False).returncode != 0
+    assert subprocess.run(["git", "--git-dir", str(main_checkout.parent / "origin.git"),
+                           "rev-parse", "--verify", f"refs/heads/{landing}"],
+                          capture_output=True, check=False).returncode != 0
+
+
+def test_integrate_reuses_the_open_landing_pull_request(main_checkout, monkeypatch, github, capsys):
+    head, _ = delivered_worker(main_checkout, monkeypatch)
+    github.pulls.append({"number": 31, "head": "land/feature/worker", "base": "main",
+                         "title": "old", "body": "old", "state": "open", "merged": False,
+                         "html_url": "https://git.example/owner/repo/pull/31"})
+
+    work_tickets.integrate(main_checkout, 7, None, None)
+
+    assert [call[0] for call in github.calls][:3] == ["open_pull", "update_pull", "check_run"]
+    assert github.pulls == [github.pulls[0]] and github.pulls[0]["merged"]
+    assert github.pulls[0]["body"] == reported_at(head)
+    assert "Landing pull request reused: https://git.example/owner/repo/pull/31" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled"])
+def test_a_failed_check_merges_nothing_and_escalates(main_checkout, monkeypatch, github, conclusion):
+    _, calls = delivered_worker(main_checkout, monkeypatch)
+    before = origin_main(main_checkout)
+    github.checks = [{"id": 3, "status": "completed", "conclusion": conclusion,
+                      "html_url": "https://git.example/owner/repo/runs/3"}]
+
+    with pytest.raises(work_tickets.QueueError,
+                       match=f"check concluded {conclusion} .*runs/3.*nothing was merged"):
+        work_tickets.integrate(main_checkout, 7, None, None)
+
+    assert origin_main(main_checkout) == before
+    assert not any(call[0] == "squash" for call in github.calls)
+    assert subprocess.run(["git", "-C", str(main_checkout), "branch", "--show-current"],
+                          capture_output=True, text=True, check=True).stdout.strip() == "main"
+    assert any(call[:5] == ["issue", "edit", "5", "--add-label", "escalated"] for call in calls)
+    assert not any(call[:2] == ["issue", "close"] for call in calls)
+
+
+def test_a_check_that_never_finishes_is_refused_after_the_last_poll(main_checkout, monkeypatch, github):
+    delivered_worker(main_checkout, monkeypatch)
+    github.checks = [{"id": 4, "status": "queued", "conclusion": None}]
+    monkeypatch.setattr(work_tickets, "CHECK_POLLS", 3)
+
+    with pytest.raises(work_tickets.QueueError, match="did not finish .* within 1 minutes"):
+        work_tickets.integrate(main_checkout, 7, None, None)
+    assert [call[0] for call in github.calls].count("check_run") == 3
+
+
+def test_a_main_that_moved_during_the_wait_is_not_squashed_onto(main_checkout, monkeypatch, github):
+    delivered_worker(main_checkout, monkeypatch)
+    other = main_checkout.parent / "other"
+
+    def moved(sha, name):
+        git_ok("-C", str(other), "pull", "-q", "origin", "main")
+        git_ok("-C", str(other), "-c", "user.name=mb", "-c", "user.email=mb", "commit", "-q",
+               "--allow-empty", "-m", "elsewhere")
+        git_ok("-C", str(other), "push", "-q", "origin", "HEAD:main")
+        return {"id": 5, "status": "completed", "conclusion": "success"}
+    github.check_run = moved
+
+    with pytest.raises(work_tickets.QueueError, match="origin's main moved .*nothing was merged"):
+        work_tickets.integrate(main_checkout, 7, None, None)
+    assert not any(call[0] == "squash" for call in github.calls)
+
+
+def test_a_squash_that_does_not_read_back_as_merged_is_refused(main_checkout, monkeypatch, github):
+    delivered_worker(main_checkout, monkeypatch)
+    squash = github.squash
+    github.squash = lambda number, sha, title, message: (squash(number, sha, title, message), "0" * 40)[1]
+
+    with pytest.raises(work_tickets.QueueError, match="reads back as merged=True .*not the squash commit"):
+        work_tickets.integrate(main_checkout, 7, None, None)
+
+
+def test_the_door_speaks_github_s_rest_api_through_gh(tmp_path, monkeypatch):
+    calls: list[tuple[list[str], object]] = []
+
+    def gh(root, arguments):
+        sent = (json.loads(Path(arguments[arguments.index("--input") + 1]).read_text())
+                if "--input" in arguments else None)
+        calls.append((arguments, sent))
+        path = arguments[3]
+        if path.endswith("/merge"):
+            return '{"sha": "abc", "merged": true}'
+        if "check-runs" in path:
+            return '{"check_runs": [{"id": 1, "status": "queued"}, {"id": 2, "status": "completed"}]}'
+        if "pulls?" in path:
+            return "[]"
+        return '{"number": 9}'
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    door = REAL_GITHUB(tmp_path, "github.com/owner/repo")
+
+    assert door.open_pull("land/x", "main") is None
+    assert door.create_pull("land/x", "main", "T", "B") == {"number": 9}
+    assert door.check_run("abc", "check") == {"id": 2, "status": "completed"}
+    assert door.squash(9, "abc", "T", "M") == "abc"
+    door.close_pull(7, "Landed")
+    assert [(arguments[2], arguments[3], sent) for arguments, sent in calls] == [
+        ("GET", "repos/owner/repo/pulls?state=open&head=owner:land/x&base=main", None),
+        ("POST", "repos/owner/repo/pulls", {"head": "land/x", "base": "main", "title": "T", "body": "B"}),
+        ("GET", "repos/owner/repo/commits/abc/check-runs?check_name=check", None),
+        ("PUT", "repos/owner/repo/pulls/9/merge", {"merge_method": "squash", "sha": "abc",
+                                                    "commit_title": "T", "commit_message": "M"}),
+        ("POST", "repos/owner/repo/issues/7/comments", {"body": "Landed"}),
+        ("PATCH", "repos/owner/repo/pulls/7", {"state": "closed"}),
+    ]
 
 
 def test_integrate_refuses_a_checkout_off_the_integration_branch(main_checkout, monkeypatch):
@@ -3220,7 +3465,7 @@ def test_integrate_leaves_an_issue_with_post_merge_acceptance_open_and_reports_g
 
     work_tickets.integrate(main_checkout, 7, None, None)
     assert [call[2] for call in calls if call[:2] == ["issue", "close"]] == []
-    assert len(bodies) == 1 and "from https://git.example/owner/repo/pull/7. Release: none." in bodies[0]
+    assert len(bodies) == 1 and "from https://git.example/owner/repo/pull/7, landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). Release: none." in bodies[0]
     assert "Stays open until this acceptance is seen after the merge: " \
            "- [ ] CI is green on main after the merge." in bodies[0]
     output = capsys.readouterr().out
@@ -3265,10 +3510,11 @@ def test_integrate_closes_the_work_issue_with_a_comment_linking_the_pull_request
     bodies: list[str] = []
     monkeypatch.setattr(work_tickets, "run_gh_with_body",
                         lambda root, args, body: calls.append(args) or bodies.append(body) or "")
-    monkeypatch.setattr(work_tickets, "push", lambda root, branch: "v1.3.0")
+    monkeypatch.setattr(work_tickets, "release", lambda root, branch, upstream: "v1.3.0")
 
     commit = work_tickets.integrate(main_checkout, 7, None, None)
-    assert bodies == [f"Integrated in {commit} from https://git.example/owner/repo/pull/7. "
+    assert bodies == [f"Integrated in {commit} from https://git.example/owner/repo/pull/7"
+                      ", landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). "
                       "Release: https://git.example/owner/repo/releases/tag/v1.3.0. Suite: 1 passed.\n"]
     assert [call[:3] for call in calls if call[:2] == ["issue", "close"]] == [["issue", "close", "5"]]
 
@@ -3360,12 +3606,12 @@ def test_dry_run_of_the_worker_to_integrator_flow_files_no_field_report_issue(
         ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True,
         check=True).stdout.strip()
     monkeypatch.setattr(work_tickets, "run_suite", lambda root: suite_passed(root, "1 passed"))
-    monkeypatch.setattr(work_tickets, "push", lambda root, branch: "v1.1.0")
+    monkeypatch.setattr(work_tickets, "release", lambda root, branch, upstream: "v1.1.0")
     commit = work_tickets.integrate(main_checkout, 7, None, None)
 
     assert gh.issue["state"] == "CLOSED"
     assert gh.issue["comments"][-1]["body"].startswith(
-        f"Integrated in {commit} from https://git.example/owner/repo/pull/7. "
+        f"Integrated in {commit} from https://git.example/owner/repo/pull/7, landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). "
         "Release: https://git.example/owner/repo/releases/tag/v1.1.0.")
     assert "Release-kind: minor" in subprocess.run(
         ["git", "-C", str(main_checkout), "log", "-1", "--format=%B"], capture_output=True,
