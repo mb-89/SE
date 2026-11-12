@@ -52,8 +52,8 @@ rm -rf ~/.claude/skills/se
 git clone --depth 1 https://github.com/mb-89/SE ~/.claude/skills/se || echo "SE: clone failed, this session starts without SE" >&2
 ```
 
-It replaces any older SE line (a clone into `/opt/se` that runs `/opt/se/src/build.sh`). A failed clone
-starts the session without SE instead of stopping it.
+It replaces any older SE line (a clone into `/opt/se` that runs `/opt/se/src/build.sh`). A failed
+clone starts the session without SE instead of stopping it.
 
 A cloud session takes no `--agent` flag, `create_session` takes no agent, and an `agent` key in the
 repository's `.claude/settings.json` gives every session of that repository SE's instructions,
