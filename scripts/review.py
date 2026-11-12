@@ -7,6 +7,15 @@ description (its field report) and its comments, is withheld: a worker's summary
 reviewer most. `--claims` adds it under a heading that calls it claims to check, never evidence,
 for once the reviewer's findings are verified.
 
+`review.py file <pull request> --report <file>` checks the reviewer's report (JSON, REPORT_FIELDS)
+and refuses a rubber stamp, writing nothing: a pass with an acceptance item lacking evidence or with
+a blocking finding, a fail without one, a report without its "checked and clean" list, a finding
+without evidence, place or judgment, an unknown field. Only damage blocks (the product made worse,
+or against what it is about). Each finding, blocking ones first, becomes a work issue through
+work_tickets.py's `file` and its dedupe, at most `max_filed` (se.toml `[review]`, MAX_FILED) of
+them, the rest counted; the verdict is one comment on the pull request, opening with
+VERDICT_MARKER, with a JSON block the retro reads.
+
 GitHub is read through work_tickets.py's door (gh). Where gh is not signed in (Claude's cloud) the
 command prints its GitHub steps as a plan for the session's GitHub tools and reads their answers
 from the files the session saved, as the work model's "Without gh" says for `integrate`. The diff
@@ -357,6 +366,250 @@ def run_brief(args: argparse.Namespace) -> int:
         sys.stdout.write(text(found))
     return 0
 
+# `review.py file`: the reviewer's report, checked, its findings filed and its verdict posted.
+
+VERDICT_MARKER = "<!-- se:review -->"
+MAX_FILED = 5
+VERDICTS = ("pass", "fail")
+# The report's fields: what each holds. Every field is required, and no other is accepted, so a
+# typo never drops a section.
+REPORT_FIELDS = {"verdict": "pass or fail", "acceptance": "each acceptance item of the work issue "
+                 "with its evidence", "findings": "the verified findings",
+                 "clean": 'the "checked and clean" list: what was examined and found sound'}
+ACCEPTANCE_FIELDS = ("item", "evidence")
+FINDING_FIELDS = ("title", "evidence", "place", "blocking", "why")
+
+
+@dataclass
+class Finding:
+    """One verified finding: its evidence, its place and its judgment (`blocking`, `why`); the
+    work issue it became, the open twin that answered it, or neither where it was past the cap."""
+
+    title: str
+    evidence: str
+    place: str
+    blocking: bool
+    why: str
+    issue: int | None = None
+    twin: int | None = None
+
+
+@dataclass
+class Report:
+    verdict: str
+    acceptance: list[dict]
+    findings: list[Finding]
+    clean: list[str]
+
+
+def unknown(given: dict, known, where: str) -> None:
+    extra = sorted(set(given) - set(known))
+    if extra:
+        raise QueueError(f"{where} has the unknown field {extra[0]}; it holds only "
+                         f"{', '.join(known)}")
+
+
+def words(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def checked_report(given: object) -> Report:
+    """`given`, the report as JSON reads it, checked against the review rules; every refusal is
+    raised before anything is written."""
+    if not isinstance(given, dict):
+        raise QueueError("The report is a JSON object with the fields "
+                         f"{', '.join(REPORT_FIELDS)}")
+    unknown(given, REPORT_FIELDS, "The report")
+    verdict = given.get("verdict")
+    if verdict not in VERDICTS:
+        raise QueueError(f"The report's verdict is pass or fail, not {verdict!r}")
+    clean = given.get("clean")
+    if not isinstance(clean, list) or not clean or not all(words(entry) for entry in clean):
+        raise QueueError('The report has no "checked and clean" list, or an empty entry in it: '
+                         "name what was examined and found sound, so a rubber stamp shows")
+    acceptance = given.get("acceptance")
+    if not isinstance(acceptance, list) or not acceptance:
+        raise QueueError("The report names no acceptance item: give each acceptance item of the "
+                         "work issue with its evidence")
+    items: list[dict] = []
+    for entry in acceptance:
+        if not isinstance(entry, dict):
+            raise QueueError("An acceptance item is an object with item and evidence")
+        unknown(entry, ACCEPTANCE_FIELDS, "An acceptance item")
+        if not words(entry.get("item")):
+            raise QueueError("An acceptance item needs its item")
+        items.append({"item": words(entry.get("item")), "evidence": words(entry.get("evidence"))})
+    findings_given = given.get("findings")
+    if not isinstance(findings_given, list):
+        raise QueueError("The report's findings are a list (empty where none was verified)")
+    findings: list[Finding] = []
+    for entry in findings_given:
+        if not isinstance(entry, dict):
+            raise QueueError("A finding is an object with " + ", ".join(FINDING_FIELDS))
+        unknown(entry, FINDING_FIELDS, "A finding")
+        title = words(entry.get("title"))
+        if not title:
+            raise QueueError("A finding needs its title")
+        if not words(entry.get("evidence")):
+            raise QueueError(f'The finding "{title}" has no evidence: a verified finding has a file '
+                             "and line, or a command and its output; drop what is unproven")
+        if not words(entry.get("place")):
+            raise QueueError(f'The finding "{title}" names no place: the file and line, or the '
+                             "command, where it shows")
+        if not isinstance(entry.get("blocking"), bool) or not words(entry.get("why")):
+            raise QueueError(f'The finding "{title}" has no judgment: blocking true or false, and '
+                             "why (only damage blocks: the product made worse, or against what "
+                             "it is about)")
+        findings.append(Finding(title, words(entry["evidence"]), words(entry["place"]),
+                                entry["blocking"], words(entry["why"])))
+    blocking = sum(found.blocking for found in findings)
+    if verdict == "pass":
+        lacking = [item["item"] for item in items if not item["evidence"]]
+        if lacking:
+            raise QueueError(f'A pass needs evidence for every acceptance item, and "{lacking[0]}" '
+                             "has none")
+        if blocking:
+            raise QueueError(f"A pass has no blocking finding; this report has {blocking}")
+    elif not blocking:
+        raise QueueError("A fail needs a verified blocking finding; this report has none, so it "
+                         "passes")
+    return Report(verdict, items, findings, [words(entry) for entry in clean])
+
+
+def read_report(path: Path) -> Report:
+    try:
+        given = json.loads(work_tickets.read_file(path, "the review report"))
+    except json.JSONDecodeError as error:
+        raise QueueError(f"The review report {path} is not JSON: {error}") from error
+    return checked_report(given)
+
+
+def max_filed(root: Path) -> int:
+    """se.toml `[review] max_filed`: how many findings one review files; MAX_FILED without it."""
+    value = work_tickets.se_table(root, "review").get("max_filed", MAX_FILED)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise QueueError(f"[review] max_filed in {root / 'se.toml'} is {value!r}; set it to a "
+                         "whole number of findings, 0 or more, or remove it")
+    return value
+
+
+def to_file(found: Report, cap: int) -> list[Finding]:
+    """The findings filed, blocking ones first, at most `cap`."""
+    ordered = sorted(found.findings, key=lambda item: not item.blocking)
+    return ordered[:cap]
+
+
+def finding_title(found: Finding) -> str:
+    """The branch name a finding's work issue is titled with; its date never makes a twin new."""
+    return f"fix/{work_tickets.slug(found.title)}-{work_tickets.today_stamp()}"
+
+
+def finding_body(found: Finding, number: int, url: str) -> str:
+    judged = ("Blocking: letting the work through does damage." if found.blocking
+              else "Not blocking: bad but fixable, an open point.")
+    return work_tickets.fleet_marked(
+        f"## Goal\n\n{found.title}\n\nA verified finding of the review of pull request #{number} "
+        f"({url}). {judged}\n\n## Package kind\n\nStandard.\n\n## Requirements\n\n"
+        f"1. {found.title}, at {found.place}.\n\n## Finding\n\n**Place:** {found.place}\n\n"
+        f"**Evidence:** {found.evidence}\n\n**Judgment:** {found.why}\n\n## Acceptance\n\n"
+        f"- [ ] A regression test shows the finding at {found.place}, and the fix makes it pass.\n")
+
+
+def verdict_data(number: int, found: Report, cap: int, unfiled: int) -> dict:
+    return {"pull": number, "verdict": found.verdict, "max_filed": cap, "unfiled": unfiled,
+            "acceptance": found.acceptance, "findings": [asdict(item) for item in found.findings],
+            "clean": found.clean}
+
+
+def verdict_comment(number: int, found: Report, cap: int) -> str:
+    """The verdict as it is posted on the pull request: what a person reads, then the JSON block
+    the retro reads."""
+    unfiled = sum(item.issue is None and item.twin is None for item in found.findings)
+    lines = [VERDICT_MARKER, f"## Review of pull request #{number}: {found.verdict.upper()}", "",
+             "### Acceptance"]
+    for item in found.acceptance:
+        lines += [f"- {item['item']}", f"  Evidence: {item['evidence'] or '_no evidence_'}"]
+    lines += ["", "### Findings"]
+    if not found.findings:
+        lines.append("None.")
+    for item in found.findings:
+        became = (f"#{item.issue}" if item.issue is not None else
+                  f"answered on its open twin #{item.twin}" if item.twin is not None else
+                  f"not filed, past the first {cap}")
+        lines += [f"- **{item.title}** ({'blocking' if item.blocking else 'not blocking'}, "
+                  f"{became})", f"  Place: {item.place}", f"  Evidence: {item.evidence}",
+                  f"  Judgment: {item.why}"]
+    if unfiled:
+        lines += ["", f"{unfiled} more finding(s) counted, not filed (se.toml [review] max_filed "
+                      f"is {cap})."]
+    lines += ["", "### Checked and clean", *(f"- {entry}" for entry in found.clean), "",
+              fenced(json.dumps(verdict_data(number, found, cap, unfiled), indent=2,
+                                ensure_ascii=False), "json")]
+    return "\n".join(lines) + "\n"
+
+
+def filed_answers(path: Path, expected: int) -> list[dict]:
+    """The session's answers to the filing plans, one per finding filed: `{"number": n}` for the
+    work issue filed, `{"twin": n}` for the open twin that answered it."""
+    try:
+        given = json.loads(work_tickets.read_file(path, "the filing answers"))
+    except json.JSONDecodeError as error:
+        raise QueueError(f"The filing answers {path} are not JSON: {error}") from error
+    if not isinstance(given, list) or not all(
+            isinstance(entry, dict) and len(entry) == 1 and set(entry) <= {"number", "twin"}
+            and isinstance(next(iter(entry.values())), int) for entry in given):
+        raise QueueError(f"The filing answers {path} are a JSON list, one entry per filing plan "
+                         'in order: {"number": <the issue filed>} or {"twin": <the twin answered>}')
+    if len(given) != expected:
+        raise QueueError(f"The report has {expected} findings to file, and --filed answers "
+                         f"{len(given)}; give one answer per filing plan")
+    return given
+
+
+def run_file(args: argparse.Namespace) -> int:
+    root = work_tickets.worktree_root(args.worktree)
+    repo = work_tickets.resolve_repo(root, args.repo)
+    found = read_report(args.report)
+    cap = max_filed(root)
+    number, url = args.pull_request, work_tickets.pull_url(repo, args.pull_request)
+    filing = to_file(found, cap)
+    labels = work_tickets.work_labels(root, repo)
+    handed_off = work_tickets.hand_off()
+    if handed_off and args.filed is None:
+        for item in filing:
+            title, body = finding_title(item), finding_body(item, number, url)
+            print(work_tickets.filing_plan(repo, "file", title, body, work_tickets.work_issue_filing(
+                repo, title, body, labels)).text())
+            print()
+        print(f"Then: review.py file {number} --report {args.report} --filed <file> --worktree "
+              f"{root}{f' --repo {args.repo}' if args.repo else ''}, the file a JSON list with one "
+              'answer per plan above, in order: {"number": <the issue filed>} or '
+              '{"twin": <the twin answered, or the lower twin the new issue was closed as a '
+              'duplicate of>}')
+        return 0
+    if args.filed is not None:
+        for item, answer in zip(filing, filed_answers(args.filed, len(filing))):
+            item.issue, item.twin = answer.get("number"), answer.get("twin")
+    else:
+        for item in filing:
+            title, body = finding_title(item), finding_body(item, number, url)
+            outcome = work_tickets.filed_once(root, repo, "file", title, body,
+                                              work_tickets.work_issue_filing(repo, title, body,
+                                                                             labels))
+            item.issue = None if outcome.duplicate else outcome.number
+            item.twin = outcome.twin if outcome.twin is not None else outcome.lower
+            print(outcome.line(repo, "work issue"))
+    comment = verdict_comment(number, found, cap)
+    if handed_off:
+        print(Plan(f"the verdict on pull request #{number}", (Step(
+            "comment", "add_issue_comment", {**work_tickets.owner_repo(repo),
+                                             "issue_number": number, "body": comment}),)).text())
+        return 0
+    work_tickets.run_gh_with_body(root, ["pr", "comment", str(number),
+                                         *work_tickets.repo_arguments(repo)], comment)
+    print(f"Posted the verdict on pull request #{number}: {found.verdict}")
+    return 0
+
 
 def parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(prog="review.py", description=__doc__.split("\n\n")[0])
@@ -378,6 +631,23 @@ def parser() -> argparse.ArgumentParser:
         brief_command.add_argument(f"--{name.replace('_', '-')}", dest=name, type=Path,
                                    metavar="FILE", help=f"without gh: {what}, as JSON")
     brief_command.set_defaults(run=run_brief)
+    file_command = commands.add_parser(
+        "file", help="check a review report, file its findings and post its verdict",
+        description="Check the reviewer's report (JSON) against the review rules, refusing a "
+                    "rubber stamp and writing nothing; file each finding as a work issue "
+                    "(work_tickets.py file, its dedupe included), at most se.toml [review] "
+                    f"max_filed (built-in {MAX_FILED}); post the verdict on the pull request.")
+    file_command.add_argument("pull_request", type=int, help="the reviewed pull request's number")
+    file_command.add_argument("--report", type=Path, required=True, metavar="FILE",
+                              help="the review report, as JSON: " + "; ".join(
+                                  f"{name}: {what}" for name, what in REPORT_FIELDS.items()))
+    file_command.add_argument("--filed", type=Path, metavar="FILE",
+                              help="without gh: the answers to the filing plans, as JSON")
+    file_command.add_argument("--worktree", default=".",
+                              help="the checkout of the reviewed repository (default: .)")
+    file_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the pull request "
+                                             "(default: the tracker or origin remote)")
+    file_command.set_defaults(run=run_file)
     return top
 
 

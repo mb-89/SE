@@ -665,3 +665,28 @@ It withholds the pull request's description (the field report) and its comments,
 worker's own account misleads a reviewer most. `--claims` adds them under a heading that calls
 them claims to check, never evidence. Without gh it prints its GitHub steps as a plan and reads
 the answers from files ([Without gh](src/skills/work-model/SKILL.md#without-gh)).
+
+`uv run python scripts/review.py file <pull request> --report <file>` keeps a reviewer's findings
+out of the chat. It reads the review report as JSON:
+
+- `verdict`: `pass` or `fail`;
+- `acceptance`: each acceptance item of the work issue, `{"item", "evidence"}`;
+- `findings`: each verified finding, `{"title", "evidence", "place", "blocking", "why"}`; only
+  damage blocks: the product made worse, or against what it is about;
+- `clean`: the "checked and clean" list, what was examined and found sound.
+
+It refuses, writing nothing:
+
+- a report with an unknown field;
+- a pass with an acceptance item lacking evidence, or with a blocking finding;
+- a fail without a blocking finding;
+- a report without its "checked and clean" list;
+- a finding without evidence, place or judgment.
+
+Each finding, blocking ones first, becomes a work issue titled `fix/<finding>-<yyyymmdd>` through
+`work_tickets.py file` and its dedupe, so a finding whose twin is open files nothing. At most
+`max_filed` are filed (`se.toml` `[review]`, built-in 5); the rest are counted.
+
+The verdict is one comment on the pull request, opening with `<!-- se:review -->`, ending in a JSON
+block the retro reads. Without gh it prints each filing plan, then, given the answers with
+`--filed <file>`, the verdict's step.
