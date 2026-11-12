@@ -18,14 +18,9 @@ it (`#se`, `-b se`); once it is `main`, they drop it. What each agent does is in
 | Place | Install | Choose SE | Check that it loaded |
 | --- | --- | --- | --- |
 | Claude Code | `claude plugin install se --marketplace mb-89/SE#se` | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator` and `se:worker` |
-| Claude Code cloud (claude.ai/code) | the environment's setup script: `rm -rf ~/.claude/skills/se; git clone --depth 1 -b se https://github.com/mb-89/SE ~/.claude/skills/se` | `"agent": "se:se"` in the repository's `.claude/settings.json` | ask the session which agent it runs as and which `se:` agents and skills it has |
+| Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud) | each session's first prompt ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
 | GitHub Copilot in VS Code, in se's own checkout | `git clone -b se https://github.com/mb-89/SE` and open it: VS Code reads its `.github/agents/` and `.github/skills/` | pick `se` in the Agent dropdown of the Chat view | the dropdown lists `se`, `integrator` and `worker`; **Configure Skills** lists `catch-up`, `decision` and `work-model` |
 | GitHub Copilot in VS Code, every repository | **Chat: Install Plugin from Source** with `https://github.com/mb-89/SE` (agent plugins, `chat.plugins.enabled`); or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/` | as above | as above |
-
-Marketplace plugins do not load in a cloud session; a plugin cloned into `~/.claude/skills/` does
-(it shows as `se@skills-dir`). Remove the environment's own SE plugin, if it has one (a
-`CLAUDE_CODE_PLUGIN_DIRS` naming another plugin `se`), so the two do not collide: while it is set,
-the other plugin wins and `claude --agent se:se` stops with `--agent 'se:se' not found`.
 
 SE's skills read files in the plugin's folder and run its scripts with `uv run python`, and that
 folder is outside your project. Claude Code asks you to allow this the first time. A headless
@@ -43,6 +38,38 @@ and the project's [modules](#modules).
 
 The one tool it cannot install without admin rights is `git`; it then names the one line to run. An
 interrupted first start finishes when run again.
+
+### Claude Code cloud
+
+Marketplace plugins do not load in a cloud session; a plugin cloned into `~/.claude/skills/` does
+(it shows as `se@skills-dir`). Remove the environment's own SE plugin, if it has one (a
+`CLAUDE_CODE_PLUGIN_DIRS` naming another plugin `se`), so the two do not collide: while it is set,
+the other plugin wins and `claude --agent se:se` stops with `--agent 'se:se' not found`.
+
+The environment's setup script, all of it; it runs before Claude starts, each time a container is
+built, touches no repository and holds no secret:
+
+```bash
+rm -rf ~/.claude/skills/se
+git clone --depth 1 -b se https://github.com/mb-89/SE ~/.claude/skills/se || echo "SE: clone failed, this session starts without SE" >&2
+```
+
+It replaces any older SE line (a clone into `/opt/se` that runs `src/build.sh`). A failed clone
+starts the session without SE instead of stopping it.
+
+A cloud session takes no `--agent` flag, `create_session` takes no agent, and an `agent` key in the
+repository's `.claude/settings.json` gives every session of that repository SE's instructions,
+workers included. So each session's first prompt names its role's file, `<se>` being
+`~/.claude/skills/se`:
+
+- SE: `Act as the se agent defined in <se>/.github/agents/se.agent.md.`
+- Worker and integrator: the session prompt the work model's
+  [Without gh](src/skills/work-model/SKILL.md#without-gh) names.
+
+The greeting needs no permission rule: the plugin's start hook hands it over, and SE opens its
+first message with it. A session whose permission mode asks before commands, and that no one
+watches, needs SE's scripts and files allowed in the repository's `.claude/settings.json`:
+`"permissions": {"allow": ["Bash(uv run python:*)", "Read(~/.claude/skills/se/**)"]}`.
 
 ## Start and refresh
 
