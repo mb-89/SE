@@ -117,6 +117,10 @@ every package, so work issues and session prompts never repeat it.
      `--issue-body <file>` without intake's snapshot; it also refuses comments and a body edit that
      arrived on the work issue after step 3 last recorded them as read, naming the remedy) and fix
      it until it passes.
+     - In the worktree the check, and `deliver` before it pushes, also runs `integrate`'s guard
+       against the branch: it refuses, as the landing would, a report whose "Removed behaviour,
+       deleted or weakened tests, and authored prose" does not name each test and authored
+       sentence the branch deletes or rewrites, and nothing is pushed or posted.
    - Then run `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request
      with the field report as its description (as `work_tickets.py pr-body` prints it), files no
      issue, and prints the integrator notification. A commit after delivery changes the Branch
