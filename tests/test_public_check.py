@@ -468,6 +468,9 @@ NOREPLY = "users.noreply.github.com"
     ("git" + AT + "github.com:Alice/example.git", "alice <alice" + AT + NOREPLY + ">", "web-flow", []),
     # Another account's noreply address stays foreign, as does the owner's off GitHub.
     ("https://github.com/alice/example.git", "Bob <456+bob" + AT + NOREPLY + ">", "web-flow", ["author"]),
+    ("https://github.com/alice/example.git", "Alice <alice" + AT + "example.com>", "web-flow", ["author"]),
+    ("https://github.com/alice/example.git", "Alice <123+alice" + AT + "noreply.github.com.example.com>",
+     "web-flow", ["author"]),
     ("https://github.com/alice/example.git", "Alice <123+alice" + AT + NOREPLY + ">", "author",
      ["author", "committer"]),
     # Without an origin on github.com no account owns the repository.
