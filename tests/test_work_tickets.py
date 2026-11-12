@@ -864,6 +864,7 @@ def refs_checkout(tmp_path: Path, monkeypatch) -> tuple[Path, FakeWorkflows, str
                f"{ahead}:refs/heads/next").returncode == 0
     fake = FakeWorkflows()
     monkeypatch.setattr(work_tickets, "Workflows", fake)
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)  # gh signed in: the local runner
     monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
     return checkout, fake, base, ahead
 
@@ -961,6 +962,106 @@ def test_refs_apply_refuses_refs_origin_does_not_hold_as_requested(refs_checkout
         work_tickets.refs_apply(checkout, 5, REPO)
     assert "refs not applied; not as requested on origin" in fake.comments_posted[-1]["body"]
     assert fake.labels == {"escalated"}
+
+
+# The hand-off: where gh is not signed in, refs prints its GitHub steps as a plan for the
+# session's GitHub tools, and --read-back checks the refs through git ls-remote.
+
+
+def test_refs_request_hands_off_a_plan_for_the_triples(refs_checkout, tmp_path, monkeypatch, capsys):
+    checkout, fake, base, ahead = refs_checkout
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    triples = f"{base} {ahead} refs/heads/main\n{ahead} {'0' * 40} refs/heads/next\n"
+    file = triples_file(tmp_path, triples)
+
+    assert work_tickets.main(["refs", "request", "5", "--triples-file", str(file), "--repo", REPO,
+                              "--worktree", str(checkout)]) == 0
+
+    out = capsys.readouterr().out
+    assert fake.comments_posted == [] and fake.dispatched == []  # the session runs the steps
+    assert "GitHub plan: refs request on #5\n1. add_issue_comment " in out
+    assert f"move refs/heads/main {base[:12]} -> {ahead[:12]}" in out
+    dispatch = next(line for line in out.splitlines() if line.startswith("2. "))
+    assert dispatch.startswith("2. actions_run_trigger ")
+    assert json.loads(dispatch.removeprefix("2. actions_run_trigger ")) == {
+        "owner": "owner", "repo": "repo", "method": "run_workflow",
+        "workflow_id": "ref-maintenance.yml", "ref": "main",
+        "inputs": {"updates": triples, "dry_run": "true"}}
+    assert "3. actions_list " in out and "4. get_job_logs " in out
+    assert (f"Then: work_tickets.py refs request 5 --triples-file {file} --read-back --request-id "
+            "<comment id from step 1>") in out
+
+
+def run_log_file(tmp_path: Path, fake: FakeWorkflows) -> Path:
+    path = tmp_path / "run.log"
+    path.write_text(fake.log, encoding="utf-8")
+    return path
+
+
+def test_refs_request_read_back_checks_the_old_refs_and_hands_off_the_escalation(
+        refs_checkout, tmp_path, monkeypatch, capsys):
+    checkout, fake, base, ahead = refs_checkout
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    file = triples_file(tmp_path, f"{base} {ahead} refs/heads/main\n")
+    arguments = ["refs", "request", "5", "--triples-file", str(file), "--repo", REPO, "--read-back",
+                 "--request-id", "100", "--run-url", "https://git.example/owner/repo/actions/runs/9",
+                 "--conclusion", "success", "--log-file", str(run_log_file(tmp_path, fake)),
+                 "--worktree", str(checkout)]
+
+    assert work_tickets.main(arguments) == 0
+    out = capsys.readouterr().out
+    assert "1. add_issue_comment " in out and "<!-- se:refs-request-id 100 -->" in out
+    assert "set    refs/heads/main a -> b" in out and "##[group]" not in out
+    assert "2. issue_write " in out and "<the issue's labels with escalated>" in out
+    assert "after these steps, escalated #5: apply the ref change (1 ref(s), dry run passed)?" in out
+
+    # origin moved main since the triples were written: nothing is escalated.
+    assert git(checkout, "push", "-q", "origin", f"{ahead}:refs/heads/main").returncode == 0
+    assert work_tickets.main(arguments) == 1
+    captured = capsys.readouterr()
+    assert "issue_write" not in captured.out
+    assert "no longer holds refs/heads/main at the old sha" in captured.err
+    assert fake.comments_posted == [] and fake.labels == set()
+
+
+def test_refs_apply_hands_off_the_real_run_and_reads_the_new_refs_back(
+        refs_checkout, tmp_path, monkeypatch, capsys):
+    checkout, fake, base, ahead = refs_checkout
+    triples = f"{base} {ahead} refs/heads/main\n"
+    work_tickets.refs_request(checkout, 5, triples_file(tmp_path, triples), REPO)  # as gh did
+    comments = tmp_path / "comments.json"
+    comments.write_text(json.dumps(fake.comments_posted), encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    posted, dispatched = len(fake.comments_posted), len(fake.dispatched)
+    capsys.readouterr()
+
+    assert work_tickets.main(["refs", "apply", "5", "--comments-file", str(comments), "--repo", REPO,
+                              "--worktree", str(checkout)]) == 0
+    out = capsys.readouterr().out
+    assert '"dry_run": "false"' in out and "1. actions_run_trigger " in out
+    assert "--read-back --run-url <run url from step 2>" in out
+
+    read_back = ["refs", "apply", "5", "--comments-file", str(comments), "--repo", REPO,
+                 "--read-back", "--run-url", "https://git.example/owner/repo/actions/runs/9",
+                 "--conclusion", "success", "--worktree", str(checkout)]
+    assert work_tickets.main(read_back) == 1  # the session has not run it: main is still at base
+    captured = capsys.readouterr()
+    assert "not as requested on origin: refs/heads/main" in captured.err
+    assert "refs not applied" in captured.out and "issue_write" not in captured.out
+
+    assert git(checkout, "push", "-q", "origin", f"{ahead}:refs/heads/main").returncode == 0
+    assert work_tickets.main(read_back) == 0
+    out = capsys.readouterr().out
+    assert "refs applied" in out and "<the issue's labels without escalated>" in out
+    assert "after these steps, refs applied on #5" in out
+    assert (len(fake.comments_posted), len(fake.dispatched)) == (posted, dispatched)
+
+
+def test_refs_apply_without_gh_needs_the_saved_comments(refs_checkout, monkeypatch, capsys):
+    checkout, fake, _, _ = refs_checkout
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    assert work_tickets.main(["refs", "apply", "5", "--repo", REPO, "--worktree", str(checkout)]) == 1
+    assert "--comments-file <file>" in capsys.readouterr().err
 
 
 def test_the_workflows_door_speaks_the_actions_api(monkeypatch, tmp_path):

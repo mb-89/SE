@@ -526,13 +526,21 @@ work_tickets.py backlog list --worktree WORKTREE [--search SEARCH] [--repo REPO]
     list the open backlog issues, or those whose title or body matches --search
 
 work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--repo REPO]
+                             [--read-back] [--request-id REQUEST_ID] [--run-url RUN_URL]
+                             [--conclusion CONCLUSION] [--log-file LOG_FILE]
                              issue
     for the integrator: post the triples on the issue, run ref-maintenance's dry run, post its
-    output and label the issue escalated; prints the line for SE
+    output and label the issue escalated; prints the line for SE. Where gh is not signed in it
+    prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the
+    refs and finishes
 
-work_tickets.py refs apply --worktree WORKTREE [--repo REPO] issue
+work_tickets.py refs apply --worktree WORKTREE [--repo REPO] [--comments-file COMMENTS_FILE]
+                           [--read-back] [--run-url RUN_URL] [--conclusion CONCLUSION]
+                           issue
     for SE, on the person's yes: run ref-maintenance for real with the triples the issue's newest
-    request posted, read the refs back and post the result; prints the line for the integrator
+    request posted, read the refs back and post the result; prints the line for the integrator.
+    Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools;
+    --read-back then checks the refs and finishes
 
 work_tickets.py sync --worktree WORKTREE
     merge the newest integration branch (se.toml project.integration_branch, default main) from
@@ -571,12 +579,17 @@ work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
     print the Release-kind trailer an integration merge of <branch> carries, from its field report's
     Release kind (a re-integration's from its Re-integration kind); push requires it
 
-work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--build-command BUILD_COMMAND]
-                          [--include-late REASON] [--check-command JSON]
-                          [--check-command-temporary-directory]
-                          pull_request
+work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE]
+                          [--issue-body FILE] [--branch BRANCH] [--read-back BRANCH]
+                          [--landing-pull LANDING_PULL] [--check-run CHECK_RUN]
+                          [--build-command BUILD_COMMAND] [--include-late REASON]
+                          [--check-command JSON] [--check-command-temporary-directory]
+                          [pull_request]
     validate the field report a pull request's description carries, merge it on land/<branch>, test,
-    land it through a squash pull request once check passes, and close the work issue
+    land it through a squash pull request once check passes, and close the work issue. Where gh is
+    not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's
+    GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-
+    out
 
 work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
                        [--integrator-session INTEGRATOR_SESSION]

@@ -3684,14 +3684,6 @@ def run_project_checks(
     return "; ".join(outputs) or "passed"
 
 
-def integration_escalation(root: Path, number: int, repo: str, reason: str) -> None:
-    run_gh_with_body(
-        root, ["issue", "comment", str(number), *repo_arguments(repo)],
-        f"Integration stopped: {reason}\n",
-    )
-    run_gh(root, ["issue", "edit", str(number), "--add-label", "escalated", *repo_arguments(repo)])
-
-
 def worker_worktree(root: Path, branch: str) -> Path:
     listing = run_git(root, "worktree", "list", "--porcelain")
     if listing.returncode != 0:
@@ -3880,12 +3872,167 @@ CHECK_NAME = "check"
 CHECK_POLL_SECONDS = 30
 CHECK_POLLS = 120  # an hour: the suite's limit is minutes, a queued runner may add some
 LANDING_PREFIX = "land/"
+HANDOFF_DIRECTORY = "handoff"
+
+
+# The GitHub boundary. A command that talks to GitHub does everything local itself and states its
+# GitHub steps as one Plan: numbered steps, each a tool of the host's GitHub tools (the GitHub MCP
+# server's names) with its arguments. Where gh is signed in the command runs the plan itself
+# through its door; where it is not (Claude's cloud) it prints the plan, the session runs it with
+# its own GitHub tools, and the command's --read-back checks the result through git alone.
+
+
+@dataclass(frozen=True)
+class Later:
+    """An argument a step takes from what an earlier step gave: `name` from step `step`."""
+
+    name: str
+    step: int
+
+    def __str__(self) -> str:
+        return f"<{self.name} from step {self.step}>"
+
+
+@dataclass(frozen=True)
+class Step:
+    """One GitHub step: the host's `tool` with its `arguments`, what to watch for (`note`) and the
+    values it gives later steps or the read-back (`gives`). `action` names what the local runner
+    does for it, with an optional `:<detail>` (the label an issue step adds or removes)."""
+
+    action: str
+    tool: str
+    arguments: dict[str, object]
+    note: str = ""
+    gives: tuple[str, ...] = ()
+
+
+def plain(value: object) -> object:
+    """`value` as the plan prints it: each Later as its placeholder."""
+    if isinstance(value, Later):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [plain(item) for item in value]
+    return value
+
+
+@dataclass(frozen=True)
+class Plan:
+    """The GitHub steps of one command, in order, and the command that follows them (`then`)."""
+
+    title: str
+    steps: tuple[Step, ...]
+    then: str = ""
+
+    def data(self) -> dict[str, object]:
+        return {"title": self.title, "then": self.then, "steps": [
+            {"step": index, "tool": step.tool, "arguments": plain(step.arguments),
+             **({"note": step.note} if step.note else {}),
+             **({"gives": list(step.gives)} if step.gives else {})}
+            for index, step in enumerate(self.steps, 1)]}
+
+    def text(self) -> str:
+        lines = [f"GitHub plan: {self.title}"]
+        for index, step in enumerate(self.steps, 1):
+            lines.append(f"{index}. {step.tool} "
+                         f"{json.dumps(plain(step.arguments), ensure_ascii=False, sort_keys=True)}")
+            if step.note:
+                lines.append(f"   {step.note}")
+            if step.gives:
+                lines.append(f"   Gives: {', '.join(step.gives)}")
+        if self.then:
+            lines.append(f"Then: {self.then}")
+        return "\n".join(lines)
+
+
+Action = Callable[[dict[str, object], str], "dict[str, object] | None"]
+
+
+def run_plan(plan: Plan, actions: dict[str, Action]) -> dict[str, object]:
+    """Run `plan` here, through the door: each step's action with its arguments, every Later
+    resolved from what its step gave; every value given, by name."""
+    given: dict[tuple[str, int], object] = {}
+    named: dict[str, object] = {}
+
+    def resolved(value: object) -> object:
+        if isinstance(value, Later):
+            return given[(value.name, value.step)]
+        if isinstance(value, dict):
+            return {key: resolved(item) for key, item in value.items()}
+        return value
+
+    for index, step in enumerate(plan.steps, 1):
+        action, _, detail = step.action.partition(":")
+        for name, value in (actions[action](resolved(step.arguments), detail) or {}).items():
+            given[(name, index)] = value
+            named[name] = value
+    return named
+
+
+def hand_off() -> bool:
+    """Whether a command hands its GitHub steps to the session: where gh is not signed in."""
+    return not gh_usable()
+
+
+def owner_repo(repo: str) -> dict[str, str]:
+    owner, name = api_repo(repo).split("/")
+    return {"owner": owner, "repo": name}
+
+
+def pull_url(repo: str, number: int) -> str:
+    return f"https://{repo_host(repo) or 'github.com'}/{api_repo(repo)}/pull/{number}"
+
+
+def tracker_actions(root: Path, repo: str) -> dict[str, Action]:
+    """The local runner's issue steps on `repo`, through gh."""
+    def comment(arguments: dict[str, object], _: str) -> None:
+        run_gh_with_body(root, ["issue", "comment", str(arguments["issue_number"]),
+                                *repo_arguments(repo)], str(arguments["body"]))
+
+    def add_label(arguments: dict[str, object], label: str) -> None:
+        run_gh(root, ["issue", "edit", str(arguments["issue_number"]), "--add-label", label,
+                      *repo_arguments(repo)])
+
+    def remove_label(arguments: dict[str, object], label: str) -> None:
+        run_gh(root, ["issue", "edit", str(arguments["issue_number"]), "--remove-label", label,
+                      *repo_arguments(repo)])
+
+    def close(arguments: dict[str, object], _: str) -> None:
+        run_gh(root, ["issue", "close", str(arguments["issue_number"]), *repo_arguments(repo)])
+
+    return {"comment_issue": comment, "add_label": add_label, "remove_label": remove_label,
+            "close_issue": close}
+
+
+def label_step(repo: str, number: int, label: str, add: bool) -> Step:
+    change = "with" if add else "without"
+    return Step(f"{'add' if add else 'remove'}_label:{label}", "issue_write", {
+        **owner_repo(repo), "method": "update", "issue_number": number,
+        "labels": f"<the issue's labels {change} {label}>"},
+        note="issue_read get_labels reads the issue's labels; issue_write sets the whole list")
+
+
+def escalation_plan(repo: str, number: int, reason: str) -> Plan:
+    return Plan(f"escalate #{number}", (
+        Step("comment_issue", "add_issue_comment", {
+            **owner_repo(repo), "issue_number": number, "body": f"Integration stopped: {reason}\n"}),
+        label_step(repo, number, "escalated", add=True),
+    ))
+
+
+def integration_escalation(root: Path, number: int, repo: str, reason: str) -> None:
+    plan = escalation_plan(repo, number, reason)
+    if hand_off():
+        print(plan.text())
+        return
+    run_plan(plan, tracker_actions(root, repo))
 
 
 class GitHub:
     """The door to GitHub's pull requests and check runs for `repo` (`<host>/<owner>/<repo>`),
-    through `gh api`; the one place `integrate` talks to GitHub about landing, so tests replace it
-    with a fake."""
+    through `gh api`; the one place the local runner of a plan talks to GitHub about pull requests,
+    so tests replace it with a fake."""
 
     def __init__(self, root: Path, repo: str) -> None:
         self.root, self.slug, self.host = root, api_repo(repo), repo_host(repo)
@@ -3919,8 +4066,10 @@ class GitHub:
     def update_pull(self, number: int, title: str, body: str) -> dict[str, object]:
         return self.api(f"pulls/{number}", "PATCH", {"title": title, "body": body})
 
-    def close_pull(self, number: int, comment: str) -> None:
-        self.api(f"issues/{number}/comments", "POST", {"body": comment})
+    def comment(self, number: int, body: str) -> dict[str, object]:
+        return self.api(f"issues/{number}/comments", "POST", {"body": body})
+
+    def close_pull(self, number: int) -> None:
         self.api(f"pulls/{number}", "PATCH", {"state": "closed"})
 
     def check_run(self, sha: str, name: str) -> dict[str, object] | None:
@@ -3979,54 +4128,159 @@ def abandon_landing(root: Path, target: str, landing: str) -> None:
     run_git(root, "branch", "-D", landing)
 
 
-def land(root: Path, door: GitHub, landing: str, target: str, base: str, description: str,
-         title: str, message: str) -> tuple[str, str, str]:
-    """Push `landing`, open or reuse its pull request into `target` with `description`, wait for
-    `check`, squash-merge it with `title` and `message` and read the merged commit back: it must
-    be origin's `target`, on `base`, with the tree tested. (merged sha, pull URL, run URL)."""
-    landed = checked_git(root, "rev-parse", "HEAD").strip()
-    push_gate(root, landing)
-    guard_pushed_tree(root, landing)
-    git_push(root, ["--force", "origin", f"{landing}:refs/heads/{landing}"])
-    pull = door.open_pull(landing, target)
-    if pull is None:
-        pull = door.create_pull(landing, target, title, description)
-        print(f"Landing pull request opened: {pull.get('html_url')}")
-    else:
-        pull = door.update_pull(int(pull["number"]), title, description)
-        print(f"Landing pull request reused: {pull.get('html_url')}")
-    number, url = int(pull["number"]), str(pull.get("html_url") or "")
-    run_url = wait_for_check(door, landed, url)
-    moved = remote_head(root, target)
-    if moved != base:
+def landing_plan(remote: str, landing: str, target: str, base: str, landed: str, title: str,
+                 message: str, description: str, then: str) -> Plan:
+    """Open or reuse the landing pull request, wait for `check` on `landed`, squash-merge it there
+    with exactly `title` and `message`: the GitHub steps of landing on `target`."""
+    where = owner_repo(remote)
+    number = Later("pull number", 1)
+    return Plan(f"land {landing} on {target}", (
+        Step("open_pull", "create_pull_request", {
+            **where, "head": landing, "base": target, "title": title, "body": description},
+            note=f"Where list_pull_requests (state open, head {where['owner']}:{landing}, base "
+                 f"{target}) lists one, update_pull_request that one with this title and body "
+                 "instead",
+            gives=("pull number", "pull url")),
+        Step("wait_check", "pull_request_read", {
+            **where, "method": "get_check_runs", "pullNumber": number},
+            note=f"Every {CHECK_POLL_SECONDS} s, up to {CHECK_POLLS * CHECK_POLL_SECONDS // 60} "
+                 f"minutes, until the check run {CHECK_NAME} on {landed} completes; any conclusion "
+                 "but success: merge nothing, fix the cause on the work branch, integrate again",
+            gives=("check run url",)),
+        Step("squash", "merge_pull_request", {
+            **where, "pullNumber": number, "merge_method": "squash", "commit_title": title,
+            "commit_message": message, "expectedHeadSha": landed},
+            note=f"Only while origin's {target} is still {base} (git ls-remote origin "
+                 f"refs/heads/{target}); where it moved, merge nothing and integrate again",
+            gives=("merge commit sha",)),
+    ), then)
+
+
+def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: str
+                    ) -> dict[str, Action]:
+    """The local runner of a landing plan, through the door."""
+    seen: dict[str, str] = {}
+
+    def open_pull(arguments: dict[str, object], _: str) -> dict[str, object]:
+        title, body = str(arguments["title"]), str(arguments["body"])
+        pull = door.open_pull(landing, target)
+        if pull is None:
+            pull = door.create_pull(landing, target, title, body)
+            print(f"Landing pull request opened: {pull.get('html_url')}")
+        else:
+            pull = door.update_pull(int(pull["number"]), title, body)
+            print(f"Landing pull request reused: {pull.get('html_url')}")
+        seen["url"] = str(pull.get("html_url") or "")
+        return {"pull number": int(pull["number"]), "pull url": seen["url"]}
+
+    def check(arguments: dict[str, object], _: str) -> dict[str, object]:
+        landed = checked_git(root, "rev-parse", landing).strip()
+        return {"check run url": wait_for_check(door, landed, seen["url"])}
+
+    def squash(arguments: dict[str, object], _: str) -> dict[str, object]:
+        number, url = int(arguments["pullNumber"]), seen["url"]
+        moved = remote_head(root, target)
+        if moved != base:
+            raise QueueError(
+                f"origin's {target} moved from {base[:12]} to {moved[:12] or 'nothing'} while "
+                f"{url} waited; nothing was merged, as a squash onto it would land an untested "
+                "tree. Integrate again, which merges the newest integration branch and reuses the "
+                "pull request"
+            )
+        merged = door.squash(number, str(arguments["expectedHeadSha"]),
+                             str(arguments["commit_title"]), str(arguments["commit_message"]))
+        read = door.pull(number)
+        if not read.get("merged") or str(read.get("merge_commit_sha") or "") != merged or not merged:
+            raise QueueError(
+                f"{url} reads back as merged={read.get('merged')} at "
+                f"{read.get('merge_commit_sha')!r}, not the squash commit {merged!r} the merge "
+                "returned; check the pull request on GitHub before integrating anything else"
+            )
+        return {"merge commit sha": merged}
+
+    return {"open_pull": open_pull, "wait_check": check, "squash": squash}
+
+
+def landing_read_back(root: Path, target: str, base: str, landed: str,
+                      merged: str | None = None) -> str:
+    """Read the landing back through git alone: origin's `target` (`merged`, where the merge
+    returned one) is one commit on `base` with the tree of `landed`, the tree the checks passed;
+    that commit."""
+    checked_git(root, "fetch", "-q", "origin", f"+refs/heads/{target}:refs/remotes/origin/{target}")
+    head = remote_head(root, target)
+    if merged is None and head == base:
         raise QueueError(
-            f"origin's {target} moved from {base[:12]} to {moved[:12] or 'nothing'} while {url} "
-            f"waited; nothing was merged, as a squash onto it would land an untested tree. "
-            "Integrate again, which merges the newest integration branch and reuses the pull request"
-        )
-    merged = door.squash(number, landed, title, message)
-    read = door.pull(number)
-    if not read.get("merged") or str(read.get("merge_commit_sha") or "") != merged or not merged:
-        raise QueueError(
-            f"{url} reads back as merged={read.get('merged')} at "
-            f"{read.get('merge_commit_sha')!r}, not the squash commit {merged!r} the merge "
-            "returned; check the pull request on GitHub before integrating anything else"
-        )
-    checked_git(root, "fetch", "-q", "origin", f"refs/heads/{target}:refs/remotes/origin/{target}")
+            f"origin's {target} is still {base[:12]}, the base the landing was tested on: the "
+            "squash merge has not landed. Run the plan's merge step, then read back again")
+    commit = merged or head
     problems = []
-    if remote_head(root, target) != merged:
-        problems.append(f"origin's {target} is not {merged[:12]}")
-    if checked_git(root, "rev-parse", f"{merged}^").strip() != base:
+    if head != commit:
+        problems.append(f"origin's {target} is not {commit[:12]}")
+    if checked_git(root, "rev-parse", f"{commit}^").strip() != base:
         problems.append(f"its parent is not {base[:12]}")
-    if tree_of(root, merged) != tree_of(root, landed):
+    if tree_of(root, commit) != tree_of(root, landed):
         problems.append(f"its tree is not the tree of {landed[:12]} that the checks passed")
     if problems:
         raise QueueError(
-            f"The squash commit {merged[:12]} of {url} does not read back as tested: "
-            + "; ".join(problems) + ". Check origin's " + target + " before integrating anything else"
+            f"The squash commit {commit[:12]} does not read back as tested: "
+            + "; ".join(problems) + f". Check origin's {target} before integrating anything else"
         )
-    print(f"Landed: {merged[:12]} on {target} from {url}")
-    return merged, url, run_url
+    print(f"Landed: {commit[:12]} on {target}, on {base[:12]} with the tree of {landed[:12]}")
+    return commit
+
+
+def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int, landed: str,
+                  comment: str, pending: list[str]) -> Plan:
+    """Close the work pull request with a line naming the landing, comment on the work issue,
+    take it out of progress and close it unless post-merge acceptance keeps it open."""
+    pulls = owner_repo(remote)
+    issues = owner_repo(tracker)
+    return Plan(f"close out #{work_number}", (
+        Step("comment_pull", "add_issue_comment",
+             {**pulls, "issue_number": pull_number, "body": landed}),
+        Step("close_pull", "update_pull_request",
+             {**pulls, "pullNumber": pull_number, "state": "closed"}),
+        Step("comment_issue", "add_issue_comment",
+             {**issues, "issue_number": work_number, "body": comment}),
+        label_step(tracker, work_number, "in-progress", add=False),
+        *(() if pending else (Step("close_issue", "issue_write", {
+            **issues, "method": "update", "issue_number": work_number, "state": "closed",
+            "state_reason": "completed"}),)),
+    ))
+
+
+def handoff_path(root: Path, branch: str) -> Path:
+    return root / ".se" / HANDOFF_DIRECTORY / f"{slug(branch, 80)}.json"
+
+
+def handed_pull_request(root: Path, pull_number: int, remote: str, description: Path | None,
+                        issue_body: Path | None, branch: str | None
+                        ) -> tuple[dict[str, object], str, dict[str, object], int]:
+    """What `pull_request_report` reads through gh, from the files the session saved with its
+    GitHub tools: the pull request (its head from origin), its field report, its work issue and
+    that issue's number."""
+    if description is None or issue_body is None or not branch:
+        raise QueueError(
+            f"work_tickets.py integrate hands its GitHub steps to the session, as gh is not signed "
+            f"in: save pull request #{pull_number}'s description and its work issue's body with the "
+            "GitHub tools and pass --pr-description <file> --issue-body <file> --branch <its head "
+            "branch>")
+    text = read_file(description, "pull request description")
+    where = f"pull request #{pull_number}"
+    report = report_in(text, f"The description of {where}")
+    work = WORK_ISSUE_PATTERN.search(report)
+    if work is None:
+        raise QueueError(
+            f"The field report in {where} names no work issue; the worker writes "
+            "**Work issue:** #<n> in its header and delivers again")
+    body = read_file(issue_body, "work issue body")
+    problems = field_report_problems(report, body)
+    if problems:
+        raise field_report_error(f"in {where}", problems)
+    checked_git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+    pull = {"number": pull_number, "url": pull_url(remote, pull_number), "body": text,
+            "headRefName": branch, "headRefOid": remote_head(root, branch)}
+    return pull, report, {"body": body}, int(work[1])
 
 
 def integrate(
@@ -4037,15 +4291,30 @@ def integrate(
     check_commands: list[list[str]] | None = None,
     check_temporary_working_directory: bool = False,
     included: str | None = None,
-) -> str:
+    pr_description: Path | None = None,
+    issue_body: Path | None = None,
+    head_branch: str | None = None,
+) -> str | None:
     """Land a delivered pull request's branch on the integration branch through a squash pull
     request: merge it into the newest integration branch on `land/<branch>`, run the checks,
-    release, push, open or reuse the landing pull request (the field report its description),
-    wait for `check`, squash-merge and read back the merged commit; then close the work issue,
-    clean up and start what is unblocked. `included` states why commits after the field report's
-    Branch tip are merged too."""
+    release and push; then the landing plan (open or reuse the landing pull request, the field
+    report its description, wait for `check`, squash-merge), the read-back of the merged commit
+    and the close-out. Where gh is not signed in the plan is printed for the session and None
+    returned: `integrate --read-back <branch>` finishes. `included` states why commits after the
+    field report's Branch tip are merged too."""
     tracker = resolve_repo(root, repo)
-    pull, report, work_issue, work_number = pull_request_report(root, pull_number, tracker)
+    handing_off = hand_off()
+    remote = remote_repo(root)
+    if remote is None:
+        raise QueueError(
+            f"work_tickets.py integrate: {root} has no origin remote to land on; add it with "
+            "git remote add origin <url>"
+        )
+    if handing_off:
+        pull, report, work_issue, work_number = handed_pull_request(
+            root, pull_number, remote, pr_description, issue_body, head_branch)
+    else:
+        pull, report, work_issue, work_number = pull_request_report(root, pull_number, tracker)
     branch = str(pull.get("headRefName", ""))
     if not branch:
         raise QueueError(f"Pull request #{pull_number} has no head branch")
@@ -4056,12 +4325,6 @@ def integrate(
         raise QueueError(
             f"work_tickets.py integrate: {root} is not on the integration branch {target}; "
             f"run git -C {root} switch {target}, or set project.integration_branch in se.toml"
-        )
-    remote = remote_repo(root)
-    if remote is None:
-        raise QueueError(
-            f"work_tickets.py integrate: {root} has no origin remote to land {branch} on; add it "
-            "with git remote add origin <url>"
         )
     sync(root)
     base = checked_git(root, "rev-parse", "HEAD").strip()
@@ -4097,7 +4360,6 @@ def integrate(
         raise QueueError(reason)
 
     has_public_mirror = any(mirror.public for mirror in mirrors)
-    door = GitHub(root, remote)
     try:
         suite_result = run_suite(root)
         if build_command:
@@ -4107,66 +4369,131 @@ def integrate(
         if public_check_enabled(root):
             run_public_check(root, base)
         tag = release(root, landing, f"refs/remotes/origin/{target}")
-        landed_tip = checked_git(root, "rev-parse", "HEAD").strip()
-        commit, landing_url, run_url = land(
-            root, door, landing, target, base, str(pull.get("body") or ""), title, message)
+        landed = checked_git(root, "rev-parse", "HEAD").strip()
+        push_gate(root, landing)
+        guard_pushed_tree(root, landing)
+        git_push(root, ["--force", "origin", f"{landing}:refs/heads/{landing}"])
+        state = {
+            "branch": branch, "landing": landing, "target": target, "base": base,
+            "landed": landed, "head": head, "tag": tag, "tracker": tracker, "remote": remote,
+            "pull_number": pull_number, "pull_url": str(pull.get("url") or ""),
+            "work_number": work_number, "suite": suite_result, "late": late,
+            "included": included, "pending": post_merge_acceptance(str(work_issue.get("body", ""))),
+            "check_commands": check_commands,
+            "check_temporary_working_directory": check_temporary_working_directory,
+        }
+        then = (f"work_tickets.py integrate --read-back {branch} --landing-pull <pull number from "
+                f"step 1> --check-run <check run url from step 2> --worktree {root}")
+        plan = landing_plan(remote, landing, target, base, landed, title, message,
+                            str(pull.get("body") or ""), then)
+        if handing_off:
+            path = handoff_path(root, branch)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({**state, "plan": plan.data()}, indent=2, sort_keys=True)
+                            + "\n", encoding="utf-8")
+            checked_git(root, "switch", "-q", target)
+            print(f"Pushed {landing} at {landed[:12]}; gh is not signed in, so the session runs "
+                  f"these GitHub steps with its GitHub tools (kept in {path}):")
+            print(plan.text())
+            return None
+        door = GitHub(root, remote)
+        given = run_plan(plan, landing_actions(root, door, landing, target, base))
+        commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
     except QueueError as error:
         abandon_landing(root, target, landing)
         integration_escalation(root, work_number, tracker, str(error))
         raise
+    return finish_integration(root, state, commit, str(given["pull url"]),
+                              str(given["check run url"]), door)
 
+
+def read_back_integration(root: Path, branch: str, landing_pull: int, check_run: str) -> str:
+    """The hand-off's second half: read the landing of `branch` back through git and finish the
+    close-out, printing its GitHub steps for the session."""
+    path = handoff_path(root, branch)
+    if not path.is_file():
+        raise QueueError(
+            f"No hand-off for {branch} in {root} ({path} is missing); integrate <pull request> "
+            "first, which writes it")
+    state = json.loads(path.read_text(encoding="utf-8"))
+    commit = landing_read_back(root, state["target"], state["base"], state["landed"])
+    short = finish_integration(root, state, commit, pull_url(state["remote"], landing_pull),
+                               check_run, None)
+    path.unlink()
+    return short
+
+
+def finish_integration(root: Path, state: dict[str, object], commit: str, landing_url: str,
+                       run_url: str, door: GitHub | None) -> str:
+    """After the read-back: the checkout at the landed commit, the release tag, the landing branch
+    gone, the mirrors pushed, the close-out plan run through `door` (or, without one, printed for
+    the session), the worker's worktree and branch removed and, with a door, what is unblocked
+    started."""
+    target, landing, tag = str(state["target"]), str(state["landing"]), state["tag"]
+    tracker, remote = str(state["tracker"]), str(state["remote"])
+    pull_number, work_number = int(state["pull_number"]), int(state["work_number"])
+    check_commands = state.get("check_commands")
+    temporary = bool(state.get("check_temporary_working_directory"))
     checked_git(root, "switch", "-q", target)
     checked_git(root, "merge", "-q", "--ff-only", commit)
     run_git(root, "branch", "-D", landing)
     if tag and release_by_workflow(root):
-        workflow_tags(tag)
+        workflow_tags(str(tag))
     elif tag:
-        checked_git(root, "tag", "-f", tag, commit)
+        checked_git(root, "tag", "-f", str(tag), commit)
         git_push(root, ["origin", f"refs/tags/{tag}"])
     deleted = run_git(root, "push", "origin", f":refs/heads/{landing}")
     if deleted.returncode != 0:
         print(f"Cleanup: {landing} left on origin ({failure_detail(deleted)}); the repository's "
               "automatic head-branch deletion removes it")
-    door.close_pull(pull_number, f"Landed on {target} in {commit[:12]} through {landing_url}.")
-    for mirror in mirrors:
+    for mirror in configured_mirrors(root):
         if mirror.public and check_commands:
-            run_project_checks(root, check_commands, check_temporary_working_directory)
+            run_project_checks(root, check_commands, temporary)
         if mirror.public:
             guard_public_push(root, mirror)
         git_push(root, [mirror.remote, f"{target}:{mirror.branch}"])
     short = run_git(root, "rev-parse", "--short", commit).stdout.strip()
+    suite_result = state["suite"]
     print(f"Suite: {suite_result}")
+    late, included = state.get("late") or [], state.get("included")
     extra = (f"Includes {len(late)} commit(s) after the field report's Branch tip: {included}\n"
              if late else "")
-    pending = post_merge_acceptance(str(work_issue.get("body", "")))
+    pending = list(state.get("pending") or [])
     waits = ("Stays open until this acceptance is seen after the merge: "
              + "; ".join(pending) + "\n") if pending else ""
-    run_gh_with_body(
-        root, ["issue", "comment", str(work_number), *repo_arguments(tracker)],
-        f"Integrated in {short} from {pull.get('url') or f'PR #{pull_number}'}, landed through "
+    comment = (
+        f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
         f"{landing_url} (check: {run_url}). {release_line(landing_url, tag)} "
-        f"Suite: {suite_result}.\n{extra}{waits}",
-    )
-    run_gh(root, [
-        "issue", "edit", str(work_number), "--remove-label", "in-progress",
-        *repo_arguments(tracker),
-    ])
-    if not pending:
-        run_gh(root, ["issue", "close", str(work_number), *repo_arguments(tracker)])
-    state = run_gh(root, [
-        "issue", "view", str(work_number), "--json", "state", "--jq", ".state",
-        *repo_arguments(tracker),
-    ]).strip() or "unreadable"
-    print(f"Issue #{work_number}: {state} on GitHub after the merge")
+        f"Suite: {suite_result}.\n{extra}{waits}")
+    plan = closeout_plan(remote, tracker, pull_number, work_number,
+                         f"Landed on {target} in {commit[:12]} through {landing_url}.",
+                         comment, pending)
+    if door is None:
+        print(plan.text())
+    else:
+        run_plan(plan, {**tracker_actions(root, tracker),
+                        "comment_pull": lambda arguments, _: door.comment(
+                            int(arguments["issue_number"]), str(arguments["body"])) and None,
+                        "close_pull": lambda arguments, _: door.close_pull(
+                            int(arguments["pullNumber"]))})
+        state_read = run_gh(root, [
+            "issue", "view", str(work_number), "--json", "state", "--jq", ".state",
+            *repo_arguments(tracker),
+        ]).strip() or "unreadable"
+        print(f"Issue #{work_number}: {state_read} on GitHub after the merge")
     if pending:
         print(f"Close #{work_number} once its post-merge acceptance is seen: {'; '.join(pending)}")
+    branch, landed = str(state["branch"]), str(state["landed"])
     try:
-        remove_worker_worktree(root, branch, landed_tip)
+        remove_worker_worktree(root, branch, landed)
         print("Cleanup: worker worktree removed")
     except QueueError as error:
         print(f"warning: worker worktree was not removed: {error}", file=sys.stderr)
         print("Cleanup: worker worktree retained")
-    delete_merged_branch(root, branch, head, landed_tip)
+    delete_merged_branch(root, branch, str(state["head"]), landed)
+    if door is None:
+        print("Started: none here; SE starts what is unblocked with the host's session tool")
+        return short
     started = 0
     for candidate in ready_issues(root, tracker):
         slots = capacity(root, tracker)
@@ -4205,9 +4532,6 @@ class Workflows(GitHub):
             if len(batch) < 100:
                 return found
             page += 1
-
-    def comment(self, number: int, body: str) -> dict[str, object]:
-        return self.api(f"issues/{number}/comments", "POST", {"body": body})
 
     def add_label(self, number: int, label: str) -> None:
         self.api(f"issues/{number}/labels", "POST", {"labels": [label]})
@@ -4268,29 +4592,74 @@ def triple_line(old: str, new: str, ref: str) -> str:
     return f"move {ref} {old[:12]} -> {new[:12]}"
 
 
-def run_workflow(door: Workflows, ref: str, triples: list[tuple[str, str, str]], dry_run: bool
-                 ) -> dict[str, object]:
-    """Dispatch ref-maintenance on `ref` with the triples and wait for its run; the finished run.
-    The workflow's concurrency group queues runs in order, so the first run newer than the newest
-    before the dispatch is this one."""
-    before = door.newest_run(REF_WORKFLOW)
-    door.dispatch(REF_WORKFLOW, ref, {"updates": triples_text(triples),
-                                      "dry_run": "true" if dry_run else "false"})
-    run_id = 0
-    for poll in range(1, RUN_POLLS + 1):
-        if not run_id:
-            newest = door.newest_run(REF_WORKFLOW)
-            run_id = newest if newest > before else 0
-        if run_id:
-            run = door.run(run_id)
-            if run.get("status") == "completed":
-                return run
-        state = "not started" if not run_id else str(run.get("status"))
-        print(f"ref-maintenance: {state} (poll {poll}/{RUN_POLLS}); waiting {RUN_POLL_SECONDS} s")
-        wait(RUN_POLL_SECONDS)
-    raise QueueError(
-        f"ref-maintenance did not finish within {RUN_POLLS * RUN_POLL_SECONDS // 60} minutes; "
-        "look at the repository's Actions runs, then run the command again")
+def workflow_steps(repo: str, ref: str, triples: list[tuple[str, str, str]], dry_run: bool,
+                   first: int) -> tuple[Step, ...]:
+    """Dispatch ref-maintenance on `ref` with the triples and wait for its run (steps `first` and
+    `first` + 1); a dry run also reads the run's log. The workflow's concurrency group queues runs
+    in order, so the first run newer than the newest before the dispatch is this one."""
+    where = owner_repo(repo)
+    wait_for = f"{RUN_POLLS * RUN_POLL_SECONDS // 60} minutes"
+    steps = (
+        Step("dispatch", "actions_run_trigger", {
+            **where, "method": "run_workflow", "workflow_id": REF_WORKFLOW, "ref": ref,
+            "inputs": {"updates": triples_text(triples), "dry_run": "true" if dry_run else "false"}},
+            note=f"First note the newest workflow_dispatch run of {REF_WORKFLOW} (actions_list "
+                 "list_workflow_runs): the run this dispatch starts is the first one newer"),
+        Step("wait_run", "actions_list", {
+            **where, "method": "list_workflow_runs", "resource_id": REF_WORKFLOW,
+            "workflow_runs_filter": {"event": "workflow_dispatch"}},
+            note=f"Every {RUN_POLL_SECONDS} s, up to {wait_for}, until that run completes",
+            gives=("run url", "conclusion")),
+    )
+    if not dry_run:
+        return steps
+    return (*steps, Step("run_log", "get_job_logs", {
+        **where, "job_id": f"<the one job of the run from step {first + 1}, as actions_list "
+                           "list_workflow_jobs lists it>", "return_content": True},
+        note="Save the log to a file", gives=("log file",)))
+
+
+def workflow_actions(door: Workflows) -> dict[str, Action]:
+    """The local runner of the refs plans, through the door."""
+    seen: dict[str, object] = {}
+
+    def comment(arguments: dict[str, object], _: str) -> dict[str, object]:
+        posted = door.comment(int(arguments["issue_number"]), str(arguments["body"]))
+        return {"comment id": int(posted["id"])}
+
+    def dispatch(arguments: dict[str, object], _: str) -> None:
+        seen["before"] = door.newest_run(REF_WORKFLOW)
+        door.dispatch(str(arguments["workflow_id"]), str(arguments["ref"]),
+                      dict(arguments["inputs"]))
+
+    def wait_run(arguments: dict[str, object], _: str) -> dict[str, object]:
+        run_id, run = 0, {}
+        for poll in range(1, RUN_POLLS + 1):
+            if not run_id:
+                newest = door.newest_run(REF_WORKFLOW)
+                run_id = newest if newest > int(seen["before"]) else 0
+            if run_id:
+                run = door.run(run_id)
+                if run.get("status") == "completed":
+                    seen["run"] = run_id
+                    return {"run url": str(run.get("html_url") or ""),
+                            "conclusion": str(run.get("conclusion"))}
+            state = "not started" if not run_id else str(run.get("status"))
+            print(f"ref-maintenance: {state} (poll {poll}/{RUN_POLLS}); waiting {RUN_POLL_SECONDS} s")
+            wait(RUN_POLL_SECONDS)
+        raise QueueError(
+            f"ref-maintenance did not finish within {RUN_POLLS * RUN_POLL_SECONDS // 60} minutes; "
+            "look at the repository's Actions runs, then run the command again")
+
+    def run_log(arguments: dict[str, object], _: str) -> dict[str, object]:
+        return {"log": door.run_log(int(seen["run"]))}
+
+    return {
+        "comment_issue": comment, "dispatch": dispatch, "wait_run": wait_run, "run_log": run_log,
+        "add_label": lambda arguments, label: door.add_label(int(arguments["issue_number"]), label),
+        "remove_label": lambda arguments, label: door.remove_label(
+            int(arguments["issue_number"]), label),
+    }
 
 
 def dry_run_lines(log: str) -> list[str]:
@@ -4299,35 +4668,89 @@ def dry_run_lines(log: str) -> list[str]:
     return [line for line in lines if DRY_RUN_LINE_PATTERN.match(line)]
 
 
+def remote_refs(root: Path, refs: list[str]) -> dict[str, str]:
+    listed = checked_git(root, "ls-remote", "origin", *refs)
+    return {name: sha for sha, name in (line.split("\t", 1) for line in listed.splitlines() if line)}
+
+
+def refs_not_at(root: Path, triples: list[tuple[str, str, str]], new: bool) -> list[str]:
+    """The refs origin does not hold at their old (or, with `new`, their new) sha, by
+    `git ls-remote`; all zeros means absent."""
+    found = remote_refs(root, [ref for _, _, ref in triples])
+    return [ref for old, wanted, ref in triples
+            if found.get(ref, ZERO_SHA) != (wanted if new else old)]
+
+
+def hand_off_or_run(plan: Plan, door: Workflows | None) -> dict[str, object]:
+    """Run `plan` through `door`, or, without one, print it for the session."""
+    if door is None:
+        print(plan.text())
+        return {}
+    return run_plan(plan, workflow_actions(door))
+
+
 def refs_request(root: Path, number: int, file: Path, repo: str | None) -> str:
-    """Post the triples on issue `number`, run ref-maintenance's dry run with them, post its
-    output and label the issue escalated; the one-line escalation for SE. A dry run that fails is
-    posted and refused, and nothing is escalated."""
+    """Post the triples on issue `number` and run ref-maintenance's dry run with them, then read
+    back; where gh is not signed in, print these GitHub steps for the session and the read-back
+    that follows them."""
     repo = resolve_repo(root, repo)
     triples = parse_triples(read_text_file(file, "triples"))
-    door = Workflows(root, repo)
     lines = "\n".join(f"- {triple_line(*triple)}" for triple in triples)
-    request = door.comment(number, (
-        f"{REFS_REQUEST_MARKER}\nOne-way ref change for `ref-maintenance`, prepared by the "
-        f"integrator:\n\n{lines}\n\n```text\n{triples_text(triples)}```\n"))
-    run = run_workflow(door, integration_branch(root), triples, dry_run=True)
-    conclusion, url = str(run.get("conclusion")), str(run.get("html_url") or "")
-    output = "\n".join(dry_run_lines(door.run_log(int(run["id"])))) or "(no push lines in the log)"
-    door.comment(number, (
-        f"{REFS_DRY_RUN_MARKER}\n<!-- se:refs-request-id {request['id']} -->\n"
-        f"Dry run of `ref-maintenance`: {conclusion} ({url})\n\n```text\n{output}\n```\n"))
+    then = (f"work_tickets.py refs request {number} --triples-file {file} --read-back "
+            "--request-id <comment id from step 1> --run-url <run url from step 3> "
+            "--conclusion <conclusion from step 3> --log-file <log file from step 4> "
+            f"--worktree {root}")
+    plan = Plan(f"refs request on #{number}", (
+        Step("comment_issue", "add_issue_comment", {
+            **owner_repo(repo), "issue_number": number, "body": (
+                f"{REFS_REQUEST_MARKER}\nOne-way ref change for `ref-maintenance`, prepared by the "
+                f"integrator:\n\n{lines}\n\n```text\n{triples_text(triples)}```\n")},
+            gives=("comment id",)),
+        *workflow_steps(repo, integration_branch(root), triples, dry_run=True, first=2),
+    ), then)
+    door = None if hand_off() else Workflows(root, repo)
+    given = hand_off_or_run(plan, door)
+    if door is None:
+        return "Then read back as the plan's last line says"
+    return refs_request_read_back(root, number, triples, int(given["comment id"]),
+                                  str(given["conclusion"]), str(given["run url"]),
+                                  str(given["log"]), repo, door)
+
+
+def refs_request_read_back(root: Path, number: int, triples: list[tuple[str, str, str]],
+                           request_id: int, conclusion: str, url: str, log: str, repo: str,
+                           door: Workflows | None) -> str:
+    """Read the dry run back: post its output and, where it passed and origin still holds every
+    ref at its old sha (`git ls-remote`), label the issue escalated; the one-line escalation for
+    SE. Otherwise nothing is escalated and the request is refused."""
+    stale = refs_not_at(root, triples, new=False)
+    passed = conclusion == "success" and not stale
+    output = "\n".join(dry_run_lines(log)) or "(no push lines in the log)"
+    plan = Plan(f"refs dry run on #{number}", (
+        Step("comment_issue", "add_issue_comment", {**owner_repo(repo), "issue_number": number, "body": (
+            f"{REFS_DRY_RUN_MARKER}\n<!-- se:refs-request-id {request_id} -->\n"
+            f"Dry run of `ref-maintenance`: {conclusion} ({url})\n\n```text\n{output}\n```\n")}),
+        *((label_step(repo, number, "escalated", add=True),) if passed else ()),
+    ))
+    hand_off_or_run(plan, door)
     if conclusion != "success":
         raise QueueError(
             f"The dry run concluded {conclusion} ({url}); nothing was escalated. Fix the triples or "
             "push the commits they need, then run refs request again")
-    door.add_label(number, "escalated")
-    return (f"escalated #{number}: apply the ref change ({len(triples)} ref(s), dry run passed)? "
-            f"On yes: work_tickets.py refs apply {number}")
+    if stale:
+        raise QueueError(
+            f"origin no longer holds {', '.join(stale)} at the old sha of its triple "
+            "(git ls-remote); nothing was escalated. Write the triples from origin's refs, then "
+            "run refs request again")
+    after = "after these steps, " if door is None else ""
+    return (f"{after}escalated #{number}: apply the ref change ({len(triples)} ref(s), dry run "
+            f"passed)? On yes: work_tickets.py refs apply {number}")
 
 
-def posted_request(door: Workflows, number: int) -> tuple[list[tuple[str, str, str]], int]:
-    """The triples of the newest refs request on the issue, refused unless its dry run passed."""
-    comments = door.comments(number)
+def posted_request(comments: list[dict[str, object]], number: int
+                   ) -> tuple[list[tuple[str, str, str]], int]:
+    """The triples of the newest refs request among the issue's `comments`, refused unless its
+    dry run passed."""
     requests = [comment for comment in comments
                 if str(comment.get("body") or "").startswith(REFS_REQUEST_MARKER)]
     if not requests:
@@ -4346,33 +4769,63 @@ def posted_request(door: Workflows, number: int) -> tuple[list[tuple[str, str, s
     return triples, int(request["id"])
 
 
-def remote_refs(root: Path, refs: list[str]) -> dict[str, str]:
-    listed = checked_git(root, "ls-remote", "origin", *refs)
-    return {name: sha for sha, name in (line.split("\t", 1) for line in listed.splitlines() if line)}
+def saved_comments(file: Path | None, number: int) -> list[dict[str, object]]:
+    """The issue's comments as the session's GitHub tools read them (issue_read get_comments),
+    saved as a JSON list to `file`."""
+    if file is None:
+        raise QueueError(
+            f"work_tickets.py refs apply hands its GitHub steps to the session, as gh is not "
+            f"signed in: save #{number}'s comments (issue_read get_comments) as JSON and pass "
+            "--comments-file <file>")
+    comments = json.loads(read_text_file(file, "issue comments"))
+    if not isinstance(comments, list):
+        raise QueueError(f"{file} holds no JSON list of comments")
+    return comments
 
 
-def refs_apply(root: Path, number: int, repo: str | None) -> str:
+def refs_apply(root: Path, number: int, repo: str | None, comments_file: Path | None = None) -> str:
     """For SE, on the person's yes: run ref-maintenance for real with the triples posted on issue
-    `number`, read the refs back from origin and post the result; the line for the integrator."""
+    `number`, then read the refs back; where gh is not signed in, print these GitHub steps for the
+    session and the read-back that follows them."""
     repo = resolve_repo(root, repo)
-    door = Workflows(root, repo)
-    triples, request_id = posted_request(door, number)
-    run = run_workflow(door, integration_branch(root), triples, dry_run=False)
-    conclusion, url = str(run.get("conclusion")), str(run.get("html_url") or "")
-    found = remote_refs(root, [ref for _, _, ref in triples]) if conclusion == "success" else {}
-    wrong = [ref for _, new, ref in triples if found.get(ref, ZERO_SHA) != new]
+    door = None if hand_off() else Workflows(root, repo)
+    comments = saved_comments(comments_file, number) if door is None else door.comments(number)
+    triples, request_id = posted_request(comments, number)
+    then = (f"work_tickets.py refs apply {number} --comments-file {comments_file} --read-back "
+            "--run-url <run url from step 2> --conclusion <conclusion from step 2> "
+            f"--worktree {root}")
+    plan = Plan(f"refs apply on #{number}",
+                workflow_steps(repo, integration_branch(root), triples, dry_run=False, first=1),
+                then)
+    given = hand_off_or_run(plan, door)
+    if door is None:
+        return "Then read back as the plan's last line says"
+    return refs_apply_read_back(root, number, triples, request_id, str(given["conclusion"]),
+                                str(given["run url"]), repo, door)
+
+
+def refs_apply_read_back(root: Path, number: int, triples: list[tuple[str, str, str]],
+                         request_id: int, conclusion: str, url: str, repo: str,
+                         door: Workflows | None) -> str:
+    """Read the real run back: origin holds every ref at its new sha (`git ls-remote`); post the
+    result and, where applied, take the issue out of escalated; the line for the integrator."""
+    wrong = refs_not_at(root, triples, new=True) if conclusion == "success" else []
     applied = conclusion == "success" and not wrong
-    mismatch = f"; not as requested on origin: {', '.join(wrong)}" if conclusion == "success" and wrong else ""
-    door.comment(number, (
-        f"{REFS_APPLIED_MARKER}\n<!-- se:refs-request-id {request_id} -->\n"
-        f"`ref-maintenance` run: {conclusion} ({url}); refs "
-        f"{'applied' if applied else 'not applied'}{mismatch}\n"))
+    mismatch = f"; not as requested on origin: {', '.join(wrong)}" if wrong else ""
+    plan = Plan(f"refs applied on #{number}", (
+        Step("comment_issue", "add_issue_comment", {**owner_repo(repo), "issue_number": number, "body": (
+            f"{REFS_APPLIED_MARKER}\n<!-- se:refs-request-id {request_id} -->\n"
+            f"`ref-maintenance` run: {conclusion} ({url}); refs "
+            f"{'applied' if applied else 'not applied'}{mismatch}\n")}),
+        *((label_step(repo, number, "escalated", add=False),) if applied else ()),
+    ))
+    hand_off_or_run(plan, door)
     if not applied:
         raise QueueError(
             f"The ref change on #{number} was not applied: run {conclusion} ({url}){mismatch}; "
             "read the run, then bring it to the person again")
-    door.remove_label(number, "escalated")
-    return f"refs applied on #{number} ({url}): verify and close out"
+    after = "after these steps, " if door is None else ""
+    return f"{after}refs applied on #{number} ({url}): verify and close out"
 
 
 @dataclass(frozen=True)
@@ -4750,25 +5203,71 @@ REFS = command_group(
             "requests, SE applies on the person's yes", dest="refs_action")
 
 
+READ_BACK_RUN = (
+    arg("--run-url", help="with --read-back: the ref-maintenance run's URL"),
+    arg("--conclusion", help="with --read-back: the run's conclusion (success, failure, ...)"),
+)
+
+
+def read_back_arguments(args: argparse.Namespace, *names: str) -> None:
+    """Refuse a --read-back without the values its plan's steps gave."""
+    missing = [f"--{name.replace('_', '-')}" for name in names if getattr(args, name) in (None, "")]
+    if missing:
+        raise QueueError(f"--read-back needs {', '.join(missing)}, from the plan's steps")
+
+
 @command("request", "for the integrator: post the triples on the issue, run ref-maintenance's dry "
-                    "run, post its output and label the issue escalated; prints the line for SE",
+                    "run, post its output and label the issue escalated; prints the line for SE. "
+                    "Where gh is not signed in it prints these GitHub steps as a plan for the "
+                    "session's GitHub tools; --read-back then checks the refs and finishes",
          WORKTREE,
          arg("issue", type=int, help="the work issue the ref change belongs to"),
          arg("--triples-file", required=True, type=Path,
              help="whitespace-separated <old-sha> <new-sha> <ref> triples; all zeros as new deletes"),
-         REPO, parent=REFS)
+         REPO,
+         arg("--read-back", action="store_true",
+             help="after the plan's steps: check through git ls-remote that origin still holds "
+                  "every ref at its old sha, then print the dry run's comment and label steps"),
+         arg("--request-id", type=int, help="with --read-back: the id of the posted request comment"),
+         *READ_BACK_RUN,
+         arg("--log-file", type=Path, help="with --read-back: the run's job log, saved to a file"),
+         parent=REFS)
 def run_refs_request(root: Path, args: argparse.Namespace) -> int:
-    print(refs_request(root, args.issue, args.triples_file, args.repo))
+    if not args.read_back:
+        print(refs_request(root, args.issue, args.triples_file, args.repo))
+        return 0
+    read_back_arguments(args, "request_id", "run_url", "conclusion", "log_file")
+    repo = resolve_repo(root, args.repo)
+    print(refs_request_read_back(
+        root, args.issue, parse_triples(read_text_file(args.triples_file, "triples")),
+        args.request_id, args.conclusion, args.run_url, read_text_file(args.log_file, "run log"),
+        repo, None))
     return 0
 
 
 @command("apply", "for SE, on the person's yes: run ref-maintenance for real with "
                   "the triples the issue's newest request posted, read the refs back and post the "
-                  "result; prints the line for the integrator",
+                  "result; prints the line for the integrator. Where gh is not signed in it prints "
+                  "these GitHub steps as a plan for the session's GitHub tools; --read-back then "
+                  "checks the refs and finishes",
          WORKTREE, arg("issue", type=int, help="the issue carrying the refs request"),
-         REPO, parent=REFS)
+         REPO,
+         arg("--comments-file", type=Path,
+             help="where gh is not signed in: the issue's comments as a JSON list "
+                  "(issue_read get_comments)"),
+         arg("--read-back", action="store_true",
+             help="after the plan's steps: check through git ls-remote that origin holds every "
+                  "ref at its new sha, then print the result's comment and label steps"),
+         *READ_BACK_RUN, parent=REFS)
 def run_refs_apply(root: Path, args: argparse.Namespace) -> int:
-    print(refs_apply(root, args.issue, args.repo))
+    if not args.read_back:
+        print(refs_apply(root, args.issue, args.repo, args.comments_file))
+        return 0
+    read_back_arguments(args, "run_url", "conclusion")
+    repo = resolve_repo(root, args.repo)
+    triples, request_id = posted_request(saved_comments(args.comments_file, args.issue), args.issue)
+    print(refs_apply_read_back(root, args.issue, triples, request_id, args.conclusion,
+                               args.run_url, repo, None))
     return 0
 
 
@@ -4899,10 +5398,23 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
 
 @command("integrate", "validate the field report a pull request's description carries, merge it "
                       "on land/<branch>, test, land it through a squash pull request once check "
-                      "passes, and close the work issue",
+                      "passes, and close the work issue. Where gh is not signed in it pushes "
+                      "land/<branch> and prints the GitHub steps as a plan for the session's "
+                      "GitHub tools; --read-back <branch> then checks the landing through git and "
+                      "finishes the close-out",
          WORKTREE,
-         arg("pull_request", type=int, help="the delivered pull request's number"),
+         arg("pull_request", type=int, nargs="?", help="the delivered pull request's number"),
          REPO,
+         arg("--pr-description", type=Path, metavar="FILE",
+             help="where gh is not signed in: the pull request's description, saved to a file"),
+         arg("--issue-body", type=Path, metavar="FILE",
+             help="where gh is not signed in: its work issue's body, saved to a file"),
+         arg("--branch", help="where gh is not signed in: the pull request's head branch"),
+         arg("--read-back", metavar="BRANCH",
+             help="after the plan's steps: check that origin's integration branch is the squash "
+                  "commit of land/BRANCH on the tested base with the tested tree, and finish"),
+         arg("--landing-pull", type=int, help="with --read-back: the landing pull request's number"),
+         arg("--check-run", help="with --read-back: the URL of its passed check run"),
          arg("--build-command", help="project's output regeneration command"),
          INCLUDE_LATE,
          arg("--check-command", type=parse_check_commands, metavar="JSON",
@@ -4912,11 +5424,22 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
 def run_integrate(root: Path, args: argparse.Namespace) -> int:
     if args.check_command_temporary_directory and not args.check_command:
         raise QueueError("--check-command-temporary-directory requires --check-command")
+    if (args.read_back is None) == (args.pull_request is None):
+        raise QueueError("integrate takes a pull request number or --read-back <branch>, one of them")
+    if args.read_back is not None:
+        read_back_arguments(args, "landing_pull", "check_run")
+        commit = read_back_integration(root, args.read_back, args.landing_pull, args.check_run)
+        print(f"Integrated {args.read_back} in {commit}")
+        return 0
     commit = integrate(
         root, args.pull_request, args.repo, args.build_command,
         args.check_command, args.check_command_temporary_directory, args.include_late,
+        args.pr_description, args.issue_body, args.branch,
     )
-    print(f"Integrated pull request #{args.pull_request} in {commit}")
+    if commit is None:
+        print(f"Run the plan's steps, then its last line for pull request #{args.pull_request}")
+    else:
+        print(f"Integrated pull request #{args.pull_request} in {commit}")
     return 0
 
 
