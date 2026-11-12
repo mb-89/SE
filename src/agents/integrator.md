@@ -96,6 +96,9 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
    project's public check included unless `se.toml` sets `public_check = false`. Every push goes through
    `work_tickets.py` (`integrate`, or `push` without `gh`), which retries a transient GitHub
    refusal once a minute, ten attempts; never `git push` by hand, and never tell a worker to retry.
+   - Where a ruleset protects the integration branch, as it does se's, land the integration as a
+     squash pull request instead (create, wait for `check`, squash-merge), as the README's
+     [Landing on main](../../README.md#landing-on-main) says.
 5. **Close** through `integrate`: it closes the work issue with a comment that links the pull
    request and the release; then hand the field report's "Tickets for other repositories" to SE.
    - A work issue whose acceptance can only be seen after the merge (a CI run on the integration

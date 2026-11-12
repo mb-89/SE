@@ -245,6 +245,30 @@ naming the file.
 `["uv", "run", "python", "scripts/se_plugin.py", "build"]`), an argument array run without a shell
 from the project root. Where it fails, push restores `se.toml`, commits nothing and shows its output.
 
+#### Landing on main
+
+se's `main` takes no direct push: its ruleset allows no force push and no deletion, keeps the
+history linear, merges pull requests by squash only and requires the check `check`
+([AGENTS.md "Public safety"](AGENTS.md#public-safety)).
+
+So each integration lands on `main` as a squash pull request: create it, wait for `check`,
+squash-merge it. Until `work_tickets.py` does this itself (a follow-up issue), the integrator does
+it with the GitHub tools:
+
+1. Make the integration as `integrate` would (the `Integrate <branch>` merge with its
+   `Release-kind` trailer, the suite, the public check, the release commit), on a branch
+   `land/<branch>` from the newest `main`, and push that branch with `work_tickets.py push`.
+2. Open a pull request of `land/<branch>` into `main` and wait until its `check` passes.
+3. Squash-merge it with an explicit commit title and message: the `Integrate <branch>: <title>`
+   line and the rest of the merge message, `Release-kind` trailer included. GitHub's defaults add
+   ` (#<number>)` to the title and may add `Co-authored-by:` lines, which the public check on the
+   push to `main` refuses.
+4. Then close the work issue and clean up as `integrate` would.
+
+The squash commit carries the release's `se.toml` version, so the release workflow tags it. GitHub
+commits it for the merging account (web-flow committer, the account's `users.noreply.github.com`
+author), which the identity gate passes for the account that owns the repository.
+
 #### Release tags
 
 `release = "workflow"` hands the tags to se's release workflow, for hosts that may push branches but
