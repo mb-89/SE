@@ -761,6 +761,14 @@ def test_nothing_calls_an_se_workflow_at_a_branch():
             assert not re.search(r"mb-89/SE/\S+@(se|main)\b", line), f"{path.name}: {line}"
 
 
+def test_every_runner_image_is_pinned():
+    """se's jobs, and the README's example jobs, name their runner image's version, never a
+    `-latest` label, so a new image arrives by a deliberate edit, not by GitHub moving the label."""
+    for path in [*(PROJECT / ".github" / "workflows").glob("*.yml"), PROJECT / "README.md"]:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            assert not re.search(r"runs-on:.*-latest\b", line), f"{path.name}: {line}"
+
+
 def test_the_squash_commit_onto_an_unrelated_main_releases_its_version_and_major_only(checkout):
     """se becoming main: main's first-parent history holds a line that never had an se.toml, then
     one squash commit with se's tree at a new major; se's own tags stay where they are."""
