@@ -46,6 +46,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import se_components  # noqa: E402
 from build_docs import child_environment, obs_dir, obs_document  # noqa: E402
 
 BUNDLE = Path(__file__).resolve().with_name("deck_answers.js")
@@ -272,7 +273,16 @@ def answers(path: Path, record: Path | None, destination: Path | None) -> int:
     return build(record, destination, path) if record else 0
 
 
-def main(argv: list[str] | None = None) -> int:
+#: deck.py's commands in the render component timeline.py names (README "Commands as
+#: components"); each command's usage and help come from make_parser.
+COMPONENTS = (se_components.script("timeline").COMPONENTS[0]._replace(
+    commands=("build", "serve", "answers")),)
+#: The commands that go through kern where it runs (se_components.routed): none, as build writes,
+#: serve waits for the person, and answers is read by the agent, not a person.
+INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
+
+
+def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="deck.py", description=__doc__.splitlines()[0],
                                      formatter_class=argparse.RawDescriptionHelpFormatter,
                                      epilog="\n".join(__doc__.splitlines()[5:]))
@@ -288,7 +298,18 @@ def main(argv: list[str] | None = None) -> int:
     read.add_argument("answers", type=Path)
     read.add_argument("--record", type=Path, metavar="FOLDER", help="build FOLDER again with the answers")
     read.add_argument("--destination", type=Path, help="with --record: the record's HTML file")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = make_parser()
     arguments = parser.parse_args(argv)
+    words = [arguments.command]
+    routed = se_components.routed(
+        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
+        arguments.command in INTERACTIVE_COMMANDS)
+    if routed is not None:
+        return routed
     if arguments.command == "build":
         return build(arguments.folder, arguments.destination)
     if arguments.command == "serve":

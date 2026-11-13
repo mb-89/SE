@@ -23,7 +23,7 @@ import pytest
 import quiet_git
 
 ROOT = Path(__file__).resolve().parents[1]
-GROUPS = ["delivery", "integration", "issues", "review", "tickets"]
+GROUPS = ["delivery", "integration", "issues", "overhaul", "render", "retro", "review", "tickets"]
 
 
 def run(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:

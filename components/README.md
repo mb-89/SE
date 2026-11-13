@@ -4,8 +4,10 @@ SE's own components on kern ([kern/README.md](../kern/README.md)), the applicati
 the rules they compute are SE's work model. Two kinds live here, one folder each:
 
 - **Python, declared** by their `component.toml` and placed by the checkout's `wiring.toml`:
-  tickets, issues, delivery and integration, SE's script commands (README
-  ["Commands as components"](../README.md#commands-as-components)).
+  tickets, issues, delivery, integration, review, retro, overhaul and render, SE's script commands
+  (README ["Commands as components"](../README.md#commands-as-components)).
+  - `retro/` holds both kinds: retro.py's commands, declared, and the Go retro-due derivation
+    beside them, which only the `se` binary carries.
 - **Go, compiled into the `se` binary**: fleet, retro and origin, SE's Go module
   `github.com/mb-89/se/components` (`go.mod` here, kern replaced by `../kern` while it is incubated).
 

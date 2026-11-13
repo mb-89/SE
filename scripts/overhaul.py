@@ -530,7 +530,7 @@ def render(facts: Facts) -> str:
 
 def sibling(name: str):
     """The script `<name>.py` beside this one, imported when a command needs it: `facts` imports
-    none."""
+    only se_components, for its route, which uses the standard library alone."""
     here = str(Path(__file__).resolve().parent)
     if here not in sys.path:
         sys.path.append(here)
@@ -1040,7 +1040,19 @@ def run_facts(args: argparse.Namespace) -> int:
     return 0
 
 
-def parser() -> argparse.ArgumentParser:
+#: overhaul.py's commands as one kern component (README "Commands as components"); each command's
+#: usage and help come from make_parser.
+COMPONENTS = (sibling("se_components").Group(
+    "overhaul", "Overhaul",
+    "An overhaul: new files its issue, read writes its draft, file checks the judged draft and "
+    "closes the issue with its report, and facts lists a checkout's pruning facts.",
+    ("new", "read", "file", "facts")),)
+#: The commands that go through kern where it runs (se_components.routed): facts, which only reads
+#: the checkout while a person waits; new, read and file write or read GitHub at length.
+INTERACTIVE_COMMANDS = frozenset({"facts"})
+
+
+def make_parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(prog="overhaul.py", description=__doc__.splitlines()[0])
     commands = top.add_subparsers(dest="command", required=True)
 
@@ -1093,7 +1105,13 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    args = make_parser().parse_args(argv)
+    words = [args.command]
+    routed = sibling("se_components").routed(
+        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
+        args.command in INTERACTIVE_COMMANDS)
+    if routed is not None:
+        return routed
     try:
         return args.run(args)
     except sibling("work_tickets").QueueError as error:

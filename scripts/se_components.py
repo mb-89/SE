@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """SE's script commands as kern components (README "Commands as components").
 
-A script's command group is one component, `components/<name>/`: its `component.toml`, which the
-script's `docs` command writes from the script's command registry, and an `__init__.py` that calls
+A script's command group is one component, `components/<name>/`: its `component.toml`, which
+`work_tickets.py docs` writes from the script's argparse parser, and an `__init__.py` that calls
 `attach`, so the component answers each declared command with the script's own code. The command
-line does not change: `work_tickets.py <command>` runs as before, and an interactive command goes
+line does not change: `<script>.py <command>` runs as before, and an interactive command goes
 through kern where kern serves this checkout (`routed`), else directly.
 
 - **Declared:** a script that runs components names them in its `COMPONENTS` (each a `Group`) and
   its read-only commands in `INTERACTIVE_COMMANDS`, and builds its parser with `make_parser`;
-  `SCRIPTS` lists those scripts. `declarations` reads each group's commands, their usage and help
-  from that argparse parser, and `declaration` writes one group's `component.toml` text; `reference`
+  `SCRIPTS` lists those scripts. `declared` reads each group's commands, their usage and help from
+  that argparse parser (a parser without subcommands is one command, the script itself, `""` in its
+  group); `components` merges a group two scripts name into one component (render: timeline.py and
+  deck.py), and `declaration` writes one group's `component.toml` text; `reference`
   renders the README's command reference from the declarations as kern's own reader
   (`kern.declaration`) reads them, so the README shows the catalog kern checks at its start.
-- **Attached:** `attach` answers each command by running the script's `main` with the command's
-  words and arguments in this process. A call's first argument may be `--se-cwd=<dir>`, the
+- **Attached:** `attach` answers each command by running the main of the script its first word
+  names, one of the component's scripts, with the command's words and arguments in this process. A call's first argument may be `--se-cwd=<dir>`, the
   directory the command runs in; without it, kern's root. What it answers:
   - exit code 0: the text is what it wrote to stdout, each stderr line a progress line;
   - any other: the error `exit code <n>`, then on its next line a JSON object of what it wrote,
@@ -63,7 +65,7 @@ CONNECT_WAIT = 0.5
 REFERENCE_WIDTH = 100
 #: The scripts whose commands are components, in the README's order: each defines make_parser,
 #: COMPONENTS and INTERACTIVE_COMMANDS.
-SCRIPTS = ("work_tickets", "review")
+SCRIPTS = ("work_tickets", "review", "retro", "overhaul", "timeline", "deck")
 #: Who writes the declarations (work_tickets.py's `docs` and `format`).
 GENERATOR = "`work_tickets.py docs`"
 EXIT_ERROR = re.compile(r"\Aexit code (\d+)\n?")
@@ -142,14 +144,15 @@ def usage(prog: str, parser: argparse.ArgumentParser, width: int = REFERENCE_WID
     return "\n".join(line[len("usage: "):] for line in formatter.format_help().rstrip().splitlines())
 
 
-def declarations(parser: argparse.ArgumentParser, groups: Iterable[Group],
-                 interactive: Iterable[str] = (), source: str | None = None) -> dict[str, str]:
-    """Each group's component.toml text by its name, read from the script's argparse parser: every
-    command the parser runs belongs to exactly one group. A command named in `interactive` only
-    reads (class interactive); every other is batch. `source` names what the header says the
-    declaration is generated from, by default the script's parser."""
+def declared(parser: argparse.ArgumentParser, groups: Iterable[Group],
+             interactive: Iterable[str] = ()) -> dict[str, tuple[Group, list[Declared]]]:
+    """Each group with its commands by the group's name, read from the script's argparse parser:
+    every command the parser runs belongs to exactly one group. A parser without subcommands is one
+    command, the script itself, which a group names as `""`, its help the parser's description. A
+    command named in `interactive` only reads (class interactive); every other is batch."""
     script = parser.prog
-    found = {" ".join(words): (words, help_text, sub) for words, help_text, sub in leaves(parser)}
+    found = {" ".join(words): (words, help_text, sub) for words, help_text, sub in
+             leaves(parser) or [((), parser.description or "", parser)]}
     groups = list(groups)
     grouped = [name for group in groups for name in group.commands]
     if sorted(grouped) != sorted(found):
@@ -157,14 +160,20 @@ def declarations(parser: argparse.ArgumentParser, groups: Iterable[Group],
         raise ValueError(f"{script}: its components' commands differ from its parser: missing "
                          f"{missing}, unknown {extra}")
     interactive = frozenset(interactive)
-    out = {}
-    for group in groups:
-        declared = [Declared(" ".join((script, *found[n][0])),
-                             usage(" ".join((script, *found[n][0])), found[n][2]), found[n][1],
-                             n in interactive) for n in group.commands]
-        out[group.name] = declaration(group.name, group.help, group.title, declared, GENERATOR,
-                                      source or f"{script}'s parser")
-    return out
+    return {group.name: (group, [Declared(" ".join((script, *found[n][0])),
+                                          usage(" ".join((script, *found[n][0])), found[n][2]),
+                                          found[n][1], n in interactive) for n in group.commands])
+            for group in groups}
+
+
+def declarations(parser: argparse.ArgumentParser, groups: Iterable[Group],
+                 interactive: Iterable[str] = (), source: str | None = None) -> dict[str, str]:
+    """Each group's component.toml text by its name, read from the script's argparse parser
+    (`declared`). `source` names what the header says the declaration is generated from, by
+    default the script's parser."""
+    return {name: declaration(name, group.help, group.title, commands, GENERATOR,
+                              source or f"{parser.prog}'s parser")
+            for name, (group, commands) in declared(parser, groups, interactive).items()}
 
 
 def script(name: str):
@@ -184,20 +193,34 @@ def script(name: str):
 
 
 def components(root: Path) -> dict[Path, str]:
-    """The component.toml of every component of SE's SCRIPTS under root, in the README's order."""
-    out = {}
+    """The component.toml of every component of SE's SCRIPTS under root, in the README's order. A
+    component two scripts share (render: timeline.py and deck.py) holds both scripts' commands, in
+    SCRIPTS' order, under the group the first one names: each later script names that same group,
+    its title and help included."""
+    merged: dict[str, tuple[Group, list[Declared], list[str]]] = {}
     for name in SCRIPTS:
         module = script(name)
-        texts = declarations(module.make_parser(), module.COMPONENTS, module.INTERACTIVE_COMMANDS,
-                             getattr(module, "COMPONENT_SOURCE", None))
-        out.update({root / COMPONENTS / group / "component.toml": text
-                    for group, text in texts.items()})
-    return out
+        parser = module.make_parser()
+        source = getattr(module, "COMPONENT_SOURCE", None) or f"{parser.prog}'s parser"
+        for group_name, (group, commands) in declared(parser, module.COMPONENTS,
+                                                      module.INTERACTIVE_COMMANDS).items():
+            if group_name not in merged:
+                merged[group_name] = (group, [], [])
+            first, into, sources = merged[group_name]
+            if (first.title, first.help) != (group.title, group.help):
+                raise ValueError(f"{parser.prog}: component {group_name} differs in its title or "
+                                 "help from the script that names it first")
+            into += commands
+            sources.append(source)
+    return {root / COMPONENTS / group_name / "component.toml":
+            declaration(group_name, group.help, group.title, commands, GENERATOR,
+                        " and ".join(sources))
+            for group_name, (group, commands, sources) in merged.items()}
 
 
 def component_names() -> list[str]:
-    """The names of every component of SE's SCRIPTS, in the README's order."""
-    return [group.name for name in SCRIPTS for group in script(name).COMPONENTS]
+    """The names of every component of SE's SCRIPTS, in the README's order, each once."""
+    return list(dict.fromkeys(group.name for name in SCRIPTS for group in script(name).COMPONENTS))
 
 
 def catalog(root: Path, names: Iterable[str]):
@@ -270,16 +293,16 @@ def run_main(main: Callable[[list[str]], int], argv: list[str], cwd: str | None)
     return code, out.getvalue(), err.getvalue()
 
 
-def attach(name: str, script: str, folder: Path):
-    """The component of that name in `folder`, each declared command answered by `script`'s main."""
+def attach(name: str, scripts: str | Iterable[str], folder: Path):
+    """The component of that name in `folder`, each declared command answered by the main of the
+    script it names first (`timeline.py`, `deck.py build`), one of `scripts`."""
     sdk()
     import kern
 
     comp = kern.component(name, folder)
-    module = importlib.import_module(script)
-    prefix = script + ".py "
+    scripts = (scripts,) if isinstance(scripts, str) else tuple(scripts)
 
-    def answer(words: list[str]):
+    def answer(module, words: list[str]):
         def run(args: list[str], inputs, say):
             cwd = None
             if args and args[0].startswith(CWD):
@@ -293,9 +316,11 @@ def attach(name: str, script: str, folder: Path):
         return run
 
     for command in comp.decl.commands:
-        if not command.startswith(prefix):
-            raise kern.KernError(f"component {name} declares {command!r}, which {script}.py does not run")
-        comp.command(command)(answer(command[len(prefix):].split()))
+        first, *words = command.split()
+        if first.removesuffix(".py") not in scripts or not first.endswith(".py"):
+            raise kern.KernError(f"component {name} declares {command!r}, which "
+                                 f"{' nor '.join(s + '.py' for s in scripts)} does not run")
+        comp.command(command)(answer(importlib.import_module(first.removesuffix(".py")), words))
     return comp
 
 
