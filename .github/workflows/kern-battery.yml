@@ -1,0 +1,65 @@
+# The battery every kern application's CI calls (kern/README.md "The battery"): it sets up the Go its
+# go.mod pins and uv, vets the Go code, and runs the application's tests, its Go and its Python tests,
+# as its se.toml [tests] command declares them, held to that table's one budget: over target_seconds
+# it warns, over limit_seconds or on a failed test it fails. An application calls it with
+#
+#   jobs:
+#     check:
+#       uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v<version>
+#
+# While kern is incubated in SE, it lives here; it moves with kern's workflows to mb-89/kern.
+name: kern-battery
+
+on:
+  workflow_call:
+    inputs:
+      directory:
+        description: The application's folder in the checkout, the one holding its se.toml and go.mod
+        type: string
+        default: "."
+
+permissions:
+  contents: read
+
+jobs:
+  battery:
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: ${{ inputs.directory }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ inputs.directory }}/go.mod
+          cache-dependency-path: ${{ inputs.directory }}/go.sum
+      - uses: astral-sh/setup-uv@v7
+      - name: The Go code vets
+        run: go vet ./...
+      - name: The tests, within their budget
+        shell: python3 {0}
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          # se.toml [tests]: command, target_seconds, limit_seconds, as SE's own (SE's README "Test budget").
+          import subprocess, sys, time, tomllib
+
+          with open("se.toml", "rb") as handle:
+              tests = tomllib.load(handle).get("tests", {})
+          command, target, limit = tests.get("command"), tests.get("target_seconds"), tests.get("limit_seconds")
+          if (not isinstance(command, list) or not command or not all(isinstance(part, str) for part in command)
+                  or not all(isinstance(value, (int, float)) and value > 0 for value in (target, limit)) or target > limit):
+              sys.exit(print("::error::battery: se.toml [tests] must declare command = [...], target_seconds "
+                             "and limit_seconds, with target_seconds <= limit_seconds"))
+          print(f"battery: {' '.join(command)}", flush=True)
+          start = time.monotonic()
+          code = subprocess.run(command).returncode
+          seconds = time.monotonic() - start
+          print(f"Battery time: {seconds:.1f} s (target {target} s, limit {limit} s)")
+          if code != 0:
+              sys.exit(print(f"::error::battery: the tests failed with exit code {code}") or 1)
+          if seconds > limit:
+              sys.exit(print(f"::error::battery: {seconds:.1f} s is over se.toml [tests] limit_seconds "
+                             f"{limit}: make the tests faster or raise the budget with its reason") or 1)
+          if seconds > target:
+              print(f"::warning::battery: {seconds:.1f} s is over se.toml [tests] target_seconds {target}")

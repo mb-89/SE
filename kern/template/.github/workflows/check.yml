@@ -1,0 +1,15 @@
+# The application's CI, the check its main's ruleset requires: kern's battery, the Go and Python
+# tests within se.toml [tests]'s budget (kern's README "The battery").
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v0.1.0
