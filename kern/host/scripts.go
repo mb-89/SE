@@ -1,16 +1,16 @@
 package host
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mb-89/kern/git"
 )
 
 // Counting an agent's ad hoc scripts, SE's docs/go-core.md "Scripts are ad
@@ -350,11 +350,9 @@ func under(base, path string) (string, bool) {
 func gitUntracked(root, rel string) (untracked, known bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitWait)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "--others", "--exclude-standard",
-		"--", filepath.ToSlash(rel))
-	out, err := cmd.Output()
+	out, err := git.Run(ctx, root, "ls-files", "--others", "--exclude-standard", "--", filepath.ToSlash(rel))
 	if err != nil {
 		return false, false
 	}
-	return len(bytes.TrimSpace(out)) > 0, true
+	return strings.TrimSpace(out) != "", true
 }

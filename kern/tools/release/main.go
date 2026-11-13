@@ -19,6 +19,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -35,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	gitdoor "github.com/mb-89/kern/git"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -358,16 +360,9 @@ func goList(dir string, args ...string) ([]listed, error) {
 	return all, nil
 }
 
+// git runs git in dir through kern's git door.
 func git(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git %s in %s: %v: %s", strings.Join(args, " "), dir, err, strings.TrimSpace(stderr.String()))
-	}
-	return string(out), nil
+	return gitdoor.Run(context.Background(), dir, args...)
 }
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }

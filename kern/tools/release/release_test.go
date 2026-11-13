@@ -12,7 +12,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	gitdoor "github.com/mb-89/kern/git"
+	"github.com/mb-89/kern/git/gitfake"
 )
+
+// Every test reaches git through kern's git door, on its fake.
+func TestMain(m *testing.M) {
+	gitdoor.Use(gitfake.New())
+	os.Exit(m.Run())
+}
 
 func TestReleaseTomlResolvesTheTagAndTheRepositoryFromTheOneURL(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", Settings))
