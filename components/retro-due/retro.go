@@ -1,9 +1,9 @@
-// Package retro is SE's retro-due component: how many work issues landed
+// Package retrodue is SE's retro-due component: how many work issues landed
 // since the last retro (scripts/retro.py landed_since_retro) and whether
 // that makes a retro due, as a derivation over kern's GitHub snapshot names,
 // so the greeting reads it live. It is SE's, not kern's: the window and what
 // counts as landed are SE's work model.
-package retro
+package retrodue
 
 import (
 	"regexp"
@@ -18,7 +18,7 @@ import (
 )
 
 // Name is the component's name, which the wiring's instances name.
-const Name = "retro"
+const Name = "retro-due"
 
 // SE's marks, as retro.py names them.
 const (

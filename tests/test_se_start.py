@@ -411,11 +411,11 @@ def test_without_a_core_the_live_read_answers_none_and_the_cache_stands(setup, t
 
 def test_the_live_read_keeps_only_the_parts_whose_names_hold_issues(monkeypatch):
     names = {"fleet/findings": {"issues": 0, "findings": []},
-             "retro/due": {"issues": 4, "landed": 1, "due_after": 10, "due": False}}
+             "retro-due/due": {"issues": 4, "landed": 1, "due_after": 10, "due": False}}
     monkeypatch.setattr(se_start.kern_names, "read", lambda root, wanted: names)
     assert se_start.kern_names.live_work(Path(".")) == {
         "retro": {"landed": 1, "due_after": 10, "issues": 4, "from": "kern"}}
-    names["retro/due"]["issues"] = 0
+    names["retro-due/due"]["issues"] = 0
     assert se_start.kern_names.live_work(Path(".")) is None
 
 

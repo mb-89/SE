@@ -21,6 +21,10 @@ through kern where kern serves this checkout (`routed`), else directly.
   - exit code 0: the text is what it wrote to stdout, each stderr line a progress line;
   - any other: the error `exit code <n>`, then on its next line a JSON object of what it wrote,
     `{"stdout": ..., "stderr": ...}`: the core answers a failed step's error without its lines.
+  - Calls run side by side (kern's runner runs each step in its own thread), and each captures its
+    own output (`captured`): what its thread, the threads it starts and its subprocesses write. The
+    process has one working directory: calls in one directory run together, a call in another
+    waits until they end (`Directory`).
 - **Routed:** `routed` sends an interactive command through `call.<command>` and prints the answer
   as the command would have; `SE_KERN=off` keeps every command direct, `SE_KERN=on` refuses to fall
   back. Only interactive commands go through kern: they only read, so a call that fails on the way
@@ -280,33 +284,195 @@ def reference(declarations) -> str:
 
 # Attached.
 
+class _Capture(NamedTuple):
+    """One call's capture: its streams, and the files a subprocess it starts writes."""
+
+    out: io.StringIO
+    err: io.StringIO
+    out_file: object
+    err_file: object
+
+
+_calls = threading.local()  # .capture: the capture of the call this thread runs, if any
+_installed_lock = threading.Lock()
+#: How many captures stand, and what the first one replaced: sys.stdout, sys.stderr,
+#: subprocess.Popen.__init__ and threading.Thread.start.
+_installed: dict = {"count": 0, "saved": None}
+
+
+def _capture() -> _Capture | None:
+    return getattr(_calls, "capture", None)
+
+
+class _Stream(io.TextIOBase):
+    """sys.stdout or sys.stderr while calls capture: what a thread writes goes to its own call's
+    capture, or, in a thread that runs no call, where it went before."""
+
+    def __init__(self, which: str, before):
+        super().__init__()
+        self.which, self.before = which, before
+
+    def _target(self):
+        capture = _capture()
+        return getattr(capture, self.which) if capture is not None else self.before
+
+    def write(self, text: str) -> int:
+        return self._target().write(text)
+
+    def flush(self) -> None:
+        with contextlib.suppress(Exception):
+            self._target().flush()
+
+    def fileno(self) -> int:  # a subprocess handed sys.stdout writes the call's file
+        capture = _capture()
+        if capture is not None:
+            return getattr(capture, self.which + "_file").fileno()
+        return self.before.fileno()
+
+    def isatty(self) -> bool:
+        return _capture() is None and bool(getattr(self.before, "isatty", lambda: False)())
+
+    def __getattr__(self, name: str):
+        return getattr(self.before, name)
+
+
+def _install() -> None:
+    """The first capture installs the per-call streams, and has each subprocess and thread a
+    call starts write into that call's capture; the last one restores what stood before."""
+    import subprocess
+
+    with _installed_lock:
+        _installed["count"] += 1
+        if _installed["count"] > 1:
+            return
+        popen_init, thread_start = subprocess.Popen.__init__, threading.Thread.start
+
+        def init(self, *args, **kwargs):
+            capture = _capture()
+            if capture is not None:
+                if len(args) < 5 and kwargs.get("stdout") is None:
+                    kwargs["stdout"] = capture.out_file
+                if len(args) < 6 and kwargs.get("stderr") is None:
+                    kwargs["stderr"] = capture.err_file
+            popen_init(self, *args, **kwargs)
+
+        def start(self):
+            capture = _capture()
+            if capture is not None:
+                run = self.run
+
+                def bound():
+                    _calls.capture = capture
+                    run()
+                self.run = bound
+            thread_start(self)
+
+        _installed["saved"] = (sys.stdout, sys.stderr, popen_init, thread_start)
+        sys.stdout, sys.stderr = _Stream("out", sys.stdout), _Stream("err", sys.stderr)
+        subprocess.Popen.__init__, threading.Thread.start = init, start
+
+
+def _uninstall() -> None:
+    import subprocess
+
+    with _installed_lock:
+        _installed["count"] -= 1
+        if _installed["count"]:
+            return
+        stdout, stderr, subprocess.Popen.__init__, threading.Thread.start = _installed["saved"]
+        if isinstance(sys.stdout, _Stream):
+            sys.stdout = stdout
+        if isinstance(sys.stderr, _Stream):
+            sys.stderr = stderr
+
+
 @contextlib.contextmanager
 def captured(err: io.StringIO | None = None) -> Iterator[tuple[io.StringIO, io.StringIO]]:
-    """Capture stdout and stderr, the Python streams and the file descriptors a subprocess writes;
-    stderr into `err` where given."""
+    """Capture the stdout and stderr of the call this thread runs, stderr into `err` where given:
+    what it writes, what the threads it starts write, and what each subprocess it starts writes
+    where that would have gone to the process's own streams. Calls in other threads capture their
+    own alongside, so calls run side by side."""
     with tempfile.TemporaryFile() as out_file, tempfile.TemporaryFile() as err_file:
         out, err = io.StringIO(), (err if err is not None else io.StringIO())
-        files = ((1, sys.stdout, out_file), (2, sys.stderr, err_file))
-        saved = []
-        for fd, stream, into in files:
-            with contextlib.suppress(Exception):
-                stream.flush()
-            try:
-                saved.append((fd, os.dup(fd)))
-                os.dup2(into.fileno(), fd)
-            except OSError:  # no such descriptor: nothing a subprocess could write to
-                pass
+        before = _capture()
+        _install()
+        _calls.capture = _Capture(out, err, out_file, err_file)
         try:
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                yield out, err
+            yield out, err
         finally:
-            for fd, copy in saved:
-                os.dup2(copy, fd)
-                os.close(copy)
-            for _, _, into in files:
+            _calls.capture = before
+            _uninstall()
+            for into in (out_file, err_file):
                 into.seek(0)
             out.write(out_file.read().decode("utf-8", "replace"))
             err.write(err_file.read().decode("utf-8", "replace"))
+
+
+class Directory:
+    """The process's one working directory, shared by the calls it runs: calls in the same
+    directory run side by side; a call in another waits until they have ended, and the process
+    stands where it stood once all have. A call waiting for a GitHub step lets go of it meanwhile
+    (`released`)."""
+
+    def __init__(self) -> None:
+        self.changed = threading.Condition()
+        self.waiting = 0
+        self._dir: str | None = None
+        self._count = 0
+        self._home = ""
+
+    def _enter(self, want: str | None) -> str:
+        with self.changed:
+            if not self._count:
+                self._home = os.path.realpath(os.getcwd())
+            want = os.path.realpath(want) if want else self._home
+            self.waiting += 1
+            self.changed.notify_all()
+            try:
+                self.changed.wait_for(lambda: not self._count or self._dir == want)
+            finally:
+                self.waiting -= 1
+            if not self._count:
+                os.chdir(want)
+                self._dir = want
+            self._count += 1
+            self.changed.notify_all()
+            return want
+
+    def _leave(self) -> None:
+        with self.changed:
+            self._count -= 1
+            if not self._count:
+                with contextlib.suppress(OSError):
+                    os.chdir(self._home)
+                self._dir = None
+            self.changed.notify_all()
+
+    @contextlib.contextmanager
+    def within(self, cwd: str | None) -> Iterator[None]:
+        """Run in `cwd`, or, without one, where the process stands."""
+        _calls.directory = self._enter(cwd)
+        try:
+            yield
+        finally:
+            self._leave()
+
+    @contextlib.contextmanager
+    def released(self) -> Iterator[None]:
+        """Let go of this thread's call's directory while it waits, and take it back after."""
+        here = getattr(_calls, "directory", None)
+        if here is None:
+            yield
+            return
+        self._leave()
+        try:
+            yield
+        finally:
+            self._enter(here)
+
+
+#: The working directory of this process's calls.
+DIRECTORY = Directory()
 
 
 class Said(io.StringIO):
@@ -326,21 +492,16 @@ class Said(io.StringIO):
 
 def run_main(main: Callable[[list[str]], int], argv: list[str], cwd: str | None,
              say: Callable[[str], None] | None = None) -> tuple[int, str, str]:
-    """Run a script's main in `cwd`: its exit code, stdout and stderr; with `say`, each stderr line
-    the script writes is also said as it comes."""
-    before = os.getcwd()
+    """Run a script's main in `cwd` (`DIRECTORY`): its exit code, stdout and stderr, its own call's
+    alone (`captured`); with `say`, each stderr line the script writes is also said as it comes."""
     code = 0
-    with captured(Said(say) if say else None) as (out, err):
+    with DIRECTORY.within(cwd), captured(Said(say) if say else None) as (out, err):
         try:
-            if cwd:
-                os.chdir(cwd)
             code = main(argv)
         except SystemExit as stop:  # argparse's refusal or --help
             code = stop.code if isinstance(stop.code, int) else (0 if stop.code is None else 1)
             if not isinstance(stop.code, (int, type(None))):
                 print(stop.code, file=sys.stderr)
-        finally:
-            os.chdir(before)
     return code, out.getvalue(), err.getvalue()
 
 
@@ -523,10 +684,8 @@ class Stepped:
     own, with se_relay's step set, and each GitHub step it asks becomes one request on the
     command's `step` port, which the wiring binds to the github component's verb step; the
     answer comes back through the request's continuation (kern's Requests and Then). Its stderr
-    lines are said as they come. A new call of the command gives up a thread still waiting from
-    a call kern stopped."""
-
-    waiting: dict[str, "Stepped"] = {}
+    lines are said as they come. Calls run side by side, each its own thread and capture; while
+    one waits for a step's answer it lets go of the working directory (`Directory.released`)."""
 
     def __init__(self, comp, main: Callable[[list[str]], int], argv: list[str], cwd: str | None,
                  say: Callable[[str], None], key: str):
@@ -535,10 +694,6 @@ class Stepped:
         self.comp, self.say, self.key = comp, say, key
         self.out: queue.Queue = queue.Queue()  # ("ask", value) or ("done", (code, out, err))
         self.answers: queue.Queue = queue.Queue()
-        old = Stepped.waiting.pop(key, None)
-        if old is not None:
-            old.answers.put(("stop", "a new call of the command began"))
-        Stepped.waiting[key] = self
         threading.Thread(target=self._run, args=(main, argv, cwd), daemon=True,
                          name=f"se-stepped-{key}").start()
 
@@ -550,7 +705,8 @@ class Stepped:
                **({"wait": wait} if wait else {})}
         self.out.put(("ask", ask))
         try:
-            kind, value = self.answers.get(timeout=STEP_ANSWER_WAIT)
+            with DIRECTORY.released():
+                kind, value = self.answers.get(timeout=STEP_ANSWER_WAIT)
         except queue.Empty:
             kind, value = "stop", f"no answer to the step {tool} within {STEP_ANSWER_WAIT:.0f} s"
         if kind == "stop":
@@ -575,7 +731,6 @@ class Stepped:
                 self.answers.put(("answer", answers[0] if answers else None))
                 return self.result()
             return self.comp.result(requests=[self.comp.ask(STEP_PORT, value)], then=then)
-        Stepped.waiting.pop(self.key, None)
         code, out, err = value
         if code:
             raise kern.KernError(f"exit code {code}\n" + json.dumps({"stdout": out, "stderr": err}))

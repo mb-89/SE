@@ -87,12 +87,20 @@ class Fake:
         """Run the derivation of an output and commit what it answers."""
         self._out[port] = self.component.derive(port, self.inputs())
 
-    def run(self, name: str, *args: str) -> str:
+    def run(self, name: str, *args: str, say: Callable[[str], None] | None = None) -> str:
         """Run a command: commit each step's writes, answer its requests in order, hand the answers to its
-        continuation. A failed request stops it with its reason; it answers every step's text, one line each."""
+        continuation. A failed request stops it with its reason; it answers every step's text, one line each.
+        Each line it says joins ``lines`` and goes to ``say``, the call's own caller, where given: calls
+        that run side by side, each in its own thread, so each hear their own."""
         text: list[str] = []
+
+        def said(line: str) -> None:
+            self.lines.append(line)
+            if say is not None:
+                say(line)
+
         try:
-            r: Result = self.component.run(name, list(args), self.inputs(), self.lines.append)
+            r: Result = self.component.run(name, list(args), self.inputs(), said)
         except Exception as e:
             raise KernError(str(e)) from e
         while True:

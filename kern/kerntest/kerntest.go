@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/mb-89/kern/index"
 )
@@ -16,8 +17,10 @@ import (
 // Answerer answers one request on a request port, as the I/O verb the wiring binds it to would.
 type Answerer func(req any) (any, error)
 
-// Fake holds one component's inputs, committed outputs and requests, by local name.
+// Fake holds one component's inputs, committed outputs and requests, by local
+// name. Calls may run side by side, each in its own goroutine, as the core runs them.
 type Fake struct {
+	mu       sync.Mutex
 	c        *index.Component
 	inputs   map[string]index.Port
 	outputs  map[string]index.Port
@@ -62,7 +65,9 @@ func (f *Fake) Seed(port string, v any) error {
 	case !index.Fits(v, p.Type):
 		return fmt.Errorf("input %s takes %s, not %T", port, p.Type, v)
 	}
+	f.mu.Lock()
 	f.seeded[port] = v
+	f.mu.Unlock()
 	return nil
 }
 
@@ -74,7 +79,9 @@ func (f *Fake) Answer(port string, a Answerer) error {
 	if _, ok := f.requests[port]; !ok {
 		return fmt.Errorf("component %s has no request port %q", f.c.Name(), port)
 	}
+	f.mu.Lock()
 	f.answers[port] = a
+	f.mu.Unlock()
 	return nil
 }
 
@@ -84,7 +91,9 @@ func (f *Fake) Derive(port string) error {
 	if err != nil {
 		return err
 	}
+	f.mu.Lock()
 	f.out[port] = v
+	f.mu.Unlock()
 	return nil
 }
 
@@ -93,16 +102,20 @@ func (f *Fake) Derive(port string) error {
 // answers to the continuation, as the core does. A failed answer stops the
 // command with its reason. It answers every step's text, one line each.
 func (f *Fake) Call(name string, args ...string) (string, error) {
+	return f.CallSaying(name, nil, args...)
+}
+
+// CallSaying runs a command as Call does, and hands say each line the call
+// says, as the core hands its caller the lines of its own call alone.
+func (f *Fake) CallSaying(name string, say func(line string), args ...string) (string, error) {
 	r, err := f.c.Run(name, f.read, args)
 	var text []string
 	for {
 		if err != nil {
 			return strings.Join(text, "\n"), err
 		}
+		f.mu.Lock()
 		f.lines = append(f.lines, r.Lines...)
-		if r.Text != "" {
-			text = append(text, r.Text)
-		}
 		for _, w := range r.Writes {
 			if w.Gone {
 				delete(f.out, at(w.Port, w.Key))
@@ -110,13 +123,24 @@ func (f *Fake) Call(name string, args ...string) (string, error) {
 			}
 			f.out[at(w.Port, w.Key)] = w.Value
 		}
+		f.mu.Unlock()
+		if say != nil {
+			for _, l := range r.Lines {
+				say(l)
+			}
+		}
+		if r.Text != "" {
+			text = append(text, r.Text)
+		}
 		answers := make([]any, 0, len(r.Requests))
 		for i, a := range r.Requests {
 			ans, err := f.answer(a)
 			if err != nil {
 				return strings.Join(text, "\n"), fmt.Errorf("%s: request %d of %d, on %s, failed: %w", name, i+1, len(r.Requests), a.Port, err)
 			}
+			f.mu.Lock()
 			f.asked = append(f.asked, a)
+			f.mu.Unlock()
 			answers = append(answers, ans)
 		}
 		if r.Then == nil {
@@ -127,7 +151,9 @@ func (f *Fake) Call(name string, args ...string) (string, error) {
 }
 
 func (f *Fake) answer(a index.Ask) (any, error) {
+	f.mu.Lock()
 	ans, ok := f.answers[a.Port]
+	f.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("request port %s has no answer: hand it one with Answer", a.Port)
 	}
@@ -142,10 +168,18 @@ func (f *Fake) answer(a index.Ask) (any, error) {
 }
 
 // Lines answers the progress lines every command run so far said, in order.
-func (f *Fake) Lines() []string { return append([]string{}, f.lines...) }
+func (f *Fake) Lines() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string{}, f.lines...)
+}
 
 // Requests answers the requests the component made and that were answered, in order.
-func (f *Fake) Requests() []index.Ask { return append([]index.Ask{}, f.asked...) }
+func (f *Fake) Requests() []index.Ask {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]index.Ask{}, f.asked...)
+}
 
 // Out answers what the component committed to an output, or its built-in value while it committed nothing.
 func (f *Fake) Out(port string) (index.Value, error) { return f.OutAt(port, "") }
@@ -160,7 +194,10 @@ func (f *Fake) OutAt(port, key string) (index.Value, error) {
 	case p.Family != (key != ""):
 		return index.Value{}, fmt.Errorf("output %s of component %s: a family is read at a key, and only a family", port, f.c.Name())
 	}
-	if v, ok := f.out[at(port, key)]; ok {
+	f.mu.Lock()
+	v, ok := f.out[at(port, key)]
+	f.mu.Unlock()
+	if ok {
 		return index.Value{V: v, Provided: true}, nil
 	}
 	return index.Value{V: p.Builtin}, nil
@@ -175,7 +212,10 @@ func at(port, key string) string {
 }
 
 func (f *Fake) read(port string) any {
-	if v, ok := f.seeded[port]; ok {
+	f.mu.Lock()
+	v, ok := f.seeded[port]
+	f.mu.Unlock()
+	if ok {
 		return v
 	}
 	if p, ok := f.inputs[port]; ok {

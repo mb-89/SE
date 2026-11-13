@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/mb-89/kern/bus"
 	"github.com/mb-89/kern/index"
@@ -28,13 +30,53 @@ type contractCase struct {
 	Answers map[string][]answer        `json:"answers"`
 	Derive  string                     `json:"derive"`
 	Run     []string                   `json:"run"`
+	// Overlap runs its calls at once, each with its own caller.
+	Overlap [][]string `json:"overlap"`
 	Want    struct {
 		Text     *string           `json:"text"`
 		Lines    []string          `json:"lines"`
 		Error    []string          `json:"error"`
 		Requests []request         `json:"requests"`
 		Outputs  map[string]output `json:"outputs"`
+		// Calls is what each call of Overlap answers its own caller, in Overlap's order.
+		Calls []called `json:"calls"`
 	} `json:"want"`
+}
+
+// called is what one call answers its own caller: its text and the lines it heard.
+type called struct {
+	Text  string   `json:"text"`
+	Lines []string `json:"lines"`
+	Error string   `json:"error,omitempty"`
+}
+
+// overlapping runs each call at once, each in its own goroutine, and answers
+// what each heard, in order; call runs one and hands say the lines it hears.
+func overlapping(runs [][]string, call func(run []string, say func(string)) (string, error)) []called {
+	got := make([]called, len(runs))
+	var wg sync.WaitGroup
+	for i, run := range runs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			lines := []string{}
+			text, err := call(run, func(l string) { lines = append(lines, l) })
+			got[i] = called{Text: text, Lines: lines}
+			if err != nil {
+				got[i] = called{Error: err.Error(), Lines: lines}
+			}
+		}()
+	}
+	wg.Wait()
+	return got
+}
+
+// judgeCalls holds what each overlapping call heard to the case's want.
+func (c contractCase) judgeCalls(t *testing.T, got []called) {
+	t.Helper()
+	if !reflect.DeepEqual(got, c.Want.Calls) {
+		t.Errorf("the overlapping calls answer %+v, and want %+v", got, c.Want.Calls)
+	}
 }
 
 type answer struct {
@@ -166,6 +208,12 @@ func TestTheGoFakeKeepsTheContract(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if len(c.Overlap) > 0 {
+				c.judgeCalls(t, overlapping(c.Overlap, func(run []string, say func(string)) (string, error) {
+					return f.CallSaying(run[0], say, run[1:]...)
+				}))
+				return
+			}
 			var text string
 			if c.Derive != "" {
 				err = f.Derive(c.Derive)
@@ -255,11 +303,66 @@ func goTally() *index.Component {
 			func(tallyIn, []string) (index.Result, error) {
 				return index.Result{Writes: []index.Write{{Port: "nowhere", Value: "x"}}}, nil
 			}),
+		index.Command(cmd("tally meet", "tally meet NAME", "Meet another call of this command.", "Says that NAME waits, waits up to 10 s for another call of tally meet to arrive, then answers whom it met.", false),
+			func(_ tallyIn, args []string) (index.Result, error) {
+				name := args[0]
+				other, err := meet(name)
+				lines := []string{"Phase: " + name + " waits"}
+				if err != nil {
+					return index.Result{Lines: lines}, err
+				}
+				return index.Result{Text: name + " met " + other, Lines: append(lines, "Phase: "+name+" met "+other)}, nil
+			}),
 		index.Command(cmd("tally wrong", "tally wrong", "Write a number to the note.", "The core refuses it: the note is a string.", false),
 			func(tallyIn, []string) (index.Result, error) {
 				return index.Result{Writes: []index.Write{{Port: "note", Value: 7}}}, nil
 			}),
 	)
+}
+
+// meetWait is how long tally meet waits for another call: calls that ran one
+// after the other never meet.
+const meetWait = 10 * time.Second
+
+// meeting is tally meet's: the call waiting for another, its name and where the other's goes.
+var meeting struct {
+	sync.Mutex
+	waiting *met
+}
+
+type met struct {
+	name   string
+	other  string
+	arrive chan struct{}
+}
+
+// meet answers the name of the other call of tally meet once both run.
+func meet(name string) (string, error) {
+	meeting.Lock()
+	if w := meeting.waiting; w != nil {
+		meeting.waiting = nil
+		w.other = name
+		close(w.arrive)
+		meeting.Unlock()
+		return w.name, nil
+	}
+	w := &met{name: name, arrive: make(chan struct{})}
+	meeting.waiting = w
+	meeting.Unlock()
+	select {
+	case <-w.arrive:
+		return w.other, nil
+	case <-time.After(meetWait):
+	}
+	meeting.Lock()
+	defer meeting.Unlock()
+	select {
+	case <-w.arrive:
+		return w.other, nil
+	default:
+		meeting.waiting = nil
+		return "", fmt.Errorf("no other call of tally meet ran beside %s within %v", name, meetWait)
+	}
 }
 
 // The Go fixture and tally's component.toml declare one component: a drift

@@ -46,7 +46,7 @@
   ([kern/README.md "Tests"](kern/README.md#tests)).
 - SE's Go components under `components/`: `cd components && go vet ./... && go test ./...`, declared
   beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet
-  and retro components to the Python paths ([components/README.md](components/README.md#tests)).
+  and retro-due components to the Python paths ([components/README.md](components/README.md#tests)).
 - Complete: `uv run pytest -q` and kern's tests, declared with their time budgets in `se.toml`
   `[tests]`; `integrate` runs both against them, and `work_tickets.py suite --worktree <checkout>`
   runs them the same way ([README "Test budget"](README.md#test-budget)).

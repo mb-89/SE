@@ -1,5 +1,5 @@
 """The Python SDK's half of streaming (docs/go-core.md "Progress and long calls"): a step's lines go
-out at once on ``say.<i>``, and while a step runs the runner beats there and on ``lease.<i>``, so the
+out at once on ``say.<i>.<call>``, and while a step runs the runner beats there and on ``lease.<i>``, so the
 core waits for a long step as long as the process lives. ``contract/stream_test.go`` runs the same
 runner against the real core."""
 
@@ -67,15 +67,16 @@ def test_a_step_says_its_lines_at_once_and_beats_while_it_runs(tmp_path: Path, m
     answer = run._step("drip talk", {"call": "7", "step": 1, "args": []})
 
     assert answer["text"] == "done" and "lines" not in answer, answer
-    said = [body for subject, body in peer.sent if subject == "say.drip"]
+    said = [body for subject, body in peer.sent if subject == "say.drip.7"]
     assert [b["line"] for b in said if "line" in b] == ["one", "two"]
-    assert all(b["call"] == "7" for b in said)
+    assert not [s for s, _ in peer.sent if s.startswith("say.") and s != "say.drip.7"], \
+        "a step says its words on its own call's subject alone"
     beats = [b for b in said if "line" not in b]
-    assert beats, "the runner beats on say.drip while the step runs"
+    assert beats, "the runner beats on say.drip.7 while the step runs"
     leases = [subject for subject, _ in peer.sent if subject == "lease.drip"]
     assert len(leases) == len(beats), "each beat also renews the lease"
     two = next(i for i, (s, b) in enumerate(peer.sent) if b.get("line") == "two")
-    assert any(s == "say.drip" and "line" not in b for s, b in peer.sent[:two]), \
+    assert any(s == "say.drip.7" and "line" not in b for s, b in peer.sent[:two]), \
         "a beat comes between the lines, while the step sleeps"
     before = len(peer.sent)
     time.sleep(0.3)

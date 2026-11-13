@@ -107,7 +107,7 @@ a refusal of the server itself.
 | user | may publish | may subscribe |
 |---|---|---|
 | `core` | everything | everything |
-| a component instance `<i>` | `commit.<i>`, `lease.<i>`, `in.<i>`, `say.<i>`, `get.>`, `call.>` | `run.<i>`, `cmd.<i>.>`, `io.<i>.>` for an I/O component, `val.>`, its own inbox |
+| a component instance `<i>` | `commit.<i>`, `lease.<i>`, `in.<i>`, `say.<i>.>`, `get.>`, `call.>` | `run.<i>`, `cmd.<i>.>`, `io.<i>.>` for an I/O component, `val.>`, its own inbox |
 | `client` (commands, hooks) | `call.>`, `get.>`, `hook.>` | `val.>`, its own inbox |
 
 Each user hears the replies to its own asks on its own inbox, `_INBOX.<user in hex>.>` (the
@@ -192,7 +192,7 @@ in step 4, [kern/README.md](../kern/README.md#a-component-in-python)).
 | `commit.<i>` | request: writes and requests; answer accepted or refused with the reason | the instance, the core |
 | `cmd.<i>.<command>` | request: arguments and the revision; answer a result: text, writes, requests | the core, the instance |
 | `call.<command>` | request with a reply inbox, and a progress subject in it where the caller streams: each line and a beat there, then the result | a client, the core |
-| `say.<i>` | publish: a progress line, or a beat, of the step of one call the instance runs | the instance, the core |
+| `say.<i>.<call>` | publish: a progress line, or a beat, of the step of one call the instance runs | the instance, the core |
 | `io.<i>.<verb>` | request: one request going out | the core alone, the I/O component |
 | `hook.<event>` | request: a host's hook event; answer the effects | the hook client, the core |
 | `lease.<i>` | publish: a heartbeat from the work loop | any part, the core |
@@ -215,10 +215,13 @@ lives, not a fixed time:
   it and `{"beat": true}` every `CallBeat` (5 s) while the call runs, then answers on the reply as
   before, every line included. The caller waits out silence (the Python SDK's `Peer.call`, `idle`),
   never the call's length.
-- **A declared step says its lines live.** The Python runner publishes each line on `say.<i>`,
-  `{"call", "line"}`, as the command says it, and while a step runs it beats there, `{"call"}`, and
-  on `lease.<i>` every 5 s. The core reads `say.<i>` and the step's answer on one channel, so the
-  lines come before the answer, in order.
+- **A declared step says its lines live.** The Python runner publishes each line on
+  `say.<i>.<call>`, `{"line"}`, as the command says it, and while a step runs it beats there, `{}`,
+  and on `lease.<i>` every 5 s. The core reads its call's `say.<i>.<call>` and the step's answer
+  on one channel, so the lines come before the answer, in order.
+- **Calls run side by side.** The core runs each call in its own goroutine, and the Python runner
+  each step in its own thread, so a long call never holds another of the same component. Each
+  call's words ride its own subject, so each caller hears only its own call's lines.
 - **The step wait counts silence.** `StepWait` (60 s, `KERN_STEP_WAIT` for a served core) is the
   longest the core waits for word from a step: its answer, a line or a beat. A step that beats runs
   as long as its process does; a process that hangs or dies fails its step after 60 s of silence.
@@ -228,8 +231,9 @@ lives, not a fixed time:
 
 Proven by `kern/host/stream_test.go` (lines and beats before the answer, a foreign subject
 refused), `kern/contract/stream_test.go` (the real core and a Python step that outlives a 1 s step
-wait by talking, and one that fails it by staying silent) and
-`kern/python/tests/test_kern_stream.py` (the runner's live lines and beats).
+wait by talking, and one that fails it by staying silent),
+`kern/python/tests/test_kern_stream.py` (the runner's live lines and beats) and the contract case
+of two overlapping calls (`kern/contract/cases.json`), against both fakes and the real core.
 
 ### How a component in another language attaches
 
@@ -242,7 +246,8 @@ A component in any language with a NATS client attaches the same way:
    LF, and the attach names the contract version too, `contract: 1`, as the standing file and the
    health do (settled in step 4).
 3. It subscribes to `run.<i>` and `cmd.<i>.>`, reads `in.<i>` on each run, answers with
-   `commit.<i>`, and beats on `lease.<i>` from its own loop; a step says its lines on `say.<i>`
+   `commit.<i>`, and beats on `lease.<i>` from its own loop; a step says its lines on
+   `say.<i>.<call>`
    ([Progress and long calls](#progress-and-long-calls)).
 
 Python comes first, with a standard-library SDK in the core's repository (`python/kern/`): the
@@ -584,7 +589,7 @@ no core answers, every hook and command falls back to today's path. Each step is
 |---|---|---|---|
 | `work_tickets.py` | attaches as Python components, one per group (tickets, issues, delivery, integration), at step 8; the CLI keeps its words | its GitHub reads and writes go through the GitHub component (step 9); `queue`, `status` and `ready` port to Go when the greeting needs them | writing the field report, judging a delivery, the dispatcher's choices |
 | `review.py` | Python component (`brief`, `file`) at step 8 | stays Python | the reviewer's find, verify and judge |
-| `retro.py` | Python component at step 8; done, `components/retrospective/` (`retro` is the Go retro-due component) | `retro due` ports to Go (step 10): the greeting reads it; done, SE's `retro` component ([components/README.md](../components/README.md)) | the retro's judgment |
+| `retro.py` | Python component at step 8; done, `components/retro/` | `retro due` ports to Go (step 10): the greeting reads it; done, SE's `retro-due` component ([components/README.md](../components/README.md)) | the retro's judgment |
 | `overhaul.py` | Python component at step 8; done, `components/overhaul/` | stays Python: its facts are Python's AST | whether the design is still right |
 | `fleet-check` | Python component at step 8 | ports to Go (step 10): a derivation over the GitHub names, pushed to the greeting and the integrator; done, SE's `fleet` component, which the greeting and `fleet-check` read live ([components/README.md](../components/README.md)) | which remedy to apply |
 | `stop-check` | the Stop hook calls it as today | ports to Go (step 11): answered from the delivery names within the hook | none |

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -214,6 +215,53 @@ func (c *core) answerAs(t *testing.T, answers []answer) {
 	}
 }
 
+// call asks call.<command> as a streaming caller: it hands say each line on its
+// own progress subject, holds the answer's lines to them and answers its text.
+func (c *core) call(t *testing.T, run []string, say func(string)) (string, error) {
+	inbox := c.client.NewInbox()
+	progress, reply := inbox+".progress", inbox+".reply"
+	heard := make(chan *nats.Msg, 64)
+	for _, subj := range []string{progress, reply} {
+		sub, err := c.client.ChanSubscribe(subj, heard)
+		if err != nil {
+			return "", err
+		}
+		defer func() { _ = sub.Unsubscribe() }()
+	}
+	body, _ := json.Marshal(map[string]any{"args": run[1:], "progress": progress})
+	if err := c.client.PublishRequest(bus.Call+bus.Token(run[0]), reply, body); err != nil {
+		return "", err
+	}
+	var streamed []string
+	deadline := time.After(30 * time.Second)
+	for {
+		select {
+		case m := <-heard:
+			if m.Subject == progress {
+				var p host.Progress
+				if json.Unmarshal(m.Data, &p) == nil && !p.Beat {
+					streamed = append(streamed, p.Line)
+					say(p.Line)
+				}
+				continue
+			}
+			var a host.CallAnswer
+			if err := json.Unmarshal(m.Data, &a); err != nil {
+				return "", err
+			}
+			if a.Error != "" {
+				return a.Text, errors.New(a.Error)
+			}
+			if !reflect.DeepEqual(append([]string{}, a.Lines...), append([]string{}, streamed...)) {
+				return a.Text, fmt.Errorf("the answer's lines %q are not the ones streamed to the caller, %q", a.Lines, streamed)
+			}
+			return a.Text, nil
+		case <-deadline:
+			return "", fmt.Errorf("call.%s answers nothing within 30 s", bus.Token(run[0]))
+		}
+	}
+}
+
 func (c *core) get(t *testing.T, name string) host.NameValue {
 	t.Helper()
 	m, err := c.client.Request(bus.Get+bus.Subject(name), nil, 10*time.Second)
@@ -257,6 +305,12 @@ func TestTheRealCoreKeepsTheContract(t *testing.T) {
 				if !a.Accepted {
 					t.Fatalf("the seed is refused: %s", a.Refused)
 				}
+			}
+			if len(cs.Overlap) > 0 {
+				cs.judgeCalls(t, overlapping(cs.Overlap, func(run []string, say func(string)) (string, error) {
+					return c.call(t, run, say)
+				}))
+				return
 			}
 			var text string
 			var lines []string

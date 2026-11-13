@@ -1,7 +1,7 @@
 // Package snap reads the GitHub snapshot names kern's GitHub component writes
 // (kern/components/github), whichever backend read them: GitHub's REST JSON
 // through the token, the session's tool JSON through the relay. It is SE's
-// one reader of a snapshot's fields, so the fleet and retro components read
+// one reader of a snapshot's fields, so the fleet and retro-due components read
 // an issue and a pull request the same way, and as SE's Python reads them
 // (scripts/work_tickets.py fleet_issue and fleet_pull, scripts/retro.py
 // issue_of and pull_of).

@@ -28,7 +28,7 @@ def test_a_python_component_declares_reads_commits_and_answers_a_command() -> No
     # Declare: the declaration the core reads, and the hash the process attaches with.
     tally = runner.load(TALLY)
     assert tally.decl.derivations() == ["total"]
-    assert sorted(tally.decl.commands) == ["tally file", "tally note", "tally stray", "tally wrong"]
+    assert sorted(tally.decl.commands) == ["tally file", "tally meet", "tally note", "tally stray", "tally wrong"]
     assert tally.decl.hash.startswith("sha256:") and CONTRACT == 1
 
     fake = Fake(tally)

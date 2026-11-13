@@ -6,7 +6,7 @@ kern's Python SDK (`kern/python/kern`, standard library only). Where no core run
 answer within the wait, the reader answers None, and every caller falls back to its own path:
 the greeting to its cached work check, `fleet-check` to its own reads.
 
-SE's components that write the names the greeting reads, `fleet/findings` and `retro/due`, are
+SE's components that write the names the greeting reads, `fleet/findings` and `retro-due/due`, are
 SE's Go components (components/README.md).
 """
 
@@ -20,7 +20,7 @@ SE_ROOT = Path(__file__).resolve().parents[1]
 STANDING = Path(".se") / ".runtime" / "standing.json"
 WAIT = 0.3  # seconds for the connection and for each name: the greeting keeps its 1 s budget
 FLEET = "fleet/findings"
-RETRO = "retro/due"
+RETRO = "retro-due/due"
 
 
 def read(root: Path | None, names: list[str], wait: float = WAIT) -> dict[str, object] | None:
