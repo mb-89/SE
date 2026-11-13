@@ -421,3 +421,139 @@ def test_check_ignore_and_add_follow_the_root_gitignore(door, tmp_path: Path) ->
         assert git_door.run("check-ignore", "-q", name, root=root).returncode == 1, name
     git(root, "add", "-A")
     assert git_door.run("ls-files", "-z", root=root).stdout.split("\0") == [".gitignore", "build.txt", "src/x.py", ""]
+
+
+# What `integrate`, `sync` and `start` ask of git (tests/test_work_ticket_issues.py)
+
+
+def test_log_and_rev_list_leave_out_excluded_revisions_and_merges(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    base = commit(root, {"a.txt": "a\n"}, "base")
+    git(root, "switch", "-q", "-c", "side")
+    side = commit(root, {"b.txt": "b\n"}, "side work")
+    git(root, "switch", "-q", "main")
+    ahead = commit(root, {"c.txt": "c\n"}, "main work")
+    git(root, "switch", "-q", "side")
+    git(root, "merge", "-q", "--no-edit", "main")
+    merge = git(root, "rev-parse", "HEAD")
+    late = commit(root, {"d.txt": "d\n"}, "late work")
+    assert git(root, "log", "--no-merges", "--format=%h %s", "side", f"^{side}", "^main").splitlines() == [
+        f"{late[:7]} late work"]
+    assert git(root, "log", "--format=%s", f"{side}..side").splitlines()[-1] == "main work"
+    assert set(git(root, "rev-list", f"{base}..side").split()) == {side, ahead, merge, late}
+    parents = dict(line.split(" ", 1) for line in git(root, "rev-list", "--parents", "-1", merge).splitlines())
+    assert set(parents[merge].split()) == {side, ahead}
+    assert git(root, "rev-list", "--first-parent", "--reverse", "side").split() == [base, side, merge, late]
+    assert git_door.run("log", "-1", "--format=%H%x00%s%x1e", late, root=root).stdout == f"{late}\0late work\x1e\n"
+    shown = git(root, "show", "-s", "--format=%B%x00%an%x00%ce", late).split("\0")
+    assert [shown[0].strip(), *shown[1:]] == ["late work", IDENTITY[0], IDENTITY[1]]
+
+
+def test_merge_base_of_several_commits_and_a_fast_forward_only_merge(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    base = commit(root, {"a.txt": "a\n"})
+    git(root, "branch", "one")
+    git(root, "branch", "stale", base)
+    middle = commit(root, {"b.txt": "b\n"})
+    git(root, "switch", "-q", "-c", "two")
+    commit(root, {"c.txt": "c\n"})
+    git(root, "switch", "-q", "main")
+    tip = commit(root, {"d.txt": "d\n"})
+    assert git(root, "merge-base", "HEAD", "one") == base
+    assert git(root, "merge-base", "HEAD", "one", "two") == middle, "the base of HEAD and a merge of both"
+    assert git(root, "rev-parse", "stale") == base
+    assert git_door.run("branch", "stale", root=root).returncode != 0, "it exists"
+    git(root, "switch", "-q", "one")
+    assert git_door.run("merge", "-q", "--ff-only", "two", root=root).returncode == 0
+    assert git_door.run("merge", "-q", "--ff-only", tip, root=root).returncode != 0, "diverged"
+    assert git(root, "rev-parse", "HEAD") == git(root, "rev-parse", "two")
+
+
+def test_a_merge_keeps_an_uncommitted_change_it_does_not_touch_and_refuses_one_it_does(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    commit(root, {"a.txt": "a\n", "b.txt": "b\n"})
+    git(root, "switch", "-q", "-c", "side")
+    side = commit(root, {"a.txt": "a2\n"})
+    git(root, "switch", "-q", "main")
+    (root / "b.txt").write_text("local\n", encoding="utf-8")
+    git(root, "merge", "-q", "--ff-only", side)
+    assert (root / "a.txt").read_text(encoding="utf-8") == "a2\n"
+    assert (root / "b.txt").read_text(encoding="utf-8") == "local\n"
+    git(root, "checkout", "HEAD", "--", "b.txt")
+    assert (root / "b.txt").read_text(encoding="utf-8") == "b\n" and git(root, "status", "--porcelain") == ""
+    git(root, "switch", "-q", "-c", "other", "HEAD~1")
+    git(root, "switch", "-q", "-C", "other", side)
+    newer = commit(root, {"a.txt": "a3\n"})
+    git(root, "switch", "-q", "main")
+    (root / "a.txt").write_text("mine\n", encoding="utf-8")
+    assert git_door.run("merge", "-q", newer, root=root).returncode != 0
+    assert (root / "a.txt").read_text(encoding="utf-8") == "mine\n" and git(root, "rev-parse", "HEAD") == side
+
+
+def test_push_deletes_a_branch_under_a_lease_and_a_declining_remote_keeps_it(door, tmp_path: Path) -> None:
+    origin = quiet_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    root = project(tmp_path)
+    git(root, "remote", "add", "origin", str(origin))
+    first = commit(root, {"a.txt": "a\n"})
+    second = commit(root, {"a.txt": "a2\n"})
+    git(root, "push", "-q", "origin", "main", f"{first}:refs/heads/done", f"{first}:refs/heads/kept")
+    stale = git_door.run("push", f"--force-with-lease=refs/heads/done:{second}", "origin", ":refs/heads/done", root=root)
+    assert stale.returncode != 0 and git(origin, "rev-parse", "refs/heads/done") == first
+    git(root, "push", "-q", f"--force-with-lease=refs/heads/done:{first}", "origin", ":refs/heads/done")
+    assert git_door.run("show-ref", "--verify", "--quiet", "refs/heads/done", root=origin).returncode == 1
+    assert git_door.run("show-ref", "--verify", "refs/heads/done", root=origin).returncode == 128
+    assert git(origin, "show-ref", "--verify", "refs/heads/kept") == f"{first} refs/heads/kept"
+    hook = origin / "hooks" / "pre-receive"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/bin/sh\necho 'deletion refused' >&2\nexit 1\n", encoding="utf-8", newline="\n")
+    hook.chmod(0o755)
+    if isinstance(git_door.BACKEND, fake_git.FakeGit):
+        git_door.BACKEND.declining[origin.resolve()] = "deletion refused"
+    declined = git_door.run("push", "origin", ":refs/heads/kept", root=root)
+    assert declined.returncode != 0 and "pre-receive hook declined" in declined.stderr
+    assert git(origin, "rev-parse", "refs/heads/kept") == first
+
+
+def test_fetch_mirrors_the_remote_branches_with_prune_and_pull_merges_one(door, tmp_path: Path) -> None:
+    origin = quiet_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    root = project(tmp_path)
+    git(root, "remote", "add", "origin", str(origin))
+    first = commit(root, {"a.txt": "a\n"})
+    git(root, "push", "-q", "origin", "main", f"{first}:refs/heads/gone")
+    git(root, "fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*")
+    assert git(root, "rev-parse", "refs/remotes/origin/gone") == first
+    git(root, "push", "-q", "origin", ":refs/heads/gone")
+    git(root, "update-ref", "refs/remotes/origin/gone", first)
+    git(root, "fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*")
+    assert git_door.run("rev-parse", "--verify", "--quiet", "refs/remotes/origin/gone", root=root).returncode != 0
+    other = quiet_git.clone(origin, tmp_path / "other")
+    assert git_door.set_identity(other, IDENTITY) is None
+    newer = commit(other, {"b.txt": "b\n"})
+    git(other, "push", "-q", "origin", "main")
+    git(root, "pull", "-q", "--ff-only", "origin", "main")
+    assert git(root, "rev-parse", "HEAD") == newer and (root / "b.txt").is_file()
+
+
+def test_commit_tree_for_each_ref_and_plain_worktree_list(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    first = commit(root, {"a.txt": "a\n"})
+    second = commit(root, {"a.txt": "a2\n"})
+    env = git_door.identity_environment(("bob", "bob@example.com"))
+    made = git_door.run("commit-tree", f"{second}^{{tree}}", "-p", first, "-m", "Title", "-m", "Body.",
+                        root=root, env=env)
+    squash = made.stdout.strip()
+    assert made.returncode == 0 and SHA.fullmatch(squash) and git(root, "rev-parse", "HEAD") == second
+    assert git(root, "log", "-1", "--format=%P|%B|%an", squash) == f"{first}|Title\n\nBody.\n|bob"
+    assert git(root, "rev-parse", f"{squash}^{{tree}}") == git(root, "rev-parse", f"{second}^{{tree}}")
+    assert git_door.run("cat-file", "-e", f"{squash}:a.txt", root=root).returncode == 0
+    assert git_door.run("cat-file", "-e", f"{squash}:none.txt", root=root).returncode != 0
+    git(root, "update-ref", "refs/remotes/origin/feat/x", squash)
+    git(root, "update-ref", "refs/remotes/origin/main", first)
+    listed = git(root, "for-each-ref", "--format=%(refname:lstrip=3)%09%(committerdate:iso-strict)",
+                 "refs/remotes/origin/").splitlines()
+    assert [line.split("\t")[0] for line in listed] == ["feat/x", "main"]
+    assert all(datetime.fromisoformat(line.split("\t")[1]).tzinfo for line in listed)
+    git(root, "worktree", "add", "-q", "-b", "worker", str(tmp_path / "worker"))
+    lines = git(root, "worktree", "list").splitlines()
+    assert len(lines) == 2 and Path(lines[1].split()[0]).resolve() == (tmp_path / "worker").resolve()
+    assert lines[1].split()[1] == second[:len(lines[1].split()[1])] and lines[1].endswith("[worker]")
