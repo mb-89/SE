@@ -26,6 +26,7 @@ type Fake struct {
 	out      map[string]any
 	answers  map[string]Answerer
 	asked    []index.Ask
+	lines    []string
 }
 
 // New takes a component, and refuses a broken declaration as the index's start would.
@@ -98,6 +99,7 @@ func (f *Fake) Call(name string, args ...string) (string, error) {
 		if err != nil {
 			return strings.Join(text, "\n"), err
 		}
+		f.lines = append(f.lines, r.Lines...)
 		if r.Text != "" {
 			text = append(text, r.Text)
 		}
@@ -138,6 +140,9 @@ func (f *Fake) answer(a index.Ask) (any, error) {
 	}
 	return v, nil
 }
+
+// Lines answers the progress lines every command run so far said, in order.
+func (f *Fake) Lines() []string { return append([]string{}, f.lines...) }
 
 // Requests answers the requests the component made and that were answered, in order.
 func (f *Fake) Requests() []index.Ask { return append([]index.Ask{}, f.asked...) }
