@@ -4324,8 +4324,8 @@ def record_suite_verdict(root: Path, commit: str | None, passed: bool, seconds: 
 CI_VARIABLE = "GITHUB_ACTIONS"
 CI_SUITE_TITLE = "se suite time"
 CI_SUITE_MESSAGE = re.compile(r"Suite time: (\d+(?:\.\d+)?) s")
-CI_SUITE_COMMITS = 5  # first-parent commits of the integration branch searched for CI's time
-CI_SUITE_RUNS = 3  # CI's time is the median of this many runs, so one slow runner does not count
+CI_SUITE_COMMITS = 8  # first-parent commits of the integration branch searched for CI's time
+CI_SUITE_RUNS = 5  # CI's time is the median of this many runs, so one slow runner does not count
 CI_MARGIN = 0.9  # CI within 10% of the limit: a local overrun refuses
 CI_READ_SECONDS = 10
 
@@ -4368,8 +4368,9 @@ def github_read(repo: str, path: str) -> object:
 
 def ci_suite_time(root: Path) -> tuple[CiSuiteTime | None, str]:
     """CI's suite time on the integration branch: the median of the `Suite time` notices of up to
-    CI_SUITE_RUNS runs, the newest completed `check` run with one on each of its last
+    CI_SUITE_RUNS runs, the newest successful `check` run with one on each of its last
     CI_SUITE_COMMITS first-parent commits, as origin has them; it stops reading once it has them.
+    A run that failed or was cancelled is skipped: a shorter failed run's time is not CI's time.
     With an even count the slower middle run counts. None with the reason where no time can be
     read."""
     repo = remote_repo(root)
@@ -4392,7 +4393,7 @@ def ci_suite_time(root: Path) -> tuple[CiSuiteTime | None, str]:
     except (OSError, ValueError) as error:  # urllib's errors are OSErrors
         return None, f"GitHub could not be read without an account ({error})"
     if not found_times:
-        return None, (f"no completed {CHECK_NAME} run on the last {len(commits)} commits of "
+        return None, (f"no successful {CHECK_NAME} run on the last {len(commits)} commits of "
                       f"origin/{target} reports a suite time")
     median = sorted(found_times, key=lambda reading: reading.seconds)[len(found_times) // 2]
     return CiSuiteTime(median.seconds, median.commit, median.url,
@@ -4400,10 +4401,11 @@ def ci_suite_time(root: Path) -> tuple[CiSuiteTime | None, str]:
 
 
 def ci_suite_time_of(repo: str, commit: str) -> CiSuiteTime | None:
-    """The `Suite time` notice of the newest completed `check` run on `commit` that reports one."""
+    """The `Suite time` notice of the newest successful `check` run on `commit` that reports one."""
     found = github_read(repo, f"commits/{commit}/check-runs?check_name={CHECK_NAME}")
     runs = [run for run in (found.get("check_runs") or [])
-            if run.get("status") == "completed"] if isinstance(found, dict) else []
+            if run.get("status") == "completed" and run.get("conclusion") == "success"
+            ] if isinstance(found, dict) else []
     for run in sorted(runs, key=lambda run: -int(run.get("id") or 0)):
         notes = github_read(repo, f"check-runs/{run['id']}/annotations")
         for note in notes if isinstance(notes, list) else []:

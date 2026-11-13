@@ -507,9 +507,9 @@ Every other run (`integrate`, a worker's `suite`) runs the complete suite too. O
 reads CI's suite time on the integration branch through github.com's API without an account (so
 `suite` needs no `gh`; a private repository's time reads as unknown).
 
-The time it reads is the median of the last three `check` runs that report one, the newest on
-each of the last five first-parent commits, so one slow runner does not count; the run names the
-times it took the median of.
+The time it reads is the median of the last five successful `check` runs that report one, the
+newest on each of the last eight first-parent commits, so one slow runner does not count and a
+shorter failed run is never read; the run names the times it took the median of.
 
 - Under 90% of the limit: it warns with the time, the host's load and CI's time, and passes; the
   landing pull request's `check` judges the budget.
