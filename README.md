@@ -165,8 +165,9 @@ is incubated in SE, `kern/release.toml` owns its version and where its release i
 
 | measured on 13 Nov in a Claude Code cloud container, Linux amd64, 5 runs | wall time |
 |---|---|
-| SessionStart, `bootstrap.sh --hook` to the greeting, kern on the machine (without kern: 140 to 184 ms) | 191 to 269 ms |
-| the first start of a version with no release yet: the `SHA256SUMS` read, then the greeting | 571 ms |
+| SessionStart, `bootstrap.sh --hook` to the greeting, kern on the machine, 10 runs (before kern: 162 to 227 ms) | 180 to 250 ms |
+| the first start of a version, its release fetched (kern-v0.1.0): the hook; the core running | 525 to 631 ms; 1.11 to 1.21 s, 3 runs |
+| the first start of a version with no release: the hook; the core running, Go's build cache warm | 367 to 466 ms; 1.09 to 1.29 s |
 | a hook through `se_hook.sh`, the core running, by event (PostToolUse with a GitHub tool's answer) | 9.2 to 14.5 ms |
 | a hook through `se_hook.sh`, no core running | 7.8 to 10.6 ms |
 | a hook through `se_hook.sh`, no kern on the machine | 3.7 to 4.8 ms |
