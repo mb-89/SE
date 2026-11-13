@@ -25,7 +25,7 @@ import pytest
 import quiet_git
 
 ROOT = Path(__file__).resolve().parents[1]
-GROUPS = ["delivery", "integration", "issues", "tickets"]  # SE's Python command groups, each placed
+GROUPS = ["delivery", "integration", "issues", "review", "tickets"]  # SE's Python command groups, each placed
 GO = ["fleet", "github", "origin", "retro"]  # SE's Go components, in the se binary (components/README.md)
 
 

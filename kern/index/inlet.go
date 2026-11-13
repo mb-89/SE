@@ -42,6 +42,23 @@ func (p hearsPart) declare(c *Component) {
 // host gave it. Its outside thing is what the host reports.
 func Hears(fn func(instance, event string, payload []byte) error) Part { return hearsPart{fn} }
 
+type tellsPart struct {
+	fn func(instance, event string, payload []byte) string
+}
+
+func (p tellsPart) declare(c *Component) {
+	if c.tells != nil {
+		c.fail("component %s tells the agent twice", c.name)
+	}
+	c.tells = p.fn
+}
+
+// Tells declares that an I/O component has a word for the agent on the host's
+// events: after the event is heard, fn answers the text the hook hands the
+// agent as context, or "" for none. The GitHub component tells the steps its
+// relay waits for.
+func Tells(fn func(instance, event string, payload []byte) string) Part { return tellsPart{fn} }
+
 // inlets hands each switched-on instance whose component declares an inlet its commit.
 func (ix *Index) inlets() error {
 	var errs []error
@@ -72,4 +89,20 @@ func (ix *Index) Hear(event string, payload []byte) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// Tell answers what every switched-on instance whose component tells the
+// agent has to say on a host's event, in the instances' order, each word on
+// its own; an instance with nothing to say adds none.
+func (ix *Index) Tell(event string, payload []byte) []string {
+	var said []string
+	for _, in := range ix.order {
+		if !in.enabled || in.comp.tells == nil {
+			continue
+		}
+		if text := in.comp.tells(in.name, event, payload); text != "" {
+			said = append(said, text)
+		}
+	}
+	return said
 }
