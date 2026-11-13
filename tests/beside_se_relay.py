@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import quiet_git
+import fake_git
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -56,7 +56,7 @@ def run(*args: str, cwd: Path, stdin: str | None = None) -> subprocess.Completed
 
 
 def test_a_posttooluse_hook_lands_a_snapshot_the_relay_read_writes_to_a_file(
-        tmp_path: Path, monkeypatch) -> None:
+        tmp_path: Path, monkeypatch, shared_fake_git) -> None:
     monkeypatch.delenv(se_relay.se_components.SWITCH, raising=False)  # the suite sets SE_KERN=off
     kern = tmp_path / ("kern.exe" if os.name == "nt" else "kern")
     built = run("go", "build", "-o", str(kern), "./cmd/kern", cwd=ROOT / "kern")
@@ -128,7 +128,7 @@ def answer(tool: str, input_: dict) -> object:
 
 @pytest.mark.parametrize("copy", ["checkout", "plugin"])
 def test_a_streamed_command_runs_as_one_call_its_steps_through_the_relay(
-        tmp_path: Path, copy: str) -> None:
+        tmp_path: Path, copy: str, shared_fake_git) -> None:
     """The acceptance's mechanism against the real core: a streamed command (fleet-check) runs as
     one call through kern's `call.`, from SE's own command line in the checkout kern serves or
     from the plugin's copy of SE, the path the skills name, run in that checkout; the integration
@@ -140,7 +140,7 @@ def test_a_streamed_command_runs_as_one_call_its_steps_through_the_relay(
     kern = tmp_path / ("se-binary.exe" if os.name == "nt" else "se-binary")
     built = run("go", "build", "-o", str(kern), "./cmd/se", cwd=ROOT / "components")
     assert built.returncode == 0, built.stderr
-    checkout = quiet_git.init(tmp_path / "se")  # a repository: SE's origin component reads its refs
+    checkout = fake_git.init(tmp_path / "se")  # a repository: SE's origin component reads its refs
     for part in ("components", "scripts", "kern"):
         try:
             (checkout / part).symlink_to(ROOT / part, target_is_directory=True)
@@ -158,8 +158,8 @@ def test_a_streamed_command_runs_as_one_call_its_steps_through_the_relay(
     env = {**os.environ, "UV_SYSTEM_CERTS": "1", "PATH": f"{nogh}{os.pathsep}{os.environ['PATH']}"}
     env.pop("SE_KERN", None)
     origin, worktree = tmp_path / "origin.git", tmp_path / "wt"  # the branches it reads
-    quiet_git.init(origin, "--bare", "-b", "main")
-    quiet_git.clone(origin, worktree)
+    fake_git.init(origin, "--bare", "-b", "main")
+    fake_git.clone(origin, worktree)
     se = checkout
     if copy == "plugin":  # a copy of SE's scripts of its own, as the plugin's clone holds them
         se = tmp_path / "plugin"

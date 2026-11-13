@@ -8,12 +8,20 @@ refuses real git behind this door to any test outside `tests/conftest.py`'s `REA
 subprocess outside this module fails `tests/test_repository.py`'s guard.
 
 The door adds nothing to what git is asked: each caller keeps its own error type and message.
+
+`SE_GIT_DOOR` picks the backend of a process the door starts in (`from_environment`), so a test
+reaches the child processes it starts too: unset or `real`, the git on PATH; `fake:<state file>`,
+the fake behind that file (tests/fake_git.py `StateFile`, whose format kern's Go door reads as
+well); `refused`, which stops the process at its first git command, naming it.
 """
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import subprocess
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -58,7 +66,54 @@ class RealGit:
         return subprocess.Popen(["git", *argv], env=self.environment(env), **options)
 
 
-BACKEND: Backend = RealGit()
+VARIABLE = "SE_GIT_DOOR"
+
+
+class RefusedGit:
+    """A child process's backend under `SE_GIT_DOOR=refused`: its first git command ends it,
+    naming the command and the remedy (a test that starts it gives it the fake)."""
+
+    def refuse(self, argv: list[str]):
+        raise SystemExit(f"git door: {VARIABLE}=refused, so this process may not run git "
+                         f"(git {' '.join(argv)}); the test that started it sets {VARIABLE}=fake:<state file> "
+                         "(the shared_fake_git fixture, tests/conftest.py)")
+
+    def run(self, argv: list[str], **_) -> subprocess.CompletedProcess[bytes]:
+        self.refuse(argv)
+
+    def popen(self, argv: list[str], **_) -> subprocess.Popen:
+        self.refuse(argv)
+
+
+def from_environment(environment: dict[str, str] | os._Environ = os.environ) -> Backend:
+    """The backend `SE_GIT_DOOR` names (the module docstring); any other value is refused."""
+    value = environment.get(VARIABLE, "")
+    kind, _, where = value.partition(":")
+    if value in ("", "real"):
+        return RealGit()
+    if value == "refused":
+        return RefusedGit()
+    if kind == "fake" and where:
+        return fake_backend(Path(where))
+    raise SystemExit(f"git door: {VARIABLE}={value!r} is none of real, refused or fake:<state file>")
+
+
+def fake_backend(state: Path) -> Backend:
+    """The fake behind `state`, from the tests/fake_git.py that wrote it (only a test sets the
+    variable; the door that reads it may be a copy of SE without tests, as the plugin's is)."""
+    fake_git = sys.modules.get("fake_git")
+    if fake_git is None:
+        if not state.is_file():
+            raise SystemExit(f"git door: {VARIABLE} names the state file {state}, which does not exist")
+        module = Path(json.loads(state.read_text(encoding="utf-8"))["fake"])
+        spec = importlib.util.spec_from_file_location("fake_git", module)
+        fake_git = importlib.util.module_from_spec(spec)
+        sys.modules["fake_git"] = fake_git
+        spec.loader.exec_module(fake_git)
+    return fake_git.StateFile(state)
+
+
+BACKEND: Backend = from_environment()
 
 
 @contextmanager

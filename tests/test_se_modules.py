@@ -1,4 +1,4 @@
-"""Tests for scripts/se_modules.py with real temporary git repositories (no network)."""
+"""Tests for scripts/se_modules.py on the fake git behind one state file, shared with the scripts it runs (no network)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ import sys
 from pathlib import Path
 
 import pytest
-import quiet_git
+import fake_git
+
+# Its git, and that of every script and binary it starts, is the fake behind one state file.
+pytestmark = pytest.mark.usefixtures("shared_fake_git")
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "se_modules.py"
@@ -205,7 +208,7 @@ def test_resolve_pinned_applies_url_rewrite(tmp_path):
     assert source.url == "https://mirror.example.net/team/lib.git"
 
 
-# Requirement 3: sync, status, update, path with real temporary git repositories.
+# Requirement 3: sync, status, update, path on the fake git's temporary repositories.
 
 
 @pytest.fixture(autouse=True)
@@ -239,7 +242,7 @@ def commit(repo: Path, message: str, files: dict[str, str]) -> str:
 
 def make_upstream(path: Path, count: int = 3) -> list[str]:
     path.mkdir(parents=True)
-    quiet_git.init(path, "-b", "main")
+    fake_git.init(path, "-b", "main")
     return [commit(path, f"change {i}", {"version.txt": f"{i}\n", "sub/file.txt": f"sub {i}\n"}) for i in range(1, count + 1)]
 
 
@@ -433,7 +436,7 @@ def test_status_of_a_missing_local_path(world, capsys):
 
 def test_status_shows_drift_of_a_local_path(world, capsys, tmp_path):
     checkout = tmp_path / "checkout"
-    quiet_git.clone(world.upstream.as_posix(), checkout)
+    fake_git.clone(world.upstream.as_posix(), checkout)
     write(world.local, f'[paths]\nlib = "{checkout.as_posix()}"\n')
 
     code, out = run(world, capsys, "status")

@@ -54,15 +54,17 @@
 - Repository hygiene: `tests/test_repository.py` fails on a tracked binary file, a tracked file over
   200 KB, or a `TODO`/`FIXME` in `scripts/` or `tests/` naming no issue; a file that must break the
   first two goes in its allow list there, with its reason.
-  - It also fails on a git `init` or `clone` in `tests/` outside `tests/quiet_git.py`, whose `init`
-    and `clone` switch the repository's background maintenance off.
-  - And on a git subprocess outside `scripts/git_door.py`, git's one door, in scripts, tests, kern
-    and the components; a test that needs git uses the door's fake (`fake_git_door` fixture,
-    `tests/fake_git.py`), which `tests/test_git_door.py` holds to real git. Today's other git
-    subprocesses sit on its allow list, which may only shrink.
+  - It also fails on a git subprocess outside `scripts/git_door.py`, git's one door, in scripts,
+    tests, kern and the components; a test that needs git uses the door's fake (`fake_git_door`
+    fixture, `tests/fake_git.py`), which `tests/test_git_door.py` holds to real git. Today's other
+    git subprocesses sit on its allow list, which may only shrink.
+  - A test whose scripts or kern binaries run as child processes takes `shared_fake_git`: the
+    fake behind a state file that `SE_GIT_DOOR=fake:<file>` names to both doors
+    (`scripts/git_door.py`, `kern/git`).
   - Behind the door, `tests/conftest.py` refuses real git to every test outside its `REAL_GIT`
-    list: the contract suite and the files still to move, a list that may only shrink. A test
-    that reaches real git without the fake fails, naming the command.
+    list, and to the child processes it starts: the contract suite and the files still to move, a
+    list that may only shrink. A test that reaches real git without the fake fails, naming the
+    command.
 - Dangling references: `tests/test_references.py` fails where the agents, the skills (the rule
   book among them), README.md or AGENTS.md name what the repository lacks.
   - A link to a missing file, a missing repository path in code (`scripts/…`, `src/…`, `tests/…`,

@@ -22,7 +22,8 @@ from pathlib import Path
 
 import pytest
 
-import quiet_git
+import fake_git
+import git_door
 
 ROOT = Path(__file__).resolve().parents[1]
 GROUPS = ["delivery", "integration", "issues", "overhaul", "render", "retro", "review",
@@ -36,13 +37,14 @@ def run(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.
 
 
 @pytest.fixture
-def checkout(tmp_path: Path) -> Path:
+def checkout(tmp_path: Path, shared_fake_git) -> Path:
     """A checkout of its own for the core, SE's components, scripts and SDK linked into it, so the
-    core's files and its lease never touch this checkout's own kern. It is a real git repository so
+    core's files and its lease never touch this checkout's own kern. It is a git repository so
     the origin component reads its refs (the bare core refuses a wiring with a component it lacks;
-    the se binary carries fleet, github, origin and retro-due)."""
+    the se binary carries fleet, github, origin and retro-due): the fake the test shares with the
+    core it starts (`shared_fake_git`)."""
     root = tmp_path / "se"
-    quiet_git.init(root, "-b", "main")
+    fake_git.init(root, "-b", "main")
     for part in ("components", "scripts", "kern"):
         try:
             (root / part).symlink_to(ROOT / part, target_is_directory=True)
@@ -102,11 +104,11 @@ def test_kern_lists_ses_components_and_a_command_answers_through_it_and_without_
 def worker_checkout(root: Path) -> Path:
     """A worker's checkout on its branch, its ticket queue for a work issue."""
     root.mkdir(parents=True)
-    quiet_git.init(root, "-b", "main")
+    fake_git.init(root, "-b", "main")
     for args in (("config", "user.name", "Worker test"),
                  ("config", "user.email", "worker-test@example.invalid"), ("commit", "-q",
                  "--allow-empty", "-m", "baseline"), ("checkout", "-q", "-b", "feat/example-20261113")):
-        assert run("git", *args, cwd=root).returncode == 0
+        assert git_door.run(*args, root=root).returncode == 0
     (root / ".se" / "work").mkdir(parents=True)
     (root / ".se" / "work" / "body-read.json").write_text('{"sha256": "0"}\n', encoding="utf-8")
     return root

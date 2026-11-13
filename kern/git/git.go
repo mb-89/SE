@@ -5,6 +5,12 @@
 // every other test uses the fake (Use), and a test binary that has chosen no
 // backend is refused real git, naming the command, so no test reaches it by
 // accident.
+//
+// SE_GIT_DOOR picks the backend of a process that installed none, so a test
+// reaches the binaries it starts too: unset or "real", the git on PATH (a
+// test binary is refused it); "refused", every command refused, naming it;
+// "fake:<state file>", the fake behind the file SE's Python door writes
+// (tests/fake_git.py StateFile), read by the reader gitfake registers.
 package git
 
 import (
@@ -112,20 +118,66 @@ func (refused) Run(_ context.Context, c Command) (string, error) {
 			"install the fake (git.Use(gitfake.New()), in TestMain) or, in the contract suite only, git.Real"}
 }
 
+// Variable names the backend of a process that installed none (the package doc).
+const Variable = "SE_GIT_DOOR"
+
 var (
-	mu      sync.RWMutex
-	current Backend
+	mu        sync.RWMutex
+	current   Backend
+	stateFile func(path string) Backend
 )
 
-// backend answers the backend Run uses: the one Use installed, else real git,
-// except in a test binary, which is refused it.
+// RegisterStateFile makes open the reader of "fake:<state file>"; gitfake
+// registers its reader, so a binary that imports gitfake serves the fake.
+func RegisterStateFile(open func(path string) Backend) {
+	mu.Lock()
+	defer mu.Unlock()
+	stateFile = open
+}
+
+// unknown refuses every command, naming why the variable's backend is none.
+type unknown struct{ why string }
+
+func (u unknown) Run(_ context.Context, c Command) (string, error) {
+	return "", &Error{Command: c, Code: -1, Err: fmt.Errorf("refused"), Stderr: u.why}
+}
+
+// FromEnvironment answers the backend value names, as Variable reads it;
+// "" answers nil, the default.
+func FromEnvironment(value string) Backend {
+	mu.RLock()
+	open := stateFile
+	mu.RUnlock()
+	where, fake := strings.CutPrefix(value, "fake:")
+	switch {
+	case value == "":
+		return nil
+	case value == "real":
+		return Real{}
+	case value == "refused":
+		return unknown{Variable + "=refused: this process may not run git; the test that started it " +
+			"sets " + Variable + "=fake:<state file> (SE's shared_fake_git fixture)"}
+	case fake && where != "" && open != nil:
+		return open(where)
+	case fake && where != "":
+		return unknown{Variable + " names a fake, but this binary has no reader of its state (import kern/git/gitfake)"}
+	}
+	return unknown{fmt.Sprintf("%s=%q is none of real, refused or fake:<state file>", Variable, value)}
+}
+
+// backend answers the backend Run uses: the one Use installed, else the one
+// Variable names, else real git, except in a test binary, which is refused it.
 func backend() Backend {
 	mu.RLock()
-	defer mu.RUnlock()
-	switch {
-	case current != nil:
-		return current
-	case testing.Testing():
+	installed := current
+	mu.RUnlock()
+	if installed != nil {
+		return installed
+	}
+	if named := FromEnvironment(os.Getenv(Variable)); named != nil {
+		return named
+	}
+	if testing.Testing() {
 		return refused{}
 	}
 	return Real{}

@@ -3,7 +3,8 @@
 shell tool's PostToolUse, posted through `kern hook PostToolUse` as SE's hook posts it, counts each
 run of a script git does not track into the use log, and `retro.py collect` lists the script with
 its count; a tracked script and an ordinary command are not counted. It builds kern's binary, so it
-runs beside the suite after kern's tests have warmed Go's cache, not in it."""
+runs beside the suite after kern's tests have warmed Go's cache, not in it. Its git is the fake the
+test shares with the kern it starts (`shared_fake_git`)."""
 
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import quiet_git  # noqa: E402
+import git_door  # noqa: E402
 import retro  # noqa: E402
 
 # The window starts before every run the test posts.
@@ -55,15 +56,16 @@ def run(*args: str, cwd: Path, stdin: str | None = None) -> subprocess.Completed
 
 
 def test_an_untracked_script_run_three_times_is_listed_by_the_retro_with_count_three(
-        tmp_path: Path) -> None:
+        tmp_path: Path, shared_fake_git) -> None:
     kern = tmp_path / ("kern.exe" if os.name == "nt" else "kern")
     built = run("go", "build", "-o", str(kern), "./cmd/kern", cwd=ROOT / "kern")
     assert built.returncode == 0, built.stderr
-    checkout = quiet_git.init(tmp_path / "app")
+    checkout = tmp_path / "app"
+    assert git_door.run("init", "-q", str(checkout)).returncode == 0
     (checkout / "tracked.py").write_text("print('tracked')\n", encoding="utf-8")
-    quiet_git.git("-C", str(checkout), "add", "tracked.py")
-    quiet_git.git("-C", str(checkout), "-c", "user.name=alice", "-c", "user.email=alice@example.com",
-                  "commit", "-q", "-m", "tracked")
+    assert git_door.run("add", "tracked.py", root=checkout).returncode == 0
+    assert git_door.run("-c", "user.name=alice", "-c", "user.email=alice@example.com", "commit", "-q",
+                        "-m", "tracked", root=checkout).returncode == 0
     (checkout / "probe.py").write_text("print('ad hoc')\n", encoding="utf-8")
 
     def post(command: str) -> None:

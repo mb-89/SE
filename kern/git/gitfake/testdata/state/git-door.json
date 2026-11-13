@@ -1,0 +1,67 @@
+{
+ "format": "se-git-door-state/1",
+ "repositories": [
+  {
+   "path": "repo",
+   "bare": false,
+   "head": "refs/heads/main",
+   "index": {
+    "a.txt": "YQo=",
+    "dir/b.txt": "Ygo="
+   },
+   "conflicts": [],
+   "refs": {
+    "refs/heads/main": "cd935e4d9755d0992c8db4b9d9976842a9f34abe",
+    "refs/remotes/origin/main": "0ee5d9c6a56e43c6b2266ed836d9d318b0f5b28b",
+    "refs/tags/v1": "cd935e4d9755d0992c8db4b9d9976842a9f34abe"
+   },
+   "config": {
+    "remote.origin.url": "https://example.com/alice/repo.git"
+   }
+  }
+ ],
+ "trees": {
+  "1a0bbfc05c908957ee35365650c9df2141d342d1": {
+   "a.txt": "YQo=",
+   "dir/b.txt": "Ygo="
+  },
+  "66bc456282bd15c1525b5d902da4891ba1deb534": {
+   "a.txt": "YQo="
+  }
+ },
+ "commits": {
+  "0ee5d9c6a56e43c6b2266ed836d9d318b0f5b28b": {
+   "tree": "66bc456282bd15c1525b5d902da4891ba1deb534",
+   "parents": [],
+   "message": "add a.txt\n",
+   "author": [
+    "alice",
+    "alice@example.com"
+   ],
+   "committer": [
+    "alice",
+    "alice@example.com"
+   ],
+   "author_date": "2026-01-02T03:04:05+00:00",
+   "committer_date": "2026-01-02T03:04:05+00:00"
+  },
+  "cd935e4d9755d0992c8db4b9d9976842a9f34abe": {
+   "tree": "1a0bbfc05c908957ee35365650c9df2141d342d1",
+   "parents": [
+    "0ee5d9c6a56e43c6b2266ed836d9d318b0f5b28b"
+   ],
+   "message": "add dir/b.txt\n",
+   "author": [
+    "alice",
+    "alice@example.com"
+   ],
+   "committer": [
+    "alice",
+    "alice@example.com"
+   ],
+   "author_date": "2026-01-02T03:04:05+00:00",
+   "committer_date": "2026-01-02T03:04:05+00:00"
+  }
+ },
+ "declining": {}
+}

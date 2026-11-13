@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import rewrite_history
-import quiet_git
+import fake_git
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECK = ROOT / "scripts" / "public_check.py"
@@ -55,7 +55,7 @@ def build(root: Path) -> None:
     tags, and a published commit's allow entry."""
     origin = root / "origin"
     origin.mkdir()
-    quiet_git.init(origin)
+    fake_git.init(origin)
     (origin / "se.toml").write_text('[project]\nidentity = "mb <mb>"\n', encoding="utf-8")
     git(origin, "add", "se.toml")
     git(origin, "commit", "-q", "-m", "Start", who=(OWNER, OWNER))
@@ -81,7 +81,7 @@ def build(root: Path) -> None:
 def clone(tmp_path, repositories) -> Path:
     repositories(build, tmp_path)
     fresh = tmp_path / "clone"
-    quiet_git.clone(tmp_path / "origin", fresh, "--no-local")
+    fake_git.clone(tmp_path / "origin", fresh, "--no-local")
     git(fresh, "branch", "-q", "feature", "origin/feature")
     return fresh
 
@@ -150,7 +150,7 @@ def test_a_message_loses_only_its_trailers_and_tracker_references(message, clean
 
 def test_a_shallow_clone_is_refused_naming_the_fetch(clone, tmp_path, capsys):
     shallow = tmp_path / "shallow"
-    quiet_git.clone(clone.as_uri(), shallow, "--depth", "1")
+    fake_git.clone(clone.as_uri(), shallow, "--depth", "1")
     assert rewrite_history.main(["--repo", str(shallow)]) == 2
     assert "fetch --unshallow" in capsys.readouterr().err
 

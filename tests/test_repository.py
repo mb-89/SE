@@ -5,8 +5,7 @@ marker of unfinished work in `scripts/` or `tests/` that names no issue. A file 
 the first two goes in its allow list below with the reason it may; an entry that no longer names
 such a file is refused, so the lists stay true.
 
-Two rules hold for the suite itself, so it behaves on GitHub's runner as it does locally: every git
-repository a test creates or clones comes from the quiet helper (tests/quiet_git.py), and no test
+One rule holds for the suite itself, so it behaves on GitHub's runner as it does locally: no test
 starts with a runner's variable set (tests/conftest.py).
 
 One rule holds for scripts, tests, kern and the components: git runs only through its door
@@ -21,9 +20,9 @@ import re
 from pathlib import Path
 
 import git_door
+import fake_git
 import pytest
-import quiet_git
-from conftest import REAL_GIT, RefusedGit, door_backend, runner_variables
+from conftest import REAL_GIT, RefusedGit, door_backend, door_variable, runner_variables
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -108,7 +107,7 @@ def fixture_repo(tmp_path: Path, files: dict[str, bytes]) -> Path:
     for name, data in files.items():
         (repo / name).parent.mkdir(parents=True, exist_ok=True)
         (repo / name).write_bytes(data)
-    quiet_git.init(repo)
+    fake_git.init(repo)
     assert git_door.run("add", "-A", root=repo).returncode == 0
     return repo
 
@@ -167,92 +166,9 @@ def test_a_marker_without_an_issue_fails(tmp_path: Path) -> None:
     ]
 
 
-# A git repository created or cloned without tests/quiet_git.py runs background maintenance, whose lock
-# files fail a copy on the runner. Its `init` and `clone` are the only ones in tests/.
-QUIET_HELPER = "quiet_git.py"
-UNQUIET = ("init", "clone")
-VALUED_OPTIONS = ("-C", "-c")  # git's options before the subcommand that take a value
-
-
-def git_subcommand(arguments: list[ast.expr]) -> str | None:
-    """The subcommand among git's `arguments`: the first literal that is no option or option value."""
-    skip = False
-    for argument in arguments:
-        if skip:
-            skip = False
-        elif isinstance(argument, ast.Constant) and isinstance(argument.value, str):
-            if argument.value in VALUED_OPTIONS:
-                skip = True
-            elif not argument.value.startswith("-"):
-                return argument.value
-    return None
-
-
 def called_name(call: ast.Call) -> str:
     function = call.func
     return function.id if isinstance(function, ast.Name) else getattr(function, "attr", "")
-
-
-def unquiet_git_findings(root: Path) -> list[str]:
-    """Each git `init` or `clone` under `root`/tests outside the quiet helper: a call to a function
-    named like git (`git`, `git_ok`), or a command list that starts with "git"."""
-    found = []
-    for path in sorted((root / "tests").rglob("*.py")):
-        if path.name == QUIET_HELPER:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
-        for node in sorted(ast.walk(tree), key=lambda node: getattr(node, "lineno", 0)):
-            arguments = None
-            if isinstance(node, ast.Call) and "git" in called_name(node).lower():
-                arguments = node.args
-            elif isinstance(node, (ast.List, ast.Tuple)) and node.elts and isinstance(node.elts[0], ast.Constant) \
-                    and node.elts[0].value == "git":
-                arguments = node.elts[1:]
-            command = git_subcommand(arguments) if arguments else None
-            if command in UNQUIET:
-                where = path.relative_to(root).as_posix()
-                found.append(f"{where}:{node.lineno}: git {command} outside the quiet helper; "
-                             f"use quiet_git.{command} (tests/{QUIET_HELPER})")
-    return found
-
-
-def test_se_creates_and_clones_git_repositories_only_through_the_quiet_helper() -> None:
-    assert unquiet_git_findings(ROOT) == []
-
-
-def test_a_bare_git_init_or_clone_in_a_fixture_fails(tmp_path: Path) -> None:
-    fixture = tmp_path / "tests" / "test_fixture.py"
-    fixture.parent.mkdir()
-    fixture.write_text(
-        "import subprocess\n"
-        "import quiet_git\n"
-        "def origin(path):\n"
-        "    subprocess.run([\"git\", \"init\", \"-q\", \"--bare\", str(path)], check=True)\n"
-        "def checkout(path):\n"
-        "    git(path.parent, \"clone\", \"-q\", str(path / \"origin\"), str(path))\n"
-        "    git_ok(\"-C\", str(path), \"-c\", \"user.name=alice\", \"init\")\n"
-        "    git(path, \"commit\", \"-m\", \"init\")\n"
-        "    quiet_git.init(path / \"quiet\")\n"
-        "    quiet_git.clone(path, path / \"copy\")\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "tests" / QUIET_HELPER).write_text('git("init", "-q")\n', encoding="utf-8")
-
-    assert unquiet_git_findings(tmp_path) == [
-        "tests/test_fixture.py:4: git init outside the quiet helper; use quiet_git.init (tests/quiet_git.py)",
-        "tests/test_fixture.py:6: git clone outside the quiet helper; use quiet_git.clone (tests/quiet_git.py)",
-        "tests/test_fixture.py:7: git init outside the quiet helper; use quiet_git.init (tests/quiet_git.py)",
-    ]
-
-
-def test_the_quiet_helper_creates_and_clones_quiet_repositories(tmp_path: Path) -> None:
-    origin = quiet_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
-    checkout = quiet_git.clone(origin, tmp_path / "checkout")
-    for repository in (origin, checkout):
-        read = lambda key: git_door.run("config", key, root=repository).stdout.strip()  # noqa: E731
-        assert (read("maintenance.auto"), read("gc.auto")) == ("false", "0")
-    with pytest.raises(RuntimeError, match="git clone .* failed: "):
-        quiet_git.clone(tmp_path / "missing", tmp_path / "nothing")
 
 
 # git is an outside thing with one door (rule book des-004): scripts/git_door.py runs every git command,
@@ -333,12 +249,15 @@ def test_a_test_reaching_real_git_through_the_door_fails_outside_the_contract_su
     outside = door_backend(Item(ROOT / "tests" / "test_example.py"))
     assert isinstance(outside, RefusedGit)
     with git_door.use(outside), pytest.raises(pytest.fail.Exception) as refused:
-        quiet_git.init(tmp_path / "repo", "-b", "main")
+        fake_git.init(tmp_path / "repo", "-b", "main")
     assert "tests/test_example.py::test_example ran real git (git init -q -b main" in str(refused.value)
     assert "fake_git_door" in str(refused.value) and not (tmp_path / "repo").exists()
     with git_door.use(outside), pytest.raises(pytest.fail.Exception):
         git_door.popen("fast-export", "--all", root=tmp_path)
     assert isinstance(door_backend(Item(ROOT / "tests" / "test_git_door.py")), git_door.RealGit)
+    # A child process the test starts is told the same: refused outside the contract suite.
+    assert door_variable(Item(ROOT / "tests" / "test_example.py")) == "refused"
+    assert door_variable(Item(ROOT / "tests" / "test_git_door.py")) == "real"
 
 
 def test_the_files_allowed_real_git_exist_and_say_why() -> None:

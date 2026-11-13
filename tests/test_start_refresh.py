@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-import quiet_git
+import fake_git
 from shell_paths import BASH, WINDOWS, sh
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,7 +53,7 @@ def release(origin: Path, version: str, binary: str) -> None:
 def behind(tmp_path):
     """SE's origin at 5.0.1 (binary se 0.2.0) and a plugin install cloned from it at 5.0.0 (se 0.1.0),
     as a cloud environment's cached setup script left it: one release behind."""
-    origin = quiet_git.init(tmp_path / "origin", "-b", "main")
+    origin = fake_git.init(tmp_path / "origin", "-b", "main")
     for name in TREE:
         source, target = ROOT / name, origin / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -63,7 +63,7 @@ def behind(tmp_path):
             shutil.copy2(source, target)
     release(origin, "5.0.0", "0.1.0")
     home = tmp_path / "home"
-    plugin = quiet_git.clone(origin.as_uri(), home / ".claude" / "skills" / "se", "--depth", "1")
+    plugin = fake_git.clone(origin.as_uri(), home / ".claude" / "skills" / "se", "--depth", "1")
     release(origin, "5.0.1", "0.2.0")
     project = tmp_path / "project"
     project.mkdir()

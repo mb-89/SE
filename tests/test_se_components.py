@@ -23,6 +23,9 @@ import work_tickets  # noqa: E402
 from kern import KernError, runner  # noqa: E402
 from kern.fake import Fake  # noqa: E402
 
+# Its git, and that of every script and binary it starts, is the fake behind one state file.
+pytestmark = pytest.mark.usefixtures("shared_fake_git")
+
 GROUPS = se_components.component_names()
 
 
