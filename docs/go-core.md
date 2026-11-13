@@ -398,7 +398,9 @@ A core that ends at its start is not silent. Its `serve` writes the cause to the
 `--json`), and the greeting says `failed: the core ended at its start` with its first lines. The
 first `UserPromptSubmit` or `PostToolUse` hook after it tells the session the same once, as
 context; SessionStart does not, since the start posts it and shows nothing of its output. A core
-that stands removes the file.
+that stands removes the file. A core that stood and ended without its end, killed or crashed,
+leaves a standing file naming a pid that runs nowhere: the first such hook tells the session the
+last lines of the core's log, once, and removes that file.
 
 | hook | posts | what it gains |
 |---|---|---|

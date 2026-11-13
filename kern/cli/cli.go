@@ -183,6 +183,16 @@ func hook(name string, args []string, stdin io.Reader, stdout, stderr io.Writer)
 				return 0
 			}
 		}
+		// A core that stood and ended without its end, killed or crashed, is
+		// told once too, with the last lines of its log.
+		if errors.Is(err, host.ErrVanished) && DiedEvents[event] {
+			if said, ok := host.TakeVanished(dir); ok {
+				out := HookOutput(event, host.HookAnswer{Context: fmt.Sprintf(
+					"%s: failed: the core ended without its end; the last lines of %s:\n%s", name, host.LogPath(dir), said)})
+				stdout.Write(append(out, '\n'))
+				return 0
+			}
+		}
 	case a.Effect == host.Output:
 		if a.Output != "" {
 			fmt.Fprintln(stdout, strings.TrimRight(a.Output, "\n"))

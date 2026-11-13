@@ -384,3 +384,42 @@ func TestACoreThatEndsAtItsStartIsToldOnce(t *testing.T) {
 		t.Fatalf("a core that stands leaves the cause of the one before: %v", err)
 	}
 }
+
+// A core that stood and ended without its end, killed outright, is told once
+// by the next hook that carries context, with the last lines of its log.
+func TestACoreKilledOutrightIsToldOnce(t *testing.T) {
+	t.Parallel()
+	root := checkout(t)
+	want(t, run(t, nil, "start", "--root", root), 0, "kern: started in "+root)
+	want(t, run(t, nil, "status", "--root", root, "--wait", wait), 0, "kern: running in "+root)
+	p, err := os.FindProcess(standing(t, root).Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	end := time.Now().Add(20 * time.Second)
+	for run(t, nil, "status", "--root", root).code != 1 {
+		if time.Now().After(end) {
+			t.Fatal("the killed core still answers")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	got := run(t, nil, "hook", "UserPromptSubmit", "--root", root)
+	var out struct {
+		HookSpecificOutput struct{ AdditionalContext string } `json:"hookSpecificOutput"`
+	}
+	line := got.out[strings.LastIndex(got.out, "\n")+1:]
+	if err := json.Unmarshal([]byte(line), &out); err != nil {
+		t.Fatalf("the first UserPromptSubmit prints %q, and wants the host's hook JSON", got.out)
+	}
+	context := filepath.ToSlash(out.HookSpecificOutput.AdditionalContext)
+	if !strings.HasPrefix(context, "kern: failed: the core ended without its end; the last lines of "+filepath.ToSlash(host.LogPath(root))+":\n") ||
+		!strings.Contains(context, "kern: serving "+filepath.ToSlash(root)) {
+		t.Fatalf("the report reads %q", context)
+	}
+	if got := run(t, nil, "hook", "UserPromptSubmit", "--root", root); strings.Contains(got.out, "additionalContext") {
+		t.Fatalf("the report is told twice: %q", got.out)
+	}
+}
