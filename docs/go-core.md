@@ -324,7 +324,7 @@ JSON. Where no core answers, it prints nothing and exits 0: a hook fails open, m
 | UserPromptSubmit | the prompt's id | context the core holds back for it: a work issue changed since it was read, an escalation pending |
 | PreToolUse | the tool and its input | guards the rules mechanically, as the cage did: a hand-typed `git push` (`work_tickets.py push` is the door), `--no-verify` ([pub-006](../src/skills/work-model/references/rules.md#pub-006-never-bypass-the-hooks)), a write outside the worker's box; each guard is a component, switched on per role |
 | PostToolUse | the tool, its input and its response | the GitHub component reads the session's GitHub tool answers ([GitHub in the cloud](#github-in-the-cloud)); a ticket move or a commit updates the delivery names |
-| Stop, SubagentStop | the stop | `stop-check` answers from the delivery names in milliseconds (today 0.35 to 0.39 s through `uv`) |
+| Stop, SubagentStop | the stop | the delivery component's `stop-check` answers within the hook, in its warm process: 24 to 57 ms after the first, against 434 to 586 ms through `uv` (README "Stop hook") |
 | SessionEnd | the end | returns the lease; the last one out stops the core after its grace |
 
 Every event lands in the family `session/<id>/events`, which the session I/O component also

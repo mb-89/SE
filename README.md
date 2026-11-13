@@ -158,8 +158,8 @@ kern and post every session event to it:
 - **Every other event** (SessionEnd, SubagentStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop
   and SubagentStop) runs [scripts/se_hook.sh](scripts/se_hook.sh) `<event>`, which hands the host's
   JSON to the named binary's `kern hook <event>`.
-  - SessionEnd returns the session's lease. The Stop hooks run beside `stop-check`
-    ([Stop hook](#stop-hook)).
+  - SessionEnd returns the session's lease. The Stop hooks are answered by the delivery
+    component's `stop-check`, and else by `stop-check` directly ([Stop hook](#stop-hook)).
   - It fails open: without kern's binary, or with no core answering within 500 ms, it prints
     nothing and exits 0.
 - **The greeting** names kern's state under its first line: `kern <version>: running, pid <n>`,
@@ -478,7 +478,22 @@ refusals = 5
 ```
 
 The plugin hands every `Stop` and `SubagentStop` to `work_tickets.py stop-check`, so a worker's turn
-ends only with its work issue delivered:
+ends only with its work issue delivered.
+
+- kern answers it within the hook: `wiring.toml` binds both events to the delivery component's
+  `stop-check`, which judges in its own warm process ([Kern](#kern)).
+- Where no command of kern's answers (no binary, no core, the component's process not attached
+  yet, or it failed), [scripts/se_hook.sh](scripts/se_hook.sh) runs `stop-check` as a process of
+  its own, with the same verdict.
+- The warm process asks `gh auth status` once: a gh found unusable is held 60 s, a usable one for
+  the process.
+
+| measured on 13 Nov in a Claude Code cloud container, Linux amd64, gh not signed in, 6 runs | wall time |
+|---|---|
+| a Stop through `se_hook.sh`, answered by kern's delivery component: the first; the later ones | 319 ms; 24 to 57 ms |
+| a Stop through `se_hook.sh`, answered by `stop-check` directly through `uv` | 434 to 586 ms |
+
+What it judges:
 
 - Where it refuses: a checkout whose ticket queue (`.se/work/`) is for a work issue (intake's
   snapshot, or what was recorded as read of it), on a branch other than the integration branch.
@@ -971,6 +986,7 @@ work_tickets.py push [--worktree WORKTREE] [branch]
     the tree pushed
 
 work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE]
+                           [--hook JSON]
     the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue,
     refuse the turn's end while its branch has no open pull request whose description carries a
     field report that passes field-report --check at the branch tip, naming what is missing and the
