@@ -292,6 +292,8 @@ so each cloud session has its own core.
     time the last lease is returned.
   - The events that count for `idle` are the hook events and `call.core.stop`. Gets, leases and
     commits do not: a placed component's beats and commits would keep an unused core up for ever.
+- `call.core.stop` answers the core's pid, then the bus stays up until the asker hangs up (1 s at
+  most), so the asker has the answer before the bus closes.
 - It ends with the container in the cloud whatever the lease says; nothing in it needs to
   survive, because GitHub and the disk own every durable fact.
 
