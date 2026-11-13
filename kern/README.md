@@ -24,6 +24,8 @@ named in the design's plan.
 | `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve` | |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve` | |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises | |
+| `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
+| `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
 | `template/` | the bare application every new application starts from ([The template](#the-template)) | |
 
 The NATS server is a Go dependency, `github.com/nats-io/nats-server/v2` v2.11.9 with
@@ -67,6 +69,33 @@ the suite, so a red kern test refuses the integration and the Python suite's bud
 `check` vets kern in its own step. The job `kern-windows` runs
 kern's vet and tests on Windows, where the detached start and the stop differ; `check` needs it
 and fails unless it passed.
+
+## Release
+
+`release.toml` owns kern's version and where its release is published:
+
+```toml
+version = "0.1.0"
+download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
+```
+
+- **The assets:** `kern-<version>-<os>-<arch>.tar.gz` for `linux` and `darwin`, `.zip` for
+  `windows`, each on `amd64` and `arm64`, each holding the one binary `kern` (`kern.exe`), and
+  `SHA256SUMS` over the six, which `sha256sum -c SHA256SUMS` checks. `go run ./tools/release build
+  --out <dir>` builds them, the same bytes for the same commit.
+- **The workflow:** SE's `.github/workflows/kern-release.yml` builds them on every pull request
+  and push to `main` that touches kern, and runs [the template](#the-template)'s battery. On `main`
+  it publishes the release `release.toml` names, where it does not exist yet, so the push that
+  changes `version` cuts it; a release that exists is never changed. A rerun is `workflow_dispatch`
+  on `main`.
+- **Fetching it:** `<download>/kern-<version>-<os>-<arch>.tar.gz` and `<download>/SHA256SUMS`, the
+  archive checked against its line, then unpacked.
+
+**The move to `mb-89/kern` changes one URL:** `release.toml`'s `download`, to
+`https://github.com/mb-89/kern/releases/download/v{version}`. The workflow reads its tag and its
+repository from that URL and refuses to publish into another repository than the one it runs in,
+so it moves with kern's other workflows (the design's move, step 2), as `release.yml`, and
+`battery.yml` below moves beside it.
 
 ## The battery
 
