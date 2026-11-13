@@ -89,6 +89,19 @@ func TestAPlacementNamesItsCommand(t *testing.T) {
 	}
 }
 
+// A hook binds a host's event to the command that answers it, in the order of its lines.
+func TestAHookBindsAnEventToItsCommand(t *testing.T) {
+	t.Parallel()
+	w, err := index.ParseWiring([]byte("[instances.sum]\ncomponent = \"sum\"\n\n[hooks]\nSubagentStop = \"sum check\"\nStop = \"sum check\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []index.Hook{{Event: "SubagentStop", Command: "sum check", Line: 5}, {Event: "Stop", Command: "sum check", Line: 6}}
+	if !reflect.DeepEqual(w.Hooks, want) {
+		t.Fatalf("the hooks read as %+v, and want %+v", w.Hooks, want)
+	}
+}
+
 func TestABrokenWiringFileIsRefusedWithItsLine(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ wiring, want string }{
@@ -103,7 +116,11 @@ func TestABrokenWiringFileIsRefusedWithItsLine(t *testing.T) {
 		{"[instances.a]\ncomponent = \"source\"\nconfig = 3\n", "wiring line 3: instance a: config is no table"},
 		{"instances = { a = 1 }\n", "wiring line 1: instance a is no table"},
 		{"instances = 1\n", "wiring line 1: instances is no table"},
-		{"\n[modules]\n", "wiring line 2: no key modules: a wiring holds [instances] and [wires]"},
+		{"\n[modules]\n", "wiring line 2: no key modules: a wiring holds [instances], [wires] and [hooks]"},
+		{"[hooks]\n\"Stop.x\" = \"check\"\n", "wiring line 2: hook \"Stop.x\": an event is one word of letters"},
+		{"[hooks]\nStop = 3\n", "wiring line 2: hook Stop names no command"},
+		{"[hooks]\nStop = \" \"\n", "wiring line 2: hook Stop names no command"},
+		{"hooks = 1\n", "wiring line 1: hooks is no table"},
 		{"[wires]\n\"a.x\" = 3\n", "wiring line 2: wire a.x binds to no name, port, verb or built-in"},
 		{"[wires]\n\"a.x\" = { builtin = true }\n", "wiring line 2: wire a.x binds to no name"},
 		{"[wires]\n\"a.x\" = { to = \"n\", builtin = 1 }\n", "wiring line 2: wire a.x: builtin is true or false"},
