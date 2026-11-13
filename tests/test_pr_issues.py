@@ -67,7 +67,9 @@ class FakeGitHub:
 @pytest.fixture
 def github() -> Iterator[FakeGitHub]:
     fake = FakeGitHub()
-    thread = threading.Thread(target=fake.server.serve_forever, daemon=True)
+    # serve_forever looks for shutdown every poll_interval; its default, 0.5 s, cost each test as much.
+    thread = threading.Thread(target=fake.server.serve_forever, kwargs={"poll_interval": 0.01},
+                              daemon=True)
     thread.start()
     yield fake
     fake.server.shutdown()
