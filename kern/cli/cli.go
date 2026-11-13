@@ -6,10 +6,13 @@
 //	<name> status [--root DIR] [--wait D] [--json]      say whether a core runs, and its health
 //	<name> stop   [--root DIR]                          stop the core and wait until it has exited
 //	<name> serve  [--root DIR] [--grace D] [--idle D]   run the core in the foreground (what start spawns)
+//	<name> hook <event> [--root DIR] [--wait D]         post the host's hook JSON on stdin to the core
 //
 // The root is the checkout the core serves: by default the nearest folder up
 // from the working directory that holds .git, else the working directory.
 // Exit codes: 0 done, 1 no core runs (status), 2 a usage or start error.
+// hook always exits 0 and prints nothing where the core does not answer: a
+// hook fails open, and a host reads a hook's exit code 2 as a block.
 package cli
 
 import (
@@ -21,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mb-89/kern/host"
@@ -31,7 +35,7 @@ import (
 // test's way to show that `kern start` returns before the core answers.
 const HoldEnv = "KERN_HOLD_START"
 
-const usage = "usage: %s <start|status|stop|serve> [--root DIR] [--grace D] [--idle D] [--wait D] [--json]"
+const usage = "usage: %s <start|status|stop|serve|hook <event>> [--root DIR] [--grace D] [--idle D] [--wait D] [--json]"
 
 // Run is the command named name: it serves the components registered with
 // index.Register before it is called, and answers the exit code.
@@ -41,6 +45,9 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	verb := args[0]
+	if verb == "hook" {
+		return hook(name, args[1:], os.Stdin, stdout, stderr)
+	}
 	fs := flag.NewFlagSet(name+" "+verb, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "the checkout the core serves")
@@ -114,6 +121,41 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	return serve(name, dir, *grace, *idle, stdout, stderr)
+}
+
+// hook posts the host's hook JSON, read from stdin, on hook.<event> and
+// prints the answer as the host's hook JSON. The effect pass, the only one
+// the core answers today, prints nothing; so does every failure, which goes
+// to stderr alone, with exit code 0.
+func hook(name string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(name+" hook", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", "", "the checkout the core serves")
+	wait := fs.Duration("wait", host.HookWait, "how long to wait for the core's answer, a start included")
+	event := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		event, args = args[0], args[1:]
+	}
+	if err := fs.Parse(args); err != nil {
+		return 0
+	}
+	if event == "" && fs.NArg() > 0 {
+		event = fs.Arg(0)
+	}
+	dir, err := rootOf(*root)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s hook: %v\n", name, err)
+		return 0
+	}
+	payload, err := io.ReadAll(stdin)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s hook: stdin: %v\n", name, err)
+		return 0
+	}
+	if _, err := host.Post(host.Wall{}, dir, event, payload, *wait); err != nil {
+		fmt.Fprintf(stderr, "%s hook: %v\n", name, err)
+	}
+	return 0
 }
 
 // serve runs the core until it ends: no session holds a lease, it is idle,

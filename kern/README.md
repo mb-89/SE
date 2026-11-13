@@ -21,8 +21,8 @@ named in the design's plan.
 | `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request | `src/index/indextest` |
 | `bus/` | the embedded NATS server on loopback, a user and permissions per component instance, so the bus refuses a second writer | quackitect v5 `src/index/bus.go` |
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
-| `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve` | |
-| `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve` | |
+| `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve`, `hook` | |
+| `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook` | |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises | |
 | `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
 | `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
@@ -42,6 +42,7 @@ One core runs per checkout, the nearest folder up from the working directory tha
 | `kern status [--wait D] [--json]` | `running` with the health (`get.core.health`, 200 ms wait), `starting`, or `not running` (exit 1) |
 | `kern stop` | asks `call.core.stop` and waits until the process has exited |
 | `kern serve [--grace D] [--idle D]` | the core in the foreground: reads `wiring.toml` where the checkout has one |
+| `kern hook <event> [--wait D]` | posts the host's hook JSON from stdin on `hook.<event>`, waiting up to 500 ms for a core whose start's claim stands; prints the answer as the host's hook JSON, nothing for `pass`; where no core answers, prints nothing; always exits 0 |
 
 - **The standing file**, `.se/.runtime/standing.json`, readable by its owner alone: the bus's
   address, the pid, the contract version and every bus user with its password. A pid that runs
@@ -75,7 +76,7 @@ and fails unless it passed.
 `release.toml` owns kern's version and where its release is published:
 
 ```toml
-version = "0.1.0"
+version = "0.2.0"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 
