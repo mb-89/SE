@@ -187,7 +187,16 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
     them.
 - **Placed:** `wiring.toml` places each in a process of its own, so the core the hooks start in SE's
   checkout lists them: `kern status --json` names the instances and those attached.
-- **Tested** against kern's Python fake core (`tests/test_se_components.py`).
+- **Routed:** a command a person waits on that only reads (its class `interactive`: `status`,
+  `config`, `ready`, `capacity`, `queue`, `fleet-check` and `metrics`) goes through kern's
+  `call.<command>` where kern serves the checkout the command runs in with the same script.
+  - Everywhere else, and for every command that writes, the command runs directly, as it did
+    before components. A call that fails on the way runs directly too: the command only reads.
+  - `SE_KERN=off` keeps every command direct (the suite and each component's own process set it);
+    `SE_KERN=on` refuses to fall back.
+- **Tested** against kern's Python fake core (`tests/test_se_components.py`), and once against the
+  real core with the components placed (`tests/beside_se_components.py`, `se.toml`
+  `[tests.beside.se-components]`).
 
 ## Documentation
 

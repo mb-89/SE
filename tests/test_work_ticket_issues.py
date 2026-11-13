@@ -3449,11 +3449,14 @@ def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budge
     budget = work_tickets.suite_budget(Path(__file__).resolve().parents[1])
     assert (budget.command, budget.target_seconds) == (["uv", "run", "pytest", "-q"], 60)
     # kern's tests first: they warm Go's build cache for se new app's acceptance after them.
-    kern, new_app = budget.beside
+    kern, new_app, components = budget.beside
     assert (kern.name, kern.command, kern.directory) == ("kern", ["go", "test", "./..."], "kern")
     assert kern.target_seconds < kern.limit_seconds < budget.limit_seconds
     assert (new_app.name, new_app.command[-1]) == ("new-app", "tests/beside_new_app.py")
     assert new_app.target_seconds < new_app.limit_seconds < budget.limit_seconds
+    assert (components.name, components.command[-1]) == (
+        "se-components", "tests/beside_se_components.py")
+    assert components.target_seconds < components.limit_seconds < budget.limit_seconds
 
 
 @pytest.fixture

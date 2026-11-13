@@ -1,6 +1,6 @@
 """SE's command groups as kern components, against kern's Python fake core (README "Commands as
-components"): each group's declaration is what docs writes and its process answers its commands with
-work_tickets.py's own code."""
+components"): each group's declaration is what docs writes, its process answers its commands with
+work_tickets.py's own code, and a command runs directly wherever kern does not serve it."""
 
 from __future__ import annotations
 
@@ -94,3 +94,35 @@ def test_docs_check_refuses_a_stale_declaration_and_docs_rewrites_it(tmp_path, m
     assert work_tickets.main(["docs"]) == 0
     assert capsys.readouterr().out == "wrote components/tickets/component.toml\n"
     assert work_tickets.main(["docs", "--check"]) == 0
+
+
+def test_a_command_runs_directly_where_kern_does_not_serve_it(tmp_path, monkeypatch) -> None:
+    script = ROOT / "scripts" / "work_tickets.py"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(se_components.SWITCH)
+    # No kern serves the directory: direct, and with SE_KERN=on a refusal.
+    assert se_components.routed(script, ["status"], [], True) is None
+    monkeypatch.setenv(se_components.SWITCH, "on")
+    assert se_components.routed(script, ["status"], [], True) == 1
+    # A command that writes is never routed; SE_KERN=off routes nothing.
+    assert se_components.routed(script, ["init"], [], False) is None
+    monkeypatch.setenv(se_components.SWITCH, "off")
+    assert se_components.routed(script, ["status"], [], True) is None
+
+
+def test_a_call_that_fails_on_the_way_runs_directly(tmp_path, monkeypatch) -> None:
+    """A standing file whose bus no longer answers, as a core that ended leaves none but a crash
+    may: the read runs directly."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "scripts").mkdir()
+    script = tmp_path / "scripts" / "work_tickets.py"
+    script.write_text("", encoding="utf-8")
+    standing = tmp_path / se_components.STANDING
+    standing.parent.mkdir(parents=True)
+    standing.write_text(json.dumps({"bus": "nats://127.0.0.1:9", "users": {"client": "x"}}),
+                        encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(se_components.SWITCH)
+    assert se_components.routed(script, ["status"], [], True) is None
+    # Another copy of the script than the one kern runs: direct.
+    assert se_components.routed(ROOT / "scripts" / "work_tickets.py", ["status"], [], True) is None

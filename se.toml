@@ -43,6 +43,13 @@ command = ["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_new_app.py"]
 target_seconds = 30
 limit_seconds = 90
 
+# SE's commands as components against the real core (README "Commands as components"): it builds
+# kern's binary with Go's cache warm, places the four components and calls through them.
+[tests.beside.se-components]
+command = ["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_se_components.py"]
+target_seconds = 30
+limit_seconds = 90
+
 # obs builds the documentation (README "Documentation").
 [modules.obs]
 url = "https://github.com/mb-89/obs.git"

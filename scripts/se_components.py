@@ -4,7 +4,8 @@
 A script's command group is one component, `components/<name>/`: its `component.toml`, which the
 script's `docs` command writes from the script's command registry, and an `__init__.py` that calls
 `attach`, so the component answers each declared command with the script's own code. The command
-line does not change: `work_tickets.py <command>` runs as before.
+line does not change: `work_tickets.py <command>` runs as before, and an interactive command goes
+through kern where kern serves this checkout (`routed`), else directly.
 
 - **Declared:** `declaration` writes one group's `component.toml` text; `reference` renders the
   README's command reference from the declarations as kern's own reader (`kern.declaration`)
@@ -15,6 +16,10 @@ line does not change: `work_tickets.py <command>` runs as before.
   - exit code 0: the text is what it wrote to stdout, each stderr line a progress line;
   - any other: the error `exit code <n>`, then on its next line a JSON object of what it wrote,
     `{"stdout": ..., "stderr": ...}`: the core answers a failed step's error without its lines.
+- **Routed:** `routed` sends an interactive command through `call.<command>` and prints the answer
+  as the command would have; `SE_KERN=off` keeps every command direct, `SE_KERN=on` refuses to fall
+  back. Only interactive commands go through kern: they only read, so a call that fails on the way
+  runs again directly without doing anything twice. A batch command writes, and runs directly.
 - **Placed:** `wiring.toml` places each component with `se_components.py run <name>`, which puts
   kern's Python SDK and `scripts/` on the path and runs `python -m kern run components/<name>`.
 
@@ -28,6 +33,7 @@ import importlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import textwrap
@@ -38,9 +44,18 @@ from pathlib import Path
 SE_ROOT = Path(__file__).resolve().parents[1]
 #: Where SE's components live, under the checkout kern serves (kern/README.md "The host").
 COMPONENTS = "components"
+#: The switch of routed: off, on, or unset for kern where it serves this checkout.
+SWITCH = "SE_KERN"
 #: A call's optional first argument: the directory the command runs in.
 CWD = "--se-cwd="
+#: kern's standing file under the checkout it serves (kern/host/standing.go).
+STANDING = Path(".se") / ".runtime" / "standing.json"
+#: How long routed waits for kern to answer a call: kern waits for a step this long (host.StepWait).
+CALL_WAIT = 60.0
+#: How long routed waits to connect: kern stands on loopback.
+CONNECT_WAIT = 0.5
 REFERENCE_WIDTH = 100
+EXIT_ERROR = re.compile(r"\Aexit code (\d+)\n?")
 
 
 def sdk() -> None:
@@ -179,6 +194,75 @@ def attach(name: str, script: str, folder: Path):
     return comp
 
 
+# Routed.
+
+def kern_root(start: Path) -> Path | None:
+    """The checkout kern serves for `start`: the nearest folder up that holds .git."""
+    for folder in (start, *start.parents):
+        if (folder / ".git").exists():
+            return folder
+    return None
+
+
+def standing(root: Path) -> dict | None:
+    try:
+        return json.loads((root / STANDING).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def routed(script: Path, words: list[str], argv: list[str], interactive: bool) -> int | None:
+    """The exit code of the command `words` run through kern, having printed its answer; None where
+    it runs directly: SE_KERN=off, a batch command, no kern serving this checkout, another copy of
+    the script than the one kern runs, or a call that failed on the way (with SE_KERN=on an error)."""
+    switch = os.environ.get(SWITCH, "").lower()
+    if switch == "off" or not interactive:
+        return None
+    root = kern_root(Path.cwd())
+    found = standing(root) if root else None
+    if root is None or found is None or (root / "scripts" / script.name).resolve() != script.resolve():
+        if switch == "on":
+            print(f"error: {SWITCH}=on: no kern serves {Path.cwd()} with this {script.name}",
+                  file=sys.stderr)
+            return 1
+        return None
+    sdk()
+    from kern.nats import NatsError, Peer
+    from kern.subjects import token
+
+    name = " ".join([script.name, *words])
+    try:
+        peer = Peer(found["bus"], "client", found["users"]["client"], name="se", timeout=CONNECT_WAIT)
+        try:
+            answer = peer.request("call." + token(name), {"args": [CWD + os.getcwd(), *argv]},
+                                  CALL_WAIT).json() or {}
+        finally:
+            peer.close()
+    except (NatsError, OSError, KeyError, TypeError, ValueError) as error:
+        if switch == "on":
+            print(f"error: {SWITCH}=on: kern's call of {name} failed: {error}", file=sys.stderr)
+            return 1
+        return None
+    failed = str(answer.get("error") or "")
+    exit_ = EXIT_ERROR.match(failed)
+    if failed and not exit_:  # kern refused the call: no such command, no attach, a timeout
+        if switch == "on":
+            print(f"error: {SWITCH}=on: kern: {failed}", file=sys.stderr)
+            return 1
+        return None
+    if exit_:
+        said = json.loads(failed[exit_.end():] or "{}")
+        sys.stderr.write(said.get("stderr", ""))
+        sys.stdout.write(said.get("stdout", ""))
+        return int(exit_.group(1))
+    for line in answer.get("lines") or []:
+        print(line, file=sys.stderr)
+    text = str(answer.get("text") or "")
+    if text:
+        print(text)
+    return 0
+
+
 # Placed.
 
 def main(argv: list[str] | None = None) -> int:
@@ -187,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
     if len(args) != 2 or args[0] != "run":
         print("usage: se_components.py run <component>", file=sys.stderr)
         return 2
+    os.environ[SWITCH] = "off"  # the component runs each command directly
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     sdk()
     from kern import runner

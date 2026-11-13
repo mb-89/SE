@@ -7739,6 +7739,11 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(errors="replace")
     args = make_parser().parse_args(argv)
     words = command_words(args)
+    routed = sibling("se_components").routed(
+        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
+        " ".join(words) in INTERACTIVE_COMMANDS)
+    if routed is not None:
+        return routed
     code, line = metrics.recorded(f"work_tickets.py {' '.join(words)}",
                                   lambda: run_command(args))
     if line is not None and args.command == "integrate":
