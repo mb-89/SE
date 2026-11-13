@@ -4324,7 +4324,8 @@ def record_suite_verdict(root: Path, commit: str | None, passed: bool, seconds: 
 CI_VARIABLE = "GITHUB_ACTIONS"
 CI_SUITE_TITLE = "se suite time"
 CI_SUITE_MESSAGE = re.compile(r"Suite time: (\d+(?:\.\d+)?) s")
-CI_SUITE_COMMITS = 5  # first-parent commits of the integration branch searched for CI's time
+CI_SUITE_COMMITS = 8  # first-parent commits of the integration branch searched for CI's time
+CI_SUITE_RUNS = 5  # CI's time is the median of this many runs, so one slow runner does not count
 CI_MARGIN = 0.9  # CI within 10% of the limit: a local overrun refuses
 CI_READ_SECONDS = 10
 
@@ -4336,11 +4337,23 @@ def suite_is_reference() -> bool:
 
 @dataclass(frozen=True)
 class CiSuiteTime:
-    """CI's suite time on one commit of the integration branch, read from its `check` run."""
+    """CI's suite time on the integration branch: the median of its last runs' times (`readings`,
+    newest first), and the commit and `check` run whose time is that median."""
 
     seconds: float
     commit: str
     url: str
+    readings: tuple[float, ...] = ()
+
+
+def ci_suite_text(ci: CiSuiteTime, branch: str) -> str:
+    """CI's suite time as run_suite names it: the median, the runs it was taken from, its run."""
+    where = f"commit {ci.commit[:12]}{f', {ci.url}' if ci.url else ''}"
+    if len(ci.readings) < 2:
+        return f"CI's suite time on {branch} is {ci.seconds:.1f} s, from its last run ({where})"
+    times = ", ".join(f"{reading:g}" for reading in ci.readings)
+    return (f"CI's suite time on {branch} is {ci.seconds:.1f} s, the median of its last "
+            f"{len(ci.readings)} runs ({times} s; median {where})")
 
 
 def github_read(repo: str, path: str) -> object:
@@ -4354,9 +4367,12 @@ def github_read(repo: str, path: str) -> object:
 
 
 def ci_suite_time(root: Path) -> tuple[CiSuiteTime | None, str]:
-    """CI's last suite time on the integration branch: the `Suite time` notice of the newest
-    completed `check` run on one of its last CI_SUITE_COMMITS first-parent commits, as origin has
-    them. None with the reason where no such time can be read."""
+    """CI's suite time on the integration branch: the median of the `Suite time` notices of up to
+    CI_SUITE_RUNS runs, the newest successful `check` run with one on each of its last
+    CI_SUITE_COMMITS first-parent commits, as origin has them; it stops reading once it has them.
+    A run that failed or was cancelled is skipped: a shorter failed run's time is not CI's time.
+    With an even count the slower middle run counts. None with the reason where no time can be
+    read."""
     repo = remote_repo(root)
     if repo is None or repo_host(repo) != "github.com":
         return None, "the checkout's origin is not on github.com"
@@ -4366,22 +4382,37 @@ def ci_suite_time(root: Path) -> tuple[CiSuiteTime | None, str]:
     commits = listed.stdout.split() if listed.returncode == 0 else []
     if not commits:
         return None, f"origin/{target} is not fetched"
+    found_times: list[CiSuiteTime] = []
     try:
         for commit in commits:
-            found = github_read(repo, f"commits/{commit}/check-runs?check_name={CHECK_NAME}")
-            runs = [run for run in (found.get("check_runs") or [])
-                    if run.get("status") == "completed"] if isinstance(found, dict) else []
-            for run in sorted(runs, key=lambda run: -int(run.get("id") or 0)):
-                notes = github_read(repo, f"check-runs/{run['id']}/annotations")
-                for note in notes if isinstance(notes, list) else []:
-                    match = CI_SUITE_MESSAGE.search(str(note.get("message") or ""))
-                    if note.get("title") == CI_SUITE_TITLE and match:
-                        return CiSuiteTime(float(match[1]), commit,
-                                           str(run.get("html_url") or "")), ""
+            if len(found_times) == CI_SUITE_RUNS:
+                break
+            reading = ci_suite_time_of(repo, commit)
+            if reading is not None:
+                found_times.append(reading)
     except (OSError, ValueError) as error:  # urllib's errors are OSErrors
         return None, f"GitHub could not be read without an account ({error})"
-    return None, (f"no completed {CHECK_NAME} run on the last {len(commits)} commits of "
-                  f"origin/{target} reports a suite time")
+    if not found_times:
+        return None, (f"no successful {CHECK_NAME} run on the last {len(commits)} commits of "
+                      f"origin/{target} reports a suite time")
+    median = sorted(found_times, key=lambda reading: reading.seconds)[len(found_times) // 2]
+    return CiSuiteTime(median.seconds, median.commit, median.url,
+                       tuple(reading.seconds for reading in found_times)), ""
+
+
+def ci_suite_time_of(repo: str, commit: str) -> CiSuiteTime | None:
+    """The `Suite time` notice of the newest successful `check` run on `commit` that reports one."""
+    found = github_read(repo, f"commits/{commit}/check-runs?check_name={CHECK_NAME}")
+    runs = [run for run in (found.get("check_runs") or [])
+            if run.get("status") == "completed" and run.get("conclusion") == "success"
+            ] if isinstance(found, dict) else []
+    for run in sorted(runs, key=lambda run: -int(run.get("id") or 0)):
+        notes = github_read(repo, f"check-runs/{run['id']}/annotations")
+        for note in notes if isinstance(notes, list) else []:
+            match = CI_SUITE_MESSAGE.search(str(note.get("message") or ""))
+            if note.get("title") == CI_SUITE_TITLE and match:
+                return CiSuiteTime(float(match[1]), commit, str(run.get("html_url") or ""))
+    return None
 
 
 def suite_notice(seconds: float, limit: float, detail: str = "") -> str:
@@ -4511,7 +4542,7 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
 
     The reference run (suite_is_reference, CI) prints its time as a notice for ci_suite_time and
     refuses a passing suite above the limit with SuiteOverLimitError. Any other run above the limit
-    warns with the host's load and refuses only where CI's last suite time on the integration
+    warns with the host's load and refuses only where CI's suite time on the integration
     branch (ci_suite_time, read there and also where `read_ci`) is unknown or within 10% of the
     limit. Where `[tests]` over_limit is "warn", no overrun refuses: each only warns.
     Records its verdict on HEAD's tree where the checkout holds exactly it (clean_commit);
@@ -4529,7 +4560,7 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     over = seconds > budget.limit_seconds
     ci, unknown = (None, "")
     if not reference and (over or read_ci):
-        feedback.phase(f"CI's last suite time on {integration_branch(root)}")
+        feedback.phase(f"CI's suite time on {integration_branch(root)}")
         ci, unknown = ci_suite_time(root)
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=budget.limit_seconds,
                  **({"ci_suite_seconds": ci.seconds} if ci else {}))
@@ -4545,9 +4576,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     )
     if reference:
         print(suite_notice(seconds, budget.limit_seconds))
-    ci_text = (f"CI's last suite time on {integration_branch(root)} is {ci.seconds:.1f} s "
-               f"(commit {ci.commit[:12]}{f', {ci.url}' if ci.url else ''})" if ci
-               else f"CI's last suite time is unknown: {unknown}")
+    ci_text = (ci_suite_text(ci, integration_branch(root)) if ci
+               else f"CI's suite time is unknown: {unknown}")
     if refused and reference:
         raise SuiteOverLimitError(
             f"Complete suite passed ({summary}) but took {seconds:.1f} s on CI, the budget's "
