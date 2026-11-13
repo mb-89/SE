@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -992,6 +993,37 @@ def test_docs_check_refuses_a_stale_reference_and_docs_rewrites_it(tmp_path, mon
     assert "work_tickets.py backlog list --worktree WORKTREE" in written
     assert "stale" not in written
     assert work_tickets.main(["docs", "--check"]) == 0
+
+
+
+def test_format_applies_every_fix_the_check_job_checks_and_a_second_run_writes_nothing(
+        tmp_path, capsys):
+    """format writes what se_plugin.py check and docs --check refuse: the generated layouts and
+    the README's command reference, in a misformatted copy of the checkout."""
+    root = tmp_path / "se"
+    shutil.copytree(PROJECT / "src", root / "src")
+    shutil.copy(PROJECT / "se.toml", root)
+    se_plugin = work_tickets.sibling("se_plugin")
+    se_plugin.build(root)
+    stale = root / "skills" / "work-model" / "SKILL.md"
+    stale.write_text("edited by hand\n", encoding="utf-8")
+    (root / "agents" / "worker.md").unlink()
+    (root / "skills" / "orphan.md").write_text("no source\n", encoding="utf-8")
+    (root / "README.md").write_text(
+        f"# Title\n\n{work_tickets.REFERENCE_BEGIN}\nstale\n{work_tickets.REFERENCE_END}\n",
+        encoding="utf-8")
+    assert len(se_plugin.differences(root)) == 3
+
+    assert work_tickets.main(["format", "--root", str(root)]) == 0
+    output = capsys.readouterr().out
+    assert "wrote skills/work-model/SKILL.md" in output
+    assert "wrote README.md" in output
+    assert se_plugin.differences(root) == []
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert readme == work_tickets.with_command_reference(readme)
+
+    assert work_tickets.main(["format", "--root", str(root)]) == 0
+    assert capsys.readouterr().out == "format: nothing to change\n"
 
 
 # refs request and refs apply: the Actions API faked behind its door, Workflows.
