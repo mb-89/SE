@@ -74,11 +74,29 @@ deep = { a = [1, -2] }
 	}
 }
 
+// A placement names the command the core runs the instance with, and its line.
+func TestAPlacementNamesItsCommand(t *testing.T) {
+	t.Parallel()
+	w, err := index.ParseWiring([]byte("[instances.pump]\ncomponent = \"pump\"\ncommand = [\"uv\", \"run\", \"pump\"]\n\n[instances.sum]\ncomponent = \"sum\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := w.Instances[0]; !reflect.DeepEqual(got.Command, []string{"uv", "run", "pump"}) || got.CommandLine != 3 {
+		t.Fatalf("the placement reads as %q at line %d, and wants [uv run pump] at line 3", got.Command, got.CommandLine)
+	}
+	if got := w.Instances[1]; got.Command != nil {
+		t.Fatalf("an instance without a command is placed with %q, and wants none: it runs in the core", got.Command)
+	}
+}
+
 func TestABrokenWiringFileIsRefusedWithItsLine(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ wiring, want string }{
 		{"[instances.a]\ncomponent = \"source\"\ncomponent = \"twice\"\n", "wiring line 3:"},
-		{"[instances.a]\nmodule = \"source\"\n", "wiring line 2: instance a: no key module: an instance holds component, enabled and config"},
+		{"[instances.a]\nmodule = \"source\"\n", "wiring line 2: instance a: no key module: an instance holds component, enabled, config and command"},
+		{"[instances.a]\ncomponent = \"source\"\ncommand = []\n", "wiring line 3: instance a: command is a list of words, the program first"},
+		{"[instances.a]\ncomponent = \"source\"\ncommand = \"pump\"\n", "wiring line 3: instance a: command is a list of words"},
+		{"[instances.a]\ncomponent = \"source\"\ncommand = [\"pump\", 3]\n", "wiring line 3: instance a: command is a list of words"},
 		{"[instances.a]\nenabled = false\n", "wiring line 1: instance a names no component"},
 		{"[instances.a]\ncomponent = \"source\"\nenabled = \"no\"\n", "wiring line 3: instance a: enabled is true or false"},
 		{"[instances.a]\ncomponent = 3\n", "wiring line 2: instance a: component is no name"},
