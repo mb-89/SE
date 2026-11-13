@@ -8097,14 +8097,20 @@ def run_paused(root: Path, args: argparse.Namespace) -> int:
          arg("--pulls", type=Path, help="without gh: the open pull requests the plan read"))
 def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
     # Live first: the fleet component of the core in the checkout (scripts/kern_names.py).
+    # Only a complete read of the open issues and pull requests is a verdict; a partial one says
+    # how much it saw, and since when, and the check reads the fleet itself.
     live = (sibling("kern_names").read(root, ["fleet/findings"]) or {}).get("fleet/findings")
-    if isinstance(live, dict) and live.get("issues"):
+    if isinstance(live, dict) and live.get("issues") and live.get("complete"):
         found = [Finding(**{**f, "holds": tuple(f.get("holds") or ())}) for f in live["findings"]]
         if not args.json:
             print(f"live from kern over the {live['issues']} issues and {live['pulls']} pull requests "
-                  f"it has read, {live['at']}")
+                  f"it has read, complete since {live.get('since')}, {live['at']}")
         print(fleet_report(found, args.json))
         return 1 if any(finding.stuck for finding in found) else 0
+    if isinstance(live, dict) and live.get("issues"):
+        print(f"kern has seen {live['issues']} issues and {live['pulls']} pull requests since "
+              f"{live.get('since')}, not a complete read of the open ones, so no verdict: reading "
+              "the fleet", file=sys.stderr)
     repo = resolve_repo(root, args.repo)
     base = integration_branch(root)
     files = (args.open_issues, args.closed_issues, args.pulls)

@@ -17,9 +17,11 @@ SETUP_GO_NODE_24 = 6
 def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow[workflow.index("\njobs:\n"):]
-    assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["check", "kern-platforms", "trust"], (
+    assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["check", "kern-platforms", "kern-platforms-queue",
+                                                         "trust"], (
         "kern runs in the required job check, and on Windows and macOS in kern-platforms, which check "
-        "needs; trust decides whether either runs (README \"Trusted landings\")"
+        "needs and kern-platforms-queue bounds the queue of; trust decides whether either runs "
+        "(README \"Trusted landings\")"
     )
     setups = re.findall(r"uses: actions/setup-go@v(\d+)\n        with:\n((?:          .*\n)+)", workflow)
     assert len(setups) == 2, "kern's steps set up Go on Linux and on the other platforms"

@@ -306,3 +306,115 @@ component = "held"
 		t.Fatal("the given-up call answers nothing")
 	}
 }
+
+const deskDeclaration = `name = "desk"
+contract = 1
+io = true
+help = "Answers questions once the case lets it go."
+
+[verbs.answer]
+type = "string"
+answer = "string"
+help = "Answers a question."
+`
+
+// A call whose step asks a declared I/O component's verb, given up while
+// that request waits: the core tells the process on the verb's
+// io.<i>.<verb>, without a reply, {"call", "stop"}, naming the request's
+// call, as it tells a command's on cmd.<i>.<command>, so the verb's code in
+// the process ends instead of serving on unseen.
+func TestTheCoreTellsADeclaredVerbOnItsStopWordThatItsCallIsGivenUp(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, "components", "desk")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, index.DeclarationFile), []byte(deskDeclaration), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	question := index.Request[string, string]("ask", "The question to the desk.")
+	asker := index.Declare("asker", "Asks the desk.", question,
+		index.Command(index.CommandDecl{
+			Name: "ask desk", Usage: "ask desk WORD", Summary: "Ask the desk.", Help: "Asks the desk, answers its answer.",
+			Group: "Fixtures", Class: index.Batch,
+		}, func(_ struct{}, args []string) (index.Result, error) {
+			return index.Result{Requests: []index.Ask{question.Ask(args[0])},
+				Then: func(a []any) (index.Result, error) { return index.Result{Text: a[0].(string)}, nil }}, nil
+		}))
+	w, err := index.ParseWiring([]byte(`
+[instances.desk]
+component = "desk"
+
+[instances.asker]
+component = "asker"
+
+[wires]
+"asker.ask" = "desk.answer"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := served(t, host.Options{Root: root, Clock: newClock(), Wiring: w, Components: []*index.Component{asker}})
+	proc := as(t, c, "desk")
+	asked := make(chan *nats.Msg, 8)
+	if _, err := proc.ChanSubscribe(bus.IOVerb+"desk.>", asked); err != nil {
+		t.Fatal(err)
+	}
+	var attached map[string]any
+	ask(t, proc, bus.Commit+"desk", map[string]any{"attach": host.Attach{Contract: host.Contract, Hash: index.Hash([]byte(deskDeclaration))}}, &attached)
+	if attached["accepted"] != true {
+		t.Fatalf("the attach answers %v", attached)
+	}
+	client := as(t, c, bus.Client)
+	reply := bus.Inbox(bus.Client) + ".desk"
+	answered := make(chan *nats.Msg, 1)
+	if _, err := client.ChanSubscribe(reply, answered); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.PublishRequest(bus.Call+bus.Token("ask desk"), reply, []byte(`{"args":["a"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	next := func() *nats.Msg {
+		t.Helper()
+		select {
+		case m := <-asked:
+			return m
+		case <-time.After(wait):
+			t.Fatal("the process hears nothing on io.desk.>")
+		}
+		return nil
+	}
+	request := next()
+	var body struct {
+		Call    string          `json:"call"`
+		Request json.RawMessage `json:"request"`
+	}
+	if err := json.Unmarshal(request.Data, &body); err != nil || request.Reply == "" || body.Call == "" ||
+		string(body.Request) != `"a"` {
+		t.Fatalf("the request reads %s, reply %q, and wants a call and the question", request.Data, request.Reply)
+	}
+	var given host.Abandoned
+	ask(t, client, host.AbandonSubject, host.Abandon{Call: reply}, &given)
+	if !given.Abandoned {
+		t.Fatalf("giving up the running call answers %+v", given)
+	}
+	stop := next()
+	var word host.StopWord
+	if err := json.Unmarshal(stop.Data, &word); err != nil {
+		t.Fatal(err)
+	}
+	if stop.Reply != "" || stop.Subject != request.Subject || word.Call != body.Call ||
+		!strings.Contains(word.Stop, "its caller gave it up") {
+		t.Fatalf("the process hears %s %s (reply %q), and wants the stop word of call %s", stop.Subject, stop.Data, stop.Reply, body.Call)
+	}
+	select {
+	case m := <-answered:
+		var a host.CallAnswer
+		if err := json.Unmarshal(m.Data, &a); err != nil || !strings.Contains(a.Error, "given up") {
+			t.Fatalf("the given-up call answers %s", m.Data)
+		}
+	case <-time.After(wait):
+		t.Fatal("the given-up call answers nothing")
+	}
+}

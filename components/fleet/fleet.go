@@ -57,22 +57,31 @@ type Finding struct {
 
 // Findings is the component's output: the findings, when they were
 // computed and how much of the fleet the names held, so a reader can tell a
-// core that has read nothing yet from a healthy fleet.
+// core that has read nothing yet, or only part of the fleet, from a healthy
+// fleet. Complete is whether the repository's open issues and its open pull
+// requests were each read as a whole list (github/issue-lists and
+// github/pull-lists); Since is the oldest read of what the check stands on.
+// Only a complete read is healthy: a partial view is no verdict.
 type Findings struct {
 	At       time.Time `json:"at"`
 	Issues   int       `json:"issues"`
 	Pulls    int       `json:"pulls"`
 	Branches int       `json:"branches"`
+	Complete bool      `json:"complete"`
+	Since    time.Time `json:"since"`
 	Healthy  bool      `json:"healthy"`
 	Findings []Finding `json:"findings"`
 }
 
-// In is what the derivation reads: the GitHub families whole, origin's
-// branches and the config.
+// In is what the derivation reads: the GitHub families whole (the open
+// lists among them, whose presence makes a read complete), origin's branches
+// and the config.
 type In struct {
 	Issues     map[string]github.Snapshot `index:"issues"`
 	Pulls      map[string]github.Snapshot `index:"pulls"`
 	Checks     map[string]github.Snapshot `index:"checks"`
+	IssueLists map[string]github.List     `index:"issue-lists"`
+	PullLists  map[string]github.List     `index:"pull-lists"`
 	Branches   map[string]time.Time       `index:"branches"`
 	LeaseHours float64                    `index:"config/lease-hours"`
 	Repository string                     `index:"config/repository"`
@@ -87,7 +96,7 @@ var Component = index.Declare(Name, "What is stuck or stray in the fleet, with i
 	index.Config("lease-hours", 3.0, "How long in-progress work may go without a push to its branch: se.toml [fleet] lease_hours."),
 	index.Config("repository", "", "The checkout's repository name: an issue labelled repo:<other> keeps its branch elsewhere."),
 	index.Config("base", "main", "The integration branch: the pull requests to it are the delivered work."),
-	index.Derived("findings", Findings{Healthy: true, Findings: []Finding{}}, "Each stuck or stray piece of work, with its remedy, as fleet-check --json lists it.",
+	index.Derived("findings", Findings{Findings: []Finding{}}, "Each stuck or stray piece of work, with its remedy, as fleet-check --json lists it.",
 		func(in In) (Findings, error) { return Check(in, Now().UTC()), nil }),
 )
 
@@ -311,8 +320,9 @@ func Check(in In, now time.Time) Findings {
 	if found == nil {
 		found = []Finding{}
 	}
+	complete, since := read(in)
 	return Findings{At: now, Issues: len(all), Pulls: len(in.Pulls), Branches: len(in.Branches),
-		Healthy: len(found) == 0, Findings: found}
+		Complete: complete, Since: since, Healthy: complete && len(found) == 0, Findings: found}
 }
 
 // Blockers are the issues of the same repository a body's Blocked by names:
@@ -410,4 +420,50 @@ func sortedKeys[V any](m map[int]V) []int {
 	}
 	sort.Ints(keys)
 	return keys
+}
+
+// read is whether in holds a complete read of the repository's open issues
+// and open pull requests, a whole list of each (any labels a list asked
+// narrow it, so only an unlabelled list counts), and the oldest read time of
+// what the check stands on: those lists where complete, else every snapshot.
+func read(in In) (bool, time.Time) {
+	var since time.Time
+	older := func(t time.Time) {
+		if !t.IsZero() && (since.IsZero() || t.Before(since)) {
+			since = t
+		}
+	}
+	whole := func(lists map[string]github.List) (time.Time, bool) {
+		var newest time.Time
+		for _, l := range lists {
+			if strings.ToLower(l.State) == "open" && len(l.Labels) == 0 && ours(l.Repo, in.Repository) &&
+				l.Read.After(newest) {
+				newest = l.Read
+			}
+		}
+		return newest, !newest.IsZero()
+	}
+	issues, haveIssues := whole(in.IssueLists)
+	pulls, havePulls := whole(in.PullLists)
+	if haveIssues && havePulls {
+		older(issues)
+		older(pulls)
+		return true, since
+	}
+	for _, family := range []map[string]github.Snapshot{in.Issues, in.Pulls} {
+		for _, s := range family {
+			older(s.Read)
+		}
+	}
+	return false, since
+}
+
+// ours is whether repo, <owner>/<name>, is the checkout's repository by its
+// name; with no name configured, any repository is.
+func ours(repo, name string) bool {
+	if name == "" {
+		return true
+	}
+	_, short, _ := strings.Cut(repo, "/")
+	return strings.EqualFold(short, name)
 }

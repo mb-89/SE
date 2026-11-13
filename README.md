@@ -162,6 +162,8 @@ no Go components. The plugin's hooks start the binary and post every session eve
   `~/.se/bin/<name>-<version>` is on the machine, it runs `<name> start` for the project, which
   returns at once, and hands the core the session's start, which takes the session's lease. It names
   the binary in `<project>/.se/.runtime/kern.path` for the later hooks.
+  - `~/.se/bin/<name>` links to the version in place (a copy where the file system makes no link),
+    and Claude Code's env file puts `~/.se/bin` on the session's PATH, so `se status` works there.
 - **The first start of a version** reads the release's `SHA256SUMS` (one small read). Where it names
   this platform's archive, the archive is fetched, checked against its line and unpacked in the
   background, and the core then starts.
@@ -217,8 +219,10 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
   the instances and those attached.
 - **Routed:** a command a person waits on that only reads (its class `interactive`: `status`,
   `config`, `ready`, `capacity`, `queue`, `fleet-check`, `metrics` and `overhaul.py facts`) goes
-  through kern's `call.<command>` where kern serves the checkout the command runs in with the same
-  script.
+  through kern's `call.<command>` where kern serves the checkout the command runs in and that
+  checkout holds the script.
+  - Any copy of the script routes there, the plugin's (the path SE's skills name) as much as the
+    checkout's own, and kern answers with the checkout's code.
   - Everywhere else, and for every command that writes, the command runs directly, as it did
     before components. A call that fails on the way runs directly too: the command only reads.
   - A call kern has not answered within 60 s (`CALL_WAIT`), as one waiting behind calls in
@@ -458,10 +462,12 @@ no token), the hand-off needs neither a retyped file nor a second run
 - **The fallback.** Without kern, on a token backend or with `SE_KERN=off`, each command keeps its
   file-based hand-off above. A call kern refuses before it says anything runs directly; one that
   fails on the way is reported and never run twice, as it writes.
+  - A command that falls back says so first, on stderr, and why: `se: <command> fell back to the
+    file-based hand-off: <why>`.
 - **Tested** against fake sessions in the suite (`tests/test_work_ticket_issues.py`,
   `tests/test_work_tickets.py`) and against the real core: `tests/beside_se_relay.py` runs
-  `fleet-check` as one call whose reads a simulated session answers on the hook, then the fallback
-  once kern stops.
+  `fleet-check` as one call whose reads a simulated session answers on the hook, from the
+  checkout's script and from a plugin's copy, then the fallback once kern stops.
 
 The squash commit carries the release's `se.toml` version, so the release workflow tags it and the
 docs workflow publishes it, as both run on every push to `main`. GitHub commits it for the merging
@@ -519,10 +525,14 @@ it is `no branch` at once, saying why.
 Blocks are the `## Blocked by` section of each open issue's body, where `work_tickets.py block`
 writes them.
 
-Where the core running in the checkout carries SE's fleet component and has read issues, it answers
-from the core's `fleet/findings` instead, live, naming how many issues and pull requests the core
-has read ([components/README.md](components/README.md#who-reads-them)); the Python check stays the
-path everywhere else.
+Where the core running in the checkout carries SE's fleet component and has read the open issues
+and the open pull requests each as a whole list, it answers from the core's `fleet/findings`
+instead, live, naming how many issues and pull requests the core has read and since when
+([components/README.md](components/README.md#who-reads-them)); the Python check stays the path
+everywhere else.
+
+A partial view is no verdict: where the core holds only some issues or pull requests, the check
+says how many it has seen and since when, and reads the fleet itself.
 
 Without gh it prints its GitHub plan; the session runs it with its GitHub tools, saves the three
 lists as JSON (each in-progress issue with its comments) and passes them as `--open-issues`,
@@ -849,6 +859,23 @@ Free minutes for a private repository, which the owner sets up:
 - Each run's job is billed by the started minute: a trusted `check` and the record's run cost a
   minute each, against the full suite's own minutes.
 
+
+### Platform legs and their queue
+
+kern-platforms runs kern's tests and SE's start and hook tests on a Windows and a macOS runner, and
+`check` needs every leg. A job's `timeout-minutes` counts only from when a runner takes it, so it
+bounds a leg that runs (45 minutes) and not one that waits: a leg that never gets a runner waits
+until GitHub fails it after 24 hours, and `check` with it.
+
+- **The queue bound.** The job kern-platforms-queue
+  ([scripts/ci_queue.py](scripts/ci_queue.py) `watch`) reads the run's jobs every 30 s. Once every
+  leg has a runner it passes; a leg still queued after 20 minutes is reported as never run, an
+  error naming the leg and in the job's summary, not as a test failure, and the run is cancelled.
+- **Re-run once.** `.github/workflows/check-rerun.yml` hears each completed run of `check`
+  (`ci_queue.py rerun`): a first attempt that was cancelled while a leg never had a runner is
+  re-run; a second attempt, or a run that ended any other way, stays as it ended.
+- **Tested** against a fake of the jobs API and a fake clock (`tests/test_ci_queue.py`); GitHub's
+  own queue, cancel and re-run are not reproducible there.
 ### Metrics
 
 Every run of a `work_tickets.py` or `se_start.py` subcommand appends one JSON line to
