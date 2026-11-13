@@ -16,6 +16,7 @@ import fnmatch
 import hashlib
 import io
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -75,6 +76,8 @@ class FakeGit:
         self.trees: dict[str, dict[str, bytes]] = {}
         self.commits: dict[str, Commit] = {}
         self.calls: list[list[str]] = []
+        # A bare repository whose pre-receive hook declines every push, to the message given
+        self.declining: dict[Path, str] = {}
 
     # The door's call
 
@@ -350,7 +353,8 @@ class FakeGit:
         return sha + "\n"
 
     def git_branch(self, call: Call) -> str:
-        """`branch --show-current`, `branch -D <name>` (refused for a branch a worktree has out)."""
+        """`branch --show-current`, `branch -D <name>` (refused for a branch a worktree has out),
+        `branch <name> [<start>]`."""
         repository = self.find(call.where)
         if call.args == ["--show-current"]:
             return repository.head.removeprefix("refs/heads/") + "\n" if repository.head.startswith("refs/") else ""
@@ -361,6 +365,12 @@ class FakeGit:
             if any(other.head == name for other in self.worktrees(repository)):
                 raise Refusal(1, f"error: cannot delete branch '{call.args[1]}' used by worktree")
             del repository.refs[name]
+            return ""
+        if 1 <= len(call.args) <= 2 and not call.args[0].startswith("-"):
+            name = f"refs/heads/{call.args[0]}"
+            if name in repository.refs:
+                raise Refusal(128, f"fatal: a branch named '{call.args[0]}' already exists")
+            repository.refs[name] = self.resolve(repository, call.args[1] if len(call.args) > 1 else "HEAD")
             return ""
         raise Refusal(129, f"fake git: no `branch {' '.join(call.args)}`")
 
@@ -391,11 +401,12 @@ class FakeGit:
         return ""
 
     def git_switch(self, call: Call) -> str:
+        """`switch [-q] [--discard-changes] <branch>`, `switch -c|-C <branch> [<start>]` (`-C` resets one)."""
         repository = self.find(call.where)
         args = [a for a in call.args if a not in ("-q", "--quiet", "--discard-changes")]
-        if args[0] == "-c":
+        if args[0] in ("-c", "-C"):
             name = f"refs/heads/{args[1]}"
-            if name in repository.refs:
+            if name in repository.refs and args[0] == "-c":
                 raise Refusal(128, f"fatal: a branch named '{args[1]}' already exists")
             start = self.resolve(repository, args[2]) if len(args) > 2 else self.head_commit(repository)
             if start is not None:
@@ -412,12 +423,23 @@ class FakeGit:
         return ""
 
     def git_checkout(self, call: Call) -> str:
-        """`checkout [-q] -b <branch> [<start>]` and `checkout [-q] <branch>`, as `switch` does."""
+        """`checkout [-q] -b <branch> [<start>]` and `checkout [-q] <branch>`, as `switch` does;
+        `checkout <rev> -- <path>...`, the paths' files at the commit into the index and on disk."""
         args = [a for a in call.args if a not in ("-q", "--quiet")]
         if args and args[0] == "-b":
             return self.git_switch(Call(call.where, call.options, call.env, ["-c", *args[1:]]))
         if len(args) == 1 and not args[0].startswith("-"):
             return self.git_switch(Call(call.where, call.options, call.env, args))
+        if "--" in args and args.index("--") == 1:
+            repository = self.find(call.where)
+            files = self.trees[self.commits[self.resolve(repository, args[0])].tree]
+            for path in args[2:]:
+                name = (call.where / path).resolve().relative_to(repository.path).as_posix()
+                if name not in files:
+                    raise Refusal(1, f"error: pathspec '{path}' did not match any file(s) known to git")
+                (repository.path / name).write_bytes(files[name])
+                repository.index[name] = files[name]
+            return ""
         raise Refusal(129, f"fake git: no `checkout {' '.join(call.args)}`")
 
     def git_rm(self, call: Call) -> str:
@@ -438,10 +460,17 @@ class FakeGit:
         return [main, *(other for other in self.repositories.values() if other.main is main)]
 
     def git_worktree(self, call: Call) -> str:
-        """`worktree add [-b <branch>|--detach] <path> [<commit>]`, `worktree list --porcelain`,
+        """`worktree add [-b <branch>|--detach] <path> [<commit>]`, `worktree list [--porcelain]`,
         `worktree remove [--force] <path>`: a linked worktree shares its repository's refs."""
         repository = self.find(call.where)
         verb, *args = call.args
+        if verb == "list" and not args:  # `<path> <short commit> [<branch>]`, the main one first
+            return "".join(
+                f"{tree.path.as_posix()} (bare)\n" if tree.bare else
+                f"{tree.path.as_posix()} {(self.head_commit(tree) or '0' * 40)[:7]} "
+                + (f"[{tree.head.removeprefix('refs/heads/')}]\n" if tree.head.startswith("refs/")
+                   else "(detached HEAD)\n")
+                for tree in self.worktrees(repository))
         if verb == "list" and args == ["--porcelain"]:
             out = []
             for tree in self.worktrees(repository):
@@ -513,6 +542,8 @@ class FakeGit:
         ours, theirs = self.commit_of(repository, "HEAD"), self.resolve(repository, theirs_rev)
         if theirs in self.ancestors(ours):
             return "Already up to date.\n"
+        if "--ff-only" in call.args and ours not in self.ancestors(theirs):
+            raise Refusal(128, "fatal: Not possible to fast-forward, aborting.")
         common = self.ancestors(ours) & self.ancestors(theirs)
         base = next((sha for sha in self.first_parents(ours) if sha in common), None)
         trees = [self.trees[self.commits[sha].tree] if sha else {} for sha in (base, ours, theirs)]
@@ -529,38 +560,100 @@ class FakeGit:
             repository.conflicts = conflicts
             raise Refusal(1, "\n".join(f"CONFLICT (content): Merge conflict in {path}" for path in conflicts)
                           + "\nAutomatic merge failed; fix conflicts and then commit the result.")
+        before, present = trees[1], self.on_disk(repository)
+        local = [path for path in sorted(set(before) | set(merged)) if before.get(path) != merged.get(path)
+                 and (present.get(path) != before.get(path) or repository.index.get(path) != before.get(path))]
+        if local:
+            raise Refusal(1, "error: Your local changes to the following files would be overwritten by merge:\n"
+                          + "".join(f"\t{path}\n" for path in local)
+                          + "Please commit your changes or stash them before you merge.\nAborting")
         if "--no-ff" not in call.args and base == ours:
             repository.refs[repository.head] = theirs
         else:
             self.commit_tree(call, repository, self.store_tree(merged), (ours, theirs), message)
-        self.check_out(repository, self.commits[self.commit_of(repository, "HEAD")].tree)
+        self.move_to(repository, self.commits[ours].tree, self.commits[self.commit_of(repository, "HEAD")].tree)
         return ""
 
-    def git_rev_list(self, call: Call) -> str:
-        repository = self.find(call.where)
-        args = list(call.args)
-        excluded: set[str] = set()
-        if "--not" in args:
-            args, negated = args[:args.index("--not")], args[args.index("--not") + 1:]
-            names = [name for name in repository.refs
-                     if ("--remotes" in negated and name.startswith("refs/remotes/"))
-                     or ("--tags" in negated and name.startswith("refs/tags/"))]
-            for name in names:
-                excluded |= self.ancestors(repository.refs[name])
-        rev = self.resolve(repository, [a for a in args if not a.startswith("-")][0])
+    def move_to(self, repository: Repository, old: str, new: str) -> None:
+        """Bring the working tree and the index from tree `old` to tree `new` as a merge does: only
+        the paths that differ change, so an uncommitted change elsewhere stays."""
+        before, after = self.trees[old], self.trees[new]
+        for path in set(before) | set(after):
+            if before.get(path) == after.get(path):
+                continue
+            target = repository.path / path
+            if path in after:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(after[path])
+                repository.index[path] = after[path]
+            else:
+                target.unlink(missing_ok=True)
+                repository.index.pop(path, None)
+
+    def walk(self, repository: Repository, args: list[str]) -> list[str]:
+        """The commits `log` and `rev-list` list for `args`: those reachable from the revisions named
+        (`<rev>`, the right side of `<a>..<b>`; HEAD where none is) and from none excluded (`^<rev>`,
+        the left side of `<a>..<b>`, the refs after `--not --remotes`/`--tags`), newest first as they
+        were made, or along the first parents with `--first-parent`; `--no-merges` drops merges and
+        `--max-count=<n>`, `-n <n>` or `-<n>` keeps the first n."""
+        included, excluded, limit = [], set(), None
+        options = {"--format", "--pretty", "--max-count"}
+        for index, argument in enumerate(args):
+            if argument == "--not":
+                negated = args[index + 1:]
+                for name, sha in repository.refs.items():
+                    if ("--remotes" in negated and name.startswith("refs/remotes/")) \
+                            or ("--tags" in negated and name.startswith("refs/tags/")):
+                        excluded |= self.ancestors(sha)
+                break
+            if argument.startswith("--max-count="):
+                limit = int(argument.partition("=")[2])
+            elif argument == "-n":
+                limit = int(args[index + 1])
+            elif argument.startswith("-") and argument[1:].isdigit():
+                limit = int(argument[1:])
+            elif argument.startswith("-") or argument.partition("=")[0] in options \
+                    or (index and args[index - 1] == "-n"):
+                continue
+            elif argument.startswith("^"):
+                excluded |= self.ancestors(self.resolve(repository, argument[1:]))
+            elif ".." in argument:
+                left, _, right = argument.partition("..")
+                excluded |= self.ancestors(self.resolve(repository, left or "HEAD"))
+                included.append(self.resolve(repository, right or "HEAD"))
+            else:
+                included.append(self.resolve(repository, argument))
+        included = included or [self.commit_of(repository, "HEAD")]
         if "--first-parent" in args:
-            line = self.first_parents(rev)
-        else:  # newest first, as the commits were made
-            reachable = self.ancestors(rev)
+            line = [sha for start in included for sha in self.first_parents(start)]
+            line = list(dict.fromkeys(line))
+        else:
+            reachable = set().union(*(self.ancestors(sha) for sha in included))
             line = [sha for sha in reversed(self.commits) if sha in reachable]
-        line = [sha for sha in line if sha not in excluded]
-        limit = next((int(a.partition("=")[2]) for a in args if a.startswith("--max-count=")), None)
-        line = line[:limit] if limit is not None else line
-        return f"{len(line)}\n" if "--count" in args else "".join(f"{sha}\n" for sha in line)
+        line = [sha for sha in line if sha not in excluded
+                and ("--no-merges" not in args or len(self.commits[sha].parents) < 2)]
+        return line[:limit] if limit is not None else line
+
+    def git_rev_list(self, call: Call) -> str:
+        """`rev-list [--count] [--parents] [--reverse] <revisions>`, as `walk` selects them."""
+        repository = self.find(call.where)
+        line = self.walk(repository, list(call.args))
+        if "--reverse" in call.args:
+            line.reverse()
+        if "--count" in call.args:
+            return f"{len(line)}\n"
+        if "--parents" in call.args:
+            return "".join(" ".join((sha, *self.commits[sha].parents)) + "\n" for sha in line)
+        return "".join(f"{sha}\n" for sha in line)
 
     def git_show(self, call: Call) -> str | bytes:
+        """`show <rev>:<path>`, a file at a commit; `show -s --format=<f> <rev>`, the commit formatted."""
         repository = self.find(call.where)
         spec = [a for a in call.args if not a.startswith("-")][0]
+        form = next((a.split("=", 1)[1] for a in call.args if a.startswith(("--format=", "--pretty="))), None)
+        if form is not None:
+            form = form.removeprefix("format:").removeprefix("tformat:")
+            return self.formatted(self.resolve(repository, spec), form) + "\n"
         rev, _, path = spec.partition(":")
         files = self.trees[self.commits[self.resolve(repository, rev)].tree]
         if path not in files:
@@ -568,28 +661,14 @@ class FakeGit:
         return files[path]
 
     def git_log(self, call: Call) -> str:
-        """`log [--first-parent] [--name-only] [-<n>|-n <n>|--max-count=<n>] --format=<f> [<rev>]`."""
+        """`log [--first-parent] [--no-merges] [--name-only] [-<n>|-n <n>|--max-count=<n>]
+        --format=<f> [<revisions>]`, as `walk` selects them."""
         repository = self.find(call.where)
-        args, limit, revs = list(call.args), None, []
+        args = list(call.args)
         form = next(a.split("=", 1)[1] for a in args if a.startswith(("--format=", "--pretty=")))
         form = form.removeprefix("format:").removeprefix("tformat:")
-        for index, argument in enumerate(args):
-            if argument.startswith("--max-count="):
-                limit = int(argument.partition("=")[2])
-            elif argument == "-n":
-                limit = int(args[index + 1])
-            elif argument[1:].isdigit() and argument.startswith("-"):
-                limit = int(argument[1:])
-            elif not argument.startswith("-") and (index == 0 or args[index - 1] != "-n"):
-                revs.append(argument)
-        rev = self.resolve(repository, revs[0] if revs else "HEAD")
-        if "--first-parent" in args:
-            line = self.first_parents(rev)
-        else:
-            reachable = self.ancestors(rev)
-            line = [sha for sha in reversed(self.commits) if sha in reachable]
         out = []
-        for sha in line[:limit]:
+        for sha in self.walk(repository, args):
             out.append(self.formatted(sha, form) + "\n")
             if "--name-only" in args:
                 out.append("\n" + "".join(f"{path}\n" for path in self.changed(sha)))
@@ -604,10 +683,13 @@ class FakeGit:
                   "at": str(int(commit.author_date.timestamp())),
                   "ct": str(int(commit.committer_date.timestamp())),
                   "s": commit.message.splitlines()[0], "B": commit.message,
-                  "x00": "\0", "x09": "\t", "n": "\n"}
+                  "n": "\n"}
         out, index = [], 0
         while index < len(form):
-            if form[index] == "%":
+            if form.startswith("%x", index) and len(form) >= index + 4:  # %xNN, the byte NN in hex
+                out.append(chr(int(form[index + 2:index + 4], 16)))
+                index += 4
+            elif form[index] == "%":
                 key = next((k for k in sorted(fields, key=len, reverse=True) if form.startswith(k, index + 1)), None)
                 if key is None:
                     raise Refusal(129, f"fake git: no log placeholder at {form[index:]!r}")
@@ -626,17 +708,22 @@ class FakeGit:
         return sorted(path for path in set(old) | set(new) if old.get(path) != new.get(path))
 
     def git_cat_file(self, call: Call) -> str:
+        """`cat-file -e <rev>` and `cat-file -e <rev>:<path>`: whether the object exists."""
         repository = self.find(call.where)
         if call.args[0] != "-e":
             raise Refusal(129, f"fake git: no `cat-file {call.args[0]}`")
+        rev, colon, path = call.args[1].partition(":")
         try:
-            self.resolve(repository, call.args[1])
+            sha = self.resolve(repository, rev)
         except (Refusal, KeyError):
-            raise Refusal(1, "")
+            raise Refusal(128 if colon else 1, "")
+        if colon and path not in self.trees[self.commits[sha].tree]:
+            raise Refusal(128, f"fatal: path '{path}' does not exist in '{rev}'")
         return ""
 
     def git_merge_base(self, call: Call) -> str:
-        """`merge-base <a> <b>`, and `merge-base --is-ancestor <a> <b>`: exit 0 or 1."""
+        """`merge-base <a> <b>...` (with more than one `<b>`, the base of `<a>` and a merge of
+        them all), and `merge-base --is-ancestor <a> <b>`: exit 0 or 1."""
         repository = self.find(call.where)
         revs = [a for a in call.args if not a.startswith("-")]
         ours, theirs = (self.resolve(repository, rev) for rev in revs[:2])
@@ -644,7 +731,8 @@ class FakeGit:
             if ours not in self.ancestors(theirs):
                 raise Refusal(1, "")
             return ""
-        base = self.merge_base(ours, theirs)
+        others = set().union(*(self.ancestors(self.resolve(repository, rev)) for rev in revs[1:]))
+        base = next((sha for sha in self.first_parents(ours) if sha in others), None)
         if base is None:
             raise Refusal(1, "")
         return base + "\n"
@@ -809,18 +897,37 @@ class FakeGit:
         return "".join(f"{remote.refs[name]}\t{name}\n" for name in refs)
 
     def git_push(self, call: Call) -> str:
+        """`push [-q] [-u] [--force] [--force-with-lease=<ref>:<sha>] <remote> <spec>...`: `<src>[:<dst>]`
+        moves the remote's branch (a non-fast-forward refused), `:<dst>` deletes it; a lease that
+        does not hold, or the remote's pre-receive hook (`declining`), refuses the push."""
         repository = self.find(call.where)
         name, *specs = [a for a in call.args if not a.startswith("-")]
         remote = self.remote(repository, name)
+        leases = dict(a.partition("=")[2].split(":", 1) for a in call.args if a.startswith("--force-with-lease="))
         for spec in specs:
             source, _, destination = spec.partition(":")
             destination = destination or source
             if not destination.startswith("refs/"):
                 destination = f"refs/heads/{destination}"
-            sha = self.resolve(repository, source)
+            short = destination.removeprefix("refs/heads/")
             old = remote.refs.get(destination)
-            if old is not None and old not in self.ancestors(sha) and "--force" not in call.args:
-                short = destination.removeprefix("refs/heads/")
+            if destination in leases and old != self.resolve(repository, leases[destination]):
+                raise Refusal(1, f"To {name}\n ! [rejected]        {spec} (stale info)\n"
+                                 f"error: failed to push some refs to '{name}'")
+            if remote.path in self.declining:
+                raise Refusal(1, f"remote: {self.declining[remote.path]}\nTo {name}\n"
+                                 f" ! [remote rejected] {spec} (pre-receive hook declined)\n"
+                                 f"error: failed to push some refs to '{name}'")
+            if not source:
+                if old is None:
+                    raise Refusal(1, f"error: unable to delete '{short}': remote ref does not exist\n"
+                                     f"error: failed to push some refs to '{name}'")
+                del remote.refs[destination]
+                repository.refs.pop(f"refs/remotes/{name}/{short}", None)
+                continue
+            sha = self.resolve(repository, source)
+            if old is not None and old not in self.ancestors(sha) and "--force" not in call.args \
+                    and destination not in leases:
                 raise Refusal(1, f"To {name}\n ! [rejected]        {source} -> {short} (non-fast-forward)\n"
                                  f"error: failed to push some refs to '{name}'")
             remote.refs[destination] = sha
@@ -840,10 +947,90 @@ class FakeGit:
                     repository.refs[ref] = sha
         for spec in specs:
             source, _, destination = spec.removeprefix("+").partition(":")
-            if source not in remote.refs:
+            if source.endswith("/*") and destination.endswith("/*"):
+                source, destination = source[:-1], destination[:-1]
+                if "--prune" in call.args:
+                    for ref in [ref for ref in repository.refs if ref.startswith(destination)]:
+                        if source + ref.removeprefix(destination) not in remote.refs:
+                            del repository.refs[ref]
+                for ref, sha in remote.refs.items():
+                    if ref.startswith(source):
+                        repository.refs[destination + ref.removeprefix(source)] = sha
+                continue
+            full = source if source in remote.refs else f"refs/heads/{source}"
+            if full not in remote.refs:
                 raise Refusal(128, f"fatal: couldn't find remote ref {source}")
-            repository.refs[destination or source] = remote.refs[source]
+            if destination:
+                repository.refs[destination] = remote.refs[full]
+            elif f"remote.{name}.url" in repository.config and full.startswith("refs/heads/"):
+                repository.refs[f"refs/remotes/{name}/{full.removeprefix('refs/heads/')}"] = remote.refs[full]
+            repository.refs["FETCH_HEAD"] = remote.refs[full]
         return ""
+
+    def git_pull(self, call: Call) -> str:
+        """`pull [-q] [--ff-only] <remote> <branch>`: fetch the branch, then merge it."""
+        name, branch = [a for a in call.args if not a.startswith("-")]
+        self.git_fetch(Call(call.where, call.options, call.env, [name, branch]))
+        flags = [a for a in call.args if a == "--ff-only"]
+        return self.git_merge(Call(call.where, call.options, call.env, [*flags, "FETCH_HEAD"]))
+
+    def git_show_ref(self, call: Call) -> str:
+        """`show-ref --verify [--quiet] <ref>...`: each ref with its commit; a missing one fails."""
+        repository = self.find(call.where)
+        out = []
+        for ref in (a for a in call.args if not a.startswith("-")):
+            if ref not in repository.refs:
+                if "--quiet" in call.args or "-q" in call.args:
+                    raise Refusal(1, "")
+                raise Refusal(128, f"fatal: '{ref}' - not a valid ref")
+            out.append(f"{repository.refs[ref]} {ref}\n")
+        return "" if "--quiet" in call.args or "-q" in call.args else "".join(out)
+
+    def git_commit_tree(self, call: Call) -> str:
+        """`commit-tree <tree> [-p <parent>]... [-m <message>]...`: a new commit, no ref moved."""
+        repository = self.find(call.where)
+        args, parents, messages, tree = list(call.args), [], [], None
+        index = 0
+        while index < len(args):
+            if args[index] in ("-p", "-m"):
+                (parents if args[index] == "-p" else messages).append(args[index + 1])
+                index += 2
+                continue
+            tree = args[index]
+            index += 1
+        tree_id = self.resolve(repository, tree)
+        author, committer = (self.identity(call, repository, role) for role in ("AUTHOR", "COMMITTER"))
+        return self.store_commit(Commit(
+            tree_id, tuple(self.resolve(repository, parent) for parent in parents),
+            "\n\n".join(messages).strip() + "\n", author, committer,
+            date(call, "AUTHOR"), date(call, "COMMITTER"))) + "\n"
+
+    def git_for_each_ref(self, call: Call) -> str:
+        """`for-each-ref --format=<f> [<prefix>...]` with `%(refname)`, `%(refname:lstrip=<n>)`,
+        `%(objectname)` and `%(committerdate:iso-strict)`, the refs in name order."""
+        repository = self.find(call.where)
+        form = next(a.split("=", 1)[1] for a in call.args if a.startswith("--format="))
+        prefixes = [a for a in call.args if not a.startswith("-")]
+        out = []
+        for ref in sorted(repository.refs):
+            if prefixes and not any(ref.startswith(prefix) for prefix in prefixes) or ref == "FETCH_HEAD":
+                continue
+            sha = repository.refs[ref]
+
+            def atom(match: re.Match) -> str:
+                key = match[1]
+                if key == "refname":
+                    return ref
+                if key.startswith("refname:lstrip="):
+                    return "/".join(ref.split("/")[int(key.partition("=")[2]):])
+                if key == "objectname":
+                    return sha
+                if key == "committerdate:iso-strict":
+                    return self.commits[sha].committer_date.isoformat()
+                raise Refusal(129, f"fake git: no for-each-ref atom %({key})")
+            line = re.sub(r"%\((.*?)\)", atom, form)
+            out.append(re.sub(r"%([0-9a-f]{2})", lambda m: chr(int(m[1], 16)), line) + "\n")
+        return "".join(out)
 
 
 def merged_lines(base: bytes | None, mine: bytes | None, theirs: bytes | None) -> bytes | None:
