@@ -179,6 +179,26 @@ no procedure but SE's sends the person to a session.
   exact command or setting. SE runs it on the person's yes, or names the one setting the person
   changes.
 
+## Pause
+
+The owner's pause switch stops the fleet: while an issue labelled `pause` is open in the
+repository, nothing is started, landed or routed. Only the owner opens or closes it, from the
+GitHub app as well; no role sets, closes or works it.
+
+- `work_tickets.py paused` reads it: exit code 1 naming the issue while one is open, 0 while none
+  is. [Without gh](#without-gh) it prints the same search as a plan for the host's GitHub tools
+  (exit code 2).
+- `queue`, `start`, `integrate` and `route` refuse while paused, naming the issue and how to
+  resume; read-only commands still run.
+  - `integrate`'s landing plan runs the same search as its first step, so a pause set while the
+    suite runs lands nothing; a pause is no failure and escalates nothing.
+- SE's and the integrator's turns start with `paused`. On exit code 1 (or an issue the plan
+  lists) the turn starts, lands, routes and dispatches nothing and ends, so a session a scheduled
+  task fires does no work either.
+- On a pause SE lists the live sessions and interrupts the working ones, as its agent's
+  [Pause](../../agents/se.md#pause) says.
+- Resuming is closing the pause issue; nothing else is reset.
+
 ## Outside issues
 
 An outside issue reaches a repository from outside the fleet: from the person's other side or any
@@ -589,6 +609,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   [Landing on main](../../README.md#landing-on-main)).
   - `fleet-check` prints its reading plan and takes the lists the GitHub tools read as files
     (README [Fleet check](../../README.md#fleet-check)).
+  - `paused` prints its search as a plan, and `route` prints it before its own
+    ([Pause](#pause)).
   - `file`, `backlog file` and `route` print their [dedupe](#issues) plan: the search, the
     conditions and the filing step. `route` takes the issue as the tools read it, `--issue-title
     <title> --issue-body <file>`; `file --blocked-by` needs gh.

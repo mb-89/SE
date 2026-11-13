@@ -1431,6 +1431,8 @@ def test_queue_lists_delivered_pull_requests_escalations_and_startable_work(work
 
     def gh(root, args):
         calls.append(args)
+        if "pause" in args:
+            return json.dumps([])
         return json.dumps(pulls if args[:2] == ["pr", "list"] else escalations)
 
     monkeypatch.setattr(work_tickets, "run_gh", gh)
@@ -1460,7 +1462,9 @@ def test_queue_filters_to_current_repository_unless_all_repositories(worktree, m
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, all_repos: [])
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, all_repos: 2)
     work_tickets.queue(worktree, "git.example/owner/repo")
-    issues = [call for call in calls if call[0] == "issue"]
+    pause = [call for call in calls if "pause" in call]  # the switch is the repository's own
+    issues = [call for call in calls if call[0] == "issue" and call not in pause]
+    assert pause and not any(value.startswith("repo:") for call in pause for value in call)
     assert issues and all("repo:worktree" in call for call in issues)
     calls.clear()
     work_tickets.queue(worktree, "git.example/owner/repo", all_repos=True)
@@ -1836,7 +1840,10 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     assert "Started: 1" in output
     closes = [call for call in calls if call[:2] == ["issue", "close"]]
     assert closes == [["issue", "close", "5", "--repo", "git.example/owner/tracker"]]  # only the work issue
-    assert not any(call[0] == "issue" and call[1] in ("create", "list") for call in calls)
+    pause = ["issue", "list", "--state", "open", "--label", "pause"]
+    assert [call[:6] for call in calls if call[:6] == pause] == [pause, pause]  # before, at landing
+    assert not any(call[0] == "issue" and call[1] in ("create", "list") for call in calls
+                   if call[:6] != pause)
     assert [call[:3] for call in calls if call[:2] == ["issue", "comment"]] == [["issue", "comment", "5"]]
     assert bodies == [
         f"Integrated in {commit} from https://git.example/owner/repo/pull/7, landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). "
@@ -2585,21 +2592,26 @@ def test_integrate_hands_off_a_plan_of_github_steps_where_gh_is_not_signed_in(
     plan = json.loads((main_checkout / ".se" / "handoff" / "feature-worker.json")
                       .read_text(encoding="utf-8"))["plan"]
     assert [step["tool"] for step in plan["steps"]] == [
-        "create_pull_request", "pull_request_read", "merge_pull_request"]
-    opened, checked, merged = (step["arguments"] for step in plan["steps"])
+        "list_issues", "create_pull_request", "pull_request_read", "merge_pull_request"]
+    paused, opened, checked, merged = (step["arguments"] for step in plan["steps"])
+    assert paused == {"owner": "owner", "repo": "tracker", "state": "OPEN", "labels": ["pause"],
+                      "perPage": 20}
+    assert "the fleet is paused: stop here, run no later step" in plan["steps"][0]["note"]
     assert opened == {"owner": "owner", "repo": "repo", "head": landing, "base": "main",
                       "title": title, "body": LANDING_BODY}
     assert checked == {"owner": "owner", "repo": "repo", "method": "get_check_runs",
-                       "pullNumber": "<pull number from step 1>"}
-    assert merged == {"owner": "owner", "repo": "repo", "pullNumber": "<pull number from step 1>",
+                       "pullNumber": "<pull number from step 2>"}
+    assert merged == {"owner": "owner", "repo": "repo", "pullNumber": "<pull number from step 2>",
                       "merge_method": "squash", "commit_title": title,
                       "commit_message": "Release-kind: minor", "expectedHeadSha": landed}
-    assert "update_pull_request that one" in plan["steps"][0]["note"]
-    assert f"check run check on {landed} completes" in plan["steps"][1]["note"]
-    assert f"still {base}" in plan["steps"][2]["note"]
+    assert "update_pull_request that one" in plan["steps"][1]["note"]
+    assert f"check run check on {landed} completes" in plan["steps"][2]["note"]
+    assert f"still {base}" in plan["steps"][3]["note"]
     assert plan["then"].startswith("work_tickets.py integrate --read-back feature/worker "
-                                   "--landing-pull <pull number from step 1> --check-run")
-    assert "GitHub plan: land land/feature/worker on main\n1. create_pull_request " in out
+                                   "--landing-pull <pull number from step 2> --check-run "
+                                   "<check run url from step 3>")
+    assert "GitHub plan: land land/feature/worker on main\n1. list_issues " in out
+    assert "\n2. create_pull_request " in out
     assert '"expectedHeadSha": "' + landed + '"' in out
     assert "Run the plan's steps, then its last line for pull request #7" in out
     assert subprocess.run(["git", "-C", str(main_checkout), "branch", "--show-current"],
@@ -2626,7 +2638,7 @@ def test_the_hand_off_plan_titles_by_the_goal_and_links_a_report_over_the_body_l
     assert "Add the worker file" not in title  # the branch's last commit subject, unrelated
     plan = json.loads((main_checkout / ".se" / "handoff" / "feature-worker.json")
                       .read_text(encoding="utf-8"))["plan"]
-    opened, _, merged = (step["arguments"] for step in plan["steps"])
+    _, opened, _, merged = (step["arguments"] for step in plan["steps"])
     assert (opened["title"], merged["commit_title"]) == (title, title)
     assert opened["body"] == LANDING_BODY and len(opened["body"]) < 1024
 
@@ -3821,7 +3833,11 @@ def test_the_cloud_hand_off_prints_the_search_and_the_condition(worktree, monkey
     assert run(worktree, "route", "1", "--routing-file", str(routing), "--issue-title",
                "Proposal: one", "--issue-body", str(outside)) == 0
     out = capsys.readouterr().out
+    assert out.startswith("GitHub plan: paused? pause issues of git.example/owner/repo\n"
+                          "1. list_issues ")  # the pause search runs first
+    assert "Then: no issue listed: run the plan below\nGitHub plan: route" in out
     assert [line.split(" ", 2)[1] for line in out.split("\n") if re.match(r"\d+\. ", line)] == [
+        "list_issues",
         "list_issues", "add_issue_comment", "add_issue_comment", "issue_write", "issue_write",
         "list_issues", "add_issue_comment", "issue_write"]
     assert "the line `Routed from: Proposal: one`" in out and "other than #1" in out

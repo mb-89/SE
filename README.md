@@ -799,6 +799,12 @@ work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]
     list delivered pull requests (open, to the integration branch, with a complete field report),
     escalations and startable work issues
 
+work_tickets.py paused [--worktree WORKTREE] [--repo REPO]
+    whether the fleet is paused: exit code 1 and the issue while an issue labelled pause is open in
+    the repository (the owner's switch; closing it resumes), exit code 0 while none is. queue,
+    start, integrate and route refuse while paused. Without gh it prints the search as a plan for
+    the session's GitHub tools, exit code 2
+
 work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json]
                             [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES]
                             [--pulls PULLS]
