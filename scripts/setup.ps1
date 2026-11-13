@@ -2,7 +2,8 @@
 .SYNOPSIS
 Installs se's git hooks (public-safety check) into a repository: se itself by default, or -Repo,
 such as a project that uses se as a module. Also adds the public check's local list
-(.public-check.local, never checked in) to the repository's .gitignore.
+(.public-check.local, never checked in) to the repository's .gitignore, and sets the repository's
+commit identity as work_tickets.py sync does, so its first commit already carries it.
 #>
 param([string]$Repo)
 
@@ -24,3 +25,10 @@ if ($lines -notcontains $localList -and $lines -notcontains "/$localList") {
     [IO.File]::WriteAllText($ignore, "$text$localList`n", (New-Object Text.UTF8Encoding $false))
     Write-Output "$localList added to $ignore"
 }
+$identity = @((Join-Path $seRoot 'scripts/work_tickets.py'), 'identity', '--worktree', $target)
+if (Get-Command uv -ErrorAction SilentlyContinue) {
+    uv run --no-project --quiet python @identity
+} else {
+    python @identity
+}
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

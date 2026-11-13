@@ -8,10 +8,10 @@ the commands they add own the behaviour.
 ([go-core.md](go-core.md)). Every verdict below marked **superseded** is overturned there; the
 rest stands. What this file ported in Python is the migration's input.
 
-The Go line is `main`'s history at ff01204 (tag `archive/go-line`): about 28,000 lines of Go plus
-17,000 of tests, a Claude plugin, a per-workspace daemon and a fleet of unattended cloud boxes.
-Read it with `git show ff01204:<path>` and `git ls-tree -r ff01204` after
-`git fetch origin tag archive/go-line`; never check it out over a branch.
+The Go line is `main`'s history at ff01204: about 28,000 lines of Go plus 17,000 of tests, a
+Claude plugin, a per-workspace daemon and a fleet of unattended cloud boxes.
+Read it with `git show ff01204:<path>` and `git ls-tree -r ff01204`; in a shallow clone, first
+`git fetch --deepen <n>` or `git fetch origin ff01204`. Never check it out over a branch.
 
 ## What SE does today
 
@@ -209,7 +209,8 @@ Not ported, and no issue will bring them back without the owner:
 - the queue estimate of `issue tree`;
 - `RUNME.sh`, `build.sh` and the setup script that built `se` in the cloud.
 
-The tag `archive/go-line` keeps all of it readable.
+The remote has no tag `archive/go-line`; commit `ff01204`, an ancestor of `main`, keeps all of
+it readable.
 
 ## Its end
 

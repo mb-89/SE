@@ -1071,7 +1071,9 @@ def tested_main(root: Path) -> str:
     return run_git(root, "rev-parse", "--short", base.stdout.strip()).stdout.strip()
 
 
-def sync(root: Path) -> str:
+def set_commit_identity(root: Path, command: str) -> tuple[str, str, str] | None:
+    """Set the checkout's user.name and user.email to its commit identity, as `sync` and the
+    setup scripts do; (name, email, source), or None where neither config sets one."""
     identity = commit_identity(root)
     if identity is not None:
         for key, value in zip(("user.name", "user.email"), identity[:2]):
@@ -1079,8 +1081,13 @@ def sync(root: Path) -> str:
             if configured.returncode != 0:
                 detail = failure_detail(configured)
                 raise QueueError(
-                    f"work_tickets.py sync: cannot set {key} from {identity[2]}: {detail}"
+                    f"work_tickets.py {command}: cannot set {key} from {identity[2]}: {detail}"
                 )
+    return identity
+
+
+def sync(root: Path) -> str:
+    set_commit_identity(root, "sync")
     remote = remote_repo(root)
     if remote is not None:
         fetched = run_git(root, "fetch", "origin")
@@ -6937,6 +6944,18 @@ def run_refs_apply(root: Path, args: argparse.Namespace) -> int:
                  "default main) from origin, or locally without origin", WORKTREE)
 def run_sync(root: Path, args: argparse.Namespace) -> int:
     print(f"Merged {integration_branch(root)} {sync(root)}")
+    return 0
+
+
+@command("identity", "set the checkout's commit identity (machine-local public_identity, else "
+                     "se.toml project.identity) as sync does, without fetching or merging; "
+                     "scripts/setup.sh and setup.ps1 run it", WORKTREE)
+def run_identity(root: Path, args: argparse.Namespace) -> int:
+    identity = set_commit_identity(root, "identity")
+    if identity is None:
+        print(f"No commit identity configured for {root}; git's own user.name and user.email stay")
+    else:
+        print(f"Commit identity of {root} set to {identity[0]} from {identity[2]}")
     return 0
 
 

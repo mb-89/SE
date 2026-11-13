@@ -616,7 +616,7 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - The commands that read such files accept both shapes, the tools' and the REST API's; where
     the tools name nothing, the command says what it falls back to, as `retro.py` does.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
-  `review-note`, `probe`, `sync`, `suite`, `suite-shard`, `suite-time`, `guard`, `config`,
+  `review-note`, `probe`, `sync`, `identity`, `suite`, `suite-shard`, `suite-time`, `guard`, `config`,
   `close`, `push`, `verified`, `comments-read`, `body-read --body-file`, `release-trailer`,
   `pr-body`, `docs`, `format`, `metrics` and `field-report --check`.
 - **Commands that hand off** their GitHub steps: `integrate`, `refs request` and `refs apply`
@@ -650,9 +650,10 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     - Once the pull request is open or updated, `stop-check --pull <number> --pr-description
       <file>` (its description as the GitHub tools read it) records it for the Stop hook
       ([README "Stop hook"](../../../README.md#stop-hook)), which judges without gh by that record.
-    - The field report comes from `field-report.md`, which `field-report --draft <file>
-      --issue-body <file>` writes from the issue as the tools answered it (or from `intake`'s
-      snapshot without `--issue-body`).
+    - The field report comes from `field-report.md`, which `field-report --draft
+      .se/work/field-report.md --worktree <worktree> --issue-body <file>` writes from the issue as
+      the tools answered it (or from `intake`'s snapshot without `--issue-body`); it refuses
+      without `--worktree`.
     - It passes `field-report --check .se/work/field-report.md --worktree <worktree> --issue-body
       <file> --comment-count <n> --newest-comment <id>` (the work issue's body, or the issue as
       the tools answered it, saved to `<file>`, its comments as the GitHub tools read them now).
