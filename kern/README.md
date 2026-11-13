@@ -50,7 +50,8 @@ One core runs per checkout, the nearest folder up from the working directory tha
 
 - **The standing file**, `.se/.runtime/standing.json`, readable by its owner alone: the bus's
   address, the pid, the contract version and every bus user with its password. A pid that runs
-  nowhere reads as absent; the core removes the claim once it has written the file.
+  nowhere, or whose bus accepts no connection (the pid is another process's after a restart that
+  kept the files), reads as absent; the core removes the claim once it has written the file.
 - **Leases.** Each `hook.<event>` with a `session_id` takes or renews that session's lease and
   `hook.SessionEnd` returns it. A component beats on `lease.<i>` every 5 s; a placed instance's
   names read `stale` once three beats are missed.
@@ -134,7 +135,7 @@ time counts against SE's budget and needs no Go).
 `release.toml` owns kern's version and where its release is published:
 
 ```toml
-version = "0.4.1"
+version = "0.4.2"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 

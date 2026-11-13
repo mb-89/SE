@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -194,6 +195,72 @@ func TestAStandingFileOfAnEndedCoreReadsAsAbsent(t *testing.T) {
 	want(t, run(t, nil, "status", "--root", root), 1, "kern: not running")
 	want(t, run(t, nil, "start", "--root", root), 0, "kern: started")
 	want(t, run(t, nil, "status", "--root", root, "--wait", wait), 0, "kern: running")
+}
+
+// A machine restarted with the checkout's files kept, as a cloud
+// environment restored from its snapshot is, gives its processes the pids of
+// the last boot: the standing file of that boot's core names a pid that runs
+// and is no core, and a bus that is gone. Two starts at once there leave
+// exactly one running core, which wrote the standing file anew.
+func TestTwoStartsOverAnEarlierBootsStandingFileLeaveOneCore(t *testing.T) {
+	t.Parallel()
+	root := checkout(t)
+	// The live process the earlier boot's pid now names: a kern held before
+	// its bus, for another checkout, so it is no core of this one.
+	other := exec.Command(kern, "serve", "--root", t.TempDir())
+	other.Env = append(os.Environ(), "KERN_HOLD_START="+filepath.Join(t.TempDir(), "never"))
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	_ = l.Close()
+	if err := os.MkdirAll(filepath.Join(root, host.Runtime), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	earlier, _ := json.Marshal(host.Standing{Contract: host.Contract, Pid: other.Process.Pid, Root: root, Bus: fmt.Sprintf("nats://127.0.0.1:%d", port), Port: port})
+	if err := os.WriteFile(host.StandingPath(root), earlier, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want(t, run(t, nil, "status", "--root", root), 1, "kern: not running")
+	starts := make([]said, 2)
+	var wg sync.WaitGroup
+	for i := range starts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			starts[i] = run(t, nil, "start", "--root", root)
+		}()
+	}
+	wg.Wait()
+	spawned := 0
+	for _, s := range starts {
+		if s.code != 0 {
+			t.Fatalf("a start answers %q with exit code %d", s.out, s.code)
+		}
+		if strings.Contains(s.out, "kern: started") {
+			spawned++
+		}
+	}
+	if spawned != 1 {
+		t.Fatalf("the two starts answer %q and %q, and want exactly one to start the core", starts[0].out, starts[1].out)
+	}
+	want(t, run(t, nil, "status", "--root", root, "--wait", wait), 0, "kern: running")
+	s := standing(t, root)
+	if s.Pid == other.Process.Pid {
+		t.Fatalf("the standing file still names the earlier boot's pid %d", s.Pid)
+	}
+	log, err := os.ReadFile(host.LogPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(log), "kern: serving"); n != 1 || strings.Contains(string(log), "already runs") {
+		t.Fatalf("the core's log says %q, and wants one core serving and none refused", log)
+	}
 }
 
 // The standing file names the bus and a user for the core and for clients;
