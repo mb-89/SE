@@ -507,7 +507,8 @@ GitHub's limits can be named instead of guessed. `scripts/metrics.py` owns the l
   (the waits on GitHub: a push retry, a poll of `check` or of a workflow run).
 - What a command notes itself: the suite's `suite_seconds` and its `suite_limit_seconds` (`[tests]`
   `limit_seconds`) from `suite` and `integrate`, the `issue` `integrate` landed, and
-  `budget_seconds` from a command with a declared budget (`se_start.py status`: 1 s).
+  `budget_seconds` from an interactive command, its budget from
+  [Feedback budgets](#feedback-budgets).
 
 A line that cannot be written is dropped; the command never fails for it. `integrate` prints its own
 line last, `Metrics: {...}`, for the integrator's report.
@@ -527,6 +528,29 @@ Overruns: 1
 
 The lines are per machine; the retro reads the report of the machine its integrations ran on
 ([retro.md](.github/ISSUE_TEMPLATE/retro.md)).
+
+### Feedback budgets
+
+A person never waits on a silent command. The budgets are declared once, in
+[scripts/feedback.py](scripts/feedback.py), which owns them and the lines below; they hold every
+`work_tickets.py` and `se_start.py` subcommand:
+
+- First line within 1 s: a run that has shown nothing after half a second prints
+  `<command>: working, nothing to show yet`.
+- Interactive commands finish within 5 s: `work_tickets.py status`, `queue`, `intake` and
+  `metrics`; `se_start.py status`, the greeting, within 1 s. Each run notes its budget in its
+  [metrics](#metrics) line, so `work_tickets.py metrics` flags an overrun.
+- Long commands announce each phase as it starts, `Phase: <what>`: `integrate` (the pull request
+  read, the guard, sync, the merge, the suite, the checks, the release, the push, the landing plan,
+  the read-back and the close-out), `suite` (its setup and the suite; with `--compare`, each run)
+  and `refresh`.
+- A call that reads GitHub or a remote prints what it reads before it is made:
+  `Reading GitHub: gh issue list --state open --label escalated` (without the options that only
+  shape the output), `Reading the remote: git fetch origin`.
+
+Progress lines go to stderr, so what a command prints on stdout, JSON or a description, stays as it
+is. `queue` reads its listings, and each candidate's blockers and branch, at once while the checkout
+syncs, so it waits on GitHub about three times per run rather than once per call.
 
 ### Machine-local `~/.se/local.toml`
 
