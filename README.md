@@ -859,6 +859,23 @@ Free minutes for a private repository, which the owner sets up:
 - Each run's job is billed by the started minute: a trusted `check` and the record's run cost a
   minute each, against the full suite's own minutes.
 
+
+### Platform legs and their queue
+
+kern-platforms runs kern's tests and SE's start and hook tests on a Windows and a macOS runner, and
+`check` needs every leg. A job's `timeout-minutes` counts only from when a runner takes it, so it
+bounds a leg that runs (45 minutes) and not one that waits: a leg that never gets a runner waits
+until GitHub fails it after 24 hours, and `check` with it.
+
+- **The queue bound.** The job kern-platforms-queue
+  ([scripts/ci_queue.py](scripts/ci_queue.py) `watch`) reads the run's jobs every 30 s. Once every
+  leg has a runner it passes; a leg still queued after 20 minutes is reported as never run, an
+  error naming the leg and in the job's summary, not as a test failure, and the run is cancelled.
+- **Re-run once.** `.github/workflows/check-rerun.yml` hears each completed run of `check`
+  (`ci_queue.py rerun`): a first attempt that was cancelled while a leg never had a runner is
+  re-run; a second attempt, or a run that ended any other way, stays as it ended.
+- **Tested** against a fake of the jobs API and a fake clock (`tests/test_ci_queue.py`); GitHub's
+  own queue, cancel and re-run are not reproducible there.
 ### Metrics
 
 Every run of a `work_tickets.py` or `se_start.py` subcommand appends one JSON line to

@@ -173,6 +173,9 @@ jobs:
   kern-platforms:
     needs: trust
     if: needs.trust.outputs.trusted != 'true'
+    # A leg that runs is bounded here; the time it waits for a runner counts against nothing here,
+    # so kern-platforms-queue bounds that (README "Platform legs and their queue").
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -205,6 +208,23 @@ jobs:
       - name: SE's start and hook scripts on this platform
         shell: bash
         run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py
+  # The queue bound of kern-platforms (README "Platform legs and their queue"): a leg still waiting
+  # for a runner after 20 minutes is reported as never run, not as a test failure, and the run is
+  # cancelled; check-rerun.yml re-runs a first attempt so cancelled once.
+  kern-platforms-queue:
+    needs: trust
+    if: needs.trust.outputs.trusted != 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Every kern-platforms leg gets a runner within 20 minutes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci_queue.py watch --jobs kern-platforms --queue-minutes 20
   # Whether this run passes on the integrator's record of exactly this tree instead of running the
   # suite (README "Trusted landings"): only where se.toml [tests] trust_integrator is on, never on
   # the safety net's runs. Its full history counts the landings for se.toml [tests] full_every.
