@@ -13,6 +13,7 @@ import pytest
 
 import retro
 import work_tickets
+from quiet_git import quiet
 
 REPO = "github.com/owner/repo"
 NOW = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
@@ -35,7 +36,9 @@ def build_checkout(tmp_path: Path) -> None:
     """A bare origin whose main holds COMMITS, and a clone of it, without hooks."""
     origin, work, root = tmp_path / "origin.git", tmp_path / "work", tmp_path / "main"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    quiet(origin)
     subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True, capture_output=True)
+    quiet(work)
     git(work, "config", "user.name", "alice")
     git(work, "config", "user.email", "alice@example.com")
     git(work, "config", "core.hooksPath", str(tmp_path / "no-hooks"))
@@ -47,6 +50,7 @@ def build_checkout(tmp_path: Path) -> None:
     git(work, "push", "-q", "origin", "main")
     subprocess.run(["git", "clone", "-q", "-b", "main", str(origin), str(root)], check=True,
                    capture_output=True)
+    quiet(root)
 
 
 @pytest.fixture
