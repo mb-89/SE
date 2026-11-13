@@ -96,3 +96,16 @@ jobs:
       # The budget's reference run (README "Test budget"): over the limit here, check fails.
       - name: The complete suite, within its budget
         run: uv run python scripts/work_tickets.py suite --worktree .
+      # kern, the Go core incubated under kern/ (kern/README.md "Tests"): its own steps after the
+      # suite, timed, so a red kern test fails this check and the suite's budget stays the suite's.
+      # The Go version is kern/go.mod's.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: kern/go.mod
+          cache-dependency-path: kern/go.sum
+      - name: kern vets
+        working-directory: kern
+        run: time go vet ./...
+      - name: kern's tests pass
+        working-directory: kern
+        run: time go test ./...
