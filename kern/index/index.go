@@ -373,9 +373,18 @@ func (in *instance) runs(port string, changed map[string]bool, all bool, s Snaps
 	plain := all
 	for _, p := range in.comp.ReadsOf(port) {
 		name := in.in[p]
-		if n := s.names[name]; n != nil && n.family {
+		n := s.names[name]
+		switch {
+		case n != nil && n.family && in.whole(p, n):
+			// A whole family runs it once for any change at any of its keys.
+			for c := range changed {
+				if _, ok := keyIn(name, c); ok {
+					plain = true
+				}
+			}
+		case n != nil && n.family:
 			fams[name] = true
-		} else if changed[name] {
+		case changed[name]:
 			plain = true
 		}
 	}
@@ -413,6 +422,9 @@ func (in *instance) reader(s Snapshot, key string) Reader {
 			return nil
 		}
 		if n := s.names[name]; n != nil && n.family {
+			if in.whole(port, n) {
+				return s.family(name, in.comp.inputs[port])
+			}
 			if key == "" {
 				return n.builtin
 			}
@@ -421,4 +433,25 @@ func (in *instance) reader(s Snapshot, key string) Reader {
 		v, _ := s.Read(name)
 		return v.V
 	}
+}
+
+// whole says whether the instance reads the family n at its input port whole.
+func (in *instance) whole(port string, n *nameInfo) bool {
+	return wholeFamily(in.comp.inputs[port], n)
+}
+
+// family answers every key standing in family f as a map of type t,
+// map[string]T: empty, never nil, where none stands.
+func (s Snapshot) family(f string, t reflect.Type) any {
+	m := reflect.MakeMap(t)
+	for name, v := range s.vals {
+		key, ok := keyIn(f, name)
+		if !ok || v == nil {
+			continue
+		}
+		if rv := reflect.ValueOf(v); rv.Type().AssignableTo(t.Elem()) {
+			m.SetMapIndex(reflect.ValueOf(key), rv)
+		}
+	}
+	return m.Interface()
 }

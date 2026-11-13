@@ -1,6 +1,6 @@
 # kern's release (kern/README.md "Release"): the version the next release carries, and where its
 # assets are published. tools/release reads both; a push to main that changes the version cuts it.
-version = "0.2.0"
+version = "0.3.0"
 # The one URL the move to mb-89/kern changes: the release's download base, `{version}` filled in.
 # Its tag is the last path part; the release workflow publishes only into the repository it names.
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"

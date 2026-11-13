@@ -46,7 +46,7 @@ One core runs per checkout, the nearest folder up from the working directory tha
 | `kern status [--wait D] [--json]` | `running` with the health (`get.core.health`, 200 ms wait), `starting`, or `not running` (exit 1) |
 | `kern stop` | asks `call.core.stop` and waits until the process has exited |
 | `kern serve [--grace D] [--idle D]` | the core in the foreground: reads `wiring.toml` where the checkout has one |
-| `kern hook <event> [--wait D]` | posts the host's hook JSON from stdin on `hook.<event>`, waiting up to 500 ms for a core whose start's claim stands; prints the answer as the host's hook JSON, the context the components told on `PostToolUse`, `UserPromptSubmit` and `SessionStart` (the [GitHub component](components/github/README.md)'s waiting tool calls) as `additionalContext`, nothing otherwise; where no core answers, prints nothing; always exits 0 |
+| `kern hook <event> [--wait D] [--unanswered N]` | posts the host's hook JSON from stdin on `hook.<event>`, waiting up to 500 ms for a core whose start's claim stands; prints the answer as the host's hook JSON: the bound command's output, else the context the components told on `PostToolUse`, `UserPromptSubmit` and `SessionStart` (the [GitHub component](components/github/README.md)'s waiting tool calls) as `additionalContext`, nothing for a `pass` with nothing told; where no core answers, prints nothing; exits 0, or N where no command answered the event and nothing was told |
 
 - **The standing file**, `.se/.runtime/standing.json`, readable by its owner alone: the bus's
   address, the pid, the contract version and every bus user with its password. A pid that runs
@@ -66,6 +66,12 @@ One core runs per checkout, the nearest folder up from the working directory tha
   with its payload before the core answers it; what it refuses goes to the core's log, and the
   hook passes. One that declares `index.Inlet` is handed its instance's commit at start, so it
   writes what comes in on its own. The [GitHub component](components/github/README.md) does both.
+- **Hooks a command answers.** The wiring's `[hooks]` binds a host's event to a command, such as
+  `Stop = "work_tickets.py stop-check"`; the core refuses to start where no instance declares it.
+  The core runs it with one argument, `--hook=` and the event's JSON, and answers the effect
+  `output` with the command's text, which `kern hook` prints as the hook's output. Where the
+  command's process has not attached yet, or the command fails, the core answers `pass` with the
+  reason at once, so the caller can answer the event another way (`--unanswered`).
 - **The idle end.** The core ends 60 s after the last session's lease is returned (or after its
   start, where none took one), or after 30 minutes without a hook event or a call.
 
@@ -95,6 +101,10 @@ SDK on `PYTHONPATH`.
   the name from its body. `contract/subjects.json` holds Go and Python to it.
 - **Types** are `int`, `float`, `string`, `bool`, `[T]` or a named JSON shape such as
   `github.issues`, which Go reads as `any`; a wire joins equal types and equal shapes.
+- **A family read whole.** A Go input of type `map[string]T` bound to a family of `T` reads every
+  key standing, `{}` where none does, and its derivation runs once for a change at any key; an input
+  of type `T` reads the family at the key that changed, once per key. A command may read a family
+  only whole.
 
 ## Tests
 
@@ -121,7 +131,7 @@ time counts against SE's budget and needs no Go).
 `release.toml` owns kern's version and where its release is published:
 
 ```toml
-version = "0.2.0"
+version = "0.3.0"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 

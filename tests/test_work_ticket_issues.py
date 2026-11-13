@@ -3483,10 +3483,13 @@ def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budge
     budget = work_tickets.suite_budget(Path(__file__).resolve().parents[1])
     assert (budget.command, budget.target_seconds) == (["uv", "run", "pytest", "-q"], 60)
     # kern's tests first: they warm Go's build cache for the acceptances after them.
-    kern, new_app, components, relay = budget.beside
+    kern, go_components, new_app, components, relay = budget.beside
     assert (kern.name, kern.command, kern.directory) == ("kern", ["go", "test", "./..."], "kern")
     assert kern.setup == ["go", "test", "-run", "^$", "./..."], "a cold build counts as no test time"
     assert kern.target_seconds < kern.limit_seconds < budget.limit_seconds
+    assert (go_components.name, go_components.command, go_components.directory) == (
+        "go-components", ["go", "test", "./..."], "components"), "after kern's, with Go's cache warm"
+    assert go_components.target_seconds < go_components.limit_seconds < budget.limit_seconds
     assert (new_app.name, new_app.command[-1]) == ("new-app", "tests/beside_new_app.py")
     assert new_app.target_seconds < new_app.limit_seconds < budget.limit_seconds
     assert (components.name, components.command[-1]) == (

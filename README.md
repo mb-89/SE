@@ -102,7 +102,9 @@ uv run python <se>/scripts/se_start.py refresh
   [fleet check](#fleet-check), and caches both.
   - The greeting then names a retro that is [due](#retro-due) and the fleet's findings by kind and
     issue, one line each with the command to run, and a part whose read failed with its cause.
-  - `status` reads them from the cache only.
+  - `status` reads them from the cache, and each part from kern live where the core in the checkout
+    carries SE's fleet and retro components and has read issues: its line then says `live from kern`
+    ([components/README.md](components/README.md#who-reads-them)).
   - Without gh (Claude's cloud, where no token reaches SE's code) the greeting names neither; the
     [se agent](src/agents/se.md) runs the fleet check's plan at its first turn instead.
   - `refresh` reads no work: its checks keep the cached lines.
@@ -158,8 +160,8 @@ kern and post every session event to it:
 - **Every other event** (SessionEnd, SubagentStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop
   and SubagentStop) runs [scripts/se_hook.sh](scripts/se_hook.sh) `<event>`, which hands the host's
   JSON to the named binary's `kern hook <event>`.
-  - SessionEnd returns the session's lease. The Stop hooks run beside `stop-check`
-    ([Stop hook](#stop-hook)).
+  - SessionEnd returns the session's lease. The Stop hooks are answered by the delivery
+    component's `stop-check`, and else by `stop-check` directly ([Stop hook](#stop-hook)).
   - It fails open: without kern's binary, or with no core answering within 500 ms, it prints
     nothing and exits 0.
 - **The greeting** names kern's state under its first line: `kern <version>: running, pid <n>`,
@@ -451,6 +453,11 @@ it is `no branch` at once, saying why.
 Blocks are the `## Blocked by` section of each open issue's body, where `work_tickets.py block`
 writes them.
 
+Where the core running in the checkout carries SE's fleet component and has read issues, it answers
+from the core's `fleet/findings` instead, live, naming how many issues and pull requests the core
+has read ([components/README.md](components/README.md#who-reads-them)); the Python check stays the
+path everywhere else.
+
 Without gh it prints its GitHub plan; the session runs it with its GitHub tools, saves the three
 lists as JSON (each in-progress issue with its comments) and passes them as `--open-issues`,
 `--closed-issues` and `--pulls`.
@@ -464,7 +471,8 @@ due_after = 10
 
 A retro is due once `due_after` work issues landed since the last closed retro issue, built in 10;
 the [start greeting](#start-and-refresh) names it. `scripts/retro.py` owns the count and the
-setting.
+setting; SE's retro component counts the same from kern's GitHub names, for the greeting to read
+live ([components/README.md](components/README.md)).
 
 ### Stop hook
 
@@ -474,7 +482,22 @@ refusals = 5
 ```
 
 The plugin hands every `Stop` and `SubagentStop` to `work_tickets.py stop-check`, so a worker's turn
-ends only with its work issue delivered:
+ends only with its work issue delivered.
+
+- kern answers it within the hook: `wiring.toml` binds both events to the delivery component's
+  `stop-check`, which judges in its own warm process ([Kern](#kern)).
+- Where no command of kern's answers (no binary, no core, the component's process not attached
+  yet, or it failed), [scripts/se_hook.sh](scripts/se_hook.sh) runs `stop-check` as a process of
+  its own, with the same verdict.
+- The warm process asks `gh auth status` once: a gh found unusable is held 60 s, a usable one for
+  the process.
+
+| measured on 13 Nov in a Claude Code cloud container, Linux amd64, gh not signed in, 6 runs | wall time |
+|---|---|
+| a Stop through `se_hook.sh`, answered by kern's delivery component: the first; the later ones | 319 ms; 24 to 57 ms |
+| a Stop through `se_hook.sh`, answered by `stop-check` directly through `uv` | 434 to 586 ms |
+
+What it judges:
 
 - Where it refuses: a checkout whose ticket queue (`.se/work/`) is for a work issue (intake's
   snapshot, or what was recorded as read of it), on a branch other than the integration branch.
@@ -966,6 +989,7 @@ work_tickets.py push [--worktree WORKTREE] [branch]
     the tree pushed
 
 work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE]
+                           [--hook JSON]
     the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue,
     refuse the turn's end while its branch has no open pull request whose description carries a
     field report that passes field-report --check at the branch tip, naming what is missing and the

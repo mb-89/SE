@@ -6,13 +6,16 @@
 //	<name> status [--root DIR] [--wait D] [--json]      say whether a core runs, and its health
 //	<name> stop   [--root DIR]                          stop the core and wait until it has exited
 //	<name> serve  [--root DIR] [--grace D] [--idle D]   run the core in the foreground (what start spawns)
-//	<name> hook <event> [--root DIR] [--wait D]         post the host's hook JSON on stdin to the core
+//	<name> hook <event> [--root DIR] [--wait D] [--unanswered N]  post the host's hook JSON on stdin to the core
 //
 // The root is the checkout the core serves: by default the nearest folder up
 // from the working directory that holds .git, else the working directory.
 // Exit codes: 0 done, 1 no core runs (status), 2 a usage or start error.
-// hook always exits 0 and prints nothing where the core does not answer: a
-// hook fails open, and a host reads a hook's exit code 2 as a block.
+// hook exits 0 and prints nothing where the core does not answer: a hook
+// fails open, and a host reads a hook's exit code 2 as a block. With
+// --unanswered N it exits N instead where no command answered the event (no
+// core, none bound to it, or the bound one failed), so its caller can answer
+// it another way.
 package cli
 
 import (
@@ -35,7 +38,7 @@ import (
 // test's way to show that `kern start` returns before the core answers.
 const HoldEnv = "KERN_HOLD_START"
 
-const usage = "usage: %s <start|status|stop|serve|hook <event>> [--root DIR] [--grace D] [--idle D] [--wait D] [--json]"
+const usage = "usage: %s <start|status|stop|serve|hook <event>> [--root DIR] [--grace D] [--idle D] [--wait D] [--json] [--unanswered N]"
 
 // Run is the command named name: it serves the components registered with
 // index.Register before it is called, and answers the exit code.
@@ -124,14 +127,17 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 }
 
 // hook posts the host's hook JSON, read from stdin, on hook.<event> and
-// prints the answer as the host's hook JSON: the context the components
-// told, on an event that carries context (HookOutput); else nothing. Every
-// failure prints nothing, goes to stderr alone, and exits 0.
+// prints the answer as the host's hook JSON: the output of the command bound
+// to the event, else the context the components told, on an event that
+// carries context (HookOutput). A pass with nothing told prints nothing; so
+// does every failure, which goes to stderr alone, with the exit code
+// --unanswered names, 0 by default.
 func hook(name string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(name+" hook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "the checkout the core serves")
 	wait := fs.Duration("wait", host.HookWait, "how long to wait for the core's answer, a start included")
+	unanswered := fs.Int("unanswered", 0, "the exit code where no command answered the event")
 	event := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		event, args = args[0], args[1:]
@@ -153,14 +159,23 @@ func hook(name string, args []string, stdin io.Reader, stdout, stderr io.Writer)
 		return 0
 	}
 	a, err := host.Post(host.Wall{}, dir, event, payload, *wait)
-	if err != nil {
+	switch {
+	case err != nil:
 		fmt.Fprintf(stderr, "%s hook: %v\n", name, err)
+	case a.Effect == host.Output:
+		if a.Output != "" {
+			fmt.Fprintln(stdout, strings.TrimRight(a.Output, "\n"))
+		}
 		return 0
+	case a.Error != "":
+		fmt.Fprintf(stderr, "%s hook: %s\n", name, a.Error)
+	default:
+		if out := HookOutput(event, a); out != nil {
+			stdout.Write(append(out, '\n'))
+			return 0
+		}
 	}
-	if out := HookOutput(event, a); out != nil {
-		stdout.Write(append(out, '\n'))
-	}
-	return 0
+	return *unanswered
 }
 
 // ContextEvents are the host's events whose hook output hands the agent
