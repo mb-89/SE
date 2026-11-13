@@ -544,6 +544,7 @@ def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_req
     message = str(refused.value)
     assert message.startswith("Field report must name each deleted or renamed test")
     assert unlisted in message and "This sentence stays." not in message
+    assert "merge it first (work_tickets.py sync" in message
     assert pushed == [] and posted == []
     assert work_tickets.main(check) == 1
     assert unlisted in capsys.readouterr().err

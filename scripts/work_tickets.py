@@ -2173,7 +2173,9 @@ def guard(root: Path, branch: str, report: str) -> list[str]:
     if missing:
         raise QueueError(
             "Field report must name each deleted or renamed test and authored sentence: "
-            + ", ".join(missing)
+            + ", ".join(missing) + f". A branch behind {integration_ref(root)} reads as deleting "
+            "what landed there since: merge it first (work_tickets.py sync; deliver does) and "
+            "check again"
         )
     return [*removed_tests, *removed_sentences]
 
