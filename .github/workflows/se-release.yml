@@ -1,0 +1,40 @@
+# SE's own binary release: the `se` binary, kern's core plus SE's Go components (components/cmd/se),
+# for six platforms with SHA256SUMS, through kern's reusable release workflow (kern-release.yml,
+# kern/README.md "Release"). components/release.toml owns its version and the tag scheme se-v<version>,
+# distinct from SE's own v<version> release tags (release.yml) and kern's kern-v<version>.
+#
+# On a pull request it only builds the six archives (no publish, so a branch proves the build). On a
+# push to main it publishes the release se-v<version> where it does not exist yet, so the push that
+# changes components/release.toml's version cuts it; a release that exists is never changed. A rerun
+# is workflow_dispatch on main. The build runs on a change to the binary's inputs: kern, SE's Go
+# components, or either release workflow.
+name: se-release
+
+on:
+  pull_request:
+    paths:
+      - "kern/**"
+      - "components/**"
+      - ".github/workflows/se-release.yml"
+      - ".github/workflows/kern-release.yml"
+      - ".github/workflows/kern-battery.yml"
+  push:
+    branches: [main]
+    paths:
+      - "kern/**"
+      - "components/**"
+      - ".github/workflows/se-release.yml"
+      - ".github/workflows/kern-release.yml"
+      - ".github/workflows/kern-battery.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    uses: ./.github/workflows/kern-release.yml
+    permissions:
+      contents: write
+    with:
+      directory: components

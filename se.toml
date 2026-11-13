@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.43.1"
+version = "5.44.0"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -19,6 +19,13 @@ authored_content = [
     "src/**/*.md",
     "docs.md",
 ]
+
+# SE builds its own binary, kern's core plus SE's Go components (components/README.md). This names
+# where that binary's release.toml lives; bootstrap.sh fetches, builds and starts it instead of the
+# bare kern (SE's docs/go-core.md "How the binary arrives"). An application with no Go components
+# sets no [binary] and keeps running the bare kern.
+[binary]
+release = "components/release.toml"
 
 # The complete suite and its time budget; work_tickets.py integrate holds every integration to it
 # (README "Test budget").

@@ -1,5 +1,12 @@
-# SE as an application on kern (README "Commands as components"): the core kern start serves in
-# this checkout places each of SE's command groups, components/<name>/, in a process of its own.
+# SE as an application on kern: the core the `se` binary serves in this checkout (bootstrap.sh
+# starts it, SE's docs/go-core.md "How the binary arrives") places and carries every one of SE's
+# components. SE's command groups are Python, placed in a process each (README "Commands as
+# components"); SE's fleet, retro and origin are Go, compiled into the `se` binary with kern's
+# GitHub component (components/README.md). The `se` binary carries the Go ones, so this wiring may
+# name them; the bare `kern` could not, which is why they lived in components/wiring.toml until SE's
+# start served `se`.
+
+# SE's command groups, components/<name>/, each a placed Python process.
 [instances.tickets]
 component = "tickets"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "tickets"]
@@ -19,6 +26,35 @@ command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts
 [instances.review]
 component = "review"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "review"]
+
+# kern's GitHub component, and SE's fleet, retro and origin reading it (components/README.md), all
+# compiled into the `se` binary. The config is SE's own checkout's: the fleet's lease hours, the
+# repository name and the integration branch; the retro's due-after count and tracker.
+[instances.github]
+component = "github"
+
+[instances.origin]
+component = "origin"
+
+[instances.fleet]
+component = "fleet"
+config = { lease-hours = 3.0, repository = "SE", base = "main" }
+
+[instances.retro]
+component = "retro"
+config = { due-after = 10, tracker = "mb-89/SE", base = "main" }
+
+[wires]
+"github.issues" = "github/issues/<key>"
+"github.pulls" = "github/pulls/<key>"
+"github.checks" = "github/checks/<key>"
+"github.outbox" = "github/outbox/<key>"
+"fleet.issues" = "github/issues/<key>"
+"fleet.pulls" = "github/pulls/<key>"
+"fleet.checks" = "github/checks/<key>"
+"fleet.branches" = "origin/branches"
+"retro.issues" = "github/issues/<key>"
+"retro.pulls" = "github/pulls/<key>"
 
 # The Stop hooks (README "Stop hook"): the delivery component's stop-check answers them inside the
 # hook, in its own warm process; scripts/se_hook.sh falls back to running it directly.
