@@ -21,7 +21,7 @@ named in the design's plan.
 | `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request, give a call up as the core does (`Begin`, `BeginServe`, `Abandon`, `Gone`) | `src/index/indextest` |
 | `bus/` | the embedded NATS server on loopback, a user and permissions per component instance, so the bus refuses a second writer | quackitect v5 `src/index/bus.go` |
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
-| `git/` | kern's git door: every git command kern and SE's Go components run, real git outside tests and the fake (`git/gitfake/`) in them, both held to one contract (`git/contract_test.go`); a test that chose no backend is refused real git | SE's `scripts/git_door.py` |
+| `git/` | kern's git door: every git command kern and SE's Go components run, real git outside tests and the fake (`git/gitfake/`) in them, both held to one contract (`git/contract_test.go`); a test that chose no backend is refused real git, and `SE_GIT_DOOR` picks a process's backend, its `fake:<state file>` read from the state SE's Python fake writes (`git/gitfake/state.go`) | SE's `scripts/git_door.py` |
 | `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve`, `hook` | |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook`, carrying kern's shared components | |
 | `components/github/` | the GitHub component: the token and relay backends and the snapshot names ([its README](components/github/README.md)) | the design's step 7 |
@@ -136,7 +136,7 @@ time counts against SE's budget and needs no Go).
 `release.toml` owns kern's version and where its release is published:
 
 ```toml
-version = "0.4.3"
+version = "0.4.4"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 

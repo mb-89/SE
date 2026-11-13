@@ -12,7 +12,7 @@ import sys
 
 import git_door
 import pytest
-import quiet_git
+import fake_git
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -626,7 +626,7 @@ def test_field_report_draft_writes_the_template_between_its_markers_and_files_no
 def test_field_report_draft_names_the_configured_integration_branch_and_its_commit(
         worktree, gh, monkeypatch):
     monkeypatch.setattr(work_tickets, "tested_main", TESTED_MAIN)
-    quiet_git.init(worktree, "-b", "next")
+    fake_git.init(worktree, "-b", "next")
     git_ok("-C", str(worktree), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
            "commit", "-q", "--allow-empty", "-m", "base")
     commit = git_run(worktree, "rev-parse", "--short", "HEAD", check=True).stdout.strip()
@@ -882,7 +882,7 @@ def test_intake_and_refresh_read_requirements_under_changes_after_filing(worktre
 
 def test_field_report_check_records_the_branch_tip_of_its_worktree(tmp_path, capsys):
     root = tmp_path / "worker"
-    quiet_git.init(root, "-b", BRANCH)
+    fake_git.init(root, "-b", BRANCH)
     git_ok("-C", str(root), "-c", "user.name=mb", "-c", "user.email=mb", "commit", "-q",
            "--allow-empty", "-m", "work")
     git_ok("-C", str(root), "branch", "main")  # the integration branch the check's guard diffs against
@@ -1251,10 +1251,10 @@ def test_sync_refuses_a_malformed_public_identity_naming_the_file(
 def test_sync_fetches_and_merges_a_configured_mirror(main_checkout, local_config):
     mirror = main_checkout.parent / "mirror.git"
     source = main_checkout.parent / "mirror-source"
-    quiet_git.init(mirror, "--bare", "-b", "main")
+    fake_git.init(mirror, "--bare", "-b", "main")
     git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
     git_ok("-C", str(main_checkout), "push", "-q", "mirror", "main")
-    quiet_git.clone(mirror, source)
+    fake_git.clone(mirror, source)
     git_ok("-C", str(source), "config", "user.name", "Mirror test")
     git_ok("-C", str(source), "config", "user.email", "mirror-test@example.invalid")
     (source / "from-mirror.txt").write_text("mirror\n", encoding="utf-8")
@@ -1420,7 +1420,7 @@ def test_deliver_refuses_a_report_with_an_invalid_result(worktree, gh, monkeypat
 def test_repository_comes_from_the_origin_remote(tmp_path, url, repo):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    quiet_git.init(checkout)
+    fake_git.init(checkout)
     assert work_tickets.remote_repo(checkout) is None
     assert git_run(checkout, "remote", "add", "origin", url).returncode == 0
     assert work_tickets.remote_repo(checkout) == repo
@@ -1780,8 +1780,8 @@ def suite_passed(root: Path, result: str | None) -> str | None:
 
 def build_main_checkout(tmp_path: Path) -> None:
     origin, checkout = tmp_path / "origin.git", tmp_path / "main"
-    quiet_git.init(origin, "--bare", "-b", "main")
-    quiet_git.clone(origin, checkout)
+    fake_git.init(origin, "--bare", "-b", "main")
+    fake_git.clone(origin, checkout)
     git_ok("-C", str(checkout), "config", "user.name", "mb")
     git_ok("-C", str(checkout), "config", "user.email", "mb")
     (checkout / "se.toml").write_text(IDENTITY, encoding="utf-8")
@@ -1789,7 +1789,7 @@ def build_main_checkout(tmp_path: Path) -> None:
     git_ok("-C", str(checkout), "commit", "-q", "-m", "base")
     git_ok("-C", str(checkout), "push", "-q", "origin", "HEAD:main")
     # The newest main exists only on origin; start must fetch it.
-    quiet_git.clone(origin, tmp_path / "other")
+    fake_git.clone(origin, tmp_path / "other")
     git_ok("-C", str(tmp_path / "other"), "-c", "user.name=Other", "-c",
            "user.email=other@example.invalid", "commit", "-q", "--allow-empty", "-m", "newest")
     git_ok("-C", str(tmp_path / "other"), "push", "-q", "origin", "HEAD:main")
@@ -2190,7 +2190,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
         main_checkout, local_config, monkeypatch, capsys, check_fails, public_check_child):
     worker = main_checkout.parent / "worker"
     mirror = main_checkout.parent / "mirror.git"
-    quiet_git.init(mirror, "--bare", "-b", "main")
+    fake_git.init(mirror, "--bare", "-b", "main")
     git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
     local_config.parent.mkdir(parents=True)
     local_config.write_text(
@@ -2315,7 +2315,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
 def test_public_mirror_guard_rejects_references_and_mismatched_identities(
         main_checkout, local_config, message, email, error):
     mirror = main_checkout.parent / "mirror.git"
-    quiet_git.init(mirror, "--bare", "-b", "main")
+    fake_git.init(mirror, "--bare", "-b", "main")
     git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
     local_config.parent.mkdir(parents=True)
     local_config.write_text(

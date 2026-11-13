@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 import git_door
-import quiet_git
+import fake_git
 
 PROJECT = Path(__file__).resolve().parents[1]
 SCRIPTS = PROJECT / "scripts"
@@ -296,8 +296,8 @@ BUDGET_DOOR_DELAY = 1.0  # the door's answer for the budget tests
 def queue_checkout(tmp_path: Path) -> Path:
     """A checkout of the fake door whose origin holds main, as the queue's merge of main needs."""
     origin, checkout = tmp_path / "origin.git", tmp_path / "checkout"
-    quiet_git.init(origin, "--bare", "-b", "main")
-    quiet_git.clone(origin, checkout)
+    fake_git.init(origin, "--bare", "-b", "main")
+    fake_git.clone(origin, checkout)
     identity = ("-c", "user.name=alice", "-c", "user.email=alice@example.com")
     for arguments in ((*identity, "commit", "-q", "--allow-empty", "-m", "start"), ("push", "-q", "origin", "HEAD:main")):
         assert git_door.run(*arguments, root=checkout).returncode == 0

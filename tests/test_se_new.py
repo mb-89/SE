@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 import git_door
-import quiet_git
+import fake_git as git_fake
 import se
 import se_modules
 import se_new
@@ -58,7 +58,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def small_se(root: Path, version: str = "0.1.0", tag: bool = True) -> Path:
     """An SE with a small kern at `version`, tagged kern-v<version> where `tag`; a commit after the
     tag changes the template's README, which the pin leaves out."""
-    quiet_git.init(root, "-b", "main")
+    git_fake.init(root, "-b", "main")
     write(root, {"se.toml": '[project]\nidentity = "alice <alice>"\n',
                  "kern/release.toml": f'version = "{version}"\n',
                  "kern/go.mod": "module github.com/mb-89/kern\n\ngo 1.24.7\n",

@@ -11,7 +11,7 @@ import pytest
 
 import git_door
 import overhaul
-import quiet_git
+import fake_git
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -109,7 +109,7 @@ def git(root: Path, *arguments: str, when: str = "2026-01-01T00:00:00Z") -> None
 def checkout(tmp_path: Path, fake_git_door) -> Path:
     """The fixture checkout, in the fake git."""
     root = tmp_path / "checkout"
-    quiet_git.init(root)
+    fake_git.init(root)
     (root / "se.toml").write_text('[project]\nauthored_content = ["README.md"]\n', encoding="utf-8")
     (root / "scripts").mkdir()
     (root / "tests").mkdir()
@@ -173,7 +173,7 @@ def test_facts_on_se_answer_within_the_budget(capsys, tmp_path: Path, fake_git_d
     and a loaded runner stretches the wall clock (10.7 s here with 16 busy processes on 4 cores,
     for 2.5 s of work), not the work. SE's files are committed once in the fake git."""
     root = tmp_path / "se"
-    quiet_git.init(root)
+    fake_git.init(root)
     for part in SE_PARTS:
         if (ROOT / part).is_dir():
             shutil.copytree(ROOT / part, root / part, ignore=shutil.ignore_patterns("__pycache__"))

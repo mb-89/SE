@@ -12,7 +12,10 @@ import time
 from pathlib import Path
 
 import pytest
-import quiet_git
+import fake_git
+
+# Its git, and that of every script and binary it starts, is the fake behind one state file.
+pytestmark = pytest.mark.usefixtures("shared_fake_git")
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("se_start", ROOT / "scripts" / "se_start.py")
@@ -517,7 +520,7 @@ def test_with_gh_each_part_keeps_its_answer_when_the_other_fails(tmp_path, monke
     assert se_start.work_check(project)["retro"] == {"landed": 11, "due_after": 10}
 
 
-# Requirement 3: refresh moves only what is due, real git repositories.
+# Requirement 3: refresh moves only what is due, on the fake git's repositories.
 
 
 @pytest.fixture
@@ -554,18 +557,18 @@ def repos(tmp_path, isolated_git):
                              "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "public-check-terms.toml")}
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
-    quiet_git.init(upstream, "-b", "main")
+    fake_git.init(upstream, "-b", "main")
     write(upstream / "se.toml.extra", 'docs_url = "https://docs.example.com/se/"\n')
     for version in ("1.0.0", "1.1.0", "2.0.0"):
         release(upstream, version, scripts)
     se = tmp_path / "se"
-    quiet_git.clone(upstream.as_uri(), se)
+    fake_git.clone(upstream.as_uri(), se)
     git(se, "reset", "-q", "--hard", "v1.0.0")
     remotes = {}
     for name, versions in {"lib": ("1.0.0", "1.1.0", "2.0.0"), "tool": ("1.0.0",)}.items():
         remote = tmp_path / f"{name}-remote"
         remote.mkdir()
-        quiet_git.init(remote, "-b", "main")
+        fake_git.init(remote, "-b", "main")
         for version in versions:
             release(remote, version)
         remotes[name] = remote
@@ -700,7 +703,7 @@ def test_a_development_checkout_of_se_is_left_alone(repos):
 def installed(repos, tag: str, where: Path) -> Path:
     """A copy of the se remote at `tag` without git, as an installer leaves it."""
     where.parent.mkdir(parents=True, exist_ok=True)
-    quiet_git.clone(repos["upstream"].as_uri(), where, "--branch", tag)
+    fake_git.clone(repos["upstream"].as_uri(), where, "--branch", tag)
     shutil.rmtree(where / ".git")
     write(where / ".claude-plugin" / "plugin.json", json.dumps({"name": "se", "repository": repos["upstream"].as_uri()}))
     return where
@@ -764,7 +767,7 @@ def test_a_cloud_setup_script_clone_is_pulled_like_a_checkout(repos, tmp_path):
     git(repos["upstream"], "branch", "release", "v1.0.0")
     git(repos["upstream"], "symbolic-ref", "HEAD", "refs/heads/release")  # the clone takes the default
     clone = tmp_path / "home" / ".claude" / "skills" / "se"
-    quiet_git.clone(repos["upstream"].as_uri(), clone, "--depth", "1")
+    fake_git.clone(repos["upstream"].as_uri(), clone, "--depth", "1")
     repos["se"] = clone
     lines, failed = refresh(repos)
     assert not failed, lines

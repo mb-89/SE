@@ -1,0 +1,33 @@
+[
+ {
+  "args": [
+   "for-each-ref",
+   "--format=%(refname)%09%(objectname)",
+   "refs/"
+  ],
+  "out": "refs/heads/main\tcd935e4d9755d0992c8db4b9d9976842a9f34abe\nrefs/remotes/origin/main\t0ee5d9c6a56e43c6b2266ed836d9d318b0f5b28b\nrefs/tags/v1\tcd935e4d9755d0992c8db4b9d9976842a9f34abe\n"
+ },
+ {
+  "args": [
+   "ls-files",
+   "--others",
+   "--exclude-standard"
+  ],
+  "out": "notes.txt\n"
+ },
+ {
+  "args": [
+   "rev-parse",
+   "HEAD"
+  ],
+  "out": "cd935e4d9755d0992c8db4b9d9976842a9f34abe\n"
+ },
+ {
+  "args": [
+   "config",
+   "--get",
+   "remote.origin.url"
+  ],
+  "out": "https://example.com/alice/repo.git\n"
+ }
+]
