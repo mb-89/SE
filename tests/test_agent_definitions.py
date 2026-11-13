@@ -180,6 +180,11 @@ def test_work_issue_template_says_how_to_name_a_design_owner_not_yet_written():
     assert 'write "none yet: create it at <path>", so the worker knows to create it there' in section
 
 
+def test_work_model_tests_leave_the_worktree_alone_while_the_complete_suite_runs():
+    tests = normalized(WORK_MODEL).split("## Tests", 1)[1].split(" ## ", 1)[0]
+    assert "Leave the worktree alone while the complete suite runs" in tests
+
+
 def test_work_issue_template_assigns_shared_root_file_owners():
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
     assert "pyproject.toml" in template
