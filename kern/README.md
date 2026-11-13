@@ -138,15 +138,27 @@ version = "0.3.0"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 
-- **The assets:** `kern-<version>-<os>-<arch>.tar.gz` for `linux` and `darwin`, `.zip` for
-  `windows`, each on `amd64` and `arm64`, each holding the one binary `kern` (`kern.exe`), and
-  `SHA256SUMS` over the six, which `sha256sum -c SHA256SUMS` checks. `go run ./tools/release build
-  --out <dir>` builds them, the same bytes for the same commit.
-- **The workflow:** SE's `.github/workflows/kern-release.yml` builds them on every pull request
-  and push to `main` that touches kern, and runs [the template](#the-template)'s battery. On `main`
-  it publishes the release `release.toml` names, where it does not exist yet, so the push that
-  changes `version` cuts it; a release that exists is never changed. A rerun is `workflow_dispatch`
-  on `main`.
+- **The assets:** `<binary>-<version>-<os>-<arch>.tar.gz` for `linux` and `darwin`, `.zip` for
+  `windows`, each on `amd64` and `arm64`, each holding the one binary (`<binary>.exe` on windows),
+  and `SHA256SUMS` over the six, which `sha256sum -c SHA256SUMS` checks. `go run ./tools/release
+  build --dir <folder> --out <dir>` builds them, the same bytes for the same commit. The binary is
+  `kern` from `./cmd/kern` by default; an application names its own with `binary` and `package` in
+  its `release.toml`, and the tool builds its folder (`--dir`).
+- **The workflow is reusable:** `.github/workflows/kern-release.yml` builds the six for the folder
+  it is called with (the bare core by default), on every pull request and push to `main` that
+  touches kern, and runs [the template](#the-template)'s battery for the bare core. On `main` it
+  publishes the release that folder's `release.toml` names, where it does not exist yet, so the push
+  that changes `version` cuts it; a release that exists is never changed. A rerun is
+  `workflow_dispatch`. An application calls it for its own binary (SE's `se-release.yml` does, for
+  `se`):
+
+```yaml
+  jobs:
+    release:
+      uses: mb-89/SE/.github/workflows/kern-release.yml@kern-v<version>
+      with:
+        directory: <the application's binary folder>
+```
 - **Fetching it:** `<download>/kern-<version>-<os>-<arch>.tar.gz` and `<download>/SHA256SUMS`, the
   archive checked against its line, then unpacked.
 

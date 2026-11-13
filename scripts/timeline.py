@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import importlib.util
 import json
 import os
 import re
@@ -475,13 +476,45 @@ Tap a day to list its issues, an issue for its goal.</p>
 # --- Command ----------------------------------------------------------------------------------
 
 
-def main(argv: list[str] | None = None, post: Poster | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+def sibling(name: str):
+    """The script `<name>.py` beside this one, loaded once under its own name."""
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+#: The pages SE renders as one kern component (README "Commands as components"), timeline.py's
+#: command first, then deck.py's, which names this group; each command's usage and help come from
+#: its script's make_parser.
+COMPONENTS = (sibling("se_components").Group(
+    "render", "Render",
+    "The pages SE renders: timeline.py builds the Timeline from GitHub, deck.py builds a deck of "
+    "decisions, serves it and reads its answers.",
+    ("",)),)
+#: The commands that go through kern where it runs (se_components.routed): none, as the Timeline
+#: writes its page.
+INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
+
+
+def make_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="timeline.py", description=__doc__.split("\n\n")[0])
     parser.add_argument("--destination", type=Path, required=True, help="the HTML file to write")
     parser.add_argument("--snapshot", type=Path, help="build from this snapshot file instead of reading GitHub")
     parser.add_argument("--save-snapshot", type=Path, help="also write the snapshot read to this file")
     parser.add_argument("--config", type=Path, default=CONFIG, help="the se.toml naming the repositories")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None, post: Poster | None = None) -> int:
+    args = make_parser().parse_args(argv)
+    routed = sibling("se_components").routed(
+        Path(__file__), [], list(sys.argv[1:] if argv is None else argv), False)
+    if routed is not None:
+        return routed
     if args.snapshot:
         try:
             snapshot = json.loads(args.snapshot.read_text(encoding="utf-8"))

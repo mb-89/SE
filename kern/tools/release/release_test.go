@@ -29,9 +29,32 @@ func TestReleaseTomlResolvesTheTagAndTheRepositoryFromTheOneURL(t *testing.T) {
 	if r.Download != "https://github.com/mb-89/SE/releases/download/kern-v"+r.Version {
 		t.Fatalf("download base: %s", r.Download)
 	}
+	if r.Binary != DefaultBinary || r.Package != DefaultPackage {
+		t.Fatalf("kern's release.toml names no binary, so it is the bare core's: got %q %q", r.Binary, r.Package)
+	}
 	moved, err := Read([]byte("version = \"1.2.3\"\ndownload = \"https://github.com/mb-89/kern/releases/download/v{version}\"\n"))
 	if err != nil || moved.Tag != "v1.2.3" || moved.Repository != "mb-89/kern" {
 		t.Fatalf("the move is the URL alone: got %+v, %v", moved, err)
+	}
+}
+
+func TestAnApplicationReleaseTomlNamesItsOwnBinaryAndPackage(t *testing.T) {
+	// SE's own binary, core plus its Go components, releases as se-v<version>;
+	// the tag and repository are the one URL's, as kern's are.
+	app, err := Read([]byte("version = \"0.1.0\"\n" +
+		"download = \"https://github.com/mb-89/SE/releases/download/se-v{version}\"\n" +
+		"binary = \"se\"\npackage = \"./cmd/se\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app.Binary != "se" || app.Package != "./cmd/se" || app.Tag != "se-v0.1.0" || app.Repository != "mb-89/SE" {
+		t.Fatalf("an application names its own binary: got %+v", app)
+	}
+	if got := Archive(app, Target{"linux", "amd64"}); got != "se-0.1.0-linux-amd64.tar.gz" {
+		t.Fatalf("the archive carries the binary's name: %s", got)
+	}
+	if _, err := Read([]byte("version = \"0.1.0\"\ndownload = \"https://github.com/o/n/releases/download/v{version}\"\nbinary = \"Se Core\"\n")); err == nil {
+		t.Fatal("accepted a binary name that is no lower-case name")
 	}
 }
 
@@ -61,15 +84,16 @@ func TestPlanRefusesToPublishIntoARepositoryTheURLDoesNotName(t *testing.T) {
 	if code := run([]string{"plan", "--repository", "MB-89/kern"}, &out, &errs); code != 0 {
 		t.Fatalf("code %d, %s", code, errs.String())
 	}
-	if want := "version=0.1.0\ntag=v0.1.0\nrepository=mb-89/kern\ndownload=https://github.com/mb-89/kern/releases/download/v0.1.0\n"; out.String() != want {
+	if want := "version=0.1.0\ntag=v0.1.0\nrepository=mb-89/kern\ndownload=https://github.com/mb-89/kern/releases/download/v0.1.0\nbinary=kern\n"; out.String() != want {
 		t.Fatalf("plan printed %q", out.String())
 	}
 }
 
 func TestTheSixTargetsAndTheirArchiveNames(t *testing.T) {
+	r := Release{Version: "0.1.0", Binary: DefaultBinary}
 	var got []string
 	for _, target := range Targets {
-		got = append(got, Archive("0.1.0", target)+":"+Executable(target))
+		got = append(got, Archive(r, target)+":"+Executable(r, target))
 	}
 	want := []string{
 		"kern-0.1.0-darwin-amd64.tar.gz:kern", "kern-0.1.0-darwin-arm64.tar.gz:kern",

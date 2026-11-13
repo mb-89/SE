@@ -575,12 +575,12 @@ no core answers, every hook and command falls back to today's path. Each step is
 |---|---|---|---|
 | `work_tickets.py` | attaches as Python components, one per group (tickets, issues, delivery, integration), at step 8; the CLI keeps its words | its GitHub reads and writes go through the GitHub component (step 9); `queue`, `status` and `ready` port to Go when the greeting needs them | writing the field report, judging a delivery, the dispatcher's choices |
 | `review.py` | Python component (`brief`, `file`) at step 8 | stays Python | the reviewer's find, verify and judge |
-| `retro.py` | Python component at step 8 | `retro due` ports to Go (step 10): the greeting reads it; done, SE's `retro` component ([components/README.md](../components/README.md)) | the retro's judgment |
-| `overhaul.py` | Python component at step 8 | stays Python: its facts are Python's AST | whether the design is still right |
+| `retro.py` | Python component at step 8; done, `components/retrospective/` (`retro` is the Go retro-due component) | `retro due` ports to Go (step 10): the greeting reads it; done, SE's `retro` component ([components/README.md](../components/README.md)) | the retro's judgment |
+| `overhaul.py` | Python component at step 8; done, `components/overhaul/` | stays Python: its facts are Python's AST | whether the design is still right |
 | `fleet-check` | Python component at step 8 | ports to Go (step 10): a derivation over the GitHub names, pushed to the greeting and the integrator; done, SE's `fleet` component, which the greeting and `fleet-check` read live ([components/README.md](../components/README.md)) | which remedy to apply |
 | `stop-check` | the Stop hook calls it as today | ports to Go (step 11): answered from the delivery names within the hook | none |
-| `timeline.py` | Python component at step 8 | reads the GitHub names instead of its own calls (step 9); stays Python: it renders a page | none |
-| `deck.py` | Python component at step 8 | stays Python: it renders the deck | the decision skill |
+| `timeline.py` | Python component at step 8; done, `components/render/` with `deck.py` | reads the GitHub names instead of its own calls (step 9); stays Python: it renders a page | none |
+| `deck.py` | Python component at step 8; done, `components/render/` | stays Python: it renders the deck | the decision skill |
 
 The public check, its hooks and `se_plugin.py` stay scripts: git hooks and CI run them where no core
 runs.

@@ -1,11 +1,13 @@
-"""SE's commands as components against the real core, the suite beside se.toml
-`[tests.beside.se-components]` (README "Commands as components"): where kern serves a checkout with
-SE's wiring, `kern status` lists SE's components attached, an interactive command answers through
-kern as it answers directly, and once kern has stopped it runs directly again; the Stop hook
-(README "Stop hook") answers through the delivery component as stop-check answers directly.
+"""SE's components against the real core, the suite beside se.toml `[tests.beside.se-components]`
+(README "Commands as components"): where the `se` binary serves a checkout with SE's wiring,
+`se status` lists SE's four Python command groups placed and attached beside its four Go components
+(fleet, github, origin, retro) in process, an interactive command answers through the core as it
+answers directly, and once the core has stopped it runs directly again; the Stop hook (README "Stop
+hook") answers through the delivery component as stop-check answers directly.
 
-It builds kern's binary, so it runs beside the suite, after kern's tests have warmed Go's build
-cache, not in it (its file name keeps the suite from collecting it): README "Test budget".
+It builds the `se` binary (kern's core plus SE's Go components, components/cmd/se), so it runs beside
+the suite, after kern's tests have warmed Go's build cache, not in it (its file name keeps the suite
+from collecting it): README "Test budget".
 """
 
 from __future__ import annotations
@@ -23,9 +25,9 @@ import pytest
 import quiet_git
 
 ROOT = Path(__file__).resolve().parents[1]
-GROUPS = ["delivery", "integration", "issues", "review", "tickets"]
-#: The instances SE's wiring names: its groups and kern's GitHub component, which serves their steps.
-INSTANCES = sorted(["github", *GROUPS])
+GROUPS = ["delivery", "integration", "issues", "overhaul", "render", "retrospective", "review",
+          "scaffold", "tickets"]  # SE's Python command groups, each placed
+GO = ["fleet", "github", "origin", "retro"]  # SE's Go components, in the se binary (components/README.md)
 
 
 def run(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
@@ -36,9 +38,11 @@ def run(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.
 @pytest.fixture
 def checkout(tmp_path: Path) -> Path:
     """A checkout of its own for the core, SE's components, scripts and SDK linked into it, so the
-    core's files and its lease never touch this checkout's own kern."""
+    core's files and its lease never touch this checkout's own kern. It is a real git repository so
+    the origin component reads its refs (the bare core refuses a wiring with a component it lacks;
+    the se binary carries fleet, github, origin and retro)."""
     root = tmp_path / "se"
-    (root / ".git").mkdir(parents=True)
+    quiet_git.init(root, "-b", "main")
     for part in ("components", "scripts", "kern"):
         try:
             (root / part).symlink_to(ROOT / part, target_is_directory=True)
@@ -49,15 +53,16 @@ def checkout(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(scope="module")
-def kern(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    binary = tmp_path_factory.mktemp("kern") / ("kern.exe" if os.name == "nt" else "kern")
-    built = run("go", "build", "-o", str(binary), "./cmd/kern", cwd=ROOT / "kern")
+def se_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    binary = tmp_path_factory.mktemp("se") / ("se.exe" if os.name == "nt" else "se")
+    built = run("go", "build", "-o", str(binary), "./cmd/se", cwd=ROOT / "components")
     assert built.returncode == 0, built.stderr
     return binary
 
 
 def test_kern_lists_ses_components_and_a_command_answers_through_it_and_without_it(
-        checkout: Path, tmp_path: Path, kern: Path) -> None:
+        checkout: Path, tmp_path: Path, se_binary: Path) -> None:
+    kern = se_binary
     queue = tmp_path / "queue"
     (queue / ".git").mkdir(parents=True)
     script = str(checkout / "scripts" / "work_tickets.py")
@@ -82,8 +87,10 @@ def test_kern_lists_ses_components_and_a_command_answers_through_it_and_without_
             1, refused.stdout, refused.stderr)
         status = run(str(kern), "status", "--root", str(checkout), "--json", cwd=checkout)
         health = json.loads(status.stdout)["health"]
-        assert sorted(health["instances"]) == INSTANCES
-        # The calls above waited for their component's attach; the other two attached alone.
+        # The four Python groups placed beside SE's four Go components in the se binary.
+        assert sorted(health["instances"]) == sorted(GROUPS + GO)
+        # The Go components run in process (not "attached"); the calls above waited for their
+        # command's component to attach, and the other placed ones attached alone.
         assert {"tickets"} <= set(health["attached"]) <= set(GROUPS)
     finally:
         run(str(kern), "stop", "--root", str(checkout), cwd=checkout)
@@ -107,7 +114,8 @@ def worker_checkout(root: Path) -> Path:
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="se_hook.sh runs in bash")
 def test_a_stop_answers_through_the_delivery_component_as_stop_check_answers_directly(
-        checkout: Path, tmp_path: Path, kern: Path) -> None:
+        checkout: Path, tmp_path: Path, se_binary: Path) -> None:
+    kern = se_binary
     worker = worker_checkout(tmp_path / "worker")
     no_gh = tmp_path / "no-gh"  # gh refuses to sign in on both paths: they judge by the answer file
     no_gh.mkdir()

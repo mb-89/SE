@@ -15,8 +15,12 @@ from shell_paths import BASH, WINDOWS, sh
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "bootstrap.sh"
-KERN_VERSION = tomllib.loads((ROOT / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
-KERN_BASE = f"https://github.com/mb-89/SE/releases/download/kern-v{KERN_VERSION}"
+# SE's own binary, as se_modules.py app-binary answers it (components/release.toml): kern's core plus
+# SE's Go components, the binary `se`. bootstrap fetches, builds and starts it, not the bare kern.
+APP = tomllib.loads((ROOT / "components" / "release.toml").read_text(encoding="utf-8"))
+NAME, APP_VERSION = APP["binary"], APP["version"]
+APP_BASE = APP["download"].replace("{version}", APP_VERSION)
+BUILD_DIR, PACKAGE = "components", APP["package"]
 TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch", "uname", "tail", "tar",
          "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm")
 pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash")
@@ -26,7 +30,7 @@ pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash"
 FAKE_UV = """#!/bin/sh
 echo "uv $*" >> "$HOME/calls"
 case "$*" in *se_start.py*) [ -f "$HOME/status-fails" ] && exit 1; echo '{"greeting": 1}'; exit 0 ;; esac
-case "$*" in *"se_modules.py --root "*" kern-pin"*) cat "$HOME/kern-pin" 2>/dev/null; exit 0 ;; esac
+case "$*" in *"se_modules.py --root "*" app-binary"*) cat "$HOME/app-binary" 2>/dev/null; exit 0 ;; esac
 case "$1 $2" in
   "python find") [ -f "$HOME/python" ] ;;
   "python install") touch "$HOME/python" ;;
@@ -38,15 +42,15 @@ cat > "$HOME/.local/bin/uv" <<'UV'
 chmod +x "$HOME/.local/bin/uv"
 """
 # A fake uv installer, as astral.sh's: puts uv into ~/.local/bin, or fails while "offline".
-# kern's release (README "Kern"): served from $HOME/kern-release where it exists, else a 404 (22).
+# The binary's release (README "Kern"): served from $HOME/se-release where it exists, else a 404 (22).
 FAKE_CURL = f"""#!/bin/sh
 echo "curl $*" >> "$HOME/calls"
 [ -f "$HOME/offline" ] && exit 6
-case "$*" in *kern-v*)
+case "$*" in */releases/download/*)
   while [ "$1" != -o ]; do shift; done
   out="$2"; url="$3"
-  [ -f "$HOME/kern-release/${{url##*/}}" ] || exit 22
-  cat "$HOME/kern-release/${{url##*/}}" > "$out"; exit 0 ;;
+  [ -f "$HOME/se-release/${{url##*/}}" ] || exit 22
+  cat "$HOME/se-release/${{url##*/}}" > "$out"; exit 0 ;;
 esac
 cat <<'INSTALLER'
 {INSTALLER}INSTALLER
@@ -101,7 +105,9 @@ def machine(tmp_path):
     project = tmp_path / "project"
     home.mkdir()
     project.mkdir()
-    (home / "kern-pin").write_text(f"{KERN_VERSION} {KERN_BASE}\n", encoding="utf-8", newline="\n")  # se_modules.py kern-pin
+    # se_modules.py app-binary: name, version, download base, build folder, package.
+    (home / "app-binary").write_text(f"{NAME} {APP_VERSION} {APP_BASE} {BUILD_DIR} {PACKAGE}\n", encoding="utf-8",
+                                     newline="\n")
     (project / "se.toml").write_text('[modules.obs]\nurl = "https://example.com/obs.git"\nref = "%s"\n' % ("0" * 40),
                                      encoding="utf-8", newline="\n")
     return home, project, tmp_path
@@ -190,8 +196,8 @@ def test_the_hook_falls_back_to_plain_lines_when_the_greeting_cannot_run(machine
 
 PLATFORM = {"Linux": "linux", "Darwin": "darwin", "Windows": "windows"}.get(platform.system(), "") + "-" + {
     "x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower(), "")
-# The release's archive for this platform: Windows' is a zip of kern.exe (kern/tools/release).
-ASSET = f"kern-{KERN_VERSION}-{PLATFORM}.{'zip' if WINDOWS else 'tar.gz'}"
+# The release's archive for this platform: Windows' is a zip of se.exe (kern/tools/release).
+ASSET = f"{NAME}-{APP_VERSION}-{PLATFORM}.{'zip' if WINDOWS else 'tar.gz'}"
 # A fake kern: logs each call with its stdin; `start` fails while $HOME/kern-fails exists.
 FAKE_KERN = """#!/bin/sh
 input=""
@@ -204,7 +210,7 @@ START = '{"session_id":"s1","hook_event_name":"SessionStart"}'
 
 
 def kern_bin(home: Path) -> Path:
-    return home / ".se" / "bin" / f"kern-{KERN_VERSION}{'.exe' if WINDOWS else ''}"
+    return home / ".se" / "bin" / f"{NAME}-{APP_VERSION}{'.exe' if WINDOWS else ''}"
 
 
 def greeting_call(home: Path) -> str:
@@ -222,16 +228,16 @@ def until(home: Path, text: str) -> list[str]:
 
 
 def release(home: Path, *, corrupt: bool = False) -> None:
-    """kern's release for this platform, as tools/release builds it: the archive and SHA256SUMS."""
-    folder = home / "kern-release"
+    """The se binary's release for this platform, as tools/release builds it: the archive and SHA256SUMS."""
+    folder = home / "se-release"
     folder.mkdir()
     staged = home / "staged"
     staged.mkdir()
-    exe = "kern.exe" if WINDOWS else "kern"
+    exe = f"{NAME}.exe" if WINDOWS else NAME
     (staged / exe).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     (staged / exe).chmod(0o755)
     asset = ASSET
-    if WINDOWS:  # Windows' release is a zip of kern.exe (kern/tools/release)
+    if WINDOWS:  # Windows' release is a zip of se.exe (kern/tools/release)
         with zipfile.ZipFile(folder / asset, "w") as archive:
             archive.write(staged / exe, arcname=exe)
     else:
@@ -258,8 +264,8 @@ def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(
     log = [line for line in calls(home) if line.startswith("kern ")]
     assert log == [f"kern start --root {sh(project)}", f"kern hook SessionStart --root {sh(project)} <<{START}"]
     assert greeting_call(home).endswith(f"--kern-bin {sh(kern_bin(home))}")
-    assert not any(line.startswith("curl") for line in calls(home)), "a kern already here needs no network"
-    assert f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {sh(ROOT)} kern-pin" in calls(home)
+    assert not any(line.startswith("curl") for line in calls(home)), "a binary already here needs no network"
+    assert f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {sh(ROOT)} app-binary" in calls(home)
     # Every later hook finds the binary where the start named it (scripts/se_hook.sh).
     assert (project / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8") == f"{sh(kern_bin(home))}\n"
 
@@ -274,7 +280,7 @@ def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
     (home / "kern-fails").touch()
     (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
-    assert "--kern-failed kern start: kern start: boom --kern-bin" in greeting_call(home)
+    assert f"--kern-failed {NAME} start: kern start: boom --kern-bin" in greeting_call(home)
     assert not any("kern hook" in line for line in calls(home)), "no core to hand the start to"
 
 
@@ -296,15 +302,15 @@ def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then
     (home / "calls").unlink()
     result = run(home, path, project, "--hook", stdin=START)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
-    assert greeting_call(home).endswith(f"--kern-starting fetching release kern-v{KERN_VERSION} for {PLATFORM} "
+    assert greeting_call(home).endswith(f"--kern-starting fetching the {NAME} {APP_VERSION} release for {PLATFORM} "
                                         "in the background")
     log = until(home, "kern hook SessionStart")
-    assert f"curl -fsSL --max-time 2 -o {sh(home)}/.se/bin/kern-{KERN_VERSION}.SHA256SUMS {KERN_BASE}/SHA256SUMS" in log
+    assert f"curl -fsSL --max-time 2 -o {sh(home)}/.se/bin/{NAME}-{APP_VERSION}.SHA256SUMS {APP_BASE}/SHA256SUMS" in log
     assert f"kern start --root {sh(project)}" in log
     assert f"kern hook SessionStart --root {sh(project)} <<{START}" in log
     assert os.access(kern_bin(home), os.X_OK)
     assert sorted(p.name for p in kern_bin(home).parent.iterdir()) == sorted([
-        kern_bin(home).name, f"kern-{KERN_VERSION}.SHA256SUMS"]), "nothing half-done is left"
+        kern_bin(home).name, f"{NAME}-{APP_VERSION}.SHA256SUMS"]), "nothing half-done is left"
 
 
 @needs_platform
@@ -325,7 +331,7 @@ def test_with_no_release_kern_is_built_from_ses_kern_in_the_background_and_the_g
     home, project, base = machine
     path = fake_bin(base)
     run(home, path, project)
-    # A fake go: `go build -o <out> ./cmd/kern` in SE's kern/ writes the fake kern.
+    # A fake go: `go build -o <out> ./cmd/se` in SE's components/ writes the fake binary.
     (path / "go").write_text(f"""#!/bin/sh
 echo "go $* in $PWD" >> "$HOME/calls"
 cat > "$3" <<'KERN'
@@ -335,10 +341,10 @@ chmod +x "$3"
     (path / "go").chmod(0o755)
     (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
-    assert greeting_call(home).endswith(f"--kern-starting no release kern-v{KERN_VERSION} at {KERN_BASE}; "
-                                        f"building it from {sh(ROOT)}/kern in the background")
+    assert greeting_call(home).endswith(f"--kern-starting no {NAME} {APP_VERSION} release at {APP_BASE}; "
+                                        f"building it from {sh(ROOT)}/{BUILD_DIR} in the background")
     log = until(home, "kern hook SessionStart")
-    assert any(line.startswith("go build -o ") and line.endswith(f"./cmd/kern in {sh(ROOT)}/kern") for line in log)
+    assert any(line.startswith("go build -o ") and line.endswith(f"{PACKAGE} in {sh(ROOT)}/{BUILD_DIR}") for line in log)
     assert f"kern start --root {sh(project)}" in log and os.access(kern_bin(home), os.X_OK)
 
 
@@ -348,8 +354,8 @@ def test_with_no_release_and_no_go_kern_failed_names_both(machine):
     run(home, path, project)
     (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
-    assert greeting_call(home).endswith(f"--kern-failed no release kern-v{KERN_VERSION} at {KERN_BASE}, and no go "
-                                        f"to build it from {sh(ROOT)}/kern")
+    assert greeting_call(home).endswith(f"--kern-failed no {NAME} {APP_VERSION} release at {APP_BASE}, and no go "
+                                        f"to build it from {sh(ROOT)}/{BUILD_DIR}")
 
 
 def test_bootstrap_outside_a_session_leaves_kern_alone(machine):
@@ -365,7 +371,7 @@ def test_without_a_pin_kern_is_left_alone(machine):
     home, project, base = machine
     path = fake_bin(base)
     run(home, path, project)
-    (home / "kern-pin").unlink()  # se_modules.py kern-pin answers nothing
+    (home / "app-binary").unlink()  # se_modules.py app-binary answers nothing
     (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert "--kern" not in greeting_call(home)

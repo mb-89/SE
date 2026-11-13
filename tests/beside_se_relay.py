@@ -131,10 +131,11 @@ def test_a_streamed_command_runs_as_one_call_its_steps_through_the_relay(tmp_pat
     with each GitHub read a `github.step` that kern tells the agent on its hook, the session's
     PostToolUse answers it, and each step's progress line reaches the caller while the call runs.
     With kern stopped the same command line hands its plan off again: the fallback."""
-    kern = tmp_path / ("kern.exe" if os.name == "nt" else "kern")
-    assert run("go", "build", "-o", str(kern), "./cmd/kern", cwd=ROOT / "kern").returncode == 0
-    checkout = tmp_path / "se"
-    (checkout / ".git").mkdir(parents=True)
+    # SE's wiring names SE's Go components too, which the `se` binary carries (components/cmd/se).
+    kern = tmp_path / ("se-binary.exe" if os.name == "nt" else "se-binary")
+    built = run("go", "build", "-o", str(kern), "./cmd/se", cwd=ROOT / "components")
+    assert built.returncode == 0, built.stderr
+    checkout = quiet_git.init(tmp_path / "se")  # a repository: SE's origin component reads its refs
     for part in ("components", "scripts", "kern"):
         try:
             (checkout / part).symlink_to(ROOT / part, target_is_directory=True)

@@ -1,11 +1,28 @@
-# kern's release (kern/README.md "Release"). On every pull request and push to main that touches kern
-# it builds the bare core for six platforms with SHA256SUMS, and runs the bare application's battery
-# (kern/template); on main it then publishes them as the release kern/release.toml names, where that
-# release does not exist yet, so a push that changes kern's version cuts its release. While kern is
-# incubated in SE, the release is SE's, tagged kern-v<version>.
+# kern's reusable release workflow (kern/README.md "Release"). It builds one application's binary —
+# the bare core by default, or, called with `directory`, an application's own (its core plus its Go
+# components) — for six platforms with SHA256SUMS, the same bytes for one commit, through the release
+# tool (kern/tools/release) which reads the folder's release.toml. On a pull request it only builds
+# (and runs the bare template's battery, for kern); on a push to main it publishes the release that
+# folder's release.toml names, where it does not exist yet, so a push that changes the version cuts
+# its release. An application calls it with
+#
+#   jobs:
+#     release:
+#       uses: mb-89/SE/.github/workflows/kern-release.yml@kern-v<version>
+#       with:
+#         directory: <the application's binary folder, e.g. components>
+#
+# SE's own se-release.yml does, for the `se` binary. While kern is incubated in SE, this lives here;
+# it moves with kern's workflows to mb-89/kern.
 name: kern-release
 
 on:
+  workflow_call:
+    inputs:
+      directory:
+        description: The folder holding the binary's release.toml and package; kern (the bare core) by default
+        type: string
+        default: kern
   pull_request:
     paths: ["kern/**", ".github/workflows/kern-release.yml", ".github/workflows/kern-battery.yml"]
   push:
@@ -18,7 +35,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: kern-release-${{ github.ref }}
+  group: kern-release-${{ inputs.directory || 'kern' }}-${{ github.ref }}
 
 jobs:
   build:
@@ -26,63 +43,68 @@ jobs:
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
       version: ${{ steps.plan.outputs.version }}
+      binary: ${{ steps.plan.outputs.binary }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: kern/go.mod
           cache-dependency-path: kern/go.sum
-      # Refuses where release.toml's URL names another repository than this one.
-      - name: The release kern/release.toml names
+      # The release tool runs from kern/ (its module) and builds the folder --dir names; it refuses
+      # where that folder's release.toml URL names another repository than this one.
+      - name: The release the folder names
         id: plan
         working-directory: kern
-        run: go run ./tools/release plan --repository "$GITHUB_REPOSITORY" | tee -a "$GITHUB_OUTPUT"
+        run: go run ./tools/release plan --dir "$GITHUB_WORKSPACE/${{ inputs.directory || 'kern' }}" --repository "$GITHUB_REPOSITORY" | tee -a "$GITHUB_OUTPUT"
       - name: Six binaries and SHA256SUMS
         working-directory: kern
         run: |
-          go run ./tools/release build --out "$RUNNER_TEMP/dist"
+          go run ./tools/release build --dir "$GITHUB_WORKSPACE/${{ inputs.directory || 'kern' }}" --out "$RUNNER_TEMP/dist"
           ls -l "$RUNNER_TEMP/dist"
           cat "$RUNNER_TEMP/dist/SHA256SUMS"
           (cd "$RUNNER_TEMP/dist" && sha256sum -c SHA256SUMS)
       - uses: actions/upload-artifact@v6
         with:
-          name: kern-${{ steps.plan.outputs.version }}
+          name: ${{ steps.plan.outputs.binary }}-${{ steps.plan.outputs.version }}
           path: ${{ runner.temp }}/dist/
           if-no-files-found: error
 
   # The bare application builds and its tests pass within its budget, through the battery every
-  # application calls.
+  # application calls. Only for the bare core's own release; an application runs its own suite in
+  # its own CI.
   template:
+    if: ${{ (inputs.directory || 'kern') == 'kern' }}
     uses: ./.github/workflows/kern-battery.yml
     with:
       directory: kern/template
 
   publish:
     needs: [build, template]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.template.result != 'failure' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
     runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v7
         with:
-          name: kern-${{ needs.build.outputs.version }}
+          name: ${{ needs.build.outputs.binary }}-${{ needs.build.outputs.version }}
           path: dist
       - name: Publish the release where it is missing
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.build.outputs.tag }}
           VERSION: ${{ needs.build.outputs.version }}
+          BINARY: ${{ needs.build.outputs.binary }}
         run: |
-          # A release that exists is never changed: a kern change without a new version releases nothing.
+          # A release that exists is never changed: a change without a new version releases nothing.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "kern-release: $TAG is released already; change kern/release.toml's version to cut the next"
+            echo "kern-release: $TAG is released already; change the folder's release.toml version to cut the next"
             exit 0
           fi
-          notes="kern $VERSION, the bare core, for linux, darwin and windows on amd64 and arm64. Verify with sha256sum -c SHA256SUMS (kern/README.md \"Release\")."
+          notes="$BINARY $VERSION, for linux, darwin and windows on amd64 and arm64. Verify with sha256sum -c SHA256SUMS (kern/README.md \"Release\")."
           if ! gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-              --title "kern $VERSION" --notes "$notes" dist/*; then
-            echo "::error::kern-release: GitHub refused release $TAG on $GITHUB_SHA; where a tag ruleset refuses kern-v*, allow this workflow to create it (Settings > Rules > Rulesets), then run this workflow on main again"
+              --title "$BINARY $VERSION" --notes "$notes" dist/*; then
+            echo "::error::kern-release: GitHub refused release $TAG on $GITHUB_SHA; where a tag ruleset refuses this tag scheme, allow this workflow to create it (Settings > Rules > Rulesets), then run this workflow on main again"
             exit 1
           fi
           echo "kern-release: published $TAG on $GITHUB_SHA"
