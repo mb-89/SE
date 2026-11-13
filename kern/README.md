@@ -73,3 +73,18 @@ The start reads `wiring.toml` and checks the whole catalog before anything runs.
 |---|---|
 | 20 instances | 0.16 to 0.20 ms |
 | 200 instances | 1.54 to 1.74 ms |
+
+## The start
+
+From the core's process start until a client's first request is answered. Measured on 13 Nov in a
+Claude Code cloud container, 4 cores, Linux amd64, Go 1.24.7, 5 runs each, the binary built warm
+with `go build -o kern ./cmd/kern`:
+
+| what | command | wall time |
+|---|---|---|
+| process start to the standing file, then a client's `get.core.health` answered | a probe that starts `kern serve --root <tmp>` and reads the standing file every 100 µs, then dials as `client` and asks | standing file 9.8 to 13.0 ms, answered 11.0 to 14.5 ms |
+| the same with v5's one wait for the bus, `ReadyForConnections(10s)` | the probe against a build with that wait | standing file 33.4 to 36.5 ms, answered 34.4 to 38.0 ms |
+| a hook's view: `kern start` returns, then `kern status --wait 5s` says running | `kern start --root $R; kern status --root $R --wait 5s`, timed with `date +%s%N` | start returns in 6.5 to 8.7 ms, running 15.8 to 20.8 ms after the start began |
+
+The server's own wait sleeps 25 ms between looks at its listener for any wait above 25 ms, so the
+bus looks in waits of 20 ms (`bus/bus.go`, `readyLook`), and stands as soon as it listens.
