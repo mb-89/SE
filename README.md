@@ -317,10 +317,13 @@ earlier ones give (`<pull number from step 1>`). Both paths run that one plan:
     `merge_pull_request` with `merge_method` squash, the exact title and message and
     `expectedHeadSha` at the landing head;
   - the session runs those steps with its GitHub tools;
-  - `integrate --read-back <branch> --landing-pull <number> --check-run <url>` then reads step 5
-    back through `git fetch` alone (origin's integration branch one commit on the tested base,
-    with the tested tree), finishes everything local of step 6 and prints its close-out plan:
-    the work pull request's comment and close, and the work issue's comment, label and close.
+  - `integrate --read-back <branch> --landing-pull <number> --check-run <url>
+    --landing-description <file>` then reads step 5 back through `git fetch` alone (origin's
+    integration branch one commit on the tested base, with the tested tree).
+  - It finishes everything local of step 6 and prints its close-out plan: the work pull request's
+    comment and close, and the work issue's comment, label and close.
+  - Before that it checks the landing pull request's description, saved after the merge: it must
+    end in the plan's [metrics](#metrics) line, or the read-back fails and closes nothing.
 - A failure on the way prints the escalation as a plan too: the comment and the `escalated`
   label.
 
@@ -520,9 +523,12 @@ GitHub's limits can be named instead of guessed. `scripts/metrics.py` owns the l
   [Feedback budgets](#feedback-budgets).
 
 A line that cannot be written is dropped; the command never fails for it. `integrate` prints its own
-line last, `Metrics: {...}`, for the integrator's report. The landing pull request's description
-ends in that line too, as it stands when the landing plan is written, so a cloud integrator's
-costs outlive its container: [`retro.py collect`](#work-commands) reads it back.
+line last, `Metrics: {...}`, for the integrator's report.
+
+The landing pull request's description ends in that line too, as it stands when the landing plan is
+written, so a cloud integrator's costs outlive its container: [`retro.py collect`](#work-commands)
+reads it back. A hand-off's `integrate --read-back` refuses a description that lacks it
+([Landing on main](#landing-on-main)).
 
 `work_tickets.py metrics [--since <YYYY-MM-DD>]` prints the top spenders by total wall time and by
 GitHub calls, and every overrun of a budget a line declares:
@@ -770,8 +776,9 @@ work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
 work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE]
                           [--issue-body FILE] [--branch BRANCH] [--read-back BRANCH]
                           [--landing-pull LANDING_PULL] [--check-run CHECK_RUN]
-                          [--build-command BUILD_COMMAND] [--include-late REASON]
-                          [--check-command JSON] [--check-command-temporary-directory]
+                          [--landing-description FILE] [--build-command BUILD_COMMAND]
+                          [--include-late REASON] [--check-command JSON]
+                          [--check-command-temporary-directory]
                           [pull_request]
     validate the field report a pull request's description carries, merge it on land/<branch>, test,
     land it through a squash pull request once check passes, and close the work issue. Where gh is
