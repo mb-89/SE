@@ -892,12 +892,17 @@ prints its reads as a plan, then, given the answers with `--pull <file> --issue 
 writes.
 
 `scripts/retro.py` holds the retro commands, which load `work_tickets.py` for its GitHub door.
-`uv run python scripts/retro.py collect <retro issue> [--out FILE] [--json]` is a retro's
-mechanical half.
+`uv run python scripts/retro.py collect <retro issue> [--since DATE | --retro ISSUE] [--out FILE]
+[--json]` is a retro's mechanical half.
 
 Its window is every work issue closed since the last closed retro issue (titled
-`docs/retro-...` or labelled `retro`) closed, or the whole history where none has. Each issue comes
-with the field report of the work pull request its landing pull request names
+`docs/retro-...` or labelled `retro`) closed. Where none has, it starts when the oldest open retro
+issue was created; only where no retro issue exists is it the whole history.
+
+`--since` starts the window at a date (`YYYY-MM-DD`) or time, `--retro` where that closed retro
+issue closed, whose findings it then scores; the rule checks judge only the window.
+
+Each issue comes with the field report of the work pull request its landing pull request names
 (`<!-- se:field-report-in <n> -->`). The draft holds:
 
 - the sizes: closed, landed, duplicates, escalated, beside the previous retro's where its block is
@@ -912,19 +917,19 @@ with the field report of the work pull request its landing pull request names
 - the window's [metrics](#metrics) report: the line each landing pull request's description ends
   in, merged with the lines of the local metrics file that started in the window, a run in both
   counted once (by its command and start, the local line winning);
-- the previous retro's findings, from its report's block, each with the work issues of the window
+- the previous retro's findings, from the block of the retro doc its report links, each with the work issues of the window
   that name it (`retro #<n> finding <k>`), its state (`closed` where one closed as completed) and
   whether the rule check it names broke again (recurred).
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
-commands read. `--json` prints the block's data alone.
+commands read from the committed draft. `--json` prints the block's data alone.
 
 Without gh it prints the GitHub steps whose
 answers are still missing, round by round, and reads the answers from the files the session saved
 into `--answers <dir>` ([Without gh](src/skills/work-model/SKILL.md#without-gh)).
 
-`uv run python scripts/retro.py file <retro issue> --draft FILE` files a judged retro. The judge
-fills the draft's block:
+`uv run python scripts/retro.py file <retro issue> --draft FILE` files a judged retro, the draft
+committed as the retro doc on the integration branch. The judge fills the draft's block:
 
 - `findings`, each with `title` (five words or more), `body`, `class`, `home` (the file it
   changes), `controversial` with its `why`, and optionally `check` (a rule check);
@@ -933,19 +938,23 @@ fills the draft's block:
 
 It refuses, writing nothing, an incomplete judgment: a finding without one of those, a class
 without a fix, a controversial finding without a why, a finding on the rule book, or on a check that
-recurred, that is not controversial, nothing that went well.
+recurred, that is not controversial, nothing that went well. It refuses, too, a draft the
+integration branch does not hold as it stands: land it there first.
 
 It files no issue
 ([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
-it posts the report as the retro issue's closing comment and closes the issue. The report opens
-with `<!-- se:retro-report -->`, then the facts and the block follow. It lists each finding,
-numbered, with its class's fix, its home and its kind:
+it posts the report proper as the retro issue's closing comment and closes the issue. The report
+opens with `<!-- se:retro-report -->` and lists each finding, numbered, with its class's fix, its
+home and its kind:
 
 - `work`: SE bundles these into as few work issues as the work needs, each naming
   `retro #<n> finding <k>` for every finding it takes;
 - `decision`: for the owner's decision list.
 
-Without gh it prints the comment and the close as a plan.
+Then what went well and what follows. The facts and the block stay in the retro doc, which the
+report links at the integration branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the
+next collect and overhaul read them. A report over GitHub's 65,536 characters is posted as
+numbered parts in order, never cut. Without gh it prints the comments and the close as a plan.
 
 `scripts/overhaul.py` holds the overhaul commands, which ask, rarely, whether the design is still
 right. SE starts one and runs it as its issue says, `read`, the judgment, then `file`.
@@ -961,9 +970,9 @@ filing path (`file --label discovery`): once, so an open overhaul answers a seco
   names the tests or the suite), judgment ("by judgment"), a check (it links a script, or names
   neither);
 - the retros closed since the last closed overhaul (titled `docs/overhaul-...`), or in the whole
-  history where none has, each from its report's block: its sizes, its broken rule checks, its
-  findings by kind and how many of the previous retro's findings closed or recurred, and the
-  finding classes more than one of them named;
+  history where none has, each from the block of the retro doc its report links: its sizes, its
+  broken rule checks, its findings by kind and how many of the previous retro's findings closed or
+  recurred, and the finding classes more than one of them named;
 - the previous overhaul's findings, each with the issues that name it
   (`overhaul #<n> finding <k>`) and their state (`closed`, `open` or `none`);
 - the pruning facts (`facts`, below), beside the previous overhaul's counts.

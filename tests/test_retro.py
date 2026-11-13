@@ -59,6 +59,42 @@ def checkout(tmp_path: Path, repositories) -> Path:
     return tmp_path / "main"
 
 
+# The retro docs the retro reports in the answers link, by (commit, path); the checkout's git
+# reads every other.
+DOCS: dict[tuple[str, str], str] = {}
+
+
+@pytest.fixture(autouse=True)
+def linked_docs(monkeypatch):
+    real = retro.git_show
+    monkeypatch.setattr(retro, "git_show", lambda root: lambda sha, path: DOCS.get(
+        (sha, path)) or real(root)(sha, path))
+
+
+def posted(number: int, block: dict) -> str:
+    """Retro `number`'s report as it posts: a link to its committed doc, whose block is
+    `block`, judged."""
+    sha, path = f"{number:040x}", f"docs/retro-{number}.md"
+    DOCS[(sha, path)] = (f"# Retro draft for #{number}\n\n{retro.BLOCK_MARKER}\n```yaml\n"
+                         + json.dumps({"window": {"retro": number}, "findings": [],
+                                       "classes": [], "went_well": ["w"], **block}) + "\n```\n")
+    return f"Report.\n\n{retro.DOC_MARKER.format(sha=sha, path=path)}\n"
+
+
+def commit_doc(checkout: Path, text: str, name: str = "docs/retro-30.md") -> Path:
+    """`text` committed as the retro doc `name` on origin's main, as a landing leaves it."""
+    doc = checkout / name
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(text, encoding="utf-8")
+    for setting in (("user.name", "alice"), ("user.email", "alice@example.com"),
+                    ("core.hooksPath", str(checkout.parent / "no-hooks"))):
+        git(checkout, "config", *setting)
+    git(checkout, "add", name)
+    git(checkout, "commit", "-q", "-m", f"Land {name}")
+    git(checkout, "push", "-q", "origin", "HEAD:main")
+    return doc
+
+
 def shas(checkout: Path) -> dict[str, str]:
     """Each commit's sha, by subject."""
     return {line.split(" ", 1)[1]: line.split(" ", 1)[0]
@@ -124,8 +160,7 @@ def answers(checkout: Path) -> dict[str, object]:
                  "Tidy up"),
             pull(26, "feat/abandoned", "Refs #14"),
         ],
-        "comments-5.json": [{"body": "Report.\n\n<!-- se:retro-yaml -->\n```yaml\n"
-                                     + json.dumps(previous) + "\n```\n"}],
+        "comments-5.json": [{"body": posted(5, previous)}],
         "comments-11.json": [
             {"body": "Integration stopped: Cannot merge feat/a; conflicts: x.py\n"},
             {"body": "Integrated in abc1234 from PR #22, landed through #21 (check: url). "
@@ -156,6 +191,9 @@ class FakeDoor:
     def closed_issues(self):
         return retro.listed(self.read("issues.json"), "issues")
 
+    def open_issues(self):
+        return retro.listed(self.read("open-issues.json"), "issues")
+
     def pulls(self):
         return retro.listed(self.read("pulls.json"), "pulls")
 
@@ -169,9 +207,9 @@ class FakeDoor:
         return retro.listed(self.read(f"checks-{found.number}.json"), "check_runs")
 
 
-def collected(checkout: Path, given: dict[str, object] | None = None) -> retro.Collected:
+def collected(checkout: Path, given: dict[str, object] | None = None, **window) -> retro.Collected:
     door = FakeDoor(given or answers(checkout))
-    found = retro.collect(checkout, 30, door, REPO, "main", "origin/main", NOW)
+    found = retro.collect(checkout, 30, door, REPO, "main", "origin/main", NOW, **window)
     assert found is not None
     return found
 
@@ -179,7 +217,8 @@ def collected(checkout: Path, given: dict[str, object] | None = None) -> retro.C
 def test_the_window_gives_the_sizes_and_the_per_issue_counts(checkout):
     found = collected(checkout)
 
-    assert found.window == retro.Window(30, "2026-11-01T00:00:00Z", 5, "2026-11-12T12:00:00Z")
+    assert found.window == retro.Window(30, "2026-11-01T00:00:00Z", 5, "2026-11-12T12:00:00Z",
+                                        retro.CLOSED_RETRO)
     assert [item.number for item in found.issues] == [11, 12, 13, 14]
     assert found.sizes == {"closed": 4, "landed": 2, "duplicates": 1, "escalated": 2}
     by = {item.number: item for item in found.issues}
@@ -230,15 +269,75 @@ def test_a_landing_naming_a_closed_or_foreign_issue_breaks_the_work_issue_check(
     assert broken == [{"item": "#25", "what": "names #15, which is not labelled work"}]
 
 
-def test_without_a_closed_retro_the_window_is_the_whole_history(checkout):
+def test_without_a_closed_retro_the_window_starts_at_the_oldest_open_retro(checkout):
+    """No retro issue has closed: the window starts when the oldest open one was created, and the
+    rule checks judge that window alone; with no retro issue at all, it is the whole history."""
     given = answers(checkout)
     given["issues.json"] = [item for item in given["issues.json"] if item["number"] != 5]
+    given["open-issues.json"] = [
+        {**issue(31, "docs/retro-20261105", None), "state": "open",
+         "created_at": "2026-11-05T00:00:00Z"},
+        {**issue(30, "retro: fleet 20261102", None, labels=("retro",)), "state": "open",
+         "createdAt": "2026-11-02T13:00:00Z"},
+        {**issue(29, "feat/open", None), "state": "open", "created_at": "2026-10-01T00:00:00Z"}]
     found = collected(checkout, given)
 
-    assert found.window.since is None and found.window.since_retro is None
-    assert [item.number for item in found.issues] == [3, 11, 12, 13, 14]
+    assert found.window == retro.Window(30, "2026-11-02T13:00:00Z", 30, "2026-11-12T12:00:00Z",
+                                        retro.OPEN_RETRO)
+    assert [item.number for item in found.issues] == [12, 13, 14]
     assert found.previous is None
+    checks = {check.name: check for check in found.checks}
+    assert (checks["work-issue"].checked, checks["outside-pr"].checked) == (2, 3)
+    assert "when retro #30, the oldest open retro issue, was created" in retro.draft(found)
+
+    given["open-issues.json"] = given["open-issues.json"][2:]
+    found = collected(checkout, given)
+    assert found.window.since is None and found.window.start == retro.HISTORY
+    assert [item.number for item in found.issues] == [3, 11, 12, 13, 14]
     assert {check.name: check for check in found.checks}["outside-pr"].checked == 5
+    assert "the whole history up to" in retro.draft(found)
+
+
+def test_since_narrows_the_window_and_the_rule_checks(checkout):
+    """`--since` starts the window at its date: the work issues closed, the landings merged and the
+    commits made after it alone; the previous retro is still the last closed one."""
+    whole = {check.name: check for check in collected(checkout).checks}
+    found = collected(checkout, since=retro.since_of("2026-11-03"))
+
+    assert found.window == retro.Window(30, "2026-11-03T00:00:00Z", None, "2026-11-12T12:00:00Z",
+                                        retro.GIVEN)
+    assert [item.number for item in found.issues] == [12, 13, 14]
+    checks = {check.name: check for check in found.checks}
+    assert {name: (whole[name].checked, checks[name].checked) for name in checks} == {
+        "work-issue": (3, 2), "check": (3, 2), "outside-pr": (4, 3), "field-report": (3, 2)}
+    assert checks["work-issue"].broken == whole["work-issue"].broken  # #25 merged 3 Nov
+    assert found.previous["retro"] == 5
+    assert "after 2026-11-03T00:00:00Z, as --since gives" in retro.draft(found)
+
+    found = collected(checkout, since=retro.since_of("2026-11-04T11:00:00+00:00"))
+    assert [item.number for item in found.issues] == [14]
+    assert {check.name: check.checked for check in found.checks} == {
+        "work-issue": 0, "check": 0, "outside-pr": 0, "field-report": 1}
+    with pytest.raises(work_tickets.QueueError, match="--since 3 Nov: give a date"):
+        retro.since_of("3 Nov")
+
+
+def test_retro_starts_the_window_where_that_retro_closed(checkout):
+    given = answers(checkout)
+    given["issues.json"].append(issue(4, "docs/retro-20261015", "2026-10-15T00:00:00Z"))
+    given["comments-4.json"] = [{"body": posted(4, {"sizes": {"closed": 2}})}]
+
+    found = collected(checkout, given, retro=4)
+    assert found.window == retro.Window(30, "2026-10-15T00:00:00Z", 4, "2026-11-12T12:00:00Z",
+                                        retro.CLOSED_RETRO)
+    assert [item.number for item in found.issues] == [11, 12, 13, 14]
+    assert found.previous == {"retro": 4, "sizes": {"closed": 2}, "findings": []}
+    with pytest.raises(work_tickets.QueueError, match="--retro 11: #11 is no closed retro issue"):
+        collected(checkout, given, retro=11)
+    parsed = retro.parser().parse_args(["collect", "30", "--retro", "4"])
+    assert (parsed.since_retro, parsed.since) == (4, None)
+    with pytest.raises(SystemExit):
+        retro.parser().parse_args(["collect", "30", "--retro", "4", "--since", "2026-11-01"])
 
 
 def test_the_landed_count_is_the_collects_and_reads_only_the_lists(checkout):
@@ -500,19 +599,25 @@ class FakeTracker:
                 for name in ("comment_issue", "close_issue", "add_label", "remove_label")}
 
 
-def test_file_posts_the_report_as_the_closing_comment_and_files_nothing(checkout, tmp_path,
-                                                                        monkeypatch, capsys):
+def filed(checkout: Path, monkeypatch, text: str) -> list[tuple[str, dict]]:
+    """`retro.py file 30` of the draft `text`, committed as the retro doc on main, through gh:
+    the writes it made."""
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
-    draft = tmp_path / "draft.md"
-    draft.write_text(judged_draft(checkout), encoding="utf-8")
-
+    draft = commit_doc(checkout, text)
     assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
                        "--worktree", str(checkout)]) == 0
-    assert [name for name, _ in tracker.calls] == ["comment_issue", "close_issue"]
-    assert all(arguments["issue_number"] == 30 for _, arguments in tracker.calls)
-    comment = tracker.calls[0][1]["body"]
+    return tracker.calls
+
+
+def test_file_posts_the_report_proper_as_the_closing_comment_and_files_nothing(
+        checkout, monkeypatch, capsys):
+    calls = filed(checkout, monkeypatch, judged_draft(checkout))
+
+    assert [name for name, _ in calls] == ["comment_issue", "close_issue"]
+    assert all(arguments["issue_number"] == 30 for _, arguments in calls)
+    comment = calls[0][1]["body"]
     assert comment.startswith(retro.REPORT_MARKER + "\n## Retro #30: the report\n")
     assert ("#### Lost reports (2)\n\nFix: `integrate` refuses a landing without one\n" in comment)
     assert ("- **1. Refuse a landing whose work issue has no field report** (work, for SE to "
@@ -521,21 +626,83 @@ def test_file_posts_the_report_as_the_closing_comment_and_files_nothing(checkout
             "decision list: it changes a rule; home `src/skills/work-model/") in comment
     assert "- The fake door kept the tests fast." in comment
     assert "This retro filed no issue." in comment and "`retro #30 finding <k>`" in comment
-    assert "### The facts" in comment and "\n#### Sizes\n" in comment
+    sha = git(checkout, "rev-parse", "origin/main")
+    url = f"https://github.com/owner/repo/blob/{sha}/docs/retro-30.md"
+    assert f"committed retro doc [docs/retro-30.md]({url}), at {sha[:12]}." in comment
+    assert comment.endswith(retro.DOC_MARKER.format(sha=sha, path="docs/retro-30.md") + "\n")
+    assert "#### Sizes" not in comment and retro.BLOCK_MARKER not in comment  # in the doc
     assert retro.JUDGE_BEGIN not in comment and "## Judgment" not in comment
-    block = retro.read_block(comment)
-    assert [(item["finding"], item["kind"]) for item in block["findings"]] == [
-        (1, "work"), (2, "decision")]
-    assert block["sizes"]["closed"] == 4 and block["went_well"]
     out = capsys.readouterr().out
+    assert f"the report in 1 comment(s) of {len(comment)} characters (limit 65536)" in out
     assert "1 work and 1 decision finding(s); no issue filed" in out
 
 
-def test_file_without_gh_prints_the_comment_and_the_close(checkout, tmp_path, monkeypatch,
-                                                          capsys):
+def test_a_draft_of_130000_characters_posts_one_comment_under_the_limit(checkout, monkeypatch):
+    """The first live retro's draft was 130,476 characters, most of it facts and block: the
+    comment holds the report proper and links the doc for the rest."""
+    text = judged_draft(checkout)
+    head = text.index("## Landed issues")
+    text = text[:head] + "## Long facts\n\n" + "- a landed issue's row\n" * 6000 + "\n" + text[head:]
+    assert len(text) > 130000
+
+    calls = filed(checkout, monkeypatch, text)
+
+    comments = [arguments["body"] for name, arguments in calls if name == "comment_issue"]
+    assert len(comments) == 1 and len(comments[0]) < retro.COMMENT_LIMIT
+    assert "/blob/" in comments[0] and "docs/retro-30.md" in comments[0]
+    assert "a landed issue's row" not in comments[0]
+    assert [name for name, _ in calls][-1] == "close_issue"
+
+
+def test_a_report_proper_over_the_limit_posts_in_numbered_parts(checkout, monkeypatch):
+    long = "\n".join(f"Line {index} of a long finding body." for index in range(4000))
+    long += "\n" + "x" * 70000  # a line longer than a comment is cut within it, never dropped
+    text = judged_draft(checkout, findings=[finding(body=long)])
+
+    calls = filed(checkout, monkeypatch, text)
+
+    comments = [arguments["body"] for name, arguments in calls if name == "comment_issue"]
+    total = len(comments)
+    assert total > 3 and [name for name, _ in calls] == ["comment_issue"] * total + ["close_issue"]
+    assert all(len(comment) <= retro.COMMENT_LIMIT for comment in comments)
+    assert comments[0].startswith(retro.REPORT_MARKER)
+    label = "\n\n_Part {} of %d of the report of retro #30._\n" % total
+    assert all(comment.endswith(label.format(index)) for index, comment in
+               enumerate(comments, 1))
+    joined = "".join(comment[:-len(label.format(index))] for index, comment in
+                     enumerate(comments, 1))
+    assert "Line 3999 of a long finding body." in joined and "x" * 70000 in joined.replace("\n", "")
+    assert retro.DOC_MARKER.split(" {")[0] in comments[-1]
+
+
+@pytest.mark.parametrize("where", ["outside", "uncommitted", "changed"])
+def test_file_refuses_a_draft_main_does_not_hold_and_writes_nothing(checkout, tmp_path,
+                                                                     monkeypatch, where):
+    writes = []
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "run_plan", lambda plan, actions: writes.append(plan))
+    text = judged_draft(checkout)
+    if where == "outside":
+        draft = tmp_path / "draft.md"
+        draft.write_text(text, encoding="utf-8")
+        refusal = "is not in the checkout"
+    else:
+        draft = checkout / "docs" / "retro-30.md"
+        if where == "changed":
+            commit_doc(checkout, text.replace("Lost reports", "Lost", 1))
+        draft.parent.mkdir(exist_ok=True)
+        draft.write_text(text, encoding="utf-8")
+        refusal = "does not hold the draft docs/retro-30.md as it stands"
+
+    with pytest.raises(work_tickets.QueueError, match=refusal):
+        retro.run_file(retro.parser().parse_args(["file", "30", "--draft", str(draft), "--repo",
+                                                  REPO, "--worktree", str(checkout)]))
+    assert writes == []
+
+
+def test_file_without_gh_prints_the_comment_and_the_close(checkout, monkeypatch, capsys):
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
-    draft = tmp_path / "draft.md"
-    draft.write_text(judged_draft(checkout), encoding="utf-8")
+    draft = commit_doc(checkout, judged_draft(checkout))
 
     assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
                        "--worktree", str(checkout)]) == 0
@@ -547,23 +714,23 @@ def test_file_without_gh_prints_the_comment_and_the_close(checkout, tmp_path, mo
     assert "create" not in out.replace("created", "")
 
 
-def test_the_next_collect_scores_the_previous_findings(checkout, tmp_path, monkeypatch):
-    """Retro #5's posted report held three findings; in the window #11 took finding 1 and
-    closed, #12 took finding 2 and closed, and the check finding 2 names broke again."""
+def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
+    """Retro #5's posted report held three findings in its linked doc; in the window #11 took
+    finding 1 and closed, #12 took finding 2 and closed, and the check finding 2 names broke
+    again."""
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
     given = answers(checkout)
-    block = retro.read_block(given["comments-5.json"][0]["body"])
-    block.update(window={"retro": 5}, classes=[{"name": "C", "fix": "F"}],
-                 went_well=["Something went well."], findings=[
-                     finding(**{"class": "C", "title": "Name the fake door in every test"}),
-                     finding(**{"class": "C", "check": "check",
-                                "title": "Run the check job on every landing"}),
-                     finding(**{"class": "C", "title": "A finding nobody took up yet"})])
-    draft = tmp_path / "draft-5.md"
-    draft.write_text("# Retro draft for #5\n\n" + retro.BLOCK_MARKER + "\n```yaml\n"
-                     + json.dumps(block) + "\n```\n", encoding="utf-8")
+    block = {"version": 1, "sizes": {"closed": 7}, "window": {"retro": 5},
+             "classes": [{"name": "C", "fix": "F"}], "went_well": ["Something went well."],
+             "findings": [
+                 finding(**{"class": "C", "title": "Name the fake door in every test"}),
+                 finding(**{"class": "C", "check": "check",
+                            "title": "Run the check job on every landing"}),
+                 finding(**{"class": "C", "title": "A finding nobody took up yet"})]}
+    draft = commit_doc(checkout, "# Retro draft for #5\n\n" + retro.BLOCK_MARKER + "\n```yaml\n"
+                       + json.dumps(block) + "\n```\n", "docs/retro-5.md")
     assert retro.main(["file", "5", "--draft", str(draft), "--repo", REPO,
                        "--worktree", str(checkout)]) == 0
     given["comments-5.json"] = [{"body": tracker.calls[0][1]["body"]}]
@@ -574,6 +741,7 @@ def test_the_next_collect_scores_the_previous_findings(checkout, tmp_path, monke
             item["body"] = "Takes Retro #5 finding 2 and retro #4 finding 3."
 
     found = collected(checkout, given)
+    assert found.previous["sizes"] == {"closed": 7}
     assert found.previous["findings"] == [
         {"finding": 1, "title": "Name the fake door in every test", "class": "C", "kind": "work",
          "check": "", "issues": [11], "state": "closed", "recurred": False},
@@ -586,6 +754,11 @@ def test_the_next_collect_scores_the_previous_findings(checkout, tmp_path, monke
     assert "| 2. Run the check job on every landing | C | work | #12 | closed | yes (check) |" in text
     assert "| 3. A finding nobody took up yet | C | work | none | none | no check named |" in text
     assert retro.read_block(text)["findings"] == []
+
+    given["comments-5.json"] = [{"body": retro.DOC_MARKER.format(sha="f" * 40,
+                                                                  path="docs/retro-5.md")}]
+    with pytest.raises(work_tickets.QueueError, match="which the checkout does not hold"):
+        collected(checkout, given)
 
 
 def test_the_retro_template_names_the_two_commands():
