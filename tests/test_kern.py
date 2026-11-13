@@ -72,6 +72,11 @@ def test_the_template_is_a_bare_application_in_ses_shape() -> None:
     assert 0 < settings["tests"]["target_seconds"] <= settings["tests"]["limit_seconds"]
     assert settings["modules"]["kern"]["go"] is True
     assert tomllib.loads((TEMPLATE / "wiring.toml").read_text(encoding="utf-8")) == {}, "no instances"
+    # A bare application has no Go components, so it sets no [binary] and runs the bare kern; the
+    # README shows how it builds its own binary once it has some (requirement 3).
+    assert "binary" not in settings, "a bare application runs the bare kern"
+    readme = (TEMPLATE / "README.md").read_text(encoding="utf-8")
+    assert "Building your own binary" in readme and "kern-release.yml" in readme
     check = (TEMPLATE / ".github" / "workflows" / "check.yml").read_text(encoding="utf-8")
     assert re.search(r"(?m)^  check:\n    uses: mb-89/SE/\.github/workflows/kern-battery\.yml@kern-v\d+\.\d+\.\d+$", check)
     version = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
@@ -89,24 +94,55 @@ def test_kerns_workflows_use_only_node_24_actions() -> None:
             assert action in NODE_24, f"{path.name}: {action} is not in NODE_24; add its Node 24 major"
             assert int(major) >= NODE_24[action], f"{path.name}: {action}@v{major} runs on Node 20"
 
-def test_the_release_is_built_on_every_change_to_kern_and_published_only_from_main() -> None:
-    """kern/README.md "Release": a pull request proves the build without publishing."""
+def test_the_release_is_reusable_built_on_every_change_and_published_only_from_main() -> None:
+    """kern/README.md "Release": a reusable workflow any application calls for its own binary; a
+    pull request proves the build without publishing."""
     text = RELEASE.read_text(encoding="utf-8")
+    # Reusable, with the folder it builds; it also self-triggers for the bare core.
+    assert "  workflow_call:\n    inputs:\n      directory:\n" in text
+    assert "        default: kern\n" in text
     paths = '["kern/**", ".github/workflows/kern-release.yml", ".github/workflows/kern-battery.yml"]'
     assert text.count(f"    paths: {paths}\n") == 2, "pull requests and pushes to main that touch kern"
     jobs = text[text.index("\njobs:\n"):]
     assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["build", "template", "publish"]
     build = re.search(r"(?ms)^  build:\n(.*?)(?=^  \w)", jobs)[1]
-    assert 'go run ./tools/release plan --repository "$GITHUB_REPOSITORY"' in build
-    assert 'go run ./tools/release build --out "$RUNNER_TEMP/dist"' in build
+    folder = '"$GITHUB_WORKSPACE/${{ inputs.directory || \'kern\' }}"'
+    assert f'go run ./tools/release plan --dir {folder} --repository "$GITHUB_REPOSITORY"' in build
+    assert f'go run ./tools/release build --dir {folder} --out "$RUNNER_TEMP/dist"' in build
     assert "sha256sum -c SHA256SUMS" in build
+    assert "binary: ${{ steps.plan.outputs.binary }}\n" in build, "the artifact and title carry the binary's name"
+    # kern's own template battery runs for the bare core's release only.
+    assert "    if: ${{ (inputs.directory || 'kern') == 'kern' }}\n" in jobs
     assert "    uses: ./.github/workflows/kern-battery.yml\n    with:\n      directory: kern/template\n" in jobs
     publish = jobs[jobs.index("\n  publish:\n"):]
     assert "    needs: [build, template]\n" in publish
-    assert "    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'\n" in publish
+    # A skipped template (an application's release) must not skip publish; a failed one must.
+    assert "needs.build.result == 'success' && needs.template.result != 'failure'" in publish
+    assert "github.ref == 'refs/heads/main' && github.event_name != 'pull_request'" in publish
     assert "      contents: write\n" in publish and "contents: write" not in jobs[:jobs.index("\n  publish:\n")]
     # A release that exists is never changed.
     assert publish.index('gh release view "$TAG"') < publish.index('gh release create "$TAG"')
+
+
+SE_RELEASE = PROJECT / ".github" / "workflows" / "se-release.yml"
+
+
+def test_se_builds_its_own_binary_through_kerns_reusable_release() -> None:
+    """Requirement: SE releases the `se` binary (core plus its Go components) through kern's reusable
+    release workflow, with the se-v<version> tag scheme components/release.toml owns."""
+    text = SE_RELEASE.read_text(encoding="utf-8")
+    assert re.search(r"(?m)^    uses: \./\.github/workflows/kern-release\.yml\n", text)
+    assert re.search(r"(?m)^    with:\n      directory: components\n", text)
+    assert "contents: write\n" in text
+    # It builds on a change to the binary's inputs, and proves the build on a pull request.
+    for event in ("  pull_request:\n", "  push:\n"):
+        assert event in text
+    for path in ('- "kern/**"', '- "components/**"', '- ".github/workflows/se-release.yml"'):
+        assert path in text
+    release = tomllib.loads((PROJECT / "components" / "release.toml").read_text(encoding="utf-8"))
+    assert release["binary"] == "se" and release["package"] == "./cmd/se"
+    assert release["download"] == "https://github.com/mb-89/SE/releases/download/se-v{version}", (
+        "the se-v<version> tag scheme, distinct from v<version> and kern-v<version>")
 
 def test_the_release_toml_names_one_url_with_the_tag_while_kern_is_incubated() -> None:
     settings = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))
