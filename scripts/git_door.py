@@ -27,8 +27,9 @@ class Backend(Protocol):
 
 
 class RealGit:
-    """The git on PATH; `env` (variable -> value, None removes it) is laid over each call's
-    environment, so a contract run can isolate git from the machine's configuration."""
+    """The git on PATH; `env` (variable -> value, None removes it) is laid over the process's
+    environment, so a contract run can isolate git from the machine's configuration. What a call
+    sets itself, differing from the process's environment, wins."""
 
     def __init__(self, env: dict[str, str | None] | None = None) -> None:
         self.env = env or {}
@@ -38,6 +39,8 @@ class RealGit:
             return env
         merged = dict(os.environ if env is None else env)
         for name, value in self.env.items():
+            if env is not None and name in env and env[name] != os.environ.get(name):
+                continue
             if value is None:
                 merged.pop(name, None)
             else:
