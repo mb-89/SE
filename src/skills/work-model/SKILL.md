@@ -431,6 +431,10 @@ A worker splits its work issue into local tickets in its worktree:
   - `work_tickets.py probe --command <command> --output <path>` appends the command and its output
     to the index; where no intake ran ([Without gh](#without-gh)), the first probe creates the
     default index. `field-report --draft` links that index in Delivered.
+  - A discovery package that changes no file still delivers a branch: it commits its report as a
+    doc under `docs/` on its branch (the findings and evidence a reader needs, never its notes), so the pull
+    request has a commit to carry its field report. After landing, the integrator removes that
+    doc in its next integration where nothing links it and no work issue names it as input.
 - Test-driven: regression first, then the change, then focused checks and the affected real
   command. Check an acceptance item only with evidence; move a ticket to `done/` only when every
   item is satisfied. A ticket that cannot be finished stays in `held/` with the attempts and
@@ -599,6 +603,14 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
 - **GitHub through the host's tools**: issues, comments and pull requests (their descriptions
   carrying the field reports) are read and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same
   titles, labels, bodies and footers the commands would write.
+- **A tool's answer as a file**: where a command takes what the tools read, the session writes
+  the tool's JSON answer, unchanged, to a file it names (with its file-writing tool, in its
+  scratchpad), and passes that file; a command never takes a summary or a hand-made copy.
+  - The tools' answers differ from the REST API's: labels are strings, not objects; an issue
+    names its comments only as their count; `list_issues` names no close time and no pull
+    request read names its merge commit.
+  - The commands that read such files accept both shapes, the tools' and the REST API's; where
+    the tools name nothing, the command says what it falls back to, as `retro.py` does.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
   `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push`, `verified`,
   `comments-read`, `body-read --body-file`, `release-trailer`, `pr-body`, `docs`, `format`, `metrics`
@@ -619,10 +631,12 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
 - **Every other command** fails, naming itself, the missing `gh` and this section.
 - **Every other step by hand**, as that command's `--help` and its role's procedure document it,
   for example:
-  - `intake` and `refresh`: read the issue and its comments; `create` one ticket per numbered
-    requirement plus `delivery`; record the comments read with `comments-read --count <n>
-    --newest <id>` and the body read with `body-read --body-file <file>`, from what the GitHub
-    tools read.
+  - `intake`: `intake --issue-body <file> --comments-file <file>`, the issue (`issue_read`,
+    method `get`) and its comments (method `get_comments`) as the tools answered them; it writes
+    the tickets, the snapshot and both read records as `intake --issue` does.
+  - `refresh`: read the issue and its comments; apply what changed to the tickets; record the
+    comments read with `comments-read --count <n> --newest <id>` and the body read with
+    `body-read --body-file <file>`, from what the GitHub tools read.
   - `intake --outside`: read each `[outside]` repository's open issues and their comments, and
     keep those [Outside issues](#outside-issues) leaves.
   - `deliver`: `sync`; `push`; open the pull request to the integration branch, titled like the
@@ -632,11 +646,12 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     - Once the pull request is open or updated, `stop-check --pull <number> --pr-description
       <file>` (its description as the GitHub tools read it) records it for the Stop hook
       ([README "Stop hook"](../../../README.md#stop-hook)), which judges without gh by that record.
-    - The field report comes from `field-report.md`, the template copied with its markers and
-      filled in by hand (`field-report --draft` needs `intake`'s snapshot).
+    - The field report comes from `field-report.md`, which `field-report --draft <file>
+      --issue-body <file>` writes from the issue as the tools answered it (or from `intake`'s
+      snapshot without `--issue-body`).
     - It passes `field-report --check .se/work/field-report.md --worktree <worktree> --issue-body
-      <file> --comment-count <n> --newest-comment <id>` (the work issue's body saved to `<file>`,
-      its comments as the GitHub tools read them now).
+      <file> --comment-count <n> --newest-comment <id>` (the work issue's body, or the issue as
+      the tools answered it, saved to `<file>`, its comments as the GitHub tools read them now).
     - That check runs after `sync` and before `push`: it fills the report's Branch tip from the
       branch.
     - A commit after delivery changes the tip: run the check again and update the pull request's

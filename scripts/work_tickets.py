@@ -1116,31 +1116,119 @@ def sync(root: Path) -> str:
 
 
 def fetch_issue(root: Path, number: int, repo: str | None) -> dict[str, object]:
-    data = json.loads(run_gh(
+    return issue_record(json.loads(run_gh(
         root, ["issue", "view", str(number), "--json", ISSUE_FIELDS, *repo_arguments(repo)]
-    ))
-    match = ISSUE_URL_PATTERN.fullmatch(data["url"])
+    )))
+
+
+def first_of(item: dict[str, object], *keys: str) -> object:
+    """The first of `keys` that `item` holds a value for: gh's camelCase name or the REST API's
+    and the GitHub tools' snake_case one."""
+    return next((item[key] for key in keys if item.get(key) not in (None, "")), "")
+
+
+def web_url(item: dict[str, object]) -> str:
+    """The page address of an issue or comment: `html_url` in the REST API's and the GitHub
+    tools' form, where `url` is the API address; `url` in gh's."""
+    return str(first_of(item, "html_url", "url"))
+
+
+def comment_record(comment: dict[str, object]) -> dict[str, object]:
+    """One comment as the snapshot keeps it, from gh's, the REST API's or the GitHub tools' form."""
+    author = first_of(comment, "author", "user")
+    return {
+        "id": str(comment.get("id", "")),
+        "author": str(author.get("login", "")) if isinstance(author, dict) else str(author),
+        "createdAt": str(first_of(comment, "createdAt", "created_at")),
+        "url": web_url(comment),
+        "body": str(comment.get("body") or "").replace("\r\n", "\n"),
+    }
+
+
+def issue_record(
+    data: dict[str, object], comments: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """The work issue as the snapshot keeps it, from gh's `issue view --json` (its comments
+    inline), or from the REST API's or the GitHub tools' answer with `comments` read apart (the
+    tools name labels as strings and the issue's comments only as their count)."""
+    url = web_url(data)
+    match = ISSUE_URL_PATTERN.fullmatch(url)
     if match is None:
-        raise QueueError(f"Unexpected issue URL: {data['url']}")
+        raise QueueError(f"Unexpected issue URL: {url!r}; the work issue's page address "
+                         "(`html_url` or `url`) is needed")
+    if comments is None:
+        inline = data.get("comments")
+        if isinstance(inline, list):
+            comments = inline
+        elif inline:
+            raise QueueError(
+                f"The work issue has {inline} comment(s) and none were given: save them as your "
+                "GitHub tools read them and pass --comments-file <file>")
+        else:
+            comments = []
     return {
         "repo": "/".join(match.groups()),
-        "number": data["number"],
-        "url": data["url"],
-        "title": data["title"],
-        "body": (data.get("body") or "").replace("\r\n", "\n"),
-        "updatedAt": data.get("updatedAt", ""),
-        "labels": data.get("labels") or [],
-        "comments": [
-            {
-                "id": comment.get("id", ""),
-                "author": (comment.get("author") or {}).get("login", ""),
-                "createdAt": comment.get("createdAt", ""),
-                "url": comment.get("url", ""),
-                "body": (comment.get("body") or "").replace("\r\n", "\n"),
-            }
-            for comment in data.get("comments") or []
-        ],
+        "number": int(data["number"]),
+        "url": url,
+        "title": str(data["title"]),
+        "body": str(data.get("body") or "").replace("\r\n", "\n"),
+        "updatedAt": str(first_of(data, "updatedAt", "updated_at")),
+        "labels": [{"name": label["name"] if isinstance(label, dict) else str(label)}
+                   for label in data.get("labels") or []],
+        "comments": [comment_record(comment) for comment in comments],
     }
+
+
+def json_answer(file: Path, what: str) -> object:
+    """The JSON a GitHub tool answered, as the session saved it to `file`."""
+    try:
+        return json.loads(read_file(file, what))
+    except ValueError as error:
+        raise QueueError(
+            f"The {what} {file} is no JSON: {error}; save the GitHub tool's answer to the file "
+            "as it came (work-model skill, \"Without gh\")") from error
+
+
+def issue_answer(issue_file: Path) -> dict[str, object]:
+    """The issue a GitHub tool's or the REST API's answer saved to `issue_file` holds."""
+    data = json_answer(issue_file, "work issue")
+    if not isinstance(data, dict) or "number" not in data or "title" not in data:
+        raise QueueError(
+            f"The work issue file {issue_file} holds no issue: save the answer of your GitHub "
+            "tools' issue read (number, title, body, html_url) to it")
+    return data
+
+
+def answered_issue(issue_file: Path, comments_file: Path | None) -> dict[str, object]:
+    """The work issue from the files the session saved its GitHub tools' answers to: the issue as
+    `issue_read` (method `get`) or the REST API answers it, and its comments as `issue_read`
+    (method `get_comments`) or the REST API list them."""
+    data = issue_answer(issue_file)
+    comments = None
+    if comments_file is not None:
+        listed = json_answer(comments_file, "work issue comments")
+        if isinstance(listed, dict):
+            listed = listed.get("comments", listed.get("items"))
+        if not isinstance(listed, list) or not all(isinstance(item, dict) for item in listed):
+            raise QueueError(
+                f"The comments file {comments_file} holds no list of comments: save the answer "
+                "of your GitHub tools' comment read to it")
+        comments = listed
+    return issue_record(data, comments)
+
+
+def issue_body_text(file: Path) -> str:
+    """The work issue's body from `file`: the body itself, or the issue as a GitHub tool, the
+    REST API or gh answers it, saved as JSON."""
+    text = read_file(file, "work issue body")
+    if text.lstrip().startswith("{"):
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return text
+        if isinstance(data, dict) and isinstance(data.get("body"), str):
+            return data["body"].replace("\r\n", "\n")
+    return text
 
 
 def snapshot_path(root: Path) -> Path:
@@ -1247,7 +1335,7 @@ def body_read(root: Path, file: Path | None) -> None:
     """Record the work issue's body as read: from `file`, as the worker's GitHub tools read it,
     or, without one, as gh reads it now."""
     if file is not None:
-        body = read_file(file, "work issue body")
+        body = issue_body_text(file)
     else:
         snapshot = required_snapshot(root)
         body = str(fetch_issue(root, int(snapshot["number"]), str(snapshot["repo"]))["body"])
@@ -1534,14 +1622,16 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
 
 
 def intake(
-    root: Path, number: int, repo: str | None, discovery: bool = False,
-    probe_root: str | None = None,
+    root: Path, number: int | None, repo: str | None, discovery: bool = False,
+    probe_root: str | None = None, answered: dict[str, object] | None = None,
 ) -> tuple[dict[str, object], list[str], list[str]]:
+    """Write the work issue's tickets: read with gh, or `answered`, as the session's GitHub tools
+    read it (`answered_issue`)."""
     initialize(root)
     paths, tickets, errors = scan_queue(root)
     if errors:
         raise QueueError("; ".join(errors))
-    issue = fetch_issue(root, number, resolve_repo(root, repo))
+    issue = answered if answered is not None else fetch_issue(root, number, resolve_repo(root, repo))
     existing = [ticket.ticket_id for ticket in tickets]
     created: list[str] = []
     kept: list[str] = []
@@ -3036,9 +3126,10 @@ def start(
 
 
 def issue_labels(issue: dict[str, object]) -> set[str]:
+    """Label names, from gh's and the REST API's objects or the GitHub tools' strings."""
     return {
-        str(label.get("name", ""))
-        for label in issue.get("labels", []) if isinstance(label, dict)
+        str(label.get("name", "")) if isinstance(label, dict) else str(label)
+        for label in issue.get("labels", [])
     }
 
 
@@ -3185,10 +3276,12 @@ def quoted(text: str) -> str:
     return "\n".join(f"> {line}".rstrip() for line in lines)
 
 
-def draft_field_report(root: Path, file: Path) -> None:
+def draft_field_report(root: Path, file: Path, issue_file: Path | None = None) -> None:
     """Write the field-report template, markers included, to `file` with the work issue, branch,
-    integration-branch commit, branch tip, proposed release kind and user requirement filled in."""
-    issue = required_snapshot(root)
+    integration-branch commit, branch tip, proposed release kind and user requirement filled in;
+    the work issue from intake's snapshot, or from `issue_file`, as the session's GitHub tools
+    read it."""
+    issue = required_snapshot(root) if issue_file is None else issue_record(issue_answer(issue_file), [])
     branch = delivery_branch(root, issue)
     body = field_report_template().replace("#<n>", f"#{issue['number']}", 1)
     kind = default_release_kind(branch, str(issue["body"]))
@@ -3403,7 +3496,7 @@ def check_field_report(
     and a body changed since (read with gh, unless `comments` and the issue body file give them).
     In a worktree its Branch tip is first set to the branch's commit."""
     if issue_body_file is not None:
-        issue_body = read_file(issue_body_file, "work issue body")
+        issue_body = issue_body_text(issue_body_file)
     elif root is None:
         raise QueueError(
             "field-report --check needs the work issue's body for the evidence gate: "
@@ -5134,7 +5227,7 @@ def handed_pull_request(root: Path, pull_number: int, remote: str, description: 
         raise QueueError(
             f"The field report in {where} names no work issue; the worker writes "
             "**Work issue:** #<n> in its header and delivers again")
-    body = read_file(issue_body, "work issue body")
+    body = issue_body_text(issue_body)
     problems = field_report_problems(report, body)
     if problems:
         raise field_report_error(f"in {where}", problems)
@@ -6257,14 +6350,21 @@ def run_close(root: Path, args: argparse.Namespace) -> int:
     return 0 if report["cleanup_eligible"] else 1
 
 
-@command("intake", "read the work issue with gh and write its tickets into todo",
+@command("intake", "read the work issue with gh, or from the files your GitHub tools' answers "
+                   "were saved to, and write its tickets into todo",
          WORKTREE,
          Exclusive((
              arg("--issue", type=int, help="work issue number"),
+             arg("--issue-body", type=Path, metavar="FILE",
+                 help="without gh: the work issue as your GitHub tools read it (issue_read, "
+                      "method get), its JSON saved to FILE; the REST API's answer also serves"),
              arg("--outside", action="store_true",
                  help="for SE: list the open issues of se.toml's [outside] repositories that carry "
                       "no fleet marker and no handled comment, in one query; writes nothing"),
          ), required=True),
+         arg("--comments-file", type=Path, metavar="FILE",
+             help="with --issue-body: the work issue's comments as your GitHub tools read them "
+                  "(issue_read, method get_comments), their JSON list saved to FILE"),
          REPO,
          arg("--discovery", action="store_true",
              help="create the ignored discovery evidence folder and index"),
@@ -6283,7 +6383,16 @@ def run_intake(root: Path, args: argparse.Namespace) -> int:
             for issue in found:
                 print(f"  {issue['repo']}#{issue['number']} {issue['title']} {issue['url']}")
         return 0
-    issue, created, kept = intake(root, args.issue, args.repo, args.discovery, args.probe_root)
+    if args.comments_file is not None and args.issue_body is None:
+        raise QueueError("intake: --comments-file goes with --issue-body; with --issue, gh reads "
+                         "the comments")
+    if args.issue_body is not None and args.repo:
+        raise QueueError("intake --issue-body takes the repository from the issue's address, "
+                         "and no --repo")
+    answered = (None if args.issue_body is None
+                else answered_issue(args.issue_body, args.comments_file))
+    issue, created, kept = intake(root, args.issue, args.repo, args.discovery, args.probe_root,
+                                  answered)
     print(f"Work issue #{issue['number']}: {issue['title']} ({issue['url']})")
     for ticket_id in created:
         print(f"created todo/{ticket_id}.md")
@@ -6375,8 +6484,10 @@ PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker
          ), required=True),
          arg("--issue-body", type=Path, metavar="FILE",
              help="with --check: the work issue's body as your GitHub tools read it now, for the "
-                  "evidence gate and the body-read check; default: intake's snapshot, the body "
-                  "read with gh"),
+                  "evidence gate and the body-read check (the body, or the issue's JSON as the "
+                  "tools answered it); default: intake's snapshot, the body read with gh; with "
+                  "--draft: the issue's JSON as your GitHub tools answered it, in place of "
+                  "intake's snapshot"),
          arg("--comment-count", type=int, metavar="N",
              help="with --check: the work issue's comment count as your GitHub tools read it now; "
                   "default: read with gh"),
@@ -6395,7 +6506,7 @@ def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
     elif root is None:
         raise QueueError("field-report --draft needs --worktree <worktree>, the worker's checkout")
     else:
-        draft_field_report(root, args.draft)
+        draft_field_report(root, args.draft, args.issue_body)
         print(f"Drafted {args.draft}")
     return 0
 
@@ -6669,7 +6780,7 @@ def run_pr_body(root: Path, args: argparse.Namespace) -> int:
     number = re.search(r"/issues/(\d+)/?$", args.issue_url)
     if number is None:
         raise QueueError(f"pr-body: --issue-url {args.issue_url!r} does not end in /issues/<n>")
-    body = read_file(args.issue_body, "work issue body")
+    body = issue_body_text(args.issue_body)
     report = report_in(read_file(args.field_report, "field report"), str(args.field_report))
     print(pull_request_body({"number": number.group(1), "url": args.issue_url, "body": body},
                             report), end="")
@@ -6688,7 +6799,7 @@ def run_pr_body(root: Path, args: argparse.Namespace) -> int:
                   "its Re-integration kind (default patch)"),
          INCLUDE_LATE)
 def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
-    body = read_file(args.issue_body, "work issue body")
+    body = issue_body_text(args.issue_body)
     file = args.pr_description
     report = None if file is None else report_in(read_file(file, "pull request description"), str(file))
     if report is not None:
