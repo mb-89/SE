@@ -410,7 +410,8 @@ A worker splits its work issue into local tickets in its worktree:
   - A project that needs another ignored root declares it in its worker command with
     `--probe-root <relative-path>`.
   - `work_tickets.py probe --command <command> --output <path>` appends the command and its output
-    to the index. `field-report --draft` links that index in Delivered.
+    to the index; where no intake ran ([Without gh](#without-gh)), the first probe creates the
+    default index. `field-report --draft` links that index in Delivered.
 - Test-driven: regression first, then the change, then focused checks and the affected real
   command. Check an acceptance item only with evidence; move a ticket to `done/` only when every
   item is satisfied. A ticket that cannot be finished stays in `held/` with the attempts and

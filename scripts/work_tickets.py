@@ -237,13 +237,13 @@ def initialize_discovery(root: Path, configured: str | None) -> Path:
 
 
 def append_discovery_evidence(root: Path, command: str, output: str) -> Path:
-    index = discovery_index(root)
-    if index is None:
-        raise QueueError("No discovery evidence index: run intake --discovery first")
+    """Append `command` and its `output` path to the evidence index; where no intake created one
+    (without gh, intake cannot run), the first probe creates the default index."""
     if not command.strip() or not output.strip():
         raise QueueError("Discovery evidence requires a command and output path")
     if any(character in command + output for character in "\r\n|"):
         raise QueueError("Discovery evidence command and output cannot contain newlines or pipes")
+    index = discovery_index(root) or initialize_discovery(root, None)
     with index.open("a", encoding="utf-8", newline="\n") as stream:
         stream.write(f"| `{command}` | `{output}` |\n")
     return index
