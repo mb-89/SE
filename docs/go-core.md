@@ -456,7 +456,12 @@ backends, chosen at start:
 Every GitHub tool answer the session receives, a plan's or not, lands in the snapshot
 (`github/issues/<key>`, `github/pulls/<key>`, `github/checks/<key>`, `github/comments/<key>`) or
 the list (`github/issue-lists/<key>`, `github/pull-lists/<key>`, every page), with the time it was
-read, so the next command reads it from the core instead of asking for a file. The core hands the agent the next
+read, so the next command reads it from the core instead of asking for a file.
+
+A snapshot's key is `<owner>.<repo>.<number>` and a list's `<owner>.<repo>.<state>`, then each
+label, all in lower case: SE's issue 1036 stands at `github/issues/mb-89.se.1036`; neither
+`github/issues/1036` nor `github/issues/mb-89.SE.1036` names it
+([kern/components/github/README.md](../kern/components/github/README.md) owns the names). The core hands the agent the next
 outbox step as context on the hook that follows each tool call, and `<app> github next` prints it.
 
 ### Measured against today's `integrate` hand-off
