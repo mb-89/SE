@@ -508,6 +508,51 @@ def _plural(count: int, word: str) -> str:
 # Commands
 
 
+def kern_status(binary: Path, root: Path) -> dict | None:
+    """`kern status --json` of the core in the checkout at root: its state and health, or None
+    where the binary does not answer."""
+    try:
+        result = subprocess.run([str(binary), "status", "--root", str(root), "--json"],
+                                capture_output=True, text=True, timeout=2)
+        return json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+@dataclass
+class Kern:
+    """What bootstrap.sh said of kern at the session's start (README "Kern"): the binary it started,
+    why the core is still starting, or why it failed."""
+
+    binary: Path | None = None
+    starting: str = ""
+    failed: str = ""
+
+
+def kern_line(se_root: Path, root: Path, kern: Kern, ask: Callable[[Path, Path], dict | None]) -> list[str]:
+    """The greeting's line on kern: running, starting, or failed with the cause; none where
+    bootstrap.sh said nothing of kern."""
+    if not (kern.binary or kern.starting or kern.failed):
+        return []
+    try:
+        version = tomllib.loads((se_root / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
+    except (OSError, tomllib.TOMLDecodeError, KeyError):
+        version = "?"
+    name = f"kern {version}"
+    if kern.failed:
+        return [f"{name}: failed: {kern.failed}"]
+    if kern.starting or kern.binary is None:
+        return [f"{name}: starting: {kern.starting}"]
+    answer = ask(kern.binary, root)
+    state = (answer or {}).get("state")
+    if state == "running":
+        return [f"{name}: running, pid {answer.get('health', {}).get('pid')}"]
+    if state == "starting":
+        return [f"{name}: starting"]
+    cause = "its status does not answer" if answer is None else "not running after its start"
+    return [f"{name}: failed: {cause}; see {root / '.se' / '.runtime' / 'core.log'}"]
+
+
 def _spawn_detached(argv: list[str]) -> None:
     kwargs = {"creationflags": 0x00000008 | 0x00000200} if os.name == "nt" else {"start_new_session": True}
     subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -533,6 +578,7 @@ class World:
     work: Callable[[Path | None], dict | None] = work_check
     spawn: Callable[[list[str]], None] = _spawn_detached
     claude: Callable[[list[str]], subprocess.CompletedProcess] = _claude
+    kern: Callable[[Path, Path], dict | None] = kern_status
 
 
 def status(se_root: Path, root: Path | None, local_config: Path | None, cache_path: Path,
@@ -815,6 +861,9 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--hook", action="store_true", help="the greeting as Claude Code SessionStart JSON")
     status_parser.add_argument("--note", action="append", default=[], help="a line to show above the greeting")
     status_parser.add_argument("--offline", action="store_true", help="never start the update check")
+    status_parser.add_argument("--kern-bin", type=Path, help="bootstrap.sh: the kern binary it started for the project")
+    status_parser.add_argument("--kern-starting", default="", help="bootstrap.sh: why kern is still starting")
+    status_parser.add_argument("--kern-failed", default="", help="bootstrap.sh: why kern failed to start")
     commands.add_parser("check", help="read every remote now, in parallel, and, where gh is signed in, "
                         "the work landed since the last retro and the fleet check; cache the result")
     commands.add_parser("refresh", help="move every module due within its range, and SE itself, into place")
@@ -841,10 +890,14 @@ def run(args: argparse.Namespace, world: World | None) -> int:
         print("\n".join(full(report, SE_ROOT)))
         return 1 if report.errors else 0
     report = status(SE_ROOT, root, args.local, cache_path, world, args.offline)
+    kern = kern_line(SE_ROOT, root or Path.cwd(), Kern(args.kern_bin, args.kern_starting, args.kern_failed),
+                     world.kern)
+    lines = (greeting if args.hook or args.greeting else full)(report, SE_ROOT)
+    lines = lines[:1] + kern + lines[1:]
     if args.hook:
-        print(hook_output(greeting(report, SE_ROOT), args.note, SE_ROOT))
+        print(hook_output(lines, args.note, SE_ROOT))
     else:
-        print("\n".join(args.note + (greeting if args.greeting else full)(report, SE_ROOT)))
+        print("\n".join(args.note + lines))
     return 0
 
 
