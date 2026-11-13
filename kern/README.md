@@ -134,7 +134,7 @@ time counts against SE's budget and needs no Go).
 `release.toml` owns kern's version and where its release is published:
 
 ```toml
-version = "0.3.0"
+version = "0.4.0"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 
@@ -144,6 +144,12 @@ download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
   build --dir <folder> --out <dir>` builds them, the same bytes for the same commit. The binary is
   `kern` from `./cmd/kern` by default; an application names its own with `binary` and `package` in
   its `release.toml`, and the tool builds its folder (`--dir`).
+- **A binary input changes with its version:** `go run ./tools/release guard --dir <folder>`
+  refuses where the tag the folder's `release.toml` names is cut already and a file its binary is
+  built from (each imported package's files but tests and prose, embedded files, the modules'
+  `go.mod` and `go.sum`) differs since that tag; it names the files and the `release.toml` to
+  raise. A tag not cut yet passes: the push to `main` that carries the version cuts it. SE runs it
+  for kern and `se` beside its suite, `se.toml` `[tests.beside.release-guard]`.
 - **The workflow is reusable:** `.github/workflows/kern-release.yml` builds the six for the folder
   it is called with (the bare core by default), on every pull request and push to `main` that
   touches kern, and runs [the template](#the-template)'s battery for the bare core. On `main` it

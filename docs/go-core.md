@@ -344,6 +344,14 @@ same for its own binary (core plus its Go components). The binary is fetched int
   session works without the core until it lands, and the greeting says so.
 - **A checkout of the core or of an application's Go code:** built from source (warm build 0.12 s,
   one changed file 0.9 to 1.0 s), so its own changes run.
+- **The release matches the checkout:** a session runs the release its `release.toml` names, so
+  a change to the binary's code without a new version runs the old binary against the new wiring
+  (`se-v0.1.0` predated the component `retro-due`, and its core refused main's wiring). SE's suite
+  refuses that change, `se.toml` `[tests.beside.release-guard]` ([kern/README.md
+  "Release"](../kern/README.md#release)): a release is built from one commit and is never changed, so
+  the files it is built from are the release's own contents, and the guard needs no download. The
+  raised version is cut by the landing; a session that starts before its release is published
+  builds it from source.
 
 ### Lifetime: bound to the session
 
