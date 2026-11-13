@@ -8,6 +8,7 @@
 package index
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -145,6 +146,8 @@ type Component struct {
 	// inlet and hears are an I/O component's own commit and its ear for the host's events.
 	inlet func(instance string, read Reader, commit Commit) error
 	hears func(instance, event string, payload []byte) error
+	// tells is an I/O component's word to the agent on the host's events.
+	tells func(instance, event string, payload []byte) string
 }
 
 type derivation struct {
@@ -216,7 +219,7 @@ func Declare(name, help string, parts ...Part) *Component {
 	if len(c.verbs) > 0 && !c.io {
 		c.fail("component %s accepts verbs but carries no I/O flag: only an I/O component reaches the outside", name)
 	}
-	if (c.inlet != nil || c.hears != nil) && !c.io {
+	if (c.inlet != nil || c.hears != nil || c.tells != nil) && !c.io {
 		c.fail("component %s commits on its own or hears the host's events but carries no I/O flag", name)
 	}
 	return c
@@ -745,4 +748,44 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// JSONVerb declares a verb whose request and answer ride as the named JSON
+// shapes reqShape and ansShape, so a component in another language, which
+// asks in JSON, binds to it: fn is handed the request decoded into Req, and
+// its answer rides as JSON.
+func JSONVerb[Req, Ans any](name, help, reqShape, ansShape string, fn func(Req) (Ans, error)) Part {
+	anyType := reflect.TypeFor[any]()
+	return verbPart{&verb{
+		decl: VerbDecl{Verb: name, Req: anyType, Ans: anyType, Help: help, ReqShape: reqShape, AnsShape: ansShape},
+		serve: func(req any) (any, error) {
+			var r Req
+			if err := Recode(req, &r); err != nil {
+				return nil, fmt.Errorf("verb %s takes %s: %w", name, reqShape, err)
+			}
+			a, err := fn(r)
+			if err != nil {
+				return nil, err
+			}
+			var out any
+			return out, Recode(a, &out)
+		},
+	}}
+}
+
+// JSONRequest declares a request port of the named JSON shapes reqShape and
+// ansShape, which the wiring binds to a JSONVerb or a declared verb of those
+// shapes; Answer reads its answer as JSON, which Recode decodes.
+func JSONRequest(port, help, reqShape, ansShape string) *RequestPort[any, any] {
+	anyType := reflect.TypeFor[any]()
+	return &RequestPort[any, any]{RequestDecl{Port: port, Req: anyType, Ans: anyType, Help: help, ReqShape: reqShape, AnsShape: ansShape}}
+}
+
+// Recode decodes v into out by way of JSON: a shape's value into its Go type.
+func Recode(v any, out any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, out)
 }

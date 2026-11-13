@@ -128,8 +128,10 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 
 // hook posts the host's hook JSON, read from stdin, on hook.<event> and
 // prints the answer as the host's hook JSON: the output of the command bound
-// to the event. The effect pass prints nothing; so does every failure, which
-// goes to stderr alone, with the exit code --unanswered names, 0 by default.
+// to the event, else the context the components told, on an event that
+// carries context (HookOutput). A pass with nothing told prints nothing; so
+// does every failure, which goes to stderr alone, with the exit code
+// --unanswered names, 0 by default.
 func hook(name string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(name+" hook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -167,8 +169,28 @@ func hook(name string, args []string, stdin io.Reader, stdout, stderr io.Writer)
 		return 0
 	case a.Error != "":
 		fmt.Fprintf(stderr, "%s hook: %s\n", name, a.Error)
+	default:
+		if out := HookOutput(event, a); out != nil {
+			stdout.Write(append(out, '\n'))
+			return 0
+		}
 	}
 	return *unanswered
+}
+
+// ContextEvents are the host's events whose hook output hands the agent
+// context: Claude Code reads hookSpecificOutput.additionalContext on these.
+var ContextEvents = map[string]bool{"PostToolUse": true, "UserPromptSubmit": true, "SessionStart": true}
+
+// HookOutput is the host's hook JSON for the core's answer to event: the
+// context the components told, on an event that carries it; nil for none.
+func HookOutput(event string, a host.HookAnswer) []byte {
+	if a.Context == "" || !ContextEvents[event] {
+		return nil
+	}
+	out, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]string{
+		"hookEventName": event, "additionalContext": a.Context}})
+	return out
 }
 
 // serve runs the core until it ends: no session holds a lease, it is idle,
