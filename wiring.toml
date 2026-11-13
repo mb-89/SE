@@ -1,0 +1,17 @@
+# SE as an application on kern (README "Commands as components"): the core kern start serves in
+# this checkout places each of SE's command groups, components/<name>/, in a process of its own.
+[instances.tickets]
+component = "tickets"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "tickets"]
+
+[instances.issues]
+component = "issues"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "issues"]
+
+[instances.delivery]
+component = "delivery"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "delivery"]
+
+[instances.integration]
+component = "integration"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "integration"]

@@ -21,6 +21,10 @@ import quiet_git  # noqa: E402
 # lines go nowhere, never into the machine's ~/.se/metrics.jsonl. A test of the lines sets its own.
 os.environ["SE_METRICS"] = os.devnull
 
+# The suite's commands run directly, never through a kern that serves this checkout (README "Commands
+# as components"): a test's fakes live in its own process. A test of the routing sets its own.
+os.environ["SE_KERN"] = "off"
+
 # What a CI runner sets and a local machine does not: GitHub Actions' variables and SE's cloud agent,
 # which switch commands to their runner behaviour (`start` a cloud start, `capacity` none).
 RUNNER_VARIABLES = ("CI", "SE_CLOUD_AGENT")

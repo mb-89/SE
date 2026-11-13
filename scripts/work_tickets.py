@@ -7575,30 +7575,111 @@ README = Path(__file__).resolve().parents[1] / "README.md"
 REFERENCE_BEGIN, REFERENCE_END = generated_markers("`work_tickets.py docs`")
 REFERENCE_WIDTH = 100
 
+#: The kern component each command attaches as, by group, in the README's order
+#: (README "Commands as components"): its name, its help, and its commands by their words.
+COMMAND_COMPONENTS = (
+    ("tickets", "Tickets",
+     "The worker's local ticket queue under .se/work: tickets, notes, discovery evidence and the "
+     "worktree's close.",
+     ("init", "create", "move", "status", "review-note", "probe", "close")),
+    ("issues", "Issues",
+     "Work issues and their comments as a role reads and files them: intake, refresh, escalation, "
+     "filing, routing, the backlog, blockers and the fleet's pause.",
+     ("intake", "refresh", "comments-read", "body-read", "escalate", "file", "route",
+      "backlog file", "backlog list", "block", "paused")),
+    ("delivery", "Delivery",
+     "A worker's delivery: the field report and its guard, sync and identity, the gated push and "
+     "the pull request, and the Stop hook's check.",
+     ("field-report", "guard", "sync", "identity", "deliver", "push", "verified", "pr-body",
+      "stop-check")),
+    ("integration", "Integration",
+     "The integrator's and SE's work: integrate and its release, ref maintenance, the suite and "
+     "its budget, metrics, settings, starting work, the queue, the fleet check and the generated "
+     "docs.",
+     ("integrate", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
+      "suite-time", "metrics", "config", "start", "ready", "capacity", "queue", "fleet-check",
+      "docs", "format")),
+)
+#: The commands a person waits on that only read: these go through kern where it runs
+#: (se_components.routed); every other command writes, or a hook, CI or a command runs it.
+INTERACTIVE_COMMANDS = frozenset(
+    {"status", "config", "ready", "capacity", "queue", "fleet-check", "metrics"})
 
-@command("docs", "write the README's command reference from this registry; with --check, only "
-                 "refuse a README that differs",
+
+def command_declarations(root: Path) -> dict[Path, str]:
+    """Each command group's component.toml under root, as docs writes it from this registry."""
+    se_components = sibling("se_components")
+    leaves = {" ".join(words): (words, command_) for words, command_ in leaf_commands()}
+    grouped = [name for *_, names in COMMAND_COMPONENTS for name in names]
+    if sorted(grouped) != sorted(leaves):
+        missing, extra = sorted(set(leaves) - set(grouped)), sorted(set(grouped) - set(leaves))
+        raise QueueError(f"COMMAND_COMPONENTS differs from the registry: missing {missing}, "
+                         f"unknown {extra}")
+    out = {}
+    for name, group, help_text, names in COMMAND_COMPONENTS:
+        declared = [se_components.Declared(" ".join((COMMANDS.name, *leaves[n][0])),
+                                           command_usage(*leaves[n]), leaves[n][1].help,
+                                           n in INTERACTIVE_COMMANDS) for n in names]
+        out[root / se_components.COMPONENTS / name / "component.toml"] = se_components.declaration(
+            name, help_text, group, declared, "`work_tickets.py docs`")
+    return out
+
+
+def stale_declarations(root: Path) -> dict[Path, str]:
+    """The component.toml files under root that differ from what docs writes, with their text."""
+    def read(path: Path) -> str | None:
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+    return {path: text for path, text in command_declarations(root).items() if read(path) != text}
+
+
+def write_command_reference(root: Path) -> list[str]:
+    """Write the declarations and the README's command reference under root; what it wrote."""
+    written = []
+    for path, text in stale_declarations(root).items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
+        written.append(path.relative_to(root).as_posix())
+    readme = root / README.name
+    text = readme.read_text(encoding="utf-8")
+    expected = with_command_reference(text, root)
+    if text != expected:
+        readme.write_text(expected, encoding="utf-8", newline="\n")
+        written.append(README.name)
+    return written
+
+
+@command("docs", "write the command groups' component declarations (components/<group>/"
+                 "component.toml) from this registry and the README's command reference from "
+                 "them; with --check, only refuse a declaration or a README that differs",
          arg("--check", action="store_true",
-             help="exit code 1, writing nothing, when README.md differs from what docs writes"))
+             help="exit code 1, writing nothing, when a declaration or README.md differs from "
+                  "what docs writes"))
 def run_docs(root: None, args: argparse.Namespace) -> int:
-    text = README.read_text(encoding="utf-8")
-    expected = with_command_reference(text)
-    if text == expected:
-        print(f"{README.name}: the command reference is up to date")
-        return 0
+    checkout = README.parent
     if args.check:
-        print(f"error: {README.name}: the command reference differs from the registry; run "
-              "work_tickets.py docs", file=sys.stderr)
+        stale = [path.relative_to(checkout).as_posix() for path in stale_declarations(checkout)]
+        text = README.read_text(encoding="utf-8")
+        if not stale and text == with_command_reference(text, checkout):
+            print(f"{README.name}: the command reference is up to date")
+            return 0
+        print(f"error: {', '.join(stale + [README.name])}: the command reference differs from "
+              "the registry; run work_tickets.py docs", file=sys.stderr)
         return 1
-    README.write_text(expected, encoding="utf-8", newline="\n")
-    print(f"{README.name}: wrote the command reference")
+    written = write_command_reference(checkout)
+    for path in written:
+        print(f"wrote {path}")
+    if not written:
+        print(f"{README.name}: the command reference is up to date")
     return 0
 
 
 
 @command("format", "apply the fix of every check the check job runs that a fix can satisfy: write "
-                   "the generated layouts (se_plugin.py build) and the README's command reference "
-                   "(docs); a second run writes nothing",
+                   "the generated layouts (se_plugin.py build) and the command reference with "
+                   "its declarations (docs); a second run writes nothing",
          arg("--root", type=Path, default=README.parent,
              help="the se checkout to write; default: the one this script runs from"))
 def run_format(root: None, args: argparse.Namespace) -> int:
@@ -7607,12 +7688,7 @@ def run_format(root: None, args: argparse.Namespace) -> int:
         written = [str(path) for path in se_plugin.build(args.root)]
     except se_plugin.SourceError as error:
         raise QueueError(f"format: se_plugin.py build: {error}") from error
-    readme = args.root / README.name
-    text = readme.read_text(encoding="utf-8")
-    expected = with_command_reference(text)
-    if text != expected:
-        readme.write_text(expected, encoding="utf-8", newline="\n")
-        written.append(README.name)
+    written += write_command_reference(args.root)
     for path in written:
         print(f"wrote {path}")
     if not written:
@@ -7652,35 +7728,38 @@ def build_parser(parser: argparse.ArgumentParser, command_: Command) -> argparse
 
 
 def make_parser() -> argparse.ArgumentParser:
-    return build_parser(argparse.ArgumentParser(description=COMMANDS.help), COMMANDS)
+    return build_parser(argparse.ArgumentParser(prog=COMMANDS.name, description=COMMANDS.help),
+                        COMMANDS)
 
 
-def command_reference() -> str:
-    """The README's command reference: each command's usage and help, from the registry."""
+def command_usage(words: tuple[str, ...], command_: Command) -> str:
+    """A command's usage as argparse prints it, without its "usage: " prefix."""
     def formatter(prog: str) -> argparse.HelpFormatter:
         return argparse.HelpFormatter(prog, width=REFERENCE_WIDTH)
-    entries = []
-    for words, command_ in leaf_commands():
-        parser = argparse.ArgumentParser(
-            prog=" ".join((COMMANDS.name, *words)), add_help=False, formatter_class=formatter)
-        add_arguments(parser, command_)
-        # Without argparse's "usage: " prefix, its continuation lines move left by as much.
-        usage = "\n".join(line[len("usage: "):]
-                          for line in parser.format_usage().rstrip().splitlines())
-        help_text = textwrap.fill(command_.help, REFERENCE_WIDTH, initial_indent="    ",
-                                  subsequent_indent="    ")
-        entries.append(f"{usage}\n{help_text}")
-    return "```text\n" + "\n\n".join(entries) + "\n```"
+    parser = argparse.ArgumentParser(
+        prog=" ".join((COMMANDS.name, *words)), add_help=False, formatter_class=formatter)
+    add_arguments(parser, command_)
+    # Without argparse's "usage: " prefix, its continuation lines move left by as much.
+    return "\n".join(line[len("usage: "):] for line in parser.format_usage().rstrip().splitlines())
 
 
-def with_command_reference(text: str) -> str:
-    """`text` with the block between the reference markers replaced by the generated one."""
+def command_reference(root: Path) -> str:
+    """The README's command reference, rendered from the command groups' declarations under root
+    as kern reads them: kern's catalog of SE's commands."""
+    se_components = sibling("se_components")
+    return se_components.reference(se_components.catalog(
+        root, [name for name, *_ in COMMAND_COMPONENTS]))
+
+
+def with_command_reference(text: str, root: Path | None = None) -> str:
+    """`text` with the block between the reference markers replaced by the generated one, rendered
+    from the declarations under root (default: this checkout)."""
     before, begin, rest = text.partition(REFERENCE_BEGIN)
     _, end, after = rest.partition(REFERENCE_END)
     if not begin or not end:
         raise QueueError(f"{README.name}: no {REFERENCE_BEGIN} ... {REFERENCE_END} block; add the "
                          "markers where the command reference belongs")
-    return f"{before}{begin}\n{command_reference()}\n{end}{after}"
+    return f"{before}{begin}\n{command_reference(root or README.parent)}\n{end}{after}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -7689,7 +7768,13 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
     args = make_parser().parse_args(argv)
-    code, line = metrics.recorded(f"work_tickets.py {' '.join(command_words(args))}",
+    words = command_words(args)
+    routed = sibling("se_components").routed(
+        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
+        " ".join(words) in INTERACTIVE_COMMANDS)
+    if routed is not None:
+        return routed
+    code, line = metrics.recorded(f"work_tickets.py {' '.join(words)}",
                                   lambda: run_command(args))
     if line is not None and args.command == "integrate":
         print(metrics.text(line))

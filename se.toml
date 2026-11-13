@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.36.0"
+version = "5.37.0"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -42,6 +42,13 @@ limit_seconds = 60
 # with a cold cache 25 s.
 [tests.beside.new-app]
 command = ["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_new_app.py"]
+target_seconds = 30
+limit_seconds = 90
+
+# SE's commands as components against the real core (README "Commands as components"): it builds
+# kern's binary with Go's cache warm, places the four components and calls through them.
+[tests.beside.se-components]
+command = ["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_se_components.py"]
 target_seconds = 30
 limit_seconds = 90
 
