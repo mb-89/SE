@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/mb-89/kern/index"
 )
 
 // Runtime is the folder, under the checkout, that holds the core's files of
@@ -27,9 +29,9 @@ const (
 	logFile      = "core.log"
 )
 
-// Contract is the component contract's version the core speaks; a peer that
-// declares another is refused.
-const Contract = 1
+// Contract is the component contract's version the core speaks, the index's;
+// a peer that attaches with another is refused.
+const Contract = index.Contract
 
 // Standing is what the standing file says of the running core: its process,
 // its bus and the bus's users with their passwords. Only the checkout's

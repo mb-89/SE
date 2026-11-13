@@ -131,6 +131,11 @@ jobs:
         with:
           go-version-file: kern/go.mod
           cache-dependency-path: kern/go.sum
+      # The contract suite's real leg runs its fixture component in Python 3.11 or later
+      # (kern/contract/real_test.go); on Linux the suite step's uv environment gives it.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: kern vets
         working-directory: kern
         run: go vet ./...

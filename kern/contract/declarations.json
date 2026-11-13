@@ -1,0 +1,17 @@
+{
+  "about": "Declarations both readers refuse alike: index.ParseDeclaration in Go, kern.declaration.parse in Python. Each refusal is a list of the substrings its message holds; hash pins the declaration hash of a text, its CRLF read as LF.",
+  "refused": [
+    {"name": "another contract version", "text": "name = \"x\"\ncontract = 2\nhelp = \"h\"\n", "error": ["contract is 2", "contract = 1"]},
+    {"name": "no contract", "text": "name = \"x\"\nhelp = \"h\"\n", "error": ["contract = 1"]},
+    {"name": "an unknown key", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nmodule = \"y\"\n", "error": ["no key module"]},
+    {"name": "a component without help", "text": "name = \"x\"\ncontract = 1\n", "error": ["component x has no help"]},
+    {"name": "an output without help", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[outputs.total]\ntype = \"int\"\nbuiltin = 0\n", "error": ["output total has no help"]},
+    {"name": "an output without a built-in value", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[outputs.total]\ntype = \"int\"\nhelp = \"t\"\n", "error": ["outputs.total has no built-in value"]},
+    {"name": "a type that is none", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[inputs]\nn = \"integer\"\n", "error": ["\"integer\" is no type"]},
+    {"name": "a command without a class", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[commands.\"x go\"]\nusage = \"x go\"\nsummary = \"s\"\ngroup = \"g\"\nhelp = \"h\"\n", "error": ["command \"x go\" has no class"]},
+    {"name": "a command without a usage", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[commands.\"x go\"]\nsummary = \"s\"\ngroup = \"g\"\nhelp = \"h\"\nclass = \"batch\"\n", "error": ["command \"x go\" has no usage"]},
+    {"name": "a verb without the I/O flag", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[verbs.append]\ntype = \"string\"\nanswer = \"int\"\nhelp = \"a\"\n", "error": ["carries no I/O flag"]},
+    {"name": "a built-in value of another type", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[config.n]\ntype = \"int\"\nbuiltin = \"one\"\nhelp = \"n\"\n", "error": ["config.n: builtin takes int"]}
+  ],
+  "hash": {"text": "name = \"x\"\r\ncontract = 1\r\n", "same_as": "name = \"x\"\ncontract = 1\n"}
+}
