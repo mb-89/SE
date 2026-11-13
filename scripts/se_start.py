@@ -539,10 +539,10 @@ def kern_line(se_root: Path, root: Path, kern: Kern, ask: Callable[[Path, Path],
     if not (kern.binary or kern.starting or kern.failed):
         return []
     try:
-        version = se_modules.kern_pin(se_root)[0]
+        binary = se_modules.app_binary(se_root)
+        name = f"{binary.name} {binary.version}"
     except ModuleError:
-        version = "?"
-    name = f"kern {version}"
+        name = "kern ?"
     if kern.failed:
         return [f"{name}: failed: {kern.failed}"]
     if kern.starting or kern.binary is None:

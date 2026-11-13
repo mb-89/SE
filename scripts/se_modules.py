@@ -283,6 +283,53 @@ def kern_download(root: Path) -> str:
     return download.replace("{version}", version)
 
 
+@dataclass(frozen=True)
+class AppBinary:
+    """The binary bootstrap.sh fetches, builds and starts for a checkout: its name (`se` for SE,
+    `kern` for a bare application), its version, the download base its release is published under
+    (`{version}` filled in), and the folder and package its source builds from."""
+
+    name: str
+    version: str
+    download: str
+    build_dir: str  # relative to the checkout root; holds release.toml, go.mod and the package
+    package: str    # the binary's Go package, relative to build_dir
+
+
+def app_binary(root: Path) -> AppBinary:
+    """The application binary the checkout at `root` runs: kern's core plus the application's Go
+    components, where it has any, else the bare kern (SE's docs/go-core.md "How the binary
+    arrives"). `se.toml` `[binary] release = "<path>"` names where that binary's release.toml
+    lives; its `version`, `download`, `binary` and `package` own the binary's facts
+    (components/release.toml for SE). An application that sets no `[binary]` runs the bare kern,
+    read from `kern/release.toml` (kern-pin)."""
+    manifest = root / MANIFEST
+    binary = _read_toml(manifest).get("binary", {}) if manifest.is_file() else {}
+    release = binary.get("release") if isinstance(binary, dict) else None
+    if not release:
+        version, _ = kern_pin(root)
+        return AppBinary("kern", version, kern_download(root), "kern", "./cmd/kern")
+    if not isinstance(release, str):
+        raise ModuleError(f"{manifest}: [binary] release must be a path to a release.toml")
+    _check_subpath("binary", release)
+    path = root / release
+    if not path.is_file():
+        raise ModuleError(f"no {release} in {root}: se.toml [binary] names it but it is missing")
+    doc = _read_toml(path)
+    version, name = doc.get("version"), doc.get("binary")
+    download, package = doc.get("download"), doc.get("package")
+    if parse_version(version) is None:
+        raise ModuleError(f"{path}: version must be MAJOR.MINOR.PATCH (kern/README.md \"Release\")")
+    if not isinstance(name, str) or not NAME_RE.match(name):
+        raise ModuleError(f"{path}: binary must name the application's binary (e.g. \"se\")")
+    if not isinstance(download, str) or not download:
+        raise ModuleError(f"{path}: download names no URL (kern/README.md \"Release\")")
+    if not isinstance(package, str) or not package:
+        raise ModuleError(f"{path}: package names no Go package (e.g. \"./cmd/se\")")
+    return AppBinary(name, version, download.replace("{version}", version),
+                     PurePosixPath(release).parent.as_posix(), package)
+
+
 def find_root(start: Path) -> Path:
     for directory in [start, *start.parents]:
         if (directory / MANIFEST).is_file():
@@ -670,6 +717,8 @@ def build_parser() -> argparse.ArgumentParser:
     path.add_argument("name")
     commands.add_parser("kern-pin", help="print the version of the kern --root pins and where its release is "
                         "published, on one line (bootstrap.sh reads it)")
+    commands.add_parser("app-binary", help="print the application binary bootstrap.sh fetches, builds and "
+                        "starts: name, version, download base, build folder and package, on one line")
     return parser
 
 
@@ -683,6 +732,10 @@ def main(argv: list[str] | None = None) -> int:
         root = args.root.resolve() if args.root else find_root(Path.cwd())
         if args.command == "kern-pin":
             print(kern_pin(root)[0], kern_download(root))
+            return 0
+        if args.command == "app-binary":
+            b = app_binary(root)
+            print(b.name, b.version, b.download, b.build_dir, b.package)
             return 0
         local = load_local(args.local or default_local_config())
         modules = load_manifest(root)

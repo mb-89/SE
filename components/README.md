@@ -4,10 +4,10 @@ SE's own components on kern ([kern/README.md](../kern/README.md)), the applicati
 the rules they compute are SE's work model. Two kinds live here, one folder each:
 
 - **Python, declared** by their `component.toml` and placed by the checkout's `wiring.toml`:
-  tickets, issues, delivery, integration, review, retro, overhaul, render and scaffold, SE's
+  tickets, issues, delivery, integration, review, retrospective, overhaul, render and scaffold, SE's
   script commands (README ["Commands as components"](../README.md#commands-as-components)).
-  - `retro/` holds both kinds: retro.py's commands, declared, and the Go retro-due derivation
-    beside them, which only the `se` binary carries.
+  - retro.py's commands are `retrospective`, as `retro` is the Go retro-due component below: one
+    wiring places both, and a component's name is its folder's.
 - **Go, compiled into the `se` binary**: fleet, retro and origin, SE's Go module
   `github.com/mb-89/se/components` (`go.mod` here, kern replaced by `../kern` while it is incubated).
 
@@ -28,10 +28,12 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 - **No comments.** The names carry no issue comments, so the lease of in-progress work without a
   branch is never counted from its `Started:` comment: it is `no branch` at once, as the Python check
   answers where it read no comments ([README "Fleet check"](../README.md#fleet-check)).
-- **The binary.** `cmd/se` is kern's command line (`se start`, `status`, `stop`, `serve`, `hook`)
-  carrying kern's GitHub component and these three. `wiring.toml` here is their wiring, with SE's own
-  checkout's config. The bare `kern` binary SE's start runs today carries none of them, so the
-  checkout's own `wiring.toml` cannot name them yet.
+- **The binary.** `cmd/se` is the `se` binary: kern's command line (`se start`, `status`, `stop`,
+  `serve`, `hook`) carrying kern's GitHub component and these three. `bootstrap.sh` builds or fetches
+  it for SE's checkout (SE's [docs/go-core.md](../docs/go-core.md) "How the binary arrives"), so the
+  checkout's root `wiring.toml` names these components beside SE's four Python command groups, and
+  the core starts them. [`release.toml`](release.toml) owns the binary's version and its release,
+  `se-v<version>`.
 
 ## Who reads them
 
@@ -52,5 +54,7 @@ cd components && go vet ./... && go test ./...
 Each component is tested against kern's Go fake core. `agreement/` feeds the Go components and SE's
 Python paths one snapshot (`agreement/testdata/snapshot.json`, in the REST and the tool shape) and
 compares every finding word for word, so the two paths cannot drift. `cmd/se` starts the real core
-with this wiring, lands GitHub tool answers through PostToolUse and reads both names as a client.
-`se.toml` `[tests.beside.go-components]` runs them after the suite.
+with the checkout's root `wiring.toml` (its Go instances), lands GitHub tool answers through
+PostToolUse and reads both names as a client. `se.toml` `[tests.beside.go-components]` runs them
+after the suite; `[tests.beside.se-components]` (`tests/beside_se_components.py`) builds the `se`
+binary and serves SE's checkout, where `se status` lists these components beside the Python groups.

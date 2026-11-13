@@ -1,0 +1,13 @@
+# SE's own binary: kern's core plus SE's Go components (components/README.md), the binary `se`
+# (cmd/se). This file owns the se binary's version and the one URL its release is published under,
+# read by the release tool (kern/tools/release) and by scripts/se_modules.py `app-binary`, which
+# bootstrap.sh reads to fetch, build and start it (SE's docs/go-core.md "How the binary arrives").
+#
+# The tag scheme is se-v<version>, distinct from SE's own v<version> release tags (release.yml) and
+# from kern's kern-v<version> (kern/release.toml), so the three never collide.
+version = "0.1.0"
+download = "https://github.com/mb-89/SE/releases/download/se-v{version}"
+# The binary and its package, which make this a release the tool builds for SE's own binary rather
+# than the bare core's; the package is relative to this folder.
+binary = "se"
+package = "./cmd/se"

@@ -141,20 +141,21 @@ uv run python <se>/scripts/se_start.py refresh
 
 ### Kern
 
-Nobody starts kern by hand. kern is the core SE pins ([kern/README.md](kern/README.md)); while it
-is incubated in SE, `kern/release.toml` owns its version and where its release is published, as
-`kern-v<version>`, and `scripts/se_modules.py kern-pin` is its one reader. The plugin's hooks start
-kern and post every session event to it:
+Nobody starts the core by hand. SE builds its own binary, `se`: kern's core with SE's Go components,
+released as `se-v<version>` that `components/release.toml` owns. `scripts/se_modules.py app-binary`
+is bootstrap's one reader of the binary to run — SE's `se`, or the bare kern for an application with
+no Go components. The plugin's hooks start the binary and post every session event to it:
 
 - **SessionStart**, [scripts/bootstrap.sh](scripts/bootstrap.sh) `--hook`: where
-  `~/.se/bin/kern-<version>` is on the machine, it runs `kern start` for the project, which returns
-  at once, and hands the core the session's start, which takes the session's lease. It names the
-  binary in `<project>/.se/.runtime/kern.path` for the later hooks.
+  `~/.se/bin/<name>-<version>` is on the machine, it runs `<name> start` for the project, which
+  returns at once, and hands the core the session's start, which takes the session's lease. It names
+  the binary in `<project>/.se/.runtime/kern.path` for the later hooks.
 - **The first start of a version** reads the release's `SHA256SUMS` (one small read). Where it names
   this platform's archive, the archive is fetched, checked against its line and unpacked in the
   background, and the core then starts.
-  - Where no release matches, kern is built from SE's own `kern/` with `go` in the background, and
-    the greeting says so; without `go`, kern failed, and the greeting names both causes.
+  - Where no release matches, the binary is built from its folder (SE's `components/`, kern's own
+    `kern/`) with `go` in the background, and the greeting says so; without `go` it failed, and the
+    greeting names both causes.
   - The background half runs in its own process (`setsid` where there is one), so the hook's end
     does not end it.
 - **Every other event** (SessionEnd, SubagentStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop
@@ -164,8 +165,8 @@ kern and post every session event to it:
     component's `stop-check`, and else by `stop-check` directly ([Stop hook](#stop-hook)).
   - It fails open: without kern's binary, or with no core answering within 500 ms, it prints
     nothing and exits 0.
-- **The greeting** names kern's state under its first line: `kern <version>: running, pid <n>`,
-  `starting: <why>`, or `failed: <cause>`.
+- **The greeting** names the binary's state under its first line: `<name> <version>: running, pid
+  <n>` (`se <version>` for SE), `starting: <why>`, or `failed: <cause>`.
 
 | measured on 13 Nov in a Claude Code cloud container, Linux amd64, 5 runs | wall time |
 |---|---|
@@ -176,6 +177,7 @@ kern and post every session event to it:
 | a hook through `se_hook.sh`, no core running | 8.8 to 11.3 ms |
 | a hook through `se_hook.sh`, no binary named | 4.2 to 5.5 ms |
 | `kern hook` alone, no core running; the core running | 6.0 to 6.6 ms; 7.0 to 7.8 ms |
+| for comparison, a Python start that does nothing: `python3 -c pass`; `uv run --no-project python -c pass` | 13 to 19 ms; 39 to 72 ms |
 
 ### Commands as components
 
@@ -185,8 +187,8 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
 
 - **Declared:** each command group of a script is one component, `components/<group>/`:
   `work_tickets.py`'s tickets, issues, delivery and integration, `review.py`'s review, `retro.py`'s
-  retro, `overhaul.py`'s overhaul, render, the pages `timeline.py` and `deck.py` build, and
-  `se.py`'s scaffold.
+  retrospective (`retro` is SE's Go retro-due component), `overhaul.py`'s overhaul, render, the
+  pages `timeline.py` and `deck.py` build, and `se.py`'s scaffold.
   - Its `component.toml` is what `work_tickets.py docs` writes from the script's argparse parser
     (for `work_tickets.py`, built from its command registry), and its `__init__.py` answers each
     declared command with the script's own code.
@@ -196,8 +198,9 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
     a component where the second names the first one's group (deck.py, timeline.py's render).
   - The [command reference](#work-commands) renders from these declarations as kern's reader reads
     them.
-- **Placed:** `wiring.toml` places each in a process of its own, so the core the hooks start in SE's
-  checkout lists them: `kern status --json` names the instances and those attached.
+- **Placed:** `wiring.toml` places each in a process of its own, beside SE's Go components in the
+  `se` binary, so the core the hooks start in SE's checkout lists them all: `se status --json` names
+  the instances and those attached.
 - **Routed:** a command a person waits on that only reads (its class `interactive`: `status`,
   `config`, `ready`, `capacity`, `queue`, `fleet-check`, `metrics` and `overhaul.py facts`) goes
   through kern's `call.<command>` where kern serves the checkout the command runs in with the same
@@ -372,6 +375,9 @@ does all of it:
    integration branch moved while it waited, it merges nothing: integrate again.
 5. It reads the merge back: the pull request merged at that commit, which is origin's integration
    branch, on the base it tested and with the tree its checks passed.
+   - Where origin's work branch holds commits the landing did not take, pushed after step 1 read
+     it, it names each and closes nothing: the worker updates its report, and `integrate` lands
+     them again, as a re-integration.
 6. It closes the work pull request with a line naming the landing one, closes the work issue and
    cleans up.
 
@@ -566,6 +572,9 @@ limit_seconds = 60
   - Its `setup`, optional, runs first in the same folder, outside its budget, as the suite's
     does: for a Go suite, `go test -run '^$' ./...` builds every test binary, so a cold build
     (kern's took 35.1 s once on CI) never counts as test time. A failing setup refuses the run, and the suite beside does not run.
+  - A key the running scripts do not know is refused on the reference run (CI's `check`, which
+    runs the merged tree's scripts) and elsewhere warns and is ignored. `integrate` runs the
+    integration branch's scripts, so a branch can add a key and use it in one landing.
 
 The two budgets are apart, and neither spends the other's time:
 
@@ -859,6 +868,11 @@ and git's first commit on `main` as the [project identity](#project-settings).
 - **What it holds:** the template's ([kern/template/README.md](kern/template/README.md)): its wiring,
   where `enabled = false` switches a component off, CI through kern's battery, the `[tests]` budget
   and the `[modules.kern]` pin.
+- **Its own binary:** a bare application runs the bare kern. To build its own (the core plus its Go
+  components), it adds a `release.toml` naming its `binary`, `package` and download, `[binary]
+  release = "release.toml"` in `se.toml`, and a release workflow calling kern's reusable
+  `kern-release.yml` with its folder — the way SE builds `se` (`components/release.toml`,
+  `se-release.yml`).
 - **GitHub stays the owner's:** the last line names the owner's step, creating the repository with
   its ruleset and the first push. The command does nothing on GitHub.
 
@@ -1151,8 +1165,8 @@ review.py file --report FILE [--pull FILE] [--issue FILE] [--worktree WORKTREE] 
 
 #### Retro
 
-`components/retro`: A retro: collect writes its draft from the work since the last one, file checks
-the judged draft and closes the retro issue with its report.
+`components/retrospective`: A retro: collect writes its draft from the work since the last one, file
+checks the judged draft and closes the retro issue with its report.
 
 ```text
 retro.py collect [--since DATE | --retro ISSUE] [--out FILE] [--json] [--answers DIR]

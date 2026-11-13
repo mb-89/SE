@@ -468,6 +468,18 @@ it. The move is one work issue, once the repository exists:
 `go.mod` also requires it; `se_modules.py` reads the version from `go.mod` where the module says
 `go = true`, so the pin has one owner.
 
+While kern is incubated, SE pins it by `kern/release.toml`'s `version`, which
+`se_modules.kern_pin` reads; `[modules.kern]` replaces it with the move. Every session hook runs
+`scripts/se_hook.sh <event>`, which execs that kern: bash builtins up to one exec, not Python,
+whose interpreter start alone costs about twice kern's whole hook, and through `uv` six to ten
+times (README [Kern](../README.md#kern) owns the measurements).
+
+**When kern is released.** A push to `main` that changes `release.toml`'s `version` cuts the
+release ([kern/README.md "Release"](../kern/README.md#release)); nothing else does. A change under
+`kern/`, its template's included, reaches sessions and new applications (`se new app` takes the
+template at the pin) only with the next release, so the pull request that needs it out bumps
+`version`.
+
 ### Switching components on and off
 
 The application's `wiring.toml` names its instances; a shared component runs only where an
@@ -535,7 +547,7 @@ no core answers, every hook and command falls back to today's path. Each step is
 |---|---|---|---|
 | `work_tickets.py` | attaches as Python components, one per group (tickets, issues, delivery, integration), at step 8; the CLI keeps its words | its GitHub reads and writes go through the GitHub component (step 9); `queue`, `status` and `ready` port to Go when the greeting needs them | writing the field report, judging a delivery, the dispatcher's choices |
 | `review.py` | Python component (`brief`, `file`) at step 8 | stays Python | the reviewer's find, verify and judge |
-| `retro.py` | Python component at step 8; done, `components/retro/` | `retro due` ports to Go (step 10): the greeting reads it; done, SE's `retro` component ([components/README.md](../components/README.md)) | the retro's judgment |
+| `retro.py` | Python component at step 8; done, `components/retrospective/` (`retro` is the Go retro-due component) | `retro due` ports to Go (step 10): the greeting reads it; done, SE's `retro` component ([components/README.md](../components/README.md)) | the retro's judgment |
 | `overhaul.py` | Python component at step 8; done, `components/overhaul/` | stays Python: its facts are Python's AST | whether the design is still right |
 | `fleet-check` | Python component at step 8 | ports to Go (step 10): a derivation over the GitHub names, pushed to the greeting and the integrator; done, SE's `fleet` component, which the greeting and `fleet-check` read live ([components/README.md](../components/README.md)) | which remedy to apply |
 | `stop-check` | the Stop hook calls it as today | ports to Go (step 11): answered from the delivery names within the hook | none |

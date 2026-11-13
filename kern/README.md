@@ -116,9 +116,11 @@ SE declares kern's tests beside its Python suite, `se.toml` `[tests.beside.kern]
 time and budget (SE's [README "Test budget"](../README.md#test-budget)): `integrate`,
 `work_tickets.py suite` and the `check` job, the check `main`'s ruleset requires, run them after
 the suite, so a red kern test refuses the integration and the Python suite's budget is untouched.
-`check` vets kern in its own step. The job `kern-windows` runs
-kern's vet and tests on Windows, where the detached start and the stop differ; `check` needs it
-and fails unless it passed.
+`check` vets kern in its own step. The job `kern-platforms` runs kern's vet and tests on Windows
+and macOS, where the detached start and the stop differ, and there also the tests of SE's start
+and hook scripts (`tests/test_bootstrap.py`, `tests/test_se_hook.py`), whose paths differ too: a
+zip on Windows, `shasum` and no `setsid` on macOS. `check` needs it and fails unless every
+platform passed.
 
 The contract suite runs `contract/cases.json` three times: against the Go fake
 (`contract/fake_test.go`), against the real core with tally's Python process placed and attached
@@ -135,15 +137,27 @@ version = "0.3.0"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 
-- **The assets:** `kern-<version>-<os>-<arch>.tar.gz` for `linux` and `darwin`, `.zip` for
-  `windows`, each on `amd64` and `arm64`, each holding the one binary `kern` (`kern.exe`), and
-  `SHA256SUMS` over the six, which `sha256sum -c SHA256SUMS` checks. `go run ./tools/release build
-  --out <dir>` builds them, the same bytes for the same commit.
-- **The workflow:** SE's `.github/workflows/kern-release.yml` builds them on every pull request
-  and push to `main` that touches kern, and runs [the template](#the-template)'s battery. On `main`
-  it publishes the release `release.toml` names, where it does not exist yet, so the push that
-  changes `version` cuts it; a release that exists is never changed. A rerun is `workflow_dispatch`
-  on `main`.
+- **The assets:** `<binary>-<version>-<os>-<arch>.tar.gz` for `linux` and `darwin`, `.zip` for
+  `windows`, each on `amd64` and `arm64`, each holding the one binary (`<binary>.exe` on windows),
+  and `SHA256SUMS` over the six, which `sha256sum -c SHA256SUMS` checks. `go run ./tools/release
+  build --dir <folder> --out <dir>` builds them, the same bytes for the same commit. The binary is
+  `kern` from `./cmd/kern` by default; an application names its own with `binary` and `package` in
+  its `release.toml`, and the tool builds its folder (`--dir`).
+- **The workflow is reusable:** `.github/workflows/kern-release.yml` builds the six for the folder
+  it is called with (the bare core by default), on every pull request and push to `main` that
+  touches kern, and runs [the template](#the-template)'s battery for the bare core. On `main` it
+  publishes the release that folder's `release.toml` names, where it does not exist yet, so the push
+  that changes `version` cuts it; a release that exists is never changed. A rerun is
+  `workflow_dispatch`. An application calls it for its own binary (SE's `se-release.yml` does, for
+  `se`):
+
+```yaml
+  jobs:
+    release:
+      uses: mb-89/SE/.github/workflows/kern-release.yml@kern-v<version>
+      with:
+        directory: <the application's binary folder>
+```
 - **Fetching it:** `<download>/kern-<version>-<os>-<arch>.tar.gz` and `<download>/SHA256SUMS`, the
   archive checked against its line, then unpacked.
 

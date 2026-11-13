@@ -156,3 +156,38 @@ def test_kern_pin_prints_the_version_and_where_its_release_is_published(tmp_path
     (tmp_path / "kern" / "release.toml").write_text('version = "1.2.3"\n', encoding="utf-8")
     assert se_modules.main(["--root", str(tmp_path), "kern-pin"]) == 1
     assert "download names no URL" in capsys.readouterr().err
+
+
+def test_app_binary_is_ses_own_binary_where_se_toml_names_one() -> None:
+    """bootstrap.sh reads the application binary through this one reader: SE's is the `se` binary,
+    kern's core plus SE's Go components (components/release.toml)."""
+    b = se_modules.app_binary(PROJECT)
+    assert (b.name, b.build_dir, b.package) == ("se", "components", "./cmd/se")
+    assert b.download == f"https://github.com/mb-89/SE/releases/download/se-v{b.version}"
+
+
+def test_app_binary_falls_back_to_the_bare_kern_without_a_binary_section(tmp_path: Path) -> None:
+    """An application with no Go components sets no [binary] and runs the bare kern."""
+    write(tmp_path, {"se.toml": "[project]\nversion = \"0.1.0\"\n",
+                     "kern/release.toml": 'version = "0.3.0"\n'
+                     'download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"\n'})
+    b = se_modules.app_binary(tmp_path)
+    assert (b.name, b.version, b.build_dir, b.package) == ("kern", "0.3.0", "kern", "./cmd/kern")
+    assert b.download == "https://github.com/mb-89/SE/releases/download/kern-v0.3.0"
+
+
+def test_app_binary_refuses_a_binary_release_that_cannot_build(tmp_path: Path) -> None:
+    write(tmp_path, {"se.toml": '[binary]\nrelease = "bin/release.toml"\n',
+                     "bin/release.toml": 'version = "0.1.0"\ndownload = "https://x/releases/download/app-v{version}"\n'})
+    with pytest.raises(se_modules.ModuleError, match="binary must name"):
+        se_modules.app_binary(tmp_path)
+
+
+def test_app_binary_prints_every_field_bootstrap_reads(tmp_path, capsys) -> None:
+    write(tmp_path, {"se.toml": '[binary]\nrelease = "components/release.toml"\n',
+                     "components/release.toml": 'version = "2.0.0"\n'
+                     'download = "https://github.com/o/n/releases/download/app-v{version}"\n'
+                     'binary = "app"\npackage = "./cmd/app"\n'})
+    assert se_modules.main(["--root", str(tmp_path), "app-binary"]) == 0
+    assert capsys.readouterr().out == (
+        "app 2.0.0 https://github.com/o/n/releases/download/app-v2.0.0 components ./cmd/app\n")

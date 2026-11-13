@@ -34,10 +34,13 @@ import (
 // Settings is the file that owns kern's version and its release URL.
 const Settings = "release.toml"
 
-// Binary is the bare core's name, and its package.
+// DefaultBinary and DefaultPackage are the bare core's name and its package;
+// an application that builds its own binary (core plus its Go components) names
+// its own with `binary` and `package` in its release.toml (kern/README.md
+// "Release", SE's docs/go-core.md "How the binary arrives").
 const (
-	Binary  = "kern"
-	Package = "./cmd/kern"
+	DefaultBinary  = "kern"
+	DefaultPackage = "./cmd/kern"
 )
 
 // Target is one platform a release carries.
@@ -60,18 +63,24 @@ type Release struct {
 	Download   string // the download base, the version filled in
 	Repository string // owner/name the download URL names
 	Tag        string // the release's tag, the URL's last path part
+	Binary     string // the binary's name, kern by default
+	Package    string // the binary's Go package, ./cmd/kern by default
 }
 
 var (
 	semver   = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 	download = regexp.MustCompile(`^https://github\.com/([\w.-]+/[\w.-]+)/releases/download/([\w.-]*\{version\}[\w.-]*)$`)
+	binary   = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 )
 
-// Read reads release.toml's text.
+// Read reads release.toml's text. `binary` and `package` default to the bare
+// core's, so kern's own release.toml names neither.
 func Read(data []byte) (Release, error) {
 	var doc struct {
 		Version  string `toml:"version"`
 		Download string `toml:"download"`
+		Binary   string `toml:"binary"`
+		Package  string `toml:"package"`
 	}
 	if err := toml.Unmarshal(data, &doc); err != nil {
 		return Release{}, fmt.Errorf("%s: %w", Settings, err)
@@ -83,29 +92,41 @@ func Read(data []byte) (Release, error) {
 	if m == nil {
 		return Release{}, fmt.Errorf("%s: download %q is no https://github.com/<owner>/<name>/releases/download/<tag with {version}>", Settings, doc.Download)
 	}
+	name, pkg := doc.Binary, doc.Package
+	if name == "" {
+		name = DefaultBinary
+	}
+	if pkg == "" {
+		pkg = DefaultPackage
+	}
+	if !binary.MatchString(name) {
+		return Release{}, fmt.Errorf("%s: binary %q is no lower-case name of letters, digits and dashes", Settings, name)
+	}
 	return Release{
 		Version:    doc.Version,
 		Download:   strings.ReplaceAll(doc.Download, "{version}", doc.Version),
 		Repository: m[1],
 		Tag:        strings.ReplaceAll(m[2], "{version}", doc.Version),
+		Binary:     name,
+		Package:    pkg,
 	}, nil
 }
 
-// Archive names a target's archive: kern-<version>-<os>-<arch>.tar.gz, .zip on Windows.
-func Archive(version string, t Target) string {
+// Archive names a target's archive: <binary>-<version>-<os>-<arch>.tar.gz, .zip on Windows.
+func Archive(r Release, t Target) string {
 	ext := ".tar.gz"
 	if t.OS == "windows" {
 		ext = ".zip"
 	}
-	return fmt.Sprintf("%s-%s-%s-%s%s", Binary, version, t.OS, t.Arch, ext)
+	return fmt.Sprintf("%s-%s-%s-%s%s", r.Binary, r.Version, t.OS, t.Arch, ext)
 }
 
 // Executable names the binary inside a target's archive.
-func Executable(t Target) string {
+func Executable(r Release, t Target) string {
 	if t.OS == "windows" {
-		return Binary + ".exe"
+		return r.Binary + ".exe"
 	}
-	return Binary
+	return r.Binary
 }
 
 // Pack writes one executable into an archive at path: a gzipped tar, or a zip
@@ -161,9 +182,11 @@ func Sums(dir string, names []string) error {
 	return os.WriteFile(filepath.Join(dir, "SHA256SUMS"), []byte(b.String()), 0o644)
 }
 
-// Build cross-compiles the bare core for every target into out, archives each
-// and writes SHA256SUMS; it answers the archives' names.
-func Build(r Release, out string, log io.Writer) ([]string, error) {
+// Build cross-compiles the binary for every target into out, archives each
+// and writes SHA256SUMS; it answers the archives' names. The go build runs in
+// dir, the folder that holds release.toml and the binary's package (kern/ for
+// the bare core, the application's own folder for its binary).
+func Build(r Release, dir, out string, log io.Writer) ([]string, error) {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return nil, err
 	}
@@ -174,9 +197,10 @@ func Build(r Release, out string, log io.Writer) ([]string, error) {
 	defer os.RemoveAll(scratch)
 	var names []string
 	for _, t := range Targets {
-		bin := filepath.Join(scratch, t.OS+"-"+t.Arch, Executable(t))
+		bin := filepath.Join(scratch, t.OS+"-"+t.Arch, Executable(r, t))
 		start := time.Now()
-		build := exec.Command("go", "build", "-trimpath", "-ldflags=-s -w", "-o", bin, Package)
+		build := exec.Command("go", "build", "-trimpath", "-ldflags=-s -w", "-o", bin, r.Package)
+		build.Dir = dir
 		build.Env = append(os.Environ(), "GOOS="+t.OS, "GOARCH="+t.Arch, "CGO_ENABLED=0")
 		build.Stdout, build.Stderr = log, log
 		if err := build.Run(); err != nil {
@@ -186,8 +210,8 @@ func Build(r Release, out string, log io.Writer) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		name := Archive(r.Version, t)
-		if err := Pack(filepath.Join(out, name), Executable(t), data); err != nil {
+		name := Archive(r, t)
+		if err := Pack(filepath.Join(out, name), Executable(r, t), data); err != nil {
 			return nil, fmt.Errorf("archive %s: %w", name, err)
 		}
 		st, err := os.Stat(filepath.Join(out, name))
@@ -203,7 +227,7 @@ func Build(r Release, out string, log io.Writer) ([]string, error) {
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
-const usage = "usage: release plan [--repository OWNER/NAME] | release build --out DIR"
+const usage = "usage: release plan [--dir DIR] [--repository OWNER/NAME] | release build [--dir DIR] --out DIR"
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || (args[0] != "plan" && args[0] != "build") {
@@ -214,12 +238,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	repository := fs.String("repository", "", "the repository the release is published into (plan)")
 	out := fs.String("out", "", "the folder the archives and SHA256SUMS go into (build)")
+	dir := fs.String("dir", ".", "the folder holding release.toml and the binary's package; kern/ by default, an application's own folder for its binary")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
-	data, err := os.ReadFile(Settings)
+	data, err := os.ReadFile(filepath.Join(*dir, Settings))
 	if err != nil {
-		fmt.Fprintf(stderr, "release: %v (run it from kern/)\n", err)
+		fmt.Fprintf(stderr, "release: %v (run it from kern/, or name the application's folder with --dir)\n", err)
 		return 2
 	}
 	r, err := Read(data)
@@ -234,14 +259,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 				Settings, r.Repository, *repository)
 			return 2
 		}
-		fmt.Fprintf(stdout, "version=%s\ntag=%s\nrepository=%s\ndownload=%s\n", r.Version, r.Tag, r.Repository, r.Download)
+		fmt.Fprintf(stdout, "version=%s\ntag=%s\nrepository=%s\ndownload=%s\nbinary=%s\n",
+			r.Version, r.Tag, r.Repository, r.Download, r.Binary)
 		return 0
 	default:
 		if *out == "" {
 			fmt.Fprintln(stderr, usage)
 			return 2
 		}
-		names, err := Build(r, *out, stderr)
+		names, err := Build(r, *dir, *out, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "release: %v\n", err)
 			return 2
