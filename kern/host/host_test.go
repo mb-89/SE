@@ -367,8 +367,7 @@ func TestAHookWithNoCoreFailsOpenAtOnce(t *testing.T) {
 	if !errors.Is(err, host.ErrNotRunning) {
 		t.Fatalf("a hook with no core answers %v, and wants ErrNotRunning", err)
 	}
-	// Generous, as Windows runners take over 50 ms: a hook that waited would take its HookWait, 500 ms.
-	if took := time.Since(began); took > host.HookWait*4/5 {
+	if took := time.Since(began); took > 50*time.Millisecond {
 		t.Fatalf("a hook with no core took %v, and should not wait for one", took)
 	}
 }
