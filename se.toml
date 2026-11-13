@@ -39,7 +39,7 @@ limit_seconds = 60
 
 # SE's Go components (components/README.md "Tests"), after kern's with Go's build cache warm; their
 # agreement test runs SE's Python fleet check and retro count beside the Go ones.
-[tests.beside.components]
+[tests.beside.go-components]
 command = ["go", "test", "./..."]
 directory = "components"
 target_seconds = 30

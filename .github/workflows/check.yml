@@ -109,7 +109,7 @@ jobs:
         working-directory: kern
         run: time go vet ./...
       # SE's Go components (components/README.md "Tests"), their module beside kern's: vetted
-      # here; their tests run in the suite step below, as se.toml [tests.beside.components] declares.
+      # here; their tests run in the suite step below, as se.toml [tests.beside.go-components] declares.
       - name: SE's Go components vet
         working-directory: components
         run: time go vet ./...

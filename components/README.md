@@ -51,4 +51,4 @@ Each component is tested against kern's Go fake core. `agreement/` feeds the Go 
 Python paths one snapshot (`agreement/testdata/snapshot.json`, in the REST and the tool shape) and
 compares every finding word for word, so the two paths cannot drift. `cmd/se` starts the real core
 with this wiring, lands GitHub tool answers through PostToolUse and reads both names as a client.
-`se.toml` `[tests.beside.components]` runs them after the suite.
+`se.toml` `[tests.beside.go-components]` runs them after the suite.
