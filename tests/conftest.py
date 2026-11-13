@@ -49,6 +49,64 @@ def local_machine() -> Iterator[None]:
         yield
 
 
+# Real git behind the door (scripts/git_door.py) only for the test files named here, with their
+# reason; every other test's git is refused unless it installs the fake (`fake_git_door`), so "only
+# the door's contract suite touches real git" is enforced, not counted. A git subprocess that does
+# not pass the door is tests/test_repository.py's guard's to find. The list may only shrink.
+STILL_ON_REAL_GIT = "runs real git until its piece of the move to the fake lands"
+REAL_GIT: dict[str, str] = {
+    "tests/test_git_door.py": "the door's contract, held against real git",
+    "tests/beside_script_runs.py": STILL_ON_REAL_GIT,
+    "tests/beside_se_components.py": STILL_ON_REAL_GIT,
+    "tests/beside_se_relay.py": STILL_ON_REAL_GIT,
+    "tests/test_public_check.py": STILL_ON_REAL_GIT,
+    "tests/test_push_guard.py": STILL_ON_REAL_GIT,
+    "tests/test_quiet_git.py": STILL_ON_REAL_GIT,
+    "tests/test_references.py": STILL_ON_REAL_GIT,
+    "tests/test_releases.py": STILL_ON_REAL_GIT,
+    "tests/test_repository.py": STILL_ON_REAL_GIT,
+    "tests/test_rewrite_history.py": STILL_ON_REAL_GIT,
+    "tests/test_se_components.py": STILL_ON_REAL_GIT,
+    "tests/test_se_modules.py": STILL_ON_REAL_GIT,
+    "tests/test_se_start.py": STILL_ON_REAL_GIT,
+    "tests/test_start_refresh.py": STILL_ON_REAL_GIT,
+    "tests/test_work_ticket_issues.py": STILL_ON_REAL_GIT,
+}
+
+
+class RefusedGit:
+    """The door's backend outside REAL_GIT: every git command fails the test that ran it, naming
+    the command and the remedy; a pytest failure, so no `except Exception` of the code under test
+    swallows it."""
+
+    def __init__(self, test: str) -> None:
+        self.test = test
+
+    def refuse(self, argv: list[str]):
+        pytest.fail(f"{self.test} ran real git (git {' '.join(argv)}); take the fake_git_door fixture "
+                    "(tests/fake_git.py), or name the file in tests/conftest.py REAL_GIT", pytrace=False)
+
+    def run(self, argv: list[str], **_) -> subprocess.CompletedProcess[bytes]:
+        self.refuse(argv)
+
+    def popen(self, argv: list[str], **_) -> subprocess.Popen:
+        self.refuse(argv)
+
+
+def door_backend(item: pytest.Item) -> git_door.Backend:
+    """What the door runs for `item`, its setup and teardown included: real git for a file in
+    REAL_GIT, otherwise RefusedGit."""
+    path = Path(item.path).resolve()
+    name = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
+    return git_door.RealGit() if name in REAL_GIT else RefusedGit(item.nodeid)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_protocol(item: pytest.Item, nextitem):
+    with git_door.use(door_backend(item)):
+        yield
+
+
 @pytest.fixture
 def fake_git_door() -> Iterator[fake_git.FakeGit]:
     """git behind the door is the fake for this test (tests/fake_git.py, held to real git by

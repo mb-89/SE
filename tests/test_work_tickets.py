@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -11,6 +13,9 @@ import pytest
 import git_door
 import quiet_git
 
+
+# Every test's git is the door's fake (tests/fake_git.py), held to real git by tests/test_git_door.py.
+pytestmark = pytest.mark.usefixtures("fake_git_door")
 
 PROJECT = Path(__file__).resolve().parents[1]
 HELPER = PROJECT / "scripts" / "work_tickets.py"
@@ -30,13 +35,17 @@ def worktree(tmp_path: Path) -> Path:
 
 
 def run_helper(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, str(HELPER), *args],
-        cwd=PROJECT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """`work_tickets.py <args>` run in this process, its output captured, so the git it runs goes
+    through the door this test installed (the `fake_git_door` fixture) and no interpreter starts."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            code = work_tickets.main(list(args))
+        except SystemExit as exit_:
+            code = exit_.code if isinstance(exit_.code, int) else 0 if exit_.code is None else 1
+            if isinstance(exit_.code, str):
+                print(exit_.code, file=sys.stderr)
+    return subprocess.CompletedProcess(["work_tickets.py", *args], code, out.getvalue(), err.getvalue())
 
 
 def command(worktree: Path, *args: str) -> list[str]:
@@ -61,13 +70,7 @@ def move(worktree: Path, ticket_id: str, state: str) -> subprocess.CompletedProc
 
 
 def git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    return git_door.run(*args, root=cwd)
 
 
 def git_worktree(case_root: Path) -> tuple[Path, Path]:
@@ -1093,9 +1096,11 @@ def test_close_remove_requires_explicit_target_and_removes_normally(worktree: Pa
     assert not worker.exists()
 
 
-def test_se_is_ignored_in_full() -> None:
-    result = git(PROJECT, "check-ignore", ".se/work/notes/private.txt")
-    assert result.returncode == 0
+def test_se_is_ignored_in_full(tmp_path: Path) -> None:
+    # SE's own .gitignore, asked in a repository of the fake, whose ignore rules test_git_door.py holds to git's.
+    repository = quiet_git.init(tmp_path / "se", "-b", "main")
+    shutil.copyfile(PROJECT / ".gitignore", repository / ".gitignore")
+    assert git(repository, "check-ignore", "-q", ".se/work/notes/private.txt").returncode == 0
 
 
 def test_readme_command_reference_is_what_docs_writes():

@@ -60,6 +60,9 @@
     and the components; a test that needs git uses the door's fake (`fake_git_door` fixture,
     `tests/fake_git.py`), which `tests/test_git_door.py` holds to real git. Today's other git
     subprocesses sit on its allow list, which may only shrink.
+  - Behind the door, `tests/conftest.py` refuses real git to every test outside its `REAL_GIT`
+    list: the contract suite and the files still to move, a list that may only shrink. A test
+    that reaches real git without the fake fails, naming the command.
 - Dangling references: `tests/test_references.py` fails where the agents, the skills (the rule
   book among them), README.md or AGENTS.md name what the repository lacks.
   - A link to a missing file, a missing repository path in code (`scripts/…`, `src/…`, `tests/…`,

@@ -284,3 +284,140 @@ def test_init_without_a_path_makes_the_working_directory_a_repository(door, tmp_
     assert git_door.run("init", "-q", "-b", "main", cwd=place).returncode == 0
     assert git_door.run("config", "user.name", IDENTITY[0], cwd=place).returncode == 0
     assert git_door.run("branch", "--show-current", cwd=place).stdout.strip() == "main"
+
+
+# Worktrees, branches and the landing guard's reads
+
+
+def test_checkout_and_switch_start_a_branch_at_a_commit_and_rm_and_add_stage_paths(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    first = commit(root, {"a.txt": "a\n", "b.txt": "b\n"})
+    commit(root, {"a.txt": "a2\n"})
+    git(root, "checkout", "-q", "-b", "old", first)
+    assert (root / "a.txt").read_text(encoding="utf-8") == "a\n" and git(root, "branch", "--show-current") == "old"
+    git(root, "checkout", "-q", "main")
+    assert (root / "a.txt").read_text(encoding="utf-8") == "a2\n"
+    git(root, "switch", "-q", "-c", "older", first)
+    assert git(root, "rev-parse", "HEAD") == first
+    assert git_door.run("checkout", "-q", "-b", "old", root=root).returncode != 0, "the branch exists"
+    git(root, "rm", "-q", "b.txt")
+    assert not (root / "b.txt").exists()
+    (root / "a.txt").write_text("staged\n", encoding="utf-8")
+    (root / "c.txt").write_text("not staged\n", encoding="utf-8")
+    git(root, "add", "a.txt")
+    assert git_door.run("status", "--porcelain", root=root).stdout.splitlines() == ["M  a.txt", "D  b.txt", "?? c.txt"]
+    assert git_door.run("status", "--porcelain=v1", "-z", "--untracked-files=no", root=root).stdout == "M  a.txt\0D  b.txt\0"
+    assert git_door.run("rm", "-q", "none.txt", root=root).returncode != 0
+
+
+def test_a_worktree_shares_the_branches_and_is_listed_until_it_is_removed(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    base = commit(root, {"a.txt": "a\n"})
+    worker = tmp_path / "worker"
+    git(root, "worktree", "add", "-q", "-b", "worker", str(worker))
+    assert (worker / ".git").is_file() and (worker / "a.txt").read_text(encoding="utf-8") == "a\n"
+    assert Path(git(worker, "rev-parse", "--show-toplevel")).resolve() == worker.resolve()
+    common = Path(git(worker, "rev-parse", "--git-common-dir"))
+    assert (common if common.is_absolute() else worker / common).resolve() == (root / ".git").resolve()
+    head = commit(worker, {"b.txt": "b\n"})
+    assert git(root, "rev-parse", "worker") == head, "a worktree's commit moves the shared branch"
+    detached = tmp_path / "detached"
+    git(root, "worktree", "add", "-q", "--detach", str(detached), base)
+    listing = git(root, "worktree", "list", "--porcelain").split("\n\n")
+    entries = [dict(line.partition(" ")[::2] for line in entry.splitlines()) for entry in listing]
+    assert Path(entries[0]["worktree"]).resolve() == root.resolve(), "the main worktree first"
+    by_path = {Path(entry["worktree"]).resolve(): entry for entry in entries}
+    assert set(by_path) == {root.resolve(), worker.resolve(), detached.resolve()}
+    assert by_path[root.resolve()]["branch"] == "refs/heads/main"
+    assert (by_path[worker.resolve()]["branch"], by_path[worker.resolve()]["HEAD"]) == ("refs/heads/worker", head)
+    assert "branch" not in by_path[detached.resolve()] and "detached" in by_path[detached.resolve()]
+    assert by_path[detached.resolve()]["HEAD"] == base
+    assert git_door.run("branch", "-D", "worker", root=root).returncode != 0, "a worktree has it out"
+    (worker / "untracked.txt").write_text("u\n", encoding="utf-8")
+    assert git_door.run("worktree", "remove", str(worker), root=root).returncode != 0, "untracked files"
+    git(root, "worktree", "remove", "--force", str(worker))
+    git(root, "worktree", "remove", str(detached))
+    assert not worker.exists() and not detached.exists()
+    assert len(git(root, "worktree", "list", "--porcelain").split("\n\n")) == 1
+    git(root, "branch", "-D", "worker")
+    assert git_door.run("rev-parse", "--verify", "--quiet", "refs/heads/worker", root=root).returncode != 0
+
+
+def test_a_three_dot_diff_names_the_branch_changes_since_the_merge_base(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    base = commit(root, {"keep.txt": "same\n", "move.txt": "moved unchanged\n", "drop.txt": "d\n", "edit.txt": "e\n"})
+    git(root, "switch", "-q", "-c", "feat/x")
+    (root / "move.txt").rename(root / "moved.txt")
+    (root / "drop.txt").unlink()
+    commit(root, {"edit.txt": "e2\n", "add.txt": "new\n"})
+    git(root, "switch", "-q", "main")
+    commit(root, {"keep.txt": "main changed it\n"})
+    assert git_door.run("merge-base", "--is-ancestor", base, "feat/x", root=root).returncode == 0
+    assert git_door.run("merge-base", "--is-ancestor", "feat/x", "main", root=root).returncode == 1
+    fields = git_door.run("diff", "--name-status", "-z", "main...feat/x", root=root).stdout.split("\0")
+    assert fields == ["A", "add.txt", "D", "drop.txt", "M", "edit.txt", "R100", "move.txt", "moved.txt", ""]
+    lines = git(root, "diff", "--unified=0", "main...feat/x").splitlines()
+    assert {"-e", "+e2", "-d", "+new"} <= set(lines) and "keep.txt" not in "\n".join(lines)
+    assert not [line for line in lines if line[:1] == " "], "no context lines"
+
+
+def test_a_merge_takes_both_sides_line_changes_and_lists_a_conflict_until_aborted(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    commit(root, {"guide.md": "First.\nMiddle one.\nMiddle two.\nLast.\n", "other.txt": "o\n"})
+    git(root, "switch", "-q", "-c", "side")
+    side = commit(root, {"guide.md": "First, reworded.\nMiddle one.\nMiddle two.\nLast.\n", "other.txt": "side\n"})
+    git(root, "switch", "-q", "main")
+    commit(root, {"guide.md": "First.\nMiddle one.\nMiddle two.\nLast, as main has it.\n"})
+    git(root, "merge", "-q", "--no-ff", "-m", "Title", "-m", "Body.", side)
+    assert (root / "guide.md").read_text(encoding="utf-8") == "First, reworded.\nMiddle one.\nMiddle two.\nLast, as main has it.\n"
+    assert git(root, "log", "-1", "--format=%B") == "Title\n\nBody."
+    git(root, "switch", "-q", "-c", "again")
+    again = commit(root, {"other.txt": "again\n"})
+    git(root, "switch", "-q", "main")
+    commit(root, {"other.txt": "main\n"})
+    assert git_door.run("merge", "-q", "-m", "merge", again, root=root).returncode != 0
+    assert git(root, "diff", "--name-only", "--diff-filter=U") == "other.txt"
+    git(root, "merge", "--abort")
+    assert git(root, "diff", "--name-only", "--diff-filter=U") == ""
+    assert (root / "other.txt").read_text(encoding="utf-8") == "main\n"
+
+
+def test_update_ref_moves_and_deletes_a_ref_only_from_the_old_value_named(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    first = commit(root, {"a.txt": "a\n"})
+    second = commit(root, {"a.txt": "a2\n"})
+    zero = "0" * 40
+    git(root, "update-ref", "refs/heads/next", first, zero)
+    assert git_door.run("update-ref", "refs/heads/next", second, zero, root=root).returncode != 0, "it exists"
+    assert git_door.run("update-ref", "refs/heads/next", second, second, root=root).returncode != 0, "not there"
+    git(root, "update-ref", "refs/heads/next", second, first)
+    assert git(root, "rev-parse", "refs/heads/next") == second
+    git(root, "update-ref", "refs/heads/next", zero, second)
+    assert git_door.run("rev-parse", "--verify", "--quiet", "refs/heads/next", root=root).returncode != 0
+
+
+def test_ls_remote_reads_a_named_remote_by_pattern(door, tmp_path: Path) -> None:
+    origin = quiet_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    root = project(tmp_path)
+    git(root, "remote", "add", "origin", str(origin))
+    first = commit(root, {"a.txt": "a\n"})
+    git(root, "tag", "v1")
+    git(root, "push", "-q", "origin", "main", f"{first}:refs/heads/feat/main", "refs/tags/v1")
+    assert git(root, "ls-remote", "origin", "refs/heads/main").splitlines() == [f"{first}\trefs/heads/main"]
+    assert git(root, "ls-remote", "--heads", "origin", "main").splitlines() == [
+        f"{first}\trefs/heads/feat/main", f"{first}\trefs/heads/main"]
+    assert git(root, "ls-remote", "--heads", "origin", "none") == ""
+
+
+def test_check_ignore_and_add_follow_the_root_gitignore(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    (root / ".gitignore").write_text("/.se/\nbuild/\n*.pyc\n", encoding="utf-8")
+    for name in (".se/work/notes/private.txt", "src/build/out.txt", "src/x.pyc", "src/x.py", "build.txt"):
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("x\n", encoding="utf-8")
+    for name in (".se/work/notes/private.txt", "src/build/out.txt", "src/x.pyc"):
+        assert git_door.run("check-ignore", "-q", name, root=root).returncode == 0, name
+    for name in ("src/x.py", "build.txt"):
+        assert git_door.run("check-ignore", "-q", name, root=root).returncode == 1, name
+    git(root, "add", "-A")
+    assert git_door.run("ls-files", "-z", root=root).stdout.split("\0") == [".gitignore", "build.txt", "src/x.py", ""]
