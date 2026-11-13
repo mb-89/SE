@@ -676,13 +676,15 @@ def received(checkout: Path) -> list[str]:
     return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
-def hook_origin(checkout: Path, refused: str = "") -> None:
-    """Origin logs each push's refs and, like a tag ruleset, refuses the ref `refused`."""
+def hook_origin(checkout: Path, refused: str = "",
+                why: str = "a tag ruleset forbids it") -> None:
+    """Origin logs each push's refs and refuses the ref `refused`, `why`: by default as a tag
+    ruleset does."""
     hook = checkout.parent / "origin.git" / "hooks" / "pre-receive"
     hook.write_text(
         "#!/bin/sh\nrefs=''\nwhile read old new ref; do refs=\"$refs $ref\"; done\n"
         f"echo $refs >> '{(checkout.parent / 'received.log').as_posix()}'\n"
-        + (f"case \"$refs \" in *' {refused} '*) echo 'Cannot create {refused}: a tag ruleset forbids it' >&2;"
+        + (f"case \"$refs \" in *' {refused} '*) echo 'Cannot create {refused}: {why}' >&2;"
            " exit 1;; esac\n" if refused else ""),
         encoding="utf-8")
     hook.chmod(0o755)
@@ -709,6 +711,18 @@ def test_a_refused_ref_fails_the_run_naming_it_and_the_remedy_and_the_others_lan
     assert "a tag ruleset forbids it" in errors[0]
     assert "tag rulesets" in errors[0] and "rerun" in errors[0]
     assert "v4.4.0" in origin_tags(checkout) and "v4" not in origin_tags(checkout)
+
+
+def test_a_ref_refused_for_another_reason_names_a_rerun_and_no_ruleset(checkout):
+    next_major(checkout)
+    hook_origin(checkout, "refs/tags/v4", "missing necessary objects")
+    result = run_workflow(checkout)
+    assert result.returncode == 1, result.stderr + result.stdout
+    error, = (line for line in result.stdout.splitlines() if line.startswith("::error::"))
+    assert "missing necessary objects" in error
+    remedy = error.split("); ", 1)[1]
+    assert remedy.startswith("rerun this job"), error
+    assert "Settings > Rules > Rulesets" not in error
 
 
 def test_the_workflow_force_updates_a_major_tag_behind_its_newest_release(checkout):
