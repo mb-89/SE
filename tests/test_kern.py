@@ -1,6 +1,7 @@
 """kern, the Go core incubated under kern/ (kern/README.md "Tests"): the check main requires runs it."""
 
 import re
+import tomllib
 from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -43,3 +44,19 @@ def test_the_required_check_fails_unless_kern_passed_on_windows() -> None:
     # A required check that is skipped counts as passed: check runs whatever kern-windows answered.
     assert "    if: ${{ !cancelled() }}\n" in check
     assert re.search(r'if \[ "\$WINDOWS" != success \]; then\n.*\n\s+exit 1', check), "check fails unless kern-windows passed"
+
+
+RELEASE = PROJECT / ".github" / "workflows" / "kern-release.yml"
+BATTERY = PROJECT / ".github" / "workflows" / "kern-battery.yml"
+TEMPLATE = PROJECT / "kern" / "template"
+# The first major of each action kern's workflows use that runs on Node 24.
+NODE_24 = {"actions/checkout": 5, "actions/setup-go": SETUP_GO_NODE_24, "actions/upload-artifact": 6,
+           "actions/download-artifact": 7, "astral-sh/setup-uv": 7}
+
+def test_the_battery_holds_the_applications_tests_to_se_toml_tests() -> None:
+    text = BATTERY.read_text(encoding="utf-8")
+    assert "on:\n  workflow_call:\n" in text
+    assert "go-version-file: ${{ inputs.directory }}/go.mod" in text
+    assert "run: go vet ./..." in text
+    assert 'tests.get("command"), tests.get("target_seconds"), tests.get("limit_seconds")' in text
+    assert "if seconds > limit:" in text and "if seconds > target:" in text

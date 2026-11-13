@@ -1,7 +1,7 @@
 # kern
 
 kern is the Go core every application builds on: the index (names, the store, snapshots, the
-catalog), and later its NATS bus and host. Its design is SE's
+catalog), its NATS bus and its host. Its design is SE's
 [docs/go-core.md](../docs/go-core.md) until kern owns its contract.
 
 **Incubated in SE.** kern's own repository, `mb-89/kern`, does not exist yet; the owner creates
@@ -65,6 +65,22 @@ the suite, so a red kern test refuses the integration and the Python suite's bud
 `check` vets kern in its own step. The job `kern-windows` runs
 kern's vet and tests on Windows, where the detached start and the stop differ; `check` needs it
 and fails unless it passed.
+
+## The battery
+
+SE's `.github/workflows/kern-battery.yml` is the reusable CI every kern application calls:
+
+```yaml
+jobs:
+  check:
+    uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v<version>
+```
+
+It sets up the Go of the application's `go.mod` and uv, vets the Go code, and runs the
+application's `se.toml` `[tests]` command, its Go tests and its Python tests, held to that table's
+one budget: over `target_seconds` it warns, over `limit_seconds` or on a failed test it fails, as
+SE's own suite (SE's [README "Test budget"](../README.md#test-budget)). Its input `directory`
+names the application's folder, `.` by default.
 
 ## The catalog check's budget
 
