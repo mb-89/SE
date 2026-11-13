@@ -3431,8 +3431,42 @@ def test_a_suite_beside_whose_command_is_missing_fails_naming_it(worktree, monke
     assert "cannot run no-such-go: " in capsys.readouterr().err
 
 
+def test_a_suite_beside_runs_its_setup_first_outside_its_budget(worktree, monkeypatch, capsys):
+    beside_suite(worktree, monkeypatch, [5.0, 2.0])
+    (worktree / "kern" / "build.py").write_text("import pathlib\nprint('built in', pathlib.Path.cwd().name)\n",
+                                               encoding="utf-8")
+    with (worktree / "se.toml").open("a", encoding="utf-8") as config:
+        config.write(f"setup = {json.dumps([sys.executable, 'build.py'])}\n")
+    # suite start and end, kern's setup (a 50 s cold build, over kern's limit), kern's start and end
+    readings = iter([0.0, 5.0, 100.0, 150.0, 200.0, 202.0])
+    monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
+    monkeypatch.setattr(work_tickets, "suite_is_reference", lambda: True)
+
+    assert run(worktree, "suite") == 0
+    captured = capsys.readouterr()
+    assert ("kern time: 2.0 s (target 30 s, limit 60 s), beside the suite ([tests.beside.kern] in "
+            "se.toml); its setup 50.0 s (not budgeted)") in captured.out
+    assert "kern passed in 2.0 s (target 30 s, limit 60 s)" in captured.out
+    assert "Phase: kern setup: " in captured.err and " build.py in kern (not budgeted)" in captured.err
+
+
+def test_a_failing_setup_beside_refuses_and_its_suite_does_not_run(worktree, monkeypatch, capsys):
+    beside_suite(worktree, monkeypatch, [5.0, 2.0])
+    (worktree / "kern" / "build.py").write_text("import sys\nprint('# kern/host: undefined: x')\n"
+                                               "sys.exit(1)\n", encoding="utf-8")
+    with (worktree / "se.toml").open("a", encoding="utf-8") as config:
+        config.write(f"setup = {json.dumps([sys.executable, 'build.py'])}\n")
+
+    assert run(worktree, "suite") == 1
+    error = capsys.readouterr().err
+    assert "Complete suite passed (3 passed), but kern setup failed (2.0 s) running " in error
+    assert "(setup of [tests.beside.kern] in se.toml); kern did not run. Fix the setup:" in error
+    assert "# kern/host: undefined: x" in error and "ok in kern" not in error
+
+
 @pytest.mark.parametrize("table, refusal", [
     ('[tests.beside.kern]\ndirectory = "kern"\n', r"\[tests.beside.kern\] in .*must declare command"),
+    ('[tests.beside.kern]\ncommand = ["go"]\nsetup = "go build"\n', r"setup must be a non-empty argument array"),
     ('[tests.beside.kern]\ncommand = ["go"]\ndirectory = "../x"\n', r"directory must be a folder inside"),
     ('[tests.beside.kern]\ncommand = ["go"]\ntimeout = 3\n', r"no key timeout"),
     ('[tests.beside.kern]\ncommand = ["go"]\ntarget_seconds = 90\nlimit_seconds = 60\n',
@@ -3450,6 +3484,7 @@ def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budge
     assert (budget.command, budget.target_seconds) == (["uv", "run", "pytest", "-q"], 60)
     kern, = budget.beside
     assert (kern.name, kern.command, kern.directory) == ("kern", ["go", "test", "./..."], "kern")
+    assert kern.setup == ["go", "test", "-run", "^$", "./..."], "a cold build counts as no test time"
     assert kern.target_seconds < kern.limit_seconds < budget.limit_seconds
 
 
