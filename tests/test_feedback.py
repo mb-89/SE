@@ -2,7 +2,9 @@
 silent run, the phases of the long commands, the announced GitHub and remote reads, and each
 interactive command against a door that answers slowly."""
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -12,6 +14,7 @@ import time
 from pathlib import Path
 
 import pytest
+import git_door
 import quiet_git
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -108,9 +111,7 @@ def test_a_github_call_is_announced_before_it_is_made(tmp_path, monkeypatch, cap
     assert seen == ["Reading GitHub: gh issue list --label escalated --repo owner/repo\n"]
 
 
-def test_a_remote_read_by_git_is_announced_and_a_local_one_is_not(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(work_tickets.subprocess, "run",
-                        lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""))
+def test_a_remote_read_by_git_is_announced_and_a_local_one_is_not(tmp_path, fake_git_door, capsys):
     work_tickets.run_git(tmp_path, "status", "--short")
     work_tickets.run_git(tmp_path, "ls-remote", "--heads", "origin", "feat/x")
     assert capsys.readouterr().err == "Reading the remote: git ls-remote --heads origin feat/x\n"
@@ -172,13 +173,10 @@ def door_depth(events: list[dict]) -> int:
     return max(depth.values(), default=0)
 
 
-def git(*arguments: str) -> None:
-    subprocess.run(["git", *arguments], check=True, capture_output=True)
-
-
 @pytest.fixture(scope="module")
 def slow_door(tmp_path_factory) -> dict:
-    """A checkout with an origin, and a `gh` on PATH that answers like GitHub, slowly."""
+    """A checkout (a directory: the first-line runs read no git), and a `gh` on PATH that answers
+    like GitHub, slowly."""
     base = tmp_path_factory.mktemp("slow-door")
     bin_dir = base / "bin"
     bin_dir.mkdir()
@@ -190,12 +188,8 @@ def slow_door(tmp_path_factory) -> dict:
         gh = bin_dir / "gh"
         gh.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
         gh.chmod(0o755)
-    origin, checkout = base / "origin.git", base / "checkout"
-    quiet_git.init(origin, "--bare", "-b", "main")
-    quiet_git.clone(origin, checkout)
-    identity = ("-c", "user.name=alice", "-c", "user.email=alice@example.com")
-    git("-C", str(checkout), *identity, "commit", "-q", "--allow-empty", "-m", "start")
-    git("-C", str(checkout), "push", "-q", "origin", "HEAD:main")
+    checkout = base / "checkout"
+    checkout.mkdir()
     environment = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                    "SE_METRICS": str(base / "metrics.jsonl"), "HOME": str(base),
                    "USERPROFILE": str(base)}
@@ -299,7 +293,31 @@ def test_a_command_whose_first_line_comes_after_its_door_call_fails_the_check(sl
 BUDGET_DOOR_DELAY = 1.0  # the door's answer for the budget tests
 
 
-def test_queue_reads_the_door_at_once_and_declares_its_budget(slow_door, tmp_path):
+def queue_checkout(tmp_path: Path) -> Path:
+    """A checkout of the fake door whose origin holds main, as the queue's merge of main needs."""
+    origin, checkout = tmp_path / "origin.git", tmp_path / "checkout"
+    quiet_git.init(origin, "--bare", "-b", "main")
+    quiet_git.clone(origin, checkout)
+    identity = ("-c", "user.name=alice", "-c", "user.email=alice@example.com")
+    for arguments in ((*identity, "commit", "-q", "--allow-empty", "-m", "start"), ("push", "-q", "origin", "HEAD:main")):
+        assert git_door.run(*arguments, root=checkout).returncode == 0
+    return checkout
+
+
+def run_in_process(argv: list[str], environment: dict[str, str], monkeypatch) -> subprocess.CompletedProcess[str]:
+    """`work_tickets.py <argv>` in this process, under `environment`, its git the door's fake; the
+    door it measures, `gh`, stays a process of its own."""
+    for name, value in environment.items():
+        if os.environ.get(name) != value:
+            monkeypatch.setenv(name, value)
+    monkeypatch.setattr(work_tickets, "_signed_in_gh", set())  # the sign-in check is the door's first call
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = work_tickets.main(argv)
+    return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
+
+
+def test_queue_reads_the_door_at_once_and_declares_its_budget(slow_door, tmp_path, fake_git_door, monkeypatch):
     """The queue's twelve door calls (the sign-in check, then seven listings at once, then five
     blockers at once) wait for the door in three rounds, not twelve: proven by the door's own
     log. Its wall time is checked against the door's delay only: under eleven delays, a margin of
@@ -308,8 +326,9 @@ def test_queue_reads_the_door_at_once_and_declares_its_budget(slow_door, tmp_pat
     environment = {**slow_door["env"], "FAKE_GH_DELAY": str(BUDGET_DOOR_DELAY),
                    DOOR_LOG: str(log)}
     slow_door["metrics"].unlink(missing_ok=True)
-    result = subprocess.run(interactive(slow_door["checkout"])["work_tickets.py queue"],
-                            capture_output=True, text=True, env=environment, check=False)
+    checkout = queue_checkout(tmp_path)
+    result = run_in_process(["queue", "--worktree", str(checkout), "--repo", "github.com/owner/repo"],
+                            environment, monkeypatch)
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("ready #") == 5
     line = json.loads(slow_door["metrics"].read_text(encoding="utf-8").splitlines()[-1])

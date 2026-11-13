@@ -268,14 +268,12 @@ KERN_DOOR = "kern's Go git calls; the migration builds kern's Go git door with a
 # Today's git subprocesses outside the door, each with how many its file holds and why it may. The list
 # may only shrink: a file with more fails, and one with fewer fails until its count is lowered.
 GIT_ALLOWED: dict[str, tuple[int, str]] = {
-    "tests/test_feedback.py": (1, TO_THE_FAKE),
     "tests/test_public_check.py": (11, TO_THE_FAKE),
     "tests/test_push_guard.py": (3, TO_THE_FAKE),
     "tests/test_releases.py": (7, TO_THE_FAKE),
     "tests/test_rewrite_history.py": (1, TO_THE_FAKE),
     "tests/test_start_refresh.py": (1, TO_THE_FAKE),
     "tests/test_work_ticket_issues.py": (76, TO_THE_FAKE),
-    "tests/test_work_tickets.py": (1, TO_THE_FAKE),
     "components/origin/origin.go": (1, KERN_DOOR),
     "components/origin/origin_test.go": (1, KERN_DOOR),
     "kern/host/scripts.go": (1, KERN_DOOR),
