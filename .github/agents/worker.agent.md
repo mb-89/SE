@@ -100,6 +100,9 @@ every package, so work issues and session prompts never repeat it.
      compares paths as `filepath.ToSlash` or `as_posix` writes them, never as text with `/`. Only
      the Windows leg of CI (`kern-platforms`) sees a path come back as `\work\tmp\...`, so a
      worker's run on Linux never catches it, and the landing fails.
+   - Before delivery, run the suite once with an empty home and no system git config
+     (`HOME=$(mktemp -d) GIT_CONFIG_NOSYSTEM=1`), as CI's runner has neither: a test that commits
+     or merges without setting its own identity passes locally and fails there.
    - The complete suite: run the complete suite only where the acceptance names it, otherwise the
      integrator does (where a pin moves, see
      [suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)).

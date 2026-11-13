@@ -18,7 +18,7 @@ named in the design's plan.
 | `go.mod` | the module and its pinned Go version, which CI reads | |
 | `index/` | names, families, the store, snapshots, a single writer per name, built-in values, the catalog check at start, waves, actions, the collector, and `wiring.toml` read at start | `src/index` at `ff01204` |
 | `index/fixture/` | the fixture components the index and the fake core are tested with | `src/index/fixture` |
-| `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request | `src/index/indextest` |
+| `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request, give a call up as the core does (`Begin`, `BeginServe`, `Abandon`, `Gone`) | `src/index/indextest` |
 | `bus/` | the embedded NATS server on loopback, a user and permissions per component instance, so the bus refuses a second writer | quackitect v5 `src/index/bus.go` |
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
 | `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve`, `hook` | |
@@ -90,7 +90,7 @@ SDK on `PYTHONPATH`.
 | `run.<i>` | hears that an input moved: reads `in.<i>`, commits each derivation's value | sends it after each commit that moves an input, and on the attach |
 | `in.<i>` | asks its inputs | answers them by local port, `config/<key>` among them, at the newest revision |
 | `cmd.<i>.<command>` | answers one step: `text`, `writes`, `requests`, `then`, or `error`; its lines go out on `say.<i>.<call>`. A message without a reply, `{"call", "stop"}`, is the stop word: it drops that call's continuation and sets its `kern.abandoned()` | sends the first step with the arguments and inputs, each later one with the answers; the stop word once it gives up a call whose step runs or whose continuation waits ([docs/go-core.md "A call given up"](../docs/go-core.md#a-call-given-up)) |
-| `io.<i>.<verb>` | an I/O component answers `{"answer": ...}` or `{"error": ...}` | sends a request bound to the verb |
+| `io.<i>.<verb>` | an I/O component answers `{"answer": ...}` or `{"error": ...}` to `{"call", "request"}` | sends a request bound to the verb; and, without a reply, `{"call", "stop"}` once it stops waiting for that request ([A call given up](../docs/go-core.md#a-call-given-up)) |
 | `say.<i>.<call>` | says a step's line as it goes, `{"line"}`, and beats `{}` every 5 s while the step runs, on its own call's subject | hands each line on to the call's caller; each word restarts the step's wait, `StepWait` (60 s, `KERN_STEP_WAIT` for a served core), so a step that beats runs as long as its process |
 | `call.<command>` | | a client's call: `{"args": [...], "progress"?}`, answered with the lines, the text or the error; with a progress subject in the caller's inbox, each line goes there as it is said and a beat every 5 s ([docs/go-core.md "Progress and long calls"](../docs/go-core.md#progress-and-long-calls)); `call.core.abandon`, `{"call": <its reply subject>}`, gives up a call in the asker's own inbox; a call whose reply subject no connection hears any more, its caller killed, is given up the same way |
 
@@ -134,7 +134,7 @@ time counts against SE's budget and needs no Go).
 `release.toml` owns kern's version and where its release is published:
 
 ```toml
-version = "0.4.0"
+version = "0.4.1"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 

@@ -1,0 +1,24 @@
+# Re-runs once a first attempt of check that kern-platforms-queue cancelled because a platform leg
+# never got a runner (README "Platform legs and their queue"); scripts/ci_queue.py rerun decides
+# from the run's jobs, so a run that failed, or a second attempt, is left as it ended.
+name: check rerun
+
+on:
+  workflow_run:
+    workflows: [check]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  rerun:
+    if: github.event.workflow_run.conclusion == 'cancelled' && github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Re-run a first attempt whose platform leg never got a runner
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci_queue.py rerun --jobs kern-platforms --run ${{ github.event.workflow_run.id }}

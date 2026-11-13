@@ -441,9 +441,10 @@ def test_the_record_workflow_names_its_run_by_the_commit_and_tree_it_records() -
 def test_ses_check_gates_the_suite_and_kern_platforms_on_the_trust_job() -> None:
     workflow = (WORKFLOWS / "check.yml").read_text(encoding="utf-8")
     jobs = dict(re.findall(r"(?ms)^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)", workflow.split("\njobs:\n")[1]))
-    assert list(jobs) == ["check", "kern-platforms", "trust"]
+    assert list(jobs) == ["check", "kern-platforms", "kern-platforms-queue", "trust"]
     assert "mode: lookup" in jobs["trust"] and "fetch-depth: 0" in jobs["trust"]
-    assert "needs: trust\n    if: needs.trust.outputs.trusted != 'true'" in jobs["kern-platforms"]
+    for gated in ("kern-platforms", "kern-platforms-queue"):
+        assert "needs: trust\n    if: needs.trust.outputs.trusted != 'true'" in jobs[gated], gated
     assert "needs: [trust, kern-platforms]" in jobs["check"]
     suite = re.search(r"(?ms)- name: The complete suite.*?\n(?=      - )", jobs["check"])[0]
     assert "if: needs.trust.outputs.trusted != 'true'" in suite

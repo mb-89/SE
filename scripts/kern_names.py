@@ -61,14 +61,15 @@ def read(root: Path | None, names: list[str], wait: float = WAIT) -> dict[str, o
 def live_work(root: Path | None) -> dict | None:
     """What is due in the work from the core, in the greeting's work-check shape: a retro part
     and a fleet part, each marked `"from": "kern"`, and only where the core has read GitHub
-    issues for it (a core that has read none answers nothing, and the cache stays); None where
-    no core carries SE's components."""
+    issues for it (a core that has read none answers nothing, and the cache stays), the fleet's
+    only from a complete read of the open issues and pull requests (a partial view is no
+    verdict); None where no core carries SE's components."""
     names = read(root, [FLEET, RETRO])
     if not names:
         return None
     work: dict[str, dict] = {}
     fleet, retro = names.get(FLEET), names.get(RETRO)
-    if isinstance(fleet, dict) and fleet.get("issues"):
+    if isinstance(fleet, dict) and fleet.get("issues") and fleet.get("complete"):
         work["fleet"] = {"findings": [{"kind": f.get("kind"), "issue": f.get("issue")}
                                       for f in fleet.get("findings") or []],
                          "issues": fleet["issues"], "from": "kern"}

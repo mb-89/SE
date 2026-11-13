@@ -383,40 +383,71 @@ func TestAHookWithNoCoreFailsOpenAtOnce(t *testing.T) {
 	}
 }
 
-// A hook waits for a core whose start's claim stands, within its wait, and
-// gives up when the wait is out.
+// looking is a wall clock that counts the looks at a start's claim (each
+// one reads Now once the claim is found) and runs first on the first of them.
+type looking struct {
+	mu    sync.Mutex
+	looks int
+	first func()
+}
+
+func (l *looking) Now() time.Time {
+	l.mu.Lock()
+	l.looks++
+	first := l.first
+	l.first = nil
+	l.mu.Unlock()
+	if first != nil {
+		first()
+	}
+	return time.Now()
+}
+
+func (l *looking) After(d time.Duration) <-chan time.Time { return time.After(d) }
+
+func (l *looking) count() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.looks
+}
+
+// A hook waits for a starting core, by what it does and in which order, not
+// by how long anything takes: with no claim it answers ErrNotRunning without
+// looking; with a claim and no core it keeps looking until its wait ends; and
+// a core that stands while the hook looks at its claim, the moment the
+// claim's removal follows the standing file's write, is the core the hook
+// reaches: the hook looks at the claim before it reads the standing file.
 func TestAHookWaitsForAStartingCoreWithinItsWait(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	none := &looking{}
+	if _, err := host.Post(none, root, "Stop", nil, wait); !errors.Is(err, host.ErrNotRunning) || none.count() != 0 {
+		t.Fatalf("a hook with no claim answers %v after %d looks, and wants ErrNotRunning without looking", err, none.count())
+	}
 	if err := os.MkdirAll(filepath.Dir(host.ClaimPath(root)), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(host.ClaimPath(root), []byte("1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	began := time.Now()
-	if _, err := host.Post(host.Wall{}, root, "Stop", nil, 30*time.Millisecond); !errors.Is(err, host.ErrNotRunning) {
-		t.Fatalf("a hook whose core never comes up answers %v, and wants ErrNotRunning", err)
+	never := &looking{}
+	if _, err := host.Post(never, root, "Stop", nil, 200*time.Millisecond); !errors.Is(err, host.ErrNotRunning) || never.count() < 2 {
+		t.Fatalf("a hook whose core never comes up answers %v after %d looks, and wants ErrNotRunning once it looked again", err, never.count())
 	}
-	if took := time.Since(began); took < 30*time.Millisecond {
-		t.Fatalf("a hook gave a starting core %v, and should wait out its 30ms", took)
-	}
-	up := make(chan *host.Core, 1)
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		c, err := host.Serve(host.Options{Root: root})
-		if err != nil {
+	var c *host.Core
+	stands := &looking{first: func() {
+		var err error
+		if c, err = host.Serve(host.Options{Root: root}); err != nil {
 			t.Error(err)
 		}
-		up <- c
-	}()
-	a, err := host.Post(host.Wall{}, root, "SessionStart", []byte(`{"session_id":"s1"}`), wait)
-	if c := <-up; c != nil {
+	}}
+	a, err := host.Post(stands, root, "SessionStart", []byte(`{"session_id":"s1"}`), wait)
+	if c != nil {
 		c.Stop("the case ends")
 		<-c.Ended()
 	}
 	if err != nil || a.Effect != "pass" {
-		t.Fatalf("a hook for a starting core answers %+v, %v, and wants the effect pass", a, err)
+		t.Fatalf("a hook for a core that stood while it looked answers %+v, %v, and wants the effect pass", a, err)
 	}
 }
 

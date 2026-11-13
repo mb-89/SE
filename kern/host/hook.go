@@ -33,11 +33,7 @@ func Post(clock Clock, root, event string, payload []byte, wait time.Duration) (
 		return HookAnswer{}, fmt.Errorf("kern hook %q: %w", event, ErrNoEvent)
 	}
 	end := time.Now().Add(wait)
-	s, err := ReadStanding(root)
-	for errors.Is(err, ErrNotRunning) && starting(clock, root) && time.Now().Before(end) {
-		time.Sleep(standingLook)
-		s, err = ReadStanding(root)
-	}
+	s, err := awaitStanding(clock, root, end, func() { time.Sleep(standingLook) })
 	if err != nil {
 		return HookAnswer{}, err
 	}
@@ -59,6 +55,23 @@ func Post(clock Clock, root, event string, payload []byte, wait time.Duration) (
 		return HookAnswer{}, fmt.Errorf("kern hook %s answers no effect: %w", event, err)
 	}
 	return a, nil
+}
+
+// awaitStanding reads the standing file until it stands, no start's claim
+// stands, or end passes, calling look between two reads. Each read checks the
+// claim first, then the standing file: the core writes its standing before it
+// removes its claim, so where the claim is gone, the read after it meets the
+// core that stood, and a hook never takes a core that has just stood for one
+// that never came up.
+func awaitStanding(clock Clock, root string, end time.Time, look func()) (Standing, error) {
+	for {
+		claimed := starting(clock, root)
+		s, err := ReadStanding(root)
+		if !errors.Is(err, ErrNotRunning) || !claimed || !time.Now().Before(end) {
+			return s, err
+		}
+		look()
+	}
 }
 
 // starting says whether a start's claim stands that is younger than ClaimStale.

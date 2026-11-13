@@ -233,8 +233,50 @@ def test_a_call_that_fails_on_the_way_runs_directly(tmp_path, monkeypatch) -> No
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv(se_components.SWITCH)
     assert se_components.routed(script, ["status"], [], True) is None
-    # Another copy of the script than the one kern runs: direct.
-    assert se_components.routed(ROOT / "scripts" / "work_tickets.py", ["status"], [], True) is None
+
+
+def test_the_plugins_copy_reaches_the_kern_serving_the_checkout(tmp_path, monkeypatch,
+                                                                 capsys) -> None:
+    """A command run from another copy of SE's script than the checkout's, the plugin's (the path
+    SE's skills name), goes to the kern serving the checkout it runs in, with SE_KERN=on too; a
+    directory whose checkout holds no such script is no kern's to serve."""
+    import kern.nats
+
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / "scripts").mkdir()
+    (checkout / "scripts" / "work_tickets.py").write_text("", encoding="utf-8")
+    standing = checkout / se_components.STANDING
+    standing.parent.mkdir(parents=True)
+    standing.write_text(json.dumps({"bus": "nats://127.0.0.1:9", "users": {"client": "x"}}),
+                        encoding="utf-8")
+    plugin = tmp_path / "plugin" / "scripts" / "work_tickets.py"
+    plugin.parent.mkdir(parents=True)
+    plugin.write_text("", encoding="utf-8")
+    asked = []
+
+    class Answering:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def request(self, subject, data, timeout, give_up=False):
+            asked.append((subject, data["args"][0]))
+            return type("Msg", (), {"json": lambda self: {"text": "served by kern",
+                                                           "lines": ["a line"]}})()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(kern.nats, "Peer", Answering)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv(se_components.SWITCH, "on")
+    assert se_components.routed(plugin, ["status"], [], True) == 0
+    said = capsys.readouterr()
+    assert said.out == "served by kern\n" and said.err == "a line\n", said
+    assert asked == [("call.work_tickets%2Epy%20status", se_components.CWD + str(checkout))]
+    (checkout / "scripts" / "work_tickets.py").unlink()  # a checkout without SE's script
+    assert se_components.routed(plugin, ["status"], [], True) == 1
+    assert "no kern serves" in capsys.readouterr().err
 
 
 STEPPED_SCRIPT = '''
@@ -279,7 +321,8 @@ def test_a_streamed_command_asks_each_github_step_as_a_request_of_its_component(
     assert "Phase: asking" in fake.lines
 
 
-def test_a_streamed_command_runs_directly_without_kerns_relay(tmp_path, monkeypatch) -> None:
+def test_a_streamed_command_runs_directly_without_kerns_relay(tmp_path, monkeypatch,
+                                                               capsys) -> None:
     """The fallback: no kern, or a kern without the relay, and a streamed batch command runs
     directly, its file-based hand-off; SE_KERN=off never routes it."""
     script = ROOT / "scripts" / "work_tickets.py"
@@ -298,6 +341,14 @@ def test_a_streamed_command_runs_directly_without_kerns_relay(tmp_path, monkeypa
     assert se_components.routed(copy, ["integrate"], ["7"], False, True) is None  # no relay
     monkeypatch.setenv(se_components.SWITCH, "off")
     assert se_components.routed(copy, ["integrate"], ["7"], False, True) is None
+    # Each fallback says so, and why: no silent file hand-off.
+    said = capsys.readouterr().err.splitlines()
+    assert [line.split(": ", 2)[2] for line in said] == [
+        f"no kern serves {tmp_path} with SE's work_tickets.py",
+        f"no kern serves {tmp_path} with its GitHub component on the relay backend",
+        "SE_KERN=off"], said
+    assert all(line.startswith("se: work_tickets.py integrate fell back to the file-based "
+                               "hand-off: ") for line in said), said
 
 
 MEET_SCRIPT = '''

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mb-89/kern/bus"
@@ -102,6 +103,9 @@ type Core struct {
 	reason     string
 	// calls are the running calls, by reply subject, and how each is given up.
 	calls map[string]context.CancelCauseFunc
+	// asks numbers the requests to declared processes' verbs, so a stop word
+	// names the one it ends (remote.Serve).
+	asks atomic.Int64
 
 	done     chan struct{}
 	stopOnce sync.Once

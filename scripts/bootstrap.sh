@@ -23,6 +23,13 @@
 # the hook's JSON (scripts/se_start.py status --hook), carrying the lines said on the way and kern's
 # state. The hook's JSON on stdin is the session's start, which kern is handed.
 set -u
+# uv's deprecated UV_NATIVE_TLS, which cloud environments set, becomes UV_SYSTEM_CERTS for all this
+# runs, the core and the components it places with `uv run` among them: core.log stays free of
+# uv's deprecation notice (as scripts/build_docs.py does for the docs build).
+if [ -n "${UV_NATIVE_TLS:-}" ]; then
+  export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-$UV_NATIVE_TLS}"
+  unset UV_NATIVE_TLS
+fi
 
 # --kern-fetch and --kern-build: the background half of kern's first start of a version (below).
 case "${1:-}" in
@@ -82,8 +89,16 @@ kern_sha256() { # the SHA-256 of a file
     read -r sum _ && printf '%s' "$sum"
   }
 }
+# ~/.se/bin/<name> names the version in place, so `se status` works from the session's PATH: a
+# link where the file system makes one, else a copy.
+kern_link() { # <bin>
+  local dir="${1%/*}" base="${1##*/}" ext=""
+  case "$base" in *.exe) ext=".exe" ;; esac
+  ln -sf "$base" "$dir/${base%%-[0-9]*}$ext" 2>/dev/null || cp -f "$1" "$dir/${base%%-[0-9]*}$ext"
+}
 # Start the core for the project and hand it the session's start; the post waits for the core.
 kern_run() { # <bin> <session start file>
+  kern_link "$1"
   "$1" start --root "$project" >/dev/null 2>"$project/.se/.runtime/kern-start.err" || return 1
   "$1" hook SessionStart --root "$project" <"$2" >/dev/null 2>&1
   return 0
@@ -113,8 +128,10 @@ kern_step() {
   case "$platform" in windows-*) exe="$name.exe"; suffix=".exe" ;; esac
   bin="$HOME/.se/bin/$name-$version$suffix"
   mkdir -p "$HOME/.se/bin" "$project/.se/.runtime" 2>/dev/null
-  # Where every later hook finds the binary (scripts/se_hook.sh), once it is in place.
+  # Where every later hook finds the binary (scripts/se_hook.sh), once it is in place; the
+  # session's shells find it as `se` (kern_link).
   printf '%s\n' "$bin" >"$project/.se/.runtime/kern.path"
+  [ -n "${CLAUDE_ENV_FILE:-}" ] && printf 'export PATH="%s:$PATH"\n' "$HOME/.se/bin" >>"$CLAUDE_ENV_FILE"
   start="$project/.se/.runtime/kern-session-start.json"
   printf '%s' "$payload" >"$start"
   if [ -x "$bin" ]; then
