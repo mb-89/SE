@@ -69,6 +69,11 @@ type Core struct {
 	writer map[string]string // a name, or a family, to the instance that writes it
 	types  map[string]map[string]reflect.Type
 	placed map[string]bool
+	comps  []*index.Component
+	// declared are the instances of components declared by their
+	// component.toml alone; attached closes once an instance's process attached.
+	declared map[string]*index.Component
+	attached map[string]chan struct{}
 
 	mu         sync.Mutex
 	sessions   map[string]time.Time
@@ -114,12 +119,18 @@ func Serve(o Options) (*Core, error) {
 	if s, err := ReadStanding(o.Root); err == nil {
 		return nil, fmt.Errorf("kern serve: a core already runs in %s, pid %d (%s)", o.Root, s.Pid, StandingPath(o.Root))
 	}
-	ix, err := index.Start(o.Wiring, o.Components...)
+	decls, err := declarations(o.Root, o.Wiring, o.Components)
+	if err != nil {
+		return nil, err
+	}
+	comps := append(append([]*index.Component{}, o.Components...), decls...)
+	ix, err := index.Start(o.Wiring, comps...)
 	if err != nil {
 		return nil, fmt.Errorf("kern serve: %w", err)
 	}
 	c := &Core{
-		o: o, ix: ix, pid: os.Getpid(), start: o.Clock.Now(),
+		o: o, ix: ix, pid: os.Getpid(), start: o.Clock.Now(), comps: comps,
+		declared: map[string]*index.Component{}, attached: map[string]chan struct{}{},
 		writer: map[string]string{}, types: map[string]map[string]reflect.Type{}, placed: map[string]bool{},
 		sessions: map[string]time.Time{}, beats: map[string]time.Time{}, prev: map[string]uint64{},
 		done: make(chan struct{}), ended: make(chan struct{}),
@@ -144,6 +155,18 @@ func Serve(o Options) (*Core, error) {
 		c.bus.Close()
 		return nil, fmt.Errorf("kern serve: %w", err)
 	}
+	byName := map[string]*index.Component{}
+	for _, comp := range decls {
+		byName[comp.Name()] = comp
+	}
+	for _, in := range o.Wiring.Instances {
+		if comp := byName[in.Component]; comp != nil {
+			comp.SetRemote(remote{c: c, inst: in.Name})
+			c.declared[in.Name] = comp
+			c.attached[in.Name] = make(chan struct{})
+		}
+	}
+	ix.OnRun(c.runInstance)
 	if err := c.answer(); err != nil {
 		c.close()
 		return nil, fmt.Errorf("kern serve: %w", err)
@@ -171,7 +194,7 @@ func Serve(o Options) (*Core, error) {
 // its runs in the core, so it declares neither.
 func (c *Core) place() error {
 	comps := map[string]*index.Component{}
-	for _, comp := range c.o.Components {
+	for _, comp := range c.comps {
 		comps[comp.Name()] = comp
 	}
 	for _, in := range c.o.Wiring.Instances {
@@ -179,7 +202,7 @@ func (c *Core) place() error {
 			continue
 		}
 		comp := comps[in.Component]
-		if len(comp.Derivations()) > 0 || len(comp.Commands()) > 0 {
+		if !comp.Declared() && (len(comp.Derivations()) > 0 || len(comp.Commands()) > 0) {
 			return fmt.Errorf("kern serve: wiring line %d: instance %s is placed, and its component %s declares a derivation or a command, which runs in the core until a placed process answers run and cmd", in.CommandLine, in.Name, in.Component)
 		}
 		c.placed[in.Name] = true
@@ -203,6 +226,8 @@ func (c *Core) answer() error {
 		{bus.Commit + ">", c.commit},
 		{bus.Lease + ">", func(m *nats.Msg) { c.beat(bus.Name(strings.TrimPrefix(m.Subject, bus.Lease))) }},
 		{bus.Hook + ">", c.hook},
+		{bus.In + ">", c.inputs},
+		{bus.Call + ">", c.call},
 	}
 	for _, s := range subs {
 		if _, err := c.nc.Subscribe(s.subject, s.fn); err != nil {
@@ -298,10 +323,24 @@ func (c *Core) commit(m *nats.Msg) {
 		return
 	}
 	var body struct {
+		Attach *Attach       `json:"attach"`
 		Writes []CommitWrite `json:"writes"`
 	}
 	if err := json.Unmarshal(m.Data, &body); err != nil {
 		refuse("commit.%s: the body is no JSON of writes: %v", bus.Subject(inst), err)
+		return
+	}
+	if body.Attach != nil {
+		if err := c.attach(inst, *body.Attach); err != nil {
+			refuse("%v", err)
+			return
+		}
+		c.beat(inst)
+		c.reply(m, CommitAnswer{Accepted: true, Revision: c.ix.Snapshot().Revision()})
+		return
+	}
+	if c.declared[inst] != nil && !c.isAttached(inst) {
+		refuse("instance %s has not attached: its process commits {\"attach\": {\"contract\": %d, \"hash\": ...}} first", inst, Contract)
 		return
 	}
 	writes := make([]index.Write, 0, len(body.Writes))
@@ -390,6 +429,8 @@ type Health struct {
 	Sessions   []string         `json:"sessions"`
 	Instances  []string         `json:"instances"`
 	Placements []PlacementState `json:"placements"`
+	// Attached are the declared instances whose process has attached.
+	Attached []string `json:"attached"`
 }
 
 // PlacementState is one placed instance as the health shows it.
@@ -404,8 +445,12 @@ type PlacementState struct {
 // Health answers the core as it stands.
 func (c *Core) Health() Health {
 	h := Health{Contract: Contract, Pid: c.pid, Bus: c.bus.URL(), Started: c.start.UTC(), Revision: c.ix.Snapshot().Revision(), Sessions: []string{}, Instances: []string{}, Placements: []PlacementState{}}
+	h.Attached = []string{}
 	for _, in := range c.ix.Catalog().Instances {
 		h.Instances = append(h.Instances, in.Name)
+		if c.isAttached(in.Name) {
+			h.Attached = append(h.Attached, in.Name)
+		}
 	}
 	c.mu.Lock()
 	for s := range c.sessions {

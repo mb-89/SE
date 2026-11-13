@@ -1,0 +1,77 @@
+{
+  "about": "kern's contract suite (contract/README.md): each case runs against the Go fake (contract/fake_test.go), the Python fake (python/tests/test_kern_contract.py) and the real core with tally's Python process attached over the bus (contract/real_test.go). Every value is JSON; an error is a list of the substrings its message holds.",
+  "cases": [
+    {
+      "name": "a derivation reads its inputs and its config at their built-in values",
+      "seed": {"numbers": [1, 2, 3]},
+      "derive": "total",
+      "want": {"outputs": {"total": {"value": 6, "provided": true}}}
+    },
+    {
+      "name": "a derivation reads the config the case gives",
+      "seed": {"numbers": [1, 2, 3]},
+      "config": {"scale": 2},
+      "derive": "total",
+      "want": {"outputs": {"total": {"value": 12, "provided": true}}}
+    },
+    {
+      "name": "an input nothing provided reads its built-in value",
+      "derive": "total",
+      "want": {"outputs": {"total": {"value": 0, "provided": true}}}
+    },
+    {
+      "name": "an output nothing committed reads its built-in value, not provided",
+      "want": {"outputs": {"note": {"value": "", "provided": false}}}
+    },
+    {
+      "name": "a command says its progress, answers its text and commits its writes",
+      "seed": {"numbers": [4, 5]},
+      "run": ["tally note", "a", "b"],
+      "want": {
+        "text": "noted \"a b\" beside 2 numbers",
+        "lines": ["Phase: noting"],
+        "outputs": {"note": {"value": "a b", "provided": true}}
+      }
+    },
+    {
+      "name": "a command's error fails it",
+      "run": ["tally note"],
+      "want": {"error": ["tally note takes the words to keep"], "outputs": {"note": {"value": "", "provided": false}}}
+    },
+    {
+      "name": "requests go out in order, and the continuation reads their answers",
+      "answers": {"post": [{"answer": 1}, {"answer": 2}]},
+      "run": ["tally file", "x", "y"],
+      "want": {
+        "text": "filing 2 words\nfiled y as line 2",
+        "requests": [{"port": "post", "value": "x"}, {"port": "post", "value": "y"}],
+        "outputs": {"note": {"value": "y as line 2", "provided": true}}
+      }
+    },
+    {
+      "name": "a continuation without requests runs with no answers",
+      "run": ["tally file"],
+      "want": {"text": "filing 0 words\nnothing filed", "requests": [], "outputs": {"note": {"value": "filing 0 words", "provided": true}}}
+    },
+    {
+      "name": "a failed request stops the command, and what it committed and asked before stands",
+      "answers": {"post": [{"answer": 1}, {"error": "the ledger takes no empty line"}]},
+      "run": ["tally file", "x", "", "z"],
+      "want": {
+        "error": ["request 2 of 3", "failed: the ledger takes no empty line"],
+        "requests": [{"port": "post", "value": "x"}],
+        "outputs": {"note": {"value": "filing 3 words", "provided": true}}
+      }
+    },
+    {
+      "name": "a write to an output the component does not declare is refused",
+      "run": ["tally stray"],
+      "want": {"error": ["component tally writes no output \"nowhere\""], "outputs": {"note": {"value": "", "provided": false}}}
+    },
+    {
+      "name": "a write of another type than its output's is refused",
+      "run": ["tally wrong"],
+      "want": {"error": ["component tally: output note takes string, not "], "outputs": {"note": {"value": "", "provided": false}}}
+    }
+  ]
+}

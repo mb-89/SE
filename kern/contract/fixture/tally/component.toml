@@ -1,0 +1,58 @@
+# The contract suite's fixture component (contract/README.md): one declaration,
+# answered in Go by contract/fake_test.go and in Python by __init__.py beside it.
+name = "tally"
+contract = 1
+help = "Sums numbers and takes notes."
+
+[inputs]
+numbers = "[int]"
+
+[outputs.total]
+type = "int"
+builtin = 0
+derived = true
+help = "The sum of the numbers, scaled."
+
+[outputs.note]
+type = "string"
+builtin = ""
+help = "The last note taken."
+
+[config.scale]
+type = "int"
+builtin = 1
+help = "What the sum is multiplied by."
+
+[commands."tally note"]
+usage = "tally note WORDS..."
+summary = "Take a note."
+group = "Fixtures"
+help = "Keeps the words as the last note, and says how many numbers stand."
+class = "batch"
+session = true
+
+[commands."tally file"]
+usage = "tally file WORDS..."
+summary = "File each word as a line."
+group = "Fixtures"
+help = "Posts each word to the ledger in order; a refused post stops the rest."
+class = "batch"
+
+[commands."tally stray"]
+usage = "tally stray"
+summary = "Write an output the component does not declare."
+group = "Fixtures"
+help = "The core refuses it."
+class = "batch"
+
+[commands."tally wrong"]
+usage = "tally wrong"
+summary = "Write a number to the note."
+group = "Fixtures"
+help = "The core refuses it: the note is a string."
+class = "batch"
+
+[requests.post]
+type = "string"
+answer = "int"
+help = "Appends a line to a ledger."

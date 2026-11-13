@@ -1,0 +1,10 @@
+# The numbers tally reads: the contract suite's real-core leg commits them as this instance.
+name = "source"
+contract = 1
+io = true
+help = "Commits the numbers a case seeds."
+
+[outputs.numbers]
+type = "[int]"
+builtin = []
+help = "The numbers a case seeds."

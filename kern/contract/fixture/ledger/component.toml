@@ -1,0 +1,10 @@
+# The ledger tally posts to: the contract suite's real-core leg answers its verb as this instance.
+name = "ledger"
+contract = 1
+io = true
+help = "Answers each line it is asked to append as a case says."
+
+[verbs.append]
+type = "string"
+answer = "int"
+help = "Appends a line and answers how many lines stand."

@@ -178,7 +178,10 @@ from them, the Python side reads them as dicts, and the contract suite round-tri
 
 ### Subjects
 
-A name's segments become tokens: `fleet/findings` rides as `fleet.findings`.
+A name's segments become tokens: `fleet/findings` rides as `fleet.findings`. A segment, a command
+name or a verb rides percent-encoded beyond letters, digits, dashes and underscores, so a command
+with a space (`tally%20note`) and a family key with a dot (`v1%2E2`) are one token each (settled
+in step 4, [kern/README.md](../kern/README.md#a-component-in-python)).
 
 | subject | shape | sender, answerer |
 |---|---|---|
@@ -208,7 +211,9 @@ A component in any language with a NATS client attaches the same way:
 1. The core spawns it as the wiring's placement says (`command = ["uv", "run", "python", "-m",
    "<pkg>"]`), with its bus address, user and token in the environment.
 2. It connects, publishes its declaration hash on `commit.<i>`, and the core refuses a hash that
-   differs from `component.toml`'s.
+   differs from `component.toml`'s. The hash is the SHA-256 of the file's bytes, line ends read as
+   LF, and the attach names the contract version too, `contract: 1`, as the standing file and the
+   health do (settled in step 4).
 3. It subscribes to `run.<i>` and `cmd.<i>.>`, reads `in.<i>` on each run, answers with
    `commit.<i>`, and beats on `lease.<i>` from its own loop.
 

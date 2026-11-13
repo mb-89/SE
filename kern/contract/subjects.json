@@ -1,0 +1,16 @@
+{
+  "about": "How a name, a command name or a verb rides as NATS subject tokens; bus.Subject and bus.Token in Go, kern.subjects in Python, are held to it.",
+  "names": [
+    {"name": "fleet/findings", "subject": "fleet.findings"},
+    {"name": "session/v1.2/events", "subject": "session.v1%2E2.events"},
+    {"name": "issues/pull/open", "subject": "issues.pull.open"},
+    {"name": "a b/50%/x*y>z", "subject": "a%20b.50%25.x%2Ay%3Ez"},
+    {"name": "café/ok_1", "subject": "caf%C3%A9.ok_1"}
+  ],
+  "tokens": [
+    {"word": "tally note", "token": "tally%20note"},
+    {"word": "fleet-check", "token": "fleet-check"},
+    {"word": "issues/pull", "token": "issues%2Fpull"},
+    {"word": "v1.2", "token": "v1%2E2"}
+  ]
+}
