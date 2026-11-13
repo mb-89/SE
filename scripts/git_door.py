@@ -3,8 +3,9 @@
 
 The rule is the rule book's des-004, one door per outside thing, and tst-001, fakes that behave:
 `tests/test_git_door.py` holds this door's contract and runs it against real git and against the
-fake `tests/fake_git.py`; every other test that needs git uses the fake (`use`). A git subprocess
-outside this module fails `tests/test_repository.py`'s guard.
+fake `tests/fake_git.py`; every other test that needs git uses the fake (`use`), and the suite
+refuses real git behind this door to any test outside `tests/conftest.py`'s `REAL_GIT`. A git
+subprocess outside this module fails `tests/test_repository.py`'s guard.
 
 The door adds nothing to what git is asked: each caller keeps its own error type and message.
 """

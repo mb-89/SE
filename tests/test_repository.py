@@ -23,7 +23,7 @@ from pathlib import Path
 import git_door
 import pytest
 import quiet_git
-from conftest import runner_variables
+from conftest import REAL_GIT, RefusedGit, door_backend, runner_variables
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -327,6 +327,30 @@ def git_door_findings(root: Path, allowed: dict[str, tuple[int, str]]) -> list[s
 def test_se_runs_git_only_through_its_door() -> None:
     assert git_door_findings(ROOT, GIT_ALLOWED) == []
     assert all(reason.strip() for _, reason in GIT_ALLOWED.values())
+
+
+class Item:
+    """What tests/conftest.py's door_backend reads of a collected test."""
+
+    def __init__(self, path: Path) -> None:
+        self.path, self.nodeid = path, f"{path.relative_to(ROOT).as_posix()}::test_example"
+
+
+def test_a_test_reaching_real_git_through_the_door_fails_outside_the_contract_suite(tmp_path: Path) -> None:
+    outside = door_backend(Item(ROOT / "tests" / "test_example.py"))
+    assert isinstance(outside, RefusedGit)
+    with git_door.use(outside), pytest.raises(pytest.fail.Exception) as refused:
+        quiet_git.init(tmp_path / "repo", "-b", "main")
+    assert "tests/test_example.py::test_example ran real git (git init -q -b main" in str(refused.value)
+    assert "fake_git_door" in str(refused.value) and not (tmp_path / "repo").exists()
+    with git_door.use(outside), pytest.raises(pytest.fail.Exception):
+        git_door.popen("fast-export", "--all", root=tmp_path)
+    assert isinstance(door_backend(Item(ROOT / "tests" / "test_git_door.py")), git_door.RealGit)
+
+
+def test_the_files_allowed_real_git_exist_and_say_why() -> None:
+    assert [name for name in REAL_GIT if not (ROOT / name).is_file()] == []
+    assert all(reason.strip() for reason in REAL_GIT.values())
 
 
 def test_a_git_subprocess_outside_the_door_fails_and_an_entry_too_high_too(tmp_path: Path) -> None:
