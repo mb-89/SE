@@ -462,6 +462,11 @@ cloud hosts differ by about 25 s for the same tree. Over the limit there, `check
 test result (passed, with its counts), the time, the limit and the slowest tests. Every CI run
 reports its time as a `se suite time` notice on its check run.
 
+CI's suite time is the wall time of the run the budget judges. For an unsharded suite it is the
+whole run's, the `suite` step of `check`. For a sharded suite, whose shards run side by side as
+parallel jobs, it is the slowest shard's: that is the time `check` waits for, while the shards' sum
+would count work nobody waits for.
+
 A sharded project records it with SE's two actions, at the se ref it pins, and copies nothing:
 
 ```yaml
