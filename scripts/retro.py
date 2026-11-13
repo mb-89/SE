@@ -1138,7 +1138,19 @@ def run_collect(args: argparse.Namespace) -> int:
     return 0
 
 
-def parser() -> argparse.ArgumentParser:
+#: retro.py's commands as one kern component (README "Commands as components"), retrospective:
+#: `retro` is SE's Go retro-due component; each command's usage and help come from make_parser.
+COMPONENTS = (sibling("se_components").Group(
+    "retrospective", "Retro",
+    "A retro: collect writes its draft from the work since the last one, file checks the judged "
+    "draft and closes the retro issue with its report.",
+    ("collect", "file")),)
+#: The commands that go through kern where it runs (se_components.routed): none, as collect reads
+#: GitHub for minutes and writes the draft, and file writes.
+INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
+
+
+def make_parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(prog="retro.py", description=__doc__.split("\n\n")[0])
     commands = top.add_subparsers(dest="command", required=True)
     collect_command = commands.add_parser(
@@ -1189,7 +1201,13 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    args = make_parser().parse_args(argv)
+    words = [args.command]
+    routed = sibling("se_components").routed(
+        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
+        args.command in INTERACTIVE_COMMANDS)
+    if routed is not None:
+        return routed
     try:
         return args.run(args)
     except QueueError as error:

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -35,7 +36,9 @@ func Hash(data []byte) string {
 // Remote is a declared component's own process, as the core reaches it over
 // the bus: it answers each step of a command and each request on a verb.
 type Remote interface {
-	Command(name string, step Step) (Answer, error)
+	// Command runs one step; say, where set, takes each progress line the
+	// step says, live where the process says it before its answer.
+	Command(name string, step Step, say func(line string)) (Answer, error)
 	Serve(verb string, req json.RawMessage) (json.RawMessage, error)
 }
 
@@ -78,7 +81,7 @@ type WireAsk struct {
 type declared struct {
 	hash     string
 	remote   Remote
-	calls    int
+	calls    atomic.Int64 // a call's id, so two calls running side by side hear their own words
 	inShapes map[string]string
 }
 
@@ -412,7 +415,7 @@ func builtinValue(v any, t reflect.Type) (any, error) {
 
 // runRemote runs one command in the declared component's process, step by
 // step: each step's writes and requests are read as the ports' types.
-func (c *Component) runRemote(name string, read Reader, args []string) (Result, error) {
+func (c *Component) runRemote(name string, read Reader, args []string, say func(string)) (Result, error) {
 	r := c.decl.remote
 	if r == nil {
 		return Result{}, fmt.Errorf("component %s runs in its own process, and none has attached", c.name)
@@ -421,23 +424,22 @@ func (c *Component) runRemote(name string, read Reader, args []string) (Result, 
 	for _, port := range c.commands[name].in.ports {
 		inputs[port] = read(port)
 	}
-	c.decl.calls++
-	call := fmt.Sprintf("%d", c.decl.calls)
+	call := fmt.Sprintf("%d", c.decl.calls.Add(1))
 	if args == nil {
 		args = []string{}
 	}
-	return c.step(name, Step{Call: call, Step: 1, Args: args, Inputs: inputs})
+	return c.step(name, Step{Call: call, Step: 1, Args: args, Inputs: inputs}, say)
 }
 
-func (c *Component) step(name string, s Step) (Result, error) {
-	a, err := c.decl.remote.Command(name, s)
+func (c *Component) step(name string, s Step, say func(string)) (Result, error) {
+	a, err := c.decl.remote.Command(name, s, say)
 	if err != nil {
 		return Result{}, err
 	}
 	if a.Error != "" {
 		return Result{}, errors.New(a.Error)
 	}
-	res := Result{Text: a.Text, Lines: a.Lines}
+	res := Result{Text: a.Text, Lines: a.Lines, Said: say != nil}
 	for _, w := range a.Writes {
 		write := Write{Port: w.Port, Key: w.Key, Gone: w.Gone}
 		if o, ok := c.outputs[w.Port]; ok && !w.Gone {
@@ -467,7 +469,7 @@ func (c *Component) step(name string, s Step) (Result, error) {
 			if err != nil {
 				return Result{}, err
 			}
-			return c.step(name, Step{Call: s.Call, Step: next, Answers: data})
+			return c.step(name, Step{Call: s.Call, Step: next, Answers: data}, say)
 		}
 	}
 	return res, nil

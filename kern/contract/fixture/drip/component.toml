@@ -1,0 +1,19 @@
+# The streaming fixture (contract/stream_test.go): a component in Python whose steps
+# outlast the core's step wait, one saying a line as it goes, one silent.
+name = "drip"
+contract = 1
+help = "Drips progress lines."
+
+[commands."drip talk"]
+usage = "drip talk COUNT"
+summary = "Say COUNT lines, a quarter second apart."
+group = "Fixtures"
+help = "Says each line as it goes, then answers how many it said."
+class = "batch"
+
+[commands."drip quiet"]
+usage = "drip quiet SECONDS"
+summary = "Sleep SECONDS, saying nothing."
+group = "Fixtures"
+help = "Says nothing for that long, then answers."
+class = "batch"

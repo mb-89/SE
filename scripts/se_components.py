@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """SE's script commands as kern components (README "Commands as components").
 
-A script's command group is one component, `components/<name>/`: its `component.toml`, which the
-script's `docs` command writes from the script's command registry, and an `__init__.py` that calls
+A script's command group is one component, `components/<name>/`: its `component.toml`, which
+`work_tickets.py docs` writes from the script's argparse parser, and an `__init__.py` that calls
 `attach`, so the component answers each declared command with the script's own code. The command
-line does not change: `work_tickets.py <command>` runs as before, and an interactive command goes
+line does not change: `<script>.py <command>` runs as before, and an interactive command goes
 through kern where kern serves this checkout (`routed`), else directly.
 
 - **Declared:** a script that runs components names them in its `COMPONENTS` (each a `Group`) and
   its read-only commands in `INTERACTIVE_COMMANDS`, and builds its parser with `make_parser`;
-  `SCRIPTS` lists those scripts. `declarations` reads each group's commands, their usage and help
-  from that argparse parser, and `declaration` writes one group's `component.toml` text; `reference`
+  `SCRIPTS` lists those scripts. `declared` reads each group's commands, their usage and help from
+  that argparse parser (a parser without subcommands is one command, the script itself, `""` in its
+  group); `components` merges a group two scripts name into one component (render: timeline.py and
+  deck.py), and `declaration` writes one group's `component.toml` text; `reference`
   renders the README's command reference from the declarations as kern's own reader
   (`kern.declaration`) reads them, so the README shows the catalog kern checks at its start.
-- **Attached:** `attach` answers each command by running the script's `main` with the command's
-  words and arguments in this process. A call's first argument may be `--se-cwd=<dir>`, the
+- **Attached:** `attach` answers each command by running the main of the script its first word
+  names, one of the component's scripts, with the command's words and arguments in this process. A call's first argument may be `--se-cwd=<dir>`, the
   directory the command runs in; without it, kern's root. What it answers:
   - exit code 0: the text is what it wrote to stdout, each stderr line a progress line;
   - any other: the error `exit code <n>`, then on its next line a JSON object of what it wrote,
@@ -23,6 +25,11 @@ through kern where kern serves this checkout (`routed`), else directly.
   as the command would have; `SE_KERN=off` keeps every command direct, `SE_KERN=on` refuses to fall
   back. Only interactive commands go through kern: they only read, so a call that fails on the way
   runs again directly without doing anything twice. A batch command writes, and runs directly.
+- **Streamed:** a batch command its script names in `STREAMED_COMMANDS` (`integrate`) runs as one
+  call through kern where kern's GitHub relay serves the checkout: its progress lines print as they
+  come, the call waits as long as kern says anything (`CALL_IDLE`), and each GitHub step it needs
+  is one `github.step` request (`Stepped`). A call kern refuses before it says anything runs
+  directly, the file-based hand-off; one that fails on the way is reported, never run twice.
 - **Placed:** `wiring.toml` places each component with `se_components.py run <name>`, which puts
   kern's Python SDK and `scripts/` on the path and runs `python -m kern run components/<name>`.
 
@@ -42,6 +49,7 @@ import re
 import sys
 import tempfile
 import textwrap
+import threading
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,12 +66,23 @@ CWD = "--se-cwd="
 STANDING = Path(".se") / ".runtime" / "standing.json"
 #: How long routed waits for kern to answer a call: kern waits for a step this long (host.StepWait).
 CALL_WAIT = 60.0
+#: How long a streamed call waits for any word from kern: kern beats every 5 s (host.CallBeat).
+CALL_IDLE = 60.0
+#: How long a streamed command's thread waits for the answer of one GitHub step: the github
+#: component's step-wait (60 minutes), and a margin.
+STEP_ANSWER_WAIT = 65 * 60.0
+#: A streamed command's request port, which the wiring binds to the github component's verb step.
+STEP_PORT = "step"
+#: The github component's shapes of its verb step's request and answer (kern's github.StepShape).
+STEP_SHAPE, STEP_ANSWER_SHAPE = "github.step", "github.step-answer"
+STEP_HELP = ("One GitHub step of a streamed command through kern's relay: the tool and the input "
+             "the session runs, answered with the tool's answer.")
 #: How long routed waits to connect: kern stands on loopback.
 CONNECT_WAIT = 0.5
 REFERENCE_WIDTH = 100
 #: The scripts whose commands are components, in the README's order: each defines make_parser,
 #: COMPONENTS and INTERACTIVE_COMMANDS.
-SCRIPTS = ("work_tickets", "review")
+SCRIPTS = ("work_tickets", "review", "retro", "overhaul", "timeline", "deck", "se")
 #: Who writes the declarations (work_tickets.py's `docs` and `format`).
 GENERATOR = "`work_tickets.py docs`"
 EXIT_ERROR = re.compile(r"\Aexit code (\d+)\n?")
@@ -104,9 +123,9 @@ class Group(NamedTuple):
 
 
 def declaration(name: str, help_text: str, group: str, commands: Iterable[Declared],
-                generator: str, source: str = "its command registry") -> str:
+                generator: str, source: str = "its command registry", steps: bool = False) -> str:
     """The text of the component.toml of one command group, as `generator` writes it from
-    `source`."""
+    `source`; with `steps`, the request port its streamed commands ask GitHub steps on."""
     q = lambda value: json.dumps(value, ensure_ascii=False)  # a TOML basic string  # noqa: E731
     lines = [f"# Generated by {generator} from {source}; change a command there.",
              f"name = {q(name)}", "contract = 1", f"help = {q(help_text)}"]
@@ -114,6 +133,10 @@ def declaration(name: str, help_text: str, group: str, commands: Iterable[Declar
         lines += ["", f"[commands.{q(c.name)}]", f"usage = {q(c.usage)}",
                   f"summary = {q(summary(c.help))}", f"group = {q(group)}", f"help = {q(c.help)}",
                   f"class = {q('interactive' if c.interactive else 'batch')}"]
+    if steps:
+        lines += ["", f"[requests.{STEP_PORT}]", f"type = {q(STEP_SHAPE)}",
+                  f"answer = {q(STEP_ANSWER_SHAPE)}",
+                  f"help = {q(STEP_HELP)}"]
     return "\n".join(lines) + "\n"
 
 
@@ -142,14 +165,15 @@ def usage(prog: str, parser: argparse.ArgumentParser, width: int = REFERENCE_WID
     return "\n".join(line[len("usage: "):] for line in formatter.format_help().rstrip().splitlines())
 
 
-def declarations(parser: argparse.ArgumentParser, groups: Iterable[Group],
-                 interactive: Iterable[str] = (), source: str | None = None) -> dict[str, str]:
-    """Each group's component.toml text by its name, read from the script's argparse parser: every
-    command the parser runs belongs to exactly one group. A command named in `interactive` only
-    reads (class interactive); every other is batch. `source` names what the header says the
-    declaration is generated from, by default the script's parser."""
+def declared(parser: argparse.ArgumentParser, groups: Iterable[Group],
+             interactive: Iterable[str] = ()) -> dict[str, tuple[Group, list[Declared]]]:
+    """Each group with its commands by the group's name, read from the script's argparse parser:
+    every command the parser runs belongs to exactly one group. A parser without subcommands is one
+    command, the script itself, which a group names as `""`, its help the parser's description. A
+    command named in `interactive` only reads (class interactive); every other is batch."""
     script = parser.prog
-    found = {" ".join(words): (words, help_text, sub) for words, help_text, sub in leaves(parser)}
+    found = {" ".join(words): (words, help_text, sub) for words, help_text, sub in
+             leaves(parser) or [((), parser.description or "", parser)]}
     groups = list(groups)
     grouped = [name for group in groups for name in group.commands]
     if sorted(grouped) != sorted(found):
@@ -157,14 +181,24 @@ def declarations(parser: argparse.ArgumentParser, groups: Iterable[Group],
         raise ValueError(f"{script}: its components' commands differ from its parser: missing "
                          f"{missing}, unknown {extra}")
     interactive = frozenset(interactive)
-    out = {}
-    for group in groups:
-        declared = [Declared(" ".join((script, *found[n][0])),
-                             usage(" ".join((script, *found[n][0])), found[n][2]), found[n][1],
-                             n in interactive) for n in group.commands]
-        out[group.name] = declaration(group.name, group.help, group.title, declared, GENERATOR,
-                                      source or f"{script}'s parser")
-    return out
+    return {group.name: (group, [Declared(" ".join((script, *found[n][0])),
+                                          usage(" ".join((script, *found[n][0])), found[n][2]),
+                                          found[n][1], n in interactive) for n in group.commands])
+            for group in groups}
+
+
+def declarations(parser: argparse.ArgumentParser, groups: Iterable[Group],
+                 interactive: Iterable[str] = (), source: str | None = None,
+                 streamed: Iterable[str] = ()) -> dict[str, str]:
+    """Each group's component.toml text by its name, read from the script's argparse parser
+    (`declared`). `source` names what the header says the declaration is generated from, by
+    default the script's parser. A group holding a command named in `streamed` declares the
+    request port `step` (`Stepped`)."""
+    streamed = frozenset(streamed)
+    return {name: declaration(name, group.help, group.title, commands, GENERATOR,
+                              source or f"{parser.prog}'s parser",
+                              steps=bool(streamed & set(group.commands)))
+            for name, (group, commands) in declared(parser, groups, interactive).items()}
 
 
 def script(name: str):
@@ -183,21 +217,43 @@ def script(name: str):
     return module
 
 
+def relay_module():
+    """se_relay, SE's reads and steps through kern's GitHub relay, beside this script."""
+    return script("se_relay")
+
+
 def components(root: Path) -> dict[Path, str]:
-    """The component.toml of every component of SE's SCRIPTS under root, in the README's order."""
-    out = {}
+    """The component.toml of every component of SE's SCRIPTS under root, in the README's order. A
+    component two scripts share (render: timeline.py and deck.py) holds both scripts' commands, in
+    SCRIPTS' order, under the group the first one names: each later script names that same group,
+    its title and help included."""
+    merged: dict[str, tuple[Group, list[Declared], list[str]]] = {}
+    stepped: set[str] = set()
     for name in SCRIPTS:
         module = script(name)
-        texts = declarations(module.make_parser(), module.COMPONENTS, module.INTERACTIVE_COMMANDS,
-                             getattr(module, "COMPONENT_SOURCE", None))
-        out.update({root / COMPONENTS / group / "component.toml": text
-                    for group, text in texts.items()})
-    return out
+        parser = module.make_parser()
+        source = getattr(module, "COMPONENT_SOURCE", None) or f"{parser.prog}'s parser"
+        for group_name, (group, commands) in declared(parser, module.COMPONENTS,
+                                                      module.INTERACTIVE_COMMANDS).items():
+            if group_name not in merged:
+                merged[group_name] = (group, [], [])
+            first, into, sources = merged[group_name]
+            if (first.title, first.help) != (group.title, group.help):
+                raise ValueError(f"{parser.prog}: component {group_name} differs in its title or "
+                                 "help from the script that names it first")
+            into += commands
+            sources.append(source)
+            if set(getattr(module, "STREAMED_COMMANDS", ())) & set(group.commands):
+                stepped.add(group_name)
+    return {root / COMPONENTS / group_name / "component.toml":
+            declaration(group_name, group.help, group.title, commands, GENERATOR,
+                        " and ".join(sources), steps=group_name in stepped)
+            for group_name, (group, commands, sources) in merged.items()}
 
 
 def component_names() -> list[str]:
-    """The names of every component of SE's SCRIPTS, in the README's order."""
-    return [group.name for name in SCRIPTS for group in script(name).COMPONENTS]
+    """The names of every component of SE's SCRIPTS, in the README's order, each once."""
+    return list(dict.fromkeys(group.name for name in SCRIPTS for group in script(name).COMPONENTS))
 
 
 def catalog(root: Path, names: Iterable[str]):
@@ -225,10 +281,11 @@ def reference(declarations) -> str:
 # Attached.
 
 @contextlib.contextmanager
-def captured() -> Iterator[tuple[io.StringIO, io.StringIO]]:
-    """Capture stdout and stderr, the Python streams and the file descriptors a subprocess writes."""
+def captured(err: io.StringIO | None = None) -> Iterator[tuple[io.StringIO, io.StringIO]]:
+    """Capture stdout and stderr, the Python streams and the file descriptors a subprocess writes;
+    stderr into `err` where given."""
     with tempfile.TemporaryFile() as out_file, tempfile.TemporaryFile() as err_file:
-        out, err = io.StringIO(), io.StringIO()
+        out, err = io.StringIO(), (err if err is not None else io.StringIO())
         files = ((1, sys.stdout, out_file), (2, sys.stderr, err_file))
         saved = []
         for fd, stream, into in files:
@@ -252,11 +309,28 @@ def captured() -> Iterator[tuple[io.StringIO, io.StringIO]]:
             err.write(err_file.read().decode("utf-8", "replace"))
 
 
-def run_main(main: Callable[[list[str]], int], argv: list[str], cwd: str | None) -> tuple[int, str, str]:
-    """Run a script's main in `cwd`: its exit code, stdout and stderr."""
+class Said(io.StringIO):
+    """A stderr that also says each whole line as it is written."""
+
+    def __init__(self, say: Callable[[str], None]):
+        super().__init__()
+        self.say, self.part = say, ""
+
+    def write(self, text: str) -> int:
+        self.part += text
+        *lines, self.part = self.part.split("\n")
+        for line in lines:
+            self.say(line)
+        return super().write(text)
+
+
+def run_main(main: Callable[[list[str]], int], argv: list[str], cwd: str | None,
+             say: Callable[[str], None] | None = None) -> tuple[int, str, str]:
+    """Run a script's main in `cwd`: its exit code, stdout and stderr; with `say`, each stderr line
+    the script writes is also said as it comes."""
     before = os.getcwd()
     code = 0
-    with captured() as (out, err):
+    with captured(Said(say) if say else None) as (out, err):
         try:
             if cwd:
                 os.chdir(cwd)
@@ -270,16 +344,24 @@ def run_main(main: Callable[[list[str]], int], argv: list[str], cwd: str | None)
     return code, out.getvalue(), err.getvalue()
 
 
-def attach(name: str, script: str, folder: Path):
-    """The component of that name in `folder`, each declared command answered by `script`'s main."""
+def attach(name: str, scripts: str | Iterable[str], folder: Path):
+    """The component of that name in `folder`, each declared command answered by the main of the
+    script it names first (`timeline.py`, `deck.py build`), one of `scripts`."""
     sdk()
     import kern
 
     comp = kern.component(name, folder)
-    module = importlib.import_module(script)
-    prefix = script + ".py "
+    scripts = (scripts,) if isinstance(scripts, str) else tuple(scripts)
 
-    def answer(words: list[str]):
+    def stepped(module, words: list[str]):
+        def run(args: list[str], inputs, say):
+            cwd = None
+            if args and args[0].startswith(CWD):
+                cwd, args = args[0][len(CWD):], args[1:]
+            return Stepped(comp, module.main, [*words, *args], cwd, say, " ".join(words)).result()
+        return run
+
+    def answer(module, words: list[str]):
         def run(args: list[str], inputs, say):
             cwd = None
             if args and args[0].startswith(CWD):
@@ -293,9 +375,13 @@ def attach(name: str, script: str, folder: Path):
         return run
 
     for command in comp.decl.commands:
-        if not command.startswith(prefix):
-            raise kern.KernError(f"component {name} declares {command!r}, which {script}.py does not run")
-        comp.command(command)(answer(command[len(prefix):].split()))
+        first, *words = command.split()
+        if first.removesuffix(".py") not in scripts or not first.endswith(".py"):
+            raise kern.KernError(f"component {name} declares {command!r}, which "
+                                 f"{' nor '.join(s + '.py' for s in scripts)} does not run")
+        module = importlib.import_module(first.removesuffix(".py"))
+        streamed = " ".join(words) in getattr(module, "STREAMED_COMMANDS", frozenset())
+        comp.command(command)((stepped if streamed else answer)(module, words))
     return comp
 
 
@@ -316,13 +402,20 @@ def standing(root: Path) -> dict | None:
         return None
 
 
-def routed(script: Path, words: list[str], argv: list[str], interactive: bool) -> int | None:
+def routed(script: Path, words: list[str], argv: list[str], interactive: bool,
+           streamed: bool = False) -> int | None:
     """The exit code of the command `words` run through kern, having printed its answer; None where
     it runs directly: SE_KERN=off, a batch command, no kern serving this checkout, another copy of
-    the script than the one kern runs, or a call that failed on the way (with SE_KERN=on an error)."""
+    the script than the one kern runs, or a call that failed on the way (with SE_KERN=on an error).
+    A `streamed` batch command goes through kern only where kern's GitHub relay serves the
+    checkout (`streamed_call`)."""
     switch = os.environ.get(SWITCH, "").lower()
-    if switch == "off" or not interactive:
+    if switch == "off" or not (interactive or streamed):
         return None
+    if streamed:
+        answered = streamed_call(script, words, argv, switch)
+        if answered is not None or not interactive:
+            return answered
     root = kern_root(Path.cwd())
     found = standing(root) if root else None
     if root is None or found is None or (root / "scripts" / script.name).resolve() != script.resolve():
@@ -366,6 +459,127 @@ def routed(script: Path, words: list[str], argv: list[str], interactive: bool) -
     if text:
         print(text)
     return 0
+
+
+def streamed_call(script: Path, words: list[str], argv: list[str], switch: str) -> int | None:
+    """Run a streamed batch command as one call through kern where kern's GitHub relay serves this
+    checkout: each progress line prints on stderr as kern streams it, the call waits as long as
+    kern says anything within CALL_IDLE, and the answer prints as the command would have. None,
+    and the command runs directly (its file-based hand-off), where no relay serves or kern refuses
+    the call before saying anything; a call that fails after it began is an error, never rerun."""
+    root = kern_root(Path.cwd())
+    if root is None or (root / "scripts" / script.name).resolve() != script.resolve():
+        return None
+    if relay_module().relay(root) is None:
+        return None
+    found = standing(root)
+    if found is None:
+        return None
+    sdk()
+    from kern.nats import NatsError, Peer
+    from kern.subjects import token
+
+    name = " ".join([script.name, *words])
+    heard: list[str] = []
+
+    def progress(msg) -> None:
+        line = (msg.json() or {}).get("line")
+        if line is not None:
+            heard.append(str(line))
+            print(line, file=sys.stderr, flush=True)
+
+    try:
+        peer = Peer(found["bus"], "client", found["users"]["client"], name="se", timeout=CONNECT_WAIT)
+    except (NatsError, OSError, KeyError, TypeError, ValueError):
+        return None
+    try:
+        answer = peer.call("call." + token(name), {"args": [CWD + os.getcwd(), *argv]}, progress,
+                           CALL_IDLE).json() or {}
+    except (NatsError, OSError, ValueError) as error:
+        print(f"error: kern's call of {name} failed after it began, so it is not run again: "
+              f"{error}", file=sys.stderr)
+        return 1
+    finally:
+        peer.close()
+    failed = str(answer.get("error") or "")
+    exit_ = EXIT_ERROR.match(failed)
+    if failed and not exit_:
+        if not heard and switch != "on":  # refused before it ran: no such command, no attach
+            return None
+        print(f"error: kern: {failed}", file=sys.stderr)
+        return 1
+    if exit_:
+        said = json.loads(failed[exit_.end():] or "{}")
+        sys.stdout.write(said.get("stdout", ""))
+        return int(exit_.group(1))
+    text = str(answer.get("text") or "")
+    if text:
+        print(text)
+    return 0
+
+
+class Stepped:
+    """A streamed command in the component's process: the script's main runs in a thread of its
+    own, with se_relay's step set, and each GitHub step it asks becomes one request on the
+    command's `step` port, which the wiring binds to the github component's verb step; the
+    answer comes back through the request's continuation (kern's Requests and Then). Its stderr
+    lines are said as they come. A new call of the command gives up a thread still waiting from
+    a call kern stopped."""
+
+    waiting: dict[str, "Stepped"] = {}
+
+    def __init__(self, comp, main: Callable[[list[str]], int], argv: list[str], cwd: str | None,
+                 say: Callable[[str], None], key: str):
+        import queue
+
+        self.comp, self.say, self.key = comp, say, key
+        self.out: queue.Queue = queue.Queue()  # ("ask", value) or ("done", (code, out, err))
+        self.answers: queue.Queue = queue.Queue()
+        old = Stepped.waiting.pop(key, None)
+        if old is not None:
+            old.answers.put(("stop", "a new call of the command began"))
+        Stepped.waiting[key] = self
+        threading.Thread(target=self._run, args=(main, argv, cwd), daemon=True,
+                         name=f"se-stepped-{key}").start()
+
+    def step(self, tool: str, input_: dict, note: str, wait: str) -> object:
+        """Ask one GitHub step from the command's thread; the tool's answer."""
+        import queue
+
+        ask = {"tool": tool, "input": input_, **({"note": note} if note else {}),
+               **({"wait": wait} if wait else {})}
+        self.out.put(("ask", ask))
+        try:
+            kind, value = self.answers.get(timeout=STEP_ANSWER_WAIT)
+        except queue.Empty:
+            kind, value = "stop", f"no answer to the step {tool} within {STEP_ANSWER_WAIT:.0f} s"
+        if kind == "stop":
+            raise RuntimeError(f"the call through kern stopped: {value}")
+        return value.get("data") if isinstance(value, dict) else value
+
+    def _run(self, main, argv, cwd) -> None:
+        try:
+            with relay_module().stepping(self.step):
+                done = run_main(main, argv, cwd, self.say)
+        except BaseException as error:  # noqa: BLE001 - the command's thread reports, never dies
+            done = (1, "", f"{error}\n")
+        self.out.put(("done", done))
+
+    def result(self):
+        """The next step's answer for kern: a request, with its continuation, or the end."""
+        import kern
+
+        kind, value = self.out.get()
+        if kind == "ask":
+            def then(answers: list) -> object:
+                self.answers.put(("answer", answers[0] if answers else None))
+                return self.result()
+            return self.comp.result(requests=[self.comp.ask(STEP_PORT, value)], then=then)
+        Stepped.waiting.pop(self.key, None)
+        code, out, err = value
+        if code:
+            raise kern.KernError(f"exit code {code}\n" + json.dumps({"stdout": out, "stderr": err}))
+        return out.rstrip("\n")
 
 
 # Placed.

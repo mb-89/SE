@@ -43,6 +43,9 @@ const (
 	IOVerb = "io."
 	Hook   = "hook."
 	Lease  = "lease."
+	// Say carries a declared instance's live progress line, or its beat, for
+	// the step of a call it runs: {"call", "line"?}.
+	Say = "say."
 )
 
 // The environment a placed component process reads its bus, user and password from.
@@ -145,7 +148,8 @@ func password() (string, error) {
 }
 
 // instancePermissions are an instance's: it publishes its own commits, leases
-// and input asks, and asks any name and command; it hears its own runs,
+// and input asks, its live progress lines (say.<i>), and asks any name and
+// command; it hears its own runs,
 // commands and, for an I/O instance, requests, every value, and its own inbox.
 func instancePermissions(in Instance) *server.Permissions {
 	i := Subject(in.Name)
@@ -154,7 +158,7 @@ func instancePermissions(in Instance) *server.Permissions {
 		sub = append(sub, IOVerb+i+".>")
 	}
 	return &server.Permissions{
-		Publish:   &server.SubjectPermission{Allow: []string{Commit + i, Lease + i, In + i, Get + ">", Call + ">"}},
+		Publish:   &server.SubjectPermission{Allow: []string{Commit + i, Lease + i, In + i, Say + i, Get + ">", Call + ">"}},
 		Subscribe: &server.SubjectPermission{Allow: sub},
 		// An instance answers the core's cmd and io requests on the reply subject each names.
 		Response: &server.ResponsePermission{MaxMsgs: 1},

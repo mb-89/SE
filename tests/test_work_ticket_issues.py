@@ -2840,6 +2840,119 @@ def test_integrate_hands_off_a_plan_of_github_steps_where_gh_is_not_signed_in(
                           capture_output=True, text=True, check=True).stdout.strip() == "main"
 
 
+class SessionSteps:
+    """A cloud session answering integrate's GitHub steps through kern's relay: each step is the
+    tool and input kern's `github.step` hands it, answered as the GitHub tools answer, on the bare
+    origin as GitHub would (`FakeGitHub` writes the squash commit)."""
+
+    def __init__(self, github: FakeGitHub, root: Path, checks: list[dict]) -> None:
+        self.github, self.root, self.checks = github(root, "git.example/owner/repo"), root, checks
+        self.asked: list[tuple[str, dict]] = []
+
+    def __call__(self, tool: str, input_: dict, note: str, wait: str) -> object:
+        self.asked.append((tool, input_))
+        method = input_.get("method")
+        if tool == "pull_request_read" and method == "get" and input_["pullNumber"] == 7:
+            head = self.github.git("rev-parse", "refs/heads/feature/worker")
+            return {"number": 7, "body": reported_at(head), "html_url": "https://git.example/owner/repo/pull/7",
+                    "head": {"ref": "feature/worker", "sha": head}}
+        if tool == "issue_read" and method == "get" and input_["issue_number"] == 5 and len(self.asked) < 3:
+            return {"number": 5, "title": "feature/worker", "state": "open",
+                    "html_url": "https://git.example/owner/tracker/issues/5", "body": reported_at(self.github.git("rev-parse", "refs/heads/feature/worker"))}
+        if tool == "list_issues":
+            return {"issues": [], "totalCount": 0}
+        if tool == "list_pull_requests":
+            return []
+        if tool == "create_pull_request":
+            pull = self.github.create_pull(input_["head"], input_["base"], input_["title"],
+                                           input_["body"])
+            return {"id": "1", "url": pull["html_url"]}  # the tool's minimal answer: no number
+        if tool == "pull_request_read" and method == "get_check_runs":
+            run = self.checks.pop(0) if len(self.checks) > 1 else self.checks[0]
+            head = self.github.git("rev-parse", "refs/heads/land/feature/worker")
+            return {"total_count": 1, "check_runs": [{**run, "name": "check", "head_sha": head}]}
+        if tool == "merge_pull_request":
+            sha = self.github.squash(input_["pullNumber"], input_["expectedHeadSha"],
+                                     input_["commit_title"], input_["commit_message"])
+            return {"sha": sha, "merged": True, "message": "Pull Request successfully merged"}
+        if tool == "pull_request_read" and method == "get":
+            pull = dict(self.github.pull(input_["pullNumber"]))
+            pull.pop("merge_commit_sha", None)  # the tools name no merge commit
+            return pull
+        if tool == "add_issue_comment":
+            return {"id": "77", "url": f"https://git.example/{input_['owner']}/{input_['repo']}/"
+                                       f"issues/{input_['issue_number']}#issuecomment-77"}
+        if tool == "issue_read" and method == "get_labels":
+            return [{"name": "work"}, {"name": "in-progress"}]
+        if tool == "issue_read" and method == "get":
+            return {"number": input_["issue_number"], "state": "closed"}
+        if tool in ("update_pull_request", "issue_write"):
+            return {"id": "1", "url": "https://git.example/owner/repo"}
+        raise AssertionError(f"integrate asked an unexpected step: {tool} {input_}")
+
+
+def test_integrate_runs_its_plan_and_close_out_as_one_call_through_kerns_relay(
+        main_checkout, monkeypatch, github, capsys):
+    """Where integrate runs as one call through kern (se_relay.steps set, as the integration
+    component's Stepped sets it), each GitHub step of its landing plan and close-out is one
+    github.step the session answers: no plan is handed off, no answer is retyped into a file, no
+    read-back follows, and the landing is read back through git within the same call."""
+    head, _ = handed_off_worker(main_checkout, monkeypatch, github)
+    base = origin_main(main_checkout)
+    waits: list[float] = []
+    monkeypatch.setattr(work_tickets, "wait", waits.append)
+    session = SessionSteps(github, main_checkout, [
+        {"id": 1, "status": "in_progress", "conclusion": None},
+        {"id": 2, "status": "completed", "conclusion": "success",
+         "html_url": "https://git.example/owner/repo/runs/2"}])
+    se_relay = work_tickets.sibling("se_relay")
+
+    with se_relay.stepping(session):
+        assert run(main_checkout, "integrate", "7") == 0  # no file: the reads are steps too
+
+    tools = [(tool, input_.get("method")) for tool, input_ in session.asked]
+    assert tools[:2] == [("pull_request_read", "get"), ("issue_read", "get")]  # PR #7, issue #5
+    session.asked = session.asked[2:]
+    tools = tools[2:]
+    assert tools == [
+        ("list_issues", None),  # the pause search on the tracker
+        ("list_pull_requests", None), ("create_pull_request", None),
+        ("pull_request_read", "get_check_runs"), ("pull_request_read", "get_check_runs"),
+        ("merge_pull_request", None), ("pull_request_read", "get"),  # the squash, read back
+        ("pull_request_read", "get"),  # the landing description, for its metrics line
+        ("add_issue_comment", None), ("update_pull_request", None),  # the work pull request
+        ("add_issue_comment", None), ("issue_read", "get_labels"), ("issue_write", "update"),
+        ("issue_write", "update"), ("issue_read", "get"),  # the work issue: out of progress, closed
+    ]
+    assert waits == [30]  # one poll before the check completed
+    assert session.asked[0][1] == {"owner": "owner", "repo": "tracker", "state": "OPEN",
+                                   "labels": ["pause"], "perPage": 20}
+    labels = session.asked[12][1]
+    assert (labels["repo"], labels["issue_number"], labels["labels"]) == ("tracker", 5, ["work"])
+    closed = session.asked[13][1]
+    assert (closed["repo"], closed["state"], closed["state_reason"]) == ("tracker", "closed", "completed")
+    commit = origin_main(main_checkout)
+    assert commit != base and squashed_onto_origin(main_checkout, commit)
+    assert not (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()
+    out = capsys.readouterr().out
+    assert "GitHub plan:" not in out  # nothing handed to the session as a plan
+    assert "Landing pull request opened: https://git.example/owner/repo/pull/20" in out
+    assert "Check check: in_progress" in out and "Check check: success" in out
+    assert "Issue #5: CLOSED on GitHub after the merge" in out
+    assert f"Integrated pull request #7 in {commit[:7]}" in out
+
+
+def test_integrate_without_kern_keeps_the_file_based_hand_off(main_checkout, monkeypatch, github,
+                                                              capsys):
+    """The fallback: no call through kern (se_relay.steps unset, as when kern is not running),
+    and integrate hands its plan to the session as before."""
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert work_tickets.sibling("se_relay").steps() is None
+    assert run(main_checkout, *arguments) == 0
+    assert "GitHub plan: land land/feature/worker on main" in capsys.readouterr().out
+    assert (main_checkout / ".se" / "handoff" / "feature-worker.json").is_file()
+
+
 def test_the_hand_off_plan_titles_by_the_goal_and_links_a_report_over_the_body_limit(
         main_checkout, monkeypatch, github):
     """The plan runs unedited: its title names the work issue's Goal, not the branch's last commit
@@ -4614,3 +4727,85 @@ def test_dry_run_of_the_worker_to_integrator_flow_files_no_field_report_issue(
         ["git", "-C", str(main_checkout), "log", "-1", "--format=%B"], capture_output=True,
         text=True, check=True).stdout
     assert not any(call[:2] == ["issue", "create"] or "field-report" in call for call in gh.calls)
+
+
+def test_file_dedupes_and_files_through_kerns_relay_as_one_call(worktree, monkeypatch, capsys):
+    """Where file runs as one call through kern (se_relay.steps set), its dedupe plan runs step by
+    step through kern's github.step: every page of the open issues is read, the issue is filed,
+    and the race check reads them again, with no plan handed to the session."""
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+    body = worktree / "body.md"
+    body.write_text("## Goal\n\nG.\n\n## Requirements\n\n1. One.\n\n## Acceptance\n\n- It.\n",
+                    encoding="utf-8")
+    asked: list[tuple[str, dict]] = []
+    filed: list[dict] = []
+
+    def session(tool: str, input_: dict, note: str, wait: str) -> object:
+        asked.append((tool, input_))
+        if tool == "list_issues" and "after" not in input_:
+            return {"issues": [{"number": 3, "title": "feat/other", "body": "x"}],
+                    "pageInfo": {"hasNextPage": True, "endCursor": "c1"}}
+        if tool == "list_issues":
+            return {"issues": [{"number": n["number"], "title": n["title"], "body": n["body"]}
+                               for n in filed], "pageInfo": {"hasNextPage": False}}
+        if tool == "issue_write" and input_["method"] == "create":
+            filed.append({**input_, "number": 12})
+            return {"id": "1", "url": "https://git.example/owner/repo/issues/12"}
+        raise AssertionError(f"file asked an unexpected step: {tool} {input_}")
+
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(worktree, "file", "--title", "feat/frob-20261113", "--body-file", str(body),
+                   "--repo", "git.example/owner/repo") == 0
+
+    assert [(tool, input_.get("after")) for tool, input_ in asked] == [
+        ("list_issues", None), ("list_issues", "c1"), ("issue_write", None),
+        ("list_issues", None), ("list_issues", "c1")]
+    created = asked[2][1]
+    assert (created["owner"], created["repo"], created["title"]) == ("owner", "repo", "feat/frob-20261113")
+    assert "work" in created["labels"] and "ready" in created["labels"]
+    out = capsys.readouterr().out
+    assert "GitHub plan:" not in out
+    assert "Filed work issue https://git.example/owner/repo/issues/12" in out
+
+
+def test_fleet_check_reads_through_kerns_relay_as_one_call(worktree, monkeypatch, capsys):
+    """Where fleet-check runs as one call through kern (se_relay.steps set), it reads the fleet
+    step by step through kern's github.step, the in-progress issue's comments among them, instead
+    of printing a plan and taking three files."""
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "fleet_branches", lambda root: {})
+    asked: list[tuple[str, dict]] = []
+
+    def session(tool: str, input_: dict, note: str, wait: str) -> object:
+        asked.append((tool, input_))
+        method = input_.get("method")
+        if tool == "list_issues" and input_["state"] == "OPEN":
+            return {"issues": [{"number": 5, "title": "feat/x", "state": "OPEN", "body": "",
+                                "labels": ["work", "in-progress"]}],
+                    "pageInfo": {"hasNextPage": False}}
+        if tool == "list_issues":
+            return {"issues": []}
+        if tool == "issue_read" and method == "get_comments":
+            return [{"body": "Started: worker", "created_at": "2026-11-01T09:00:00Z"}]
+        if tool == "list_pull_requests":
+            return [{"number": 9}]
+        if tool == "pull_request_read" and method == "get":
+            return {"number": 9, "head": {"ref": "feat/y", "sha": "abc"}, "body": "",
+                    "mergeable_state": "clean"}
+        if tool == "pull_request_read" and method == "get_check_runs":
+            return {"check_runs": [{"id": 1, "name": "check", "head_sha": "abc",
+                                    "status": "completed", "conclusion": "failure"}]}
+        raise AssertionError(f"fleet-check asked an unexpected step: {tool} {input_}")
+
+    with work_tickets.sibling("se_relay").stepping(session):
+        code = run(worktree, "fleet-check", "--repo", "git.example/owner/repo")
+
+    assert code == 1  # stuck work found
+    assert [(tool, input_.get("method")) for tool, input_ in asked] == [
+        ("list_issues", None), ("list_issues", None), ("list_pull_requests", None),
+        ("pull_request_read", "get"), ("pull_request_read", "get_check_runs"),
+        ("issue_read", "get_comments")]
+    out = capsys.readouterr().out
+    assert "GitHub plan:" not in out
+    assert "#5" in out and "no branch" in out

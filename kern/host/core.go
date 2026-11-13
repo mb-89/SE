@@ -60,6 +60,8 @@ type Options struct {
 	Clock Clock
 	// Grace, Idle and LeaseLapse override the built-in spans where set.
 	Grace, Idle, LeaseLapse time.Duration
+	// StepWait and CallBeat override the built-in waits of a call where set.
+	StepWait, CallBeat time.Duration
 	// Log takes what the core and its placed processes say; none where nil.
 	Log io.Writer
 }
@@ -123,6 +125,12 @@ func Serve(o Options) (*Core, error) {
 	}
 	if o.LeaseLapse == 0 {
 		o.LeaseLapse = LeaseLapse
+	}
+	if o.StepWait == 0 {
+		o.StepWait = StepWait
+	}
+	if o.CallBeat == 0 {
+		o.CallBeat = CallBeat
 	}
 	if o.Log == nil {
 		o.Log = io.Discard

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,12 +45,21 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	var goInstances []index.Instance
+	kept := map[string]bool{}
 	for _, in := range w.Instances {
 		if len(in.Command) == 0 {
 			goInstances = append(goInstances, in)
+			kept[in.Name] = true
 		}
 	}
-	w.Instances, w.Hooks = goInstances, nil
+	// The placed groups' wires go with them: a streamed group's step port (integration.step).
+	var wires []index.Wire
+	for _, wire := range w.Wires {
+		if inst, _, _ := strings.Cut(wire.Port, "."); kept[inst] {
+			wires = append(wires, wire)
+		}
+	}
+	w.Instances, w.Wires, w.Hooks = goInstances, wires, nil
 	origin.Read = func(string) (map[string]time.Time, error) {
 		return map[string]time.Time{"main": time.Now()}, nil
 	}

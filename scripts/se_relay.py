@@ -18,9 +18,10 @@ Python SDK and `se_components` are imported where they are needed.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,28 @@ FAMILIES = {
     "comments": ("issue_read", "get_comments", "issue_number"),
     "checks": ("pull_request_read", "get_check_runs", "pullNumber"),
 }
+
+
+#: The GitHub step of the call this process runs as one call through kern, where se_components'
+#: Stepped set it: step(tool, input, note, wait) asks kern's `github.step` and answers the tool's
+#: answer. None outside such a call: the command hands its plan to the session instead.
+_step: Callable[[str, dict[str, Any], str, str], Any] | None = None
+
+
+def steps() -> Callable[[str, dict[str, Any], str, str], Any] | None:
+    """The GitHub step of the call this process runs through kern, or None."""
+    return _step
+
+
+@contextlib.contextmanager
+def stepping(step: Callable[[str, dict[str, Any], str, str], Any]) -> Iterator[None]:
+    """Run a command with `step` as its GitHub step (se_components' Stepped sets it)."""
+    global _step
+    before, _step = _step, step
+    try:
+        yield
+    finally:
+        _step = before
 
 
 class RelayError(Exception):

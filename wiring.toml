@@ -27,6 +27,21 @@ command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts
 component = "review"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "review"]
 
+[instances.retrospective]
+component = "retrospective"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "retrospective"]
+
+[instances.overhaul]
+component = "overhaul"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "overhaul"]
+
+[instances.render]
+component = "render"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "render"]
+
+[instances.scaffold]
+component = "scaffold"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "scaffold"]
 # kern's GitHub component, and SE's fleet, retro and origin reading it (components/README.md), all
 # compiled into the `se` binary. The config is SE's own checkout's: the fleet's lease hours, the
 # repository name and the integration branch; the retro's due-after count and tracker.
@@ -47,6 +62,7 @@ config = { due-after = 10, tracker = "mb-89/SE", base = "main" }
 [wires]
 "github.issues" = "github/issues/<key>"
 "github.pulls" = "github/pulls/<key>"
+"github.comments" = "github/comments/<key>"
 "github.checks" = "github/checks/<key>"
 "github.outbox" = "github/outbox/<key>"
 "fleet.issues" = "github/issues/<key>"
@@ -55,6 +71,9 @@ config = { due-after = 10, tracker = "mb-89/SE", base = "main" }
 "fleet.branches" = "origin/branches"
 "retro.issues" = "github/issues/<key>"
 "retro.pulls" = "github/pulls/<key>"
+# The streamed commands' GitHub steps (README "Hand-offs through the relay").
+"integration.step" = "github.step"
+"issues.step" = "github.step"
 
 # The Stop hooks (README "Stop hook"): the delivery component's stop-check answers them inside the
 # hook, in its own warm process; scripts/se_hook.sh falls back to running it directly.

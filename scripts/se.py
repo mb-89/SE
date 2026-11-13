@@ -19,8 +19,18 @@ def _sibling(name: str):
     return module
 
 
-def parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="se", description="SE's commands.")
+#: se.py's commands as one kern component (README "Commands as components"); each command's usage
+#: and help come from make_parser.
+COMPONENTS = (_sibling("se_components").Group(
+    "scaffold", "Scaffold",
+    "What SE scaffolds: a new application on kern, and an ad hoc component in a checkout.",
+    ("new app", "component add")),)
+#: The commands that go through kern where it runs (se_components.routed): none, as both write.
+INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
+
+
+def make_parser() -> argparse.ArgumentParser:
+    top = argparse.ArgumentParser(prog="se.py", description="SE's commands.")
     commands = top.add_subparsers(dest="command", required=True)
     new = commands.add_parser("new", help="create something new").add_subparsers(dest="what", required=True)
     app = new.add_parser("app", help="create an application on kern from kern's template at SE's kern pin")
@@ -42,7 +52,13 @@ def _checkout(start: Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    args = make_parser().parse_args(argv)
+    words = [args.command, args.what if args.command == "new" else args.action]
+    routed = _sibling("se_components").routed(
+        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
+        " ".join(words) in INTERACTIVE_COMMANDS)
+    if routed is not None:
+        return routed
     if args.command == "component":
         se_component = _sibling("se_component")
         root = (args.root or _checkout(Path.cwd())).resolve()
