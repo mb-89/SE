@@ -100,7 +100,7 @@ type fakeGitHub struct {
 	links    map[string]string
 	refusals []func(http.ResponseWriter)
 	refuseAt map[string][]func(http.ResponseWriter) // refusals queued before one path's answer
-	asked    []string // each request: its path, and its If-None-Match where it sent one
+	asked    []string                               // each request: its path, and its If-None-Match where it sent one
 	answered []int
 }
 

@@ -109,6 +109,15 @@ jobs:
       - name: kern vets
         working-directory: kern
         run: time go vet ./...
+      # gofmt -l lists each file of kern's not formatted as gofmt writes it; any fails the check.
+      - name: kern is formatted
+        working-directory: kern
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt -l lists files of kern not formatted: $(echo $unformatted); run gofmt -w . in kern"
+            exit 1
+          fi
       # SE's Go components (components/README.md "Tests"), their module beside kern's: vetted
       # here; their tests run in the suite step below, as se.toml [tests.beside.go-components] declares.
       - name: SE's Go components vet

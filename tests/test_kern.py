@@ -1,8 +1,12 @@
 """kern, the Go core incubated under kern/ (kern/README.md "Tests"): the check main requires runs it."""
 
 import re
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
+
+import pytest
 
 PROJECT = Path(__file__).resolve().parents[1]
 WORKFLOW = PROJECT / ".github" / "workflows" / "check.yml"
@@ -29,6 +33,39 @@ def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins()
     assert [check.index(step) for step in steps] == sorted(check.index(step) for step in steps)
     assert "        working-directory: kern\n        run: time go vet ./...\n" in check
     assert "go test" not in check, "kern's tests have one declaration, se.toml [tests.beside.kern]"
+
+
+def gofmt_step() -> str:
+    """The shell of the check job's step "kern is formatted"."""
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    step = workflow[workflow.index("      - name: kern is formatted\n"):]
+    lines = step.splitlines()[3:]
+    block = []
+    for line in lines:
+        if line.strip() and not line.startswith(" " * 10):
+            break
+        block.append(line[10:])
+    return "\n".join(block)
+
+
+def test_the_required_check_fails_where_gofmt_lists_a_file_of_kern() -> None:
+    """The check job's step after kern's vet runs gofmt -l in kern/ and fails on any file it
+    lists, naming it; a formatted tree passes."""
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", workflow[workflow.index("\njobs:\n"):])[1]
+    assert check.index("run: time go vet ./...") < check.index("- name: kern is formatted\n        working-directory: kern\n        run: |\n")
+    assert "gofmt -l ." in gofmt_step()
+
+
+@pytest.mark.skipif(shutil.which("gofmt") is None, reason="gofmt is not installed")
+def test_the_gofmt_step_refuses_an_unformatted_file_and_passes_a_formatted_one(tmp_path) -> None:
+    (tmp_path / "ok.go").write_text("package x\n\nfunc A() {}\n", encoding="utf-8")
+    run = lambda: subprocess.run(["bash", "-c", gofmt_step()], cwd=tmp_path, capture_output=True, text=True)
+    assert run().returncode == 0
+    (tmp_path / "bad.go").write_text("package x\nfunc  B( ) {}\n", encoding="utf-8")
+    result = run()
+    assert result.returncode == 1
+    assert "::error::gofmt -l lists files of kern not formatted: bad.go; run gofmt -w . in kern" in result.stdout
 
 
 def test_the_required_check_fails_unless_kern_and_ses_hook_passed_on_windows_and_macos() -> None:
