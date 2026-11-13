@@ -13,7 +13,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from quiet_git import quiet
+import quiet_git
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = SE_ROOT / "scripts" / "public_check.py"
@@ -125,8 +125,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.delenv(public_check.MACHINE_ENV, raising=False)
     path = tmp_path / "repo"
     path.mkdir()
-    git(path, "init", "-q", "-b", "main")
-    quiet(path)
+    quiet_git.init(path, "-b", "main")
     git(path, "config", "user.name", "Test")
     git(path, "config", "user.email", "test" + AT + "example.com")
     git(path, "config", "commit.gpgsign", "false")
@@ -744,9 +743,7 @@ def shallow_clone(repo: Path, tmp_path: Path, depth: int) -> Path:
     for index in range(4):
         commit(repo, {f"f{index}.txt": "x\n"}, f"Change {index}")
     clone = tmp_path / "shallow"
-    subprocess.run(["git", "clone", "-q", "--depth", str(depth), repo.as_uri(), str(clone)],
-                   capture_output=True, check=True)
-    quiet(clone)
+    quiet_git.clone(repo.as_uri(), clone, "--depth", str(depth))
     return clone
 
 
@@ -849,8 +846,7 @@ def test_commit_msg_hook_blocks_a_leaky_message(hooked: Path) -> None:
 
 def test_pre_push_hook_checks_pushed_commits(hooked: Path, tmp_path: Path) -> None:
     remote = tmp_path / "remote.git"
-    git(tmp_path, "init", "-q", "--bare", str(remote))
-    quiet(remote)
+    quiet_git.init(remote, "--bare")
     git(hooked, "remote", "add", "origin", str(remote))
     (hooked / "clean.txt").write_text("clean\n", encoding="utf-8")
     assert try_commit(hooked).returncode == 0
@@ -996,8 +992,7 @@ def test_commit_msg_hook_accepts_csharp_and_include(hooked: Path) -> None:
 def test_pre_push_hook_refuses_a_tracker_reference_naming_the_commit(
         hooked: Path, tmp_path: Path) -> None:
     remote = tmp_path / "remote.git"
-    git(tmp_path, "init", "-q", "--bare", str(remote))
-    quiet(remote)
+    quiet_git.init(remote, "--bare")
     git(hooked, "remote", "add", "origin", str(remote))
     (hooked / "clean.txt").write_text("clean\n", encoding="utf-8")
     git(hooked, "add", "-A")
@@ -1052,8 +1047,7 @@ def test_the_message_gate_passes_a_clean_message(repo: Path, tmp_path: Path) -> 
 def test_the_range_gate_refuses_unpushed_trailers_and_leaves_published_ones(
         repo: Path, tmp_path: Path) -> None:
     remote = tmp_path / "remote.git"
-    git(tmp_path, "init", "-q", "--bare", str(remote))
-    quiet(remote)
+    quiet_git.init(remote, "--bare")
     git(repo, "remote", "add", "origin", str(remote))
     commit(repo, {"a.txt": "a\n"}, f"Published work\n\n{CO_AUTHOR}")
     git(repo, "push", "-q", "origin", "main")
@@ -1090,8 +1084,7 @@ def owner_push(repo: Path, tmp_path: Path, message: str) -> tuple[str, str]:
     git(repo, "config", "user.email", "mb")
     commit(repo, {"se.toml": PROJECT_IDENTITY})
     remote = tmp_path / "remote.git"
-    git(tmp_path, "init", "-q", "--bare", str(remote))
-    quiet(remote)
+    quiet_git.init(remote, "--bare")
     git(repo, "remote", "add", "origin", str(remote))
     git(repo, "push", "-q", "origin", "main")
     before = git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -1106,8 +1099,7 @@ def run_ci(tmp_path: Path, before: str, after: str,
     or with `base_ref` on a pull request into that branch, whose head is `after`."""
     runner = tmp_path / "runner"
     shutil.rmtree(runner, ignore_errors=True)
-    git(tmp_path, "clone", "-q", "-b", "main", str(tmp_path / "remote.git"), str(runner))
-    quiet(runner)
+    quiet_git.clone(tmp_path / "remote.git", runner, "-b", "main")
     env = {**os.environ, "BEFORE": before, "AFTER": after, "BRANCH": base_ref or "main",
            "BASE_REF": base_ref}
     return subprocess.run(["bash", "-e", "-c", ci_script()], cwd=runner, env=env,
