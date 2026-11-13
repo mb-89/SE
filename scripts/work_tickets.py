@@ -2201,7 +2201,9 @@ def guard(root: Path, branch: str, report: str) -> list[str]:
     if missing:
         raise QueueError(
             "Field report must name each deleted or renamed test and authored sentence: "
-            + ", ".join(missing)
+            + ", ".join(missing) + f". A branch behind {integration_ref(root)} reads as deleting "
+            "what landed there since: merge it first (work_tickets.py sync; deliver does) and "
+            "check again"
         )
     return [*removed_tests, *removed_sentences]
 
@@ -2739,13 +2741,35 @@ def pull_request_body(issue: dict[str, object], report: str) -> str:
     return f"{keyword} {issue['url']}\n\n{marked_report(report)}"
 
 
+def merge_current_main(root: Path, branch: str) -> None:
+    """`deliver`'s start: merge the newest integration branch into `branch` (`sync`), so the
+    checks that follow, `integrate`'s guard among them, and the delivery itself are against
+    current main. A conflict aborts the merge, leaves the branch as it was and names its files."""
+    before = branch_tip(root)
+    try:
+        commit = sync(root)
+    except QueueError as error:
+        conflicted = run_git(root, "diff", "--name-only", "--diff-filter=U").stdout.split()
+        if not conflicted:
+            raise
+        run_git(root, "merge", "--abort")
+        raise QueueError(
+            f"deliver: merging {integration_ref(root)} into {branch} conflicts in "
+            f"{', '.join(conflicted)}; nothing was pushed. Run work_tickets.py sync, resolve those "
+            "files, commit the merge, rerun the focused tests and deliver again"
+        ) from error
+    if branch_tip(root) != before:
+        print(f"Merged {integration_ref(root)} ({commit}) into {branch}; checking against it")
+
+
 def deliver(root: Path) -> int:
-    """Sync, check the field report, push, and open or update the pull request whose description
-    carries the report; returns the pull request's number. No issue is filed."""
+    """Merge current main, check the field report against it, push, and open or update the pull
+    request whose description carries the report; returns the pull request's number. No issue is
+    filed."""
     issue = required_snapshot(root)
     check_issue_read(root, None, None, str(issue["url"]))
     branch = delivery_branch(root, issue)
-    sync(root)
+    merge_current_main(root, branch)
     file = root / ".se" / "work" / "field-report.md"
     if not file.exists():
         draft_field_report(root, file)

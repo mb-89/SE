@@ -254,6 +254,15 @@ the issues dispatch reads:
   step reads the work issue from the description's first line with it, so both accept the short
   and the full form.
 
+A delivery is against current main: with several workers in parallel each landing makes the other
+branches stale, and against the new main a stale branch reads to `integrate`'s guard as deleting
+what landed.
+
+- `deliver` first merges the newest integration branch, then checks the field report and runs the
+  guard against the merge, and only then pushes.
+- A conflict stops it before any push, naming the conflicting files.
+- [Without gh](#without-gh) the same order holds: `sync`, the check, then `push`.
+
 Nothing reaches the integration branch without a passing complete suite and, unless `se.toml` sets
 `public_check = false`, a passing public check on exactly the tree pushed:
 
