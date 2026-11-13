@@ -39,14 +39,17 @@ type Status struct {
 
 // AskStatus asks the core in the checkout at root for its health. Where none
 // answers, a claim younger than ClaimStale or a standing file whose bus does
-// not answer yet reads as starting.
+// not answer yet reads as starting. The claim is looked at before the
+// standing file, as awaitStanding does, so a core that stands between the two
+// never reads as stopped.
 func AskStatus(clock Clock, root string) (Status, error) {
+	claimed := starting(clock, root)
 	s, err := ReadStanding(root)
 	if err != nil {
 		if !errors.Is(err, ErrNotRunning) {
 			return Status{}, err
 		}
-		if st, err := os.Stat(ClaimPath(root)); err == nil && clock.Now().Sub(st.ModTime()) <= ClaimStale {
+		if claimed {
 			return Status{State: StateStarting}, nil
 		}
 		return Status{State: StateStopped, Died: ReadDied(root)}, nil
