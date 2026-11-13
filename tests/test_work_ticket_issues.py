@@ -996,6 +996,39 @@ def test_field_report_check_refuses_a_body_edited_after_intake_until_it_is_recor
     assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
 
 
+def test_field_report_check_reads_the_body_again_at_delivery_not_as_intake_saved_it(
+        worktree, gh, capsys):
+    """Requirement 4 (issue #1047): a requirement added after intake, its body recorded as read
+    but never applied to the tickets or the report, is refused at delivery: the check reads the
+    issue again and checks the report against that body, not against intake's snapshot."""
+    run(worktree, "intake", "--issue", "5")
+    report = worktree / "report.md"
+    report.write_text(COMPLETE_REPORT, encoding="utf-8")
+    gh.issue["body"] = BODY + "\n## Changes after filing\n\n3. Also the docs.\n"
+    assert run(worktree, "body-read") == 0  # read, and the snapshot still holds intake's body
+    capsys.readouterr()
+
+    assert run(worktree, "field-report", "--check", str(report)) == 1
+    captured = capsys.readouterr()
+    assert f"The work issue {URL} changed after intake read it: Requirement 3 added" in captured.out
+    assert 'missing evidence for: Requirement 3 (under "Changes after filing")' in captured.err
+    report.write_text(with_requirement_3(COMPLETE_REPORT), encoding="utf-8")
+    assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
+
+
+def test_deliver_checks_the_report_against_the_body_read_at_delivery(
+        worktree, gh, monkeypatch, capsys):
+    run(worktree, "intake", "--issue", "5")
+    draft_complete_field_report(worktree)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(work_tickets, "push", lambda root, branch: pytest.fail("pushed"))
+    gh.issue["body"] = BODY + "\n## Changes after filing\n\n3. Also the docs.\n"
+    assert run(worktree, "body-read") == 0
+    assert run(worktree, "deliver") == 1
+    assert "missing evidence for: Requirement 3" in capsys.readouterr().err
+    assert not any(call[:2] in (["pr", "create"], ["issue", "create"]) for call in gh.calls)
+
+
 def test_field_report_check_takes_the_body_by_hand_without_gh(worktree, gh, monkeypatch, capsys):
     report = worktree / "report.md"
     report.write_text(with_requirement_3(COMPLETE_REPORT), encoding="utf-8")
@@ -3643,7 +3676,7 @@ def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budge
     budget = work_tickets.suite_budget(Path(__file__).resolve().parents[1])
     assert (budget.command, budget.target_seconds) == (["uv", "run", "pytest", "-q"], 60)
     # kern's tests first: they warm Go's build cache for the acceptances after them.
-    kern, go_components, new_app, components, relay = budget.beside
+    kern, go_components, new_app, components, relay, scripts = budget.beside
     assert (kern.name, kern.command, kern.directory) == ("kern", ["go", "test", "./..."], "kern")
     assert kern.setup == ["go", "test", "-run", "^$", "./..."], "a cold build counts as no test time"
     assert kern.target_seconds < kern.limit_seconds < budget.limit_seconds
@@ -3657,6 +3690,8 @@ def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budge
     assert components.target_seconds < components.limit_seconds < budget.limit_seconds
     assert (relay.name, relay.command[-1]) == ("se-relay", "tests/beside_se_relay.py")
     assert relay.target_seconds < relay.limit_seconds < budget.limit_seconds
+    assert (scripts.name, scripts.command[-1]) == ("script-runs", "tests/beside_script_runs.py")
+    assert scripts.target_seconds < scripts.limit_seconds < budget.limit_seconds
 
 
 @pytest.fixture
