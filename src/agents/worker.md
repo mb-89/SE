@@ -89,6 +89,10 @@ every package, so work issues and session prompts never repeat it.
    - The focused tests are those of what changed plus every one the project's `AGENTS.md` names
      for the kind of file changed (in se, the docs build for published Markdown), so a rule a
      check enforces fails in the focused step, not first in the complete suite.
+   - A failing test is yours only once it passes at base: before treating it as your own, rerun
+     that one test at the integration branch with a high repeat count (`go test -count=500 -run
+     <test>` for Go, the test in a loop of as many runs for Python). One that fails there too is a
+     flake already at base; name it, with both counts, in the field report.
    - Tests follow the work model's [test rules](../skills/work-model/SKILL.md#tests); a change that
      adds tests measures the suite with `work_tickets.py suite` before and after it, for the field
      report.
