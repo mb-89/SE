@@ -79,3 +79,8 @@ summary = "whether the fleet is paused: exit code 1 and the issue while an ..."
 group = "Issues"
 help = "whether the fleet is paused: exit code 1 and the issue while an issue labelled pause is open in the repository (the owner's switch; closing it resumes), exit code 0 while none is. queue, start, integrate and route refuse while paused. Without gh it prints the search as a plan for the session's GitHub tools, exit code 2"
 class = "batch"
+
+[requests.step]
+type = "github.step"
+answer = "github.step-answer"
+help = "One GitHub step of a streamed command through kern's relay: the tool and the input the session runs, answered with the tool's answer."

@@ -2555,3 +2555,59 @@ def test_ci_suite_time_skips_a_check_run_that_did_not_succeed(tmp_path, monkeypa
     assert found is not None and found.readings == (35.7, 78.4, 36.0, 41.0, 30.0)
     assert (found.seconds, found.commit) == (36.0, commits[3])
     assert "check-runs/1/annotations" not in paths  # the failed run's time is never read
+
+
+def test_refs_request_runs_its_steps_through_kerns_relay_as_one_call(
+        refs_checkout, tmp_path, monkeypatch, capsys):
+    """Where refs request runs as one call through kern (se_relay.steps set), its dry run is asked
+    step by step through kern's github.step and read back in the same call: no plan is handed off,
+    no comment id, run url or log is retyped into a read-back."""
+    checkout, fake, base, ahead = refs_checkout
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    file = triples_file(tmp_path, f"{base} {ahead} refs/heads/main\n")
+    asked: list[tuple[str, dict]] = []
+    runs = [{"id": 8}]
+
+    def session(tool: str, input_: dict, note: str, wait: str) -> object:
+        asked.append((tool, input_))
+        method = input_.get("method")
+        if tool == "add_issue_comment":
+            return {"id": "100" if len(asked) == 1 else "101",
+                    "url": "https://git.example/owner/repo/issues/5#issuecomment-100"}
+        if tool == "actions_run_trigger":
+            runs.append({"id": 9})
+            return {"message": "Workflow run has been queued"}
+        if tool == "actions_list" and method == "list_workflow_runs":
+            return {"total_count": len(runs), "workflow_runs": list(reversed(runs))}
+        if tool == "actions_get":
+            return {"id": 9, "status": "completed", "conclusion": "success",
+                    "html_url": "https://git.example/owner/repo/actions/runs/9"}
+        if tool == "actions_list" and method == "list_workflow_jobs":
+            return {"total_count": 1, "jobs": [{"id": 3}]}
+        if tool == "get_job_logs":
+            return {"logs_content": fake.log}
+        if tool == "issue_read" and method == "get_labels":
+            return [{"name": "work"}]
+        if tool == "issue_write":
+            return {"id": "1"}
+        raise AssertionError(f"refs request asked an unexpected step: {tool} {input_}")
+
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert work_tickets.main(["refs", "request", "5", "--triples-file", str(file), "--repo",
+                                  REPO, "--worktree", str(checkout)]) == 0
+
+    assert [tool for tool, _ in asked] == [
+        "add_issue_comment", "actions_list", "actions_run_trigger", "actions_list", "actions_get",
+        "actions_list", "get_job_logs", "add_issue_comment", "issue_read", "issue_write"]
+    assert asked[2][1]["inputs"] == {"updates": f"{base} {ahead} refs/heads/main\n",
+                                     "dry_run": "true"}
+    assert asked[4][1] == {"owner": "owner", "repo": "repo", "method": "get_workflow_run",
+                           "resource_id": "9"}
+    dry_run = asked[7][1]["body"]
+    assert "<!-- se:refs-request-id 100 -->" in dry_run and "set    refs/heads/main a -> b" in dry_run
+    assert asked[9][1]["labels"] == ["work", "escalated"]
+    out = capsys.readouterr().out
+    assert "GitHub plan:" not in out
+    assert "escalated #5: apply the ref change (1 ref(s), dry run passed)?" in out
+    assert "after these steps" not in out
+    assert fake.comments_posted == [] and fake.dispatched == []  # nothing went through gh

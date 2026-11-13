@@ -114,3 +114,8 @@ summary = "apply the fix of every check the check job runs that a fix can ..."
 group = "Integration"
 help = "apply the fix of every check the check job runs that a fix can satisfy: write the generated layouts (se_plugin.py build) and the command reference with its declarations (docs); a second run writes nothing"
 class = "batch"
+
+[requests.step]
+type = "github.step"
+answer = "github.step-answer"
+help = "One GitHub step of a streamed command through kern's relay: the tool and the input the session runs, answered with the tool's answer."

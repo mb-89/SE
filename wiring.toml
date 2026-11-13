@@ -1,5 +1,10 @@
 # SE as an application on kern (README "Commands as components"): the core kern start serves in
 # this checkout places each of SE's command groups, components/<name>/, in a process of its own.
+# kern's GitHub component serves them: on the relay backend in a cloud session, integrate asks its
+# GitHub steps through it (README "Hand-offs through the relay").
+[instances.github]
+component = "github"
+
 [instances.tickets]
 component = "tickets"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "tickets"]
@@ -19,6 +24,15 @@ command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts
 [instances.review]
 component = "review"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "review"]
+
+[wires]
+"github.issues" = "github/issues/<key>"
+"github.pulls" = "github/pulls/<key>"
+"github.comments" = "github/comments/<key>"
+"github.checks" = "github/checks/<key>"
+"github.outbox" = "github/outbox/<key>"
+"integration.step" = "github.step"
+"issues.step" = "github.step"
 
 # The Stop hooks (README "Stop hook"): the delivery component's stop-check answers them inside the
 # hook, in its own warm process; scripts/se_hook.sh falls back to running it directly.

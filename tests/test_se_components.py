@@ -169,3 +169,66 @@ def test_a_call_that_fails_on_the_way_runs_directly(tmp_path, monkeypatch) -> No
     assert se_components.routed(script, ["status"], [], True) is None
     # Another copy of the script than the one kern runs: direct.
     assert se_components.routed(ROOT / "scripts" / "work_tickets.py", ["status"], [], True) is None
+
+
+STEPPED_SCRIPT = '''
+import sys
+
+STREAMED_COMMANDS = frozenset({"demo"})
+
+
+def main(argv):
+    import se_relay
+    step = se_relay.steps()
+    print("Phase: asking", file=sys.stderr, flush=True)
+    first = step("issue_read", {"method": "get", "issue_number": int(argv[1])}, "", "")
+    second = step("add_issue_comment", {"issue_number": first["number"], "body": "seen"}, "", "")
+    print(f"read #{first['number']}, commented {second['id']}")
+    return 0
+'''
+
+
+def test_a_streamed_command_asks_each_github_step_as_a_request_of_its_component(
+        tmp_path, monkeypatch) -> None:
+    """Stepped: the script's main runs in a thread with se_relay's step set; each step it asks is one
+    request on the component's `step` port, answered through the step's continuation, and what
+    it writes on stderr is said as it comes."""
+    (tmp_path / "stepdemo.py").write_text(STEPPED_SCRIPT, encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    folder = tmp_path / "demo"
+    folder.mkdir()
+    (folder / "component.toml").write_text(se_components.declaration(
+        "demo", "A demo.", "Demo", [se_components.Declared("stepdemo.py demo", "stepdemo.py demo N",
+                                                           "demo", False)], "a test", steps=True),
+        encoding="utf-8")
+    fake = Fake(se_components.attach("demo", "stepdemo", folder))
+    asked = []
+    fake.answer("step", lambda ask: asked.append(ask) or {
+        "tool": ask["tool"], "input": ask["input"],
+        "data": {"number": 7} if ask["tool"] == "issue_read" else {"id": 99}})
+
+    assert fake.run("stepdemo.py demo", "7") == "read #7, commented 99"
+    assert [a["tool"] for a in asked] == ["issue_read", "add_issue_comment"]
+    assert asked[1]["input"] == {"issue_number": 7, "body": "seen"}
+    assert "Phase: asking" in fake.lines
+
+
+def test_a_streamed_command_runs_directly_without_kerns_relay(tmp_path, monkeypatch) -> None:
+    """The fallback: no kern, or a kern without the relay, and a streamed batch command runs
+    directly, its file-based hand-off; SE_KERN=off never routes it."""
+    script = ROOT / "scripts" / "work_tickets.py"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(se_components.SWITCH)
+    assert "integrate" in work_tickets.STREAMED_COMMANDS
+    assert se_components.routed(script, ["integrate"], ["7"], False, True) is None
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "scripts").mkdir()
+    copy = tmp_path / "scripts" / "work_tickets.py"
+    copy.write_text("", encoding="utf-8")
+    standing = tmp_path / se_components.STANDING
+    standing.parent.mkdir(parents=True)
+    standing.write_text(json.dumps({"bus": "nats://127.0.0.1:9", "users": {"client": "x"}}),
+                        encoding="utf-8")
+    assert se_components.routed(copy, ["integrate"], ["7"], False, True) is None  # no relay
+    monkeypatch.setenv(se_components.SWITCH, "off")
+    assert se_components.routed(copy, ["integrate"], ["7"], False, True) is None
