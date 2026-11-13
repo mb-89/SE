@@ -45,6 +45,29 @@ found, else the relay. `token` without one refuses the start.
     last page is heard, and a first page nobody asked with more behind it lands nothing, since it
     is no whole list. Other tools and methods pass unread; an error answer is logged.
 
+## The verb `step`: a write tool through the relay
+
+The reads above are the tools the component knows; the verb `step` runs any GitHub tool through
+the relay, so a command's write steps (open a pull request, merge, comment, close) reach GitHub
+through the session the same way. It asks `github.step`, `{"tool", "input", "note"?, "match"?,
+"wait"?}`: the tool's bare name (such as `merge_pull_request`), its input, the note the agent
+watches for, the input keys an answer must carry equal, and how long to wait, up to `step-wait`
+(`60m`).
+
+- Without `match`, every input key whose value is no text over 200 bytes must match, so a long
+  body the session re-wraps is read back from the answer; owner and repo match regardless of case.
+- The step stands in `outbox` until a PostToolUse of that tool with that input answers it. The
+  verb answers `github.step-answer`, `{"tool", "input", "read", "data"}`: the input the session
+  sent and the tool's answer, as JSON where it is JSON, else its text.
+- Only the relay runs steps; with a token a command runs its GitHub steps itself.
+
+## Telling the agent, on the hook
+
+On each `PostToolUse`, `UserPromptSubmit` and `SessionStart` the component tells the agent the
+tool calls `outbox` waits for, reads and steps, oldest first, each with its note, as the host's
+hook `additionalContext`. A PostToolUse that answered a step first waits up to `tell-wait`
+(`300ms`) for the next step, so the agent is told it in the same hook.
+
 ## Verbs and names
 
 | verb | asks | answers |
@@ -55,6 +78,7 @@ found, else the relay. `token` without one refuses the start.
 | `comment-list` | the same | the snapshot of every comment of the issue or pull request, every page |
 | `issue-list` | `{"owner", "repo", "state", "labels"}` | the list of the repository's issues in that state carrying every label |
 | `pull-list` | `{"owner", "repo", "state"}` | the list of the repository's pull requests in that state |
+| `step` | `github.step` | `github.step-answer`, the tool's answer |
 
 `state` is `open` (the default), `closed` or `all`; `labels` lists issues alone, since GitHub
 lists pull requests by none. A list read keeps the issues, not the pull requests GitHub's issues
@@ -70,7 +94,7 @@ each label in order, all in lower case, in its family:
 ```toml
 [instances.github]
 component = "github"
-# config = { backend = "auto", refresh = "2m", relay-wait = "0s", pace-max = "60s" }
+# config = { backend = "auto", refresh = "2m", relay-wait = "0s", pace-max = "60s", step-wait = "60m", tell-wait = "300ms" }
 
 [wires]
 "github.issues" = "github/issues/<key>"
@@ -81,9 +105,10 @@ component = "github"
 "github.pull-lists" = "github/pull-lists/<key>"
 "github.outbox" = "github/outbox/<key>"
 "<component>.<request port>" = "github.issue"
+"<component>.<request port>" = "github.step"
 ```
 
-An outbox entry stands at `<verb>.<key>`. The component runs one instance per core. It is switched
+An outbox entry stands at `<verb>.<key>`, a step's at `step.<tool>.<hash of its input>`. The component runs one instance per core. It is switched
 off with `enabled = false`: it then looks for no token and hears nothing, and its names read their
 built-in values.
 
@@ -95,4 +120,6 @@ single read and on a later page, paged issue, pull-request and comment reads), t
 PostToolUse payloads shaped as a cloud session's hook hands them (list_issues' cursor pages,
 list_pull_requests' and get_comments' numbered pages, a list heard whole without being asked), and
 both through the real core, from the
-hook's post to a client's read of the snapshot name.
+hook's post to a client's read of the snapshot name. `step_test.go` holds the verb `step` and the
+telling: a step waits for the tool use that matches it and answers that tool's answer, and the hook
+of an answer tells the next step as the host's hook JSON.

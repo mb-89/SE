@@ -3529,8 +3529,8 @@ def test_a_key_these_scripts_do_not_know_beside_warns_off_ci_and_the_suite_runs(
 def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budget():
     budget = work_tickets.suite_budget(Path(__file__).resolve().parents[1])
     assert (budget.command, budget.target_seconds) == (["uv", "run", "pytest", "-q"], 60)
-    # kern's tests first: they warm Go's build cache for se new app's acceptance after them.
-    kern, go_components, new_app, components = budget.beside
+    # kern's tests first: they warm Go's build cache for the acceptances after them.
+    kern, go_components, new_app, components, relay = budget.beside
     assert (kern.name, kern.command, kern.directory) == ("kern", ["go", "test", "./..."], "kern")
     assert kern.setup == ["go", "test", "-run", "^$", "./..."], "a cold build counts as no test time"
     assert kern.target_seconds < kern.limit_seconds < budget.limit_seconds
@@ -3542,6 +3542,8 @@ def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budge
     assert (components.name, components.command[-1]) == (
         "se-components", "tests/beside_se_components.py")
     assert components.target_seconds < components.limit_seconds < budget.limit_seconds
+    assert (relay.name, relay.command[-1]) == ("se-relay", "tests/beside_se_relay.py")
+    assert relay.target_seconds < relay.limit_seconds < budget.limit_seconds
 
 
 @pytest.fixture
