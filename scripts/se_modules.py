@@ -257,6 +257,22 @@ def resolve(root: Path, module: Module, local: LocalConfig) -> Source:
     return Source(module, "pinned", root / MODULES_DIR / module.name, url, note)
 
 
+KERN_RELEASE = Path("kern") / "release.toml"
+
+
+def kern_pin(root: Path) -> tuple[str, str]:
+    """(version, tag) of the kern a repository that incubates it pins: the version
+    `kern/release.toml` owns (kern/README.md "Release") and its release tag `kern-v<version>`.
+    kern's own go.mod names no version of kern; `[modules.kern]` replaces this with the move."""
+    path = root / KERN_RELEASE
+    if not path.is_file():
+        raise ModuleError(f"no {KERN_RELEASE.as_posix()} in {root}: it incubates no kern")
+    version = _read_toml(path).get("version")
+    if parse_version(version) is None:
+        raise ModuleError(f"{path}: version must be MAJOR.MINOR.PATCH (kern/README.md \"Release\")")
+    return version, f"kern-v{version}"
+
+
 def find_root(start: Path) -> Path:
     for directory in [start, *start.parents]:
         if (directory / MANIFEST).is_file():

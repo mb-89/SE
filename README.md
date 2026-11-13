@@ -782,6 +782,28 @@ uv run python <se>/scripts/se_modules.py path <name>
   reads another machine-local file than `~/.se/local.toml`.
 - Git runs without prompts; credentials come from the machine's git setup.
 
+## New application
+
+```sh
+uv run python <se>/scripts/se.py new app <name> --path <dir>
+```
+
+It creates an application on kern, the core SE builds on ([docs/go-core.md "A bare application,
+and `se new app`"](docs/go-core.md#a-bare-application-and-se-new-app)), in the new or empty folder
+`<dir>`: kern's template at SE's kern pin, the name filled in, and git's first commit on `main` as
+the [project identity](#project-settings).
+
+- **The pin:** while kern is incubated, `kern/release.toml`'s version and its tag `kern-v<version>`,
+  read by `se_modules.py`'s `kern_pin`. A version not tagged yet comes from SE's `HEAD`, which the
+  command says.
+- **kern beside it:** no module `github.com/mb-89/kern` can be fetched yet, so the application holds
+  kern's source at the pin in `kern/`, and its `go.mod` replaces the module by it.
+- **What it holds:** the template's ([kern/template/README.md](kern/template/README.md)): its wiring,
+  where `enabled = false` switches a component off, CI through kern's battery, the `[tests]` budget
+  and the `[modules.kern]` pin.
+- **GitHub stays the owner's:** the last line names the owner's step, creating the repository with
+  its ruleset and the first push. The command does nothing on GitHub.
+
 ## Work commands
 
 `scripts/work_tickets.py` runs the [work model](src/skills/work-model/SKILL.md): its tickets, issues,
