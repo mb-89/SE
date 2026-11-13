@@ -46,12 +46,31 @@ From `ff01204` (`spec/index.md`, `src/index/index.go`, `module.go`, `catalog.go`
 | snapshots | a run reads all its inputs at one revision | unchanged |
 | pushes and waves | a changed name runs its readers once, lowest height first | unchanged; a run may now be in another process |
 | built-in values | an unprovided name reads its writer's built-in value, marked `not provided` | unchanged; a component that is down or switched off reads the same way |
-| catalog check at start | refuses two writers, an unbound input, two types on a wire, a cycle, a missing built-in or help | gains one refusal: a wire to a component that is switched off |
+| catalog check at start | refuses two writers, an unbound input, two types on a wire, a cycle, a missing built-in or help | gains two refusals: an input or a request port wired to a component that is switched off |
 | collector | commands declared by modules, rendered by every surface | unchanged; it now gathers Python components' commands too |
-| actions | a command answers a list of requests to I/O modules, no undo | unchanged: no undo |
+| actions | specified in `spec/index.md` alone; `ff01204` has no code for them | built new, as [Actions](#actions) says; still no undo |
 | wiring file | `src/index/wiring.yaml`, embedded in the binary | `wiring.toml` in the application, read at start: a Python component is not compiled in, and Python's `tomllib` reads it for the fake core |
 | fake index | `indextest`: seed by local name, run, assert writes and requests | comes back twice, in Go and in Python, held to one contract suite |
 | host | `se serve`, a daemon on loopback HTTP with a token, idle exit | the core process; NATS replaces HTTP, see below |
+
+### Actions
+
+An action is a command that reaches the outside. kern builds it from the Go line's spec, in
+`kern/index`:
+
+- **Request ports.** A component declares a local request port with its request and answer
+  types and its help (`index.Request[Req, Ans](port, help)`, `[requests]` in `component.toml`).
+  The wiring binds it to a verb of an I/O component (`index.Verb[Req, Ans](verb, help, fn)`), as
+  `"clerk.file" = "ledger.append"`; the catalog check refuses a type mismatch and an unbound port.
+- **A result in steps.** A command answers an `index.Result`: `Text`, `Writes` and `Requests`.
+  The core commits the writes first, then sends the requests in order, each to its bound verb.
+- **The continuation.** Where the result sets `Then`, the core hands it the answers in the order
+  of `Requests`; it answers the next step's result. The command's text is every step's text, in
+  order, and the command ends with the first step that sets no `Then`.
+- **No undo.** A failed request stops the list and fails the command with its reason; the writes
+  already committed and the requests already answered stay.
+- **The fake core.** The fake hands each request the answer the test gives it, so a
+  continuation runs without an I/O component ([The fake core](#the-fake-core)).
 
 The Go line's GitHub snapshot comes back as names the GitHub component writes
 ([GitHub in the cloud](#github-in-the-cloud)). Its I/O modules for the clock, the disk, processes
@@ -103,6 +122,11 @@ Each component has a `component.toml` beside its code. The core reads every decl
 and checks the whole catalog before any component process runs, so the check costs milliseconds
 and a broken catalog never starts. The process, once attached, must declare the same hash.
 
+The check's budget is 20 ms for a catalog of 200 instances, about ten times the 1.54 to 1.74 ms
+measured ([Measurements](#measurements)). Its owner is `CheckBudget` in
+`kern/index/budget_test.go`, which `TestTheCatalogCheckKeepsItsBudget` holds the median of nine
+checks to, so a slower check fails kern's tests before a merge.
+
 ```toml
 name = "fleet"
 contract = 1
@@ -127,12 +151,17 @@ help = "How long in-progress work may go without a push."
 usage = "fleet-check [--json]"
 summary = "List what is stuck or stray."
 group = "Fleet"
+help = "Each finding names the work issue or branch, why it is stuck and the remedy."
 class = "interactive"            # a person waits on it: first line within 1 s
 session = true                   # offered to the agent as a command
 
-[requests]
-comment = "github.comment"       # a local request port, bound to an I/O verb by the wiring
+[requests.comment]               # a local request port, bound to an I/O verb by the wiring
+type = "github.comment"
+help = "Comments a finding's remedy on its work issue."
 ```
+
+The catalog check refuses a component, an output, a config key, a command, a request port or a
+verb without its `help`, and a command without its `usage`, `summary`, `group` or `class`.
 
 Types are named JSON shapes. The core's repository owns the shared ones (`github.issues`,
 `session.event`); an application's own live in its `types/` folder. The Go side generates structs
@@ -174,12 +203,12 @@ A component in any language with a NATS client attaches the same way:
 3. It subscribes to `run.<i>` and `cmd.<i>.>`, reads `in.<i>` on each run, answers with
    `commit.<i>`, and beats on `lease.<i>` from its own loop.
 
-Python comes first, with a standard-library SDK in the core's repository (`python/core/`): the
+Python comes first, with a standard-library SDK in the core's repository (`python/kern/`): the
 NATS peer, a runner that reads `component.toml` and dispatches to decorated functions, and the fake
 core. It adds no dependency to SE, whose scripts run on the standard library today.
 
 ```python
-from core import component
+from kern import component
 
 fleet = component("fleet")            # reads component.toml beside this file
 
@@ -201,7 +230,7 @@ one suite runs against both.
 
 Every component is tested alone, against a fake core, and never against a running bus:
 
-| step | Go (`coretest`) | Python (`core.fake`) |
+| step | Go (`kerntest`) | Python (`kern.fake`) |
 |---|---|---|
 | build | a catalog from the component's `component.toml` alone, checked | the same |
 | seed | inputs and config by local name | `fake.seed(issues=[...], lease_hours=3)` |
@@ -369,14 +398,29 @@ kern/
   index/                  names, store, snapshots, catalog, waves (from ff01204)
   bus/                    embedded NATS, users and permissions, standing file
   host/                   start, detach, leases, placements, idle end, hook client
-  coretest/               the Go fake core
-  python/core/            the Python SDK and fake core
+  kerntest/               the Go fake core
+  python/kern/            the Python SDK and fake core
   contract/               the one contract suite, run against both fakes and the real core
   components/             clock, disk, proc, git, session, github: generic, each switchable
   types/                  the shared JSON types
   template/               the bare application
   .github/workflows/      check.yml, release.yml, battery.yml (reusable)
 ```
+
+### Incubated in SE until `mb-89/kern` exists
+
+Until the owner creates `mb-89/kern` (step 1 of [the plan](#the-plan)), kern grows in SE under
+`kern/`, as its own Go module `github.com/mb-89/kern`, so the move changes no import path. Nothing
+in SE outside `kern/` imports it. Meanwhile SE runs kern's tests beside its Python suite (`se.toml`
+`[tests.beside.kern]`, README [Test budget](../README.md#test-budget)), and SE's `check` job vets
+it. The move is one work issue, once the repository exists:
+
+1. kern's history goes over with `git subtree split --prefix kern`, pushed as the new
+   repository's `main`; `kern/` becomes its root, and nothing in it changes.
+2. kern's CI moves with it: its vet, its tests and their Windows run become the new repository's
+   `check.yml`, with a ruleset like SE's.
+3. SE then removes `kern/`, `[tests.beside.kern]` and the vet step in one pull request, and pins
+   the new repository's first tag as `[modules.kern]`, step 6's pin below.
 
 **Pinning it.** An application pins the core in `se.toml [modules.kern]`, as SE pins obs. Its
 `go.mod` also requires it; `se_modules.py` reads the version from `go.mod` where the module says
@@ -402,7 +446,23 @@ enabled = false
 
 The core refuses to start on a wiring whose input is bound to an output of a switched-off or
 missing component, naming the wire's line and the switch's line. An input that may go without
-marks itself `builtin = true` in the wiring and reads the built-in value, marked `not provided`.
+says so on its wire: `builtin = true` goes in the wire's table, not on the instance, and the
+input then reads its writer's built-in value, marked `not provided`:
+
+```toml
+[wires]
+"report.ticks" = { to = "clock/ticks", builtin = true }
+```
+
+A switched-off instance keeps its names and their place in the catalog; what it answers:
+
+| asked | answer |
+|---|---|
+| a read of one of its names | the name's built-in value, marked `not provided` |
+| its derivations | none runs, on any wave |
+| a commit to its names | refused, naming the instance and the switch's line |
+| its commands | none is offered: the collector leaves them out, so no surface lists them, and `call.<command>` answers that no such command exists |
+| its verbs | none is reached: the start refuses a request port bound to a verb of a switched-off instance, naming both lines; a request has no `builtin` way out, since a built-in value cannot answer it |
 
 ### A bare application, and `se new app`
 
@@ -511,6 +571,7 @@ loopback with a token, dials it and answers one request; nothing of it is in SE.
 | Python start | `python3 -I -c "import socket,json"`; `uv run -q python -c pass` | 30 to 31 ms; 46 to 61 ms |
 | a Go hook client | dial, `hook.Stop` request, answer from a Python responder (5 runs); with no server | 5 to 6 ms; 5 ms, failing open |
 | today's Stop hook | `uv run --no-project python scripts/work_tickets.py stop-check` (3 runs) | 0.35 to 0.39 s |
+| kern's catalog check | `cd kern && go test -run XXX -bench . -benchtime 200x -count 5 ./index/`: 20 and 200 instances | 0.16 to 0.20 ms; 1.54 to 1.74 ms |
 
 The NATS server adds about 6 s to a cold compile against the Go line's `se`, and 10 MB to the
 binary. quackitect v5 asks for Go 1.25, which this image lacks; the core's `go.mod` names the

@@ -18,7 +18,7 @@ named in the design's plan.
 | `go.mod` | the module and its pinned Go version, which CI reads | |
 | `index/` | names, families, the store, snapshots, a single writer per name, built-in values, the catalog check at start, waves, actions, the collector, and `wiring.toml` read at start | `src/index` at `ff01204` |
 | `index/fixture/` | the fixture components the index and the fake core are tested with | `src/index/fixture` |
-| `coretest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request | `src/index/indextest` |
+| `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request | `src/index/indextest` |
 
 ## Tests
 
