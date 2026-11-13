@@ -93,6 +93,18 @@ type Wire struct {
 	Line     int
 }
 
+// Merge adds an overlay's instances, wires and hooks to w: the ad hoc wiring
+// .se/wiring.toml, which `se component add` writes under the ignored .se/ so
+// the core runs an ad hoc component without tracking it (SE's docs/go-core.md
+// "Scripts are ad hoc, components are long-term"). The catalog check still
+// refuses a duplicate instance or command, so an overlay cannot shadow a
+// tracked one unseen.
+func (w *Wiring) Merge(o Wiring) {
+	w.Instances = append(w.Instances, o.Instances...)
+	w.Wires = append(w.Wires, o.Wires...)
+	w.Hooks = append(w.Hooks, o.Hooks...)
+}
+
 // ReadWiring reads the wiring file at path.
 func ReadWiring(path string) (Wiring, error) {
 	data, err := os.ReadFile(path)
