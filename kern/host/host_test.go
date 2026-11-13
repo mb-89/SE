@@ -359,16 +359,24 @@ func TestAHookPostTakesItsSessionsLease(t *testing.T) {
 	}
 }
 
-// A hook fails open at once where no core runs and none is starting.
+// A hook fails open at once where no core runs and none is starting: given
+// an hour to wait, it answers long before the hour, so it never waited for a
+// core. The bound is the test's, not the hook's: runner variance cannot reach it.
 func TestAHookWithNoCoreFailsOpenAtOnce(t *testing.T) {
 	t.Parallel()
-	began := time.Now()
-	_, err := host.Post(host.Wall{}, t.TempDir(), "PreToolUse", []byte(`{}`), host.HookWait)
-	if !errors.Is(err, host.ErrNotRunning) {
-		t.Fatalf("a hook with no core answers %v, and wants ErrNotRunning", err)
-	}
-	if took := time.Since(began); took > 50*time.Millisecond {
-		t.Fatalf("a hook with no core took %v, and should not wait for one", took)
+	root := t.TempDir()
+	answered := make(chan error, 1)
+	go func() {
+		_, err := host.Post(host.Wall{}, root, "PreToolUse", []byte(`{}`), time.Hour)
+		answered <- err
+	}()
+	select {
+	case err := <-answered:
+		if !errors.Is(err, host.ErrNotRunning) {
+			t.Fatalf("a hook with no core answers %v, and wants ErrNotRunning", err)
+		}
+	case <-time.After(wait):
+		t.Fatalf("a hook with no core and an hour's wait has not answered after %v: it waits for a core", wait)
 	}
 }
 
