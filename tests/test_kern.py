@@ -13,11 +13,11 @@ SETUP_GO_NODE_24 = 6
 def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow[workflow.index("\njobs:\n"):]
-    assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["check", "kern-windows"], (
-        "kern runs in the required job check, and on Windows in kern-windows, which check needs"
+    assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["check", "kern-platforms"], (
+        "kern runs in the required job check, and on Windows and macOS in kern-platforms, which check needs"
     )
     setups = re.findall(r"uses: actions/setup-go@v(\d+)\n        with:\n((?:          .*\n)+)", workflow)
-    assert len(setups) == 2, "kern's steps set up Go on Windows and on Linux"
+    assert len(setups) == 2, "kern's steps set up Go on Linux and on the other platforms"
     for major, inputs in setups:
         assert int(major) >= SETUP_GO_NODE_24, "setup-go below v6 runs on Node 20"
         assert "go-version-file: kern/go.mod" in inputs and "cache-dependency-path: kern/go.sum" in inputs
@@ -25,25 +25,31 @@ def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins()
     # Go is set up before the suite step, which runs kern's tests as se.toml declares them.
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", jobs)[1]
     steps = ["actions/setup-go", "time go vet ./...", "scripts/work_tickets.py suite --worktree .",
-             "needs.kern-windows.result"]
+             "needs.kern-platforms.result"]
     assert [check.index(step) for step in steps] == sorted(check.index(step) for step in steps)
     assert "        working-directory: kern\n        run: time go vet ./...\n" in check
     assert "go test" not in check, "kern's tests have one declaration, se.toml [tests.beside.kern]"
 
 
-def test_the_required_check_fails_unless_kern_passed_on_windows() -> None:
+def test_the_required_check_fails_unless_kern_and_ses_hook_passed_on_windows_and_macos() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow[workflow.index("\njobs:\n"):]
-    windows = jobs[jobs.index("\n  kern-windows:\n"):]
+    platforms = jobs[jobs.index("\n  kern-platforms:\n"):]
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", jobs)[1]
-    assert "    runs-on: windows-" in windows
-    for command in ("go vet ./...", "go test ./..."):
-        assert f"        working-directory: kern\n        run: {command}\n" in windows
-    assert "work_tickets.py suite" not in windows, "the Python suite and its budget stay on Linux"
-    assert "    needs: kern-windows\n" in check
-    # A required check that is skipped counts as passed: check runs whatever kern-windows answered.
+    assert "    runs-on: ${{ matrix.os }}\n" in platforms
+    [matrix] = re.findall(r"(?m)^        os: \[(.*)\]$", platforms)
+    assert sorted(os.split("-")[0] for os in matrix.split(", ")) == ["macos", "windows"]
+    assert "      fail-fast: false\n" in platforms, "each platform answers, whichever fails first"
+    for command in ("go vet ./...", "go test ./...",
+                    "go test -count=200 -run 'TestAHookWithNoCoreFailsOpenAtOnce$' ./host/"):
+        assert f"        working-directory: kern\n        run: {command}\n" in platforms
+    # SE's start and hook scripts, whose paths differ off Linux, run there in Git's bash and macOS's.
+    assert "        shell: bash\n        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py\n" in platforms
+    assert "work_tickets.py suite" not in platforms, "the Python suite and its budget stay on Linux"
+    assert "    needs: kern-platforms\n" in check
+    # A required check that is skipped counts as passed: check runs whatever kern-platforms answered.
     assert "    if: ${{ !cancelled() }}\n" in check
-    assert re.search(r'if \[ "\$WINDOWS" != success \]; then\n.*\n\s+exit 1', check), "check fails unless kern-windows passed"
+    assert re.search(r'if \[ "\$PLATFORMS" != success \]; then\n.*\n\s+exit 1', check), "check fails unless kern-platforms passed"
 
 
 RELEASE = PROJECT / ".github" / "workflows" / "kern-release.yml"

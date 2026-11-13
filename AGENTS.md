@@ -6,6 +6,11 @@
 - SPOT everywhere: one owner per fact; everything else links to it
   ([gen-002](src/skills/work-model/references/rules.md#gen-002-single-point-of-truth)).
 - No backwards compatibility unless asked.
+- Scripts are ad hoc, components are long-term
+  ([gen-001](src/skills/work-model/references/rules.md#gen-001-mechanize-first)): an ad hoc solution
+  stays untracked, a script in the scratch directory or an ad hoc Python component `se component add`
+  scaffolds under `.se/components/`; what the whole system keeps is a tracked component under
+  `components/`, with its declaration and tests ([docs/go-core.md](docs/go-core.md)).
 
 ## Agents and skills
 
@@ -36,8 +41,9 @@
     `tests/test_kern.py` for kern's, `tests/test_pr_issues.py` for the issue rule's).
 - kern, the Go core under `kern/`: `cd kern && go vet ./... && go test ./...`. Its tests are
   declared beside the suite, `se.toml` `[tests.beside.kern]`, so the complete suite runs them too;
-  the `check` job vets kern in its own step, and runs its vet and tests on Windows through the job
-  `kern-windows` ([kern/README.md "Tests"](kern/README.md#tests)).
+  the `check` job vets kern in its own step, and runs its vet and tests, with the tests of SE's
+  start and hook scripts, on Windows and macOS through the job `kern-platforms`
+  ([kern/README.md "Tests"](kern/README.md#tests)).
 - SE's Go components under `components/`: `cd components && go vet ./... && go test ./...`, declared
   beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet
   and retro components to the Python paths ([components/README.md](components/README.md#tests)).

@@ -212,6 +212,18 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 			return 2
 		}
 	}
+	// The ad hoc wiring overlay, .se/wiring.toml, holds the instances `se
+	// component add` placed under the ignored .se/ (index.ReadWiring comment on
+	// Merge); it is read after the tracked wiring and merged into it.
+	overlay := filepath.Join(root, ".se", index.WiringFile)
+	if _, err := os.Stat(overlay); err == nil {
+		o, err := index.ReadWiring(overlay)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s serve: %v\n", name, err)
+			return 2
+		}
+		w.Merge(o)
+	}
 	core, err := host.Serve(host.Options{
 		Root: root, Wiring: w, Components: index.Registered(), Grace: grace, Idle: idle, Log: stderr,
 	})

@@ -180,3 +180,49 @@ c = { component = "doubler", enabled = false, config = { k = 1 } }
 		t.Fatalf("the wiring reads\n%+v\nwant\n%+v", w, want)
 	}
 }
+
+// Merge adds an overlay wiring's instances, wires and hooks to a base wiring,
+// as cli reads .se/wiring.toml after wiring.toml for `se component add`'s ad
+// hoc components.
+func TestMergeAddsAnOverlaysInstancesWiresAndHooks(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	base := filepath.Join(dir, index.WiringFile)
+	if err := os.WriteFile(base, []byte(
+		"[instances.a]\ncomponent = \"a\"\n\n[wires]\n\"a.x\" = \"b/y\"\n\n[hooks]\nStop = \"a check\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	overlay := filepath.Join(dir, "overlay.toml")
+	if err := os.WriteFile(overlay, []byte(
+		"[instances.probe]\ncomponent = \"probe\"\ncommand = [\"python\", \"-m\", \"kern\", \"run\", \".se/components/probe\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := index.ReadWiring(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, err := index.ReadWiring(overlay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Merge(o)
+	names := make([]string, 0, len(w.Instances))
+	for _, in := range w.Instances {
+		names = append(names, in.Name)
+	}
+	if !reflect.DeepEqual(names, []string{"a", "probe"}) {
+		t.Fatalf("the merged instances are %v, and want [a probe]", names)
+	}
+	if len(w.Wires) != 1 || len(w.Hooks) != 1 {
+		t.Fatalf("the merge kept %d wires and %d hooks, and wants the base's one each", len(w.Wires), len(w.Hooks))
+	}
+	var probe index.Instance
+	for _, in := range w.Instances {
+		if in.Name == "probe" {
+			probe = in
+		}
+	}
+	if len(probe.Command) == 0 {
+		t.Fatalf("the overlay's placed instance lost its command: %+v", probe)
+	}
+}

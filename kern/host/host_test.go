@@ -359,17 +359,24 @@ func TestAHookPostTakesItsSessionsLease(t *testing.T) {
 	}
 }
 
-// A hook fails open at once where no core runs and none is starting.
+// A hook fails open at once where no core runs and none is starting: given
+// an hour to wait, it answers long before the hour, so it never waited for a
+// core. The bound is the test's, not the hook's: runner variance cannot reach it.
 func TestAHookWithNoCoreFailsOpenAtOnce(t *testing.T) {
 	t.Parallel()
-	began := time.Now()
-	_, err := host.Post(host.Wall{}, t.TempDir(), "PreToolUse", []byte(`{}`), host.HookWait)
-	if !errors.Is(err, host.ErrNotRunning) {
-		t.Fatalf("a hook with no core answers %v, and wants ErrNotRunning", err)
-	}
-	// Generous, as Windows runners take over 50 ms: a hook that waited would take its HookWait, 500 ms.
-	if took := time.Since(began); took > host.HookWait*4/5 {
-		t.Fatalf("a hook with no core took %v, and should not wait for one", took)
+	root := t.TempDir()
+	answered := make(chan error, 1)
+	go func() {
+		_, err := host.Post(host.Wall{}, root, "PreToolUse", []byte(`{}`), time.Hour)
+		answered <- err
+	}()
+	select {
+	case err := <-answered:
+		if !errors.Is(err, host.ErrNotRunning) {
+			t.Fatalf("a hook with no core answers %v, and wants ErrNotRunning", err)
+		}
+	case <-time.After(wait):
+		t.Fatalf("a hook with no core and an hour's wait has not answered after %v: it waits for a core", wait)
 	}
 }
 
@@ -494,5 +501,94 @@ func TestAHookBoundToNoCommandIsRefused(t *testing.T) {
 	_, err := host.Serve(host.Options{Root: t.TempDir(), Clock: newClock(), Wiring: checked(index.Hook{Event: "Stop", Command: "checker none", Line: 7}), Components: []*index.Component{checker}})
 	if err == nil || !strings.Contains(err.Error(), `wiring line 7: hook Stop: no instance declares the command "checker none"`) {
 		t.Fatalf("a hook bound to no command starts with %v, and wants a refusal at its line", err)
+	}
+}
+
+// counter is a compiled command component; the usage test marks its instance
+// ad hoc by dropping a component.toml under .se/components/counter/, so its
+// call runs in the core (no placed process) and is still counted.
+var counter = index.Declare("counter", "Counts.",
+	index.Command(index.CommandDecl{
+		Name: "counter run", Usage: "counter run", Summary: "Run.", Help: "Says ran.",
+		Group: "Fixtures", Class: index.Batch, Session: true,
+	}, func(_ struct{}, args []string) (index.Result, error) {
+		return index.Result{Text: "ran"}, nil
+	}))
+
+// markAdHoc writes a component.toml under <root>/.se/components/<name>/, so the
+// core reads that instance as ad hoc (usage.go adHocInstances).
+func markAdHoc(t *testing.T, root, name string) {
+	t.Helper()
+	dir := filepath.Join(root, ".se", "components", name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	decl := fmt.Sprintf("name = %q\ncontract = 1\nhelp = \"Ad hoc.\"\n", name)
+	if err := os.WriteFile(filepath.Join(dir, index.DeclarationFile), []byte(decl), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// uses reads the ad hoc use log the core writes under root.
+func uses(t *testing.T, root string) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, host.UsageLog))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("use log line %q is no JSON: %v", line, err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// A call to an ad hoc component's command is counted in the use log, against
+// the session the core touched last; a call to a component that is not ad hoc
+// writes nothing.
+func TestAnAdHocCallIsCounted(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	markAdHoc(t, root, "counter")
+	clk := newClock()
+	w := index.Wiring{Instances: []index.Instance{
+		{Name: "counter", Component: "counter", Enabled: true, Config: map[string]index.ConfigValue{}, Line: 1},
+		{Name: "checker", Component: "checker", Enabled: true, Config: map[string]index.ConfigValue{}, Line: 2},
+	}}
+	c := served(t, host.Options{Root: root, Clock: clk, Wiring: w, Components: []*index.Component{counter, checker}})
+	client := as(t, c, bus.Client)
+	var effect host.HookAnswer
+	ask(t, client, bus.Hook+"SessionStart", map[string]string{"session_id": "s1"}, &effect)
+	clk.move(time.Minute)
+	ask(t, client, bus.Hook+"SessionStart", map[string]string{"session_id": "s2"}, &effect)
+
+	var ans host.CallAnswer
+	ask(t, client, bus.Call+bus.Token("counter run"), map[string][]string{"args": {}}, &ans)
+	if ans.Error != "" || ans.Text != "ran" {
+		t.Fatalf("the ad hoc call answered %+v, and wants text ran", ans)
+	}
+	ask(t, client, bus.Call+bus.Token("checker check"), map[string][]string{"args": {host.HookArg + "{}"}}, &ans)
+
+	records := uses(t, root)
+	if len(records) != 1 {
+		t.Fatalf("the use log holds %d records, and wants one (only the ad hoc call): %v", len(records), records)
+	}
+	r := records[0]
+	if r["component"] != "counter" || r["path"] != ".se/components/counter" || r["session"] != "s2" {
+		t.Fatalf("the use record is %v, and wants counter at .se/components/counter in session s2 (the newest lease)", r)
+	}
+	ask(t, client, bus.Call+bus.Token("counter run"), map[string][]string{"args": {}}, &ans)
+	if records := uses(t, root); len(records) != 2 {
+		t.Fatalf("a second ad hoc call makes %d records, and wants two (the log appends)", len(records))
 	}
 }
