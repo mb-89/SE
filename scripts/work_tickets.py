@@ -4384,6 +4384,104 @@ def ci_suite_time(root: Path) -> tuple[CiSuiteTime | None, str]:
                   f"origin/{target} reports a suite time")
 
 
+def suite_notice(seconds: float, limit: float, detail: str = "") -> str:
+    """CI's suite time as the workflow notice ci_suite_time reads from the `check` run."""
+    return (f"::notice title={CI_SUITE_TITLE}::Suite time: {seconds:.1f} s "
+            f"(limit {limit:g} s{detail})")
+
+
+# A sharded suite (README "Test budget"): each shard records its time, `check` judges the slowest.
+SHARD_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+@dataclass(frozen=True)
+class ShardTime:
+    """One shard's record: its name, its command's wall time and exit code."""
+
+    name: str
+    seconds: float
+    exit_code: int
+
+
+def record_shard(root: Path, name: str, directory: Path, command: list[str]) -> int:
+    """Run one shard's command in `root`, its output shown as it runs, time it and write its
+    record, `<directory>/<name>.json`, for suite_time_of_shards; returns the command's exit code."""
+    if not SHARD_NAME.fullmatch(name):
+        raise QueueError(f"suite-shard: the shard name {name!r} must be letters, digits, '.', '_' "
+                         "or '-', starting with a letter or digit; name it so")
+    if not command:
+        raise QueueError("suite-shard: no shard command; give it after --, for example "
+                         "suite-shard --worktree . --name one --record <dir> -- pytest -q tests/a")
+    feedback.phase(f"suite shard {name}: {' '.join(command)}")
+    started = clock()
+    try:
+        code = subprocess.run(command, cwd=root, shell=False, check=False).returncode
+    except OSError as error:
+        raise QueueError(f"suite-shard: cannot run {command[0]}: {error}") from error
+    seconds = clock() - started
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{name}.json"
+    path.write_text(json.dumps({"shard": name, "seconds": round(seconds, 3), "exit_code": code}),
+                    encoding="utf-8")
+    print(f"Shard {name}: {seconds:.1f} s, exit code {code}; recorded in {path}")
+    return code
+
+
+def shard_times(directory: Path) -> list[ShardTime]:
+    """The shard records in `directory`, by name; refuses one it cannot read, naming the file."""
+    shards = []
+    for path in sorted(directory.glob("*.json")) if directory.is_dir() else []:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            shard = ShardTime(str(record["shard"]), float(record["seconds"]),
+                              int(record["exit_code"]))
+        except (ValueError, KeyError, TypeError) as error:
+            raise QueueError(f"suite-time: {path} is no shard record suite-shard wrote ({error}); "
+                             "run the shard again") from error
+        shards.append(shard)
+    return shards
+
+
+def suite_time_of_shards(root: Path, directory: Path, expect: int | None) -> str:
+    """CI's suite time of a sharded suite: the slowest shard's, as the shards run side by side.
+    Prints each shard and the notice ci_suite_time reads, then holds it to the budget as the
+    reference run: refuses a missing or failed shard, and a time over the limit with
+    SuiteOverLimitError unless `[tests]` over_limit is "warn"."""
+    budget = suite_budget(root)
+    shards = shard_times(directory)
+    if not shards:
+        raise QueueError(f"suite-time: no shard records in {directory}; each shard runs "
+                         "suite-shard --record <dir> and the check job collects them there")
+    if expect is not None and len(shards) != expect:
+        raise QueueError(f"suite-time: {len(shards)} shard records in {directory}, expected "
+                         f"{expect} ({', '.join(shard.name for shard in shards)}); a shard that "
+                         "did not record its time is missing; run it again")
+    slowest = max(shards, key=lambda shard: shard.seconds)
+    seconds, limit = slowest.seconds, budget.limit_seconds
+    print("Shards:\n" + "\n".join(f"  {shard.name}: {shard.seconds:.1f} s, exit code "
+                                   f"{shard.exit_code}" for shard in shards))
+    print(suite_notice(seconds, limit, f"; slowest of {len(shards)} shards: {slowest.name}"))
+    metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=limit)
+    failed = [shard.name for shard in shards if shard.exit_code != 0]
+    if failed:
+        raise QueueError(f"suite-time: shard {', '.join(failed)} failed; fix the failing tests "
+                         "its job names")
+    timing = (f"{seconds:.1f} s, the slowest of {len(shards)} shards ({slowest.name}) "
+              f"(target {budget.target_seconds:g} s, limit {limit:g} s)")
+    if seconds > limit and budget.over_limit == "warn":
+        print(over_limit_warning(seconds, limit), file=sys.stderr)
+    elif seconds > limit:
+        raise SuiteOverLimitError(
+            f"Sharded suite passed but took {timing} on CI, the budget's reference, over its "
+            "limit ([tests] limit_seconds in se.toml). Remedy: make the slowest shard's tests "
+            "faster or split them across the shards more evenly."
+        )
+    elif seconds > budget.target_seconds:
+        print(f"warning: the sharded suite took {seconds:.1f} s, over its target of "
+              f"{budget.target_seconds:g} s ([tests] target_seconds in se.toml)", file=sys.stderr)
+    return timing
+
+
 def host_load() -> str:
     """The host's load averages over its CPUs, for a warning about a slow run."""
     cpus = os.cpu_count() or 1
@@ -4446,8 +4544,7 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
         f"{seconds:.1f} s (target {budget.target_seconds:g} s, limit {budget.limit_seconds:g} s)"
     )
     if reference:
-        print(f"::notice title={CI_SUITE_TITLE}::Suite time: {seconds:.1f} s "
-              f"(limit {budget.limit_seconds:g} s)")
+        print(suite_notice(seconds, budget.limit_seconds))
     ci_text = (f"CI's last suite time on {integration_branch(root)} is {ci.seconds:.1f} s "
                f"(commit {ci.commit[:12]}{f', {ci.url}' if ci.url else ''})" if ci
                else f"CI's last suite time is unknown: {unknown}")
@@ -6818,6 +6915,35 @@ def run_suite_command(root: Path, args: argparse.Namespace) -> int:
         print(f"Verdict: {compare_suites(root, args.compare, args.runs)}")
         return 0
     print(f"Suite: {run_suite(root, args.slowest)}")
+    return 0
+
+
+@command("suite-shard", "on CI, run one shard of a sharded suite, the COMMAND after --, show its "
+                        "output, time it and write its record DIR/NAME.json for suite-time; exit "
+                        "code the command's (README \"Test budget\")",
+         WORKTREE,
+         arg("--name", required=True, help="the shard's name, unique among the shards"),
+         arg("--record", required=True, type=Path, metavar="DIR",
+             help="directory the record is written to, collected for suite-time"),
+         arg("shard_command", nargs=argparse.REMAINDER, metavar="-- COMMAND",
+             help="the shard's command and its arguments, run without a shell"))
+def run_suite_shard(root: Path, args: argparse.Namespace) -> int:
+    command = args.shard_command[1:] if args.shard_command[:1] == ["--"] else args.shard_command
+    return record_shard(root, args.name, args.record, command)
+
+
+@command("suite-time", "in CI's check job, judge a sharded suite: its time is its slowest "
+                       "shard's, from the records suite-shard wrote; prints it as the notice CI's "
+                       "suite time is read from; exit code 1 when a shard failed or is missing, 3 "
+                       "when the time is over the limit and the budget refuses it (README \"Test "
+                       "budget\")",
+         WORKTREE,
+         arg("--shards", required=True, type=Path, metavar="DIR",
+             help="directory holding the shards' records"),
+         arg("--expect", type=positive_int, metavar="N",
+             help="how many shards run; fewer or more records refuse"))
+def run_suite_time(root: Path, args: argparse.Namespace) -> int:
+    print(f"Suite time: {suite_time_of_shards(root, args.shards, args.expect)}")
     return 0
 
 

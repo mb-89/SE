@@ -462,6 +462,42 @@ cloud hosts differ by about 25 s for the same tree. Over the limit there, `check
 test result (passed, with its counts), the time, the limit and the slowest tests. Every CI run
 reports its time as a `se suite time` notice on its check run.
 
+A sharded project records it with SE's two actions, at the se ref it pins, and copies nothing:
+
+```yaml
+jobs:
+  shard:
+    strategy:
+      matrix:
+        shard: [one, two]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mb-89/SE/.github/actions/suite-shard@<se ref>
+        with:
+          name: ${{ matrix.shard }}
+          command: uv run pytest -q tests/${{ matrix.shard }}
+  check:
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mb-89/SE/.github/actions/suite-time@<se ref>
+        with:
+          shards: 2
+```
+
+- [`suite-shard`](.github/actions/suite-shard/action.yml) runs in each shard:
+  `work_tickets.py suite-shard` runs the shard's command, times it and writes its record, which
+  the action uploads, also when the shard fails.
+- [`suite-time`](.github/actions/suite-time/action.yml) runs in `check`: `work_tickets.py
+  suite-time` collects the records, lists each shard and prints the slowest shard's time as the
+  `se suite time` notice. It fails `check` where a shard failed or its record is missing, and over
+  the limit as above.
+- `check` runs with `if: always()`, so a failed shard fails the check the ruleset requires instead
+  of skipping it.
+
 Every other run (`integrate`, a worker's `suite`) runs the complete suite too. Over the limit it
 reads CI's last suite time on the integration branch, from the `check` runs of its last five
 first-parent commits, through github.com's API without an account (so `suite` needs no `gh`; a
@@ -766,6 +802,16 @@ work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs 
     run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1
     when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test
     budget")
+
+work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...
+    on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and
+    write its record DIR/NAME.json for suite-time; exit code the command's (README "Test budget")
+
+work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]
+    in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records
+    suite-shard wrote; prints it as the notice CI's suite time is read from; exit code 1 when a
+    shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README
+    "Test budget")
 
 work_tickets.py metrics [--since DATE] [--file FILE]
     print what the commands cost, from the line every run of a command appends (README Metrics): top

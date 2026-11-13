@@ -1,0 +1,36 @@
+# One shard of a sharded suite (README "Test budget"): runs the shard's command, times it with
+# work_tickets.py suite-shard and uploads its record for the check job's suite-time action.
+# SE's scripts run from this action's own checkout, so the project copies nothing.
+name: se suite shard
+description: Run and time one shard of the project's suite and upload its record.
+inputs:
+  name:
+    description: The shard's name, unique among the shards (letters, digits, '.', '_', '-').
+    required: true
+  command:
+    description: The shard's command, a bash command line run from the worktree.
+    required: true
+  worktree:
+    description: The project's checkout.
+    default: .
+runs:
+  using: composite
+  steps:
+    - name: Run and time the shard
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        COMMAND: ${{ inputs.command }}
+        WORKTREE: ${{ inputs.worktree }}
+      run: >-
+        python3 "$GITHUB_ACTION_PATH/../../../scripts/work_tickets.py" suite-shard
+        --worktree "$WORKTREE" --name "$NAME" --record "$RUNNER_TEMP/se-suite-shards"
+        -- bash -c "$COMMAND"
+    # Also after a failed shard: suite-time refuses its exit code and names it.
+    - name: Upload the shard's record
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: se-suite-shard-${{ inputs.name }}
+        path: ${{ runner.temp }}/se-suite-shards/${{ inputs.name }}.json
+        if-no-files-found: error
