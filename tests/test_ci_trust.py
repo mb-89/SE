@@ -13,7 +13,7 @@ from pathlib import Path
 
 import git_door
 import pytest
-import quiet_git
+import fake_git
 
 import ci_trust  # scripts/ is on the path (tests/conftest.py)
 
@@ -44,7 +44,7 @@ def commit(root: Path, files: dict[str, str], message: str = "change") -> str:
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     """A project with trust on and one landing on main."""
-    root = quiet_git.init(tmp_path / "project", "-b", "main")
+    root = fake_git.init(tmp_path / "project", "-b", "main")
     commit(root, {"se.toml": TRUSTED, "a.txt": "a\n"}, "first landing")
     return root
 

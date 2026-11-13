@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
-import quiet_git
+import fake_git
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "se_modules.py"
@@ -239,7 +239,7 @@ def commit(repo: Path, message: str, files: dict[str, str]) -> str:
 
 def make_upstream(path: Path, count: int = 3) -> list[str]:
     path.mkdir(parents=True)
-    quiet_git.init(path, "-b", "main")
+    fake_git.init(path, "-b", "main")
     return [commit(path, f"change {i}", {"version.txt": f"{i}\n", "sub/file.txt": f"sub {i}\n"}) for i in range(1, count + 1)]
 
 
@@ -433,7 +433,7 @@ def test_status_of_a_missing_local_path(world, capsys):
 
 def test_status_shows_drift_of_a_local_path(world, capsys, tmp_path):
     checkout = tmp_path / "checkout"
-    quiet_git.clone(world.upstream.as_posix(), checkout)
+    fake_git.clone(world.upstream.as_posix(), checkout)
     write(world.local, f'[paths]\nlib = "{checkout.as_posix()}"\n')
 
     code, out = run(world, capsys, "status")

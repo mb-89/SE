@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 import pytest
-import quiet_git
+import fake_git
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -43,8 +43,8 @@ IDENTITY = '[project]\nidentity = "alice <alice@example.com>"\n'
 
 def build_checkout(tmp_path: Path) -> None:
     origin, root = tmp_path / "origin.git", tmp_path / "main"
-    quiet_git.init(origin, "--bare", "-b", "main")
-    quiet_git.clone(origin, root)
+    fake_git.init(origin, "--bare", "-b", "main")
+    fake_git.clone(origin, root)
     git(root, "config", "user.name", "alice")
     git(root, "config", "user.email", "alice@example.com")
     git(root, "config", "core.hooksPath", str(tmp_path / "no-hooks"))

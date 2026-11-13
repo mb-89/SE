@@ -15,7 +15,7 @@ import se_component
 import se_usage
 import work_tickets
 import git_door
-import quiet_git
+import fake_git
 
 REPO = "github.com/owner/repo"
 NOW = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
@@ -36,8 +36,8 @@ def git(root: Path, *arguments: str, env: dict[str, str] | None = None) -> str:
 def build_checkout(tmp_path: Path) -> None:
     """A bare origin whose main holds COMMITS, and a clone of it."""
     origin, work, root = tmp_path / "origin.git", tmp_path / "work", tmp_path / "main"
-    quiet_git.init(origin, "--bare", "-b", "main")
-    quiet_git.clone(origin, work)
+    fake_git.init(origin, "--bare", "-b", "main")
+    fake_git.clone(origin, work)
     git(work, "config", "user.name", "alice")
     git(work, "config", "user.email", "alice@example.com")
     for index, (subject, date) in enumerate(COMMITS):
@@ -46,7 +46,7 @@ def build_checkout(tmp_path: Path) -> None:
         git(work, "commit", "-q", "-m", subject,
             env={**os.environ, "GIT_COMMITTER_DATE": date, "GIT_AUTHOR_DATE": date})
     git(work, "push", "-q", "origin", "main")
-    quiet_git.clone(origin, root, "-b", "main")
+    fake_git.clone(origin, root, "-b", "main")
 
 
 @pytest.fixture

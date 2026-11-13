@@ -10,7 +10,7 @@ import sys
 import tomllib
 
 import pytest
-import quiet_git
+import fake_git
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -37,8 +37,8 @@ def settings(version: str | None) -> str:
 
 def build_checkout(tmp_path: Path) -> None:
     origin, root = tmp_path / "origin.git", tmp_path / "main"
-    quiet_git.init(origin, "--bare", "-b", "main")
-    quiet_git.clone(origin, root)
+    fake_git.init(origin, "--bare", "-b", "main")
+    fake_git.clone(origin, root)
     git(root, "config", "user.name", "mb")
     git(root, "config", "user.email", "mb")
     (root / "se.toml").write_text(settings("1.2.3"), encoding="utf-8")
@@ -588,7 +588,7 @@ def run_workflow(checkout: Path, ref: str = "main") -> subprocess.CompletedProce
     """Run the workflow as its runner does: in a fresh full clone of origin, on a push of `ref`."""
     runner = checkout.parent / "runner"
     shutil.rmtree(runner, ignore_errors=True)
-    quiet_git.clone(checkout.parent / "origin.git", runner, "-b", ref)
+    fake_git.clone(checkout.parent / "origin.git", runner, "-b", ref)
     script = checkout.parent / "release.py"
     script.write_text(workflow_script(), encoding="utf-8")
     return subprocess.run([sys.executable, "-I", str(script)], cwd=runner, capture_output=True, text=True,

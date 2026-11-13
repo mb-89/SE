@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+import git_door
+
 ZERO_IDENTITY = "Author identity unknown\n\n*** Please tell me who you are.\n"
 
 
@@ -1120,6 +1122,28 @@ def _bytes(data: str | bytes) -> bytes:
     return data if isinstance(data, bytes) else data.encode("utf-8")
 
 
+# The suite's repositories, made through the door (the fake, or real git in the contract suite)
+
+
+def git(*arguments: str) -> None:
+    """`git <arguments>` through the door; a refusal raises, naming the command and git's answer."""
+    result = git_door.run(*arguments)
+    if result.returncode != 0:
+        raise RuntimeError(f"git {' '.join(arguments)} failed: {result.stderr.strip()}")
+
+
+def init(repository: Path, *options: str) -> Path:
+    """`git init -q <options> <repository>`: a checkout, or a bare one with `--bare`."""
+    git("init", "-q", *options, str(repository))
+    return repository
+
+
+def clone(source: str | Path, destination: Path, *options: str) -> Path:
+    """`git clone -q <options> <source> <destination>`."""
+    git("clone", "-q", *options, str(source), str(destination))
+    return destination
+
+
 # The state file: the fake shared with child processes (scripts/git_door.py's SE_GIT_DOOR)
 
 STATE_FORMAT = "se-git-door-state/1"
@@ -1163,7 +1187,7 @@ def to_state(fake: FakeGit, folder: Path) -> dict:
                       for tree, files in sorted(fake.trees.items())},
             "commits": commits,
             "declining": {_place(path, folder): message for path, message in sorted(fake.declining.items())},
-            "calls": fake.calls}
+            "calls": fake.calls, "fake": Path(__file__).resolve().as_posix()}
 
 
 def from_state(state: dict, folder: Path) -> FakeGit:

@@ -17,6 +17,8 @@ well); `refused`, which stops the process at its first git command, naming it.
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -97,12 +99,17 @@ def from_environment(environment: dict[str, str] | os._Environ = os.environ) -> 
 
 
 def fake_backend(state: Path) -> Backend:
-    """The fake behind `state`, from se's tests/fake_git.py (only a test sets the variable)."""
-    tests = str(Path(__file__).resolve().parents[1] / "tests")
-    if tests not in sys.path:
-        sys.path.append(tests)
-    import fake_git
-
+    """The fake behind `state`, from the tests/fake_git.py that wrote it (only a test sets the
+    variable; the door that reads it may be a copy of SE without tests, as the plugin's is)."""
+    fake_git = sys.modules.get("fake_git")
+    if fake_git is None:
+        if not state.is_file():
+            raise SystemExit(f"git door: {VARIABLE} names the state file {state}, which does not exist")
+        module = Path(json.loads(state.read_text(encoding="utf-8"))["fake"])
+        spec = importlib.util.spec_from_file_location("fake_git", module)
+        fake_git = importlib.util.module_from_spec(spec)
+        sys.modules["fake_git"] = fake_git
+        spec.loader.exec_module(fake_git)
     return fake_git.StateFile(state)
 
 

@@ -18,7 +18,6 @@ import pytest
 
 import fake_git
 import git_door
-import quiet_git
 import work_tickets  # scripts/ is on the path (tests/conftest.py)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,7 +32,7 @@ def isolated_git(home: Path) -> git_door.RealGit:
     identity, and it may not guess one."""
     home.mkdir(parents=True, exist_ok=True)
     config = home / "gitconfig"
-    config.write_text("[user]\n\tuseConfigOnly = true\n", encoding="utf-8")
+    config.write_text("[user]\n\tuseConfigOnly = true\n[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n", encoding="utf-8")
     return git_door.RealGit({"HOME": str(home), "XDG_CONFIG_HOME": str(home),
                              "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(config),
                              **{name: None for name in RUNNER_VARIABLES}})
@@ -70,7 +69,7 @@ def commit(root: Path, files: dict[str, str], message: str = "change") -> str:
 
 
 def project(tmp_path: Path) -> Path:
-    root = quiet_git.init(tmp_path / "project", "-b", "main")
+    root = fake_git.init(tmp_path / "project", "-b", "main")
     assert git_door.set_identity(root, IDENTITY) is None
     return root
 
@@ -79,7 +78,7 @@ def project(tmp_path: Path) -> Path:
 
 
 def test_a_commit_and_a_merge_without_an_identity_are_refused(door, tmp_path: Path) -> None:
-    root = quiet_git.init(tmp_path / "project", "-b", "main")
+    root = fake_git.init(tmp_path / "project", "-b", "main")
     (root / "a.txt").write_text("a\n", encoding="utf-8")
     git(root, "add", "-A")
     refused = git_door.run("commit", "-q", "-m", "first", root=root)
@@ -183,7 +182,7 @@ def test_a_conflicting_merge_fails_naming_the_file(door, tmp_path: Path) -> None
 
 
 def test_push_fetch_and_ls_remote_against_a_bare_origin(door, tmp_path: Path) -> None:
-    origin = quiet_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    origin = fake_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
     root = project(tmp_path)
     git(root, "remote", "add", "origin", str(origin))
     first = commit(root, {"a.txt": "a\n"})
@@ -207,8 +206,8 @@ def test_ls_remote_of_a_missing_remote_fails(door, tmp_path: Path) -> None:
 
 
 def test_clone_brings_the_branches_and_tags_and_checks_out_the_branch_asked(door, tmp_path: Path) -> None:
-    origin = quiet_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
-    empty = quiet_git.clone(origin, tmp_path / "empty")
+    origin = fake_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    empty = fake_git.clone(origin, tmp_path / "empty")
     assert git_door.set_identity(empty, IDENTITY) is None
     first = commit(empty, {"a.txt": "a\n"})
     git(empty, "push", "-q", "origin", "main")
@@ -217,7 +216,7 @@ def test_clone_brings_the_branches_and_tags_and_checks_out_the_branch_asked(door
     feature = commit(empty, {"b.txt": "b\n"})
     git(empty, "tag", "v1.0.0")
     git(empty, "push", "-q", "origin", "feat/x", "refs/tags/v1.0.0")
-    clone = quiet_git.clone(origin, tmp_path / "clone", "-b", "main")
+    clone = fake_git.clone(origin, tmp_path / "clone", "-b", "main")
     assert (clone / "a.txt").read_text(encoding="utf-8") == "a\n" and not (clone / "b.txt").exists()
     assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "main"
     assert git(clone, "rev-parse", "refs/remotes/origin/feat/x") == feature
@@ -418,7 +417,7 @@ def test_update_ref_moves_and_deletes_a_ref_only_from_the_old_value_named(door, 
 
 
 def test_ls_remote_reads_a_named_remote_by_pattern(door, tmp_path: Path) -> None:
-    origin = quiet_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    origin = fake_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
     root = project(tmp_path)
     git(root, "remote", "add", "origin", str(origin))
     first = commit(root, {"a.txt": "a\n"})
@@ -512,7 +511,7 @@ def test_a_merge_keeps_an_uncommitted_change_it_does_not_touch_and_refuses_one_i
 
 
 def test_push_deletes_a_branch_under_a_lease_and_a_declining_remote_keeps_it(door, tmp_path: Path) -> None:
-    origin = quiet_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    origin = fake_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
     root = project(tmp_path)
     git(root, "remote", "add", "origin", str(origin))
     first = commit(root, {"a.txt": "a\n"})
@@ -539,7 +538,7 @@ def test_push_deletes_a_branch_under_a_lease_and_a_declining_remote_keeps_it(doo
 
 
 def test_fetch_mirrors_the_remote_branches_with_prune_and_pull_merges_one(door, tmp_path: Path) -> None:
-    origin = quiet_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    origin = fake_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
     root = project(tmp_path)
     git(root, "remote", "add", "origin", str(origin))
     first = commit(root, {"a.txt": "a\n"})
@@ -550,7 +549,7 @@ def test_fetch_mirrors_the_remote_branches_with_prune_and_pull_merges_one(door, 
     git(root, "update-ref", "refs/remotes/origin/gone", first)
     git(root, "fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*")
     assert git_door.run("rev-parse", "--verify", "--quiet", "refs/remotes/origin/gone", root=root).returncode != 0
-    other = quiet_git.clone(origin, tmp_path / "other")
+    other = fake_git.clone(origin, tmp_path / "other")
     assert git_door.set_identity(other, IDENTITY) is None
     newer = commit(other, {"b.txt": "b\n"})
     git(other, "push", "-q", "origin", "main")
@@ -621,7 +620,7 @@ def state_answers(folder: Path) -> list[dict]:
 
 def state_json(path: Path) -> dict:
     state = json.loads(path.read_text(encoding="utf-8"))
-    state.pop("calls", None)
+    state.pop("calls", None), state.pop("fake", None)
     return state
 
 

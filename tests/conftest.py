@@ -56,9 +56,6 @@ def local_machine() -> Iterator[None]:
 STILL_ON_REAL_GIT = "runs real git until its piece of the move to the fake lands"
 REAL_GIT: dict[str, str] = {
     "tests/test_git_door.py": "the door's contract, held against real git",
-    "tests/beside_script_runs.py": STILL_ON_REAL_GIT,
-    "tests/beside_se_components.py": STILL_ON_REAL_GIT,
-    "tests/beside_se_relay.py": STILL_ON_REAL_GIT,
     "tests/test_public_check.py": STILL_ON_REAL_GIT,
     "tests/test_push_guard.py": STILL_ON_REAL_GIT,
     "tests/test_quiet_git.py": STILL_ON_REAL_GIT,
