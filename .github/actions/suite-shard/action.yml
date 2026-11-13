@@ -19,6 +19,7 @@ runs:
     - name: Run and time the shard
       shell: bash
       env:
+        PYTHONUNBUFFERED: "1" # its output in the order it was written
         NAME: ${{ inputs.name }}
         COMMAND: ${{ inputs.command }}
         WORKTREE: ${{ inputs.worktree }}

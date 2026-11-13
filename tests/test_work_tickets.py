@@ -2214,7 +2214,7 @@ def test_a_sharded_suite_reports_its_slowest_shard_as_ci_s_suite_time(
     out = capsys.readouterr().out
     assert "  fast: 20.0 s, exit code 0\n  slow: 55.5 s, exit code 0" in out
     assert ("::notice title=se suite time::Suite time: 55.5 s (limit 120 s; slowest of 2 shards: "
-            "slow)") in out
+            "55.5 s (shard slow))") in out
 
 
 def test_the_shards_notice_round_trips_through_ci_suite_time(
@@ -2252,13 +2252,16 @@ def test_a_sharded_overrun_fails_unless_the_project_declares_warn_only(
 
     code = work_tickets.main(["suite-time", "--worktree", str(worktree), "--shards", str(records)])
 
-    error = capsys.readouterr().err
+    out = capsys.readouterr().out.splitlines()
+    level = "warning" if warn_only else "error"
+    annotation, = (line for line in out if line.startswith(f"::{level}::"))
+    assert out.index(annotation) > out.index("Shards:")
     if warn_only:
-        assert code == 0 and '[tests] over_limit = "warn" in se.toml' in error
+        assert code == 0 and '[tests] over_limit = "warn" in se.toml' in annotation
     else:
         assert code == work_tickets.SUITE_OVER_LIMIT_EXIT_CODE
-        assert "took 130.0 s, the slowest of 2 shards (slow)" in error
-        assert "over its limit ([tests] limit_seconds in se.toml)" in error
+        assert "took 130.0 s, the slowest of 2 shards (shard slow)" in annotation
+        assert "over its limit ([tests] limit_seconds in se.toml)" in annotation
 
 
 def test_a_failed_or_missing_shard_fails_the_suite_time(worktree, monkeypatch, capsys):
@@ -2267,15 +2270,37 @@ def test_a_failed_or_missing_shard_fails_the_suite_time(worktree, monkeypatch, c
     arguments = ["suite-time", "--worktree", str(worktree), "--shards", str(records)]
 
     assert work_tickets.main([*arguments, "--expect", "3"]) == 1
-    assert "2 shard records in" in capsys.readouterr().err
+    assert "::error::suite-time: 2 shard records in" in capsys.readouterr().out
     monkeypatch.setattr(work_tickets, "clock", iter([0.0, 5.0]).__next__)
     assert work_tickets.main(["suite-shard", "--worktree", str(worktree), "--name", "red",
                               "--record", str(records), "--", sys.executable, "-c",
                               "raise SystemExit(4)"]) == 4
+    capsys.readouterr()
     assert work_tickets.main(arguments) == 1
+    out = capsys.readouterr().out
+    assert "Suite time" not in out  # a failed run's shorter time never stands as CI's
+    assert "::notice" not in out
+    error, = (line for line in out.splitlines() if line.startswith("::error::"))
+    assert error.startswith("::error::suite-time: the run failed: shard red failed (exit code 4)")
+    assert out.index("  red: 5.0 s, exit code 4") < out.index("::error::")
+
+
+def test_a_sharded_suite_over_its_target_warns_as_an_annotation(worktree, monkeypatch, capsys):
+    budget_suite(worktree, monkeypatch, 0.0, None)
+    records = record_two_shards(worktree, monkeypatch, 20.0, 70.0)
+    capsys.readouterr()
+
+    assert work_tickets.main(["suite-time", "--worktree", str(worktree), "--shards",
+                              str(records)]) == 0
     captured = capsys.readouterr()
-    assert "Suite time: 30.0 s" in captured.out  # the time is reported all the same
-    assert "suite-time: shard red failed" in captured.err
+    assert captured.err == ""
+    assert ("::warning::the sharded suite took 70.0 s, over its target of 60 s ([tests] "
+            "target_seconds in se.toml)") in captured.out.splitlines()
+
+
+def test_a_workflow_annotation_keeps_line_breaks_and_percent_signs_as_text():
+    assert work_tickets.workflow_annotation("error", "100% done\nnext\r") == \
+        "::error::100%25 done%0Anext%0D"
 
 
 def test_ci_suite_time_reads_the_notice_of_the_newest_completed_check_on_main(

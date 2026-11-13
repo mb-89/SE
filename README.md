@@ -818,9 +818,9 @@ work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...
 
 work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]
     in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records
-    suite-shard wrote; prints it as the notice CI's suite time is read from; exit code 1 when a
-    shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README
-    "Test budget")
+    suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a
+    shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or
+    is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget")
 
 work_tickets.py metrics [--since DATE] [--file FILE]
     print what the commands cost, from the line every run of a command appends (README Metrics): top

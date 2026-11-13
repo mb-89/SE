@@ -23,6 +23,7 @@ runs:
     - name: The sharded suite, within its budget
       shell: bash
       env:
+        PYTHONUNBUFFERED: "1" # its output in the order it was written
         SHARDS: ${{ inputs.shards }}
         WORKTREE: ${{ inputs.worktree }}
       run: >-
