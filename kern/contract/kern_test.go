@@ -260,3 +260,37 @@ func TestUsage(t *testing.T) {
 	want(t, run(t, nil, "begin"), 2, `kern: no command "begin"`)
 	want(t, run(t, nil, "status", "--root", filepath.Join(t.TempDir(), "none")), 2, "is no folder")
 }
+
+// `kern hook <event>` posts the host's hook JSON from stdin and takes the
+// session's lease; where no core answers it prints nothing and exits 0, as
+// every failure does: a host reads a hook's exit code 2 as a block.
+func TestAHookPostsItsEventAndFailsOpen(t *testing.T) {
+	t.Parallel()
+	hook := func(root, stdin string, args ...string) (string, int) {
+		t.Helper()
+		cmd := exec.Command(kern, append([]string{"hook"}, args...)...)
+		cmd.Dir, cmd.Stdin = root, strings.NewReader(stdin)
+		out, err := cmd.Output()
+		if ee, ok := err.(*exec.ExitError); ok {
+			return string(out), ee.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		return string(out), 0
+	}
+	root := checkout(t)
+	for _, args := range [][]string{{"PreToolUse"}, {}, {"no.word"}, {"Stop", "--bogus"}} {
+		if out, code := hook(root, `{"session_id":"s1"}`, args...); out != "" || code != 0 {
+			t.Fatalf("kern hook %q with no core prints %q with exit code %d, and wants nothing with 0", args, out, code)
+		}
+	}
+	want(t, run(t, nil, "start", "--root", root), 0, "kern: started")
+	if out, code := hook(root, `{"session_id":"s1","hook_event_name":"SessionStart"}`, "SessionStart", "--root", root); out != "" || code != 0 {
+		t.Fatalf("kern hook SessionStart prints %q with exit code %d, and wants nothing with 0", out, code)
+	}
+	want(t, run(t, nil, "status", "--root", root), 0, "1 session(s)")
+	if out, code := hook(root, `{"session_id":"s1"}`, "SessionEnd"); out != "" || code != 0 {
+		t.Fatalf("kern hook SessionEnd prints %q with exit code %d, and wants nothing with 0", out, code)
+	}
+	want(t, run(t, nil, "status", "--root", root), 0, "0 session(s)")
+}

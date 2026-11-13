@@ -39,6 +39,17 @@ BOOTSTRAP = 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" --hook || true'
 # a hook that cannot run lets the turn end (advice fails open).
 STOP_CHECK = ('PATH="$HOME/.local/bin:$PATH" uv run --no-project --python ">=3.11" python '
               '"${CLAUDE_PLUGIN_ROOT}/scripts/work_tickets.py" stop-check || true')
+# Every other session event goes to kern, the core SE pins (README "Kern"), through SE's hook
+# command; it fails open, and `|| true` holds a hook that cannot run to the same.
+KERN_EVENTS = ("SessionEnd", "SubagentStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop",
+               "SubagentStop")
+
+
+def kern_hook(event: str) -> str:
+    """The plugin's hook command that posts `event` to kern."""
+    return f'bash "${{CLAUDE_PLUGIN_ROOT}}/scripts/se_hook.sh" {event} || true'
+
+
 LINK = re.compile(r"(\]\()([^)\s#]+)((?:#[^)\s]*)?\))")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 # A script path not under `<se>`, the root the start hook names (scripts/se_start.py `root_line`):
@@ -245,8 +256,10 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "license": "MIT",
         "hooks": {
             "SessionStart": [{"hooks": [{"type": "command", "command": BOOTSTRAP}]}],
-            "Stop": [{"hooks": [{"type": "command", "command": STOP_CHECK}]}],
-            "SubagentStop": [{"hooks": [{"type": "command", "command": STOP_CHECK}]}],
+            **{event: [{"hooks": [{"type": "command", "command": command}
+                                  for command in ((STOP_CHECK,) if event.endswith("Stop") else ())
+                                  + (kern_hook(event),)]}]
+               for event in KERN_EVENTS},
         },
     }
     marketplace = {

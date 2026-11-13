@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -325,5 +326,79 @@ func TestAPlacementTheCoreCannotRunIsRefused(t *testing.T) {
 		Wires: []index.Wire{{Port: "tally.total", To: "sum", Line: 5}}}
 	if _, err := host.Serve(host.Options{Root: t.TempDir(), Clock: newClock(), Wiring: w, Components: []*index.Component{tally}}); err == nil || !strings.Contains(err.Error(), "wiring line 3: instance tally is placed") {
 		t.Fatalf("a placed derivation starts with %v, and wants a refusal at its wiring line", err)
+	}
+}
+
+// A hook posts its event and takes its session's lease; the core's answer is its effect.
+func TestAHookPostTakesItsSessionsLease(t *testing.T) {
+	t.Parallel()
+	c := served(t, host.Options{})
+	s, _ := c.Standing()
+	a, err := host.Post(host.Wall{}, s.Root, "UserPromptSubmit", []byte(`{"session_id":"s1"}`), host.HookWait)
+	if err != nil || a.Effect != "pass" {
+		t.Fatalf("a hook's post answers %+v, %v, and wants the effect pass", a, err)
+	}
+	if h := c.Health(); len(h.Sessions) != 1 || h.Sessions[0] != "s1" {
+		t.Fatalf("the health names the sessions %q, and wants [s1]", h.Sessions)
+	}
+}
+
+// A hook fails open at once where no core runs and none is starting.
+func TestAHookWithNoCoreFailsOpenAtOnce(t *testing.T) {
+	t.Parallel()
+	began := time.Now()
+	_, err := host.Post(host.Wall{}, t.TempDir(), "PreToolUse", []byte(`{}`), host.HookWait)
+	if !errors.Is(err, host.ErrNotRunning) {
+		t.Fatalf("a hook with no core answers %v, and wants ErrNotRunning", err)
+	}
+	if took := time.Since(began); took > 50*time.Millisecond {
+		t.Fatalf("a hook with no core took %v, and should not wait for one", took)
+	}
+}
+
+// A hook waits for a core whose start's claim stands, within its wait, and
+// gives up when the wait is out.
+func TestAHookWaitsForAStartingCoreWithinItsWait(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(host.ClaimPath(root)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(host.ClaimPath(root), []byte("1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	began := time.Now()
+	if _, err := host.Post(host.Wall{}, root, "Stop", nil, 30*time.Millisecond); !errors.Is(err, host.ErrNotRunning) {
+		t.Fatalf("a hook whose core never comes up answers %v, and wants ErrNotRunning", err)
+	}
+	if took := time.Since(began); took < 30*time.Millisecond {
+		t.Fatalf("a hook gave a starting core %v, and should wait out its 30ms", took)
+	}
+	up := make(chan *host.Core, 1)
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		c, err := host.Serve(host.Options{Root: root})
+		if err != nil {
+			t.Error(err)
+		}
+		up <- c
+	}()
+	a, err := host.Post(host.Wall{}, root, "SessionStart", []byte(`{"session_id":"s1"}`), wait)
+	if c := <-up; c != nil {
+		c.Stop("the case ends")
+		<-c.Ended()
+	}
+	if err != nil || a.Effect != "pass" {
+		t.Fatalf("a hook for a starting core answers %+v, %v, and wants the effect pass", a, err)
+	}
+}
+
+// An event name that is no one word is refused before the bus sees it.
+func TestAHookEventIsOneWord(t *testing.T) {
+	t.Parallel()
+	for _, event := range []string{"", "a.b", "a b", ">"} {
+		if _, err := host.Post(host.Wall{}, t.TempDir(), event, nil, host.HookWait); !errors.Is(err, host.ErrNoEvent) {
+			t.Fatalf("the event %q answers %v, and wants ErrNoEvent", event, err)
+		}
 	}
 }

@@ -334,6 +334,22 @@ effects (`pass`, `context`, `block`, `result`), and the rule that a hook fails o
 module is JavaScript for its host; Claude Code's hooks are commands, so the client is the core's
 own Go binary.
 
+### What the hooks carry, probed in a cloud session
+
+Probed on 13 Nov by a worker in a Claude Code cloud session, its hooks writing each payload to a
+file (step 6):
+
+- **PostToolUse carries a GitHub tool's answer.** After `mcp__github__issue_read` (method
+  `get_labels`), the payload held `tool_name`, `tool_input` (`method`, `owner`, `repo`,
+  `issue_number`), `tool_use_id`, `duration_ms`, `mcp_server` (`name` `github`, `source` `dynamic`)
+  and `tool_response`: the tool's whole answer as MCP content, `[{"type": "text", "text": <the JSON
+  the session read>}]`, which parsed to the same labels. The relay backend can match it.
+- **SubagentStart carries the parent's session id.** Its `session_id` is the parent session's,
+  equal to the one on the parent's own PostToolUse; beside it come `agent_id` and `agent_type`
+  (`general-purpose`), and no field of its own for the parent. A sub-agent renews its session's lease
+  by that id.
+- Both also carried `transcript_path`, `cwd`, `prompt_id` and `hook_event_name`.
+
 ## GitHub in the cloud
 
 No token reaches code in a cloud session; the session's GitHub tools reach GitHub, and `git`
