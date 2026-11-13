@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 import pytest
-from quiet_git import quiet
+import quiet_git
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -200,14 +200,6 @@ def local_config(tmp_path: Path, monkeypatch) -> Path:
     path = tmp_path / "home" / ".se" / "local.toml"
     monkeypatch.setattr(work_tickets, "local_config_path", lambda: path)
     return path
-
-
-@pytest.fixture(autouse=True)
-def local_runner(monkeypatch) -> None:
-    """Every test starts on a local machine, whatever runs the suite: a GitHub Actions runner sets
-    GITHUB_ACTIONS, which makes `start` a cloud start; a test that needs the cloud sets it."""
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    monkeypatch.delenv("SE_CLOUD_AGENT", raising=False)
 
 
 @pytest.fixture
@@ -432,8 +424,7 @@ def test_field_report_draft_writes_the_template_between_its_markers_and_files_no
 def test_field_report_draft_names_the_configured_integration_branch_and_its_commit(
         worktree, gh, monkeypatch):
     monkeypatch.setattr(work_tickets, "tested_main", TESTED_MAIN)
-    git_ok("init", "-q", "-b", "next", str(worktree))
-    quiet(worktree)
+    quiet_git.init(worktree, "-b", "next")
     git_ok("-C", str(worktree), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
            "commit", "-q", "--allow-empty", "-m", "base")
     commit = subprocess.run(["git", "-C", str(worktree), "rev-parse", "--short", "HEAD"],
@@ -690,8 +681,7 @@ def test_intake_and_refresh_read_requirements_under_changes_after_filing(worktre
 
 def test_field_report_check_records_the_branch_tip_of_its_worktree(tmp_path, capsys):
     root = tmp_path / "worker"
-    git_ok("init", "-q", "-b", BRANCH, str(root))
-    quiet(root)
+    quiet_git.init(root, "-b", BRANCH)
     git_ok("-C", str(root), "-c", "user.name=mb", "-c", "user.email=mb", "commit", "-q",
            "--allow-empty", "-m", "work")
     git_ok("-C", str(root), "branch", "main")  # the integration branch the check's guard diffs against
@@ -1051,12 +1041,10 @@ def test_sync_refuses_a_malformed_public_identity_naming_the_file(
 def test_sync_fetches_and_merges_a_configured_mirror(main_checkout, local_config):
     mirror = main_checkout.parent / "mirror.git"
     source = main_checkout.parent / "mirror-source"
-    git_ok("init", "-q", "--bare", "-b", "main", str(mirror))
-    quiet(mirror)
+    quiet_git.init(mirror, "--bare", "-b", "main")
     git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
     git_ok("-C", str(main_checkout), "push", "-q", "mirror", "main")
-    git_ok("clone", "-q", str(mirror), str(source))
-    quiet(source)
+    quiet_git.clone(mirror, source)
     git_ok("-C", str(source), "config", "user.name", "Mirror test")
     git_ok("-C", str(source), "config", "user.email", "mirror-test@example.invalid")
     (source / "from-mirror.txt").write_text("mirror\n", encoding="utf-8")
@@ -1225,7 +1213,7 @@ def test_deliver_refuses_a_report_with_an_invalid_result(worktree, gh, monkeypat
 def test_repository_comes_from_the_origin_remote(tmp_path, url, repo):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    assert subprocess.run(["git", "init", "-q", str(checkout)], check=False).returncode == 0
+    quiet_git.init(checkout)
     assert work_tickets.remote_repo(checkout) is None
     assert subprocess.run(["git", "-C", str(checkout), "remote", "add", "origin", url],
                           check=False).returncode == 0
@@ -1599,10 +1587,8 @@ def suite_passed(root: Path, result: str | None) -> str | None:
 
 def build_main_checkout(tmp_path: Path) -> None:
     origin, checkout = tmp_path / "origin.git", tmp_path / "main"
-    git_ok("init", "-q", "--bare", "-b", "main", str(origin))
-    quiet(origin)
-    git_ok("clone", "-q", str(origin), str(checkout))
-    quiet(checkout)
+    quiet_git.init(origin, "--bare", "-b", "main")
+    quiet_git.clone(origin, checkout)
     git_ok("-C", str(checkout), "config", "user.name", "mb")
     git_ok("-C", str(checkout), "config", "user.email", "mb")
     (checkout / "se.toml").write_text(IDENTITY, encoding="utf-8")
@@ -1610,8 +1596,7 @@ def build_main_checkout(tmp_path: Path) -> None:
     git_ok("-C", str(checkout), "commit", "-q", "-m", "base")
     git_ok("-C", str(checkout), "push", "-q", "origin", "HEAD:main")
     # The newest main exists only on origin; start must fetch it.
-    git_ok("clone", "-q", str(origin), str(tmp_path / "other"))
-    quiet(tmp_path / "other")
+    quiet_git.clone(origin, tmp_path / "other")
     git_ok("-C", str(tmp_path / "other"), "-c", "user.name=Other", "-c",
            "user.email=other@example.invalid", "commit", "-q", "--allow-empty", "-m", "newest")
     git_ok("-C", str(tmp_path / "other"), "push", "-q", "origin", "HEAD:main")
@@ -2022,8 +2007,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
         main_checkout, local_config, monkeypatch, capsys, check_fails):
     worker = main_checkout.parent / "worker"
     mirror = main_checkout.parent / "mirror.git"
-    git_ok("init", "-q", "--bare", "-b", "main", str(mirror))
-    quiet(mirror)
+    quiet_git.init(mirror, "--bare", "-b", "main")
     git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
     local_config.parent.mkdir(parents=True)
     local_config.write_text(
@@ -2168,8 +2152,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
 def test_public_mirror_guard_rejects_references_and_mismatched_identities(
         main_checkout, local_config, message, email, error):
     mirror = main_checkout.parent / "mirror.git"
-    git_ok("init", "-q", "--bare", "-b", "main", str(mirror))
-    quiet(mirror)
+    quiet_git.init(mirror, "--bare", "-b", "main")
     git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
     local_config.parent.mkdir(parents=True)
     local_config.write_text(

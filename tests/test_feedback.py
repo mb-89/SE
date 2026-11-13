@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
-from quiet_git import quiet
+import quiet_git
 
 PROJECT = Path(__file__).resolve().parents[1]
 SCRIPTS = PROJECT / "scripts"
@@ -157,16 +157,14 @@ def slow_door(tmp_path_factory) -> dict:
         gh.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
         gh.chmod(0o755)
     origin, checkout = base / "origin.git", base / "checkout"
-    git("init", "-q", "--bare", "-b", "main", str(origin))
-    quiet(origin)
-    git("clone", "-q", str(origin), str(checkout))
-    quiet(checkout)
+    quiet_git.init(origin, "--bare", "-b", "main")
+    quiet_git.clone(origin, checkout)
     identity = ("-c", "user.name=alice", "-c", "user.email=alice@example.com")
     git("-C", str(checkout), *identity, "commit", "-q", "--allow-empty", "-m", "start")
     git("-C", str(checkout), "push", "-q", "origin", "HEAD:main")
     environment = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                    "SE_METRICS": str(base / "metrics.jsonl"), "HOME": str(base),
-                   "USERPROFILE": str(base), "GITHUB_ACTIONS": ""}
+                   "USERPROFILE": str(base)}
     return {"checkout": checkout, "env": environment, "metrics": base / "metrics.jsonl"}
 
 

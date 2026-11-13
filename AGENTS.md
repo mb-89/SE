@@ -34,6 +34,8 @@
 - Repository hygiene: `tests/test_repository.py` fails on a tracked binary file, a tracked file over
   200 KB, or a `TODO`/`FIXME` in `scripts/` or `tests/` naming no issue; a file that must break the
   first two goes in its allow list there, with its reason.
+  - It also fails on a git `init` or `clone` in `tests/` outside `tests/quiet_git.py`, whose `init`
+    and `clone` switch the repository's background maintenance off.
 - Dangling references: `tests/test_references.py` fails where the agents, the skills (the rule
   book among them), README.md or AGENTS.md name what the repository lacks.
   - A link to a missing file, a missing repository path in code (`scripts/…`, `src/…`, `tests/…`,
@@ -44,7 +46,8 @@
   checks refuse, the layouts (`se_plugin.py check`) and the README's command reference
   (`work_tickets.py docs --check`); SE runs no code formatter or linter, and its other checks
   have no fix to apply.
-- Test environment: none to load. Where uv warns that it cannot verify TLS behind a proxy, set
+- Test environment: none to load; `tests/conftest.py` clears the runner's variables (`CI`,
+  `SE_CLOUD_AGENT`, every `GITHUB_*`) for the session, and a test that needs one sets it. Where uv warns that it cannot verify TLS behind a proxy, set
   `UV_SYSTEM_CERTS=1` in that shell.
 
 ## Public safety

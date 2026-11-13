@@ -8,14 +8,13 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from quiet_git import quiet
+import quiet_git
 
 
 def build_locked(tmp_path: Path) -> None:
     """A bare repository, quieted, whose objects/maintenance.lock git's maintenance holds."""
     origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
-    quiet(origin)
+    quiet_git.init(origin, "--bare")
     (origin / "objects" / "maintenance.lock").write_text("", encoding="utf-8")
 
 
@@ -54,8 +53,7 @@ def test_a_plain_copy_fails_on_the_vanished_lock(tmp_path, vanishing_locks):
 
 def test_a_quiet_repository_runs_no_background_maintenance(tmp_path):
     for repository, arguments in ((tmp_path / "bare.git", ["--bare"]), (tmp_path / "work", [])):
-        subprocess.run(["git", "init", "-q", *arguments, str(repository)], check=True)
-        quiet(repository)
+        quiet_git.init(repository, *arguments)
         read = lambda key: subprocess.run(["git", "-C", str(repository), "config", key],  # noqa: E731
                                           capture_output=True, text=True, check=True).stdout.strip()
         assert (read("maintenance.auto"), read("gc.auto")) == ("false", "0")
