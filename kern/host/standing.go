@@ -60,7 +60,7 @@ func LogPath(root string) string { return filepath.Join(root, Runtime, logFile) 
 // unreadable, or names a pid that runs nowhere reads as ErrNotRunning.
 func ReadStanding(root string) (Standing, error) {
 	var s Standing
-	data, err := os.ReadFile(StandingPath(root))
+	data, err := readWhole(StandingPath(root))
 	if errors.Is(err, fs.ErrNotExist) {
 		return s, ErrNotRunning
 	}
@@ -74,6 +74,24 @@ func ReadStanding(root string) (Standing, error) {
 		return Standing{}, fmt.Errorf("%w: %s names pid %d, which runs nowhere", ErrNotRunning, StandingPath(root), s.Pid)
 	}
 	return s, nil
+}
+
+// The looks a read of the standing file takes while the core replaces it:
+// Windows refuses to open a file during its rename with a sharing violation.
+const (
+	readTries = 200
+	readPause = time.Millisecond
+)
+
+// readWhole reads a file, trying again while an error other than its absence
+// stands, since the core's rename of the standing file is over in a moment.
+func readWhole(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	for try := 1; err != nil && !errors.Is(err, fs.ErrNotExist) && try < readTries; try++ {
+		time.Sleep(readPause)
+		data, err = os.ReadFile(path)
+	}
+	return data, err
 }
 
 // writeStanding writes the standing file whole, readable by its owner alone,
@@ -105,7 +123,16 @@ func writeStanding(root string, s Standing) error {
 		_ = os.Remove(tmp.Name())
 		return err
 	}
-	return os.Rename(tmp.Name(), StandingPath(root))
+	// A reader that holds the file open on Windows refuses the rename for a moment.
+	err = os.Rename(tmp.Name(), StandingPath(root))
+	for try := 1; err != nil && try < readTries; try++ {
+		time.Sleep(readPause)
+		err = os.Rename(tmp.Name(), StandingPath(root))
+	}
+	if err != nil {
+		_ = os.Remove(tmp.Name())
+	}
+	return err
 }
 
 // dropStanding removes the standing file where it still names pid, so a core

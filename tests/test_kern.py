@@ -12,7 +12,7 @@ SETUP_GO_NODE_24 = 6
 def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow[workflow.index("\njobs:\n"):]
-    assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["kern-windows", "check"], (
+    assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["check", "kern-windows"], (
         "kern runs in the required job check, and on Windows in kern-windows, which check needs"
     )
     setups = re.findall(r"uses: actions/setup-go@v(\d+)\n        with:\n((?:          .*\n)+)", workflow)
@@ -21,7 +21,7 @@ def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins()
         assert int(major) >= SETUP_GO_NODE_24, "setup-go below v6 runs on Node 20"
         assert "go-version-file: kern/go.mod" in inputs and "cache-dependency-path: kern/go.sum" in inputs
     assert re.search(r"(?m)^go \d+\.\d+\.\d+$", (PROJECT / "kern" / "go.mod").read_text(encoding="utf-8"))
-    check = jobs[jobs.index("\n  check:\n"):]
+    check = jobs[jobs.index("\n  check:\n"):jobs.index("\n  kern-windows:\n") + 1]
     steps = ["scripts/work_tickets.py suite --worktree .", "actions/setup-go", "time go vet ./...",
              "time go test ./...", "needs.kern-windows.result"]
     assert [check.index(step) for step in steps] == sorted(check.index(step) for step in steps)
@@ -32,8 +32,8 @@ def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins()
 def test_the_required_check_fails_unless_kern_passed_on_windows() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow[workflow.index("\njobs:\n"):]
-    windows = jobs[jobs.index("\n  kern-windows:\n"):jobs.index("\n  check:\n") + 1]
-    check = jobs[jobs.index("\n  check:\n"):]
+    windows = jobs[jobs.index("\n  kern-windows:\n"):]
+    check = jobs[jobs.index("\n  check:\n"):jobs.index("\n  kern-windows:\n") + 1]
     assert "    runs-on: windows-" in windows
     for command in ("go vet ./...", "go test ./..."):
         assert f"        working-directory: kern\n        run: {command}\n" in windows

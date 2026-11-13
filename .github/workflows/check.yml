@@ -18,23 +18,6 @@ permissions:
   issues: read
 
 jobs:
-  # kern's contract suite on Windows (kern/README.md "Tests"): the detached start, the standing
-  # file and the stop differ there. `check` needs it and fails unless it passed, so the one
-  # required check covers it; the Python suite and its budget stay on Linux.
-  kern-windows:
-    runs-on: windows-2025
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: kern/go.mod
-          cache-dependency-path: kern/go.sum
-      - name: kern vets
-        working-directory: kern
-        run: go vet ./...
-      - name: kern's tests pass, its contract suite among them
-        working-directory: kern
-        run: go test ./...
   check:
     needs: kern-windows
     # It runs whatever kern-windows answered, and its last step fails unless that passed: a
@@ -139,3 +122,20 @@ jobs:
             echo "::error::kern-windows answered $WINDOWS: kern's tests on Windows (the job kern-windows of this run) must pass"
             exit 1
           fi
+  # kern's contract suite on Windows (kern/README.md "Tests"): the detached start, the standing
+  # file and the stop differ there. `check` needs it and fails unless it passed, so the one
+  # required check covers it; the Python suite and its budget stay on Linux.
+  kern-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: kern/go.mod
+          cache-dependency-path: kern/go.sum
+      - name: kern vets
+        working-directory: kern
+        run: go vet ./...
+      - name: kern's tests pass, its contract suite among them
+        working-directory: kern
+        run: go test ./...
