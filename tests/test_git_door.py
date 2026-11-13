@@ -7,6 +7,7 @@ identity, so a runner's bare git config cannot change what it sees (rule book de
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -108,7 +109,7 @@ def test_rev_parse_names_commits_trees_branches_and_the_git_directory(door, tmp_
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "back")
     assert git(root, "rev-parse", "HEAD^{tree}") == tree, "the same files are the same tree"
-    assert git(root, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert git(root, "rev-parse", "--abbrev-ref", "HEAD") == "main" == git(root, "branch", "--show-current")
     common = Path(git(root, "rev-parse", "--git-common-dir"))
     assert (common if common.is_absolute() else root / common).resolve() == (root / ".git").resolve()
 
@@ -127,8 +128,10 @@ def test_config_sets_and_gets_and_a_missing_key_fails(door, tmp_path: Path) -> N
     assert git(root, "config", "--get", "user.name") == "alice"
     assert git_door.run("config", "--get", "se.none", root=root).returncode != 0
     assert git_door.run("remote", "get-url", "origin", root=root).returncode != 0
+    assert git(root, "remote") == ""
     git(root, "remote", "add", "origin", "https://github.com/alice/project.git")
     assert git(root, "remote", "get-url", "origin") == "https://github.com/alice/project.git"
+    assert git(root, "remote") == "origin"
 
 
 # Branches, merges and the main line
@@ -188,3 +191,96 @@ def test_push_fetch_and_ls_remote_against_a_bare_origin(door, tmp_path: Path) ->
 def test_ls_remote_of_a_missing_remote_fails(door, tmp_path: Path) -> None:
     missing = git_door.run("ls-remote", "--tags", "--refs", (tmp_path / "none.git").as_uri(), no_prompt=True)
     assert missing.returncode != 0 and missing.stdout == ""
+
+
+def test_clone_brings_the_branches_and_tags_and_checks_out_the_branch_asked(door, tmp_path: Path) -> None:
+    origin = quiet_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    empty = quiet_git.clone(origin, tmp_path / "empty")
+    assert git_door.set_identity(empty, IDENTITY) is None
+    first = commit(empty, {"a.txt": "a\n"})
+    git(empty, "push", "-q", "origin", "main")
+    assert git(empty, "rev-parse", "refs/remotes/origin/main") == first, "a push moves the tracking ref"
+    git(empty, "switch", "-q", "-c", "feat/x")
+    feature = commit(empty, {"b.txt": "b\n"})
+    git(empty, "tag", "v1.0.0")
+    git(empty, "push", "-q", "origin", "feat/x", "refs/tags/v1.0.0")
+    clone = quiet_git.clone(origin, tmp_path / "clone", "-b", "main")
+    assert (clone / "a.txt").read_text(encoding="utf-8") == "a\n" and not (clone / "b.txt").exists()
+    assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert git(clone, "rev-parse", "refs/remotes/origin/feat/x") == feature
+    assert git(clone, "rev-parse", "v1.0.0^{commit}") == feature
+    git(clone, "fetch", "-q", "origin", "+refs/heads/feat/x:refs/remotes/origin/feat/x")
+    assert git_door.run("clone", "-q", str(tmp_path / "none.git"), str(tmp_path / "nothing")).returncode != 0
+
+
+def test_log_formats_the_dates_subjects_and_changed_paths(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    when = {"GIT_AUTHOR_DATE": "2026-11-02T10:00:00Z", "GIT_COMMITTER_DATE": "2026-11-02T10:00:00+00:00"}
+    commit(root, {"a.txt": "a\n", "b.txt": "b\n"}, "first")
+    (root / "a.txt").write_text("a2\n", encoding="utf-8")
+    git(root, "add", "-A")
+    environment = {**git_door.identity_environment(IDENTITY), **when}
+    assert git_door.run("commit", "-q", "-m", "second", root=root, env=environment).returncode == 0
+    second = git(root, "rev-parse", "HEAD")
+    sha, date, subject = git(root, "log", "-1", "--format=%H%x09%cI%x09%s").split("\t")
+    # git prints a UTC %cI as +00:00 (2.43) or Z (2.56.1, CI's runner): the instant is the contract.
+    when = datetime.fromisoformat(date.replace("Z", "+00:00"))
+    assert (sha, when, subject) == (second, datetime(2026, 11, 2, 10, tzinfo=timezone.utc), "second")
+    assert git(root, "log", "--first-parent", "--format=%s", "HEAD").splitlines() == ["second", "first"]
+    names = git_door.run("log", "--format=%x00%ct", "--name-only", "HEAD", root=root).stdout
+    assert names.startswith("\0" + "1793613600\n\na.txt\n\0"), names
+    assert names.endswith("\n\na.txt\nb.txt\n")
+
+
+def test_cat_file_merge_base_and_diff_compare_two_commits(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    base = commit(root, {"a.txt": "a\n", "gone.txt": "g\n"})
+    assert git_door.run("cat-file", "-e", f"{base}^{{commit}}", root=root).returncode == 0
+    assert git_door.run("cat-file", "-e", f"{'0' * 40}^{{commit}}", root=root).returncode != 0
+    git(root, "switch", "-q", "-c", "feat/x")
+    (root / "gone.txt").unlink()
+    head = commit(root, {"a.txt": "a2\n", "new.py": "def feature():\n    return 42\n"})
+    git(root, "switch", "-q", "main")
+    commit(root, {"main.txt": "m\n"})
+    assert git(root, "merge-base", "main", head) == base
+    diff = git(root, "diff", f"{base}..{head}").splitlines()
+    assert [line for line in diff if line.startswith("diff --git")] == [
+        "diff --git a/a.txt b/a.txt", "diff --git a/gone.txt b/gone.txt", "diff --git a/new.py b/new.py"]
+    assert {"-a", "+a2", "-g", "+    return 42", "--- /dev/null", "+++ /dev/null"} <= set(diff)
+
+
+def test_ls_files_status_and_archive_read_the_tracked_files(door, tmp_path: Path) -> None:
+    import io
+    import tarfile
+    root = project(tmp_path)
+    first = commit(root, {"a.txt": "a\n", "kern/x.go": "package x\n", "kern/t/y.go": "package y\n"})
+    assert git_door.run("ls-files", "-z", root=root).stdout.split("\0") == ["a.txt", "kern/t/y.go", "kern/x.go", ""]
+    assert git(root, "status", "--porcelain") == ""
+    (root / "a.txt").write_text("changed\n", encoding="utf-8")
+    (root / "new.txt").write_text("new\n", encoding="utf-8")
+    assert git_door.run("status", "--porcelain", root=root).stdout.splitlines() == [" M a.txt", "?? new.txt"]
+    archive = git_door.run("archive", "--format=tar", first, "kern", root=root, binary=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        files = {member.name: tar.extractfile(member).read() for member in tar.getmembers() if member.isfile()}
+    assert files == {"kern/x.go": b"package x\n", "kern/t/y.go": b"package y\n"}
+
+
+def test_commit_all_takes_the_tracked_files_and_leaves_new_ones(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    commit(root, {"a.txt": "a\n", "b.txt": "b\n"})
+    (root / "a.txt").write_text("a2\n", encoding="utf-8")
+    (root / "b.txt").unlink()
+    (root / "new.txt").write_text("new\n", encoding="utf-8")
+    git(root, "commit", "-qam", "all")
+    assert git_door.run("show", "HEAD:a.txt", root=root).stdout == "a2\n"
+    assert git_door.run("show", "HEAD:b.txt", root=root).returncode != 0
+    assert git_door.run("show", "HEAD:new.txt", root=root).returncode != 0
+    assert git(root, "status", "--porcelain") == "?? new.txt"
+
+
+def test_init_without_a_path_makes_the_working_directory_a_repository(door, tmp_path: Path) -> None:
+    place = tmp_path / "app"
+    place.mkdir()
+    assert git_door.run("init", "-q", "-b", "main", cwd=place).returncode == 0
+    assert git_door.run("config", "user.name", IDENTITY[0], cwd=place).returncode == 0
+    assert git_door.run("branch", "--show-current", cwd=place).stdout.strip() == "main"
