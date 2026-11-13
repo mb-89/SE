@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/mb-89/kern/bus"
+	gitdoor "github.com/mb-89/kern/git"
+	"github.com/mb-89/kern/git/gitfake"
 	"github.com/mb-89/kern/host"
 	"github.com/mb-89/kern/index"
 	"github.com/nats-io/nats.go"
@@ -31,6 +33,8 @@ func TestMain(m *testing.M) {
 	case callerArg:
 		os.Exit(caller())
 	}
+	// Every test reaches git through kern's git door, on its fake.
+	gitdoor.Use(gitfake.New())
 	os.Exit(m.Run())
 }
 
