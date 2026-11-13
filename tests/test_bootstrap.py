@@ -8,6 +8,7 @@ import subprocess
 import tarfile
 import time
 import tomllib
+import zipfile
 
 import pytest
 
@@ -16,7 +17,16 @@ SCRIPT = ROOT / "scripts" / "bootstrap.sh"
 KERN_VERSION = tomllib.loads((ROOT / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
 KERN_BASE = f"https://github.com/mb-89/SE/releases/download/kern-v{KERN_VERSION}"
 TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch", "uname", "tail", "tar",
-         "gzip", "sha256sum", "setsid", "mv", "rm")
+         "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm")
+WINDOWS = os.name == "nt"
+
+
+def sh(path: Path) -> str:
+    """A path as the script's bash names it: Git's bash on Windows mounts drive C: at /c."""
+    if not WINDOWS:
+        return str(path)
+    drive, rest = os.path.splitdrive(str(path))
+    return f"/{drive.rstrip(':').lower()}{rest.replace(os.sep, '/')}"
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bootstrap.sh runs in bash")
 
 # A fake uv: `python find` fails until `python install` ran; SE's start prints a greeting unless
@@ -55,19 +65,25 @@ def fake_bin(base: Path, *, git: bool = True) -> Path:
     folder = base / "bin"
     folder.mkdir()
     for tool in TOOLS:
-        if shutil.which(tool):  # setsid is not everywhere; bootstrap.sh does without it
-            (folder / tool).symlink_to(shutil.which(tool))
-    (folder / "curl").write_text(FAKE_CURL, encoding="utf-8")
+        found = shutil.which(tool)
+        if not found:  # setsid, shasum and unzip are not everywhere; bootstrap.sh does without them
+            continue
+        if WINDOWS:  # a linked Git tool would not find the DLLs beside it: a shim runs it there
+            (folder / tool).write_text(f'#!/bin/sh\nexec "{sh(Path(found))}" "$@"\n', encoding="utf-8",
+                                       newline="\n")
+        else:
+            (folder / tool).symlink_to(found)
+    (folder / "curl").write_text(FAKE_CURL, encoding="utf-8", newline="\n")
     (folder / "curl").chmod(0o755)
     if git:
-        (folder / "git").write_text("#!/bin/sh\n", encoding="utf-8")
+        (folder / "git").write_text("#!/bin/sh\n", encoding="utf-8", newline="\n")
         (folder / "git").chmod(0o755)
     return folder
 
 
 def run(home: Path, path: Path, project: Path, *args: str, stdin: str = "") -> subprocess.CompletedProcess:
-    env = {"HOME": str(home), "PATH": str(path), "CLAUDE_PROJECT_DIR": str(project)}
-    return subprocess.run(["bash", str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60,
+    env = {"HOME": sh(home), "PATH": sh(path), "CLAUDE_PROJECT_DIR": sh(project)}
+    return subprocess.run(["bash", sh(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60,
                           input=stdin)
 
 
@@ -82,9 +98,9 @@ def machine(tmp_path):
     project = tmp_path / "project"
     home.mkdir()
     project.mkdir()
-    (home / "kern-pin").write_text(f"{KERN_VERSION} {KERN_BASE}\n", encoding="utf-8")  # se_modules.py kern-pin
+    (home / "kern-pin").write_text(f"{KERN_VERSION} {KERN_BASE}\n", encoding="utf-8", newline="\n")  # se_modules.py kern-pin
     (project / "se.toml").write_text('[modules.obs]\nurl = "https://example.com/obs.git"\nref = "%s"\n' % ("0" * 40),
-                                     encoding="utf-8")
+                                     encoding="utf-8", newline="\n")
     return home, project, tmp_path
 
 
@@ -98,7 +114,7 @@ def test_an_empty_home_gets_uv_python_and_the_modules_and_a_second_start_is_quie
     assert log[0] == "curl -LsSf https://astral.sh/uv/install.sh"
     assert "uv python install 3.11" in log
     sync = [line for line in log if line.startswith("uv run")]
-    assert sync == [f"uv run --no-project --python >=3.11 python {SCRIPT.parent}/se_modules.py --root {project} sync"]
+    assert sync == [f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {sh(project)} sync"]
     (home / "calls").unlink()
     second = run(home, path, project)
     assert second.returncode == 0 and second.stdout == ""
@@ -128,7 +144,7 @@ def test_missing_git_names_the_one_line_to_run(machine):
 
 def test_a_project_without_modules_syncs_nothing(machine):
     home, project, base = machine
-    (project / "se.toml").write_text("[project]\n", encoding="utf-8")
+    (project / "se.toml").write_text("[project]\n", encoding="utf-8", newline="\n")
     assert run(home, fake_bin(base), project).returncode == 0
     assert not any(line.startswith("uv run") for line in calls(home))
 
@@ -136,10 +152,10 @@ def test_a_project_without_modules_syncs_nothing(machine):
 def test_the_session_finds_uv_through_claudes_env_file(machine):
     home, project, base = machine
     env_file = base / "env"
-    env = {"HOME": str(home), "PATH": str(fake_bin(base)), "CLAUDE_PROJECT_DIR": str(project),
+    env = {"HOME": sh(home), "PATH": sh(fake_bin(base)), "CLAUDE_PROJECT_DIR": sh(project),
            "CLAUDE_ENV_FILE": str(env_file)}
-    subprocess.run(["bash", str(SCRIPT)], env=env, check=True, capture_output=True, timeout=60)
-    assert env_file.read_text(encoding="utf-8") == f'export PATH="{home}/.local/bin:$PATH"\n'
+    subprocess.run(["bash", sh(SCRIPT)], env=env, check=True, capture_output=True, timeout=60)
+    assert env_file.read_text(encoding="utf-8") == f'export PATH="{sh(home)}/.local/bin:$PATH"\n'
     assert os.access(home / ".local" / "bin" / "uv", os.X_OK)
 
 
@@ -150,8 +166,8 @@ def test_the_hook_ends_with_ses_greeting_carrying_what_bootstrap_said(machine):
     assert result.stdout == '{"greeting": 1}\n'  # the JSON alone: Claude Code parses the hook's stdout
     start = [line for line in calls(home) if "se_start.py" in line]
     assert len(start) == 1
-    assert start[0].startswith(f"uv run --no-project --python >=3.11 python {SCRIPT.parent}/se_start.py "
-                               f"--root {project} status --hook --note se bootstrap: installing uv into ")
+    assert start[0].startswith(f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_start.py "
+                               f"--root {sh(project)} status --hook --note se bootstrap: installing uv into ")
     assert "--note se bootstrap: installing Python 3.11" in start[0]
 
 
@@ -169,8 +185,10 @@ def test_the_hook_falls_back_to_plain_lines_when_the_greeting_cannot_run(machine
     assert failing.stdout.startswith("se bootstrap: installing uv into ")
 
 
-PLATFORM = {"Linux": "linux", "Darwin": "darwin"}.get(platform.system(), "") + "-" + {
+PLATFORM = {"Linux": "linux", "Darwin": "darwin", "Windows": "windows"}.get(platform.system(), "") + "-" + {
     "x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower(), "")
+# The release's archive for this platform: Windows' is a zip of kern.exe (kern/tools/release).
+ASSET = f"kern-{KERN_VERSION}-{PLATFORM}.{'zip' if WINDOWS else 'tar.gz'}"
 # A fake kern: logs each call with its stdin; `start` fails while $HOME/kern-fails exists.
 FAKE_KERN = """#!/bin/sh
 input=""
@@ -183,7 +201,7 @@ START = '{"session_id":"s1","hook_event_name":"SessionStart"}'
 
 
 def kern_bin(home: Path) -> Path:
-    return home / ".se" / "bin" / f"kern-{KERN_VERSION}"
+    return home / ".se" / "bin" / f"kern-{KERN_VERSION}{'.exe' if WINDOWS else ''}"
 
 
 def greeting_call(home: Path) -> str:
@@ -206,17 +224,22 @@ def release(home: Path, *, corrupt: bool = False) -> None:
     folder.mkdir()
     staged = home / "staged"
     staged.mkdir()
-    (staged / "kern").write_text(FAKE_KERN, encoding="utf-8")
-    (staged / "kern").chmod(0o755)
-    asset = f"kern-{KERN_VERSION}-{PLATFORM}.tar.gz"
-    with tarfile.open(folder / asset, "w:gz") as archive:
-        archive.add(staged / "kern", arcname="kern")
+    exe = "kern.exe" if WINDOWS else "kern"
+    (staged / exe).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
+    (staged / exe).chmod(0o755)
+    asset = ASSET
+    if WINDOWS:  # Windows' release is a zip of kern.exe (kern/tools/release)
+        with zipfile.ZipFile(folder / asset, "w") as archive:
+            archive.write(staged / exe, arcname=exe)
+    else:
+        with tarfile.open(folder / asset, "w:gz") as archive:
+            archive.add(staged / exe, arcname=exe)
     digest = hashlib.sha256((folder / asset).read_bytes()).hexdigest()
-    (folder / "SHA256SUMS").write_text(f"{'0' * 64 if corrupt else digest}  {asset}\n", encoding="utf-8")
+    (folder / "SHA256SUMS").write_text(f"{'0' * 64 if corrupt else digest}  {asset}\n", encoding="utf-8", newline="\n")
 
 
 needs_platform = pytest.mark.skipif(PLATFORM.startswith("-") or PLATFORM.endswith("-"),
-                                    reason="kern releases linux and darwin on amd64 and arm64")
+                                    reason="kern releases linux, darwin and windows on amd64 and arm64")
 
 
 def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(machine):
@@ -224,18 +247,18 @@ def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(
     path = fake_bin(base)
     run(home, path, project)  # uv and Python in place
     kern_bin(home).parent.mkdir(parents=True)
-    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8")
+    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
     (home / "calls").unlink()
     result = run(home, path, project, "--hook", stdin=START)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
     log = [line for line in calls(home) if line.startswith("kern ")]
-    assert log == [f"kern start --root {project}", f"kern hook SessionStart --root {project} <<{START}"]
-    assert greeting_call(home).endswith(f"--kern-bin {kern_bin(home)}")
+    assert log == [f"kern start --root {sh(project)}", f"kern hook SessionStart --root {sh(project)} <<{START}"]
+    assert greeting_call(home).endswith(f"--kern-bin {sh(kern_bin(home))}")
     assert not any(line.startswith("curl") for line in calls(home)), "a kern already here needs no network"
-    assert f"uv run --no-project --python >=3.11 python {SCRIPT.parent}/se_modules.py --root {ROOT} kern-pin" in calls(home)
+    assert f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {sh(ROOT)} kern-pin" in calls(home)
     # Every later hook finds the binary where the start named it (scripts/se_hook.sh).
-    assert (project / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8") == f"{kern_bin(home)}\n"
+    assert (project / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8") == f"{sh(kern_bin(home))}\n"
 
 
 def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
@@ -243,7 +266,7 @@ def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
     path = fake_bin(base)
     run(home, path, project)
     kern_bin(home).parent.mkdir(parents=True)
-    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8")
+    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
     (home / "kern-fails").touch()
     (home / "calls").unlink()
@@ -253,9 +276,17 @@ def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
 
 
 @needs_platform
-def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then_starts_it(machine):
+@pytest.mark.parametrize("missing", [
+    (),
+    ("sha256sum", "setsid"),  # as on macOS: the checksum from shasum, the background without setsid
+], ids=["every-tool", "shasum-no-setsid"])
+def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then_starts_it(machine, missing):
     home, project, base = machine
     path = fake_bin(base)
+    for tool in missing:
+        (path / tool).unlink(missing_ok=True)
+    if not (path / "sha256sum").exists() and not (path / "shasum").exists():
+        pytest.skip("neither sha256sum nor shasum is on this machine")
     run(home, path, project)
     release(home)
     (home / "calls").unlink()
@@ -264,12 +295,12 @@ def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then
     assert greeting_call(home).endswith(f"--kern-starting fetching release kern-v{KERN_VERSION} for {PLATFORM} "
                                         "in the background")
     log = until(home, "kern hook SessionStart")
-    assert f"curl -fsSL --max-time 2 -o {home}/.se/bin/kern-{KERN_VERSION}.SHA256SUMS {KERN_BASE}/SHA256SUMS" in log
-    assert f"kern start --root {project}" in log
-    assert f"kern hook SessionStart --root {project} <<{START}" in log
+    assert f"curl -fsSL --max-time 2 -o {sh(home)}/.se/bin/kern-{KERN_VERSION}.SHA256SUMS {KERN_BASE}/SHA256SUMS" in log
+    assert f"kern start --root {sh(project)}" in log
+    assert f"kern hook SessionStart --root {sh(project)} <<{START}" in log
     assert os.access(kern_bin(home), os.X_OK)
     assert sorted(p.name for p in kern_bin(home).parent.iterdir()) == [
-        kern_bin(home).name, f"{kern_bin(home).name}.SHA256SUMS"], "nothing half-done is left"
+        kern_bin(home).name, f"kern-{KERN_VERSION}.SHA256SUMS"], "nothing half-done is left"
 
 
 @needs_platform
@@ -280,7 +311,7 @@ def test_an_archive_that_fails_its_checksum_is_never_run(machine):
     release(home, corrupt=True)
     (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
-    until(home, f"kern-{KERN_VERSION}-{PLATFORM}.tar.gz")
+    until(home, ASSET)
     time.sleep(0.5)
     assert not kern_bin(home).exists()
     assert not any(line.startswith("kern ") for line in calls(home))
@@ -296,15 +327,15 @@ echo "go $* in $PWD" >> "$HOME/calls"
 cat > "$3" <<'KERN'
 {FAKE_KERN}KERN
 chmod +x "$3"
-""", encoding="utf-8")
+""", encoding="utf-8", newline="\n")
     (path / "go").chmod(0o755)
     (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert greeting_call(home).endswith(f"--kern-starting no release kern-v{KERN_VERSION} at {KERN_BASE}; "
-                                        f"building it from {ROOT}/kern in the background")
+                                        f"building it from {sh(ROOT)}/kern in the background")
     log = until(home, "kern hook SessionStart")
-    assert any(line.startswith("go build -o ") and line.endswith(f"./cmd/kern in {ROOT}/kern") for line in log)
-    assert f"kern start --root {project}" in log and os.access(kern_bin(home), os.X_OK)
+    assert any(line.startswith("go build -o ") and line.endswith(f"./cmd/kern in {sh(ROOT)}/kern") for line in log)
+    assert f"kern start --root {sh(project)}" in log and os.access(kern_bin(home), os.X_OK)
 
 
 def test_with_no_release_and_no_go_kern_failed_names_both(machine):
@@ -314,7 +345,7 @@ def test_with_no_release_and_no_go_kern_failed_names_both(machine):
     (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert greeting_call(home).endswith(f"--kern-failed no release kern-v{KERN_VERSION} at {KERN_BASE}, and no go "
-                                        f"to build it from {ROOT}/kern")
+                                        f"to build it from {sh(ROOT)}/kern")
 
 
 def test_bootstrap_outside_a_session_leaves_kern_alone(machine):

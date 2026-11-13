@@ -36,8 +36,9 @@
     `tests/test_kern.py` for kern's, `tests/test_pr_issues.py` for the issue rule's).
 - kern, the Go core under `kern/`: `cd kern && go vet ./... && go test ./...`. Its tests are
   declared beside the suite, `se.toml` `[tests.beside.kern]`, so the complete suite runs them too;
-  the `check` job vets kern in its own step, and runs its vet and tests on Windows through the job
-  `kern-windows` ([kern/README.md "Tests"](kern/README.md#tests)).
+  the `check` job vets kern in its own step, and runs its vet and tests, with the tests of SE's
+  start and hook scripts, on Windows and macOS through the job `kern-platforms`
+  ([kern/README.md "Tests"](kern/README.md#tests)).
 - Complete: `uv run pytest -q` and kern's tests, declared with their time budgets in `se.toml`
   `[tests]`; `integrate` runs both against them, and `work_tickets.py suite --worktree <checkout>`
   runs them the same way ([README "Test budget"](README.md#test-budget)).

@@ -2,7 +2,8 @@
 # on every pull request and every push to the integration branch, every check the integration runs:
 # the public check's commit gate, the generated layouts, the README's command reference, a pull
 # request's field report and the complete suite within its budget, kern's tests on Linux and,
-# through the job kern-windows, on Windows; on a pull request also the work model's issue rule.
+# through the job kern-platforms, on Windows and macOS with SE's start and hook scripts; on a pull
+# request also the work model's issue rule.
 # The job passes only when all pass, so a push or pull request the hooks did not see still fails
 # here.
 name: check
@@ -19,8 +20,8 @@ permissions:
 
 jobs:
   check:
-    needs: kern-windows
-    # It runs whatever kern-windows answered, and its last step fails unless that passed: a
+    needs: kern-platforms
+    # It runs whatever kern-platforms answered, and its last step fails unless that passed: a
     # required check that is skipped would count as passed.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-26.04
@@ -111,20 +112,26 @@ jobs:
       # The budget's reference run (README "Test budget"): over a limit here, check fails.
       - name: The complete suite and kern's tests, within their budgets
         run: uv run python scripts/work_tickets.py suite --worktree .
-      - name: kern's contract suite passed on Windows
+      - name: kern and SE's start and hook passed on Windows and macOS
         env:
-          WINDOWS: ${{ needs.kern-windows.result }}
+          PLATFORMS: ${{ needs.kern-platforms.result }}
         run: |
-          if [ "$WINDOWS" != success ]; then
-            echo "::error::kern-windows answered $WINDOWS: kern's tests on Windows (the job kern-windows of this run) must pass"
+          if [ "$PLATFORMS" != success ]; then
+            echo "::error::kern-platforms answered $PLATFORMS: kern's tests and SE's start and hook tests on Windows and macOS (the job kern-platforms of this run) must pass"
             exit 1
           fi
-  # kern's tests on Windows, its contract suite among them (kern/README.md "Tests"): the detached
-  # start, the standing file and the stop differ there. `check` needs it and fails unless it
-  # passed, so the one required check covers it; the Python suite and its budget stay on Linux,
-  # so this job runs the command of se.toml [tests.beside.kern] itself.
-  kern-windows:
-    runs-on: windows-2025
+  # kern's tests on Windows and macOS, its contract suite among them (kern/README.md "Tests"): the
+  # detached start, the standing file and the stop differ there; and the tests of SE's start and
+  # hook scripts, whose paths differ there too (a zip on Windows, shasum and no setsid on macOS).
+  # `check` needs it and fails unless every platform passed, so the one required check covers it;
+  # the Python suite and its budget stay on Linux, so this job runs the command of se.toml
+  # [tests.beside.kern] itself.
+  kern-platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -142,3 +149,13 @@ jobs:
       - name: kern's tests pass, its contract suite among them
         working-directory: kern
         run: go test ./...
+      # The hook test that once bounded runner speed (kern/host/host_test.go), repeated where it
+      # flaked; a second or less.
+      - name: A hook with no core fails open at once, 200 runs of 200
+        working-directory: kern
+        run: go test -count=200 -run 'TestAHookWithNoCoreFailsOpenAtOnce$' ./host/
+      - uses: astral-sh/setup-uv@v7
+      # Git's bash on Windows, as a session runs these scripts there.
+      - name: SE's start and hook scripts on this platform
+        shell: bash
+        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py

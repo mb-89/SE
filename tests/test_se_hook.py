@@ -35,11 +35,11 @@ def machine(tmp_path):
 def install(home: Path, project: Path) -> Path:
     """The binary bootstrap.sh named for the project at the session's start."""
     binary = home / ".se" / "bin" / "kern-0.0.0"
-    binary.write_text(FAKE_KERN, encoding="utf-8")
+    binary.write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     binary.chmod(0o755)
     named = project / ".se" / ".runtime" / "kern.path"
     named.parent.mkdir(parents=True)
-    named.write_text(f"{binary}\n", encoding="utf-8")
+    named.write_text(f"{binary}\n", encoding="utf-8", newline="\n")
     return binary
 
 
@@ -54,7 +54,7 @@ def test_an_event_goes_to_the_pinned_kern_for_the_project_with_the_hosts_json(ma
 def test_kerns_answer_is_the_hooks_output_and_its_errors_stay_quiet(machine):
     home, project = machine
     install(home, project)
-    (home / "answer").write_text('{"decision": "block"}\n', encoding="utf-8")
+    (home / "answer").write_text('{"decision": "block"}\n', encoding="utf-8", newline="\n")
     (home / "noise").touch()
     result = hook(home, project, "Stop")
     assert result.returncode == 0 and result.stdout == '{"decision": "block"}\n' and result.stderr == ""
