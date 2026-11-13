@@ -1,14 +1,17 @@
 """Nothing reaches the integration branch without a passing suite and public check recorded on
-exactly the tree pushed: `work_tickets.py push` and the pre-push hook refuse alike."""
+exactly the tree pushed: `work_tickets.py push` and the pre-push hook refuse alike.
+
+git is the door's fake behind a state file (`shared_fake_git`, tests/conftest.py), which runs se's
+pre-push hook as git does and which the hook's scripts reach as child processes."""
 import importlib.util
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 
 import pytest
 import fake_git
+import git_door
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -24,8 +27,7 @@ SUITE = f'["{INTERPRETER.name}", "-c", "import sys; sys.exit(open(\'verdict.txt\
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True,
-                            check=False)
+    result = git_door.run(*arguments, root=root)
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
 
@@ -54,12 +56,12 @@ def build_checkout(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def checkout(tmp_path: Path, monkeypatch, repositories) -> Path:
+def checkout(tmp_path: Path, monkeypatch, shared_fake_git) -> Path:
     """A clone of a bare origin on main, the integration branch, without hooks; its suite passes
     where verdict.txt says pass."""
     monkeypatch.setattr(work_tickets, "local_config_path", lambda: tmp_path / "no-local.toml")
     monkeypatch.setenv("PATH", f"{INTERPRETER.parent}{os.pathsep}{os.environ.get('PATH', '')}")
-    repositories(build_checkout, tmp_path)
+    build_checkout(tmp_path)
     return tmp_path / "main"
 
 
@@ -84,12 +86,13 @@ def push_with(pusher: str, root: Path, capfd) -> tuple[bool, str]:
     """Push main with work_tickets.py push, or with a plain git push through se's hooks."""
     if pusher == "push":
         code = work_tickets.main(["push", "main", "--worktree", str(root)])
+        said = ""
     else:
         git(root, "config", "core.hooksPath", str(PROJECT / ".githooks"))
-        code = subprocess.run(["git", "-C", str(root), "push", "-q", "origin", "main"],
-                              check=False).returncode
+        pushed = git_door.run("push", "-q", "origin", "main", root=root)
+        code, said = pushed.returncode, pushed.stdout + pushed.stderr
     captured = capfd.readouterr()
-    return code == 0, captured.out + captured.err
+    return code == 0, captured.out + captured.err + said
 
 
 CASES = {
@@ -127,8 +130,7 @@ def test_a_branch_other_than_the_integration_branch_needs_no_verdict(checkout, c
     assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 0
     git(checkout, "config", "core.hooksPath", str(PROJECT / ".githooks"))
     commit(checkout, name="later.txt")
-    assert subprocess.run(["git", "-C", str(checkout), "push", "-q", "origin", "topic"],
-                          check=False).returncode == 0
+    assert git_door.run("push", "-q", "origin", "topic", root=checkout).returncode == 0
 
 
 def verified(root: Path, ref: str = "refs/heads/main") -> int:

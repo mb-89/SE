@@ -185,7 +185,6 @@ TO_THE_FAKE = "real git in temporary repositories; the migration moves it to the
 # Today's git subprocesses outside the door, each with how many its file holds and why it may. The list
 # may only shrink: a file with more fails, and one with fewer fails until its count is lowered.
 GIT_ALLOWED: dict[str, tuple[int, str]] = {
-    "tests/test_push_guard.py": (3, TO_THE_FAKE),
     "tests/test_releases.py": (7, TO_THE_FAKE),
     "tests/test_rewrite_history.py": (1, TO_THE_FAKE),
     "tests/test_start_refresh.py": (1, TO_THE_FAKE),
