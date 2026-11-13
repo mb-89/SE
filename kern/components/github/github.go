@@ -86,6 +86,8 @@ type Step struct {
 	Tool  string         `json:"tool"`
 	Input map[string]any `json:"input"`
 	Asked time.Time      `json:"asked"`
+	// Note is what the asker says the agent watches for, for a step of the verb step.
+	Note string `json:"note,omitempty"`
 }
 
 // kind is one family of snapshots of one issue or pull request: its output,
@@ -155,6 +157,11 @@ type GitHub struct {
 	outbox   map[string]Step   // the relay's open steps, by outbox key
 	pages    map[string]*pages // the relay's paged reads under way, by outbox key
 	last     map[string]any    // the newest Snapshot or List of each read, by outbox key
+	stepWait time.Duration
+	tellWait time.Duration
+	answered map[string]bool         // the PostToolUse payloads that answered a step, until their tell
+	steps    map[string]*waitingStep // the steps of the verb step waiting for a tool answer, by outbox key
+	asked    chan struct{}           // signalled each time a step is asked, which a tell waits for
 }
 
 // The component's outputs.
@@ -207,7 +214,8 @@ func New(o Options) *GitHub {
 			}()
 		}
 	}
-	g := &GitHub{o: o, held: map[string]func(){}, waiting: map[string][]chan any{}, outbox: map[string]Step{}, pages: map[string]*pages{}, last: map[string]any{}}
+	g := &GitHub{o: o, held: map[string]func(){}, waiting: map[string][]chan any{}, outbox: map[string]Step{}, pages: map[string]*pages{}, last: map[string]any{},
+		answered: map[string]bool{}, steps: map[string]*waitingStep{}, asked: make(chan struct{}, 1)}
 	parts := []index.Part{
 		index.IO(),
 		index.Config("backend", Auto, "auto, token or relay: auto takes the relay in a cloud session, else the token where one is found, else the relay."),
@@ -215,9 +223,15 @@ func New(o Options) *GitHub {
 		index.Config("refresh", "2m", "How often the token backend reads each snapshot it holds again, with its ETag; 0s reads none again. The relay answers a snapshot younger than it without asking."),
 		index.Config("relay-wait", "0s", "How long a relay read waits for the session's tool answer before it fails, naming the outbox step."),
 		index.Config("pace-max", "60s", "The longest rate-limit wait the token backend sits out; a longer one fails the read."),
+		index.Config("step-wait", "60m", "The longest a step of the verb step waits for the session's tool answer; a step asks its own wait up to it."),
+		index.Config("tell-wait", "300ms", "How long the hook of a tool answer that answered a step waits for the next step to be asked, so it tells that one."),
 		issuesOut, pullsOut, checksOut, commentsOut, issueListsOut, pullListsOut, outboxOut, backendOut,
 		index.Inlet(g.start),
 		index.Hears(g.hear),
+		index.Tells(g.tell),
+		index.JSONVerb("step", "Runs one GitHub tool call through the relay: the step stands in the outbox until a PostToolUse of that tool with those arguments answers it, and the verb answers the tool's answer.", StepShape, StepAnswerShape, func(a StepAsk) (StepAnswer, error) {
+			return g.step(a)
+		}),
 	}
 	for _, k := range kinds {
 		k := k
@@ -280,6 +294,14 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 	if err != nil {
 		return err
 	}
+	stepWait, err := dur("step-wait")
+	if err != nil {
+		return err
+	}
+	tellWait, err := dur("tell-wait")
+	if err != nil {
+		return err
+	}
 	backend := str("backend")
 	var token string
 	if backend == Auto && g.o.Cloud() {
@@ -308,6 +330,7 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 		return fmt.Errorf("component %s runs one instance per core, and %s is one already", Name, g.instance)
 	}
 	g.instance, g.commit, g.backend, g.fresh, g.wait = instance, commit, backend, refresh, wait
+	g.stepWait, g.tellWait = stepWait, tellWait
 	if backend == Token {
 		g.rest = &rest{api: strings.TrimSuffix(str("api"), "/"), token: token, client: g.o.Client, sleep: g.o.Sleep, now: g.o.Now, paceMax: paceMax, cache: map[string]cached{}}
 	}
