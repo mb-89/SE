@@ -392,8 +392,10 @@ system, it becomes a component and attaches through the core, in Go or in anothe
 
 - **Ad hoc, kept out of the repository:** a script goes in the session's scratch directory, as
   today. An ad hoc component goes under `.se/components/<name>/` (ignored), with its
-  `component.toml`; `<app> component add <path>` restarts the core with it, about 30 ms, for this
-  checkout alone. An agent may write one in Python over NATS at any time.
+  `component.toml`; `se component add <name>` scaffolds one (a Python component over NATS) and
+  places it in the ad hoc wiring overlay `.se/wiring.toml`, which the core reads after
+  `wiring.toml` (kern/index/wiring.go `Merge`). Restarting the core picks it up in about 30 ms, for
+  this checkout alone; an agent may write one at any time.
 - **Promoted:** a component the system keeps goes to `components/<name>/` in the application, or
   into the core's repository when every application needs it. It is tested against the fake core
   like any other.
@@ -405,16 +407,19 @@ system, it becomes a component and attaches through the core, in Go or in anothe
 | a person waits on it and it runs often | it renders a page or a deck |
 | it moves into the core's repository: a shared component needs no Python on the application's machines | only this application uses it, and it meets its budgets |
 
-**The rule it changes.** SE's AGENTS.md names no place for ad hoc scripts; the rule book's
-[gen-001](../src/skills/work-model/references/rules.md#gen-001-mechanize-first) cites the Go
-line's `src/scripts/` as a frozen implementation. The new rule, for AGENTS.md and gen-001: an ad
-hoc script stays in the scratch directory or `.se/components/`, never tracked; what is tracked
-under `components/` is a component, with its declaration and its tests.
+**The rule it changes.** The rule book's
+[gen-001](../src/skills/work-model/references/rules.md#gen-001-mechanize-first) and SE's AGENTS.md
+now own it: an ad hoc solution stays in the scratch directory or `.se/components/`, never tracked;
+what is tracked under `components/` is a component, with its declaration and its tests. gen-001's
+"Go line (frozen)" note keeps citing that line's `src/scripts/`.
 
-**Promotion is mechanical.** The session component counts, from PostToolUse, each run of an
-untracked script and each call of an ad hoc component, by its path's hash, into
-`usage/adhoc`. `retro.py collect` reads it: one used in three or more sessions since the last
-retro is a promotion candidate in the retro's facts, which the dispatcher files as work. The
+**Promotion is mechanical.** The core counts each call of an ad hoc component — one whose
+`component.toml` is under `.se/components/` — into the use log `.se/usage/adhoc.jsonl`, by the
+component's path, attributing the session the hook stream named last (so the count is from
+PostToolUse). One record is one line of JSON: `at` (RFC3339), `session`, `component` and `path`;
+`scripts/se_usage.py` owns that shape for the Python side, as Go and Python agree on the
+declaration hash. `retro.py collect` reads the log: a component used in three or more sessions
+since the last retro is a promotion candidate in the retro's facts, which SE files as work. The
 overhaul reads the components' call times against their budgets and names the port candidates.
 
 ## The core's repository

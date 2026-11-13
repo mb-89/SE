@@ -44,17 +44,24 @@ rule whose only implementation is "by judgment".
 
 ### gen-001 Mechanize first
 
-Every step that can be a deterministic, tested command is one, and agents keep only judgment.
+Every step that can be a deterministic, tested command is one, written ad hoc as a script or an ad
+hoc component while it serves one agent and promoted to a tracked component once the whole system
+needs it, and agents keep only judgment.
 
 - **Why:** a command does the same thing every time and its tests say so; an agent following prose
-  does it a little differently each time.
+  does it a little differently each time; and an ad hoc solution left untracked never becomes a
+  lasting cost until it has earned its place.
 - **Without it:** repeated procedures stay prose, and each run of them is a new chance to skip a
-  step.
+  step; or every quick fix is tracked and tested at once, so none is quick.
 - **Prevents:** a step skipped or done differently by hand; a procedure whose prose and practice
-  drift apart.
+  drift apart; an ad hoc script committed before it was worth keeping.
 - **Implementations:**
   - se: the work model's [Mechanical first](../SKILL.md#rules-for-all-roles), the commands of
     [`<se>/scripts/work_tickets.py`](../../../../scripts/work_tickets.py) with their tests.
+  - se, ad hoc: an ad hoc solution stays untracked — a script, or a component
+    [`se component add`](../../../../scripts/se_component.py) scaffolds under `.se/components/`,
+    whose uses kern counts so [`retro.py collect`](../../../../scripts/retro.py) names what to
+    promote to a tracked `components/` (`docs/go-core.md` weighs Python against a port to Go).
   - Go line (frozen): the retro counted `by-hand` answers and the scripts in the Go line's
     src/scripts/ directory.
 - **Related:** gen-002, wrk-006
