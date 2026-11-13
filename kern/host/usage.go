@@ -15,8 +15,8 @@ import (
 // component has a declaration here is ad hoc, and its calls are counted.
 var AdHocDir = filepath.Join(".se", "components")
 
-// UsageLog is the ad hoc components' use log under the checkout, one JSON
-// record a line. SE's scripts/se_usage.py owns the record's shape for the
+// UsageLog is the use log under the checkout, one JSON record a line: the ad
+// hoc components' calls and the ad hoc scripts' runs (scripts.go). SE's scripts/se_usage.py owns the record's shape for the
 // Python side (retro.py collect reads it); this file writes the same shape, as
 // Go and Python agree on the declaration hash.
 var UsageLog = filepath.Join(".se", "usage", "adhoc.jsonl")
@@ -55,16 +55,21 @@ func adHocInstances(root string, instances []instanceName) map[string]adHoc {
 // instanceName is the part of a wiring instance adHocInstances reads.
 type instanceName struct{ Name, Component string }
 
-// recordUse appends one use of an ad hoc component to the log under root; a
-// write that fails is dropped, since counting is advice, never enforcement
-// (the rule book's gen-003).
+// recordUse appends one use of an ad hoc component to the log under root.
 func recordUse(root string, a adHoc, session string, at time.Time) {
+	appendRecord(root, use{At: at.UTC().Format(time.RFC3339), Session: session,
+		Component: a.component, Path: a.path})
+}
+
+// appendRecord appends one record to the use log under root: a component's
+// use or a script's run (scripts.go). A write that fails is dropped, since
+// counting is advice, never enforcement (the rule book's gen-003).
+func appendRecord(root string, record any) {
 	path := filepath.Join(root, UsageLog)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return
 	}
-	data, err := json.Marshal(use{At: at.UTC().Format(time.RFC3339), Session: session,
-		Component: a.component, Path: a.path})
+	data, err := json.Marshal(record)
 	if err != nil {
 		return
 	}

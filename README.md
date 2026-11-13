@@ -914,10 +914,12 @@ overlay `.se/wiring.toml` that the core reads after `wiring.toml`. Restart the c
 30 ms; it is never tracked.
 
 An ad hoc solution stays untracked until it earns its place
-([gen-001](src/skills/work-model/references/rules.md#gen-001-mechanize-first)). The core counts each
-call of an ad hoc component into `.se/usage/adhoc.jsonl`, and `work_tickets.py`'s retro
-([Retro due](#retro-due)) lists a component used in three or more sessions since the last retro as a
-candidate to promote to a tracked `components/<name>/` ([docs/go-core.md](docs/go-core.md#scripts-are-ad-hoc-components-are-long-term)).
+([gen-001](src/skills/work-model/references/rules.md#gen-001-mechanize-first)).
+
+The core counts each call of an ad hoc component and each run of an untracked script into
+`.se/usage/adhoc.jsonl`, and `work_tickets.py`'s retro ([Retro due](#retro-due)) lists a component
+used in three or more sessions and a script run three or more times since the last retro as
+candidates to promote to a tracked `components/<name>/` ([docs/go-core.md](docs/go-core.md#scripts-are-ad-hoc-components-are-long-term)).
 
 ## Work commands
 

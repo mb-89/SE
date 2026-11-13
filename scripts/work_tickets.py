@@ -2781,13 +2781,13 @@ def deliver(root: Path) -> int:
     request whose description carries the report; returns the pull request's number. No issue is
     filed."""
     issue = required_snapshot(root)
-    check_issue_read(root, None, None, str(issue["url"]))
+    body = body_at_delivery(root, check_issue_read(root, None, None, str(issue["url"])))
     branch = delivery_branch(root, issue)
     merge_current_main(root, branch)
     file = root / ".se" / "work" / "field-report.md"
     if not file.exists():
         draft_field_report(root, file)
-    report = checked_report(root, file, str(issue["body"]))
+    report = checked_report(root, file, body)
     if f"#{issue['number']}" not in report and str(issue["url"]) not in report:
         raise field_report_error(file.name, [f"does not link work issue #{issue['number']}"])
     remote = remote_repo(root)
@@ -3577,9 +3577,9 @@ def field_report_error(name: str, problems: list[str]) -> QueueError:
 
 def check_issue_read(
     root: Path, current: dict[str, object] | None, body: str | None, issue: str,
-) -> None:
+) -> str:
     """Refuse where the work issue has comments past those recorded as read, or a body other than
-    the one recorded as read.
+    the one recorded as read; answer the body read now, which the evidence gate checks against.
 
     `current` and `body` are the issue's comment state and body as the worker's own GitHub tools
     read them; where either is missing, the issue is read with gh, once, and where gh is not
@@ -3620,6 +3620,22 @@ def check_issue_read(
                   changed_body_error(recorded_body, body, issue)):
         if error is not None:
             raise error
+    return body
+
+
+def body_at_delivery(root: Path, body: str) -> str:
+    """`body`, the work issue as read again at delivery, compared with the body intake saved: the
+    evidence gate checks against it, so a requirement or acceptance item added after the start is
+    refused before landing; each such item is named."""
+    snapshot = load_snapshot(root)
+    if snapshot is not None:
+        added = [item for item in field_report_evidence_items(body)
+                 if item not in field_report_evidence_items(str(snapshot["body"]))]
+        if added:
+            print(f"The work issue {snapshot['url']} changed after intake read it: "
+                  f"{', '.join(added)} added; the field report is checked against the body read "
+                  "now")
+    return body
 
 
 def checked_report(root: Path | None, file: Path, issue_body: str) -> str:
@@ -3667,14 +3683,17 @@ def check_field_report(
                 "run intake, or save the work issue's body to a file and pass --issue-body <file>"
             )
         issue_body = str(snapshot["body"])
-    report = checked_report(root, file, issue_body)
     if root is not None and (comments is not None or load_comments_read(root) is not None
                              or load_body_read(root) is not None):
+        # Read the issue again at delivery: the evidence gate checks against the body as it is
+        # now, not as intake saved it (body_at_delivery).
         snapshot = load_snapshot(root)
-        named = WORK_ISSUE_PATTERN.search(report)
+        named = WORK_ISSUE_PATTERN.search(read_file(file, "field report"))
         issue = (str(snapshot["url"]) if snapshot is not None
                  else f"#{named[1]}" if named else "named in the field report")
-        check_issue_read(root, comments, None if issue_body_file is None else issue_body, issue)
+        issue_body = body_at_delivery(root, check_issue_read(
+            root, comments, None if issue_body_file is None else issue_body, issue))
+    checked_report(root, file, issue_body)
 
 
 def branch_tip(root: Path) -> str | None:
