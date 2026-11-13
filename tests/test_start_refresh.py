@@ -2,7 +2,8 @@
 moves to the latest release in the same start, and the core starts from the moved tree's pins; a
 remote that cannot be read starts the session with the SE it has, in one line.
 
-Real git, the real bootstrap.sh and se_start.py; only the core is a fake binary that logs its calls.
+The real bootstrap.sh and se_start.py, their git the door's fake behind a state file
+(`shared_fake_git`); the core is a fake binary that logs its calls.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from pathlib import Path
 
 import pytest
 import fake_git
+import git_door
 from shell_paths import BASH, WINDOWS, sh
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,7 +33,14 @@ START = '{"session_id":"s1","hook_event_name":"SessionStart"}'
 
 
 def git(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True).stdout.strip()
+    result = git_door.run(*args, root=cwd)
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def tag_at_head(repo: Path) -> str:
+    """The release tag HEAD carries."""
+    return git(repo, "tag", "--points-at", "HEAD", "--list", "v*")
 
 
 def release(origin: Path, version: str, binary: str) -> None:
@@ -50,7 +59,7 @@ def release(origin: Path, version: str, binary: str) -> None:
 
 
 @pytest.fixture
-def behind(tmp_path):
+def behind(tmp_path, shared_fake_git):
     """SE's origin at 5.0.1 (binary se 0.2.0) and a plugin install cloned from it at 5.0.0 (se 0.1.0),
     as a cloud environment's cached setup script left it: one release behind."""
     origin = fake_git.init(tmp_path / "origin", "-b", "main")
@@ -99,7 +108,7 @@ def calls(home: Path) -> list[str]:
 def test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the_new_pins(behind):
     home, plugin, project, base = behind
     greeting = start(home, plugin, project, base)["systemMessage"].splitlines()
-    assert git(plugin, "describe", "--tags", "--exact-match") == "v5.0.1"
+    assert tag_at_head(plugin) == "v5.0.1"
     assert greeting[0] == f"SE: 5.0.0 -> 5.0.1, refreshed at this start ({plugin.resolve().as_posix()})"
     assert greeting[1].startswith("SE 5.0.1 started: ")
     assert calls(home) == ["se-0.2.0 start", "se-0.2.0 hook SessionStart"]
@@ -116,7 +125,7 @@ def test_a_remote_that_cannot_be_read_starts_with_the_plugin_it_has_in_one_line(
     home, plugin, project, base = behind
     git(plugin, "remote", "set-url", "origin", (base / "gone").as_uri())
     greeting = start(home, plugin, project, base)["systemMessage"].splitlines()
-    assert git(plugin, "describe", "--tags", "--exact-match") == "v5.0.0"
+    assert tag_at_head(plugin) == "v5.0.0"
     assert greeting[0].startswith("SE: no refresh at start, this session starts with SE 5.0.0: cannot reach ")
     assert greeting[1].startswith("SE 5.0.0 started: ")
     assert calls(home) == ["se-0.1.0 start", "se-0.1.0 hook SessionStart"]

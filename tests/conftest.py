@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -15,7 +15,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_docs  # noqa: E402
 import se_plugin  # noqa: E402
-import quiet_git  # noqa: E402
 import fake_git  # noqa: E402
 import git_door  # noqa: E402
 
@@ -59,12 +58,8 @@ REAL_GIT: dict[str, str] = {
     # Found by the refusal of child processes: `se new app` reads SE's own checkout, kern's template
     # at its real pin tag, as test_references.py and test_repository.py read it (piece 6's kind).
     "tests/beside_new_app.py": "reads SE's own checkout: kern's template at its real pin",
-    "tests/test_quiet_git.py": STILL_ON_REAL_GIT,
     "tests/test_references.py": STILL_ON_REAL_GIT,
-    "tests/test_releases.py": STILL_ON_REAL_GIT,
     "tests/test_repository.py": STILL_ON_REAL_GIT,
-    "tests/test_rewrite_history.py": STILL_ON_REAL_GIT,
-    "tests/test_start_refresh.py": STILL_ON_REAL_GIT,
 }
 
 
@@ -159,34 +154,6 @@ def obs() -> Path:
         return directory
     finally:
         os.rmdir(lock)
-
-
-@pytest.fixture(scope="session")
-def repositories(tmp_path_factory) -> Callable[[Callable[[Path], None], Path], None]:
-    """`repositories(build, tmp_path)` lays out in tmp_path the git repositories `build` makes in an
-    empty directory: built once per session (per worker) and copied for each test, which costs a
-    fraction of the git commands. The copies' remotes point into tmp_path, as a fresh build's do;
-    git's lock files stay behind (tests/quiet_git.py)."""
-    built: dict[Callable[[Path], None], Path] = {}
-
-    def lay_out(build: Callable[[Path], None], tmp_path: Path) -> None:
-        if build not in built:
-            built[build] = tmp_path_factory.mktemp(build.__name__)
-            build(built[build])
-        template = built[build]
-        quiet_git.copy(template, tmp_path)
-        # Git writes a local remote's path into config as given, a backslash doubled.
-        forms = {str(template): str(tmp_path), template.as_posix(): tmp_path.as_posix(),
-                 str(template).replace("\\", "\\\\"): str(tmp_path).replace("\\", "\\\\")}
-        for config in [*tmp_path.glob("*/.git/config"), *tmp_path.glob("*.git/config")]:
-            text = original = config.read_text(encoding="utf-8")
-            for old, new in forms.items():
-                text = text.replace(old, new)
-            if text != original:
-                config.write_text(text, encoding="utf-8")
-
-    return lay_out
-
 
 
 # The suite's JUnit report for `work_tickets.py suite` (README "Test budget"): where the gate names a

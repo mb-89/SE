@@ -1,5 +1,7 @@
 """work_tickets.py push releases the integration branch: it bumps se.toml's version and tags it."""
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -11,6 +13,7 @@ import tomllib
 
 import pytest
 import fake_git
+import git_door
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -21,8 +24,7 @@ SPEC.loader.exec_module(work_tickets)
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True,
-                            check=False)
+    result = git_door.run(*arguments, root=root)
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
 
@@ -49,10 +51,11 @@ def build_checkout(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def checkout(tmp_path: Path, monkeypatch, repositories) -> Path:
-    """A clone of a bare origin on main, the integration branch, with se.toml at 1.2.3 tagged."""
+def checkout(tmp_path: Path, monkeypatch, fake_git_door) -> Path:
+    """A clone of a bare origin on main, the integration branch, with se.toml at 1.2.3 tagged, on
+    the git door's fake."""
     monkeypatch.setattr(work_tickets, "local_config_path", lambda: tmp_path / "no-local.toml")
-    repositories(build_checkout, tmp_path)
+    build_checkout(tmp_path)
     return tmp_path / "main"
 
 
@@ -68,8 +71,8 @@ def declared(kind: str, removed: str = "None") -> str:
 
 def commit_on(root: Path, branch: str, text: str) -> str:
     """Commit `text` on `branch` (created where missing), back on main; returns the commit."""
-    git(root, "switch", "-q", branch) if git(root, "branch", "--list", branch) else git(
-        root, "switch", "-q", "-c", branch)
+    present = git_door.run("show-ref", "--verify", "--quiet", f"refs/heads/{branch}", root=root)
+    git(root, "switch", "-q", branch) if present.returncode == 0 else git(root, "switch", "-q", "-c", branch)
     (root / f"{branch.replace('/', '-')}.txt").write_text(text, encoding="utf-8")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", text)
@@ -99,11 +102,13 @@ def push(root: Path) -> int:
 def released(root: Path) -> tuple[str, str]:
     """The version in se.toml on origin's main and origin's newest tag."""
     origin = root.parent / "origin.git"
-    text = subprocess.run(["git", "--git-dir", str(origin), "show", "main:se.toml"],
-                          capture_output=True, text=True, check=True).stdout
-    tags = subprocess.run(["git", "--git-dir", str(origin), "tag", "--sort=-v:refname"],
-                          capture_output=True, text=True, check=True).stdout.split()
-    return text.split('version = "')[1].split('"')[0], tags[0]
+    text = git(origin, "show", "main:se.toml")
+    return text.split('version = "')[1].split('"')[0], newest(origin_tags(root))
+
+
+def newest(tags: list[str]) -> str:
+    """The highest of the version tags `tags`, as `git tag --sort=-v:refname` lists it first."""
+    return max(tags, key=lambda tag: tuple(int(part) for part in re.findall(r"\d+", tag)))
 
 
 @pytest.mark.parametrize(("branch", "breaking", "version"), [
@@ -139,7 +144,7 @@ def test_several_integrations_release_once_by_the_highest_kind(checkout):
 def test_a_failed_push_is_retried_without_a_second_bump(checkout, monkeypatch):
     integrate(checkout, "feature/topic-20261106")
     real = work_tickets.run_git_push
-    refusals = [subprocess.CompletedProcess(["git", "push"], 1, "", "error: permission denied (403)")]
+    refusals = [subprocess.CompletedProcess(["push"], 1, "", "error: permission denied (403)")]
     monkeypatch.setattr(work_tickets, "run_git_push",
                         lambda root, arguments: refusals.pop() if refusals else real(root, arguments))
     assert push(checkout) == 1
@@ -248,21 +253,26 @@ def test_a_merge_whose_kind_cannot_be_told_is_refused_with_the_remedy(checkout, 
 
 def test_a_second_integration_of_a_branch_releases_a_patch_and_the_first_its_kind(checkout):
     integrate(checkout, "feature/topic-20261106")
-    assert git(checkout, "log", "-1", "--format=%(trailers:key=Release-kind,valueonly)") == "minor"
+    assert release_kind(checkout) == "minor"
     assert push(checkout) == 0
     assert released(checkout) == ("1.3.0", "v1.3.0")
     integrate(checkout, "feature/topic-20261106", text="a late prose fix")
-    assert git(checkout, "log", "-1", "--format=%(trailers:key=Release-kind,valueonly)") == "patch"
+    assert release_kind(checkout) == "patch"
     assert push(checkout) == 0
     assert released(checkout) == ("1.3.1", "v1.3.1")
+
+
+def release_kind(root: Path) -> str:
+    """The Release-kind trailer of HEAD's message."""
+    message = git(root, "log", "-1", "--format=%B")
+    return "\n".join(line.partition(": ")[2] for line in message.splitlines() if line.startswith("Release-kind: "))
 
 
 def squash_on_origin(root: Path, branch: str, text: str, trailer: str) -> None:
     """Land `branch` as a squash pull request does: one commit on origin's main with the
     `Integrate <branch>` subject and `trailer`, then fetched and fast-forwarded into main."""
     commit_on(root, branch, text)
-    tree = git(root, "rev-parse", f"{branch}^{{tree}}")
-    squash = git(root, "commit-tree", tree, "-p", "main", "-m", f"Integrate {branch}: work",
+    squash = git(root, "commit-tree", f"{branch}^{{tree}}", "-p", "main", "-m", f"Integrate {branch}: work",
                  "-m", trailer)
     git(root, "push", "-q", "origin", f"{squash}:refs/heads/main")
     git(root, "fetch", "-q", "origin")
@@ -288,12 +298,9 @@ def test_push_of_a_landing_branch_releases_against_origin_s_main_and_waits_with_
     git(checkout, "merge", "-q", "--ff-only", "main")
     assert push(checkout) == 0
     origin = checkout.parent / "origin.git"
-    shown = subprocess.run(["git", "--git-dir", str(origin), "show",
-                            "land/feature/topic-20261106:se.toml"], capture_output=True, text=True,
-                           check=True).stdout
+    shown = git_door.run("show", "land/feature/topic-20261106:se.toml", root=origin).stdout
     assert shown == settings("1.3.0")
-    assert "v1.3.0" not in subprocess.run(["git", "--git-dir", str(origin), "tag"],
-                                          capture_output=True, text=True, check=True).stdout
+    assert "v1.3.0" not in origin_tags(checkout)
     assert "Release: tag v1.3.0 once the squash commit is on main" in capsys.readouterr().out
 
 
@@ -446,8 +453,7 @@ def by_workflow(root: Path, version: str = "1.2.3") -> None:
 
 
 def origin_tags(root: Path) -> list[str]:
-    return subprocess.run(["git", "--git-dir", str(root.parent / "origin.git"), "tag"],
-                          capture_output=True, text=True, check=True).stdout.split()
+    return git(root.parent / "origin.git", "tag", "--list").split()
 
 
 def test_with_release_by_workflow_push_bumps_and_pushes_the_branch_only(checkout, capsys):
@@ -584,15 +590,50 @@ def workflow_script() -> str:
     return "\n".join(block) + "\n"
 
 
-def run_workflow(checkout: Path, ref: str = "main") -> subprocess.CompletedProcess[str]:
-    """Run the workflow as its runner does: in a fresh full clone of origin, on a push of `ref`."""
+class Workflow:
+    """A run of the release workflow's script, as its runner runs it (a fresh full clone of
+    origin, on a push of a ref), in this process: the script's `subprocess.run` of git goes through
+    the git door to the test's fake. `refused` stands in for GitHub's ruleset: origin refuses a
+    push of that ref, `why`. `pushed` is each ref the script pushed, one push each."""
+
+    def __init__(self, checkout: Path, ref: str, refused: str, why: str) -> None:
+        self.checkout, self.ref, self.refused, self.why = checkout, ref, refused, why
+        self.pushed: list[str] = []
+        self.returncode, self.stdout, self.stderr = 0, "", ""
+
+    def run(self, argv, *, capture_output=False, text=False, check=False, **_):
+        assert argv[0] == "git" and capture_output and text, argv
+        arguments = list(argv[1:])
+        if arguments[0] == "push":
+            self.pushed.append(arguments[-1])
+            if arguments[-1].lstrip("+") == self.refused:
+                return subprocess.CompletedProcess(argv, 1, "", f"remote: Cannot create {self.refused}: "
+                                                   f"{self.why}\n ! [remote rejected] {self.refused}\n")
+        done = git_door.run(*arguments, cwd=Path.cwd())
+        if check and done.returncode != 0:
+            raise subprocess.CalledProcessError(done.returncode, argv, done.stdout, done.stderr)
+        return subprocess.CompletedProcess(argv, done.returncode, done.stdout, done.stderr)
+
+
+def run_workflow(checkout: Path, ref: str = "main", refused: str = "",
+                 why: str = "a tag ruleset forbids it") -> Workflow:
+    """Run the workflow's script on a push of `ref` (Workflow)."""
     runner = checkout.parent / "runner"
     shutil.rmtree(runner, ignore_errors=True)
     fake_git.clone(checkout.parent / "origin.git", runner, "-b", ref)
-    script = checkout.parent / "release.py"
-    script.write_text(workflow_script(), encoding="utf-8")
-    return subprocess.run([sys.executable, "-I", str(script)], cwd=runner, capture_output=True, text=True,
-                          check=False, env={**os.environ, "GITHUB_REF_NAME": ref})
+    workflow = Workflow(checkout, ref, refused, why)
+    out, err = io.StringIO(), io.StringIO()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(subprocess, "run", workflow.run)
+        patch.setenv("GITHUB_REF_NAME", ref)
+        patch.chdir(runner)
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                exec(compile(workflow_script(), str(WORKFLOW), "exec"), {"__name__": "__main__"})
+        except SystemExit as exited:
+            workflow.returncode = exited.code if isinstance(exited.code, int) else int(bool(exited.code))
+    workflow.stdout, workflow.stderr = out.getvalue(), err.getvalue()
+    return workflow
 
 
 def origin_tag(checkout: Path, tag: str) -> str:
@@ -670,40 +711,18 @@ def next_major(checkout: Path) -> None:
     git(checkout, "push", "-q", "origin", "main")
 
 
-def received(checkout: Path) -> list[str]:
-    """Each ref origin received, one line per push, from its pre-receive hook's log."""
-    log = checkout.parent / "received.log"
-    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
-
-
-def hook_origin(checkout: Path, refused: str = "",
-                why: str = "a tag ruleset forbids it") -> None:
-    """Origin logs each push's refs and refuses the ref `refused`, `why`: by default as a tag
-    ruleset does."""
-    hook = checkout.parent / "origin.git" / "hooks" / "pre-receive"
-    hook.write_text(
-        "#!/bin/sh\nrefs=''\nwhile read old new ref; do refs=\"$refs $ref\"; done\n"
-        f"echo $refs >> '{(checkout.parent / 'received.log').as_posix()}'\n"
-        + (f"case \"$refs \" in *' {refused} '*) echo 'Cannot create {refused}: {why}' >&2;"
-           " exit 1;; esac\n" if refused else ""),
-        encoding="utf-8")
-    hook.chmod(0o755)
-
-
 def test_a_release_pushes_exactly_its_version_tag_and_its_major_tag_each_on_its_own(checkout):
     next_major(checkout)
-    hook_origin(checkout)
     result = run_workflow(checkout)
     assert result.returncode == 0, result.stderr + result.stdout
-    assert received(checkout) == ["refs/tags/v4.4.0", "refs/tags/v4"]
+    assert result.pushed == ["refs/tags/v4.4.0", "+refs/tags/v4"]
     assert origin_tag(checkout, "v4") == origin_tag(checkout, "v4.4.0") == git(checkout, "rev-parse", "HEAD")
     assert not {"v1", "v3"} & set(origin_tags(checkout))
 
 
 def test_a_refused_ref_fails_the_run_naming_it_and_the_remedy_and_the_others_land(checkout):
     next_major(checkout)
-    hook_origin(checkout, "refs/tags/v4")
-    result = run_workflow(checkout)
+    result = run_workflow(checkout, refused="refs/tags/v4")
     assert result.returncode == 1, result.stderr + result.stdout
     errors = [line for line in result.stdout.splitlines() if line.startswith("::error::")]
     assert len(errors) == 1, result.stdout
@@ -715,8 +734,7 @@ def test_a_refused_ref_fails_the_run_naming_it_and_the_remedy_and_the_others_lan
 
 def test_a_ref_refused_for_another_reason_names_a_rerun_and_no_ruleset(checkout):
     next_major(checkout)
-    hook_origin(checkout, "refs/tags/v4", "missing necessary objects")
-    result = run_workflow(checkout)
+    result = run_workflow(checkout, refused="refs/tags/v4", why="missing necessary objects")
     assert result.returncode == 1, result.stderr + result.stdout
     error, = (line for line in result.stdout.splitlines() if line.startswith("::error::"))
     assert "missing necessary objects" in error
@@ -786,7 +804,6 @@ def test_every_runner_image_is_pinned():
 def test_the_squash_commit_onto_an_unrelated_main_releases_its_version_and_major_only(checkout):
     """se becoming main: main's first-parent history holds a line that never had an se.toml, then
     one squash commit with se's tree at a new major; se's own tags stay where they are."""
-    hook_origin(checkout)
     old = origin_tag(checkout, "v1.2.3")
     git(checkout, "push", "-q", "origin", "main:se")
     git(checkout, "switch", "-q", "--orphan", "go")
@@ -803,6 +820,6 @@ def test_the_squash_commit_onto_an_unrelated_main_releases_its_version_and_major
     git(checkout, "push", "-q", "--force", "origin", "go:main")
     result = run_workflow(checkout)
     assert result.returncode == 0, result.stderr + result.stdout
-    assert received(checkout)[-2:] == ["refs/tags/v2.0.0", "refs/tags/v2"]
+    assert result.pushed == ["refs/tags/v2.0.0", "+refs/tags/v2"]
     assert origin_tag(checkout, "v2.0.0") == origin_tag(checkout, "v2") == squash
     assert origin_tag(checkout, "v1.2.3") == old and "v1" not in origin_tags(checkout)
