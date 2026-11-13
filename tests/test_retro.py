@@ -281,6 +281,38 @@ def test_the_draft_ends_in_the_block_that_parses_back(checkout):
         "work-issue": False, "check": False, "outside-pr": False, "field-report": False}
 
 
+def run_line(start: str, wall: float, issue: int) -> dict:
+    return {"command": "work_tickets.py integrate", "start": start, "wall_seconds": wall,
+            "gh_calls": 3, "gh_refusals": 0, "gh_wait_seconds": 0.0, "exit_code": 0, "issue": issue}
+
+
+def test_collect_reads_metrics_back_from_the_landings_and_counts_a_run_once(
+        checkout, tmp_path, monkeypatch):
+    """A cloud integrator's line survives only in its landing's description (#23's); a run the
+    local file holds too (#21's) counts once, by its finished local line; a local line before the
+    window is not the window's."""
+    given = answers(checkout)
+    landed_a = run_line("2026-11-02T09:00:00Z", 40.0, 11)
+    landed_b = run_line("2026-11-03T09:00:00Z", 50.0, 12)
+    for item, line in zip((given["pulls.json"][0], given["pulls.json"][2]), (landed_a, landed_b)):
+        item["body"] = item["body"] + "\n" + work_tickets.metrics.text(line) + "\n"
+    finished_a = {**landed_a, "wall_seconds": 95.0}
+    local_only = {**run_line("2026-11-05T09:00:00Z", 10.0, 0), "command": "work_tickets.py sync"}
+    before = run_line("2026-10-20T09:00:00Z", 70.0, 3)
+    local = tmp_path / "metrics.jsonl"
+    local.write_text("".join(json.dumps(line) + "\n" for line in (before, finished_a, local_only)),
+                     encoding="utf-8")
+    monkeypatch.setenv("SE_METRICS", str(local))
+
+    found = collected(checkout, given)
+
+    assert found.runs == [finished_a, landed_b, local_only]
+    assert found.data()["metrics"] == {"landings": 2, "local": 2, "runs": 3}
+    text = retro.draft(found)
+    assert f"3 runs: 2 from the landing pull requests, 2 from {local}, each run once." in text
+    assert "work_tickets.py integrate: 2 runs, 145.0 s wall, 6 GitHub calls" in text
+
+
 def test_a_block_that_is_not_json_is_refused():
     assert retro.read_block("No block here.") is None
     with pytest.raises(work_tickets.QueueError, match="is not JSON"):

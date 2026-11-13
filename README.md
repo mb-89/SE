@@ -909,6 +909,9 @@ with the field report of the work pull request its landing pull request names
   issue open when it merged (`work-issue`), its `check` passed (`check`), no commit reached the
   integration branch outside a pull request (`outside-pr`), every closed work issue has a field
   report (`field-report`);
+- the window's [metrics](#metrics) report: the line each landing pull request's description ends
+  in, merged with the lines of the local metrics file that started in the window, a run in both
+  counted once (by its command and start, the local line winning);
 - the previous retro's findings, from its report's block, each with the work issues of the window
   that name it (`retro #<n> finding <k>`), its state (`closed` where one closed as completed) and
   whether the rule check it names broke again (recurred).
