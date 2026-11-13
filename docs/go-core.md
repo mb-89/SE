@@ -9,8 +9,9 @@ that can be mechanized becomes a component of it; what is judgment stays a skill
 the core by hand: the SE plugin's hooks start it in the background, in the cloud too. The core
 gets a repository of its own and becomes the template every new application starts from.
 
-This decision overturns the verdicts in [go-line-port.md](go-line-port.md) that called the index,
-the daemon and the bus obsolete; that file marks each one. Every number below was measured on
+This decision overturns the 12 Nov port plan's verdict that the index, the daemon and the bus
+were obsolete; [The Go line](#the-go-line) says what of it comes back and what does not. Every
+number below was measured on
 13 Nov in a Claude Code cloud container (4 cores, 15 GB, Go 1.24.7 preinstalled), in
 [Measurements](#measurements).
 
@@ -461,12 +462,29 @@ Once the core runs, the skills, agents and specs read from it instead of restati
 - **In the cloud:** every GitHub answer the session read, readable by the next command, so no
   skill tells the agent to save a tool's answer to a file.
 
-## The port plan superseded
+## The Go line
 
-[go-line-port.md](go-line-port.md) marks each verdict this design overturns as **superseded**,
-with a link here. What it ported in Python (review, retro, overhaul, fleet check, the Stop hook,
-the hygiene checks) stays and becomes the migration's input. SE#884 removes that file once this
-design has taken over what is still true in it.
+The Go line is `main`'s history at `ff01204`: about 28,000 lines of Go plus 17,000 of tests, a
+Claude plugin, a per-workspace daemon and a fleet of unattended cloud boxes. Read it with
+`git show ff01204:<path>` and `git ls-tree -r ff01204`, which need no tag: origin has no
+`archive/go-line`. In a shallow clone, first `git fetch origin ff01204`; never check it out over a
+branch.
+
+What the 12 Nov port rebuilt in Python (review, retro, overhaul, fleet check, the Stop hook, the
+hygiene checks) stays and is the [Migration](#migration)'s input. Of the Go line's own rules, the
+core's contract suite holds components to `io-module`, `module-imports`, `library-users` and
+`fake-contract` ([The fake core](#the-fake-core)).
+
+Not coming back, and no issue brings them back without the owner:
+
+- branch claims, leases on claims, takeover markers, manifests, coordinator trees, `issue keep`,
+  `fleet refresh`, `fleet rules`, `fleet fix`, the routine and its fan-out: one integrator assigns
+  and lands each work issue;
+- landing answers (`landing.yaml`) and the battery record `tests/passed`: the field report and the
+  push gate's verdicts replace them;
+- the queue estimate of `issue tree`, and the session panel's pane;
+- the Go line's other `se rules` and its `golangci-lint`, `biome` and `deadcode` steps;
+- `RUNME.sh` and `build.sh`: the binary arrives as a release ([How the binary arrives](#how-the-binary-arrives)).
 
 ## Measurements
 
