@@ -55,12 +55,13 @@ func TakeDied(root string) string {
 }
 
 // TakeVanished answers the last DiedLines lines of the core's log where the
-// standing file names a core whose process runs nowhere, and removes that
-// file, so one report names it once; false where it names none.
+// standing file names a core whose process runs nowhere, or whose bus is gone
+// (ErrReused), and removes that file, so one report names it once; false
+// where it names none.
 func TakeVanished(root string) (string, bool) {
 	var s Standing
 	data, err := os.ReadFile(StandingPath(root))
-	if err != nil || json.Unmarshal(data, &s) != nil || s.Pid == 0 || alive(s.Pid) {
+	if err != nil || json.Unmarshal(data, &s) != nil || s.Pid == 0 || alive(s.Pid) && accepts(s.Bus) {
 		return "", false
 	}
 	dropStanding(root, s.Pid)

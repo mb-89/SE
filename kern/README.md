@@ -50,7 +50,8 @@ One core runs per checkout, the nearest folder up from the working directory tha
 
 - **The standing file**, `.se/.runtime/standing.json`, readable by its owner alone: the bus's
   address, the pid, the contract version and every bus user with its password. A pid that runs
-  nowhere reads as absent; the core removes the claim once it has written the file.
+  nowhere, or whose bus accepts no connection (the pid is another process's after a restart that
+  kept the files), reads as absent; the core removes the claim once it has written the file.
 - **Leases.** Each `hook.<event>` with a `session_id` takes or renews that session's lease and
   `hook.SessionEnd` returns it. A component beats on `lease.<i>` every 5 s; a placed instance's
   names read `stale` once three beats are missed.
