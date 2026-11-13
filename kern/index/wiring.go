@@ -36,6 +36,10 @@ const BuiltIn = "built-in"
 //	component = "issues/pull"
 //	enabled = false                    # switched off: its names read their built-in values
 //
+//	[instances.pump]
+//	component = "pump"
+//	command = ["uv", "run", "python", "-m", "pump"]  # placed: runs in a process of its own
+//
 //	[wires]
 //	"counter.count" = "numbers/count"  # an output to a name
 //	"report.total" = "counter.count"   # an input to another instance's port
@@ -56,7 +60,11 @@ type Instance struct {
 	Enabled bool
 	OffLine int
 	Config  map[string]ConfigValue
-	Line    int
+	// Command is the placement: where set, the core runs the instance in a
+	// process of its own, started with this command; CommandLine is its line.
+	Command     []string
+	CommandLine int
+	Line        int
 }
 
 // ConfigValue is one config value as the wiring file gives it, and its line.
@@ -146,8 +154,25 @@ func ParseWiring(data []byte) (Wiring, error) {
 				for key, v := range cfg {
 					in.Config[key] = ConfigValue{Value: v, Line: line("instances", name, "config", key)}
 				}
+			case "command":
+				words, ok := t[k].([]any)
+				if ok && len(words) == 0 {
+					ok = false
+				}
+				for _, w := range words {
+					if s, isWord := w.(string); !isWord || s == "" {
+						ok = false
+					}
+				}
+				if !ok {
+					return Wiring{}, fmt.Errorf("wiring line %d: instance %s: command is a list of words, the program first", kl, name)
+				}
+				for _, w := range words {
+					in.Command = append(in.Command, w.(string))
+				}
+				in.CommandLine = kl
 			default:
-				return Wiring{}, fmt.Errorf("wiring line %d: instance %s: no key %s: an instance holds component, enabled and config", kl, name, k)
+				return Wiring{}, fmt.Errorf("wiring line %d: instance %s: no key %s: an instance holds component, enabled, config and command", kl, name, k)
 			}
 		}
 		if in.Component == "" {
