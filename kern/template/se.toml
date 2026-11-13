@@ -1,0 +1,19 @@
+[project]
+# The application's one semantic version (SE's README "Project settings").
+version = "0.1.0"
+integration_branch = "main"
+# The commit identity every commit carries; `se new app` sets it (SE's README "Project settings").
+identity = "<name> <name>"
+public_check = true
+
+# The tests and their one budget: the battery (kern's battery.yml) runs this command, the Go tests
+# (tests/test_go.py) and the Python tests, and holds it to these seconds (SE's README "Test budget").
+[tests]
+command = ["uv", "run", "pytest", "-q"]
+target_seconds = 60
+limit_seconds = 120
+
+# The core this application builds on (kern's docs/go-core.md "Pinning it"): go.mod owns the version.
+[modules.kern]
+url = "https://github.com/mb-89/kern.git"
+go = true
