@@ -21,7 +21,9 @@ Two commands of se (its README "Work commands"):
    `findings`, `classes` and `went_well`. Each finding names its class, its home (the file it
    changes) and, where it changes a rule, trades one metric for another, the judge is unsure or it
    recurred, `controversial` with its why.
-3. `uv run python <se>/scripts/retro.py file <this issue> --draft <draft>` checks the judgment,
-   posts the report as this issue's closing comment and closes it. It files no issue: SE reads the
-   report, bundles the `work` findings into work issues (each naming `retro #<n> finding <k>`)
-   and puts the `decision` findings on the owner's decision list.
+3. The judged draft lands on the integration branch as the retro doc (`docs/retro-...`), then
+   `uv run python <se>/scripts/retro.py file <this issue> --draft <draft>` checks the judgment,
+   posts the report as this issue's closing comment, linking the doc for the facts and the block,
+   and closes it. It files no issue: SE reads the report, bundles the `work` findings into work
+   issues (each naming `retro #<n> finding <k>`) and puts the `decision` findings on the owner's
+   decision list.

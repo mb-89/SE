@@ -619,24 +619,11 @@ def door_for(retro, work_tickets, args: argparse.Namespace, root: Path):
     """The read door: the answer files where given, else gh, else the plan's placeholders."""
     tracker = work_tickets.resolve_repo(root, args.repo)
 
-    class GhDoor(retro.GhDoor):
-        def open_issues(self) -> list[dict]:
-            return [item for item in self.pages(self.issues_door, "issues?state=open")
-                    if "pull_request" not in item]
-
-    class FileDoor(retro.FileDoor):
-        def open_issues(self) -> list[dict]:
-            name = "open-issues.json"
-            return retro.listed(self.read(name, work_tickets.Step(name, "list_issues", {
-                **work_tickets.owner_repo(self.tracker), "state": "OPEN", "perPage": 100},
-                note=f"Every page; save the issues of all pages as one JSON list to "
-                     f"{self.directory / name}")), "issues", "nodes")
-
     if args.answers is not None:
-        return FileDoor(args.answers, tracker, tracker)
+        return retro.FileDoor(args.answers, tracker, tracker)
     if work_tickets.hand_off():
-        return FileDoor(Path("<dir>"), tracker, tracker)
-    return GhDoor(root, tracker, tracker)
+        return retro.FileDoor(Path("<dir>"), tracker, tracker)
+    return retro.GhDoor(root, tracker, tracker)
 
 
 def last_block(texts: list[str], marker: str, reader) -> dict | None:
@@ -646,7 +633,7 @@ def last_block(texts: list[str], marker: str, reader) -> dict | None:
 
 
 def retro_row(issue, block: dict | None) -> dict:
-    """One retro of the window as its report's block names it."""
+    """One retro of the window as the block of the retro doc its report links names it."""
     if block is None:
         return {"retro": issue.number, "closed_at": issue.closed_at, "block": False}
     findings = [item for item in block.get("findings") or [] if isinstance(item, dict)]
@@ -721,9 +708,11 @@ class Gathered:
                 "findings": [], "went_well": []}
 
 
-def gather(number: int, door, rules: list, facts: Facts, now: datetime) -> Gathered | None:
-    """Overhaul `number`'s draft data, read through `door`; None while the door is still missing
-    answers (`door.missing`)."""
+def gather(number: int, door, rules: list, facts: Facts, now: datetime,
+           show) -> Gathered | None:
+    """Overhaul `number`'s draft data, read through `door`, each retro's block from the retro doc
+    its report links, read with `show(sha, path)` (retro.posted_block); None while the door is
+    still missing answers (`door.missing`)."""
     retro = sibling("retro")
     closed = [retro.issue_of(item) for item in door.closed_issues()]
     opened = [retro.issue_of(item) for item in door.open_issues()]
@@ -748,11 +737,12 @@ def gather(number: int, door, rules: list, facts: Facts, now: datetime) -> Gathe
     def texts(issue) -> list[str]:
         return [issue.body, *(str(item.get("body") or "") for item in door.comments(issue.number))]
 
-    rows = [retro_row(issue, last_block(texts(issue), retro.BLOCK_MARKER, retro.read_block))
-            for issue in window]
+    posted = {issue.number: texts(issue) for issue in window}
     previous_block = last_block(texts(last), BLOCK_MARKER, read_block) if last else None
     if door.missing:
         return None
+    rows = [retro_row(issue, retro.posted_block(posted[issue.number], issue.number, show))
+            for issue in window]
     previous = None
     if last is not None:
         previous = {"overhaul": last.number, "found": previous_block is not None,
@@ -995,7 +985,7 @@ def run_file(args: argparse.Namespace) -> int:
     tracker = work_tickets.resolve_repo(root, args.repo)
     text = work_tickets.read_file(args.draft, "the overhaul draft")
     block = judged(text, args.overhaul)
-    steps = retro.file_steps(tracker, args.overhaul, report(text, block, args.overhaul),
+    steps = retro.file_steps(tracker, args.overhaul, [report(text, block, args.overhaul)],
                              "overhaul")
     if work_tickets.hand_off():
         print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
@@ -1017,7 +1007,7 @@ def run_read(args: argparse.Namespace) -> int:
     root = work_tickets.worktree_root(args.worktree)
     door = door_for(retro, work_tickets, args, root)
     found = gather(args.overhaul, door, book_rules(root), find(read(root)),
-                   datetime.now(timezone.utc))
+                   datetime.now(timezone.utc), retro.git_show(root))
     if found is None:
         directory = args.answers or Path("<dir>")
         then = (f"overhaul.py read {args.overhaul} --answers {directory}"
