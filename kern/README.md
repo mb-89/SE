@@ -91,7 +91,8 @@ SDK on `PYTHONPATH`.
 | `in.<i>` | asks its inputs | answers them by local port, `config/<key>` among them, at the newest revision |
 | `cmd.<i>.<command>` | answers one step: `text`, `lines`, `writes`, `requests`, `then` | sends the first step with the arguments and inputs, each later one with the answers |
 | `io.<i>.<verb>` | an I/O component answers `{"answer": ...}` or `{"error": ...}` | sends a request bound to the verb |
-| `call.<command>` | | a client's call: `{"args": [...]}`, answered with the lines, the text or the error |
+| `say.<i>` | says a step's line as it goes, `{"call", "line"}`, and beats `{"call"}` every 5 s while the step runs | hands each line on to the call's caller; each word restarts the step's wait, `StepWait` (60 s, `KERN_STEP_WAIT` for a served core), so a step that beats runs as long as its process |
+| `call.<command>` | | a client's call: `{"args": [...], "progress"?}`, answered with the lines, the text or the error; with a progress subject in the caller's inbox, each line goes there as it is said and a beat every 5 s ([docs/go-core.md "Progress and long calls"](../docs/go-core.md#progress-and-long-calls)) |
 
 - **The declaration hash** is the SHA-256 of `component.toml`'s bytes, line ends read as LF,
   written `sha256:<hex>`: the bytes, not what they parse to, so Go and Python answer one hash.

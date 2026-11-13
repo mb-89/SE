@@ -38,6 +38,11 @@ import (
 // test's way to show that `kern start` returns before the core answers.
 const HoldEnv = "KERN_HOLD_START"
 
+// StepWaitEnv names a duration that replaces the served core's StepWait, the
+// silence it waits out from one step of a declared command: a test's way to
+// show that a step that beats outlives it.
+const StepWaitEnv = "KERN_STEP_WAIT"
+
 const usage = "usage: %s <start|status|stop|serve|hook <event>> [--root DIR] [--grace D] [--idle D] [--wait D] [--json] [--unanswered N]"
 
 // Run is the command named name: it serves the components registered with
@@ -212,8 +217,18 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 			return 2
 		}
 	}
+	var stepWait time.Duration
+	if v := os.Getenv(StepWaitEnv); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			fmt.Fprintf(stderr, "%s serve: %s=%q is no duration, such as 60s\n", name, StepWaitEnv, v)
+			return 2
+		}
+		stepWait = d
+	}
 	core, err := host.Serve(host.Options{
 		Root: root, Wiring: w, Components: index.Registered(), Grace: grace, Idle: idle, Log: stderr,
+		StepWait: stepWait,
 	})
 	if err != nil {
 		fmt.Fprintln(stderr, err)

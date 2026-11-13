@@ -210,12 +210,20 @@ func (ix *Index) Commit(instance string, writes ...Write) error {
 // the command with its reason; what it already committed and requested stands.
 // The result holds every step's text, writes and delivered requests.
 func (ix *Index) Call(command string, args ...string) (Result, error) {
+	return ix.CallSaying(command, nil, args...)
+}
+
+// CallSaying runs a command as Call does, and hands say each progress line as
+// its step says it: a declared component's process live, within its step; a
+// compiled command's lines once its step answers. A long command so streams
+// its progress to its caller (docs/go-core.md "Progress and long calls").
+func (ix *Index) CallSaying(command string, say func(line string), args ...string) (Result, error) {
 	c, ok := ix.catalog.Command(command)
 	if !ok {
 		return Result{}, fmt.Errorf("index: no command %q", command)
 	}
 	in := ix.insts[c.Instance]
-	r, err := in.comp.Run(command, in.reader(ix.Snapshot(), ""), args)
+	r, err := in.comp.RunSaying(command, in.reader(ix.Snapshot(), ""), args, say)
 	var done Result
 	for {
 		if err != nil {
@@ -225,6 +233,11 @@ func (ix *Index) Call(command string, args ...string) (Result, error) {
 			done.Text = strings.TrimPrefix(done.Text+"\n"+r.Text, "\n")
 		}
 		done.Lines = append(done.Lines, r.Lines...)
+		if say != nil && !r.Said {
+			for _, l := range r.Lines {
+				say(l)
+			}
+		}
 		done.Writes = append(done.Writes, r.Writes...)
 		if err := ix.apply(in, r.Writes); err != nil {
 			return done, err

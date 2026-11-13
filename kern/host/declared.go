@@ -19,9 +19,15 @@ const (
 	// AttachWait is how long a call to a command of a declared instance waits
 	// for its process to attach, as one the core just placed does in milliseconds.
 	AttachWait = 10 * time.Second
-	// StepWait is how long the core waits for one step of a command, or one
-	// request on a verb, from a declared component's process.
+	// StepWait is how long the core waits for one request on a verb from a
+	// declared component's process, and for word from one step of a command:
+	// a step that says a line or beats on say.<i> waits StepWait again, so a
+	// long step runs as long as its process lives.
 	StepWait = 60 * time.Second
+	// CallBeat is how often the core beats on a streaming call's progress
+	// subject while the call runs, and a declared process on say.<i> while
+	// its step runs (the Python SDK's runner).
+	CallBeat = 5 * time.Second
 )
 
 // DeclarationDirs are where, under the checkout, the core finds the
@@ -76,20 +82,70 @@ type remote struct {
 	inst string
 }
 
-func (r remote) Command(name string, s index.Step) (index.Answer, error) {
+func (r remote) Command(name string, s index.Step, say func(string)) (index.Answer, error) {
 	var a index.Answer
 	if err := r.c.waitAttached(r.inst); err != nil {
 		return a, err
 	}
 	data, _ := json.Marshal(s)
-	m, err := r.c.nc.Request(bus.Cmd+bus.Subject(r.inst)+"."+bus.Token(name), data, StepWait)
-	if err != nil {
+	// The step's answer and its process's say.<i> ride one channel, so the
+	// lines said before the answer are read before it, in their order.
+	heard := make(chan *nats.Msg, 64)
+	inbox := r.c.nc.NewRespInbox()
+	said := bus.Say + bus.Subject(r.inst)
+	for _, subj := range []string{inbox, said} {
+		sub, err := r.c.nc.ChanSubscribe(subj, heard)
+		if err != nil {
+			return a, fmt.Errorf("instance %s: command %q, step %d: %w", r.inst, name, s.Step, err)
+		}
+		defer func() { _ = sub.Unsubscribe() }()
+	}
+	if err := r.c.nc.PublishRequest(bus.Cmd+bus.Subject(r.inst)+"."+bus.Token(name), inbox, data); err != nil {
 		return a, fmt.Errorf("instance %s: command %q, step %d: %w", r.inst, name, s.Step, err)
 	}
-	if err := json.Unmarshal(m.Data, &a); err != nil {
-		return a, fmt.Errorf("instance %s: command %q answers no result: %v", r.inst, name, err)
+	wait := r.c.o.StepWait
+	quiet := time.NewTimer(wait)
+	defer quiet.Stop()
+	var live []string
+	for {
+		select {
+		case m := <-heard:
+			if m.Subject == said {
+				var w struct {
+					Call string  `json:"call"`
+					Line *string `json:"line"`
+				}
+				if json.Unmarshal(m.Data, &w) != nil || w.Call != s.Call {
+					continue // another call's word
+				}
+				if !quiet.Stop() {
+					<-quiet.C
+				}
+				quiet.Reset(wait)
+				if w.Line != nil {
+					live = append(live, *w.Line)
+					if say != nil {
+						say(*w.Line)
+					}
+				}
+				continue
+			}
+			if err := json.Unmarshal(m.Data, &a); err != nil {
+				return a, fmt.Errorf("instance %s: command %q answers no result: %v", r.inst, name, err)
+			}
+			if say != nil {
+				for _, l := range a.Lines {
+					say(l)
+				}
+			}
+			a.Lines = append(live, a.Lines...)
+			return a, nil
+		case <-quiet.C:
+			return a, fmt.Errorf("instance %s: command %q, step %d: no answer, line or beat within %v", r.inst, name, s.Step, wait)
+		case <-r.c.done:
+			return a, fmt.Errorf("instance %s: command %q, step %d: the core ends", r.inst, name, s.Step)
+		}
 	}
-	return a, nil
 }
 
 func (r remote) Serve(verb string, req json.RawMessage) (json.RawMessage, error) {
@@ -97,7 +153,7 @@ func (r remote) Serve(verb string, req json.RawMessage) (json.RawMessage, error)
 		return nil, err
 	}
 	data, _ := json.Marshal(map[string]json.RawMessage{"request": req})
-	m, err := r.c.nc.Request(bus.IOVerb+bus.Subject(r.inst)+"."+bus.Token(verb), data, StepWait)
+	m, err := r.c.nc.Request(bus.IOVerb+bus.Subject(r.inst)+"."+bus.Token(verb), data, r.c.o.StepWait)
 	if err != nil {
 		return nil, fmt.Errorf("instance %s: verb %s: %w", r.inst, verb, err)
 	}
@@ -208,8 +264,19 @@ type CallAnswer struct {
 	Error string   `json:"error,omitempty"`
 }
 
+// Progress is what the core publishes on a call's progress subject while the
+// call runs: each line as a step says it, or a beat every CallBeat, so the
+// caller waits as long as the call lives instead of a fixed time.
+type Progress struct {
+	Line string `json:"line,omitempty"`
+	Beat bool   `json:"beat,omitempty"`
+}
+
 // call answers call.<command>: it runs the command with the arguments the
-// body names, {"args": [...]}, and answers its lines and text.
+// body names, {"args": [...], "progress"?: <subject>}, and answers its lines
+// and text. Where the body names a progress subject, one in the caller's own
+// inbox, the core streams each line there as it is said, and beats there
+// while the call runs (docs/go-core.md "Progress and long calls").
 func (c *Core) call(m *nats.Msg) {
 	if m.Subject == StopSubject {
 		return
@@ -217,7 +284,8 @@ func (c *Core) call(m *nats.Msg) {
 	c.event()
 	name := bus.Word(strings.TrimPrefix(m.Subject, bus.Call))
 	var body struct {
-		Args []string `json:"args"`
+		Args     []string `json:"args"`
+		Progress string   `json:"progress"`
 	}
 	if len(m.Data) > 0 {
 		if err := json.Unmarshal(m.Data, &body); err != nil {
@@ -225,12 +293,53 @@ func (c *Core) call(m *nats.Msg) {
 			return
 		}
 	}
+	if body.Progress != "" && !sameInbox(m.Reply, body.Progress) {
+		c.reply(m, CallAnswer{Lines: []string{}, Error: fmt.Sprintf("call.%s: the progress subject %q lies outside the caller's inbox, the one its reply %q names", bus.Token(name), body.Progress, m.Reply)})
+		return
+	}
 	go func() {
-		r, err := c.ix.Call(name, body.Args...)
+		var say func(string)
+		stop := make(chan struct{})
+		if body.Progress != "" {
+			say = func(line string) { c.progress(body.Progress, Progress{Line: line}) }
+			go func() {
+				t := time.NewTicker(c.o.CallBeat)
+				defer t.Stop()
+				for {
+					select {
+					case <-stop:
+						return
+					case <-c.done:
+						return
+					case <-t.C:
+						c.progress(body.Progress, Progress{Beat: true})
+					}
+				}
+			}()
+		}
+		r, err := c.ix.CallSaying(name, say, body.Args...)
+		close(stop)
 		a := CallAnswer{Text: r.Text, Lines: append([]string{}, r.Lines...)}
 		if err != nil {
 			a.Error = err.Error()
 		}
 		c.reply(m, a)
 	}()
+}
+
+func (c *Core) progress(subject string, p Progress) {
+	data, _ := json.Marshal(p)
+	_ = c.nc.Publish(subject, data)
+}
+
+// sameInbox says whether subject lies in the inbox the reply subject names:
+// both under its first two tokens, _INBOX.<user in hex>, so a caller streams
+// only to itself.
+func sameInbox(reply, subject string) bool {
+	parts := strings.SplitN(reply, ".", 3)
+	if len(parts) < 3 || parts[0] != "_INBOX" {
+		return false
+	}
+	prefix := parts[0] + "." + parts[1] + "."
+	return strings.HasPrefix(subject, prefix) && len(subject) > len(prefix) && !strings.ContainsAny(subject, "*> ")
 }
