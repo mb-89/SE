@@ -23,16 +23,21 @@ TRUSTED = '[tests]\ncommand = ["uv", "run", "pytest", "-q"]\ntrust_integrator = 
 OWNER = "alice"
 
 
+IDENTITY = ("-c", "user.name=mb", "-c", "user.email=mb")  # a runner has no git identity
+
+
 def git(root: Path, *arguments: str) -> str:
-    return subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True,
-                          check=True).stdout.strip()
+    result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True,
+                            check=False)
+    assert result.returncode == 0, f"git {' '.join(arguments)}: {result.stderr.strip()}"
+    return result.stdout.strip()
 
 
 def commit(root: Path, files: dict[str, str], message: str = "change") -> str:
     for name, text in files.items():
         (root / name).write_text(text, encoding="utf-8")
     git(root, "add", "-A")
-    git(root, "-c", "user.name=mb", "-c", "user.email=mb", "commit", "-q", "-m", message)
+    git(root, *IDENTITY, "commit", "-q", "-m", message)
     return git(root, "rev-parse", "HEAD")
 
 
@@ -152,7 +157,7 @@ def test_a_record_of_the_head_is_not_trusted_for_a_merge_onto_a_moved_main(repo:
     git(repo, "switch", "-q", "main")
     moved = commit(repo, {"c.txt": "c\n"}, "main moved")
     git(repo, "update-ref", "refs/remotes/origin/main", moved)
-    git(repo, "merge", "-q", "--no-ff", "-m", "merge", head)  # the merge commit check checks out
+    git(repo, *IDENTITY, "merge", "-q", "--no-ff", "-m", "merge", head)  # the merge commit check checks out
 
     decision = ci_trust.decide(repo, pull_request(repo, head), api)
 
