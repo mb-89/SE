@@ -441,6 +441,8 @@ A worker splits its work issue into local tickets in its worktree:
   command. Check an acceptance item only with evidence; move a ticket to `done/` only when every
   item is satisfied. A ticket that cannot be finished stays in `held/` with the attempts and
   failure evidence, and the field report states it as not delivered with exact next steps.
+- An acceptance item of the form "`git grep X` finds nothing" excludes the history records
+  `docs/retro-*`, which quote what was true when they were written.
 - A partial-delivery blocker is only work outside the worker's box: another package's file, a
   user decision, or missing access. Tests of the package's own code are never blockers, including
   failure paths exercised with temporary repositories or fakes. Workers may create, use and close
