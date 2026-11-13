@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/kern/coretest"
 	"github.com/mb-89/kern/index"
 	"github.com/mb-89/kern/index/fixture"
+	"github.com/mb-89/kern/kerntest"
 )
 
 // source is a fixture component whose outputs a test commits, as an I/O component commits what comes in.
@@ -302,7 +302,7 @@ func TestABrokenDeclarationIsRefused(t *testing.T) {
 	} {
 		refused(t, `instances = { b = { component = "broken" } }`, want, broken)
 	}
-	if _, err := coretest.New(broken); err == nil {
+	if _, err := kerntest.New(broken); err == nil {
 		t.Fatal("the fake took a broken component")
 	}
 	refused(t, `instances = { a = { component = "source" } }`, "two components are named source", source, source)
@@ -336,7 +336,7 @@ func TestTheFakeAndTheCoreAgree(t *testing.T) {
 	must(t, ix.Commit("numbers", index.Write{Port: "list", Value: []int{4, 5}}))
 	core, err := ix.Call("tally note", "same")
 	must(t, err)
-	f, err := coretest.New(fixture.Tally)
+	f, err := kerntest.New(fixture.Tally)
 	must(t, err)
 	must(t, f.Seed("numbers", []int{4, 5}))
 	must(t, f.Config("scale", 2))
@@ -454,7 +454,7 @@ wires = { "p.posts" = "posts/<a>", "t.numbers" = "posts/<a>" }`, "a command read
 // The fake core keeps what a command writes to a family at its key.
 func TestTheFakeKeepsAFamilyByKey(t *testing.T) {
 	t.Parallel()
-	f, err := coretest.New(index.Declare("post", "Posts 1 at its argument.", posts,
+	f, err := kerntest.New(index.Declare("post", "Posts 1 at its argument.", posts,
 		index.Command(index.CommandDecl{Name: "post", Usage: "post <key>", Summary: "Post.", Help: "Posts 1 at key.", Group: "Fixtures", Class: index.Batch},
 			func(_ struct{}, args []string) (index.Result, error) {
 				return index.Result{Writes: []index.Write{posts.At(args[0], 1)}}, nil

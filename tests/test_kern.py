@@ -18,8 +18,9 @@ def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins()
     assert int(setup[1]) >= SETUP_GO_NODE_24, "setup-go below v6 runs on Node 20"
     assert "go-version-file: kern/go.mod" in setup[2] and "cache-dependency-path: kern/go.sum" in setup[2]
     assert re.search(r"(?m)^go \d+\.\d+\.\d+$", (PROJECT / "kern" / "go.mod").read_text(encoding="utf-8"))
-    steps = ["scripts/work_tickets.py suite --worktree .", "actions/setup-go", "time go vet ./...",
-             "time go test ./..."]
+    # Go is set up before the suite step, which runs kern's tests as se.toml declares them.
+    steps = ["actions/setup-go", "time go vet ./...", "scripts/work_tickets.py suite --worktree ."]
     assert [workflow.index(step) for step in steps] == sorted(workflow.index(step) for step in steps)
-    for command in ("time go vet ./...", "time go test ./..."):
-        assert f"        working-directory: kern\n        run: {command}\n" in workflow
+    assert "        working-directory: kern\n        run: time go vet ./...\n" in workflow
+    check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", jobs)[1]
+    assert "go test" not in check, "kern's tests have one declaration, se.toml [tests.beside.kern]"

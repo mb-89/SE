@@ -3,14 +3,14 @@ package fixture_test
 import (
 	"testing"
 
-	"github.com/mb-89/kern/coretest"
 	"github.com/mb-89/kern/index"
 	"github.com/mb-89/kern/index/fixture"
+	"github.com/mb-89/kern/kerntest"
 )
 
 func TestTheFixturePassesAgainstTheFakeCoreAlone(t *testing.T) {
 	t.Parallel()
-	f, err := coretest.New(fixture.Tally)
+	f, err := kerntest.New(fixture.Tally)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestTheFakeCoreTakesANestedComponent(t *testing.T) {
 	t.Parallel()
 	echo := index.Declare("fixtures/echo", "Says its word back.",
 		index.Derived("said", "", "The word, said back.", func(in echoIn) (string, error) { return in.Word, nil }))
-	f, err := coretest.New(echo)
+	f, err := kerntest.New(echo)
 	must(t, err)
 	must(t, f.Seed("word", "hi"))
 	must(t, f.Derive("said"))
@@ -104,7 +104,7 @@ func TestTheFakeCoreTakesANestedComponent(t *testing.T) {
 		t.Fatal("the fake derived an output with no derivation")
 	}
 	for _, name := range []string{"fixtures//echo", "/echo", "fixtures/", "fixtures/<id>", "fixtures.echo"} {
-		if _, err := coretest.New(index.Declare(name, "Bad.")); err == nil {
+		if _, err := kerntest.New(index.Declare(name, "Bad.")); err == nil {
 			t.Errorf("the fake took a component named %q", name)
 		}
 	}

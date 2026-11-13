@@ -4020,6 +4020,22 @@ class SuiteBudget:
     setup: list[str] | None = None
     tier: str | None = None  # `<module>:<function>`, the project's tier function
     over_limit: str = "fail"  # "warn": an overrun only warns (README "Test budget")
+    beside: tuple["BesideSuite", ...] = ()  # `[tests.beside.<name>]`, run after the suite
+
+
+@dataclass(frozen=True)
+class BesideSuite:
+    """se.toml `[tests.beside.<name>]`: a suite in another toolchain (kern's Go tests), run after
+    the complete suite in `directory` with its own time and budget (README "Test budget")."""
+
+    name: str
+    command: list[str]
+    directory: str  # relative to the project root; "." where not given
+    target_seconds: float
+    limit_seconds: float
+
+    def where(self) -> str:
+        return f"[tests.beside.{self.name}] in se.toml"
 
 
 def is_argument_array(value: object) -> bool:
@@ -4076,16 +4092,51 @@ def suite_budget(root: Path) -> SuiteBudget:
             f'{where}: over_limit must be "fail" (the default) or "warn", what a run over '
             "limit_seconds does; fix it or remove it"
         )
+    values = budget_seconds(tests, where)
+    return SuiteBudget(command, values["target_seconds"], values["limit_seconds"], setup, tier,
+                       over_limit, beside_suites(root, tests.get("beside", {})))
+
+
+def budget_seconds(table: dict, where: str) -> dict[str, float]:
+    """`target_seconds` (default 60) and `limit_seconds` (default 120) of a `[tests]` table."""
     values: dict[str, float] = {}
     for key, default in (("target_seconds", 60), ("limit_seconds", 120)):
-        value = tests.get(key, default)
+        value = table.get(key, default)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
             raise QueueError(f"{where}: {key} must be a positive number of seconds; fix it")
         values[key] = float(value)
     if values["target_seconds"] > values["limit_seconds"]:
         raise QueueError(f"{where}: target_seconds must not exceed limit_seconds; fix it")
-    return SuiteBudget(command, values["target_seconds"], values["limit_seconds"], setup, tier,
-                       over_limit)
+    return values
+
+
+def beside_suites(root: Path, tables: object) -> tuple[BesideSuite, ...]:
+    """`[tests.beside.<name>]` of se.toml, each validated; refuses, naming the key and the remedy."""
+    if not isinstance(tables, dict) or not all(isinstance(t, dict) for t in tables.values()):
+        raise QueueError(
+            f"[tests] beside in {root / 'se.toml'} must hold one table per suite, "
+            '[tests.beside.<name>] with command = [...]; fix it or remove it'
+        )
+    suites = []
+    for name, table in tables.items():
+        where = f"[tests.beside.{name}] in {root / 'se.toml'}"
+        unknown = sorted(set(table) - {"command", "directory", "target_seconds", "limit_seconds"})
+        if unknown:
+            raise QueueError(f"{where}: no key {', '.join(unknown)}: a suite beside holds command, "
+                             "directory, target_seconds and limit_seconds; fix it")
+        command = table.get("command")
+        if not is_argument_array(command):
+            raise QueueError(f"{where} must declare command, the suite as a non-empty argument "
+                             'array, for example command = ["go", "test", "./..."]')
+        directory = table.get("directory", ".")
+        if (not isinstance(directory, str) or not directory or Path(directory).is_absolute()
+                or ".." in Path(directory).parts):
+            raise QueueError(f"{where}: directory must be a folder inside the project, relative "
+                             'to its root, for example directory = "kern"; fix it')
+        values = budget_seconds(table, where)
+        suites.append(BesideSuite(name, command, directory, values["target_seconds"],
+                                  values["limit_seconds"]))
+    return tuple(suites)
 
 
 OVER_LIMIT_CHOICES = ("fail", "warn")
@@ -4306,6 +4357,48 @@ def time_suite(checkout: Path, command: list[str]) -> SuiteRun:
         parts = report_parts(Path(reports))
     return SuiteRun(seconds, result.returncode, result.stdout,
                     (result.stdout + result.stderr).strip(), parts)
+
+
+@dataclass(frozen=True)
+class BesideRun:
+    """One timed run of a suite beside the complete suite."""
+
+    suite: BesideSuite
+    seconds: float
+    returncode: int
+    output: str  # stdout and stderr, stripped
+
+    def timing(self) -> str:
+        return (f"{self.seconds:.1f} s (target {self.suite.target_seconds:g} s, "
+                f"limit {self.suite.limit_seconds:g} s)")
+
+    def refusal(self) -> str:
+        """Why the run fails its suite's gate, or "" where its tests passed."""
+        if self.returncode == 0:
+            return ""
+        suite = self.suite
+        return (f"{suite.name} failed ({self.seconds:.1f} s) running {' '.join(suite.command)} in "
+                f"{suite.directory} ({suite.where()}); fix the failing tests:\n"
+                f"{self.output or f'exit code {self.returncode}'}")
+
+
+def time_beside(root: Path, suite: BesideSuite) -> BesideRun:
+    """Run a suite beside the complete suite once, in its directory, and time it; a command that
+    is not installed fails the run, naming it."""
+    feedback.phase(f"{suite.name}: {' '.join(suite.command)} in {suite.directory} "
+                   f"(limit {suite.limit_seconds:g} s)")
+    started = clock()
+    try:
+        result = subprocess.run(
+            suite.command, cwd=root / suite.directory, shell=False, capture_output=True,
+            text=True, encoding="utf-8", errors="replace", check=False,
+        )
+    except OSError as error:
+        return BesideRun(suite, clock() - started, 127,
+                         f"cannot run {suite.command[0]}: {error}; install it (the project's "
+                         "AGENTS.md names its setup)")
+    return BesideRun(suite, clock() - started, result.returncode,
+                     (result.stdout + result.stderr).strip())
 
 
 def clean_commit(root: Path) -> str | None:
@@ -4566,6 +4659,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     warns with the host's load and refuses only where CI's suite time on the integration
     branch (ci_suite_time, read there and also where `read_ci`) is unknown or within 10% of the
     limit. Where `[tests]` over_limit is "warn", no overrun refuses: each only warns.
+    Then runs each `[tests.beside.<name>]` suite (time_beside), prints and returns its time beside
+    the suite's, and refuses a failed one; over its limit it is refused on the reference run alone.
     Records its verdict on HEAD's tree where the checkout holds exactly it (clean_commit);
     push reads it before the integration branch is pushed."""
     budget = suite_budget(root)
@@ -4577,6 +4672,7 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     feedback.phase(f"complete suite: {' '.join(budget.command)} (limit {budget.limit_seconds:g} s)")
     result = time_suite(root, with_durations(budget.command, slowest_count))
     seconds, output, parts = result.seconds, result.output, result.parts
+    beside = [time_beside(root, suite) for suite in budget.beside]
     reference = suite_is_reference()
     over = seconds > budget.limit_seconds
     ci, unknown = (None, "")
@@ -4584,13 +4680,25 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
         feedback.phase(f"CI's suite time on {integration_branch(root)}")
         ci, unknown = ci_suite_time(root)
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=budget.limit_seconds,
-                 **({"ci_suite_seconds": ci.seconds} if ci else {}))
+                 **({"ci_suite_seconds": ci.seconds} if ci else {}),
+                 **({"beside_seconds": {run.suite.name: round(run.seconds, 3) for run in beside},
+                     "beside_limit_seconds": {run.suite.name: run.suite.limit_seconds
+                                              for run in beside}} if beside else {}))
     close = ci is None or ci.seconds >= CI_MARGIN * budget.limit_seconds
     enforced = budget.over_limit == "fail"
     refused = over and enforced and (reference or close)
-    record_suite_verdict(root, commit, result.returncode == 0 and not refused, seconds)
+    # A suite beside is small and has no CI reading of its own: over its limit, only the
+    # reference run (CI) refuses it; elsewhere it warns.
+    beside_over = [run for run in beside if run.seconds > run.suite.limit_seconds]
+    beside_refused = [run for run in beside_over if enforced and reference]
+    beside_failed = [run for run in beside if run.refusal()]
+    record_suite_verdict(root, commit, result.returncode == 0 and not refused and not beside_failed
+                         and not beside_refused, seconds)
     slowest = slowest_tests(output, parts, slowest_count)
     summary = result.refuse_failed(budget)
+    if beside_failed:
+        raise QueueError(f"Complete suite passed ({summary}), but " + "\n".join(
+            run.refusal() for run in beside_failed))
     listing = "\n".join(f"  {line}" for line in slowest) or NO_SLOWEST_TESTS
     timing = (
         f"{seconds:.1f} s (target {budget.target_seconds:g} s, limit {budget.limit_seconds:g} s)"
@@ -4599,6 +4707,12 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
         print(suite_notice(seconds, budget.limit_seconds))
     ci_text = (ci_suite_text(ci, integration_branch(root)) if ci
                else f"CI's suite time is unknown: {unknown}")
+    for run in beside_refused:
+        raise SuiteOverLimitError(
+            f"{run.suite.name} passed but took {run.seconds:.1f} s on CI, the budget's reference, "
+            f"over its limit of {run.suite.limit_seconds:g} s (limit_seconds of "
+            f"{run.suite.where()}). Remedy: make its slowest tests faster, or its build smaller."
+        )
     if refused and reference:
         raise SuiteOverLimitError(
             f"Complete suite passed ({summary}) but took {seconds:.1f} s on CI, the budget's "
@@ -4632,6 +4746,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     if own_lines:
         print(f"Suite output (last lines):\n{output_tail(own_lines)}")
     print(f"Suite time: {timing}")
+    for run in beside:
+        print(f"{run.suite.name} time: {run.timing()}, beside the suite ({run.suite.where()})")
     if parts:
         print("Parts:\n" + "\n".join(
             "\n".join([f"  {part.line()}", *(f"    {line}" for line in part.setup_lines())])
@@ -4647,7 +4763,19 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
             "tests above faster",
             file=sys.stderr,
         )
-    return f"{summary}; {timing}"
+    for run in beside:
+        if run in beside_over:
+            print(f"warning: {run.suite.name} took {run.seconds:.1f} s here ({host_load()}), over "
+                  f"its limit of {run.suite.limit_seconds:g} s (limit_seconds of "
+                  f"{run.suite.where()}); " + (f"CI's {CHECK_NAME}, the reference, refuses it "
+                  "there" if enforced else '[tests] over_limit = "warn", so it is not refused'),
+                  file=sys.stderr)
+        elif run.seconds > run.suite.target_seconds:
+            print(f"warning: {run.suite.name} took {run.seconds:.1f} s, over its target of "
+                  f"{run.suite.target_seconds:g} s (target_seconds of {run.suite.where()})",
+                  file=sys.stderr)
+    return "; ".join([f"{summary}; {timing}",
+                      *(f"{run.suite.name} passed in {run.timing()}" for run in beside)])
 
 
 COMPARE_RUNS = 2

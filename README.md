@@ -442,6 +442,12 @@ limit_seconds = 120
 setup = ["uv", "sync"] # optional
 tier = "tests.tiers:tier" # optional
 over_limit = "fail" # optional, or "warn"
+
+[tests.beside.kern] # optional, one table per suite in another toolchain
+command = ["go", "test", "./..."]
+directory = "kern"
+target_seconds = 30
+limit_seconds = 60
 ```
 
 - `command`: the project's complete suite, an argument array run without a shell from the project
@@ -458,6 +464,19 @@ over_limit = "fail" # optional, or "warn"
   the trade-off: no run is refused for its time, so a slow runner never blocks a landing, but
   nothing stops the suite from creeping past its budget; each overrun only warns, naming the
   setting.
+- `beside.<name>`: optional, a suite in another toolchain, such as SE's kern Go tests
+  ([kern/README.md](kern/README.md#tests)). Its `command` runs in `directory` (relative to the
+  root, default `.`) after the complete suite, wherever the suite runs: `integrate`,
+  `work_tickets.py suite` and CI's `check`.
+
+The two budgets are apart, and neither spends the other's time:
+
+- Each run prints and reports both times, `Suite: <result>; <time> (target, limit); kern passed in
+  <time> (target, limit)`, and the metrics line notes `beside_seconds` beside `suite_seconds`.
+- A failing suite beside refuses the run as a failing suite does, with its output. A suite beside
+  over its target warns. Over its limit, only the reference run refuses it; elsewhere it warns, as
+  it has no CI reading of its own; `over_limit = "warn"` holds for it too.
+- `suite --compare` and the sharded suite's actions time the complete suite alone.
 
 The budget's reference is the suite of the CI `check` job, on the same runner type every time, as
 cloud hosts differ by about 25 s for the same tree. Over the limit there, `check` fails, naming the

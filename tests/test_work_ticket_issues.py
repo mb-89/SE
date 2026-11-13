@@ -2100,6 +2100,51 @@ def test_integrate_failure_restores_pre_merge_main_and_escalates(
     assert not any(call[:2] == ["issue", "close"] for call in calls)
 
 
+def test_integrate_refuses_a_failing_kern_test_after_a_passing_suite_and_escalates(
+        main_checkout, monkeypatch):
+    worker = main_checkout.parent / "kern-worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/kern", str(worker))
+    (worker / "suite.py").write_text('print("3 passed")\n', encoding="utf-8")
+    (worker / "kern").mkdir()
+    (worker / "kern" / "kern.py").write_text(
+        'import sys\nprint("--- FAIL: TestTally")\nsys.exit(1)\n', encoding="utf-8")
+    with (worker / "se.toml").open("a", encoding="utf-8") as config:
+        config.write(f"[tests]\ncommand = {json.dumps([sys.executable, 'suite.py'])}\n"
+                     f"[tests.beside.kern]\ncommand = {json.dumps([sys.executable, 'kern.py'])}\n"
+                     'directory = "kern"\n')
+    git_ok("-C", str(worker), "add", ".")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "kern")
+    head = subprocess.run(
+        ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    report = {"body": reported_at(head)}
+    calls: list[list[str]] = []
+    monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
+    monkeypatch.setattr(work_tickets, "ci_suite_time", lambda root: (None, "not on GitHub"))
+
+    def gh_call(root, args):
+        calls.append(args)
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({"headRefName": "feature/kern", "headRefOid": head,
+                               "body": report["body"], "url": "https://git.example/owner/repo/pull/7"})
+        return ""
+    monkeypatch.setattr(work_tickets, "run_gh", gh_call)
+    monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args))
+
+    with pytest.raises(work_tickets.QueueError,
+                       match=r"Complete suite passed \(3 passed\), but kern failed") as refused:
+        work_tickets.integrate(main_checkout, 7, None, None)
+    assert "--- FAIL: TestTally" in str(refused.value)
+    assert subprocess.run(
+        ["git", "-C", str(main_checkout), "merge-base", "--is-ancestor", head, "HEAD"],
+        capture_output=True, check=False,
+    ).returncode != 0
+    assert any(call[:5] == ["issue", "edit", "5", "--add-label", "escalated"] for call in calls)
+    assert not any(call[:2] == ["issue", "close"] for call in calls)
+
+
 @pytest.mark.parametrize("check_fails", [False, True])
 def test_integrate_pushes_a_public_mirror_after_running_the_check(
         main_checkout, local_config, monkeypatch, capsys, check_fails):
@@ -3276,6 +3321,95 @@ def test_suite_budget_defaults_and_refuses_a_missing_command(worktree):
     (worktree / "se.toml").write_text("[tests]\ntarget_seconds = 60\n", encoding="utf-8")
     with pytest.raises(work_tickets.QueueError, match=r"\[tests\] in .*se.toml must declare command"):
         work_tickets.suite_budget(worktree)
+
+
+def beside_suite(worktree: Path, monkeypatch, seconds: list[float], fails: bool = False) -> None:
+    """The fake suite and, beside it, a fake kern suite in `kern/`; the clock reads the suite's
+    start and end, then kern's: `seconds` are the two durations."""
+    fake_suite(worktree, monkeypatch, 0.0)
+    (worktree / "kern").mkdir()
+    (worktree / "kern" / "kern.py").write_text(
+        "import pathlib, sys\n"
+        "print('ok in', pathlib.Path.cwd().name)\n"
+        + ("print('--- FAIL: TestTally', file=sys.stderr)\nsys.exit(1)\n" if fails else ""),
+        encoding="utf-8")
+    with (worktree / "se.toml").open("a", encoding="utf-8") as config:
+        config.write(f"[tests.beside.kern]\ncommand = {json.dumps([sys.executable, 'kern.py'])}\n"
+                     'directory = "kern"\ntarget_seconds = 30\nlimit_seconds = 60\n')
+    suite, kern = seconds
+    readings = iter([0.0, suite, 100.0, 100.0 + kern])
+    monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
+
+
+def test_suite_runs_the_suite_beside_in_its_directory_and_reports_its_own_time(
+        worktree, monkeypatch, capsys):
+    beside_suite(worktree, monkeypatch, [5.0, 2.0])
+
+    assert run(worktree, "suite") == 0
+    captured = capsys.readouterr()
+    assert "Suite time: 5.0 s (target 60 s, limit 120 s)\n" in captured.out
+    assert "kern time: 2.0 s (target 30 s, limit 60 s), beside the suite" in captured.out
+    assert ("Suite: 3 passed; 5.0 s (target 60 s, limit 120 s); kern passed in 2.0 s "
+            "(target 30 s, limit 60 s)") in captured.out
+    assert "Phase: kern: " in captured.err and " kern.py in kern (limit 60 s)" in captured.err
+
+
+def test_a_failing_suite_beside_refuses_with_its_output_after_a_passing_suite(
+        worktree, monkeypatch, capsys):
+    beside_suite(worktree, monkeypatch, [5.0, 2.0], fails=True)
+
+    assert run(worktree, "suite") == 1
+    error = capsys.readouterr().err
+    assert "Complete suite passed (3 passed), but kern failed (2.0 s) running " in error
+    assert "in kern ([tests.beside.kern] in se.toml); fix the failing tests:" in error
+    assert "ok in kern" in error and "--- FAIL: TestTally" in error
+
+
+@pytest.mark.parametrize("reference", [False, True])
+def test_a_suite_beside_over_its_limit_is_refused_on_the_reference_run_alone(
+        worktree, monkeypatch, capsys, reference):
+    beside_suite(worktree, monkeypatch, [5.0, 70.0])
+    monkeypatch.setattr(work_tickets, "suite_is_reference", lambda: reference)
+
+    assert run(worktree, "suite") == (work_tickets.SUITE_OVER_LIMIT_EXIT_CODE if reference else 0)
+    error = capsys.readouterr().err
+    if reference:
+        assert "kern passed but took 70.0 s on CI, the budget's reference, over its limit of 60 s" in error
+    else:
+        assert "warning: kern took 70.0 s here (" in error
+        assert "CI's check, the reference, refuses it there" in error
+
+
+def test_a_suite_beside_whose_command_is_missing_fails_naming_it(worktree, monkeypatch, capsys):
+    beside_suite(worktree, monkeypatch, [5.0, 0.0])
+    config = (worktree / "se.toml").read_text(encoding="utf-8")
+    (worktree / "se.toml").write_text(config.replace(json.dumps([sys.executable, "kern.py"]),
+                                                     '["no-such-go", "test"]'), encoding="utf-8")
+
+    assert run(worktree, "suite") == 1
+    assert "cannot run no-such-go: " in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("table, refusal", [
+    ('[tests.beside.kern]\ndirectory = "kern"\n', r"\[tests.beside.kern\] in .*must declare command"),
+    ('[tests.beside.kern]\ncommand = ["go"]\ndirectory = "../x"\n', r"directory must be a folder inside"),
+    ('[tests.beside.kern]\ncommand = ["go"]\ntimeout = 3\n', r"no key timeout"),
+    ('[tests.beside.kern]\ncommand = ["go"]\ntarget_seconds = 90\nlimit_seconds = 60\n',
+     r"target_seconds must not exceed limit_seconds"),
+    ('[tests.beside]\nkern = ["go"]\n', r"must hold one table per suite"),
+])
+def test_suite_budget_refuses_a_malformed_suite_beside(worktree, table, refusal):
+    (worktree / "se.toml").write_text(f'[tests]\ncommand = ["pytest"]\n{table}', encoding="utf-8")
+    with pytest.raises(work_tickets.QueueError, match=refusal):
+        work_tickets.suite_budget(worktree)
+
+
+def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budget():
+    budget = work_tickets.suite_budget(Path(__file__).resolve().parents[1])
+    assert (budget.command, budget.target_seconds) == (["uv", "run", "pytest", "-q"], 60)
+    kern, = budget.beside
+    assert (kern.name, kern.command, kern.directory) == ("kern", ["go", "test", "./..."], "kern")
+    assert kern.target_seconds < kern.limit_seconds < budget.limit_seconds
 
 
 @pytest.fixture

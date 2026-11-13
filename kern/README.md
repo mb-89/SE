@@ -18,7 +18,7 @@ named in the design's plan.
 | `go.mod` | the module and its pinned Go version, which CI reads | |
 | `index/` | names, families, the store, snapshots, a single writer per name, built-in values, the catalog check at start, waves, actions, the collector, and `wiring.toml` read at start | `src/index` at `ff01204` |
 | `index/fixture/` | the fixture components the index and the fake core are tested with | `src/index/fixture` |
-| `coretest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request | `src/index/indextest` |
+| `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request | `src/index/indextest` |
 
 ## Tests
 
@@ -26,9 +26,11 @@ named in the design's plan.
 cd kern && go vet ./... && go test ./...
 ```
 
-SE's CI runs both in the `check` job, the check `main`'s ruleset requires, in their own steps
-after SE's Python suite, so a red kern test blocks landing and the Python suite's budget is
-untouched.
+SE declares kern's tests beside its Python suite, `se.toml` `[tests.beside.kern]`, with their own
+time and budget (SE's [README "Test budget"](../README.md#test-budget)): `integrate`,
+`work_tickets.py suite` and the `check` job, the check `main`'s ruleset requires, run them after
+the suite, so a red kern test refuses the integration and the Python suite's budget is untouched.
+`check` vets kern in its own step.
 
 ## The catalog check's budget
 
