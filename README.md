@@ -183,8 +183,12 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
 
 - **Declared:** each command group of `work_tickets.py` is one component, `components/<group>/`:
   tickets, issues, delivery and integration.
-  - Its `component.toml` is what `work_tickets.py docs` writes from the command registry, and its
-    `__init__.py` answers each declared command with the script's own code.
+  - Its `component.toml` is what `work_tickets.py docs` writes from the script's argparse parser
+    (for `work_tickets.py`, built from its command registry), and its `__init__.py` answers each
+    declared command with the script's own code.
+  - A script joins by naming its groups (`COMPONENTS`), its read-only commands
+    (`INTERACTIVE_COMMANDS`) and its `make_parser`, and by its name in `se_components.py`
+    `SCRIPTS`.
   - The [command reference](#work-commands) renders from these declarations as kern's reader reads
     them.
 - **Placed:** `wiring.toml` places each in a process of its own, so the core the hooks start in SE's
