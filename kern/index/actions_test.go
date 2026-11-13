@@ -1,6 +1,7 @@
 package index_test
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -70,7 +71,7 @@ func TestABrokenRequestWireIsRefused(t *testing.T) {
 	t.Parallel()
 	var lines []string
 	other := index.Declare("other", "Takes numbers.", index.IO(),
-		index.Verb("count", "Counts.", func(n int) (int, error) { return n, nil }))
+		index.Verb("count", "Counts.", func(_ context.Context, n int) (int, error) { return n, nil }))
 	for _, c := range []struct{ wiring, want string }{
 		{`instances = { clerk = { component = "clerk" } }`, "wiring line 1: request port clerk.post is bound to nothing"},
 		{`instances = { clerk = { component = "clerk" }, s = { component = "source" } }

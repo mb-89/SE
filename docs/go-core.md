@@ -244,7 +244,14 @@ the core ends. Nothing in the component's process may then wait on it, so the co
 - **The caller gives it up** on `call.core.abandon`, naming the call by its reply subject: the
   Python SDK's `Peer.request` with `give_up` and `Peer.call` do so when they stop waiting, by
   timeout or interrupt. The core refuses a call outside the asker's inbox, and the call answers
-  its error at once, naming the cause; a request already out runs on, and its answer is dropped.
+  its error at once, naming the cause.
+- **A caller killed outright** sends no abandon. Every `CallBeat` (5 s) the core asks its bus
+  whether a connection still hears the call's reply subject; where none does, it gives the call
+  up as if the caller had sent `call.core.abandon`, so the call ends within the lease lapse.
+- **A request already out** is handed the call's context (the `ctx` of `Verb` and `JSONVerb`),
+  so its verb lets go of what it holds: the GitHub component's `step` leaves the outbox at once,
+  and no session is pointed at a step that no one waits for. For a declared process's verb, the
+  core stops waiting for the answer; the answer is dropped either way.
 - **The stop word.** Where a declared component's step runs or its continuation waits, the core
   publishes `{"call", "stop"}` on the command's `cmd.<i>.<command>`, without a reply. The Python
   runner drops that call's continuation and sets the call's `Abandon` (`kern.abandoned()` in the
@@ -255,6 +262,8 @@ the core ends. Nothing in the component's process may then wait on it, so the co
 
 Proven by `kern/index/abandon_test.go` (the cause, and the stop word of one call of two),
 `kern/host/stream_test.go` (`call.core.abandon`, and the stop word on the bus),
+`kern/host/caller_test.go` (a caller process killed outright),
+`kern/components/github/step_test.go` (a given-up call's step leaves the outbox),
 `kern/python/tests/test_kern_stream.py` (the runner and the peer) and SE's
 `tests/test_se_components.py` (one of two overlapping streamed calls).
 
@@ -351,6 +360,8 @@ so each cloud session has its own core.
     commits do not: a placed component's beats and commits would keep an unused core up for ever.
 - `call.core.stop` answers the core's pid, then the bus stays up until the asker hangs up (1 s at
   most), so the asker has the answer before the bus closes.
+- A call lives no longer than its caller: one whose caller's connection is gone, a process killed
+  outright, is given up within the lease lapse ([A call given up](#a-call-given-up)).
 - It ends with the container in the cloud whatever the lease says; nothing in it needs to
   survive, because GitHub and the disk own every durable fact.
 

@@ -59,6 +59,8 @@ watches for, the input keys an answer must carry equal, and how long to wait, up
 - The step stands in `outbox` until a PostToolUse of that tool with that input answers it. The
   verb answers `github.step-answer`, `{"tool", "input", "read", "data"}`: the input the session
   sent and the tool's answer, as JSON where it is JSON, else its text.
+- A step whose call is given up leaves `outbox` at once, so the agent is never told a step that
+  no one waits for ([docs/go-core.md "A call given up"](../../../docs/go-core.md#a-call-given-up)).
 - Only the relay runs steps; with a token a command runs its GitHub steps itself.
 
 ## Telling the agent, on the hook

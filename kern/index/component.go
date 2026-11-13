@@ -171,7 +171,7 @@ type command struct {
 
 type verb struct {
 	decl  VerbDecl
-	serve func(any) (any, error)
+	serve func(context.Context, any) (any, error)
 }
 
 // inputStruct is a run's input struct: its type, and the local port each field reads.
@@ -429,8 +429,10 @@ func (c *Component) CheckAsks(asks []Ask) error {
 	return nil
 }
 
-// Serve answers one request on a verb, as the I/O component's outside thing answers it.
-func (c *Component) Serve(name string, req any) (any, error) {
+// Serve answers one request on a verb, as the I/O component's outside thing
+// answers it, until ctx is done: the call that asked it is given up, so the
+// verb lets go of what it holds for it (docs/go-core.md "A call given up").
+func (c *Component) Serve(ctx context.Context, name string, req any) (any, error) {
 	v, ok := c.verbs[name]
 	switch {
 	case !ok:
@@ -439,9 +441,9 @@ func (c *Component) Serve(name string, req any) (any, error) {
 		return nil, fmt.Errorf("component %s: verb %s takes %s, not %T", c.name, name, v.decl.Req, req)
 	}
 	if c.decl != nil {
-		return c.serveRemote(v.decl, req)
+		return c.serveRemote(ctx, v.decl, req)
 	}
-	return v.serve(req)
+	return v.serve(ctx, req)
 }
 
 // OutPort is an output a command writes; Set makes the write.
@@ -591,13 +593,15 @@ func (c *Component) addRequest(p RequestDecl) {
 type verbPart struct{ v *verb }
 
 // Verb declares a verb the I/O component accepts from others, with its help
-// line: fn reaches the component's outside thing and answers the request.
-func Verb[Req, Ans any](name, help string, fn func(Req) (Ans, error)) Part {
+// line: fn reaches the component's outside thing and answers the request. Its
+// ctx is done once the call that asked it is given up; a verb that waits on
+// something outside lets go of it then.
+func Verb[Req, Ans any](name, help string, fn func(context.Context, Req) (Ans, error)) Part {
 	return verbPart{&verb{
 		decl: VerbDecl{Verb: name, Req: reflect.TypeFor[Req](), Ans: reflect.TypeFor[Ans](), Help: help},
-		serve: func(req any) (any, error) {
+		serve: func(ctx context.Context, req any) (any, error) {
 			r, _ := req.(Req)
-			return fn(r)
+			return fn(ctx, r)
 		},
 	}}
 }
@@ -784,17 +788,17 @@ func sortedKeys[V any](m map[string]V) []string {
 // JSONVerb declares a verb whose request and answer ride as the named JSON
 // shapes reqShape and ansShape, so a component in another language, which
 // asks in JSON, binds to it: fn is handed the request decoded into Req, and
-// its answer rides as JSON.
-func JSONVerb[Req, Ans any](name, help, reqShape, ansShape string, fn func(Req) (Ans, error)) Part {
+// its answer rides as JSON. Its ctx is Verb's.
+func JSONVerb[Req, Ans any](name, help, reqShape, ansShape string, fn func(context.Context, Req) (Ans, error)) Part {
 	anyType := reflect.TypeFor[any]()
 	return verbPart{&verb{
 		decl: VerbDecl{Verb: name, Req: anyType, Ans: anyType, Help: help, ReqShape: reqShape, AnsShape: ansShape},
-		serve: func(req any) (any, error) {
+		serve: func(ctx context.Context, req any) (any, error) {
 			var r Req
 			if err := Recode(req, &r); err != nil {
 				return nil, fmt.Errorf("verb %s takes %s: %w", name, reqShape, err)
 			}
-			a, err := fn(r)
+			a, err := fn(ctx, r)
 			if err != nil {
 				return nil, err
 			}

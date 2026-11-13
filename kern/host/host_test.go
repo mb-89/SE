@@ -24,8 +24,11 @@ const wait = 10 * time.Second
 const placedArg = "kern-test-placed"
 
 func TestMain(m *testing.M) {
-	if os.Args[len(os.Args)-1] == placedArg {
+	switch os.Args[len(os.Args)-1] {
+	case placedArg:
 		os.Exit(placed())
+	case callerArg:
+		os.Exit(caller())
 	}
 	os.Exit(m.Run())
 }

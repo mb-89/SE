@@ -45,7 +45,9 @@ type Remote interface {
 	// so nothing waits on it: no continuation of it runs, and no step of it
 	// is answered.
 	Stop(name, call, reason string)
-	Serve(verb string, req json.RawMessage) (json.RawMessage, error)
+	// Serve hands one request on a verb to the process, and stops waiting
+	// for its answer once ctx is done.
+	Serve(ctx context.Context, verb string, req json.RawMessage) (json.RawMessage, error)
 }
 
 // Step is one step of a command a declared component's process runs: the
@@ -496,7 +498,7 @@ func (c *Component) step(ctx context.Context, name string, s Step, say func(stri
 
 // serveRemote hands one request to the declared I/O component's process and
 // reads its answer as the verb's answer type.
-func (c *Component) serveRemote(v VerbDecl, req any) (any, error) {
+func (c *Component) serveRemote(ctx context.Context, v VerbDecl, req any) (any, error) {
 	r := c.decl.remote
 	if r == nil {
 		return nil, fmt.Errorf("component %s runs in its own process, and none has attached", c.name)
@@ -505,7 +507,7 @@ func (c *Component) serveRemote(v VerbDecl, req any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	ans, err := r.Serve(v.Verb, data)
+	ans, err := r.Serve(ctx, v.Verb, data)
 	if err != nil {
 		return nil, err
 	}

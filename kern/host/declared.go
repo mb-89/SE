@@ -166,12 +166,16 @@ type StopWord struct {
 	Stop string `json:"stop"`
 }
 
-func (r remote) Serve(verb string, req json.RawMessage) (json.RawMessage, error) {
+// Serve asks the process for one request on a verb, and waits StepWait for
+// its answer, or until ctx is done: the call that asked it is given up.
+func (r remote) Serve(ctx context.Context, verb string, req json.RawMessage) (json.RawMessage, error) {
 	if err := r.c.waitAttached(r.inst); err != nil {
 		return nil, err
 	}
 	data, _ := json.Marshal(map[string]json.RawMessage{"request": req})
-	m, err := r.c.nc.Request(bus.IOVerb+bus.Subject(r.inst)+"."+bus.Token(verb), data, r.c.o.StepWait)
+	ctx, cancel := context.WithTimeout(ctx, r.c.o.StepWait)
+	defer cancel()
+	m, err := r.c.nc.RequestWithContext(ctx, bus.IOVerb+bus.Subject(r.inst)+"."+bus.Token(verb), data)
 	if err != nil {
 		return nil, fmt.Errorf("instance %s: verb %s: %w", r.inst, verb, err)
 	}
@@ -326,24 +330,11 @@ func (c *Core) call(m *nats.Msg) {
 	go func() {
 		defer cancel(nil)
 		var say func(string)
-		stop := make(chan struct{})
 		if body.Progress != "" {
 			say = func(line string) { c.progress(body.Progress, Progress{Line: line}) }
-			go func() {
-				t := time.NewTicker(c.o.CallBeat)
-				defer t.Stop()
-				for {
-					select {
-					case <-stop:
-						return
-					case <-c.done:
-						return
-					case <-t.C:
-						c.progress(body.Progress, Progress{Beat: true})
-					}
-				}
-			}()
 		}
+		stop := make(chan struct{})
+		go c.watchCall(m.Reply, body.Progress, cancel, stop)
 		r, err := c.ix.CallContext(ctx, name, say, body.Args...)
 		close(stop)
 		a := CallAnswer{Text: r.Text, Lines: append([]string{}, r.Lines...)}
@@ -358,6 +349,10 @@ func (c *Core) call(m *nats.Msg) {
 
 // ErrCallerGaveUp is the cause of a call its caller gave up.
 var ErrCallerGaveUp = errors.New("its caller gave it up")
+
+// ErrCallerGone is the cause of a call whose caller's connection is gone,
+// one killed outright among them: no connection hears its reply subject.
+var ErrCallerGone = errors.New("its caller is gone: no connection hears its reply subject")
 
 // ErrCoreEnds is the cause of a call the core gave up as it ends.
 var ErrCoreEnds = errors.New("the core ends")
@@ -383,6 +378,33 @@ func (c *Core) running(reply string) (context.Context, context.CancelCauseFunc) 
 		delete(c.calls, reply)
 		c.mu.Unlock()
 		cancel(cause)
+	}
+}
+
+// watchCall looks at a running call every CallBeat until stop closes or the
+// core ends: it beats on the call's progress subject, where it names one, and
+// gives the call up as if its caller had sent call.core.abandon where no
+// connection hears its reply subject any more, so a caller killed outright,
+// which sends no abandon, ends its call within one CallBeat, inside the lease
+// lapse (docs/go-core.md "A call given up").
+func (c *Core) watchCall(reply, progress string, cancel context.CancelCauseFunc, stop <-chan struct{}) {
+	t := time.NewTicker(c.o.CallBeat)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-c.done:
+			return
+		case <-t.C:
+			if progress != "" {
+				c.progress(progress, Progress{Beat: true})
+			}
+			if reply != "" && c.bus.Unheard(reply, 0) {
+				cancel(ErrCallerGone)
+				return
+			}
+		}
 	}
 }
 

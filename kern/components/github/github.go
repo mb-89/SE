@@ -16,6 +16,7 @@
 package github
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -229,19 +230,19 @@ func New(o Options) *GitHub {
 		index.Inlet(g.start),
 		index.Hears(g.hear),
 		index.Tells(g.tell),
-		index.JSONVerb("step", "Runs one GitHub tool call through the relay: the step stands in the outbox until a PostToolUse of that tool with those arguments answers it, and the verb answers the tool's answer.", StepShape, StepAnswerShape, func(a StepAsk) (StepAnswer, error) {
-			return g.step(a)
+		index.JSONVerb("step", "Runs one GitHub tool call through the relay: the step stands in the outbox until a PostToolUse of that tool with those arguments answers it, and the verb answers the tool's answer.", StepShape, StepAnswerShape, func(ctx context.Context, a StepAsk) (StepAnswer, error) {
+			return g.step(ctx, a)
 		}),
 	}
 	for _, k := range kinds {
 		k := k
-		parts = append(parts, index.Verb(k.verb, "Reads "+k.help+": answers its snapshot and writes it to "+k.port+".", func(r Ref) (Snapshot, error) {
+		parts = append(parts, index.Verb(k.verb, "Reads "+k.help+": answers its snapshot and writes it to "+k.port+".", func(_ context.Context, r Ref) (Snapshot, error) {
 			return g.read(k, r)
 		}))
 	}
 	for _, l := range lists {
 		l := l
-		parts = append(parts, index.Verb(l.verb, "Lists "+l.help+", every page: answers the list and writes it to "+l.port+".", func(r ListRef) (List, error) {
+		parts = append(parts, index.Verb(l.verb, "Lists "+l.help+", every page: answers the list and writes it to "+l.port+".", func(_ context.Context, r ListRef) (List, error) {
 			return g.list(l, r)
 		}))
 	}
