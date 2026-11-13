@@ -6,6 +6,11 @@
 - SPOT everywhere: one owner per fact; everything else links to it
   ([gen-002](src/skills/work-model/references/rules.md#gen-002-single-point-of-truth)).
 - No backwards compatibility unless asked.
+- Scripts are ad hoc, components are long-term
+  ([gen-001](src/skills/work-model/references/rules.md#gen-001-mechanize-first)): an ad hoc solution
+  stays untracked, a script in the scratch directory or an ad hoc Python component `se component add`
+  scaffolds under `.se/components/`; what the whole system keeps is a tracked component under
+  `components/`, with its declaration and tests ([docs/go-core.md](docs/go-core.md)).
 
 ## Agents and skills
 

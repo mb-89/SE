@@ -74,6 +74,7 @@ def sibling(name: str):
 
 work_tickets = sibling("work_tickets")
 review = sibling("review")
+se_usage = sibling("se_usage")
 QueueError = work_tickets.QueueError
 Step, Plan = work_tickets.Step, work_tickets.Plan
 metrics = work_tickets.metrics
@@ -426,12 +427,14 @@ class Collected:
     previous: dict | None
     runs: list[dict] = field(default_factory=list)  # the window's metrics lines, each run once
     run_sources: dict[str, int] = field(default_factory=dict)  # lines read per source
+    adhoc: list[dict] = field(default_factory=list)  # the ad hoc components to promote (se_usage)
 
     def data(self) -> dict:
         return {"version": BLOCK_VERSION, "window": asdict(self.window), "sizes": self.sizes,
                 "issues": [asdict(item) for item in self.issues],
                 "rule_checks": [{**asdict(check), "kept": check.kept} for check in self.checks],
                 "metrics": {**self.run_sources, "runs": len(self.runs)},
+                "adhoc": self.adhoc,
                 "previous": self.previous, **{name: [] for name in JUDGMENT}}
 
 
@@ -690,12 +693,15 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
     sizes = {"closed": len(closed), "landed": sum(item.landed for item in closed),
              "duplicates": sum(item.duplicate for item in closed),
              "escalated": sum(item.escalations > 0 for item in closed)}
+    # The ad hoc components to promote: those the use log (se_usage) shows used in enough sessions
+    # in this window, by the window's own `in_window` on each use's time.
+    adhoc = se_usage.candidates(se_usage.read(root), read.in_window)
     return Collected(
         Window(number, read.since, read.since_retro,
                now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), read.start),
         sizes, closed, list(checks.values()),
         {"retro": last.number, "sizes": previous.get("sizes"), "findings": scored}
-        if previous else None, runs, {"landings": len(landed_runs), "local": len(local)})
+        if previous else None, runs, {"landings": len(landed_runs), "local": len(local)}, adhoc)
 
 
 def scored_findings(previous: dict | None, retro: int, window: list[Issue],
@@ -787,6 +793,15 @@ def draft(found: Collected) -> str:
               f"{len(found.runs)} runs: {found.run_sources.get('landings', 0)} from the landing "
               f"pull requests, {found.run_sources.get('local', 0)} from {metrics.path()}, each run "
               "once.", "", "```text", metrics.report(found.runs), "```"]
+    lines += ["", "## Ad hoc components to promote", ""]
+    if found.adhoc:
+        lines += [f"Used in {se_usage.PROMOTE_SESSIONS} or more sessions since the last retro; "
+                  "promote each to a tracked component (docs/go-core.md).", "",
+                  "| component | sessions | uses | path |", "|---|---|---|---|"]
+        lines += [f"| {c['component']} | {c['sessions']} | {c['uses']} | `{c['path']}` |"
+                  for c in found.adhoc]
+    else:
+        lines.append("None.")
     lines += ["", "## Retro sections of the field reports"]
     for key in RETRO_KEYS:
         entries = [(item.number, item.retro[key]) for item in found.issues if key in item.retro]
