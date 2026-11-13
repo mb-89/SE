@@ -7,6 +7,7 @@ identity, so a runner's bare git config cannot change what it sees (rule book de
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -221,7 +222,10 @@ def test_log_formats_the_dates_subjects_and_changed_paths(door, tmp_path: Path) 
     environment = {**git_door.identity_environment(IDENTITY), **when}
     assert git_door.run("commit", "-q", "-m", "second", root=root, env=environment).returncode == 0
     second = git(root, "rev-parse", "HEAD")
-    assert git(root, "log", "-1", "--format=%H%x09%cI%x09%s") == f"{second}\t2026-11-02T10:00:00+00:00\tsecond"
+    sha, date, subject = git(root, "log", "-1", "--format=%H%x09%cI%x09%s").split("\t")
+    # git prints a UTC %cI as +00:00 (2.43) or Z (2.56.1, CI's runner): the instant is the contract.
+    when = datetime.fromisoformat(date.replace("Z", "+00:00"))
+    assert (sha, when, subject) == (second, datetime(2026, 11, 2, 10, tzinfo=timezone.utc), "second")
     assert git(root, "log", "--first-parent", "--format=%s", "HEAD").splitlines() == ["second", "first"]
     names = git_door.run("log", "--format=%x00%ct", "--name-only", "HEAD", root=root).stdout
     assert names.startswith("\0" + "1793613600\n\na.txt\n\0"), names
