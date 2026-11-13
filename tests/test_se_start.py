@@ -369,6 +369,43 @@ def test_a_due_retro_and_the_fleets_findings_appear_from_a_seeded_cache(setup):
     assert setup["remotes"].calls == [] and setup["world"].work == [] and setup["world"].spawn == []
 
 
+def test_the_parts_kern_holds_live_replace_the_cached_ones_and_say_so(setup):
+    seed(setup, DUE)
+    asked = []
+    live = {"fleet": {"findings": [{"kind": "conflict", "issue": 9}], "issues": 14, "from": "kern"}}
+    setup["world"] = dataclasses.replace(setup["world"], live=lambda root: asked.append(root) or live)
+    se = setup["se"].as_posix()
+    assert work_lines(se_start.greeting(report(setup), setup["se"])) == [
+        "Retro due: 12 work issues landed since the last retro (due after 10); file one from "
+        f".github/ISSUE_TEMPLATE/retro.md, then run: uv run python {se}/scripts/retro.py collect "
+        "<retro issue> --out <draft>",
+        "Fleet: 1 finding (conflict #9), live from kern over 14 issues read; see each with its "
+        f"remedy: uv run python {se}/scripts/work_tickets.py fleet-check --worktree "
+        f"{setup['project'].as_posix()}"]
+    assert asked == [setup["project"]]
+    live["retro"] = {"landed": 3, "due_after": 3, "issues": 14, "from": "kern"}
+    assert work_lines(se_start.greeting(report(setup), setup["se"]))[0].startswith(
+        "Retro due: 3 work issues landed since the last retro (due after 3, live from kern); ")
+
+
+def test_without_a_core_the_live_read_answers_none_and_the_cache_stands(setup, tmp_path):
+    assert se_start.kern_names.live_work(tmp_path) is None
+    write(tmp_path / ".se" / ".runtime" / "standing.json", '{"bus": "nats://127.0.0.1:9", "users": {"client": "x"}}')
+    assert se_start.kern_names.live_work(tmp_path) is None  # a standing file whose bus is gone
+    seed(setup, DUE)
+    assert len(work_lines(se_start.greeting(report(setup), setup["se"]))) == 2
+
+
+def test_the_live_read_keeps_only_the_parts_whose_names_hold_issues(monkeypatch):
+    names = {"fleet/findings": {"issues": 0, "findings": []},
+             "retro/due": {"issues": 4, "landed": 1, "due_after": 10, "due": False}}
+    monkeypatch.setattr(se_start.kern_names, "read", lambda root, wanted: names)
+    assert se_start.kern_names.live_work(Path(".")) == {
+        "retro": {"landed": 1, "due_after": 10, "issues": 4, "from": "kern"}}
+    names["retro/due"]["issues"] = 0
+    assert se_start.kern_names.live_work(Path(".")) is None
+
+
 @pytest.mark.parametrize("work", [None, {"retro": {"landed": 9, "due_after": 10}, "fleet": {"findings": []}}])
 def test_the_lines_are_absent_without_gh_without_a_cache_or_with_nothing_due(setup, work):
     assert work_lines(se_start.greeting(report(setup), setup["se"])) == []  # no cache yet
@@ -471,7 +508,7 @@ def repos(tmp_path, isolated_git):
     (v1.0.0, v1.1.0, v2.0.0) and tool (v1.0.0 only); a project locked at lib 1.0.0 and tool 1.0.0."""
     scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
                for name in ("se_start.py", "se_modules.py", "public_check.py",
-                             "metrics.py", "feedback.py", "se_plugin.py", "public-check-terms.toml")}
+                             "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "public-check-terms.toml")}
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
     quiet_git.init(upstream, "-b", "main")

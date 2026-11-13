@@ -101,6 +101,10 @@ SDK on `PYTHONPATH`.
   the name from its body. `contract/subjects.json` holds Go and Python to it.
 - **Types** are `int`, `float`, `string`, `bool`, `[T]` or a named JSON shape such as
   `github.issues`, which Go reads as `any`; a wire joins equal types and equal shapes.
+- **A family read whole.** A Go input of type `map[string]T` bound to a family of `T` reads every
+  key standing, `{}` where none does, and its derivation runs once for a change at any key; an input
+  of type `T` reads the family at the key that changed, once per key. A command may read a family
+  only whole.
 
 ## Tests
 
