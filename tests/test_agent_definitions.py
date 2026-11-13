@@ -818,3 +818,32 @@ def test_se_runs_the_steps_only_the_person_approves():
         assert "(../skills/work-model/SKILL.md#steps-only-the-person-approves)" in normalized(
             AGENTS / f"{role}.md"), role
     assert "on the person's yes in this session run it yourself" in normalized(AGENTS / "se.md")
+
+
+def test_se_lists_and_interrupts_the_live_sessions_on_a_pause_and_says_how_to_resume():
+    se = normalized(AGENTS / "se.md")
+    pause = se[se.index("## Pause"):se.index("## Outside issues")]
+    steps = ["Start, dispatch, route and release nothing", "List every live session",
+             "when it last wrote", "`list_sessions`", "`list_triggers`", "`last_run.session_id`",
+             "Interrupt every working one with `interrupt_session`",
+             "Report the list to the owner", "close the pause issue"]
+    positions = [pause.find(step) for step in steps]
+    assert -1 not in positions and positions == sorted(positions), dict(zip(steps, positions))
+    assert "(../skills/work-model/SKILL.md#pause)" in pause
+    turn_start = se[se.index("**Turn-start check**"):]
+    assert turn_start.index("`work_tickets.py paused") < turn_start.index("`work_tickets.py queue")
+
+
+def test_the_work_model_states_the_pause_switch_once_and_the_roles_link_it():
+    rules = normalized(WORK_MODEL)
+    assert rules.count("## Pause") == 1
+    assert "an issue labelled `pause` is open in the repository" in rules
+    for command in ("`queue`, `start`, `integrate` and `route` refuse while paused",
+                    "`work_tickets.py paused` reads it"):
+        assert command in rules
+    for role in ("se", "integrator"):
+        text = normalized(AGENTS / f"{role}.md")
+        assert "labelled `pause`" not in text  # the switch is stated once, in the work model
+        assert "work-model/SKILL.md#pause)" in text
+    integrator = normalized(AGENTS / "integrator.md")
+    assert integrator.index("`work_tickets.py paused`") < integrator.index("`work_tickets.py queue`")

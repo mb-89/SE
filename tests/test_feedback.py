@@ -176,6 +176,8 @@ def interactive(checkout: Path) -> dict[str, list[str]]:
         "work_tickets.py intake": [*work, "intake", "--worktree", str(checkout), "--issue", "5",
                                    "--repo", "github.com/owner/repo"],
         "work_tickets.py metrics": [*work, "metrics"],
+        "work_tickets.py paused": [*work, "paused", "--worktree", str(checkout),
+                                   "--repo", "github.com/owner/repo"],
         "se_start.py status": [sys.executable, str(SCRIPTS / "se_start.py"),
                                "--root", str(checkout), "status", "--offline"],
     }
@@ -221,6 +223,19 @@ def test_queue_finishes_within_its_budget_against_a_door_of_half_a_second(slow_d
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("ready #") == 5
     line = json.loads(slow_door["metrics"].read_text(encoding="utf-8").splitlines()[-1])
-    assert line["command"] == "work_tickets.py queue" and line["gh_calls"] == 10
+    assert line["command"] == "work_tickets.py queue" and line["gh_calls"] == 11
+    assert line["wall_seconds"] < line["budget_seconds"] == feedback.INTERACTIVE_SECONDS
+    assert metrics.overruns(line) == []
+
+
+def test_paused_finishes_within_its_budget_against_a_door_of_half_a_second(slow_door):
+    environment = {**slow_door["env"], "FAKE_GH_DELAY": "0.5"}
+    slow_door["metrics"].unlink(missing_ok=True)
+    result = subprocess.run(interactive(slow_door["checkout"])["work_tickets.py paused"],
+                            capture_output=True, text=True, env=environment, check=False)
+    assert result.returncode == 0, result.stderr
+    assert "Not paused" in result.stdout
+    line = json.loads(slow_door["metrics"].read_text(encoding="utf-8").splitlines()[-1])
+    assert line["command"] == "work_tickets.py paused" and line["gh_calls"] == 1
     assert line["wall_seconds"] < line["budget_seconds"] == feedback.INTERACTIVE_SECONDS
     assert metrics.overruns(line) == []

@@ -44,8 +44,10 @@ its tools.
     GitHub tools, pass the lists back as it says, and present its findings
     ([Fleet check](../../README.md#fleet-check)).
 
-- **Turn-start check**: run `work_tickets.py queue --worktree <main checkout>` to surface field
-  reports and startable ready work; local sessions have no scheduled agent.
+- **Turn-start check**: run `work_tickets.py paused --worktree <main checkout>` first; while the
+  fleet is paused, do as [Pause](#pause) says. Then run `work_tickets.py queue --worktree <main
+  checkout>` to surface field reports and startable ready work; local sessions have no scheduled
+  agent.
 - **Work issues** from [work.md](../ISSUE_TEMPLATE/work.md), filed with
   `work_tickets.py file`, labelled as the work model's [Issues](../skills/work-model/SKILL.md#issues)
   says: title = branch name, carrying only the task (goal, the user's requirement verbatim, design owner, numbered
@@ -103,6 +105,23 @@ its tools.
   never asks for one.
 - Paths and shell follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell).
+
+## Pause
+
+The switch is the work model's [Pause](../skills/work-model/SKILL.md#pause). While `paused` names
+an open pause issue (exit code 1, or an issue its plan lists):
+
+1. Start, dispatch, route and release nothing: no worker, integrator or reviewer session, no
+   `start`, no `route`, no message that asks for work.
+2. List every live session with the host's session tools, each with when it last wrote: in
+   Claude's cloud `list_sessions` (with `mine`) and its timestamps, `list_triggers` for the
+   scheduled tasks and the session each last run started (`last_run.session_id`), as trigger-started
+   runs are not in `list_sessions`, and `get_session` for a session's status and last activity.
+3. Interrupt every working one with `interrupt_session`: each session but this one whose
+   `get_session` status bucket is `working`; an idle one is left alone.
+4. Report the list to the owner: each session's title, kind (started by you, by a scheduled task),
+   status, last write and whether you interrupted it. End with how to resume: close the pause
+   issue, named with its link; the next turn then starts as usual.
 
 ## Outside issues
 

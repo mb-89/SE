@@ -1883,3 +1883,152 @@ def test_the_metrics_command_reads_its_file_and_skips_unreadable_lines(tmp_path,
     assert "work_tickets.py sync: 1 runs, 3.0 s wall" in out
     with pytest.raises(SystemExit):
         work_tickets.make_parser().parse_args(["metrics", "--since", "12 Nov"])
+
+
+PAUSE_REPO = "github.com/owner/repo"
+PAUSE_ISSUE = {"number": 3, "title": "Pause the fleet", "url": "https://github.com/owner/repo/issues/3"}
+
+
+def pause_door(monkeypatch, paused: bool, answers=lambda arguments: None) -> list[list[str]]:
+    """gh signed in, the pause search answering PAUSE_ISSUE where `paused`, every other call
+    by `answers` (a call it answers None for fails the test); the calls made."""
+    calls: list[list[str]] = []
+
+    def gh(_: Path, arguments: list[str]) -> str:
+        calls.append(arguments)
+        if arguments[:6] == ["issue", "list", "--state", "open", "--label", "pause"]:
+            return json.dumps([PAUSE_ISSUE] if paused else [])
+        answer = answers(arguments)
+        if answer is None:
+            raise AssertionError(f"gh {arguments} while {'paused' if paused else 'not paused'}")
+        return answer
+
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    return calls
+
+
+def only_the_pause_search(calls: list[list[str]]) -> bool:
+    return [call[:6] for call in calls] == [["issue", "list", "--state", "open", "--label", "pause"]]
+
+
+def assert_paused_refusal(code: int, error: str, command: str) -> None:
+    assert code == 1
+    assert (f"work_tickets.py {command}: the fleet is paused by the open pause issue "
+            f"#3 Pause the fleet {PAUSE_ISSUE['url']}") in error
+    assert "closing it" in error
+
+
+@pytest.mark.parametrize("paused", [True, False], ids=["paused", "unpaused"])
+def test_paused_answers_by_the_open_pause_issue(worktree, monkeypatch, capsys, paused):
+    calls = pause_door(monkeypatch, paused)
+
+    code = work_tickets.main(["paused", "--worktree", str(worktree), "--repo", PAUSE_REPO])
+
+    out = capsys.readouterr().out
+    assert only_the_pause_search(calls) and calls[0][-2:] == ["--repo", PAUSE_REPO]
+    if paused:
+        assert code == 1 and f"Paused by #3 Pause the fleet {PAUSE_ISSUE['url']}" in out
+    else:
+        assert code == 0 and f"Not paused: no open issue labelled pause in {PAUSE_REPO}" in out
+
+
+def test_paused_hands_its_search_off_as_a_plan_without_gh(worktree, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+
+    assert work_tickets.main(["paused", "--worktree", str(worktree), "--repo", PAUSE_REPO]) == 2
+
+    out = capsys.readouterr().out
+    assert out.startswith(f"GitHub plan: paused? pause issues of {PAUSE_REPO}\n1. list_issues "
+                          '{"labels": ["pause"], "owner": "owner", "perPage": 20, "repo": "repo", '
+                          '"state": "OPEN"}')
+    assert "the fleet is paused: stop here" in out and "Then: no issue listed: not paused" in out
+
+
+@pytest.mark.parametrize("paused", [True, False], ids=["paused", "unpaused"])
+def test_queue_refuses_while_paused(worktree, monkeypatch, capsys, paused):
+    calls = pause_door(monkeypatch, paused, lambda arguments: "[]")  # no escalations
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(work_tickets, "delivered_pull_requests", lambda root, repo: [])
+    monkeypatch.setattr(work_tickets, "ready_issues",
+                        lambda root, repo, all_repos: [{"number": 1, "title": "feat/one"}])
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, all_repos: 2)
+
+    code = work_tickets.main(["queue", "--worktree", str(worktree), "--repo", PAUSE_REPO])
+
+    captured = capsys.readouterr()
+    assert any("pause" in call for call in calls)
+    if paused:
+        assert_paused_refusal(code, captured.err, "queue")
+        assert "ready #1" not in captured.out  # nothing to start is offered
+    else:
+        assert code == 0 and "ready #1 feat/one" in captured.out
+
+
+@pytest.mark.parametrize("paused", [True, False], ids=["paused", "unpaused"])
+def test_start_refuses_while_paused(worktree, monkeypatch, capsys, paused):
+    calls = pause_door(monkeypatch, paused,
+                       lambda arguments: "" if arguments[:2] == ["issue", "edit"] else None)
+    read: list[int] = []
+    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, allow_existing_branch=False:
+                        read.append(1) or [{"number": 5, "title": "feat/five"}])
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+
+    code = work_tickets.main(["start", "5", "--cloud-agent", "bot", "--worktree", str(worktree),
+                              "--repo", PAUSE_REPO])
+
+    captured = capsys.readouterr()
+    if paused:
+        assert_paused_refusal(code, captured.err, "start")
+        assert only_the_pause_search(calls) and read == []  # nothing read, nothing labelled
+    else:
+        assert code == 0 and "Started #5" in captured.out
+        assert ["issue", "edit", "5", "--add-assignee", "bot", "--remove-label", "ready",
+                "--add-label", "in-progress", "--repo", PAUSE_REPO] in calls
+
+
+@pytest.mark.parametrize("paused", [True, False], ids=["paused", "unpaused"])
+def test_integrate_refuses_while_paused(worktree, monkeypatch, capsys, paused):
+    calls = pause_door(monkeypatch, paused)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)  # the next step's refusal
+
+    code = work_tickets.main(["integrate", "7", "--worktree", str(worktree), "--repo", PAUSE_REPO])
+
+    error = capsys.readouterr().err
+    assert only_the_pause_search(calls)  # paused: before anything else; unpaused: on to landing
+    if paused:
+        assert_paused_refusal(code, error, "integrate")
+    else:
+        assert code == 1 and "has no origin remote to land on" in error
+
+
+@pytest.mark.parametrize("paused", [True, False], ids=["paused", "unpaused"])
+def test_the_landing_plan_runs_the_pause_search_before_it_opens_the_pull_request(
+        worktree, monkeypatch, paused):
+    pause_door(monkeypatch, paused)
+    plan = work_tickets.landing_plan("github.com/owner/repo", "land/feat/x", "main", "a" * 40,
+                                     "b" * 40, "Integrate feat/x", "Release-kind: minor", "body",
+                                     "then", PAUSE_REPO)
+    step = plan.steps[0]
+    assert (step.action, step.tool) == ("paused", "list_issues")
+    assert step.arguments["labels"] == ["pause"]
+    paused_action = work_tickets.landing_actions(worktree, None, "land/feat/x", "main", "a" * 40,
+                                                 PAUSE_REPO)["paused"]
+    if paused:
+        with pytest.raises(work_tickets.PausedError, match="integrate: the fleet is paused"):
+            paused_action({}, "")
+    else:
+        assert paused_action({}, "") is None
+
+
+def test_route_routes_nothing_while_paused(worktree, monkeypatch, capsys):
+    calls = pause_door(monkeypatch, True)
+    routing = worktree / "route.md"
+    routing.write_text("## Requirements\n\n1. One.\n", encoding="utf-8")
+
+    code = work_tickets.main(["route", "1", "--routing-file", str(routing),
+                              "--worktree", str(worktree), "--repo", PAUSE_REPO])
+
+    assert_paused_refusal(code, capsys.readouterr().err, "route")
+    assert only_the_pause_search(calls)  # the issue is neither read nor edited
