@@ -12,9 +12,11 @@ repository's config.
 from __future__ import annotations
 
 import difflib
+import fnmatch
 import hashlib
 import io
 import os
+import shutil
 import subprocess
 import tarfile
 import urllib.parse
@@ -51,10 +53,18 @@ class Repository:
     refs: dict[str, str] = field(default_factory=dict)
     config: dict[str, str] = field(default_factory=dict)
     index: dict[str, bytes] = field(default_factory=dict)
+    conflicts: list[str] = field(default_factory=list)  # what a failed merge left conflicted
+    main: Repository | None = None  # a linked worktree's repository; its refs and config are main's
 
     @property
     def git_dir(self) -> Path:
+        if self.main is not None:
+            return self.main.git_dir / "worktrees" / self.path.name
         return self.path if self.bare else self.path / ".git"
+
+    @property
+    def common_dir(self) -> Path:
+        return (self.main or self).git_dir
 
 
 class FakeGit:
@@ -246,12 +256,53 @@ class FakeGit:
         raise Refusal(129, f"fake git: no `remote {verb}`")
 
     def git_add(self, call: Call) -> str:
+        """`add -A`, `add .` or `add <path>...`: the paths' files as they are on disk, a missing one
+        leaving the index; an ignored file stays out unless it is tracked already."""
         repository = self.find(call.where)
-        root = repository.path
-        repository.index = {path.relative_to(root).as_posix(): path.read_bytes()
-                            for path in sorted(root.rglob("*"))
-                            if path.is_file() and ".git" not in path.relative_to(root).parts}
+        present = self.on_disk(repository)
+        paths = [a for a in call.args if not a.startswith("-")]
+        if not paths or "." in paths or "-A" in call.args or "--all" in call.args:
+            repository.index = present
+            return ""
+        for path in paths:
+            name = (call.where / path).resolve().relative_to(repository.path).as_posix()
+            inside = [known for known in {*present, *repository.index}
+                      if known == name or known.startswith(name + "/")]
+            if not inside:
+                raise Refusal(128, f"fatal: pathspec '{path}' did not match any files")
+            for known in inside:
+                if known in present:
+                    repository.index[known] = present[known]
+                else:
+                    repository.index.pop(known, None)
         return ""
+
+    def on_disk(self, repository: Repository) -> dict[str, bytes]:
+        """The working tree's files git sees: without .git, other worktrees nested in it and the
+        untracked files its .gitignore ignores."""
+        root = repository.path
+        nested = [other.path for other in self.repositories.values()
+                  if other.path != root and other.path.is_relative_to(root)]
+        patterns = ignore_patterns(root)
+        files = {}
+        for path in sorted(root.rglob("*")):
+            name = path.relative_to(root).as_posix()
+            if not path.is_file() or ".git" in path.relative_to(root).parts \
+                    or any(path.is_relative_to(other) for other in nested):
+                continue
+            if name in repository.index or not ignored(name, patterns):
+                files[name] = path.read_bytes()
+        return files
+
+    def git_check_ignore(self, call: Call) -> str:
+        """`check-ignore [-q] <path>...`: the paths the root .gitignore ignores; exit 1 for none."""
+        repository = self.find(call.where)
+        patterns = ignore_patterns(repository.path)
+        found = [path for path in call.args if not path.startswith("-")
+                 if ignored((call.where / path).resolve().relative_to(repository.path).as_posix(), patterns)]
+        if not found:
+            raise Refusal(1, "")
+        return "" if "-q" in call.args else "".join(f"{path}\n" for path in found)
 
     def git_commit(self, call: Call) -> str:
         """`commit [-q] [-a] [--allow-empty] -m <message>`, short flags combined as git takes them (`-qam`)."""
@@ -273,7 +324,11 @@ class FakeGit:
         repository = self.find(call.where)
         args = list(call.args)
         if "--git-common-dir" in args:
-            return f"{repository.git_dir}\n"
+            return f"{repository.common_dir}\n"
+        if "--show-toplevel" in args:
+            if repository.bare:
+                raise Refusal(128, "fatal: this operation must be run in a work tree")
+            return f"{repository.path}\n"
         if "--absolute-git-dir" in args:
             return f"{repository.git_dir}\n"
         verify = "--verify" in args
@@ -295,15 +350,38 @@ class FakeGit:
         return sha + "\n"
 
     def git_branch(self, call: Call) -> str:
+        """`branch --show-current`, `branch -D <name>` (refused for a branch a worktree has out)."""
         repository = self.find(call.where)
-        if call.args != ["--show-current"]:
-            raise Refusal(129, f"fake git: no `branch {' '.join(call.args)}`")
-        return repository.head.removeprefix("refs/heads/") + "\n" if repository.head.startswith("refs/") else ""
+        if call.args == ["--show-current"]:
+            return repository.head.removeprefix("refs/heads/") + "\n" if repository.head.startswith("refs/") else ""
+        if len(call.args) == 2 and call.args[0] in ("-D", "-d"):
+            name = f"refs/heads/{call.args[1]}"
+            if name not in repository.refs:
+                raise Refusal(1, f"error: branch '{call.args[1]}' not found")
+            if any(other.head == name for other in self.worktrees(repository)):
+                raise Refusal(1, f"error: cannot delete branch '{call.args[1]}' used by worktree")
+            del repository.refs[name]
+            return ""
+        raise Refusal(129, f"fake git: no `branch {' '.join(call.args)}`")
 
     def git_update_ref(self, call: Call) -> str:
+        """`update-ref <ref> <new> [<old>]` and `update-ref -d <ref> [<old>]`: all zeros as `new`
+        deletes the ref, as `old` requires that it does not exist; a ref not at `old` is refused."""
         repository = self.find(call.where)
-        name, rev = call.args[:2]
-        repository.refs[name] = self.resolve(repository, rev)
+        args = [a for a in call.args if a != "-d"]
+        name, rest = args[0], args[1:]
+        new, old = (None, rest[0] if rest else None) if "-d" in call.args else \
+            (rest[0], rest[1] if len(rest) > 1 else None)
+        if old is not None:
+            current = repository.refs.get(name)
+            expected = None if set(old) == {"0"} else self.resolve(repository, old)
+            if current != expected:
+                raise Refusal(128, f"fatal: update_ref failed for ref '{name}': cannot lock ref '{name}': "
+                                   f"is at {current or '0' * 40} but expected {old}")
+        if new is None or set(new) == {"0"}:
+            repository.refs.pop(name, None)
+        else:
+            repository.refs[name] = self.resolve(repository, new)
         return ""
 
     def git_tag(self, call: Call) -> str:
@@ -316,10 +394,15 @@ class FakeGit:
         repository = self.find(call.where)
         args = [a for a in call.args if a not in ("-q", "--quiet", "--discard-changes")]
         if args[0] == "-c":
-            head = self.head_commit(repository)
-            if head is not None:
-                repository.refs[f"refs/heads/{args[1]}"] = head
-            repository.head = f"refs/heads/{args[1]}"
+            name = f"refs/heads/{args[1]}"
+            if name in repository.refs:
+                raise Refusal(128, f"fatal: a branch named '{args[1]}' already exists")
+            start = self.resolve(repository, args[2]) if len(args) > 2 else self.head_commit(repository)
+            if start is not None:
+                repository.refs[name] = start
+            repository.head = name
+            if len(args) > 2:
+                self.check_out(repository, self.commits[start].tree)
             return ""
         name = f"refs/heads/{args[0]}"
         if name not in repository.refs:
@@ -328,11 +411,103 @@ class FakeGit:
         self.check_out(repository, self.commits[repository.refs[name]].tree)
         return ""
 
+    def git_checkout(self, call: Call) -> str:
+        """`checkout [-q] -b <branch> [<start>]` and `checkout [-q] <branch>`, as `switch` does."""
+        args = [a for a in call.args if a not in ("-q", "--quiet")]
+        if args and args[0] == "-b":
+            return self.git_switch(Call(call.where, call.options, call.env, ["-c", *args[1:]]))
+        if len(args) == 1 and not args[0].startswith("-"):
+            return self.git_switch(Call(call.where, call.options, call.env, args))
+        raise Refusal(129, f"fake git: no `checkout {' '.join(call.args)}`")
+
+    def git_rm(self, call: Call) -> str:
+        """`rm [-q] [--cached] <path>...`: the paths leave the index, and without --cached the disk."""
+        repository = self.find(call.where)
+        for path in (a for a in call.args if not a.startswith("-")):
+            name = (call.where / path).resolve().relative_to(repository.path).as_posix()
+            if name not in repository.index:
+                raise Refusal(128, f"fatal: pathspec '{path}' did not match any files")
+            del repository.index[name]
+            if "--cached" not in call.args:
+                (repository.path / name).unlink(missing_ok=True)
+        return ""
+
+    def worktrees(self, repository: Repository) -> list[Repository]:
+        """The main repository of `repository` and its linked worktrees, the main one first."""
+        main = repository.main or repository
+        return [main, *(other for other in self.repositories.values() if other.main is main)]
+
+    def git_worktree(self, call: Call) -> str:
+        """`worktree add [-b <branch>|--detach] <path> [<commit>]`, `worktree list --porcelain`,
+        `worktree remove [--force] <path>`: a linked worktree shares its repository's refs."""
+        repository = self.find(call.where)
+        verb, *args = call.args
+        if verb == "list" and args == ["--porcelain"]:
+            out = []
+            for tree in self.worktrees(repository):
+                out.append(f"worktree {tree.path.as_posix()}\n")
+                if tree.bare:
+                    out.append("bare\n\n")
+                    continue
+                head = self.head_commit(tree)
+                out.append(f"HEAD {head or '0' * 40}\n")
+                out.append(f"branch {tree.head}\n\n" if tree.head.startswith("refs/") else "detached\n\n")
+            return "".join(out)
+        if verb == "add":
+            branch, detach, positional, index = None, "--detach" in args, [], 0
+            while index < len(args):
+                if args[index] in ("-b", "-B"):
+                    branch, index = args[index + 1], index + 2
+                    continue
+                if not args[index].startswith("-"):
+                    positional.append(args[index])
+                index += 1
+            path = (call.where / positional[0]).resolve()
+            if path.exists() and any(path.iterdir()):
+                raise Refusal(128, f"fatal: '{positional[0]}' already exists")
+            main = repository.main or repository
+            start = positional[1] if len(positional) > 1 else "HEAD"
+            if branch is None and not detach and len(positional) > 1 and f"refs/heads/{start}" in main.refs:
+                head = f"refs/heads/{start}"
+            elif branch is None and not detach:
+                head = f"refs/heads/{path.name}"
+            else:
+                head = None if detach else f"refs/heads/{branch}"
+            sha = self.resolve(repository, start)
+            if head is not None and head != f"refs/heads/{start}":
+                if head in main.refs:
+                    raise Refusal(128, f"fatal: a branch named '{head.removeprefix('refs/heads/')}' already exists")
+                main.refs[head] = sha
+            if head is not None and any(tree.head == head for tree in self.worktrees(main)):
+                raise Refusal(128, f"fatal: '{head.removeprefix('refs/heads/')}' is already used by worktree")
+            path.mkdir(parents=True, exist_ok=True)
+            tree = Repository(path, False, head=head or sha, refs=main.refs, config=main.config, main=main)
+            tree.git_dir.mkdir(parents=True, exist_ok=True)
+            (path / ".git").write_text(f"gitdir: {tree.git_dir.as_posix()}\n", encoding="utf-8")
+            self.repositories[path] = tree
+            self.check_out(tree, self.commits[sha].tree)
+            return ""
+        if verb == "remove":
+            named = [a for a in args if not a.startswith("-")][0]
+            path = (call.where / named).resolve()
+            tree = self.repositories.get(path)
+            if tree is None or tree.main is None:
+                raise Refusal(128, f"fatal: '{named}' is not a working tree")
+            if "--force" not in args and self.git_status(Call(path, {}, call.env, ["--porcelain"])):
+                raise Refusal(128, f"fatal: '{named}' contains modified or untracked files, use --force to delete it")
+            del self.repositories[path]
+            shutil.rmtree(tree.git_dir, ignore_errors=True)
+            shutil.rmtree(path)
+            return ""
+        raise Refusal(129, f"fake git: no `worktree {' '.join(call.args)}`")
+
     def git_merge(self, call: Call) -> str:
         repository = self.find(call.where)
         if "--abort" in call.args:
+            repository.conflicts = []
             return ""
-        message = call.args[call.args.index("-m") + 1] if "-m" in call.args else "Merge"
+        messages = [call.args[i + 1] for i, a in enumerate(call.args) if a == "-m"]
+        message = "\n\n".join(messages) if messages else "Merge"
         theirs_rev = [a for i, a in enumerate(call.args)
                       if not a.startswith("-") and (i == 0 or call.args[i - 1] != "-m")][-1]
         ours, theirs = self.commit_of(repository, "HEAD"), self.resolve(repository, theirs_rev)
@@ -344,12 +519,14 @@ class FakeGit:
         merged, conflicts = {}, []
         for path in sorted(set().union(*trees)):
             old, mine, other = (tree.get(path) for tree in trees)
-            result = mine if mine == other or other == old else other if mine == old else None
-            if result is None and mine != other:
+            result = mine if mine == other or other == old else other if mine == old else \
+                merged_lines(old, mine, other)
+            if result is None:
                 conflicts.append(path)
-            elif result is not None:
+            else:
                 merged[path] = result
         if conflicts:
+            repository.conflicts = conflicts
             raise Refusal(1, "\n".join(f"CONFLICT (content): Merge conflict in {path}" for path in conflicts)
                           + "\nAutomatic merge failed; fix conflicts and then commit the result.")
         if "--no-ff" not in call.args and base == ours:
@@ -459,24 +636,45 @@ class FakeGit:
         return ""
 
     def git_merge_base(self, call: Call) -> str:
+        """`merge-base <a> <b>`, and `merge-base --is-ancestor <a> <b>`: exit 0 or 1."""
         repository = self.find(call.where)
-        ours, theirs = (self.resolve(repository, rev) for rev in call.args[:2])
-        common = self.ancestors(theirs)
-        base = next((sha for sha in self.first_parents(ours) if sha in common), None)
+        revs = [a for a in call.args if not a.startswith("-")]
+        ours, theirs = (self.resolve(repository, rev) for rev in revs[:2])
+        if "--is-ancestor" in call.args:
+            if ours not in self.ancestors(theirs):
+                raise Refusal(1, "")
+            return ""
+        base = self.merge_base(ours, theirs)
         if base is None:
             raise Refusal(1, "")
         return base + "\n"
 
+    def merge_base(self, ours: str, theirs: str) -> str | None:
+        common = self.ancestors(theirs)
+        return next((sha for sha in self.first_parents(ours) if sha in common), None)
+
     def git_diff(self, call: Call) -> str:
-        """`diff <a>..<b>`: git's unified diff of the two commits' files."""
+        """`diff [--unified=<n>|-U<n>] <a>..<b>` (or `<a>...<b>`, from their merge base): git's
+        unified diff of the two commits' files; `--name-status [-z]` the changed paths, a file moved
+        unchanged as `R100`; `--name-only --diff-filter=U` the paths a failed merge left conflicted."""
         repository = self.find(call.where)
+        if "--diff-filter=U" in call.args:
+            return "".join(f"{path}\n" for path in repository.conflicts)
         spec = [a for a in call.args if not a.startswith("-")][0]
-        old_rev, _, new_rev = spec.partition("..")
-        old, new = (self.trees[self.commits[self.resolve(repository, rev)].tree] for rev in (old_rev, new_rev))
+        old_rev, dots, new_rev = spec.partition("...")
+        if not dots:
+            old_rev, _, new_rev = spec.partition("..")
+        old_sha, new_sha = (self.resolve(repository, rev) for rev in (old_rev, new_rev))
+        if dots:
+            old_sha = self.merge_base(new_sha, old_sha) or old_sha
+        old, new = (self.trees[self.commits[sha].tree] for sha in (old_sha, new_sha))
+        changed = [path for path in sorted(set(old) | set(new)) if old.get(path) != new.get(path)]
+        if "--name-status" in call.args:
+            return self.name_status(old, new, changed, "\0" if "-z" in call.args else "\n")
+        context = next((int(a.split("=")[1]) for a in call.args if a.startswith("--unified=")),
+                       next((int(a[2:]) for a in call.args if a.startswith("-U") and a[2:].isdigit()), 3))
         out = []
-        for path in sorted(set(old) | set(new)):
-            if old.get(path) == new.get(path):
-                continue
+        for path in changed:
             before = old.get(path, b"").decode("utf-8", "replace").splitlines(keepends=True)
             after = new.get(path, b"").decode("utf-8", "replace").splitlines(keepends=True)
             out.append(f"diff --git a/{path} b/{path}\n")
@@ -485,7 +683,29 @@ class FakeGit:
             elif path not in new:
                 out.append("deleted file mode 100644\n")
             out.extend(difflib.unified_diff(before, after, "/dev/null" if path not in old else f"a/{path}",
-                                            "/dev/null" if path not in new else f"b/{path}"))
+                                            "/dev/null" if path not in new else f"b/{path}", n=context))
+        return "".join(out)
+
+    def name_status(self, old: dict[str, bytes], new: dict[str, bytes], changed: list[str], end: str) -> str:
+        """`--name-status` lines (`-z`: status and paths each ended by NUL); a deleted file whose
+        content an added file has unchanged is a rename, `R100`. Git also finds renames of similar
+        content; the fake only exact ones."""
+        added = [path for path in changed if path not in old]
+        deleted = [path for path in changed if path not in new]
+        renamed = {}
+        for gone in deleted:
+            twin = next((path for path in added if new[path] == old[gone] and path not in renamed.values()), None)
+            if twin is not None:
+                renamed[gone] = twin
+        out = []
+        for path in changed:
+            if path in renamed.values():
+                continue
+            if path in renamed:
+                fields = ["R100", path, renamed[path]]
+            else:
+                fields = ["A" if path in added else "D" if path in deleted else "M", path]
+            out.append(end.join(fields) + end if end == "\0" else "\t".join(fields) + end)
         return "".join(out)
 
     def git_ls_files(self, call: Call) -> str:
@@ -496,22 +716,23 @@ class FakeGit:
     def git_status(self, call: Call) -> str:
         """`status --porcelain`: the working tree's changes against the index and HEAD."""
         repository = self.find(call.where)
-        root = repository.path
         head = self.head_commit(repository)
         committed = self.trees[self.commits[head].tree] if head else {}
-        present = {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(root.rglob("*"))
-                   if path.is_file() and ".git" not in path.relative_to(root).parts}
+        present = self.on_disk(repository)
+        end = "\0" if "-z" in call.args else "\n"
+        untracked = "--untracked-files=no" not in call.args and "-uno" not in call.args
         out = []
         for path in sorted(set(committed) | set(repository.index) | set(present)):
             staged, work = repository.index.get(path), present.get(path)
             if path not in repository.index and path not in committed:
-                out.append(f"?? {path}\n")
+                if untracked:
+                    out.append(f"?? {path}{end}")
                 continue
             x = " " if staged == committed.get(path) else "A" if path not in committed else \
                 "D" if staged is None else "M"
             y = " " if work == staged else "D" if work is None else "M"
             if x + y != "  ":
-                out.append(f"{x}{y} {path}\n")
+                out.append(f"{x}{y} {path}{end}")
         return "".join(out)
 
     def git_archive(self, call: Call) -> bytes:
@@ -569,12 +790,22 @@ class FakeGit:
         return ""
 
     def git_ls_remote(self, call: Call) -> str:
-        url = [a for a in call.args if not a.startswith("-")][0]
+        """`ls-remote [--heads] [--tags] [--refs] <remote> [<pattern>...]`: a remote's refs, the
+        remote a URL, a path or a remote of the repository in the working directory; a pattern
+        matches a ref's name whole or its last components."""
+        url, *patterns = [a for a in call.args if not a.startswith("-")]
         try:
-            remote = self.remote(Repository(Path(), False), url)
+            try:
+                remote = self.remote(self.find(call.where), url)
+            except Refusal:
+                remote = self.remote(Repository(Path(), False), url)
         except Refusal:
             raise Refusal(128, f"fatal: '{url}' does not appear to be a git repository")
-        refs = sorted(name for name in remote.refs if "--tags" not in call.args or name.startswith("refs/tags/"))
+        kinds = [prefix for flag, prefix in (("--heads", "refs/heads/"), ("--tags", "refs/tags/"))
+                 if flag in call.args]
+        refs = sorted(name for name in remote.refs if not kinds or name.startswith(tuple(kinds)))
+        if patterns:
+            refs = [name for name in refs if any(name == p or name.endswith("/" + p) for p in patterns)]
         return "".join(f"{remote.refs[name]}\t{name}\n" for name in refs)
 
     def git_push(self, call: Call) -> str:
@@ -613,6 +844,56 @@ class FakeGit:
                 raise Refusal(128, f"fatal: couldn't find remote ref {source}")
             repository.refs[destination or source] = remote.refs[source]
         return ""
+
+
+def merged_lines(base: bytes | None, mine: bytes | None, theirs: bytes | None) -> bytes | None:
+    """Both sides' line changes to one file, or None where they overlap or touch (git conflicts on
+    adjacent changes too), or where one side deleted the file."""
+    if base is None or mine is None or theirs is None:
+        return None
+    old = base.splitlines(keepends=True)
+    changes = []
+    for side in (mine, theirs):
+        lines = side.splitlines(keepends=True)
+        matcher = difflib.SequenceMatcher(None, old, lines, autojunk=False)
+        changes += [(i1, i2, lines[j1:j2]) for tag, i1, i2, j1, j2 in matcher.get_opcodes() if tag != "equal"]
+    changes.sort(key=lambda change: (change[0], change[1]))
+    out, at = [], 0
+    for index, (start, end, lines) in enumerate(changes):
+        if index and start <= changes[index - 1][1]:
+            return None
+        out += old[at:start] + lines
+        at = end
+    return b"".join(out + old[at:])
+
+
+def ignore_patterns(root: Path) -> list[str]:
+    """The patterns of the repository's root .gitignore (the fake reads no other ignore file)."""
+    ignore = root / ".gitignore"
+    lines = ignore.read_text(encoding="utf-8").splitlines() if ignore.is_file() else []
+    patterns = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+    if any(pattern.startswith("!") for pattern in patterns):
+        raise Refusal(129, "fake git: no negated .gitignore patterns")
+    return patterns
+
+
+def ignored(path: str, patterns: list[str]) -> bool:
+    """Whether `path` (slash-separated, from the root) matches one of `patterns` as git matches
+    them: `dir/` only directories, a pattern with an inner or leading slash only from the root,
+    any other at any depth; `*` and `?` stay within one name."""
+    parts = path.split("/")
+    for pattern in patterns:
+        directory = pattern.endswith("/")
+        body = pattern.rstrip("/")
+        anchored = "/" in body
+        body = body.lstrip("/")
+        for depth in range(1, len(parts) + 1):
+            if directory and depth == len(parts):
+                continue  # the file itself is no directory
+            candidate = "/".join(parts[:depth]) if anchored else parts[depth - 1]
+            if fnmatch.fnmatchcase(candidate, body):
+                return True
+    return False
 
 
 def date(call: Call, role: str) -> datetime:
