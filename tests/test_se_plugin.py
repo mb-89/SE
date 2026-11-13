@@ -195,3 +195,50 @@ def test_a_script_under_ses_root_a_relative_link_and_another_folder_pass(checkou
     finally:
         source.write_text(original, encoding="utf-8")
         assert se_plugin.main(["build", "--root", str(checkout)]) == 0
+
+
+def roles_copy(tmp_path: Path, roles: str) -> Path:
+    """A copy of the sources whose se.toml declares `roles` in place of its own [roles]."""
+    shutil.copytree(ROOT / "src", tmp_path / "src")
+    manifest = (ROOT / "se.toml").read_text(encoding="utf-8").split("\n[roles.", 1)[0]
+    (tmp_path / "se.toml").write_text(manifest + "\n" + roles, encoding="utf-8")
+    return tmp_path
+
+
+def front(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").split("\n---\n", 1)[0].splitlines()[1:]
+
+
+def test_se_toml_names_every_role_and_each_relies_on_no_outside_skill_today():
+    assert se_plugin.roles() == {"se": [], "integrator": [], "reviewer": [], "worker": []}
+
+
+def test_a_roles_skills_are_preloaded_into_that_agent_where_the_host_reads_them(tmp_path):
+    root = roles_copy(tmp_path, '[roles.worker]\nskills = ["plugin-dev@claude-plugins-official:plugin-structure",'
+                                ' "example-skills@anthropic-agent-skills:skill-creator"]\n')
+    se_plugin.build(root)
+    assert front(root / "agents" / "worker.md")[-1] == (
+        "skills: plugin-dev:plugin-structure, example-skills:skill-creator")
+    assert not any(line.startswith("skills:") for line in front(root / ".github" / "agents" / "worker.agent.md"))
+    assert not any(line.startswith("skills:") for line in front(root / "agents" / "integrator.md"))
+
+
+@pytest.mark.parametrize(("roles", "refusal"), (
+    ('[roles.nobody]\nskills = []\n', "[roles.nobody] names no agent in src/agents"),
+    ('[roles.worker]\nskills = ["plugin-dev"]\n', "is not `<plugin>@<marketplace>:<skill>`"),
+    ('[roles.worker]\nskills = "plugin-dev@m:s"\n', "[roles.worker] skills is not a list"),
+    ('[roles.worker]\ntools = []\n', "[roles.worker] holds only `skills = [...]`"),
+))
+def test_a_roles_list_the_build_cannot_write_is_refused_naming_it(tmp_path, capsys, roles, refusal):
+    root = roles_copy(tmp_path, roles)
+    assert se_plugin.main(["build", "--root", str(root)]) == 2
+    assert refusal in capsys.readouterr().err
+
+
+def test_an_agents_own_skills_field_is_refused_for_the_one_list(tmp_path, capsys):
+    root = roles_copy(tmp_path, "")
+    source = root / "src" / "agents" / "worker.md"
+    source.write_text(source.read_text(encoding="utf-8").replace("---\n", "---\nclaude.skills: x\n", 1),
+                      encoding="utf-8")
+    assert se_plugin.main(["build", "--root", str(root)]) == 2
+    assert "skills come from se.toml [roles.<role>] skills" in capsys.readouterr().err
