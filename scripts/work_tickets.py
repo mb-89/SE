@@ -105,6 +105,7 @@ FLEET_LABEL = "field-report"
 # A backlog issue, owned by the work model's "Issues": a far-out idea for the person, never work.
 BACKLOG_LABEL = "backlogged"
 PERSON_LABEL = "se-person"
+PAUSE_LABEL = "pause"  # an open issue with it pauses the fleet (work model, Pause)
 # Work, owned by the work model's "Issues": SE files a work issue, or routes an outside issue, with
 # WORK_LABELS (its record that the issue was checked and may be worked) and the issue's `repo:`
 # label; `ready` and `start` take only those, and never an issue that carries a NOT_STARTABLE label.
@@ -2931,6 +2932,7 @@ def start(
 ) -> Path | None:
     """Starts a startable work issue, locally or with a cloud worker."""
     repo = resolve_repo(root, repo)
+    refuse_while_paused("start", pause_issues(root, repo))
     candidates = (
         ready_issues(root, repo, allow_existing_branch=True)
         if not create else ready_issues(root, repo)
@@ -3137,10 +3139,11 @@ def queue(
     root: Path, repo: str, all_repos: bool = False
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], int | None]:
     """The integrator's queue: the delivered pull requests, the escalations, the startable work
-    issues and the capacity, read at once while the checkout syncs (within the interactive budget,
-    feedback.py)."""
+    issues and the capacity, read at once with the pause switch while the checkout syncs (within
+    the interactive budget, feedback.py); refused while the fleet is paused."""
     labels = repository_label_arguments(root, all_repos)
-    _, escalations, delivered, ready, slots = concurrently(
+    pause, _, escalations, delivered, ready, slots = concurrently(
+        lambda: pause_issues(root, repo),
         lambda: sync(root),
         lambda: json.loads(run_gh(root, [
             "issue", "list", "--state", "open", "--label", "escalated",
@@ -3150,6 +3153,7 @@ def queue(
         lambda: ready_issues(root, repo, all_repos),
         lambda: capacity(root, repo, all_repos),
     )
+    refuse_while_paused("queue", pause)
     return delivered, escalations, ready, slots
 
 
@@ -3782,10 +3786,16 @@ def route_outside_issue(
     signed in."""
     routing = read_text_file(file, "routing sections")
     repo = resolve_repo(root, repo)
-    if read is None and hand_off():
+    handing_off = hand_off()
+    if read is None and handing_off:
         raise QueueError(
             f"route reads #{number} through gh, which is not signed in here; read the issue with "
             "the GitHub tools and pass --issue-title <title> --issue-body <file with its body>")
+    if handing_off:  # the pause search runs first, as its own plan
+        print(Plan(pause_plan(repo).title, (pause_step(repo),),
+                   "no issue listed: run the plan below").text())
+    else:
+        refuse_while_paused("route", pause_issues(root, repo))
     issue = (fetch_issue(root, number, repo) if read is None
              else {"title": read[0], "body": read_file(read[1], "issue body")})
     if section(markdown_sections(str(issue["body"])), ROUTING_SECTION):
@@ -4765,6 +4775,46 @@ def issue_url(repo: str, number: int) -> str:
     return "https://" + f"{host}/{api_repo(repo)}/issues/{number}"
 
 
+class PausedError(QueueError):
+    """The fleet is paused: an open issue labelled PAUSE_LABEL (work model, Pause)."""
+
+
+def pause_issues(root: Path, repo: str) -> list[dict[str, object]]:
+    """The open issues labelled PAUSE_LABEL in `repo`, read now: the owner's pause switch
+    (work model, Pause). None open: not paused."""
+    return json.loads(run_gh(root, [
+        "issue", "list", "--state", "open", "--label", PAUSE_LABEL,
+        "--json", "number,title,url", "--limit", "20", *repo_arguments(repo),
+    ]) or "[]")
+
+
+def pause_names(found: list[dict[str, object]]) -> str:
+    return ", ".join(f"#{issue['number']} {issue['title']} {issue['url']}" for issue in found)
+
+
+def refuse_while_paused(command: str, found: list[dict[str, object]]) -> None:
+    """Raise PausedError naming `command`, the pause issue and the remedy, where `found` holds
+    one."""
+    if found:
+        raise PausedError(
+            f"work_tickets.py {command}: the fleet is paused by the open {PAUSE_LABEL} issue "
+            f"{pause_names(found)}; {command} starts, lands and routes nothing while it is open. "
+            "The owner resumes the fleet by closing it (work model, Pause)")
+
+
+def pause_step(repo: str) -> Step:
+    """The plan step that runs the pause search with the host's GitHub tools."""
+    return Step("paused", "list_issues", {
+        **owner_repo(repo), "state": "OPEN", "labels": [PAUSE_LABEL], "perPage": 20},
+        note="An issue listed means the fleet is paused: stop here, run no later step and start, "
+             "land or route nothing; the owner resumes it by closing that issue")
+
+
+def pause_plan(repo: str) -> Plan:
+    return Plan(f"paused? {PAUSE_LABEL} issues of {repo}", (pause_step(repo),),
+                "no issue listed: not paused")
+
+
 def tracker_actions(root: Path, repo: str) -> dict[str, Action]:
     """The local runner's issue steps on `repo`, through gh."""
     def comment(arguments: dict[str, object], _: str) -> None:
@@ -4910,12 +4960,14 @@ def abandon_landing(root: Path, target: str, landing: str) -> None:
 
 
 def landing_plan(remote: str, landing: str, target: str, base: str, landed: str, title: str,
-                 message: str, description: str, then: str) -> Plan:
-    """Open or reuse the landing pull request, wait for `check` on `landed`, squash-merge it there
-    with exactly `title` and `message`: the GitHub steps of landing on `target`."""
+                 message: str, description: str, then: str, tracker: str) -> Plan:
+    """The pause search on `tracker`, then open or reuse the landing pull request, wait for
+    `check` on `landed`, squash-merge it there with exactly `title` and `message`: the GitHub
+    steps of landing on `target`."""
     where = owner_repo(remote)
-    number = Later("pull number", 1)
+    number = Later("pull number", 2)
     return Plan(f"land {landing} on {target}", (
+        pause_step(tracker),
         Step("open_pull", "create_pull_request", {
             **where, "head": landing, "base": target, "title": title, "body": description},
             note=f"Where list_pull_requests (state open, head {where['owner']}:{landing}, base "
@@ -4937,10 +4989,13 @@ def landing_plan(remote: str, landing: str, target: str, base: str, landed: str,
     ), then)
 
 
-def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: str
-                    ) -> dict[str, Action]:
+def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: str,
+                    tracker: str) -> dict[str, Action]:
     """The local runner of a landing plan, through the door."""
     seen: dict[str, str] = {}
+
+    def paused(_: dict[str, object], __: str) -> None:
+        refuse_while_paused("integrate", pause_issues(root, tracker))
 
     def open_pull(arguments: dict[str, object], _: str) -> dict[str, object]:
         title, body = str(arguments["title"]), str(arguments["body"])
@@ -4979,7 +5034,7 @@ def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: s
             )
         return {"merge commit sha": merged}
 
-    return {"open_pull": open_pull, "wait_check": check, "squash": squash}
+    return {"paused": paused, "open_pull": open_pull, "wait_check": check, "squash": squash}
 
 
 def landing_read_back(root: Path, target: str, base: str, landed: str,
@@ -5085,6 +5140,8 @@ def integrate(
     field report's Branch tip are merged too."""
     tracker = resolve_repo(root, repo)
     handing_off = hand_off()
+    if not handing_off:  # handed off, the landing plan's first step runs the pause search
+        refuse_while_paused("integrate", pause_issues(root, tracker))
     remote = remote_repo(root)
     if remote is None:
         raise QueueError(
@@ -5176,12 +5233,12 @@ def integrate(
             "check_temporary_working_directory": check_temporary_working_directory,
         }
         then = (f"work_tickets.py integrate --read-back {branch} --landing-pull <pull number from "
-                f"step 1> --check-run <check run url from step 2> --worktree {root}")
+                f"step 2> --check-run <check run url from step 3> --worktree {root}")
         description = landing_description(
             str(pull.get("url") or pull_url(remote, pull_number)), pull_number,
             issue_url(tracker, work_number))
         plan = landing_plan(remote, landing, target, base, landed, title, message, description,
-                            then)
+                            then, tracker)
         if handing_off:
             path = handoff_path(root, branch)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -5194,12 +5251,13 @@ def integrate(
             return None
         feedback.phase("landing plan: the landing pull request, its check, the squash merge")
         door = GitHub(root, remote)
-        given = run_plan(plan, landing_actions(root, door, landing, target, base))
+        given = run_plan(plan, landing_actions(root, door, landing, target, base, tracker))
         feedback.phase("read back the landed commit")
         commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
     except QueueError as error:
         abandon_landing(root, target, landing)
-        integration_escalation(root, work_number, tracker, str(error))
+        if not isinstance(error, PausedError):  # a pause is the owner's, no escalation
+            integration_escalation(root, work_number, tracker, str(error))
         raise
     return finish_integration(root, state, commit, str(given["pull url"]),
                               str(given["check run url"]), door)
@@ -6711,6 +6769,25 @@ def run_queue(root: Path, args: argparse.Namespace) -> int:
     print("Capacity: unlimited (cloud)" if slots is None else f"Capacity: {slots}")
     for issue in ready:
         print(f"ready #{issue['number']} {issue['title']}")
+    return 0
+
+
+@command("paused", f"whether the fleet is paused: exit code 1 and the issue while an issue "
+                   f"labelled {PAUSE_LABEL} is open in the repository (the owner's switch; closing "
+                   "it resumes), exit code 0 while none is. queue, start, integrate and route "
+                   "refuse while paused. Without gh it prints the search as a plan for the "
+                   "session's GitHub tools, exit code 2", OPTIONAL_WORKTREE, REPO)
+def run_paused(root: Path, args: argparse.Namespace) -> int:
+    repo = resolve_repo(root, args.repo)
+    if hand_off():
+        print(pause_plan(repo).text())
+        return 2
+    found = pause_issues(root, repo)
+    if found:
+        print(f"Paused by {pause_names(found)}: nothing starts, lands or is routed until the owner "
+              "closes it")
+        return 1
+    print(f"Not paused: no open issue labelled {PAUSE_LABEL} in {repo}")
     return 0
 
 

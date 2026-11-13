@@ -27,6 +27,7 @@ INTERACTIVE = {  # command -> the seconds it may take
     "work_tickets.py queue": INTERACTIVE_SECONDS,
     "work_tickets.py intake": INTERACTIVE_SECONDS,
     "work_tickets.py metrics": INTERACTIVE_SECONDS,
+    "work_tickets.py paused": INTERACTIVE_SECONDS,
     "se_start.py status": 1.0,  # the session's greeting: answers from disk and its cache
 }
 PHASED = ("work_tickets.py integrate", "work_tickets.py suite", "work_tickets.py refresh")
