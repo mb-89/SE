@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/kern/coretest"
 	"github.com/mb-89/kern/index"
 	"github.com/mb-89/kern/index/fixture"
+	"github.com/mb-89/kern/kerntest"
 )
 
 const clerkWiring = `
@@ -104,12 +104,12 @@ wires = { "bad.post" = "ledger.append" }`, bad, fixture.Ledger(&lines))
 // continuation runs, and records the requests in order.
 func TestTheFakeAnswersRequestsAndAgreesWithTheCore(t *testing.T) {
 	t.Parallel()
-	f, err := coretest.New(fixture.Clerk)
+	f, err := kerntest.New(fixture.Clerk)
 	must(t, err)
 	if _, err := f.Call("clerk file", "a"); err == nil || !strings.Contains(err.Error(), "request port post has no answer") {
 		t.Fatalf("an unanswered request answered %v", err)
 	}
-	f, err = coretest.New(fixture.Clerk)
+	f, err = kerntest.New(fixture.Clerk)
 	must(t, err)
 	n := 0
 	must(t, f.Answer("post", func(req any) (any, error) { n++; return n, nil }))
@@ -128,7 +128,7 @@ func TestTheFakeAnswersRequestsAndAgreesWithTheCore(t *testing.T) {
 	if err := f.Answer("nope", nil); err == nil {
 		t.Fatal("the fake answered a port the component does not declare")
 	}
-	f, err = coretest.New(fixture.Clerk)
+	f, err = kerntest.New(fixture.Clerk)
 	must(t, err)
 	must(t, f.Answer("post", func(any) (any, error) { return "many", nil }))
 	if _, err := f.Call("clerk file", "a"); err == nil || !strings.Contains(err.Error(), "reads int, and its answerer gave string") {

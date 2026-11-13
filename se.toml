@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.28.0"
+version = "5.29.0"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -26,6 +26,14 @@ authored_content = [
 command = ["uv", "run", "pytest", "-q"]
 target_seconds = 60
 limit_seconds = 120
+
+# kern's Go tests (kern/README.md "Tests"), run after the suite with their own time and budget:
+# a cold build of kern with NATS compiles in about 19 to 23 s (docs/go-core.md "Measurements").
+[tests.beside.kern]
+command = ["go", "test", "./..."]
+directory = "kern"
+target_seconds = 30
+limit_seconds = 60
 
 # obs builds the documentation (README "Documentation").
 [modules.obs]

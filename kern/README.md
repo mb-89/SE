@@ -18,7 +18,7 @@ named in the design's plan.
 | `go.mod` | the module and its pinned Go version, which CI reads | |
 | `index/` | names, families, the store, snapshots, a single writer per name, built-in values, the catalog check at start, waves, actions, the collector, and `wiring.toml` read at start | `src/index` at `ff01204` |
 | `index/fixture/` | the fixture components the index and the fake core are tested with | `src/index/fixture` |
-| `coretest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request | `src/index/indextest` |
+| `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request | `src/index/indextest` |
 | `bus/` | the embedded NATS server on loopback, a user and permissions per component instance, so the bus refuses a second writer | quackitect v5 `src/index/bus.go` |
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve` | |
@@ -58,10 +58,13 @@ One core runs per checkout, the nearest folder up from the working directory tha
 cd kern && go vet ./... && go test ./...
 ```
 
-SE's CI runs both in the `check` job, the check `main`'s ruleset requires, in their own steps
-after SE's Python suite, so a red kern test blocks landing and the Python suite's budget is
-untouched. The job `kern-windows` runs them on Windows, where the detached start and the stop
-differ; `check` needs it and fails unless it passed.
+SE declares kern's tests beside its Python suite, `se.toml` `[tests.beside.kern]`, with their own
+time and budget (SE's [README "Test budget"](../README.md#test-budget)): `integrate`,
+`work_tickets.py suite` and the `check` job, the check `main`'s ruleset requires, run them after
+the suite, so a red kern test refuses the integration and the Python suite's budget is untouched.
+`check` vets kern in its own step. The job `kern-windows` runs
+kern's vet and tests on Windows, where the detached start and the stop differ; `check` needs it
+and fails unless it passed.
 
 ## The catalog check's budget
 

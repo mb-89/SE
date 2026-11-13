@@ -21,19 +21,20 @@ def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins()
         assert int(major) >= SETUP_GO_NODE_24, "setup-go below v6 runs on Node 20"
         assert "go-version-file: kern/go.mod" in inputs and "cache-dependency-path: kern/go.sum" in inputs
     assert re.search(r"(?m)^go \d+\.\d+\.\d+$", (PROJECT / "kern" / "go.mod").read_text(encoding="utf-8"))
-    check = jobs[jobs.index("\n  check:\n"):jobs.index("\n  kern-windows:\n") + 1]
-    steps = ["scripts/work_tickets.py suite --worktree .", "actions/setup-go", "time go vet ./...",
-             "time go test ./...", "needs.kern-windows.result"]
+    # Go is set up before the suite step, which runs kern's tests as se.toml declares them.
+    check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", jobs)[1]
+    steps = ["actions/setup-go", "time go vet ./...", "scripts/work_tickets.py suite --worktree .",
+             "needs.kern-windows.result"]
     assert [check.index(step) for step in steps] == sorted(check.index(step) for step in steps)
-    for command in ("time go vet ./...", "time go test ./..."):
-        assert f"        working-directory: kern\n        run: {command}\n" in check
+    assert "        working-directory: kern\n        run: time go vet ./...\n" in check
+    assert "go test" not in check, "kern's tests have one declaration, se.toml [tests.beside.kern]"
 
 
 def test_the_required_check_fails_unless_kern_passed_on_windows() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow[workflow.index("\njobs:\n"):]
     windows = jobs[jobs.index("\n  kern-windows:\n"):]
-    check = jobs[jobs.index("\n  check:\n"):jobs.index("\n  kern-windows:\n") + 1]
+    check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", jobs)[1]
     assert "    runs-on: windows-" in windows
     for command in ("go vet ./...", "go test ./..."):
         assert f"        working-directory: kern\n        run: {command}\n" in windows

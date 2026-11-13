@@ -98,12 +98,9 @@ jobs:
           fi
           gh api "repos/$REPOSITORY/issues/$issue" --jq .body > "$RUNNER_TEMP/issue-body.md"
           uv run python scripts/work_tickets.py field-report --check "$body" --issue-body "$RUNNER_TEMP/issue-body.md"
-      # The budget's reference run (README "Test budget"): over the limit here, check fails.
-      - name: The complete suite, within its budget
-        run: uv run python scripts/work_tickets.py suite --worktree .
-      # kern, the Go core incubated under kern/ (kern/README.md "Tests"): its own steps after the
-      # suite, timed, so a red kern test fails this check and the suite's budget stays the suite's.
-      # The Go version is kern/go.mod's.
+      # kern, the Go core incubated under kern/ (kern/README.md "Tests"), on the Go its go.mod
+      # pins: vetted here; its tests run in the suite step below, as se.toml [tests.beside.kern]
+      # declares them, with their own time and budget.
       - uses: actions/setup-go@v6
         with:
           go-version-file: kern/go.mod
@@ -111,9 +108,9 @@ jobs:
       - name: kern vets
         working-directory: kern
         run: time go vet ./...
-      - name: kern's tests pass
-        working-directory: kern
-        run: time go test ./...
+      # The budget's reference run (README "Test budget"): over a limit here, check fails.
+      - name: The complete suite and kern's tests, within their budgets
+        run: uv run python scripts/work_tickets.py suite --worktree .
       - name: kern's contract suite passed on Windows
         env:
           WINDOWS: ${{ needs.kern-windows.result }}
@@ -122,9 +119,10 @@ jobs:
             echo "::error::kern-windows answered $WINDOWS: kern's tests on Windows (the job kern-windows of this run) must pass"
             exit 1
           fi
-  # kern's contract suite on Windows (kern/README.md "Tests"): the detached start, the standing
-  # file and the stop differ there. `check` needs it and fails unless it passed, so the one
-  # required check covers it; the Python suite and its budget stay on Linux.
+  # kern's tests on Windows, its contract suite among them (kern/README.md "Tests"): the detached
+  # start, the standing file and the stop differ there. `check` needs it and fails unless it
+  # passed, so the one required check covers it; the Python suite and its budget stay on Linux,
+  # so this job runs the command of se.toml [tests.beside.kern] itself.
   kern-windows:
     runs-on: windows-2025
     steps:
