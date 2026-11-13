@@ -401,6 +401,36 @@ The same split holds for `refs request` and `refs apply` (the work model's
 without a signed-in `gh` each prints its comment, dispatch and run steps, and `--read-back` checks
 the refs through `git ls-remote` and prints the rest.
 
+#### Hand-offs through the relay
+
+Where kern serves the checkout with its GitHub component on the relay backend (a cloud session,
+no token), the hand-off needs neither a retyped file nor a second run
+([docs/go-core.md "GitHub in the cloud"](docs/go-core.md#github-in-the-cloud)):
+
+- **Reads.** `intake`, `field-report --check`, `deliver` and `integrate` read the issue, its
+  comments and the pull request from kern's snapshots, which every GitHub tool answer the session
+  receives fills through the PostToolUse hook ([scripts/se_relay.py](scripts/se_relay.py)).
+- **One call.** `integrate`, `refs request`, `refs apply`, `file`, `route` and `fleet-check`
+  (`work_tickets.py` `STREAMED_COMMANDS`) run as one call through kern's `call.`, from the same
+  command line.
+  - Their component runs the command in a thread of its own; each GitHub step of its plan is one
+    `github.step` request on the component's `step` port, which `wiring.toml` binds to the GitHub
+    component (`RelayDoor` in `work_tickets.py`, `Stepped` in
+    [scripts/se_components.py](scripts/se_components.py)).
+  - kern tells the agent each step on its hook; the session runs it with its GitHub tools, and the
+    answer comes back to the command through the PostToolUse hook. `integrate` so lands, reads its
+    landing back and closes out in that one call, with no `--read-back`.
+  - Each step's line, `GitHub step through kern's relay: <tool>`, and every phase reach the caller
+    as they are said, and the call waits as long as kern beats: a check run of many minutes fits
+    ([docs/go-core.md "Progress and long calls"](docs/go-core.md#progress-and-long-calls)).
+- **The fallback.** Without kern, on a token backend or with `SE_KERN=off`, each command keeps its
+  file-based hand-off above. A call kern refuses before it says anything runs directly; one that
+  fails on the way is reported and never run twice, as it writes.
+- **Tested** against fake sessions in the suite (`tests/test_work_ticket_issues.py`,
+  `tests/test_work_tickets.py`) and against the real core: `tests/beside_se_relay.py` runs
+  `fleet-check` as one call whose reads a simulated session answers on the hook, then the fallback
+  once kern stops.
+
 The squash commit carries the release's `se.toml` version, so the release workflow tags it and the
 docs workflow publishes it, as both run on every push to `main`. GitHub commits it for the merging
 account (web-flow committer, the account's `users.noreply.github.com` author), which the identity

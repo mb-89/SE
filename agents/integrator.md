@@ -97,8 +97,10 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
      <branch>` checks the landing through git and prints the close-out plan
      ([Without gh](../skills/work-model/SKILL.md#without-gh)).
    - Where kern's relay serves the checkout, `integrate <pull request>` reads the pull request and
-     its work issue from the relay, so you save no file; run the plan's tool calls (the hook tells
-     you the waiting ones) and the answers reach the command through kern.
+     its work issue from the relay, so you save no file, and runs as one call through kern: start
+     it in the background, run each GitHub step the hook tells you with exactly that input, and it
+     lands, reads back and closes out by itself, with no `--read-back`
+     ([One call through kern](../skills/work-model/SKILL.md#without-gh)).
    - The landing pull request ends in its `Metrics:` line, step 2's body unedited, which
      `retro.py collect` reads back (README [Metrics](../README.md#metrics)).
    - Check it after the merge: pass its description, saved as `pull_request_read` `get` reads it,

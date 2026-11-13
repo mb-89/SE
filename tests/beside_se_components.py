@@ -24,6 +24,8 @@ import quiet_git
 
 ROOT = Path(__file__).resolve().parents[1]
 GROUPS = ["delivery", "integration", "issues", "review", "tickets"]
+#: The instances SE's wiring names: its groups and kern's GitHub component, which serves their steps.
+INSTANCES = sorted(["github", *GROUPS])
 
 
 def run(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
@@ -80,7 +82,7 @@ def test_kern_lists_ses_components_and_a_command_answers_through_it_and_without_
             1, refused.stdout, refused.stderr)
         status = run(str(kern), "status", "--root", str(checkout), "--json", cwd=checkout)
         health = json.loads(status.stdout)["health"]
-        assert sorted(health["instances"]) == GROUPS
+        assert sorted(health["instances"]) == INSTANCES
         # The calls above waited for their component's attach; the other two attached alone.
         assert {"tickets"} <= set(health["attached"]) <= set(GROUPS)
     finally:
