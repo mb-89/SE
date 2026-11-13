@@ -90,7 +90,12 @@ jobs:
                   refused += 1
                   reason = " ".join(line.strip() for line in pushed.stderr.splitlines()
                                     if line.strip().startswith(("remote:", "!", "error:"))) or pushed.stderr.strip()
-                  print(f"::error::Release: origin refused {ref.lstrip('+')} ({reason}); allow this workflow "
-                        "to push it, as the repository's tag rulesets (Settings > Rules > Rulesets) decide, "
-                        "then rerun this job")
+                  # A ruleset's refusal names its rule; another (missing necessary objects) passes on a rerun.
+                  if re.search(r"GH013|rule violation|ruleset|protected ref|being restricted", pushed.stderr, re.I):
+                      remedy = ("allow this workflow to push it, as the repository's tag rulesets "
+                                "(Settings > Rules > Rulesets) decide, then rerun this job")
+                  else:
+                      remedy = ("rerun this job: the refusal names no ruleset, and a transient one passes on a "
+                                "rerun; where it fails again, the reason above names what to fix")
+                  print(f"::error::Release: origin refused {ref.lstrip('+')} ({reason}); {remedy}")
           sys.exit(1 if refused else 0)

@@ -354,7 +354,9 @@ not tags (Claude's cloud sessions).
   by major version. An older major's tag is its own releases' to push; a run never creates or moves
   it.
 - Each tag is pushed on its own: a refused one fails the run with one line naming the tag, origin's
-  reason and the remedy (the repository's tag rulesets), and the others still land.
+  reason and the remedy, and the others still land. The remedy is the repository's tag rulesets
+  where origin's reason names a rule; otherwise it is a rerun first, as a transient refusal
+  (`missing necessary objects`) passes on one.
 - Without `release`, `push` pushes the tags itself; another value is refused, naming the file.
 
 A repository turns it on with `release = "workflow"` and a copy of se's own
