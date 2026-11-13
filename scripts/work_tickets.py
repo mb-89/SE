@@ -7727,11 +7727,11 @@ def run_stop_check(root: Path | None, args: argparse.Namespace) -> int:
 
 README = Path(__file__).resolve().parents[1] / "README.md"
 REFERENCE_BEGIN, REFERENCE_END = generated_markers("`work_tickets.py docs`")
-REFERENCE_WIDTH = 100
 
 #: The kern component each command attaches as, by group, in the README's order
-#: (README "Commands as components"): its name, its help, and its commands by their words.
-COMMAND_COMPONENTS = (
+#: (README "Commands as components"): its name, its heading, its help, and its commands by their
+#: words. se_components.declarations reads each command's usage and help from make_parser.
+COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
     ("tickets", "Tickets",
      "The worker's local ticket queue under .se/work: tickets, notes, discovery evidence and the "
      "worktree's close.",
@@ -7753,7 +7753,9 @@ COMMAND_COMPONENTS = (
      ("integrate", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
       "suite-time", "metrics", "config", "start", "ready", "capacity", "queue", "fleet-check",
       "docs", "format")),
-)
+))
+#: What the header of these components' declarations says they are generated from.
+COMPONENT_SOURCE = "its command registry"
 #: The commands a person waits on that only read: these go through kern where it runs
 #: (se_components.routed); every other command writes, or a hook, CI or a command runs it.
 INTERACTIVE_COMMANDS = frozenset(
@@ -7761,22 +7763,12 @@ INTERACTIVE_COMMANDS = frozenset(
 
 
 def command_declarations(root: Path) -> dict[Path, str]:
-    """Each command group's component.toml under root, as docs writes it from this registry."""
-    se_components = sibling("se_components")
-    leaves = {" ".join(words): (words, command_) for words, command_ in leaf_commands()}
-    grouped = [name for *_, names in COMMAND_COMPONENTS for name in names]
-    if sorted(grouped) != sorted(leaves):
-        missing, extra = sorted(set(leaves) - set(grouped)), sorted(set(grouped) - set(leaves))
-        raise QueueError(f"COMMAND_COMPONENTS differs from the registry: missing {missing}, "
-                         f"unknown {extra}")
-    out = {}
-    for name, group, help_text, names in COMMAND_COMPONENTS:
-        declared = [se_components.Declared(" ".join((COMMANDS.name, *leaves[n][0])),
-                                           command_usage(*leaves[n]), leaves[n][1].help,
-                                           n in INTERACTIVE_COMMANDS) for n in names]
-        out[root / se_components.COMPONENTS / name / "component.toml"] = se_components.declaration(
-            name, help_text, group, declared, "`work_tickets.py docs`")
-    return out
+    """The component.toml of every SE command group under root (se_components.SCRIPTS), as docs
+    writes it from each script's parser."""
+    try:
+        return sibling("se_components").components(root)
+    except ValueError as error:
+        raise QueueError(f"docs: {error}") from error
 
 
 def stale_declarations(root: Path) -> dict[Path, str]:
@@ -7886,23 +7878,11 @@ def make_parser() -> argparse.ArgumentParser:
                         COMMANDS)
 
 
-def command_usage(words: tuple[str, ...], command_: Command) -> str:
-    """A command's usage as argparse prints it, without its "usage: " prefix."""
-    def formatter(prog: str) -> argparse.HelpFormatter:
-        return argparse.HelpFormatter(prog, width=REFERENCE_WIDTH)
-    parser = argparse.ArgumentParser(
-        prog=" ".join((COMMANDS.name, *words)), add_help=False, formatter_class=formatter)
-    add_arguments(parser, command_)
-    # Without argparse's "usage: " prefix, its continuation lines move left by as much.
-    return "\n".join(line[len("usage: "):] for line in parser.format_usage().rstrip().splitlines())
-
-
 def command_reference(root: Path) -> str:
     """The README's command reference, rendered from the command groups' declarations under root
     as kern reads them: kern's catalog of SE's commands."""
     se_components = sibling("se_components")
-    return se_components.reference(se_components.catalog(
-        root, [name for name, *_ in COMMAND_COMPONENTS]))
+    return se_components.reference(se_components.catalog(root, se_components.component_names()))
 
 
 def with_command_reference(text: str, root: Path | None = None) -> str:
