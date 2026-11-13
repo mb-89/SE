@@ -1,0 +1,534 @@
+# The Go core: design and plan
+
+Reader: the dispatcher filing the core's build, and each worker on one of its issues. This note
+owns the design of the core, its bus, its components and how SE starts it. The work issues own the
+work; once built, the core's own repository owns its contract.
+
+The owner decided on 13 Nov that SE gets a Go core again: the index, with a NATS bus. Everything
+that can be mechanized becomes a component of it; what is judgment stays a skill. Nobody starts
+the core by hand: the SE plugin's hooks start it in the background, in the cloud too. The core
+gets a repository of its own and becomes the template every new application starts from.
+
+This decision overturns the verdicts in [go-line-port.md](go-line-port.md) that called the index,
+the daemon and the bus obsolete; that file marks each one. Every number below was measured on
+13 Nov in a Claude Code cloud container (4 cores, 15 GB, Go 1.24.7 preinstalled), in
+[Measurements](#measurements).
+
+## Naming
+
+| word | meaning |
+|---|---|
+| **module** | a pinned repository: `se.toml [modules.<name>]`, synced by `se_modules.py` |
+| **component** | a part that plugs into the core: it declares inputs, outputs, config and commands |
+| **command** | what a component or a script offers a person or an agent |
+| **core** | the index (names, store, snapshots, catalog), its bus and its host process |
+| **application** | a repository built on the core; SE is one |
+
+The Go line's word for a plug-in, "module", is not reused. The core's repository is itself a
+module of every application that pins it.
+
+## The core
+
+The core is the Go line's index, nearly unchanged, hosted on quackitect v5's bus. It holds no
+business logic and no line of it names a component.
+
+### What comes back from the Go line
+
+From `ff01204` (`spec/index.md`, `src/index/index.go`, `module.go`, `catalog.go`, `wiring.go`,
+`indextest/`), about 1,600 lines of Go with their tests:
+
+| part | as it was | what changes |
+|---|---|---|
+| names | a path of segments with exactly one writer, a type and a built-in value | unchanged |
+| families | `session/<id>/events`: keys come and go inside one declared name | unchanged |
+| store and revision | one revision for the whole store, raised by every commit | unchanged |
+| snapshots | a run reads all its inputs at one revision | unchanged |
+| pushes and waves | a changed name runs its readers once, lowest height first | unchanged; a run may now be in another process |
+| built-in values | an unprovided name reads its writer's built-in value, marked `not provided` | unchanged; a component that is down or switched off reads the same way |
+| catalog check at start | refuses two writers, an unbound input, two types on a wire, a cycle, a missing built-in or help | gains one refusal: a wire to a component that is switched off |
+| collector | commands declared by modules, rendered by every surface | unchanged; it now gathers Python components' commands too |
+| actions | a command answers a list of requests to I/O modules, no undo | unchanged: no undo |
+| wiring file | `src/index/wiring.yaml`, embedded in the binary | `wiring.toml` in the application, read at start: a Python component is not compiled in, and Python's `tomllib` reads it for the fake core |
+| fake index | `indextest`: seed by local name, run, assert writes and requests | comes back twice, in Go and in Python, held to one contract suite |
+| host | `se serve`, a daemon on loopback HTTP with a token, idle exit | the core process; NATS replaces HTTP, see below |
+
+The Go line's GitHub snapshot comes back as names the GitHub component writes
+([GitHub in the cloud](#github-in-the-cloud)). Its I/O modules for the clock, the disk, processes
+and sessions come back as shared I/O components ([The core's repository](#the-cores-repository)).
+
+### What comes from quackitect v5
+
+From v5's `src/index/bus.go` and `spec/design_output/model.md` ("The inner protocol",
+"Processes", "Watchdogs"):
+
+| part | in v5 | taken |
+|---|---|---|
+| embedded NATS server | `server.NewServer` on `127.0.0.1`, `RANDOM_PORT`, a 24-byte token, `NoLog`, `NoSigs`, no JetStream, no disk | yes, as it is |
+| subjects | `get.`, `val.`, `run.`, `in.`, `commit.`, `act.`, `io.`, `lease.` | yes, renamed and reduced in [Subjects](#subjects) |
+| the standing file | `.se/.runtime/standing.json`: bus port, token, pid, stamp | yes; a `pid` that runs nowhere reads as absent |
+| detached start | `Setsid` on Unix, a detached process on Windows (`src/index/detach_*.go`); a claim file while one caller starts it | yes, for the hooks' start |
+| leases | a heartbeat on `lease.<part>` from the work loop itself; a lapsed lease marks names stale | yes, for components and for sessions |
+| placements | instances grouped into processes by config | yes: Go components run inside the core by default, other languages in their own process |
+| the stamp | the hash of the Go type package; a peer with another stamp is refused | becomes the contract version, since Python peers cannot share Go types |
+| SQLite, the `files/` mirror, folds, views, chunks, the LSP relay, operations, the cage | | not taken; each can return as a component when an application needs it |
+
+The one decision that is SE's own: v5 lets clients in over HTTP `/v1` and keeps NATS for its own
+processes. The core speaks NATS alone, to components and clients alike. One protocol means one
+client library per language, and NATS's text protocol needs about 150 lines of standard-library
+Python (measured: attach and round trip in 2.3 to 2.8 ms).
+
+### Single writer, enforced by the bus
+
+v5 shows one shared token to every peer. The core gives each component instance a user of its
+own, with NATS permissions that let it publish only on its own subjects. A Python component cannot
+commit another's name even by mistake; the Go line's "a commit names the module instance" becomes
+a refusal of the server itself.
+
+| user | may publish | may subscribe |
+|---|---|---|
+| `core` | everything | everything |
+| a component instance `<i>` | `commit.<i>`, `lease.<i>`, `in.<i>`, `get.>`, `call.>` | `run.<i>`, `cmd.<i>.>`, `io.<i>.>` for an I/O component, `val.>` |
+| `client` (commands, hooks) | `call.>`, `get.>`, `hook.>` | `val.>`, its own inbox |
+
+The core writes the users and their random passwords into the standing file, readable by the
+owner of the checkout alone, and hands each spawned component its own through its environment
+(`CORE_BUS`, `CORE_USER`, `CORE_TOKEN`).
+
+## The component contract
+
+### A component declares itself in one file
+
+Each component has a `component.toml` beside its code. The core reads every declaration at start
+and checks the whole catalog before any component process runs, so the check costs milliseconds
+and a broken catalog never starts. The process, once attached, must declare the same hash.
+
+```toml
+name = "fleet"
+contract = 1
+io = false                       # an I/O component sets true; only it reaches the outside
+help = "What is stuck or stray, with its remedy."
+
+[inputs]
+issues = "github.issues"         # local port = type; the wiring binds the port to a name
+pulls  = "github.pulls"
+
+[outputs.findings]
+type = "fleet.findings"
+builtin = []
+help = "Each stuck or stray piece of work, with its remedy."
+
+[config.lease_hours]
+type = "int"
+builtin = 3
+help = "How long in-progress work may go without a push."
+
+[commands.fleet-check]
+usage = "fleet-check [--json]"
+summary = "List what is stuck or stray."
+group = "Fleet"
+class = "interactive"            # a person waits on it: first line within 1 s
+session = true                   # offered to the agent as a command
+
+[requests]
+comment = "github.comment"       # a local request port, bound to an I/O verb by the wiring
+```
+
+Types are named JSON shapes. The core's repository owns the shared ones (`github.issues`,
+`session.event`); an application's own live in its `types/` folder. The Go side generates structs
+from them, the Python side reads them as dicts, and the contract suite round-trips each.
+
+### Subjects
+
+A name's segments become tokens: `fleet/findings` rides as `fleet.findings`.
+
+| subject | shape | sender, answerer |
+|---|---|---|
+| `get.<name>` | request: the value, its revision, `not provided` or `stale` | any peer, the core |
+| `val.<name>` | publish: each new value, its revision and the name's previous revision | the core, after a commit |
+| `run.<i>` | publish: an input of `<i>` moved, with the snapshot's revision | the core, to the instance |
+| `in.<i>` | request: the instance's inputs at that revision | the instance, the core |
+| `commit.<i>` | request: writes and requests; answer accepted or refused with the reason | the instance, the core |
+| `cmd.<i>.<command>` | request: arguments and the revision; answer a result: text, writes, requests | the core, the instance |
+| `call.<command>` | request with a reply inbox: zero or more progress lines, then the result | a client, the core |
+| `io.<i>.<verb>` | request: one request going out | the core alone, the I/O component |
+| `hook.<event>` | request: a host's hook event; answer the effects | the hook client, the core |
+| `lease.<i>` | publish: a heartbeat from the work loop | any part, the core |
+
+A watch is a subscription: `val.github.>` sees every GitHub name. A subscriber that misses a push
+sees a previous revision that does not match its own and sends a `get` (v5's "A push names its
+predecessor").
+
+`call.` streams so a command keeps the [feedback budgets](../README.md#feedback-budgets): the core
+sends `working, nothing to show yet` after half a second without a line, and every
+`Phase: <what>` a long command announces.
+
+### How a component in another language attaches
+
+A component in any language with a NATS client attaches the same way:
+
+1. The core spawns it as the wiring's placement says (`command = ["uv", "run", "python", "-m",
+   "<pkg>"]`), with its bus address, user and token in the environment.
+2. It connects, publishes its declaration hash on `commit.<i>`, and the core refuses a hash that
+   differs from `component.toml`'s.
+3. It subscribes to `run.<i>` and `cmd.<i>.>`, reads `in.<i>` on each run, answers with
+   `commit.<i>`, and beats on `lease.<i>` from its own loop.
+
+Python comes first, with a standard-library SDK in the core's repository (`python/core/`): the
+NATS peer, a runner that reads `component.toml` and dispatches to decorated functions, and the fake
+core. It adds no dependency to SE, whose scripts run on the standard library today.
+
+```python
+from core import component
+
+fleet = component("fleet")            # reads component.toml beside this file
+
+@fleet.derived("findings")
+def findings(issues, pulls, config):
+    return stuck(issues, pulls, config["lease_hours"])
+
+@fleet.command("fleet-check")
+def fleet_check(args, inputs, say):
+    say("Phase: reading")             # a progress line on the caller's inbox
+    return render(inputs["findings"])
+```
+
+A Go component is a package that registers the same declaration; it runs inside the core's
+process unless a placement moves it out. The Go contract and the Python contract are one contract:
+one suite runs against both.
+
+### The fake core
+
+Every component is tested alone, against a fake core, and never against a running bus:
+
+| step | Go (`coretest`) | Python (`core.fake`) |
+|---|---|---|
+| build | a catalog from the component's `component.toml` alone, checked | the same |
+| seed | inputs and config by local name | `fake.seed(issues=[...], lease_hours=3)` |
+| run | a derivation, or a command with its arguments | `fake.run("fleet-check", "--json")` |
+| assert | the writes and the requests, by local name; the progress lines | the same |
+| answer | each request gets the answer the case hands it, so a continuation runs | the same |
+
+One contract suite, in the core's repository, runs against the Go fake, the Python fake and the
+real core with a fixture component attached over the bus. A fake that drifts fails there. SE's
+own suite tests its components against the Python fake only, so it needs no Go and keeps its 60 s
+budget; the real-core runs are the core's CI.
+
+## Start on invoke
+
+### How the binary arrives
+
+| path | cost measured | verdict |
+|---|---|---|
+| a prebuilt release per platform, downloaded and checked against its checksum | an equal-sized release (nats-server, 6.35 MB) in 0.43 to 0.71 s; SE's core is about 12.0 MB gzipped, so about 1 s | **chosen** |
+| built by the environment's setup script | 18.7 to 18.9 s cold compile, 23.0 s with module downloads; plus 2.5 s for a toolchain where the image lacks the version | fallback only |
+| built at session start | the same 19 to 23 s on every new container | refused: twenty times the budget |
+
+The core's release workflow builds `linux`, `darwin` and `windows` for `amd64` and `arm64`,
+attaches them with a `SHA256SUMS` file to the core's tag, and an application's release does the
+same for its own binary (core plus its Go components). The binary is fetched into
+`~/.se/bin/<app>-<version>` and kept: a version already there costs nothing.
+
+- **Cloud:** the environment's setup script fetches it beside the SE clone, before Claude starts,
+  outside any budget. A failed fetch prints one line and the session starts without the core.
+- **Local:** `bootstrap.sh` fetches it on the first start of a new version, in the background; that
+  session works without the core until it lands, and the greeting says so.
+- **A checkout of the core or of an application's Go code:** built from source (warm build 0.12 s,
+  one changed file 0.9 to 1.0 s), so its own changes run.
+
+### Lifetime: bound to the session
+
+One core runs per checkout and serves every session in it; a cloud container has one checkout,
+so each cloud session has its own core.
+
+- Each session holds a lease the hooks renew (SessionStart takes it, each hook event renews it,
+  SessionEnd returns it). A sub-agent renews its session's lease and starts nothing.
+- The core ends when no session holds a lease, after a grace of 60 s, or after `idle` (built in
+  30 minutes) without any event, whichever comes first.
+- It ends with the container in the cloud whatever the lease says; nothing in it needs to
+  survive, because GitHub and the disk own every durable fact.
+
+### The start budget: feedback within 1 s
+
+| step | measured | budget left of 1 s |
+|---|---|---|
+| SessionStart hook spawns the core detached and returns | Go hook client 5 to 6 ms | 994 ms |
+| the core's process start to a bus that accepts connections | 27.0 to 28.2 ms embedded (v5's `ReadyForConnections` polls every 25 ms); 7.6 to 8.9 ms for a standalone server | 966 ms |
+| first request answered over the bus | 28.4 to 32.8 ms after process start | 967 ms |
+| a Python component attached and answering | 2.3 to 2.8 ms over the bus, 36 to 40 ms with the interpreter's start, 46 to 61 ms through `uv run` | about 900 ms |
+
+The greeting stays `se_start.py status`'s, within its 1 s budget; it reads `get.core.health` with a
+200 ms wait and says `core: starting` where none answers yet. Nothing waits for Python components:
+their names read as `not provided` until they attach.
+
+## Nobody starts the index by hand
+
+The SE plugin's hooks start the core and post every event to it. Each hook is one command,
+`<app> hook <event>`, the application's own binary as a client: it reads the host's JSON on
+stdin, sends it on `hook.<event>` with a 500 ms wait, and prints the answer as the host's hook
+JSON. Where no core answers, it prints nothing and exits 0: a hook fails open, measured at 5 ms.
+
+| hook | posts | what it gains |
+|---|---|---|
+| SessionStart | the session id, the checkout, the agent | spawns the core detached where the standing file names none (v5's claim file keeps two hooks from starting two), takes the session's lease; the greeting gains live names: what is due, stuck or waiting |
+| SubagentStart | the agent id and type under the session | the sub-agent shares the session's core; the core knows its role, so a worker is handed its ticket queue and its work issue's freshness |
+| UserPromptSubmit | the prompt's id | context the core holds back for it: a work issue changed since it was read, an escalation pending |
+| PreToolUse | the tool and its input | guards the rules mechanically, as the cage did: a hand-typed `git push` (`work_tickets.py push` is the door), `--no-verify` ([pub-006](../src/skills/work-model/references/rules.md#pub-006-never-bypass-the-hooks)), a write outside the worker's box; each guard is a component, switched on per role |
+| PostToolUse | the tool, its input and its response | the GitHub component reads the session's GitHub tool answers ([GitHub in the cloud](#github-in-the-cloud)); a ticket move or a commit updates the delivery names |
+| Stop, SubagentStop | the stop | `stop-check` answers from the delivery names in milliseconds (today 0.35 to 0.39 s through `uv`) |
+| SessionEnd | the end | returns the lease; the last one out stops the core after its grace |
+
+Every event lands in the family `session/<id>/events`, which the session I/O component also
+appends to `.se/.runtime/sessions/<id>.jsonl`, so the core reads a session's history back after a
+restart.
+
+From v5 carries over: the detached start, the claim file, the standing file, the post and its
+effects (`pass`, `context`, `block`, `result`), and the rule that a hook fails open. v5's hooks
+module is JavaScript for its host; Claude Code's hooks are commands, so the client is the core's
+own Go binary.
+
+## GitHub in the cloud
+
+No token reaches code in a cloud session; the session's GitHub tools reach GitHub, and `git`
+reaches it through the session's proxy. The GitHub component is one I/O component with two
+backends, chosen at start:
+
+- **token**, where `gh auth token` or `GH_TOKEN` gives one: the Go line's REST client, in process,
+  with ETags, a refresh every 2 minutes and the rate-limit pacing of SE#750.
+- **relay**, where none does: a request going out becomes an entry of `github/outbox`, with the
+  same tool names and arguments as today's hand-off plan. The agent runs it with its GitHub tools.
+  The PostToolUse hook hands the tool's response to the core, which matches it to the entry,
+  answers the request and runs the command's continuation.
+
+Every GitHub tool answer the session receives, a plan's or not, lands in the snapshot
+(`github/issues/<n>`, `github/pulls/<n>`, `github/comments/<n>`) with the time it was read, so the
+next command reads it from the core instead of asking for a file. The core hands the agent the next
+outbox step as context on the hook that follows each tool call, and `<app> github next` prints it.
+
+### Measured against today's `integrate` hand-off
+
+| what the session does | today, without gh | with the relay |
+|---|---|---|
+| GitHub tool calls | about 13 and the check polls: read the pull request and the issue, the pause search, open or update, the check runs every 30 s, the merge, read the landing pull request, then five close-out calls | the same: the tools are the only door, so no call goes away |
+| command runs | two: `integrate ... --pr-description --issue-body --branch`, then `integrate --read-back ...` | one: the read-back is the continuation of the merge's answer |
+| tool answers retyped into files | three: the pull request's description, the issue, the landing description | none |
+| what each retyping costs | this issue's JSON is 9,000 bytes; this worker wrote it twice, before and after a body change | nothing |
+| a step done wrong | a file saved from a summary, a stale body | the core holds the tool's own answer |
+
+The gain is the retyped answers and the second run, not fewer GitHub calls. The same relay serves
+every command that hands off today: `intake`, `field-report --check`, `deliver`, `fleet-check`,
+`refs`, `route` and `file`.
+
+## Scripts are ad hoc, components are long-term
+
+A script is what an agent writes while working. Once something is judged useful to the whole
+system, it becomes a component and attaches through the core, in Go or in another language.
+
+- **Ad hoc, kept out of the repository:** a script goes in the session's scratch directory, as
+  today. An ad hoc component goes under `.se/components/<name>/` (ignored), with its
+  `component.toml`; `<app> component add <path>` restarts the core with it, about 30 ms, for this
+  checkout alone. An agent may write one in Python over NATS at any time.
+- **Promoted:** a component the system keeps goes to `components/<name>/` in the application, or
+  into the core's repository when every application needs it. It is tested against the fake core
+  like any other.
+- **Python may stay Python.** It is ported to Go only where porting pays, below.
+
+| port a Python component to Go when | keep it Python when |
+|---|---|
+| it is on a hook's or the greeting's path: an interpreter costs 30 to 60 ms a run, a Go call 5 ms | it wraps Python itself: pytest, the overhaul's AST facts |
+| a person waits on it and it runs often | it renders a page or a deck |
+| it moves into the core's repository: a shared component needs no Python on the application's machines | only this application uses it, and it meets its budgets |
+
+**The rule it changes.** SE's AGENTS.md names no place for ad hoc scripts; the rule book's
+[gen-001](../src/skills/work-model/references/rules.md#gen-001-mechanize-first) cites the Go
+line's `src/scripts/` as a frozen implementation. The new rule, for AGENTS.md and gen-001: an ad
+hoc script stays in the scratch directory or `.se/components/`, never tracked; what is tracked
+under `components/` is a component, with its declaration and its tests.
+
+**Promotion is mechanical.** The session component counts, from PostToolUse, each run of an
+untracked script and each call of an ad hoc component, by its path's hash, into
+`usage/adhoc`. `retro.py collect` reads it: one used in three or more sessions since the last
+retro is a promotion candidate in the retro's facts, which the dispatcher files as work. The
+overhaul reads the components' call times against their budgets and names the port candidates.
+
+## The core's repository
+
+The core gets a repository of its own; creating it is the owner's step, since no session here can.
+
+- **Name:** `mb-89/core`, Go module `github.com/mb-89/core`. The binary an application builds is
+  named after the application (`se` for SE); the bare one is `core`.
+- **What belongs in it:** what every application needs, and nothing that names an application:
+  the core, the bus, the fakes, the contract suite, the Python SDK, the template, the reusable CI,
+  and the generic components.
+- **What stays in an application:** every component that knows its domain. SE's work issues, field
+  reports, fleet check, retro and review stay in SE.
+
+```text
+core/
+  go.mod                  github.com/mb-89/core
+  index/                  names, store, snapshots, catalog, waves (from ff01204)
+  bus/                    embedded NATS, users and permissions, standing file
+  host/                   start, detach, leases, placements, idle end, hook client
+  coretest/               the Go fake core
+  python/core/            the Python SDK and fake core
+  contract/               the one contract suite, run against both fakes and the real core
+  components/             clock, disk, proc, git, session, github: generic, each switchable
+  types/                  the shared JSON types
+  template/               the bare application
+  .github/workflows/      check.yml, release.yml, battery.yml (reusable)
+```
+
+**Pinning it.** An application pins the core in `se.toml [modules.core]`, as SE pins obs. Its
+`go.mod` also requires it; `se_modules.py` reads the version from `go.mod` where the module says
+`go = true`, so the pin has one owner.
+
+### Switching components on and off
+
+The application's `wiring.toml` names its instances; a shared component runs only where an
+instance names it, and `enabled = false` switches one off without deleting its wires:
+
+```toml
+[instances.github]
+component = "core/github"
+config = { refresh = "2m" }
+
+[instances.clock]
+component = "core/clock"
+enabled = false
+
+[wires]
+"fleet.issues" = "github/issues"
+```
+
+The core refuses to start on a wiring whose input is bound to an output of a switched-off or
+missing component, naming the wire's line and the switch's line. An input that may go without
+marks itself `builtin = true` in the wiring and reads the built-in value, marked `not provided`.
+
+### A bare application, and `se new app`
+
+A bare application contains the core pinned, an empty `wiring.toml`, `cmd/<name>/main.go` (the
+core plus the application's Go components, none yet), `components/`, `types/`, `se.toml` with its
+`[project]`, `[tests]` budget and `[modules.core]`, an `AGENTS.md`, a `tests/` folder whose
+battery starts the bare core, and a `check.yml` that calls the core's reusable `battery.yml`.
+
+`se new app <name> --path <dir>` copies the core's `template/` at its pin, fills in the name,
+initializes git with the project identity and makes the first commit. Creating the GitHub
+repository, its ruleset and its first push stay the owner's steps, which SE names as one line. A
+new application then gets components by adding instances, CI from the reusable workflow, and its
+test budget from `se.toml [tests]`, in the same shape as SE's.
+
+SE becomes one application on the core: its binary is `se`, its components live in SE's
+`components/`, and its Python scripts attach as components ([Migration](#migration)).
+
+## Migration
+
+SE works after every step: until a command's component exists, its script runs as today, and where
+no core answers, every hook and command falls back to today's path. Each step is one issue in the
+[plan](#the-plan).
+
+| today | first | then | stays a skill |
+|---|---|---|---|
+| `work_tickets.py` | attaches as Python components, one per group (tickets, issues, delivery, integration), at step 8; the CLI keeps its words | its GitHub reads and writes go through the GitHub component (step 9); `queue`, `status` and `ready` port to Go when the greeting needs them | writing the field report, judging a delivery, the dispatcher's choices |
+| `review.py` | Python component (`brief`, `file`) at step 8 | stays Python | the reviewer's find, verify and judge |
+| `retro.py` | Python component at step 8 | `retro due` ports to Go (step 10): the greeting reads it | the retro's judgment |
+| `overhaul.py` | Python component at step 8 | stays Python: its facts are Python's AST | whether the design is still right |
+| `fleet-check` | Python component at step 8 | ports to Go (step 10): a derivation over the GitHub names, pushed to the greeting and the integrator | which remedy to apply |
+| `stop-check` | the Stop hook calls it as today | ports to Go (step 11): answered from the delivery names within the hook | none |
+| `timeline.py` | Python component at step 8 | reads the GitHub names instead of its own calls (step 9); stays Python: it renders a page | none |
+| `deck.py` | Python component at step 8 | stays Python: it renders the deck | the decision skill |
+
+The public check, its hooks and `se_plugin.py` stay scripts: git hooks and CI run them where no core
+runs.
+
+## What the Markdown gains
+
+Once the core runs, the skills, agents and specs read from it instead of restating or recomputing:
+
+- **The catalog:** every command's usage, summary and help from its one declaration, through
+  `<app> help <command>`. The README's command reference is rendered from the catalog, Python and
+  Go components alike, so no skill copies a usage line.
+- **The greeting and SE's first turn:** what is due (a retro, an overhaul), stuck (the fleet
+  findings), waiting on the person (escalations), live instead of from an hour-old cache.
+- **The work model:** a worker's ticket queue, its work issue's freshness (a comment or body edit
+  since it was read, pushed on UserPromptSubmit), and whether its delivery passes the Stop hook,
+  as names it reads, not commands it reruns.
+- **The integrator:** the queue from the GitHub names within 1 s, instead of about three GitHub
+  round trips per run; a landing's state as the continuation holds it.
+- **The rule book:** each rule's live state (`rules/<id>/hits`: the public check's last verdict, the
+  dangling references) next to its prose, so a skill links the rule and the core says whether it
+  holds now.
+- **Specs and notes:** their links and anchors resolved by a references component as files change,
+  so a dangling link shows during the edit, not first in `tests/test_references.py`.
+- **In the cloud:** every GitHub answer the session read, readable by the next command, so no
+  skill tells the agent to save a tool's answer to a file.
+
+## The port plan superseded
+
+[go-line-port.md](go-line-port.md) marks each verdict this design overturns as **superseded**,
+with a link here. What it ported in Python (review, retro, overhaul, fleet check, the Stop hook,
+the hygiene checks) stays and becomes the migration's input. SE#884 removes that file once this
+design has taken over what is still true in it.
+
+## Measurements
+
+Measured on 13 Nov in a Claude Code cloud container: 4 cores, 15 GB, Linux amd64, Go 1.24.7
+preinstalled, every host reachable through the session's proxy (proxy.golang.org, github.com
+releases, go.dev). The probe is a 40-line Go program that starts an embedded NATS server on
+loopback with a token, dials it and answers one request; nothing of it is in SE.
+
+| what | command | wall time |
+|---|---|---|
+| module download for NATS | `go get github.com/nats-io/nats-server/v2@v2.11.9 github.com/nats-io/nats.go@v1.45.0` | 7.1 s |
+| cold build, no module or build cache | `go clean -modcache; rm -rf $GOCACHE; go build -o probe .` | 23.0 s (user 52.7 s) |
+| cold compile, modules present | `rm -rf $GOCACHE; go build -o probe .` (twice) | 18.7 s, 18.9 s |
+| warm build, nothing changed | `go build -o probe .` (3 runs) | 0.118 to 0.125 s |
+| warm build, one file changed | `echo '// edit' >> main.go; go build -o probe .` (3 runs) | 0.90 to 1.03 s |
+| the Go line's `se`, for comparison | `go build ./cmd/se` at `ff01204`: cold, cold compile, warm | 13.0 s, 12.7 s, 0.12 s |
+| binary size | the probe; gzipped | 22.6 MB; 12.0 MB |
+| release download | `curl -L -o n.tgz https://github.com/nats-io/nats-server/releases/download/v2.11.9/nats-server-v2.11.9-linux-amd64.tar.gz` (6.35 MB, 3 runs) | 0.71 s, 0.64 s, 0.43 s |
+| unpack | `tar xzf n.tgz` | 0.12 s |
+| a Go toolchain download | `curl -L https://go.dev/dl/go1.25.4.linux-amd64.tar.gz` (59.8 MB) | 2.49 s |
+| embedded NATS start | `./probe`: server ready, client dialled, first request answered (5 runs) | ready 27.0 to 28.2 ms, answered 28.4 to 32.8 ms, process 33 to 38 ms |
+| standalone NATS start | `nats-server -a 127.0.0.1 -p 14222 --auth <token>` until its `INFO` line (3 runs) | 7.6 to 8.9 ms |
+| a Python peer on the bus | standard-library socket: `CONNECT`, `SUB`, `PUB`, the `MSG` back (3 runs) | 2.3 to 2.8 ms; 36 to 40 ms with `python3 -I` |
+| Python start | `python3 -I -c "import socket,json"`; `uv run -q python -c pass` | 30 to 31 ms; 46 to 61 ms |
+| a Go hook client | dial, `hook.Stop` request, answer from a Python responder (5 runs); with no server | 5 to 6 ms; 5 ms, failing open |
+| today's Stop hook | `uv run --no-project python scripts/work_tickets.py stop-check` (3 runs) | 0.35 to 0.39 s |
+
+The NATS server adds about 6 s to a cold compile against the Go line's `se`, and 10 MB to the
+binary. quackitect v5 asks for Go 1.25, which this image lacks; the core's `go.mod` names the
+version the images carry, or the fallback build fetches the toolchain (2.5 s).
+
+## Risks and open points
+
+- **PostToolUse and MCP answers.** The relay assumes the PostToolUse hook carries a GitHub tool's
+  response in the cloud. Step 6 probes it first; where it does not, the relay keeps today's files
+  as its fallback and the gain of [GitHub in the cloud](#github-in-the-cloud) is lost.
+- **A release pipeline.** Each application that has Go components builds six binaries per release;
+  the core's reusable release workflow carries it, and an application without Go components runs
+  the core's own binary.
+- **Windows.** The detached start and the hook client run on Windows in v5; the core's CI runs its
+  contract suite on Windows from step 2.
+- **Two languages in one application.** SE's suite stays Python against the Python fake; the Go
+  side is tested in the core's repository. An application with Go components runs both in its
+  `battery.yml`, under one budget.
+
+## The plan
+
+The steps, in order; the field report of SE#971 proposes each as a worker-sized issue with its
+goal and blockers, and the dispatcher files them.
+
+| step | what | repository |
+|---|---|---|
+| 1 | the core's repository exists, with a ruleset like SE's | the owner |
+| 2 | the index from `ff01204`, in process, with its fake and fixture components | core |
+| 3 | the bus, users and permissions, the standing file, detached start, leases, idle end | core |
+| 4 | the Python SDK, the Python fake core, the contract suite against both fakes and the real core | core |
+| 5 | the release workflow, `battery.yml` and the bare template | core |
+| 6 | SE pins the core, fetches its release, SessionStart starts it and the greeting names it; the hook client posts every event, probing PostToolUse | SE |
+| 7 | the GitHub component: token and relay backends, the snapshot names | core |
+| 8 | SE's script commands attach as Python components; the README's command reference renders from the catalog | SE |
+| 9 | `integrate` and every hand-off run through the relay: no retyped files | SE |
+| 10 | fleet check and retro due as Go components, read live by the greeting | SE |
+| 11 | `stop-check` answered from the core within the hook | SE |
+| 12 | ad hoc components, `usage/adhoc`, and the promotion facts in the retro | SE |
+| 13 | `se new app` | SE |

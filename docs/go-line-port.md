@@ -4,6 +4,10 @@ Reader: a worker on one of the port issues listed under [The plan](#the-plan), a
 them. It is the one place that says what each Go capability became; the port issues own the work,
 the commands they add own the behaviour.
 
+**Superseded in part, 13 Nov.** The owner decided that SE gets a Go core with a NATS bus again
+([go-core.md](go-core.md)). Every verdict below marked **superseded** is overturned there; the
+rest stands. What this file ported in Python is the migration's input.
+
 The Go line is `main`'s history at ff01204 (tag `archive/go-line`): about 28,000 lines of Go plus
 17,000 of tests, a Claude plugin, a per-workspace daemon and a fleet of unattended cloud boxes.
 Read it with `git show ff01204:<path>` and `git ls-tree -r ff01204` after
@@ -38,23 +42,23 @@ place for it, with the reason), **port the idea** (rebuilt for today's model), *
 
 | Go capability | What it did | SE today | Verdict | Size |
 |---|---|---|---|---|
-| index core (`src/index`) | names with one writer, a store, snapshots, pushes, built-in values | nothing | obsolete: one process per command, no shared in-memory state to guard; single point of truth is the rule book's [gen-002](../src/skills/work-model/references/rules.md#gen-002-single-point-of-truth) | L |
-| wiring file and modules (`wiring.yaml`, `module.go`) | binds module ports to names; one package per module | nothing | obsolete with the index; the migration it planned never moved a module | M |
-| collector (`commands.go`, `help.md`, `se manifest`) | one command registry renders the CLI, `/se`, help and manifests | `work_tickets.py docs` renders the README from its argparse registry; `se_plugin.py build` renders the host layouts | covered | S |
-| daemon (`se serve`, `start`, `stop`, `restart`, `internal/daemon`) | per-workspace process holding the index, loopback HTTP, idle exit | nothing | obsolete: cloud containers are short-lived, a cold Go build takes 13 s, and no state needs a host | M |
-| session switch and panel (`on`, `off`, `ui`, `hooks/register.tsx`) | forwards every session event to the daemon; a button grid in a pane | SessionStart hook only (`bootstrap.sh --hook`) | obsolete: SE is on whenever its plugin loads; no pane is used | M |
-| snapshot (`snapshot.go`, `github/snapshot`) | warm copy of what `issue pull` reads, refreshed every 2 minutes | nothing | idea covered by SE#748 (a cache with stated freshness); no daemon | M |
+| index core (`src/index`) | names with one writer, a store, snapshots, pushes, built-in values | nothing | **superseded**: the index returns as the core ([go-core](go-core.md#the-core)). Was: obsolete: one process per command, no shared in-memory state to guard; single point of truth is the rule book's [gen-002](../src/skills/work-model/references/rules.md#gen-002-single-point-of-truth) | L |
+| wiring file and modules (`wiring.yaml`, `module.go`) | binds module ports to names; one package per module | nothing | **superseded**: the wiring returns as `wiring.toml`, modules as components ([go-core](go-core.md#the-component-contract)). Was: obsolete with the index; the migration it planned never moved a module | M |
+| collector (`commands.go`, `help.md`, `se manifest`) | one command registry renders the CLI, `/se`, help and manifests | `work_tickets.py docs` renders the README from its argparse registry; `se_plugin.py build` renders the host layouts | **superseded**: the core's catalog gathers every component's commands ([go-core](go-core.md#what-the-markdown-gains)). Was: covered | S |
+| daemon (`se serve`, `start`, `stop`, `restart`, `internal/daemon`) | per-workspace process holding the index, loopback HTTP, idle exit | nothing | **superseded**: the core starts on invoke, from a release, bound to the session ([go-core](go-core.md#start-on-invoke)). Was: obsolete: cloud containers are short-lived, a cold Go build takes 13 s, and no state needs a host | M |
+| session switch and panel (`on`, `off`, `ui`, `hooks/register.tsx`) | forwards every session event to the daemon; a button grid in a pane | SessionStart hook only (`bootstrap.sh --hook`) | **superseded** for the switch: every hook posts to the core ([go-core](go-core.md#nobody-starts-the-index-by-hand)); the pane stays obsolete. Was: obsolete: SE is on whenever its plugin loads; no pane is used | M |
+| snapshot (`snapshot.go`, `github/snapshot`) | warm copy of what `issue pull` reads, refreshed every 2 minutes | nothing | **superseded**: the GitHub component's names are the snapshot ([go-core](go-core.md#github-in-the-cloud)). Was: idea covered by SE#748 (a cache with stated freshness); no daemon | M |
 | `status` | whether a daemon answers and which commits SE came from | `se_start.py status` (version, modules, update check) | covered | S |
 | `update`, stale-se refusal (`update`, `stale.go`, `checkout.go`, `commit.go`) | pull main, rebuild, refuse an se older than main | `se_start.py refresh`; pinned se per check ([pub-007](../src/skills/work-model/references/rules.md#pub-007-one-se-version-per-check)) | covered | S |
-| clock, disk, proc, http, session I/O (`internal/io/*`) | one module per outside thing, with fakes held to contract suites | tests fake `run_gh`, git in temporary repositories, injected clocks (work model "Tests") | covered as a test rule; the module layer is obsolete | M |
-| GitHub client (`io/github`) | REST in process, ETags, the owner's token, a recorded fake | `work_tickets.py`'s door (gh) and, without gh, the hand-off plan for the session's GitHub tools | covered; in the cloud no token reaches code, so the Go client could not run there | L |
+| clock, disk, proc, http, session I/O (`internal/io/*`) | one module per outside thing, with fakes held to contract suites | tests fake `run_gh`, git in temporary repositories, injected clocks (work model "Tests") | **superseded**: they return as the core's shared I/O components ([go-core](go-core.md#the-cores-repository)). Was: covered as a test rule; the module layer is obsolete | M |
+| GitHub client (`io/github`) | REST in process, ETags, the owner's token, a recorded fake | `work_tickets.py`'s door (gh) and, without gh, the hand-off plan for the session's GitHub tools | **superseded**: the GitHub component, token backend locally and relay in the cloud ([go-core](go-core.md#github-in-the-cloud)). Was: covered; in the cloud no token reaches code, so the Go client could not run there | L |
 | rate-limit pacing (`github.Limit`, `quota-floor`) | back off on 403/429, pace writes, keep a quota floor | nothing | open as SE#750 (discovery: likely moot) | M |
 | budgets and call timing (`budgets.yaml`, `calls.jsonl`) | soft and hard budgets per command class; every call timed | `se.toml [tests]` budget; `se_start.py status` 1 s budget | open as SE#749 and SE#748 | M |
 | `guidance`, skills line (`internal/guidance`) | hands an issue's skills and the principles to an agent | plugin skills and agents; AGENTS.md | covered; per-role outside skills open as SE#754 | S |
 | outside plugins (`fleet plugins`, `internal/reuse`) | pinned outside plugins and skills, a list per agent tier | nothing | open as SE#754 | M |
 | models (`models.yaml`, rule `agents`) | one model per agent, held equal to the front matter | each agent's front matter in `src/agents/` | covered | S |
-| Go build and setup (`build.sh`, `RUNME.sh`, `cloud.md`) | installs Go tools into `~/.se`, builds `se` in the setup script | `bootstrap.sh` (uv, Python, modules); README "Install" | covered | S |
-| development guide (`development.md`: two clones, Windows check, daemon debugging) | how to work on the Go line | AGENTS.md | obsolete with the daemon | S |
+| Go build and setup (`build.sh`, `RUNME.sh`, `cloud.md`) | installs Go tools into `~/.se`, builds `se` in the setup script | `bootstrap.sh` (uv, Python, modules); README "Install" | **superseded**: the binary arrives as a release per platform ([go-core](go-core.md#how-the-binary-arrives)). Was: covered | S |
+| development guide (`development.md`: two clones, Windows check, daemon debugging) | how to work on the Go line | AGENTS.md | **superseded**: the core's repository carries its own guide ([go-core](go-core.md#the-cores-repository)). Was: obsolete with the daemon | S |
 
 ### The work model: issues and the fleet
 
@@ -100,12 +104,15 @@ place for it, with the reason), **port the idea** (rebuilt for today's model), *
 | Go capability | What it did | SE today | Verdict | Size |
 |---|---|---|---|---|
 | battery (`tests/check.sh`, `internal/battery`) | lint, `go test`, deadcode, plugin validation, budgets, a decoy | `uv run pytest -q` in budget; CI `check` | covered | M |
-| `se rules`: `go-in-src`, `io-module`, `module-imports`, `library-users`, `plugin-clock`, `fake-contract`, `test-package`, `test-swap`, `fast-test`, `rule-of-five`, `programs`, `help-sentences`, `budgeted` | Go and index layout rules | the suite's budget; test rules in the work model | obsolete with the Go code | M |
+| `se rules`: `go-in-src`, `io-module`, `module-imports`, `library-users`, `plugin-clock`, `fake-contract`, `test-package`, `test-swap`, `fast-test`, `rule-of-five`, `programs`, `help-sentences`, `budgeted` | Go and index layout rules | the suite's budget; test rules in the work model | **superseded** for `io-module`, `module-imports`, `library-users` and `fake-contract`: the core's battery holds components to them ([go-core](go-core.md#the-fake-core)). Was: obsolete with the Go code | M |
 | `se rules`: `agents`, `manifest`, `reader` | agents' models, generated sections, a reader line per spec | `se_plugin.py check`, `work_tickets.py docs --check`, agent-definition tests | covered | S |
 | `se rules`: `repo-path`, `se-command` | no path or command that does not exist | nothing | open as SE#755 | S |
 | `se rules`: `no-binary`, `large-file`, `todo-issue` | no tracked binaries, no oversized files, no TODO without an issue | `tests/test_repository.py`, with reasoned allow lists | ported (#882) | S |
 
 ## Start on invoke
+
+**Superseded**: the core starts on invoke through the plugin's hooks
+([go-core](go-core.md#start-on-invoke)). Was:
 
 The se agent gets every ported capability as a **command its scripts provide**, run in the
 session's own process when needed: `review.py`, `retro.py`, `overhaul.py` and
@@ -131,6 +138,9 @@ not give to code.
 
 ## Language
 
+**Superseded**: the core is Go; a component may be Go or Python
+([go-core](go-core.md#scripts-are-ad-hoc-components-are-long-term)). Was:
+
 Every part to port is Python inside SE's scripts; nothing calls for Go. Recommended for the whole
 port:
 
@@ -148,6 +158,9 @@ New commands go into scripts of their own (`review.py`, `retro.py`, `overhaul.py
 `work_tickets.py` does not grow further. The owner decides the direction in the deck (SE#865).
 
 ## Naming
+
+**Confirmed** by the owner on 13 Nov; index-like plug-ins return as components
+([go-core](go-core.md#naming)).
 
 The collision goes away with the index: the Go line's "modules" (plug-ins of the index) are pruned,
 so **module** keeps its one meaning, a pinned repository (`se.toml [modules.<name>]`,
@@ -179,6 +192,9 @@ SE#749 (cost per command), SE#750 (rate limits), SE#754 (outside plugins per rol
 (dangling references), SE#756 (pause switch), SE#752 (review cadence, the owner's).
 
 ## Pruned for good
+
+**Superseded** for the first three items and the setup script that built `se`: they return in
+[go-core](go-core.md#the-core). The rest stands.
 
 Not ported, and no issue will bring them back without the owner:
 
