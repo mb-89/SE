@@ -690,6 +690,7 @@ def test_var_names_the_identity_a_commit_would_carry(door, tmp_path: Path) -> No
 
 def test_a_shallow_clone_names_its_boundary_and_lists_no_commit_below_it(door, tmp_path: Path) -> None:
     root = project(tmp_path)
+    assert git(root, "rev-list", "--all", "--count") == "0"
     shas = [commit(root, {"a.txt": f"{index}\n"}, f"change {index}") for index in range(4)]
     full = fake_git.clone(root, tmp_path / "full")
     assert git(full, "rev-parse", "--is-shallow-repository") == "false"
@@ -701,6 +702,11 @@ def test_a_shallow_clone_names_its_boundary_and_lists_no_commit_below_it(door, t
     assert git(clone, "rev-list", "HEAD", "--").split() == [shas[3], shas[2]]
     assert git(clone, "rev-list", "HEAD", "--not", shas[2], "--").split() == [shas[3]]
     assert git(root, "rev-list", "HEAD", "--not", shas[1], "--").split() == [shas[3], shas[2]]
+    git(root, "branch", "side", shas[0])
+    assert git(root, "rev-list", "--all", "--count") == "4"
+    assert git(root, "log", "--format=%H", "HEAD^!", "--").split() == [shas[3]]
+    assert git_door.run("log", "-z", "--format=%s%x1f%B", "-2", root=root).stdout == \
+        "change 3\x1fchange 3\n\0change 2\x1fchange 2\n\0"
 
 
 HOOK = """#!/bin/sh

@@ -1,5 +1,10 @@
-"""Tests for scripts/public_check.py. Leaky sample values are assembled at runtime from
-fragments, so this file itself passes the check."""
+"""Tests for scripts/public_check.py and se's hooks that run it. Leaky sample values are assembled
+at runtime from fragments, so this file itself passes the check.
+
+git is the door's fake behind a state file (`shared_fake_git`, tests/conftest.py), which the check,
+the hooks and the setup scripts reach as child processes; the fake holds an se checkout at this
+one's root at SE_HEAD, so a verdict names that commit. SE's own checkout is checked by
+tests/test_repository.py."""
 
 from __future__ import annotations
 
@@ -10,15 +15,16 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 import fake_git
+import git_door
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = SE_ROOT / "scripts" / "public_check.py"
-SE_HEAD = subprocess.run(["git", "-C", str(SE_ROOT), "rev-parse", "HEAD"],
-                         capture_output=True, text=True, check=True).stdout.strip()
+SE_HEAD = "5e" * 20  # the commit of the se checkout the fake holds at SE_ROOT
 BS = "\\"
 AT = "@"
 
@@ -110,19 +116,30 @@ def test_generic_pattern_ignores(label: str, text: str) -> None:
     assert label not in labels(f"prefix {text} suffix")
 
 
-def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
-    )
+def git(repo: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    """`git -C repo <args>` through the door; a refusal fails the test, naming git's answer."""
+    result = git_door.run(*args, root=repo, env=env)
+    assert result.returncode == 0, f"git {' '.join(args)}: {result.stderr.strip()}"
+    return result
+
+
+def se_checkout(state: fake_git.StateFile) -> None:
+    """The se checkout the check runs from, as the fake holds it: SE_ROOT at commit SE_HEAD."""
+    with state.edit() as fake:
+        moment = datetime.now(timezone.utc)
+        fake.commits[SE_HEAD] = fake_git.Commit(fake.store_tree({}), (), "se\n", ("alice", "alice"),
+                                                ("alice", "alice"), moment, moment)
+        fake.repositories[SE_ROOT] = fake_git.Repository(SE_ROOT, False, head=SE_HEAD)
 
 
 @pytest.fixture
-def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared_fake_git: fake_git.StateFile) -> Path:
     """A repository with a generic identity and an empty, ignored local list, so a run is a full
     check; checked without the machine's ~/.se/local.toml or a machine-level list."""
     for variable in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(variable, str(tmp_path / "home"))
     monkeypatch.delenv(public_check.MACHINE_ENV, raising=False)
+    se_checkout(shared_fake_git)
     path = tmp_path / "repo"
     path.mkdir()
     fake_git.init(path, "-b", "main")
@@ -130,6 +147,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     git(path, "config", "user.email", "test" + AT + "example.com")
     git(path, "config", "commit.gpgsign", "false")
     git(path, "config", "core.hooksPath", str(tmp_path / "no-hooks"))
+    (path / ".git" / "info").mkdir(exist_ok=True)
     (path / ".git" / "info" / "exclude").write_text(f"{public_check.LOCAL_FILE}\n",
                                                     encoding="utf-8")
     (path / public_check.LOCAL_FILE).write_text("# no terms\n", encoding="utf-8")
@@ -394,8 +412,7 @@ def test_author_and_committer_identity_hits(repo: Path) -> None:
     assert " author: email-address" in result.stdout
     (repo / "README.md").write_text("changed\n", encoding="utf-8")
     env = {**os.environ, "GIT_COMMITTER_EMAIL": "bob" + AT + "corp.test"}
-    subprocess.run(["git", "-C", str(repo), "commit", "-qam", "Change readme"], env=env,
-                   check=True)
+    git(repo, "commit", "-qam", "Change readme", env=env)
     result = run_check("--repo", str(repo), "--range", "HEAD^!")
     assert result.returncode == 1
     assert result.stdout.splitlines()[0].endswith(" committer: email-address")
@@ -433,7 +450,7 @@ def test_a_foreign_committer_alone_is_refused_and_a_redacted_identity_names_no_p
     (repo / "README.md").write_text("clean\n", encoding="utf-8")
     git(repo, "add", "README.md")
     env = {**os.environ, "GIT_COMMITTER_EMAIL": "bob" + AT + "corp.test"}
-    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "Add readme"], env=env, check=True)
+    git(repo, "commit", "-qm", "Add readme", env=env)
     result = run_check("--repo", str(repo), "--range", "HEAD^!")
     assert result.returncode == 1
     hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
@@ -453,7 +470,7 @@ def test_a_commit_made_on_github_passes_only_with_the_project_author(
     (repo / "README.md").write_text("clean\n", encoding="utf-8")
     git(repo, "add", "README.md")
     env = {**os.environ, **WEB_FLOW, "GIT_AUTHOR_NAME": author, "GIT_AUTHOR_EMAIL": author}
-    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "Add readme"], env=env, check=True)
+    git(repo, "commit", "-qm", "Add readme", env=env)
     result = run_check("--repo", str(repo), "--range", "HEAD^!")
     hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
     assert [hit.split(": ", 1)[0].rsplit(" ", 1)[1] for hit in hits] == refused, result.stdout
@@ -490,7 +507,7 @@ def test_a_commit_github_made_for_the_owning_account_passes_the_gate(
     env = {**os.environ, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
            **(WEB_FLOW if committer == "web-flow" else
               {"GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email})}
-    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "Squash the topic"], env=env, check=True)
+    git(repo, "commit", "-qm", "Squash the topic", env=env)
     result = run_check("--repo", str(repo), "--range", "HEAD^!")
     hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
     assert [hit.split(": ", 1)[0].rsplit(" ", 1)[1] for hit in hits] == refused, result.stdout
@@ -639,8 +656,7 @@ def commit_entry_repo(repo: Path) -> tuple[str, str]:
         git(repo, "add", name)
         env = {**os.environ, "GIT_AUTHOR_NAME": "Claude",
                "GIT_AUTHOR_EMAIL": "noreply" + AT + "anthropic.com"}
-        subprocess.run(["git", "-C", str(repo), "commit", "-qm", f"Add {name}"], env=env,
-                       check=True)
+        git(repo, "commit", "-qm", f"Add {name}", env=env)
         shas.append(git(repo, "rev-parse", "HEAD").stdout.strip())
     return shas[0], shas[1]
 
@@ -768,9 +784,11 @@ def git_sh() -> str | None:
     found = shutil.which("sh")
     if found:
         return found
-    exec_path = Path(git(Path.cwd(), "--exec-path").stdout.strip())
-    for candidate in (exec_path.parents[2] / "bin" / "sh.exe",
-                      exec_path.parents[2] / "usr" / "bin" / "sh.exe"):
+    found = shutil.which("git")
+    if found is None:
+        return None
+    root = Path(found).resolve().parents[1]  # Git for Windows: <root>/cmd/git.exe
+    for candidate in (root / "bin" / "sh.exe", root / "usr" / "bin" / "sh.exe"):
         if candidate.is_file():
             return str(candidate)
     return None
@@ -832,8 +850,7 @@ def hooked(request: pytest.FixtureRequest, repo: Path) -> Path:
 
 def try_commit(repo: Path, message: str = "Add file") -> subprocess.CompletedProcess[str]:
     git(repo, "add", "-A")
-    return subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", message],
-                          capture_output=True, text=True, check=False)
+    return git_door.run("commit", "-q", "-m", message, root=repo)
 
 
 def test_pre_commit_hook_blocks_a_planted_user_path(hooked: Path) -> None:
@@ -859,12 +876,12 @@ def test_pre_push_hook_checks_pushed_commits(hooked: Path, tmp_path: Path) -> No
     git(hooked, "remote", "add", "origin", str(remote))
     (hooked / "clean.txt").write_text("clean\n", encoding="utf-8")
     assert try_commit(hooked).returncode == 0
-    push = ["git", "-C", str(hooked), "push", "-q", "origin", "main:topic"]  # not the integration branch
-    assert subprocess.run(push, capture_output=True, text=True).returncode == 0
+    push = ["push", "-q", "origin", "main:topic"]  # not the integration branch
+    assert git_door.run(*push, root=hooked).returncode == 0
     (hooked / "clean.txt").write_text("still clean\n", encoding="utf-8")
     git(hooked, "add", "-A")
     git(hooked, "commit", "-q", "--no-verify", "-m", "Mirror https://acme" + ".ghe" + ".com/x")
-    result = subprocess.run(push, capture_output=True, text=True)
+    result = git_door.run(*push, root=hooked)
     assert result.returncode != 0
     assert "message:1: enterprise-github-host" in result.stdout + result.stderr
     assert f"(2 files, 1 commits, se {SE_HEAD[:7]})" in result.stdout + result.stderr
@@ -887,18 +904,10 @@ def se_line(root: Path) -> str:
     parents = {line.split()[0]: line.split()[1:]
                for line in git(root, "rev-list", "--parents", "HEAD").stdout.splitlines()}
     query = "".join(f"{sha}:{SE_LINE_MARKER}\n" for sha in parents)
-    found = subprocess.run(["git", "-C", str(root), "cat-file", "--batch-check"], input=query,
-                           capture_output=True, text=True, check=True).stdout.splitlines()
+    found = git_door.run("cat-file", "--batch-check", root=root, stdin=query.encode()).stdout.splitlines()
     own = {sha for sha, line in zip(parents, found) if not line.endswith(" missing")}
     tips = sorted({parent for sha in own for parent in parents[sha] if parent not in own})
     return " ".join(["HEAD", "--not", *tips]) if tips else "HEAD"
-
-
-def test_se_itself_passes() -> None:
-    """se must stay publishable; uses se's local list when the checkout has one. History is SE's
-    own line (se_line)."""
-    result = run_check("--repo", str(SE_ROOT), "--history", se_line(SE_ROOT))
-    assert result.returncode == 0, result.stdout
 
 
 def foreign_line(repo: Path) -> None:
@@ -1007,8 +1016,7 @@ def test_pre_push_hook_refuses_a_tracker_reference_naming_the_commit(
     git(hooked, "add", "-A")
     git(hooked, "commit", "-q", "--no-verify", "-m", "Worker role (" + "#593)")
     sha = git(hooked, "rev-parse", "HEAD").stdout.strip()
-    result = subprocess.run(["git", "-C", str(hooked), "push", "-q", "origin", "main"],
-                            capture_output=True, text=True)
+    result = git_door.run("push", "-q", "origin", "main", root=hooked)
     output = result.stdout + result.stderr
     assert result.returncode != 0
     assert f"commit {sha[:12]} message:1: tracker-reference '#593'" in output

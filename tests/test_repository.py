@@ -10,6 +10,8 @@ starts with a runner's variable set (tests/conftest.py).
 
 One rule holds for scripts, tests, kern and the components: git runs only through its door
 (scripts/git_door.py); today's other git subprocesses sit on an allow list that may only shrink.
+
+And se's own checkout passes its public check (pub-001), with its history.
 """
 
 from __future__ import annotations
@@ -183,7 +185,6 @@ TO_THE_FAKE = "real git in temporary repositories; the migration moves it to the
 # Today's git subprocesses outside the door, each with how many its file holds and why it may. The list
 # may only shrink: a file with more fails, and one with fewer fails until its count is lowered.
 GIT_ALLOWED: dict[str, tuple[int, str]] = {
-    "tests/test_public_check.py": (11, TO_THE_FAKE),
     "tests/test_push_guard.py": (3, TO_THE_FAKE),
     "tests/test_releases.py": (7, TO_THE_FAKE),
     "tests/test_rewrite_history.py": (1, TO_THE_FAKE),
@@ -301,3 +302,11 @@ def test_the_runner_variables_are_ci_se_cloud_agent_and_every_github_variable() 
 def test_a_test_that_needs_a_runner_variable_sets_it_itself(monkeypatch) -> None:
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     assert runner_variables(os.environ) == ["GITHUB_ACTIONS"]
+
+
+def test_se_itself_passes() -> None:
+    """se must stay publishable; uses se's local list when the checkout has one. History is SE's
+    own line (tests/test_public_check.py `se_line`). It reads SE's own checkout through real git."""
+    from test_public_check import run_check, se_line
+    result = run_check("--repo", str(ROOT), "--history", se_line(ROOT))
+    assert result.returncode == 0, result.stdout

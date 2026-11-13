@@ -730,7 +730,9 @@ class FakeGit:
 
     def walk(self, repository: Repository, args: list[str]) -> list[str]:
         """The commits `log` and `rev-list` list for `args`: those reachable from the revisions named
-        (`<rev>`, the right side of `<a>..<b>`; HEAD where none is) and from none excluded (`^<rev>`,
+        (`<rev>`, the right side of `<a>..<b>`, `<rev>^!` without its parents, every ref with
+        `--all`; HEAD where none is)
+        and from none excluded (`^<rev>`,
         the left side of `<a>..<b>`, the revisions after `--not`, `--remotes` and `--tags` among
         them their refs), down to a shallow clone's boundary, newest first as they
         were made, or along the first parents with `--first-parent`; `--no-merges` drops merges and
@@ -759,12 +761,22 @@ class FakeGit:
                 continue
             elif argument.startswith("^"):
                 excluded |= self.ancestors(self.resolve(repository, argument[1:]))
+            elif argument.endswith("^!"):  # the commit alone, without its parents
+                sha = self.resolve(repository, argument[:-2])
+                included.append(sha)
+                for parent in self.commits[sha].parents:
+                    excluded |= self.ancestors(parent)
             elif ".." in argument:
                 left, _, right = argument.partition("..")
                 excluded |= self.ancestors(self.resolve(repository, left or "HEAD"))
                 included.append(self.resolve(repository, right or "HEAD"))
             else:
                 included.append(self.resolve(repository, argument))
+        if "--all" in args:  # every ref and HEAD; none in a repository without a commit
+            included += [sha for name, sha in repository.refs.items() if name != "FETCH_HEAD"]
+            included += [head for head in [self.head_commit(repository)] if head]
+            if not included:
+                return []
         included = included or [self.commit_of(repository, "HEAD")]
         if "--first-parent" in args:
             line = [sha for start in included for sha in self.first_parents(start)]
@@ -807,15 +819,15 @@ class FakeGit:
         return files[path]
 
     def git_log(self, call: Call) -> str:
-        """`log [--first-parent] [--no-merges] [--name-only] [-<n>|-n <n>|--max-count=<n>]
-        --format=<f> [<revisions>]`, as `walk` selects them."""
+        """`log [--first-parent] [--no-merges] [--name-only] [-<n>|-n <n>|--max-count=<n>] [-z]
+        --format=<f> [<revisions>]`, as `walk` selects them, each ended by a newline (NUL with -z)."""
         repository = self.find(call.where)
         args = list(call.args)
         form = next(a.split("=", 1)[1] for a in args if a.startswith(("--format=", "--pretty=")))
         form = form.removeprefix("format:").removeprefix("tformat:")
-        out = []
+        out, end = [], "\0" if "-z" in args else "\n"
         for sha in self.walk(repository, args):
-            out.append(self.formatted(sha, form) + "\n")
+            out.append(self.formatted(sha, form) + end)
             if "--name-only" in args:
                 out.append("\n" + "".join(f"{path}\n" for path in self.changed(sha)))
         return "".join(out)
