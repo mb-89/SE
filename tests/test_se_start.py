@@ -3,6 +3,7 @@ temporary local git repositories (no network)."""
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
 import shutil
@@ -289,6 +290,47 @@ def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, mon
     assert f"\nSE root: {setup['se']}\n" in context
     assert "<se>/scripts/<name>.py" in context
     assert "SE root" not in data["systemMessage"]
+
+
+# kern's state, as bootstrap.sh hands it over (README "Kern").
+
+def kern_greeting(setup, capsys, monkeypatch, *args, answer=None):
+    """The hook's greeting lines with bootstrap.sh's kern arguments, kern's status answering `answer`."""
+    monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
+    write(setup["se"] / "kern" / "release.toml", 'version = "0.2.0"\n')
+    asked = []
+    world = dataclasses.replace(setup["world"], kern=lambda binary, root: asked.append((binary, root)) or answer)
+    assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]),
+                          "--cache", str(setup["cache"]), "status", "--hook", "--offline", *args],
+                         world=world) == 0
+    return json.loads(capsys.readouterr().out)["systemMessage"].splitlines(), asked
+
+
+def test_the_greeting_names_a_running_kern_under_its_first_line(setup, capsys, monkeypatch):
+    lines, asked = kern_greeting(setup, capsys, monkeypatch, "--kern-bin", "/k/kern-0.2.0",
+                                 answer={"state": "running", "health": {"pid": 42}})
+    assert lines[1] == "kern 0.2.0: running, pid 42"
+    assert asked == [(Path("/k/kern-0.2.0"), setup["project"].resolve())]
+
+
+@pytest.mark.parametrize(("args", "answer", "line"), [
+    (["--kern-bin", "/k"], {"state": "starting"}, "kern 0.2.0: starting"),
+    (["--kern-starting", "fetching release kern-v0.2.0 for linux-amd64 in the background"], None,
+     "kern 0.2.0: starting: fetching release kern-v0.2.0 for linux-amd64 in the background"),
+    (["--kern-failed", "kern start: boom", "--kern-bin", "/k"], {"state": "running"}, "kern 0.2.0: failed: kern start: boom"),
+    (["--kern-bin", "/k"], {"state": "not running"}, "kern 0.2.0: failed: not running after its start; see "),
+    (["--kern-bin", "/k"], None, "kern 0.2.0: failed: its status does not answer; see "),
+])
+def test_the_greeting_names_kern_starting_or_failed_with_the_cause(setup, capsys, monkeypatch, args, answer, line):
+    lines, _ = kern_greeting(setup, capsys, monkeypatch, *args, answer=answer)
+    assert lines[1].startswith(line)
+    if "see " in line:
+        assert lines[1].endswith(str(setup["project"].resolve() / ".se" / ".runtime" / "core.log"))
+
+
+def test_without_word_of_kern_the_greeting_names_none(setup, capsys, monkeypatch):
+    lines, asked = kern_greeting(setup, capsys, monkeypatch)
+    assert not any(line.startswith("kern") for line in lines) and asked == []
 
 
 # What is due in the work: a retro and the fleet's findings, from the cache (work issue

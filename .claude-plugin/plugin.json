@@ -1,6 +1,6 @@
 {
   "name": "se",
-  "version": "5.33.0",
+  "version": "5.34.0",
   "description": "SE, the agent a person talks to, with its integrator, worker and reviewer sub-agents and their skills.",
   "author": {
     "name": "mb-89"
@@ -18,12 +18,66 @@
         ]
       }
     ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/se_hook.sh\" SessionEnd || true"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/se_hook.sh\" SubagentStart || true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/se_hook.sh\" UserPromptSubmit || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/se_hook.sh\" PreToolUse || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/se_hook.sh\" PostToolUse || true"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
             "command": "PATH=\"$HOME/.local/bin:$PATH\" uv run --no-project --python \">=3.11\" python \"${CLAUDE_PLUGIN_ROOT}/scripts/work_tickets.py\" stop-check || true"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/se_hook.sh\" Stop || true"
           }
         ]
       }
@@ -34,6 +88,10 @@
           {
             "type": "command",
             "command": "PATH=\"$HOME/.local/bin:$PATH\" uv run --no-project --python \">=3.11\" python \"${CLAUDE_PLUGIN_ROOT}/scripts/work_tickets.py\" stop-check || true"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/se_hook.sh\" SubagentStop || true"
           }
         ]
       }
