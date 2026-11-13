@@ -69,6 +69,9 @@ every package, so work issues and session prompts never repeat it.
    `delivery` ticket into `.se/work/todo/` and lists the issue's comments. Read every comment: a
    comment from SE changes the requirements; edit or add tickets to match.
 
+   Without gh, `intake --issue-body <file> --comments-file <file>` does the same from files
+   ([Without gh](../skills/work-model/SKILL.md#without-gh)).
+
    A ticket created by hand (`work_tickets.py create`) gets its acceptance items with
    `--acceptance <text>`, one per item, so `move --to done` needs no hand edit.
 3. **Before each ticket**: re-read the body and the comments. `work_tickets.py refresh` reads the
@@ -106,7 +109,8 @@ every package, so work issues and session prompts never repeat it.
      grouping.
 5. **Deliver, always, even when partial**:
    - Complete the field report in `.se/work/field-report.md` (`work_tickets.py field-report
-     --draft` writes it from the template, between the markers the integration reads).
+     --draft` writes it from the template, between the markers the integration reads; without
+     gh, add `--issue-body <file>`).
    - Where the issue asks for "not slower", run `work_tickets.py suite --compare <integration
      branch>` and quote its verdict line in the evidence table.
    - Where the acceptance names the public check, run it on the branch's commits with

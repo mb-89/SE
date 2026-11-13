@@ -673,9 +673,11 @@ work_tickets.py close --worktree WORKTREE [--integration-target INTEGRATION_TARG
                       [--remove] [--json]
     check or close an integrated worktree
 
-work_tickets.py intake --worktree WORKTREE (--issue ISSUE | --outside) [--repo REPO]
-                       [--discovery] [--probe-root PROBE_ROOT]
-    read the work issue with gh and write its tickets into todo
+work_tickets.py intake --worktree WORKTREE (--issue ISSUE | --issue-body FILE | --outside)
+                       [--comments-file FILE] [--repo REPO] [--discovery]
+                       [--probe-root PROBE_ROOT]
+    read the work issue with gh, or from the files your GitHub tools' answers were saved to, and
+    write its tickets into todo
 
 work_tickets.py probe --worktree WORKTREE --command PROBE_COMMAND --output OUTPUT
     append a command and output path to the discovery evidence index
