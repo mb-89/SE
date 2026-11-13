@@ -89,8 +89,27 @@ class FakeGit:
     # The door's call
 
     def run(self, argv: list[str], *, cwd: Path | None, env: dict[str, str] | None,
-            stdin: bytes | None, timeout: float | None) -> subprocess.CompletedProcess[bytes]:
+            stdin: bytes | None, timeout: float | None,
+            hooked: bool = False) -> subprocess.CompletedProcess[bytes]:
+        """One git command; `hooked` once the hooks it runs have passed (StateFile), as the fake
+        in memory runs none and refuses a command that would."""
         self.calls.append(list(argv))
+        call, command = self.parse(argv, cwd, env, stdin)
+        try:
+            handler = getattr(self, "git_" + command.replace("-", "_"), None)
+            if handler is None:
+                raise Refusal(129, f"fake git: no `{command}` (tests/fake_git.py answers only what the tests use)")
+            if not hooked and self.hooks(call, command):
+                raise Refusal(129, f"fake git: `{command}` would run a hook of core.hooksPath, which only the "
+                                   "fake behind a state file runs (the shared_fake_git fixture)")
+            out = handler(call)
+            return subprocess.CompletedProcess(["git", *argv], 0, _bytes(out), b"")
+        except Refusal as refusal:
+            return subprocess.CompletedProcess(["git", *argv], refusal.code, b"", _bytes(refusal.message + "\n"))
+
+    def parse(self, argv: list[str], cwd: Path | None, env: dict[str, str] | None,
+              stdin: bytes | None) -> tuple[Call, str]:
+        """The call and the command `git <argv>` makes, its `-C` and `-c` options applied."""
         where, options, arguments = Path(cwd or Path.cwd()), {}, list(argv)
         while arguments and arguments[0] in ("-C", "-c"):
             flag, value = arguments[0], arguments[1]
@@ -101,14 +120,62 @@ class FakeGit:
                 key, _, setting = value.partition("=")
                 options[key.lower()] = setting
         command, *rest = arguments or ["help"]
+        return Call(where, options, dict(os.environ if env is None else env), rest, stdin), command
+
+    # Hooks: what git runs from core.hooksPath (else <git dir>/hooks) before a commit or a push
+
+    def hooks(self, call: Call, command: str) -> list[Hook]:
+        """The hooks `command` runs, in order, each with its arguments and stdin: pre-commit and
+        commit-msg (the message in `<git dir>/COMMIT_EDITMSG`) before a commit, pre-push before a
+        push (`<remote> <url>`, a line `<local ref> <local sha> <remote ref> <remote sha>` per ref);
+        none with `--no-verify`. A hook is an executable file; git reads back no message a
+        commit-msg hook edits, nor does the fake."""
+        if command not in ("commit", "push") or "--no-verify" in call.args:
+            return []
         try:
-            handler = getattr(self, "git_" + command.replace("-", "_"), None)
-            if handler is None:
-                raise Refusal(129, f"fake git: no `{command}` (tests/fake_git.py answers only what the tests use)")
-            out = handler(Call(where, options, dict(os.environ if env is None else env), rest))
-            return subprocess.CompletedProcess(["git", *argv], 0, _bytes(out), b"")
-        except Refusal as refusal:
-            return subprocess.CompletedProcess(["git", *argv], refusal.code, b"", _bytes(refusal.message + "\n"))
+            repository = self.find(call.where)
+        except Refusal:
+            return []
+        configured = call.options.get("core.hookspath") or repository.config.get("core.hookspath")
+        root = repository.git_dir if repository.bare else repository.path
+        folder = (root / configured) if configured else repository.common_dir / "hooks"
+        names = ("pre-commit", "commit-msg") if command == "commit" else ("pre-push",)
+        found = [folder / name for name in names if executable(folder / name)]
+        if not found:
+            return []
+        if command == "commit":
+            if any(a.startswith("-") and not a.startswith("--") and "a" in a.removesuffix("m") for a in call.args):
+                raise Refusal(129, "fake git: no hooks with `commit -a`; stage the files first")
+            message = next(call.args[i + 1] for i, a in enumerate(call.args)
+                           if a.startswith("-") and not a.startswith("--") and a.endswith("m"))
+            edit = repository.git_dir / "COMMIT_EDITMSG"
+            edit.write_text(message.strip() + "\n", encoding="utf-8")
+            return [Hook(hook, [str(edit)] if hook.name == "commit-msg" else [], b"", root) for hook in found]
+        name, *specs = [a for a in call.args if not a.startswith("-")]
+        remote = self.remote(repository, name)
+        lines = []
+        for spec in specs:
+            source, destination = self.push_refs(repository, spec)
+            old = remote.refs.get(destination, "0" * 40)
+            if source:
+                local = source if source.startswith("refs/") or source == "HEAD" else \
+                    next((f"refs/{kind}/{source}" for kind in ("heads", "tags")
+                          if f"refs/{kind}/{source}" in repository.refs), source)
+                lines.append(f"{local} {self.resolve(repository, source)} {destination} {old}\n")
+            else:
+                lines.append(f"(delete) {'0' * 40} {destination} {old}\n")
+        url = repository.config.get(f"remote.{name}.url", name)
+        return [Hook(found[0], [name, url], "".join(lines).encode(), root)]
+
+    def push_refs(self, repository: Repository, spec: str) -> tuple[str, str]:
+        """A push spec's source (empty for a deletion) and the remote ref it moves."""
+        source, _, destination = spec.removeprefix("+").partition(":")
+        destination = destination or source
+        if not destination.startswith("refs/"):
+            tag = not spec.count(":") and f"refs/tags/{source}" in repository.refs \
+                and f"refs/heads/{source}" not in repository.refs
+            destination = f"refs/{'tags' if tag else 'heads'}/{destination}"
+        return source, destination
 
     # Repositories
 
@@ -274,9 +341,9 @@ class FakeGit:
 
     def git_add(self, call: Call) -> str:
         """`add -A`, `add .` or `add <path>...`: the paths' files as they are on disk, a missing one
-        leaving the index; an ignored file stays out unless it is tracked already."""
+        leaving the index; an ignored file stays out unless it is tracked already or `-f` adds it."""
         repository = self.find(call.where)
-        present = self.on_disk(repository)
+        present = self.on_disk(repository, force="-f" in call.args or "--force" in call.args)
         paths = [a for a in call.args if not a.startswith("-")]
         if not paths or "." in paths or "-A" in call.args or "--all" in call.args:
             repository.index = present
@@ -294,13 +361,13 @@ class FakeGit:
                     repository.index.pop(known, None)
         return ""
 
-    def on_disk(self, repository: Repository) -> dict[str, bytes]:
+    def on_disk(self, repository: Repository, force: bool = False) -> dict[str, bytes]:
         """The working tree's files git sees: without .git, other worktrees nested in it and the
-        untracked files its .gitignore ignores."""
+        untracked files its ignore patterns ignore (all of them with `force`)."""
         root = repository.path
         nested = [other.path for other in self.repositories.values()
                   if other.path != root and other.path.is_relative_to(root)]
-        patterns = ignore_patterns(root)
+        patterns = [] if force else ignore_patterns(root, repository.common_dir)
         files = {}
         for path in sorted(root.rglob("*")):
             name = path.relative_to(root).as_posix()
@@ -314,7 +381,7 @@ class FakeGit:
     def git_check_ignore(self, call: Call) -> str:
         """`check-ignore [-q] <path>...`: the paths the root .gitignore ignores; exit 1 for none."""
         repository = self.find(call.where)
-        patterns = ignore_patterns(repository.path)
+        patterns = ignore_patterns(repository.path, repository.common_dir)
         found = [path for path in call.args if not path.startswith("-")
                  if ignored((call.where / path).resolve().relative_to(repository.path).as_posix(), patterns)]
         if not found:
@@ -348,6 +415,10 @@ class FakeGit:
             return f"{repository.path}\n"
         if "--absolute-git-dir" in args or "--git-dir" in args:
             return f"{repository.git_dir}\n"
+        if "--git-path" in args:
+            return f"{repository.common_dir / args[args.index('--git-path') + 1]}\n"
+        if "--is-shallow-repository" in args:
+            return "true\n" if (repository.common_dir / "shallow").is_file() else "false\n"
         verify = "--verify" in args
         quiet = "--quiet" in args or "-q" in args
         short = next((a for a in args if a.startswith("--short")), None)
@@ -660,7 +731,8 @@ class FakeGit:
     def walk(self, repository: Repository, args: list[str]) -> list[str]:
         """The commits `log` and `rev-list` list for `args`: those reachable from the revisions named
         (`<rev>`, the right side of `<a>..<b>`; HEAD where none is) and from none excluded (`^<rev>`,
-        the left side of `<a>..<b>`, the refs after `--not --remotes`/`--tags`), newest first as they
+        the left side of `<a>..<b>`, the revisions after `--not`, `--remotes` and `--tags` among
+        them their refs), down to a shallow clone's boundary, newest first as they
         were made, or along the first parents with `--first-parent`; `--no-merges` drops merges and
         `--max-count=<n>`, `-n <n>` or `-<n>` keeps the first n."""
         included, excluded, limit = [], set(), None
@@ -672,6 +744,9 @@ class FakeGit:
                     if ("--remotes" in negated and name.startswith("refs/remotes/")) \
                             or ("--tags" in negated and name.startswith("refs/tags/")):
                         excluded |= self.ancestors(sha)
+                for rev in negated:
+                    if not rev.startswith("-"):
+                        excluded |= self.ancestors(self.resolve(repository, rev))
                 break
             if argument.startswith("--max-count="):
                 limit = int(argument.partition("=")[2])
@@ -695,7 +770,7 @@ class FakeGit:
             line = [sha for start in included for sha in self.first_parents(start)]
             line = list(dict.fromkeys(line))
         else:
-            reachable = set().union(*(self.ancestors(sha) for sha in included))
+            reachable = set().union(*(self.reachable(repository, sha) for sha in included))
             line = [sha for sha in reversed(self.commits) if sha in reachable]
         line = [sha for sha in line if sha not in excluded
                 and ("--no-merges" not in args or len(self.commits[sha].parents) < 2)]
@@ -778,9 +853,14 @@ class FakeGit:
         old = self.trees[self.commits[commit.parents[0]].tree] if commit.parents else {}
         return sorted(path for path in set(old) | set(new) if old.get(path) != new.get(path))
 
-    def git_cat_file(self, call: Call) -> str:
-        """`cat-file -e <rev>` and `cat-file -e <rev>:<path>`: whether the object exists."""
+    def git_cat_file(self, call: Call) -> str | bytes:
+        """`cat-file -e <rev>` and `cat-file -e <rev>:<path>`: whether the object exists;
+        `cat-file --batch` and `--batch-check`, for each line of stdin (a blob, or `<rev>:<path>`)
+        `<blob> blob <size>` and with `--batch` its content and a newline, or `<line> missing`."""
         repository = self.find(call.where)
+        if call.args[0] in ("--batch", "--batch-check"):
+            return self.batch(repository, (call.stdin or b"").decode("utf-8").splitlines(),
+                              call.args[0] == "--batch")
         if call.args[0] != "-e":
             raise Refusal(129, f"fake git: no `cat-file {call.args[0]}`")
         rev, colon, path = call.args[1].partition(":")
@@ -793,6 +873,27 @@ class FakeGit:
         if colon and path not in self.trees[self.commits[sha].tree]:
             raise Refusal(128, f"fatal: path '{path}' does not exist in '{rev}'")
         return ""
+
+    def batch(self, repository: Repository, lines: list[str], content: bool) -> bytes:
+        blobs = {blob_id(data): data for files in [*self.trees.values(), repository.index]
+                 for data in files.values()}
+        out = []
+        for line in lines:
+            data = blobs.get(line)
+            rev, colon, path = line.partition(":")
+            if data is None and colon:
+                try:
+                    sha = self.resolve(repository, rev)
+                    data = self.trees[self.commits[sha].tree].get(path) if self.holds(repository, sha) else None
+                except (Refusal, KeyError):
+                    data = None
+            if data is None:
+                out.append(f"{line} missing\n".encode())
+                continue
+            out.append(f"{blob_id(data)} blob {len(data)}\n".encode())
+            if content:
+                out.append(data + b"\n")
+        return b"".join(out)
 
     def holds(self, repository: Repository, sha: str) -> bool:
         """Whether `repository` has the commit: its refs or HEAD reach it, or no other repository's
@@ -880,12 +981,16 @@ class FakeGit:
         return "".join(out)
 
     def git_ls_files(self, call: Call) -> str:
-        """`ls-files [-z]`, the tracked files; `ls-files --others --exclude-standard [--full-name]
-        [-- <path>...]`, the files under the folder that git neither tracks nor ignores."""
+        """`ls-files [-z] [-s] [-- <path>...]`, the tracked files (`-s` as `<mode> <blob> <stage>\t<path>`);
+        `ls-files --others --exclude-standard [--full-name] [-- <path>...]`, the files under the
+        folder that git neither tracks nor ignores."""
         repository = self.find(call.where)
         end = "\0" if "-z" in call.args else "\n"
         if "--others" not in call.args and "-o" not in call.args:
-            return "".join(f"{path}{end}" for path in sorted(repository.index))
+            paths = within(sorted(repository.index), self.pathspecs(repository, call))
+            if "-s" in call.args or "--stage" in call.args:
+                return "".join(f"100644 {blob_id(repository.index[path])} 0\t{path}{end}" for path in paths)
+            return "".join(f"{path}{end}" for path in paths)
         prefix = call.where.resolve().relative_to(repository.path).as_posix().removeprefix(".")
         specs = [a for a in call.args if not a.startswith("-")] or ["."]
         scopes = [(repository.path / prefix / spec).resolve().relative_to(repository.path).as_posix() for spec in specs]
@@ -894,6 +999,40 @@ class FakeGit:
         if prefix and "--full-name" not in call.args:
             found = [name.removeprefix(prefix + "/") for name in found]
         return "".join(f"{name}{end}" for name in found)
+
+    def pathspecs(self, repository: Repository, call: Call) -> list[str]:
+        """The paths after `--`, from the repository's root, slash-separated."""
+        if "--" not in call.args:
+            return []
+        return [(call.where / spec).resolve().relative_to(repository.path).as_posix()
+                for spec in call.args[call.args.index("--") + 1:]]
+
+    def git_ls_tree(self, call: Call) -> str:
+        """`ls-tree -r [-z] [--full-tree] <rev>`, a commit's files as `<mode> blob <blob>\t<path>`;
+        `ls-tree --name-only <rev> [-- <path>...]`, their paths. The fake's trees hold files only,
+        so it answers a whole tree (`-r`) or the paths asked."""
+        repository = self.find(call.where)
+        arguments = call.args[:call.args.index("--")] if "--" in call.args else call.args
+        rev = [a for a in arguments if not a.startswith("-")][0]
+        files = self.trees[self.commits[self.resolve(repository, rev)].tree]
+        specs = self.pathspecs(repository, call)
+        if "-r" not in call.args and not specs:
+            raise Refusal(129, "fake git: no `ls-tree` of a tree's top level; ask -r or for paths")
+        end = "\0" if "-z" in call.args else "\n"
+        paths = within(sorted(files), specs)
+        if "--name-only" in call.args:
+            return "".join(f"{path}{end}" for path in paths)
+        return "".join(f"100644 blob {blob_id(files[path])}\t{path}{end}" for path in paths)
+
+    def git_var(self, call: Call) -> str:
+        """`var GIT_AUTHOR_IDENT` and `var GIT_COMMITTER_IDENT`: `<name> <<email>> <time> <zone>`,
+        refused without an identity as a commit is."""
+        role = {"GIT_AUTHOR_IDENT": "AUTHOR", "GIT_COMMITTER_IDENT": "COMMITTER"}.get(call.args[0])
+        if role is None:
+            raise Refusal(129, f"fake git: no `var {call.args[0]}`")
+        name, email = self.identity(call, self.find(call.where), role)
+        when = date(call, role)
+        return f"{name} <{email}> {int(when.timestamp())} {when.strftime('%z')}\n"
 
     def git_status(self, call: Call) -> str:
         """`status --porcelain`: the working tree's changes against the index and HEAD."""
@@ -934,13 +1073,18 @@ class FakeGit:
 
     def git_clone(self, call: Call) -> str:
         """`clone [-b <branch>] [--depth <n>] [--no-local] <source> <destination>`: origin's branches
-        as remote-tracking refs, its tags, and the branch (`-b`, else origin's HEAD) checked out."""
-        args, branch, positional = list(call.args), None, []
+        as remote-tracking refs, its tags, and the branch (`-b`, else origin's HEAD) checked out.
+        `--depth <n>` from a `file:` URL (git ignores it for a plain path) makes it shallow: only
+        the n newest commits of the checked-out line are fetched (`shallow`)."""
+        args, branch, positional, depth = list(call.args), None, [], None
         index = 0
         while index < len(args):
             argument = args[index]
             if argument in ("-b", "--branch", "--depth"):
-                branch = args[index + 1] if argument != "--depth" else branch
+                if argument == "--depth":
+                    depth = int(args[index + 1])
+                else:
+                    branch = args[index + 1]
                 index += 2
                 continue
             if not argument.startswith("-"):
@@ -973,7 +1117,36 @@ class FakeGit:
         start = origin.refs.get(head, head if head in self.commits else None)
         if start is not None and "--no-checkout" not in args and "-n" not in args:
             self.check_out(repository, self.commits[start].tree)
+        if depth is not None and start is not None and source.startswith("file:"):
+            self.shallow(repository, start, depth)
         return ""
+
+    def shallow(self, repository: Repository, tip: str, depth: int) -> None:
+        """Make `repository` hold the `depth` newest commits from `tip` only: git's `shallow` file
+        names the commits whose parents it lacks, and a walk stops at them."""
+        line, edge = {tip}, {tip}
+        for _ in range(depth - 1):
+            edge = {parent for sha in edge for parent in self.commits[sha].parents} - line
+            line |= edge
+        boundary = sorted(sha for sha in line if any(parent not in line for parent in self.commits[sha].parents))
+        if boundary:
+            (repository.common_dir / "shallow").write_text("".join(f"{sha}\n" for sha in boundary), encoding="utf-8")
+
+    def reachable(self, repository: Repository, sha: str) -> set[str]:
+        """The commits `repository` reaches from `sha`: its ancestors, a shallow clone's only down
+        to its boundary (`shallow`)."""
+        marker = repository.common_dir / "shallow"
+        if not marker.is_file():
+            return self.ancestors(sha)
+        boundary = set(marker.read_text(encoding="utf-8").split())
+        seen, todo = set(), [sha]
+        while todo:
+            current = todo.pop()
+            if current not in seen:
+                seen.add(current)
+                if current not in boundary:
+                    todo.extend(self.commits[current].parents)
+        return seen
 
     def git_ls_remote(self, call: Call) -> str:
         """`ls-remote [--heads] [--tags] [--refs] <remote> [<pattern>...]`: a remote's refs, the
@@ -1003,12 +1176,7 @@ class FakeGit:
         remote = self.remote(repository, name)
         leases = dict(a.partition("=")[2].split(":", 1) for a in call.args if a.startswith("--force-with-lease="))
         for spec in specs:
-            source, _, destination = spec.partition(":")
-            destination = destination or source
-            if not destination.startswith("refs/"):
-                tag = not spec.count(":") and f"refs/tags/{source}" in repository.refs \
-                    and f"refs/heads/{source}" not in repository.refs
-                destination = f"refs/{'tags' if tag else 'heads'}/{destination}"
+            source, destination = self.push_refs(repository, spec)
             short = destination.removeprefix("refs/heads/")
             old = remote.refs.get(destination)
             if destination in leases and old != self.resolve(repository, leases[destination]):
@@ -1162,10 +1330,25 @@ def merged_lines(base: bytes | None, mine: bytes | None, theirs: bytes | None) -
     return b"".join(out + old[at:])
 
 
-def ignore_patterns(root: Path) -> list[str]:
-    """The patterns of the repository's root .gitignore (the fake reads no other ignore file)."""
-    ignore = root / ".gitignore"
-    lines = ignore.read_text(encoding="utf-8").splitlines() if ignore.is_file() else []
+def blob_id(data: bytes) -> str:
+    """The id git gives a file's content."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def within(paths: list[str], specs: list[str]) -> list[str]:
+    """The paths a pathspec names, whole or as a folder above them; all of them without one."""
+    if not specs:
+        return paths
+    return [path for path in paths if any(spec in (".", path) or path.startswith(spec.rstrip("/") + "/")
+                                          for spec in specs)]
+
+
+def ignore_patterns(root: Path, git_dir: Path | None = None) -> list[str]:
+    """The patterns of the repository's root .gitignore and of `<git dir>/info/exclude` (the fake
+    reads no other ignore file)."""
+    lines = []
+    for ignore in (root / ".gitignore", *([git_dir / "info" / "exclude"] if git_dir else [])):
+        lines += ignore.read_text(encoding="utf-8").splitlines() if ignore.is_file() else []
     patterns = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
     if any(pattern.startswith("!") for pattern in patterns):
         raise Refusal(129, "fake git: no negated .gitignore patterns")
@@ -1200,12 +1383,34 @@ def date(call: Call, role: str) -> datetime:
     return when if when.tzinfo else when.astimezone()
 
 
+def executable(path: Path) -> bool:
+    """Whether git runs `path` as a hook: a file, executable where the platform marks it."""
+    return path.is_file() and (os.name == "nt" or os.access(path, os.X_OK))
+
+
+@dataclass(frozen=True)
+class Hook:
+    path: Path
+    args: list[str]
+    stdin: bytes
+    cwd: Path
+
+    def run(self, env: dict[str, str], timeout: float | None) -> subprocess.CompletedProcess[bytes]:
+        """The hook as git runs it: in the working tree's root, through the shell git ships where
+        the platform cannot start a script itself (Windows)."""
+        shell = [] if os.name != "nt" else [shutil.which("sh") or str(
+            Path(shutil.which("git")).parents[1] / "bin" / "sh.exe")]
+        return subprocess.run([*shell, str(self.path), *self.args], cwd=self.cwd, env=env,
+                              input=self.stdin, capture_output=True, timeout=timeout, check=False)
+
+
 @dataclass(frozen=True)
 class Call:
     where: Path
     options: dict[str, str]
     env: dict[str, str]
     args: list[str]
+    stdin: bytes | None = None
 
 
 def _bytes(data: str | bytes) -> bytes:
@@ -1358,9 +1563,33 @@ class StateFile:
         with self.locked():
             return self.load().calls
 
-    def run(self, argv: list[str], **options) -> subprocess.CompletedProcess[bytes]:
+    def run(self, argv: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None,
+            stdin: bytes | None = None, timeout: float | None = None) -> subprocess.CompletedProcess[bytes]:
+        """One command under the lock; the hooks it runs (FakeGit.hooks) run first, outside the
+        lock and pointed at this file, so their own git reaches this fake. A hook that fails
+        refuses the command with exit code 1. What a commit's hooks print goes to its stderr, a
+        pre-push hook's output to stdout and stderr as it printed it, as git 2.43 does."""
         with self.locked():
             fake = self.load()
-            done = fake.run(argv, **options)
+            call, command = fake.parse(argv, cwd, env, stdin)
+            try:
+                hooks = fake.hooks(call, command)
+            except Refusal as refusal:
+                return subprocess.CompletedProcess(["git", *argv], refusal.code, b"", _bytes(refusal.message + "\n"))
+        environment = {**(os.environ if env is None else env), git_door.VARIABLE: f"fake:{self.path}"}
+        out = err = b""
+        for hook in hooks:
+            ran = hook.run(environment, timeout)
+            if hook.path.name == "pre-push":
+                out, err = out + ran.stdout, err + ran.stderr
+            else:
+                err += ran.stdout + ran.stderr
+            if ran.returncode != 0:
+                with self.edit() as fake:
+                    fake.calls.append(list(argv))
+                return subprocess.CompletedProcess(["git", *argv], 1, out, err)
+        with self.locked():
+            fake = self.load()
+            done = fake.run(argv, cwd=cwd, env=env, stdin=stdin, timeout=timeout, hooked=True)
             self.save(fake)
-            return done
+        return subprocess.CompletedProcess(done.args, done.returncode, out + done.stdout, err + done.stderr)
