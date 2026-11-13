@@ -200,6 +200,44 @@ def test_push_fetch_and_ls_remote_against_a_bare_origin(door, tmp_path: Path) ->
     assert work_tickets.push_refusal(refused.stderr + refused.stdout) == ("non-fast-forward", False)
 
 
+def test_a_clone_has_a_commit_made_upstream_only_once_it_fetches_it(door, tmp_path: Path) -> None:
+    origin = fake_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    root = project(tmp_path)
+    git(root, "remote", "add", "origin", str(origin))
+    commit(root, {"a.txt": "a\n"})
+    git(root, "push", "-q", "origin", "main")
+    other = fake_git.clone(origin, tmp_path / "other", "--no-checkout")
+    assert not (other / ".git" / "index").exists(), "a clone without checkout has no index yet"
+    git(other, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", "origin/main")
+    assert (other / ".git" / "index").is_file() and (other / "a.txt").is_file()
+    newer = commit(root, {"b.txt": "b\n"})
+    git(root, "push", "-q", "origin", "main")
+    assert git_door.run("cat-file", "-e", f"{newer}^{{commit}}", root=other).returncode != 0
+    git(other, "fetch", "--quiet", "--force", "--prune", "--tags", "origin")
+    assert git_door.run("cat-file", "-e", f"{newer}^{{commit}}", root=other).returncode == 0
+    git(root, "push", "-q", "origin", f"{newer}:refs/heads/topic")
+    git(root, "tag", "v1.0.0", newer)
+    git(root, "push", "-q", "origin", "v1.0.0")
+    git(other, "fetch", "--quiet", "--force", "--prune", "--tags", "origin")
+    assert git(other, "rev-parse", "refs/remotes/origin/topic") == newer
+    assert git(other, "tag", "--list", "v*") == "v1.0.0" == git(other, "tag", "--points-at", newer, "--list", "v*")
+    assert git(other, "tag", "--points-at", "HEAD", "--list", "v*") == ""
+    git(root, "push", "-q", "origin", ":refs/heads/topic")
+    git(other, "fetch", "--quiet", "--force", "--prune", "--tags", "origin")
+    assert git_door.run("rev-parse", "--verify", "--quiet", "refs/remotes/origin/topic", root=other).returncode != 0
+    assert git(other, "rev-list", "--left-right", "--count", f"{newer}...HEAD").split() == ["1", "0"]
+    git(other, "remote", "set-url", "origin", str(tmp_path / "elsewhere.git"))
+    assert git(other, "remote", "get-url", "origin") == str(tmp_path / "elsewhere.git")
+    tagged = fake_git.clone(origin, tmp_path / "tagged", "--branch", "v1.0.0")
+    assert git(tagged, "rev-parse", "HEAD") == newer and git(tagged, "branch", "--show-current") == ""
+    named = Path(git(tagged, "rev-parse", "--git-dir"))
+    assert (named if named.is_absolute() else tagged / named).resolve() == (tagged / ".git").resolve()
+    git(origin, "symbolic-ref", "HEAD", "refs/heads/release")
+    assert git(origin, "symbolic-ref", "HEAD") == "refs/heads/release"
+    assert git_door.run("gc", "-q", "--prune=now", root=origin).returncode == 0
+    assert git(origin, "rev-parse", "refs/heads/main") == newer
+
+
 def test_ls_remote_of_a_missing_remote_fails(door, tmp_path: Path) -> None:
     missing = git_door.run("ls-remote", "--tags", "--refs", (tmp_path / "none.git").as_uri(), no_prompt=True)
     assert missing.returncode != 0 and missing.stdout == ""
@@ -283,6 +321,23 @@ def test_ls_files_status_and_archive_read_the_tracked_files(door, tmp_path: Path
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         files = {member.name: tar.extractfile(member).read() for member in tar.getmembers() if member.isfile()}
     assert files == {"kern/x.go": b"package x\n", "kern/t/y.go": b"package y\n"}
+
+
+def test_checkout_detach_and_reset_hard_move_head_and_the_files_to_a_commit(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    first = commit(root, {"a.txt": "a\n"})
+    second = commit(root, {"a.txt": "a2\n", "b.txt": "b\n"})
+    git(root, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", first)
+    assert git(root, "rev-parse", "HEAD") == first and git(root, "branch", "--show-current") == ""
+    assert (root / "a.txt").read_text(encoding="utf-8") == "a\n" and not (root / "b.txt").exists()
+    assert git(root, "rev-parse", "main") == second, "a detached checkout leaves the branch"
+    git(root, "switch", "-q", "main")
+    (root / "a.txt").write_text("changed\n", encoding="utf-8")
+    git(root, "reset", "-q", "--hard", first)
+    assert git(root, "rev-parse", "main") == first and git(root, "status", "--porcelain") == ""
+    assert (root / "a.txt").read_text(encoding="utf-8") == "a\n" and not (root / "b.txt").exists()
+    git(root, "reset", "-q", "--hard", second)
+    assert git(root, "rev-parse", "HEAD") == second and (root / "b.txt").is_file()
 
 
 def test_commit_all_takes_the_tracked_files_and_leaves_new_ones(door, tmp_path: Path) -> None:

@@ -14,6 +14,9 @@ from pathlib import Path
 import pytest
 import fake_git
 
+# Its git, and that of every script and binary it starts, is the fake behind one state file.
+pytestmark = pytest.mark.usefixtures("shared_fake_git")
+
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("se_start", ROOT / "scripts" / "se_start.py")
 se_start = importlib.util.module_from_spec(_spec)
@@ -517,7 +520,7 @@ def test_with_gh_each_part_keeps_its_answer_when_the_other_fails(tmp_path, monke
     assert se_start.work_check(project)["retro"] == {"landed": 11, "due_after": 10}
 
 
-# Requirement 3: refresh moves only what is due, real git repositories.
+# Requirement 3: refresh moves only what is due, on the fake git's repositories.
 
 
 @pytest.fixture

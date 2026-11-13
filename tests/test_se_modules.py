@@ -1,4 +1,4 @@
-"""Tests for scripts/se_modules.py with real temporary git repositories (no network)."""
+"""Tests for scripts/se_modules.py on the fake git behind one state file, shared with the scripts it runs (no network)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ from pathlib import Path
 
 import pytest
 import fake_git
+
+# Its git, and that of every script and binary it starts, is the fake behind one state file.
+pytestmark = pytest.mark.usefixtures("shared_fake_git")
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "se_modules.py"
@@ -205,7 +208,7 @@ def test_resolve_pinned_applies_url_rewrite(tmp_path):
     assert source.url == "https://mirror.example.net/team/lib.git"
 
 
-# Requirement 3: sync, status, update, path with real temporary git repositories.
+# Requirement 3: sync, status, update, path on the fake git's temporary repositories.
 
 
 @pytest.fixture(autouse=True)

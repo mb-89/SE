@@ -63,9 +63,6 @@ REAL_GIT: dict[str, str] = {
     "tests/test_releases.py": STILL_ON_REAL_GIT,
     "tests/test_repository.py": STILL_ON_REAL_GIT,
     "tests/test_rewrite_history.py": STILL_ON_REAL_GIT,
-    "tests/test_se_components.py": STILL_ON_REAL_GIT,
-    "tests/test_se_modules.py": STILL_ON_REAL_GIT,
-    "tests/test_se_start.py": STILL_ON_REAL_GIT,
     "tests/test_start_refresh.py": STILL_ON_REAL_GIT,
 }
 

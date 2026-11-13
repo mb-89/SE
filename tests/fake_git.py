@@ -224,6 +224,8 @@ class FakeGit:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
         repository.index = dict(files)
+        if not repository.bare:  # git writes its index on the first checkout, not before
+            (repository.git_dir / "index").touch()
 
     # The commands
 
@@ -263,6 +265,11 @@ class FakeGit:
             if f"remote.{name}.url" not in repository.config:
                 raise Refusal(2, f"error: No such remote '{name}'")
             return repository.config[f"remote.{name}.url"] + "\n"
+        if verb == "set-url":
+            if f"remote.{name}.url" not in repository.config:
+                raise Refusal(2, f"error: No such remote '{name}'")
+            repository.config[f"remote.{name}.url"] = url[0]
+            return ""
         raise Refusal(129, f"fake git: no `remote {verb}`")
 
     def git_add(self, call: Call) -> str:
@@ -339,7 +346,7 @@ class FakeGit:
             if repository.bare:
                 raise Refusal(128, "fatal: this operation must be run in a work tree")
             return f"{repository.path}\n"
-        if "--absolute-git-dir" in args:
+        if "--absolute-git-dir" in args or "--git-dir" in args:
             return f"{repository.git_dir}\n"
         verify = "--verify" in args
         quiet = "--quiet" in args or "-q" in args
@@ -402,7 +409,20 @@ class FakeGit:
         return ""
 
     def git_tag(self, call: Call) -> str:
+        """`tag <name> [<rev>]` makes a tag; `tag --list [<pattern>]` and `tag --points-at <rev>
+        --list [<pattern>]` list the tags, sorted by name, matching the pattern (a glob)."""
         repository = self.find(call.where)
+        args = list(call.args)
+        if "--list" in args or "-l" in args or "--points-at" in args:
+            at = None
+            if "--points-at" in args:
+                where = args.index("--points-at")
+                at = self.resolve(repository, args[where + 1])
+                del args[where:where + 2]
+            patterns = [a for a in args if not a.startswith("-")] or ["*"]
+            names = sorted(name.removeprefix("refs/tags/") for name, sha in repository.refs.items()
+                           if name.startswith("refs/tags/") and (at is None or sha == at))
+            return "".join(f"{name}\n" for name in names if any(fnmatch.fnmatchcase(name, p) for p in patterns))
         name, *rev = [a for a in call.args if not a.startswith("-")]
         repository.refs[f"refs/tags/{name}"] = self.resolve(repository, rev[0] if rev else "HEAD")
         return ""
@@ -437,6 +457,12 @@ class FakeGit:
             return self.git_switch(Call(call.where, call.options, call.env, ["-c", *args[1:]]))
         if len(args) == 1 and not args[0].startswith("-"):
             return self.git_switch(Call(call.where, call.options, call.env, args))
+        if len(args) == 2 and args[0] == "--detach":
+            repository = self.find(call.where)
+            sha = self.resolve(repository, args[1])
+            self.check_out(repository, self.commits[sha].tree)
+            repository.head = sha
+            return ""
         if "--" in args and args.index("--") == 1:
             repository = self.find(call.where)
             files = self.trees[self.commits[self.resolve(repository, args[0])].tree]
@@ -448,6 +474,40 @@ class FakeGit:
                 repository.index[name] = files[name]
             return ""
         raise Refusal(129, f"fake git: no `checkout {' '.join(call.args)}`")
+
+    def git_reset(self, call: Call) -> str:
+        """`reset [-q] --hard [<rev>]`: the branch (or the detached HEAD) moves to the commit, and
+        the index and working tree become its files."""
+        args = [a for a in call.args if a not in ("-q", "--quiet")]
+        if not args or args[0] != "--hard" or len(args) > 2:
+            raise Refusal(129, f"fake git: no `reset {' '.join(call.args)}`")
+        repository = self.find(call.where)
+        sha = self.resolve(repository, args[1] if len(args) == 2 else "HEAD")
+        self.check_out(repository, self.commits[sha].tree)
+        if repository.head.startswith("refs/"):
+            repository.refs[repository.head] = sha
+        else:
+            repository.head = sha
+        return ""
+
+    def git_gc(self, call: Call) -> str:
+        """`gc [-q] [--prune=now]`: nothing to do, as the fake keeps no objects per repository; what
+        a repository reaches is what its refs name."""
+        return ""
+
+    def git_symbolic_ref(self, call: Call) -> str:
+        """`symbolic-ref [--short] HEAD [<ref>]`: the branch HEAD names, or HEAD set to name `<ref>`
+        (a branch that need not exist yet; a bare repository's default branch)."""
+        repository = self.find(call.where)
+        args = [a for a in call.args if not a.startswith("-")]
+        if args[0] != "HEAD":
+            raise Refusal(129, f"fake git: no `symbolic-ref {' '.join(call.args)}`")
+        if len(args) == 2:
+            repository.head = args[1]
+            return ""
+        if not repository.head.startswith("refs/"):
+            raise Refusal(128, "fatal: ref HEAD is not a symbolic ref")
+        return (repository.head.removeprefix("refs/heads/") if "--short" in call.args else repository.head) + "\n"
 
     def git_rm(self, call: Call) -> str:
         """`rm [-q] [--cached] <path>...`: the paths leave the index, and without --cached the disk."""
@@ -644,6 +704,10 @@ class FakeGit:
     def git_rev_list(self, call: Call) -> str:
         """`rev-list [--count] [--parents] [--reverse] <revisions>`, as `walk` selects them."""
         repository = self.find(call.where)
+        if "--left-right" in call.args:  # `--left-right --count <a>...<b>`: only in a, only in b
+            left, _, right = [a for a in call.args if "..." in a][0].partition("...")
+            ours, theirs = (self.ancestors(self.resolve(repository, side or "HEAD")) for side in (left, right))
+            return f"{len(ours - theirs)}\t{len(theirs - ours)}\n"
         line = self.walk(repository, list(call.args))
         if "--reverse" in call.args:
             line.reverse()
@@ -724,9 +788,21 @@ class FakeGit:
             sha = self.resolve(repository, rev)
         except (Refusal, KeyError):
             raise Refusal(128 if colon else 1, "")
+        if not self.holds(repository, sha):
+            raise Refusal(128 if colon else 1, "")
         if colon and path not in self.trees[self.commits[sha].tree]:
             raise Refusal(128, f"fatal: path '{path}' does not exist in '{rev}'")
         return ""
+
+    def holds(self, repository: Repository, sha: str) -> bool:
+        """Whether `repository` has the commit: its refs or HEAD reach it, or no other repository's
+        refs do (a commit made here that no ref names yet). The fake keeps one object store, so a
+        commit made elsewhere is here only once a clone, fetch or push brought a ref to it."""
+        mine = [*repository.refs.values(), self.head_commit(repository)]
+        if any(start and sha in self.ancestors(start) for start in mine):
+            return True
+        return not any(sha in self.ancestors(start) for other in self.repositories.values()
+                       if other.common_dir != repository.common_dir for start in other.refs.values())
 
     def git_merge_base(self, call: Call) -> str:
         """`merge-base <a> <b>...` (with more than one `<b>`, the base of `<a>` and a merge of
@@ -879,7 +955,9 @@ class FakeGit:
         path = (call.where / destination).resolve()
         path.mkdir(parents=True, exist_ok=True)
         head = f"refs/heads/{branch}" if branch else origin.head
-        if branch and head not in origin.refs:
+        if branch and head not in origin.refs and f"refs/tags/{branch}" in origin.refs:
+            head = origin.refs[f"refs/tags/{branch}"]  # a tag: HEAD detached at its commit
+        elif branch and head not in origin.refs:
             raise Refusal(128, f"fatal: Remote branch {branch} not found in upstream origin")
         repository = Repository(path, False, head=head)
         repository.git_dir.mkdir(exist_ok=True)
@@ -892,7 +970,9 @@ class FakeGit:
                 repository.refs[ref] = sha
         if head in origin.refs:
             repository.refs[head] = origin.refs[head]
-            self.check_out(repository, self.commits[origin.refs[head]].tree)
+        start = origin.refs.get(head, head if head in self.commits else None)
+        if start is not None and "--no-checkout" not in args and "-n" not in args:
+            self.check_out(repository, self.commits[start].tree)
         return ""
 
     def git_ls_remote(self, call: Call) -> str:
@@ -926,7 +1006,9 @@ class FakeGit:
             source, _, destination = spec.partition(":")
             destination = destination or source
             if not destination.startswith("refs/"):
-                destination = f"refs/heads/{destination}"
+                tag = not spec.count(":") and f"refs/tags/{source}" in repository.refs \
+                    and f"refs/heads/{source}" not in repository.refs
+                destination = f"refs/{'tags' if tag else 'heads'}/{destination}"
             short = destination.removeprefix("refs/heads/")
             old = remote.refs.get(destination)
             if destination in leases and old != self.resolve(repository, leases[destination]):
@@ -958,6 +1040,10 @@ class FakeGit:
         name, *specs = [a for a in call.args if not a.startswith("-")]
         remote = self.remote(repository, name)
         if not specs:
+            if "--prune" in call.args:
+                for ref in [ref for ref in repository.refs if ref.startswith(f"refs/remotes/{name}/")]:
+                    if f"refs/heads/{ref.removeprefix(f'refs/remotes/{name}/')}" not in remote.refs:
+                        del repository.refs[ref]
             for ref, sha in remote.refs.items():
                 if ref.startswith("refs/heads/"):
                     repository.refs[f"refs/remotes/{name}/{ref.removeprefix('refs/heads/')}"] = sha
@@ -976,6 +1062,10 @@ class FakeGit:
                         repository.refs[destination + ref.removeprefix(source)] = sha
                 continue
             full = source if source in remote.refs else f"refs/heads/{source}"
+            if full not in remote.refs and re.fullmatch(r"[0-9a-f]{40}", source) \
+                    and any(source in self.ancestors(sha) for sha in remote.refs.values()):
+                repository.refs["FETCH_HEAD"] = source  # a commit the remote reaches, by its id
+                continue
             if full not in remote.refs:
                 raise Refusal(128, f"fatal: couldn't find remote ref {source}")
             if destination:
