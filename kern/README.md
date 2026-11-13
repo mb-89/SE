@@ -23,7 +23,10 @@ named in the design's plan.
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
 | `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve` | |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve` | |
-| `contract/` | the contract suite: the built binary held to the bus's and the host's promises | |
+| `contract/` | the contract suite: the built binary held to the bus's and the host's promises, and `cases.json` held against the Go fake, the Python fake and the real core with a Python component attached | |
+| `contract/fixture/` | tally, the suite's fixture and the sample Python component (`component.toml`, `__init__.py`), and the declarations of the two peers the real leg plays | |
+| `python/kern/` | the Python SDK, standard library only: the NATS peer, `component.toml`'s reader, the component and its decorators, the fake core, the runner `python -m kern run <folder>` | |
+| `python/tests/` | the Python fake's leg of the contract suite and the sample component's test, run by SE's Python suite | |
 | `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
 | `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
 | `template/` | the bare application every new application starts from ([The template](#the-template)) | |
@@ -51,10 +54,41 @@ One core runs per checkout, the nearest folder up from the working directory tha
   names read `stale` once three beats are missed.
 - **Placements.** A wiring instance with `command = [...]` runs in a process of its own, started
   with `CORE_BUS`, `CORE_USER` and `CORE_TOKEN`; it commits on `commit.<i>` and the core checks
-  each write against the component's declaration. Until a placed process answers `run.<i>` and
-  `cmd.<i>.>`, the core refuses to place a component that declares a derivation or a command.
+  each write against the component's declaration. A Go component placed out of process may
+  declare no derivation or command; a declared component's process answers both.
+- **Declared components.** A component no binary carries is declared by its `component.toml`
+  alone, in `components/<name>/` or `.se/components/<name>/` of the checkout, one instance each.
+  Its process attaches first, and the core runs its derivations, commands and verbs over the bus,
+  as [A component in Python](#a-component-in-python) says.
 - **The idle end.** The core ends 60 s after the last session's lease is returned (or after its
   start, where none took one), or after 30 minutes without a hook event or a call.
+
+## A component in Python
+
+`python/kern/` is the SDK, standard library only (SE's
+[docs/go-core.md](../docs/go-core.md), "How a component in another language attaches"). A
+component is a folder: its `component.toml`, and an `__init__.py` that makes it with
+`kern.component("<name>")` and decorates its functions; `contract/fixture/tally/` is the sample.
+The wiring places it with `command = ["python", "-m", "kern", "run", "components/<name>"]`, the
+SDK on `PYTHONPATH`.
+
+| subject | the process | the core |
+|---|---|---|
+| `commit.<i>` | first `{"attach": {"contract": 1, "hash": "sha256:<hex>"}}`, then `{"writes": [...]}` | refuses another contract, another declaration, and a write before the attach |
+| `run.<i>` | hears that an input moved: reads `in.<i>`, commits each derivation's value | sends it after each commit that moves an input, and on the attach |
+| `in.<i>` | asks its inputs | answers them by local port, `config/<key>` among them, at the newest revision |
+| `cmd.<i>.<command>` | answers one step: `text`, `lines`, `writes`, `requests`, `then` | sends the first step with the arguments and inputs, each later one with the answers |
+| `io.<i>.<verb>` | an I/O component answers `{"answer": ...}` or `{"error": ...}` | sends a request bound to the verb |
+| `call.<command>` | | a client's call: `{"args": [...]}`, answered with the lines, the text or the error |
+
+- **The declaration hash** is the SHA-256 of `component.toml`'s bytes, line ends read as LF,
+  written `sha256:<hex>`: the bytes, not what they parse to, so Go and Python answer one hash.
+- **Subject tokens.** A name's segments are one token each, and every byte of a segment, a command
+  name or a verb but letters, digits, dashes and underscores rides percent-encoded:
+  `tally note` rides as `tally%20note`, the family key `v1.2` as `v1%2E2`. `get.<name>` also reads
+  the name from its body. `contract/subjects.json` holds Go and Python to it.
+- **Types** are `int`, `float`, `string`, `bool`, `[T]` or a named JSON shape such as
+  `github.issues`, which Go reads as `any`; a wire joins equal types and equal shapes.
 
 ## Tests
 
@@ -69,6 +103,12 @@ the suite, so a red kern test refuses the integration and the Python suite's bud
 `check` vets kern in its own step. The job `kern-windows` runs
 kern's vet and tests on Windows, where the detached start and the stop differ; `check` needs it
 and fails unless it passed.
+
+The contract suite runs `contract/cases.json` three times: against the Go fake
+(`contract/fake_test.go`), against the real core with tally's Python process placed and attached
+(`contract/real_test.go`, Python 3.11 or later, from `KERN_PYTHON` or the path), and against the
+Python fake (`python/tests/`, in SE's Python suite through `pyproject.toml`'s `testpaths`, so its
+time counts against SE's budget and needs no Go).
 
 ## Release
 

@@ -2,6 +2,7 @@ package index
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -212,7 +213,7 @@ func (b *builder) outputs() {
 				b.fail(line, "name %s has two writers: %s (line %d) and %s", name, n.writer, n.line, writer)
 				continue
 			}
-			b.ix.names[name] = &nameInfo{writer: writer, inst: inst, line: line, typ: o.Type, builtin: o.Builtin, family: o.Family}
+			b.ix.names[name] = &nameInfo{writer: writer, inst: inst, line: line, typ: o.Type, shape: o.Shape, builtin: o.Builtin, family: o.Family}
 			if o.Family {
 				b.ix.fams = append(b.ix.fams, name)
 			}
@@ -262,7 +263,7 @@ func (b *builder) config() {
 				b.fail(wi.Line, "name %s has two writers: %s (line %d) and the wiring's config", name, n.writer, n.line)
 				continue
 			}
-			b.ix.names[name] = &nameInfo{writer: "config of " + wi.Name, line: wi.Line, typ: c.Type, builtin: c.Builtin}
+			b.ix.names[name] = &nameInfo{writer: "config of " + wi.Name, line: wi.Line, typ: c.Type, shape: c.Shape, builtin: c.Builtin}
 			in.in[ConfigPrefix+c.Port] = name
 			if given, ok := wi.Config[c.Port]; ok {
 				v, err := configValue(given.Value, c.Type)
@@ -309,8 +310,8 @@ func (b *builder) inputs(refs []ref) {
 				b.fail(lines[port], "input %s is bound to %s, which nothing writes", port, name)
 			case n.family && commandReads(in.comp, p.Port):
 				b.fail(lines[port], "input %s is bound to the family %s, and a command reads it: only a derivation reads a family, at the key that changed", port, name)
-			case n.typ != p.Type:
-				b.fail(lines[port], "two types on one wire: %s reads %s as %s, but %s writes %s", port, name, p.Type, n.writer, n.typ)
+			case n.typ != p.Type || n.shape != p.Shape:
+				b.fail(lines[port], "two types on one wire: %s reads %s as %s, but %s writes %s", port, name, typeName(p.Type, p.Shape), n.writer, typeName(n.typ, n.shape))
 			case in.enabled && n.inst != "" && !b.ix.insts[n.inst].enabled && !b.lenient[port]:
 				w := b.ix.insts[n.inst]
 				b.fail(lines[port], "input %s is bound to %s, and its writer %s is switched off on line %d: switch it on, or let the wire go without it with builtin = true", port, name, w.name, w.offLine)
@@ -334,8 +335,9 @@ func (b *builder) requests() {
 			to := b.ix.insts[t.inst]
 			v := to.comp.verbs[t.verb].decl
 			switch {
-			case v.Req != r.Req || v.Ans != r.Ans:
-				b.fail(t.line, "two types on one wire: %s sends %s and reads %s, but %s.%s takes %s and answers %s", port, r.Req, r.Ans, t.inst, t.verb, v.Req, v.Ans)
+			case v.Req != r.Req || v.Ans != r.Ans || v.ReqShape != r.ReqShape || v.AnsShape != r.AnsShape:
+				b.fail(t.line, "two types on one wire: %s sends %s and reads %s, but %s.%s takes %s and answers %s", port,
+					typeName(r.Req, r.ReqShape), typeName(r.Ans, r.AnsShape), t.inst, t.verb, typeName(v.Req, v.ReqShape), typeName(v.Ans, v.AnsShape))
 			case in.enabled && !to.enabled:
 				b.fail(t.line, "request port %s is bound to %s.%s, and %s is switched off on line %d", port, t.inst, t.verb, t.inst, to.offLine)
 			}
@@ -378,6 +380,14 @@ func (b *builder) heights() {
 		b.ix.order = append(b.ix.order, b.ix.insts[inst])
 	}
 	sort.SliceStable(b.ix.order, func(i, j int) bool { return b.ix.order[i].height < b.ix.order[j].height })
+}
+
+// typeName is how a refusal names a type: its shape where it carries one.
+func typeName(t reflect.Type, shape string) string {
+	if shape != "" {
+		return shape
+	}
+	return t.String()
 }
 
 // commandReads says whether a command of c reads the local input port.

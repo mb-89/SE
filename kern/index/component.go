@@ -38,6 +38,9 @@ type Port struct {
 	// Family is set on an output written at a key: the wiring binds it to a
 	// family, a name with one key segment, and each write names its key.
 	Family bool
+	// Shape is the named JSON shape a declared port carries, such as
+	// github.issues, whose Go type is any; a wire joins only equal shapes.
+	Shape string
 }
 
 // Write is one value a run commits to one of its component's outputs.
@@ -64,7 +67,9 @@ type Ask struct {
 // where set, reads the answers in the order of Requests and answers the next
 // step.
 type Result struct {
-	Text     string
+	Text string
+	// Lines are the progress lines the step said before its text, such as "Phase: reading".
+	Lines    []string
 	Writes   []Write
 	Requests []Ask
 	Then     func(answers []any) (Result, error)
@@ -104,6 +109,8 @@ type RequestDecl struct {
 	Port     string
 	Req, Ans reflect.Type
 	Help     string
+	// ReqShape and AnsShape are the named JSON shapes of a declared port's request and answer.
+	ReqShape, AnsShape string
 }
 
 // VerbDecl is a verb an I/O component accepts: the request it takes and the answer it gives.
@@ -111,6 +118,8 @@ type VerbDecl struct {
 	Verb     string
 	Req, Ans reflect.Type
 	Help     string
+	// ReqShape and AnsShape are the named JSON shapes of a declared verb's request and answer.
+	ReqShape, AnsShape string
 }
 
 // Reader answers the value of a local input port.
@@ -130,6 +139,9 @@ type Component struct {
 	requests   map[string]*RequestDecl
 	verbs      map[string]*verb
 	errs       []string
+	// decl is set on a component declared by its component.toml alone: its
+	// derivations, commands and verbs run in its own process, over the bus.
+	decl *declared
 }
 
 type derivation struct {
@@ -229,7 +241,11 @@ func (c *Component) Err() error {
 func (c *Component) Inputs() []Port {
 	var out []Port
 	for _, p := range sortedKeys(c.inputs) {
-		out = append(out, Port{Port: p, Type: c.inputs[p], Builtin: reflect.Zero(c.inputs[p]).Interface()})
+		port := Port{Port: p, Type: c.inputs[p], Builtin: reflect.Zero(c.inputs[p]).Interface()}
+		if c.decl != nil {
+			port.Shape = c.decl.inShapes[p]
+		}
+		out = append(out, port)
 	}
 	return out
 }
@@ -287,6 +303,9 @@ func (c *Component) Derive(port string, read Reader) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("component %s derives no output %q", c.name, port)
 	}
+	if c.decl != nil {
+		return nil, fmt.Errorf("component %s derives %s in its own process, which commits it", c.name, port)
+	}
 	in, err := d.in.fill(read)
 	if err != nil {
 		return nil, err
@@ -301,6 +320,9 @@ func (c *Component) Run(name string, read Reader, args []string) (Result, error)
 	k, ok := c.commands[name]
 	if !ok {
 		return Result{}, fmt.Errorf("component %s has no command %q", c.name, name)
+	}
+	if c.decl != nil {
+		return c.checked(c.runRemote(name, read, args))
 	}
 	in, err := k.in.fill(read)
 	if err != nil {
@@ -328,13 +350,17 @@ func (c *Component) checked(r Result, err error) (Result, error) {
 
 // CheckWrites refuses a write to anything but one of the component's outputs
 // a command writes, or of another type than the port's.
-func (c *Component) CheckWrites(writes []Write) error {
+func (c *Component) CheckWrites(writes []Write) error { return c.checkWrites(writes, false) }
+
+// checkWrites is CheckWrites; derived lets a declared component's own process
+// commit what its derivations answer.
+func (c *Component) checkWrites(writes []Write, derived bool) error {
 	for _, w := range writes {
 		o, ok := c.outputs[w.Port]
 		switch {
 		case !ok:
 			return fmt.Errorf("component %s writes no output %q", c.name, w.Port)
-		case o.Derived:
+		case o.Derived && !derived:
 			return fmt.Errorf("component %s: output %s is written by its derivation alone", c.name, w.Port)
 		case w.Gone && !o.Family:
 			return fmt.Errorf("component %s: output %s is no family, and drops no key", c.name, w.Port)
@@ -371,6 +397,9 @@ func (c *Component) Serve(name string, req any) (any, error) {
 		return nil, fmt.Errorf("component %s accepts no verb %q", c.name, name)
 	case !Fits(req, v.decl.Req):
 		return nil, fmt.Errorf("component %s: verb %s takes %s, not %T", c.name, name, v.decl.Req, req)
+	}
+	if c.decl != nil {
+		return c.serveRemote(v.decl, req)
 	}
 	return v.serve(req)
 }
@@ -470,17 +499,19 @@ func Config[T any](key string, builtin T, help string) Part {
 	return configPart{Port{Port: key, Type: reflect.TypeFor[T](), Builtin: builtin, Help: help}}
 }
 
-func (p configPart) declare(c *Component) {
-	if !portName(p.port.Port) {
-		c.fail("config key %q needs a local name of letters, digits and dashes", p.port.Port)
+func (p configPart) declare(c *Component) { c.addConfig(p.port) }
+
+func (c *Component) addConfig(p Port) {
+	if !portName(p.Port) {
+		c.fail("config key %q needs a local name of letters, digits and dashes", p.Port)
 	}
-	if _, taken := c.config[p.port.Port]; taken {
-		c.fail("config key %s is declared twice", p.port.Port)
+	if _, taken := c.config[p.Port]; taken {
+		c.fail("config key %s is declared twice", p.Port)
 	}
-	if strings.TrimSpace(p.port.Help) == "" {
-		c.fail("config key %s has no help", p.port.Port)
+	if strings.TrimSpace(p.Help) == "" {
+		c.fail("config key %s has no help", p.Port)
 	}
-	c.config[p.port.Port] = &p.port
+	c.config[p.Port] = &p
 }
 
 // RequestPort is a local request port a command asks on; Ask makes the
@@ -502,8 +533,9 @@ func (r *RequestPort[Req, Ans]) Answer(a any) Ans {
 	return v
 }
 
-func (r *RequestPort[Req, Ans]) declare(c *Component) {
-	p := r.decl
+func (r *RequestPort[Req, Ans]) declare(c *Component) { c.addRequest(r.decl) }
+
+func (c *Component) addRequest(p RequestDecl) {
 	if !portName(p.Port) {
 		c.fail("request port %q needs a local name of letters, digits and dashes", p.Port)
 	}
@@ -530,8 +562,10 @@ func Verb[Req, Ans any](name, help string, fn func(Req) (Ans, error)) Part {
 	}}
 }
 
-func (p verbPart) declare(c *Component) {
-	d := p.v.decl
+func (p verbPart) declare(c *Component) { c.addVerb(p.v) }
+
+func (c *Component) addVerb(v *verb) {
+	d := v.decl
 	if !portName(d.Verb) {
 		c.fail("verb %q needs a local name of letters, digits and dashes", d.Verb)
 	}
@@ -541,7 +575,7 @@ func (p verbPart) declare(c *Component) {
 	if strings.TrimSpace(d.Help) == "" {
 		c.fail("verb %s has no help", d.Verb)
 	}
-	c.verbs[d.Verb] = p.v
+	c.verbs[d.Verb] = v
 }
 
 type commandPart struct {
@@ -559,11 +593,15 @@ func Command[In any](decl CommandDecl, fn func(in In, args []string) (Result, er
 }
 
 func (p commandPart) declare(c *Component) {
-	d := p.c.decl
 	if p.err != nil {
-		c.fail("command %q: %v", d.Name, p.err)
+		c.fail("command %q: %v", p.c.decl.Name, p.err)
 		return
 	}
+	c.addCommand(p.c)
+}
+
+func (c *Component) addCommand(k *command) {
+	d := k.decl
 	for _, f := range []struct{ field, v string }{{"name", d.Name}, {"usage", d.Usage}, {"summary", d.Summary}, {"help", d.Help}, {"group", d.Group}} {
 		if strings.TrimSpace(f.v) == "" {
 			c.fail("command %q has no %s", d.Name, f.field)
@@ -575,11 +613,14 @@ func (p commandPart) declare(c *Component) {
 	if _, taken := c.commands[d.Name]; taken {
 		c.fail("command %q is declared twice", d.Name)
 	}
-	c.addInputs(p.c.in)
-	c.commands[d.Name] = p.c
+	c.addInputs(k.in)
+	c.commands[d.Name] = k
 }
 
 func (c *Component) addInputs(in inputStruct) {
+	if in.typ == nil {
+		return // a declared component's inputs stand in its declaration
+	}
 	for i, port := range in.ports {
 		t := in.typ.Field(i).Type
 		if have, ok := c.inputs[port]; ok && have != t {
