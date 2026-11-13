@@ -5,7 +5,8 @@ A script's command group is one component, `components/<name>/`: its `component.
 `work_tickets.py docs` writes from the script's argparse parser, and an `__init__.py` that calls
 `attach`, so the component answers each declared command with the script's own code. The command
 line does not change: `<script>.py <command>` runs as before, and an interactive command goes
-through kern where kern serves this checkout (`routed`), else directly.
+through kern where kern serves this checkout (`routed`), else directly; any copy of the script
+routes there, the plugin's as much as the checkout's own (`serves`).
 
 - **Declared:** a script that runs components names them in its `COMPONENTS` (each a `Group`) and
   its read-only commands in `INTERACTIVE_COMMANDS`, and builds its parser with `make_parser`;
@@ -36,7 +37,8 @@ through kern where kern serves this checkout (`routed`), else directly.
   call through kern where kern's GitHub relay serves the checkout: its progress lines print as they
   come, the call waits as long as kern says anything (`CALL_IDLE`), and each GitHub step it needs
   is one `github.step` request (`Stepped`). A call kern refuses before it says anything runs
-  directly, the file-based hand-off; one that fails on the way is reported, never run twice.
+  directly, the file-based hand-off, and says that it fell back (`fell_back`); one that fails on
+  the way is reported, never run twice.
 - **Placed:** `wiring.toml` places each component with `se_components.py run <name>`, which puts
   kern's Python SDK and `scripts/` on the path and runs `python -m kern run components/<name>`.
 
@@ -606,15 +608,32 @@ def standing(root: Path) -> dict | None:
         return None
 
 
+def serves(root: Path, script: Path) -> bool:
+    """Whether the kern serving `root` runs the commands of `script`: root holds SE's script of
+    that name, whose commands its components answer. Any copy of it is routed there, the
+    plugin's (the path SE's skills name) as much as the checkout's own: kern answers with the
+    checkout's code, the code of what the session works on."""
+    return (root / "scripts" / script.name).is_file()
+
+
+def fell_back(script: Path, words: list[str], why: str) -> None:
+    """Say on stderr that a streamed command runs without kern's relay, and why: its GitHub steps
+    follow as the file-based hand-off, never silently."""
+    print(f"se: {' '.join([script.name, *words])} fell back to the file-based hand-off: {why}",
+          file=sys.stderr)
+
+
 def routed(script: Path, words: list[str], argv: list[str], interactive: bool,
            streamed: bool = False) -> int | None:
     """The exit code of the command `words` run through kern, having printed its answer; None where
-    it runs directly: SE_KERN=off, a batch command, no kern serving this checkout, another copy of
-    the script than the one kern runs, or a call that failed on the way (with SE_KERN=on an error),
-    among them one kern did not answer within CALL_WAIT, which it gives up first.
+    it runs directly: SE_KERN=off, a batch command, no kern serving this checkout with this script
+    (`serves`), or a call that failed on the way (with SE_KERN=on an error), among them one kern
+    did not answer within CALL_WAIT, which it gives up first.
     A `streamed` batch command goes through kern only where kern's GitHub relay serves the
-    checkout (`streamed_call`)."""
+    checkout (`streamed_call`), and says so where it falls back (`fell_back`)."""
     switch = os.environ.get(SWITCH, "").lower()
+    if switch == "off" and streamed and relay_module().steps() is None:  # not kern's own call
+        fell_back(script, words, f"{SWITCH}=off")
     if switch == "off" or not (interactive or streamed):
         return None
     if streamed:
@@ -623,7 +642,7 @@ def routed(script: Path, words: list[str], argv: list[str], interactive: bool,
             return answered
     root = kern_root(Path.cwd())
     found = standing(root) if root else None
-    if root is None or found is None or (root / "scripts" / script.name).resolve() != script.resolve():
+    if root is None or found is None or not serves(root, script):
         if switch == "on":
             print(f"error: {SWITCH}=on: no kern serves {Path.cwd()} with this {script.name}",
                   file=sys.stderr)
@@ -671,14 +690,19 @@ def streamed_call(script: Path, words: list[str], argv: list[str], switch: str) 
     checkout: each progress line prints on stderr as kern streams it, the call waits as long as
     kern says anything within CALL_IDLE, and the answer prints as the command would have. None,
     and the command runs directly (its file-based hand-off), where no relay serves or kern refuses
-    the call before saying anything; a call that fails after it began is an error, never rerun."""
+    the call before saying anything; a call that fails after it began is an error, never rerun.
+    Each None says why on stderr (`fell_back`)."""
     root = kern_root(Path.cwd())
-    if root is None or (root / "scripts" / script.name).resolve() != script.resolve():
+    if root is None or not serves(root, script):
+        fell_back(script, words, f"no kern serves {Path.cwd()} with SE's {script.name}")
         return None
     if relay_module().relay(root) is None:
+        fell_back(script, words, f"no kern serves {root} with its GitHub component on the relay "
+                                 "backend")
         return None
     found = standing(root)
     if found is None:
+        fell_back(script, words, f"kern's standing file {root / STANDING} is gone")
         return None
     sdk()
     from kern.nats import NatsError, Peer
@@ -695,7 +719,8 @@ def streamed_call(script: Path, words: list[str], argv: list[str], switch: str) 
 
     try:
         peer = Peer(found["bus"], "client", found["users"]["client"], name="se", timeout=CONNECT_WAIT)
-    except (NatsError, OSError, KeyError, TypeError, ValueError):
+    except (NatsError, OSError, KeyError, TypeError, ValueError) as error:
+        fell_back(script, words, f"kern's bus is not reachable: {error}")
         return None
     try:
         answer = peer.call("call." + token(name), {"args": [CWD + os.getcwd(), *argv]}, progress,
@@ -710,6 +735,7 @@ def streamed_call(script: Path, words: list[str], argv: list[str], switch: str) 
     exit_ = EXIT_ERROR.match(failed)
     if failed and not exit_:
         if not heard and switch != "on":  # refused before it ran: no such command, no attach
+            fell_back(script, words, f"kern refused the call: {failed}")
             return None
         print(f"error: kern: {failed}", file=sys.stderr)
         return 1

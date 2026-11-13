@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -125,12 +126,16 @@ def answer(tool: str, input_: dict) -> object:
     raise AssertionError(f"an unexpected tool call: {tool} {input_}")
 
 
-def test_a_streamed_command_runs_as_one_call_its_steps_through_the_relay(tmp_path: Path) -> None:
+@pytest.mark.parametrize("copy", ["checkout", "plugin"])
+def test_a_streamed_command_runs_as_one_call_its_steps_through_the_relay(
+        tmp_path: Path, copy: str) -> None:
     """The acceptance's mechanism against the real core: a streamed command (fleet-check) runs as
-    one call through kern's `call.` from SE's own command line; the integration component runs it
-    with each GitHub read a `github.step` that kern tells the agent on its hook, the session's
-    PostToolUse answers it, and each step's progress line reaches the caller while the call runs.
-    With kern stopped the same command line hands its plan off again: the fallback."""
+    one call through kern's `call.`, from SE's own command line in the checkout kern serves or
+    from the plugin's copy of SE, the path the skills name, run in that checkout; the integration
+    component runs it with each GitHub read a `github.step` that kern tells the agent on its hook,
+    the session's PostToolUse answers it, and each step's progress line reaches the caller while
+    the call runs. With kern stopped the same command line hands its plan off again and says that
+    it fell back: the fallback."""
     # SE's wiring names SE's Go components too, which the `se` binary carries (components/cmd/se).
     kern = tmp_path / ("se-binary.exe" if os.name == "nt" else "se-binary")
     built = run("go", "build", "-o", str(kern), "./cmd/se", cwd=ROOT / "components")
@@ -155,7 +160,13 @@ def test_a_streamed_command_runs_as_one_call_its_steps_through_the_relay(tmp_pat
     origin, worktree = tmp_path / "origin.git", tmp_path / "wt"  # the branches it reads
     quiet_git.init(origin, "--bare", "-b", "main")
     quiet_git.clone(origin, worktree)
-    command = [sys.executable, str(checkout / "scripts" / "work_tickets.py"), "fleet-check",
+    se = checkout
+    if copy == "plugin":  # a copy of SE's scripts of its own, as the plugin's clone holds them
+        se = tmp_path / "plugin"
+        shutil.copytree(ROOT / "scripts", se / "scripts",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        (se / "kern").symlink_to(ROOT / "kern", target_is_directory=True)
+    command = [sys.executable, str(se / "scripts" / "work_tickets.py"), "fleet-check",
                "--repo", "alice/demo", "--worktree", str(worktree)]
 
     started = subprocess.run([str(kern), "start", "--root", str(checkout)], cwd=checkout, env=env,
@@ -194,3 +205,4 @@ def test_a_streamed_command_runs_as_one_call_its_steps_through_the_relay(tmp_pat
     fallback = subprocess.run(command, cwd=checkout, env=env, capture_output=True, text=True,
                               timeout=60)
     assert fallback.returncode == 0 and "GitHub plan: fleet check" in fallback.stdout, fallback
+    assert "fell back to the file-based hand-off" in fallback.stderr, fallback.stderr

@@ -217,8 +217,10 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
   the instances and those attached.
 - **Routed:** a command a person waits on that only reads (its class `interactive`: `status`,
   `config`, `ready`, `capacity`, `queue`, `fleet-check`, `metrics` and `overhaul.py facts`) goes
-  through kern's `call.<command>` where kern serves the checkout the command runs in with the same
-  script.
+  through kern's `call.<command>` where kern serves the checkout the command runs in and that
+  checkout holds the script.
+  - Any copy of the script routes there, the plugin's (the path SE's skills name) as much as the
+    checkout's own, and kern answers with the checkout's code.
   - Everywhere else, and for every command that writes, the command runs directly, as it did
     before components. A call that fails on the way runs directly too: the command only reads.
   - A call kern has not answered within 60 s (`CALL_WAIT`), as one waiting behind calls in
@@ -458,10 +460,12 @@ no token), the hand-off needs neither a retyped file nor a second run
 - **The fallback.** Without kern, on a token backend or with `SE_KERN=off`, each command keeps its
   file-based hand-off above. A call kern refuses before it says anything runs directly; one that
   fails on the way is reported and never run twice, as it writes.
+  - A command that falls back says so first, on stderr, and why: `se: <command> fell back to the
+    file-based hand-off: <why>`.
 - **Tested** against fake sessions in the suite (`tests/test_work_ticket_issues.py`,
   `tests/test_work_tickets.py`) and against the real core: `tests/beside_se_relay.py` runs
-  `fleet-check` as one call whose reads a simulated session answers on the hook, then the fallback
-  once kern stops.
+  `fleet-check` as one call whose reads a simulated session answers on the hook, from the
+  checkout's script and from a plugin's copy, then the fallback once kern stops.
 
 The squash commit carries the release's `se.toml` version, so the release workflow tags it and the
 docs workflow publishes it, as both run on every push to `main`. GitHub commits it for the merging
