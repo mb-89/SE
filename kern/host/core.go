@@ -76,6 +76,8 @@ type Core struct {
 	// component.toml alone; attached closes once an instance's process attached.
 	declared map[string]*index.Component
 	attached map[string]chan struct{}
+	// hooks are the wiring's bound events: an event to the instance and the command that answer it.
+	hooks map[string]index.CommandInfo
 
 	mu         sync.Mutex
 	sessions   map[string]time.Time
@@ -135,7 +137,14 @@ func Serve(o Options) (*Core, error) {
 		declared: map[string]*index.Component{}, attached: map[string]chan struct{}{},
 		writer: map[string]string{}, types: map[string]map[string]reflect.Type{}, placed: map[string]bool{},
 		sessions: map[string]time.Time{}, beats: map[string]time.Time{}, prev: map[string]uint64{},
-		done: make(chan struct{}), ended: make(chan struct{}),
+		done: make(chan struct{}), ended: make(chan struct{}), hooks: map[string]index.CommandInfo{},
+	}
+	for _, h := range o.Wiring.Hooks {
+		info, ok := ix.Catalog().Command(h.Command)
+		if !ok {
+			return nil, fmt.Errorf("kern serve: wiring line %d: hook %s: no instance declares the command %q", h.Line, h.Event, h.Command)
+		}
+		c.hooks[h.Event] = info
 	}
 	c.emptySince, c.lastEvent = c.start, c.start
 	if err := c.place(); err != nil {
@@ -395,14 +404,33 @@ func (c *Core) event() {
 	c.lastEvent = c.o.Clock.Now()
 }
 
-// HookAnswer is what hook.<event> answers: the effect on the host.
+// The effects hook.<event> answers.
+const (
+	// Pass is the effect of an event no command answers: the host goes on.
+	Pass = "pass"
+	// Output is the effect of an event a command answered: its text is the host's hook output.
+	Output = "output"
+)
+
+// HookArg is the one argument the command bound to an event is run with:
+// HookArg followed by the event's JSON as the host gave it.
+const HookArg = "--hook="
+
+// HookAnswer is what hook.<event> answers: the effect on the host, the
+// output of the command that answered it, or why the bound command did not.
 type HookAnswer struct {
 	Effect string `json:"effect"`
+	Output string `json:"output,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // hook takes a host's hook event: each renews the session's lease, and
 // SessionEnd returns it. Every instance that hears the host's events is
 // handed it first; what one refuses goes to the log, and the hook passes.
+// Where the wiring binds the event to a command, the command answers it, run
+// with HookArg and the event's JSON; where its instance's process has not
+// attached yet, or the command fails, the event passes with the reason, at
+// once rather than waiting for the attach.
 func (c *Core) hook(m *nats.Msg) {
 	event := strings.TrimPrefix(m.Subject, bus.Hook)
 	var body struct {
@@ -426,7 +454,24 @@ func (c *Core) hook(m *nats.Msg) {
 	if err := c.ix.Hear(event, m.Data); err != nil {
 		fmt.Fprintln(c.o.Log, err)
 	}
-	c.reply(m, HookAnswer{Effect: "pass"})
+	h, bound := c.hooks[event]
+	if !bound {
+		c.reply(m, HookAnswer{Effect: Pass})
+		return
+	}
+	if _, declared := c.declared[h.Instance]; declared && !c.isAttached(h.Instance) {
+		c.reply(m, HookAnswer{Effect: Pass, Error: fmt.Sprintf("hook %s: instance %s has not attached yet", event, h.Instance)})
+		return
+	}
+	payload := string(m.Data)
+	go func() { // a command may take its time; the next event does not wait for it
+		r, err := c.ix.Call(h.Name, HookArg+payload)
+		if err != nil {
+			c.reply(m, HookAnswer{Effect: Pass, Error: fmt.Sprintf("hook %s: %v", event, err)})
+			return
+		}
+		c.reply(m, HookAnswer{Effect: Output, Output: r.Text})
+	}()
 }
 
 // Health is what get.core.health answers.

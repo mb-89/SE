@@ -367,7 +367,8 @@ func TestAHookWithNoCoreFailsOpenAtOnce(t *testing.T) {
 	if !errors.Is(err, host.ErrNotRunning) {
 		t.Fatalf("a hook with no core answers %v, and wants ErrNotRunning", err)
 	}
-	if took := time.Since(began); took > 50*time.Millisecond {
+	// Generous, as Windows runners take over 50 ms: a hook that waited would take its HookWait, 500 ms.
+	if took := time.Since(began); took > host.HookWait*4/5 {
 		t.Fatalf("a hook with no core took %v, and should not wait for one", took)
 	}
 }
@@ -416,5 +417,82 @@ func TestAHookEventIsOneWord(t *testing.T) {
 		if _, err := host.Post(host.Wall{}, t.TempDir(), event, nil, host.HookWait); !errors.Is(err, host.ErrNoEvent) {
 			t.Fatalf("the event %q answers %v, and wants ErrNoEvent", event, err)
 		}
+	}
+}
+
+// checker answers its command with the hook's JSON it was handed, and fails on "fail".
+var checker = index.Declare("checker", "Answers a hook.",
+	index.Command(index.CommandDecl{
+		Name: "checker check", Usage: "checker check --hook=JSON", Summary: "Answer a hook.", Help: "Says the hook's JSON back.",
+		Group: "Fixtures", Class: index.Batch,
+	}, func(_ struct{}, args []string) (index.Result, error) {
+		if len(args) != 1 || !strings.HasPrefix(args[0], host.HookArg) {
+			return index.Result{}, fmt.Errorf("checker check takes %sJSON, and was given %q", host.HookArg, args)
+		}
+		if strings.Contains(args[0], "fail") {
+			return index.Result{}, errors.New("the check failed")
+		}
+		return index.Result{Text: `{"said": ` + strings.TrimPrefix(args[0], host.HookArg) + "}"}, nil
+	}))
+
+func checked(hooks ...index.Hook) index.Wiring {
+	return index.Wiring{Instances: []index.Instance{{Name: "checker", Component: "checker", Enabled: true, Config: map[string]index.ConfigValue{}, Line: 1}}, Hooks: hooks}
+}
+
+// The command the wiring binds an event to answers it with the event's JSON,
+// its text the hook's output; an event bound to none passes, and so does one
+// whose command fails, with the reason.
+func TestABoundHookIsAnsweredByItsCommand(t *testing.T) {
+	t.Parallel()
+	c := served(t, host.Options{Wiring: checked(index.Hook{Event: "Stop", Command: "checker check", Line: 3}), Components: []*index.Component{checker}})
+	s, _ := c.Standing()
+	a, err := host.Post(host.Wall{}, s.Root, "Stop", []byte(`{"session_id":"s1"}`), wait)
+	if err != nil || a.Effect != host.Output || a.Output != `{"said": {"session_id":"s1"}}` {
+		t.Fatalf("a bound Stop answers %+v, %v, and wants the command's text as its output", a, err)
+	}
+	if h := c.Health(); len(h.Sessions) != 1 {
+		t.Fatalf("a bound hook takes its session's lease too: the health names %q, and wants [s1]", h.Sessions)
+	}
+	if a, err := host.Post(host.Wall{}, s.Root, "SubagentStop", []byte(`{}`), wait); err != nil || a.Effect != host.Pass || a.Error != "" {
+		t.Fatalf("an unbound event answers %+v, %v, and wants pass", a, err)
+	}
+	if a, err := host.Post(host.Wall{}, s.Root, "Stop", []byte(`{"fail":1}`), wait); err != nil || a.Effect != host.Pass || !strings.Contains(a.Error, "the check failed") {
+		t.Fatalf("a bound hook whose command fails answers %+v, %v, and wants pass with its reason", a, err)
+	}
+}
+
+// A hook bound to a declared instance whose process has not attached passes
+// with the reason, without waiting for the attach.
+func TestAHookBoundToAnUnattachedInstancePassesAtOnce(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, "components", "remote")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	decl := "name = \"remote\"\ncontract = 1\nhelp = \"Answers a hook.\"\n\n[commands.\"remote check\"]\nusage = \"remote check\"\nsummary = \"Answer a hook.\"\ngroup = \"Fixtures\"\nhelp = \"Answers a hook.\"\nclass = \"batch\"\n"
+	if err := os.WriteFile(filepath.Join(dir, index.DeclarationFile), []byte(decl), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := index.Wiring{Instances: []index.Instance{{Name: "remote", Component: "remote", Enabled: true, Config: map[string]index.ConfigValue{}, Line: 1}},
+		Hooks: []index.Hook{{Event: "Stop", Command: "remote check", Line: 4}}}
+	served(t, host.Options{Root: root, Wiring: w})
+	began := time.Now()
+	a, err := host.Post(host.Wall{}, root, "Stop", []byte(`{}`), wait)
+	if err != nil || a.Effect != host.Pass || !strings.Contains(a.Error, "instance remote has not attached yet") {
+		t.Fatalf("a hook bound to an unattached instance answers %+v, %v, and wants pass with the reason", a, err)
+	}
+	// Generous: the attach would wait host.AttachWait, 10 s.
+	if took := time.Since(began); took > host.AttachWait/2 {
+		t.Fatalf("a hook bound to an unattached instance took %v: it waited for the attach", took)
+	}
+}
+
+// A hook bound to a command no instance declares is refused at the start, with its line.
+func TestAHookBoundToNoCommandIsRefused(t *testing.T) {
+	t.Parallel()
+	_, err := host.Serve(host.Options{Root: t.TempDir(), Clock: newClock(), Wiring: checked(index.Hook{Event: "Stop", Command: "checker none", Line: 7}), Components: []*index.Component{checker}})
+	if err == nil || !strings.Contains(err.Error(), `wiring line 7: hook Stop: no instance declares the command "checker none"`) {
+		t.Fatalf("a hook bound to no command starts with %v, and wants a refusal at its line", err)
 	}
 }
