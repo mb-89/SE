@@ -190,8 +190,9 @@ in step 4, [kern/README.md](../kern/README.md#a-component-in-python)).
 | `run.<i>` | publish: an input of `<i>` moved, with the snapshot's revision | the core, to the instance |
 | `in.<i>` | request: the instance's inputs at that revision | the instance, the core |
 | `commit.<i>` | request: writes and requests; answer accepted or refused with the reason | the instance, the core |
-| `cmd.<i>.<command>` | request: arguments and the revision; answer a result: text, writes, requests | the core, the instance |
+| `cmd.<i>.<command>` | request: arguments and the revision; answer a result: text, writes, requests. Without a reply, `{"call", "stop"}`: the core gave that call up | the core, the instance |
 | `call.<command>` | request with a reply inbox, and a progress subject in it where the caller streams: each line and a beat there, then the result | a client, the core |
+| `call.core.abandon` | request: `{"call": <reply subject>}`, a call in the asker's own inbox; answer whether one ran | a client, the core |
 | `say.<i>.<call>` | publish: a progress line, or a beat, of the step of one call the instance runs | the instance, the core |
 | `io.<i>.<verb>` | request: one request going out | the core alone, the I/O component |
 | `hook.<event>` | request: a host's hook event; answer the effects | the hook client, the core |
@@ -235,6 +236,28 @@ wait by talking, and one that fails it by staying silent),
 `kern/python/tests/test_kern_stream.py` (the runner's live lines and beats) and the contract case
 of two overlapping calls (`kern/contract/cases.json`), against both fakes and the real core.
 
+### A call given up
+
+A call ends early when its caller gives it up, when one of its steps or requests fails, or when
+the core ends. Nothing in the component's process may then wait on it, so the core tells it:
+
+- **The caller gives it up** on `call.core.abandon`, naming the call by its reply subject: the
+  Python SDK's `Peer.request` with `give_up` and `Peer.call` do so when they stop waiting, by
+  timeout or interrupt. The core refuses a call outside the asker's inbox, and the call answers
+  its error at once, naming the cause; a request already out runs on, and its answer is dropped.
+- **The stop word.** Where a declared component's step runs or its continuation waits, the core
+  publishes `{"call", "stop"}` on the command's `cmd.<i>.<command>`, without a reply. The Python
+  runner drops that call's continuation and sets the call's `Abandon` (`kern.abandoned()` in the
+  call's code), so what waits on the call ends at once instead of at its own timeout.
+- **Only that call.** Every other call of the component, of the same command or not, runs on.
+  SE's streamed commands (`Stepped`) end their thread on it, and a call waiting for the process's
+  working directory leaves the line.
+
+Proven by `kern/index/abandon_test.go` (the cause, and the stop word of one call of two),
+`kern/host/stream_test.go` (`call.core.abandon`, and the stop word on the bus),
+`kern/python/tests/test_kern_stream.py` (the runner and the peer) and SE's
+`tests/test_se_components.py` (one of two overlapping streamed calls).
+
 ### How a component in another language attaches
 
 A component in any language with a NATS client attaches the same way:
@@ -248,7 +271,8 @@ A component in any language with a NATS client attaches the same way:
 3. It subscribes to `run.<i>` and `cmd.<i>.>`, reads `in.<i>` on each run, answers with
    `commit.<i>`, and beats on `lease.<i>` from its own loop; a step says its lines on
    `say.<i>.<call>`
-   ([Progress and long calls](#progress-and-long-calls)).
+   ([Progress and long calls](#progress-and-long-calls)), and the stop word on
+   `cmd.<i>.<command>` ends what waits on a call ([A call given up](#a-call-given-up)).
 
 Python comes first, with a standard-library SDK in the core's repository (`python/kern/`): the
 NATS peer, a runner that reads `component.toml` and dispatches to decorated functions, and the fake

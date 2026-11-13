@@ -81,3 +81,101 @@ def test_a_step_says_its_lines_at_once_and_beats_while_it_runs(tmp_path: Path, m
     before = len(peer.sent)
     time.sleep(0.3)
     assert len(peer.sent) == before, "no beat after the step answered"
+
+
+HOLD = """name = "hold"
+contract = 1
+help = "Holds a call until its continuation runs."
+
+[commands."hold on"]
+usage = "hold on NAME"
+summary = "Ask once, then answer."
+group = "Fixtures"
+help = "Asks its ledger, and answers the answer."
+class = "batch"
+
+[requests.ask]
+type = "string"
+answer = "string"
+help = "The question."
+"""
+
+HOLD_INIT = """from kern import abandoned, component
+
+hold = component("hold")
+given = {}
+
+
+@hold.command("hold on")
+def on(args, inputs, say):
+    name = args[0]
+    abandoned().when(lambda reason: given.setdefault(name, reason))
+    return hold.result(requests=[hold.ask("ask", name)], then=lambda answers: f"{name}: {answers[0]}")
+"""
+
+
+def test_the_cores_stop_word_gives_up_one_call_and_leaves_the_call_beside_it(tmp_path: Path) -> None:
+    """The core's stop word, a cmd.<i>.<command> message without a reply that names the call and
+    the reason: the runner drops that call's waiting continuation and sets its Abandon, which the
+    call's code read with kern.abandoned(); the call beside it keeps its continuation and answers."""
+    from kern.nats import Msg
+    from kern.subjects import token
+
+    (tmp_path / "component.toml").write_text(HOLD, encoding="utf-8")
+    (tmp_path / "__init__.py").write_text(HOLD_INIT, encoding="utf-8")
+    comp = runner.load(tmp_path)
+    run = runner.Runner(comp, Peer(), "hold")  # type: ignore[arg-type]
+    module = sys.modules["kern_component_hold"]
+    subject = "cmd.hold." + token("hold on")
+    for call, name in (("1", "a"), ("2", "b")):
+        assert run._step("hold on", {"call": call, "step": 1, "args": [name]})["then"] is True
+    assert sorted(run._steps) == ["1", "2"]
+
+    run._called(Msg(subject, "", json.dumps({"call": "1", "stop": "its caller gave it up"}).encode()))
+
+    assert module.given == {"a": "its caller gave it up"}
+    assert sorted(run._steps) == ["2"], "only the given-up call's continuation is dropped"
+    assert run._step("hold on", {"call": "1", "step": 2, "answers": ["late"]}) == {
+        "error": "command 'hold on': call 1 has no step 1 waiting"}
+    assert run._step("hold on", {"call": "2", "step": 2, "answers": ["yes"]})["text"] == "b: yes"
+    assert module.given == {"a": "its caller gave it up"} and not run._steps and not run._abandons
+
+
+def test_a_caller_that_stops_waiting_gives_its_call_up(monkeypatch) -> None:
+    """Peer.request with give_up, and Peer.call: a call.<command> the caller stops waiting for is
+    given up on call.core.abandon, naming the call by its reply subject; one that answered is not."""
+    from kern import nats
+
+    peer = object.__new__(nats.Peer)
+    peer._inbox, peer._next, peer._waiting, peer._progress = "_INBOX.c", iter(range(1, 99)), {}, {}
+    peer.closed = threading.Event()
+    sent: list[tuple[str, dict, str]] = []
+
+    def publish(subject, data=b"", reply=""):
+        sent.append((subject, data, reply))
+        if subject == nats.ABANDON:
+            got = peer._waiting[reply]
+            got[1].append(nats.Msg(reply, "", json.dumps({"abandoned": True}).encode()))
+            got[0].set()
+
+    monkeypatch.setattr(peer, "publish", publish)
+    try:
+        peer.request("call.slow", {"args": []}, 0.2, give_up=True)
+    except nats.NatsError as error:
+        assert "answers nothing within 0.2 s" in str(error)
+    else:
+        raise AssertionError("a silent call answers")
+    assert sent[1][:2] == (nats.ABANDON, {"call": "_INBOX.c.1"}), sent
+    sent.clear()
+    try:
+        peer.call("call.long", {"args": []}, lambda m: None, idle=0.2)
+    except nats.NatsError:
+        pass
+    assert [s for s, _, _ in sent] == ["call.long", nats.ABANDON]
+    assert sent[1][1] == {"call": sent[0][2]}
+    sent.clear()
+    try:
+        peer.request("call.quick", {}, 0.2)
+    except nats.NatsError:
+        pass
+    assert [s for s, _, _ in sent] == ["call.quick"], "without give_up, nothing is given up"

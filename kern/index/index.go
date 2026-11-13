@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -218,12 +219,22 @@ func (ix *Index) Call(command string, args ...string) (Result, error) {
 // compiled command's lines once its step answers. A long command so streams
 // its progress to its caller (docs/go-core.md "Progress and long calls").
 func (ix *Index) CallSaying(command string, say func(line string), args ...string) (Result, error) {
+	return ix.CallContext(context.Background(), command, say, args...)
+}
+
+// CallContext runs a command as CallSaying does, until ctx is done: then the
+// call fails at once, with ctx's cause, and is given up. A call given up, by
+// ctx or by a failure, while a continuation of a declared component waits
+// tells that component (Result.Stop), so nothing in its process waits on a
+// call that ended (docs/go-core.md "A call given up"). A request already
+// out runs to its end, and its answer is dropped.
+func (ix *Index) CallContext(ctx context.Context, command string, say func(line string), args ...string) (Result, error) {
 	c, ok := ix.catalog.Command(command)
 	if !ok {
 		return Result{}, fmt.Errorf("index: no command %q", command)
 	}
 	in := ix.insts[c.Instance]
-	r, err := in.comp.RunSaying(command, in.reader(ix.Snapshot(), ""), args, say)
+	r, err := in.comp.RunContext(ctx, command, in.reader(ix.Snapshot(), ""), args, say)
 	var done Result
 	for {
 		if err != nil {
@@ -240,14 +251,17 @@ func (ix *Index) CallSaying(command string, say func(line string), args ...strin
 		}
 		done.Writes = append(done.Writes, r.Writes...)
 		if err := ix.apply(in, r.Writes); err != nil {
+			r.Stopped(err.Error())
 			return done, err
 		}
 		answers := make([]any, 0, len(r.Requests))
 		for i, a := range r.Requests {
 			t := in.req[a.Port]
-			ans, err := ix.insts[t.inst].comp.Serve(t.verb, a.Value)
+			ans, err := serve(ctx, ix.insts[t.inst].comp, t.verb, a.Value)
 			if err != nil {
-				return done, fmt.Errorf("index: %s: request %d of %d, %s.%s to %s.%s, failed: %w", command, i+1, len(r.Requests), in.name, a.Port, t.inst, t.verb, err)
+				err = fmt.Errorf("index: %s: request %d of %d, %s.%s to %s.%s, failed: %w", command, i+1, len(r.Requests), in.name, a.Port, t.inst, t.verb, err)
+				r.Stopped(err.Error())
+				return done, err
 			}
 			done.Requests = append(done.Requests, a)
 			answers = append(answers, ans)
@@ -255,7 +269,44 @@ func (ix *Index) CallSaying(command string, say func(line string), args ...strin
 		if r.Then == nil {
 			return done, nil
 		}
+		if err := given(ctx); err != nil {
+			r.Stopped(err.Error())
+			return done, err
+		}
 		r, err = r.Then(answers)
+	}
+}
+
+// given is the error of a call whose ctx is done, naming its cause; nil while it runs.
+func given(ctx context.Context) error {
+	if ctx.Err() == nil {
+		return nil
+	}
+	return fmt.Errorf("index: the call is given up: %w", context.Cause(ctx))
+}
+
+// serve hands one request to its verb, and stops waiting once ctx is done.
+func serve(ctx context.Context, comp *Component, verb string, req any) (any, error) {
+	if ctx.Done() == nil {
+		return comp.Serve(verb, req)
+	}
+	if err := given(ctx); err != nil {
+		return nil, err
+	}
+	type served struct {
+		ans any
+		err error
+	}
+	got := make(chan served, 1)
+	go func() {
+		ans, err := comp.Serve(verb, req)
+		got <- served{ans, err}
+	}()
+	select {
+	case s := <-got:
+		return s.ans, s.err
+	case <-ctx.Done():
+		return nil, given(ctx)
 	}
 }
 

@@ -8,6 +8,7 @@ SE's docs/go-core.md ("The component contract") is the contract until kern owns 
 
 from .component import Ask, Component, Inputs, KernError, Result, Write, component
 from .declaration import CONTRACT, Declaration, DeclarationError
+from .runner import Abandon, abandoned
 
-__all__ = ["Ask", "CONTRACT", "Component", "Declaration", "DeclarationError", "Inputs", "KernError", "Result",
-           "Write", "component"]
+__all__ = ["Abandon", "Ask", "CONTRACT", "Component", "Declaration", "DeclarationError", "Inputs", "KernError",
+           "Result", "Write", "abandoned", "component"]

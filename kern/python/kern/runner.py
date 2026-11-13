@@ -12,7 +12,11 @@ environment (``CORE_BUS``, ``CORE_USER``, ``CORE_TOKEN``), as docs/go-core.md,
    of its own, so calls run side by side, and, an I/O component, each request on
    ``io.<i>.<verb>``; each line a step says goes out at once on
    ``say.<i>.<call>``, its own call's, and while a step runs it beats there, so
-   the core waits for a long step as long as the process lives;
+   the core waits for a long step as long as the process lives; a message on
+   ``cmd.<i>.<command>`` without a reply, ``{"call", "stop"}``, is the core's
+   stop word: it gave that call up, so the runner drops the call's waiting
+   continuation and sets its :class:`Abandon`, which the call's code reads
+   with :func:`abandoned`;
 4. it beats on ``lease.<i>`` from its work loop, every 5 s.
 
 It ends when the bus closes: the core ended it, or ended.
@@ -37,6 +41,46 @@ from .subjects import subject, token, word
 BEAT = 5.0
 #: How long a request to the core waits.
 WAIT = 10.0
+
+
+class Abandon:
+    """The core's stop word for one call: set once, with its reason, when the core gives the call
+    up (docs/go-core.md "A call given up"). The call's code reads it with :func:`abandoned`, and
+    what waits on the call ends: it checks :attr:`event`, or runs a function :meth:`when` it comes."""
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.reason = ""
+        self._lock = threading.Lock()
+        self._then: list[Any] = []
+
+    def when(self, fn) -> None:
+        """Run ``fn(reason)`` once the call is given up: now, where it already is."""
+        with self._lock:
+            if not self.event.is_set():
+                self._then.append(fn)
+                return
+        fn(self.reason)
+
+    def set(self, reason: str) -> None:
+        with self._lock:
+            if self.event.is_set():
+                return
+            self.reason = reason
+            self.event.set()
+            then, self._then = self._then, []
+        for fn in then:
+            fn(reason)
+
+
+_current = threading.local()
+
+
+def abandoned() -> Abandon:
+    """The :class:`Abandon` of the call this thread runs a step of; outside a runner's step, one
+    the core never sets, as the fake core gives no call up."""
+    got = getattr(_current, "abandon", None)
+    return got if got is not None else Abandon()
 
 
 def load(folder: str | Path) -> Component:
@@ -69,6 +113,7 @@ class Runner:
         self.me = subject(instance)
         self._work: queue.Queue[Msg | None] = queue.Queue()
         self._steps: dict[str, Result] = {}
+        self._abandons: dict[str, Abandon] = {}
         self._steps_lock = threading.Lock()
         self._run_due = threading.Event()
 
@@ -109,6 +154,14 @@ class Runner:
                 raise
 
     def _called(self, msg: Msg) -> None:
+        if not msg.reply:  # no step: the core's stop word, {"call", "stop"}
+            body = msg.json() or {}
+            if "stop" in body:
+                self._stop(str(body.get("call", "")), str(body["stop"]))
+            return
+        call = str((msg.json() or {}).get("call", ""))
+        with self._steps_lock:  # before its thread starts, so a stop word that follows finds it
+            self._abandons.setdefault(call, Abandon())
         # Each step runs in its own thread, so a long call never holds another; the steps of one
         # call never overlap, as the core asks the next only once the last has answered.
         threading.Thread(target=self._answer_step, args=(msg,), name="kern-step", daemon=True).start()
@@ -119,6 +172,14 @@ class Runner:
         except NatsError:
             if not self.peer.closed.is_set():
                 raise
+
+    def _stop(self, call: str, reason: str) -> None:
+        """The core gave `call` up: drop its waiting continuation and tell its code."""
+        with self._steps_lock:
+            self._steps.pop(call, None)
+            abandon = self._abandons.pop(call, None)
+        if abandon is not None:
+            abandon.set(reason)
 
     def _watch(self) -> None:
         self.peer.closed.wait()
@@ -187,6 +248,9 @@ class Runner:
         def say(line: str) -> None:
             self._say(call, str(line))
 
+        with self._steps_lock:
+            abandon = self._abandons.setdefault(call, Abandon())
+        _current.abandon = abandon
         try:
             if step == 1:
                 r = self.comp.run(name, body.get("args") or [], body.get("inputs") or {}, say)
@@ -199,10 +263,15 @@ class Runner:
         except Exception as e:
             with self._steps_lock:
                 self._steps.pop(call, None)
+                self._abandons.pop(call, None)
             return {"error": str(e)}
-        if r.then is not None:
-            with self._steps_lock:
+        finally:
+            _current.abandon = None
+        with self._steps_lock:
+            if r.then is not None and not abandon.event.is_set():
                 self._steps[call] = r
+            else:  # the call ends here, or the core gave it up while this step ran
+                self._abandons.pop(call, None)
         return {"text": r.text, "writes": [w.wire() for w in r.writes],
                 "requests": [{"port": a.port, "value": a.value} for a in r.requests], "then": r.then is not None}
 
