@@ -175,6 +175,7 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
   agent definition, template or rule it would change; SE files the retro issue
   ([wrk-007](../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - Report per integration, as a statement, never a question: squash commit, landing pull request
-  and its `check` run, suite result, output
+  and its `check` run, suite result, the integration's own metrics line (`Metrics: {...}`, which
+  `integrate` prints last, README [Metrics](../README.md#metrics)), output
   check, each issue's GitHub state as `integrate` read it after the merge (never as intended),
   escalations, and anything SE must decide or file.

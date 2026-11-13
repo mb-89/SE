@@ -17,6 +17,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import build_docs  # noqa: E402
 import se_plugin  # noqa: E402
 
+# The suite's runs of work_tickets.py and se_start.py measure themselves (scripts/metrics.py); their
+# lines go nowhere, never into the machine's ~/.se/metrics.jsonl. A test of the lines sets its own.
+os.environ["SE_METRICS"] = os.devnull
+
 
 @pytest.fixture(scope="session")
 def obs() -> Path:
