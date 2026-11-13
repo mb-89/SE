@@ -51,6 +51,7 @@ class Peer:
         self._sids = itertools.count(1)
         self._subs: dict[int, Handler] = {}
         self._waiting: dict[str, tuple[threading.Event, list[Msg]]] = {}
+        self._progress: dict[str, Handler] = {}
         self._next = itertools.count(1)
         self._inbox = inbox(user) + "." + secrets.token_hex(8)
         #: The errors the server sent, such as a permissions violation; `closed` is set once the connection is gone.
@@ -119,6 +120,36 @@ class Peer:
         finally:
             self._waiting.pop(reply, None)
 
+    def call(self, subject: str, body: dict, on_progress: Handler, idle: float = 60.0) -> Msg:
+        """Ask a streaming call, ``call.<command>``: name a progress subject in this peer's inbox in
+        the body, hand each progress message (``{"line"}`` or ``{"beat"}``) to on_progress as it
+        comes, and wait for the one answer as long as the core says anything within ``idle``
+        seconds (docs/go-core.md "Progress and long calls")."""
+        n = next(self._next)
+        reply, progress = f"{self._inbox}.{n}", f"{self._inbox}.p{n}"
+        got: tuple[threading.Event, list[Msg]] = (threading.Event(), [])
+        heard = threading.Event()
+
+        def said(msg: Msg) -> None:
+            heard.set()
+            on_progress(msg)
+
+        self._waiting[reply] = got
+        self._progress[progress] = said
+        try:
+            self.publish(subject, {**body, "progress": progress}, reply)
+            while not got[0].is_set():
+                heard.clear()
+                if got[0].wait(idle) or heard.is_set():
+                    continue
+                raise NatsError(f"{subject} says nothing within {idle} s")
+            if not got[1]:
+                raise NatsError(f"the bus closed before {subject} answered")
+            return got[1][0]
+        finally:
+            self._waiting.pop(reply, None)
+            self._progress.pop(progress, None)
+
     def respond(self, msg: Msg, data: bytes | str | dict | list) -> None:
         if msg.reply:
             self.publish(msg.reply, data)
@@ -139,6 +170,10 @@ class Peer:
         self.closed.wait(2)
 
     def _answered(self, msg: Msg) -> None:
+        said = self._progress.get(msg.subject)
+        if said:
+            said(msg)
+            return
         got = self._waiting.get(msg.subject)
         if got:
             got[1].append(msg)

@@ -638,6 +638,15 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - `integrate`'s read-back then needs no `--landing-description`: it reads the landing pull
     request from the relay. `SE_KERN=off`, no kern or a token backend keeps the file-based path
     above, the fallback; `<se>/scripts/se_relay.py` owns which path a command takes.
+- **One call through kern**: there `integrate`, `refs request`, `refs apply`, `file`, `route` and
+  `fleet-check` run as one call, each GitHub step of their plan asked through kern (README
+  [Hand-offs through the relay](../../../README.md#hand-offs-through-the-relay)).
+  - Run the command in the background (in Claude Code, Bash's `run_in_background`), so the
+    session can run its steps while it waits; each one prints `GitHub step through kern's relay:
+    <tool>`.
+  - Run each step with exactly the input the hook tells, one at a time; its answer reaches the
+    command through the PostToolUse hook. No file is saved and no `--read-back` follows: the
+    command finishes on its own and prints its result.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
   `review-note`, `probe`, `sync`, `identity`, `suite`, `suite-shard`, `suite-time`, `guard`, `config`,
   `close`, `push`, `verified`, `comments-read`, `body-read --body-file`, `release-trailer`,

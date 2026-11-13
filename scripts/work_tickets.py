@@ -3908,19 +3908,23 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
     body naming a missing se command is refused first (`refuse_dangling`)."""
     refuse_dangling(repo, command, body)
     plan = filing_plan(repo, command, title, body, filing, existing)
-    if hand_off():
+    door = relay_door(root, repo) if hand_off() else None
+    if hand_off() and door is None:
         print(plan.text())
         return Filed()
     key = purpose_key(title, body)
     state: dict[str, object] = {}
+    issues = door.open_issues if door is not None else lambda: open_issues(root, repo)
 
     def find_twin(_: dict[str, object], __: str) -> dict[str, object]:
-        found = twins(open_issues(root, repo), key, existing)
+        found = twins(issues(), key, existing)
         state["twin"] = found[0] if found else None
         return {"twin": state["twin"]}
 
     def comment_twin(arguments: dict[str, object], _: str) -> None:
-        if state["twin"] is not None:
+        if state["twin"] is not None and door is not None:
+            door.comment(int(str(state["twin"])), str(arguments["body"]))
+        elif state["twin"] is not None:
             run_gh_with_body(root, ["issue", "comment", str(state["twin"]), *repo_arguments(repo)],
                              str(arguments["body"]))
 
@@ -3928,6 +3932,12 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
         if state["twin"] is not None:
             return {"number": None}
         labels = [str(label) for label in arguments["labels"]]  # type: ignore[union-attr]
+        if door is not None:  # GitHub creates a label an issue names that it lacks
+            number = tool_number(door.ask("issue_write", {
+                "method": "create", "title": str(arguments["title"]),
+                "body": str(arguments["body"]), "labels": labels}), "issue")
+            state.update(number=number, url=issue_url(repo, number))
+            return {"number": number}
         ensure_labels(root, repo, labels)
         output = run_gh_with_body(root, [
             "issue", "create", "--title", str(arguments["title"]),
@@ -3944,6 +3954,12 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
         if state["twin"] is not None:
             return
         labels = work_labels(root, repo)
+        if door is not None:
+            have = door.labels(int(str(existing)))
+            door.edit_issue(int(str(existing)), str(arguments["title"]), str(arguments["body"]),
+                            [*have, *(label for label in labels if label not in have)])
+            state["number"] = existing
+            return
         ensure_labels(root, repo, labels)
         run_gh_with_body(root, [
             "issue", "edit", str(existing), "--title", str(arguments["title"]),
@@ -3953,7 +3969,7 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
 
     def find_lower(_: dict[str, object], __: str) -> dict[str, object]:
         number = state.get("number")
-        found = ([twin for twin in twins(open_issues(root, repo), key, int(str(number)))
+        found = ([twin for twin in twins(issues(), key, int(str(number)))
                   if twin < int(str(number))] if number is not None else [])
         state["lower"] = found[0] if found else None
         return {"lower": state["lower"]}
@@ -3962,11 +3978,19 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
         if state[source] is None:
             return
         body = re.sub(r"#<[^>]*>", f"#{state[source]}", str(arguments["body"]))
+        if door is not None:
+            door.comment(int(str(arguments["issue_number"])), body)
+            return
         run_gh_with_body(root, ["issue", "comment", str(arguments["issue_number"]),
                                 *repo_arguments(repo)], body)
 
     def close_duplicate(arguments: dict[str, object], source: str) -> None:
         if state[source] is None:
+            return
+        if door is not None:
+            door.ask("issue_write", {"method": "update", "issue_number": arguments["issue_number"],
+                                     "state": "closed", "state_reason": "duplicate",
+                                     "duplicate_of": state[source]})
             return
         hostname = repo_host(repo)
         run_gh(root, ["api", "-X", "PATCH",
@@ -4058,17 +4082,26 @@ def route_outside_issue(
     routing = read_text_file(file, "routing sections")
     repo = resolve_repo(root, repo)
     handing_off = hand_off()
-    if read is None and handing_off:
+    door = relay_door(root, repo) if handing_off else None  # one call through kern's relay
+    if read is None and handing_off and door is None:
         raise QueueError(
             f"route reads #{number} through gh, which is not signed in here; read the issue with "
             "the GitHub tools and pass --issue-title <title> --issue-body <file with its body>")
-    if handing_off:  # the pause search runs first, as its own plan
+    if door is not None:
+        refuse_while_paused("route", door.paused(repo))
+    elif handing_off:  # the pause search runs first, as its own plan
         print(Plan(pause_plan(repo).title, (pause_step(repo),),
                    "no issue listed: run the plan below").text())
     else:
         refuse_while_paused("route", pause_issues(root, repo))
-    issue = (fetch_issue(root, number, repo) if read is None
-             else {"title": read[0], "body": read_file(read[1], "issue body")})
+    if read is not None:
+        issue = {"title": read[0], "body": read_file(read[1], "issue body")}
+    elif door is not None:
+        issue = door.ask("issue_read", {"method": "get", "issue_number": number})
+        issue = issue if isinstance(issue, dict) else {}
+        issue = {"title": str(issue.get("title") or ""), "body": str(issue.get("body") or "")}
+    else:
+        issue = fetch_issue(root, number, repo)
     if section(markdown_sections(str(issue["body"])), ROUTING_SECTION):
         raise QueueError(f"route: #{number} is routed already; edit its {ROUTING_SECTION} section")
     branch = title.strip() if title is not None else routed_branch(str(issue["title"]), kind)
@@ -5703,7 +5736,9 @@ def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: s
     seen: dict[str, str] = {}
 
     def paused(_: dict[str, object], __: str) -> None:
-        refuse_while_paused("integrate", pause_issues(root, tracker))
+        relayed = getattr(door, "relayed", False)
+        refuse_while_paused("integrate",
+                            door.paused(tracker) if relayed else pause_issues(root, tracker))
 
     def open_pull(arguments: dict[str, object], _: str) -> dict[str, object]:
         title, body = str(arguments["title"]), str(arguments["body"])
@@ -5892,6 +5927,8 @@ def integrate(
         )
     feedback.phase(f"read pull request #{pull_number} and its field report")
     relay = relay_for(root) if handing_off and pr_description is None else None
+    if handing_off and pr_description is None and (stepped := relay_door(root, remote)):
+        relay = StepReads(root, stepped)  # one call through kern: the reads are steps too
     if handing_off and relay is not None:
         pull, report, work_issue, work_number = relay_pull_request(relay, root, pull_number, remote)
     elif handing_off:
@@ -5988,7 +6025,17 @@ def integrate(
             issue_url(tracker, work_number), metrics.snapshot())
         plan = landing_plan(remote, landing, target, base, landed, title, message, description,
                             then, tracker)
-        if handing_off:
+        door = relay_door(root, remote) if handing_off else None
+        if door is not None:  # one call through kern: each GitHub step is a github.step
+            feedback.phase("landing plan through kern's relay: the landing pull request, its "
+                           "check, the squash merge")
+            given = run_plan(plan, landing_actions(root, door, landing, target, base, tracker))
+            landing_pull = int(given["pull number"])
+            feedback.phase("read back the landing pull request and the landed commit")
+            landed_metrics({**state, "plan": plan.data()}, landing_pull,
+                           str(door.pull(landing_pull).get("body") or ""))
+            commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
+        elif handing_off:
             path = handoff_path(root, branch)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps({**state, "plan": plan.data(), "relay": relay is not None},
@@ -6002,11 +6049,12 @@ def integrate(
             print(f"Pushed {landing} at {landed[:12]}; {through} (kept in {path}):")
             print(plan.text())
             return None
-        feedback.phase("landing plan: the landing pull request, its check, the squash merge")
-        door = GitHub(root, remote)
-        given = run_plan(plan, landing_actions(root, door, landing, target, base, tracker))
-        feedback.phase("read back the landed commit")
-        commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
+        else:
+            feedback.phase("landing plan: the landing pull request, its check, the squash merge")
+            door = GitHub(root, remote)
+            given = run_plan(plan, landing_actions(root, door, landing, target, base, tracker))
+            feedback.phase("read back the landed commit")
+            commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
     except QueueError as error:
         abandon_landing(root, target, landing)
         if not isinstance(error, PausedError):  # a pause is the owner's, no escalation
@@ -6129,6 +6177,21 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
                          comment, [*pending, *points])
     if door is None:
         print(plan.text())
+    elif getattr(door, "relayed", False):
+        issues = RelayDoor(root, tracker, door.step)
+        run_plan(plan, {
+            "comment_pull": lambda arguments, _: door.comment(
+                int(arguments["issue_number"]), str(arguments["body"])) and None,
+            "close_pull": lambda arguments, _: door.close_pull(int(arguments["pullNumber"])),
+            "comment_issue": lambda arguments, _: issues.comment(
+                int(arguments["issue_number"]), str(arguments["body"])) and None,
+            "remove_label": lambda arguments, label: issues.remove_label(
+                int(arguments["issue_number"]), label),
+            "add_label": lambda arguments, label: issues.add_label(
+                int(arguments["issue_number"]), label),
+            "close_issue": lambda arguments, _: issues.close_issue(int(arguments["issue_number"])),
+        })
+        print(f"Issue #{work_number}: {issues.issue_state(work_number)} on GitHub after the merge")
     else:
         run_plan(plan, {**tracker_actions(root, tracker),
                         "comment_pull": lambda arguments, _: door.comment(
@@ -6152,7 +6215,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print(f"warning: worker worktree was not removed: {error}", file=sys.stderr)
         print("Cleanup: worker worktree retained")
     delete_merged_branch(root, branch, str(state["head"]), landed)
-    if door is None:
+    if door is None or getattr(door, "relayed", False):
         print(f"Started: none here; start what is unblocked with the host's session tool ({WITHOUT_GH})")
         return short
     started = 0
@@ -6219,6 +6282,221 @@ class Workflows(GitHub):
         """The log of the run's first job: the one job ref-maintenance has."""
         jobs = self.api(f"actions/runs/{run_id}/jobs").get("jobs") or []
         return self.text(f"actions/jobs/{jobs[0]['id']}/logs") if jobs else ""
+
+
+# The GitHub door through kern's relay. Where integrate (or another plan runner) runs as one call
+# through kern (se_components' Stepped), each door call is one GitHub step: the session runs the
+# tool kern's hook names, and the step answers with the tool's own answer. The plans and their
+# local runners stay as they are; only the door changes.
+
+
+def tool_items(data: object, key: str) -> list[dict[str, object]]:
+    """The items of a GitHub tool's list answer: the list itself, or its `key` list (the tools
+    answer `{"issues": [...]}`, `{"check_runs": [...]}`, `{"workflow_runs": [...]}`)."""
+    if isinstance(data, dict):
+        data = data.get(key)
+    return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+
+def tool_number(data: object, kind: str = "pull") -> int:
+    """The number a write tool's answer names: its `number`, else the last path segment of its
+    `url` or `html_url` after /<kind>/ (create_pull_request answers `{"id", "url"}`)."""
+    if isinstance(data, dict):
+        if str(data.get("number") or "").isdigit():
+            return int(data["number"])
+        for field in ("html_url", "url"):
+            found = re.search(rf"/{kind}s?/(\d+)(?:$|[/#?])", str(data.get(field) or ""))
+            if found:
+                return int(found[1])
+    raise QueueError(f"The GitHub tool's answer names no {kind} number: {str(data)[:200]}")
+
+
+class RelayDoor(Workflows):
+    """The door of the landing, close-out and refs plans through kern's relay: each call is one
+    `github.step` (se_relay.step), the tool and arguments the plan names, and reads the tool's
+    answer. A step the session does not run within its wait fails the command, naming the call."""
+
+    relayed = True
+
+    def __init__(self, root: Path, repo: str, step: Callable[..., object]) -> None:
+        super().__init__(root, repo)
+        self.repo = repo
+        owner, name = self.slug.split("/")
+        self.where = {"owner": owner, "repo": name}
+        self.step = step
+        self.pull_number: int | None = None
+        self.merged: dict[int, str] = {}
+
+    def ask(self, tool: str, arguments: dict[str, object], note: str = "",
+            wait: str = "") -> object:
+        method = arguments.get("method")
+        number = next((arguments[key] for key in ("pullNumber", "issue_number") if key in arguments), "")
+        feedback.progress(f"GitHub step through kern's relay: {tool}"
+                          + (f" {method}" if method else "") + (f" #{number}" if number else "")
+                          + "; run it with the input kern's hook tells")
+        return self.step(tool, {**self.where, **arguments}, note, wait)
+
+    def paused(self, tracker: str) -> list[dict[str, object]]:
+        found = self.ask("list_issues", {**owner_repo(tracker), "state": "OPEN",
+                                         "labels": [PAUSE_LABEL], "perPage": 20})
+        return [{"number": issue.get("number"), "title": issue.get("title"),
+                 "url": issue.get("url") or issue.get("html_url")}
+                for issue in tool_items(found, "issues")]
+
+    def pull(self, number: int) -> dict[str, object]:
+        read = self.ask("pull_request_read", {"method": "get", "pullNumber": number})
+        read = dict(read) if isinstance(read, dict) else {}
+        if read.get("merged") and not read.get("merge_commit_sha") and number in self.merged:
+            # The tools name no merge commit (work model, Without gh); the read-back checks it
+            # through git.
+            read["merge_commit_sha"] = self.merged[number]
+        return read
+
+    def open_pull(self, head: str, base: str) -> dict[str, object] | None:
+        found = tool_items(self.ask("list_pull_requests", {
+            "state": "open", "head": f"{self.where['owner']}:{head}", "base": base}), "pull_requests")
+        if found:
+            self.pull_number = int(found[0]["number"])
+            return {**found[0], "html_url": found[0].get("html_url") or pull_url(self.repo, self.pull_number)}
+        return None
+
+    def _written(self, data: object) -> dict[str, object]:
+        self.pull_number = tool_number(data)
+        return {"number": self.pull_number, "html_url": pull_url(self.repo, self.pull_number)}
+
+    def create_pull(self, head: str, base: str, title: str, body: str) -> dict[str, object]:
+        return self._written(self.ask("create_pull_request", {
+            "head": head, "base": base, "title": title, "body": body}))
+
+    def update_pull(self, number: int, title: str, body: str) -> dict[str, object]:
+        self.ask("update_pull_request", {"pullNumber": number, "title": title, "body": body})
+        self.pull_number = number
+        return {"number": number, "html_url": pull_url(self.repo, number)}
+
+    def comment(self, number: int, body: str) -> dict[str, object]:
+        data = self.ask("add_issue_comment", {"issue_number": number, "body": body})
+        found = data.get("id") if isinstance(data, dict) else None
+        if not str(found or "").isdigit():
+            found = re.search(r"issuecomment-(\d+)", str(data.get("url") if isinstance(data, dict) else ""))
+            found = found[1] if found else 0
+        return {"id": int(found or 0)}
+
+    def close_pull(self, number: int) -> None:
+        self.ask("update_pull_request", {"pullNumber": number, "state": "closed"})
+
+    def check_run(self, sha: str, name: str) -> dict[str, object] | None:
+        if self.pull_number is None:
+            raise QueueError("The relay reads check runs by pull request: open it first")
+        runs = [run for run in tool_items(self.ask("pull_request_read", {
+                    "method": "get_check_runs", "pullNumber": self.pull_number}), "check_runs")
+                if run.get("name") == name and str(run.get("head_sha") or sha) == sha]
+        return max(runs, key=lambda run: int(run.get("id") or 0)) if runs else None
+
+    def squash(self, number: int, sha: str, title: str, message: str) -> str:
+        merged = self.ask("merge_pull_request", {
+            "pullNumber": number, "merge_method": "squash", "commit_title": title,
+            "commit_message": message, "expectedHeadSha": sha})
+        found = str(merged.get("sha") or "") if isinstance(merged, dict) else ""
+        self.merged[number] = found
+        return found
+
+    def labels(self, number: int) -> list[str]:
+        data = self.ask("issue_read", {"method": "get_labels", "issue_number": number})
+        items = tool_items(data, "labels") or ([{"name": n} for n in data] if isinstance(data, list) else [])
+        return [str(label.get("name")) for label in items if label.get("name")]
+
+    def set_labels(self, number: int, labels: list[str]) -> None:
+        self.ask("issue_write", {"method": "update", "issue_number": number, "labels": labels})
+
+    def add_label(self, number: int, label: str) -> None:
+        have = self.labels(number)
+        if label not in have:
+            self.set_labels(number, [*have, label])
+
+    def remove_label(self, number: int, label: str) -> None:
+        have = self.labels(number)
+        if label in have:
+            self.set_labels(number, [name for name in have if name != label])
+
+    def open_issues(self) -> list[dict[str, object]]:
+        """Every open issue, page by page (list_issues with `after`), with its title and body."""
+        found: list[dict[str, object]] = []
+        after = ""
+        while True:
+            data = self.ask("list_issues", {"state": "OPEN", "perPage": 100,
+                                            **({"after": after} if after else {})})
+            found += tool_items(data, "issues")
+            page = data.get("pageInfo") if isinstance(data, dict) else None
+            after = str((page or {}).get("endCursor") or "") if (page or {}).get("hasNextPage") else ""
+            if not after:
+                return found
+
+    def edit_issue(self, number: int, title: str, body: str, labels: list[str]) -> None:
+        self.ask("issue_write", {"method": "update", "issue_number": number, "title": title,
+                                 "body": body, "labels": labels})
+
+    def close_issue(self, number: int) -> None:
+        self.ask("issue_write", {"method": "update", "issue_number": number, "state": "closed",
+                                 "state_reason": "completed"})
+
+    def issue_state(self, number: int) -> str:
+        read = self.ask("issue_read", {"method": "get", "issue_number": number})
+        return str(read.get("state") or "unreadable").upper() if isinstance(read, dict) else "unreadable"
+
+    def comments(self, number: int) -> list[dict[str, object]]:
+        data = self.ask("issue_read", {"method": "get_comments", "issue_number": number,
+                                       "perPage": 100})
+        return tool_items(data, "comments")
+
+    def newest_run(self, workflow: str) -> int:
+        runs = tool_items(self.ask("actions_list", {
+            "method": "list_workflow_runs", "resource_id": workflow,
+            "workflow_runs_filter": {"event": "workflow_dispatch"}}), "workflow_runs")
+        return max((int(run.get("id") or 0) for run in runs), default=0)
+
+    def dispatch(self, workflow: str, ref: str, inputs: dict[str, str]) -> None:
+        self.ask("actions_run_trigger", {"method": "run_workflow", "workflow_id": workflow,
+                                         "ref": ref, "inputs": inputs})
+
+    def run(self, run_id: int) -> dict[str, object]:
+        data = self.ask("actions_get", {"method": "get_workflow_run", "resource_id": str(run_id)})
+        return data if isinstance(data, dict) else {}
+
+    def run_log(self, run_id: int) -> str:
+        jobs = tool_items(self.ask("actions_list", {"method": "list_workflow_jobs",
+                                                     "resource_id": str(run_id)}), "jobs")
+        if not jobs:
+            return ""
+        data = self.ask("get_job_logs", {"job_id": int(jobs[0]["id"]), "return_content": True})
+        if isinstance(data, dict):
+            return str(data.get("logs_content") or data.get("content") or data.get("logs") or "")
+        return str(data or "")
+
+
+class StepReads:
+    """kern relay's reads (se_relay.Relay.answer_file) asked as github.step through the relay
+    door, where a command runs as one call: the tool's answer is written to the file a command
+    reads, no snapshot needed beforehand."""
+
+    def __init__(self, root: Path, door: RelayDoor) -> None:
+        self.root, self.door = root, door
+
+    def answer_file(self, family: str, owner: str, repo: str, number: int, what: str) -> Path:
+        relay = sibling("se_relay")
+        tool, method, number_arg = relay.FAMILIES[family]
+        data = self.door.step(tool, {"method": method, "owner": owner, "repo": repo,
+                                     number_arg: number}, f"read the {what}", "")
+        path = self.root / relay.ANSWERS / f"{family}-{relay.key(owner, repo, number)}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        return path
+
+
+def relay_door(root: Path, repo: str) -> RelayDoor | None:
+    """The relay door where this command runs as one call through kern's relay (se_relay.steps
+    is set), else None: the command hands its plan to the session, or runs it through gh."""
+    step = sibling("se_relay").steps()
+    return RelayDoor(root, repo, step) if step is not None else None
 
 
 def parse_triples(text: str) -> list[tuple[str, str, str]]:
@@ -6369,7 +6647,7 @@ def refs_request(root: Path, number: int, file: Path, repo: str | None) -> str:
             gives=("comment id",)),
         *workflow_steps(repo, integration_branch(root), triples, dry_run=True, first=2),
     ), then)
-    door = None if hand_off() else Workflows(root, repo)
+    door = relay_door(root, repo) if hand_off() else Workflows(root, repo)
     given = hand_off_or_run(plan, door)
     if door is None:
         return "Then read back as the plan's last line says"
@@ -6449,7 +6727,7 @@ def refs_apply(root: Path, number: int, repo: str | None, comments_file: Path | 
     `number`, then read the refs back; where gh is not signed in, print these GitHub steps for the
     session and the read-back that follows them."""
     repo = resolve_repo(root, repo)
-    door = None if hand_off() else Workflows(root, repo)
+    door = relay_door(root, repo) if hand_off() else Workflows(root, repo)
     comments = saved_comments(comments_file, number) if door is None else door.comments(number)
     triples, request_id = posted_request(comments, number)
     then = (f"work_tickets.py refs apply {number} --comments-file {comments_file} --read-back "
@@ -6673,6 +6951,40 @@ class FileFleet:
 
     def branches(self) -> dict[str, datetime]:
         return fleet_branches(self.root)
+
+
+class RelayFleet(Fleet):
+    """The fleet check's door through kern's relay, as one call: each read is a github.step the
+    session runs (RelayDoor), the same reads the gh door makes; origin's branches through git."""
+
+    def __init__(self, root: Path, door: RelayDoor, base: str) -> None:
+        self.root, self.base, self.github = root, base, door
+
+    def issues(self, state: str) -> list[dict[str, object]]:
+        if state == "open":
+            return [item for item in self.github.open_issues() if "pull_request" not in item]
+        return tool_items(self.github.ask("list_issues", {
+            "state": "CLOSED", "labels": ["work"], "orderBy": "UPDATED_AT", "direction": "DESC",
+            "perPage": 100}), "issues")
+
+    def issue(self, number: int) -> dict[str, object] | None:
+        read = self.github.ask("issue_read", {"method": "get", "issue_number": number})
+        return read if isinstance(read, dict) else None
+
+    def comments(self, number: int) -> list[dict[str, object]] | None:
+        return self.github.comments(number)
+
+    def pulls(self) -> list[dict[str, object]]:
+        pulls = []
+        for listed in tool_items(self.github.ask("list_pull_requests", {
+                "state": "open", "base": self.base, "perPage": 100}), "pull_requests"):
+            number = int(listed["number"])
+            pull = self.github.pull(number)
+            self.github.pull_number = number
+            head = pull.get("head") if isinstance(pull.get("head"), dict) else {}
+            run = self.github.check_run(str(head.get("sha") or ""), CHECK_NAME)
+            pulls.append({**pull, "check": (run or {}).get("conclusion") or ""})
+        return pulls
 
 
 def fleet_plan(repo: str, base: str) -> Plan:
@@ -7692,7 +8004,10 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
     base = integration_branch(root)
     files = (args.open_issues, args.closed_issues, args.pulls)
-    if hand_off():
+    relayed = relay_door(root, repo) if hand_off() and not any(files) else None
+    if relayed is not None:  # one call through kern's relay: every read a github.step
+        door = RelayFleet(root, relayed, base)
+    elif hand_off():
         if not all(files):
             print(fleet_plan(repo, base).text())
             return 0
@@ -7789,6 +8104,11 @@ COMPONENT_SOURCE = "its command registry"
 #: (se_components.routed); every other command writes, or a hook, CI or a command runs it.
 INTERACTIVE_COMMANDS = frozenset(
     {"status", "config", "ready", "capacity", "queue", "fleet-check", "metrics"})
+#: The batch commands that run as one call through kern where its GitHub relay serves the
+#: checkout (se_components' streamed_call): progress streams, and each GitHub step of their plans
+#: goes through kern's `github.step` (RelayDoor) instead of a plan the session runs and reads back.
+STREAMED_COMMANDS = frozenset(
+    {"integrate", "refs request", "refs apply", "file", "route", "fleet-check"})
 
 
 def command_declarations(root: Path) -> dict[Path, str]:
@@ -7934,7 +8254,7 @@ def main(argv: list[str] | None = None) -> int:
     words = command_words(args)
     routed = sibling("se_components").routed(
         Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
-        " ".join(words) in INTERACTIVE_COMMANDS)
+        " ".join(words) in INTERACTIVE_COMMANDS, " ".join(words) in STREAMED_COMMANDS)
     if routed is not None:
         return routed
     code, line = metrics.recorded(f"work_tickets.py {' '.join(words)}",

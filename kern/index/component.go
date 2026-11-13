@@ -70,7 +70,10 @@ type Ask struct {
 type Result struct {
 	Text string
 	// Lines are the progress lines the step said before its text, such as "Phase: reading".
-	Lines    []string
+	Lines []string
+	// Said is set where every line was already handed to the call's say,
+	// live, as a declared component's process said it.
+	Said     bool
 	Writes   []Write
 	Requests []Ask
 	Then     func(answers []any) (Result, error)
@@ -326,12 +329,18 @@ func (c *Component) Derive(port string, read Reader) (any, error) {
 // refuses a result, or a continuation's, that writes a port the component's
 // commands do not write or asks on a port it does not declare.
 func (c *Component) Run(name string, read Reader, args []string) (Result, error) {
+	return c.RunSaying(name, read, args, nil)
+}
+
+// RunSaying runs a command's first step as Run does; say, where set, takes
+// each progress line a declared component's process says, as it says it.
+func (c *Component) RunSaying(name string, read Reader, args []string, say func(string)) (Result, error) {
 	k, ok := c.commands[name]
 	if !ok {
 		return Result{}, fmt.Errorf("component %s has no command %q", c.name, name)
 	}
 	if c.decl != nil {
-		return c.checked(c.runRemote(name, read, args))
+		return c.checked(c.runRemote(name, read, args, say))
 	}
 	in, err := k.in.fill(read)
 	if err != nil {

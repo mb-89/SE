@@ -9,7 +9,9 @@ environment (``CORE_BUS``, ``CORE_USER``, ``CORE_TOKEN``), as docs/go-core.md,
 1. it commits its attach on ``commit.<i>``: the contract and the declaration hash;
 2. it hears ``run.<i>``, reads ``in.<i>`` and commits its derivations on ``commit.<i>``;
 3. it answers each step of a command on ``cmd.<i>.<command>`` and, an I/O
-   component, each request on ``io.<i>.<verb>``;
+   component, each request on ``io.<i>.<verb>``; each line a step says goes out
+   at once on ``say.<i>``, and while a step runs it beats there, so the core
+   waits for a long step as long as the process lives;
 4. it beats on ``lease.<i>`` from its work loop, every 5 s.
 
 It ends when the bus closes: the core ended it, or ended.
@@ -141,12 +143,39 @@ class Runner:
             return
         self.peer.respond(msg, self._step(what, body))
 
+    def _say(self, call: str, line: str | None = None) -> None:
+        """One word on say.<i> for the step of `call`: a progress line, or a beat without one."""
+        self.peer.publish("say." + self.me, {"call": call} if line is None else {"call": call, "line": line})
+
     def _step(self, name: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Run one step of a command: each line it says goes to the core at once on say.<i>,
+        and, while it runs, the runner beats there and on lease.<i> every BEAT, so the core
+        waits for a long step as long as this process lives (docs/go-core.md "Progress and
+        long calls")."""
         call, step = str(body.get("call", "")), int(body.get("step", 1))
-        lines: list[str] = []
+        done = threading.Event()
+
+        def beat() -> None:
+            while not done.wait(BEAT):
+                try:
+                    self._say(call)
+                    self.peer.publish("lease." + self.me)
+                except NatsError:
+                    return
+
+        threading.Thread(target=beat, name="kern-step-beat", daemon=True).start()
+        try:
+            return self._run_step(name, body, call, step)
+        finally:
+            done.set()
+
+    def _run_step(self, name: str, body: dict[str, Any], call: str, step: int) -> dict[str, Any]:
+        def say(line: str) -> None:
+            self._say(call, str(line))
+
         try:
             if step == 1:
-                r = self.comp.run(name, body.get("args") or [], body.get("inputs") or {}, lines.append)
+                r = self.comp.run(name, body.get("args") or [], body.get("inputs") or {}, say)
             else:
                 prev = self._steps.pop(call, None)
                 if prev is None:
@@ -154,10 +183,10 @@ class Runner:
                 r = self.comp.then(prev, body.get("answers") or [])
         except Exception as e:
             self._steps.pop(call, None)
-            return {"error": str(e), "lines": lines}
+            return {"error": str(e)}
         if r.then is not None:
             self._steps[call] = r
-        return {"text": r.text, "lines": lines, "writes": [w.wire() for w in r.writes],
+        return {"text": r.text, "writes": [w.wire() for w in r.writes],
                 "requests": [{"port": a.port, "value": a.value} for a in r.requests], "then": r.then is not None}
 
 
