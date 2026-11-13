@@ -272,7 +272,6 @@ GIT_ALLOWED: dict[str, tuple[int, str]] = {
     "tests/test_releases.py": (7, TO_THE_FAKE),
     "tests/test_rewrite_history.py": (1, TO_THE_FAKE),
     "tests/test_start_refresh.py": (1, TO_THE_FAKE),
-    "tests/test_work_ticket_issues.py": (76, TO_THE_FAKE),
 }
 
 
