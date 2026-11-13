@@ -82,6 +82,9 @@ every package, so work issues and session prompts never repeat it.
    - Then regression test first, then the change, then the focused tests and the affected real
      command, and what the issue's acceptance names. No backwards compatibility, no bookkeeping
      files.
+   - The focused tests are those of what changed plus every one the project's `AGENTS.md` names
+     for the kind of file changed (in se, the docs build for published Markdown), so a rule a
+     check enforces fails in the focused step, not first in the complete suite.
    - Tests follow the work model's [test rules](../skills/work-model/SKILL.md#tests); a change that
      adds tests measures the suite with `work_tickets.py suite` before and after it, for the field
      report.
