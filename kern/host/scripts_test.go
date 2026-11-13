@@ -18,7 +18,8 @@ import (
 // against the directory a cd before it left.
 func TestOnlyAScriptNamedByItsPathIsARun(t *testing.T) {
 	t.Parallel()
-	dir := filepath.FromSlash("/work")
+	base := filepath.ToSlash(t.TempDir())
+	dir := filepath.Join(filepath.FromSlash(base), "work")
 	none := []string{
 		"git status",
 		"git -C /work log --oneline -3",
@@ -32,6 +33,7 @@ func TestOnlyAScriptNamedByItsPathIsARun(t *testing.T) {
 		"echo ./x.sh",
 		"grep -rn foo scripts/ # ./x.sh",
 		"python $SCRIPT",
+		"python ~/x.py",
 		"bash -c './x.sh'",
 		"uv run --with rich python -m rich",
 		"node --version",
@@ -42,26 +44,30 @@ func TestOnlyAScriptNamedByItsPathIsARun(t *testing.T) {
 			t.Errorf("%q runs %v, and wants no script", cmd, got)
 		}
 	}
+	// "@" stands for an absolute folder of this platform (a drive on
+	// Windows), in the command as the agent writes it and in the path wanted.
 	some := map[string][]string{
-		"./x.sh":                                     {"/work/x.sh"},
-		"bash x.sh a b":                              {"/work/x.sh"},
-		"python3 -I /tmp/s/probe.py --flag":          {"/tmp/s/probe.py"},
-		"cd /else && uv run python tools/a.py":       {"/else/tools/a.py"},
-		"uv run --with rich a.py":                    {"/work/a.py"},
-		"FOO=1 env python 'my dir/b.py' > out.txt":   {"/work/my dir/b.py"},
-		"go run ./gen.go":                            {"/work/gen.go"},
-		"node c.js; ./d.sh | tee log":                {"/work/c.js", "/work/d.sh"},
-		"pwsh -NoProfile -File scripts/e.ps1":        {"/work/scripts/e.ps1"},
-		"uv run python scripts/work_tickets.py sync": {"/work/scripts/work_tickets.py"},
+		"./x.sh":                           {"@/work/x.sh"},
+		"bash x.sh a b":                    {"@/work/x.sh"},
+		"python3 -I '@/s/probe.py' --flag": {"@/s/probe.py"},
+		"cd '@/else' && uv run python tools/a.py":    {"@/else/tools/a.py"},
+		"uv run --with rich a.py":                    {"@/work/a.py"},
+		"FOO=1 env python 'my dir/b.py' > out.txt":   {"@/work/my dir/b.py"},
+		"go run ./gen.go":                            {"@/work/gen.go"},
+		"node c.js; ./d.sh | tee log":                {"@/work/c.js", "@/work/d.sh"},
+		"python '@/RUNNER~1/f.py'":                   {"@/RUNNER~1/f.py"},
+		"pwsh -NoProfile -File scripts/e.ps1":        {"@/work/scripts/e.ps1"},
+		"uv run python scripts/work_tickets.py sync": {"@/work/scripts/work_tickets.py"},
 	}
-	for cmd, want := range some {
+	for written, want := range some {
+		cmd := strings.ReplaceAll(written, "@", base)
 		got := host.ScriptsRun(cmd, dir)
 		if len(got) != len(want) {
 			t.Errorf("%q runs %v, and wants %v", cmd, got, want)
 			continue
 		}
 		for i := range want {
-			if got[i] != filepath.FromSlash(want[i]) {
+			if got[i] != filepath.FromSlash(strings.ReplaceAll(want[i], "@", base)) {
 				t.Errorf("%q runs %v, and wants %v", cmd, got, want)
 			}
 		}

@@ -210,8 +210,10 @@ func scriptExt(w string) bool {
 }
 
 // plain says whether a word is literal: no expansion, substitution or glob.
+// A tilde expands only at the word's start; inside it is a name's, as in a
+// Windows short name (RUNNER~1).
 func plain(w string) bool {
-	return w != "" && !strings.ContainsAny(w, "$`*?~<>(){}")
+	return w != "" && !strings.HasPrefix(w, "~") && !strings.ContainsAny(w, "$`*?<>(){}")
 }
 
 func resolve(dir, p string) string {
