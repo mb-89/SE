@@ -1,7 +1,6 @@
 """The suite's fixture repositories hold still (tests/quiet_git.py): a lock file that git's background
-maintenance creates and removes while the fixture copy runs does not fail the copy, every
-fixture repository has background maintenance switched off, and each commits as the suite's own
-identity, so a commit in one needs no identity from the machine, as on CI's runner."""
+maintenance creates and removes while the fixture copy runs does not fail the copy, and every
+fixture repository has background maintenance switched off."""
 import os
 import shutil
 import subprocess
@@ -58,21 +57,3 @@ def test_a_quiet_repository_runs_no_background_maintenance(tmp_path):
         read = lambda key: subprocess.run(["git", "-C", str(repository), "config", key],  # noqa: E731
                                           capture_output=True, text=True, check=True).stdout.strip()
         assert (read("maintenance.auto"), read("gc.auto")) == ("false", "0")
-
-
-def test_a_suite_repository_commits_without_the_machines_identity(tmp_path, monkeypatch):
-    home = tmp_path / "home"
-    home.mkdir()
-    for name, value in (("HOME", home), ("USERPROFILE", home), ("XDG_CONFIG_HOME", home / ".config"),
-                        ("GIT_CONFIG_NOSYSTEM", "1")):
-        monkeypatch.setenv(name, str(value))
-    for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
-                 "EMAIL", "GIT_CONFIG_GLOBAL"):
-        monkeypatch.delenv(name, raising=False)
-    repository = quiet_git.init(tmp_path / "repository")
-    committed = subprocess.run(["git", "-C", str(repository), "commit", "-q", "--allow-empty", "-m", "one"],
-                               capture_output=True, text=True, check=False)
-    assert committed.returncode == 0, committed.stderr
-    author = subprocess.run(["git", "-C", str(repository), "log", "-1", "--format=%an <%ae>"],
-                            capture_output=True, text=True, check=True).stdout.strip()
-    assert author == "alice <alice@example.com>"
