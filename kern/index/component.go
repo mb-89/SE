@@ -142,6 +142,9 @@ type Component struct {
 	// decl is set on a component declared by its component.toml alone: its
 	// derivations, commands and verbs run in its own process, over the bus.
 	decl *declared
+	// inlet and hears are an I/O component's own commit and its ear for the host's events.
+	inlet func(instance string, read Reader, commit Commit) error
+	hears func(instance, event string, payload []byte) error
 }
 
 type derivation struct {
@@ -212,6 +215,9 @@ func Declare(name, help string, parts ...Part) *Component {
 	}
 	if len(c.verbs) > 0 && !c.io {
 		c.fail("component %s accepts verbs but carries no I/O flag: only an I/O component reaches the outside", name)
+	}
+	if (c.inlet != nil || c.hears != nil) && !c.io {
+		c.fail("component %s commits on its own or hears the host's events but carries no I/O flag", name)
 	}
 	return c
 }
