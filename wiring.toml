@@ -32,6 +32,10 @@ command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts
 component = "render"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "render"]
 
+[instances.scaffold]
+component = "scaffold"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "scaffold"]
+
 # The Stop hooks (README "Stop hook"): the delivery component's stop-check answers them inside the
 # hook, in its own warm process; scripts/se_hook.sh falls back to running it directly.
 [hooks]

@@ -32,7 +32,7 @@ def test_every_command_is_declared_once_and_the_wiring_places_every_group() -> N
     assert sorted(declared) == sorted(leaves + [
         "review.py brief", "review.py file", "retro.py collect", "retro.py file", "overhaul.py new",
         "overhaul.py read", "overhaul.py file", "overhaul.py facts", "timeline.py",
-        "deck.py build", "deck.py serve", "deck.py answers"])
+        "deck.py build", "deck.py serve", "deck.py answers", "se.py new app", "se.py component add"])
     wiring = (ROOT / "wiring.toml").read_text(encoding="utf-8")
     for group in GROUPS:
         assert f'[instances.{group}]\ncomponent = "{group}"\n' in wiring
@@ -155,7 +155,9 @@ def test_each_group_answers_its_commands_with_the_scripts_code(components, tmp_p
             ("overhaul", "overhaul.py facts", ("--repo", "."), 2, "error: overhaul.py facts: "),
             ("render", "timeline.py", ("--destination", "t.html", "--snapshot", "missing.json"), 2,
              "timeline: cannot read the snapshot"),
-            ("render", "deck.py answers", ("missing.json",), 1, "deck: ")):
+            ("render", "deck.py answers", ("missing.json",), 1, "deck: "),
+            ("scaffold", "se.py component add", ("Not A Name", "--root", "."), 1,
+             "se component add: ")):
         with pytest.raises(KernError, match=rf"\Aexit code {code}\n") as refused:
             components[component].run(command, cwd, *args)
         assert said in json.loads(str(refused.value).split("\n", 1)[1])["stderr"], command
@@ -207,7 +209,7 @@ def test_a_command_runs_directly_where_kern_does_not_serve_it(tmp_path, monkeypa
     assert se_components.routed(ROOT / "scripts" / "overhaul.py", ["facts"], [], True) == 1
     monkeypatch.setenv(se_components.SWITCH, "")
     for name, words in (("overhaul", ["facts"]), ("retro", ["collect"]), ("timeline", []),
-                        ("deck", ["build"])):
+                        ("deck", ["build"]), ("se", ["component", "add"])):
         interactive = " ".join(words) in se_components.script(name).INTERACTIVE_COMMANDS
         assert se_components.routed(ROOT / "scripts" / f"{name}.py", words, [], interactive) is None
     monkeypatch.setenv(se_components.SWITCH, "on")
