@@ -37,6 +37,14 @@ directory = "kern"
 target_seconds = 30
 limit_seconds = 60
 
+# SE's Go components (components/README.md "Tests"), after kern's with Go's build cache warm; their
+# agreement test runs SE's Python fleet check and retro count beside the Go ones.
+[tests.beside.components]
+command = ["go", "test", "./..."]
+directory = "components"
+target_seconds = 30
+limit_seconds = 60
+
 # `se new app`'s acceptance (README "New application"): an application created from this SE passes
 # its own test run, which builds its core. After kern's tests Go's build cache is warm: 6.8 s here;
 # with a cold cache 25 s.

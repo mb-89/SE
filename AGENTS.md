@@ -38,6 +38,9 @@
   declared beside the suite, `se.toml` `[tests.beside.kern]`, so the complete suite runs them too;
   the `check` job vets kern in its own step, and runs its vet and tests on Windows through the job
   `kern-windows` ([kern/README.md "Tests"](kern/README.md#tests)).
+- SE's Go components under `components/`: `cd components && go vet ./... && go test ./...`, declared
+  beside the suite as `se.toml` `[tests.beside.components]`; their agreement test holds the Go fleet
+  and retro components to the Python paths ([components/README.md](components/README.md#tests)).
 - Complete: `uv run pytest -q` and kern's tests, declared with their time budgets in `se.toml`
   `[tests]`; `integrate` runs both against them, and `work_tickets.py suite --worktree <checkout>`
   runs them the same way ([README "Test budget"](README.md#test-budget)).
