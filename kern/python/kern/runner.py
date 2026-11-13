@@ -8,10 +8,11 @@ environment (``CORE_BUS``, ``CORE_USER``, ``CORE_TOKEN``), as docs/go-core.md,
 
 1. it commits its attach on ``commit.<i>``: the contract and the declaration hash;
 2. it hears ``run.<i>``, reads ``in.<i>`` and commits its derivations on ``commit.<i>``;
-3. it answers each step of a command on ``cmd.<i>.<command>`` and, an I/O
-   component, each request on ``io.<i>.<verb>``; each line a step says goes out
-   at once on ``say.<i>``, and while a step runs it beats there, so the core
-   waits for a long step as long as the process lives;
+3. it answers each step of a command on ``cmd.<i>.<command>``, each in a thread
+   of its own, so calls run side by side, and, an I/O component, each request on
+   ``io.<i>.<verb>``; each line a step says goes out at once on
+   ``say.<i>.<call>``, its own call's, and while a step runs it beats there, so
+   the core waits for a long step as long as the process lives;
 4. it beats on ``lease.<i>`` from its work loop, every 5 s.
 
 It ends when the bus closes: the core ended it, or ended.
@@ -30,7 +31,7 @@ from typing import Any
 from . import declaration
 from .component import Component, KernError, Result, _loaded
 from .nats import Msg, NatsError, Peer
-from .subjects import subject, word
+from .subjects import subject, token, word
 
 #: How often the work loop beats on lease.<i>: the core's Beat.
 BEAT = 5.0
@@ -68,6 +69,7 @@ class Runner:
         self.me = subject(instance)
         self._work: queue.Queue[Msg | None] = queue.Queue()
         self._steps: dict[str, Result] = {}
+        self._steps_lock = threading.Lock()
         self._run_due = threading.Event()
 
     def attach(self) -> None:
@@ -80,7 +82,7 @@ class Runner:
         """Hear the instance's subjects, attach, and work until the bus closes."""
         p = self.peer
         p.subscribe("run." + self.me, self._due)
-        p.subscribe("cmd." + self.me + ".>", self._work.put)
+        p.subscribe("cmd." + self.me + ".>", self._called)
         if self.comp.decl.io:
             p.subscribe("io." + self.me + ".>", self._work.put)
         p.flush()
@@ -104,6 +106,18 @@ class Runner:
             except NatsError:
                 if p.closed.is_set():
                     return
+                raise
+
+    def _called(self, msg: Msg) -> None:
+        # Each step runs in its own thread, so a long call never holds another; the steps of one
+        # call never overlap, as the core asks the next only once the last has answered.
+        threading.Thread(target=self._answer_step, args=(msg,), name="kern-step", daemon=True).start()
+
+    def _answer_step(self, msg: Msg) -> None:
+        try:
+            self._handle(msg)
+        except NatsError:
+            if not self.peer.closed.is_set():
                 raise
 
     def _watch(self) -> None:
@@ -144,11 +158,11 @@ class Runner:
         self.peer.respond(msg, self._step(what, body))
 
     def _say(self, call: str, line: str | None = None) -> None:
-        """One word on say.<i> for the step of `call`: a progress line, or a beat without one."""
-        self.peer.publish("say." + self.me, {"call": call} if line is None else {"call": call, "line": line})
+        """One word on say.<i>.<call> for the step of `call`: a progress line, or a beat without one."""
+        self.peer.publish("say." + self.me + "." + token(call), {} if line is None else {"line": line})
 
     def _step(self, name: str, body: dict[str, Any]) -> dict[str, Any]:
-        """Run one step of a command: each line it says goes to the core at once on say.<i>,
+        """Run one step of a command: each line it says goes to the core at once on say.<i>.<call>,
         and, while it runs, the runner beats there and on lease.<i> every BEAT, so the core
         waits for a long step as long as this process lives (docs/go-core.md "Progress and
         long calls")."""
@@ -177,15 +191,18 @@ class Runner:
             if step == 1:
                 r = self.comp.run(name, body.get("args") or [], body.get("inputs") or {}, say)
             else:
-                prev = self._steps.pop(call, None)
+                with self._steps_lock:
+                    prev = self._steps.pop(call, None)
                 if prev is None:
                     raise KernError(f"command {name!r}: call {call} has no step {step - 1} waiting")
                 r = self.comp.then(prev, body.get("answers") or [])
         except Exception as e:
-            self._steps.pop(call, None)
+            with self._steps_lock:
+                self._steps.pop(call, None)
             return {"error": str(e)}
         if r.then is not None:
-            self._steps[call] = r
+            with self._steps_lock:
+                self._steps[call] = r
         return {"text": r.text, "writes": [w.wire() for w in r.writes],
                 "requests": [{"port": a.port, "value": a.value} for a in r.requests], "then": r.then is not None}
 

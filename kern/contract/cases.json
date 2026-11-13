@@ -1,5 +1,5 @@
 {
-  "about": "kern's contract suite (contract/README.md): each case runs against the Go fake (contract/fake_test.go), the Python fake (python/tests/test_kern_contract.py) and the real core with tally's Python process attached over the bus (contract/real_test.go). Every value is JSON; an error is a list of the substrings its message holds.",
+  "about": "kern's contract suite (contract/README.md): each case runs against the Go fake (contract/fake_test.go), the Python fake (python/tests/test_kern_contract.py) and the real core with tally's Python process attached over the bus (contract/real_test.go). An overlap case runs its calls at once, each its own caller. Every value is JSON; an error is a list of the substrings its message holds.",
   "cases": [
     {
       "name": "a derivation reads its inputs and its config at their built-in values",
@@ -72,6 +72,16 @@
       "name": "a write of another type than its output's is refused",
       "run": ["tally wrong"],
       "want": {"error": ["component tally: output note takes string, not "], "outputs": {"note": {"value": "", "provided": false}}}
+    },
+    {
+      "name": "two overlapping calls of one command each answer their own text and hear only their own lines",
+      "overlap": [["tally meet", "a"], ["tally meet", "b"]],
+      "want": {
+        "calls": [
+          {"text": "a met b", "lines": ["Phase: a waits", "Phase: a met b"]},
+          {"text": "b met a", "lines": ["Phase: b waits", "Phase: b met a"]}
+        ]
+      }
     }
   ]
 }

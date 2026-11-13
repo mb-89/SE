@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,9 @@ def test_the_python_fake_keeps_the_contract(tally, case: dict) -> None:
 
         fake.answer(port, answer)
     text, error = "", None
+    if "overlap" in case:
+        assert overlapping(fake, case["overlap"]) == case["want"]["calls"]
+        return
     try:
         if "derive" in case:
             fake.derive(case["derive"])
@@ -72,6 +76,25 @@ def test_the_python_fake_keeps_the_contract(tally, case: dict) -> None:
     for port, w in want.get("outputs", {}).items():
         v = fake.out(port)
         assert (v.value, v.provided) == (w["value"], w["provided"]), port
+
+
+def overlapping(fake: Fake, runs: list[list[str]]) -> list[dict]:
+    """Run each call at once, each in its own thread with its own caller: its text and its lines."""
+    got: list[dict] = [{} for _ in runs]
+
+    def call(i: int, run: list[str]) -> None:
+        lines: list[str] = []
+        try:
+            got[i] = {"text": fake.run(*run, say=lines.append), "lines": lines}
+        except KernError as e:
+            got[i] = {"error": str(e), "lines": lines}
+
+    threads = [threading.Thread(target=call, args=(i, run)) for i, run in enumerate(runs)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return got
 
 
 def test_subject_tokens() -> None:

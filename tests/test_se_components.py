@@ -298,3 +298,133 @@ def test_a_streamed_command_runs_directly_without_kerns_relay(tmp_path, monkeypa
     assert se_components.routed(copy, ["integrate"], ["7"], False, True) is None  # no relay
     monkeypatch.setenv(se_components.SWITCH, "off")
     assert se_components.routed(copy, ["integrate"], ["7"], False, True) is None
+
+
+MEET_SCRIPT = '''
+import os
+import subprocess
+import sys
+import threading
+
+_met = threading.Condition()
+_arrived = []
+
+
+def main(argv):
+    name = argv[1]
+    print(f"out {name} in {os.path.basename(os.getcwd())}")
+    print(f"err {name}", file=sys.stderr, flush=True)
+    subprocess.run([sys.executable, "-c", f"import sys; print('child {name}'); "
+                    f"print('child err {name}', file=sys.stderr)"], check=True)
+    helper = threading.Thread(target=print, args=(f"thread {name}",))
+    helper.start()
+    helper.join()
+    with _met:
+        _arrived.append(name)
+        _met.notify_all()
+        if not _met.wait_for(lambda: len(_arrived) == 2, timeout=10):
+            print(f"no other call ran beside {name}", file=sys.stderr)
+            return 3
+    print(f"{name} met {next(n for n in _arrived if n != name)}")
+    return 0
+'''
+
+
+class RecordingPeer:
+    """What a component's runner publishes and answers, from any thread."""
+
+    def __init__(self) -> None:
+        import threading
+
+        self.sent: list[tuple[str, dict]] = []
+        self.lock, self.answered = threading.Lock(), threading.Condition()
+        self.closed = threading.Event()
+
+    def publish(self, subject: str, data=b"", reply: str = "") -> None:
+        body = data if isinstance(data, dict) else json.loads(data or b"{}")
+        with self.answered:
+            self.sent.append((subject, body))
+            self.answered.notify_all()
+
+    def respond(self, msg, data) -> None:
+        self.publish(msg.reply, data)
+
+    def answer(self, reply: str, wait: float = 30.0) -> dict:
+        with self.answered:
+            assert self.answered.wait_for(lambda: any(s == reply for s, _ in self.sent), wait), reply
+            return next(b for s, b in self.sent if s == reply)
+
+
+def test_two_overlapping_calls_of_one_component_each_answer_only_their_own_output(
+        tmp_path, monkeypatch) -> None:
+    """Calls side by side: two calls of one command run at once in the component's process (each
+    waits for the other), and each answers only what it wrote: its stdout, its stderr lines said on
+    its own call's subject, what its subprocess and its thread wrote."""
+    from kern.nats import Msg
+    from kern.subjects import token
+
+    (tmp_path / "meetdemo.py").write_text(MEET_SCRIPT, encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    folder = tmp_path / "meet"
+    folder.mkdir()
+    (folder / "component.toml").write_text(se_components.declaration(
+        "meet", "A meeting.", "Meet", [se_components.Declared(
+            "meetdemo.py meet", "meetdemo.py meet NAME", "meet", False)], "a test"),
+        encoding="utf-8")
+    work = tmp_path / "work"
+    work.mkdir()
+    peer = RecordingPeer()
+    run = runner.Runner(se_components.attach("meet", "meetdemo", folder), peer, "meet")  # type: ignore[arg-type]
+    subject = "cmd.meet." + token("meetdemo.py meet")
+    for call, name in (("1", "a"), ("2", "b")):
+        body = {"call": call, "step": 1, "args": [se_components.CWD + str(work), name]}
+        run._called(Msg(subject, f"reply.{call}", json.dumps(body).encode()))
+
+    for call, name, other in (("1", "a", "b"), ("2", "b", "a")):
+        answer = peer.answer(f"reply.{call}")
+        assert "error" not in answer, answer
+        assert sorted(answer["text"].splitlines()) == sorted(
+            [f"out {name} in work", f"child {name}", f"thread {name}", f"{name} met {other}"])
+        said = [b["line"] for s, b in peer.sent if s == f"say.meet.{call}" and "line" in b]
+        assert sorted(said) == [f"child err {name}", f"err {name}"]
+
+
+def test_calls_in_one_directory_run_together_and_one_in_another_waits(tmp_path) -> None:
+    """The process has one working directory: calls in the same one run side by side, a call in
+    another waits until they end, and the process stands where it stood once all have."""
+    import threading
+
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    release, seen = threading.Event(), {}
+    began = {name: threading.Event() for name in "abc"}
+
+    def main(name):
+        def run(argv):
+            seen[name] = Path.cwd().name
+            began[name].set()
+            if name == "a":
+                assert release.wait(30)
+            return 0
+        return run
+
+    def call(name, folder):
+        thread = threading.Thread(target=se_components.run_main, args=(main(name), [], str(folder)))
+        thread.start()
+        return thread
+
+    home = Path.cwd()
+    calls = [call("a", first)]
+    assert began["a"].wait(30)
+    calls.append(call("b", second))
+    with se_components.DIRECTORY.changed:
+        assert se_components.DIRECTORY.changed.wait_for(lambda: se_components.DIRECTORY.waiting, 30)
+    assert not began["b"].is_set(), "a call in another directory waits for the calls in this one"
+    calls.append(call("c", first))
+    assert began["c"].wait(30), "a call in the same directory runs beside the one that waits"
+    release.set()
+    for thread in calls:
+        thread.join(30)
+    assert seen == {"a": "first", "b": "second", "c": "first"}
+    assert Path.cwd() == home

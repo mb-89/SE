@@ -52,6 +52,13 @@ group = "Fixtures"
 help = "The core refuses it: the note is a string."
 class = "batch"
 
+[commands."tally meet"]
+usage = "tally meet NAME"
+summary = "Meet another call of this command."
+group = "Fixtures"
+help = "Says that NAME waits, waits up to 10 s for another call of tally meet to arrive, then answers whom it met."
+class = "batch"
+
 [requests.post]
 type = "string"
 answer = "int"
