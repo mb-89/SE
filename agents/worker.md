@@ -129,6 +129,8 @@ every package, so work issues and session prompts never repeat it.
      `--issue-body <file>` without intake's snapshot; it also refuses comments and a body edit that
      arrived on the work issue after step 3 last recorded them as read, naming the remedy) and fix
      it until it passes.
+     - The check and `deliver` read the work issue again and check the report against its body
+       as it is now, not as intake saved it, naming each requirement added since intake.
      - In the worktree the check, and `deliver` before it pushes, also runs `integrate`'s guard
        against the branch: it refuses, as the landing would, a report whose "Removed behaviour,
        deleted or weakened tests, and authored prose" does not name each test and authored
