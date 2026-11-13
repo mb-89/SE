@@ -697,3 +697,16 @@ def test_a_bad_roles_list_is_named_and_the_greeting_still_appears(setup, claude_
     assert skill_line(setup) == [f"Skills check not done: {setup['se'] / 'se.toml'}: [roles.worker] skills "
                                  "entry 'plugin-dev' is not `<plugin>@<marketplace>:<skill>`"]
 
+
+def test_the_round_trip_list_then_build_then_the_greeting_names_the_missing_item(tmp_path, claude_home):
+    se = tmp_path / "se"
+    shutil.copytree(ROOT / "src", se / "src")
+    manifest = (ROOT / "se.toml").read_text(encoding="utf-8").split("\n[roles.", 1)[0]
+    write(se / "se.toml", manifest + f'\n[roles.worker]\nskills = ["{PLUGIN_DEV}"]\n')
+    se_start.se_plugin.build(se)
+    worker = (se / "agents" / "worker.md").read_text(encoding="utf-8")
+    assert "\nskills: plugin-dev:plugin-structure\n" in worker.split("\n---\n", 1)[0] + "\n"
+    rep = se_start.status(se, None, tmp_path / "local.toml", tmp_path / "cache.json",
+                          se_start.World(clock=Clock(), spawn=Spawns(), work=Work()), offline=True)
+    assert ("Missing for SE's agents: plugin-dev:plugin-structure (worker). Install: claude plugin "
+            "install plugin-dev@claude-plugins-official") in se_start.greeting(rep, se)
