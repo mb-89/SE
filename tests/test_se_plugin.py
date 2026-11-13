@@ -40,7 +40,8 @@ def test_the_committed_layouts_match_their_source(capsys):
 def suite_run(checkout: Path) -> subprocess.CompletedProcess:
     """A pytest run in the copy, with se's conftest.py and one probe test, as the suite runs."""
     shutil.copytree(ROOT / "tests", checkout / "tests", dirs_exist_ok=True,
-                    ignore=lambda folder, names: [name for name in names if name != "conftest.py"])
+                    ignore=lambda folder, names: [name for name in names
+                                                  if name not in ("conftest.py", "quiet_git.py")])
     (checkout / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
     (checkout / "tests" / "test_probe.py").write_text(
         "from pathlib import Path\n"

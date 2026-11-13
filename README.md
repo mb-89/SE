@@ -520,7 +520,9 @@ GitHub's limits can be named instead of guessed. `scripts/metrics.py` owns the l
   [Feedback budgets](#feedback-budgets).
 
 A line that cannot be written is dropped; the command never fails for it. `integrate` prints its own
-line last, `Metrics: {...}`, for the integrator's report.
+line last, `Metrics: {...}`, for the integrator's report. The landing pull request's description
+ends in that line too, as it stands when the landing plan is written, so a cloud integrator's
+costs outlive its container: [`retro.py collect`](#work-commands) reads it back.
 
 `work_tickets.py metrics [--since <YYYY-MM-DD>]` prints the top spenders by total wall time and by
 GitHub calls, and every overrun of a budget a line declares:
@@ -907,6 +909,9 @@ with the field report of the work pull request its landing pull request names
   issue open when it merged (`work-issue`), its `check` passed (`check`), no commit reached the
   integration branch outside a pull request (`outside-pr`), every closed work issue has a field
   report (`field-report`);
+- the window's [metrics](#metrics) report: the line each landing pull request's description ends
+  in, merged with the lines of the local metrics file that started in the window, a run in both
+  counted once (by its command and start, the local line winning);
 - the previous retro's findings, from its report's block, each with the work issues of the window
   that name it (`retro #<n> finding <k>`), its state (`closed` where one closed as completed) and
   whether the rule check it names broke again (recurred).

@@ -4543,13 +4543,17 @@ def integration_merge_message(
 FIELD_REPORT_IN = "<!-- se:field-report-in {number} -->"
 
 
-def landing_description(work_pull_url: str, work_pull_number: int, issue_url: str) -> str:
+def landing_description(work_pull_url: str, work_pull_number: int, issue_url: str,
+                        metrics_line: dict[str, object] | None = None) -> str:
     """The landing pull request's description: short enough for any tool argument, it names the
     work issue and the work pull request whose description is the field report, and the marker
-    CI's field-report step reads that report by (.github/workflows/check.yml)."""
+    CI's field-report step reads that report by (.github/workflows/check.yml); it ends in the
+    integration's metrics line, which outlives a cloud integrator's container for `retro.py
+    collect` (README "Metrics")."""
     return (f"Refs {issue_url}\n\n"
             f"Lands {work_pull_url}, whose description is the field report.\n\n"
-            + FIELD_REPORT_IN.format(number=work_pull_number) + "\n")
+            + FIELD_REPORT_IN.format(number=work_pull_number) + "\n"
+            + (f"\n{metrics.text(metrics_line)}\n" if metrics_line is not None else ""))
 
 
 def parsed_identity(configured: object, source: str) -> tuple[str, str]:
@@ -5236,7 +5240,7 @@ def integrate(
                 f"step 2> --check-run <check run url from step 3> --worktree {root}")
         description = landing_description(
             str(pull.get("url") or pull_url(remote, pull_number)), pull_number,
-            issue_url(tracker, work_number))
+            issue_url(tracker, work_number), metrics.snapshot())
         plan = landing_plan(remote, landing, target, base, landed, title, message, description,
                             then, tracker)
         if handing_off:
@@ -6988,7 +6992,7 @@ def main(argv: list[str] | None = None) -> int:
     code, line = metrics.recorded(f"work_tickets.py {' '.join(command_words(args))}",
                                   lambda: run_command(args))
     if line is not None and args.command == "integrate":
-        print(f"Metrics: {json.dumps(line, sort_keys=True)}")
+        print(metrics.text(line))
     return code
 
 
