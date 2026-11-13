@@ -170,8 +170,12 @@ def test_up_to_date_out_of_date_newer_major_local_path_and_commit_pin(setup):
     assert states["mine"].item.kind == "local" and states["mine"].item.version == (3, 1, 0)
     assert states["obs"].due is None and states["obs"].latest == (0, 9, 0)
     lines = se_start.full(report(setup), setup["se"])
-    assert "tool: in use 2.0.3; latest 2.1.0; up to date; 2.1.0 is outside ~2.0.1, never applied by refresh" in lines
-    assert "lib: in use 1.2.0; latest 2.0.0; update due to 1.4.1; 2.0.0 is outside ^1.2, never applied by refresh" in lines
+    assert any(line.startswith("tool: in use 2.0.3; latest 2.1.0; up to date; 2.1.0 is outside ~2.0.1, never "
+                               "applied by refresh; to take it, set version = \"^2.1\" in [modules.tool] of ")
+               for line in lines)
+    assert any(line.startswith("lib: in use 1.2.0; latest 2.0.0; update due to 1.4.1; 2.0.0 is outside ^1.2, "
+                               "never applied by refresh; to take it, set version = \"^2.0\" in [modules.lib] of ")
+               for line in lines)
     assert any(line.startswith("mine: in use 3.1.0 (local path ") and line.endswith("local, refresh never touches it")
                for line in lines)
     assert any(line.startswith("obs: in use none (pinned to commit aaaaaaa); latest 0.9.0; pinned by commit")
@@ -182,12 +186,16 @@ def test_up_to_date_out_of_date_newer_major_local_path_and_commit_pin(setup):
 def test_the_greeting_names_only_what_is_out_of_date_and_the_refresh(setup):
     report(setup, "check")
     lines = se_start.greeting(report(setup), setup["se"])
+    manifest, se = (setup["project"] / "se.toml").as_posix(), setup["se"].as_posix()
     assert lines[1:] == [
         "  SE: 1.2.0 -> 1.3.0",
         "  lib: 1.2.0 -> 1.4.1",
-        "  SE: 2.0.0 is outside SE's major 1; refresh never applies it",
-        "  lib: 2.0.0 is outside ^1.2; refresh never applies it",
-        "  tool: 2.1.0 is outside ~2.0.1; refresh never applies it",
+        "  SE: 2.0.0 is outside SE's major 1; refresh never applies it; to take it, install SE 2.0.0 "
+        "again as README \"Install\" says",
+        f"  lib: 2.0.0 is outside ^1.2; refresh never applies it; to take it, set version = \"^2.0\" in "
+        f"[modules.lib] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update lib",
+        f"  tool: 2.1.0 is outside ~2.0.1; refresh never applies it; to take it, set version = \"^2.1\" in "
+        f"[modules.tool] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update tool",
         f"Refresh: uv run python {setup['se'].as_posix()}/scripts/se_start.py refresh",
     ]
 
@@ -574,6 +582,48 @@ def refresh(r):
     return se_start.refresh(r["se"], r["project"], r["config"], r["cache"], r["world"])
 
 
+# The refresh at the session's start (start_refresh): SE alone, in place, failing open.
+
+
+def test_start_refresh_moves_se_to_the_latest_release_of_its_major(repos):
+    line, moved = se_start.start_refresh(repos["se"], repos["project"], repos["config"])
+    assert moved and line == f"SE: 1.0.0 -> 1.1.0, refreshed at this start ({repos['se'].as_posix()})"
+    assert se_modules.checkout_version(repos["se"]) == (1, 1, 0)
+    assert se_modules.read_lock(repos["project"])["lib"][0] == "1.0.0", "the modules wait for refresh"
+    assert se_start.start_refresh(repos["se"], repos["project"], repos["config"]) == ("", False)
+    # Moved to the tag, the clone is ahead of its stale origin/main, and still moves at a later start.
+    release(repos["upstream"], "1.2.0", says="1.2.0")
+    line, moved = se_start.start_refresh(repos["se"], repos["project"], repos["config"])
+    assert moved and line.startswith("SE: 1.1.0 -> 1.2.0, refreshed at this start"), line
+
+
+def test_start_refresh_fails_open_with_one_line(repos):
+    def offline(url):
+        raise se_start.RemoteError(f"cannot reach {url}: offline")
+
+    line, moved = se_start.start_refresh(repos["se"], repos["project"], repos["config"], offline)
+    assert not moved and line.startswith("SE: no refresh at start, this session starts with SE 1.0.0: "
+                                         "cannot reach ")
+    assert "\n" not in line and se_modules.checkout_version(repos["se"]) == (1, 0, 0)
+    git(repos["upstream"], "tag", "v1.2.0")  # a tag whose se.toml names another version: no start
+    line, moved = se_start.start_refresh(repos["se"], repos["project"], repos["config"])
+    assert not moved and line.startswith("SE: no refresh at start to 1.2.0, this session starts with SE 1.0.0: ")
+    assert se_modules.checkout_version(repos["se"]) == (1, 0, 0)
+
+
+def test_start_refresh_leaves_a_development_checkout_and_the_sessions_own_tree(repos):
+    assert se_start.start_refresh(repos["se"], repos["se"], repos["config"]) == ("", False)
+    write(repos["se"] / "notes.md", "mine\n")
+    git(repos["se"], "add", "notes.md")
+    assert se_start.start_refresh(repos["se"], repos["project"], repos["config"]) == ("", False)  # changes
+    git(repos["se"], "commit", "-q", "-m", "mine")
+    assert se_start.start_refresh(repos["se"], repos["project"], repos["config"]) == ("", False)  # own commit
+    git(repos["se"], "reset", "-q", "--hard", "v1.0.0")
+    git(repos["se"], "checkout", "-q", "-b", "feature")
+    assert se_start.start_refresh(repos["se"], repos["project"], repos["config"]) == ("", False)  # its branch
+    assert se_modules.checkout_version(repos["se"]) == (1, 0, 0)
+
+
 def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
     lock_before = se_modules.read_lock(repos["project"])
     assert lock_before["lib"][0] == "1.0.0" and lock_before["tool"][0] == "1.0.0"
@@ -581,8 +631,11 @@ def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
     assert not failed, lines
     assert any(line.startswith("SE: ") and line.endswith(" -> v1.1.0") for line in lines)
     assert "lib: 1.0.0 -> 1.1.0 (se.lock; commit it)" in lines
-    assert "lib: 2.0.0 is outside ^1; not applied" in lines
-    assert "SE: 2.0.0 is outside SE's major 1; not applied" in lines
+    assert (f"lib: 2.0.0 is outside ^1; not applied; to take it, set version = \"^2.0\" in [modules.lib] of "
+            f"{(repos['project'] / 'se.toml').as_posix()}, then run: uv run python {repos['se'].as_posix()}"
+            "/scripts/se_modules.py update lib") in lines
+    assert ("SE: 2.0.0 is outside SE's major 1; not applied; to take it, install SE 2.0.0 again as README "
+            "\"Install\" says") in lines
     assert "mine: local, not touched" in lines
     assert not any(line.startswith("tool:") for line in lines)
     lock = se_modules.read_lock(repos["project"])

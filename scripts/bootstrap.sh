@@ -7,6 +7,10 @@
 #   uv       installed into the user's home (~/.local/bin) from astral.sh when missing
 #   Python   3.11 or newer, installed by uv into the user's home when missing
 #   modules  the current project's se.toml modules, synced by se_modules.py
+#   SE       in --hook mode: an installed SE that is a git checkout behind SE's latest release within
+#            its major is moved to it first (se_start.py start-refresh), and the start then runs again
+#            from the moved tree, so the core starts from its pins; a refresh that fails starts with
+#            the SE in place and says so in one line
 #   kern     in --hook mode: the application binary (se_modules.py app-binary) — kern's core plus the
 #            application's Go components where it has any (the `se` binary for SE), else the bare kern
 #            — fetched for this platform into ~/.se/bin/<name>-<version> in the background (or built
@@ -29,6 +33,10 @@ esac
 hook=false
 [ "${1:-}" = "--hook" ] && hook=true
 notes=()
+# The lines the start before a refresh said (se_start.py start-refresh), carried into this one.
+if [ -n "${SE_START_REFRESHED:-}" ]; then
+  while IFS= read -r line; do [ -n "$line" ] && notes+=("$line"); done <<<"$SE_START_REFRESHED"
+fi
 kern_args=()
 payload=""
 if $hook && [ ! -t 0 ]; then payload="$(cat)"; fi
@@ -89,12 +97,15 @@ kern_background() { # <mode> <bin> <args>...
 }
 kern_step() {
   local spec name version base builddir package platform exe suffix asset bin sums cause start
+  local pins
   # One reader of the application binary: se_modules.py app-binary, which answers kern's core plus
   # the application's Go components where it has any, else the bare kern (SE's docs/go-core.md "How
-  # the binary arrives"). One line: "<name> <version> <download base> <build folder> <package>".
+  # the binary arrives"), from the project where it is SE's own checkout. One line: "<name>
+  # <version> <download base> <build folder> <package> <the checkout it read>".
   spec="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" \
-    --root "$se_root" app-binary 2>/dev/null)" || return 0
-  read -r name version base builddir package <<<"$spec"
+    --root "$se_root" app-binary --project "$project" 2>/dev/null)" || return 0
+  read -r name version base builddir package pins <<<"$spec"
+  [ -n "$pins" ] || pins="$se_root"
   [ -n "$name" ] && [ -n "$version" ] && [ -n "$base" ] && [ -n "$builddir" ] && [ -n "$package" ] || return 0
   platform="$(kern_platform)"
   exe="$name"
@@ -129,11 +140,11 @@ kern_step() {
     kern_args+=(--kern-starting "fetching the $name $version release for $platform in the background")
     return 0
   fi
-  if command -v go >/dev/null 2>&1 && [ -f "$se_root/$builddir/go.mod" ]; then
-    kern_background --kern-build "$bin" "$project" "$start" "$builddir" "$package"
-    kern_args+=(--kern-starting "$cause; building it from $se_root/$builddir in the background")
+  if command -v go >/dev/null 2>&1 && [ -f "$pins/$builddir/go.mod" ]; then
+    kern_background --kern-build "$bin" "$project" "$start" "$pins/$builddir" "$package"
+    kern_args+=(--kern-starting "$cause; building it from $pins/$builddir in the background")
   else
-    kern_args+=(--kern-failed "$cause, and no go to build it from $se_root/$builddir")
+    kern_args+=(--kern-failed "$cause, and no go to build it from $pins/$builddir")
   fi
 }
 if [ -n "$kern_mode" ]; then
@@ -154,7 +165,7 @@ if [ -n "$kern_mode" ]; then
     start="$7"
   else
     project="$3"
-    (cd "$se_root/${5:-kern}" && go build -o "$part" "${6:-./cmd/kern}") && mv -f "$part" "$bin"
+    (cd "${5:-$se_root/kern}" && go build -o "$part" "${6:-./cmd/kern}") && mv -f "$part" "$bin"
     start="$4"
   fi
   [ -x "$bin" ] && kern_run "$bin" "$start"
@@ -202,6 +213,19 @@ if ! uv python find ">=$python_version" >/dev/null 2>&1; then
   say "installing Python $python_version with uv (se's scripts need $python_version or newer)"
   uv python install "$python_version" >/dev/null 2>&1 ||
     need "installing Python with uv failed (offline?). Run this again when online: uv python install $python_version"
+fi
+
+# SE itself (README "Start and refresh"): where the installed SE moved to a newer release, the start
+# runs again from the moved tree, once, carrying what this one said. It fails open: a refresh that
+# cannot reach the remote or fails says so in one line and the start goes on with the SE in place.
+if $hook && [ -z "${SE_START_REFRESHED:-}" ]; then
+  if line="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_start.py" \
+    --root "$project" start-refresh 2>/dev/null)"; then
+    carried=""
+    for note in ${notes[@]+"${notes[@]}"}; do carried+="$note"$'\n'; done
+    SE_START_REFRESHED="$carried$line" exec bash "$se_root/scripts/bootstrap.sh" --hook <<<"$payload"
+  fi
+  [ -n "$line" ] && notes+=("$line")
 fi
 
 # Modules: the project's se.toml modules, fetched at their pins.

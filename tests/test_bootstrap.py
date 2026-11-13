@@ -26,8 +26,14 @@ TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch
 pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash")
 
 # A fake uv: `python find` fails until `python install` ran; SE's start prints a greeting unless
-# `status-fails` exists; every call is logged.
+# `status-fails` exists; its refresh at start (tests/test_start_refresh.py) moves SE where
+# `refresh-moves` exists, else has nothing to move, and is logged apart; every other call is logged.
 FAKE_UV = """#!/bin/sh
+case "$*" in *"se_start.py "*" start-refresh"*)
+  echo refresh >> "$HOME/refreshes"
+  [ -f "$HOME/refresh-moves" ] || exit 1
+  echo "SE: 1.0.0 -> 1.0.1, refreshed at this start"; exit 0 ;;
+esac
 echo "uv $*" >> "$HOME/calls"
 case "$*" in *se_start.py*) [ -f "$HOME/status-fails" ] && exit 1; echo '{"greeting": 1}'; exit 0 ;; esac
 case "$*" in *"se_modules.py --root "*" app-binary"*) cat "$HOME/app-binary" 2>/dev/null; exit 0 ;; esac
@@ -180,6 +186,18 @@ def test_the_hook_ends_with_ses_greeting_carrying_what_bootstrap_said(machine):
     assert "--note se bootstrap: installing Python 3.11" in start[0]
 
 
+def test_a_start_that_moved_se_runs_once_more_carrying_what_it_said(machine):
+    home, project, base = machine
+    (home / "refresh-moves").touch()
+    result = run(home, fake_bin(base), project, "--hook", stdin=START)
+    assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
+    assert (home / "refreshes").read_text(encoding="utf-8").splitlines() == ["refresh"]  # once: no loop
+    notes = greeting_call(home).split(" status --hook ")[1]
+    assert notes.startswith("--note se bootstrap: installing uv into ")
+    assert "--note se bootstrap: installing Python 3.11" in notes
+    assert notes.index("installing Python") < notes.index("--note SE: 1.0.0 -> 1.0.1, refreshed at this start")
+
+
 def test_the_hook_falls_back_to_plain_lines_when_the_greeting_cannot_run(machine):
     home, project, base = machine
     path = fake_bin(base)
@@ -265,7 +283,7 @@ def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(
     assert log == [f"kern start --root {sh(project)}", f"kern hook SessionStart --root {sh(project)} <<{START}"]
     assert greeting_call(home).endswith(f"--kern-bin {sh(kern_bin(home))}")
     assert not any(line.startswith("curl") for line in calls(home)), "a binary already here needs no network"
-    assert f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {sh(ROOT)} app-binary" in calls(home)
+    assert f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {sh(ROOT)} app-binary --project {sh(project)}" in calls(home)
     # Every later hook finds the binary where the start named it (scripts/se_hook.sh).
     assert (project / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8") == f"{sh(kern_bin(home))}\n"
 

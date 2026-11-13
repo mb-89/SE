@@ -6,6 +6,7 @@ The format and the commands are described once in the README section "Modules".
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -328,6 +329,26 @@ def app_binary(root: Path) -> AppBinary:
         raise ModuleError(f"{path}: package names no Go package (e.g. \"./cmd/se\")")
     return AppBinary(name, version, download.replace("{version}", version),
                      PurePosixPath(release).parent.as_posix(), package)
+
+
+def app_root(se_root: Path, project: Path | None) -> Path:
+    """The checkout whose release pins the session runs: the project where it is SE's own
+    checkout (its plugin manifest names the same plugin as se_root's and it sets a `[binary]`), so
+    a session on SE's main runs main's pins; else se_root, the installed SE."""
+    if project is None or project.resolve() == se_root.resolve():
+        return se_root
+
+    def plugin(root: Path) -> object:
+        try:
+            data = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return data.get("name") if isinstance(data, dict) else None
+
+    manifest = project / MANIFEST
+    binary = _read_toml(manifest).get("binary") if manifest.is_file() else None
+    name = plugin(se_root)
+    return project if name and plugin(project) == name and isinstance(binary, dict) else se_root
 
 
 def find_root(start: Path) -> Path:
@@ -717,8 +738,11 @@ def build_parser() -> argparse.ArgumentParser:
     path.add_argument("name")
     commands.add_parser("kern-pin", help="print the version of the kern --root pins and where its release is "
                         "published, on one line (bootstrap.sh reads it)")
-    commands.add_parser("app-binary", help="print the application binary bootstrap.sh fetches, builds and "
-                        "starts: name, version, download base, build folder and package, on one line")
+    app = commands.add_parser("app-binary", help="print the application binary bootstrap.sh fetches, builds "
+                              "and starts: name, version, download base, build folder, package and the "
+                              "checkout it was read from, on one line")
+    app.add_argument("--project", type=Path, help="the session's project: where it is SE's own checkout, "
+                     "its pins are read instead of --root's")
     return parser
 
 
@@ -734,8 +758,9 @@ def main(argv: list[str] | None = None) -> int:
             print(kern_pin(root)[0], kern_download(root))
             return 0
         if args.command == "app-binary":
-            b = app_binary(root)
-            print(b.name, b.version, b.download, b.build_dir, b.package)
+            source = app_root(root, args.project)
+            b = app_binary(source)
+            print(b.name, b.version, b.download, b.build_dir, b.package, source.as_posix())
             return 0
         local = load_local(args.local or default_local_config())
         modules = load_manifest(root)

@@ -183,6 +183,17 @@ def test_app_binary_refuses_a_binary_release_that_cannot_build(tmp_path: Path) -
         se_modules.app_binary(tmp_path)
 
 
+def test_the_pins_come_from_the_project_where_it_is_ses_own_checkout(tmp_path) -> None:
+    binary = "[binary]\nrelease = \"r.toml\"\n"
+    se, own, other, plain = (tmp_path / name for name in ("se", "own", "other", "plain"))
+    write(se, {".claude-plugin/plugin.json": '{"name": "se"}', "se.toml": binary})
+    write(own, {".claude-plugin/plugin.json": '{"name": "se"}', "se.toml": binary})
+    write(other, {".claude-plugin/plugin.json": '{"name": "app"}', "se.toml": binary})
+    write(plain, {"se.toml": "[project]\n"})
+    assert se_modules.app_root(se, own) == own
+    assert [se_modules.app_root(se, p) for p in (other, plain, None, se)] == [se] * 4
+
+
 def test_app_binary_prints_every_field_bootstrap_reads(tmp_path, capsys) -> None:
     write(tmp_path, {"se.toml": '[binary]\nrelease = "components/release.toml"\n',
                      "components/release.toml": 'version = "2.0.0"\n'
@@ -190,4 +201,5 @@ def test_app_binary_prints_every_field_bootstrap_reads(tmp_path, capsys) -> None
                      'binary = "app"\npackage = "./cmd/app"\n'})
     assert se_modules.main(["--root", str(tmp_path), "app-binary"]) == 0
     assert capsys.readouterr().out == (
-        "app 2.0.0 https://github.com/o/n/releases/download/app-v2.0.0 components ./cmd/app\n")
+        f"app 2.0.0 https://github.com/o/n/releases/download/app-v2.0.0 components ./cmd/app "
+        f"{tmp_path.resolve().as_posix()}\n")

@@ -16,7 +16,7 @@ One step per place. What each agent does is in its own file in [src/agents/](src
 | Place | Install | Choose SE | Check that it loaded |
 | --- | --- | --- | --- |
 | Claude Code | `claude plugin install se --marketplace mb-89/SE` | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:reviewer` and `se:worker` |
-| Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud) | each session's first prompt ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
+| Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
 | GitHub Copilot in VS Code, in se's own checkout | `git clone https://github.com/mb-89/SE` and open it: VS Code reads its `.github/agents/` and `.github/skills/` | pick `se` in the Agent dropdown of the Chat view | the dropdown lists `se`, `integrator`, `reviewer` and `worker`; **Configure Skills** lists `catch-up`, `decision` and `work-model` |
 | GitHub Copilot in VS Code, every repository | **Chat: Install Plugin from Source** with `https://github.com/mb-89/SE` (agent plugins, `chat.plugins.enabled`); or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/` | as above | as above |
 
@@ -89,6 +89,17 @@ uv run python <se>/scripts/se_start.py refresh
   to the person and hands it to the session, together with SE's root (`SE root: <path>`), where the
   skills find SE's scripts; elsewhere SE's [instructions](src/agents/se.md) run `status --greeting`
   first.
+- At the session's start, before the core starts, the hook moves an installed SE that is a git
+  checkout (the cloud's setup-script clone) to the latest release of its major, `se_start.py
+  start-refresh`: one read of the remote's tags and, where it is behind, one fetch of that tag.
+  - The move is `refresh`'s, trial start included; the start then runs again from the moved tree,
+    so the core starts from its pins, and the greeting names both versions.
+  - It fails open: a remote that cannot be read, or a move that fails, starts the session with the
+    SE it has, saying so in one line. A development checkout (local changes, a branch other than
+    `main`, or commits no remote branch or tag holds), the session's own working tree and a plugin
+    Claude Code installed are left to `refresh`.
+  - Where the session's working tree is SE's own checkout, the core runs that checkout's release
+    pins, not the installed SE's, so a session on `main` runs `main`'s.
 - The counts are what loaded: the skills and agents of the plugin's layout (every agent but SE is a
   sub-agent) and the rules the [public check](AGENTS.md#public-safety) enforces.
 - `status` reads only the disk and the last update check, cached in `~/.se/start-check.json`
@@ -119,7 +130,8 @@ uv run python <se>/scripts/se_start.py refresh
   - A list SE cannot read is named instead, and the greeting still appears.
 - What is due: the highest version a module's `version` range admits above its locked one, and for
   SE the highest version of its major. A newer version outside the range is shown apart and never
-  applied.
+  applied, with the remedy: for a module the range to set in its `se.toml` and the `update` that
+  takes it, for SE an install again.
 - A local path (`[paths]` of `~/.se/local.toml`, SE's own under the name `se`) is reported as local
   and never touched. A module pinned by commit is reported, and only the module command's
   [`update`](#commands) moves it.
@@ -171,6 +183,8 @@ no Go components. The plugin's hooks start the binary and post every session eve
 | measured on 13 Nov in a Claude Code cloud container, Linux amd64, 5 runs | wall time |
 |---|---|
 | SessionStart, `bootstrap.sh --hook` to the greeting, kern on the machine, 10 runs (before kern: 180 to 234 ms); the pin's read through `uv` is about 150 ms of it | 336 to 410 ms |
+| the same with the [refresh at start](#start-and-refresh), SE up to date: one read of SE's tags from GitHub, the core running, 6 runs (without the read: 393 to 463 ms) | 0.98 to 1.44 s |
+| the refresh at start moving a shallow clone one release behind (5.47.3 to 5.47.4, from GitHub), trial start included, `start_refresh` alone | 1.84 s |
 | the first start of a version, its release fetched (kern-v0.1.0): the hook; the core running, 3 runs | 657 to 715 ms; 1.21 to 1.38 s |
 | the first start of a version with no release: the hook; the core running, Go's build cache warm, 3 runs | 524 to 667 ms; 1.40 to 1.52 s |
 | a hook through `se_hook.sh`, the core running, by event (PostToolUse with a GitHub tool's answer) | 10.0 to 15.5 ms |
