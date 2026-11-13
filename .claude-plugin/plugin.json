@@ -73,10 +73,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PATH=\"$HOME/.local/bin:$PATH\" uv run --no-project --python \">=3.11\" python \"${CLAUDE_PLUGIN_ROOT}/scripts/work_tickets.py\" stop-check || true"
-          },
-          {
-            "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/se_hook.sh\" Stop || true"
           }
         ]
@@ -85,10 +81,6 @@
     "SubagentStop": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "PATH=\"$HOME/.local/bin:$PATH\" uv run --no-project --python \">=3.11\" python \"${CLAUDE_PLUGIN_ROOT}/scripts/work_tickets.py\" stop-check || true"
-          },
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/se_hook.sh\" SubagentStop || true"
