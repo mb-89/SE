@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.32.0"
+version = "5.33.0"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -34,6 +34,14 @@ command = ["go", "test", "./..."]
 directory = "kern"
 target_seconds = 30
 limit_seconds = 60
+
+# `se new app`'s acceptance (README "New application"): an application created from this SE passes
+# its own test run, which builds its core. After kern's tests Go's build cache is warm: 6.8 s here;
+# with a cold cache 25 s.
+[tests.beside.new-app]
+command = ["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_new_app.py"]
+target_seconds = 30
+limit_seconds = 90
 
 # obs builds the documentation (README "Documentation").
 [modules.obs]
