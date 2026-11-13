@@ -273,6 +273,16 @@ def kern_pin(root: Path) -> tuple[str, str]:
     return version, f"kern-v{version}"
 
 
+def kern_download(root: Path) -> str:
+    """Where the release of the kern `root` pins is published: `kern/release.toml`'s `download`
+    with `{version}` filled in (kern/README.md "Release"), as bootstrap.sh fetches it."""
+    version, _ = kern_pin(root)
+    download = _read_toml(root / KERN_RELEASE).get("download")
+    if not isinstance(download, str) or not download:
+        raise ModuleError(f"{root / KERN_RELEASE}: download names no URL (kern/README.md \"Release\")")
+    return download.replace("{version}", version)
+
+
 def find_root(start: Path) -> Path:
     for directory in [start, *start.parents]:
         if (directory / MANIFEST).is_file():
@@ -658,6 +668,8 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--all", action="store_true", help="update every module")
     path = commands.add_parser("path", help="print the directory a module is used from")
     path.add_argument("name")
+    commands.add_parser("kern-pin", help="print the version of the kern --root pins and where its release is "
+                        "published, on one line (bootstrap.sh reads it)")
     return parser
 
 
@@ -669,6 +681,9 @@ def main(argv: list[str] | None = None) -> int:
     failed = False
     try:
         root = args.root.resolve() if args.root else find_root(Path.cwd())
+        if args.command == "kern-pin":
+            print(kern_pin(root)[0], kern_download(root))
+            return 0
         local = load_local(args.local or default_local_config())
         modules = load_manifest(root)
         if args.command == "path":
