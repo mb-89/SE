@@ -322,6 +322,8 @@ func (c *Core) call(m *nats.Msg) {
 		a := CallAnswer{Text: r.Text, Lines: append([]string{}, r.Lines...)}
 		if err != nil {
 			a.Error = err.Error()
+		} else if ad, ok := c.adhocOf(name); ok {
+			recordUse(c.o.Root, ad, c.activeSession(), c.o.Clock.Now())
 		}
 		c.reply(m, a)
 	}()
@@ -342,4 +344,30 @@ func sameInbox(reply, subject string) bool {
 	}
 	prefix := parts[0] + "." + parts[1] + "."
 	return strings.HasPrefix(subject, prefix) && len(subject) > len(prefix) && !strings.ContainsAny(subject, "*> ")
+}
+
+// adhocOf is the ad hoc component a command belongs to, where it is one: the
+// command's instance is in the ad hoc set (usage.go).
+func (c *Core) adhocOf(command string) (adHoc, bool) {
+	info, ok := c.ix.Catalog().Command(command)
+	if !ok {
+		return adHoc{}, false
+	}
+	ad, ok := c.adhoc[info.Instance]
+	return ad, ok
+}
+
+// activeSession is the session a call is counted against: the one whose lease
+// the core touched last, since a tool's PostToolUse renews it around the call;
+// "" where the core knows no session.
+func (c *Core) activeSession() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	name, latest := "", time.Time{}
+	for s, at := range c.sessions {
+		if name == "" || at.After(latest) {
+			name, latest = s, at
+		}
+	}
+	return name
 }

@@ -12,6 +12,8 @@ from pathlib import Path
 import pytest
 
 import retro
+import se_component
+import se_usage
 import work_tickets
 import quiet_git
 
@@ -762,3 +764,32 @@ def test_the_retro_template_names_the_two_commands():
                 / "retro.md").read_text(encoding="utf-8")
     assert "scripts/retro.py collect <this issue> --out <draft>" in template
     assert "scripts/retro.py file <this issue> --draft <draft>" in template
+
+
+def test_an_ad_hoc_component_used_in_enough_sessions_is_a_promotion_candidate(checkout):
+    """The acceptance (issue #990): an ad hoc component scaffolded by `se component add`, used in
+    PROMOTE_SESSIONS sessions in the window, is listed by retro.py collect as a candidate; one used
+    in fewer is not."""
+    se_component.add(checkout, "probe")
+    se_component.add(checkout, "once")
+    for session in range(se_usage.PROMOTE_SESSIONS):
+        se_usage.record(checkout, "probe", session=f"s{session}", at="2026-11-05T00:00:00Z")
+    se_usage.record(checkout, "once", session="s0", at="2026-11-05T00:00:00Z")
+    # A use before the window (the last retro closed 2026-11-01) does not count.
+    se_usage.record(checkout, "probe", session="old", at="2026-10-01T00:00:00Z")
+
+    found = collected(checkout)
+
+    assert [c["component"] for c in found.adhoc] == ["probe"]
+    assert found.adhoc[0]["sessions"] == se_usage.PROMOTE_SESSIONS
+    assert found.adhoc[0]["path"] == ".se/components/probe"
+    text = retro.draft(found)
+    assert "## Ad hoc components to promote" in text
+    assert "| probe |" in text and "`.se/components/probe`" in text
+    assert "once" not in text.split("## Ad hoc components to promote", 1)[1].split("##", 1)[0]
+
+
+def test_no_ad_hoc_use_leaves_the_draft_section_empty(checkout):
+    found = collected(checkout)
+    assert found.adhoc == []
+    assert "## Ad hoc components to promote\n\nNone." in retro.draft(found)

@@ -80,6 +80,9 @@ type Core struct {
 	attached map[string]chan struct{}
 	// hooks are the wiring's bound events: an event to the instance and the command that answer it.
 	hooks map[string]index.CommandInfo
+	// adhoc are the instances whose component is declared under .se/components/,
+	// by instance name: their calls are counted in the use log (usage.go).
+	adhoc map[string]adHoc
 
 	mu         sync.Mutex
 	sessions   map[string]time.Time
@@ -154,6 +157,11 @@ func Serve(o Options) (*Core, error) {
 		}
 		c.hooks[h.Event] = info
 	}
+	names := make([]instanceName, 0, len(o.Wiring.Instances))
+	for _, in := range o.Wiring.Instances {
+		names = append(names, instanceName{Name: in.Name, Component: in.Component})
+	}
+	c.adhoc = adHocInstances(o.Root, names)
 	c.emptySince, c.lastEvent = c.start, c.start
 	if err := c.place(); err != nil {
 		return nil, err
