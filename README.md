@@ -106,6 +106,15 @@ uv run python <se>/scripts/se_start.py refresh
   - Without gh (Claude's cloud, where no token reaches SE's code) the greeting names neither; the
     [se agent](src/agents/se.md) runs the fleet check's plan at its first turn instead.
   - `refresh` reads no work: its checks keep the cached lines.
+- The outside skills SE's agents rely on (`[roles]` of SE's `se.toml`,
+  [AGENTS.md "Agents and skills"](AGENTS.md#agents-and-skills)): the greeting names, in one line,
+  each one whose plugin the session lacks, with the roles that rely on it.
+  - A plugin counts as present where Claude Code's record of the installed plugins names it with
+    its marketplace, or where it is cloned into `~/.claude/skills/` (as the cloud's SE is).
+  - Locally the line ends with the command that installs each plugin, `claude plugin install
+    <plugin>@<marketplace>`; in Claude's cloud it says that the session lacks them and that the
+    cloud environment provides plugins ([Claude Code cloud](#claude-code-cloud)).
+  - A list SE cannot read is named instead, and the greeting still appears.
 - What is due: the highest version a module's `version` range admits above its locked one, and for
   SE the highest version of its major. A newer version outside the range is shown apart and never
   applied.

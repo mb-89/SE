@@ -14,6 +14,14 @@
 - `uv run python scripts/se_plugin.py build` generates everything else from it: the Copilot layout
   (`.github/agents/`, `.github/skills/`) and the Claude Code plugin (`agents/`, `skills/`,
   `.claude-plugin/`). Never edit those by hand; `tests/test_se_plugin.py` checks they match.
+- The outside skills a role relies on are one list, `se.toml` `[roles.<role>] skills`, never an
+  agent's own front matter.
+  - Each entry is `<plugin>@<marketplace>:<skill>`; a skill Claude Code ships loads by itself and
+    is not listed.
+  - The build preloads it into that agent's `skills` field where the host reads one (Claude Code;
+    Copilot's agents have none).
+  - The start greeting names an entry the session lacks
+    ([README "Start and refresh"](README.md#start-and-refresh)).
 - Every pytest run builds them first (`tests/conftest.py`, naming each file it wrote), so no suite
   tests stale layouts and nobody runs the build by hand before it; commit what it wrote.
 - Installing SE is the README's [Install](README.md#install).
