@@ -29,7 +29,7 @@ runs:
     # Also after a failed shard: suite-time refuses its exit code and names it.
     - name: Upload the shard's record
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: se-suite-shard-${{ inputs.name }}
         path: ${{ runner.temp }}/se-suite-shards/${{ inputs.name }}.json

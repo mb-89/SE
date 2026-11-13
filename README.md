@@ -475,9 +475,9 @@ jobs:
     strategy:
       matrix:
         shard: [one, two]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: mb-89/SE/.github/actions/suite-shard@<se ref>
         with:
           name: ${{ matrix.shard }}
@@ -485,9 +485,9 @@ jobs:
   check:
     needs: shard
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: mb-89/SE/.github/actions/suite-time@<se ref>
         with:
           shards: 2

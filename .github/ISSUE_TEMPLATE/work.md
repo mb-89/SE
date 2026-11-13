@@ -43,7 +43,8 @@ None
 ## Design owner
 
 <!-- The design notes that own the decided behaviour: file and section, as the project's AGENTS.md
-     names them. The worker reads them; the issue does not copy them. -->
+     names them. The worker reads them; the issue does not copy them. Where no file owns it yet,
+     write "none yet: create it at <path>", so the worker knows to create it there. -->
 
 ## Requirements
 
