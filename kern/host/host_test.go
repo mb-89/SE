@@ -215,16 +215,32 @@ func TestTheCoreEndsWhenIdle(t *testing.T) {
 	ended(t, c, "no event for 30m0s")
 }
 
-// A client stops the core on call.core.stop, and hears its pid first.
+// A client stops the core on call.core.stop, and hears its pid first: the bus
+// stays up until the client has the answer and hangs up, as kern stop does.
 func TestAClientStopsTheCore(t *testing.T) {
 	t.Parallel()
 	c := served(t, host.Options{Clock: newClock()})
+	nc := as(t, c, bus.Client)
 	var said map[string]int
-	ask(t, as(t, c, bus.Client), host.StopSubject, nil, &said)
+	ask(t, nc, host.StopSubject, nil, &said)
+	nc.Close()
 	if said["pid"] != os.Getpid() {
 		t.Fatalf("the stop answers %v, and wants the core's pid %d", said, os.Getpid())
 	}
 	ended(t, c, "asked to stop")
+}
+
+// A client that stays on after the stop's answer delays the stop by HangUp at most.
+func TestAStopEndsTheCoreThoughItsAskerStaysOn(t *testing.T) {
+	t.Parallel()
+	c := served(t, host.Options{Clock: newClock()})
+	var said map[string]int
+	asked := time.Now()
+	ask(t, as(t, c, bus.Client), host.StopSubject, nil, &said)
+	ended(t, c, "asked to stop")
+	if took := time.Since(asked); took < host.HangUp || took > host.HangUp+wait {
+		t.Fatalf("the core ends %v after the stop, and wants about %v", took, host.HangUp)
+	}
 }
 
 // One core per checkout: a second one in the same root is refused.

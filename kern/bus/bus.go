@@ -60,6 +60,8 @@ const (
 	// readyLook is each look at the listener: the server's own wait sleeps
 	// 25 ms between looks for any wait longer than 25 ms, and not for shorter ones.
 	readyLook = 20 * time.Millisecond
+	// unheardLook is each look at the connections that hear a subject.
+	unheardLook = 2 * time.Millisecond
 	// maxPayload is v5's largest message.
 	maxPayload = 64 << 20
 )
@@ -190,6 +192,24 @@ func (b *Bus) Names() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Unheard waits until no open connection hears subject, or within is out, and
+// answers whether none does. The core waits on it before its bus goes, so that
+// the asker of its stop takes the answer and hangs up first: once the server
+// closes a connection, its client drops what it has not yet handed on.
+func (b *Bus) Unheard(subject string, within time.Duration) bool {
+	end := time.Now().Add(within)
+	for {
+		z, err := b.server.Connz(&server.ConnzOptions{Account: server.DEFAULT_GLOBAL_ACCOUNT, FilterSubject: subject})
+		if err == nil && z.NumConns == 0 {
+			return true
+		}
+		if !time.Now().Before(end) {
+			return false
+		}
+		time.Sleep(unheardLook)
+	}
 }
 
 // Close ends the server and waits until it is down.

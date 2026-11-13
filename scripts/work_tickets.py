@@ -4083,6 +4083,7 @@ class BesideSuite:
     directory: str  # relative to the project root; "." where not given
     target_seconds: float
     limit_seconds: float
+    setup: list[str] | None = None  # run first in `directory`, outside the budget: a cold build
 
     def where(self) -> str:
         return f"[tests.beside.{self.name}] in se.toml"
@@ -4170,10 +4171,11 @@ def beside_suites(root: Path, tables: object) -> tuple[BesideSuite, ...]:
     suites = []
     for name, table in tables.items():
         where = f"[tests.beside.{name}] in {root / 'se.toml'}"
-        unknown = sorted(set(table) - {"command", "directory", "target_seconds", "limit_seconds"})
+        unknown = sorted(set(table) - {"command", "directory", "target_seconds", "limit_seconds",
+                                       "setup"})
         if unknown:
             raise QueueError(f"{where}: no key {', '.join(unknown)}: a suite beside holds command, "
-                             "directory, target_seconds and limit_seconds; fix it")
+                             "directory, target_seconds, limit_seconds and setup; fix it")
         command = table.get("command")
         if not is_argument_array(command):
             raise QueueError(f"{where} must declare command, the suite as a non-empty argument "
@@ -4183,9 +4185,14 @@ def beside_suites(root: Path, tables: object) -> tuple[BesideSuite, ...]:
                 or ".." in Path(directory).parts):
             raise QueueError(f"{where}: directory must be a folder inside the project, relative "
                              'to its root, for example directory = "kern"; fix it')
+        setup = table.get("setup")
+        if setup is not None and not is_argument_array(setup):
+            raise QueueError(f"{where}: setup must be a non-empty argument array, the build run "
+                             'before the suite, for example setup = ["go", "test", "-run", "^$", '
+                             '"./..."]; fix it or remove it')
         values = budget_seconds(table, where)
         suites.append(BesideSuite(name, command, directory, values["target_seconds"],
-                                  values["limit_seconds"]))
+                                  values["limit_seconds"], setup))
     return tuple(suites)
 
 
@@ -4417,6 +4424,8 @@ class BesideRun:
     seconds: float
     returncode: int
     output: str  # stdout and stderr, stripped
+    setup_seconds: float | None = None  # the suite's setup, outside the budget; None: none ran
+    setup_failed: bool = False  # the setup failed, so the suite did not run
 
     def timing(self) -> str:
         return (f"{self.seconds:.1f} s (target {self.suite.target_seconds:g} s, "
@@ -4427,28 +4436,46 @@ class BesideRun:
         if self.returncode == 0:
             return ""
         suite = self.suite
+        if self.setup_failed:
+            return (f"{suite.name} setup failed ({self.setup_seconds:.1f} s) running "
+                    f"{' '.join(suite.setup or [])} in {suite.directory} (setup of "
+                    f"{suite.where()}); {suite.name} did not run. Fix the setup:\n"
+                    f"{self.output or f'exit code {self.returncode}'}")
         return (f"{suite.name} failed ({self.seconds:.1f} s) running {' '.join(suite.command)} in "
                 f"{suite.directory} ({suite.where()}); fix the failing tests:\n"
                 f"{self.output or f'exit code {self.returncode}'}")
 
 
-def time_beside(root: Path, suite: BesideSuite) -> BesideRun:
-    """Run a suite beside the complete suite once, in its directory, and time it; a command that
-    is not installed fails the run, naming it."""
-    feedback.phase(f"{suite.name}: {' '.join(suite.command)} in {suite.directory} "
-                   f"(limit {suite.limit_seconds:g} s)")
+def run_beside_step(root: Path, suite: BesideSuite, command: list[str]) -> tuple[float, int, str]:
+    """Run one step of a suite beside in its directory: its time, exit code and output; a command
+    that is not installed fails the step, naming it."""
     started = clock()
     try:
         result = subprocess.run(
-            suite.command, cwd=root / suite.directory, shell=False, capture_output=True,
+            command, cwd=root / suite.directory, shell=False, capture_output=True,
             text=True, encoding="utf-8", errors="replace", check=False,
         )
     except OSError as error:
-        return BesideRun(suite, clock() - started, 127,
-                         f"cannot run {suite.command[0]}: {error}; install it (the project's "
-                         "AGENTS.md names its setup)")
-    return BesideRun(suite, clock() - started, result.returncode,
-                     (result.stdout + result.stderr).strip())
+        return (clock() - started, 127, f"cannot run {command[0]}: {error}; install it (the "
+                "project's AGENTS.md names its setup)")
+    return clock() - started, result.returncode, (result.stdout + result.stderr).strip()
+
+
+def time_beside(root: Path, suite: BesideSuite) -> BesideRun:
+    """Run a suite beside the complete suite once, in its directory, and time it. Its setup, a
+    cold build, runs first and outside the budget; a failing setup fails the run, and the suite
+    does not run."""
+    setup_seconds = None
+    if suite.setup:
+        feedback.phase(f"{suite.name} setup: {' '.join(suite.setup)} in {suite.directory} "
+                       "(not budgeted)")
+        setup_seconds, returncode, output = run_beside_step(root, suite, suite.setup)
+        if returncode != 0:
+            return BesideRun(suite, 0.0, returncode, output, setup_seconds, setup_failed=True)
+    feedback.phase(f"{suite.name}: {' '.join(suite.command)} in {suite.directory} "
+                   f"(limit {suite.limit_seconds:g} s)")
+    seconds, returncode, output = run_beside_step(root, suite, suite.command)
+    return BesideRun(suite, seconds, returncode, output, setup_seconds)
 
 
 def clean_commit(root: Path) -> str | None:
@@ -4797,7 +4824,10 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
         print(f"Suite output (last lines):\n{output_tail(own_lines)}")
     print(f"Suite time: {timing}")
     for run in beside:
-        print(f"{run.suite.name} time: {run.timing()}, beside the suite ({run.suite.where()})")
+        setup = ("" if run.setup_seconds is None
+                 else f"; its setup {run.setup_seconds:.1f} s (not budgeted)")
+        print(f"{run.suite.name} time: {run.timing()}, beside the suite ({run.suite.where()})"
+              f"{setup}")
     if parts:
         print("Parts:\n" + "\n".join(
             "\n".join([f"  {part.line()}", *(f"    {line}" for line in part.setup_lines())])
