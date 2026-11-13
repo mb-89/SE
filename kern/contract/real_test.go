@@ -282,82 +282,130 @@ func TestTheRealCoreKeepsTheContract(t *testing.T) {
 	for _, cs := range cases(t) {
 		t.Run(cs.Name, func(t *testing.T) {
 			t.Parallel()
-			c := startCore(t, cs.Config, true)
-			c.answerAs(t, cs.Answers["post"])
-			var pushed chan json.RawMessage
-			if cs.Derive != "" {
-				pushed = make(chan json.RawMessage, 16)
-				if _, err := c.client.Subscribe(bus.Val+bus.Subject("tally/"+cs.Derive), func(m *nats.Msg) {
-					var v struct {
-						Value json.RawMessage `json:"value"`
-					}
-					_ = json.Unmarshal(m.Data, &v)
-					pushed <- v.Value
-				}); err != nil {
-					t.Fatal(err)
-				}
-				if err := c.client.Flush(); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if raw, ok := cs.Seed["numbers"]; ok {
-				a := c.commit(t, c.source, "source", map[string]any{"writes": []map[string]any{{"port": "numbers", "value": raw}}})
-				if !a.Accepted {
-					t.Fatalf("the seed is refused: %s", a.Refused)
-				}
-			}
-			if len(cs.Overlap) > 0 {
-				cs.judgeCalls(t, overlapping(cs.Overlap, func(run []string, say func(string)) (string, error) {
-					return c.call(t, run, say)
-				}))
-				return
-			}
-			var text string
-			var lines []string
-			var err error
-			if cs.Derive != "" {
-				// The derivation runs in tally's process, on its attach and on each seed: wait for its value.
+			cs.runReal(t, nil)
+		})
+	}
+}
+
+// A derived value tally pushed before the case subscribed to it is not lost:
+// the subscriber here comes only once the core already provides the value, so
+// no push reaches it, and the case still finds the value and ends.
+func TestTheRealCoreKeepsTheContractForALateSubscriber(t *testing.T) {
+	t.Parallel()
+	var late []contractCase
+	for _, cs := range cases(t) {
+		if cs.Derive != "" && len(cs.Seed) == 0 {
+			late = append(late, cs)
+		}
+	}
+	if len(late) == 0 {
+		t.Fatal("no case derives a value without a seed, so none shows a push before the subscription")
+	}
+	for _, cs := range late {
+		t.Run(cs.Name, func(t *testing.T) {
+			t.Parallel()
+			cs.runReal(t, func(c *core) {
 				wantValue := cs.Want.Outputs[cs.Derive].Value
-				deadline := time.After(20 * time.Second)
-			waiting:
+				deadline := time.Now().Add(20 * time.Second)
 				for {
-					select {
-					case v := <-pushed:
-						if sameJSON(t, v, wantValue) {
-							break waiting
-						}
-					case <-deadline:
-						t.Fatalf("tally's %s is never pushed as %s", cs.Derive, wantValue)
+					v := c.get(t, "tally/"+cs.Derive)
+					if v.Provided && sameJSON(t, v.Value, wantValue) {
+						return
 					}
+					if time.Now().After(deadline) {
+						t.Fatalf("tally never provides %s as %s before the subscription", cs.Derive, wantValue)
+					}
+					time.Sleep(50 * time.Millisecond)
 				}
-			}
-			if len(cs.Run) > 0 {
-				body, _ := json.Marshal(map[string][]string{"args": cs.Run[1:]})
-				m, rerr := c.client.Request(bus.Call+bus.Token(cs.Run[0]), body, 30*time.Second)
-				if rerr != nil {
-					t.Fatal(rerr)
-				}
-				var a host.CallAnswer
-				if err := json.Unmarshal(m.Data, &a); err != nil {
-					t.Fatal(err)
-				}
-				text, lines = a.Text, a.Lines
-				if a.Error != "" {
-					err = errors.New(a.Error)
-				}
-			}
-			c.mu.Lock()
-			asked := append([]request{}, c.asked...)
-			c.mu.Unlock()
-			cs.judge(t, text, lines, err, asked, func(port string) (any, bool) {
-				v := c.get(t, "tally/"+port)
-				if v.Error != "" {
-					t.Fatalf("get tally/%s: %s", port, v.Error)
-				}
-				return v.Value, v.Provided
 			})
 		})
 	}
+}
+
+// runReal runs the case against a real core. beforeSubscribe, where given,
+// runs after the core starts and before the case subscribes to the derived value.
+func (cs contractCase) runReal(t *testing.T, beforeSubscribe func(c *core)) {
+	t.Helper()
+	c := startCore(t, cs.Config, true)
+	c.answerAs(t, cs.Answers["post"])
+	var pushed chan json.RawMessage
+	if cs.Derive != "" {
+		if beforeSubscribe != nil {
+			beforeSubscribe(c)
+		}
+		pushed = make(chan json.RawMessage, 16)
+		if _, err := c.client.Subscribe(bus.Val+bus.Subject("tally/"+cs.Derive), func(m *nats.Msg) {
+			var v struct {
+				Value json.RawMessage `json:"value"`
+			}
+			_ = json.Unmarshal(m.Data, &v)
+			pushed <- v.Value
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.client.Flush(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if raw, ok := cs.Seed["numbers"]; ok {
+		a := c.commit(t, c.source, "source", map[string]any{"writes": []map[string]any{{"port": "numbers", "value": raw}}})
+		if !a.Accepted {
+			t.Fatalf("the seed is refused: %s", a.Refused)
+		}
+	}
+	if len(cs.Overlap) > 0 {
+		cs.judgeCalls(t, overlapping(cs.Overlap, func(run []string, say func(string)) (string, error) {
+			return c.call(t, run, say)
+		}))
+		return
+	}
+	var text string
+	var lines []string
+	var err error
+	if cs.Derive != "" {
+		// The derivation runs in tally's process, on its attach and on each seed: wait for its value.
+		// The push may come before the subscription (tally pushes on its attach), so
+		// read the name once after subscribing: a value already there ends the wait.
+		wantValue := cs.Want.Outputs[cs.Derive].Value
+		deadline := time.After(20 * time.Second)
+		current := c.get(t, "tally/"+cs.Derive)
+	waiting:
+		for current.Error != "" || !current.Provided || !sameJSON(t, current.Value, wantValue) {
+			select {
+			case v := <-pushed:
+				if sameJSON(t, v, wantValue) {
+					break waiting
+				}
+			case <-deadline:
+				t.Fatalf("tally's %s is never pushed as %s", cs.Derive, wantValue)
+			}
+		}
+	}
+	if len(cs.Run) > 0 {
+		body, _ := json.Marshal(map[string][]string{"args": cs.Run[1:]})
+		m, rerr := c.client.Request(bus.Call+bus.Token(cs.Run[0]), body, 30*time.Second)
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		var a host.CallAnswer
+		if err := json.Unmarshal(m.Data, &a); err != nil {
+			t.Fatal(err)
+		}
+		text, lines = a.Text, a.Lines
+		if a.Error != "" {
+			err = errors.New(a.Error)
+		}
+	}
+	c.mu.Lock()
+	asked := append([]request{}, c.asked...)
+	c.mu.Unlock()
+	cs.judge(t, text, lines, err, asked, func(port string) (any, bool) {
+		v := c.get(t, "tally/"+port)
+		if v.Error != "" {
+			t.Fatalf("get tally/%s: %s", port, v.Error)
+		}
+		return v.Value, v.Provided
+	})
 }
 
 // The core takes an attach only with the contract it speaks and the

@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -53,6 +55,19 @@ var ErrNotRunning = errors.New("no core runs")
 // nowhere: the core ended without its end, killed or crashed (TakeVanished).
 var ErrVanished = fmt.Errorf("%w: its process ended without its end", ErrNotRunning)
 
+// ErrReused is ErrVanished where the standing file names a pid that runs,
+// and its bus accepts no connection: the core is gone, and its pid is not
+// reaped yet or is another process's now. A
+// machine restarted with the checkout's files kept, as a cloud environment
+// restored from its snapshot is, gives its processes the pids of the last
+// boot, the start's own among them, so the file of a core of that boot names
+// a live process that is no core.
+var ErrReused = fmt.Errorf("%w: its pid runs and its bus is gone", ErrVanished)
+
+// BusWait bounds the look at the standing file's bus: a running core's
+// listener accepts on the loopback at once, whatever the core is busy with.
+const BusWait = time.Second
+
 // StandingPath is the standing file's path in a checkout.
 func StandingPath(root string) string { return filepath.Join(root, Runtime, standingFile) }
 
@@ -63,7 +78,9 @@ func ClaimPath(root string) string { return filepath.Join(root, Runtime, claimFi
 func LogPath(root string) string { return filepath.Join(root, Runtime, logFile) }
 
 // ReadStanding answers the running core's standing. A file that is missing,
-// unreadable, or names a pid that runs nowhere reads as ErrNotRunning.
+// unreadable, names a pid that runs nowhere, or names a bus that accepts no
+// connection reads as ErrNotRunning: a pid alone says nothing once the machine
+// restarted (ErrReused).
 func ReadStanding(root string) (Standing, error) {
 	var s Standing
 	data, err := readWhole(StandingPath(root))
@@ -79,7 +96,24 @@ func ReadStanding(root string) (Standing, error) {
 	if !alive(s.Pid) {
 		return Standing{}, fmt.Errorf("%w: %s names pid %d, which runs nowhere", ErrVanished, StandingPath(root), s.Pid)
 	}
+	if !accepts(s.Bus) {
+		return Standing{}, fmt.Errorf("%w: %s names pid %d, which runs, and its bus %s accepts no connection", ErrReused, StandingPath(root), s.Pid, s.Bus)
+	}
 	return s, nil
+}
+
+// accepts says whether the bus at url takes a connection within BusWait.
+func accepts(url string) bool {
+	u, err := neturl.Parse(url)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", u.Host, BusWait)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // The looks a read of the standing file takes while the core replaces it:

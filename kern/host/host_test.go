@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,6 +254,70 @@ func TestASecondCoreInOneCheckoutIsRefused(t *testing.T) {
 	s, _ := c.Standing()
 	if _, err := host.Serve(host.Options{Root: s.Root, Clock: newClock()}); err == nil || !strings.Contains(err.Error(), "already runs") {
 		t.Fatalf("a second core in one checkout starts with %v, and wants a refusal", err)
+	}
+}
+
+// closedBus answers a bus URL on the loopback that nothing listens on.
+func closedBus(t *testing.T) (string, int) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	_ = l.Close()
+	return fmt.Sprintf("nats://127.0.0.1:%d", port), port
+}
+
+// earlierBoot writes the standing file a core of the machine's last boot
+// left in the checkout: it names pid, which runs in this boot, and a bus
+// that is gone.
+func earlierBoot(t *testing.T, root string, pid int) {
+	t.Helper()
+	url, port := closedBus(t)
+	data, _ := json.Marshal(host.Standing{Contract: host.Contract, Pid: pid, Root: root, Bus: url, Port: port})
+	if err := os.MkdirAll(filepath.Join(root, host.Runtime), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(host.StandingPath(root), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A standing file whose pid runs and whose bus accepts nothing names no
+// core: the pid is another process's, as after a restart that kept the files.
+// It reads as a core that ended without its end, told once.
+func TestAStandingFileWhoseBusIsGoneReadsAsVanished(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	earlierBoot(t, root, os.Getpid())
+	_, err := host.ReadStanding(root)
+	if !errors.Is(err, host.ErrReused) || !errors.Is(err, host.ErrVanished) || !errors.Is(err, host.ErrNotRunning) {
+		t.Fatalf("the standing file of an earlier boot reads as %v, and wants ErrReused, vanished and not running", err)
+	}
+	if _, ok := host.TakeVanished(root); !ok {
+		t.Fatal("the standing file of an earlier boot is not taken as a core that ended without its end")
+	}
+	if _, ok := host.TakeVanished(root); ok {
+		t.Fatal("the standing file of an earlier boot is told twice")
+	}
+}
+
+// The core that serves meets the standing file of an earlier boot that
+// names its own pid, and stands, since that file's bus is gone; the start
+// that met it took the core for running and the checkout ran none.
+func TestACoreServesOverAStandingFileNamingItsOwnPid(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	earlierBoot(t, root, os.Getpid())
+	c, err := host.Serve(host.Options{Root: root, Clock: newClock()})
+	if err != nil {
+		t.Fatalf("a core over the standing file of an earlier boot naming its pid answers %v, and wants to serve", err)
+	}
+	t.Cleanup(func() { c.Stop("the case ends"); <-c.Ended() })
+	s, err := c.Standing()
+	if err != nil || s.Pid != os.Getpid() || s.Bus != c.Health().Bus {
+		t.Fatalf("the standing file reads %+v, %v, and wants this core's bus %s", s, err, c.Health().Bus)
 	}
 }
 
