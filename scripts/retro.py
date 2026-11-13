@@ -12,6 +12,8 @@ draft with
   names;
 - the field reports' Retro sections and their "Not delivered" items, grouped;
 - the rule checks (RULE_CHECKS), each broken one with what broke it;
+- the metrics of the window: the line each landing pull request's description ends in and the
+  local metrics file's lines that started in the window, each run once (README "Metrics");
 - the previous retro's sizes, where its block is found;
 
 - the previous retro's findings, each scored: the work issues of the window that name it
@@ -68,6 +70,7 @@ work_tickets = sibling("work_tickets")
 review = sibling("review")
 QueueError = work_tickets.QueueError
 Step, Plan = work_tickets.Step, work_tickets.Plan
+metrics = work_tickets.metrics
 
 BLOCK_MARKER = "<!-- se:retro-yaml -->"
 REPORT_MARKER = "<!-- se:retro-report -->"
@@ -388,11 +391,14 @@ class Collected:
     issues: list[Closed]
     checks: list[RuleCheck]
     previous: dict | None
+    runs: list[dict] = field(default_factory=list)  # the window's metrics lines, each run once
+    run_sources: dict[str, int] = field(default_factory=dict)  # lines read per source
 
     def data(self) -> dict:
         return {"version": BLOCK_VERSION, "window": asdict(self.window), "sizes": self.sizes,
                 "issues": [asdict(item) for item in self.issues],
                 "rule_checks": [{**asdict(check), "kept": check.kept} for check in self.checks],
+                "metrics": {**self.run_sources, "runs": len(self.runs)},
                 "previous": self.previous, **{name: [] for name in JUDGMENT}}
 
 
@@ -609,6 +615,12 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         previous = blocks[-1] if blocks else None
         if door.missing:
             return None
+    # The window's metrics: the local file's lines that started in it, and the line each landing
+    # pull request's description ends in, which outlives a cloud integrator's container; a run in
+    # both counts once, by its local line (README "Metrics").
+    local = [line for line in metrics.read(metrics.path())[0] if in_window(str(line["start"]))]
+    landed_runs = [line for pull in landings if (line := metrics.of_text(pull.body)) is not None]
+    runs = metrics.merged(local, landed_runs)
     scored = scored_findings(previous, last.number if last else 0, window, checks)
     sizes = {"closed": len(closed), "landed": sum(item.landed for item in closed),
              "duplicates": sum(item.duplicate for item in closed),
@@ -618,7 +630,7 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
                now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
         sizes, closed, list(checks.values()),
         {"retro": last.number, "sizes": previous.get("sizes"), "findings": scored}
-        if previous else None)
+        if previous else None, runs, {"landings": len(landed_runs), "local": len(local)})
 
 
 def scored_findings(previous: dict | None, retro: int, window: list[Issue],
@@ -701,6 +713,10 @@ def draft(found: Collected) -> str:
                  else f"broken {len(check.broken)} of {check.checked}")
         lines.append(f"- **{check.name}**: {check.rule}: {state}")
         lines += [f"  - {item['item']}: {item['what']}" for item in check.broken]
+    lines += ["", "## Metrics", "",
+              f"{len(found.runs)} runs: {found.run_sources.get('landings', 0)} from the landing "
+              f"pull requests, {found.run_sources.get('local', 0)} from {metrics.path()}, each run "
+              "once.", "", "```text", metrics.report(found.runs), "```"]
     lines += ["", "## Retro sections of the field reports"]
     for key in RETRO_KEYS:
         entries = [(item.number, item.retro[key]) for item in found.issues if key in item.retro]

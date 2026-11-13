@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
+from quiet_git import quiet
 
 PROJECT = Path(__file__).resolve().parents[1]
 SCRIPTS = PROJECT / "scripts"
@@ -157,7 +158,9 @@ def slow_door(tmp_path_factory) -> dict:
         gh.chmod(0o755)
     origin, checkout = base / "origin.git", base / "checkout"
     git("init", "-q", "--bare", "-b", "main", str(origin))
+    quiet(origin)
     git("clone", "-q", str(origin), str(checkout))
+    quiet(checkout)
     identity = ("-c", "user.name=alice", "-c", "user.email=alice@example.com")
     git("-C", str(checkout), *identity, "commit", "-q", "--allow-empty", "-m", "start")
     git("-C", str(checkout), "push", "-q", "origin", "HEAD:main")

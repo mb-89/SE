@@ -90,13 +90,8 @@ def note(**fields: object) -> None:
         _runs[-1].noted.update(fields)
 
 
-def finish(exit_code: int) -> dict[str, object] | None:
-    """End the current run and append its line; the line, or None where none was started. A write
-    that fails is ignored: measuring never fails the command."""
-    if not _runs:
-        return None
-    run = _runs.pop()
-    line: dict[str, object] = {
+def _line(run: Run, exit_code: int) -> dict[str, object]:
+    return {
         "command": run.command,
         "start": run.start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "wall_seconds": round(clock() - run.started, 3),
@@ -106,6 +101,20 @@ def finish(exit_code: int) -> dict[str, object] | None:
         "exit_code": exit_code,
         **run.noted,
     }
+
+
+def snapshot(exit_code: int = 0) -> dict[str, object] | None:
+    """The current run's line as it stands now, with `exit_code`, neither ended nor written: what
+    a landing pull request records of the integration that opens it; None where no run started."""
+    return _line(_runs[-1], exit_code) if _runs else None
+
+
+def finish(exit_code: int) -> dict[str, object] | None:
+    """End the current run and append its line; the line, or None where none was started. A write
+    that fails is ignored: measuring never fails the command."""
+    if not _runs:
+        return None
+    line = _line(_runs.pop(), exit_code)
     try:
         target = path()
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -135,6 +144,41 @@ def recorded(command: str, body: Callable[[], int]) -> tuple[int, dict[str, obje
         finish(code)
         raise
     return code, finish(code)
+
+
+# A line in a text: the integration's line that `integrate` prints last and that ends the landing
+# pull request's description, read back by `retro.py collect` (README "Metrics").
+
+TEXT_PREFIX = "Metrics: "
+
+
+def text(line: dict[str, object]) -> str:
+    """`line` as one line of text, `Metrics: {...}`."""
+    return TEXT_PREFIX + json.dumps(line, sort_keys=True)
+
+
+def of_text(body: str) -> dict | None:
+    """The run's line of the last `Metrics: {...}` line in `body`; None where it holds none that
+    reads as a run's line."""
+    for candidate in reversed(body.splitlines()):
+        if candidate.startswith(TEXT_PREFIX):
+            try:
+                line = json.loads(candidate[len(TEXT_PREFIX):])
+            except json.JSONDecodeError:
+                return None
+            readable = isinstance(line, dict) and isinstance(line.get("command"), str)
+            return line if readable and "start" in line else None
+    return None
+
+
+def merged(*sources: Iterable[dict]) -> list[dict]:
+    """The lines of `sources`, each run once: a run is its command and its start, and the first
+    source that holds it wins (a local file's finished line over a landing's snapshot of it)."""
+    seen: dict[tuple[str, str], dict] = {}
+    for source in sources:
+        for line in source:
+            seen.setdefault((str(line["command"]), str(line["start"])), line)
+    return sorted(seen.values(), key=lambda line: (str(line["start"]), str(line["command"])))
 
 
 # The report

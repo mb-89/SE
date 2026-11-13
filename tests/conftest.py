@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -16,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_docs  # noqa: E402
 import se_plugin  # noqa: E402
+import quiet_git  # noqa: E402
 
 # The suite's runs of work_tickets.py and se_start.py measure themselves (scripts/metrics.py); their
 # lines go nowhere, never into the machine's ~/.se/metrics.jsonl. A test of the lines sets its own.
@@ -54,7 +54,8 @@ def obs() -> Path:
 def repositories(tmp_path_factory) -> Callable[[Callable[[Path], None], Path], None]:
     """`repositories(build, tmp_path)` lays out in tmp_path the git repositories `build` makes in an
     empty directory: built once per session (per worker) and copied for each test, which costs a
-    fraction of the git commands. The copies' remotes point into tmp_path, as a fresh build's do."""
+    fraction of the git commands. The copies' remotes point into tmp_path, as a fresh build's do;
+    git's lock files stay behind (tests/quiet_git.py)."""
     built: dict[Callable[[Path], None], Path] = {}
 
     def lay_out(build: Callable[[Path], None], tmp_path: Path) -> None:
@@ -62,7 +63,7 @@ def repositories(tmp_path_factory) -> Callable[[Callable[[Path], None], Path], N
             built[build] = tmp_path_factory.mktemp(build.__name__)
             build(built[build])
         template = built[build]
-        shutil.copytree(template, tmp_path, symlinks=True, dirs_exist_ok=True)
+        quiet_git.copy(template, tmp_path)
         # Git writes a local remote's path into config as given, a backslash doubled.
         forms = {str(template): str(tmp_path), template.as_posix(): tmp_path.as_posix(),
                  str(template).replace("\\", "\\\\"): str(tmp_path).replace("\\", "\\\\")}

@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import pytest
+from quiet_git import quiet
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("se_start", ROOT / "scripts" / "se_start.py")
@@ -432,17 +433,20 @@ def repos(tmp_path, isolated_git):
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
     git(upstream, "init", "-q", "-b", "main")
+    quiet(upstream)
     write(upstream / "se.toml.extra", 'docs_url = "https://docs.example.com/se/"\n')
     for version in ("1.0.0", "1.1.0", "2.0.0"):
         release(upstream, version, scripts)
     se = tmp_path / "se"
     git(tmp_path, "clone", "-q", upstream.as_uri(), str(se))
+    quiet(se)
     git(se, "reset", "-q", "--hard", "v1.0.0")
     remotes = {}
     for name, versions in {"lib": ("1.0.0", "1.1.0", "2.0.0"), "tool": ("1.0.0",)}.items():
         remote = tmp_path / f"{name}-remote"
         remote.mkdir()
         git(remote, "init", "-q", "-b", "main")
+        quiet(remote)
         for version in versions:
             release(remote, version)
         remotes[name] = remote
@@ -533,6 +537,7 @@ def installed(repos, tag: str, where: Path) -> Path:
     """A copy of the se remote at `tag` without git, as an installer leaves it."""
     where.parent.mkdir(parents=True, exist_ok=True)
     git(where.parent, "clone", "-q", "--branch", tag, repos["upstream"].as_uri(), str(where))
+    quiet(where)
     shutil.rmtree(where / ".git")
     write(where / ".claude-plugin" / "plugin.json", json.dumps({"name": "se", "repository": repos["upstream"].as_uri()}))
     return where
@@ -597,6 +602,7 @@ def test_a_cloud_setup_script_clone_is_pulled_like_a_checkout(repos, tmp_path):
     git(repos["upstream"], "symbolic-ref", "HEAD", "refs/heads/release")  # the clone takes the default
     clone = tmp_path / "home" / ".claude" / "skills" / "se"
     git(tmp_path, "clone", "-q", "--depth", "1", repos["upstream"].as_uri(), str(clone))
+    quiet(clone)
     repos["se"] = clone
     lines, failed = refresh(repos)
     assert not failed, lines

@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
+from quiet_git import quiet
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -97,6 +98,7 @@ def fixture_repo(tmp_path: Path, files: dict[str, bytes]) -> Path:
         (repo / name).parent.mkdir(parents=True, exist_ok=True)
         (repo / name).write_bytes(data)
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    quiet(repo)
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
     return repo
 
