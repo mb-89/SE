@@ -2840,6 +2840,99 @@ def test_integrate_hands_off_a_plan_of_github_steps_where_gh_is_not_signed_in(
                           capture_output=True, text=True, check=True).stdout.strip() == "main"
 
 
+TRUSTED = IDENTITY + "\n[tests]\ncommand = [\"true\"]\ntrust_integrator = true\n"
+
+
+def trust_on(checkout: Path) -> None:
+    """se.toml [tests] trust_integrator on, pushed to origin's main (README "Trusted landings")."""
+    (checkout / "se.toml").write_text(TRUSTED, encoding="utf-8")
+    git_ok("-C", str(checkout), "pull", "-q", "origin", "main")
+    git_ok("-C", str(checkout), "commit", "-q", "-am", "Trust the integrator")
+    git_ok("-C", str(checkout), "push", "-q", "origin", "HEAD:main")
+
+
+def test_integrate_records_its_pass_before_the_landing_pull_request_where_trust_is_on(
+        main_checkout, monkeypatch, github, capsys):
+    trust_on(main_checkout)
+    delivered_worker(main_checkout, monkeypatch)
+    runs = {"newest": 40}
+
+    def dispatch(workflow, ref, inputs):
+        github.calls.append(("dispatch", workflow, ref, inputs))
+        runs["newest"] = 41
+    github.newest_run = lambda workflow: runs["newest"]
+    github.dispatch = dispatch
+    github.run = lambda run_id: {"id": run_id, "status": "completed", "conclusion": "success",
+                                 "html_url": f"https://git.example/owner/repo/actions/runs/{run_id}"}
+    monkeypatch.setenv("SE_SESSION", "session_integrator")
+
+    work_tickets.integrate(main_checkout, 7, None, None)
+
+    names = [call[0] for call in github.calls]
+    assert names.index("dispatch") < names.index("create_pull")  # on the head before check starts
+    _, workflow, ref, inputs = github.calls[names.index("dispatch")]
+    assert (workflow, ref) == ("se-pass-record.yml", "land/feature/worker")
+    squashed = next(call for call in github.calls if call[0] == "squash")[2]
+    git = lambda *arguments: subprocess.run(["git", "-C", str(main_checkout), *arguments],
+                                            capture_output=True, text=True, check=True).stdout.strip()
+    assert inputs["sha"] == squashed  # the landing head check runs on
+    assert inputs["tree"] == git("rev-parse", f"{squashed}^{{tree}}") == inputs["tested"]
+    assert inputs["suite"] == work_tickets.trust.suite_hash(main_checkout, squashed)
+    assert (inputs["command"], inputs["result"], inputs["session"]) == (
+        "true", "passed", "session_integrator")
+    assert re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", inputs["time"])
+    assert "The integrator's record: success (https://git.example/owner/repo/actions/runs/41)" in (
+        capsys.readouterr().out)
+
+
+def test_integrate_lands_without_a_record_where_its_run_does_not_finish(
+        main_checkout, monkeypatch, github, capsys):
+    trust_on(main_checkout)
+    delivered_worker(main_checkout, monkeypatch)
+    github.newest_run = lambda workflow: 3  # the dispatch starts no newer run
+    github.dispatch = lambda workflow, ref, inputs: github.calls.append(("dispatch",))
+    github.run = lambda run_id: pytest.fail("no run to read")
+    monkeypatch.setattr(work_tickets, "RECORD_POLLS", 2)
+
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+
+    assert squashed_onto_origin(main_checkout, commit)  # check ran in full and passed
+    assert "No integrator record: the integrator's record did not finish" in capsys.readouterr().out
+
+
+def test_integrate_hands_off_the_record_as_steps_the_github_tools_make_where_trust_is_on(
+        main_checkout, monkeypatch, github, capsys):
+    trust_on(main_checkout)
+    head, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+
+    assert run(main_checkout, *arguments) == 0
+
+    plan = json.loads((main_checkout / ".se" / "handoff" / "feature-worker.json")
+                      .read_text(encoding="utf-8"))["plan"]
+    assert [step["tool"] for step in plan["steps"]] == [
+        "list_issues", "actions_run_trigger", "actions_list", "create_pull_request",
+        "pull_request_read", "merge_pull_request"]
+    landing = "land/feature/worker"
+    landed = subprocess.run(["git", "--git-dir", str(main_checkout.parent / "origin.git"),
+                             "rev-parse", f"refs/heads/{landing}"],
+                            capture_output=True, text=True, check=True).stdout.strip()
+    dispatched, waited = (step["arguments"] for step in plan["steps"][1:3])
+    inputs = dispatched.pop("inputs")
+    assert dispatched == {"owner": "owner", "repo": "repo", "method": "run_workflow",
+                          "workflow_id": "se-pass-record.yml", "ref": landing}
+    assert sorted(inputs) == sorted(work_tickets.trust.RECORD_INPUTS)
+    assert inputs["sha"] == landed and all(isinstance(value, str) for value in inputs.values())
+    assert waited == {"owner": "owner", "repo": "repo", "method": "list_workflow_runs",
+                      "resource_id": "se-pass-record.yml",
+                      "workflow_runs_filter": {"event": "workflow_dispatch"}}
+    assert "without a record check runs the full suite" in plan["steps"][2]["note"]
+    assert plan["steps"][4]["arguments"]["pullNumber"] == "<pull number from step 4>"
+    assert plan["steps"][5]["arguments"]["pullNumber"] == "<pull number from step 4>"
+    assert ("--landing-pull <pull number from step 4> --check-run <check run url from step 5> "
+            "--landing-description <file: the landing pull request's description, as "
+            "pull_request_read get reads it after step 6>") in plan["then"]
+
+
 class SessionSteps:
     """A cloud session answering integrate's GitHub steps through kern's relay: each step is the
     tool and input kern's `github.step` hands it, answered as the GitHub tools answer, on the bare

@@ -1,0 +1,53 @@
+# The integrator's record of its pass (README "Trusted landings"): work_tickets.py integrate's landing
+# plan dispatches this workflow on land/<branch> where se.toml [tests] trust_integrator is on, with
+# what its suite run found. Its one job checks the inputs against the commit it checked out and writes
+# them as the check run `se integrator pass` on it, which CI's check trusts for exactly that tree.
+# Only the integrator's account may dispatch it (se.toml [tests] integrator, default the owner).
+name: se-pass-record
+# ci_trust.py run_title: the run names the commit and tree it records, which lookup checks.
+run-name: se pass record ${{ inputs.sha }} tree ${{ inputs.tree }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The landing head, the commit the record is for
+        required: true
+      tree:
+        description: Its git tree
+        required: true
+      tested:
+        description: The tree the suite ran on (the parent's where a release commit followed)
+        required: true
+      suite:
+        description: The suite's hash, ci_trust.py suite_hash
+        required: true
+      command:
+        description: The test command
+        required: true
+      seconds:
+        description: The suite's time
+        required: false
+        default: ""
+      result:
+        description: passed or failed
+        required: true
+      time:
+        description: When the suite finished, UTC
+        required: true
+      session:
+        description: The integrator session
+        required: true
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  record:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/integrator-pass
+        with:
+          mode: record
