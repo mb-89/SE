@@ -49,6 +49,10 @@ type Standing struct {
 // ErrNotRunning is what a reader of the standing file meets where no core runs.
 var ErrNotRunning = errors.New("no core runs")
 
+// ErrVanished is ErrNotRunning where the standing file names a pid that runs
+// nowhere: the core ended without its end, killed or crashed (TakeVanished).
+var ErrVanished = fmt.Errorf("%w: its process ended without its end", ErrNotRunning)
+
 // StandingPath is the standing file's path in a checkout.
 func StandingPath(root string) string { return filepath.Join(root, Runtime, standingFile) }
 
@@ -73,7 +77,7 @@ func ReadStanding(root string) (Standing, error) {
 		return Standing{}, fmt.Errorf("%w: %s names no bus", ErrNotRunning, StandingPath(root))
 	}
 	if !alive(s.Pid) {
-		return Standing{}, fmt.Errorf("%w: %s names pid %d, which runs nowhere", ErrNotRunning, StandingPath(root), s.Pid)
+		return Standing{}, fmt.Errorf("%w: %s names pid %d, which runs nowhere", ErrVanished, StandingPath(root), s.Pid)
 	}
 	return s, nil
 }

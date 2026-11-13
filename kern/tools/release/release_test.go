@@ -186,3 +186,97 @@ func TestSumsListsEveryArchiveSortedAsSha256sumReadsIt(t *testing.T) {
 		t.Fatalf("SHA256SUMS:\n%s", got)
 	}
 }
+
+// A repository with one application binary: cmd/app imports lib, which
+// embeds a file; tagged as released at 0.1.0.
+func releasedRepository(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	app := filepath.Join(repo, "app")
+	files := map[string]string{
+		filepath.Join("app", Settings):                   "version = \"0.1.0\"\ndownload = \"https://github.com/example/app/releases/download/app-v{version}\"\nbinary = \"app\"\npackage = \"./cmd/app\"\n",
+		filepath.Join("app", "go.mod"):                   "module example.com/app\n\ngo 1.24\n",
+		filepath.Join("app", "cmd", "app", "main.go"):    "package main\n\nimport \"example.com/app/lib\"\n\nfunc main() { println(lib.Name()) }\n",
+		filepath.Join("app", "lib", "lib.go"):            "package lib\n\nimport _ \"embed\"\n\n//go:embed name.txt\nvar name string\n\nfunc Name() string { return name }\n",
+		filepath.Join("app", "lib", "name.txt"):          "app\n",
+		filepath.Join("app", "lib", "lib_test.go"):       "package lib\n",
+		filepath.Join("app", "lib", "README.md"):         "# lib\n",
+		filepath.Join("app", "tools", "other", "x.go"):   "package other\n",
+		filepath.Join("app", "lib", "testdata", "a.txt"): "a\n",
+	}
+	for name, text := range files {
+		write(t, filepath.Join(repo, name), text)
+	}
+	run := func(args ...string) {
+		t.Helper()
+		if _, err := git(repo, append([]string{"-c", "user.name=alice", "-c", "user.email=alice@example.com", "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"}, args...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("init", "-q")
+	run("add", "-A")
+	run("commit", "-q", "-m", "released")
+	run("tag", "app-v0.1.0")
+	return app
+}
+
+func write(t *testing.T, name, text string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(name, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The guard SE's suite runs (se.toml [tests.beside.release-guard]): a change
+// to a file the binary is built from, once its version is released, refuses
+// the checkout until the version is raised; tests, prose, test data and
+// packages the binary does not import refuse nothing.
+func TestGuardRefusesABinaryInputChangedSinceItsReleasedTag(t *testing.T) {
+	app := releasedRepository(t)
+	guard := func() (int, string) {
+		var out, errs bytes.Buffer
+		code := run([]string{"guard", "--dir", app}, &out, &errs)
+		return code, out.String() + errs.String()
+	}
+	if code, said := guard(); code != 0 || !strings.Contains(said, "the checkout builds the binary app-v0.1.0 holds") {
+		t.Fatalf("at the tag: code %d, %s", code, said)
+	}
+	for _, name := range []string{
+		filepath.Join("lib", "lib_test.go"), filepath.Join("lib", "README.md"),
+		filepath.Join("lib", "testdata", "a.txt"), filepath.Join("tools", "other", "x.go"),
+	} {
+		write(t, filepath.Join(app, name), "package lib\n// changed\n")
+	}
+	if code, said := guard(); code != 0 {
+		t.Fatalf("no input changed: code %d, %s", code, said)
+	}
+	for _, input := range []string{filepath.Join("lib", "name.txt"), "go.mod", filepath.Join("lib", "lib.go")} {
+		original, err := os.ReadFile(filepath.Join(app, input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(app, input), string(original)+"\n")
+		code, said := guard()
+		want := "app/" + filepath.ToSlash(input)
+		if code != 1 || !strings.Contains(said, "app-v0.1.0 is cut, and 1 of the app binary's inputs changed since: "+want+";") ||
+			!strings.Contains(said, "raise version in app/release.toml") {
+			t.Fatalf("%s changed: code %d, %s", want, code, said)
+		}
+		write(t, filepath.Join(app, input), string(original))
+	}
+	write(t, filepath.Join(app, "lib", "new.go"), "package lib\n")
+	if code, said := guard(); code != 1 || !strings.Contains(said, "app/lib/new.go") {
+		t.Fatalf("a file added to an imported package: code %d, %s", code, said)
+	}
+	settings, err := os.ReadFile(filepath.Join(app, Settings))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(app, Settings), strings.Replace(string(settings), "0.1.0", "0.2.0", 1))
+	if code, said := guard(); code != 0 || !strings.Contains(said, "app 0.2.0 is not cut yet; the push to main that carries it cuts app-v0.2.0") {
+		t.Fatalf("the version raised: code %d, %s", code, said)
+	}
+}

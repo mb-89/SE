@@ -329,6 +329,21 @@ def test_the_greeting_names_kern_starting_or_failed_with_the_cause(setup, capsys
         assert lines[1].endswith(str(setup["project"].resolve() / ".se" / ".runtime" / "core.log"))
 
 
+def test_the_greeting_names_a_core_that_ended_at_its_start_with_the_first_lines_it_said(
+        setup, capsys, monkeypatch):
+    # kern's status names what a core that ended at its start said (its died file); the greeting
+    # says failed with it, not starting: the core se-v0.1.0 shipped refused main's wiring so.
+    said = ("kern serve: index: the catalog is broken:\n"
+            "  wiring line 58: instance retro-due: no component retro-due is registered")
+    lines, _ = kern_greeting(setup, capsys, monkeypatch, "--kern-bin", "/k",
+                             answer={"state": "not running", "health": {}, "died": said})
+    log = setup["project"].resolve() / ".se" / ".runtime" / "core.log"
+    assert lines[1:5] == ["kern 0.2.0: failed: the core ended at its start; it said:",
+                          "  kern serve: index: the catalog is broken:",
+                          "    wiring line 58: instance retro-due: no component retro-due is registered",
+                          f"  (all of it in {log})"]
+
+
 def test_without_word_of_kern_the_greeting_names_none(setup, capsys, monkeypatch):
     lines, asked = kern_greeting(setup, capsys, monkeypatch)
     assert not any(line.startswith("kern") for line in lines) and asked == []

@@ -344,6 +344,14 @@ same for its own binary (core plus its Go components). The binary is fetched int
   session works without the core until it lands, and the greeting says so.
 - **A checkout of the core or of an application's Go code:** built from source (warm build 0.12 s,
   one changed file 0.9 to 1.0 s), so its own changes run.
+- **The release matches the checkout:** a session runs the release its `release.toml` names, so
+  a change to the binary's code without a new version runs the old binary against the new wiring
+  (`se-v0.1.0` predated the component `retro-due`, and its core refused main's wiring). SE's suite
+  refuses that change, `se.toml` `[tests.beside.release-guard]` ([kern/README.md
+  "Release"](../kern/README.md#release)): a release is built from one commit and is never changed, so
+  the files it is built from are the release's own contents, and the guard needs no download. The
+  raised version is cut by the landing; a session that starts before its release is published
+  builds it from source.
 
 ### Lifetime: bound to the session
 
@@ -384,6 +392,15 @@ The SE plugin's hooks start the core and post every event to it. Each hook is on
 `<app> hook <event>`, the application's own binary as a client: it reads the host's JSON on
 stdin, sends it on `hook.<event>` with a 500 ms wait, and prints the answer as the host's hook
 JSON. Where no core answers, it prints nothing and exits 0: a hook fails open, measured at 5 ms.
+
+A core that ends at its start is not silent. Its `serve` writes the cause to the core's log and to
+`.se/.runtime/core.died` before it gives up the start's claim; `<app> status` names it (`died` in
+`--json`), and the greeting says `failed: the core ended at its start` with its first lines. The
+first `UserPromptSubmit` or `PostToolUse` hook after it tells the session the same once, as
+context; SessionStart does not, since the start posts it and shows nothing of its output. A core
+that stands removes the file. A core that stood and ended without its end, killed or crashed,
+leaves a standing file naming a pid that runs nowhere: the first such hook tells the session the
+last lines of the core's log, once, and removes that file.
 
 | hook | posts | what it gains |
 |---|---|---|

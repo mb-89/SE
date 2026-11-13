@@ -29,10 +29,12 @@ const (
 	StateStopped  State = "not running"
 )
 
-// Status is a core's state, and its health where it answers.
+// Status is a core's state, and its health where it answers; where none runs,
+// what the last one said as it ended at its start (ReadDied), if it did.
 type Status struct {
 	State  State
 	Health Health
+	Died   string
 }
 
 // AskStatus asks the core in the checkout at root for its health. Where none
@@ -47,7 +49,7 @@ func AskStatus(clock Clock, root string) (Status, error) {
 		if st, err := os.Stat(ClaimPath(root)); err == nil && clock.Now().Sub(st.ModTime()) <= ClaimStale {
 			return Status{State: StateStarting}, nil
 		}
-		return Status{State: StateStopped}, nil
+		return Status{State: StateStopped, Died: ReadDied(root)}, nil
 	}
 	h, err := health(s)
 	if err != nil {
@@ -110,12 +112,13 @@ func AskStop(root string) (int, error) {
 	return s.Pid, nil
 }
 
-// WaitRunning asks the status until the core answers, or the wait is out.
+// WaitRunning asks the status until the core answers, it ended at its start,
+// or the wait is out.
 func WaitRunning(clock Clock, root string, wait time.Duration) (Status, error) {
 	end := time.Now().Add(wait)
 	for {
 		st, err := AskStatus(clock, root)
-		if err != nil || st.State == StateRunning || !time.Now().Before(end) {
+		if err != nil || st.State == StateRunning || st.Died != "" || !time.Now().Before(end) {
 			return st, err
 		}
 		time.Sleep(time.Millisecond)
