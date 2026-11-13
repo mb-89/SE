@@ -1,0 +1,30 @@
+# The check job's step of a sharded suite (README "Test budget"): collects the records the
+# suite-shard action uploaded and runs work_tickets.py suite-time, which prints CI's suite time,
+# the slowest shard's, as the notice SE reads, and holds it to se.toml's [tests] budget.
+# SE's scripts run from this action's own checkout, so the project copies nothing.
+name: se suite time
+description: Judge a sharded suite's time, its slowest shard's, against the project's budget.
+inputs:
+  shards:
+    description: How many shards ran; fewer or more records fail the step.
+    required: true
+  worktree:
+    description: The project's checkout, holding se.toml.
+    default: .
+runs:
+  using: composite
+  steps:
+    - name: Download the shards' records
+      uses: actions/download-artifact@v4
+      with:
+        pattern: se-suite-shard-*
+        merge-multiple: true
+        path: ${{ runner.temp }}/se-suite-shards
+    - name: The sharded suite, within its budget
+      shell: bash
+      env:
+        SHARDS: ${{ inputs.shards }}
+        WORKTREE: ${{ inputs.worktree }}
+      run: >-
+        python3 "$GITHUB_ACTION_PATH/../../../scripts/work_tickets.py" suite-time
+        --worktree "$WORKTREE" --shards "$RUNNER_TEMP/se-suite-shards" --expect "$SHARDS"
