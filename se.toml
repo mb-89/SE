@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.38.0"
+version = "5.39.0"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -34,6 +34,14 @@ limit_seconds = 120
 setup = ["go", "test", "-run", "^$", "./..."]
 command = ["go", "test", "./..."]
 directory = "kern"
+target_seconds = 30
+limit_seconds = 60
+
+# SE's Go components (components/README.md "Tests"), after kern's with Go's build cache warm; their
+# agreement test runs SE's Python fleet check and retro count beside the Go ones.
+[tests.beside.go-components]
+command = ["go", "test", "./..."]
+directory = "components"
 target_seconds = 30
 limit_seconds = 60
 

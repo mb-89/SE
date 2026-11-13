@@ -51,6 +51,7 @@ se_modules = _load("se_modules")
 public_check = _load("public_check")
 metrics = _load("metrics")
 feedback = _load("feedback")
+kern_names = _load("kern_names")
 se_plugin = _load("se_plugin")
 ModuleError = se_modules.ModuleError
 Version = tuple[int, int, int]
@@ -440,8 +441,9 @@ def work_lines(report: Report, se_root: Path) -> list[str]:
     if "error" in retro:
         lines.append(f"Retro check not done: {retro['error']}; {CHECK_REMEDY.format(se=se)}")
     elif isinstance(landed, int) and isinstance(due_after, int) and landed >= due_after:
+        live = ", live from kern" if retro.get("from") == "kern" else ""
         lines.append(f"Retro due: {_plural(landed, 'work issue')} landed since the last retro "
-                     f"(due after {due_after}); file one from .github/ISSUE_TEMPLATE/retro.md, then "
+                     f"(due after {due_after}{live}); file one from .github/ISSUE_TEMPLATE/retro.md, then "
                      f"run: uv run python {se}/scripts/retro.py collect <retro issue> --out <draft>")
     fleet = work.get("fleet") or {}
     findings = fleet.get("findings") or []
@@ -452,9 +454,11 @@ def work_lines(report: Report, se_root: Path) -> list[str]:
         for finding in findings:
             kinds.setdefault(str(finding.get("kind")), []).append(f"#{finding.get('issue')}")
         where = f" --worktree {report.root.as_posix()}" if report.root else ""
+        live = (f", live from kern over {_plural(fleet.get('issues'), 'issue')} read"
+                if fleet.get("from") == "kern" else "")
         lines.append(f"Fleet: {_plural(len(findings), 'finding')} ("
                      + "; ".join(f"{kind} {', '.join(issues)}" for kind, issues in kinds.items())
-                     + f"); see each with its remedy: uv run python {se}/scripts/work_tickets.py "
+                     + f"){live}; see each with its remedy: uv run python {se}/scripts/work_tickets.py "
                      f"fleet-check{where}")
     return lines
 
@@ -579,6 +583,7 @@ class World:
     spawn: Callable[[list[str]], None] = _spawn_detached
     claude: Callable[[list[str]], subprocess.CompletedProcess] = _claude
     kern: Callable[[Path, Path], dict | None] = kern_status
+    live: Callable[[Path | None], dict | None] = kern_names.live_work
 
 
 def status(se_root: Path, root: Path | None, local_config: Path | None, cache_path: Path,
@@ -597,7 +602,14 @@ def status(se_root: Path, root: Path | None, local_config: Path | None, cache_pa
         world.spawn(argv + ["check"])
         running = True
     states = [assess(item, cache.remotes if cache.checked_at is not None else None) for item in local.items]
-    return Report(local, states, cache.checked_at, running, now, cache.work, root)
+    return Report(local, states, cache.checked_at, running, now, live_or_cached(world, root, cache.work), root)
+
+
+def live_or_cached(world: World, root: Path | None, cached: dict | None) -> dict | None:
+    """What is due in the work: each part kern's core holds live (kern_names.live_work) over
+    the cached work check's."""
+    live = world.live(root)
+    return {**(cached or {}), **live} if live else cached
 
 
 def check(se_root: Path, root: Path | None, local_config: Path | None, cache_path: Path,
