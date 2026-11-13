@@ -294,3 +294,34 @@ func TestAHookPostsItsEventAndFailsOpen(t *testing.T) {
 	}
 	want(t, run(t, nil, "status", "--root", root), 0, "0 session(s)")
 }
+
+// With --unanswered N, `kern hook` exits N where no command answered the
+// event: no core runs, or the core binds no command to it.
+func TestAnUnansweredHookExitsWithTheCodeItIsGiven(t *testing.T) {
+	t.Parallel()
+	root := checkout(t)
+	hook := func(args ...string) said {
+		t.Helper()
+		cmd := exec.Command(kern, append([]string{"hook", "Stop", "--root", root}, args...)...)
+		cmd.Stdin = strings.NewReader(`{"session_id":"s1"}`)
+		out, err := cmd.Output()
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		return said{string(out), code}
+	}
+	if got := hook("--unanswered", "3"); got != (said{"", 3}) {
+		t.Fatalf("kern hook --unanswered 3 with no core answers %+v, and wants nothing with 3", got)
+	}
+	want(t, run(t, nil, "start", "--root", root), 0, "kern: started")
+	want(t, run(t, nil, "status", "--root", root, "--wait", wait), 0, "kern: running")
+	if got := hook("--unanswered", "3"); got != (said{"", 3}) {
+		t.Fatalf("kern hook --unanswered 3 for an event no command answers prints %+v, and wants nothing with 3", got)
+	}
+	if got := hook(); got != (said{"", 0}) {
+		t.Fatalf("kern hook without --unanswered prints %+v, and wants nothing with 0", got)
+	}
+}
