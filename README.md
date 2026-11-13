@@ -439,6 +439,7 @@ target_seconds = 60
 limit_seconds = 120
 setup = ["uv", "sync"] # optional
 tier = "tests.tiers:tier" # optional
+over_limit = "fail" # optional, or "warn"
 ```
 
 - `command`: the project's complete suite, an argument array run without a shell from the project
@@ -450,6 +451,11 @@ tier = "tests.tiers:tier" # optional
   output.
 - `target_seconds` (default 60): above it the gate warns.
 - `limit_seconds` (default 120): the budget, judged on one reference run, CI's (below).
+- `over_limit` (default `"fail"`): what a run over the limit does. One rule holds for every
+  project: an overrun fails, as below. A project that declares `"warn"` takes the other side of
+  the trade-off: no run is refused for its time, so a slow runner never blocks a landing, but
+  nothing stops the suite from creeping past its budget; each overrun only warns, naming the
+  setting.
 
 The budget's reference is the suite of the CI `check` job, on the same runner type every time, as
 cloud hosts differ by about 25 s for the same tree. Over the limit there, `check` fails, naming the

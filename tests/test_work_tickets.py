@@ -2074,13 +2074,15 @@ def test_route_routes_nothing_while_paused(worktree, monkeypatch, capsys):
 BUDGET_SUITE = 'print("0.20s call     tests/test_fast.py::test_quick")\nprint("3 passed")\n'
 
 
-def budget_suite(root: Path, monkeypatch, seconds: float, ci: float | None) -> list[int]:
-    """A suite in se.toml `[tests]` (limit 120 s) that a fake clock times at `seconds`, and CI's
-    last suite time on main faked as `ci` (None: unknown); returns a list that counts CI reads."""
+def budget_suite(root: Path, monkeypatch, seconds: float, ci: float | None,
+                 extra: str = "") -> list[int]:
+    """A suite in se.toml `[tests]` (limit 120 s, plus the `extra` lines) that a fake clock times
+    at `seconds`, and CI's last suite time on main faked as `ci` (None: unknown); returns a list
+    that counts CI reads."""
     (root / "suite.py").write_text(BUDGET_SUITE, encoding="utf-8")
     (root / "se.toml").write_text(
         f"[tests]\ncommand = {json.dumps([sys.executable, 'suite.py'])}\n"
-        "target_seconds = 60\nlimit_seconds = 120\n", encoding="utf-8")
+        f"target_seconds = 60\nlimit_seconds = 120\n{extra}", encoding="utf-8")
     readings = iter([0.0, seconds])
     monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
     reads: list[int] = []
@@ -2145,6 +2147,29 @@ def test_a_ci_suite_over_the_limit_fails_check_with_its_time_and_slowest_tests(
             "over its limit of 120 s") in captured.err
     assert "0.20s call tests/test_fast.py::test_quick" in captured.err
     assert reads == []  # the reference reads no other time
+
+
+@pytest.mark.parametrize("reference", [True, False], ids=["ci", "local"])
+def test_an_overrun_only_warns_where_the_project_declares_warn_only(
+        worktree, monkeypatch, capsys, reference):
+    if reference:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    budget_suite(worktree, monkeypatch, 130.0, 118.0, 'over_limit = "warn"\n')
+
+    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 0
+
+    captured = capsys.readouterr()
+    assert "warning: the complete suite took 130.0 s" in captured.err
+    assert ('over its limit of 120 s; [tests] over_limit = "warn" in se.toml, so the overrun '
+            "is not refused") in captured.err
+    assert "Suite: 3 passed; 130.0 s (target 60 s, limit 120 s)" in captured.out
+
+
+def test_over_limit_takes_fail_or_warn_only(worktree, monkeypatch, capsys):
+    budget_suite(worktree, monkeypatch, 40.0, None, 'over_limit = "ignore"\n')
+
+    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 1
+    assert 'over_limit must be "fail" (the default) or "warn"' in capsys.readouterr().err
 
 
 def test_a_ci_suite_within_the_limit_reports_its_time_as_a_notice(worktree, monkeypatch, capsys):

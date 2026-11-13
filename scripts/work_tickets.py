@@ -4012,6 +4012,7 @@ class SuiteBudget:
     limit_seconds: float
     setup: list[str] | None = None
     tier: str | None = None  # `<module>:<function>`, the project's tier function
+    over_limit: str = "fail"  # "warn": an overrun only warns (README "Test budget")
 
 
 def is_argument_array(value: object) -> bool:
@@ -4062,6 +4063,12 @@ def suite_budget(root: Path) -> SuiteBudget:
             'a module importable from the project root, for example tier = "tests.tiers:tier"; '
             "fix it or remove it"
         )
+    over_limit = tests.get("over_limit", "fail")
+    if over_limit not in OVER_LIMIT_CHOICES:
+        raise QueueError(
+            f'{where}: over_limit must be "fail" (the default) or "warn", what a run over '
+            "limit_seconds does; fix it or remove it"
+        )
     values: dict[str, float] = {}
     for key, default in (("target_seconds", 60), ("limit_seconds", 120)):
         value = tests.get(key, default)
@@ -4070,9 +4077,11 @@ def suite_budget(root: Path) -> SuiteBudget:
         values[key] = float(value)
     if values["target_seconds"] > values["limit_seconds"]:
         raise QueueError(f"{where}: target_seconds must not exceed limit_seconds; fix it")
-    return SuiteBudget(command, values["target_seconds"], values["limit_seconds"], setup, tier)
+    return SuiteBudget(command, values["target_seconds"], values["limit_seconds"], setup, tier,
+                       over_limit)
 
 
+OVER_LIMIT_CHOICES = ("fail", "warn")
 TIER_SETTING = re.compile(r"[A-Za-z_][\w.]*:[A-Za-z_]\w*")
 
 
@@ -4385,6 +4394,13 @@ def host_load() -> str:
     return f"load {one:.1f}/{five:.1f}/{fifteen:.1f} (1/5/15 min) on {cpus} CPUs"
 
 
+def over_limit_warning(seconds: float, limit: float) -> str:
+    """The warning of an overrun where the project declares warn-only (`[tests] over_limit`)."""
+    return (f"warning: the complete suite took {seconds:.1f} s, over its limit of {limit:g} s; "
+            '[tests] over_limit = "warn" in se.toml, so the overrun is not refused; make the '
+            "slowest tests faster")
+
+
 def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = False) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget (README "Test budget").
 
@@ -4399,7 +4415,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     refuses a passing suite above the limit with SuiteOverLimitError. Any other run above the limit
     warns with the host's load and refuses only where CI's last suite time on the integration
     branch (ci_suite_time, read there and also where `read_ci`) is unknown or within 10% of the
-    limit. Records its verdict on HEAD's tree where the checkout holds exactly it (clean_commit);
+    limit. Where `[tests]` over_limit is "warn", no overrun refuses: each only warns.
+    Records its verdict on HEAD's tree where the checkout holds exactly it (clean_commit);
     push reads it before the integration branch is pushed."""
     budget = suite_budget(root)
     tier_of = tier_function(root, budget.tier) if budget.tier else None
@@ -4419,7 +4436,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=budget.limit_seconds,
                  **({"ci_suite_seconds": ci.seconds} if ci else {}))
     close = ci is None or ci.seconds >= CI_MARGIN * budget.limit_seconds
-    refused = over and (reference or close)
+    enforced = budget.over_limit == "fail"
+    refused = over and enforced and (reference or close)
     record_suite_verdict(root, commit, result.returncode == 0 and not refused, seconds)
     slowest = slowest_tests(output, parts, slowest_count)
     summary = result.refuse_failed(budget)
@@ -4449,7 +4467,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
             f"{why}. Slowest tests:\n{listing}\n"
             "Remedy: make the slowest tests above faster (the work model's test rules)."
         )
-    if over:
+    if over and not enforced:
+        print(over_limit_warning(seconds, budget.limit_seconds), file=sys.stderr)
+    elif over:
         print(
             f"warning: the complete suite took {seconds:.1f} s here ({host_load()}), over its "
             f"limit of {budget.limit_seconds:g} s; {ci_text}, under 90% of the limit, so this "
