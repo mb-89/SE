@@ -182,8 +182,8 @@ The logic lives in one place, and each host adapter is thin and generated from i
 
 ### des-004 One door per outside thing
 
-Each outside thing (processes, disk, the network, GitHub) is reached through one door, and a run
-reads its inputs once, computes, then writes its outputs.
+Each outside thing (git, GitHub, processes, disk, the network, the clock) is reached through one
+door, and a run reads its inputs once, computes, then writes its outputs.
 
 - **Why:** one door is one place to fake, to measure and to fix; inputs read at different times
   disagree, and reading again what a run already has is slow.
@@ -192,9 +192,12 @@ reads its inputs once, computes, then writes its outputs.
 - **Prevents:** a test that needs a real service; a run that acts on inputs read at different
   times; one call per item where one batched read would do.
 - **Implementations:**
-  - se: [`<se>/scripts/work_tickets.py`](../../../../scripts/work_tickets.py) reaches GitHub only
+  - se: git only through [`<se>/scripts/git_door.py`](../../../../scripts/git_door.py), which
+    `tests/test_repository.py` checks, today's other git subprocesses on its allow list;
+    [`<se>/scripts/work_tickets.py`](../../../../scripts/work_tickets.py) reaches GitHub only
     through its `run_gh` functions, and without `gh` a role uses the host's GitHub tools
     ([Without gh](../SKILL.md#without-gh)); otherwise by judgment.
+  - kern: git's Go callers sit on that allow list until kern has its own git door.
   - Go line (frozen): the battery's `io-module` and `programs` rules (`proc.Programs`; GitHub
     through its own HTTP client, never `gh`); a box's take, local work and land.
 - **Related:** tst-001, des-009
@@ -352,16 +355,20 @@ another place holds.
 
 ### tst-001 Fakes that behave
 
-Every outside service the code reaches has a fake that behaves like it, and the real service is
-called only in its own contract tests and once for each affected command at delivery.
+Each door has a fake held to one contract suite that runs against both the fake and the real thing,
+every other test uses the fake, and the real thing is called only in that suite and once for each
+affected command at delivery.
 
 - **Why:** a fake that does not behave like the service tests the fake; only the real call shows
-  what the service refuses.
-- **Without it:** tests pass on fakes while the real service refuses the same call.
-- **Prevents:** a change that passes on fakes and fails against the real service.
+  what the service refuses; a test on the real thing depends on the machine it runs on.
+- **Without it:** tests pass on fakes while the real service refuses the same call, and a test that
+  passes locally fails on a runner whose configuration differs.
+- **Prevents:** a change that passes on fakes and fails against the real service; a test that
+  depends on the machine's configuration of an outside thing.
 - **Implementations:**
-  - se: the work model's [Tests](../SKILL.md#tests); the worker runs the affected real command once
-    against the real service ([worker procedure](../../../agents/worker.agent.md#procedure)).
+  - se: the work model's [Tests](../SKILL.md#tests); git's contract, `tests/test_git_door.py`,
+    against real git and its fake `tests/fake_git.py`; the worker runs the affected real command
+    once against the real service ([worker procedure](../../../agents/worker.agent.md#procedure)).
   - Go line (frozen): the battery's `fake-contract` rule ran one contract suite against fake and
     real.
 - **Related:** des-004, tst-002

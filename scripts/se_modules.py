@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -15,6 +14,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+import git_door
 MANIFEST = "se.toml"
 LOCK = "se.lock"
 MODULES_DIR = Path(".se") / "modules"
@@ -362,15 +362,7 @@ def find_root(start: Path) -> Path:
 
 
 def _run_git(cwd: Path, args: tuple[str, ...]) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-    )
+    return git_door.run(*args, cwd=cwd, no_prompt=True)
 
 
 def git(cwd: Path, *args: str) -> str:

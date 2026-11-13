@@ -13,8 +13,9 @@ or `clone` anywhere else in tests/), and every copy of fixture repositories goes
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
+
+import git_door
 
 # maintenance.auto covers `git maintenance run --auto`, gc.auto 0 the `gc --auto` of older gits and of
 # receive-pack (receive.autogc follows it); [user] is the suite's identity, a generic one.
@@ -45,7 +46,7 @@ def clone(source: str | Path, destination: Path, *options: str) -> Path:
 
 
 def git(*arguments: str) -> None:
-    result = subprocess.run(["git", *arguments], capture_output=True, text=True, check=False)
+    result = git_door.run(*arguments)
     if result.returncode != 0:
         raise RuntimeError(f"git {' '.join(arguments)} failed: {result.stderr.strip()}")
 

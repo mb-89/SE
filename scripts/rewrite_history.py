@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
+import git_door
 
 def _public_check():
     """scripts/public_check.py beside this script, whose detectors the commit gates apply."""
@@ -148,8 +149,7 @@ def filter_stream(source: BinaryIO, sink: BinaryIO, identity: tuple[str, str],
 
 
 def git(repo: Path, *arguments: str) -> str:
-    result = subprocess.run(["git", "-C", str(repo), *arguments], capture_output=True, text=True,
-                            check=False)
+    result = git_door.run(*arguments, root=repo)
     if result.returncode != 0:
         raise SetupError(f"git {' '.join(arguments)} failed in {repo}: "
                          f"{(result.stderr or result.stdout).strip()}")
@@ -193,8 +193,7 @@ def project_identity(repo: Path, given: str | None) -> tuple[str, str]:
 
 def stale_allow_entries(repo: Path, branch: str) -> list[str]:
     """The `.public-check-allow` commit entries at `branch`'s tip, as `<line>: <entry>`."""
-    shown = subprocess.run(["git", "-C", str(repo), "show", f"{branch}:.public-check-allow"],
-                           capture_output=True, text=True, check=False)
+    shown = git_door.run("show", f"{branch}:.public-check-allow", root=repo)
     if shown.returncode != 0:
         return []
     return [f"{number}: {line.split('#', 1)[0].strip()}"
@@ -205,8 +204,7 @@ def stale_allow_entries(repo: Path, branch: str) -> list[str]:
 def fast_export_options(repo: Path) -> list[str]:
     options = ["--branches", "--tags", "--signed-tags=strip", "--tag-of-filtered-object=rewrite",
                "--reencode=yes", "--show-original-ids", "--mark-tags"]
-    usage = subprocess.run(["git", "-C", str(repo), "fast-export", "-h"], capture_output=True,
-                           text=True, check=False)
+    usage = git_door.run("fast-export", "-h", root=repo)
     if "--signed-commits" in usage.stdout + usage.stderr:
         options.append("--signed-commits=strip")  # a rewritten commit's signature is void anyway
     return options
@@ -221,12 +219,11 @@ def rewrite(repo: Path, identity: tuple[str, str]) -> tuple[Counts, dict[str, st
     with tempfile.TemporaryDirectory() as scratch:
         marks, errors = Path(scratch) / "marks", Path(scratch) / "errors"
         with errors.open("wb") as log:
-            exporter = subprocess.Popen(["git", "-C", str(repo), "fast-export",
-                                         *fast_export_options(repo)],
-                                        stdout=subprocess.PIPE, stderr=log)
-            importer = subprocess.Popen(["git", "-C", str(repo), "fast-import", "--force",
-                                         "--quiet", f"--export-marks={marks}"],
-                                        stdin=subprocess.PIPE, stderr=log)
+            exporter = git_door.popen("fast-export", *fast_export_options(repo), root=repo,
+                                      stdout=subprocess.PIPE, stderr=log)
+            importer = git_door.popen("fast-import", "--force", "--quiet",
+                                      f"--export-marks={marks}", root=repo,
+                                      stdin=subprocess.PIPE, stderr=log)
             try:
                 filter_stream(exporter.stdout, importer.stdin, identity, counts)
             finally:

@@ -8,10 +8,10 @@ from __future__ import annotations
 import http.server
 import json
 import re
-import subprocess
 import threading
 from pathlib import Path
 
+import git_door
 import pytest
 import quiet_git
 
@@ -24,11 +24,11 @@ OWNER = "alice"
 
 
 IDENTITY = ("-c", "user.name=mb", "-c", "user.email=mb")  # a runner has no git identity
+pytestmark = pytest.mark.usefixtures("fake_git_door")  # git is the fake behind the door (tests/fake_git.py)
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True,
-                            check=False)
+    result = git_door.run(*arguments, root=root)
     assert result.returncode == 0, f"git {' '.join(arguments)}: {result.stderr.strip()}"
     return result.stdout.strip()
 

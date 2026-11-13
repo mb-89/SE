@@ -454,7 +454,7 @@ A worker splits its work issue into local tickets in its worktree:
   `docs/retro-*`, which quote what was true when they were written.
 - A partial-delivery blocker is only work outside the worker's box: another package's file, a
   user decision, or missing access. Tests of the package's own code are never blockers, including
-  failure paths exercised with temporary repositories or fakes. Workers may create, use and close
+  failure paths exercised with the doors' fakes. Workers may create, use and close
   throw-away tracker issues for live acceptance runs.
 - Notes are private scratch: never committed, never copied into tracked files or reports. A note
   is resolved by a local `Disposition:` line stating the decision; future work becomes a
@@ -471,6 +471,10 @@ issues point here and never restate it. The project's suite and its time budget 
 
 - Test a behaviour once, at the outermost interface (the command a person or role runs), on fakes;
   real outside services appear only in their own contract tests.
+- Each outside thing has one door with a fake held to its contract
+  ([des-004](references/rules.md#des-004-one-door-per-outside-thing),
+  [tst-001](references/rules.md#tst-001-fakes-that-behave)): a test that needs git uses the git
+  door's fake, never real git in temporary repositories (the project's `AGENTS.md` names both).
 - No sleeping and no wall clock: time comes from an injected clock, waiting from an event.
 - Tests run in parallel and share no state; fixtures are built once and reused.
 - Browser checks are batched: one browser session serves every check of a run.
