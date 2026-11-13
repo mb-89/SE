@@ -223,3 +223,16 @@ def test_a_release_commit_carries_its_parents_suite_verdict(checkout, capfd):
     assert git(checkout, "log", "-1", "--format=%s") == "Release v1.0.1"
     recorded = verdicts.verdict(checkout, "suite", release_tree)
     assert recorded["passed"] is True and recorded["carried_from"] == merge_tree
+
+
+def test_the_suite_notes_its_time_and_limit_in_the_metrics_line(checkout, tmp_path, monkeypatch,
+                                                                 capsys):
+    """README "Metrics": the suite's wall time and its [tests] limit, which the report flags."""
+    path = tmp_path / "metrics.jsonl"
+    monkeypatch.setenv("SE_METRICS", str(path))
+
+    assert work_tickets.main(["suite", "--worktree", str(checkout)]) == 0
+
+    line = json.loads(path.read_text(encoding="utf-8"))
+    assert line["command"] == "work_tickets.py suite" and line["suite_limit_seconds"] == 120
+    assert 0 < line["suite_seconds"] <= line["wall_seconds"]

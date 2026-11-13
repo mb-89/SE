@@ -495,6 +495,39 @@ A sentence ends at a dot, `!` or `?` before whitespace, and at the start
 and end of a fenced block, at a heading and at a block-id line, so a paragraph added or removed
 between two unchanged blocks is that paragraph alone.
 
+### Metrics
+
+Every run of a `work_tickets.py` or `se_start.py` subcommand appends one JSON line to
+`~/.se/metrics.jsonl` (`SE_METRICS` names another file), so the command that spends time or
+GitHub's limits can be named instead of guessed. `scripts/metrics.py` owns the line and the report.
+
+- `command` (`work_tickets.py backlog file`), `start` (UTC), `wall_seconds` and `exit_code`.
+- GitHub through the door: `gh_calls` (every `gh` call and every push attempt), `gh_refusals` (a
+  call GitHub refused for its rate limit, a push it refused transiently) and `gh_wait_seconds`
+  (the waits on GitHub: a push retry, a poll of `check` or of a workflow run).
+- What a command notes itself: the suite's `suite_seconds` and its `suite_limit_seconds` (`[tests]`
+  `limit_seconds`) from `suite` and `integrate`, the `issue` `integrate` landed, and
+  `budget_seconds` from a command with a declared budget (`se_start.py status`: 1 s).
+
+A line that cannot be written is dropped; the command never fails for it. `integrate` prints its own
+line last, `Metrics: {...}`, for the integrator's report.
+
+`work_tickets.py metrics [--since <YYYY-MM-DD>]` prints the top spenders by total wall time and by
+GitHub calls, and every overrun of a budget a line declares:
+
+```text
+Metrics: 4 runs since 2026-11-10 in ~/.se/metrics.jsonl
+Top spenders by wall time:
+  work_tickets.py integrate: 1 runs, 300.0 s wall, 40 GitHub calls, 2 refused, 120 s waiting
+Top spenders by GitHub calls:
+  work_tickets.py integrate: 1 runs, 300.0 s wall, 40 GitHub calls, 2 refused, 120 s waiting
+Overruns: 1
+  2026-11-10T09:00:00Z work_tickets.py integrate #749: suite 130.5 s over its budget 120 s
+```
+
+The lines are per machine; the retro reads the report of the machine its integrations ran on
+([retro.md](.github/ISSUE_TEMPLATE/retro.md)).
+
 ### Machine-local `~/.se/local.toml`
 
 `public_identity = "Name <email>"` pins the author and committer identity allowed in every
@@ -664,6 +697,11 @@ work_tickets.py sync --worktree WORKTREE
 work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N]
     run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1
     when tests fail, 3 when they pass over the limit
+
+work_tickets.py metrics [--since DATE] [--file FILE]
+    print what the commands cost, from the line every run of a command appends (README Metrics): top
+    spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the
+    suite's [tests] limit_seconds in se.toml)
 
 work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE
     require the field report to name removed protected content, against origin/<integration branch>

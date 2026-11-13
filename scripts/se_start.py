@@ -48,6 +48,7 @@ def _load(name: str):
 
 se_modules = _load("se_modules")
 public_check = _load("public_check")
+metrics = _load("metrics")
 ModuleError = se_modules.ModuleError
 Version = tuple[int, int, int]
 
@@ -763,6 +764,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None, world: World | None = None) -> int:
     args = build_parser().parse_args(argv)
+    code, _ = metrics.recorded(f"se_start.py {args.command}", lambda: run(args, world))
+    return code
+
+
+def run(args: argparse.Namespace, world: World | None) -> int:
+    """Run the command `args` selected; `status` notes its interactive budget in its metrics."""
     world = world or World()
     root = find_project(args.root)
     cache_path = (args.cache or default_cache()).expanduser()
@@ -774,6 +781,7 @@ def main(argv: list[str] | None = None, world: World | None = None) -> int:
         report = check(SE_ROOT, root, args.local, cache_path, world)
         print("\n".join(full(report, SE_ROOT)))
         return 1 if report.errors else 0
+    metrics.note(budget_seconds=BUDGET)
     report = status(SE_ROOT, root, args.local, cache_path, world, args.offline)
     if args.hook:
         print(hook_output(greeting(report, SE_ROOT), args.note, SE_ROOT))

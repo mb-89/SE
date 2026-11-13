@@ -653,6 +653,8 @@ def status_report(
 
 
 GH_ENVIRONMENT = {"GH_PROMPT_DISABLED": "1"}
+# GitHub's refusal of a call for its primary or secondary rate limit, as gh reports it.
+RATE_LIMITED = re.compile(r"rate limit|HTTP 429|abuse detection", re.IGNORECASE)
 _signed_in_gh: set[str] = set()
 
 
@@ -704,6 +706,8 @@ def run_gh(root: Path, arguments: list[str]) -> str:
         env={**os.environ, **GH_ENVIRONMENT},
         check=False,
     )
+    refused = result.returncode != 0 and bool(RATE_LIMITED.search(result.stderr + result.stdout))
+    metrics.door_call(refused)
     if result.returncode != 0:
         detail = failure_detail(result)
         raise QueueError(f"gh {' '.join(arguments[:2])} failed: {detail}")
@@ -892,6 +896,9 @@ def sibling(name: str):
         sys.modules[name] = module
         spec.loader.exec_module(module)
     return module
+
+
+metrics = sibling("metrics")
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
@@ -2025,6 +2032,12 @@ PUSH_TRANSIENT_REFUSALS = (
 wait = time.sleep
 
 
+def github_wait(seconds: float) -> None:
+    """Wait `seconds` on GitHub (a retry after its refusal, a poll), counted in the run's metrics."""
+    metrics.door_wait(seconds)
+    wait(seconds)
+
+
 def push_refusal(output: str) -> tuple[str, bool]:
     """Name a push refusal and whether it is transient; a final refusal wins over a transient one."""
     for name, pattern in PUSH_FINAL_REFUSALS:
@@ -2047,10 +2060,12 @@ def git_push(root: Path, arguments: list[str]) -> None:
         print(f"Push attempt {attempt}/{PUSH_ATTEMPTS}: {command}")
         pushed = run_git_push(root, arguments)
         if pushed.returncode == 0:
+            metrics.door_call()
             print(f"Pushed: {command}")
             return
         detail = (pushed.stderr + pushed.stdout).strip() or f"exit code {pushed.returncode}"
         refusal, transient = push_refusal(detail)
+        metrics.door_call(transient)
         if not transient:
             raise QueueError(
                 f"{command} refused by the remote ({refusal}, attempt {attempt}, not retried "
@@ -2059,7 +2074,7 @@ def git_push(root: Path, arguments: list[str]) -> None:
             )
         if attempt < PUSH_ATTEMPTS:
             print(f"Push refused ({refusal}, transient); retrying in {PUSH_RETRY_SECONDS} s: {detail}")
-            wait(PUSH_RETRY_SECONDS)
+            github_wait(PUSH_RETRY_SECONDS)
     raise QueueError(
         f"{command} refused by the remote ({refusal}, transient) on all {PUSH_ATTEMPTS} attempts, "
         f"one every {PUSH_RETRY_SECONDS} s: {detail}. Remedy: check "
@@ -4153,6 +4168,7 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     commit = clean_commit(root)
     result = time_suite(root, with_durations(budget.command, slowest_count))
     seconds, output, parts = result.seconds, result.output, result.parts
+    metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=budget.limit_seconds)
     passed = result.returncode == 0 and seconds <= budget.limit_seconds
     record_suite_verdict(root, commit, passed, seconds)
     slowest = slowest_tests(output, parts, slowest_count)
@@ -4828,7 +4844,7 @@ def wait_for_check(door: GitHub, sha: str, pull_url: str) -> str:
         state = "not started" if run is None else str(run.get("status"))
         print(f"Check {CHECK_NAME}: {state} on {sha[:12]} (poll {poll}/{CHECK_POLLS}); "
               f"waiting {CHECK_POLL_SECONDS} s")
-        wait(CHECK_POLL_SECONDS)
+        github_wait(CHECK_POLL_SECONDS)
     raise QueueError(
         f"The required check {CHECK_NAME} did not finish on {sha[:12]} within "
         f"{CHECK_POLLS * CHECK_POLL_SECONDS // 60} minutes ({pull_url}); nothing was merged. Look at "
@@ -5039,6 +5055,7 @@ def integrate(
             root, pull_number, remote, pr_description, issue_body, head_branch)
     else:
         pull, report, work_issue, work_number = pull_request_report(root, pull_number, tracker)
+    metrics.note(issue=work_number)
     branch = str(pull.get("headRefName", ""))
     if not branch:
         raise QueueError(f"Pull request #{pull_number} has no head branch")
@@ -5145,6 +5162,7 @@ def read_back_integration(root: Path, branch: str, landing_pull: int, check_run:
             f"No hand-off for {branch} in {root} ({path} is missing); integrate <pull request> "
             "first, which writes it")
     state = json.loads(path.read_text(encoding="utf-8"))
+    metrics.note(issue=state["work_number"])
     commit = landing_read_back(root, state["target"], state["base"], state["landed"])
     short = finish_integration(root, state, commit, pull_url(state["remote"], landing_pull),
                                check_run, None)
@@ -5382,7 +5400,7 @@ def workflow_actions(door: Workflows) -> dict[str, Action]:
                             "conclusion": str(run.get("conclusion"))}
             state = "not started" if not run_id else str(run.get("status"))
             print(f"ref-maintenance: {state} (poll {poll}/{RUN_POLLS}); waiting {RUN_POLL_SECONDS} s")
-            wait(RUN_POLL_SECONDS)
+            github_wait(RUN_POLL_SECONDS)
         raise QueueError(
             f"ref-maintenance did not finish within {RUN_POLLS * RUN_POLL_SECONDS // 60} minutes; "
             "look at the repository's Actions runs, then run the command again")
@@ -6401,6 +6419,30 @@ def run_suite_command(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def iso_day(text: str) -> str:
+    """A `YYYY-MM-DD` date argument, as given."""
+    try:
+        datetime.strptime(text, "%Y-%m-%d")
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"not a date YYYY-MM-DD: {text}") from error
+    return text
+
+
+@command("metrics", "print what the commands cost, from the line every run of a command "
+                    "appends (README Metrics): top spenders by total wall time and by GitHub "
+                    "calls, and each overrun of a declared budget (the suite's [tests] "
+                    "limit_seconds in se.toml)",
+         arg("--since", type=iso_day, metavar="DATE",
+             help="only runs that started on or after DATE (YYYY-MM-DD)"),
+         arg("--file", type=Path,
+             help=f"the lines to read; default: ${metrics.PATH_ENV} or {metrics.PATH_DEFAULT}"))
+def run_metrics(root: None, args: argparse.Namespace) -> int:
+    source = args.file or metrics.path()
+    lines, skipped = metrics.read(source)
+    print(metrics.report(lines, args.since, source, skipped))
+    return 0
+
+
 @command("guard", "require the field report to name removed protected content, against "
                   "origin/<integration branch> as sync fetched it (the local branch without "
                   "origin)",
@@ -6812,6 +6854,25 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
     args = make_parser().parse_args(argv)
+    code, line = metrics.recorded(f"work_tickets.py {' '.join(command_words(args))}",
+                                  lambda: run_command(args))
+    if line is not None and args.command == "integrate":
+        print(f"Metrics: {json.dumps(line, sort_keys=True)}")
+    return code
+
+
+def command_words(args: argparse.Namespace) -> list[str]:
+    """The words of the command `args` selected, `backlog file` for a subcommand."""
+    words, node = [], COMMANDS
+    while node.subcommands:
+        name = getattr(args, node.dest)
+        node = next(command_ for command_ in node.subcommands if command_.name == name)
+        words.append(name)
+    return words
+
+
+def run_command(args: argparse.Namespace) -> int:
+    """Run the selected command's handler; its errors become an exit code and a message."""
     try:
         worktree = getattr(args, "worktree", None)
         return args.handler(worktree_root(worktree) if worktree is not None else None, args)
