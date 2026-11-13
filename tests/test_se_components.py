@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -90,6 +91,21 @@ def test_two_scripts_share_the_render_component_under_the_group_the_first_names(
     timeline, deck = se_components.script("timeline"), se_components.script("deck")
     assert deck.COMPONENTS[0][:3] == timeline.COMPONENTS[0][:3]
     assert {c.group for c in render.commands.values()} == {timeline.COMPONENTS[0].title}
+
+
+def test_no_command_is_hand_listed_outside_the_reference() -> None:
+    """The README lists every SE command's usage once, in the reference the catalog renders: outside
+    it, a code span naming a catalog command carries no argument synopsis (an option in brackets, a
+    `<placeholder>`, an upper-case metavar), as `git grep` finds it."""
+    lines = (ROOT / "README.md").read_text(encoding="utf-8").splitlines()
+    begin, end = lines.index(work_tickets.REFERENCE_BEGIN), lines.index(work_tickets.REFERENCE_END)
+    names = sorted({name for d in se_components.catalog(ROOT, GROUPS) for name in d.commands},
+                   key=len, reverse=True)
+    synopsis = re.compile(r"(?<![\w.-])(" + "|".join(map(re.escape, names))
+                          + r")(?![\w.-])[^`\n]*(\[-|<[a-z][a-z -]*>|\b[A-Z]{3,}\b)")
+    found = [f"README.md:{n}: {line}" for n, line in enumerate(lines, 1)
+             if not begin < n - 1 < end and synopsis.search(line)]
+    assert not found, "\n".join(found)
 
 
 @pytest.fixture(scope="module")
