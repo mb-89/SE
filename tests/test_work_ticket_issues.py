@@ -905,7 +905,8 @@ def test_a_gh_that_is_not_signed_in_takes_the_no_gh_path(worktree, monkeypatch, 
     )
     assert work_tickets.gh_usable() is False
     assert run(worktree, "intake", "--issue", "5", "--repo", "git.example/owner/repo") == 1
-    error = capsys.readouterr().err
+    announced, _, error = capsys.readouterr().err.rpartition("Reading GitHub: gh auth status\n")
+    assert announced == "Reading GitHub: gh auth status\n"  # each check is announced first
     assert error.startswith("error: work_tickets.py intake needs the GitHub CLI (gh), which is "
                             "installed but not signed in")
     assert "counts as no gh" in error and "SKILL.md#without-gh" in error
@@ -2816,7 +2817,7 @@ def test_suite_under_the_target_passes_quietly(worktree, monkeypatch, capsys):
 
     assert run(worktree, "suite") == 0
     captured = capsys.readouterr()
-    assert captured.err == ""
+    assert all(line.startswith("Phase: ") for line in captured.err.splitlines())  # only phases
     assert "Suite time: 5.0 s (target 60 s, limit 120 s)" in captured.out
     tail = captured.out.split("Suite output (last lines):\n", 1)[1].split("Suite time:", 1)[0]
     assert "  3 passed" in tail and "test_sleepy" not in tail
@@ -3049,7 +3050,7 @@ def test_suite_setup_is_timed_apart_and_not_held_to_the_budget(worktree, monkeyp
 
     assert run(worktree, "suite") == 0
     captured = capsys.readouterr()
-    assert captured.err == ""
+    assert all(line.startswith("Phase: ") for line in captured.err.splitlines())  # only phases
     assert "Setup time: 200.0 s (not budgeted)" in captured.out
     assert "  setup: 2 browsers ready" in captured.out
     assert "Suite time: 5.0 s (target 60 s, limit 120 s)" in captured.out

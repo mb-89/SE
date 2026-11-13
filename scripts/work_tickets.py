@@ -16,9 +16,11 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import tomllib
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -656,6 +658,7 @@ GH_ENVIRONMENT = {"GH_PROMPT_DISABLED": "1"}
 # GitHub's refusal of a call for its primary or secondary rate limit, as gh reports it.
 RATE_LIMITED = re.compile(r"rate limit|HTTP 429|abuse detection", re.IGNORECASE)
 _signed_in_gh: set[str] = set()
+_signing_in = threading.Lock()
 
 
 def gh_executable() -> str:
@@ -668,7 +671,16 @@ def gh_executable() -> str:
             "the project's AGENTS.md names, or, where the host has no gh (Claude's cloud), do this "
             f"step by hand as the se checkout's {WITHOUT_GH} says"
         )
+    with _signing_in:  # concurrent first calls check once
+        signed_in(executable)
+    return executable
+
+
+def signed_in(executable: str) -> None:
+    """Refuse a `gh` that `gh auth status` finds not signed in; a passed check holds for the
+    process."""
     if executable not in _signed_in_gh:
+        feedback.reading("GitHub", ["gh", "auth", "status"])
         status = subprocess.run(
             [executable, "auth", "status"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -682,7 +694,6 @@ def gh_executable() -> str:
                 f"this step by hand as the se checkout's {WITHOUT_GH} says"
             )
         _signed_in_gh.add(executable)
-    return executable
 
 
 def gh_usable() -> bool:
@@ -694,7 +705,9 @@ def gh_usable() -> bool:
 
 
 def run_gh(root: Path, arguments: list[str]) -> str:
+    """One call to GitHub through gh, announced before it is made (feedback.reading)."""
     executable = gh_executable()
+    feedback.reading("GitHub", ["gh", *arguments])
     result = subprocess.run(
         [executable, *arguments],
         cwd=root,
@@ -899,6 +912,7 @@ def sibling(name: str):
 
 
 metrics = sibling("metrics")
+feedback = sibling("feedback")
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
@@ -1714,9 +1728,11 @@ def refresh(root: Path, number: int | None, repo: str | None) -> dict[str, objec
         if repo is None:
             raise QueueError(
                 "No repository: pass --repo [HOST/]OWNER/REPO or add a git remote origin")
+    feedback.phase(f"read work issue #{number}")
     issue = fetch_issue(root, number, repo)
     if previous is not None and previous["number"] != number:
         previous = None
+    feedback.phase("compare it with the last read")
     changes = issue_changes(previous, issue)
     save_snapshot(root, issue)
     return changes
@@ -2286,8 +2302,13 @@ def failure_detail(result: subprocess.CompletedProcess[str]) -> str:
     return result.stderr.strip() or f"exit code {result.returncode}"
 
 
+REMOTE_GIT = {"fetch", "ls-remote", "pull"}  # git commands that read a remote, announced
+
+
 def run_git(root: Path, *arguments: str,
             env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    if arguments and arguments[0] in REMOTE_GIT:
+        feedback.reading("the remote", ["git", *arguments])
     return subprocess.run(
         ["git", "-C", str(root), *arguments],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, env=env,
@@ -3028,35 +3049,47 @@ def branch_exists(root: Path, branch: str) -> bool:
     return bool(remote.stdout.strip())
 
 
+def concurrently(*calls: Callable[[], object]) -> list[object]:
+    """The results of `calls`, in their order, made at the same time: reads that wait on GitHub
+    wait once, not once each. The first exception raised is raised."""
+    if len(calls) < 2:
+        return [call() for call in calls]
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
+        futures = [pool.submit(call) for call in calls]
+        return [future.result() for future in futures]
+
+
 def ready_issues(
     root: Path, repo: str, all_repos: bool = False, allow_existing_branch: bool = False
 ) -> list[dict[str, object]]:
+    """The startable work issues: open, `work` and `ready`, not held, unblocked, with no branch
+    yet and no file ownership an issue in progress holds. The two listings are read at once,
+    then each candidate's blockers and branch at once."""
     labels = repository_label_arguments(root, all_repos)
-    arguments = [
-        "issue", "list", "--state", "open", "--label", "work", "--label", "ready",
-        "--json", "number,title,body,labels", "--limit", "200", *labels, *repo_arguments(repo),
-    ]
-    candidates = json.loads(run_gh(root, arguments))
-    active = json.loads(run_gh(root, [
-        "issue", "list", "--state", "open", "--label", "in-progress",
-        "--json", "number,title,body,labels", "--limit", "200", *labels, *repo_arguments(repo),
-    ]))
+    candidates, active = (json.loads(listing) for listing in concurrently(
+        lambda: run_gh(root, [
+            "issue", "list", "--state", "open", "--label", "work", "--label", "ready",
+            "--json", "number,title,body,labels", "--limit", "200", *labels, *repo_arguments(repo),
+        ]),
+        lambda: run_gh(root, [
+            "issue", "list", "--state", "open", "--label", "in-progress",
+            "--json", "number,title,body,labels", "--limit", "200", *labels, *repo_arguments(repo),
+        ]),
+    ))
     active_ownership = set().union(*(issue_ownership(item) for item in active))
-    ready: list[dict[str, object]] = []
-    for candidate in candidates:
-        if issue_labels(candidate) & NOT_STARTABLE_LABELS:
-            continue
-        number = int(candidate["number"])
-        detail = issue_api(root, repo, f"issues/{number}")
-        blockers = int(
-            (detail.get("issue_dependencies_summary") or {}).get("blocked_by", 0)
-        )
-        branch = str(candidate["title"])
-        if blockers == 0 and (allow_existing_branch or not branch_exists(root, branch)) and not (
-            issue_ownership(candidate) & active_ownership
-        ):
-            ready.append(candidate)
-    return ready
+    startable = [candidate for candidate in candidates
+                 if not issue_labels(candidate) & NOT_STARTABLE_LABELS
+                 and not issue_ownership(candidate) & active_ownership]
+
+    def ready(candidate: dict[str, object]) -> bool:
+        detail = issue_api(root, repo, f"issues/{int(candidate['number'])}")
+        blockers = int((detail.get("issue_dependencies_summary") or {}).get("blocked_by", 0))
+        return blockers == 0 and (allow_existing_branch
+                                  or not branch_exists(root, str(candidate["title"])))
+
+    verdicts = concurrently(*(lambda candidate=candidate: ready(candidate)
+                              for candidate in startable))
+    return [candidate for candidate, verdict in zip(startable, verdicts) if verdict]
 
 
 def capacity(root: Path, repo: str | None, all_repos: bool = False) -> int | None:
@@ -3103,18 +3136,21 @@ def delivered_pull_requests(root: Path, repo: str) -> list[dict[str, object]]:
 def queue(
     root: Path, repo: str, all_repos: bool = False
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], int | None]:
-    sync(root)
+    """The integrator's queue: the delivered pull requests, the escalations, the startable work
+    issues and the capacity, read at once while the checkout syncs (within the interactive budget,
+    feedback.py)."""
     labels = repository_label_arguments(root, all_repos)
-    escalations = json.loads(run_gh(root, [
-        "issue", "list", "--state", "open", "--label", "escalated",
-        "--json", "number,title,url", "--limit", "200", *labels, *repo_arguments(repo),
-    ]))
-    return (
-        delivered_pull_requests(root, repo),
-        escalations,
-        ready_issues(root, repo, all_repos),
-        capacity(root, repo, all_repos),
+    _, escalations, delivered, ready, slots = concurrently(
+        lambda: sync(root),
+        lambda: json.loads(run_gh(root, [
+            "issue", "list", "--state", "open", "--label", "escalated",
+            "--json", "number,title,url", "--limit", "200", *labels, *repo_arguments(repo),
+        ])),
+        lambda: delivered_pull_requests(root, repo),
+        lambda: ready_issues(root, repo, all_repos),
+        lambda: capacity(root, repo, all_repos),
     )
+    return delivered, escalations, ready, slots
 
 
 def quoted(text: str) -> str:
@@ -4164,8 +4200,10 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     budget = suite_budget(root)
     tier_of = tier_function(root, budget.tier) if budget.tier else None
     if budget.setup:
+        feedback.phase(f"suite setup: {' '.join(budget.setup)}")
         run_suite_setup(root, budget.setup)
     commit = clean_commit(root)
+    feedback.phase(f"complete suite: {' '.join(budget.command)} (limit {budget.limit_seconds:g} s)")
     result = time_suite(root, with_durations(budget.command, slowest_count))
     seconds, output, parts = result.seconds, result.output, result.parts
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=budget.limit_seconds)
@@ -4263,6 +4301,7 @@ def compare_suites(root: Path, ref: str, runs: int = COMPARE_RUNS) -> str:
         budgets = {label: suite_budget(checkout) for label, checkout in states}
         for label, checkout in states:
             if budgets[label].setup:
+                feedback.phase(f"suite setup of {label}")
                 run_suite_setup(checkout, budgets[label].setup)
 
         def timed(label: str, checkout: Path) -> SuiteRun:
@@ -4271,10 +4310,12 @@ def compare_suites(root: Path, ref: str, runs: int = COMPARE_RUNS) -> str:
             return result
 
         for label, checkout in states:  # warm-up: caches, environments, bytecode; not counted
+            feedback.phase(f"untimed warm-up run of {label}")
             timed(label, checkout)
         results: dict[str, list[SuiteRun]] = {label: [] for label, _ in states}
-        for _ in range(runs):
+        for run in range(1, runs + 1):
             for label, checkout in states:
+                feedback.phase(f"timed run {run}/{runs} of {label}")
                 results[label].append(timed(label, checkout))
     print(f"Suite compare: HEAD against {described}, {runs} timed runs each, interleaved, "
           "after one untimed warm-up run of each")
@@ -5050,6 +5091,7 @@ def integrate(
             f"work_tickets.py integrate: {root} has no origin remote to land on; add it with "
             "git remote add origin <url>"
         )
+    feedback.phase(f"read pull request #{pull_number} and its field report")
     if handing_off:
         pull, report, work_issue, work_number = handed_pull_request(
             root, pull_number, remote, pr_description, issue_body, head_branch)
@@ -5059,6 +5101,7 @@ def integrate(
     branch = str(pull.get("headRefName", ""))
     if not branch:
         raise QueueError(f"Pull request #{pull_number} has no head branch")
+    feedback.phase(f"guard {branch} against its field report")
     guard(root, branch, report)
 
     target = integration_branch(root)
@@ -5067,6 +5110,7 @@ def integrate(
             f"work_tickets.py integrate: {root} is not on the integration branch {target}; "
             f"run git -C {root} switch {target}, or set project.integration_branch in se.toml"
         )
+    feedback.phase(f"sync {target}")
     sync(root)
     base = checked_git(root, "rev-parse", "HEAD").strip()
     if base != remote_head(root, target):
@@ -5087,6 +5131,7 @@ def integrate(
     )
     message = "\n\n".join((kind, *((trailer,) if trailer else ())))
     landing = f"{LANDING_PREFIX}{branch}"
+    feedback.phase(f"merge {branch} on {landing}")
     checked_git(root, "switch", "-q", "-C", landing, base)
     merged = run_git(root, "merge", "--no-ff", "-m", title, "-m", message, branch_head(root, branch))
     if merged.returncode != 0:
@@ -5105,13 +5150,18 @@ def integrate(
     try:
         suite_result = run_suite(root)
         if build_command:
+            feedback.phase(f"output regeneration: {build_command}")
             run_project_command(root, build_command, "Output regeneration")
         if check_commands and not has_public_mirror:
+            feedback.phase("project checks")
             run_project_checks(root, check_commands, check_temporary_working_directory)
         if public_check_enabled(root):
+            feedback.phase("public check")
             run_public_check(root, base)
+        feedback.phase("release")
         tag = release(root, landing, f"refs/remotes/origin/{target}")
         landed = checked_git(root, "rev-parse", "HEAD").strip()
+        feedback.phase(f"push {landing}")
         push_gate(root, landing)
         guard_pushed_tree(root, landing)
         git_push(root, ["--force", "origin", f"{landing}:refs/heads/{landing}"])
@@ -5142,8 +5192,10 @@ def integrate(
                   f"these GitHub steps with its GitHub tools (kept in {path}):")
             print(plan.text())
             return None
+        feedback.phase("landing plan: the landing pull request, its check, the squash merge")
         door = GitHub(root, remote)
         given = run_plan(plan, landing_actions(root, door, landing, target, base))
+        feedback.phase("read back the landed commit")
         commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
     except QueueError as error:
         abandon_landing(root, target, landing)
@@ -5163,6 +5215,7 @@ def read_back_integration(root: Path, branch: str, landing_pull: int, check_run:
             "first, which writes it")
     state = json.loads(path.read_text(encoding="utf-8"))
     metrics.note(issue=state["work_number"])
+    feedback.phase(f"read back the landing of {branch}")
     commit = landing_read_back(root, state["target"], state["base"], state["landed"])
     short = finish_integration(root, state, commit, pull_url(state["remote"], landing_pull),
                                check_run, None)
@@ -5181,6 +5234,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     pull_number, work_number = int(state["pull_number"]), int(state["work_number"])
     check_commands = state.get("check_commands")
     temporary = bool(state.get("check_temporary_working_directory"))
+    feedback.phase(f"close out: {target} at the landed commit, the release tag, the mirrors, "
+                   "the work issue")
     checked_git(root, "switch", "-q", target)
     checked_git(root, "merge", "-q", "--ff-only", commit)
     run_git(root, "branch", "-D", landing)
@@ -6648,8 +6703,7 @@ def run_capacity(root: Path, args: argparse.Namespace) -> int:
                   "field report), escalations and startable work issues", *TRACKER_QUERY)
 def run_queue(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
-    ready = ready_issues(root, repo, args.all_repos)
-    delivered, escalations, _, slots = queue(root, repo, args.all_repos)
+    delivered, escalations, ready, slots = queue(root, repo, args.all_repos)
     for pull in delivered:
         print(f"delivered PR #{pull['number']} {pull['title']} {pull['url']}")
     for escalation in escalations:

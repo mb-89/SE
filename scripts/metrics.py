@@ -3,15 +3,17 @@ subcommand, and the report of its top spenders and overruns (README "Metrics").
 
 A run's line holds its command, start, wall seconds, its GitHub calls through the door (count,
 refusals, wait seconds) and its exit code, plus what the command notes itself (`integrate`: the
-suite's wall time and the issue it landed; a command with a declared budget: that budget). The
-line goes to `~/.se/metrics.jsonl` (or `$SE_METRICS`); a failure to write it never fails the
-command.
+suite's wall time and the issue it landed; an interactive command: its budget, declared in
+feedback.py). The line goes to `~/.se/metrics.jsonl` (or `$SE_METRICS`); a failure to write it
+never fails the command.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import sys
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -25,6 +27,20 @@ TOP = 10  # spenders listed per ranking
 
 clock: Callable[[], float] = time.monotonic
 now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)  # noqa: E731
+
+
+def _sibling(name: str):
+    """The script `<name>.py` beside this one, loaded once under its own name."""
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+feedback = _sibling("feedback")
 
 
 def path() -> Path:
@@ -101,12 +117,16 @@ def finish(exit_code: int) -> dict[str, object] | None:
 
 
 def recorded(command: str, body: Callable[[], int]) -> tuple[int, dict[str, object] | None]:
-    """Run `body` measured as `command`: its exit code and its line. An exception that escapes
-    `body` is recorded with exit code 1 (or SystemExit's code) and raised."""
+    """Run `body` measured as `command`, watched for its first line and with its budget noted
+    (both declared in feedback.py): its exit code and its line. An exception that escapes `body`
+    is recorded with exit code 1 (or SystemExit's code) and raised."""
     start(command)
+    if (seconds := feedback.budget(command)) is not None:
+        note(budget_seconds=seconds)
     code = 1
     try:
-        code = body()
+        with feedback.watched(command):
+            code = body()
     except SystemExit as error:
         code = error.code if isinstance(error.code, int) else 1
         finish(code)
