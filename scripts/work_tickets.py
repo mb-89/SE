@@ -919,6 +919,7 @@ def sibling(name: str):
 
 
 metrics = sibling("metrics")
+trust = sibling("ci_trust")
 feedback = sibling("feedback")
 
 
@@ -5696,6 +5697,18 @@ class GitHub:
         runs = self.api(f"commits/{sha}/check-runs?check_name={name}").get("check_runs") or []
         return max(runs, key=lambda run: int(run.get("id") or 0)) if runs else None
 
+    def newest_run(self, workflow: str) -> int:
+        """The id of the newest workflow_dispatch run of `workflow`, 0 before any."""
+        runs = self.api(f"actions/workflows/{workflow}/runs?event=workflow_dispatch&per_page=1")
+        listed = runs.get("workflow_runs") or []
+        return int(listed[0]["id"]) if listed else 0
+
+    def dispatch(self, workflow: str, ref: str, inputs: dict[str, str]) -> None:
+        self.api(f"actions/workflows/{workflow}/dispatches", "POST", {"ref": ref, "inputs": inputs})
+
+    def run(self, run_id: int) -> dict[str, object]:
+        return self.api(f"actions/runs/{run_id}")
+
     def squash(self, number: int, sha: str, title: str, message: str) -> str:
         """Squash-merge pull request `number` at head `sha` with exactly `title` and `message`;
         the merged commit's sha."""
@@ -5747,15 +5760,54 @@ def abandon_landing(root: Path, target: str, landing: str) -> None:
     run_git(root, "branch", "-D", landing)
 
 
+def record_steps(remote: str, landing: str, record: dict[str, str] | None) -> tuple[Step, ...]:
+    """Where se.toml [tests] trust_integrator is on, the integrator's record of its pass
+    (README "Trusted landings"): dispatch se-pass-record.yml on `landing` with `record`, wait for
+    its run, so the record is on the landing head before check starts; none where trust is off."""
+    if record is None:
+        return ()
+    where, workflow = owner_repo(remote), trust.RECORD_WORKFLOW
+    return (
+        Step("dispatch_record", "actions_run_trigger", {
+            **where, "method": "run_workflow", "workflow_id": workflow, "ref": landing,
+            "inputs": record},
+            note=f"First note the newest workflow_dispatch run of {workflow} (actions_list "
+                 "list_workflow_runs): the run this dispatch starts is the first one newer. Its "
+                 f"check run {trust.RECORD_CHECK} on {record['sha']} is the record check trusts"),
+        Step("wait_record", "actions_list", {
+            **where, "method": "list_workflow_runs", "resource_id": workflow,
+            "workflow_runs_filter": {"event": "workflow_dispatch"}},
+            note=f"Every {RUN_POLL_SECONDS} s, up to {RECORD_POLLS * RUN_POLL_SECONDS // 60} "
+                 "minutes, until that run completes; whatever its conclusion, go on: without a "
+                 "record check runs the full suite"),
+    )
+
+
+def integrator_record(root: Path, landed: str, tested: str) -> dict[str, str] | None:
+    """The record's inputs for the landing head `landed`, whose suite passed on `tested`, where
+    se.toml [tests] trust_integrator is on; None where it is off (README "Trusted landings")."""
+    try:
+        if not trust.trust_settings(root, landed).on:
+            return None
+        seconds = (metrics.snapshot() or {}).get("suite_seconds")
+        return trust.record_inputs(root, landed, tested,
+                                   float(seconds) if isinstance(seconds, (int, float)) else None)
+    except trust.TrustError as error:
+        raise QueueError(f"The integrator's record: {error}") from error
+
+
 def landing_plan(remote: str, landing: str, target: str, base: str, landed: str, title: str,
-                 message: str, description: str, then: str, tracker: str) -> Plan:
-    """The pause search on `tracker`, then open or reuse the landing pull request, wait for
-    `check` on `landed`, squash-merge it there with exactly `title` and `message`: the GitHub
-    steps of landing on `target`."""
+                 message: str, description: str, then: str, tracker: str,
+                 record: dict[str, str] | None = None) -> Plan:
+    """The pause search on `tracker`, the integrator's record where trust is on, then open or
+    reuse the landing pull request, wait for `check` on `landed`, squash-merge it there with
+    exactly `title` and `message`: the GitHub steps of landing on `target`."""
     where = owner_repo(remote)
-    number = Later("pull number", 2)
+    recording = record_steps(remote, landing, record)
+    number = Later("pull number", 2 + len(recording))
     return Plan(f"land {landing} on {target}", (
         pause_step(tracker),
+        *recording,
         Step("open_pull", "create_pull_request", {
             **where, "head": landing, "base": target, "title": title, "body": description},
             note=f"Where list_pull_requests (state open, head {where['owner']}:{landing}, base "
@@ -5824,7 +5876,22 @@ def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: s
             )
         return {"merge commit sha": merged}
 
-    return {"paused": paused, "open_pull": open_pull, "wait_check": check, "squash": squash}
+    def dispatch_record(arguments: dict[str, object], _: str) -> None:
+        seen["record before"] = str(door.newest_run(trust.RECORD_WORKFLOW))
+        door.dispatch(str(arguments["workflow_id"]), str(arguments["ref"]),
+                      dict(arguments["inputs"]))
+
+    def wait_record(arguments: dict[str, object], _: str) -> None:
+        try:
+            _, run = wait_for_run(door, trust.RECORD_WORKFLOW, int(seen["record before"]),
+                                  "the integrator's record", RECORD_POLLS)
+        except QueueError as error:  # a landing without its record runs check in full
+            print(f"No integrator record: {error}; check runs the full suite")
+            return
+        print(f"The integrator's record: {run.get('conclusion')} ({run.get('html_url')})")
+
+    return {"paused": paused, "dispatch_record": dispatch_record, "wait_record": wait_record,
+            "open_pull": open_pull, "wait_check": check, "squash": squash}
 
 
 def landing_read_back(root: Path, target: str, base: str, landed: str,
@@ -6035,6 +6102,7 @@ def integrate(
     has_public_mirror = any(mirror.public for mirror in mirrors)
     try:
         suite_result = run_suite(root, read_ci=True)
+        tested = checked_git(root, "rev-parse", "HEAD").strip()
         if build_command:
             feedback.phase(f"output regeneration: {build_command}")
             run_project_command(root, build_command, "Output regeneration")
@@ -6061,17 +6129,20 @@ def integrate(
             "check_commands": check_commands,
             "check_temporary_working_directory": check_temporary_working_directory,
         }
+        record = integrator_record(root, landed, tested)
+        first = 2 + len(record_steps(remote, landing, record))  # the landing pull request's step
         landing_desc = ("--landing-description <file: the landing pull request's description, as "
-                        "pull_request_read get reads it after step 4> ")
+                        f"pull_request_read get reads it after step {first + 2}> ")
         if relay is not None:  # the relay holds that read: the read-back sources it, no file
             landing_desc = ""
         then = (f"work_tickets.py integrate --read-back {branch} --landing-pull <pull number from "
-                f"step 2> --check-run <check run url from step 3> {landing_desc}--worktree {root}")
+                f"step {first}> --check-run <check run url from step {first + 1}> "
+                f"{landing_desc}--worktree {root}")
         description = landing_description(
             str(pull.get("url") or pull_url(remote, pull_number)), pull_number,
             issue_url(tracker, work_number), metrics.snapshot())
         plan = landing_plan(remote, landing, target, base, landed, title, message, description,
-                            then, tracker)
+                            then, tracker, record)
         door = relay_door(root, remote) if handing_off else None
         if door is not None:  # one call through kern: each GitHub step is a github.step
             feedback.phase("landing plan through kern's relay: the landing pull request, its "
@@ -6125,7 +6196,7 @@ def landed_metrics(state: dict[str, object], landing_pull: int, description: str
         line = metrics.text(expected) if expected is not None else "Metrics: {...}"
         raise QueueError(
             f"The landing pull request #{landing_pull}'s description {what}: it ends in "
-            f"`{line}`, the body of the plan's step 2. Update it to that body (update_pull_request "
+            f"`{line}`, the body of the plan's create_pull_request step. Update it to that body (update_pull_request "
             f"#{landing_pull}), save it again and read back again; nothing was closed")
 
 
@@ -6277,6 +6348,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
 
 
 REF_WORKFLOW = "ref-maintenance.yml"
+RECORD_POLLS = 30  # five minutes: the record's job takes seconds once a runner picks it up
 REFS_REQUEST_MARKER = "<!-- se:refs-request -->"
 REFS_DRY_RUN_MARKER = "<!-- se:refs-dry-run -->"
 REFS_APPLIED_MARKER = "<!-- se:refs-applied -->"
@@ -6312,18 +6384,6 @@ class Workflows(GitHub):
             self.api(f"issues/{number}/labels/{label}", "DELETE")
         except QueueError:
             pass  # a label already gone is the state asked for
-
-    def newest_run(self, workflow: str) -> int:
-        """The id of the newest workflow_dispatch run of `workflow`, 0 before any."""
-        runs = self.api(f"actions/workflows/{workflow}/runs?event=workflow_dispatch&per_page=1")
-        listed = runs.get("workflow_runs") or []
-        return int(listed[0]["id"]) if listed else 0
-
-    def dispatch(self, workflow: str, ref: str, inputs: dict[str, str]) -> None:
-        self.api(f"actions/workflows/{workflow}/dispatches", "POST", {"ref": ref, "inputs": inputs})
-
-    def run(self, run_id: int) -> dict[str, object]:
-        return self.api(f"actions/runs/{run_id}")
 
     def run_log(self, run_id: int) -> str:
         """The log of the run's first job: the one job ref-maintenance has."""
@@ -6605,6 +6665,27 @@ def workflow_steps(repo: str, ref: str, triples: list[tuple[str, str, str]], dry
         note="Save the log to a file", gives=("log file",)))
 
 
+def wait_for_run(door: GitHub, workflow: str, before: int, what: str,
+                 polls: int = RUN_POLLS) -> tuple[int, dict[str, object]]:
+    """Wait for the first workflow_dispatch run of `workflow` newer than run `before` to complete:
+    its id and run; refused where it does not finish within `polls` polls."""
+    run_id, run = 0, {}
+    for poll in range(1, polls + 1):
+        if not run_id:
+            newest = door.newest_run(workflow)
+            run_id = newest if newest > before else 0
+        if run_id:
+            run = door.run(run_id)
+            if run.get("status") == "completed":
+                return run_id, run
+        state = "not started" if not run_id else str(run.get("status"))
+        print(f"{what}: {state} (poll {poll}/{polls}); waiting {RUN_POLL_SECONDS} s")
+        github_wait(RUN_POLL_SECONDS)
+    raise QueueError(
+        f"{what} did not finish within {polls * RUN_POLL_SECONDS // 60} minutes; "
+        "look at the repository's Actions runs, then run the command again")
+
+
 def workflow_actions(door: Workflows) -> dict[str, Action]:
     """The local runner of the refs plans, through the door."""
     seen: dict[str, object] = {}
@@ -6619,23 +6700,9 @@ def workflow_actions(door: Workflows) -> dict[str, Action]:
                       dict(arguments["inputs"]))
 
     def wait_run(arguments: dict[str, object], _: str) -> dict[str, object]:
-        run_id, run = 0, {}
-        for poll in range(1, RUN_POLLS + 1):
-            if not run_id:
-                newest = door.newest_run(REF_WORKFLOW)
-                run_id = newest if newest > int(seen["before"]) else 0
-            if run_id:
-                run = door.run(run_id)
-                if run.get("status") == "completed":
-                    seen["run"] = run_id
-                    return {"run url": str(run.get("html_url") or ""),
-                            "conclusion": str(run.get("conclusion"))}
-            state = "not started" if not run_id else str(run.get("status"))
-            print(f"ref-maintenance: {state} (poll {poll}/{RUN_POLLS}); waiting {RUN_POLL_SECONDS} s")
-            github_wait(RUN_POLL_SECONDS)
-        raise QueueError(
-            f"ref-maintenance did not finish within {RUN_POLLS * RUN_POLL_SECONDS // 60} minutes; "
-            "look at the repository's Actions runs, then run the command again")
+        run_id, run = wait_for_run(door, REF_WORKFLOW, int(seen["before"]), "ref-maintenance")
+        seen["run"] = run_id
+        return {"run url": str(run.get("html_url") or ""), "conclusion": str(run.get("conclusion"))}
 
     def run_log(arguments: dict[str, object], _: str) -> dict[str, object]:
         return {"log": door.run_log(int(seen["run"]))}

@@ -5,7 +5,9 @@
 # through the job kern-platforms, on Windows and macOS with SE's start and hook scripts; on a pull
 # request also the work model's issue rule.
 # The job passes only when all pass, so a push or pull request the hooks did not see still fails
-# here.
+# here. Where se.toml [tests] trust_integrator is on, the job trust passes it on the integrator's
+# record of exactly the tree checked out, and the suite, kern's checks and kern-platforms do not run;
+# a nightly run is the safety net (README "Trusted landings"). SE keeps it off: everything runs.
 name: check
 
 on:
@@ -13,16 +15,22 @@ on:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   push:
     branches: [main]
+  # The safety net of trusted landings: main's full suite every night.
+  schedule:
+    - cron: "17 3 * * *"
 
 permissions:
   contents: read
   issues: read
+  # The trust job reads the integrator's record and its run; a full pass marks its commit.
+  checks: write
+  actions: read
 
 jobs:
   check:
-    needs: kern-platforms
-    # It runs whatever kern-platforms answered, and its last step fails unless that passed: a
-    # required check that is skipped would count as passed.
+    needs: [trust, kern-platforms]
+    # It runs whatever kern-platforms answered, and its last step fails unless that passed (or was
+    # skipped for a trusted landing): a required check that is skipped would count as passed.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-26.04
     steps:
@@ -30,6 +38,8 @@ jobs:
         with:
           fetch-depth: 0
       - name: Gate the commits
+        # A scheduled run gates nothing new: its commits were gated when they were pushed.
+        if: github.event_name != 'schedule'
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           BEFORE: ${{ github.event.before }}
@@ -102,15 +112,18 @@ jobs:
       # kern, the Go core incubated under kern/ (kern/README.md "Tests"), on the Go its go.mod
       # pins: vetted here; its tests run in the suite step below, as se.toml [tests.beside.kern]
       # declares them, with their own time and budget.
-      - uses: actions/setup-go@v6
+      - if: needs.trust.outputs.trusted != 'true'
+        uses: actions/setup-go@v6
         with:
           go-version-file: kern/go.mod
           cache-dependency-path: kern/go.sum
       - name: kern vets
+        if: needs.trust.outputs.trusted != 'true'
         working-directory: kern
         run: time go vet ./...
       # gofmt -l lists each file of kern's not formatted as gofmt writes it; any fails the check.
       - name: kern is formatted
+        if: needs.trust.outputs.trusted != 'true'
         working-directory: kern
         run: |
           unformatted=$(gofmt -l .)
@@ -121,19 +134,36 @@ jobs:
       # SE's Go components (components/README.md "Tests"), their module beside kern's: vetted
       # here; their tests run in the suite step below, as se.toml [tests.beside.go-components] declares.
       - name: SE's Go components vet
+        if: needs.trust.outputs.trusted != 'true'
         working-directory: components
         run: time go vet ./...
       # The budget's reference run (README "Test budget"): over a limit here, check fails.
       - name: The complete suite and kern's tests, within their budgets
+        if: needs.trust.outputs.trusted != 'true'
         run: uv run python scripts/work_tickets.py suite --worktree .
       - name: kern and SE's start and hook passed on Windows and macOS
         env:
           PLATFORMS: ${{ needs.kern-platforms.result }}
+          TRUSTED: ${{ needs.trust.outputs.trusted }}
         run: |
-          if [ "$PLATFORMS" != success ]; then
+          if [ "$TRUSTED" = true ] && [ "$PLATFORMS" = skipped ]; then
+            echo "kern-platforms did not run: the integrator's record of this tree is trusted"
+          elif [ "$PLATFORMS" != success ]; then
             echo "::error::kern-platforms answered $PLATFORMS: kern's tests and SE's start and hook tests on Windows and macOS (the job kern-platforms of this run) must pass"
             exit 1
           fi
+      # The safety net's bookkeeping, where trust_integrator is on (else they do nothing): a full
+      # pass marks its commit; a failed full run names the trusted records since the last one.
+      - name: Mark the full pass
+        if: success() && needs.trust.outputs.trusted != 'true'
+        uses: ./.github/actions/integrator-pass
+        with:
+          mode: full-pass
+      - name: Name the trusted records the failure came through
+        if: failure() && needs.trust.outputs.trusted != 'true'
+        uses: ./.github/actions/integrator-pass
+        with:
+          mode: finding
   # kern's tests on Windows and macOS, its contract suite among them (kern/README.md "Tests"): the
   # detached start, the standing file and the stop differ there; and the tests of SE's start and
   # hook scripts, whose paths differ there too (a zip on Windows, shasum and no setsid on macOS).
@@ -141,6 +171,8 @@ jobs:
   # the Python suite and its budget stay on Linux, so this job runs the command of se.toml
   # [tests.beside.kern] itself.
   kern-platforms:
+    needs: trust
+    if: needs.trust.outputs.trusted != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -173,3 +205,18 @@ jobs:
       - name: SE's start and hook scripts on this platform
         shell: bash
         run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py
+  # Whether this run passes on the integrator's record of exactly this tree instead of running the
+  # suite (README "Trusted landings"): only where se.toml [tests] trust_integrator is on, never on
+  # the safety net's runs. Its full history counts the landings for se.toml [tests] full_every.
+  trust:
+    runs-on: ubuntu-26.04
+    outputs:
+      trusted: ${{ steps.lookup.outputs.trusted }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: lookup
+        uses: ./.github/actions/integrator-pass
+        with:
+          mode: lookup

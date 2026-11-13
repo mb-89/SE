@@ -1,0 +1,36 @@
+# CI's trust in the integrator's run (README "Trusted landings"): scripts/ci_trust.py in one of its
+# modes. lookup says whether this run may pass on the integrator's record (output trusted, and the
+# record it trusted); record, in se-pass-record.yml, writes that record; full-pass marks a commit
+# whose full suite passed; finding names the trusted records since the last full pass after a
+# failed full run. Where se.toml [tests] trust_integrator is off, lookup answers false and the
+# others do nothing. SE's scripts run from this action's own checkout, so the project copies nothing.
+name: se integrator pass
+description: Trust the integrator's recorded pass of the exact tree, or let the full suite run.
+inputs:
+  mode:
+    description: lookup, record, full-pass or finding.
+    required: true
+  worktree:
+    description: The project's checkout, holding se.toml; lookup needs its full history.
+    default: .
+  token:
+    description: The token that reads the record (checks, actions) and writes it (checks write).
+    default: ${{ github.token }}
+outputs:
+  trusted:
+    description: lookup's answer, true where the record names exactly this tree; else false.
+    value: ${{ steps.se.outputs.trusted }}
+  record:
+    description: The URL of the record lookup trusted.
+    value: ${{ steps.se.outputs.record }}
+runs:
+  using: composite
+  steps:
+    - id: se
+      shell: bash
+      env:
+        PYTHONUNBUFFERED: "1"
+        GITHUB_TOKEN: ${{ inputs.token }}
+        MODE: ${{ inputs.mode }}
+        WORKTREE: ${{ inputs.worktree }}
+      run: python3 "$GITHUB_ACTION_PATH/../../../scripts/ci_trust.py" "$MODE" --worktree "$WORKTREE"
