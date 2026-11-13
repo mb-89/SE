@@ -432,6 +432,10 @@ A worker splits its work issue into local tickets in its worktree:
   - `work_tickets.py probe --command <command> --output <path>` appends the command and its output
     to the index; where no intake ran ([Without gh](#without-gh)), the first probe creates the
     default index. `field-report --draft` links that index in Delivered.
+  - A discovery package that changes no file still delivers a branch: it commits its report as a
+    doc under `docs/` on its branch (the findings and evidence a reader needs, never its notes), so the pull
+    request has a commit to carry its field report. After landing, the integrator removes that
+    doc in its next integration where nothing links it and no work issue names it as input.
 - Test-driven: regression first, then the change, then focused checks and the affected real
   command. Check an acceptance item only with evidence; move a ticket to `done/` only when every
   item is satisfied. A ticket that cannot be finished stays in `held/` with the attempts and
