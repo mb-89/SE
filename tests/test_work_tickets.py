@@ -461,6 +461,12 @@ def test_guard_leaves_out_a_regenerated_command_reference(worktree: Path) -> Non
     ]
 
 
+def test_authored_text_keeps_markers_quoted_in_prose() -> None:
+    begin, end = work_tickets.generated_markers("tool")
+    text = f"Quote `{begin}` here.\nThis sentence stays.\nAnd `{end}` there.\n"
+    assert work_tickets.authored_text(text) == text
+
+
 def test_guard_leaves_out_a_file_the_build_generates_whole(worktree: Path) -> None:
     se_plugin = work_tickets.sibling("se_plugin")
     repository, guide = authored_repository(
