@@ -466,6 +466,9 @@ issues point here and never restate it. The project's suite and its time budget 
 - A worker whose change adds tests runs `work_tickets.py suite` before and after the change and
   reports both times in its field report (`**Suite time:**`); each new test that takes over 2 s is
   named there with its reason.
+- Leave the worktree alone while the complete suite runs: tests that read the checkout (the
+  generated layouts, the references, the public check) would see an edit made mid-run and fail or
+  pass on files the run never started with.
 
 ## What the project provides
 
