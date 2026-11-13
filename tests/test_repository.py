@@ -4,14 +4,20 @@ Three rules hold for every tracked file: no binary file, no file over `MAX_BYTES
 marker of unfinished work in `scripts/` or `tests/` that names no issue. A file that must break
 the first two goes in its allow list below with the reason it may; an entry that no longer names
 such a file is refused, so the lists stay true.
+
+One rule holds for the suite itself, so it behaves on GitHub's runner as it does locally: no test
+starts with a runner's variable set (tests/conftest.py).
 """
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
 from quiet_git import quiet
+
+from conftest import runner_variables
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -155,3 +161,21 @@ def test_a_marker_without_an_issue_fails(tmp_path: Path) -> None:
         "scripts/a.py:1: names no issue; write the issue that owns it, #<n>",
         "tests/b.py:1: names no issue; write the issue that owns it, #<n>",
     ]
+
+
+# The runner's variables switch commands to their runner behaviour; tests/conftest.py clears them for
+# the session, so a test sees a local machine wherever the suite runs.
+
+def test_no_test_starts_with_a_runner_variable() -> None:
+    assert runner_variables(os.environ) == []
+
+
+def test_the_runner_variables_are_ci_se_cloud_agent_and_every_github_variable() -> None:
+    environment = {"CI": "true", "SE_CLOUD_AGENT": "a", "GITHUB_ACTIONS": "true", "GITHUB_SHA": "1",
+                   "PATH": "/bin", "SE_METRICS": "x", "CIRCLE": "y"}
+    assert runner_variables(environment) == ["CI", "SE_CLOUD_AGENT", "GITHUB_ACTIONS", "GITHUB_SHA"]
+
+
+def test_a_test_that_needs_a_runner_variable_sets_it_itself(monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert runner_variables(os.environ) == ["GITHUB_ACTIONS"]

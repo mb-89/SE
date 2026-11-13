@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -20,6 +20,27 @@ import quiet_git  # noqa: E402
 # The suite's runs of work_tickets.py and se_start.py measure themselves (scripts/metrics.py); their
 # lines go nowhere, never into the machine's ~/.se/metrics.jsonl. A test of the lines sets its own.
 os.environ["SE_METRICS"] = os.devnull
+
+# What a CI runner sets and a local machine does not: GitHub Actions' variables and SE's cloud agent,
+# which switch commands to their runner behaviour (`start` a cloud start, `capacity` none).
+RUNNER_VARIABLES = ("CI", "SE_CLOUD_AGENT")
+RUNNER_PREFIX = "GITHUB_"
+
+
+def runner_variables(environment: Mapping[str, str]) -> list[str]:
+    """The names in `environment` that a runner sets (RUNNER_VARIABLES, every GITHUB_*)."""
+    return [name for name in environment if name in RUNNER_VARIABLES or name.startswith(RUNNER_PREFIX)]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def local_machine() -> Iterator[None]:
+    """Every test runs as on a local machine, whatever runs the suite: the runner's variables are
+    cleared for the session, before any fixture, so the suite behaves on GitHub's runner as it does
+    locally. A test that needs one sets it itself (`monkeypatch.setenv`)."""
+    with pytest.MonkeyPatch.context() as patch:
+        for name in runner_variables(os.environ):
+            patch.delenv(name)
+        yield
 
 
 @pytest.fixture(scope="session")

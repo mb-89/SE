@@ -202,14 +202,6 @@ def local_config(tmp_path: Path, monkeypatch) -> Path:
     return path
 
 
-@pytest.fixture(autouse=True)
-def local_runner(monkeypatch) -> None:
-    """Every test starts on a local machine, whatever runs the suite: a GitHub Actions runner sets
-    GITHUB_ACTIONS, which makes `start` a cloud start; a test that needs the cloud sets it."""
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    monkeypatch.delenv("SE_CLOUD_AGENT", raising=False)
-
-
 @pytest.fixture
 def gh(monkeypatch) -> FakeGh:
     fake = FakeGh()

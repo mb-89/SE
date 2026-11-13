@@ -238,7 +238,6 @@ def test_a_read_saves_its_snapshot_and_rebuilds_the_same_page(tmp_path):
 
 
 def test_a_read_without_a_token_is_a_setup_error(tmp_path, monkeypatch, capsys):
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
     assert timeline.main(["--destination", str(tmp_path / "t.html")]) == 2
     assert "GITHUB_TOKEN" in capsys.readouterr().err

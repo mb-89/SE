@@ -166,7 +166,7 @@ def slow_door(tmp_path_factory) -> dict:
     git("-C", str(checkout), "push", "-q", "origin", "HEAD:main")
     environment = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                    "SE_METRICS": str(base / "metrics.jsonl"), "HOME": str(base),
-                   "USERPROFILE": str(base), "GITHUB_ACTIONS": ""}
+                   "USERPROFILE": str(base)}
     return {"checkout": checkout, "env": environment, "metrics": base / "metrics.jsonl"}
 
 
