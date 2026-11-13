@@ -449,14 +449,26 @@ tier = "tests.tiers:tier" # optional
   against the budget. A failing setup stops the run before the suite, naming the command and its
   output.
 - `target_seconds` (default 60): above it the gate warns.
-- `limit_seconds` (default 120): above it the gate refuses the integration, naming the test result
-  (passed, with its counts), the time, the limit, the slowest tests and the remedy: rerun once on
-  an idle host, as a loaded host can push a passing suite over the limit, and if it is still over,
-  make those tests faster.
+- `limit_seconds` (default 120): the budget, judged on one reference run, CI's (below).
+
+The budget's reference is the suite of the CI `check` job, on the same runner type every time, as
+cloud hosts differ by about 25 s for the same tree. Over the limit there, `check` fails, naming the
+test result (passed, with its counts), the time, the limit and the slowest tests. Every CI run
+reports its time as a `se suite time` notice on its check run.
+
+Every other run (`integrate`, a worker's `suite`) runs the complete suite too. Over the limit it
+reads CI's last suite time on the integration branch, from the `check` runs of its last five
+first-parent commits, through github.com's API without an account (so `suite` needs no `gh`; a
+private repository's time reads as unknown).
+
+- Under 90% of the limit: it warns with the time, the host's load and CI's time, and passes; the
+  landing pull request's `check` judges the budget.
+- Within 10% of the limit, or unknown: it refuses, naming both, so a creeping suite is caught
+  before it breaks.
 
 The gate measures the suite's wall time and prints it with the last lines of the suite's own output
 and the ten slowest tests (`suite --slowest N` lists N). Failed tests exit with code 1, a passing
-suite over the limit with code 3. How tests are written is owned by the
+suite the budget refuses with code 3. How tests are written is owned by the
 [work model](src/skills/work-model/SKILL.md#tests).
 
 A runner of any kind may write JUnit XML reports into the directory named by the environment
@@ -522,6 +534,8 @@ GitHub's limits can be named instead of guessed. `scripts/metrics.py` owns the l
 - GitHub through the door: `gh_calls` (every `gh` call and every push attempt), `gh_refusals` (a
   call GitHub refused for its rate limit, a push it refused transiently) and `gh_wait_seconds`
   (the waits on GitHub: a push retry, a poll of `check` or of a workflow run).
+- CI's last suite time on the integration branch, `ci_suite_seconds`, where it was read
+  ([Test budget](#test-budget)); `integrate` always reads it, so its line holds both times.
 - What a command notes itself: the suite's `suite_seconds` and its `suite_limit_seconds` (`[tests]`
   `limit_seconds`) from `suite` and `integrate`, the `issue` `integrate` landed, and
   `budget_seconds` from an interactive command, its budget from
@@ -744,7 +758,8 @@ work_tickets.py sync --worktree WORKTREE
 
 work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N]
     run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1
-    when tests fail, 3 when they pass over the limit
+    when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test
+    budget")
 
 work_tickets.py metrics [--since DATE] [--file FILE]
     print what the commands cost, from the line every run of a command appends (README Metrics): top

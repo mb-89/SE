@@ -101,7 +101,8 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
    - Check it after the merge: pass its description, saved as `pull_request_read` `get` reads it,
      as `--read-back`'s `--landing-description <file>`. Without the line the read-back fails and
      closes nothing: update the body to step 2's and read back again.
-   - A suite over its limit is refused: escalate it to the worker with the gate's remedy.
+   - A suite the [Test budget](../README.md#test-budget) refuses: escalate it to the worker
+     with the gate's remedy.
    - Commits on the branch after the report's Branch tip are refused, named: escalate them to the
      worker to update the report in the pull request description, or include them with
      `--include-late <reason>` where
