@@ -48,15 +48,16 @@ jobs:
         run: |
           # A pull request: its commits, those its head holds and its base branch does not. A push:
           # the commits after the branch's old tip, as the pre-push hook takes them; where that tip
-          # is unknown (a new branch, a force push), those no other branch holds.
+          # is unknown (a new branch, a force push), those no other branch holds. Its git goes
+          # through se's git door (scripts/git_door.py).
           if [ -n "$BASE_REF" ]; then
             range="refs/remotes/origin/$BASE_REF..$AFTER"
             what="the commits of the pull request into $BRANCH"
-          elif git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+          elif python3 scripts/git_door.py cat-file -e "$BEFORE^{commit}" >/dev/null 2>&1; then
             range="$BEFORE..$AFTER"
             what="the commits pushed to $BRANCH"
           else
-            others=$(git for-each-ref --format='%(refname)' refs/remotes/origin |
+            others=$(python3 scripts/git_door.py for-each-ref --format='%(refname)' refs/remotes/origin |
               grep -vx -e "refs/remotes/origin/$BRANCH" -e refs/remotes/origin/HEAD | tr '\n' ' ')
             range="$AFTER --not $others"
             what="the commits pushed to $BRANCH"

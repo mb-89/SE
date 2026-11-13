@@ -1076,7 +1076,8 @@ CI_WORKFLOW = SE_ROOT / ".github" / "workflows" / "check.yml"
 
 
 def ci_script() -> str:
-    """The shell the check workflow's gate runs, its one `run: |` block, calling this se's check."""
+    """The shell the check workflow's gate runs, its one `run: |` block, calling this se's scripts
+    (the check and the git door)."""
     lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
     start = next(index for index, line in enumerate(lines) if line.strip() == "run: |") + 1
     block = []
@@ -1084,7 +1085,7 @@ def ci_script() -> str:
         if line.strip() and not line.startswith(" " * 10):
             break
         block.append(line[10:])
-    return "\n".join(block).replace("python3 scripts/public_check.py", f"'{sys.executable}' '{SCRIPT}'")
+    return "\n".join(block).replace("python3 scripts/", f"'{Path(sys.executable).as_posix()}' '{SCRIPT.parent.as_posix()}'/")
 
 
 def owner_push(repo: Path, tmp_path: Path, message: str) -> tuple[str, str]:
