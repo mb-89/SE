@@ -686,3 +686,50 @@ def test_a_missing_or_malformed_local_version_is_an_error_naming_the_file_and_th
     assert code == 1
     assert str(released.upstream / "se.toml") in out and message in out
     assert 'set version = "MAJOR.MINOR.PATCH" under [project]' in out
+
+
+# The actions a module ships follow its pin: update moves the workflows' calls of them.
+
+
+def workflow(root: Path, ref: str) -> Path:
+    return write(root / ".github" / "workflows" / "check.yml", f"""jobs:
+  check:
+    steps:
+      - uses: actions/checkout@v7
+      - uses: upstream/lib/.github/actions/suite-shard@{ref}
+      - uses: 'Upstream/Lib/.github/actions/suite-time@{ref}'
+      - uses: upstream/lib/.github/workflows/release.yml@v1
+      - uses: other/lib/.github/actions/suite-time@{ref}
+""")
+
+
+def test_update_moves_the_workflows_calls_of_the_module_s_actions_to_its_new_tag(released, capsys):
+    assert run(released, capsys, "sync")[0] == 0
+    calls = workflow(released.root, "v1.10.1")
+    newer = commit(released.upstream, "v1.11.0", {"version.txt": "1.11.0\n"})
+    git(released.upstream, "tag", "v1.11.0")
+
+    code, out = run(released, capsys, "update", "lib")
+
+    assert code == 0, out
+    assert locked(released)["lib"] == ("1.11.0", newer)
+    assert ".github/workflows/check.yml: 2 action calls moved to @v1.11.0" in out
+    text = calls.read_text(encoding="utf-8")
+    assert "upstream/lib/.github/actions/suite-shard@v1.11.0\n" in text
+    assert "'Upstream/Lib/.github/actions/suite-time@v1.11.0'" in text
+    assert "upstream/lib/.github/workflows/release.yml@v1\n" in text  # a workflow, at its major
+    assert "other/lib/.github/actions/suite-time@v1.10.1\n" in text  # another repository's
+    code, out = run(released, capsys, "update", "lib")
+    assert code == 0 and "action call" not in out  # already there: nothing to move
+
+
+def test_update_moves_an_untagged_pin_s_action_calls_to_its_commit(world, capsys):
+    calls = workflow(world.root, "v0.1.0")
+
+    code, out = run(world, capsys, "update", "lib")
+
+    assert code == 0, out
+    text = calls.read_text(encoding="utf-8")
+    assert f"upstream/lib/.github/actions/suite-shard@{world.shas[2]}" in text
+    assert f"'Upstream/Lib/.github/actions/suite-time@{world.shas[2]}'" in text
+    assert "other/lib/.github/actions/suite-time@v0.1.0" in text

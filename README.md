@@ -354,7 +354,9 @@ not tags (Claude's cloud sessions).
   by major version. An older major's tag is its own releases' to push; a run never creates or moves
   it.
 - Each tag is pushed on its own: a refused one fails the run with one line naming the tag, origin's
-  reason and the remedy (the repository's tag rulesets), and the others still land.
+  reason and the remedy, and the others still land. The remedy is the repository's tag rulesets
+  where origin's reason names a rule; otherwise it is a rerun first, as a transient refusal
+  (`missing necessary objects`) passes on one.
 - Without `release`, `push` pushes the tags itself; another value is refused, naming the file.
 
 A repository turns it on with `release = "workflow"` and a copy of se's own
@@ -467,7 +469,8 @@ whole run's, the `suite` step of `check`. For a sharded suite, whose shards run 
 parallel jobs, it is the slowest shard's: that is the time `check` waits for, while the shards' sum
 would count work nobody waits for.
 
-A sharded project records it with SE's two actions, at the se ref it pins, and copies nothing:
+A sharded project records it with SE's two actions, at the se ref it pins (the module command's
+`update se` moves the ref with the pin, [Modules](#modules)), and copies nothing:
 
 ```yaml
 jobs:
@@ -498,8 +501,16 @@ jobs:
   the action uploads, also when the shard fails.
 - [`suite-time`](.github/actions/suite-time/action.yml) runs in `check`: `work_tickets.py
   suite-time` collects the records, lists each shard and prints the slowest shard's time as the
-  `se suite time` notice. It fails `check` where a shard failed or its record is missing, and over
-  the limit as above.
+  `se suite time` notice, `Suite time: 66.1 s (limit 120 s; slowest of 2 shards: 66.1 s (shard
+  1))`.
+  - It fails `check` where a shard's record is missing, and over the limit as above.
+  - Where a shard failed, it prints no time: the run failed, and a failed run's shorter time
+    never stands as CI's.
+  - Its refusals and warnings are `::error` and `::warning` annotations on the check run, printed
+    after the shards' list.
+- Both actions run SE's scripts with the runner's `python3`, which must be Python 3.11 or later
+  (they read `se.toml` with `tomllib`); `ubuntu-26.04` has it, another runner sets it up first,
+  for example with `actions/setup-python`. The actions they use run on Node 24.
 - `check` runs with `if: always()`, so a failed shard fails the check the ruleset requires instead
   of skipping it.
 
@@ -704,6 +715,11 @@ uv run python <se>/scripts/se_modules.py path <name>
   does not commit; commit the new pin with the commit list.
   - A `version` range moves to its highest matching tag in `se.lock` instead (`--to` is refused
     there; change the range).
+  - It also moves each call of the module's actions in `.github/workflows/`, `uses:
+    <owner>/<repo>/.github/actions/<name>@<ref>` with `<owner>/<repo>` its url's last two path
+    segments, to the new pin: its highest `v<x.y.z>` tag, else its commit. So the actions (SE's
+    [shard actions](#test-budget)) run the version `se.lock` pins; a reusable workflow stays at
+    its major tag.
 - `path`: prints the directory a module is used from (its `path` included), for tools that load it.
 - `--root <dir>` names the repository (default: the nearest ancestor with `se.toml`); `--local <file>`
   reads another machine-local file than `~/.se/local.toml`.
@@ -818,9 +834,9 @@ work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...
 
 work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]
     in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records
-    suite-shard wrote; prints it as the notice CI's suite time is read from; exit code 1 when a
-    shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README
-    "Test budget")
+    suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a
+    shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or
+    is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget")
 
 work_tickets.py metrics [--since DATE] [--file FILE]
     print what the commands cost, from the line every run of a command appends (README Metrics): top

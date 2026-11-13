@@ -4473,11 +4473,20 @@ def shard_times(directory: Path) -> list[ShardTime]:
     return shards
 
 
+def workflow_annotation(level: str, message: str) -> str:
+    """`message` as a GitHub workflow command `::<level>::` (error, warning), escaped so a line
+    break or `%` in it survives as text."""
+    escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    return f"::{level}::{escaped}"
+
+
 def suite_time_of_shards(root: Path, directory: Path, expect: int | None) -> str:
     """CI's suite time of a sharded suite: the slowest shard's, as the shards run side by side.
-    Prints each shard and the notice ci_suite_time reads, then holds it to the budget as the
-    reference run: refuses a missing or failed shard, and a time over the limit with
-    SuiteOverLimitError unless `[tests]` over_limit is "warn"."""
+    Prints each shard, then holds the run to the budget as the reference run: refuses a missing
+    shard, and a failed one without printing a time, as a failed run's time is no suite time; prints
+    the notice ci_suite_time reads, and refuses a time over the limit with SuiteOverLimitError
+    unless `[tests]` over_limit is "warn". Its warnings are `::warning` annotations on stdout, in
+    order with what it printed before them."""
     budget = suite_budget(root)
     shards = shard_times(directory)
     if not shards:
@@ -4487,20 +4496,23 @@ def suite_time_of_shards(root: Path, directory: Path, expect: int | None) -> str
         raise QueueError(f"suite-time: {len(shards)} shard records in {directory}, expected "
                          f"{expect} ({', '.join(shard.name for shard in shards)}); a shard that "
                          "did not record its time is missing; run it again")
+    print("Shards:\n" + "\n".join(f"  {shard.name}: {shard.seconds:.1f} s, exit code "
+                                   f"{shard.exit_code}" for shard in shards), flush=True)
+    failed = [shard for shard in shards if shard.exit_code != 0]
+    if failed:
+        raise QueueError(
+            f"suite-time: the run failed: shard {', '.join(shard.name for shard in failed)} failed "
+            f"(exit code {', '.join(str(shard.exit_code) for shard in failed)}), so it reports no "
+            "suite time; fix the failing tests its job names")
     slowest = max(shards, key=lambda shard: shard.seconds)
     seconds, limit = slowest.seconds, budget.limit_seconds
-    print("Shards:\n" + "\n".join(f"  {shard.name}: {shard.seconds:.1f} s, exit code "
-                                   f"{shard.exit_code}" for shard in shards))
-    print(suite_notice(seconds, limit, f"; slowest of {len(shards)} shards: {slowest.name}"))
+    print(suite_notice(seconds, limit, f"; slowest of {len(shards)} shards: {seconds:.1f} s "
+                                       f"(shard {slowest.name})"), flush=True)
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=limit)
-    failed = [shard.name for shard in shards if shard.exit_code != 0]
-    if failed:
-        raise QueueError(f"suite-time: shard {', '.join(failed)} failed; fix the failing tests "
-                         "its job names")
-    timing = (f"{seconds:.1f} s, the slowest of {len(shards)} shards ({slowest.name}) "
+    timing = (f"{seconds:.1f} s, the slowest of {len(shards)} shards (shard {slowest.name}) "
               f"(target {budget.target_seconds:g} s, limit {limit:g} s)")
     if seconds > limit and budget.over_limit == "warn":
-        print(over_limit_warning(seconds, limit), file=sys.stderr)
+        print(workflow_annotation("warning", over_limit_warning(seconds, limit)), flush=True)
     elif seconds > limit:
         raise SuiteOverLimitError(
             f"Sharded suite passed but took {timing} on CI, the budget's reference, over its "
@@ -4508,8 +4520,10 @@ def suite_time_of_shards(root: Path, directory: Path, expect: int | None) -> str
             "faster or split them across the shards more evenly."
         )
     elif seconds > budget.target_seconds:
-        print(f"warning: the sharded suite took {seconds:.1f} s, over its target of "
-              f"{budget.target_seconds:g} s ([tests] target_seconds in se.toml)", file=sys.stderr)
+        print(workflow_annotation(
+            "warning", f"the sharded suite took {seconds:.1f} s, over its target of "
+                       f"{budget.target_seconds:g} s ([tests] target_seconds in se.toml)"),
+              flush=True)
     return timing
 
 
@@ -6964,16 +6978,26 @@ def run_suite_shard(root: Path, args: argparse.Namespace) -> int:
 
 @command("suite-time", "in CI's check job, judge a sharded suite: its time is its slowest "
                        "shard's, from the records suite-shard wrote; prints it as the notice CI's "
-                       "suite time is read from; exit code 1 when a shard failed or is missing, 3 "
-                       "when the time is over the limit and the budget refuses it (README \"Test "
-                       "budget\")",
+                       "suite time is read from, and no time when a shard failed; refusals and "
+                       "warnings are workflow annotations; exit code 1 when a shard failed or is "
+                       "missing, 3 when the time is over the limit and the budget refuses it "
+                       "(README \"Test budget\")",
          WORKTREE,
          arg("--shards", required=True, type=Path, metavar="DIR",
              help="directory holding the shards' records"),
          arg("--expect", type=positive_int, metavar="N",
              help="how many shards run; fewer or more records refuse"))
 def run_suite_time(root: Path, args: argparse.Namespace) -> int:
-    print(f"Suite time: {suite_time_of_shards(root, args.shards, args.expect)}")
+    # Its refusals are `::error` annotations on stdout, after the shards it listed.
+    try:
+        timing = suite_time_of_shards(root, args.shards, args.expect)
+    except SuiteOverLimitError as error:
+        print(workflow_annotation("error", str(error)), flush=True)
+        return SUITE_OVER_LIMIT_EXIT_CODE
+    except QueueError as error:
+        print(workflow_annotation("error", str(error)), flush=True)
+        return 1
+    print(f"Suite time: {timing}", flush=True)
     return 0
 
 
