@@ -389,42 +389,208 @@ def test_two_overlapping_calls_of_one_component_each_answer_only_their_own_outpu
         assert sorted(said) == [f"child err {name}", f"err {name}"]
 
 
-def test_calls_in_one_directory_run_together_and_one_in_another_waits(tmp_path) -> None:
-    """The process has one working directory: calls in the same one run side by side, a call in
-    another waits until they end, and the process stands where it stood once all have."""
+def _directory_calls(tmp_path):
+    """Calls of run_main in their own threads: each records its directory and the order it began
+    in, and holds until the case lets it go."""
     import threading
+
+    began, release, order = {}, {}, []
+
+    def call(name, folder, abandon=None):
+        began[name], release[name] = threading.Event(), threading.Event()
+
+        def run(argv):
+            order.append((name, Path.cwd().name))
+            began[name].set()
+            assert release[name].wait(30)
+            return 0
+
+        def main():
+            try:
+                se_components.run_main(run, [], str(folder), abandon=abandon)
+            except se_components.GivenUp:
+                order.append((name, "given up"))
+
+        thread = threading.Thread(target=main)
+        thread.start()
+        return thread
+
+    def waiting(n):
+        with se_components.DIRECTORY.changed:
+            assert se_components.DIRECTORY.changed.wait_for(
+                lambda: se_components.DIRECTORY.waiting == n, 30), n
+
+    return call, waiting, began, release, order
+
+
+def test_calls_in_one_directory_run_together_and_waiting_calls_enter_in_arrival_order(
+        tmp_path) -> None:
+    """The process has one working directory: calls in the same one run side by side, a call in
+    another waits until they end, and waiting calls are served in arrival order. A call for the
+    running directory that arrives after one waiting for another waits behind it, so calls in one
+    directory never starve a call in another; the calls at the head of the line that share a
+    directory enter together; and the process stands where it stood once all have ended."""
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    call, waiting, began, release, order = _directory_calls(tmp_path)
+    home = Path.cwd()
+    threads = [call("a", first)]
+    assert began["a"].wait(30)
+    threads.append(call("a2", first))
+    assert began["a2"].wait(30), "a call in the running directory, with no one waiting, runs beside"
+    threads.append(call("b", second))
+    waiting(1)
+    threads.append(call("b2", second))
+    waiting(2)
+    threads.append(call("c", first))
+    waiting(3)
+    assert not began["c"].is_set(), "a later call in the running directory waits behind b"
+    release["a"].set()
+    release["a2"].set()
+    assert began["b"].wait(30) and began["b2"].wait(30), "b and b2 head the line in one directory"
+    waiting(1)
+    assert not began["c"].is_set()
+    release["b"].set()
+    release["b2"].set()
+    assert began["c"].wait(30)
+    release["c"].set()
+    for thread in threads:
+        thread.join(30)
+    assert [name for name, _ in order[:2]] == ["a", "a2"]
+    assert sorted(order[2:4]) == [("b", "second"), ("b2", "second")]
+    assert order[4] == ("c", "first")
+    assert Path.cwd() == home
+
+
+def test_a_call_kern_gives_up_while_it_waits_leaves_the_line(tmp_path) -> None:
+    """A waiting call whose Abandon kern sets (its stop word) leaves the line without running, and
+    the call behind it is served as if it had never waited."""
+    from kern import Abandon
 
     first, second = tmp_path / "first", tmp_path / "second"
     first.mkdir()
     second.mkdir()
-    release, seen = threading.Event(), {}
-    began = {name: threading.Event() for name in "abc"}
-
-    def main(name):
-        def run(argv):
-            seen[name] = Path.cwd().name
-            began[name].set()
-            if name == "a":
-                assert release.wait(30)
-            return 0
-        return run
-
-    def call(name, folder):
-        thread = threading.Thread(target=se_components.run_main, args=(main(name), [], str(folder)))
-        thread.start()
-        return thread
-
-    home = Path.cwd()
-    calls = [call("a", first)]
+    call, waiting, began, release, order = _directory_calls(tmp_path)
+    threads = [call("a", first)]
     assert began["a"].wait(30)
-    calls.append(call("b", second))
-    with se_components.DIRECTORY.changed:
-        assert se_components.DIRECTORY.changed.wait_for(lambda: se_components.DIRECTORY.waiting, 30)
-    assert not began["b"].is_set(), "a call in another directory waits for the calls in this one"
-    calls.append(call("c", first))
-    assert began["c"].wait(30), "a call in the same directory runs beside the one that waits"
-    release.set()
-    for thread in calls:
+    given = Abandon()
+    threads.append(call("b", second, given))
+    waiting(1)
+    threads.append(call("c", second))
+    waiting(2)
+    given.set("its caller gave it up")
+    waiting(1)
+    assert ("b", "given up") in order and not began.get("b").is_set()
+    release["a"].set()
+    assert began["c"].wait(30)
+    release["c"].set()
+    for thread in threads:
         thread.join(30)
-    assert seen == {"a": "first", "b": "second", "c": "first"}
-    assert Path.cwd() == home
+    assert order == [("a", "first"), ("b", "given up"), ("c", "second")]
+
+
+HELD_SCRIPT = '''
+import threading
+
+STREAMED_COMMANDS = frozenset({"held"})
+ended, threads = {}, {}
+
+
+def main(argv):
+    import se_relay
+    name = argv[1]
+    threads[name] = threading.current_thread()
+    step = se_relay.steps()
+    try:
+        got = step("issue_read", {"method": "get", "issue_number": int(argv[2])}, "", "")
+    except RuntimeError as error:
+        ended[name] = str(error)
+        raise
+    ended[name] = "answered"
+    print(f"{name} read #{got['number']}")
+    return 0
+'''
+
+
+def test_kern_gives_up_one_of_two_overlapping_streamed_calls_and_only_its_thread_ends(
+        tmp_path, monkeypatch) -> None:
+    """Two streamed calls of one command wait side by side for their GitHub step's answer. The
+    core's stop word for one (cmd.<i>.<command>, {"call", "stop"}, no reply) ends that call's thread
+    at once, long before STEP_ANSWER_WAIT; the other still waits, and its answer still runs its
+    continuation to the end."""
+    from kern.nats import Msg
+    from kern.subjects import token
+
+    (tmp_path / "helddemo.py").write_text(HELD_SCRIPT, encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    folder = tmp_path / "held"
+    folder.mkdir()
+    (folder / "component.toml").write_text(se_components.declaration(
+        "held", "A held call.", "Held", [se_components.Declared(
+            "helddemo.py held", "helddemo.py held NAME N", "held", False)], "a test", steps=True),
+        encoding="utf-8")
+    peer = RecordingPeer()
+    run = runner.Runner(se_components.attach("held", "helddemo", folder), peer, "held")  # type: ignore[arg-type]
+    subject = "cmd.held." + token("helddemo.py held")
+    for call, name, number in (("1", "a", 7), ("2", "b", 8)):
+        body = {"call": call, "step": 1, "args": [name, str(number)]}
+        run._called(Msg(subject, f"reply.{call}.1", json.dumps(body).encode()))
+    import helddemo
+
+    asks = {call: peer.answer(f"reply.{call}.1") for call in ("1", "2")}
+    assert all(a.get("then") and a["requests"][0]["port"] == "step" for a in asks.values()), asks
+    assert sorted(helddemo.threads) == ["a", "b"]
+    assert all(t.is_alive() for t in helddemo.threads.values())
+
+    run._called(Msg(subject, "", json.dumps({"call": "1", "stop": "its caller gave it up"}).encode()))
+    helddemo.threads["a"].join(30)
+    assert not helddemo.threads["a"].is_alive(), "the given-up call's thread ends"
+    assert helddemo.threads["b"].is_alive(), "the call beside it still waits for its answer"
+    assert helddemo.ended == {"a": "the call through kern stopped: kern gave it up: its caller gave it up"}
+    assert "1" not in run._steps, "the given-up call's continuation is dropped"
+
+    answer = {"tool": "issue_read", "input": {}, "data": {"number": 8}}
+    run._called(Msg(subject, "reply.2.2", json.dumps(
+        {"call": "2", "step": 2, "answers": [answer]}).encode()))
+    assert peer.answer("reply.2.2") == {"text": "b read #8", "writes": [], "requests": [],
+                                        "then": False}
+    assert helddemo.ended == {"a": "the call through kern stopped: kern gave it up: its caller gave it up",
+                              "b": "answered"}
+
+
+def test_a_routed_call_kern_does_not_answer_within_call_wait_is_given_up_and_runs_directly(
+        tmp_path, monkeypatch) -> None:
+    """An interactive routed call that kern has not answered within CALL_WAIT, as one waiting
+    behind calls in another directory: routed gives it up (give_up, so kern ends it and its
+    component drops it) and the command runs directly."""
+    import kern.nats
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "scripts").mkdir()
+    script = tmp_path / "scripts" / "work_tickets.py"
+    script.write_text("", encoding="utf-8")
+    standing = tmp_path / se_components.STANDING
+    standing.parent.mkdir(parents=True)
+    standing.write_text(json.dumps({"bus": "nats://127.0.0.1:9", "users": {"client": "x"}}),
+                        encoding="utf-8")
+    asked = []
+
+    class Silent:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def request(self, subject, data, timeout, give_up=False):
+            asked.append((subject, timeout, give_up))
+            raise kern.nats.NatsError(f"{subject} answers nothing within {timeout} s")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(kern.nats, "Peer", Silent)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(se_components.SWITCH)
+    assert se_components.routed(script, ["status"], [], True) is None
+    assert asked == [("call.work_tickets%2Epy%20status", se_components.CALL_WAIT, True)]
+    monkeypatch.setenv(se_components.SWITCH, "on")
+    assert se_components.routed(script, ["status"], [], True) == 1

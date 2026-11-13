@@ -29,6 +29,9 @@ through kern where kern serves this checkout (`routed`), else directly.
   as the command would have; `SE_KERN=off` keeps every command direct, `SE_KERN=on` refuses to fall
   back. Only interactive commands go through kern: they only read, so a call that fails on the way
   runs again directly without doing anything twice. A batch command writes, and runs directly.
+  - A call kern has not answered within `CALL_WAIT` (60 s), such as one waiting behind calls in
+    another directory, is given up (`call.core.abandon`): kern ends it, the component drops it
+    from the directory's line where it still waits there, and the command runs directly.
 - **Streamed:** a batch command its script names in `STREAMED_COMMANDS` (`integrate`) runs as one
   call through kern where kern's GitHub relay serves the checkout: its progress lines print as they
   come, the call waits as long as kern says anything (`CALL_IDLE`), and each GitHub step it needs
@@ -68,7 +71,8 @@ SWITCH = "SE_KERN"
 CWD = "--se-cwd="
 #: kern's standing file under the checkout it serves (kern/host/standing.go).
 STANDING = Path(".se") / ".runtime" / "standing.json"
-#: How long routed waits for kern to answer a call: kern waits for a step this long (host.StepWait).
+#: How long routed waits for kern to answer a call, then gives it up and runs the command directly:
+#: kern waits for a step this long (host.StepWait).
 CALL_WAIT = 60.0
 #: How long a streamed call waits for any word from kern: kern beats every 5 s (host.CallBeat).
 CALL_IDLE = 60.0
@@ -205,6 +209,10 @@ def declarations(parser: argparse.ArgumentParser, groups: Iterable[Group],
             for name, (group, commands) in declared(parser, groups, interactive).items()}
 
 
+#: Held while a script loads, so a call beside it in another thread never reads it half loaded.
+_LOADING = threading.RLock()
+
+
 def script(name: str):
     """The script `scripts/<name>.py` beside this one, as a module: the one running as __main__
     where that is it, else loaded once under its own name."""
@@ -212,12 +220,17 @@ def script(name: str):
     main_module = sys.modules.get("__main__")
     if Path(getattr(main_module, "__file__", None) or "").resolve() == path:
         return main_module
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(name, path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
+    with _LOADING:
+        module = sys.modules.get(name)
+        if module is None:
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                sys.modules.pop(name, None)
+                raise
     return module
 
 
@@ -408,35 +421,56 @@ def captured(err: io.StringIO | None = None) -> Iterator[tuple[io.StringIO, io.S
             err.write(err_file.read().decode("utf-8", "replace"))
 
 
+class GivenUp(Exception):
+    """kern gave up the call this thread runs before it ran (kern's stop word, `kern.abandoned`)."""
+
+
 class Directory:
     """The process's one working directory, shared by the calls it runs: calls in the same
     directory run side by side; a call in another waits until they have ended, and the process
-    stands where it stood once all have. A call waiting for a GitHub step lets go of it meanwhile
-    (`released`)."""
+    stands where it stood once all have. Waiting calls are served in arrival order: a call enters
+    only once every call that arrived before it has, so calls in one directory never starve a call
+    in another, and the calls at the head of the line that share a directory enter together. A call
+    kern gives up while it waits leaves the line (`GivenUp`). A call waiting for a GitHub step lets
+    go of its directory meanwhile (`released`), and takes its place at the end of the line after."""
 
     def __init__(self) -> None:
         self.changed = threading.Condition()
         self.waiting = 0
+        self._line: list[list[str]] = []  # the waiting calls, in arrival order: [their directory]
         self._dir: str | None = None
         self._count = 0
         self._home = ""
 
-    def _enter(self, want: str | None) -> str:
+    def _wake(self, _reason: str = "") -> None:
+        with self.changed:
+            self.changed.notify_all()
+
+    def _enter(self, want: str | None, abandon=None) -> str:
         with self.changed:
             if not self._count:
                 self._home = os.path.realpath(os.getcwd())
             want = os.path.realpath(want) if want else self._home
+            place = [want]
+            self._line.append(place)
             self.waiting += 1
+            given = abandon.event.is_set if abandon is not None else (lambda: False)
+            if abandon is not None:
+                abandon.when(self._wake)
             self.changed.notify_all()
             try:
-                self.changed.wait_for(lambda: not self._count or self._dir == want)
+                self.changed.wait_for(lambda: given() or (
+                    self._line[0] is place and (not self._count or self._dir == want)))
             finally:
                 self.waiting -= 1
+                self._line.remove(place)
+                self.changed.notify_all()
+            if given():
+                raise GivenUp(f"kern gave the call up while it waited for {want}: {abandon.reason}")
             if not self._count:
                 os.chdir(want)
                 self._dir = want
             self._count += 1
-            self.changed.notify_all()
             return want
 
     def _leave(self) -> None:
@@ -449,26 +483,33 @@ class Directory:
             self.changed.notify_all()
 
     @contextlib.contextmanager
-    def within(self, cwd: str | None) -> Iterator[None]:
-        """Run in `cwd`, or, without one, where the process stands."""
-        _calls.directory = self._enter(cwd)
+    def within(self, cwd: str | None, abandon=None) -> Iterator[None]:
+        """Run in `cwd`, or, without one, where the process stands; with `abandon` (kern's
+        `Abandon` of the call), a call kern gives up while it waits raises `GivenUp`."""
+        _calls.directory = self._enter(cwd, abandon)
+        held = [True]
+        _calls.abandon, _calls.held = abandon, held
         try:
             yield
         finally:
-            self._leave()
+            if held[0]:
+                self._leave()
 
     @contextlib.contextmanager
     def released(self) -> Iterator[None]:
-        """Let go of this thread's call's directory while it waits, and take it back after."""
-        here = getattr(_calls, "directory", None)
-        if here is None:
+        """Let go of this thread's call's directory while it waits, and take it back after; a call
+        kern gave up meanwhile does not take it back, and raises `GivenUp`."""
+        here, held = getattr(_calls, "directory", None), getattr(_calls, "held", None)
+        if here is None or not held or not held[0]:
             yield
             return
         self._leave()
+        held[0] = False
         try:
             yield
         finally:
-            self._enter(here)
+            self._enter(here, getattr(_calls, "abandon", None))
+            held[0] = True
 
 
 #: The working directory of this process's calls.
@@ -491,11 +532,13 @@ class Said(io.StringIO):
 
 
 def run_main(main: Callable[[list[str]], int], argv: list[str], cwd: str | None,
-             say: Callable[[str], None] | None = None) -> tuple[int, str, str]:
+             say: Callable[[str], None] | None = None, abandon=None) -> tuple[int, str, str]:
     """Run a script's main in `cwd` (`DIRECTORY`): its exit code, stdout and stderr, its own call's
-    alone (`captured`); with `say`, each stderr line the script writes is also said as it comes."""
+    alone (`captured`); with `say`, each stderr line the script writes is also said as it comes.
+    With `abandon`, kern's `Abandon` of the call, a call kern gives up before it ran raises
+    `GivenUp`."""
     code = 0
-    with DIRECTORY.within(cwd), captured(Said(say) if say else None) as (out, err):
+    with DIRECTORY.within(cwd, abandon), captured(Said(say) if say else None) as (out, err):
         try:
             code = main(argv)
         except SystemExit as stop:  # argparse's refusal or --help
@@ -527,7 +570,7 @@ def attach(name: str, scripts: str | Iterable[str], folder: Path):
             cwd = None
             if args and args[0].startswith(CWD):
                 cwd, args = args[0][len(CWD):], args[1:]
-            code, out, err = run_main(module.main, [*words, *args], cwd)
+            code, out, err = run_main(module.main, [*words, *args], cwd, abandon=kern.abandoned())
             if code:  # the core answers a failed step's error alone, without its lines
                 raise kern.KernError(f"exit code {code}\n" + json.dumps({"stdout": out, "stderr": err}))
             for line in err.splitlines():
@@ -567,7 +610,8 @@ def routed(script: Path, words: list[str], argv: list[str], interactive: bool,
            streamed: bool = False) -> int | None:
     """The exit code of the command `words` run through kern, having printed its answer; None where
     it runs directly: SE_KERN=off, a batch command, no kern serving this checkout, another copy of
-    the script than the one kern runs, or a call that failed on the way (with SE_KERN=on an error).
+    the script than the one kern runs, or a call that failed on the way (with SE_KERN=on an error),
+    among them one kern did not answer within CALL_WAIT, which it gives up first.
     A `streamed` batch command goes through kern only where kern's GitHub relay serves the
     checkout (`streamed_call`)."""
     switch = os.environ.get(SWITCH, "").lower()
@@ -594,7 +638,7 @@ def routed(script: Path, words: list[str], argv: list[str], interactive: bool,
         peer = Peer(found["bus"], "client", found["users"]["client"], name="se", timeout=CONNECT_WAIT)
         try:
             answer = peer.request("call." + token(name), {"args": [CWD + os.getcwd(), *argv]},
-                                  CALL_WAIT).json() or {}
+                                  CALL_WAIT, give_up=True).json() or {}
         finally:
             peer.close()
     except (NatsError, OSError, KeyError, TypeError, ValueError) as error:
@@ -685,15 +729,22 @@ class Stepped:
     command's `step` port, which the wiring binds to the github component's verb step; the
     answer comes back through the request's continuation (kern's Requests and Then). Its stderr
     lines are said as they come. Calls run side by side, each its own thread and capture; while
-    one waits for a step's answer it lets go of the working directory (`Directory.released`)."""
+    one waits for a step's answer it lets go of the working directory (`Directory.released`).
+    Where kern gives the call up (its stop word, `kern.abandoned`), the step waiting for an answer
+    fails at once, and so does each step the command asks after, so its thread ends;
+    `STEP_ANSWER_WAIT` only bounds a wait kern never ends."""
 
     def __init__(self, comp, main: Callable[[list[str]], int], argv: list[str], cwd: str | None,
                  say: Callable[[str], None], key: str):
         import queue
 
+        import kern
+
         self.comp, self.say, self.key = comp, say, key
         self.out: queue.Queue = queue.Queue()  # ("ask", value) or ("done", (code, out, err))
         self.answers: queue.Queue = queue.Queue()
+        self.abandon = kern.abandoned()  # the call this step thread runs
+        self.abandon.when(lambda reason: self.answers.put(("stop", f"kern gave it up: {reason}")))
         threading.Thread(target=self._run, args=(main, argv, cwd), daemon=True,
                          name=f"se-stepped-{key}").start()
 
@@ -701,6 +752,8 @@ class Stepped:
         """Ask one GitHub step from the command's thread; the tool's answer."""
         import queue
 
+        if self.abandon.event.is_set():
+            raise RuntimeError(f"the call through kern stopped: kern gave it up: {self.abandon.reason}")
         ask = {"tool": tool, "input": input_, **({"note": note} if note else {}),
                **({"wait": wait} if wait else {})}
         self.out.put(("ask", ask))
@@ -709,6 +762,8 @@ class Stepped:
                 kind, value = self.answers.get(timeout=STEP_ANSWER_WAIT)
         except queue.Empty:
             kind, value = "stop", f"no answer to the step {tool} within {STEP_ANSWER_WAIT:.0f} s"
+        except GivenUp:
+            kind, value = "stop", f"kern gave it up: {self.abandon.reason}"
         if kind == "stop":
             raise RuntimeError(f"the call through kern stopped: {value}")
         return value.get("data") if isinstance(value, dict) else value
@@ -716,7 +771,7 @@ class Stepped:
     def _run(self, main, argv, cwd) -> None:
         try:
             with relay_module().stepping(self.step):
-                done = run_main(main, argv, cwd, self.say)
+                done = run_main(main, argv, cwd, self.say, self.abandon)
         except BaseException as error:  # noqa: BLE001 - the command's thread reports, never dies
             done = (1, "", f"{error}\n")
         self.out.put(("done", done))

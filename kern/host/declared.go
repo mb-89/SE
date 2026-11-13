@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,7 +83,7 @@ type remote struct {
 	inst string
 }
 
-func (r remote) Command(name string, s index.Step, say func(string)) (index.Answer, error) {
+func (r remote) Command(ctx context.Context, name string, s index.Step, say func(string)) (index.Answer, error) {
 	var a index.Answer
 	if err := r.c.waitAttached(r.inst); err != nil {
 		return a, err
@@ -133,19 +134,36 @@ func (r remote) Command(name string, s index.Step, say func(string)) (index.Answ
 			if err := json.Unmarshal(m.Data, &a); err != nil {
 				return a, fmt.Errorf("instance %s: command %q answers no result: %v", r.inst, name, err)
 			}
-			if say != nil {
-				for _, l := range a.Lines {
-					say(l)
-				}
-			}
-			a.Lines = append(live, a.Lines...)
+			a.Lines = live
 			return a, nil
 		case <-quiet.C:
-			return a, fmt.Errorf("instance %s: command %q, step %d: no answer, line or beat within %v", r.inst, name, s.Step, wait)
+			err := fmt.Errorf("instance %s: command %q, step %d: no answer, line or beat within %v", r.inst, name, s.Step, wait)
+			r.Stop(name, s.Call, err.Error())
+			return a, err
 		case <-r.c.done:
-			return a, fmt.Errorf("instance %s: command %q, step %d: the core ends", r.inst, name, s.Step)
+			err := fmt.Errorf("instance %s: command %q, step %d: the core ends", r.inst, name, s.Step)
+			r.Stop(name, s.Call, err.Error())
+			return a, err
+		case <-ctx.Done():
+			err := fmt.Errorf("instance %s: command %q, step %d: the call is given up: %w", r.inst, name, s.Step, context.Cause(ctx))
+			r.Stop(name, s.Call, err.Error())
+			return a, err
 		}
 	}
+}
+
+// Stop is the core's stop word for one call: published on the command's
+// cmd.<i>.<command> without a reply, {"call", "stop"}, it tells the process
+// that the core gave the call up, so what waits on it in the process ends.
+func (r remote) Stop(name, call, reason string) {
+	data, _ := json.Marshal(StopWord{Call: call, Stop: reason})
+	_ = r.c.nc.Publish(bus.Cmd+bus.Subject(r.inst)+"."+bus.Token(name), data)
+}
+
+// StopWord is the body of the core's stop word on cmd.<i>.<command>.
+type StopWord struct {
+	Call string `json:"call"`
+	Stop string `json:"stop"`
 }
 
 func (r remote) Serve(verb string, req json.RawMessage) (json.RawMessage, error) {
@@ -276,9 +294,16 @@ type Progress struct {
 // body names, {"args": [...], "progress"?: <subject>}, and answers its lines
 // and text. Where the body names a progress subject, one in the caller's own
 // inbox, the core streams each line there as it is said, and beats there
-// while the call runs (docs/go-core.md "Progress and long calls").
+// while the call runs (docs/go-core.md "Progress and long calls"). The call
+// runs until it ends, its caller gives it up (call.core.abandon), or the core
+// ends; given up, it answers its error at once (docs/go-core.md "A call
+// given up").
 func (c *Core) call(m *nats.Msg) {
-	if m.Subject == StopSubject {
+	switch m.Subject {
+	case StopSubject:
+		return
+	case AbandonSubject:
+		c.abandon(m)
 		return
 	}
 	c.event()
@@ -297,7 +322,9 @@ func (c *Core) call(m *nats.Msg) {
 		c.reply(m, CallAnswer{Lines: []string{}, Error: fmt.Sprintf("call.%s: the progress subject %q lies outside the caller's inbox, the one its reply %q names", bus.Token(name), body.Progress, m.Reply)})
 		return
 	}
+	ctx, cancel := c.running(m.Reply)
 	go func() {
+		defer cancel(nil)
 		var say func(string)
 		stop := make(chan struct{})
 		if body.Progress != "" {
@@ -317,7 +344,7 @@ func (c *Core) call(m *nats.Msg) {
 				}
 			}()
 		}
-		r, err := c.ix.CallSaying(name, say, body.Args...)
+		r, err := c.ix.CallContext(ctx, name, say, body.Args...)
 		close(stop)
 		a := CallAnswer{Text: r.Text, Lines: append([]string{}, r.Lines...)}
 		if err != nil {
@@ -327,6 +354,71 @@ func (c *Core) call(m *nats.Msg) {
 		}
 		c.reply(m, a)
 	}()
+}
+
+// ErrCallerGaveUp is the cause of a call its caller gave up.
+var ErrCallerGaveUp = errors.New("its caller gave it up")
+
+// ErrCoreEnds is the cause of a call the core gave up as it ends.
+var ErrCoreEnds = errors.New("the core ends")
+
+// running registers a call by its reply subject, so its caller can give it
+// up, and ends it once the core ends; cancel unregisters it.
+func (c *Core) running(reply string) (context.Context, context.CancelCauseFunc) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	c.mu.Lock()
+	if reply != "" {
+		c.calls[reply] = cancel
+	}
+	c.mu.Unlock()
+	go func() {
+		select {
+		case <-c.done:
+			cancel(ErrCoreEnds)
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, func(cause error) {
+		c.mu.Lock()
+		delete(c.calls, reply)
+		c.mu.Unlock()
+		cancel(cause)
+	}
+}
+
+// Abandon is the body of call.core.abandon: the reply subject of the call
+// its caller gives up.
+type Abandon struct {
+	Call string `json:"call"`
+}
+
+// Abandoned is what call.core.abandon answers: whether a call of that reply
+// subject ran and is now given up, or why the core refuses.
+type Abandoned struct {
+	Abandoned bool   `json:"abandoned"`
+	Error     string `json:"error,omitempty"`
+}
+
+// abandon answers call.core.abandon: it gives up the running call whose
+// reply subject the body names, one in the asker's own inbox, so a caller
+// gives up only its own calls.
+func (c *Core) abandon(m *nats.Msg) {
+	var a Abandon
+	if err := json.Unmarshal(m.Data, &a); err != nil || a.Call == "" {
+		c.reply(m, Abandoned{Error: fmt.Sprintf("%s: the body names no call: %s", AbandonSubject, m.Data)})
+		return
+	}
+	if !sameInbox(m.Reply, a.Call) {
+		c.reply(m, Abandoned{Error: fmt.Sprintf("%s: the call %q lies outside the asker's inbox, the one its reply %q names", AbandonSubject, a.Call, m.Reply)})
+		return
+	}
+	c.mu.Lock()
+	cancel, ok := c.calls[a.Call]
+	c.mu.Unlock()
+	if ok {
+		cancel(ErrCallerGaveUp)
+	}
+	c.reply(m, Abandoned{Abandoned: ok})
 }
 
 func (c *Core) progress(subject string, p Progress) {

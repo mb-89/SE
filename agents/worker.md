@@ -95,6 +95,10 @@ every package, so work issues and session prompts never repeat it.
    - Tests follow the work model's [test rules](../skills/work-model/SKILL.md#tests); a change that
      adds tests measures the suite with `work_tickets.py suite` before and after it, for the field
      report.
+   - A new test that builds a path builds it with `filepath` (Go) or `pathlib` (Python), and
+     compares paths as `filepath.ToSlash` or `as_posix` writes them, never as text with `/`. Only
+     the Windows leg of CI (`kern-platforms`) sees a path come back as `\work\tmp\...`, so a
+     worker's run on Linux never catches it, and the landing fails.
    - The complete suite: run the complete suite only where the acceptance names it, otherwise the
      integrator does (where a pin moves, see
      [suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)).

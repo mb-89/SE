@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -37,8 +38,13 @@ func Hash(data []byte) string {
 // the bus: it answers each step of a command and each request on a verb.
 type Remote interface {
 	// Command runs one step; say, where set, takes each progress line the
-	// step says, live where the process says it before its answer.
-	Command(name string, step Step, say func(line string)) (Answer, error)
+	// step says, live where the process says it before its answer. Once ctx
+	// is done it stops waiting, tells the process (Stop) and fails the step.
+	Command(ctx context.Context, name string, step Step, say func(line string)) (Answer, error)
+	// Stop tells the process that the core gave up the call of the command,
+	// so nothing waits on it: no continuation of it runs, and no step of it
+	// is answered.
+	Stop(name, call, reason string)
 	Serve(verb string, req json.RawMessage) (json.RawMessage, error)
 }
 
@@ -54,10 +60,13 @@ type Step struct {
 }
 
 // Answer is what a declared component's process answers a step: its result,
-// with Then set where a continuation reads the answers of its requests.
+// with Then set where a continuation reads the answers of its requests. The
+// step's lines ride say.<i>.<call> as it says them, never its answer: Lines
+// holds those the core heard (kern/README.md "A component in Python" holds
+// its row to these fields).
 type Answer struct {
 	Text     string      `json:"text"`
-	Lines    []string    `json:"lines,omitempty"`
+	Lines    []string    `json:"-"`
 	Writes   []WireWrite `json:"writes,omitempty"`
 	Requests []WireAsk   `json:"requests,omitempty"`
 	Then     bool        `json:"then,omitempty"`
@@ -415,7 +424,7 @@ func builtinValue(v any, t reflect.Type) (any, error) {
 
 // runRemote runs one command in the declared component's process, step by
 // step: each step's writes and requests are read as the ports' types.
-func (c *Component) runRemote(name string, read Reader, args []string, say func(string)) (Result, error) {
+func (c *Component) runRemote(ctx context.Context, name string, read Reader, args []string, say func(string)) (Result, error) {
 	r := c.decl.remote
 	if r == nil {
 		return Result{}, fmt.Errorf("component %s runs in its own process, and none has attached", c.name)
@@ -428,16 +437,24 @@ func (c *Component) runRemote(name string, read Reader, args []string, say func(
 	if args == nil {
 		args = []string{}
 	}
-	return c.step(name, Step{Call: call, Step: 1, Args: args, Inputs: inputs}, say)
+	return c.step(ctx, name, Step{Call: call, Step: 1, Args: args, Inputs: inputs}, say)
 }
 
-func (c *Component) step(name string, s Step, say func(string)) (Result, error) {
-	a, err := c.decl.remote.Command(name, s, say)
+func (c *Component) step(ctx context.Context, name string, s Step, say func(string)) (Result, error) {
+	a, err := c.decl.remote.Command(ctx, name, s, say)
 	if err != nil {
 		return Result{}, err
 	}
 	if a.Error != "" {
 		return Result{}, errors.New(a.Error)
+	}
+	// A refused answer that holds a continuation leaves it waiting in the
+	// process: tell it the call is given up.
+	refused := func(err error) (Result, error) {
+		if a.Then {
+			c.decl.remote.Stop(name, s.Call, err.Error())
+		}
+		return Result{}, err
 	}
 	res := Result{Text: a.Text, Lines: a.Lines, Said: say != nil}
 	for _, w := range a.Writes {
@@ -445,7 +462,7 @@ func (c *Component) step(name string, s Step, say func(string)) (Result, error) 
 		if o, ok := c.outputs[w.Port]; ok && !w.Gone {
 			v, err := decodeAs(w.Value, o.Type)
 			if err != nil {
-				return Result{}, fmt.Errorf("component %s: output %s takes %s, not %s", c.name, w.Port, o.Type, err)
+				return refused(fmt.Errorf("component %s: output %s takes %s, not %s", c.name, w.Port, o.Type, err))
 			}
 			write.Value = v
 		}
@@ -456,21 +473,23 @@ func (c *Component) step(name string, s Step, say func(string)) (Result, error) 
 		if rp, ok := c.requests[q.Port]; ok {
 			v, err := decodeAs(q.Value, rp.Req)
 			if err != nil {
-				return Result{}, fmt.Errorf("component %s: request port %s sends %s, not %s", c.name, q.Port, rp.Req, err)
+				return refused(fmt.Errorf("component %s: request port %s sends %s, not %s", c.name, q.Port, rp.Req, err))
 			}
 			ask.Value = v
 		}
 		res.Requests = append(res.Requests, ask)
 	}
 	if a.Then {
-		next := s.Step + 1
+		next, remote := s.Step+1, c.decl.remote
 		res.Then = func(answers []any) (Result, error) {
 			data, err := json.Marshal(answers)
 			if err != nil {
+				remote.Stop(name, s.Call, err.Error())
 				return Result{}, err
 			}
-			return c.step(name, Step{Call: s.Call, Step: next, Answers: data}, say)
+			return c.step(ctx, name, Step{Call: s.Call, Step: next, Answers: data}, say)
 		}
+		res.Stop = func(reason string) { remote.Stop(name, s.Call, reason) }
 	}
 	return res, nil
 }

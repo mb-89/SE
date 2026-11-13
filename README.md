@@ -207,6 +207,10 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
   script.
   - Everywhere else, and for every command that writes, the command runs directly, as it did
     before components. A call that fails on the way runs directly too: the command only reads.
+  - A call kern has not answered within 60 s (`CALL_WAIT`), as one waiting behind calls in
+    another directory, is given up and runs directly. The component's process serves the calls
+    waiting for its one working directory in arrival order, and drops a call given up while it
+    waits ([docs/go-core.md "A call given up"](docs/go-core.md#a-call-given-up)).
   - `SE_KERN=off` keeps every command direct (the suite and each component's own process set it);
     `SE_KERN=on` refuses to fall back.
 - **Tested** against kern's Python fake core (`tests/test_se_components.py`), and once against the
@@ -361,6 +365,9 @@ does all of it:
      Goal>`, never a commit's subject. Tracker references (pub-004's forms) are dropped from it,
      with an aside such as `(PR #<n>)` that holds one, and its punctuation tidied; without a
      usable Goal, or with fewer than two words left, it is `Integrate <branch>` alone.
+   - A Goal that opens with a list's lead-in gives that lead-in. A sentence over 120 characters
+     ends at its last clause boundary (a comma, semicolon, colon or dash) within them, never with
+     "...", or at its first within 200 (`work_tickets.py` `at_boundary`).
    - Its description is always a link, never the report, so it fits GitHub's body limit and any
      tool argument whatever the report's size: `Refs <work issue>`, the work pull request, and the
      marker `<!-- se:field-report-in <n> -->`.

@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import threading
 from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,26 +49,27 @@ FAMILIES = {
 }
 
 
-#: The GitHub step of the call this process runs as one call through kern, where se_components'
+#: The GitHub step of the call this thread runs as one call through kern, where se_components'
 #: Stepped set it: step(tool, input, note, wait) asks kern's `github.step` and answers the tool's
-#: answer. None outside such a call: the command hands its plan to the session instead.
-_step: Callable[[str, dict[str, Any], str, str], Any] | None = None
+#: answer. None outside such a call: the command hands its plan to the session instead. It is the
+#: thread's, as calls run side by side in one process, each in its own thread.
+_calls = threading.local()
 
 
 def steps() -> Callable[[str, dict[str, Any], str, str], Any] | None:
-    """The GitHub step of the call this process runs through kern, or None."""
-    return _step
+    """The GitHub step of the call this thread runs through kern, or None."""
+    return getattr(_calls, "step", None)
 
 
 @contextlib.contextmanager
 def stepping(step: Callable[[str, dict[str, Any], str, str], Any]) -> Iterator[None]:
-    """Run a command with `step` as its GitHub step (se_components' Stepped sets it)."""
-    global _step
-    before, _step = _step, step
+    """Run a command in this thread with `step` as its GitHub step (se_components' Stepped sets
+    it); a call beside it in another thread keeps its own."""
+    before, _calls.step = steps(), step
     try:
         yield
     finally:
-        _step = before
+        _calls.step = before
 
 
 class RelayError(Exception):

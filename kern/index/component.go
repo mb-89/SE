@@ -8,6 +8,7 @@
 package index
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -77,6 +78,10 @@ type Result struct {
 	Writes   []Write
 	Requests []Ask
 	Then     func(answers []any) (Result, error)
+	// Stop, where set beside Then, tells the component that its call is given
+	// up and Then never runs: a declared component's process ends what waits
+	// on it (docs/go-core.md "A call given up").
+	Stop func(reason string)
 }
 
 // CommandDecl is a command as a component declares it, and as every surface renders it.
@@ -335,12 +340,19 @@ func (c *Component) Run(name string, read Reader, args []string) (Result, error)
 // RunSaying runs a command's first step as Run does; say, where set, takes
 // each progress line a declared component's process says, as it says it.
 func (c *Component) RunSaying(name string, read Reader, args []string, say func(string)) (Result, error) {
+	return c.RunContext(context.Background(), name, read, args, say)
+}
+
+// RunContext runs a command's first step as RunSaying does, within ctx: a
+// declared component's step, and each of its continuations, ends once ctx is
+// done, and its process is told the call is given up.
+func (c *Component) RunContext(ctx context.Context, name string, read Reader, args []string, say func(string)) (Result, error) {
 	k, ok := c.commands[name]
 	if !ok {
 		return Result{}, fmt.Errorf("component %s has no command %q", c.name, name)
 	}
 	if c.decl != nil {
-		return c.checked(c.runRemote(name, read, args, say))
+		return c.checked(c.runRemote(ctx, name, read, args, say))
 	}
 	in, err := k.in.fill(read)
 	if err != nil {
@@ -354,16 +366,26 @@ func (c *Component) checked(r Result, err error) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if err := c.CheckWrites(r.Writes); err != nil {
-		return Result{}, err
+	err = c.CheckWrites(r.Writes)
+	if err == nil {
+		err = c.CheckAsks(r.Requests)
 	}
-	if err := c.CheckAsks(r.Requests); err != nil {
+	if err != nil {
+		r.Stopped(err.Error())
 		return Result{}, err
 	}
 	if then := r.Then; then != nil {
 		r.Then = func(answers []any) (Result, error) { return c.checked(then(answers)) }
 	}
 	return r, nil
+}
+
+// Stopped tells the component that the call this result belongs to is given
+// up, where a continuation of it waits and the component asked to be told.
+func (r Result) Stopped(reason string) {
+	if r.Then != nil && r.Stop != nil {
+		r.Stop(reason)
+	}
 }
 
 // CheckWrites refuses a write to anything but one of the component's outputs

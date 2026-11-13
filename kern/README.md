@@ -89,10 +89,10 @@ SDK on `PYTHONPATH`.
 | `commit.<i>` | first `{"attach": {"contract": 1, "hash": "sha256:<hex>"}}`, then `{"writes": [...]}` | refuses another contract, another declaration, and a write before the attach |
 | `run.<i>` | hears that an input moved: reads `in.<i>`, commits each derivation's value | sends it after each commit that moves an input, and on the attach |
 | `in.<i>` | asks its inputs | answers them by local port, `config/<key>` among them, at the newest revision |
-| `cmd.<i>.<command>` | answers one step: `text`, `lines`, `writes`, `requests`, `then` | sends the first step with the arguments and inputs, each later one with the answers |
+| `cmd.<i>.<command>` | answers one step: `text`, `writes`, `requests`, `then`, or `error`; its lines go out on `say.<i>.<call>`. A message without a reply, `{"call", "stop"}`, is the stop word: it drops that call's continuation and sets its `kern.abandoned()` | sends the first step with the arguments and inputs, each later one with the answers; the stop word once it gives up a call whose step runs or whose continuation waits ([docs/go-core.md "A call given up"](../docs/go-core.md#a-call-given-up)) |
 | `io.<i>.<verb>` | an I/O component answers `{"answer": ...}` or `{"error": ...}` | sends a request bound to the verb |
 | `say.<i>.<call>` | says a step's line as it goes, `{"line"}`, and beats `{}` every 5 s while the step runs, on its own call's subject | hands each line on to the call's caller; each word restarts the step's wait, `StepWait` (60 s, `KERN_STEP_WAIT` for a served core), so a step that beats runs as long as its process |
-| `call.<command>` | | a client's call: `{"args": [...], "progress"?}`, answered with the lines, the text or the error; with a progress subject in the caller's inbox, each line goes there as it is said and a beat every 5 s ([docs/go-core.md "Progress and long calls"](../docs/go-core.md#progress-and-long-calls)) |
+| `call.<command>` | | a client's call: `{"args": [...], "progress"?}`, answered with the lines, the text or the error; with a progress subject in the caller's inbox, each line goes there as it is said and a beat every 5 s ([docs/go-core.md "Progress and long calls"](../docs/go-core.md#progress-and-long-calls)); `call.core.abandon`, `{"call": <its reply subject>}`, gives up a call in the asker's own inbox |
 
 - **The declaration hash** is the SHA-256 of `component.toml`'s bytes, line ends read as LF,
   written `sha256:<hex>`: the bytes, not what they parse to, so Go and Python answer one hash.
@@ -115,13 +115,13 @@ cd kern && go vet ./... && go test ./...
 
 SE declares kern's tests beside its Python suite, `se.toml` `[tests.beside.kern]`, with their own
 time and budget (SE's [README "Test budget"](../README.md#test-budget)): `integrate`,
-`work_tickets.py suite` and the `check` job, the check `main`'s ruleset requires, run them after
-the suite, so a red kern test refuses the integration and the Python suite's budget is untouched.
-`check` vets kern in its own step. The job `kern-platforms` runs kern's vet and tests on Windows
-and macOS, where the detached start and the stop differ, and there also the tests of SE's start
-and hook scripts (`tests/test_bootstrap.py`, `tests/test_se_hook.py`), whose paths differ too: a
-zip on Windows, `shasum` and no `setsid` on macOS. `check` needs it and fails unless every
-platform passed.
+`work_tickets.py suite` and the `check` job, the check `main`'s ruleset requires, run them after the
+suite, so a red kern test refuses the integration and the Python suite's budget is untouched.
+`check` vets kern in its own step, and fails where `gofmt -l` lists a file of kern's. The job
+`kern-platforms` runs kern's vet and tests on Windows and macOS, where the detached start and the
+stop differ, and there also the tests of SE's start and hook scripts (`tests/test_bootstrap.py`,
+`tests/test_se_hook.py`), whose paths differ too: a zip on Windows, `shasum` and no `setsid` on
+macOS. `check` needs it and fails unless every platform passed.
 
 The contract suite runs `contract/cases.json` three times: against the Go fake
 (`contract/fake_test.go`), against the real core with tally's Python process placed and attached
