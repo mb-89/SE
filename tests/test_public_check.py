@@ -809,6 +809,15 @@ def test_setup_ignores_the_local_list_once(kind: str, repo: Path) -> None:
     assert text == f"build/\n{public_check.LOCAL_FILE}\n"
 
 
+@pytest.mark.parametrize("kind", SETUPS)
+def test_setup_sets_the_project_commit_identity_as_sync_does(kind: str, repo: Path) -> None:
+    (repo / "se.toml").write_text('[project]\nidentity = "alice <alice>"\n', encoding="utf-8")
+    result = setup_hooks(kind, repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert git(repo, "config", "user.name").stdout.strip() == "alice"
+    assert git(repo, "config", "user.email").stdout.strip() == "alice"
+
+
 def test_se_ignores_its_local_list() -> None:
     lines = (SE_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert public_check.LOCAL_FILE in lines
