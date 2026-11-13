@@ -1,0 +1,8 @@
+# The application's instances and wires (kern's docs/go-core.md "Switching components on and off").
+# The bare application has none; the core starts on it with only its own names. An instance:
+#
+#   [instances.<name>]
+#   component = "<component>"
+#
+#   [wires]
+#   "<instance>.<input>" = "<instance>/<output>"

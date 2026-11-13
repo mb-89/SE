@@ -21,8 +21,10 @@ named in the design's plan.
 | `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request | `src/index/indextest` |
 | `bus/` | the embedded NATS server on loopback, a user and permissions per component instance, so the bus refuses a second writer | quackitect v5 `src/index/bus.go` |
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
+| `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve` | |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve` | |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises | |
+| `template/` | the bare application every new application starts from ([The template](#the-template)) | |
 
 The NATS server is a Go dependency, `github.com/nats-io/nats-server/v2` v2.11.9 with
 `github.com/nats-io/nats.go` v1.45.0, v5's versions; `go.mod` owns them.
@@ -81,6 +83,14 @@ application's `se.toml` `[tests]` command, its Go tests and its Python tests, he
 one budget: over `target_seconds` it warns, over `limit_seconds` or on a failed test it fails, as
 SE's own suite (SE's [README "Test budget"](../README.md#test-budget)). Its input `directory`
 names the application's folder, `.` by default.
+
+## The template
+
+`template/` is the bare application ([its README](template/README.md)): the core with no
+components, an empty `wiring.toml`, `components/`, `types/`, `se.toml` with its `[tests]` budget
+and `[modules.kern]`, an `AGENTS.md`, a battery that starts the bare core, and a `check.yml` that
+calls the battery. It is a Go module of its own, so kern's `go test ./...` leaves it out; the
+release workflow runs its battery on every change to kern.
 
 ## The catalog check's budget
 

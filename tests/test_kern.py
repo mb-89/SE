@@ -60,3 +60,19 @@ def test_the_battery_holds_the_applications_tests_to_se_toml_tests() -> None:
     assert "run: go vet ./..." in text
     assert 'tests.get("command"), tests.get("target_seconds"), tests.get("limit_seconds")' in text
     assert "if seconds > limit:" in text and "if seconds > target:" in text
+
+def test_the_template_is_a_bare_application_in_ses_shape() -> None:
+    """docs/go-core.md "A bare application, and `se new app`"."""
+    for path in ("go.mod", "cmd/app/main.go", "components/doc.go", "types/doc.go", "wiring.toml",
+                 "se.toml", "AGENTS.md", "README.md", "tests/test_core.py", "tests/test_go.py",
+                 ".github/workflows/check.yml"):
+        assert (TEMPLATE / path).is_file(), path
+    settings = tomllib.loads((TEMPLATE / "se.toml").read_text(encoding="utf-8"))
+    assert settings["tests"]["command"] == ["uv", "run", "pytest", "-q"]
+    assert 0 < settings["tests"]["target_seconds"] <= settings["tests"]["limit_seconds"]
+    assert settings["modules"]["kern"]["go"] is True
+    assert tomllib.loads((TEMPLATE / "wiring.toml").read_text(encoding="utf-8")) == {}, "no instances"
+    check = (TEMPLATE / ".github" / "workflows" / "check.yml").read_text(encoding="utf-8")
+    assert re.search(r"(?m)^  check:\n    uses: mb-89/SE/\.github/workflows/kern-battery\.yml@kern-v\d+\.\d+\.\d+$", check)
+    main = (TEMPLATE / "cmd" / "app" / "main.go").read_text(encoding="utf-8")
+    assert 'cli.Run("app", os.Args[1:], os.Stdout, os.Stderr)' in main

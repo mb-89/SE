@@ -1,0 +1,6 @@
+.venv/
+.se/.runtime/
+.public-check.local
+/app
+/app.exe
+.pytest_cache/
