@@ -474,7 +474,8 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
     `<se>/scripts/se_plugin.py` refuses a skill or agent that names one otherwise;
 - the setup command that installs the tools the roles need (`git`, `gh`, Python 3.11 or newer and
   whatever the project's tests need);
-- the focused and the complete test commands, including gated test tiers if there are any;
+- the focused and the complete test commands, including gated test tiers if there are any, and
+  the focused tests a kind of change adds (in se, the docs build for published Markdown);
 - its public check with the hooks that run it; `public_check` in its `se.toml`
   ([Project settings](../../README.md#project-settings)) gates every push to the integration
   branch on it, on unless the project sets it to `false`;
