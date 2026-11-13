@@ -75,6 +75,10 @@ An action is a command that reaches the outside. kern builds it from the Go line
 The Go line's GitHub snapshot comes back as names the GitHub component writes
 ([GitHub in the cloud](#github-in-the-cloud)). Its I/O modules for the clock, the disk, processes
 and sessions come back as shared I/O components ([The core's repository](#the-cores-repository)).
+git is one of them, kern's git door: until its `git` component exists, kern's Go git calls
+(`kern/host`, `kern/tools/release`, `components/origin`) sit on the allow list of SE's git door
+guard in `tests/test_repository.py`, and the migration moves them behind that component, with a
+fake held to the contract `tests/test_git_door.py` holds SE's git door to.
 
 ### What comes from quackitect v5
 
