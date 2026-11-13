@@ -49,6 +49,8 @@ func (c *rest) read(k kind, r Ref) (any, error) {
 		return c.get(fmt.Sprintf("%s/issues/%d", base, r.Number))
 	case pulls.port:
 		return c.get(fmt.Sprintf("%s/pulls/%d", base, r.Number))
+	case comments.port:
+		return c.get(fmt.Sprintf("%s/issues/%d/comments?per_page=100", base, r.Number))
 	}
 	pr, err := c.get(fmt.Sprintf("%s/pulls/%d", base, r.Number))
 	if err != nil {

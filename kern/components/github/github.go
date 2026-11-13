@@ -62,6 +62,8 @@ type Step struct {
 	Tool  string         `json:"tool"`
 	Input map[string]any `json:"input"`
 	Asked time.Time      `json:"asked"`
+	// Note is what the asker says the agent watches for, for a step of the verb step.
+	Note string `json:"note,omitempty"`
 }
 
 // kind is one family of snapshots: its output, its verb, the tool call that
@@ -73,10 +75,11 @@ type kind struct {
 }
 
 var (
-	issues = kind{port: "issues", verb: "issue", help: "an issue", tool: "issue_read", method: "get", numberArg: "issue_number"}
-	pulls  = kind{port: "pulls", verb: "pull", help: "a pull request", tool: "pull_request_read", method: "get", numberArg: "pullNumber"}
-	checks = kind{port: "checks", verb: "check-runs", help: "the check runs of a pull request's head", tool: "pull_request_read", method: "get_check_runs", numberArg: "pullNumber"}
-	kinds  = []kind{issues, pulls, checks}
+	issues   = kind{port: "issues", verb: "issue", help: "an issue", tool: "issue_read", method: "get", numberArg: "issue_number"}
+	pulls    = kind{port: "pulls", verb: "pull", help: "a pull request", tool: "pull_request_read", method: "get", numberArg: "pullNumber"}
+	checks   = kind{port: "checks", verb: "check-runs", help: "the check runs of a pull request's head", tool: "pull_request_read", method: "get_check_runs", numberArg: "pullNumber"}
+	comments = kind{port: "comments", verb: "comments", help: "an issue's comments", tool: "issue_read", method: "get_comments", numberArg: "issue_number"}
+	kinds    = []kind{issues, pulls, checks, comments}
 )
 
 // Key is the key a read stands at in its family: <owner>.<repo>.<number>, in
@@ -123,6 +126,12 @@ type GitHub struct {
 	waiting  map[string][]chan Snapshot
 	outbox   map[string]bool
 	last     map[string]Snapshot // the newest snapshot of each read, by outbox key
+	stepWait time.Duration
+	tellWait time.Duration
+	asking   map[string]Step         // the step of each relay read in the outbox, by outbox key
+	answered map[string]bool         // the PostToolUse payloads that answered a step, until their tell
+	steps    map[string]*waitingStep // the steps of the verb step waiting for a tool answer, by outbox key
+	asked    chan struct{}           // signalled each time a step is asked, which a tell waits for
 }
 
 type heldRead struct {
@@ -132,11 +141,12 @@ type heldRead struct {
 
 // The component's outputs.
 var (
-	issuesOut  = index.Family("issues", Snapshot{}, "Each issue read, at <owner>.<repo>.<number>, with the time it was read.")
-	pullsOut   = index.Family("pulls", Snapshot{}, "Each pull request read, at <owner>.<repo>.<number>, with the time it was read.")
-	checksOut  = index.Family("checks", Snapshot{}, "The check runs of each pull request's head read, at <owner>.<repo>.<number>, with the time they were read.")
-	outboxOut  = index.Family("outbox", Step{}, "The relay's reads waiting for the session's GitHub tool, at <verb>.<owner>.<repo>.<number>.")
-	backendOut = index.Output("backend", "", "The backend chosen at start: token or relay.")
+	issuesOut   = index.Family("issues", Snapshot{}, "Each issue read, at <owner>.<repo>.<number>, with the time it was read.")
+	pullsOut    = index.Family("pulls", Snapshot{}, "Each pull request read, at <owner>.<repo>.<number>, with the time it was read.")
+	checksOut   = index.Family("checks", Snapshot{}, "The check runs of each pull request's head read, at <owner>.<repo>.<number>, with the time they were read.")
+	commentsOut = index.Family("comments", Snapshot{}, "Each issue's comments read, at <owner>.<repo>.<number>, with the time they were read.")
+	outboxOut   = index.Family("outbox", Step{}, "The relay's reads waiting for the session's GitHub tool, at <verb>.<owner>.<repo>.<number>.")
+	backendOut  = index.Output("backend", "", "The backend chosen at start: token or relay.")
 )
 
 func (k kind) out() *index.FamilyPort[Snapshot] {
@@ -145,6 +155,8 @@ func (k kind) out() *index.FamilyPort[Snapshot] {
 		return issuesOut
 	case pulls.port:
 		return pullsOut
+	case comments.port:
+		return commentsOut
 	}
 	return checksOut
 }
@@ -175,7 +187,8 @@ func New(o Options) *GitHub {
 			}()
 		}
 	}
-	g := &GitHub{o: o, held: map[string]heldRead{}, waiting: map[string][]chan Snapshot{}, outbox: map[string]bool{}, last: map[string]Snapshot{}}
+	g := &GitHub{o: o, held: map[string]heldRead{}, waiting: map[string][]chan Snapshot{}, outbox: map[string]bool{}, last: map[string]Snapshot{},
+		asking: map[string]Step{}, answered: map[string]bool{}, steps: map[string]*waitingStep{}, asked: make(chan struct{}, 1)}
 	parts := []index.Part{
 		index.IO(),
 		index.Config("backend", Auto, "auto, token or relay: auto takes the relay in a cloud session, else the token where one is found, else the relay."),
@@ -183,9 +196,15 @@ func New(o Options) *GitHub {
 		index.Config("refresh", "2m", "How often the token backend reads each snapshot it holds again, with its ETag; 0s reads none again. The relay answers a snapshot younger than it without asking."),
 		index.Config("relay-wait", "0s", "How long a relay read waits for the session's tool answer before it fails, naming the outbox step."),
 		index.Config("pace-max", "60s", "The longest rate-limit wait the token backend sits out; a longer one fails the read."),
-		issuesOut, pullsOut, checksOut, outboxOut, backendOut,
+		index.Config("step-wait", "60m", "The longest a step of the verb step waits for the session's tool answer; a step asks its own wait up to it."),
+		index.Config("tell-wait", "300ms", "How long the hook of a tool answer that answered a step waits for the next step to be asked, so it tells that one."),
+		issuesOut, pullsOut, checksOut, commentsOut, outboxOut, backendOut,
 		index.Inlet(g.start),
 		index.Hears(g.hear),
+		index.Tells(g.tell),
+		index.JSONVerb("step", "Runs one GitHub tool call through the relay: the step stands in the outbox until a PostToolUse of that tool with those arguments answers it, and the verb answers the tool's answer.", StepShape, StepAnswerShape, func(a StepAsk) (StepAnswer, error) {
+			return g.step(a)
+		}),
 	}
 	for _, k := range kinds {
 		k := k
@@ -242,6 +261,14 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 	if err != nil {
 		return err
 	}
+	stepWait, err := dur("step-wait")
+	if err != nil {
+		return err
+	}
+	tellWait, err := dur("tell-wait")
+	if err != nil {
+		return err
+	}
 	backend := str("backend")
 	var token string
 	if backend == Auto && g.o.Cloud() {
@@ -270,6 +297,7 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 		return fmt.Errorf("component %s runs one instance per core, and %s is one already", Name, g.instance)
 	}
 	g.instance, g.commit, g.backend, g.fresh, g.wait = instance, commit, backend, refresh, wait
+	g.stepWait, g.tellWait = stepWait, tellWait
 	if backend == Token {
 		g.rest = &rest{api: strings.TrimSuffix(str("api"), "/"), token: token, client: g.o.Client, sleep: g.o.Sleep, now: g.o.Now, paceMax: paceMax, cache: map[string]cached{}}
 	}
@@ -340,6 +368,7 @@ func (g *GitHub) land(k kind, r Ref, s Snapshot) error {
 	writes := []index.Write{k.out().At(Key(r), s)}
 	if g.outbox[ob] {
 		delete(g.outbox, ob)
+		delete(g.asking, ob)
 		writes = append(writes, outboxOut.Drop(ob))
 	}
 	g.last[ob] = s

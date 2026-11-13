@@ -398,6 +398,9 @@ func (c *Core) event() {
 // HookAnswer is what hook.<event> answers: the effect on the host.
 type HookAnswer struct {
 	Effect string `json:"effect"`
+	// Context is what the components that tell the agent say on the event,
+	// which the hook hands the agent; empty for none.
+	Context string `json:"context,omitempty"`
 }
 
 // hook takes a host's hook event: each renews the session's lease, and
@@ -426,7 +429,7 @@ func (c *Core) hook(m *nats.Msg) {
 	if err := c.ix.Hear(event, m.Data); err != nil {
 		fmt.Fprintln(c.o.Log, err)
 	}
-	c.reply(m, HookAnswer{Effect: "pass"})
+	c.reply(m, HookAnswer{Effect: "pass", Context: strings.Join(c.ix.Tell(event, m.Data), "\n\n")})
 }
 
 // Health is what get.core.health answers.

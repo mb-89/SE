@@ -79,6 +79,7 @@ component = "reader"
 "github.issues" = "github/issues/<key>"
 "github.pulls" = "github/pulls/<key>"
 "github.checks" = "github/checks/<key>"
+"github.comments" = "github/comments/<key>"
 "github.outbox" = "github/outbox/<key>"
 "reader.issue" = "github.issue"
 "reader.pull" = "github.pull"
@@ -225,6 +226,12 @@ func TestTheTokenBackendReadsAPullsCheckRuns(t *testing.T) {
 		t.Fatalf("read pull answers %q, %v", r.Text, err)
 	}
 	snapshot(t, ix, "github/pulls/alice.demo.8")
+	if err := ix.Hear(github.PostToolUse, toolUse("mcp__github__issue_read", map[string]any{"method": "get_comments", "owner": "alice", "repo": "demo", "issue_number": 7}, `[{"id": 1, "body": "Started"}]`)); err != nil {
+		t.Fatal(err)
+	}
+	if s := snapshot(t, ix, "github/comments/alice.demo.7"); len(s.Data.([]any)) != 1 {
+		t.Fatalf("the comments snapshot holds %v", s.Data)
+	}
 }
 
 // The refresh reads each snapshot the token holds again, with its ETag, and
@@ -417,7 +424,7 @@ func TestEveryGitHubToolAnswerLandsAndNothingElse(t *testing.T) {
 	before := ix.Snapshot().Revision()
 	for _, p := range [][]byte{
 		toolUse("Bash", map[string]any{"command": "ls"}, "{}"),
-		toolUse("mcp__github__issue_read", map[string]any{"method": "get_comments", "owner": "alice", "repo": "demo", "issue_number": 7}, "[]"),
+		toolUse("mcp__github__issue_read", map[string]any{"method": "get_labels", "owner": "alice", "repo": "demo", "issue_number": 7}, "[]"),
 		[]byte(`not json`),
 	} {
 		if err := ix.Hear(github.PostToolUse, p); err != nil {
