@@ -87,6 +87,8 @@ ISSUE_FIELDS = "number,title,body,url,updatedAt,comments,labels"
 ISSUE_SNAPSHOT = "issue.json"
 COMMENTS_READ = "comments-read.json"
 BODY_READ = "body-read.json"
+# Written by an intake from files (without gh): the first hold reads the issue again (reread_before_hold).
+REREAD = "reread-before-hold.json"
 # The issue templates belong to se, wherever a project keeps it; messages name them relative to it.
 TEMPLATE_DIRECTORY = ".github/ISSUE_TEMPLATE"
 TEMPLATES = Path(__file__).resolve().parents[1] / TEMPLATE_DIRECTORY
@@ -422,7 +424,8 @@ def create_ticket(
         raise QueueError(f"Refusing to overwrite existing ticket: {path.name}") from error
 
 
-def move_ticket(root: Path, ticket_id: str, destination: str) -> None:
+def move_ticket(root: Path, ticket_id: str, destination: str,
+                issue_file: Path | None = None) -> None:
     if not valid_id(ticket_id):
         raise QueueError(f"Unsafe ticket ID: {ticket_id!r}")
     if destination not in STATES:
@@ -445,6 +448,8 @@ def move_ticket(root: Path, ticket_id: str, destination: str) -> None:
         raise QueueError(f"Invalid transition: {ticket.state} -> {destination}")
     if errors:
         raise QueueError("; ".join(errors))
+    if destination == "held":
+        reread_before_hold(root, issue_file)
     if destination == "done":
         problems = checklist_and_evidence_errors(ticket.content)
         location = ticket.path.relative_to(root).as_posix()
@@ -1658,7 +1663,52 @@ def intake(
     save_snapshot(root, issue)
     record_comments_read(root, comment_state(issue["comments"]))
     record_body_read(root, str(issue["body"]))
+    if answered is not None:
+        reread_path(root).write_text(json.dumps({"updatedAt": issue["updatedAt"]}) + "\n",
+                                     encoding="utf-8", newline="\n")
     return issue, created, kept
+
+
+def reread_path(root: Path) -> Path:
+    path = queue_paths(root)["todo"].parent / REREAD
+    inside_root(root, path)
+    return path
+
+
+def reread_before_hold(root: Path, issue_file: Path | None) -> None:
+    """Without gh, the first hold after an intake from files reads the issue again: `issue_file`,
+    the issue as the session's GitHub tools read it now, is compared with intake's `updated_at`.
+    A changed body refuses the hold until intake has read it; any other update passes, named.
+    The read is done once: the record intake wrote is removed."""
+    path = reread_path(root)
+    if not path.is_file():
+        return
+    snapshot = required_snapshot(root)
+    issue = f"#{snapshot['number']}"
+    if issue_file is None:
+        raise QueueError(
+            f"Before the first ticket is held, read the work issue again with your GitHub tools "
+            f"(issue_read, method get), save the answer to a file and pass it: move --issue-body "
+            f"<file>; a body edited after intake read {issue} is caught there (work-model skill, "
+            "\"Without gh\")")
+    try:
+        read = str(json.loads(path.read_text(encoding="utf-8"))["updatedAt"])
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise QueueError(f"Cannot read {path}: {error}; run intake again") from error
+    now = issue_answer(issue_file)
+    if int(now["number"]) != int(snapshot["number"]):
+        raise QueueError(f"{issue_file} holds issue #{now['number']}, not the work issue {issue}")
+    updated = str(first_of(now, "updatedAt", "updated_at"))
+    if updated != read:
+        if body_hash(str(now.get("body") or "")) != body_hash(str(snapshot["body"])):
+            raise QueueError(
+                f"The work issue {issue} was updated at {updated}, after intake read it ({read}), "
+                "and its body changed: apply the change to the tickets, then run intake again "
+                "with this answer and its comments (intake --issue-body <file> --comments-file "
+                "<file>) and hold the ticket again")
+        print(f"The work issue {issue} was updated at {updated}, after intake read it; its body "
+              "is unchanged: read its comments and labels for what changed")
+    path.unlink()
 
 
 def outside_cutoffs(root: Path) -> dict[str, int]:
@@ -6693,9 +6743,13 @@ def run_create(root: Path, args: argparse.Namespace) -> int:
 @command("move", "move a ticket between states",
          WORKTREE,
          arg("--id", required=True, help="ticket ID"),
-         arg("--to", required=True, choices=STATES))
+         arg("--to", required=True, choices=STATES),
+         arg("--issue-body", type=Path, metavar="FILE",
+             help="without gh, for the first hold after an intake from files: the work issue as "
+                  "your GitHub tools read it now (issue_read, method get), its JSON saved to "
+                  "FILE; a body changed since intake refuses the hold"))
 def run_move(root: Path, args: argparse.Namespace) -> int:
-    move_ticket(root, args.id, args.to)
+    move_ticket(root, args.id, args.to, args.issue_body)
     print(f"Moved ticket {args.id} to {args.to}")
     return 0
 

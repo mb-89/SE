@@ -87,8 +87,8 @@ From v5's `src/index/bus.go` and `spec/design_output/model.md` ("The inner proto
 | subjects | `get.`, `val.`, `run.`, `in.`, `commit.`, `act.`, `io.`, `lease.` | yes, renamed and reduced in [Subjects](#subjects) |
 | the standing file | `.se/.runtime/standing.json`: bus port, token, pid, stamp | yes; a `pid` that runs nowhere reads as absent |
 | detached start | `Setsid` on Unix, a detached process on Windows (`src/index/detach_*.go`); a claim file while one caller starts it | yes, for the hooks' start |
-| leases | a heartbeat on `lease.<part>` from the work loop itself; a lapsed lease marks names stale | yes, for components and for sessions |
-| placements | instances grouped into processes by config | yes: Go components run inside the core by default, other languages in their own process |
+| leases | a heartbeat on `lease.<part>` from the work loop itself; a lapsed lease marks names stale | yes, for components and for sessions: a component beats every 5 s and its lease lapses 15 s (three beats) after its last beat; a session's lease is the hooks' ([Lifetime](#lifetime-bound-to-the-session)) |
+| placements | instances grouped into processes by config | yes: Go components run inside the core by default, other languages in their own process; a placed process that exits is not restarted, and the health shows it with its exit |
 | the stamp | the hash of the Go type package; a peer with another stamp is refused | becomes the contract version, since Python peers cannot share Go types |
 | SQLite, the `files/` mirror, folds, views, chunks, the LSP relay, operations, the cage | | not taken; each can return as a component when an application needs it |
 
@@ -107,12 +107,21 @@ a refusal of the server itself.
 | user | may publish | may subscribe |
 |---|---|---|
 | `core` | everything | everything |
-| a component instance `<i>` | `commit.<i>`, `lease.<i>`, `in.<i>`, `get.>`, `call.>` | `run.<i>`, `cmd.<i>.>`, `io.<i>.>` for an I/O component, `val.>` |
+| a component instance `<i>` | `commit.<i>`, `lease.<i>`, `in.<i>`, `get.>`, `call.>` | `run.<i>`, `cmd.<i>.>`, `io.<i>.>` for an I/O component, `val.>`, its own inbox |
 | `client` (commands, hooks) | `call.>`, `get.>`, `hook.>` | `val.>`, its own inbox |
 
-The core writes the users and their random passwords into the standing file, readable by the
-owner of the checkout alone, and hands each spawned component its own through its environment
-(`CORE_BUS`, `CORE_USER`, `CORE_TOKEN`).
+Each user hears the replies to its own asks on its own inbox, `_INBOX.<user in hex>.>` (the
+core's is `_INBOX.>`). Hex makes the user one token, so no inbox lies inside another's: `issues`'s
+does not hold `issues/pull`'s. An instance answers the core's `cmd.` and `io.` requests with one
+reply each on the subject the request names.
+
+The core writes the users and their random passwords into the standing file and hands each
+spawned component its own through its environment (`CORE_BUS`, `CORE_USER`, `CORE_TOKEN`). The
+file is for the owner of the checkout alone:
+
+- on Unix by its mode, `0600`, in `.se/.runtime/`, whose mode is `0700`;
+- on Windows by the ACL it inherits from the checkout's folder, as the core sets none of its own:
+  it is as private as the checkout is.
 
 ## The component contract
 
@@ -274,6 +283,10 @@ so each cloud session has its own core.
   SessionEnd returns it). A sub-agent renews its session's lease and starts nothing.
 - The core ends when no session holds a lease, after a grace of 60 s, or after `idle` (built in
   30 minutes) without any event, whichever comes first.
+  - The grace starts at the core's start, until a session takes its first lease, and again each
+    time the last lease is returned.
+  - The events that count for `idle` are the hook events and `call.core.stop`. Gets, leases and
+    commits do not: a placed component's beats and commits would keep an unused core up for ever.
 - It ends with the container in the cloud whatever the lease says; nothing in it needs to
   survive, because GitHub and the disk own every durable fact.
 
