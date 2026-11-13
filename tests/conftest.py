@@ -61,10 +61,7 @@ REAL_GIT: dict[str, str] = {
     "tests/beside_new_app.py": "reads SE's own checkout: kern's template at its real pin",
     "tests/test_quiet_git.py": STILL_ON_REAL_GIT,
     "tests/test_references.py": STILL_ON_REAL_GIT,
-    "tests/test_releases.py": STILL_ON_REAL_GIT,
     "tests/test_repository.py": STILL_ON_REAL_GIT,
-    "tests/test_rewrite_history.py": STILL_ON_REAL_GIT,
-    "tests/test_start_refresh.py": STILL_ON_REAL_GIT,
 }
 
 

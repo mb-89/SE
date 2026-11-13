@@ -1,137 +1,53 @@
-"""scripts/rewrite_history.py: the one-time history rewrite before se replaces main."""
+"""scripts/rewrite_history.py: the one-time history rewrite before se replaces main.
+
+Its parts run here on the git door's fake: the message and stream filter, and the reads and
+refusals of a clone. The fake streams nothing, so the rewrite end to end (`fast-export` through the
+filter into `fast-import`) is a case of the door's contract suite, held against real git
+(tests/test_git_door.py, the history rewrite).
+"""
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
+import io
 from pathlib import Path
 
 import pytest
 
-import rewrite_history
 import fake_git
+import git_door
+import rewrite_history
 
-ROOT = Path(__file__).resolve().parents[1]
-CHECK = ROOT / "scripts" / "public_check.py"
-CLAUDE = ("Claude", "noreply" + "@anthropic.com")
-WEB_FLOW = ("GitHub", "noreply" + "@github.com")
 OWNER = ("mb", "mb")
-
-
-@pytest.fixture(autouse=True)
-def isolated_git(tmp_path, monkeypatch):
-    """Git without the machine's configuration (no signing, no identity), and no ~/.se."""
-    home = tmp_path / "home"
-    home.mkdir()
-    gitconfig = home / ".gitconfig"
-    gitconfig.write_text("[init]\n\tdefaultBranch = main\n", encoding="utf-8")
-    for key, value in {"HOME": str(home), "GIT_CONFIG_GLOBAL": str(gitconfig),
-                       "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0",
-                       "GIT_ALLOW_PROTOCOL": "file"}.items():
-        monkeypatch.setenv(key, value)
-
-
-def git(repo: Path, *args: str, who: tuple[tuple[str, str], tuple[str, str]] | None = None) -> str:
-    env = dict(os.environ)
-    if who is not None:
-        (an, ae), (cn, ce) = who
-        env.update(GIT_AUTHOR_NAME=an, GIT_AUTHOR_EMAIL=ae, GIT_COMMITTER_NAME=cn,
-                   GIT_COMMITTER_EMAIL=ce)
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
-                          check=True, env=env).stdout.strip()
-
-
-def commit(repo: Path, name: str, message: str, author=OWNER, committer=OWNER) -> str:
-    (repo / name).write_text(f"{name}\n", encoding="utf-8")
-    git(repo, "add", name)
-    git(repo, "commit", "-q", "-m", message, who=(author, committer))
-    return git(repo, "rev-parse", "HEAD")
-
-
-def build(root: Path) -> None:
-    """An se-like history: a clean root, a release by Claude with its session trailers, a commit with
-    tracker references and a co-author line, a merge GitHub committed, lightweight and annotated
-    tags, and a published commit's allow entry."""
-    origin = root / "origin"
-    origin.mkdir()
-    fake_git.init(origin)
-    (origin / "se.toml").write_text('[project]\nidentity = "mb <mb>"\n', encoding="utf-8")
-    git(origin, "add", "se.toml")
-    git(origin, "commit", "-q", "-m", "Start", who=(OWNER, OWNER))
-    git(origin, "tag", "v0.1.0")
-    released = commit(origin, "release.txt", "Release v1.0.1\n\nCo-Authored-By: Claude <"
-                      + CLAUDE[1] + ">\nClaude-Session: https://claude.ai/code/session_x\n",
-                      author=CLAUDE, committer=CLAUDE)
-    git(origin, "tag", "v1.0.1")
-    git(origin, "switch", "-q", "-c", "feature")
-    commit(origin, "feature.txt", "Add the feature (#593, requirement 3)\n\nIt follows #12, as "
-           "asked (#7).\n\nco-authored-by: Copilot <copilot@example.com>\n")
-    git(origin, "switch", "-q", "main")
-    git(origin, "merge", "-q", "--no-ff", "-m", "Merge feature", "feature", who=(OWNER, WEB_FLOW))
-    (origin / ".public-check-allow").write_text(
-        f"commit:{released} author  # published before the identity rule\n", encoding="utf-8")
-    git(origin, "add", ".public-check-allow")
-    git(origin, "commit", "-q", "-m", "Allow the published release", who=(OWNER, OWNER))
-    git(origin, "tag", "-a", "-m", "Release v1.0.2", "v1.0.2", who=(OWNER, OWNER))
-    git(origin, "tag", "v1")
+WEB_FLOW = "GitHub <noreply" + "@github.com>"
 
 
 @pytest.fixture
-def clone(tmp_path, repositories) -> Path:
-    repositories(build, tmp_path)
-    fresh = tmp_path / "clone"
-    fake_git.clone(tmp_path / "origin", fresh, "--no-local")
-    git(fresh, "branch", "-q", "feature", "origin/feature")
+def clone(tmp_path: Path, fake_git_door) -> Path:
+    """A fresh clone of an origin with a main line, a side branch and a tag, on the fake."""
+    origin = fake_git.init(tmp_path / "origin", "-b", "main")
+    assert git_door.set_identity(origin, OWNER) is None
+    (origin / "se.toml").write_text('[project]\nidentity = "mb <mb>"\n', encoding="utf-8")
+    commit(origin, "se.toml", "Start")
+    git(origin, "tag", "v0.1.0")
+    commit(origin, "a.txt", "More")
+    fresh = fake_git.clone(origin, tmp_path / "clone")
+    assert git_door.set_identity(fresh, OWNER) is None
+    git(fresh, "branch", "-q", "feature", "origin/main")
     return fresh
 
 
-def gate(repo: Path, revisions: str) -> subprocess.CompletedProcess[str]:
-    """The public check's commit gate of a --range over `revisions`."""
-    return subprocess.run([sys.executable, str(CHECK), "--repo", str(repo), "--range", revisions],
-                          capture_output=True, text=True, check=False)
+def git(repo: Path, *arguments: str) -> str:
+    result = git_door.run(*arguments, root=repo)
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
 
 
-def identities(repo: Path, revision: str) -> set[str]:
-    return set(git(repo, "log", "--format=%an <%ae>|%cn <%ce>", revision).splitlines())
-
-
-def tag_targets(repo: Path) -> dict[str, str]:
-    return {name: git(repo, "rev-parse", f"{name}^{{commit}}")
-            for name in git(repo, "tag").splitlines()}
-
-
-def test_the_rewrite_drops_the_trailers_fixes_the_identity_and_moves_every_tag(clone, capsys):
-    assert gate(clone, "main feature").returncode == 1  # the history as published fails the gates
-    old_head, old_tree = git(clone, "rev-parse", "main"), git(clone, "rev-parse", "main^{tree}")
-    old_tags = tag_targets(clone)
-
-    assert rewrite_history.main(["--repo", str(clone)]) == 0
-    out = capsys.readouterr().out
-
-    checked = gate(clone, "main feature")
-    assert checked.returncode == 0, checked.stdout + checked.stderr
-    messages = [m.lstrip("\n") for m in git(clone, "log", "--format=%B%x00", "main").split("\x00")]
-    assert not any("co-authored-by" in m.lower() or "claude-session" in m.lower() for m in messages)
-    assert "Add the feature (requirement 3)\n\nIt follows as asked.\n" in messages
-    assert identities(clone, "main") == {"mb <mb>|mb <mb>", f"mb <mb>|{WEB_FLOW[0]} <{WEB_FLOW[1]}>"}
-    assert git(clone, "rev-parse", "main^{tree}") == old_tree  # same content, new history
-    assert git(clone, "status", "--porcelain") == ""
-
-    mapping = dict(line.split() for line in
-                   (clone / ".git" / rewrite_history.MAP_FILE).read_text().splitlines())
-    new_tags = tag_targets(clone)
-    assert new_tags == {name: mapping[old] for name, old in old_tags.items()}
-    assert new_tags["v0.1.0"] == old_tags["v0.1.0"]  # the clean root keeps its id
-    assert new_tags["v1.0.1"] != old_tags["v1.0.1"]
-    assert git(clone, "cat-file", "-t", "v1.0.2") == "tag"  # an annotated tag stays annotated
-    assert git(clone, "rev-parse", "main") == mapping[old_head]
-
-    assert "5 commits rewritten, 4 with a new id; 3 trailer lines dropped from 2 commits, " \
-           "3 tracker references from 1, the identity 'mb <mb>' set on 1" in out
-    assert f"main {old_head[:12]} -> {mapping[old_head][:12]} (same tree)" in out
-    assert "3 of 4 tags moved to their rewritten commits" in out
-    assert "main: .public-check-allow line 1: commit:" in out and "delete it" in out
+def commit(repo: Path, name: str, message: str) -> str:
+    if not (repo / name).exists():
+        (repo / name).write_text(f"{name}\n", encoding="utf-8")
+    git(repo, "add", name)
+    git(repo, "commit", "-q", "-m", message)
+    return git(repo, "rev-parse", "HEAD")
 
 
 @pytest.mark.parametrize(("message", "cleaned"), [
@@ -148,11 +64,78 @@ def test_a_message_loses_only_its_trailers_and_tracker_references(message, clean
     assert rewrite_history.clean_message(message)[0] == cleaned
 
 
+def data(text: bytes) -> bytes:
+    return b"data %d\n%s" % (len(text), text)
+
+
+def stream_commit(mark: int, original: str, author: str, committer: str, message: bytes) -> bytes:
+    return (b"commit refs/heads/main\nmark :%d\noriginal-oid %s\nauthor %s 1700000000 +0000\n"
+            b"committer %s 1700000000 +0000\n" % (mark, original.encode(), author.encode(), committer.encode())
+            + data(message) + b"M 100644 :1 a.txt\n\n")
+
+
+def test_the_stream_filter_cleans_each_commit_and_copies_everything_else_as_it_is():
+    """A `fast-export` stream: a blob whose content looks like a message, a clean commit, one by
+    another author with a trailer and a reference, a merge GitHub committed, an annotated tag."""
+    blob = b"blob\nmark :1\n" + data(b"Co-Authored-By: kept in a file (#5)\n")
+    clean = stream_commit(2, "a" * 40, "mb <mb>", "mb <mb>", b"Start\n")
+    foreign = stream_commit(3, "b" * 40, "Claude <c@example.com>", "Claude <c@example.com>",
+                            b"Fix (#593)\n\nCo-Authored-By: A <a@example.com>\n")
+    merged = stream_commit(4, "c" * 40, "mb <mb>", WEB_FLOW, b"Merge it\n")
+    tag = b"tag v1\nmark :5\nfrom :4\ntagger mb <mb> 1700000000 +0000\n" + data(b"Release (#7)\n")
+    source = blob + clean + foreign + merged + tag
+    sink, counts = io.BytesIO(), rewrite_history.Counts()
+
+    rewrite_history.filter_stream(io.BytesIO(source), sink, OWNER, counts)
+
+    expected = (blob + clean + stream_commit(3, "b" * 40, "mb <mb>", "mb <mb>", b"Fix\n") + merged + tag)
+    assert sink.getvalue() == expected
+    assert (counts.commits, counts.trailers, counts.trailer_commits, counts.references,
+            counts.reference_commits, counts.identity_commits) == (3, 1, 1, 1, 1, 1)
+    assert counts.originals == {":2": "a" * 40, ":3": "b" * 40, ":4": "c" * 40}
+
+
+def test_web_flow_passes_as_committer_never_as_author():
+    committer = b"committer " + WEB_FLOW.encode() + b" 1700000000 +0000\n"
+    author = b"author " + WEB_FLOW.encode() + b" 1700000000 +0000\n"
+    assert rewrite_history.fix_identity(committer, OWNER) == committer
+    assert rewrite_history.fix_identity(author, OWNER) == b"author mb <mb> 1700000000 +0000\n"
+    with pytest.raises(rewrite_history.SetupError, match="cannot read the identity line"):
+        rewrite_history.fix_identity(b"author nobody\n", OWNER)
+
+
+def test_refs_names_each_local_branch_and_tag_with_its_commit(clone):
+    head = git(clone, "rev-parse", "main")
+    assert rewrite_history.refs(clone) == {
+        "refs/heads/feature": head, "refs/heads/main": head,
+        "refs/tags/v0.1.0": git(clone, "rev-parse", "v0.1.0^{commit}")}
+
+
+def test_the_allow_entries_naming_commits_are_listed_at_a_branch_tip(clone):
+    assert rewrite_history.stale_allow_entries(clone, "refs/heads/main") == []
+    (clone / ".public-check-allow").write_text(
+        "# reasons\nREADME.md:3  # a sample\ncommit:abc1234 author  # published\n", encoding="utf-8")
+    commit(clone, ".public-check-allow", "Allow")
+    assert rewrite_history.stale_allow_entries(clone, "refs/heads/main") == ["3: commit:abc1234 author"]
+
+
+def test_the_identity_comes_from_the_project_or_the_option(clone):
+    assert rewrite_history.project_identity(clone, None) == OWNER
+    assert rewrite_history.project_identity(clone, "alice <alice@example.com>") == ("alice", "alice@example.com")
+    with pytest.raises(rewrite_history.SetupError, match="no project identity"):
+        rewrite_history.project_identity(clone, "alice")
+
+
 def test_a_shallow_clone_is_refused_naming_the_fetch(clone, tmp_path, capsys):
-    shallow = tmp_path / "shallow"
-    fake_git.clone(clone.as_uri(), shallow, "--depth", "1")
+    shallow = fake_git.clone(clone.as_uri(), tmp_path / "shallow", "--depth", "1")
     assert rewrite_history.main(["--repo", str(shallow)]) == 2
     assert "fetch --unshallow" in capsys.readouterr().err
+
+
+def test_a_bare_repository_is_refused(clone, tmp_path, capsys):
+    bare = fake_git.init(tmp_path / "bare.git", "--bare")
+    assert rewrite_history.main(["--repo", str(bare)]) == 2
+    assert "is a bare repository" in capsys.readouterr().err
 
 
 def test_local_changes_are_refused_and_nothing_moves(clone, capsys):
