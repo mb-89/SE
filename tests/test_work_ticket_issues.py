@@ -2396,6 +2396,13 @@ LANDING_BODY = ("Refs https://git.example/owner/tracker/issues/5\n\n"
                 "\n\n<!-- se:field-report-in 7 -->\n")
 
 
+def landing_body_and_metrics(body: str) -> tuple[str, dict | None]:
+    """A handed-off landing body split into what precedes its last line and the integration's
+    metrics line that last line holds (README "Metrics")."""
+    head, _, last = body.rstrip("\n").rpartition("\n")
+    return head, work_tickets.metrics.of_text(last)
+
+
 def origin_main(checkout: Path) -> str:
     return subprocess.run(["git", "--git-dir", str(checkout.parent / "origin.git"), "rev-parse",
                            "refs/heads/main"], capture_output=True, text=True, check=True).stdout.strip()
@@ -2608,7 +2615,11 @@ def test_integrate_hands_off_a_plan_of_github_steps_where_gh_is_not_signed_in(
                       "perPage": 20}
     assert "the fleet is paused: stop here, run no later step" in plan["steps"][0]["note"]
     assert opened == {"owner": "owner", "repo": "repo", "head": landing, "base": "main",
-                      "title": title, "body": LANDING_BODY}
+                      "title": title, "body": opened["body"]}
+    body, line = landing_body_and_metrics(opened["body"])
+    assert body == LANDING_BODY  # then the integration's metrics line, the body's last line
+    assert (line["command"], line["exit_code"], line["issue"]) == ("work_tickets.py integrate", 0, 5)
+    assert opened["body"].endswith(f"\n{work_tickets.metrics.text(line)}\n")
     assert checked == {"owner": "owner", "repo": "repo", "method": "get_check_runs",
                        "pullNumber": "<pull number from step 2>"}
     assert merged == {"owner": "owner", "repo": "repo", "pullNumber": "<pull number from step 2>",
@@ -2650,7 +2661,8 @@ def test_the_hand_off_plan_titles_by_the_goal_and_links_a_report_over_the_body_l
                       .read_text(encoding="utf-8"))["plan"]
     _, opened, _, merged = (step["arguments"] for step in plan["steps"])
     assert (opened["title"], merged["commit_title"]) == (title, title)
-    assert opened["body"] == LANDING_BODY and len(opened["body"]) < 1024
+    assert landing_body_and_metrics(opened["body"])[0] == LANDING_BODY
+    assert len(opened["body"]) < 1024
 
 
 @pytest.mark.parametrize(("goal", "summary"), [

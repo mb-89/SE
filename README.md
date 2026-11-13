@@ -520,7 +520,9 @@ GitHub's limits can be named instead of guessed. `scripts/metrics.py` owns the l
   [Feedback budgets](#feedback-budgets).
 
 A line that cannot be written is dropped; the command never fails for it. `integrate` prints its own
-line last, `Metrics: {...}`, for the integrator's report.
+line last, `Metrics: {...}`, for the integrator's report. The landing pull request's description
+ends in that line too, as it stands when the landing plan is written, so a cloud integrator's
+costs outlive its container: [`retro.py collect`](#work-commands) reads it back.
 
 `work_tickets.py metrics [--since <YYYY-MM-DD>]` prints the top spenders by total wall time and by
 GitHub calls, and every overrun of a budget a line declares:
