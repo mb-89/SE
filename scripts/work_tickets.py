@@ -6718,6 +6718,31 @@ def run_docs(root: None, args: argparse.Namespace) -> int:
     return 0
 
 
+
+@command("format", "apply the fix of every check the check job runs that a fix can satisfy: write "
+                   "the generated layouts (se_plugin.py build) and the README's command reference "
+                   "(docs); a second run writes nothing",
+         arg("--root", type=Path, default=README.parent,
+             help="the se checkout to write; default: the one this script runs from"))
+def run_format(root: None, args: argparse.Namespace) -> int:
+    se_plugin = sibling("se_plugin")
+    try:
+        written = [str(path) for path in se_plugin.build(args.root)]
+    except se_plugin.SourceError as error:
+        raise QueueError(f"format: se_plugin.py build: {error}") from error
+    readme = args.root / README.name
+    text = readme.read_text(encoding="utf-8")
+    expected = with_command_reference(text)
+    if text != expected:
+        readme.write_text(expected, encoding="utf-8", newline="\n")
+        written.append(README.name)
+    for path in written:
+        print(f"wrote {path}")
+    if not written:
+        print("format: nothing to change")
+    return 0
+
+
 def leaf_commands(group: Command = COMMANDS, path: tuple[str, ...] = ()
                   ) -> list[tuple[tuple[str, ...], Command]]:
     """Every command with a handler, as its words after work_tickets.py, in registry order."""
