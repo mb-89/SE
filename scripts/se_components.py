@@ -371,17 +371,20 @@ def routed(script: Path, words: list[str], argv: list[str], interactive: bool) -
 # Placed.
 
 def main(argv: list[str] | None = None) -> int:
-    """`se_components.py run <name>`: the process of SE's component <name>, as wiring.toml places it."""
+    """`se_components.py run <name>`: the process of SE's component <name>, as wiring.toml places it;
+    `run-adhoc <name>` runs an ad hoc component under .se/components/<name>, as the ad hoc wiring
+    overlay places it (se_component.py)."""
     args = sys.argv[1:] if argv is None else argv
-    if len(args) != 2 or args[0] != "run":
-        print("usage: se_components.py run <component>", file=sys.stderr)
+    folders = {"run": SE_ROOT / COMPONENTS, "run-adhoc": SE_ROOT / ".se" / COMPONENTS}
+    if len(args) != 2 or args[0] not in folders:
+        print("usage: se_components.py (run | run-adhoc) <component>", file=sys.stderr)
         return 2
     os.environ[SWITCH] = "off"  # the component runs each command directly
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     sdk()
     from kern import runner
 
-    return runner.main(["run", str(SE_ROOT / COMPONENTS / args[1])])
+    return runner.main(["run", str(folders[args[0]] / args[1])])
 
 
 if __name__ == "__main__":

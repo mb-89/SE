@@ -869,6 +869,23 @@ the [project identity](#project-settings).
 - **GitHub stays the owner's:** the last line names the owner's step, creating the repository with
   its ruleset and the first push. The command does nothing on GitHub.
 
+## Ad hoc components
+
+```sh
+uv run python <se>/scripts/se.py component add <name>
+```
+
+It scaffolds an ad hoc component in the checkout: a Python component over NATS under the ignored
+`.se/components/<name>/` (its `component.toml` and `__init__.py`), placed in the ad hoc wiring
+overlay `.se/wiring.toml` that the core reads after `wiring.toml`. Restart the core to run it, about
+30 ms; it is never tracked.
+
+An ad hoc solution stays untracked until it earns its place
+([gen-001](src/skills/work-model/references/rules.md#gen-001-mechanize-first)). The core counts each
+call of an ad hoc component into `.se/usage/adhoc.jsonl`, and `work_tickets.py`'s retro
+([Retro due](#retro-due)) lists a component used in three or more sessions since the last retro as a
+candidate to promote to a tracked `components/<name>/` ([docs/go-core.md](docs/go-core.md#scripts-are-ad-hoc-components-are-long-term)).
+
 ## Work commands
 
 `scripts/work_tickets.py` runs the [work model](src/skills/work-model/SKILL.md): its tickets, issues,
