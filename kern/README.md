@@ -91,6 +91,12 @@ download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 - **Fetching it:** `<download>/kern-<version>-<os>-<arch>.tar.gz` and `<download>/SHA256SUMS`, the
   archive checked against its line, then unpacked.
 
+| asset | measured on 13 Nov in a Claude Code cloud container, 4 cores, Linux amd64, 5 runs |
+|---|---|
+| `kern-0.1.0-linux-amd64.tar.gz`, 6.44 MB (16.0 MB unpacked), built by `tools/release` and served from loopback: download, `SHA256SUMS`, `sha256sum -c`, `tar -xzf`, first run | 157 to 176 ms |
+| nats-server v2.11.9 linux-amd64, 6.35 MB, from its GitHub release through the container's proxy: the same steps | 0.68 to 1.27 s |
+| building the six, `go run ./tools/release build`, warm module cache | 17.5 to 18.7 s each, 110 s in all |
+
 **The move to `mb-89/kern` changes one URL:** `release.toml`'s `download`, to
 `https://github.com/mb-89/kern/releases/download/v{version}`. The workflow reads its tag and its
 repository from that URL and refuses to publish into another repository than the one it runs in,
