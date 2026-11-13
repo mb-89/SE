@@ -2,15 +2,19 @@
 // index running: the test seeds the inputs and config the component reads, by
 // local name, hands each request port its answers, runs a derivation or a
 // command, and reads the outputs it committed and the requests it made. It
-// speaks the component contract and nothing more.
+// speaks the component contract and nothing more. A call it runs with Begin
+// or BeginServe the test gives up as the core does (docs/go-core.md "A call
+// given up"): Abandon as call.core.abandon, Gone as the dead-caller check.
 package kerntest
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
 	"sync"
 
+	"github.com/mb-89/kern/host"
 	"github.com/mb-89/kern/index"
 )
 
@@ -108,7 +112,90 @@ func (f *Fake) Call(name string, args ...string) (string, error) {
 // CallSaying runs a command as Call does, and hands say each line the call
 // says, as the core hands its caller the lines of its own call alone.
 func (f *Fake) CallSaying(name string, say func(line string), args ...string) (string, error) {
-	r, err := f.c.Run(name, f.read, args)
+	return f.callContext(context.Background(), name, say, args...)
+}
+
+// Running is a call the fake runs in its own goroutine, which the test gives
+// up as the core gives a call up: Abandon as call.core.abandon does, Gone as
+// the core's dead-caller check does once no connection hears the call's reply.
+type Running struct {
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+	done   chan struct{}
+	answer any
+	err    error
+}
+
+// Begin runs a command as CallSaying does, in its own goroutine: between its
+// steps, and while one of its requests waits for its answerer, it ends once
+// the call is given up, with the cause the core names, as index.CallContext.
+func (f *Fake) Begin(name string, say func(line string), args ...string) *Running {
+	return begin(func(ctx context.Context) (any, error) { return f.callContext(ctx, name, say, args...) })
+}
+
+// BeginServe serves one request on a verb of the component, an I/O
+// component's, in its own goroutine, handing the verb the call's context, so
+// a verb that waits lets go once the call is given up.
+func (f *Fake) BeginServe(verb string, req any) *Running {
+	return begin(func(ctx context.Context) (any, error) { return f.c.Serve(ctx, verb, req) })
+}
+
+func begin(run func(context.Context) (any, error)) *Running {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	r := &Running{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	go func() {
+		defer close(r.done)
+		r.answer, r.err = run(ctx)
+		if ctx.Err() != nil { // given up: its answer, or the verb's own error, is dropped
+			r.answer, r.err = nil, given(ctx)
+		}
+	}()
+	return r
+}
+
+// Abandon gives the call up as call.core.abandon does, with
+// host.ErrCallerGaveUp; it answers whether the call still ran, as the core's
+// answer does.
+func (r *Running) Abandon() bool { return r.end(host.ErrCallerGaveUp) }
+
+// Gone gives the call up as the core's dead-caller check does once its
+// caller's connection is gone, with host.ErrCallerGone.
+func (r *Running) Gone() { r.end(host.ErrCallerGone) }
+
+func (r *Running) end(cause error) bool {
+	select {
+	case <-r.done:
+		return false
+	default:
+	}
+	if r.ctx.Err() != nil {
+		return false
+	}
+	r.cancel(cause)
+	return true
+}
+
+// Wait answers the call's answer once it ended: a command's text, a verb's
+// answer, or why it was given up, wrapping the cause.
+func (r *Running) Wait() (any, error) {
+	<-r.done
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.answer, nil
+}
+
+// given is the error of a call whose ctx is done, naming its cause, as the
+// index names it; nil while it runs.
+func given(ctx context.Context) error {
+	if ctx.Err() == nil {
+		return nil
+	}
+	return fmt.Errorf("kerntest: the call is given up: %w", context.Cause(ctx))
+}
+
+func (f *Fake) callContext(ctx context.Context, name string, say func(line string), args ...string) (string, error) {
+	r, err := f.c.RunContext(ctx, name, f.read, args, nil)
 	var text []string
 	for {
 		if err != nil {
@@ -134,8 +221,9 @@ func (f *Fake) CallSaying(name string, say func(line string), args ...string) (s
 		}
 		answers := make([]any, 0, len(r.Requests))
 		for i, a := range r.Requests {
-			ans, err := f.answer(a)
+			ans, err := f.answerWithin(ctx, a)
 			if err != nil {
+				r.Stopped(err.Error())
 				return strings.Join(text, "\n"), fmt.Errorf("%s: request %d of %d, on %s, failed: %w", name, i+1, len(r.Requests), a.Port, err)
 			}
 			f.mu.Lock()
@@ -146,7 +234,37 @@ func (f *Fake) CallSaying(name string, say func(line string), args ...string) (s
 		if r.Then == nil {
 			return strings.Join(text, "\n"), nil
 		}
+		if err := given(ctx); err != nil {
+			r.Stopped(err.Error())
+			return strings.Join(text, "\n"), err
+		}
 		r, err = r.Then(answers)
+	}
+}
+
+// answerWithin answers a request with its port's answerer, and stops waiting
+// for it once ctx is done, as the core stops waiting for a verb.
+func (f *Fake) answerWithin(ctx context.Context, a index.Ask) (any, error) {
+	if ctx.Done() == nil {
+		return f.answer(a)
+	}
+	if err := given(ctx); err != nil {
+		return nil, err
+	}
+	type answered struct {
+		v   any
+		err error
+	}
+	got := make(chan answered, 1)
+	go func() {
+		v, err := f.answer(a)
+		got <- answered{v, err}
+	}()
+	select {
+	case g := <-got:
+		return g.v, g.err
+	case <-ctx.Done():
+		return nil, given(ctx)
 	}
 }
 

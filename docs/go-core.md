@@ -250,18 +250,27 @@ the core ends. Nothing in the component's process may then wait on it, so the co
   up as if the caller had sent `call.core.abandon`, so the call ends within the lease lapse.
 - **A request already out** is handed the call's context (the `ctx` of `Verb` and `JSONVerb`),
   so its verb lets go of what it holds: the GitHub component's `step` leaves the outbox at once,
-  and no session is pointed at a step that no one waits for. For a declared process's verb, the
-  core stops waiting for the answer; the answer is dropped either way.
+  and no session is pointed at a step that no one waits for. A declared process's verb hears the
+  stop word below on its `io.<i>.<verb>`; the answer is dropped either way.
 - **The stop word.** Where a declared component's step runs or its continuation waits, the core
   publishes `{"call", "stop"}` on the command's `cmd.<i>.<command>`, without a reply. The Python
   runner drops that call's continuation and sets the call's `Abandon` (`kern.abandoned()` in the
   call's code), so what waits on the call ends at once instead of at its own timeout.
+  - A request to a declared process's verb carries its own `call`, `{"call", "request"}` on
+    `io.<i>.<verb>`; where the core stops waiting for it, given up or past its wait, it publishes
+    `{"call", "stop"}` there, without a reply. The runner hears it at once, beside the request it
+    serves, and sets that request's `Abandon` (`kern.abandoned()` in the verb's code); a request
+    it names that has not run yet is answered as given up without running.
+- **In the Go fake core.** `kerntest`'s `Begin` and `BeginServe` run a command or a verb as a
+  call its test gives up: `Abandon` as `call.core.abandon` does, `Gone` as the dead-caller check
+  does, each with the core's cause (`host.ErrCallerGaveUp`, `host.ErrCallerGone`).
 - **Only that call.** Every other call of the component, of the same command or not, runs on.
   SE's streamed commands (`Stepped`) end their thread on it, and a call waiting for the process's
   working directory leaves the line.
 
 Proven by `kern/index/abandon_test.go` (the cause, and the stop word of one call of two),
-`kern/host/stream_test.go` (`call.core.abandon`, and the stop word on the bus),
+`kern/host/stream_test.go` (`call.core.abandon`, and the stop word on the bus, a command's and a
+declared verb's), `kern/kerntest/abandon_test.go` (the fake's),
 `kern/host/caller_test.go` (a caller process killed outright),
 `kern/components/github/step_test.go` (a given-up call's step leaves the outbox),
 `kern/python/tests/test_kern_stream.py` (the runner and the peer) and SE's

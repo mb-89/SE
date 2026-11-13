@@ -166,17 +166,26 @@ type StopWord struct {
 	Stop string `json:"stop"`
 }
 
-// Serve asks the process for one request on a verb, and waits StepWait for
-// its answer, or until ctx is done: the call that asked it is given up.
+// Serve asks the process for one request on a verb, {"call", "request"},
+// and waits StepWait for its answer, or until ctx is done: the call that
+// asked it is given up. Where it stops waiting, it tells the process with the
+// stop word on the verb's io.<i>.<verb>, without a reply, {"call", "stop"},
+// as Stop tells a command's, so the verb's code in the process ends too.
 func (r remote) Serve(ctx context.Context, verb string, req json.RawMessage) (json.RawMessage, error) {
 	if err := r.c.waitAttached(r.inst); err != nil {
 		return nil, err
 	}
-	data, _ := json.Marshal(map[string]json.RawMessage{"request": req})
+	call := fmt.Sprintf("%d", r.c.asks.Add(1))
+	data, _ := json.Marshal(map[string]any{"call": call, "request": req})
 	ctx, cancel := context.WithTimeout(ctx, r.c.o.StepWait)
 	defer cancel()
-	m, err := r.c.nc.RequestWithContext(ctx, bus.IOVerb+bus.Subject(r.inst)+"."+bus.Token(verb), data)
+	subject := bus.IOVerb + bus.Subject(r.inst) + "." + bus.Token(verb)
+	m, err := r.c.nc.RequestWithContext(ctx, subject, data)
 	if err != nil {
+		if ctx.Err() != nil {
+			why, _ := json.Marshal(StopWord{Call: call, Stop: fmt.Sprintf("instance %s: verb %s: the call is given up: %v", r.inst, verb, context.Cause(ctx))})
+			_ = r.c.nc.Publish(subject, why)
+		}
 		return nil, fmt.Errorf("instance %s: verb %s: %w", r.inst, verb, err)
 	}
 	var a struct {

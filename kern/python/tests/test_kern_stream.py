@@ -179,3 +179,82 @@ def test_a_caller_that_stops_waiting_gives_its_call_up(monkeypatch) -> None:
     except nats.NatsError:
         pass
     assert [s for s, _, _ in sent] == ["call.quick"], "without give_up, nothing is given up"
+
+
+DESK = """name = "desk"
+contract = 1
+io = true
+help = "Answers questions."
+
+[verbs.answer]
+type = "string"
+answer = "string"
+help = "Answers a question once its call is given up."
+"""
+
+DESK_INIT = """from kern import abandoned, component
+
+desk = component("desk")
+started = __import__("threading").Event()
+
+
+@desk.verb("answer")
+def answer(question):
+    started.set()
+    given = abandoned()
+    if not given.event.wait(10):
+        return "never given up"
+    return f"{question}: {given.reason}"
+"""
+
+
+class Answering(Peer):
+    """A Peer that also records the runner's answers to requests."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.answered: list[tuple[str, dict]] = []
+
+    def respond(self, msg, data) -> None:
+        with self.lock:
+            self.answered.append((msg.reply, data))
+
+
+def test_the_cores_stop_word_on_a_verb_ends_the_request_it_names(tmp_path: Path) -> None:
+    """The core's stop word on io.<i>.<verb>, a message without a reply that names the request's
+    call: the verb serving it reads it with kern.abandoned() and ends, and a request it names
+    before it runs is answered as given up without running."""
+    from kern.nats import Msg
+
+    (tmp_path / "component.toml").write_text(DESK, encoding="utf-8")
+    (tmp_path / "__init__.py").write_text(DESK_INIT, encoding="utf-8")
+    comp = runner.load(tmp_path)
+    peer = Answering()
+    run = runner.Runner(comp, peer, "desk")  # type: ignore[arg-type]
+    module = sys.modules["kern_component_desk"]
+    subject = "io.desk.answer"
+
+    def request(call: str) -> Msg:
+        return Msg(subject, f"_INBOX.r{call}", json.dumps({"call": call, "request": "q" + call}).encode())
+
+    def stop(call: str) -> Msg:
+        return Msg(subject, "", json.dumps({"call": call, "stop": "its caller gave it up"}).encode())
+
+    # Given up while its verb runs: the verb ends with the reason.
+    first = request("1")
+    run._asked(first)
+    assert run._work.get_nowait() is first
+    serving = threading.Thread(target=run._handle, args=(first,))
+    serving.start()
+    assert module.started.wait(10)
+    run._asked(stop("1"))
+    serving.join(10)
+    assert peer.answered == [("_INBOX.r1", {"answer": "q1: its caller gave it up"})]
+    # Given up before it runs: answered as given up, its verb never runs.
+    module.started.clear()
+    second = request("2")
+    run._asked(second)
+    run._asked(stop("2"))
+    run._handle(run._work.get_nowait())
+    assert peer.answered[1] == ("_INBOX.r2", {"error": "the core gave it up: its caller gave it up"})
+    assert not module.started.is_set() and not run._asks

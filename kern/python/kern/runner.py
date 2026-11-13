@@ -16,7 +16,10 @@ environment (``CORE_BUS``, ``CORE_USER``, ``CORE_TOKEN``), as docs/go-core.md,
    ``cmd.<i>.<command>`` without a reply, ``{"call", "stop"}``, is the core's
    stop word: it gave that call up, so the runner drops the call's waiting
    continuation and sets its :class:`Abandon`, which the call's code reads
-   with :func:`abandoned`;
+   with :func:`abandoned`; one on ``io.<i>.<verb>`` without a reply,
+   ``{"call", "stop"}``, names a request the core stopped waiting for, whose
+   verb's code reads it the same way, and a request it names that has not run
+   yet is answered as given up without running;
 4. it beats on ``lease.<i>`` from its work loop, every 5 s.
 
 It ends when the bus closes: the core ended it, or ended.
@@ -77,8 +80,9 @@ _current = threading.local()
 
 
 def abandoned() -> Abandon:
-    """The :class:`Abandon` of the call this thread runs a step of; outside a runner's step, one
-    the core never sets, as the fake core gives no call up."""
+    """The :class:`Abandon` of the call this thread runs a step of, or of the request it serves on
+    an I/O verb; outside a runner's step, one the core never sets, as the fake core gives no call
+    up."""
     got = getattr(_current, "abandon", None)
     return got if got is not None else Abandon()
 
@@ -114,6 +118,8 @@ class Runner:
         self._work: queue.Queue[Msg | None] = queue.Queue()
         self._steps: dict[str, Result] = {}
         self._abandons: dict[str, Abandon] = {}
+        #: Each request on io.<i>.<verb> by its call, from its arrival until it is answered.
+        self._asks: dict[str, Abandon] = {}
         self._steps_lock = threading.Lock()
         self._run_due = threading.Event()
 
@@ -129,7 +135,7 @@ class Runner:
         p.subscribe("run." + self.me, self._due)
         p.subscribe("cmd." + self.me + ".>", self._called)
         if self.comp.decl.io:
-            p.subscribe("io." + self.me + ".>", self._work.put)
+            p.subscribe("io." + self.me + ".>", self._asked)
         p.flush()
         self.attach()
         p.publish("lease." + self.me)
@@ -165,6 +171,23 @@ class Runner:
         # Each step runs in its own thread, so a long call never holds another; the steps of one
         # call never overlap, as the core asks the next only once the last has answered.
         threading.Thread(target=self._answer_step, args=(msg,), name="kern-step", daemon=True).start()
+
+    def _asked(self, msg: Msg) -> None:
+        """A request on io.<i>.<verb>, for the work loop, or the core's stop word for one, at once:
+        the work loop may be serving the very request it ends."""
+        body = msg.json() or {}
+        call = str(body.get("call", ""))
+        if not msg.reply:  # no request: the core's stop word, {"call", "stop"}
+            if "stop" in body:
+                with self._steps_lock:  # it stays until its request is answered (_handle)
+                    abandon = self._asks.get(call)
+                if abandon is not None:
+                    abandon.set(str(body["stop"]))
+            return
+        if call:
+            with self._steps_lock:
+                self._asks.setdefault(call, Abandon())
+        self._work.put(msg)
 
     def _answer_step(self, msg: Msg) -> None:
         try:
@@ -211,10 +234,23 @@ class Runner:
         what = word(rest[len(self.me) + 1:])
         body = msg.json() or {}
         if verb == "io":
+            call = str(body.get("call", ""))
+            with self._steps_lock:
+                abandon = self._asks.get(call) or Abandon()
+            if abandon.event.is_set():  # given up before it ran: nobody waits for its answer
+                with self._steps_lock:
+                    self._asks.pop(call, None)
+                self.peer.respond(msg, {"error": f"the core gave it up: {abandon.reason}"})
+                return
+            _current.abandon = abandon
             try:
                 self.peer.respond(msg, {"answer": self.comp.serve(what, body.get("request"))})
             except Exception as e:
                 self.peer.respond(msg, {"error": str(e)})
+            finally:
+                _current.abandon = None
+                with self._steps_lock:
+                    self._asks.pop(call, None)
             return
         self.peer.respond(msg, self._step(what, body))
 
