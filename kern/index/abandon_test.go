@@ -58,7 +58,7 @@ func (r *heldRemote) Stop(_, call, reason string) {
 	r.stopped[call] = reason
 }
 
-func (r *heldRemote) Serve(string, json.RawMessage) (json.RawMessage, error) {
+func (r *heldRemote) Serve(context.Context, string, json.RawMessage) (json.RawMessage, error) {
 	return nil, errors.New("held serves no verb")
 }
 
@@ -77,7 +77,7 @@ func heldIndex(t *testing.T) (*index.Index, *heldRemote, chan struct{}) {
 	t.Helper()
 	release := make(chan struct{})
 	desk := index.Declare("desk", "Answers questions.", index.IO(),
-		index.Verb("answer", "Answers once the case lets it go.", func(q string) (string, error) {
+		index.Verb("answer", "Answers once the case lets it go.", func(_ context.Context, q string) (string, error) {
 			if q == "refuse" {
 				return "", errors.New("the desk refuses")
 			}

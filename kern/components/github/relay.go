@@ -1,6 +1,7 @@
 package github
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -368,18 +369,20 @@ type stepResult struct {
 	err error
 }
 
-// stepKey is a step's key in the outbox: step.<tool>.<hash of its input>, so
+// StepKey is a step's key in the outbox: step.<tool>.<hash of its input>, so
 // one tool call asked twice waits as one entry.
-func stepKey(a StepAsk) string {
+func StepKey(a StepAsk) string {
 	data, _ := json.Marshal(a.Input) // maps marshal in key order
 	sum := sha256.Sum256(append([]byte(a.Tool+"\n"), data...))
 	return "step." + strings.ToLower(a.Tool) + "." + hex.EncodeToString(sum[:6])
 }
 
 // step puts one tool call in the outbox and waits for the PostToolUse that
-// answers it. Only the relay runs steps: with a token, the application runs
+// answers it, its wait, or ctx: once the call that asked it is given up, the
+// step leaves the outbox at once, so no session is pointed at a step no one
+// waits for. Only the relay runs steps: with a token, the application runs
 // its GitHub steps itself.
-func (g *GitHub) step(a StepAsk) (StepAnswer, error) {
+func (g *GitHub) step(ctx context.Context, a StepAsk) (StepAnswer, error) {
 	if a.Tool == "" || strings.Contains(a.Tool, "__") || a.Input == nil {
 		return StepAnswer{}, fmt.Errorf("github step: a step names the tool's bare name, such as merge_pull_request, and its input, not %+v", a)
 	}
@@ -399,7 +402,7 @@ func (g *GitHub) step(a StepAsk) (StepAnswer, error) {
 			wait = d
 		}
 	}
-	key := stepKey(a)
+	key := StepKey(a)
 	now := g.o.Now().UTC()
 	w := &waitingStep{ask: a, asked: now, answer: make(chan stepResult, 1)}
 	g.mu.Lock()
@@ -422,6 +425,9 @@ func (g *GitHub) step(a StepAsk) (StepAnswer, error) {
 	select {
 	case r := <-w.answer:
 		return r.a, r.err
+	case <-ctx.Done():
+		g.drop(key)
+		return StepAnswer{}, fmt.Errorf("github step %s: its call is given up: %w; outbox step %s dropped", a.Tool, context.Cause(ctx), key)
 	case <-timer.C:
 	}
 	g.drop(key)

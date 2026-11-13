@@ -1,7 +1,9 @@
 package github_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -266,4 +268,50 @@ func TestAHookPrintsTheRelaysStepsAsContext(t *testing.T) {
 		t.Fatal("a Stop, or an answer with nothing told, prints hook output")
 	}
 	_, _ = host.Post(host.Wall{}, s.Root, github.PostToolUse, toolUse("mcp__github__merge_pull_request", map[string]any{"owner": "alice", "repo": "demo", "pullNumber": 8}, `{}`), 10*time.Second)
+}
+
+// A call given up while its step stands in the outbox takes the step out at
+// once, long before the step's wait: no session is told a step that no one
+// waits for, and the outbox name holds it no longer.
+func TestAGivenUpCallsStepLeavesTheOutbox(t *testing.T) {
+	t.Parallel()
+	g, ix := startedSteps(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, ``)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := ix.CallContext(ctx, "run", nil, "merge_pull_request", `{"owner": "alice", "repo": "demo", "pullNumber": 8}`)
+		done <- err
+	}()
+	waitOutbox(t, g, "merge_pull_request")
+	name := "github/outbox/" + github.StepKey(github.StepAsk{Tool: "merge_pull_request", Input: map[string]any{"owner": "alice", "repo": "demo", "pullNumber": 8.0}})
+	if v, err := ix.Read(name); err != nil || !v.Provided {
+		t.Fatalf("the step does not stand at %s: %+v, %v", name, v, err)
+	}
+	cancel(errors.New("the caller is gone"))
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "the call is given up: the caller is gone") {
+			t.Fatalf("the given-up call answers %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the given-up call still waits for its step")
+	}
+	// Half the stepper's step wait of 10s: the step goes with its call, not with its wait.
+	end := time.Now().Add(5 * time.Second)
+	for {
+		v, err := ix.Read(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g.Outbox() == "" && !v.Provided {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatalf("the given-up call's step stands in the outbox: %q, %s holds %+v", g.Outbox(), name, v)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if said := ix.Tell("UserPromptSubmit", nil); len(said) != 0 {
+		t.Fatalf("a session is told %q after the call was given up", said)
+	}
 }

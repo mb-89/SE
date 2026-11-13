@@ -1,6 +1,7 @@
 package index_test
 
 import (
+	"context"
 	"reflect"
 	"slices"
 	"strings"
@@ -293,7 +294,7 @@ func TestABrokenDeclarationIsRefused(t *testing.T) {
 		index.Derived("d", 0, "help", func(untagged) (int, error) { return 0, nil }),
 		index.Command(index.CommandDecl{Name: "broken"}, func(xIn, []string) (index.Result, error) { return index.Result{}, nil }),
 		index.Request[string, int]("o", ""),
-		index.Verb("v", "", func(string) (int, error) { return 0, nil }),
+		index.Verb("v", "", func(context.Context, string) (int, error) { return 0, nil }),
 	)
 	for _, want := range []string{
 		"component broken has no help", "output o has no help", "tagged index", `command "broken" has no summary`,
