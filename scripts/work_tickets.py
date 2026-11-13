@@ -1134,6 +1134,25 @@ def fetch_issue(root: Path, number: int, repo: str | None) -> dict[str, object]:
     )))
 
 
+def relay_for(root: Path):
+    """kern's GitHub relay for `root`, where kern serves it with the relay backend; None
+    otherwise, and the command keeps its file-based hand-off. Loaded lazily so the direct path
+    needs no kern."""
+    return sibling("se_relay").relay(root)
+
+
+def relay_issue(relay, root: Path, repo: str, number: int) -> dict[str, object]:
+    """The work issue and its comments as kern's relay holds them, read from the GitHub tool
+    answers the session's hooks landed; raises naming the tool calls where a snapshot is missing
+    or stale (se_relay.RelayError)."""
+    owner, name = api_repo(repo).split("/")
+    issue = json.loads(relay.answer_file("issues", owner, name, number, "work issue")
+                       .read_text(encoding="utf-8"))
+    comments = json.loads(relay.answer_file("comments", owner, name, number, "work issue comments")
+                          .read_text(encoding="utf-8"))
+    return issue_record(issue, comments if isinstance(comments, list) else [])
+
+
 def first_of(item: dict[str, object], *keys: str) -> object:
     """The first of `keys` that `item` holds a value for: gh's camelCase name or the REST API's
     and the GitHub tools' snake_case one."""
@@ -1644,7 +1663,16 @@ def intake(
     paths, tickets, errors = scan_queue(root)
     if errors:
         raise QueueError("; ".join(errors))
-    issue = answered if answered is not None else fetch_issue(root, number, resolve_repo(root, repo))
+    if answered is not None:
+        issue = answered
+    else:
+        try:  # gh first; where the host gives it no account, kern's relay, else the no-gh message
+            issue = fetch_issue(root, number, resolve_repo(root, repo))
+        except MissingGhError:
+            relay = relay_for(root)
+            if relay is None:
+                raise
+            issue = relay_issue(relay, root, resolve_repo(root, repo), number)
     existing = [ticket.ticket_id for ticket in tickets]
     created: list[str] = []
     kept: list[str] = []
@@ -2173,7 +2201,9 @@ def guard(root: Path, branch: str, report: str) -> list[str]:
     if missing:
         raise QueueError(
             "Field report must name each deleted or renamed test and authored sentence: "
-            + ", ".join(missing)
+            + ", ".join(missing) + f". A branch behind {integration_ref(root)} reads as deleting "
+            "what landed there since: merge it first (work_tickets.py sync; deliver does) and "
+            "check again"
         )
     return [*removed_tests, *removed_sentences]
 
@@ -2711,13 +2741,35 @@ def pull_request_body(issue: dict[str, object], report: str) -> str:
     return f"{keyword} {issue['url']}\n\n{marked_report(report)}"
 
 
+def merge_current_main(root: Path, branch: str) -> None:
+    """`deliver`'s start: merge the newest integration branch into `branch` (`sync`), so the
+    checks that follow, `integrate`'s guard among them, and the delivery itself are against
+    current main. A conflict aborts the merge, leaves the branch as it was and names its files."""
+    before = branch_tip(root)
+    try:
+        commit = sync(root)
+    except QueueError as error:
+        conflicted = run_git(root, "diff", "--name-only", "--diff-filter=U").stdout.split()
+        if not conflicted:
+            raise
+        run_git(root, "merge", "--abort")
+        raise QueueError(
+            f"deliver: merging {integration_ref(root)} into {branch} conflicts in "
+            f"{', '.join(conflicted)}; nothing was pushed. Run work_tickets.py sync, resolve those "
+            "files, commit the merge, rerun the focused tests and deliver again"
+        ) from error
+    if branch_tip(root) != before:
+        print(f"Merged {integration_ref(root)} ({commit}) into {branch}; checking against it")
+
+
 def deliver(root: Path) -> int:
-    """Sync, check the field report, push, and open or update the pull request whose description
-    carries the report; returns the pull request's number. No issue is filed."""
+    """Merge current main, check the field report against it, push, and open or update the pull
+    request whose description carries the report; returns the pull request's number. No issue is
+    filed."""
     issue = required_snapshot(root)
     check_issue_read(root, None, None, str(issue["url"]))
     branch = delivery_branch(root, issue)
-    sync(root)
+    merge_current_main(root, branch)
     file = root / ".se" / "work" / "field-report.md"
     if not file.exists():
         draft_field_report(root, file)
@@ -3531,13 +3583,20 @@ def check_issue_read(
     comments = None
     if current is None or body is None:
         snapshot = load_snapshot(root)
-        if snapshot is None or not gh_usable():
-            raise QueueError(
-                "Cannot compare the work issue with what was recorded as read: gh is not usable "
-                "or intake's snapshot is missing; pass --comment-count <n> --newest-comment <id> "
-                "and --issue-body <file> as your GitHub tools read the issue now"
-            )
-        fetched = fetch_issue(root, int(snapshot["number"]), str(snapshot["repo"]))
+        missing = QueueError(
+            "Cannot compare the work issue with what was recorded as read: gh is not usable "
+            "or intake's snapshot is missing; pass --comment-count <n> --newest-comment <id> "
+            "and --issue-body <file> as your GitHub tools read the issue now"
+        )
+        if snapshot is None:
+            raise missing
+        try:  # gh first; where the host gives it no account, kern's relay
+            fetched = fetch_issue(root, int(snapshot["number"]), str(snapshot["repo"]))
+        except MissingGhError:
+            relay = relay_for(root)
+            if relay is None:
+                raise missing from None
+            fetched = relay_issue(relay, root, str(snapshot["repo"]), int(snapshot["number"]))
         if current is None:
             comments = fetched["comments"]
             current = comment_state(comments)
@@ -5748,6 +5807,40 @@ def handed_pull_request(root: Path, pull_number: int, remote: str, description: 
     return pull, report, {"body": body}, int(work[1])
 
 
+def relay_pull_request(relay, root: Path, pull_number: int, remote: str
+                       ) -> tuple[dict[str, object], str, dict[str, object], int]:
+    """What `pull_request_report` reads, from kern's relay instead of retyped files: the pull
+    request (its snapshot), its field report, its work issue (that snapshot) and its number. No
+    file is saved."""
+    owner, name = api_repo(remote).split("/")
+    data = json.loads(relay.answer_file("pulls", owner, name, pull_number, "pull request")
+                      .read_text(encoding="utf-8"))
+    text = str(data.get("body") or "")
+    where = f"pull request #{pull_number}"
+    report = report_in(text, f"The description of {where}")
+    work = WORK_ISSUE_PATTERN.search(report)
+    if work is None:
+        raise QueueError(
+            f"The field report in {where} names no work issue; the worker writes "
+            "**Work issue:** #<n> in its header and delivers again")
+    work_number = int(work[1])
+    head = data.get("head") if isinstance(data.get("head"), dict) else {}
+    branch = str(head.get("ref") or "")
+    if not branch:
+        raise QueueError(f"The pull request snapshot of #{pull_number} names no head branch")
+    issue = issue_record(json.loads(
+        relay.answer_file("issues", owner, name, work_number, "work issue")
+        .read_text(encoding="utf-8")))
+    body = str(issue["body"])
+    problems = field_report_problems(report, body)
+    if problems:
+        raise field_report_error(f"in {where}", problems)
+    checked_git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+    pull = {"number": pull_number, "url": pull_url(remote, pull_number), "body": text,
+            "headRefName": branch, "headRefOid": str(head.get("sha") or remote_head(root, branch))}
+    return pull, report, {"body": body}, work_number
+
+
 def integrate(
     root: Path,
     pull_number: int,
@@ -5778,7 +5871,10 @@ def integrate(
             "git remote add origin <url>"
         )
     feedback.phase(f"read pull request #{pull_number} and its field report")
-    if handing_off:
+    relay = relay_for(root) if handing_off and pr_description is None else None
+    if handing_off and relay is not None:
+        pull, report, work_issue, work_number = relay_pull_request(relay, root, pull_number, remote)
+    elif handing_off:
         pull, report, work_issue, work_number = handed_pull_request(
             root, pull_number, remote, pr_description, issue_body, head_branch)
     else:
@@ -5861,10 +5957,12 @@ def integrate(
             "check_commands": check_commands,
             "check_temporary_working_directory": check_temporary_working_directory,
         }
+        landing_desc = ("--landing-description <file: the landing pull request's description, as "
+                        "pull_request_read get reads it after step 4> ")
+        if relay is not None:  # the relay holds that read: the read-back sources it, no file
+            landing_desc = ""
         then = (f"work_tickets.py integrate --read-back {branch} --landing-pull <pull number from "
-                f"step 2> --check-run <check run url from step 3> --landing-description <file: "
-                f"the landing pull request's description, as pull_request_read get reads it "
-                f"after step 4> --worktree {root}")
+                f"step 2> --check-run <check run url from step 3> {landing_desc}--worktree {root}")
         description = landing_description(
             str(pull.get("url") or pull_url(remote, pull_number)), pull_number,
             issue_url(tracker, work_number), metrics.snapshot())
@@ -5873,11 +5971,15 @@ def integrate(
         if handing_off:
             path = handoff_path(root, branch)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps({**state, "plan": plan.data()}, indent=2, sort_keys=True)
-                            + "\n", encoding="utf-8")
+            path.write_text(json.dumps({**state, "plan": plan.data(), "relay": relay is not None},
+                                       indent=2, sort_keys=True) + "\n", encoding="utf-8")
             checked_git(root, "switch", "-q", target)
-            print(f"Pushed {landing} at {landed[:12]}; gh is not signed in, so the session runs "
-                  f"these GitHub steps with its GitHub tools (kept in {path}):")
+            through = ("kern's GitHub relay serves this checkout, so no answer is retyped: run "
+                       "these GitHub tool calls and their answers reach the command through kern's "
+                       "PostToolUse hook" if relay is not None
+                       else "gh is not signed in, so the session runs these GitHub steps with its "
+                       "GitHub tools")
+            print(f"Pushed {landing} at {landed[:12]}; {through} (kept in {path}):")
             print(plan.text())
             return None
         feedback.phase("landing plan: the landing pull request, its check, the squash merge")
@@ -5913,16 +6015,27 @@ def landed_metrics(state: dict[str, object], landing_pull: int, description: str
 
 
 def read_back_integration(root: Path, branch: str, landing_pull: int, check_run: str,
-                          description: str) -> str:
+                          description: str | None) -> str:
     """The hand-off's second half: check the landing pull request's `description` for its
     metrics line, read the landing of `branch` back through git and finish the close-out,
-    printing its GitHub steps for the session."""
+    printing its GitHub steps for the session. Where the hand-off went through kern's relay,
+    `description` is read from the landing pull request's snapshot, not a retyped file."""
     path = handoff_path(root, branch)
     if not path.is_file():
         raise QueueError(
             f"No hand-off for {branch} in {root} ({path} is missing); integrate <pull request> "
             "first, which writes it")
     state = json.loads(path.read_text(encoding="utf-8"))
+    if description is None:
+        relay = relay_for(root) if state.get("relay") else None
+        if relay is None:
+            raise QueueError(
+                "--read-back needs --landing-description <file>, the landing pull request's "
+                "description after the merge, or a checkout kern's relay served the integrate")
+        owner, name = api_repo(str(state["remote"])).split("/")
+        description = str(json.loads(
+            relay.answer_file("pulls", owner, name, landing_pull, "landing pull request")
+            .read_text(encoding="utf-8")).get("body") or "")
     metrics.note(issue=state["work_number"])
     landed_metrics(state, landing_pull, description)
     feedback.phase(f"read back the landing of {branch}")
@@ -7413,8 +7526,11 @@ def run_integrate(root: Path, args: argparse.Namespace) -> int:
     if (args.read_back is None) == (args.pull_request is None):
         raise QueueError("integrate takes a pull request number or --read-back <branch>, one of them")
     if args.read_back is not None:
-        read_back_arguments(args, "landing_pull", "check_run", "landing_description")
-        description = read_file(args.landing_description, "the landing pull request's description")
+        read_back_arguments(args, "landing_pull", "check_run")
+        if args.landing_description is None and relay_for(root) is None:
+            read_back_arguments(args, "landing_description")  # no relay to read it from
+        description = (read_file(args.landing_description, "the landing pull request's description")
+                       if args.landing_description is not None else None)
         commit = read_back_integration(root, args.read_back, args.landing_pull, args.check_run,
                                        description)
         print(f"Integrated {args.read_back} in {commit}")
@@ -7611,11 +7727,11 @@ def run_stop_check(root: Path | None, args: argparse.Namespace) -> int:
 
 README = Path(__file__).resolve().parents[1] / "README.md"
 REFERENCE_BEGIN, REFERENCE_END = generated_markers("`work_tickets.py docs`")
-REFERENCE_WIDTH = 100
 
 #: The kern component each command attaches as, by group, in the README's order
-#: (README "Commands as components"): its name, its help, and its commands by their words.
-COMMAND_COMPONENTS = (
+#: (README "Commands as components"): its name, its heading, its help, and its commands by their
+#: words. se_components.declarations reads each command's usage and help from make_parser.
+COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
     ("tickets", "Tickets",
      "The worker's local ticket queue under .se/work: tickets, notes, discovery evidence and the "
      "worktree's close.",
@@ -7637,7 +7753,9 @@ COMMAND_COMPONENTS = (
      ("integrate", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
       "suite-time", "metrics", "config", "start", "ready", "capacity", "queue", "fleet-check",
       "docs", "format")),
-)
+))
+#: What the header of these components' declarations says they are generated from.
+COMPONENT_SOURCE = "its command registry"
 #: The commands a person waits on that only read: these go through kern where it runs
 #: (se_components.routed); every other command writes, or a hook, CI or a command runs it.
 INTERACTIVE_COMMANDS = frozenset(
@@ -7645,22 +7763,12 @@ INTERACTIVE_COMMANDS = frozenset(
 
 
 def command_declarations(root: Path) -> dict[Path, str]:
-    """Each command group's component.toml under root, as docs writes it from this registry."""
-    se_components = sibling("se_components")
-    leaves = {" ".join(words): (words, command_) for words, command_ in leaf_commands()}
-    grouped = [name for *_, names in COMMAND_COMPONENTS for name in names]
-    if sorted(grouped) != sorted(leaves):
-        missing, extra = sorted(set(leaves) - set(grouped)), sorted(set(grouped) - set(leaves))
-        raise QueueError(f"COMMAND_COMPONENTS differs from the registry: missing {missing}, "
-                         f"unknown {extra}")
-    out = {}
-    for name, group, help_text, names in COMMAND_COMPONENTS:
-        declared = [se_components.Declared(" ".join((COMMANDS.name, *leaves[n][0])),
-                                           command_usage(*leaves[n]), leaves[n][1].help,
-                                           n in INTERACTIVE_COMMANDS) for n in names]
-        out[root / se_components.COMPONENTS / name / "component.toml"] = se_components.declaration(
-            name, help_text, group, declared, "`work_tickets.py docs`")
-    return out
+    """The component.toml of every SE command group under root (se_components.SCRIPTS), as docs
+    writes it from each script's parser."""
+    try:
+        return sibling("se_components").components(root)
+    except ValueError as error:
+        raise QueueError(f"docs: {error}") from error
 
 
 def stale_declarations(root: Path) -> dict[Path, str]:
@@ -7770,23 +7878,11 @@ def make_parser() -> argparse.ArgumentParser:
                         COMMANDS)
 
 
-def command_usage(words: tuple[str, ...], command_: Command) -> str:
-    """A command's usage as argparse prints it, without its "usage: " prefix."""
-    def formatter(prog: str) -> argparse.HelpFormatter:
-        return argparse.HelpFormatter(prog, width=REFERENCE_WIDTH)
-    parser = argparse.ArgumentParser(
-        prog=" ".join((COMMANDS.name, *words)), add_help=False, formatter_class=formatter)
-    add_arguments(parser, command_)
-    # Without argparse's "usage: " prefix, its continuation lines move left by as much.
-    return "\n".join(line[len("usage: "):] for line in parser.format_usage().rstrip().splitlines())
-
-
 def command_reference(root: Path) -> str:
     """The README's command reference, rendered from the command groups' declarations under root
     as kern reads them: kern's catalog of SE's commands."""
     se_components = sibling("se_components")
-    return se_components.reference(se_components.catalog(
-        root, [name for name, *_ in COMMAND_COMPONENTS]))
+    return se_components.reference(se_components.catalog(root, se_components.component_names()))
 
 
 def with_command_reference(text: str, root: Path | None = None) -> str:
@@ -7840,7 +7936,7 @@ def run_command(args: argparse.Namespace) -> int:
     except SuiteOverLimitError as error:
         print(f"error: {error}", file=sys.stderr)
         return SUITE_OVER_LIMIT_EXIT_CODE
-    except (QueueError, OSError, ValueError, KeyError) as error:
+    except (QueueError, OSError, ValueError, KeyError, sibling("se_relay").RelayError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 

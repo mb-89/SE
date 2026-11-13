@@ -430,6 +430,9 @@ type HookAnswer struct {
 	Effect string `json:"effect"`
 	Output string `json:"output,omitempty"`
 	Error  string `json:"error,omitempty"`
+	// Context is what the components that tell the agent say on the event,
+	// which the hook hands the agent; empty for none.
+	Context string `json:"context,omitempty"`
 }
 
 // hook takes a host's hook event: each renews the session's lease, and
@@ -462,9 +465,10 @@ func (c *Core) hook(m *nats.Msg) {
 	if err := c.ix.Hear(event, m.Data); err != nil {
 		fmt.Fprintln(c.o.Log, err)
 	}
+	told := strings.Join(c.ix.Tell(event, m.Data), "\n\n")
 	h, bound := c.hooks[event]
 	if !bound {
-		c.reply(m, HookAnswer{Effect: Pass})
+		c.reply(m, HookAnswer{Effect: Pass, Context: told})
 		return
 	}
 	if _, declared := c.declared[h.Instance]; declared && !c.isAttached(h.Instance) {

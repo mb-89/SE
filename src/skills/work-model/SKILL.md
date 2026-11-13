@@ -253,6 +253,15 @@ the issues dispatch reads:
   step reads the work issue from the description's first line with it, so both accept the short
   and the full form.
 
+A delivery is against current main: with several workers in parallel each landing makes the other
+branches stale, and against the new main a stale branch reads to `integrate`'s guard as deleting
+what landed.
+
+- `deliver` first merges the newest integration branch, then checks the field report and runs the
+  guard against the merge, and only then pushes.
+- A conflict stops it before any push, naming the conflicting files.
+- [Without gh](#without-gh) the same order holds: `sync`, the check, then `push`.
+
 Nothing reaches the integration branch without a passing complete suite and, unless `se.toml` sets
 `public_check = false`, a passing public check on exactly the tree pushed:
 
@@ -617,6 +626,18 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     request read names its merge commit.
   - The commands that read such files accept both shapes, the tools' and the REST API's; where
     the tools name nothing, the command says what it falls back to, as `retro.py` does.
+- **Through kern's relay, no file retyped**: where kern serves the checkout with its GitHub
+  component on the relay backend (a cloud session, no token), a command reads GitHub from kern
+  instead of from a file the session retypes.
+  - Every GitHub tool answer the session receives lands in kern's snapshot (`github/issues/<key>`,
+    `github/pulls/<key>`, `github/comments/<key>`), so `intake`, `field-report --check`, `deliver`
+    and `integrate` (its pull request, work issue and landing description) read it from there.
+  - Where a snapshot is missing or stale the command names the exact GitHub tool call to run and
+    stops; the session runs it (the hook, telling it the waiting calls, points the same way), its
+    answer reaches kern through the PostToolUse hook, and the command runs again.
+  - `integrate`'s read-back then needs no `--landing-description`: it reads the landing pull
+    request from the relay. `SE_KERN=off`, no kern or a token backend keeps the file-based path
+    above, the fallback; `<se>/scripts/se_relay.py` owns which path a command takes.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
   `review-note`, `probe`, `sync`, `identity`, `suite`, `suite-shard`, `suite-time`, `guard`, `config`,
   `close`, `push`, `verified`, `comments-read`, `body-read --body-file`, `release-trailer`,
@@ -639,7 +660,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   for example:
   - `intake`: `intake --issue-body <file> --comments-file <file>`, the issue (`issue_read`,
     method `get`) and its comments (method `get_comments`) as the tools answered them; it writes
-    the tickets, the snapshot and both read records as `intake --issue` does.
+    the tickets, the snapshot and both read records as `intake --issue` does. Where kern's relay
+    serves the checkout, `intake --issue <n>` reads both from the relay instead (no file).
     - The first `move --to held` after it reads the issue again: `move --issue-body <file>`, the
       issue as the tools answer it then. An `updated_at` later than intake's with a changed body
       refuses the hold until `intake` has read the new answer; with the body unchanged it passes,
@@ -673,14 +695,17 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - `integrate`: the hand-off, the cloud path of [Landing on main](../../../README.md#landing-on-main).
     - Save the pull request's description and its work issue's body to files, then run
       `integrate <pull request> --pr-description <file> --issue-body <file> --branch <its head
-      branch>`.
+      branch>`. Where kern's relay serves the checkout, run `integrate <pull request>` alone: it
+      reads the pull request and its work issue from the relay, no file.
     - It checks the report, merges on `land/<branch>`, runs the complete suite, the checks and
       the public check, releases, pushes `land/<branch>` and prints the landing plan.
     - Its refusals (late commits, a failed check) are those with `gh`; `--include-late <reason>`
       states why late commits are included.
     - Run the plan's steps; anything but a passed `check` merges nothing.
     - Then `integrate --read-back <branch> --landing-pull <number> --check-run <url>
-      --landing-description <file>`, the landing pull request's description saved after the merge.
+      --landing-description <file>`, the landing pull request's description saved after the merge;
+      through the relay, run it without `--landing-description` and it reads that description from
+      the relay too.
     - It refuses a description without the plan's `Metrics:` line, reads the landing back through
       git, fast-forwards the checkout, cleans up and prints the close-out plan; run its steps. It starts no session: start what is unblocked as `start`
       above says.

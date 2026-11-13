@@ -133,10 +133,15 @@ every package, so work issues and session prompts never repeat it.
        against the branch: it refuses, as the landing would, a report whose "Removed behaviour,
        deleted or weakened tests, and authored prose" does not name each test and authored
        sentence the branch deletes or rewrites, and nothing is pushed or posted.
-   - Then run `work_tickets.py deliver`; it syncs, pushes, creates or updates the pull request
-     with the field report as its description (as `work_tickets.py pr-body` prints it), files no
-     issue, and prints the integrator notification. A commit after delivery changes the Branch
-     tip: check and deliver again, which updates the description in place.
+   - Then run `work_tickets.py deliver`; it merges current main first, checks the report and runs
+     the guard again against the merge, pushes, creates or updates the pull request with the field
+     report as its description (as `work_tickets.py pr-body` prints it), files no issue, and prints
+     the integrator notification.
+     - A commit after delivery changes the Branch tip: check and deliver again, which updates the
+       description in place.
+     - Delivering on current main ([Integration branch](../skills/work-model/SKILL.md#integration-branch))
+       spares the landing a round: a merge it reports bringing commits gets the focused tests again;
+       a conflict stops it, naming the files, to resolve after `work_tickets.py sync`.
 6. A ticket you cannot finish is handled as the work model's
    [Local tickets and notes](../skills/work-model/SKILL.md#local-tickets-and-notes) says, under
    "Not delivered". Never claim unfinished work complete.

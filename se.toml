@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.39.0"
+version = "5.42.0"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -57,6 +57,13 @@ limit_seconds = 90
 # kern's binary with Go's cache warm, places the four components and calls through them.
 [tests.beside.se-components]
 command = ["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_se_components.py"]
+target_seconds = 30
+limit_seconds = 90
+
+# SE's GitHub reads through kern's relay against the real core (README "Hand-offs through the
+# relay"): it builds kern's binary with Go's cache warm, lands a PostToolUse answer and reads it.
+[tests.beside.se-relay]
+command = ["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_se_relay.py"]
 target_seconds = 30
 limit_seconds = 90
 

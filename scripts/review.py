@@ -665,7 +665,19 @@ def outcome_line(number: int, url: str, found: Report, landed: bool, issue_numbe
     return f"#{number} passes: it lands as is"
 
 
-def parser() -> argparse.ArgumentParser:
+#: review.py's commands as one kern component (README "Commands as components"); each command's
+#: usage and help come from make_parser.
+COMPONENTS = (sibling("se_components").Group(
+    "review", "Review",
+    "A cold review of a delivered pull request: the brief a reviewer starts from, and the "
+    "report it files as one comment.",
+    ("brief", "file")),)
+#: The commands that go through kern where it runs (se_components.routed): none, as a reviewer,
+#: not a person, waits on brief, and file writes.
+INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
+
+
+def make_parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(prog="review.py", description=__doc__.split("\n\n")[0])
     commands = top.add_subparsers(dest="command", required=True)
     brief_command = commands.add_parser(
@@ -709,7 +721,13 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    args = make_parser().parse_args(argv)
+    words = [args.command]
+    routed = sibling("se_components").routed(
+        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
+        args.command in INTERACTIVE_COMMANDS)
+    if routed is not None:
+        return routed
     try:
         return args.run(args)
     except QueueError as error:
