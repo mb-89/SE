@@ -133,7 +133,8 @@ func Registered() []*Component {
 // it refuses, naming the port and the wiring line, a name with two writers, an
 // input bound to nothing, two types on one wire, a cycle, a broken
 // declaration, or a wire to an instance that is switched off. Then every
-// derivation of a switched-on instance runs once.
+// derivation of a switched-on instance runs once, and each switched-on
+// instance whose component declares an inlet is handed its commit.
 func Start(w Wiring, components ...*Component) (*Index, error) {
 	ix, err := check(w, components)
 	if err != nil {
@@ -141,6 +142,9 @@ func Start(w Wiring, components ...*Component) (*Index, error) {
 	}
 	changed := map[string]bool{}
 	if err := ix.settle(changed, true); err != nil {
+		return nil, err
+	}
+	if err := ix.inlets(); err != nil {
 		return nil, err
 	}
 	return ix, nil

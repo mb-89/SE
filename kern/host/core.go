@@ -401,7 +401,8 @@ type HookAnswer struct {
 }
 
 // hook takes a host's hook event: each renews the session's lease, and
-// SessionEnd returns it.
+// SessionEnd returns it. Every instance that hears the host's events is
+// handed it first; what one refuses goes to the log, and the hook passes.
 func (c *Core) hook(m *nats.Msg) {
 	event := strings.TrimPrefix(m.Subject, bus.Hook)
 	var body struct {
@@ -422,6 +423,9 @@ func (c *Core) hook(m *nats.Msg) {
 		}
 	}
 	c.mu.Unlock()
+	if err := c.ix.Hear(event, m.Data); err != nil {
+		fmt.Fprintln(c.o.Log, err)
+	}
 	c.reply(m, HookAnswer{Effect: "pass"})
 }
 

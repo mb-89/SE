@@ -22,7 +22,8 @@ named in the design's plan.
 | `bus/` | the embedded NATS server on loopback, a user and permissions per component instance, so the bus refuses a second writer | quackitect v5 `src/index/bus.go` |
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
 | `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve`, `hook` | |
-| `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook` | |
+| `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook`, carrying kern's shared components | |
+| `components/github/` | the GitHub component: the token and relay backends and the snapshot names ([its README](components/github/README.md)) | the design's step 7 |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises, and `cases.json` held against the Go fake, the Python fake and the real core with a Python component attached | |
 | `contract/fixture/` | tally, the suite's fixture and the sample Python component (`component.toml`, `__init__.py`), and the declarations of the two peers the real leg plays | |
 | `python/kern/` | the Python SDK, standard library only: the NATS peer, `component.toml`'s reader, the component and its decorators, the fake core, the runner `python -m kern run <folder>` | |
@@ -61,6 +62,10 @@ One core runs per checkout, the nearest folder up from the working directory tha
   alone, in `components/<name>/` or `.se/components/<name>/` of the checkout, one instance each.
   Its process attaches first, and the core runs its derivations, commands and verbs over the bus,
   as [A component in Python](#a-component-in-python) says.
+- **The host's events.** An I/O component that declares `index.Hears` hears each `hook.<event>`
+  with its payload before the core answers it; what it refuses goes to the core's log, and the
+  hook passes. One that declares `index.Inlet` is handed its instance's commit at start, so it
+  writes what comes in on its own. The [GitHub component](components/github/README.md) does both.
 - **The idle end.** The core ends 60 s after the last session's lease is returned (or after its
   start, where none took one), or after 30 minutes without a hook event or a call.
 
