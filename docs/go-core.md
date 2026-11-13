@@ -355,8 +355,8 @@ overhaul reads the components' call times against their budgets and names the po
 
 The core gets a repository of its own; creating it is the owner's step, since no session here can.
 
-- **Name:** `mb-89/core`, Go module `github.com/mb-89/core`. The binary an application builds is
-  named after the application (`se` for SE); the bare one is `core`.
+- **Name:** `mb-89/kern`, Go module `github.com/mb-89/kern`. The binary an application builds is
+  named after the application (`se` for SE); the bare one is `kern`.
 - **What belongs in it:** what every application needs, and nothing that names an application:
   the core, the bus, the fakes, the contract suite, the Python SDK, the template, the reusable CI,
   and the generic components.
@@ -364,8 +364,8 @@ The core gets a repository of its own; creating it is the owner's step, since no
   reports, fleet check, retro and review stay in SE.
 
 ```text
-core/
-  go.mod                  github.com/mb-89/core
+kern/
+  go.mod                  github.com/mb-89/kern
   index/                  names, store, snapshots, catalog, waves (from ff01204)
   bus/                    embedded NATS, users and permissions, standing file
   host/                   start, detach, leases, placements, idle end, hook client
@@ -378,7 +378,7 @@ core/
   .github/workflows/      check.yml, release.yml, battery.yml (reusable)
 ```
 
-**Pinning it.** An application pins the core in `se.toml [modules.core]`, as SE pins obs. Its
+**Pinning it.** An application pins the core in `se.toml [modules.kern]`, as SE pins obs. Its
 `go.mod` also requires it; `se_modules.py` reads the version from `go.mod` where the module says
 `go = true`, so the pin has one owner.
 
@@ -389,11 +389,11 @@ instance names it, and `enabled = false` switches one off without deleting its w
 
 ```toml
 [instances.github]
-component = "core/github"
+component = "kern/github"
 config = { refresh = "2m" }
 
 [instances.clock]
-component = "core/clock"
+component = "kern/clock"
 enabled = false
 
 [wires]
@@ -408,7 +408,7 @@ marks itself `builtin = true` in the wiring and reads the built-in value, marked
 
 A bare application contains the core pinned, an empty `wiring.toml`, `cmd/<name>/main.go` (the
 core plus the application's Go components, none yet), `components/`, `types/`, `se.toml` with its
-`[project]`, `[tests]` budget and `[modules.core]`, an `AGENTS.md`, a `tests/` folder whose
+`[project]`, `[tests]` budget and `[modules.kern]`, an `AGENTS.md`, a `tests/` folder whose
 battery starts the bare core, and a `check.yml` that calls the core's reusable `battery.yml`.
 
 `se new app <name> --path <dir>` copies the core's `template/` at its pin, fills in the name,
@@ -538,12 +538,12 @@ goal and blockers, and the dispatcher files them.
 | step | what | repository |
 |---|---|---|
 | 1 | the core's repository exists, with a ruleset like SE's | the owner |
-| 2 | the index from `ff01204`, in process, with its fake and fixture components | core |
-| 3 | the bus, users and permissions, the standing file, detached start, leases, idle end | core |
-| 4 | the Python SDK, the Python fake core, the contract suite against both fakes and the real core | core |
-| 5 | the release workflow, `battery.yml` and the bare template | core |
+| 2 | the index from `ff01204`, in process, with its fake and fixture components | kern |
+| 3 | the bus, users and permissions, the standing file, detached start, leases, idle end | kern |
+| 4 | the Python SDK, the Python fake core, the contract suite against both fakes and the real core | kern |
+| 5 | the release workflow, `battery.yml` and the bare template | kern |
 | 6 | SE pins the core, fetches its release, SessionStart starts it and the greeting names it; the hook client posts every event, probing PostToolUse | SE |
-| 7 | the GitHub component: token and relay backends, the snapshot names | core |
+| 7 | the GitHub component: token and relay backends, the snapshot names | kern |
 | 8 | SE's script commands attach as Python components; the README's command reference renders from the catalog | SE |
 | 9 | `integrate` and every hand-off run through the relay: no retyped files | SE |
 | 10 | fleet check and retro due as Go components, read live by the greeting | SE |
