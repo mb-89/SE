@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import importlib.util
 import io
-import os
 import re
-import subprocess
 import sys
 import tarfile
 from pathlib import Path, PurePosixPath
+
+import git_door
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
@@ -47,23 +47,21 @@ def _sibling(name: str):
 
 
 def _git(cwd: Path, *args: str, env: dict[str, str] | None = None, binary: bool = False):
-    done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, env=env)
+    done = git_door.run(*args, cwd=cwd, env=env, binary=True)
     if done.returncode != 0:
         raise NewError(f"git {' '.join(args)} failed in {cwd}: {done.stderr.decode(errors='replace').strip()}")
     return done.stdout if binary else done.stdout.decode().strip()
 
 
 def _has_ref(root: Path, ref: str) -> bool:
-    return subprocess.run(["git", "rev-parse", "-q", "--verify", f"{ref}^{{commit}}"], cwd=root,
-                          capture_output=True).returncode == 0
+    return git_door.run("rev-parse", "-q", "--verify", f"{ref}^{{commit}}", cwd=root).returncode == 0
 
 
 def source_ref(se_root: Path, tag: str) -> tuple[str, str]:
     """(ref, note) the template is read at: the pin's tag, fetched from origin where the clone lacks
     it; HEAD, with a note saying so, where the version is not released yet."""
     if not _has_ref(se_root, f"refs/tags/{tag}"):
-        subprocess.run(["git", "fetch", "-q", "origin", f"refs/tags/{tag}:refs/tags/{tag}"], cwd=se_root,
-                       capture_output=True, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+        git_door.run("fetch", "-q", "origin", f"refs/tags/{tag}:refs/tags/{tag}", cwd=se_root, no_prompt=True)
     if _has_ref(se_root, f"refs/tags/{tag}"):
         return f"refs/tags/{tag}", ""
     head = _git(se_root, "rev-parse", "--short=12", "HEAD")
@@ -108,8 +106,7 @@ def _fill(path: Path, old: re.Pattern | str, new: str, tag: str) -> None:
 def github_owner(se_root: Path) -> str:
     """The owner of SE's origin on github.com, the owner the new repository most likely shares;
     `<owner>` where origin is elsewhere."""
-    url = subprocess.run(["git", "remote", "get-url", "origin"], cwd=se_root, capture_output=True,
-                         text=True).stdout.strip()
+    url = git_door.run("remote", "get-url", "origin", cwd=se_root).stdout.strip()
     found = re.match(r"(?:https://|ssh://git@|git@)github\.com[/:]([A-Za-z0-9-]+)/", url)
     return found[1] if found else "<owner>"
 
@@ -139,7 +136,7 @@ def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
     _git(path, "config", "user.email", identity[1])
     _git(path, "add", "-A")
     _git(path, "commit", "-q", "-m", f"Start {name}, a bare application on kern {version}",
-         env=work_tickets.identity_environment(identity[:2]))
+         env=git_door.identity_environment(identity[:2]))
     first = _git(path, "rev-parse", "--short=12", "HEAD")
     owner = github_owner(se_root)
     return [

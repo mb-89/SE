@@ -9,16 +9,16 @@ verdict. A verdict is keyed by tree hash, so every worktree of a repository shar
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
+
+import git_door
 
 
 STORE = "se-verdicts"
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", check=False)
+    result = git_door.run(*arguments, root=root)
     if result.returncode != 0:
         raise ValueError(f"git {' '.join(arguments)} failed in {root}: {result.stderr.strip()}")
     return result.stdout.strip()
