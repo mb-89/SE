@@ -2880,7 +2880,7 @@ def test_integrate_records_its_pass_before_the_landing_pull_request_where_trust_
     assert inputs["suite"] == work_tickets.trust.suite_hash(main_checkout, squashed)
     assert (inputs["command"], inputs["result"], inputs["session"]) == (
         "true", "passed", "session_integrator")
-    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", inputs["time"])
+    assert re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", inputs["time"])
     assert "The integrator's record: success (https://git.example/owner/repo/actions/runs/41)" in (
         capsys.readouterr().out)
 

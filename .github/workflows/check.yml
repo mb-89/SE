@@ -112,8 +112,8 @@ jobs:
       # kern, the Go core incubated under kern/ (kern/README.md "Tests"), on the Go its go.mod
       # pins: vetted here; its tests run in the suite step below, as se.toml [tests.beside.kern]
       # declares them, with their own time and budget.
-      - uses: actions/setup-go@v6
-        if: needs.trust.outputs.trusted != 'true'
+      - if: needs.trust.outputs.trusted != 'true'
+        uses: actions/setup-go@v6
         with:
           go-version-file: kern/go.mod
           cache-dependency-path: kern/go.sum

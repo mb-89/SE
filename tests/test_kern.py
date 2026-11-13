@@ -17,8 +17,9 @@ SETUP_GO_NODE_24 = 6
 def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow[workflow.index("\njobs:\n"):]
-    assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["check", "kern-platforms"], (
-        "kern runs in the required job check, and on Windows and macOS in kern-platforms, which check needs"
+    assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["check", "kern-platforms", "trust"], (
+        "kern runs in the required job check, and on Windows and macOS in kern-platforms, which check "
+        "needs; trust decides whether either runs (README \"Trusted landings\")"
     )
     setups = re.findall(r"uses: actions/setup-go@v(\d+)\n        with:\n((?:          .*\n)+)", workflow)
     assert len(setups) == 2, "kern's steps set up Go on Linux and on the other platforms"
@@ -39,7 +40,8 @@ def gofmt_step() -> str:
     """The shell of the check job's step "kern is formatted"."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
     step = workflow[workflow.index("      - name: kern is formatted\n"):]
-    lines = step.splitlines()[3:]
+    lines = step.splitlines()
+    lines = lines[lines.index("        run: |") + 1:]
     block = []
     for line in lines:
         if line.strip() and not line.startswith(" " * 10):
@@ -53,7 +55,9 @@ def test_the_required_check_fails_where_gofmt_lists_a_file_of_kern() -> None:
     lists, naming it; a formatted tree passes."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", workflow[workflow.index("\njobs:\n"):])[1]
-    assert check.index("run: time go vet ./...") < check.index("- name: kern is formatted\n        working-directory: kern\n        run: |\n")
+    assert check.index("run: time go vet ./...") < check.index(
+        "- name: kern is formatted\n        if: needs.trust.outputs.trusted != 'true'\n"
+        "        working-directory: kern\n        run: |\n")
     assert "gofmt -l ." in gofmt_step()
 
 
@@ -83,7 +87,7 @@ def test_the_required_check_fails_unless_kern_and_ses_hook_passed_on_windows_and
     # SE's start and hook scripts, whose paths differ off Linux, run there in Git's bash and macOS's.
     assert "        shell: bash\n        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py\n" in platforms
     assert "work_tickets.py suite" not in platforms, "the Python suite and its budget stay on Linux"
-    assert "    needs: kern-platforms\n" in check
+    assert "    needs: [trust, kern-platforms]\n" in check
     # A required check that is skipped counts as passed: check runs whatever kern-platforms answered.
     assert "    if: ${{ !cancelled() }}\n" in check
     assert re.search(r'if \[ "\$PLATFORMS" != success \]; then\n.*\n\s+exit 1', check), "check fails unless kern-platforms passed"
