@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 import overhaul
-from quiet_git import quiet
+import quiet_git
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -108,8 +108,7 @@ def git(root: Path, *arguments: str, when: str = "2026-01-01T00:00:00Z") -> None
 def checkout(tmp_path_factory) -> Path:
     """The fixture checkout, built once: facts only reads it."""
     root = tmp_path_factory.mktemp("checkout")
-    git(root, "init", "-q")
-    quiet(root)
+    quiet_git.init(root)
     (root / "se.toml").write_text('[project]\nauthored_content = ["README.md"]\n', encoding="utf-8")
     (root / "scripts").mkdir()
     (root / "tests").mkdir()

@@ -11,7 +11,7 @@ import pytest
 
 import review
 import work_tickets
-from quiet_git import quiet
+import quiet_git
 
 REPO = "github.com/owner/repo"
 ISSUE_URL = "https://github.com/owner/repo/issues/7"
@@ -39,10 +39,8 @@ def build_checkout(tmp_path: Path) -> None:
     """A bare origin with main (the rule book) and the delivered branch feat/x, and a reviewer's
     clone of main only, without hooks."""
     origin, work, root = tmp_path / "origin.git", tmp_path / "work", tmp_path / "main"
-    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
-    quiet(origin)
-    subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True, capture_output=True)
-    quiet(work)
+    quiet_git.init(origin, "--bare", "-b", "main")
+    quiet_git.clone(origin, work)
     git(work, "config", "user.name", "alice")
     git(work, "config", "user.email", "alice@example.com")
     git(work, "config", "core.hooksPath", str(tmp_path / "no-hooks"))
@@ -51,9 +49,7 @@ def build_checkout(tmp_path: Path) -> None:
     git(work, "switch", "-q", "-c", "feat/x")
     commit(work, "feature.py", "def feature():\n    return 42\n")
     git(work, "push", "-q", "origin", "feat/x")
-    subprocess.run(["git", "clone", "-q", "-b", "main", str(origin), str(root)], check=True,
-                   capture_output=True)
-    quiet(root)
+    quiet_git.clone(origin, root, "-b", "main")
 
 
 @pytest.fixture

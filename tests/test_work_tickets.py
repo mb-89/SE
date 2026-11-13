@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import quiet_git
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -72,7 +73,7 @@ def git_worktree(case_root: Path) -> tuple[Path, Path]:
     coordinator = case_root / "coordinator"
     worker = case_root / "worker"
     coordinator.mkdir(parents=True)
-    assert git(coordinator, "init", "-b", "coordinator").returncode == 0
+    quiet_git.init(coordinator, "-b", "coordinator")
     assert git(coordinator, "config", "user.name", "Worker test").returncode == 0
     assert git(coordinator, "config", "user.email", "worker-test@example.invalid").returncode == 0
     (coordinator / ".gitignore").write_text("/.se/\n", encoding="utf-8")
@@ -116,7 +117,7 @@ def test_project_checks_run_all_commands_and_report_failures(tmp_path: Path) -> 
 def test_guard_reports_removed_tests_until_field_report_names_them(worktree: Path) -> None:
     repository = worktree.parent / "guard-case"
     repository.mkdir()
-    assert git(repository, "init", "-b", "main").returncode == 0
+    quiet_git.init(repository, "-b", "main")
     assert git(repository, "config", "user.name", "Guard test").returncode == 0
     assert git(repository, "config", "user.email", "guard-test@example.invalid").returncode == 0
     (repository / "test_example.py").write_text(
@@ -173,7 +174,7 @@ def test_guard_reports_removed_tests_until_field_report_names_them(worktree: Pat
 def test_guard_compares_against_the_fetched_remote_integration_branch(worktree: Path) -> None:
     upstream = worktree.parent / "guard-upstream"
     upstream.mkdir()
-    assert git(upstream, "init", "-b", "main").returncode == 0
+    quiet_git.init(upstream, "-b", "main")
     assert git(upstream, "config", "user.name", "Guard test").returncode == 0
     assert git(upstream, "config", "user.email", "guard-test@example.invalid").returncode == 0
     (upstream / "test_example.py").write_text(
@@ -182,7 +183,7 @@ def test_guard_compares_against_the_fetched_remote_integration_branch(worktree: 
     assert git(upstream, "add", ".").returncode == 0
     assert git(upstream, "commit", "-m", "baseline tests").returncode == 0
     clone = worktree.parent / "guard-clone"
-    assert git(worktree.parent, "clone", "-q", str(upstream), str(clone)).returncode == 0
+    quiet_git.clone(upstream, clone)
     assert git(upstream, "rm", "-q", "test_example.py").returncode == 0
     assert git(upstream, "commit", "-m", "remove a test on the integration branch").returncode == 0
     assert git(clone, "fetch", "-q", "origin").returncode == 0
@@ -205,7 +206,7 @@ def test_guard_reads_a_branch_the_clone_only_fetched_and_names_the_fetch_otherwi
         worktree: Path) -> None:
     upstream = worktree.parent / "guard-upstream"
     upstream.mkdir()
-    assert git(upstream, "init", "-b", "main").returncode == 0
+    quiet_git.init(upstream, "-b", "main")
     assert git(upstream, "config", "user.name", "Guard test").returncode == 0
     assert git(upstream, "config", "user.email", "guard-test@example.invalid").returncode == 0
     (upstream / "test_example.py").write_text("def test_removed_on_feature():\n    pass\n",
@@ -216,7 +217,7 @@ def test_guard_reads_a_branch_the_clone_only_fetched_and_names_the_fetch_otherwi
     assert git(upstream, "rm", "-q", "test_example.py").returncode == 0
     assert git(upstream, "commit", "-m", "remove a test").returncode == 0
     clone = worktree.parent / "guard-clone"
-    assert git(worktree.parent, "clone", "-q", "-b", "main", str(upstream), str(clone)).returncode == 0
+    quiet_git.clone(upstream, clone, "-b", "main")
     report = clone / "field-report.md"
     report.write_text(
         "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n<!-- se:field-report:end -->\n",
@@ -251,7 +252,7 @@ def authored_repository(repository: Path, branch: str, guide_text: str) -> tuple
     """A repository whose authored content is docs/**/*.md, with docs/guide.md holding
     `guide_text` committed on main, checked out on the new branch `branch`."""
     repository.mkdir()
-    assert git(repository, "init", "-b", "main").returncode == 0
+    quiet_git.init(repository, "-b", "main")
     assert git(repository, "config", "user.name", "Guard test").returncode == 0
     assert git(repository, "config", "user.email", "guard-test@example.invalid").returncode == 0
     (repository / "se.toml").write_text(
@@ -1092,8 +1093,8 @@ class FakeWorkflows:
 def refs_checkout(tmp_path: Path, monkeypatch) -> tuple[Path, FakeWorkflows, str, str]:
     """A checkout whose origin holds main and a branch `next` one commit ahead; the fake door."""
     origin, checkout = tmp_path / "origin.git", tmp_path / "main"
-    assert git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin)).returncode == 0
-    assert git(tmp_path, "clone", "-q", str(origin), str(checkout)).returncode == 0
+    quiet_git.init(origin, "--bare", "-b", "main")
+    quiet_git.clone(origin, checkout)
     identity = ("-c", "user.name=mb", "-c", "user.email=mb")
     assert git(checkout, *identity, "commit", "-q", "--allow-empty", "-m", "base").returncode == 0
     base = git(checkout, "rev-parse", "HEAD").stdout.strip()
@@ -1539,7 +1540,7 @@ def stop_checkout(case_root: Path, monkeypatch, *, queue: bool = True) -> Path:
     false; gh is not usable until a test fakes it."""
     root = case_root / "stop"
     root.mkdir(parents=True)
-    assert git(root, "init", "-q", "-b", "main").returncode == 0
+    quiet_git.init(root, "-b", "main")
     for key, value in (("user.name", "Worker test"), ("user.email", "worker-test@example.invalid")):
         assert git(root, "config", key, value).returncode == 0
     (root / ".gitignore").write_text("/.se/\n", encoding="utf-8")
