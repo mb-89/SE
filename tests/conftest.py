@@ -16,6 +16,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import build_docs  # noqa: E402
 import se_plugin  # noqa: E402
 import quiet_git  # noqa: E402
+import fake_git  # noqa: E402
+import git_door  # noqa: E402
 
 # The suite's runs of work_tickets.py and se_start.py measure themselves (scripts/metrics.py); their
 # lines go nowhere, never into the machine's ~/.se/metrics.jsonl. A test of the lines sets its own.
@@ -45,6 +47,14 @@ def local_machine() -> Iterator[None]:
         for name in runner_variables(os.environ):
             patch.delenv(name)
         yield
+
+
+@pytest.fixture
+def fake_git_door() -> Iterator[fake_git.FakeGit]:
+    """git behind the door is the fake for this test (tests/fake_git.py, held to real git by
+    tests/test_git_door.py); what the test and the code under test run reaches no real git."""
+    with git_door.use(fake_git.FakeGit()) as fake:
+        yield fake
 
 
 @pytest.fixture(scope="session")

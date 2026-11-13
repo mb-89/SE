@@ -23,7 +23,6 @@ import hashlib
 import json
 import os
 import shlex
-import subprocess
 import sys
 import time
 import tomllib
@@ -33,6 +32,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+import git_door
 
 RECORD_CHECK = "se integrator pass"  # the check run the record is
 FULL_CHECK = "se full pass"  # the check run a full pass of CI leaves where trust is on
@@ -61,8 +61,7 @@ class Trust:
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", check=False)
+    result = git_door.run(*arguments, root=root)
     if result.returncode != 0:
         raise TrustError(f"git {' '.join(arguments)} failed in {root}: {result.stderr.strip()}")
     return result.stdout.strip()

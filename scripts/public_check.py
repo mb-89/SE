@@ -42,13 +42,13 @@ import bisect
 import fnmatch
 import os
 import re
-import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
+import git_door
 ALLOW_FILE = ".public-check-allow"
 SE_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "se.toml"
@@ -384,9 +384,7 @@ def decode(data: bytes) -> str:
 
 
 def git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
-    result = subprocess.run(
-        ["git", "-C", str(root), *args], input=stdin, capture_output=True, check=False
-    )
+    result = git_door.run(*args, root=root, stdin=stdin, binary=True)
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", "replace").strip()
         raise SetupError(f"git {args[0]} failed: {detail}")
@@ -567,18 +565,12 @@ def scan_message_file(root: Path, path: Path, patterns: list[Pattern], report: R
 
 
 def has_head(root: Path) -> bool:
-    return subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", "HEAD"],
-        capture_output=True, check=False,
-    ).returncode == 0
+    return git_door.run("rev-parse", "--verify", "--quiet", "HEAD", root=root).returncode == 0
 
 
 def se_commit() -> str | None:
     """The commit of the se checkout this script runs from, or None outside a git checkout."""
-    result = subprocess.run(
-        ["git", "-C", str(SE_ROOT), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=False,
-    )
+    result = git_door.run("rev-parse", "HEAD", root=SE_ROOT)
     return result.stdout.strip().lower() if result.returncode == 0 else None
 
 

@@ -8,6 +8,9 @@ such a file is refused, so the lists stay true.
 Two rules hold for the suite itself, so it behaves on GitHub's runner as it does locally: every git
 repository a test creates or clones comes from the quiet helper (tests/quiet_git.py), and no test
 starts with a runner's variable set (tests/conftest.py).
+
+One rule holds for scripts, tests, kern and the components: git runs only through its door
+(scripts/git_door.py); today's other git subprocesses sit on an allow list that may only shrink.
 """
 
 from __future__ import annotations
@@ -15,9 +18,9 @@ from __future__ import annotations
 import ast
 import os
 import re
-import subprocess
 from pathlib import Path
 
+import git_door
 import pytest
 import quiet_git
 from conftest import runner_variables
@@ -49,10 +52,9 @@ MARKED_DIRS = ("scripts/", "tests/")
 
 def tracked(repo: Path) -> list[str]:
     """The files git tracks in `repo` that exist in its working tree."""
-    out = subprocess.run(
-        ["git", "-C", str(repo), "ls-files", "-z"], check=True, capture_output=True
-    ).stdout
-    return [p for p in out.decode().split("\0") if p and (repo / p).is_file()]
+    listed = git_door.run("ls-files", "-z", root=repo)
+    assert listed.returncode == 0, listed.stderr
+    return [p for p in listed.stdout.split("\0") if p and (repo / p).is_file()]
 
 
 def binary_findings(repo: Path, allowed: dict[str, str]) -> list[str]:
@@ -107,7 +109,7 @@ def fixture_repo(tmp_path: Path, files: dict[str, bytes]) -> Path:
         (repo / name).parent.mkdir(parents=True, exist_ok=True)
         (repo / name).write_bytes(data)
     quiet_git.init(repo)
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    assert git_door.run("add", "-A", root=repo).returncode == 0
     return repo
 
 
@@ -247,11 +249,111 @@ def test_the_quiet_helper_creates_and_clones_quiet_repositories(tmp_path: Path) 
     origin = quiet_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
     checkout = quiet_git.clone(origin, tmp_path / "checkout")
     for repository in (origin, checkout):
-        read = lambda key: subprocess.run(["git", "-C", str(repository), "config", key],  # noqa: E731
-                                          capture_output=True, text=True, check=True).stdout.strip()
+        read = lambda key: git_door.run("config", key, root=repository).stdout.strip()  # noqa: E731
         assert (read("maintenance.auto"), read("gc.auto")) == ("false", "0")
     with pytest.raises(RuntimeError, match="git clone .* failed: "):
         quiet_git.clone(tmp_path / "missing", tmp_path / "nothing")
+
+
+# git is an outside thing with one door (rule book des-004): scripts/git_door.py runs every git command,
+# tests/fake_git.py is its fake, and tests/test_git_door.py holds both to one contract. A git subprocess
+# anywhere else fails: a command list that starts with "git" (not one announced with `.reading`), a
+# command string that does, or Go's exec.Command of "git".
+GIT_DOOR = ("scripts/git_door.py", "tests/fake_git.py")
+GIT_SCANNED = ("scripts", "tests", "components", "kern")
+GO_GIT = re.compile(r'exec\.Command(?:Context)?\((?:\w+, )?"git"')
+SUBPROCESS_CALLS = {"run", "Popen", "check_output", "check_call", "call"}
+TO_THE_FAKE = "real git in temporary repositories; the migration moves it to the fake"
+KERN_DOOR = "kern's Go git calls; the migration builds kern's Go git door with a fake held to the contract"
+# Today's git subprocesses outside the door, each with how many its file holds and why it may. The list
+# may only shrink: a file with more fails, and one with fewer fails until its count is lowered.
+GIT_ALLOWED: dict[str, tuple[int, str]] = {
+    "tests/test_feedback.py": (1, TO_THE_FAKE),
+    "tests/test_overhaul.py": (2, TO_THE_FAKE),
+    "tests/test_public_check.py": (11, TO_THE_FAKE),
+    "tests/test_push_guard.py": (3, TO_THE_FAKE),
+    "tests/test_quiet_git.py": (1, TO_THE_FAKE),
+    "tests/test_releases.py": (7, TO_THE_FAKE),
+    "tests/test_retro.py": (1, TO_THE_FAKE),
+    "tests/test_review.py": (1, TO_THE_FAKE),
+    "tests/test_rewrite_history.py": (1, TO_THE_FAKE),
+    "tests/test_se_new.py": (1, TO_THE_FAKE),
+    "tests/test_start_refresh.py": (1, TO_THE_FAKE),
+    "tests/test_work_ticket_issues.py": (76, TO_THE_FAKE),
+    "tests/test_work_tickets.py": (12, TO_THE_FAKE),
+    "components/origin/origin.go": (1, KERN_DOOR),
+    "components/origin/origin_test.go": (1, KERN_DOOR),
+    "kern/host/scripts.go": (1, KERN_DOOR),
+    "kern/host/scripts_test.go": (1, KERN_DOOR),
+    "kern/tools/release/main.go": (1, KERN_DOOR),
+}
+
+
+def git_subprocess_lines(path: Path) -> list[int]:
+    """The lines of `path` (Python or Go) that start a git subprocess."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".go":
+        return [number for number, line in enumerate(text.splitlines(), 1) if GO_GIT.search(line)]
+    tree = ast.parse(text, str(path))
+    announced = {id(argument) for node in ast.walk(tree)
+                 if isinstance(node, ast.Call) and called_name(node) == "reading" for argument in node.args}
+    lines = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.List, ast.Tuple)) and node.elts and isinstance(node.elts[0], ast.Constant) \
+                and node.elts[0].value == "git" and id(node) not in announced:
+            lines.append(node.lineno)
+        elif isinstance(node, ast.Call) and called_name(node) in SUBPROCESS_CALLS and node.args \
+                and isinstance(node.args[0], ast.Constant) and str(node.args[0].value).startswith("git "):
+            lines.append(node.lineno)
+    return sorted(lines)
+
+
+def git_door_findings(root: Path, allowed: dict[str, tuple[int, str]]) -> list[str]:
+    """Each file under `root` that starts more git subprocesses outside the door than `allowed` lets it,
+    and each entry of `allowed` whose file now starts fewer."""
+    found, counts = [], {}
+    for folder in GIT_SCANNED:
+        for path in sorted((root / folder).rglob("*")):
+            name = path.relative_to(root).as_posix()
+            if path.suffix in (".py", ".go") and path.is_file() and name not in GIT_DOOR \
+                    and not {".venv", "testdata", "__pycache__"} & set(path.parts):
+                if lines := git_subprocess_lines(path):
+                    counts[name] = lines
+    for name, lines in counts.items():
+        limit = allowed.get(name, (0, ""))[0]
+        if len(lines) > limit:
+            found.append(f"{name}:{lines[0]}: {len(lines)} git subprocess(es) outside the door, {limit} allowed; "
+                         f"run git through scripts/git_door.py (tests: the fake_git_door fixture)")
+    for name, (limit, _) in allowed.items():
+        if len(counts.get(name, [])) < limit:
+            found.append(f"{name}: {len(counts.get(name, []))} git subprocess(es) outside the door, the allow "
+                         f"list says {limit}; lower its entry (it may only shrink)")
+    return found
+
+
+def test_se_runs_git_only_through_its_door() -> None:
+    assert git_door_findings(ROOT, GIT_ALLOWED) == []
+    assert all(reason.strip() for _, reason in GIT_ALLOWED.values())
+
+
+def test_a_git_subprocess_outside_the_door_fails_and_an_entry_too_high_too(tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "tool.py").write_text(
+        "import subprocess\n"
+        "feedback.reading('the remote', ['git', 'fetch'])\n"
+        "subprocess.run(['git', '-C', root, 'status'])\n"
+        "subprocess.run('git status', shell=True)\n"
+        "git_door.run('status', root=root)\n", encoding="utf-8")
+    (tmp_path / "kern").mkdir()
+    (tmp_path / "kern" / "tool.go").write_text('cmd := exec.CommandContext(ctx, "git", "-C", dir)\n',
+                                                 encoding="utf-8")
+    (tmp_path / "scripts" / "git_door.py").write_text("subprocess.run(['git', *argv])\n", encoding="utf-8")
+    assert git_door_findings(tmp_path, {"kern/tool.go": (1, "a reason"), "tests/gone.py": (2, "a reason")}) == [
+        "scripts/tool.py:3: 2 git subprocess(es) outside the door, 0 allowed; run git through "
+        "scripts/git_door.py (tests: the fake_git_door fixture)",
+        "tests/gone.py: 0 git subprocess(es) outside the door, the allow list says 2; lower its entry (it may "
+        "only shrink)",
+    ]
 
 
 # The runner's variables switch commands to their runner behaviour; tests/conftest.py clears them for

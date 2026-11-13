@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from xml.etree import ElementTree
 
+import git_door
 
 STATES = ("todo", "held", "done")
 DIRECTORIES = (*STATES, "notes")
@@ -1082,13 +1083,13 @@ def set_commit_identity(root: Path, command: str) -> tuple[str, str, str] | None
     setup scripts do; (name, email, source), or None where neither config sets one."""
     identity = commit_identity(root)
     if identity is not None:
-        for key, value in zip(("user.name", "user.email"), identity[:2]):
-            configured = run_git(root, "config", key, value)
-            if configured.returncode != 0:
-                detail = failure_detail(configured)
-                raise QueueError(
-                    f"work_tickets.py {command}: cannot set {key} from {identity[2]}: {detail}"
-                )
+        failed = git_door.set_identity(root, identity[:2])
+        if failed is not None:
+            key = failed.args[-2]
+            raise QueueError(
+                f"work_tickets.py {command}: cannot set {key} from {identity[2]}: "
+                f"{failure_detail(failed)}"
+            )
     return identity
 
 
@@ -2267,7 +2268,7 @@ def push_refusal(output: str) -> tuple[str, bool]:
 
 
 def run_git_push(root: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
-    return run_git(root, "push", *arguments)
+    return git_door.push(root, arguments)
 
 
 def git_push(root: Path, arguments: list[str]) -> None:
@@ -2524,10 +2525,7 @@ def run_git(root: Path, *arguments: str,
             env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     if arguments and arguments[0] in REMOTE_GIT:
         feedback.reading("the remote", ["git", *arguments])
-    return subprocess.run(
-        ["git", "-C", str(root), *arguments],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, env=env,
-    )
+    return git_door.run(*arguments, root=root, env=env)
 
 
 def checked_git(root: Path, *arguments: str, env: dict[str, str] | None = None) -> str:
@@ -2691,7 +2689,7 @@ def release(root: Path, branch: str, upstream_ref: str | None = None) -> str | N
             f"Cannot release {tag}: the tag exists already; fetch the tags (work_tickets.py sync) "
             f"and check project.version in {root / 'se.toml'}"
         )
-    environment = identity_environment(required_identity(root, "push"))
+    environment = git_door.identity_environment(required_identity(root, "push"))
     paths = build_release(root, tag)
     trailer = config_value("commit_trailer", remote_repo(root), None)
     checked_git(root, "add", "--", *paths)
@@ -5376,14 +5374,6 @@ def required_identity(root: Path, command: str) -> tuple[str, str]:
     return identity[0], identity[1]
 
 
-def identity_environment(identity: tuple[str, str]) -> dict[str, str]:
-    """The environment that makes a git commit carry `identity` as author and committer, whatever
-    the clone's configuration or the environment's own GIT_AUTHOR_* and GIT_COMMITTER_* say."""
-    name, email = identity
-    return {**os.environ, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
-            "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email}
-
-
 def configured_public_identity(root: Path) -> tuple[str, str]:
     identity = commit_identity(root)
     if identity is not None:
@@ -5755,7 +5745,7 @@ def tree_of(root: Path, commit: str) -> str:
 
 def abandon_landing(root: Path, target: str, landing: str) -> None:
     """Leave the landing branch: back on the integration branch, the local landing branch gone."""
-    subprocess.run(["git", "-C", str(root), "merge", "--abort"], capture_output=True, check=False)
+    run_git(root, "merge", "--abort")
     checked_git(root, "switch", "-q", "--discard-changes", target)
     run_git(root, "branch", "-D", landing)
 
