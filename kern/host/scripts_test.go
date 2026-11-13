@@ -1,14 +1,15 @@
 package host_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mb-89/kern/bus"
+	gitdoor "github.com/mb-89/kern/git"
 	"github.com/mb-89/kern/host"
 	"github.com/mb-89/kern/index"
 )
@@ -74,12 +75,12 @@ func TestOnlyAScriptNamedByItsPathIsARun(t *testing.T) {
 	}
 }
 
+// git runs git in dir through kern's git door, on the fake TestMain installs.
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "maintenance.auto=false",
-		"-c", "user.name=alice", "-c", "user.email=alice@example.com"}, args...)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
+	if _, err := gitdoor.Run(context.Background(), dir, append([]string{"-c", "user.name=alice",
+		"-c", "user.email=alice@example.com"}, args...)...); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -7,13 +7,13 @@
 package origin
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/mb-89/kern/git"
 	"github.com/mb-89/kern/index"
 )
 
@@ -27,13 +27,13 @@ var events = map[string]bool{"SessionStart": true, "UserPromptSubmit": true, "St
 
 // Read answers origin's branches in the checkout at dir; a test replaces it.
 var Read = func(dir string) (map[string]time.Time, error) {
-	out, err := exec.Command("git", "-C", dir, "for-each-ref",
-		"--format=%(refname:lstrip=3)%09%(committerdate:iso-strict)", "refs/remotes/origin/").Output()
+	out, err := git.Run(context.Background(), dir, "for-each-ref",
+		"--format=%(refname:lstrip=3)%09%(committerdate:iso-strict)", "refs/remotes/origin/")
 	if err != nil {
-		return nil, fmt.Errorf("git for-each-ref in %s: %w", dir, err)
+		return nil, err // the door's error names the command and dir
 	}
 	found := map[string]time.Time{}
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		name, when, _ := strings.Cut(line, "\t")
 		if name == "" || name == "HEAD" || when == "" {
 			continue
