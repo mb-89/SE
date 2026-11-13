@@ -134,12 +134,7 @@ func (r remote) Command(ctx context.Context, name string, s index.Step, say func
 			if err := json.Unmarshal(m.Data, &a); err != nil {
 				return a, fmt.Errorf("instance %s: command %q answers no result: %v", r.inst, name, err)
 			}
-			if say != nil {
-				for _, l := range a.Lines {
-					say(l)
-				}
-			}
-			a.Lines = append(live, a.Lines...)
+			a.Lines = live
 			return a, nil
 		case <-quiet.C:
 			err := fmt.Errorf("instance %s: command %q, step %d: no answer, line or beat within %v", r.inst, name, s.Step, wait)

@@ -60,10 +60,13 @@ type Step struct {
 }
 
 // Answer is what a declared component's process answers a step: its result,
-// with Then set where a continuation reads the answers of its requests.
+// with Then set where a continuation reads the answers of its requests. The
+// step's lines ride say.<i>.<call> as it says them, never its answer: Lines
+// holds those the core heard (kern/README.md "A component in Python" holds
+// its row to these fields).
 type Answer struct {
 	Text     string      `json:"text"`
-	Lines    []string    `json:"lines,omitempty"`
+	Lines    []string    `json:"-"`
 	Writes   []WireWrite `json:"writes,omitempty"`
 	Requests []WireAsk   `json:"requests,omitempty"`
 	Then     bool        `json:"then,omitempty"`
