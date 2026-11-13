@@ -54,7 +54,9 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 
 `work_tickets.py` below runs with `--worktree <main checkout>` unless another worktree is named.
 
-At the start of every turn run `work_tickets.py sync`, which sets the
+At the start of every turn run `work_tickets.py paused`; while the fleet is paused, end the
+turn, as the work model's [Pause](../skills/work-model/SKILL.md#pause) says. Then run
+`work_tickets.py sync`, which sets the
 [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) in the checkout, then
 `work_tickets.py queue`.
 
