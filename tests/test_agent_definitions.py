@@ -473,6 +473,12 @@ def test_the_work_model_owns_without_gh_and_lists_the_commands_that_still_run():
     assert "naming itself, the missing `gh` and this section" in " ".join(section.split())
 
 
+def test_without_gh_spells_out_the_field_report_draft_with_its_worktree():
+    section = " ".join(without_gh_section().split())
+    assert ("`field-report --draft .se/work/field-report.md --worktree <worktree> --issue-body "
+            "<file>`" in section)
+
+
 def test_without_gh_names_what_the_session_prompt_still_carries_and_nothing_else():
     section = without_gh_section()
     assert ("**The session prompt carries only** the agent, the work issue, the branch"

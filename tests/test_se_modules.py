@@ -503,13 +503,35 @@ def test_script_runs_as_a_command(world):
     assert "error: unknown module(s): nope" in failed.stderr
 
 
+def module_commands(markdown: str) -> list[str]:
+    """The lines of `markdown`'s code fences that run se_modules.py: its commands; prose that
+    names the script, wrapped or not, is a mention and not checked."""
+    commands, fenced = [], False
+    for line in markdown.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif fenced and "se_modules.py" in line:
+            commands.append(line.strip())
+    return commands
+
+
+def spelled_one_way(commands: list[str]) -> bool:
+    return bool(commands) and all(
+        line.startswith("uv run python <se>/scripts/se_modules.py ") for line in commands)
+
+
 def test_readme_spells_the_module_command_one_way():
     readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
-    invocations = [line for line in readme.splitlines() if "se_modules.py " in line
-                   and not line.startswith(("-", "`"))]
-    assert invocations and all(
-        line.startswith("uv run python <se>/scripts/se_modules.py ") for line in invocations
-    ), invocations
+    commands = module_commands(readme)
+    assert spelled_one_way(commands), commands
+
+
+def test_the_invocation_check_judges_commands_not_mentions():
+    prose = ("Run the sync first; it is the\nse_modules.py sync of the pin, and `se_modules.py`\n"
+             "owns it.\n\n```sh\nuv run python <se>/scripts/se_modules.py sync\n```\n")
+    assert module_commands(prose) == ["uv run python <se>/scripts/se_modules.py sync"]
+    assert spelled_one_way(module_commands(prose))
+    assert not spelled_one_way(module_commands("```sh\npython se_modules.py sync\n```\n"))
 
 
 # Semantic versions: ranges resolve to the highest matching tag; local paths report their version.

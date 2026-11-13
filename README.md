@@ -823,6 +823,11 @@ work_tickets.py sync --worktree WORKTREE
     merge the newest integration branch (se.toml project.integration_branch, default main) from
     origin, or locally without origin
 
+work_tickets.py identity --worktree WORKTREE
+    set the checkout's commit identity (machine-local public_identity, else se.toml
+    project.identity) as sync does, without fetching or merging; scripts/setup.sh and setup.ps1 run
+    it
+
 work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N]
     run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1
     when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test
