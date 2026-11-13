@@ -3,6 +3,7 @@
 package fixture
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -60,7 +61,7 @@ func init() { index.Register(Tally) }
 func Ledger(lines *[]string) *index.Component {
 	return index.Declare("ledger", "Keeps the lines it is asked to append.",
 		index.IO(),
-		index.Verb("append", "Appends a line and answers how many lines stand.", func(line string) (int, error) {
+		index.Verb("append", "Appends a line and answers how many lines stand.", func(_ context.Context, line string) (int, error) {
 			if line == "" {
 				return 0, fmt.Errorf("the ledger takes no empty line")
 			}

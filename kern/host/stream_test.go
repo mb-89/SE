@@ -1,6 +1,7 @@
 package host_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ func slowWiring(t *testing.T) (index.Wiring, []*index.Component, chan struct{}) 
 	release := make(chan struct{})
 	hold := index.Request[string, string]("hold", "Waits until the case lets it go.")
 	holder := index.Declare("holder", "Holds a request.", index.IO(),
-		index.Verb("hold", "Waits until the case lets it go.", func(s string) (string, error) {
+		index.Verb("hold", "Waits until the case lets it go.", func(_ context.Context, s string) (string, error) {
 			<-release
 			return "let go " + s, nil
 		}))
@@ -225,7 +226,7 @@ func TestTheCoreTellsTheProcessOnItsStopWordThatACallIsGivenUp(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
 	desk := index.Declare("desk", "Answers questions.", index.IO(),
-		index.Verb("answer", "Answers once the case lets it go.", func(q string) (string, error) {
+		index.Verb("answer", "Answers once the case lets it go.", func(_ context.Context, q string) (string, error) {
 			<-release
 			return "yes " + q, nil
 		}))

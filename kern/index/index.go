@@ -227,7 +227,7 @@ func (ix *Index) CallSaying(command string, say func(line string), args ...strin
 // ctx or by a failure, while a continuation of a declared component waits
 // tells that component (Result.Stop), so nothing in its process waits on a
 // call that ended (docs/go-core.md "A call given up"). A request already
-// out runs to its end, and its answer is dropped.
+// out is handed ctx, so its verb lets go of it; its answer is dropped.
 func (ix *Index) CallContext(ctx context.Context, command string, say func(line string), args ...string) (Result, error) {
 	c, ok := ix.catalog.Command(command)
 	if !ok {
@@ -285,10 +285,12 @@ func given(ctx context.Context) error {
 	return fmt.Errorf("index: the call is given up: %w", context.Cause(ctx))
 }
 
-// serve hands one request to its verb, and stops waiting once ctx is done.
+// serve hands one request to its verb with the call's ctx, so a verb that
+// waits lets go once the call is given up, and stops waiting itself then,
+// for a verb that does not look at ctx.
 func serve(ctx context.Context, comp *Component, verb string, req any) (any, error) {
 	if ctx.Done() == nil {
-		return comp.Serve(verb, req)
+		return comp.Serve(ctx, verb, req)
 	}
 	if err := given(ctx); err != nil {
 		return nil, err
@@ -299,7 +301,7 @@ func serve(ctx context.Context, comp *Component, verb string, req any) (any, err
 	}
 	got := make(chan served, 1)
 	go func() {
-		ans, err := comp.Serve(verb, req)
+		ans, err := comp.Serve(ctx, verb, req)
 		got <- served{ans, err}
 	}()
 	select {

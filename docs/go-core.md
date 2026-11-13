@@ -244,7 +244,11 @@ the core ends. Nothing in the component's process may then wait on it, so the co
 - **The caller gives it up** on `call.core.abandon`, naming the call by its reply subject: the
   Python SDK's `Peer.request` with `give_up` and `Peer.call` do so when they stop waiting, by
   timeout or interrupt. The core refuses a call outside the asker's inbox, and the call answers
-  its error at once, naming the cause; a request already out runs on, and its answer is dropped.
+  its error at once, naming the cause.
+- **A request already out** is handed the call's context (the `ctx` of `Verb` and `JSONVerb`),
+  so its verb lets go of what it holds: the GitHub component's `step` leaves the outbox at once,
+  and no session is pointed at a step that no one waits for. For a declared process's verb, the
+  core stops waiting for the answer; the answer is dropped either way.
 - **The stop word.** Where a declared component's step runs or its continuation waits, the core
   publishes `{"call", "stop"}` on the command's `cmd.<i>.<command>`, without a reply. The Python
   runner drops that call's continuation and sets the call's `Abandon` (`kern.abandoned()` in the
@@ -255,6 +259,7 @@ the core ends. Nothing in the component's process may then wait on it, so the co
 
 Proven by `kern/index/abandon_test.go` (the cause, and the stop word of one call of two),
 `kern/host/stream_test.go` (`call.core.abandon`, and the stop word on the bus),
+`kern/components/github/step_test.go` (a given-up call's step leaves the outbox),
 `kern/python/tests/test_kern_stream.py` (the runner and the peer) and SE's
 `tests/test_se_components.py` (one of two overlapping streamed calls).
 

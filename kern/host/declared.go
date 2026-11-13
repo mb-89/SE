@@ -166,12 +166,16 @@ type StopWord struct {
 	Stop string `json:"stop"`
 }
 
-func (r remote) Serve(verb string, req json.RawMessage) (json.RawMessage, error) {
+// Serve asks the process for one request on a verb, and waits StepWait for
+// its answer, or until ctx is done: the call that asked it is given up.
+func (r remote) Serve(ctx context.Context, verb string, req json.RawMessage) (json.RawMessage, error) {
 	if err := r.c.waitAttached(r.inst); err != nil {
 		return nil, err
 	}
 	data, _ := json.Marshal(map[string]json.RawMessage{"request": req})
-	m, err := r.c.nc.Request(bus.IOVerb+bus.Subject(r.inst)+"."+bus.Token(verb), data, r.c.o.StepWait)
+	ctx, cancel := context.WithTimeout(ctx, r.c.o.StepWait)
+	defer cancel()
+	m, err := r.c.nc.RequestWithContext(ctx, bus.IOVerb+bus.Subject(r.inst)+"."+bus.Token(verb), data)
 	if err != nil {
 		return nil, fmt.Errorf("instance %s: verb %s: %w", r.inst, verb, err)
 	}
