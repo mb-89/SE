@@ -614,9 +614,9 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - The commands that read such files accept both shapes, the tools' and the REST API's; where
     the tools name nothing, the command says what it falls back to, as `retro.py` does.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
-  `review-note`, `probe`, `sync`, `suite`, `guard`, `config`, `close`, `push`, `verified`,
-  `comments-read`, `body-read --body-file`, `release-trailer`, `pr-body`, `docs`, `format`, `metrics`
-  and `field-report --check`.
+  `review-note`, `probe`, `sync`, `suite`, `suite-shard`, `suite-time`, `guard`, `config`,
+  `close`, `push`, `verified`, `comments-read`, `body-read --body-file`, `release-trailer`,
+  `pr-body`, `docs`, `format`, `metrics` and `field-report --check`.
 - **Commands that hand off** their GitHub steps: `integrate`, `refs request` and `refs apply`
   do everything local, print their GitHub steps as a plan of tool names and arguments, and
   check the result through git with `--read-back` (README
