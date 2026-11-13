@@ -1737,3 +1737,149 @@ def test_stop_check_falls_back_to_the_cwd_and_says_why_it_cannot_judge_a_worker_
     missing = {**event, "agent_transcript_path": str(tmp_path / "gone.jsonl")}
     assert "cannot judge" in stop_hook(session, monkeypatch, capsys, "SubagentStop", **missing)[
         "systemMessage"]
+
+
+# Metrics (README "Metrics")
+
+
+class FakeClock:
+    """A monotonic clock and a wall clock that move only when told."""
+
+    def __init__(self, monkeypatch, start: str = "2026-11-10T08:00:00+00:00") -> None:
+        self.seconds = 100.0
+        self.wall = work_tickets.datetime.fromisoformat(start)
+        monkeypatch.setattr(work_tickets.metrics, "clock", lambda: self.seconds)
+        monkeypatch.setattr(work_tickets.metrics, "now", lambda: self.wall)
+
+    def advance(self, seconds: float) -> None:
+        self.seconds += seconds
+
+
+def metrics_lines(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_command_appends_one_metrics_line_with_its_github_calls(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "metrics.jsonl"
+    monkeypatch.setenv("SE_METRICS", str(path))
+    clock = FakeClock(monkeypatch)
+    answers = iter([
+        subprocess.CompletedProcess([], 1, "", "HTTP 403: API rate limit exceeded"),
+        subprocess.CompletedProcess([], 0, "{}", ""),
+    ])
+
+    def door(*_, **__):  # the fake door: gh answers without GitHub
+        clock.advance(2.5)
+        return next(answers)
+
+    monkeypatch.setattr(work_tickets, "gh_executable", lambda: "gh")
+    monkeypatch.setattr(work_tickets.subprocess, "run", door)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: clock.advance(seconds))
+
+    def handler(root, args):
+        with pytest.raises(work_tickets.QueueError):
+            work_tickets.run_gh(tmp_path, ["api", "user"])
+        work_tickets.github_wait(60)
+        work_tickets.run_gh(tmp_path, ["api", "user"])
+        return 0
+
+    monkeypatch.setattr(work_tickets, "run_command", lambda args: handler(None, args))
+
+    assert work_tickets.main(["metrics"]) == 0
+
+    assert metrics_lines(path) == [{
+        "command": "work_tickets.py metrics", "start": "2026-11-10T08:00:00Z",
+        "wall_seconds": 65.0, "gh_calls": 2, "gh_refusals": 1, "gh_wait_seconds": 60.0,
+        "exit_code": 0,
+    }]
+
+
+def test_a_group_command_is_recorded_by_its_words_and_its_exit_code(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "metrics.jsonl"
+    monkeypatch.setenv("SE_METRICS", str(path))
+    FakeClock(monkeypatch)
+
+    assert work_tickets.main(["field-report", "--check", str(tmp_path / "missing.md")]) == 1
+
+    line, = metrics_lines(path)
+    assert (line["command"], line["exit_code"]) == ("work_tickets.py field-report", 1)
+    assert work_tickets.command_words(work_tickets.make_parser().parse_args(
+        ["refs", "apply", "7", "--worktree", "."])) == ["refs", "apply"]
+
+
+def test_a_metrics_write_that_fails_never_fails_the_command(tmp_path, monkeypatch, capsys):
+    blocker = tmp_path / "file"
+    blocker.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SE_METRICS", str(blocker / "metrics.jsonl"))  # its parent is a file
+
+    assert work_tickets.main(["metrics", "--file", str(tmp_path / "none.jsonl")]) == 0
+    assert "Metrics: 0 runs" in capsys.readouterr().out
+
+
+def test_integrate_notes_the_suite_and_the_landed_issue_and_prints_its_line(
+        tmp_path, monkeypatch, capsys):
+    path = tmp_path / "metrics.jsonl"
+    monkeypatch.setenv("SE_METRICS", str(path))
+    clock = FakeClock(monkeypatch)
+
+    def integrate(root, args):
+        work_tickets.metrics.note(issue=749)
+        clock.advance(130)
+        work_tickets.metrics.note(suite_seconds=130.0, suite_limit_seconds=120)
+        return 0
+
+    monkeypatch.setattr(work_tickets, "run_command", lambda args: integrate(None, args))
+
+    assert work_tickets.main(["integrate", "7", "--worktree", str(tmp_path)]) == 0
+
+    line, = metrics_lines(path)
+    assert (line["issue"], line["suite_seconds"], line["suite_limit_seconds"]) == (749, 130.0, 120)
+    assert f"Metrics: {json.dumps(line, sort_keys=True)}" in capsys.readouterr().out
+
+
+def test_the_metrics_report_ranks_spenders_and_flags_an_overrun():
+    lines = [
+        {"command": "work_tickets.py sync", "start": "2026-11-01T09:00:00Z", "wall_seconds": 900,
+         "gh_calls": 1, "gh_refusals": 0, "gh_wait_seconds": 0, "exit_code": 0},
+        {"command": "work_tickets.py integrate", "start": "2026-11-10T09:00:00Z",
+         "wall_seconds": 300, "gh_calls": 40, "gh_refusals": 2, "gh_wait_seconds": 120,
+         "exit_code": 0, "issue": 749, "suite_seconds": 130.5, "suite_limit_seconds": 120},
+        {"command": "work_tickets.py sync", "start": "2026-11-11T09:00:00Z", "wall_seconds": 5,
+         "gh_calls": 0, "gh_refusals": 0, "gh_wait_seconds": 0, "exit_code": 0},
+        {"command": "se_start.py status", "start": "2026-11-12T09:00:00Z", "wall_seconds": 1.5,
+         "gh_calls": 0, "gh_refusals": 0, "gh_wait_seconds": 0, "exit_code": 0,
+         "budget_seconds": 1.0},
+        {"command": "work_tickets.py suite", "start": "2026-11-12T10:00:00Z", "wall_seconds": 50,
+         "gh_calls": 0, "gh_refusals": 0, "gh_wait_seconds": 0, "exit_code": 0,
+         "suite_seconds": 49, "suite_limit_seconds": 120},
+    ]
+
+    text = work_tickets.metrics.report(lines, since="2026-11-10")
+
+    assert text.splitlines() == [
+        "Metrics: 4 runs since 2026-11-10",
+        "Top spenders by wall time:",
+        "  work_tickets.py integrate: 1 runs, 300.0 s wall, 40 GitHub calls, 2 refused, 120 s waiting",
+        "  work_tickets.py suite: 1 runs, 50.0 s wall, 0 GitHub calls, 0 refused, 0 s waiting",
+        "  work_tickets.py sync: 1 runs, 5.0 s wall, 0 GitHub calls, 0 refused, 0 s waiting",
+        "  se_start.py status: 1 runs, 1.5 s wall, 0 GitHub calls, 0 refused, 0 s waiting",
+        "Top spenders by GitHub calls:",
+        "  work_tickets.py integrate: 1 runs, 300.0 s wall, 40 GitHub calls, 2 refused, 120 s waiting",
+        "Overruns: 2",
+        "  2026-11-10T09:00:00Z work_tickets.py integrate #749: suite 130.5 s over its budget 120 s",
+        "  2026-11-12T09:00:00Z se_start.py status: wall time 1.5 s over its budget 1 s",
+    ]
+
+
+def test_the_metrics_command_reads_its_file_and_skips_unreadable_lines(tmp_path, capsys):
+    source = tmp_path / "metrics.jsonl"
+    source.write_text('{"command": "work_tickets.py sync", "start": "2026-11-12T00:00:00Z", '
+                      '"wall_seconds": 3}\nnot json\n', encoding="utf-8")
+
+    assert work_tickets.main(["metrics", "--file", str(source), "--since", "2026-11-12"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Metrics: 1 runs since 2026-11-12 in" in out and "1 unreadable lines skipped" in out
+    assert "work_tickets.py sync: 1 runs, 3.0 s wall" in out
+    with pytest.raises(SystemExit):
+        work_tickets.make_parser().parse_args(["metrics", "--since", "12 Nov"])
