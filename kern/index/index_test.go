@@ -472,3 +472,53 @@ func TestTheFakeKeepsAFamilyByKey(t *testing.T) {
 		t.Fatal("a family was read without a key")
 	}
 }
+
+type allIn struct {
+	All map[string]int `index:"all"`
+}
+
+// summer is a fixture component that reads the family posts whole.
+func summer(runs *int) *index.Component {
+	return index.Declare("summer", "Sums every number posted.",
+		index.Derived("sum", 0, "The sum over every key.", func(in allIn) (int, error) {
+			*runs++
+			n := 0
+			for _, v := range in.All {
+				n += v
+			}
+			return n, nil
+		}),
+	)
+}
+
+// An input of type map[string]T bound to a family of T reads it whole: every
+// key standing, once per change at any key, so a derivation can count across
+// keys; a command may read a family that way too.
+func TestAnInputReadsAFamilyWhole(t *testing.T) {
+	t.Parallel()
+	runs := 0
+	ix := start(t, `
+instances = { p = { component = "poster" }, s = { component = "summer" } }
+wires = { "p.posts" = "posts/<id>", "s.all" = "posts/<id>" }
+`, poster, summer(&runs))
+	if got := read(t, ix, "s/sum"); got.V != 0 {
+		t.Fatalf("s/sum before any post is %+v, want 0", got)
+	}
+	before := runs
+	must(t, ix.Commit("p", posts.At("a", 3)))
+	must(t, ix.Commit("p", posts.At("b", 5)))
+	if got := read(t, ix, "s/sum"); got.V != 8 {
+		t.Fatalf("s/sum after posts at a and b is %+v, want 8", got)
+	}
+	if runs-before != 2 {
+		t.Fatalf("the derivation ran %d times for two commits, want once each", runs-before)
+	}
+	must(t, ix.Commit("p", posts.Drop("a")))
+	if got := read(t, ix, "s/sum"); got.V != 5 {
+		t.Fatalf("s/sum after a went is %+v, want 5", got)
+	}
+	refused(t, `
+instances = { p = { component = "poster" }, s = { component = "summer" } }
+wires = { "p.posts" = "posts/<id>", "s.all" = "posts/<id>/x" }
+`, "which nothing writes", poster, summer(&runs))
+}
