@@ -203,11 +203,6 @@ jobs:
       - name: A hook with no core fails open at once, 200 runs of 200
         working-directory: kern
         run: go test -count=200 -run 'TestAHookWithNoCoreFailsOpenAtOnce$' ./host/
-      # TEMPORARY, for one pull request's run only, dropped before it lands: the contract's
-      # derived-value cases and their late subscriber, 200 runs.
-      - name: The contract's derived values, 200 runs of 200
-        working-directory: kern
-        run: go test -count=200 -timeout 40m -run 'TestTheRealCoreKeepsTheContract(ForALateSubscriber)?$/(a_derivation|an_input)' ./contract/
       - uses: astral-sh/setup-uv@v7
       # Git's bash on Windows, as a session runs these scripts there.
       - name: SE's start and hook scripts on this platform
