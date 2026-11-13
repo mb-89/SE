@@ -193,7 +193,8 @@ Not ported, and no issue will bring them back without the owner:
 - the queue estimate of `issue tree`;
 - `RUNME.sh`, `build.sh` and the setup script that built `se` in the cloud.
 
-The tag `archive/go-line` keeps all of it readable.
+The remote has no tag `archive/go-line`; commit `ff01204`, an ancestor of `main`, keeps all of
+it readable.
 
 ## Its end
 
