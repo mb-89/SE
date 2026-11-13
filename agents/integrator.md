@@ -96,11 +96,15 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
      the GitHub steps as a plan, you run them, and `integrate --read-back
      <branch>` checks the landing through git and prints the close-out plan
      ([Without gh](../skills/work-model/SKILL.md#without-gh)).
+   - Where kern's relay serves the checkout, `integrate <pull request>` reads the pull request and
+     its work issue from the relay, so you save no file; run the plan's tool calls (the hook tells
+     you the waiting ones) and the answers reach the command through kern.
    - The landing pull request ends in its `Metrics:` line, step 2's body unedited, which
      `retro.py collect` reads back (README [Metrics](../README.md#metrics)).
    - Check it after the merge: pass its description, saved as `pull_request_read` `get` reads it,
-     as `--read-back`'s `--landing-description <file>`. Without the line the read-back fails and
-     closes nothing: update the body to step 2's and read back again.
+     as `--read-back`'s `--landing-description <file>`; through the relay, run `--read-back`
+     without that flag and it reads the description from the relay. Without the `Metrics:` line the
+     read-back fails and closes nothing: update the body to step 2's and read back again.
    - A suite the [Test budget](../README.md#test-budget) refuses: escalate it to the worker
      with the gate's remedy.
    - Commits on the branch after the report's Branch tip are refused, named: escalate them to the
