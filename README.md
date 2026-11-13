@@ -89,6 +89,16 @@ uv run python <se>/scripts/se_start.py refresh
   to the person and hands it to the session, together with SE's root (`SE root: <path>`), where the
   skills find SE's scripts; elsewhere SE's [instructions](src/agents/se.md) run `status --greeting`
   first.
+- At the session's start, before the core starts, the hook moves an installed SE that is a git
+  checkout (the cloud's setup-script clone) to the latest release of its major, `se_start.py
+  start-refresh`: one read of the remote's tags and, where it is behind, one fetch of that tag.
+  - The move is `refresh`'s, trial start included; the start then runs again from the moved tree,
+    so the core starts from its pins, and the greeting names both versions.
+  - It fails open: a remote that cannot be read, or a move that fails, starts the session with the
+    SE it has, saying so in one line. A development checkout (local changes or its own commits),
+    the session's own working tree and a plugin Claude Code installed are left to `refresh`.
+  - Where the session's working tree is SE's own checkout, the core runs that checkout's release
+    pins, not the installed SE's, so a session on `main` runs `main`'s.
 - The counts are what loaded: the skills and agents of the plugin's layout (every agent but SE is a
   sub-agent) and the rules the [public check](AGENTS.md#public-safety) enforces.
 - `status` reads only the disk and the last update check, cached in `~/.se/start-check.json`

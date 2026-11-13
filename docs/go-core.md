@@ -342,6 +342,9 @@ same for its own binary (core plus its Go components). The binary is fetched int
   outside any budget. A failed fetch prints one line and the session starts without the core.
 - **Local:** `bootstrap.sh` fetches it on the first start of a new version, in the background; that
   session works without the core until it lands, and the greeting says so.
+- **Which pins:** the installed SE's `release.toml`, after the refresh at start moved it to its
+  latest release (README ["Start and refresh"](../README.md#start-and-refresh)); where the
+  session's working tree is SE's own checkout, that checkout's, so a session on `main` tests `main`.
 - **A checkout of the core or of an application's Go code:** built from source (warm build 0.12 s,
   one changed file 0.9 to 1.0 s), so its own changes run.
 - **The release matches the checkout:** a session runs the release its `release.toml` names, so

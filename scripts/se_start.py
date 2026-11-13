@@ -3,8 +3,9 @@
 `status` answers from what is on disk and the cached update check, never from the network, and
 starts the check in the background when the cache is stale; `check` runs that check, and where gh
 is signed in also counts the work landed since the last retro and runs the fleet check; `refresh`
-moves every module that is due within its range, and SE itself, into place. What each command
-does and where SE runs it is the README section "Start and refresh".
+moves every module that is due within its range, and SE itself, into place; `start-refresh` moves
+an installed SE that is a git checkout to its latest release at the session's start. What each
+command does and where SE runs it is the README section "Start and refresh".
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
 CLOUD_ENV = "CLAUDE_CODE_REMOTE"  # "true" in a Claude Code cloud session
 CLOUD_PLUGINS = "README \"Claude Code cloud\""
 CHECK_REMEDY = "run it by hand to see the cause: uv run python {se}/scripts/se_start.py check"
+START_TIMEOUT = 15  # seconds each network read of the refresh at start may take
 
 
 def _load(name: str):
@@ -64,13 +66,13 @@ class RemoteError(Exception):
 # Inputs
 
 
-def git_tags(url: str) -> list[Version]:
+def git_tags(url: str, timeout: float = 60) -> list[Version]:
     """The `vMAJOR.MINOR.PATCH` tags of a remote, in one call that fetches nothing."""
     feedback.reading("the remote", ["git", "ls-remote", "--tags", "--refs", url])
     result = subprocess.run(
         ["git", "ls-remote", "--tags", "--refs", url],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=60,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=timeout,
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().splitlines()
@@ -463,8 +465,6 @@ def work_lines(report: Report, se_root: Path) -> list[str]:
     return lines
 
 
-def _range(item: Item) -> str:
-    return item.range if item.kind == "range" else f"SE's major {item.version[0]}"
 def take_outside(state: State, root: Path | None, se_root: Path) -> str:
     """The remedy for a version outside the range: the pin to change and where, and the command
     that moves to it."""
@@ -476,6 +476,8 @@ def take_outside(state: State, root: Path | None, se_root: Path) -> str:
             f"then run: uv run python {se_root.as_posix()}/scripts/se_modules.py update {item.name}")
 
 
+def _range(item: Item) -> str:
+    return item.range if item.kind == "range" else f"SE's major {item.version[0]}"
 
 
 def _check_lines(report: Report, se_root: Path) -> list[str]:
@@ -551,7 +553,7 @@ def kern_line(se_root: Path, root: Path, kern: Kern, ask: Callable[[Path, Path],
     if not (kern.binary or kern.starting or kern.failed):
         return []
     try:
-        binary = se_modules.app_binary(se_root)
+        binary = se_modules.app_binary(se_modules.app_root(se_root, root))
         name = f"{binary.name} {binary.version}"
     except ModuleError:
         name = "kern ?"
@@ -685,12 +687,25 @@ def _starts(se: Path, root: Path | None, version: Version) -> None:
         raise RefreshError(f"SE v{_v(version)} does not start: {(result.stderr or result.stdout).strip()[-300:]}")
 
 
-def refresh_se(se_root: Path, root: Path | None, version: Version) -> str:
+def _fetch_tag(repo: Path, tag: str, timeout: float | None) -> None:
+    """One fetch of the tag from origin; in a shallow clone it brings only the commits it lacks."""
+    argv = ["git", "-C", str(repo), "fetch", "--quiet", "origin", f"refs/tags/{tag}:refs/tags/{tag}"]
+    feedback.reading("the remote", ["git", "fetch", "origin", f"refs/tags/{tag}"])
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        raise RefreshError(f"fetching {tag} took over {timeout:g} s") from error
+    if result.returncode != 0:
+        raise RefreshError(f"fetching {tag} failed: {_tail(result)}")
+
+
+def refresh_se(se_root: Path, root: Path | None, version: Version, timeout: float | None = None) -> str:
     """Bring the se checkout to tag v<version>, after the new version started in a trial worktree."""
     tag = f"v{_v(version)}"
     if se_modules.is_dirty(se_root):
         raise RefreshError(f"the se checkout {se_root} has local changes; commit or discard them")
-    _git(se_root, "fetch", "--quiet", "origin", f"refs/tags/{tag}:refs/tags/{tag}")
+    _fetch_tag(se_root, tag, timeout)
     sha = _git(se_root, "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}")
 
     def starts(trial: Path) -> None:
@@ -853,6 +868,47 @@ def refresh(se_root: Path, root: Path | None, local_config: Path | None, cache_p
     return lines, failed
 
 
+def _development(se_root: Path) -> bool:
+    """A checkout someone works in: local changes, or commits on its branch its upstream lacks."""
+    if se_modules.is_dirty(se_root):
+        return True
+    if _git(se_root, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD":
+        return False
+    ahead = subprocess.run(["git", "-C", str(se_root), "rev-list", "--count", "@{upstream}..HEAD"],
+                           capture_output=True, text=True, check=False)
+    return ahead.returncode == 0 and ahead.stdout.strip() not in ("", "0")
+
+
+def start_refresh(se_root: Path, root: Path | None, local_config: Path | None,
+                  remote: Callable[[str], list[Version]] | None = None) -> tuple[str, bool]:
+    """At the session's start: move an installed SE that is a git checkout (the cloud's setup-script
+    clone) to the latest release of its major, in one read of its tags and one fetch, so this start
+    runs the moved tree. The line to show, and whether it moved; it fails open, every failure a
+    line saying the session starts with the SE it has. Leaves alone what the start cannot move in
+    place: a development checkout, the session's own working tree, a local path, a plugin Claude
+    Code installed (refresh updates it; it loads at the next start)."""
+    version = se_modules.parse_version(_project(se_root).get("version"))
+    stays = f"this session starts with SE {_v(version)}"
+    try:
+        local = se_modules.load_local(local_config or se_modules.default_local_config())
+        item = _se_item(se_root, version, local)
+        if (item.kind != "se" or item.url is None or version is None or not (se_root / ".git").exists()
+                or (root is not None and root.resolve() == se_root.resolve()) or _development(se_root)):
+            return "", False
+        versions = (remote or (lambda url: git_tags(url, timeout=START_TIMEOUT)))(item.url)
+    except (RemoteError, ModuleError, OSError, subprocess.SubprocessError) as error:
+        return f"SE: no refresh at start, {stays}: {error}", False
+    bounds = item.bounds()
+    due = max((v for v in versions if se_modules.matches(v, bounds) and v > version), default=None)
+    if due is None:
+        return "", False
+    try:
+        refresh_se(se_root, root, due, timeout=START_TIMEOUT)
+    except (RefreshError, ModuleError, OSError, subprocess.SubprocessError) as error:
+        return f"SE: no refresh at start to {_v(due)}, {stays}: {error}", False
+    return f"SE: {_v(version)} -> {_v(due)}, refreshed at this start ({se_root.as_posix()})", True
+
+
 def root_line(se_root: Path) -> str:
     """The one named value that tells a session where SE is: `<se>` in SE's skills and agents."""
     return f"{ROOT_NAME}: {se_root}"
@@ -899,6 +955,8 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("check", help="read every remote now, in parallel, and, where gh is signed in, "
                         "the work landed since the last retro and the fleet check; cache the result")
     commands.add_parser("refresh", help="move every module due within its range, and SE itself, into place")
+    commands.add_parser("start-refresh", help="bootstrap.sh at the session's start: move an installed SE that "
+                        "is a git checkout to its latest release; exit code 0 where it moved")
     return parser
 
 
@@ -913,6 +971,14 @@ def run(args: argparse.Namespace, world: World | None) -> int:
     world = world or World()
     root = find_project(args.root)
     cache_path = (args.cache or default_cache()).expanduser()
+    if args.command == "start-refresh":
+        try:
+            line, moved = start_refresh(SE_ROOT, root, args.local)
+        except Exception as error:  # noqa: BLE001 - the start fails open, whatever went wrong
+            line, moved = f"SE: no refresh at start, it failed: {type(error).__name__}: {error}", False
+        if line:
+            print(line)
+        return 0 if moved else 1
     if args.command == "refresh":
         lines, failed = refresh(SE_ROOT, root, args.local, cache_path, world)
         print("\n".join(lines))

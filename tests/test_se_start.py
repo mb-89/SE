@@ -582,6 +582,41 @@ def refresh(r):
     return se_start.refresh(r["se"], r["project"], r["config"], r["cache"], r["world"])
 
 
+# The refresh at the session's start (start_refresh): SE alone, in place, failing open.
+
+
+def test_start_refresh_moves_se_to_the_latest_release_of_its_major(repos):
+    line, moved = se_start.start_refresh(repos["se"], repos["project"], repos["config"])
+    assert moved and line == f"SE: 1.0.0 -> 1.1.0, refreshed at this start ({repos['se'].as_posix()})"
+    assert se_modules.checkout_version(repos["se"]) == (1, 1, 0)
+    assert se_modules.read_lock(repos["project"])["lib"][0] == "1.0.0", "the modules wait for refresh"
+    assert se_start.start_refresh(repos["se"], repos["project"], repos["config"]) == ("", False)
+
+
+def test_start_refresh_fails_open_with_one_line(repos):
+    def offline(url):
+        raise se_start.RemoteError(f"cannot reach {url}: offline")
+
+    line, moved = se_start.start_refresh(repos["se"], repos["project"], repos["config"], offline)
+    assert not moved and line.startswith("SE: no refresh at start, this session starts with SE 1.0.0: "
+                                         "cannot reach ")
+    assert "\n" not in line and se_modules.checkout_version(repos["se"]) == (1, 0, 0)
+    git(repos["upstream"], "tag", "v1.2.0")  # a tag whose se.toml names another version: no start
+    line, moved = se_start.start_refresh(repos["se"], repos["project"], repos["config"])
+    assert not moved and line.startswith("SE: no refresh at start to 1.2.0, this session starts with SE 1.0.0: ")
+    assert se_modules.checkout_version(repos["se"]) == (1, 0, 0)
+
+
+def test_start_refresh_leaves_a_development_checkout_and_the_sessions_own_tree(repos):
+    assert se_start.start_refresh(repos["se"], repos["se"], repos["config"]) == ("", False)
+    write(repos["se"] / "notes.md", "mine\n")
+    git(repos["se"], "add", "notes.md")
+    assert se_start.start_refresh(repos["se"], repos["project"], repos["config"]) == ("", False)  # changes
+    git(repos["se"], "commit", "-q", "-m", "mine")
+    assert se_start.start_refresh(repos["se"], repos["project"], repos["config"]) == ("", False)  # own commit
+    assert se_modules.checkout_version(repos["se"]) == (1, 0, 0)
+
+
 def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
     lock_before = se_modules.read_lock(repos["project"])
     assert lock_before["lib"][0] == "1.0.0" and lock_before["tool"][0] == "1.0.0"
