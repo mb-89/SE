@@ -74,6 +74,14 @@ def test_a_posttooluse_hook_lands_a_snapshot_the_relay_read_writes_to_a_file(
         assert posted.returncode == 0, posted.stderr
         path = relay.answer_file("issues", "alice", "demo", 7, "work issue")
         assert json.loads(path.read_text(encoding="utf-8"))["title"] == "One issue"
+        # The comments, a one-page get_comments answer, land in the comments family as one list.
+        comments = json.dumps({**json.loads(PAYLOAD), "tool_input": {
+            "method": "get_comments", "owner": "alice", "repo": "demo", "issue_number": 7},
+            "tool_response": [{"type": "text", "text": json.dumps([{"id": 5, "body": "Started"}])}]})
+        assert run(str(kern), "hook", "PostToolUse", "--root", str(checkout), cwd=checkout,
+                   stdin=comments).returncode == 0
+        listed = relay.answer_file("comments", "alice", "demo", 7, "work issue comments")
+        assert [c["id"] for c in json.loads(listed.read_text(encoding="utf-8"))] == [5]
         # And the hook of a prompt now hands the agent nothing to run: the outbox is empty.
         prompt = run(str(kern), "hook", "UserPromptSubmit", "--root", str(checkout), cwd=checkout,
                      stdin='{"session_id": "s1"}')

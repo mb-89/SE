@@ -79,7 +79,6 @@ component = "reader"
 "github.issues" = "github/issues/<key>"
 "github.pulls" = "github/pulls/<key>"
 "github.checks" = "github/checks/<key>"
-"github.comments" = "github/comments/<key>"
 "github.outbox" = "github/outbox/<key>"
 "reader.issue" = "github.issue"
 "reader.pull" = "github.pull"
@@ -93,11 +92,14 @@ component = "reader"
 
 // fakeGitHub is GitHub's REST API as the token backend reads it: an issue,
 // a pull request and its check runs, each with an ETag, and the refusals a
-// case queues before them.
+// case queues before them. A list's page stands at its path and query, and
+// links holds the Link header of each page that has a next.
 type fakeGitHub struct {
 	mu       sync.Mutex
 	bodies   map[string]string
+	links    map[string]string
 	refusals []func(http.ResponseWriter)
+	refuseAt map[string][]func(http.ResponseWriter) // refusals queued before one path's answer
 	asked    []string // each request: its path, and its If-None-Match where it sent one
 	answered []int
 }
@@ -107,11 +109,15 @@ func newFake(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		"/repos/alice/demo/issues/7":                  `{"number": 7, "title": "One issue", "state": "open"}`,
 		"/repos/alice/demo/pulls/8":                   `{"number": 8, "title": "One pull", "head": {"sha": "abc123"}}`,
 		"/repos/alice/demo/commits/abc123/check-runs": `{"total_count": 2, "check_runs": [{"name": "check"}, {"name": "kern-windows"}]}`,
-	}}
+	}, links: map[string]string{}, refuseAt: map[string][]func(http.ResponseWriter){}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		f.asked = append(f.asked, strings.TrimSpace(r.URL.Path+" "+r.Header.Get("If-None-Match")))
+		path := r.URL.Path
+		if r.URL.RawQuery != "" {
+			path += "?" + r.URL.RawQuery
+		}
+		f.asked = append(f.asked, strings.TrimSpace(path+" "+r.Header.Get("If-None-Match")))
 		if r.Header.Get("Authorization") != "Bearer test-token" {
 			w.WriteHeader(http.StatusUnauthorized)
 			f.answered = append(f.answered, http.StatusUnauthorized)
@@ -123,7 +129,13 @@ func newFake(t *testing.T) (*fakeGitHub, *httptest.Server) {
 			f.answered = append(f.answered, -1)
 			return
 		}
-		body, ok := f.bodies[strings.ToLower(r.URL.Path)] // GitHub reads names regardless of case
+		if q := f.refuseAt[path]; len(q) > 0 {
+			q[0](w)
+			f.refuseAt[path] = q[1:]
+			f.answered = append(f.answered, -1)
+			return
+		}
+		body, ok := f.bodies[strings.ToLower(path)] // GitHub reads names regardless of case
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
 			f.answered = append(f.answered, http.StatusNotFound)
@@ -136,6 +148,9 @@ func newFake(t *testing.T) (*fakeGitHub, *httptest.Server) {
 			return
 		}
 		w.Header().Set("ETag", etag)
+		if link := f.links[path]; link != "" {
+			w.Header().Set("Link", link)
+		}
 		fmt.Fprint(w, body)
 		f.answered = append(f.answered, http.StatusOK)
 	}))
@@ -226,12 +241,6 @@ func TestTheTokenBackendReadsAPullsCheckRuns(t *testing.T) {
 		t.Fatalf("read pull answers %q, %v", r.Text, err)
 	}
 	snapshot(t, ix, "github/pulls/alice.demo.8")
-	if err := ix.Hear(github.PostToolUse, toolUse("mcp__github__issue_read", map[string]any{"method": "get_comments", "owner": "alice", "repo": "demo", "issue_number": 7}, `[{"id": 1, "body": "Started"}]`)); err != nil {
-		t.Fatal(err)
-	}
-	if s := snapshot(t, ix, "github/comments/alice.demo.7"); len(s.Data.([]any)) != 1 {
-		t.Fatalf("the comments snapshot holds %v", s.Data)
-	}
 }
 
 // The refresh reads each snapshot the token holds again, with its ETag, and
