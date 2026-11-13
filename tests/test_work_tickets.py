@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import git_door
 import quiet_git
 
 
@@ -2380,21 +2381,27 @@ def test_a_sharded_suite_reports_its_slowest_shard_as_ci_s_suite_time(
             "55.5 s (shard slow))") in out
 
 
+def origin_main_of(root: Path, messages: list[str]) -> tuple[Path, list[str]]:
+    """A repository in the fake git whose origin/main (GitHub's example/repo) holds one empty commit
+    per message; returns it and its commits, newest first."""
+    quiet_git.init(root, "-b", "main")
+    identity = ("-c", "user.name=a", "-c", "user.email=a@example.com")
+    for message in messages:
+        assert git_door.run(*identity, "commit", "-q", "--allow-empty", "-m", message, root=root).returncode == 0
+    git_door.run("remote", "add", "origin", "https://github.com/example/repo.git", root=root)
+    git_door.run("update-ref", "refs/remotes/origin/main", "HEAD", root=root)
+    return root, git_door.run("rev-list", "HEAD", root=root).stdout.split()
+
+
 def test_the_shards_notice_round_trips_through_ci_suite_time(
-        worktree, tmp_path, monkeypatch, capsys):
+        worktree, tmp_path, monkeypatch, capsys, fake_git_door):
     read_ci = work_tickets.ci_suite_time  # the real one, reading the fake check run below
     budget_suite(worktree, monkeypatch, 0.0, None)
     records = record_two_shards(worktree, monkeypatch, 20.0, 55.5)
     work_tickets.main(["suite-time", "--worktree", str(worktree), "--shards", str(records)])
     notice, = (line for line in capsys.readouterr().out.splitlines() if line.startswith("::notice"))
     title, message = re.fullmatch(r"::notice title=(.*?)::(.*)", notice).groups()
-    root = quiet_git.init(tmp_path / "repo", "-b", "main")
-    subprocess.run(["git", "-C", str(root), "-c", "user.name=a", "-c", "user.email=a@example.com",
-                    "commit", "-q", "--allow-empty", "-m", "one"], check=True)
-    subprocess.run(["git", "-C", str(root), "remote", "add", "origin",
-                    "https://github.com/example/repo.git"], check=True)
-    subprocess.run(["git", "-C", str(root), "update-ref", "refs/remotes/origin/main", "HEAD"],
-                   check=True)
+    root, _ = origin_main_of(tmp_path / "repo", ["one"])
 
     def github_read(repo, path):
         if path.startswith("commits/"):
@@ -2467,17 +2474,8 @@ def test_a_workflow_annotation_keeps_line_breaks_and_percent_signs_as_text():
 
 
 def test_ci_suite_time_reads_the_notice_of_the_newest_completed_check_on_main(
-        tmp_path, monkeypatch):
-    root = quiet_git.init(tmp_path / "repo", "-b", "main")
-    for name in ("one", "two"):
-        subprocess.run(["git", "-C", str(root), "-c", "user.name=a", "-c", "user.email=a@example.com",
-                        "commit", "-q", "--allow-empty", "-m", name], check=True)
-    subprocess.run(["git", "-C", str(root), "remote", "add", "origin",
-                    "https://github.com/example/repo.git"], check=True)
-    subprocess.run(["git", "-C", str(root), "update-ref", "refs/remotes/origin/main", "HEAD"],
-                   check=True)
-    tip, parent = subprocess.run(["git", "-C", str(root), "rev-list", "HEAD"], capture_output=True,
-                                 text=True, check=True).stdout.split()
+        tmp_path, monkeypatch, fake_git_door):
+    root, (tip, parent) = origin_main_of(tmp_path / "repo", ["one", "two"])
     runs = {tip: [{"id": 9, "status": "in_progress"}],
             parent: [{"id": 7, "status": "completed", "conclusion": "success",
                       "html_url": "https://github.com/run/7"}]}
@@ -2509,16 +2507,7 @@ def fake_ci_runs(tmp_path, monkeypatch, runs: list[tuple[float, str]]):
     """A clone whose origin/main has one commit per entry of `runs` (newest first), each with one
     completed `check` run of that suite time and conclusion; returns the commits and the API paths
     ci_suite_time reads."""
-    root = quiet_git.init(tmp_path / "repo", "-b", "main")
-    for index in range(len(runs)):
-        subprocess.run(["git", "-C", str(root), "-c", "user.name=a", "-c", "user.email=a@example.com",
-                        "commit", "-q", "--allow-empty", "-m", f"c{index}"], check=True)
-    subprocess.run(["git", "-C", str(root), "remote", "add", "origin",
-                    "https://github.com/example/repo.git"], check=True)
-    subprocess.run(["git", "-C", str(root), "update-ref", "refs/remotes/origin/main", "HEAD"],
-                   check=True)
-    commits = subprocess.run(["git", "-C", str(root), "rev-list", "HEAD"], capture_output=True,
-                             text=True, check=True).stdout.split()
+    root, commits = origin_main_of(tmp_path / "repo", [f"c{index}" for index in range(len(runs))])
     paths: list[str] = []
 
     def github_read(repo, path):
@@ -2536,7 +2525,7 @@ def fake_ci_runs(tmp_path, monkeypatch, runs: list[tuple[float, str]]):
 
 
 def test_ci_suite_time_is_the_median_of_five_runs_so_one_slow_runner_does_not_count(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, fake_git_door):
     root, commits, paths = fake_ci_runs(tmp_path, monkeypatch, [
         (35.7, "success"), (39.2, "success"), (78.4, "success"), (36.0, "success"),
         (41.0, "success"), (30.0, "success")])  # newest first; the sixth is not read
@@ -2552,7 +2541,7 @@ def test_ci_suite_time_is_the_median_of_five_runs_so_one_slow_runner_does_not_co
         f"(35.7, 39.2, 78.4, 36, 41 s; median commit {commits[1][:12]}, https://github.com/run/1)")
 
 
-def test_ci_suite_time_skips_a_check_run_that_did_not_succeed(tmp_path, monkeypatch):
+def test_ci_suite_time_skips_a_check_run_that_did_not_succeed(tmp_path, monkeypatch, fake_git_door):
     root, commits, paths = fake_ci_runs(tmp_path, monkeypatch, [
         (35.7, "success"), (12.0, "failure"), (78.4, "success"), (36.0, "success"),
         (41.0, "success"), (30.0, "success")])
