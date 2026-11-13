@@ -725,7 +725,7 @@ work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs 
 work_tickets.py metrics [--since DATE] [--file FILE]
     print what the commands cost, from the line every run of a command appends (README Metrics): top
     spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the
-    suite's [tests] limit_seconds in se.toml, an interactive command's budget in feedback.py)
+    suite's [tests] limit_seconds in se.toml)
 
 work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE
     require the field report to name removed protected content, against origin/<integration branch>

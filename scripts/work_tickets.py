@@ -6486,7 +6486,7 @@ def iso_day(text: str) -> str:
 @command("metrics", "print what the commands cost, from the line every run of a command "
                     "appends (README Metrics): top spenders by total wall time and by GitHub "
                     "calls, and each overrun of a declared budget (the suite's [tests] "
-                    "limit_seconds in se.toml, an interactive command's budget in feedback.py)",
+                    "limit_seconds in se.toml)",
          arg("--since", type=iso_day, metavar="DATE",
              help="only runs that started on or after DATE (YYYY-MM-DD)"),
          arg("--file", type=Path,
