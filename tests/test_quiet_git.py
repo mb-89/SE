@@ -1,9 +1,9 @@
 """The suite's fixture repositories hold still (tests/quiet_git.py): a lock file that git's background
-maintenance creates and removes while the fixture copy runs does not fail the copy, and every
-fixture repository has background maintenance switched off."""
+maintenance creates and removes while the fixture copy runs does not fail the copy. That every
+fixture repository has background maintenance switched off is tests/test_repository.py's
+test_the_quiet_helper_creates_and_clones_quiet_repositories."""
 import os
 import shutil
-import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -50,10 +50,3 @@ def test_a_plain_copy_fails_on_the_vanished_lock(tmp_path, vanishing_locks):
     with pytest.raises(shutil.Error, match="maintenance.lock"):
         shutil.copytree(tmp_path / "template", tmp_path / "copy", symlinks=True)
 
-
-def test_a_quiet_repository_runs_no_background_maintenance(tmp_path):
-    for repository, arguments in ((tmp_path / "bare.git", ["--bare"]), (tmp_path / "work", [])):
-        quiet_git.init(repository, *arguments)
-        read = lambda key: subprocess.run(["git", "-C", str(repository), "config", key],  # noqa: E731
-                                          capture_output=True, text=True, check=True).stdout.strip()
-        assert (read("maintenance.auto"), read("gc.auto")) == ("false", "0")

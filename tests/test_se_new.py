@@ -7,11 +7,11 @@ directory. The application's own test run, which builds the core, is the suite b
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
+import git_door
 import quiet_git
 import se
 import se_modules
@@ -31,7 +31,15 @@ TEMPLATE = {
 
 
 def git(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+    done = git_door.run(*args, cwd=cwd)
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+@pytest.fixture(autouse=True)
+def fake_git(fake_git_door):
+    """Every repository here, the small SE's and the new application's, is in the fake git."""
+    return fake_git_door
 
 
 def write(root: Path, files: dict[str, str]) -> None:
