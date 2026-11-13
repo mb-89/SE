@@ -5267,18 +5267,46 @@ def without_tracker_references(sentence: str) -> str:
     return text[0].upper() + text[1:]
 
 
+#: Where a clause ends inside a sentence: a comma, semicolon or colon before a space, or a dash
+#: between spaces.
+CLAUSE_END = re.compile(r"[,;:](?=\s)|\s[-\u2013\u2014]\s")
+#: Where a Goal's list starts: its lead-in is the Goal's first sentence.
+LIST_START = re.compile(r"\n[ \t]*(?:[-*+]|\d+[.)])[ \t]")
+#: How long a landing title's summary may run before it ends at a clause, and the longest it runs.
+SUMMARY_WIDTH, SUMMARY_MAX = 120, 200
+
+
+def at_boundary(sentence: str, width: int = SUMMARY_WIDTH, longest: int = SUMMARY_MAX) -> str:
+    """`sentence` ended at a sentence or clause boundary, never mid-clause with "...": whole where
+    it fits `width`; else up to its last clause end within `width`, or its first within `longest`;
+    else whole where it fits `longest`. Only a sentence over `longest` without a clause end there
+    is cut at its last word within it."""
+    if len(sentence) <= width:
+        return sentence
+    ends = [m.start() for m in CLAUSE_END.finditer(sentence)]
+    within = [end for end in ends if end <= width] or [end for end in ends if end <= longest][:1]
+    if within:
+        return sentence[:within[-1]].rstrip(" ,;:")
+    if len(sentence) <= longest:
+        return sentence
+    return sentence[:longest + 1].rsplit(" ", 1)[0].rstrip(" ,;:")
+
+
 def goal_summary(issue_body: str) -> str:
     """The first sentence of the work issue's Goal, without its tracker references: what the work
-    is, as the landing's title names it; "" where the Goal is missing or names no more than that."""
+    is, as the landing's title names it, ended at a sentence or clause boundary (`at_boundary`);
+    a Goal that opens with a list's lead-in is that lead-in. "" where the Goal is missing or
+    names no more than that."""
     goal = re.sub(r"<!--.*?-->", "", section(markdown_sections(issue_body), GOAL_SECTION),
                   flags=re.DOTALL)
-    text = " ".join(goal.split())
+    lead = LIST_START.split("\n" + goal.strip(), maxsplit=1)[0]
+    text = " ".join((lead if lead.strip() else goal).split())
     if not text:
         return ""
     sentence = without_tracker_references(SENTENCE_END.split(text, maxsplit=1)[0])
     if not sentence or tracker_references(sentence) or PUBLIC_HOST_PATTERN.search(sentence):
         return ""
-    return one_line(sentence, 120)
+    return at_boundary(" ".join(sentence.replace("**", "").split()).rstrip(":"))
 
 
 def integration_merge_message(

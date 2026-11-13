@@ -365,6 +365,9 @@ does all of it:
      Goal>`, never a commit's subject. Tracker references (pub-004's forms) are dropped from it,
      with an aside such as `(PR #<n>)` that holds one, and its punctuation tidied; without a
      usable Goal, or with fewer than two words left, it is `Integrate <branch>` alone.
+   - A Goal that opens with a list's lead-in gives that lead-in. A sentence over 120 characters
+     ends at its last clause boundary (a comma, semicolon, colon or dash) within them, never with
+     "...", or at its first within 200 (`work_tickets.py` `at_boundary`).
    - Its description is always a link, never the report, so it fits GitHub's body limit and any
      tool argument whatever the report's size: `Refs <work issue>`, the work pull request, and the
      marker `<!-- se:field-report-in <n> -->`.
