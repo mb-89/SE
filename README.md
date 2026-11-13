@@ -95,8 +95,9 @@ uv run python <se>/scripts/se_start.py refresh
   - The move is `refresh`'s, trial start included; the start then runs again from the moved tree,
     so the core starts from its pins, and the greeting names both versions.
   - It fails open: a remote that cannot be read, or a move that fails, starts the session with the
-    SE it has, saying so in one line. A development checkout (local changes or its own commits),
-    the session's own working tree and a plugin Claude Code installed are left to `refresh`.
+    SE it has, saying so in one line. A development checkout (local changes, a branch other than
+    `main`, or commits no remote branch or tag holds), the session's own working tree and a plugin
+    Claude Code installed are left to `refresh`.
   - Where the session's working tree is SE's own checkout, the core runs that checkout's release
     pins, not the installed SE's, so a session on `main` runs `main`'s.
 - The counts are what loaded: the skills and agents of the plugin's layout (every agent but SE is a
