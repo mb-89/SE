@@ -308,6 +308,20 @@ def test_discovery_intake_creates_an_evidence_index_and_probe_appends_to_it(work
     )
 
 
+def test_probe_without_intake_creates_the_default_evidence_index(worktree):
+    # Without gh (Claude's cloud) intake cannot run, yet the work model lists probe as a command
+    # that still does: the first probe creates the index intake --discovery would have.
+    assert run(worktree, "probe", "--command", "gh api rate_limit", "--output", ".se/work/probe/limit.json") == 0
+
+    evidence = worktree / ".se" / "work" / "probe" / "evidence.md"
+    assert evidence.read_text(encoding="utf-8") == (
+        "# Discovery evidence\n\n"
+        "| Command | Output |\n"
+        "|---|---|\n"
+        "| `gh api rate_limit` | `.se/work/probe/limit.json` |\n"
+    )
+
+
 def test_discovery_label_creates_evidence_oriented_tickets(worktree, gh):
     gh.issue["labels"] = [{"name": "work"}, {"name": "discovery"}]
 
