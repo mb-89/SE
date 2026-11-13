@@ -652,9 +652,10 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     - Its refusals (late commits, a failed check) are those with `gh`; `--include-late <reason>`
       states why late commits are included.
     - Run the plan's steps; anything but a passed `check` merges nothing.
-    - Then `integrate --read-back <branch> --landing-pull <number> --check-run <url>`: it reads
-      the landing back through git, fast-forwards the checkout, cleans up and prints the
-      close-out plan; run its steps. It starts no session: start what is unblocked as `start`
+    - Then `integrate --read-back <branch> --landing-pull <number> --check-run <url>
+      --landing-description <file>`, the landing pull request's description saved after the merge.
+    - It refuses a description without the plan's `Metrics:` line, reads the landing back through
+      git, fast-forwards the checkout, cleans up and prints the close-out plan; run its steps. It starts no session: start what is unblocked as `start`
       above says.
   - `refs request` and `refs apply`: the same hand-off. `refs apply` takes the issue's comments
     as the GitHub tools read them, saved as a JSON list, with `--comments-file <file>`.

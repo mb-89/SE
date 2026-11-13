@@ -185,15 +185,32 @@ def issue(number: int, title: str, closed: str | None, body: str = "", reason: s
             "labels": [{"name": name} for name in labels]}
 
 
-def retro_block(classes: list[str], broken: bool) -> str:
-    block = {"version": 1, "sizes": {"closed": 6, "landed": 5, "duplicates": 0, "escalated": 1},
+# The retro docs the retro reports link, by (commit, path): what `show` reads.
+DOCS: dict[tuple[str, str], str] = {}
+
+
+def show(sha: str, path: str) -> str | None:
+    return DOCS.get((sha, path))
+
+
+def retro_block(number: int, classes: list[str], broken: bool) -> str:
+    """Retro `number`'s report: it links the committed retro doc, whose judged block holds two
+    work findings and a decision."""
+    def finding(controversial: bool) -> dict:
+        return {"title": "Refuse a landing without its report", "body": "b", "class": classes[0],
+                "home": "scripts/work_tickets.py", "controversial": controversial,
+                **({"why": "unsure"} if controversial else {})}
+    block = {"version": 1, "window": {"retro": number},
+             "sizes": {"closed": 6, "landed": 5, "duplicates": 0, "escalated": 1},
              "rule_checks": [{"name": "field-report", "kept": not broken},
                              {"name": "check", "kept": True}],
              "classes": [{"name": name, "fix": "f"} for name in classes],
-             "findings": [{"kind": "work"}, {"kind": "work"}, {"kind": "decision"}],
+             "findings": [finding(False), finding(False), finding(True)], "went_well": ["w"],
              "previous": {"findings": [{"state": "closed", "recurred": False},
                                        {"state": "none", "recurred": True}]}}
-    return f"Report.\n\n{retro.BLOCK_MARKER}\n```yaml\n{json.dumps(block)}\n```\n"
+    sha, path = f"{number:040x}", f"docs/retro-{number}.md"
+    DOCS[(sha, path)] = f"# Retro draft\n\n{retro.BLOCK_MARKER}\n```yaml\n{json.dumps(block)}\n```\n"
+    return f"Report.\n\n{retro.DOC_MARKER.format(sha=sha, path=path)}\n"
 
 
 def overhaul_block() -> str:
@@ -226,8 +243,8 @@ def answers() -> dict[str, object]:
             issue(45, "feat/split-20261102", None, "Refs overhaul #40 finding 2."),
             issue(THIS, "docs/overhaul-20261112", None)],
         "comments-40.json": [{"body": overhaul_block()}],
-        "comments-42.json": [{"body": retro_block(["Lost reports", "Slow suite"], True)}],
-        "comments-43.json": [{"body": "Hello."}, {"body": retro_block(["Lost reports"], False)}],
+        "comments-42.json": [{"body": retro_block(42, ["Lost reports", "Slow suite"], True)}],
+        "comments-43.json": [{"body": "Hello."}, {"body": retro_block(43, ["Lost reports"], False)}],
         "comments-41.json": [], "comments-46.json": [],
     }
 
@@ -258,7 +275,7 @@ class FakeDoor:
 def gathered(checkout: Path, given: dict[str, object] | None = None) -> overhaul.Gathered:
     door = FakeDoor(given or answers())
     found = overhaul.gather(THIS, door, overhaul.book_rules(ROOT),
-                            overhaul.find(overhaul.read(checkout)), NOW)
+                            overhaul.find(overhaul.read(checkout)), NOW, show)
     assert found is not None
     return found
 
@@ -314,6 +331,7 @@ def test_without_a_closed_overhaul_the_window_is_the_whole_history(checkout):
 def test_without_gh_read_prints_its_reads_round_by_round_and_takes_the_answers(
         checkout, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(retro, "git_show", lambda root: show)  # the linked retro docs
     directory, out = tmp_path / "answers", tmp_path / "draft.md"
     directory.mkdir()
     arguments = ["read", str(THIS), "--answers", str(directory), "--out", str(out), "--repo", REPO,
@@ -473,7 +491,7 @@ def test_the_next_read_scores_the_findings_file_posted(checkout, tmp_path, monke
     given[f"comments-{THIS}.json"] = [{"body": tracker.calls[0][1]["body"]}]
 
     found = overhaul.gather(60, FakeDoor(given), overhaul.book_rules(ROOT),
-                            overhaul.find(overhaul.read(checkout)), NOW)
+                            overhaul.find(overhaul.read(checkout)), NOW, show)
     assert found.since_overhaul == THIS and found.retros == []
     assert [(item["finding"], item["kind"], item["issues"], item["state"])
             for item in found.previous["findings"]] == [

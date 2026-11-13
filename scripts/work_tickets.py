@@ -5237,7 +5237,9 @@ def integrate(
             "check_temporary_working_directory": check_temporary_working_directory,
         }
         then = (f"work_tickets.py integrate --read-back {branch} --landing-pull <pull number from "
-                f"step 2> --check-run <check run url from step 3> --worktree {root}")
+                f"step 2> --check-run <check run url from step 3> --landing-description <file: "
+                f"the landing pull request's description, as pull_request_read get reads it "
+                f"after step 4> --worktree {root}")
         description = landing_description(
             str(pull.get("url") or pull_url(remote, pull_number)), pull_number,
             issue_url(tracker, work_number), metrics.snapshot())
@@ -5267,9 +5269,29 @@ def integrate(
                               str(given["check run url"]), door)
 
 
-def read_back_integration(root: Path, branch: str, landing_pull: int, check_run: str) -> str:
-    """The hand-off's second half: read the landing of `branch` back through git and finish the
-    close-out, printing its GitHub steps for the session."""
+def landed_metrics(state: dict[str, object], landing_pull: int, description: str) -> None:
+    """Refuse a landing pull request whose `description` does not end in the metrics line the
+    hand-off's plan gave it (step 2's body): the line `retro.py collect` reads the cloud
+    integration's costs back from (README "Metrics")."""
+    plan = state.get("plan") if isinstance(state.get("plan"), dict) else {}
+    bodies = [str((step.get("arguments") or {}).get("body") or "") for step in plan.get("steps", [])
+              if isinstance(step, dict) and step.get("tool") == "create_pull_request"]
+    expected = metrics.of_text(bodies[0]) if bodies else None
+    found = metrics.of_text(description)
+    if found is None or (expected is not None and found != expected):
+        what = "names another metrics line" if found is not None else "has no metrics line"
+        line = metrics.text(expected) if expected is not None else "Metrics: {...}"
+        raise QueueError(
+            f"The landing pull request #{landing_pull}'s description {what}: it ends in "
+            f"`{line}`, the body of the plan's step 2. Update it to that body (update_pull_request "
+            f"#{landing_pull}), save it again and read back again; nothing was closed")
+
+
+def read_back_integration(root: Path, branch: str, landing_pull: int, check_run: str,
+                          description: str) -> str:
+    """The hand-off's second half: check the landing pull request's `description` for its
+    metrics line, read the landing of `branch` back through git and finish the close-out,
+    printing its GitHub steps for the session."""
     path = handoff_path(root, branch)
     if not path.is_file():
         raise QueueError(
@@ -5277,6 +5299,7 @@ def read_back_integration(root: Path, branch: str, landing_pull: int, check_run:
             "first, which writes it")
     state = json.loads(path.read_text(encoding="utf-8"))
     metrics.note(issue=state["work_number"])
+    landed_metrics(state, landing_pull, description)
     feedback.phase(f"read back the landing of {branch}")
     commit = landing_read_back(root, state["target"], state["base"], state["landed"])
     short = finish_integration(root, state, commit, pull_url(state["remote"], landing_pull),
@@ -6676,6 +6699,9 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
                   "commit of land/BRANCH on the tested base with the tested tree, and finish"),
          arg("--landing-pull", type=int, help="with --read-back: the landing pull request's number"),
          arg("--check-run", help="with --read-back: the URL of its passed check run"),
+         arg("--landing-description", type=Path, metavar="FILE",
+             help="with --read-back: the landing pull request's description after the merge, "
+                  "saved to a file; it must end in the plan's metrics line"),
          arg("--build-command", help="project's output regeneration command"),
          INCLUDE_LATE,
          arg("--check-command", type=parse_check_commands, metavar="JSON",
@@ -6688,8 +6714,10 @@ def run_integrate(root: Path, args: argparse.Namespace) -> int:
     if (args.read_back is None) == (args.pull_request is None):
         raise QueueError("integrate takes a pull request number or --read-back <branch>, one of them")
     if args.read_back is not None:
-        read_back_arguments(args, "landing_pull", "check_run")
-        commit = read_back_integration(root, args.read_back, args.landing_pull, args.check_run)
+        read_back_arguments(args, "landing_pull", "check_run", "landing_description")
+        description = read_file(args.landing_description, "the landing pull request's description")
+        commit = read_back_integration(root, args.read_back, args.landing_pull, args.check_run,
+                                       description)
         print(f"Integrated {args.read_back} in {commit}")
         return 0
     commit = integrate(
