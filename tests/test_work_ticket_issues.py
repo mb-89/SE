@@ -1895,7 +1895,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     )
     monkeypatch.setattr(
         work_tickets, "run_suite",
-        lambda root: (commands.append(("suite", "Complete suite")) or suite_passed(root, "214 passed")),
+        lambda root, **_: (commands.append(("suite", "Complete suite")) or suite_passed(root, "214 passed")),
     )
     monkeypatch.setattr(
         work_tickets, "run_project_checks",
@@ -2033,7 +2033,7 @@ def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch)
     )
     monkeypatch.setattr(
         work_tickets, "run_suite",
-        lambda root: (commands.append(("suite", "Complete suite")) or suite_passed(root, "passed")),
+        lambda root, **_: (commands.append(("suite", "Complete suite")) or suite_passed(root, "passed")),
     )
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
 
@@ -2071,7 +2071,7 @@ def test_integrate_failure_restores_pre_merge_main_and_escalates(
         if description == failed_step:
             raise work_tickets.QueueError(f"{description} failed: expected")
     monkeypatch.setattr(work_tickets, "run_project_command", fail)
-    monkeypatch.setattr(work_tickets, "run_suite", lambda root: fail(root, "suite", "Complete suite") or suite_passed(root, None))
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root, **_: fail(root, "suite", "Complete suite") or suite_passed(root, None))
     def fail_checks(root, commands, temporary):
         if failed_step == "Project check":
             raise work_tickets.QueueError("Project check failed: expected")
@@ -2171,7 +2171,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     monkeypatch.setattr(work_tickets, "run_project_command", run_project_command)
     monkeypatch.setattr(
         work_tickets, "run_suite",
-        lambda root: suite_passed(root, run_project_command(root, "suite", "Complete suite")))
+        lambda root, **_: suite_passed(root, run_project_command(root, "suite", "Complete suite")))
     def run_project_checks(root, check_commands, temporary):
         checks.append((check_commands, temporary))
         if check_fails:
@@ -2342,7 +2342,7 @@ def test_integrate_keeps_worktree_when_cleanup_refuses(main_checkout, monkeypatc
                            "url": "https://git.example/owner/repo/pull/7"}) if args[:2] == ["pr", "view"] else ""))
     monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args))
     monkeypatch.setattr(work_tickets, "run_project_command", lambda root, command, description: None)
-    monkeypatch.setattr(work_tickets, "run_suite", lambda root: suite_passed(root, "passed"))
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root, **_: suite_passed(root, "passed"))
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
 
     work_tickets.integrate(main_checkout, 7, None, None)
@@ -2364,7 +2364,7 @@ def integration_fakes(monkeypatch, head: str, reported: str | None = None) -> li
     monkeypatch.setattr(
         work_tickets, "run_gh_with_body", lambda root, args, body: calls.append(args) or "")
     monkeypatch.setattr(work_tickets, "run_project_command", lambda root, command, label: "1 passed")
-    monkeypatch.setattr(work_tickets, "run_suite", lambda root: suite_passed(root, "1 passed"))
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root, **_: suite_passed(root, "1 passed"))
     monkeypatch.setattr(work_tickets, "guard", lambda root, branch, report: [])
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 0)
@@ -2954,12 +2954,13 @@ def fake_suite(worktree: Path, monkeypatch, seconds: float) -> None:
 def test_suite_passing_over_the_limit_says_passed_and_refuses_with_its_own_exit_code(
         worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 130.0)
+    monkeypatch.setattr(work_tickets, "ci_suite_time", lambda root: (None, "not on GitHub"))
 
     assert run(worktree, "suite") == work_tickets.SUITE_OVER_LIMIT_EXIT_CODE != 1
     error = capsys.readouterr().err
-    assert "Complete suite passed (3 passed) but took 130.0 s, over its limit of 120 s" in error
-    assert "rerun it once on an idle host" in error
-    assert "if it is still over, make the slowest tests above faster" in error
+    assert "Complete suite passed (3 passed) but took 130.0 s here (" in error
+    assert "over its limit of 120 s" in error
+    assert "Remedy: make the slowest tests above faster" in error
     assert error.index("test_sleepy") < error.index("test_fixture") < error.index("test_quick")
 
 
@@ -4298,7 +4299,7 @@ def test_dry_run_of_the_worker_to_integrator_flow_files_no_field_report_issue(
     gh.pulls[0]["headRefOid"] = subprocess.run(
         ["git", "-C", str(worker), "rev-parse", "HEAD"], capture_output=True, text=True,
         check=True).stdout.strip()
-    monkeypatch.setattr(work_tickets, "run_suite", lambda root: suite_passed(root, "1 passed"))
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root, **_: suite_passed(root, "1 passed"))
     monkeypatch.setattr(work_tickets, "release", lambda root, branch, upstream: "v1.1.0")
     commit = work_tickets.integrate(main_checkout, 7, None, None)
 

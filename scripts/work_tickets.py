@@ -18,6 +18,7 @@ import tempfile
 import textwrap
 import threading
 import time
+import urllib.request
 import tomllib
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -4310,17 +4311,96 @@ def record_suite_verdict(root: Path, commit: str | None, passed: bool, seconds: 
           f"(commit {commit[:12]})")
 
 
-def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
-    """Run se.toml's complete suite, measure it and hold it to its budget.
+# The reference run of the budget (README "Test budget"): the CI `check` job on GitHub's runner.
+CI_VARIABLE = "GITHUB_ACTIONS"
+CI_SUITE_TITLE = "se suite time"
+CI_SUITE_MESSAGE = re.compile(r"Suite time: (\d+(?:\.\d+)?) s")
+CI_SUITE_COMMITS = 5  # first-parent commits of the integration branch searched for CI's time
+CI_MARGIN = 0.9  # CI within 10% of the limit: a local overrun refuses
+CI_READ_SECONDS = 10
+
+
+def suite_is_reference() -> bool:
+    """Whether this run is the budget's reference: the CI `check` job (GitHub Actions)."""
+    return os.environ.get(CI_VARIABLE) == "true"
+
+
+@dataclass(frozen=True)
+class CiSuiteTime:
+    """CI's suite time on one commit of the integration branch, read from its `check` run."""
+
+    seconds: float
+    commit: str
+    url: str
+
+
+def github_read(repo: str, path: str) -> object:
+    """GET `repos/<repo>/<path>` of github.com's API without an account, as a public repository's
+    check runs need none; so `suite` still runs without gh."""
+    url = f"https://api.github.com/repos/{api_repo(repo)}/{path}"
+    feedback.reading("GitHub", ["GET", url])
+    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(request, timeout=CI_READ_SECONDS) as response:
+        return json.loads(response.read().decode("utf-8") or "{}")
+
+
+def ci_suite_time(root: Path) -> tuple[CiSuiteTime | None, str]:
+    """CI's last suite time on the integration branch: the `Suite time` notice of the newest
+    completed `check` run on one of its last CI_SUITE_COMMITS first-parent commits, as origin has
+    them. None with the reason where no such time can be read."""
+    repo = remote_repo(root)
+    if repo is None or repo_host(repo) != "github.com":
+        return None, "the checkout's origin is not on github.com"
+    target = integration_branch(root)
+    listed = run_git(root, "rev-list", "--first-parent", f"--max-count={CI_SUITE_COMMITS}",
+                     f"refs/remotes/origin/{target}")
+    commits = listed.stdout.split() if listed.returncode == 0 else []
+    if not commits:
+        return None, f"origin/{target} is not fetched"
+    try:
+        for commit in commits:
+            found = github_read(repo, f"commits/{commit}/check-runs?check_name={CHECK_NAME}")
+            runs = [run for run in (found.get("check_runs") or [])
+                    if run.get("status") == "completed"] if isinstance(found, dict) else []
+            for run in sorted(runs, key=lambda run: -int(run.get("id") or 0)):
+                notes = github_read(repo, f"check-runs/{run['id']}/annotations")
+                for note in notes if isinstance(notes, list) else []:
+                    match = CI_SUITE_MESSAGE.search(str(note.get("message") or ""))
+                    if note.get("title") == CI_SUITE_TITLE and match:
+                        return CiSuiteTime(float(match[1]), commit,
+                                           str(run.get("html_url") or "")), ""
+    except (OSError, ValueError) as error:  # urllib's errors are OSErrors
+        return None, f"GitHub could not be read without an account ({error})"
+    return None, (f"no completed {CHECK_NAME} run on the last {len(commits)} commits of "
+                  f"origin/{target} reports a suite time")
+
+
+def host_load() -> str:
+    """The host's load averages over its CPUs, for a warning about a slow run."""
+    cpus = os.cpu_count() or 1
+    try:
+        one, five, fifteen = os.getloadavg()
+    except (AttributeError, OSError):  # Windows has no load average
+        return f"{cpus} CPUs, load average unknown"
+    return f"load {one:.1f}/{five:.1f}/{fifteen:.1f} (1/5/15 min) on {cpus} CPUs"
+
+
+def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = False) -> str:
+    """Run se.toml's complete suite, measure it and hold it to its budget (README "Test budget").
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
     Runs `[tests]` setup first, outside the budget. Prints the last result lines of the suite's
     stdout (without progress lines, banners and durations), its time, one line per JUnit report
     (SuitePart.line) with its slow setups under it (SuitePart.setup_lines), its `slowest_count` slowest tests
     and, where `[tests]` names a tier function, each tier's slowest test (tier_lines);
-    warns above the target; refuses failed tests, and a passing suite above the limit with
-    SuiteOverLimitError. Records its verdict on HEAD's tree where the checkout holds exactly it
-    (clean_commit); push reads it before the integration branch is pushed."""
+    warns above the target; refuses failed tests.
+
+    The reference run (suite_is_reference, CI) prints its time as a notice for ci_suite_time and
+    refuses a passing suite above the limit with SuiteOverLimitError. Any other run above the limit
+    warns with the host's load and refuses only where CI's last suite time on the integration
+    branch (ci_suite_time, read there and also where `read_ci`) is unknown or within 10% of the
+    limit. Records its verdict on HEAD's tree where the checkout holds exactly it (clean_commit);
+    push reads it before the integration branch is pushed."""
     budget = suite_budget(root)
     tier_of = tier_function(root, budget.tier) if budget.tier else None
     if budget.setup:
@@ -4330,23 +4410,52 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     feedback.phase(f"complete suite: {' '.join(budget.command)} (limit {budget.limit_seconds:g} s)")
     result = time_suite(root, with_durations(budget.command, slowest_count))
     seconds, output, parts = result.seconds, result.output, result.parts
-    metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=budget.limit_seconds)
-    passed = result.returncode == 0 and seconds <= budget.limit_seconds
-    record_suite_verdict(root, commit, passed, seconds)
+    reference = suite_is_reference()
+    over = seconds > budget.limit_seconds
+    ci, unknown = (None, "")
+    if not reference and (over or read_ci):
+        feedback.phase(f"CI's last suite time on {integration_branch(root)}")
+        ci, unknown = ci_suite_time(root)
+    metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=budget.limit_seconds,
+                 **({"ci_suite_seconds": ci.seconds} if ci else {}))
+    close = ci is None or ci.seconds >= CI_MARGIN * budget.limit_seconds
+    refused = over and (reference or close)
+    record_suite_verdict(root, commit, result.returncode == 0 and not refused, seconds)
     slowest = slowest_tests(output, parts, slowest_count)
     summary = result.refuse_failed(budget)
     listing = "\n".join(f"  {line}" for line in slowest) or NO_SLOWEST_TESTS
     timing = (
         f"{seconds:.1f} s (target {budget.target_seconds:g} s, limit {budget.limit_seconds:g} s)"
     )
-    if seconds > budget.limit_seconds:
+    if reference:
+        print(f"::notice title={CI_SUITE_TITLE}::Suite time: {seconds:.1f} s "
+              f"(limit {budget.limit_seconds:g} s)")
+    ci_text = (f"CI's last suite time on {integration_branch(root)} is {ci.seconds:.1f} s "
+               f"(commit {ci.commit[:12]}{f', {ci.url}' if ci.url else ''})" if ci
+               else f"CI's last suite time is unknown: {unknown}")
+    if refused and reference:
         raise SuiteOverLimitError(
-            f"Complete suite passed ({summary}) but took {seconds:.1f} s, over its limit of "
-            f"{budget.limit_seconds:g} s ([tests] limit_seconds in se.toml). Slowest tests:\n"
-            f"{listing}\n"
-            "Remedy: a loaded host can push a passing suite over the limit, so rerun it once on "
-            "an idle host; if it is still over, make the slowest tests above faster (the work "
-            "model's test rules)."
+            f"Complete suite passed ({summary}) but took {seconds:.1f} s on CI, the budget's "
+            f"reference, over its limit of {budget.limit_seconds:g} s ([tests] limit_seconds in "
+            f"se.toml). Slowest tests:\n{listing}\n"
+            "Remedy: make the slowest tests above faster (the work model's test rules)."
+        )
+    if refused:
+        why = (f"{ci_text}, within 10% of the limit, so the suite is near its budget on the "
+               "reference too" if ci else f"{ci_text}, so this run decides")
+        raise SuiteOverLimitError(
+            f"Complete suite passed ({summary}) but took {seconds:.1f} s here ({host_load()}), "
+            f"over its limit of {budget.limit_seconds:g} s ([tests] limit_seconds in se.toml); "
+            f"{why}. Slowest tests:\n{listing}\n"
+            "Remedy: make the slowest tests above faster (the work model's test rules)."
+        )
+    if over:
+        print(
+            f"warning: the complete suite took {seconds:.1f} s here ({host_load()}), over its "
+            f"limit of {budget.limit_seconds:g} s; {ci_text}, under 90% of the limit, so this "
+            f"host is slow and the run is not refused: CI's {CHECK_NAME} on the landing pull "
+            "request judges the budget",
+            file=sys.stderr,
         )
     own_lines = "\n".join(  # stdout only; the durations are listed below, as the slowest tests
         line for line in result.stdout.strip().splitlines()
@@ -4363,7 +4472,7 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     print(f"Slowest tests:\n{listing}")
     if tier_of and parts:
         print("Slowest per tier:\n" + "\n".join(f"  {line}" for line in tier_lines(parts, tier_of)))
-    if seconds > budget.target_seconds:
+    if budget.target_seconds < seconds <= budget.limit_seconds:
         print(
             f"warning: the complete suite took {seconds:.1f} s, over its target of "
             f"{budget.target_seconds:g} s ([tests] target_seconds in se.toml); make the slowest "
@@ -5323,7 +5432,7 @@ def integrate(
 
     has_public_mirror = any(mirror.public for mirror in mirrors)
     try:
-        suite_result = run_suite(root)
+        suite_result = run_suite(root, read_ci=True)
         if build_command:
             feedback.phase(f"output regeneration: {build_command}")
             run_project_command(root, build_command, "Output regeneration")
@@ -6671,7 +6780,8 @@ def run_sync(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("suite", "run se.toml's complete suite against its [tests] time budget, as integrate "
-                  "does; exit code 1 when tests fail, 3 when they pass over the limit",
+                  "does; exit code 1 when tests fail, 3 when they pass over the limit and the "
+                  "budget refuses them (README \"Test budget\")",
          WORKTREE,
          arg("--slowest", type=positive_int, default=SLOWEST_TESTS, metavar="N",
              help=f"how many slowest tests to list, from the JUnit reports or pytest's --durations "
