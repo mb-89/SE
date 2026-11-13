@@ -4,11 +4,9 @@ SE's own components on kern ([kern/README.md](../kern/README.md)), the applicati
 the rules they compute are SE's work model. Two kinds live here, one folder each:
 
 - **Python, declared** by their `component.toml` and placed by the checkout's `wiring.toml`:
-  tickets, issues, delivery, integration, review, retrospective, overhaul, render and scaffold, SE's
+  tickets, issues, delivery, integration, review, retro, overhaul, render and scaffold, SE's
   script commands (README ["Commands as components"](../README.md#commands-as-components)).
-  - retro.py's commands are `retrospective`, as `retro` is the Go retro-due component below: one
-    wiring places both, and a component's name is its folder's.
-- **Go, compiled into the `se` binary**: fleet, retro and origin, SE's Go module
+- **Go, compiled into the `se` binary**: fleet, retro-due and origin, SE's Go module
   `github.com/mb-89/se/components` (`go.mod` here, kern replaced by `../kern` while it is incubated).
 
 ## The Go components
@@ -16,10 +14,10 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 | component | reads | writes | port of |
 |---|---|---|---|
 | `fleet` | `github/issues`, `github/pulls`, `github/checks` whole; `origin/branches`; config `lease-hours`, `repository`, `base` | `fleet/findings`: each stuck or stray piece of work with its remedy, as `fleet-check --json` lists it, with when it was computed and how many issues, pull requests and branches it read | `work_tickets.py` `fleet_findings` |
-| `retro` | `github/issues`, `github/pulls` whole; config `due-after`, `tracker`, `base` | `retro/due`: the work issues landed since the last retro, `due_after`, whether a retro is due, where the window starts | `retro.py` `landed_since_retro` |
+| `retro-due` | `github/issues`, `github/pulls` whole; config `due-after`, `tracker`, `base` | `retro-due/due`: the work issues landed since the last retro, `due_after`, whether a retro is due, where the window starts | `retro.py` `landed_since_retro` |
 | `origin` | the checkout's git: `refs/remotes/origin`, at start and after SessionStart, UserPromptSubmit, Stop, SubagentStop and each Bash PostToolUse | `origin/branches`: each branch with the committer time of its tip | `work_tickets.py` `fleet_branches`, without its fetch |
 
-- **Whole families.** fleet and retro count across issues, so each reads a GitHub family whole: an
+- **Whole families.** fleet and retro-due count across issues, so each reads a GitHub family whole: an
   input of type `map[string]T` bound to a family of `T` reads every key standing, and the
   derivation runs once per change at any key (kern's index, kern/README.md "Types").
 - **What the names hold.** They hold only what was read: every GitHub tool answer a session receives
@@ -37,7 +35,7 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 
 ## Who reads them
 
-[scripts/kern_names.py](../scripts/kern_names.py) reads `fleet/findings` and `retro/due` from the core
+[scripts/kern_names.py](../scripts/kern_names.py) reads `fleet/findings` and `retro-due/due` from the core
 running in a checkout, over its bus as the client user, within 0.3 s each; where no core carries
 them it answers nothing and every reader keeps its own path.
 

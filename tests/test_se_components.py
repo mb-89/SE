@@ -150,7 +150,7 @@ def test_each_group_answers_its_commands_with_the_scripts_code(components, tmp_p
 
     # retro, overhaul and render: each script's own code, its refusal of a file that does not exist.
     for component, command, args, code, said in (
-            ("retrospective", "retro.py file", ("5", "--draft", "missing.md", "--repo",
+            ("retro", "retro.py file", ("5", "--draft", "missing.md", "--repo",
                                         "github.com/alice/example"), 1, "retro.py: "),
             ("overhaul", "overhaul.py facts", ("--repo", "."), 2, "error: overhaul.py facts: "),
             ("render", "timeline.py", ("--destination", "t.html", "--snapshot", "missing.json"), 2,

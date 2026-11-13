@@ -1138,10 +1138,10 @@ def run_collect(args: argparse.Namespace) -> int:
     return 0
 
 
-#: retro.py's commands as one kern component (README "Commands as components"), retrospective:
-#: `retro` is SE's Go retro-due component; each command's usage and help come from make_parser.
+#: retro.py's commands as one kern component (README "Commands as components"), retro; each
+#: command's usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
-    "retrospective", "Retro",
+    "retro", "Retro",
     "A retro: collect writes its draft from the work since the last one, file checks the judged "
     "draft and closes the retro issue with its report.",
     ("collect", "file")),)
