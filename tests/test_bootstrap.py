@@ -11,6 +11,7 @@ import tomllib
 import zipfile
 
 import pytest
+from shell_paths import BASH, WINDOWS, sh
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "bootstrap.sh"
@@ -18,16 +19,7 @@ KERN_VERSION = tomllib.loads((ROOT / "kern" / "release.toml").read_text(encoding
 KERN_BASE = f"https://github.com/mb-89/SE/releases/download/kern-v{KERN_VERSION}"
 TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch", "uname", "tail", "tar",
          "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm")
-WINDOWS = os.name == "nt"
-
-
-def sh(path: Path) -> str:
-    """A path as the script's bash names it: Git's bash on Windows mounts drive C: at /c."""
-    if not WINDOWS:
-        return str(path)
-    drive, rest = os.path.splitdrive(str(path))
-    return f"/{drive.rstrip(':').lower()}{rest.replace(os.sep, '/')}"
-pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bootstrap.sh runs in bash")
+pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash")
 
 # A fake uv: `python find` fails until `python install` ran; SE's start prints a greeting unless
 # `status-fails` exists; every call is logged.
@@ -83,7 +75,7 @@ def fake_bin(base: Path, *, git: bool = True) -> Path:
 
 def run(home: Path, path: Path, project: Path, *args: str, stdin: str = "") -> subprocess.CompletedProcess:
     env = {"HOME": sh(home), "PATH": sh(path), "CLAUDE_PROJECT_DIR": sh(project)}
-    return subprocess.run(["bash", sh(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60,
+    return subprocess.run([BASH, sh(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60,
                           input=stdin)
 
 
@@ -154,7 +146,7 @@ def test_the_session_finds_uv_through_claudes_env_file(machine):
     env_file = base / "env"
     env = {"HOME": sh(home), "PATH": sh(fake_bin(base)), "CLAUDE_PROJECT_DIR": sh(project),
            "CLAUDE_ENV_FILE": str(env_file)}
-    subprocess.run(["bash", sh(SCRIPT)], env=env, check=True, capture_output=True, timeout=60)
+    subprocess.run([BASH, sh(SCRIPT)], env=env, check=True, capture_output=True, timeout=60)
     assert env_file.read_text(encoding="utf-8") == f'export PATH="{sh(home)}/.local/bin:$PATH"\n'
     assert os.access(home / ".local" / "bin" / "uv", os.X_OK)
 
