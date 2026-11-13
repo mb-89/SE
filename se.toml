@@ -27,6 +27,14 @@ command = ["uv", "run", "pytest", "-q"]
 target_seconds = 60
 limit_seconds = 120
 
+# kern's Go tests (kern/README.md "Tests"), run after the suite with their own time and budget:
+# a cold build of kern with NATS compiles in about 19 to 23 s (docs/go-core.md "Measurements").
+[tests.beside.kern]
+command = ["go", "test", "./..."]
+directory = "kern"
+target_seconds = 30
+limit_seconds = 60
+
 # obs builds the documentation (README "Documentation").
 [modules.obs]
 url = "https://github.com/mb-89/obs.git"

@@ -1,9 +1,9 @@
-// Package coretest is the fake core a component is tested against without the
+// Package kerntest is the fake core a component is tested against without the
 // index running: the test seeds the inputs and config the component reads, by
 // local name, hands each request port its answers, runs a derivation or a
 // command, and reads the outputs it committed and the requests it made. It
 // speaks the component contract and nothing more.
-package coretest
+package kerntest
 
 import (
 	"fmt"
