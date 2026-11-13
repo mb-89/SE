@@ -139,10 +139,24 @@ def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
     plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     for event in ("Stop", "SubagentStop"):
         [entry] = plugin["hooks"][event]
-        [hook] = entry["hooks"]
+        hook, kern = entry["hooks"]
         assert hook["type"] == "command"
         assert '"${CLAUDE_PLUGIN_ROOT}/scripts/work_tickets.py" stop-check' in hook["command"]
         assert hook["command"].endswith("|| true")  # a hook that cannot run lets the turn end
+        assert kern["command"] == f'bash "${{CLAUDE_PLUGIN_ROOT}}/scripts/se_hook.sh" {event} || true'
+
+
+def test_every_session_event_but_the_start_posts_to_kern_and_fails_open(checkout):
+    """README "Kern": SessionStart starts kern through bootstrap.sh; every other event posts to it."""
+    plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    events = ["SessionEnd", "SubagentStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"]
+    assert sorted(plugin["hooks"]) == sorted(["SessionStart", *events])
+    for event in events:
+        [entry] = plugin["hooks"][event]
+        assert "matcher" not in entry, "every tool's call is posted"
+        command = f'bash "${{CLAUDE_PLUGIN_ROOT}}/scripts/se_hook.sh" {event} || true'
+        assert [hook["command"] for hook in entry["hooks"]].count(command) == 1, event
+    assert (ROOT / "scripts" / "se_hook.sh").is_file()
 
 
 def test_the_readme_installs_the_plugin_the_marketplace_declares():
