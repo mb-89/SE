@@ -4187,9 +4187,15 @@ def beside_suites(root: Path, tables: object) -> tuple[BesideSuite, ...]:
         where = f"[tests.beside.{name}] in {root / 'se.toml'}"
         unknown = sorted(set(table) - {"command", "directory", "target_seconds", "limit_seconds",
                                        "setup"})
-        if unknown:
+        if unknown and suite_is_reference():
             raise QueueError(f"{where}: no key {', '.join(unknown)}: a suite beside holds command, "
                              "directory, target_seconds, limit_seconds and setup; fix it")
+        if unknown:
+            # integrate runs the integration branch's scripts on the merged tree, so a key the
+            # branch adds and uses lands in one integration: CI's check judges it.
+            print(f"warning: {where}: no key {', '.join(unknown)}, which these scripts do not "
+                  f"know; ignored here. CI's {CHECK_NAME} runs the merged tree's scripts and "
+                  "refuses a key they do not know either", file=sys.stderr)
         command = table.get("command")
         if not is_argument_array(command):
             raise QueueError(f"{where} must declare command, the suite as a non-empty argument "

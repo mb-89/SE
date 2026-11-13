@@ -538,6 +538,9 @@ limit_seconds = 60
   - Its `setup`, optional, runs first in the same folder, outside its budget, as the suite's
     does: for a Go suite, `go test -run '^$' ./...` builds every test binary, so a cold build
     (kern's took 35.1 s once on CI) never counts as test time. A failing setup refuses the run, and the suite beside does not run.
+  - A key the running scripts do not know is refused on the reference run (CI's `check`, which
+    runs the merged tree's scripts) and elsewhere warns and is ignored. `integrate` runs the
+    integration branch's scripts, so a branch can add a key and use it in one landing.
 
 The two budgets are apart, and neither spends the other's time:
 

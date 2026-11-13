@@ -3501,10 +3501,29 @@ def test_a_failing_setup_beside_refuses_and_its_suite_does_not_run(worktree, mon
      r"target_seconds must not exceed limit_seconds"),
     ('[tests.beside]\nkern = ["go"]\n', r"must hold one table per suite"),
 ])
-def test_suite_budget_refuses_a_malformed_suite_beside(worktree, table, refusal):
+def test_suite_budget_refuses_a_malformed_suite_beside(worktree, monkeypatch, table, refusal):
+    monkeypatch.setattr(work_tickets, "suite_is_reference", lambda: True)  # CI's check
     (worktree / "se.toml").write_text(f'[tests]\ncommand = ["pytest"]\n{table}', encoding="utf-8")
     with pytest.raises(work_tickets.QueueError, match=refusal):
         work_tickets.suite_budget(worktree)
+
+
+def test_a_key_these_scripts_do_not_know_beside_warns_off_ci_and_the_suite_runs(
+        worktree, monkeypatch, capsys):
+    """A branch that adds a key to [tests.beside.<name>] and uses it lands in one integration:
+    integrate runs the integration branch's scripts, which do not know the key yet, so off CI it
+    warns and is ignored; CI's check runs the merged tree's scripts and refuses a key they lack."""
+    beside_suite(worktree, monkeypatch, [5.0, 2.0])
+    with (worktree / "se.toml").open("a", encoding="utf-8") as config:
+        config.write('warm = ["go", "build"]\n')
+
+    assert run(worktree, "suite") == 0
+    captured = capsys.readouterr()
+    assert ("warning: [tests.beside.kern] in " in captured.err
+            and "se.toml: no key warm, which these scripts do not know; ignored here. CI's check "
+                "runs the merged tree's scripts and refuses a key they do not know either"
+            in captured.err)
+    assert "kern passed in 2.0 s" in captured.out
 
 
 def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budget():
