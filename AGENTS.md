@@ -58,6 +58,8 @@
     tests, kern and the components; a test that needs git uses the door's fake (`fake_git_door`
     fixture, `tests/fake_git.py`), which `tests/test_git_door.py` holds to real git. Today's other
     git subprocesses sit on its allow list, which may only shrink.
+  - A shell script runs git through the door as a command, `git_door.py <git arguments>`: the
+    hooks, `scripts/setup.sh`, `setup.ps1` and the `check` job's gate. The guard reads no shell.
   - A test whose scripts or kern binaries run as child processes takes `shared_fake_git`: the
     fake behind a state file that `SE_GIT_DOOR=fake:<file>` names to both doors
     (`scripts/git_door.py`, `kern/git`).

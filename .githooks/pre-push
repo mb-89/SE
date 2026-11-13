@@ -1,13 +1,14 @@
 #!/bin/sh
 # Public-safety check of every pushed commit: the pushed tree, messages and identities. A push to
 # the integration branch also needs a passing suite and public check recorded on the pushed tree
-# (work_tickets.py verified, the same guard work_tickets.py push runs).
+# (work_tickets.py verified, the same guard work_tickets.py push runs). Its git goes through se's
+# git door (scripts/git_door.py), as every git command se runs does.
 script="$(dirname "$0")/se-script"
 status=0
 while read -r local_ref local_sha remote_ref remote_sha; do
     case "$local_sha" in *[!0]*) ;; *) continue ;; esac  # branch deletion
     if case "$remote_sha" in *[!0]*) true ;; *) false ;; esac &&
-        git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+        "$script" git_door.py cat-file -e "$remote_sha^{commit}" </dev/null >/dev/null 2>&1; then
         range="$remote_sha..$local_sha"
     else
         range="$local_sha --not --remotes"
