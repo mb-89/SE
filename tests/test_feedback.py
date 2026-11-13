@@ -203,6 +203,16 @@ def first_line_seconds(argv: list[str], environment: dict[str, str]) -> tuple[fl
     return found[0]
 
 
+def test_each_interactive_command_shows_its_first_line_within_a_second_of_a_slow_door(slow_door):
+    environment = {**slow_door["env"], "FAKE_GH_DELAY": "3"}  # far past every budget
+    commands = interactive(slow_door["checkout"])
+    assert set(commands) == set(feedback.INTERACTIVE)
+    for command, argv in commands.items():
+        seconds, line = first_line_seconds(argv, environment)
+        assert line.strip(), command
+        assert seconds < feedback.FIRST_LINE_SECONDS, (command, seconds, line)
+
+
 def test_queue_finishes_within_its_budget_against_a_door_of_half_a_second(slow_door):
     environment = {**slow_door["env"], "FAKE_GH_DELAY": "0.5"}
     slow_door["metrics"].unlink(missing_ok=True)
