@@ -15,7 +15,7 @@ import (
 	"github.com/mb-89/kern/index"
 	"github.com/mb-89/se/components/fleet"
 	"github.com/mb-89/se/components/origin"
-	"github.com/mb-89/se/components/retro"
+	retrodue "github.com/mb-89/se/components/retro-due"
 )
 
 // toolUse is a PostToolUse payload as a cloud session's hook hands it, with
@@ -30,7 +30,7 @@ func toolUse(tool string, input map[string]any, answer any) []byte {
 
 // SE's wiring starts with kern's GitHub component and SE's own, and through
 // the real core a session's GitHub tool answers land as snapshots, from
-// which fleet/findings and retro/due derive at once, read by a client.
+// which fleet/findings and retro-due/due derive at once, read by a client.
 func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	// SE's one wiring is the checkout's root wiring.toml, which the `se` binary serves (../../..
 	// from this package). It places SE's four Python command groups beside these Go components;
@@ -65,7 +65,7 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	}
 	g := github.New(github.Options{Token: func() (string, error) { return "", nil }})
 	c, err := host.Serve(host.Options{Root: t.TempDir(), Wiring: w,
-		Components: []*index.Component{g.Component, origin.Component, fleet.Component, retro.Component}})
+		Components: []*index.Component{g.Component, origin.Component, fleet.Component, retrodue.Component}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,9 +114,9 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	if found.Issues != 3 || found.Branches != 1 || kinds["no branch"] != 1 || kinds["waiting on the person"] != 2 {
 		t.Fatalf("fleet/findings is %+v, and wants 3 issues read, #1 without a branch, #2 waiting on the person", found)
 	}
-	var due retro.Due
-	get("retro/due", &due)
+	var due retrodue.Due
+	get("retro-due/due", &due)
 	if due.Issues != 3 || due.Landed != 0 || due.Due || due.DueAfter != 10 {
-		t.Fatalf("retro/due is %+v, and wants 3 issues read, none landed, due after 10", due)
+		t.Fatalf("retro-due/due is %+v, and wants 3 issues read, none landed, due after 10", due)
 	}
 }

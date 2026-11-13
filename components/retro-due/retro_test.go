@@ -1,17 +1,17 @@
-package retro_test
+package retrodue_test
 
 import (
 	"testing"
 
 	"github.com/mb-89/kern/components/github"
 	"github.com/mb-89/kern/kerntest"
-	"github.com/mb-89/se/components/retro"
+	retrodue "github.com/mb-89/se/components/retro-due"
 )
 
 // Against the fake core: a retro is due once due-after work issues landed
 // after the last retro closed.
 func TestARetroIsDueOnceEnoughWorkLanded(t *testing.T) {
-	f, err := kerntest.New(retro.Component)
+	f, err := kerntest.New(retrodue.Component)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestARetroIsDueOnceEnoughWorkLanded(t *testing.T) {
 			t.Fatal(err)
 		}
 		v, _ := f.Out("due")
-		if got := v.V.(retro.Due); got.Landed != 1 || got.Due != want || got.Retro != 1 {
+		if got := v.V.(retrodue.Due); got.Landed != 1 || got.Due != want || got.Retro != 1 {
 			t.Fatalf("due after %d: %+v, and wants 1 landed since retro #1, due %v", due, got, want)
 		}
 	}

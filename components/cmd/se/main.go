@@ -11,7 +11,7 @@ import (
 	_ "github.com/mb-89/kern/components/github"
 	_ "github.com/mb-89/se/components/fleet"
 	_ "github.com/mb-89/se/components/origin"
-	_ "github.com/mb-89/se/components/retro"
+	_ "github.com/mb-89/se/components/retro-due"
 )
 
 func main() { os.Exit(cli.Run("se", os.Args[1:], os.Stdout, os.Stderr)) }

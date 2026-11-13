@@ -1,5 +1,5 @@
 // Package agreement holds SE's two fleet paths to one answer: the Go
-// components (fleet, retro) and the Python fallback (scripts/work_tickets.py
+// components (fleet, retro-due) and the Python fallback (scripts/work_tickets.py
 // fleet_findings, scripts/retro.py landed_since_retro) read the same
 // GitHub snapshot names, testdata/snapshot.json, and must find the same.
 package agreement
@@ -16,7 +16,7 @@ import (
 
 	"github.com/mb-89/kern/components/github"
 	"github.com/mb-89/se/components/fleet"
-	"github.com/mb-89/se/components/retro"
+	retrodue "github.com/mb-89/se/components/retro-due"
 )
 
 // PythonEnv names the Python the test runs SE's scripts with; where unset,
@@ -116,14 +116,14 @@ func TestTheFleetPathsAgree(t *testing.T) {
 	}
 }
 
-// The retro component and retro.py count the same work issues landed since
+// The retro-due component and retro.py count the same work issues landed since
 // the last retro on one snapshot.
 func TestTheRetroPathsAgree(t *testing.T) {
 	f := load(t)
-	got := retro.Count(retro.In{Issues: f.Issues, Pulls: f.Pulls, DueAfter: f.DueAfter, Tracker: f.Tracker, Base: f.Base})
+	got := retrodue.Count(retrodue.In{Issues: f.Issues, Pulls: f.Pulls, DueAfter: f.DueAfter, Tracker: f.Tracker, Base: f.Base})
 	want := runPython(t)
 	if got.Landed != want.Retro {
-		t.Fatalf("the retro component counts %d landed, retro.py %d", got.Landed, want.Retro)
+		t.Fatalf("the retro-due component counts %d landed, retro.py %d", got.Landed, want.Retro)
 	}
 	if got.Landed == 0 || !got.Due || got.Retro != 20 {
 		t.Fatalf("on the fixture the count is %+v, want landed above 0, due, since retro #20", got)

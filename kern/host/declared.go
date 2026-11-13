@@ -88,11 +88,12 @@ func (r remote) Command(name string, s index.Step, say func(string)) (index.Answ
 		return a, err
 	}
 	data, _ := json.Marshal(s)
-	// The step's answer and its process's say.<i> ride one channel, so the
-	// lines said before the answer are read before it, in their order.
+	// The step's answer and its call's say.<i>.<call> ride one channel, so the
+	// lines said before the answer are read before it, in their order; another
+	// call's words ride its own subject, so calls side by side never crowd it.
 	heard := make(chan *nats.Msg, 64)
 	inbox := r.c.nc.NewRespInbox()
-	said := bus.Say + bus.Subject(r.inst)
+	said := bus.Say + bus.Subject(r.inst) + "." + bus.Token(s.Call)
 	for _, subj := range []string{inbox, said} {
 		sub, err := r.c.nc.ChanSubscribe(subj, heard)
 		if err != nil {
@@ -112,11 +113,10 @@ func (r remote) Command(name string, s index.Step, say func(string)) (index.Answ
 		case m := <-heard:
 			if m.Subject == said {
 				var w struct {
-					Call string  `json:"call"`
 					Line *string `json:"line"`
 				}
-				if json.Unmarshal(m.Data, &w) != nil || w.Call != s.Call {
-					continue // another call's word
+				if json.Unmarshal(m.Data, &w) != nil {
+					continue // no word of a step
 				}
 				if !quiet.Stop() {
 					<-quiet.C

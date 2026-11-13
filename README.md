@@ -103,7 +103,7 @@ uv run python <se>/scripts/se_start.py refresh
   - The greeting then names a retro that is [due](#retro-due) and the fleet's findings by kind and
     issue, one line each with the command to run, and a part whose read failed with its cause.
   - `status` reads them from the cache, and each part from kern live where the core in the checkout
-    carries SE's fleet and retro components and has read issues: its line then says `live from kern`
+    carries SE's fleet and retro-due components and has read issues: its line then says `live from kern`
     ([components/README.md](components/README.md#who-reads-them)).
   - Without gh (Claude's cloud, where no token reaches SE's code) the greeting names neither; the
     [se agent](src/agents/se.md) runs the fleet check's plan at its first turn instead.
@@ -187,7 +187,7 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
 
 - **Declared:** each command group of a script is one component, `components/<group>/`:
   `work_tickets.py`'s tickets, issues, delivery and integration, `review.py`'s review, `retro.py`'s
-  retrospective (`retro` is SE's Go retro-due component), `overhaul.py`'s overhaul, render, the
+  retro, `overhaul.py`'s overhaul, render, the
   pages `timeline.py` and `deck.py` build, and `se.py`'s scaffold.
   - Its `component.toml` is what `work_tickets.py docs` writes from the script's argparse parser
     (for `work_tickets.py`, built from its command registry), and its `__init__.py` answers each
@@ -515,7 +515,7 @@ due_after = 10
 
 A retro is due once `due_after` work issues landed since the last closed retro issue, built in 10;
 the [start greeting](#start-and-refresh) names it. `scripts/retro.py` owns the count and the
-setting; SE's retro component counts the same from kern's GitHub names, for the greeting to read
+setting; SE's retro-due component counts the same from kern's GitHub names, for the greeting to read
 live ([components/README.md](components/README.md)).
 
 ### Stop hook
@@ -1197,8 +1197,8 @@ review.py file --report FILE [--pull FILE] [--issue FILE] [--worktree WORKTREE] 
 
 #### Retro
 
-`components/retrospective`: A retro: collect writes its draft from the work since the last one, file
-checks the judged draft and closes the retro issue with its report.
+`components/retro`: A retro: collect writes its draft from the work since the last one, file checks
+the judged draft and closes the retro issue with its report.
 
 ```text
 retro.py collect [--since DATE | --retro ISSUE] [--out FILE] [--json] [--answers DIR]
