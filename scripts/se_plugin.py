@@ -34,13 +34,9 @@ DESCRIPTION = ("SE, the agent a person talks to, with its integrator, worker and
 # `|| true`: a step that needs the person is advice for the session, never a failed start.
 # `--hook`: it ends with SE's greeting (scripts/se_start.py status --hook).
 BOOTSTRAP = 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" --hook || true'
-# The Stop hook (README "Stop hook"): a worker's turn ends only with its work issue delivered. uv
-# where bootstrap.sh installs it; `--no-project` so no project's environment is synced; `|| true`:
-# a hook that cannot run lets the turn end (advice fails open).
-STOP_CHECK = ('PATH="$HOME/.local/bin:$PATH" uv run --no-project --python ">=3.11" python '
-              '"${CLAUDE_PLUGIN_ROOT}/scripts/work_tickets.py" stop-check || true')
 # Every other session event goes to kern, the core SE pins (README "Kern"), through SE's hook
-# command; it fails open, and `|| true` holds a hook that cannot run to the same.
+# command; it fails open, and `|| true` holds a hook that cannot run to the same. The Stop hooks
+# (README "Stop hook") are answered by kern's delivery component, else by stop-check directly.
 KERN_EVENTS = ("SessionEnd", "SubagentStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop",
                "SubagentStop")
 
@@ -256,9 +252,7 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "license": "MIT",
         "hooks": {
             "SessionStart": [{"hooks": [{"type": "command", "command": BOOTSTRAP}]}],
-            **{event: [{"hooks": [{"type": "command", "command": command}
-                                  for command in ((STOP_CHECK,) if event.endswith("Stop") else ())
-                                  + (kern_hook(event),)]}]
+            **{event: [{"hooks": [{"type": "command", "command": kern_hook(event)}]}]
                for event in KERN_EVENTS},
         },
     }

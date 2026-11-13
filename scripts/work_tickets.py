@@ -2899,11 +2899,29 @@ def record_delivered_pull(root: Path, number: int, description: Path) -> None:
                                indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
+#: How long a stop-check trusts a gh it found unusable, in a process that judges many stops (kern's
+#: delivery component, README "Stop hook"): `gh auth status` costs 0.25 s of each judgement.
+STOP_GH_UNUSABLE_FOR = 60.0
+_stop_gh_unusable_at: list[float] = []
+
+
+def stop_gh_usable() -> bool:
+    """gh_usable, a refusal held STOP_GH_UNUSABLE_FOR seconds (a pass holds for the process)."""
+    now = time.monotonic()
+    if _stop_gh_unusable_at and now - _stop_gh_unusable_at[0] < STOP_GH_UNUSABLE_FOR:
+        return False
+    _stop_gh_unusable_at.clear()
+    if gh_usable():
+        return True
+    _stop_gh_unusable_at.append(now)
+    return False
+
+
 def delivered_pull(root: Path, branch: str) -> tuple[int, str] | None:
     """The branch's open pull request to the integration branch and its description: read with
     gh, or without gh from the answer file `stop-check --pull` keeps; None where there is none.
     Refused as unjudgeable without gh and without an answer file for the branch."""
-    if gh_usable():
+    if stop_gh_usable():
         remote = remote_repo(root)
         if remote is None:
             raise CannotJudge(f"{root} has no origin remote to look for the pull request on")
@@ -3031,8 +3049,16 @@ def hook_event() -> dict[str, object]:
     try:
         if sys.stdin is None or sys.stdin.isatty():
             return {}
-        data = json.loads(sys.stdin.read() or "{}")
-    except (OSError, ValueError):
+        return hook_event_of(sys.stdin.read())
+    except OSError:
+        return {}
+
+
+def hook_event_of(text: str) -> dict[str, object]:
+    """The hook's JSON from its text; {} where it is none."""
+    try:
+        data = json.loads(text or "{}")
+    except ValueError:
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -7571,7 +7597,10 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
                   "answer file, then say whether the hook passes; exit code 1 where it would "
                   "refuse"),
          arg("--pr-description", type=Path, metavar="FILE",
-             help="with --pull: its description as your GitHub tools read it"))
+             help="with --pull: its description as your GitHub tools read it"),
+         arg("--hook", metavar="JSON",
+             help="the hook's JSON, as kern's core hands it to the command its wiring binds to "
+                  "the event; default: stdin"))
 def run_stop_check(root: Path | None, args: argparse.Namespace) -> int:
     if args.pull is not None:
         if args.pr_description is None:
@@ -7589,7 +7618,7 @@ def run_stop_check(root: Path | None, args: argparse.Namespace) -> int:
         print(f"Recorded pull request #{args.pull}; the Stop hook passes"
               + (f" ({verdict.note})" if verdict.note else ""))
         return 0
-    event = hook_event()
+    event = hook_event() if args.hook is None else hook_event_of(args.hook)
     cwd = event.get("cwd")
     own = (subagent_checkout(event) if root is None and event.get("hook_event_name") ==
            "SubagentStop" and is_worker_agent(event) else None)

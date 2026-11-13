@@ -46,9 +46,20 @@ const BuiltIn = "built-in"
 //	"report.extra" = "built-in"        # an input left unbound
 //	"report.open" = { to = "issues/pull/open", builtin = true }  # may go without its writer
 //	"report.file" = "ledger.append"    # a request port to an I/O component's verb
+//
+//	[hooks]
+//	Stop = "report check"              # the command that answers the host's event
 type Wiring struct {
 	Instances []Instance
 	Wires     []Wire
+	Hooks     []Hook
+}
+
+// Hook binds a host's event, one word, to the command that answers it: the
+// core runs it with the event's JSON, and its text is the hook's output.
+type Hook struct {
+	Event, Command string
+	Line           int
 }
 
 // Instance is one component instance: its name, plain or nested as
@@ -113,8 +124,8 @@ func ParseWiring(data []byte) (Wiring, error) {
 	line := func(path ...string) int { return lines[strings.Join(path, "\x00")] }
 	var w Wiring
 	for _, k := range sortedKeys(doc) {
-		if k != "instances" && k != "wires" {
-			return Wiring{}, fmt.Errorf("wiring line %d: no key %s: a wiring holds [instances] and [wires]", line(k), k)
+		if k != "instances" && k != "wires" && k != "hooks" {
+			return Wiring{}, fmt.Errorf("wiring line %d: no key %s: a wiring holds [instances], [wires] and [hooks]", line(k), k)
 		}
 	}
 	instances, err := table(doc, "instances", line("instances"))
@@ -210,9 +221,34 @@ func ParseWiring(data []byte) (Wiring, error) {
 		}
 		w.Wires = append(w.Wires, wr)
 	}
+	hooks, err := table(doc, "hooks", line("hooks"))
+	if err != nil {
+		return Wiring{}, err
+	}
+	for event, v := range hooks {
+		h := Hook{Event: event, Line: line("hooks", event)}
+		if !eventWord(event) {
+			return Wiring{}, fmt.Errorf("wiring line %d: hook %q: an event is one word of letters", h.Line, event)
+		}
+		if h.Command, _ = v.(string); strings.TrimSpace(h.Command) == "" {
+			return Wiring{}, fmt.Errorf("wiring line %d: hook %s names no command", h.Line, event)
+		}
+		w.Hooks = append(w.Hooks, h)
+	}
+	sort.Slice(w.Hooks, func(i, j int) bool { return w.Hooks[i].Line < w.Hooks[j].Line })
 	sort.Slice(w.Instances, func(i, j int) bool { return w.Instances[i].Line < w.Instances[j].Line })
 	sort.Slice(w.Wires, func(i, j int) bool { return w.Wires[i].Line < w.Wires[j].Line })
 	return w, nil
+}
+
+// eventWord says whether s is a host's event name: one word of letters.
+func eventWord(s string) bool {
+	for _, r := range s {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') {
+			return false
+		}
+	}
+	return s != ""
 }
 
 // table answers the table doc holds under key, or none where it holds none.
