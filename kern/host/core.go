@@ -45,6 +45,10 @@ const (
 // SessionEnd is the hook event that returns a session's lease.
 const SessionEnd = "SessionEnd"
 
+// PostToolUse is the hook event that follows a tool's run: the core counts
+// the ad hoc scripts a shell tool ran (scripts.go).
+const PostToolUse = "PostToolUse"
+
 // Options are what a core starts with.
 type Options struct {
 	// Root is the checkout the core serves; its standing file lies under it.
@@ -462,6 +466,11 @@ func (c *Core) hook(m *nats.Msg) {
 		}
 	}
 	c.mu.Unlock()
+	if event == PostToolUse {
+		// After the answer: the hook does not wait on the count's one git call,
+		// and the next event, handled in turn, finds it written.
+		defer countScripts(c.o.Root, m.Data, now)
+	}
 	if err := c.ix.Hear(event, m.Data); err != nil {
 		fmt.Fprintln(c.o.Log, err)
 	}
