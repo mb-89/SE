@@ -438,6 +438,13 @@ def test_the_live_read_keeps_only_the_parts_whose_names_hold_issues(monkeypatch)
     monkeypatch.setattr(se_start.kern_names, "read", lambda root, wanted: names)
     assert se_start.kern_names.live_work(Path(".")) == {
         "retro": {"landed": 1, "due_after": 10, "issues": 4, "from": "kern"}}
+    # A partial view of the fleet is no verdict: the cached check stands; a complete one replaces it.
+    names["fleet/findings"] = {"issues": 1, "complete": False, "findings": []}
+    assert "fleet" not in se_start.kern_names.live_work(Path("."))
+    names["fleet/findings"] = {"issues": 9, "complete": True, "findings": []}
+    assert se_start.kern_names.live_work(Path("."))["fleet"] == {"findings": [], "issues": 9,
+                                                                  "from": "kern"}
+    names["fleet/findings"] = {"issues": 0, "findings": []}
     names["retro-due/due"]["issues"] = 0
     assert se_start.kern_names.live_work(Path(".")) is None
 

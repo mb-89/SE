@@ -1629,25 +1629,32 @@ def test_fleet_check_reads_the_cores_fleet_live_and_falls_back_without_it(
     kern_names = work_tickets.sibling("kern_names")
     finding = {"kind": "conflict", "issue": 6, "pull": 106, "branch": "feat/f", "what": "feat/f conflicts",
                "remedy": "a worker on feat/f syncs", "holds": []}
-    live = {"at": "2026-11-13T12:00:00Z", "issues": 12, "pulls": 3, "findings": [finding]}
+    live = {"at": "2026-11-13T12:00:00Z", "issues": 12, "pulls": 3, "complete": True,
+            "since": "2026-11-13T11:50:00Z", "findings": [finding]}
     asked = []
     monkeypatch.setattr(kern_names, "read", lambda root, names: asked.append(names) or {names[0]: live})
     monkeypatch.setattr(work_tickets, "Fleet", lambda *a: pytest.fail("the live read reads no GitHub"))
     arguments = ["fleet-check", "--worktree", str(tmp_path), "--repo", "owner/repo"]
     assert work_tickets.main(arguments) == 1
     assert capsys.readouterr().out.splitlines() == [
-        "live from kern over the 12 issues and 3 pull requests it has read, 2026-11-13T12:00:00Z",
+        "live from kern over the 12 issues and 3 pull requests it has read, complete since "
+        "2026-11-13T11:50:00Z, 2026-11-13T12:00:00Z",
         "conflict #6 PR #106: feat/f conflicts", "  remedy: a worker on feat/f syncs"]
     assert work_tickets.main([*arguments, "--json"]) == 1
     assert json.loads(capsys.readouterr().out) == {"healthy": False, "findings": [finding]}
     assert asked == [["fleet/findings"]] * 2
-    # A core that has read no issue yet, or none at all: the Python check reads GitHub.
-    for answer in ({"fleet/findings": {**live, "issues": 0}}, None):
+    # A core that has read no issue yet, only part of the open fleet, or none at all: the Python
+    # check reads GitHub; the partial view says how much it saw and since when, never "healthy".
+    partial = {**live, "issues": 1, "pulls": 0, "complete": False, "findings": []}
+    for answer in ({"fleet/findings": {**live, "issues": 0}}, {"fleet/findings": partial}, None):
         monkeypatch.setattr(kern_names, "read", lambda root, names, answer=answer: answer)
         monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
         monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "github.com/owner/repo")
         assert work_tickets.main(arguments) == 0
-        assert "GitHub plan: fleet check" in capsys.readouterr().out
+        said = capsys.readouterr()
+        assert "GitHub plan: fleet check" in said.out and "healthy" not in said.out
+        assert ("kern has seen 1 issues and 0 pull requests since 2026-11-13T11:50:00Z, not a "
+                "complete read" in said.err) == (answer is not None and answer["fleet/findings"] is partial)
 
 
 def test_fleet_check_without_gh_prints_its_plan_then_reads_the_answers(

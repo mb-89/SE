@@ -523,10 +523,14 @@ it is `no branch` at once, saying why.
 Blocks are the `## Blocked by` section of each open issue's body, where `work_tickets.py block`
 writes them.
 
-Where the core running in the checkout carries SE's fleet component and has read issues, it answers
-from the core's `fleet/findings` instead, live, naming how many issues and pull requests the core
-has read ([components/README.md](components/README.md#who-reads-them)); the Python check stays the
-path everywhere else.
+Where the core running in the checkout carries SE's fleet component and has read the open issues
+and the open pull requests each as a whole list, it answers from the core's `fleet/findings`
+instead, live, naming how many issues and pull requests the core has read and since when
+([components/README.md](components/README.md#who-reads-them)); the Python check stays the path
+everywhere else.
+
+A partial view is no verdict: where the core holds only some issues or pull requests, the check
+says how many it has seen and since when, and reads the fleet itself.
 
 Without gh it prints its GitHub plan; the session runs it with its GitHub tools, saves the three
 lists as JSON (each in-progress issue with its comments) and passes them as `--open-issues`,
