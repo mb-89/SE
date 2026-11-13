@@ -22,7 +22,7 @@ NAME, APP_VERSION = APP["binary"], APP["version"]
 APP_BASE = APP["download"].replace("{version}", APP_VERSION)
 BUILD_DIR, PACKAGE = "components", APP["package"]
 TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch", "uname", "tail", "tar",
-         "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm")
+         "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm", "ln", "cp")
 pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash")
 
 # A fake uv: `python find` fails until `python install` ran; SE's start prints a greeting unless
@@ -288,6 +288,29 @@ def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(
     assert (project / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8") == f"{sh(kern_bin(home))}\n"
 
 
+def test_the_session_finds_se_on_its_path_by_a_stable_name(machine):
+    """`se status` works in the session's shells: the start links ~/.se/bin/<name> to the version
+    it runs and puts ~/.se/bin on the session's PATH through Claude Code's env file."""
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    kern_bin(home).parent.mkdir(parents=True)
+    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
+    kern_bin(home).chmod(0o755)
+    env_file = base / "env"
+    env = {"HOME": sh(home), "PATH": sh(path), "CLAUDE_PROJECT_DIR": sh(project),
+           "CLAUDE_ENV_FILE": str(env_file)}
+    subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, input=START, check=True, capture_output=True,
+                   text=True, timeout=60)
+    assert f'export PATH="{sh(home)}/.se/bin:$PATH"\n' in env_file.read_text(encoding="utf-8")
+    stable = kern_bin(home).with_name(NAME + (".exe" if WINDOWS else ""))
+    (home / "calls").unlink()
+    shell = subprocess.run([BASH, "-c", f'. "{sh(env_file)}" && {NAME} status'], env=env,
+                           capture_output=True, text=True, timeout=60)
+    assert shell.returncode == 0 and calls(home) == ["kern status"], (shell.stderr, calls(home))
+    assert os.access(stable, os.X_OK)
+
+
 def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
     home, project, base = machine
     path = fake_bin(base)
@@ -328,7 +351,8 @@ def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then
     assert f"kern hook SessionStart --root {sh(project)} <<{START}" in log
     assert os.access(kern_bin(home), os.X_OK)
     assert sorted(p.name for p in kern_bin(home).parent.iterdir()) == sorted([
-        kern_bin(home).name, f"{NAME}-{APP_VERSION}.SHA256SUMS"]), "nothing half-done is left"
+        kern_bin(home).name, f"{NAME}-{APP_VERSION}.SHA256SUMS",
+        NAME + (".exe" if WINDOWS else "")]), "nothing half-done is left; the stable name is there"
 
 
 @needs_platform

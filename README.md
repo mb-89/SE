@@ -162,6 +162,8 @@ no Go components. The plugin's hooks start the binary and post every session eve
   `~/.se/bin/<name>-<version>` is on the machine, it runs `<name> start` for the project, which
   returns at once, and hands the core the session's start, which takes the session's lease. It names
   the binary in `<project>/.se/.runtime/kern.path` for the later hooks.
+  - `~/.se/bin/<name>` links to the version in place (a copy where the file system makes no link),
+    and Claude Code's env file puts `~/.se/bin` on the session's PATH, so `se status` works there.
 - **The first start of a version** reads the release's `SHA256SUMS` (one small read). Where it names
   this platform's archive, the archive is fetched, checked against its line and unpacked in the
   background, and the core then starts.
