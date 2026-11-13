@@ -258,6 +258,104 @@ def test_intake_writes_one_ticket_per_requirement_and_a_delivery_ticket(worktree
     assert "created" not in output and output.count("kept existing ticket") == 3
 
 
+COMMENT = {"id": "4100", "author": {"login": "dispatcher"}, "body": "Also do 3.\r\n",
+           "createdAt": "2026-11-04T11:00:00Z", "url": f"{URL}#issuecomment-4100"}
+
+
+def tool_answers(tmp_path: Path, shape: str) -> tuple[Path, Path]:
+    """The work issue and its comments as the session saved its GitHub tools' answers (`tool`:
+    labels as strings, no API address) or the REST API's (`rest`: label objects, `url` the API
+    address) to files; both name the comments of the issue only as their count."""
+    rest = shape == "rest"
+    issue = {"number": 5, "title": BRANCH, "body": BODY.replace("\n", "\r\n"), "state": "open",
+             "html_url": URL, "updated_at": "2026-11-04T10:00:00Z", "comments": 1,
+             "user": {"login": "owner"},
+             "labels": [{"name": "work"}, {"name": "discovery"}] if rest else ["work", "discovery"]}
+    comment = {"id": 4100, "body": "Also do 3.\r\n", "html_url": f"{URL}#issuecomment-4100",
+               "user": {"login": "dispatcher"}, "created_at": "2026-11-04T11:00:00Z"}
+    if rest:
+        issue["url"] = "https://api.git.example/repos/owner/repo/issues/5"
+        comment["url"] = "https://api.git.example/repos/owner/repo/issues/comments/4100"
+    folder = tmp_path / f"answers-{shape}"
+    folder.mkdir()
+    (folder / "issue.json").write_text(json.dumps(issue), encoding="utf-8")
+    (folder / "comments.json").write_text(json.dumps([comment]), encoding="utf-8")
+    return folder / "issue.json", folder / "comments.json"
+
+
+def queue_and_draft(worktree: Path) -> dict[str, str]:
+    """Every ticket, the snapshot, the read records and a draft, by name, as one run wrote them."""
+    work = worktree / ".se" / "work"
+    return {path.relative_to(work).as_posix(): path.read_text(encoding="utf-8")
+            for path in sorted(work.rglob("*")) if path.is_file()}
+
+
+@pytest.mark.parametrize("shape", ["tool", "rest"])
+def test_intake_and_draft_from_the_github_tools_answers_match_the_gh_read(
+        tmp_path, gh, shape, capsys):
+    gh.issue["labels"] = [{"name": "work"}, {"name": "discovery"}]
+    gh.issue["comments"].append(dict(COMMENT))
+    by_gh = tmp_path / "by-gh"
+    by_gh.mkdir()
+    (by_gh / "se.toml").write_text(IDENTITY, encoding="utf-8")
+    assert run(by_gh, "intake", "--issue", "5") == 0
+    assert run(by_gh, "field-report", "--draft", str(by_gh / ".se" / "work" / "draft.md")) == 0
+    gh.calls.clear()
+
+    issue_file, comments_file = tool_answers(tmp_path, shape)
+    by_files = tmp_path / f"by-{shape}"
+    by_files.mkdir()
+    (by_files / "se.toml").write_text(IDENTITY, encoding="utf-8")
+    capsys.readouterr()
+    assert run(by_files, "intake", "--issue-body", str(issue_file),
+               "--comments-file", str(comments_file)) == 0
+    output = capsys.readouterr().out
+    assert f"Work issue #5: {BRANCH} ({URL})" in output
+    assert f"2026-11-04T11:00:00Z dispatcher: {URL}#issuecomment-4100" in output
+    (by_files / ".se" / "work" / "issue.json").unlink()  # the draft reads the file, not intake
+    assert run(by_files, "field-report", "--draft", str(by_files / ".se" / "work" / "draft.md"),
+               "--issue-body", str(issue_file)) == 0
+    assert gh.calls == []  # no gh read on the cloud path
+
+    expected, found = queue_and_draft(by_gh), queue_and_draft(by_files)
+    snapshot = json.loads(expected.pop("issue.json"))
+    assert found.pop("issue.json", None) is None
+    assert found == expected  # the same tickets, read records, evidence index and draft
+    assert "[Discovery evidence index]" in found["draft.md"]
+    assert run(by_files, "intake", "--issue-body", str(issue_file),
+               "--comments-file", str(comments_file)) == 0
+    assert json.loads((by_files / ".se" / "work" / "issue.json").read_text(encoding="utf-8")) \
+        == snapshot
+
+
+def test_intake_from_files_refuses_unread_comments_and_an_answer_that_is_no_issue(
+        tmp_path, worktree, gh, capsys):
+    issue_file, _ = tool_answers(tmp_path, "tool")
+    assert run(worktree, "intake", "--issue-body", str(issue_file)) == 1
+    assert "has 1 comment(s) and none were given" in capsys.readouterr().err
+    other = tmp_path / "other.json"
+    other.write_text("## Goal\n", encoding="utf-8")
+    assert run(worktree, "intake", "--issue-body", str(other)) == 1
+    assert "is no JSON" in capsys.readouterr().err
+    other.write_text("[]", encoding="utf-8")
+    assert run(worktree, "intake", "--issue-body", str(other)) == 1
+    assert "holds no issue" in capsys.readouterr().err
+    assert run(worktree, "intake", "--issue", "5", "--comments-file", str(other)) == 1
+    assert "--comments-file goes with --issue-body" in capsys.readouterr().err
+    assert not (worktree / ".se" / "work" / "todo").exists() or not any(
+        (worktree / ".se" / "work" / "todo").iterdir())
+
+
+def test_commands_taking_the_issue_body_accept_the_tools_json_answer(tmp_path, worktree, gh):
+    issue_file, _ = tool_answers(tmp_path, "tool")
+    assert work_tickets.issue_body_text(issue_file) == BODY
+    plain = tmp_path / "body.md"
+    plain.write_text(BODY, encoding="utf-8")
+    assert work_tickets.issue_body_text(plain) == BODY
+    assert work_tickets.issue_labels({"labels": ["work", {"name": "discovery"}]}) == {
+        "work", "discovery"}
+
+
 def test_intake_warns_on_a_bare_cross_repository_reference(worktree, gh, capsys):
     gh.issue["body"] = BODY.replace("## Design owner", """See other/list#3 for the list.
 
