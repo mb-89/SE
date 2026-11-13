@@ -66,6 +66,12 @@ LAYOUTS = (
 # marketplace it installs from. A skill Claude Code ships loads by itself and is not listed.
 ROLE_SKILL = re.compile(r"^(?P<plugin>[a-z0-9][a-z0-9-]*)@(?P<marketplace>[A-Za-z0-9][\w.-]*)"
                         r":(?P<skill>[a-z0-9][a-z0-9-]*)$")
+# The notice that opens every Markdown file the build generates, naming its source: the one mark of
+# a whole generated file, which the landing guard reads to leave the file out of authored prose.
+NOTICE = ("<!-- Generated from {source} by scripts/se_plugin.py; edit the source and run "
+          "`python scripts/se_plugin.py build`. -->\n")
+NOTICE_PATTERN = re.compile(
+    "^" + re.escape(NOTICE.rstrip("\n")).replace(re.escape("{source}"), r"\S+") + "$", re.MULTILINE)
 MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"))
 
 
@@ -207,10 +213,13 @@ def _generated_file(source: PurePosixPath, layout: Layout, root: Path,
                               "`<se>/scripts/<name>.py` (the work model's \"What the project provides\")")
     role = source.stem if source.parent == SOURCE / "agents" else None
     front, body = _front_matter(text, source, layout, role_skills.get(role, []) if role else [])
-    notice = (f"<!-- Generated from {source} by scripts/se_plugin.py; edit the source and run "
-              f"`python scripts/se_plugin.py build`. -->\n")
     body = _rewrite_links(body, source, generated, layout)
-    return generated, (front + notice + body).encode("utf-8")
+    return generated, (front + notice(source) + body).encode("utf-8")
+
+
+def notice(source: PurePosixPath | str) -> str:
+    """The notice line that opens a Markdown file generated from `source`."""
+    return NOTICE.format(source=source)
 
 
 def _version(root: Path) -> str:
