@@ -498,8 +498,16 @@ jobs:
   the action uploads, also when the shard fails.
 - [`suite-time`](.github/actions/suite-time/action.yml) runs in `check`: `work_tickets.py
   suite-time` collects the records, lists each shard and prints the slowest shard's time as the
-  `se suite time` notice. It fails `check` where a shard failed or its record is missing, and over
-  the limit as above.
+  `se suite time` notice, `Suite time: 66.1 s (limit 120 s; slowest of 2 shards: 66.1 s (shard
+  1))`.
+  - It fails `check` where a shard's record is missing, and over the limit as above.
+  - Where a shard failed, it prints no time: the run failed, and a failed run's shorter time
+    never stands as CI's.
+  - Its refusals and warnings are `::error` and `::warning` annotations on the check run, printed
+    after the shards' list.
+- Both actions run SE's scripts with the runner's `python3`, which must be Python 3.11 or later
+  (they read `se.toml` with `tomllib`); `ubuntu-26.04` has it, another runner sets it up first,
+  for example with `actions/setup-python`. The actions they use run on Node 24.
 - `check` runs with `if: always()`, so a failed shard fails the check the ruleset requires instead
   of skipping it.
 
