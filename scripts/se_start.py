@@ -535,8 +535,8 @@ def kern_line(se_root: Path, root: Path, kern: Kern, ask: Callable[[Path, Path],
     if not (kern.binary or kern.starting or kern.failed):
         return []
     try:
-        version = tomllib.loads((se_root / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
-    except (OSError, tomllib.TOMLDecodeError, KeyError):
+        version = se_modules.kern_pin(se_root)[0]
+    except ModuleError:
         version = "?"
     name = f"kern {version}"
     if kern.failed:
