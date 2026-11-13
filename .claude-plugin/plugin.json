@@ -1,6 +1,6 @@
 {
   "name": "se",
-  "version": "5.42.0",
+  "version": "5.43.0",
   "description": "SE, the agent a person talks to, with its integrator, worker and reviewer sub-agents and their skills.",
   "author": {
     "name": "mb-89"
