@@ -13,6 +13,10 @@ The door adds nothing to what git is asked: each caller keeps its own error type
 reaches the child processes it starts too: unset or `real`, the git on PATH; `fake:<state file>`,
 the fake behind that file (tests/fake_git.py `StateFile`, whose format kern's Go door reads as
 well); `refused`, which stops the process at its first git command, naming it.
+
+As a command, `git_door.py <git arguments>` runs one git command through the door, its output and
+exit code git's: the door for a shell that needs git (se's hooks, setup.sh, setup.ps1, the check
+workflow's gate), so a test that hands them the fake reaches no real git.
 """
 
 from __future__ import annotations
@@ -113,6 +117,8 @@ def fake_backend(state: Path) -> Backend:
     return fake_git.StateFile(state)
 
 
+if __name__ == "__main__":  # run as a command: the fake a state file loads imports this module
+    sys.modules.setdefault("git_door", sys.modules[__name__])
 BACKEND: Backend = from_environment()
 
 
@@ -184,3 +190,16 @@ def set_identity(root: Path, identity: tuple[str, str]) -> subprocess.CompletedP
             return configured
     return None
 
+
+def main(arguments: list[str] | None = None) -> int:
+    """Run `git <arguments>` through the door; git's output and exit code are the command's."""
+    done = run(*(sys.argv[1:] if arguments is None else arguments), binary=True)
+    sys.stdout.buffer.write(done.stdout)
+    sys.stdout.buffer.flush()
+    sys.stderr.buffer.write(done.stderr)
+    sys.stderr.buffer.flush()
+    return done.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

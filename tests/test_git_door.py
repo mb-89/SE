@@ -637,6 +637,145 @@ def test_commit_tree_for_each_ref_and_plain_worktree_list(door, tmp_path: Path) 
     assert lines[1].split()[1] == second[:len(lines[1].split()[1])] and lines[1].endswith("[worker]")
 
 
+# What the public check and se's hooks ask of git (tests/test_public_check.py, tests/test_push_guard.py)
+
+
+def test_ls_files_ls_tree_and_cat_file_read_the_index_and_a_commit_by_blob(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    first = commit(root, {"a.txt": "a\n", "dir/b.txt": "b\n"})
+    (root / "a.txt").write_text("staged\n", encoding="utf-8", newline="\n")
+    git(root, "add", "a.txt")
+    staged = [line.split("\t") for line in git_door.run("ls-files", "-s", "-z", root=root).stdout.split("\0") if line]
+    assert [(meta.split()[0], meta.split()[2], path) for meta, path in staged] == \
+        [("100644", "0", "a.txt"), ("100644", "0", "dir/b.txt")]
+    listed = [line.split("\t") for line in
+              git_door.run("ls-tree", "-r", "-z", "--full-tree", first, root=root).stdout.split("\0") if line]
+    assert [(meta.split()[:2], path) for meta, path in listed] == [(["100644", "blob"], "a.txt"),
+                                                                   (["100644", "blob"], "dir/b.txt")]
+    blobs = [staged[0][0].split()[1], listed[0][0].split()[2]]
+    batch = git_door.run("cat-file", "--batch", root=root, stdin="".join(f"{b}\n" for b in blobs).encode(),
+                         binary=True).stdout
+    assert batch == f"{blobs[0]} blob 7\n".encode() + b"staged\n\n" + f"{blobs[1]} blob 2\n".encode() + b"a\n\n"
+    check = git_door.run("cat-file", "--batch-check", root=root,
+                         stdin=f"{first}:dir/b.txt\n{first}:none.txt\n".encode()).stdout.splitlines()
+    assert check[0].split()[1:] == ["blob", "2"] and check[1] == f"{first}:none.txt missing"
+    assert git(root, "ls-files", "--", "dir/b.txt") == "dir/b.txt" and git(root, "ls-files", "--", "none.txt") == ""
+    assert git(root, "ls-tree", "--name-only", first, "--", "a.txt") == "a.txt"
+    assert git(root, "ls-tree", "--name-only", first, "--", "none.txt") == ""
+
+
+def test_add_force_takes_an_excluded_file_and_rm_cached_untracks_it(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    commit(root, {"a.txt": "a\n"})
+    (root / ".git" / "info").mkdir(exist_ok=True)
+    (root / ".git" / "info" / "exclude").write_text("local.txt\n", encoding="utf-8")
+    (root / "local.txt").write_text("private\n", encoding="utf-8")
+    git(root, "add", "-A")
+    assert git(root, "ls-files") == "a.txt", "info/exclude ignores the file"
+    git(root, "add", "-f", "local.txt")
+    git(root, "commit", "-q", "-m", "track it")
+    assert git(root, "ls-files", "--", "local.txt") == "local.txt"
+    git(root, "rm", "-q", "--cached", "local.txt")
+    assert git(root, "ls-files", "--", "local.txt") == "" and (root / "local.txt").is_file()
+    assert git(root, "ls-tree", "--name-only", "HEAD", "--", "local.txt") == "local.txt"
+
+
+def test_var_names_the_identity_a_commit_would_carry(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    author = git(root, "var", "GIT_AUTHOR_IDENT")
+    assert re.fullmatch(r"alice <alice@example\.com> \d+ [+-]\d{4}", author), author
+    env = git_door.identity_environment(("bob", "bob@example.com"))
+    assert git_door.run("var", "GIT_COMMITTER_IDENT", root=root, env=env).stdout.startswith("bob <bob@example.com> ")
+
+
+def test_a_shallow_clone_names_its_boundary_and_lists_no_commit_below_it(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    assert git(root, "rev-list", "--all", "--count") == "0"
+    shas = [commit(root, {"a.txt": f"{index}\n"}, f"change {index}") for index in range(4)]
+    full = fake_git.clone(root, tmp_path / "full")
+    assert git(full, "rev-parse", "--is-shallow-repository") == "false"
+    clone = fake_git.clone(root.as_uri(), tmp_path / "shallow", "--depth", "2")
+    assert git(clone, "rev-parse", "--is-shallow-repository") == "true"
+    marker = Path(git(clone, "rev-parse", "--git-path", "shallow"))
+    marker = marker if marker.is_absolute() else clone / marker
+    assert marker.read_text(encoding="utf-8").split() == [shas[2]]
+    assert git(clone, "rev-list", "HEAD", "--").split() == [shas[3], shas[2]]
+    assert git(clone, "rev-list", "HEAD", "--not", shas[2], "--").split() == [shas[3]]
+    assert git(root, "rev-list", "HEAD", "--not", shas[1], "--").split() == [shas[3], shas[2]]
+    git(root, "branch", "side", shas[0])
+    assert git(root, "rev-list", "--all", "--count") == "4"
+    assert git(root, "log", "--format=%H", "HEAD^!", "--").split() == [shas[3]]
+    assert git_door.run("log", "-z", "--format=%s%x1f%B", "-2", root=root).stdout == \
+        "change 3\x1fchange 3\n\0change 2\x1fchange 2\n\0"
+
+
+HOOK = """#!/bin/sh
+# Notes what git hands the hook, and fails where the test leaves a file named after it. Where git
+# shows a hook's output differs across versions, so the case reads stdout and stderr together.
+name=$(basename "$0")
+log='{log}'
+echo "$name" >> "$log"
+case "$name" in
+    pre-commit) '{python}' '{door}' ls-files >> "$log" ;;
+    commit-msg) cat "$1" >> "$log" ;;
+    pre-push) echo "$*" >> "$log"; cat >> "$log" ;;
+esac
+if [ -f "$(dirname "$0")/refuse-$name" ]; then
+    echo "$name refuses"
+    exit 1
+fi
+"""
+
+
+def test_git_runs_the_hooks_paths_hooks_with_their_arguments_and_stdin_and_a_refusal_stops_the_command(
+        door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    hooks, log = tmp_path / "hooks", tmp_path / "hooks.log"
+    hooks.mkdir()
+    for name in ("pre-commit", "commit-msg", "pre-push"):
+        (hooks / name).write_text(HOOK.format(log=log.as_posix(), python=Path(sys.executable).as_posix(),
+                                              door=(ROOT / "scripts" / "git_door.py").as_posix()),
+                                  encoding="utf-8", newline="\n")
+        (hooks / name).chmod(0o755)
+    git(root, "config", "core.hooksPath", str(hooks))
+    (root / "a.txt").write_text("a\n", encoding="utf-8")
+    git(root, "add", "-A")
+    if door == "fake":  # the fake in memory starts no process: hooks run behind the state file only
+        refused = git_door.run("commit", "-q", "-m", "first", root=root)
+        assert refused.returncode == 129 and "shared_fake_git" in refused.stderr
+        return
+    git(root, "commit", "-q", "-m", "first")
+    assert log.read_text(encoding="utf-8").splitlines() == ["pre-commit", "a.txt", "commit-msg", "first"]
+    first = git(root, "rev-parse", "HEAD")
+
+    log.unlink()
+    (hooks / "refuse-commit-msg").touch()
+    (root / "b.txt").write_text("b\n", encoding="utf-8")
+    git(root, "add", "-A")
+    refused = git_door.run("commit", "-q", "-m", "second", root=root)
+    assert refused.returncode != 0 and "commit-msg refuses" in refused.stdout + refused.stderr
+    assert git(root, "rev-parse", "HEAD") == first
+    assert git_door.run("commit", "-q", "--no-verify", "-m", "second", root=root).returncode == 0
+    assert log.read_text(encoding="utf-8").splitlines() == ["pre-commit", "a.txt", "b.txt", "commit-msg", "second"]
+    second = git(root, "rev-parse", "HEAD")
+
+    origin = fake_git.init(tmp_path / "origin.git", "--bare")
+    git(root, "remote", "add", "origin", str(origin))
+    log.unlink()
+    git(root, "push", "-q", "origin", "HEAD~1:refs/heads/main")
+    assert log.read_text(encoding="utf-8").splitlines() == [
+        "pre-push", f"origin {origin}", f"HEAD~1 {first} refs/heads/main {'0' * 40}"]
+    log.unlink()
+    (hooks / "refuse-pre-push").touch()
+    refused = git_door.run("push", "-q", "origin", "main", root=root)
+    assert refused.returncode != 0 and "pre-push refuses" in refused.stdout + refused.stderr
+    assert log.read_text(encoding="utf-8").splitlines() == [
+        "pre-push", f"origin {origin}", f"refs/heads/main {second} refs/heads/main {first}"]
+    assert git(origin, "rev-parse", "main") == first
+    assert git_door.run("push", "-q", "--no-verify", "origin", "main", root=root).returncode == 0
+    assert git(origin, "rev-parse", "main") == second
+
+
 # The door's variable: one fake for a test and the processes it starts
 
 STATE_TESTDATA = ROOT / "kern" / "git" / "gitfake" / "testdata" / "state"
