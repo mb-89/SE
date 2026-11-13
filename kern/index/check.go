@@ -308,8 +308,10 @@ func (b *builder) inputs(refs []ref) {
 			case name == "":
 			case n == nil:
 				b.fail(lines[port], "input %s is bound to %s, which nothing writes", port, name)
+			case n.family && wholeFamily(p.Type, n) && n.shape == p.Shape:
+				// It reads the whole family, every key standing, as one map.
 			case n.family && commandReads(in.comp, p.Port):
-				b.fail(lines[port], "input %s is bound to the family %s, and a command reads it: only a derivation reads a family, at the key that changed", port, name)
+				b.fail(lines[port], "input %s is bound to the family %s, and a command reads it: only a derivation reads a family at the key that changed, and a command reads it whole as map[string]%s", port, name, typeName(n.typ, n.shape))
 			case n.typ != p.Type || n.shape != p.Shape:
 				b.fail(lines[port], "two types on one wire: %s reads %s as %s, but %s writes %s", port, name, typeName(p.Type, p.Shape), n.writer, typeName(n.typ, n.shape))
 			case in.enabled && n.inst != "" && !b.ix.insts[n.inst].enabled && !b.lenient[port]:
@@ -391,6 +393,13 @@ func typeName(t reflect.Type, shape string) string {
 }
 
 // commandReads says whether a command of c reads the local input port.
+// wholeFamily says whether an input of type t reads the family n whole: t is
+// map[string]T, T the family's type, and the map holds every key standing.
+func wholeFamily(t reflect.Type, n *nameInfo) bool {
+	return n != nil && n.family && t != nil && t.Kind() == reflect.Map &&
+		t.Key().Kind() == reflect.String && t.Elem() == n.typ
+}
+
 func commandReads(c *Component, port string) bool {
 	for _, k := range c.Commands() {
 		if slices.Contains(c.ReadsOf(k.Name), port) {

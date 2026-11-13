@@ -109,6 +109,11 @@ jobs:
       - name: kern vets
         working-directory: kern
         run: time go vet ./...
+      # SE's Go components (components/README.md "Tests"), their module beside kern's: vetted
+      # here; their tests run in the suite step below, as se.toml [tests.beside.go-components] declares.
+      - name: SE's Go components vet
+        working-directory: components
+        run: time go vet ./...
       # The budget's reference run (README "Test budget"): over a limit here, check fails.
       - name: The complete suite and kern's tests, within their budgets
         run: uv run python scripts/work_tickets.py suite --worktree .

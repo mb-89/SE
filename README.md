@@ -102,7 +102,9 @@ uv run python <se>/scripts/se_start.py refresh
   [fleet check](#fleet-check), and caches both.
   - The greeting then names a retro that is [due](#retro-due) and the fleet's findings by kind and
     issue, one line each with the command to run, and a part whose read failed with its cause.
-  - `status` reads them from the cache only.
+  - `status` reads them from the cache, and each part from kern live where the core in the checkout
+    carries SE's fleet and retro components and has read issues: its line then says `live from kern`
+    ([components/README.md](components/README.md#who-reads-them)).
   - Without gh (Claude's cloud, where no token reaches SE's code) the greeting names neither; the
     [se agent](src/agents/se.md) runs the fleet check's plan at its first turn instead.
   - `refresh` reads no work: its checks keep the cached lines.
@@ -455,6 +457,11 @@ it is `no branch` at once, saying why.
 Blocks are the `## Blocked by` section of each open issue's body, where `work_tickets.py block`
 writes them.
 
+Where the core running in the checkout carries SE's fleet component and has read issues, it answers
+from the core's `fleet/findings` instead, live, naming how many issues and pull requests the core
+has read ([components/README.md](components/README.md#who-reads-them)); the Python check stays the
+path everywhere else.
+
 Without gh it prints its GitHub plan; the session runs it with its GitHub tools, saves the three
 lists as JSON (each in-progress issue with its comments) and passes them as `--open-issues`,
 `--closed-issues` and `--pulls`.
@@ -468,7 +475,8 @@ due_after = 10
 
 A retro is due once `due_after` work issues landed since the last closed retro issue, built in 10;
 the [start greeting](#start-and-refresh) names it. `scripts/retro.py` owns the count and the
-setting.
+setting; SE's retro component counts the same from kern's GitHub names, for the greeting to read
+live ([components/README.md](components/README.md)).
 
 ### Stop hook
 
