@@ -31,6 +31,9 @@
 - Focused: `uv run pytest -q tests/<file>.py` (add `-k <name>` for one test), the tests of what changed.
   - A change to Markdown the docs build publishes (`docs.md` and every note it lists) also runs
     `tests/test_docs.py`, whose build fails on obs's lints, a paragraph over five lines among them.
+  - A change to `.github/workflows/check.yml` also runs `tests/test_public_check.py`, which holds
+    the workflow's jobs and their order, beside the tests of the steps it changed (such as
+    `tests/test_kern.py` for kern's, `tests/test_pr_issues.py` for the issue rule's).
 - kern, the Go core under `kern/`: `cd kern && go vet ./... && go test ./...`. Its tests are
   declared beside the suite, `se.toml` `[tests.beside.kern]`, so the complete suite runs them too;
   the `check` job vets kern in its own step, and runs its vet and tests on Windows through the job

@@ -1908,6 +1908,18 @@ def test_the_metrics_report_ranks_spenders_and_flags_an_overrun():
     ]
 
 
+def test_the_metrics_report_flags_a_suite_beside_over_its_limit_as_it_does_the_suite():
+    line = {"command": "work_tickets.py suite", "start": "2026-11-13T10:00:00Z", "wall_seconds": 90,
+            "suite_seconds": 49, "suite_limit_seconds": 120,
+            "beside_seconds": {"kern": 61.5, "web": 10}, "beside_limit_seconds": {"kern": 60, "web": 30}}
+
+    assert work_tickets.metrics.overruns(line) == ["suite kern 61.5 s over its budget 60 s"]
+    assert work_tickets.metrics.report([line]).splitlines()[-2:] == [
+        "Overruns: 1",
+        "  2026-11-13T10:00:00Z work_tickets.py suite: suite kern 61.5 s over its budget 60 s",
+    ]
+
+
 def test_the_metrics_command_reads_its_file_and_skips_unreadable_lines(tmp_path, capsys):
     source = tmp_path / "metrics.jsonl"
     source.write_text('{"command": "work_tickets.py sync", "start": "2026-11-12T00:00:00Z", '

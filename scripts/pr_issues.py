@@ -14,7 +14,8 @@ A reference is `Refs`, `Closes`, `Fixes` or `Lands`, then `#<n>` or this reposit
 - it was opened by the repository owner's account and carries the label `housekeeping`.
 
 A pull request into another branch is not checked. Exit code 0 passed, 1 refused, 2 setup error
-(no event, no token, the API failing).
+(no event, no token, the API failing). A single server error (HTTP 5xx) on a read is read again once,
+RETRY_SECONDS later, so one hiccup of GitHub does not fail the required check; a second fails it.
 
 `references` is the one parser of how a pull request names its issue. The field-report step of the
 same job uses it too: `--work-issue <file>` prints the number of the issue the first line of the
@@ -31,6 +32,7 @@ import json
 import os
 import re
 import sys
+import time
 import tomllib
 import urllib.error
 import urllib.request
@@ -39,6 +41,7 @@ from pathlib import Path
 WORK_LABEL = "work"
 HOUSEKEEPING_LABEL = "housekeeping"
 KEYWORDS = ("refs", "closes", "fixes", "lands")
+RETRY_SECONDS = 5  # the wait before the one read again after a server error
 REMEDY = ("name the work issue in the description's first line, `Refs <issue url>` (work_tickets.py "
           "pr-body writes it), or file a work issue first")
 
@@ -83,15 +86,22 @@ class Api:
                      "Accept": "application/vnd.github+json",
                      "X-GitHub-Api-Version": "2022-11-28"},
         )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return json.load(response)
-        except urllib.error.HTTPError as error:
-            if error.code in (404, 410):
-                return None
-            raise SetupError(f"GET issue #{number}: HTTP {error.code}") from error
-        except urllib.error.URLError as error:
-            raise SetupError(f"GET issue #{number}: {error.reason}") from error
+        for attempt in (1, 2):
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    return json.load(response)
+            except urllib.error.HTTPError as error:
+                if error.code in (404, 410):
+                    return None
+                if error.code >= 500 and attempt == 1:
+                    print(f"::warning::pr-issues: GET issue #{number}: HTTP {error.code}; "
+                          "reading it once more")
+                    time.sleep(RETRY_SECONDS)
+                    continue
+                raise SetupError(f"GET issue #{number}: HTTP {error.code}") from error
+            except urllib.error.URLError as error:
+                raise SetupError(f"GET issue #{number}: {error.reason}") from error
+        raise AssertionError("unreachable: the second attempt returns or raises")
 
 
 def labels(item: dict) -> set[str]:

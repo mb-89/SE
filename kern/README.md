@@ -1,7 +1,7 @@
 # kern
 
 kern is the Go core every application builds on: the index (names, the store, snapshots, the
-catalog), and later its NATS bus and host. Its design is SE's
+catalog), its NATS bus and its host. Its design is SE's
 [docs/go-core.md](../docs/go-core.md) until kern owns its contract.
 
 **Incubated in SE.** kern's own repository, `mb-89/kern`, does not exist yet; the owner creates
@@ -21,11 +21,15 @@ named in the design's plan.
 | `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request | `src/index/indextest` |
 | `bus/` | the embedded NATS server on loopback, a user and permissions per component instance, so the bus refuses a second writer | quackitect v5 `src/index/bus.go` |
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
+| `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve` | |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve` | |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises, and `cases.json` held against the Go fake, the Python fake and the real core with a Python component attached | |
 | `contract/fixture/` | tally, the suite's fixture and the sample Python component (`component.toml`, `__init__.py`), and the declarations of the two peers the real leg plays | |
 | `python/kern/` | the Python SDK, standard library only: the NATS peer, `component.toml`'s reader, the component and its decorators, the fake core, the runner `python -m kern run <folder>` | |
 | `python/tests/` | the Python fake's leg of the contract suite and the sample component's test, run by SE's Python suite | |
+| `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
+| `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
+| `template/` | the bare application every new application starts from ([The template](#the-template)) | |
 
 The NATS server is a Go dependency, `github.com/nats-io/nats-server/v2` v2.11.9 with
 `github.com/nats-io/nats.go` v1.45.0, v5's versions; `go.mod` owns them.
@@ -105,6 +109,63 @@ The contract suite runs `contract/cases.json` three times: against the Go fake
 (`contract/real_test.go`, Python 3.11 or later, from `KERN_PYTHON` or the path), and against the
 Python fake (`python/tests/`, in SE's Python suite through `pyproject.toml`'s `testpaths`, so its
 time counts against SE's budget and needs no Go).
+
+## Release
+
+`release.toml` owns kern's version and where its release is published:
+
+```toml
+version = "0.1.0"
+download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
+```
+
+- **The assets:** `kern-<version>-<os>-<arch>.tar.gz` for `linux` and `darwin`, `.zip` for
+  `windows`, each on `amd64` and `arm64`, each holding the one binary `kern` (`kern.exe`), and
+  `SHA256SUMS` over the six, which `sha256sum -c SHA256SUMS` checks. `go run ./tools/release build
+  --out <dir>` builds them, the same bytes for the same commit.
+- **The workflow:** SE's `.github/workflows/kern-release.yml` builds them on every pull request
+  and push to `main` that touches kern, and runs [the template](#the-template)'s battery. On `main`
+  it publishes the release `release.toml` names, where it does not exist yet, so the push that
+  changes `version` cuts it; a release that exists is never changed. A rerun is `workflow_dispatch`
+  on `main`.
+- **Fetching it:** `<download>/kern-<version>-<os>-<arch>.tar.gz` and `<download>/SHA256SUMS`, the
+  archive checked against its line, then unpacked.
+
+| asset | measured on 13 Nov in a Claude Code cloud container, 4 cores, Linux amd64, 5 runs |
+|---|---|
+| `kern-0.1.0-linux-amd64.tar.gz`, 6.44 MB (16.0 MB unpacked), built by `tools/release` and served from loopback: download, `SHA256SUMS`, `sha256sum -c`, `tar -xzf`, first run | 157 to 176 ms |
+| nats-server v2.11.9 linux-amd64, 6.35 MB, from its GitHub release through the container's proxy: the same steps | 0.68 to 1.27 s |
+| building the six, `go run ./tools/release build`, warm module cache | 17.5 to 18.7 s each, 110 s in all |
+
+**The move to `mb-89/kern` changes one URL:** `release.toml`'s `download`, to
+`https://github.com/mb-89/kern/releases/download/v{version}`. The workflow reads its tag and its
+repository from that URL and refuses to publish into another repository than the one it runs in,
+so it moves with kern's other workflows (the design's move, step 2), as `release.yml`, and
+`battery.yml` below moves beside it.
+
+## The battery
+
+SE's `.github/workflows/kern-battery.yml` is the reusable CI every kern application calls:
+
+```yaml
+jobs:
+  check:
+    uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v<version>
+```
+
+It sets up the Go of the application's `go.mod` and uv, vets the Go code, and runs the
+application's `se.toml` `[tests]` command, its Go tests and its Python tests, held to that table's
+one budget: over `target_seconds` it warns, over `limit_seconds` or on a failed test it fails, as
+SE's own suite (SE's [README "Test budget"](../README.md#test-budget)). Its input `directory`
+names the application's folder, `.` by default.
+
+## The template
+
+`template/` is the bare application ([its README](template/README.md)): the core with no
+components, an empty `wiring.toml`, `components/`, `types/`, `se.toml` with its `[tests]` budget
+and `[modules.kern]`, an `AGENTS.md`, a battery that starts the bare core, and a `check.yml` that
+calls the battery. It is a Go module of its own, so kern's `go test ./...` leaves it out; the
+release workflow runs its battery on every change to kern.
 
 ## The catalog check's budget
 

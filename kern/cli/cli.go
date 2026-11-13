@@ -1,0 +1,188 @@
+// Package cli is the core's command line, the same for the bare core and for
+// every application built on it: an application's main registers its
+// components (index.Register) and calls Run with its own name.
+//
+//	<name> start  [--root DIR] [--grace D] [--idle D]   start the core in the background, return at once
+//	<name> status [--root DIR] [--wait D] [--json]      say whether a core runs, and its health
+//	<name> stop   [--root DIR]                          stop the core and wait until it has exited
+//	<name> serve  [--root DIR] [--grace D] [--idle D]   run the core in the foreground (what start spawns)
+//
+// The root is the checkout the core serves: by default the nearest folder up
+// from the working directory that holds .git, else the working directory.
+// Exit codes: 0 done, 1 no core runs (status), 2 a usage or start error.
+package cli
+
+import (
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"time"
+
+	"github.com/mb-89/kern/host"
+	"github.com/mb-89/kern/index"
+)
+
+// HoldEnv names a file a served core waits for before it stands its bus: a
+// test's way to show that `kern start` returns before the core answers.
+const HoldEnv = "KERN_HOLD_START"
+
+const usage = "usage: %s <start|status|stop|serve> [--root DIR] [--grace D] [--idle D] [--wait D] [--json]"
+
+// Run is the command named name: it serves the components registered with
+// index.Register before it is called, and answers the exit code.
+func Run(name string, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintf(stderr, usage+"\n", name)
+		return 2
+	}
+	verb := args[0]
+	fs := flag.NewFlagSet(name+" "+verb, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", "", "the checkout the core serves")
+	var grace, idle, wait *time.Duration
+	var asJSON *bool
+	switch verb {
+	case "start", "serve":
+		grace = fs.Duration("grace", host.Grace, "how long the core runs on once no session holds a lease")
+		idle = fs.Duration("idle", host.Idle, "how long the core runs without any event")
+	case "status":
+		wait = fs.Duration("wait", 0, "how long to wait for a starting core to answer")
+		asJSON = fs.Bool("json", false, "print the health as JSON")
+	case "stop":
+	default:
+		fmt.Fprintf(stderr, "%s: no command %q\n"+usage+"\n", name, verb, name)
+		return 2
+	}
+	if err := fs.Parse(args[1:]); err != nil {
+		return 2
+	}
+	dir, err := rootOf(*root)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s %s: %v\n", name, verb, err)
+		return 2
+	}
+	switch verb {
+	case "start":
+		bin, err := os.Executable()
+		if err != nil {
+			fmt.Fprintf(stderr, "%s start: no path to this binary: %v\n", name, err)
+			return 2
+		}
+		got, err := host.Start(host.Wall{}, dir, bin, "--grace", grace.String(), "--idle", idle.String())
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		fmt.Fprintf(stdout, "%s: %s in %s\n", name, got, dir)
+		return 0
+	case "status":
+		st, err := host.WaitRunning(host.Wall{}, dir, *wait)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s status: %v\n", name, err)
+			return 2
+		}
+		if *asJSON {
+			data, _ := json.Marshal(map[string]any{"state": st.State, "health": st.Health})
+			fmt.Fprintln(stdout, string(data))
+		} else if st.State == host.StateRunning {
+			h := st.Health
+			fmt.Fprintf(stdout, "%s: running in %s, pid %d, bus %s, %d session(s), %d instance(s), %d placed\n",
+				name, dir, h.Pid, h.Bus, len(h.Sessions), len(h.Instances), len(h.Placements))
+		} else {
+			fmt.Fprintf(stdout, "%s: %s in %s\n", name, st.State, dir)
+		}
+		if st.State == host.StateStopped {
+			return 1
+		}
+		return 0
+	case "stop":
+		pid, err := host.AskStop(dir)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		if pid == 0 {
+			fmt.Fprintf(stdout, "%s: not running in %s\n", name, dir)
+		} else {
+			fmt.Fprintf(stdout, "%s: stopped pid %d in %s\n", name, pid, dir)
+		}
+		return 0
+	}
+	return serve(name, dir, *grace, *idle, stdout, stderr)
+}
+
+// serve runs the core until it ends: no session holds a lease, it is idle,
+// it is asked to stop, or the process is interrupted.
+func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Writer) int {
+	if hold := os.Getenv(HoldEnv); hold != "" {
+		for {
+			if _, err := os.Stat(hold); err == nil {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	var w index.Wiring
+	path := filepath.Join(root, index.WiringFile)
+	if _, err := os.Stat(path); err == nil {
+		if w, err = index.ReadWiring(path); err != nil {
+			fmt.Fprintf(stderr, "%s serve: %v\n", name, err)
+			return 2
+		}
+	}
+	core, err := host.Serve(host.Options{
+		Root: root, Wiring: w, Components: index.Registered(), Grace: grace, Idle: idle, Log: stderr,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		_ = os.Remove(host.ClaimPath(root))
+		return 2
+	}
+	fmt.Fprintf(stdout, "%s: serving %s, pid %d, bus %s\n", name, root, os.Getpid(), core.Health().Bus)
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	select {
+	case <-core.Ended():
+	case <-interrupt:
+		core.Stop("interrupted")
+		<-core.Ended()
+	}
+	fmt.Fprintf(stdout, "%s: ended, %s\n", name, core.Reason())
+	return 0
+}
+
+// rootOf answers the checkout: the folder given, else the nearest one up from
+// the working directory that holds .git, else the working directory.
+func rootOf(given string) (string, error) {
+	if given != "" {
+		abs, err := filepath.Abs(given)
+		if err != nil {
+			return "", err
+		}
+		if st, err := os.Stat(abs); err != nil || !st.IsDir() {
+			return "", fmt.Errorf("--root %s is no folder", given)
+		}
+		return abs, nil
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for dir := wd; ; {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		up := filepath.Dir(dir)
+		if up == dir {
+			return wd, nil
+		}
+		dir = up
+	}
+}
