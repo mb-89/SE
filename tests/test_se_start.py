@@ -297,7 +297,8 @@ def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, mon
 def kern_greeting(setup, capsys, monkeypatch, *args, answer=None):
     """The hook's greeting lines with bootstrap.sh's kern arguments, kern's status answering `answer`."""
     monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
-    write(setup["se"] / "kern" / "release.toml", 'version = "0.2.0"\n')
+    write(setup["se"] / "kern" / "release.toml",
+          'version = "0.2.0"\ndownload = "https://github.com/mb-89/SE/releases/download/kern-v{version}"\n')
     asked = []
     world = dataclasses.replace(setup["world"], kern=lambda binary, root: asked.append((binary, root)) or answer)
     assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]),
@@ -331,6 +332,18 @@ def test_the_greeting_names_kern_starting_or_failed_with_the_cause(setup, capsys
 def test_without_word_of_kern_the_greeting_names_none(setup, capsys, monkeypatch):
     lines, asked = kern_greeting(setup, capsys, monkeypatch)
     assert not any(line.startswith("kern") for line in lines) and asked == []
+
+
+def test_the_greeting_names_the_applications_own_binary_where_it_builds_one(setup, capsys, monkeypatch):
+    # Where se.toml names a [binary] release, the line is the application's own binary, not the bare
+    # kern: SE's is se (components/release.toml), kern's core plus SE's Go components.
+    write(setup["se"] / "se.toml", '[project]\nversion = "5.0.0"\n[binary]\nrelease = "components/release.toml"\n')
+    write(setup["se"] / "components" / "release.toml",
+          'version = "0.1.0"\ndownload = "https://github.com/mb-89/SE/releases/download/se-v{version}"\n'
+          'binary = "se"\npackage = "./cmd/se"\n')
+    lines, asked = kern_greeting(setup, capsys, monkeypatch, "--kern-bin", "/k/se-0.1.0",
+                                 answer={"state": "running", "health": {"pid": 7}})
+    assert lines[1] == "se 0.1.0: running, pid 7"
 
 
 # What is due in the work: a retro and the fleet's findings, from the cache (work issue

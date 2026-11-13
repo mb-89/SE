@@ -7,9 +7,11 @@
 #   uv       installed into the user's home (~/.local/bin) from astral.sh when missing
 #   Python   3.11 or newer, installed by uv into the user's home when missing
 #   modules  the current project's se.toml modules, synced by se_modules.py
-#   kern     in --hook mode: the core SE pins (se_modules.py kern-pin), fetched for this platform into
-#            ~/.se/bin/kern-<version> in the background (or built from kern/ where no release
-#            matches), started detached for the project, and handed the session's start
+#   kern     in --hook mode: the application binary (se_modules.py app-binary) — kern's core plus the
+#            application's Go components where it has any (the `se` binary for SE), else the bare kern
+#            — fetched for this platform into ~/.se/bin/<name>-<version> in the background (or built
+#            from its folder where no release matches), started detached for the project, and handed
+#            the session's start
 # Exit code 0 when everything is in place, 1 when a step needs the person: the line on stdout says
 # what to run and why (the plugin's hook passes it on to the session).
 #
@@ -86,16 +88,19 @@ kern_background() { # <mode> <bin> <args>...
   ${detach[@]+"${detach[@]}"} bash "$se_root/scripts/bootstrap.sh" "$@" </dev/null >/dev/null 2>&1 &
 }
 kern_step() {
-  local pin version base platform exe=kern asset bin sums cause start
-  # The pin's one reader is se_modules.py (kern_pin): "<version> <download base>".
-  pin="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" \
-    --root "$se_root" kern-pin 2>/dev/null)" || return 0
-  version="${pin%% *}"
-  base="${pin#* }"
-  [ -n "$version" ] && [ "$base" != "$pin" ] || return 0
+  local spec name version base builddir package platform exe suffix asset bin sums cause start
+  # One reader of the application binary: se_modules.py app-binary, which answers kern's core plus
+  # the application's Go components where it has any, else the bare kern (SE's docs/go-core.md "How
+  # the binary arrives"). One line: "<name> <version> <download base> <build folder> <package>".
+  spec="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" \
+    --root "$se_root" app-binary 2>/dev/null)" || return 0
+  read -r name version base builddir package <<<"$spec"
+  [ -n "$name" ] && [ -n "$version" ] && [ -n "$base" ] && [ -n "$builddir" ] && [ -n "$package" ] || return 0
   platform="$(kern_platform)"
-  case "$platform" in windows-*) exe=kern.exe ;; esac
-  bin="$HOME/.se/bin/kern-$version${exe#kern}"
+  exe="$name"
+  suffix=""
+  case "$platform" in windows-*) exe="$name.exe"; suffix=".exe" ;; esac
+  bin="$HOME/.se/bin/$name-$version$suffix"
   mkdir -p "$HOME/.se/bin" "$project/.se/.runtime" 2>/dev/null
   # Where every later hook finds the binary (scripts/se_hook.sh), once it is in place.
   printf '%s\n' "$bin" >"$project/.se/.runtime/kern.path"
@@ -103,37 +108,38 @@ kern_step() {
   printf '%s' "$payload" >"$start"
   if [ -x "$bin" ]; then
     kern_run "$bin" "$start" ||
-      kern_args+=(--kern-failed "kern start: $(tail -n 1 "$project/.se/.runtime/kern-start.err" 2>/dev/null)")
+      kern_args+=(--kern-failed "$name start: $(tail -n 1 "$project/.se/.runtime/kern-start.err" 2>/dev/null)")
     kern_args+=(--kern-bin "$bin")
     return 0
   fi
   # The first start of this version: one small read says whether a release matches this platform.
-  asset="kern-$version-$platform.tar.gz"
-  [ "$exe" = kern.exe ] && asset="kern-$version-$platform.zip"
-  sums="$HOME/.se/bin/kern-$version.SHA256SUMS"
+  asset="$name-$version-$platform.tar.gz"
+  [ -n "$suffix" ] && asset="$name-$version-$platform.zip"
+  sums="$HOME/.se/bin/$name-$version.SHA256SUMS"
   if [ -z "$platform" ]; then
-    cause="no kern release for $(uname -s 2>/dev/null) $(uname -m 2>/dev/null)"
+    cause="no $name release for $(uname -s 2>/dev/null) $(uname -m 2>/dev/null)"
   elif ! command -v curl >/dev/null 2>&1; then
-    cause="no curl to fetch release kern-v$version"
+    cause="no curl to fetch the $name $version release"
   elif ! curl -fsSL --max-time 2 -o "$sums" "$base/SHA256SUMS" >/dev/null 2>&1; then
-    cause="no release kern-v$version at $base"
+    cause="no $name $version release at $base"
   elif ! grep -q "  $asset\$" "$sums" 2>/dev/null; then
-    cause="release kern-v$version has no $asset"
+    cause="the $name $version release has no $asset"
   else
     kern_background --kern-fetch "$bin" "$base/$asset" "$sums" "$exe" "$project" "$start"
-    kern_args+=(--kern-starting "fetching release kern-v$version for $platform in the background")
+    kern_args+=(--kern-starting "fetching the $name $version release for $platform in the background")
     return 0
   fi
-  if command -v go >/dev/null 2>&1 && [ -f "$se_root/kern/go.mod" ]; then
-    kern_background --kern-build "$bin" "$project" "$start"
-    kern_args+=(--kern-starting "$cause; building it from $se_root/kern in the background")
+  if command -v go >/dev/null 2>&1 && [ -f "$se_root/$builddir/go.mod" ]; then
+    kern_background --kern-build "$bin" "$project" "$start" "$builddir" "$package"
+    kern_args+=(--kern-starting "$cause; building it from $se_root/$builddir in the background")
   else
-    kern_args+=(--kern-failed "$cause, and no go to build it from $se_root/kern")
+    kern_args+=(--kern-failed "$cause, and no go to build it from $se_root/$builddir")
   fi
 }
 if [ -n "$kern_mode" ]; then
-  # <bin> then, for --kern-fetch, <archive url> <SHA256SUMS file> <binary in it>; then the project
-  # and the session's start, which the core is handed once it runs.
+  # <bin> then, for --kern-fetch, <archive url> <SHA256SUMS file> <binary in it> <project> <start>;
+  # for --kern-build, <project> <start> <build folder> <package>. The core is handed <start> once
+  # it runs.
   bin="$2"
   part="$bin.part$$"
   if [ "$kern_mode" = --kern-fetch ]; then
@@ -148,7 +154,7 @@ if [ -n "$kern_mode" ]; then
     start="$7"
   else
     project="$3"
-    (cd "$se_root/kern" && go build -o "$part" ./cmd/kern) && mv -f "$part" "$bin"
+    (cd "$se_root/${5:-kern}" && go build -o "$part" "${6:-./cmd/kern}") && mv -f "$part" "$bin"
     start="$4"
   fi
   [ -x "$bin" ] && kern_run "$bin" "$start"

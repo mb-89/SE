@@ -25,6 +25,26 @@ says `go = true`, so the version is read from `go.mod`. While kern is incubated 
 kern beside the template here, and kern's source at the pin in `kern/` in an application that
 `se new app` made. The move to `mb-89/kern` drops the `replace` and that folder.
 
+## Building your own binary
+
+This bare application has no Go components, so it runs the bare `kern` release that `bootstrap.sh`
+fetches: it needs no binary of its own (SE's `docs/go-core.md` "How the binary arrives"). When it
+gains Go components, it builds its own binary the same way SE builds `se`:
+
+- add a `release.toml` beside `cmd/app/` naming its `version`, its `download` base, its `binary` and
+  its `package` (`./cmd/app`), as `kern/release.toml` does for the bare core;
+- point `se.toml` at it with `[binary]\nrelease = "release.toml"`, so `bootstrap.sh` fetches, builds
+  and starts that binary instead of the bare kern;
+- add a release workflow that calls kern's reusable one with its folder (`.`):
+
+```yaml
+  jobs:
+    release:
+      uses: mb-89/SE/.github/workflows/kern-release.yml@kern-v<version>
+      with:
+        directory: .
+```
+
 ## Tests
 
 ```sh

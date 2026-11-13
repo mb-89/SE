@@ -31,7 +31,11 @@ func toolUse(tool string, input map[string]any, answer any) []byte {
 // the real core a session's GitHub tool answers land as snapshots, from
 // which fleet/findings and retro/due derive at once, read by a client.
 func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "wiring.toml"))
+	// SE's one wiring is the checkout's root wiring.toml, which the `se` binary serves (../../..
+	// from this package). It places SE's four Python command groups beside these Go components;
+	// this test exercises the Go derivations alone, so it keeps the Go instances (no placement
+	// command) and drops the placed Python ones and the hooks that need them.
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "wiring.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,6 +43,13 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var goInstances []index.Instance
+	for _, in := range w.Instances {
+		if len(in.Command) == 0 {
+			goInstances = append(goInstances, in)
+		}
+	}
+	w.Instances, w.Hooks = goInstances, nil
 	origin.Read = func(string) (map[string]time.Time, error) {
 		return map[string]time.Time{"main": time.Now()}, nil
 	}
