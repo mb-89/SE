@@ -119,7 +119,8 @@ uv run python <se>/scripts/se_start.py refresh
   - A list SE cannot read is named instead, and the greeting still appears.
 - What is due: the highest version a module's `version` range admits above its locked one, and for
   SE the highest version of its major. A newer version outside the range is shown apart and never
-  applied.
+  applied, with the remedy: for a module the range to set in its `se.toml` and the `update` that
+  takes it, for SE an install again.
 - A local path (`[paths]` of `~/.se/local.toml`, SE's own under the name `se`) is reported as local
   and never touched. A module pinned by commit is reported, and only the module command's
   [`update`](#commands) moves it.

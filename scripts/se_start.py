@@ -407,7 +407,7 @@ def greeting(report: Report, se_root: Path) -> list[str]:
         lines.append(f"  {state.item.name}: {_v(state.item.version)} -> {_v(state.due)}")
     for state in (s for s in report.states if s.outside):
         lines.append(f"  {state.item.name}: {_v(state.outside)} is outside "
-                     f"{_range(state.item)}; refresh never applies it")
+                     f"{_range(state.item)}; refresh never applies it; {take_outside(state, report.root, se_root)}")
     if due:
         lines.append(f"Refresh: {refresh_command(se_root)}")
     lines += _check_lines(report, se_root)
@@ -465,6 +465,17 @@ def work_lines(report: Report, se_root: Path) -> list[str]:
 
 def _range(item: Item) -> str:
     return item.range if item.kind == "range" else f"SE's major {item.version[0]}"
+def take_outside(state: State, root: Path | None, se_root: Path) -> str:
+    """The remedy for a version outside the range: the pin to change and where, and the command
+    that moves to it."""
+    item, outside = state.item, state.outside
+    if item.kind == "se":
+        return f"to take it, install SE {_v(outside)} again as README \"Install\" says"
+    where = (root / se_modules.MANIFEST).as_posix() if root else se_modules.MANIFEST
+    return (f"to take it, set version = \"^{outside[0]}.{outside[1]}\" in [modules.{item.name}] of {where}, "
+            f"then run: uv run python {se_root.as_posix()}/scripts/se_modules.py update {item.name}")
+
+
 
 
 def _check_lines(report: Report, se_root: Path) -> list[str]:
@@ -498,7 +509,8 @@ def full(report: Report, se_root: Path) -> list[str]:
                    "pinned by commit, refresh leaves it (se_modules.py update moves it)"
                    if item.kind == "commit" else "up to date")
         if state.outside:
-            verdict += f"; {_v(state.outside)} is outside {_range(item)}, never applied by refresh"
+            verdict += (f"; {_v(state.outside)} is outside {_range(item)}, never applied by refresh; "
+                        f"{take_outside(state, report.root, se_root)}")
         lines.append(f"{item.name}: in use {use}; latest {_v(state.latest)}; {verdict}")
     if any(s.due for s in report.states):
         lines.append(f"Refresh: {refresh_command(se_root)}")
@@ -810,7 +822,8 @@ def refresh(se_root: Path, root: Path | None, local_config: Path | None, cache_p
     for state in report.states:
         item = state.item
         if state.outside:
-            lines.append(f"{item.name}: {_v(state.outside)} is outside {_range(item)}; not applied")
+            lines.append(f"{item.name}: {_v(state.outside)} is outside {_range(item)}; not applied; "
+                         f"{take_outside(state, root, se_root)}")
         if not state.due:
             continue
         try:
