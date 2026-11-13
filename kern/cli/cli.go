@@ -102,8 +102,14 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		if *asJSON {
-			data, _ := json.Marshal(map[string]any{"state": st.State, "health": st.Health})
+			answer := map[string]any{"state": st.State, "health": st.Health}
+			if st.Died != "" {
+				answer["died"] = st.Died
+			}
+			data, _ := json.Marshal(answer)
 			fmt.Fprintln(stdout, string(data))
+		} else if st.Died != "" {
+			fmt.Fprintf(stdout, "%s: %s in %s; %s\n", name, st.State, dir, DiedReport(dir, st.Died))
 		} else if st.State == host.StateRunning {
 			h := st.Health
 			fmt.Fprintf(stdout, "%s: running in %s, pid %d, bus %s, %d session(s), %d instance(s), %d placed\n",
@@ -167,6 +173,16 @@ func hook(name string, args []string, stdin io.Reader, stdout, stderr io.Writer)
 	switch {
 	case err != nil:
 		fmt.Fprintf(stderr, "%s hook: %v\n", name, err)
+		// A core that ended at its start is told once, on the first event
+		// that carries context but SessionStart, whose start runs it and
+		// whose greeting names it from the status (DiedEvents).
+		if errors.Is(err, host.ErrNotRunning) && DiedEvents[event] {
+			if said := host.TakeDied(dir); said != "" {
+				out := HookOutput(event, host.HookAnswer{Context: name + ": failed: " + DiedReport(dir, said)})
+				stdout.Write(append(out, '\n'))
+				return 0
+			}
+		}
 	case a.Effect == host.Output:
 		if a.Output != "" {
 			fmt.Fprintln(stdout, strings.TrimRight(a.Output, "\n"))
@@ -186,6 +202,17 @@ func hook(name string, args []string, stdin io.Reader, stdout, stderr io.Writer)
 // ContextEvents are the host's events whose hook output hands the agent
 // context: Claude Code reads hookSpecificOutput.additionalContext on these.
 var ContextEvents = map[string]bool{"PostToolUse": true, "UserPromptSubmit": true, "SessionStart": true}
+
+// DiedEvents are the events whose hook tells the session of a core that ended
+// at its start: ContextEvents but SessionStart, which the start posts itself
+// and whose output it does not show.
+var DiedEvents = map[string]bool{"PostToolUse": true, "UserPromptSubmit": true}
+
+// DiedReport says that the core ended at its start, the first lines it said
+// and where its log holds the rest.
+func DiedReport(root, said string) string {
+	return fmt.Sprintf("the core ended at its start; it said:\n%s\n(%s holds all it said)", said, host.LogPath(root))
+}
 
 // HookOutput is the host's hook JSON for the core's answer to event: the
 // context the components told, on an event that carries it; nil for none.
@@ -209,20 +236,27 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 			time.Sleep(time.Millisecond)
 		}
 	}
+	// A core that ends at its start says why in its log and in the died file,
+	// before it gives up the start's claim, so the status that waits on the
+	// claim and the next hook find the cause (host.RecordDied).
+	die := func(said string) int {
+		fmt.Fprintln(stderr, said)
+		_ = host.RecordDied(root, said)
+		_ = os.Remove(host.ClaimPath(root))
+		return 2
+	}
 	var w index.Wiring
 	path := filepath.Join(root, index.WiringFile)
 	if _, err := os.Stat(path); err == nil {
 		if w, err = index.ReadWiring(path); err != nil {
-			fmt.Fprintf(stderr, "%s serve: %v\n", name, err)
-			return 2
+			return die(fmt.Sprintf("%s serve: %v", name, err))
 		}
 	}
 	var stepWait time.Duration
 	if v := os.Getenv(StepWaitEnv); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d <= 0 {
-			fmt.Fprintf(stderr, "%s serve: %s=%q is no duration, such as 60s\n", name, StepWaitEnv, v)
-			return 2
+			return die(fmt.Sprintf("%s serve: %s=%q is no duration, such as 60s", name, StepWaitEnv, v))
 		}
 		stepWait = d
 	}
@@ -233,8 +267,7 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 	if _, err := os.Stat(overlay); err == nil {
 		o, err := index.ReadWiring(overlay)
 		if err != nil {
-			fmt.Fprintf(stderr, "%s serve: %v\n", name, err)
-			return 2
+			return die(fmt.Sprintf("%s serve: %v", name, err))
 		}
 		w.Merge(o)
 	}
@@ -243,9 +276,7 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 		StepWait: stepWait,
 	})
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		_ = os.Remove(host.ClaimPath(root))
-		return 2
+		return die(err.Error())
 	}
 	fmt.Fprintf(stdout, "%s: serving %s, pid %d, bus %s\n", name, root, os.Getpid(), core.Health().Bus)
 	interrupt := make(chan os.Signal, 1)

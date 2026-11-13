@@ -217,6 +217,7 @@ func Serve(o Options) (*Core, error) {
 		return nil, fmt.Errorf("kern serve: the standing file: %w", err)
 	}
 	_ = os.Remove(ClaimPath(o.Root))
+	_ = os.Remove(DiedPath(o.Root))
 	if err := c.spawnPlaced(standing); err != nil {
 		c.Stop(err.Error())
 		<-c.ended

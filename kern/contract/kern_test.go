@@ -325,3 +325,62 @@ func TestAnUnansweredHookExitsWithTheCodeItIsGiven(t *testing.T) {
 		t.Fatalf("kern hook without --unanswered prints %+v, and wants nothing with 0", got)
 	}
 }
+
+// A core that ends at its start is not silent (SE's docs/go-core.md "The
+// start budget"): its status names the cause, the first hook that carries
+// context but SessionStart tells the session once, with the first lines the
+// core said, and a core that stands again clears it. The case is the one a
+// released binary met: a wiring that names a component it does not register.
+func TestACoreThatEndsAtItsStartIsToldOnce(t *testing.T) {
+	t.Parallel()
+	root := checkout(t)
+	wiring := filepath.Join(root, "wiring.toml")
+	if err := os.WriteFile(wiring, []byte("[instances.retro-due]\ncomponent = \"retro-due\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want(t, run(t, nil, "start", "--root", root), 0, "kern: started in "+root)
+	got := run(t, nil, "status", "--root", root, "--wait", wait, "--json")
+	var status struct {
+		State string `json:"state"`
+		Died  string `json:"died"`
+	}
+	if err := json.Unmarshal([]byte(got.out), &status); err != nil || status.State != "not running" ||
+		!strings.Contains(status.Died, "instance retro-due: no component retro-due is registered") {
+		t.Fatalf("kern status --json answers %q, and wants the cause the core said", got.out)
+	}
+	want(t, run(t, nil, "status", "--root", root), 1, "the core ended at its start; it said:\n")
+
+	want(t, run(t, nil, "hook", "SessionStart", "--root", root), 0, "")
+	if got := run(t, nil, "hook", "SessionStart", "--root", root); strings.Contains(got.out, "additionalContext") {
+		t.Fatalf("SessionStart, whose output the start does not show, took the report: %q", got.out)
+	}
+	got = run(t, nil, "hook", "PostToolUse", "--root", root)
+	var out struct {
+		HookSpecificOutput struct{ AdditionalContext string } `json:"hookSpecificOutput"`
+	}
+	line := got.out[strings.LastIndex(got.out, "\n")+1:]
+	if err := json.Unmarshal([]byte(line), &out); err != nil {
+		t.Fatalf("the first PostToolUse prints %q, and wants the host's hook JSON", got.out)
+	}
+	context := out.HookSpecificOutput.AdditionalContext
+	if !strings.HasPrefix(context, "kern: failed: the core ended at its start; it said:\n") ||
+		!strings.Contains(context, "no component retro-due is registered") ||
+		!strings.Contains(filepath.ToSlash(context), filepath.ToSlash(host.LogPath(root))+" holds all it said") {
+		t.Fatalf("the report reads %q", context)
+	}
+	if got := run(t, nil, "hook", "PostToolUse", "--root", root); strings.Contains(got.out, "additionalContext") {
+		t.Fatalf("the report is told twice: %q", got.out)
+	}
+
+	if err := os.WriteFile(host.DiedPath(root), []byte("an earlier core's cause\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(wiring); err != nil {
+		t.Fatal(err)
+	}
+	want(t, run(t, nil, "start", "--root", root), 0, "kern: started in "+root)
+	want(t, run(t, nil, "status", "--root", root, "--wait", wait), 0, "kern: running in "+root)
+	if _, err := os.Stat(host.DiedPath(root)); !os.IsNotExist(err) {
+		t.Fatalf("a core that stands leaves the cause of the one before: %v", err)
+	}
+}

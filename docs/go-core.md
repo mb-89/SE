@@ -393,6 +393,13 @@ The SE plugin's hooks start the core and post every event to it. Each hook is on
 stdin, sends it on `hook.<event>` with a 500 ms wait, and prints the answer as the host's hook
 JSON. Where no core answers, it prints nothing and exits 0: a hook fails open, measured at 5 ms.
 
+A core that ends at its start is not silent. Its `serve` writes the cause to the core's log and to
+`.se/.runtime/core.died` before it gives up the start's claim; `<app> status` names it (`died` in
+`--json`), and the greeting says `failed: the core ended at its start` with its first lines. The
+first `UserPromptSubmit` or `PostToolUse` hook after it tells the session the same once, as
+context; SessionStart does not, since the start posts it and shows nothing of its output. A core
+that stands removes the file.
+
 | hook | posts | what it gains |
 |---|---|---|
 | SessionStart | the session id, the checkout, the agent | spawns the core detached where the standing file names none (v5's claim file keeps two hooks from starting two), takes the session's lease; the greeting gains live names: what is due, stuck or waiting |
