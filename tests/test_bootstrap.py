@@ -32,6 +32,11 @@ case "$1 $2" in
   "python install") touch "$HOME/python" ;;
 esac
 """
+INSTALLER = f"""mkdir -p "$HOME/.local/bin"
+cat > "$HOME/.local/bin/uv" <<'UV'
+{FAKE_UV}UV
+chmod +x "$HOME/.local/bin/uv"
+"""
 # A fake uv installer, as astral.sh's: puts uv into ~/.local/bin, or fails while "offline".
 # kern's release (README "Kern"): served from $HOME/kern-release where it exists, else a 404 (22).
 FAKE_CURL = f"""#!/bin/sh
@@ -44,12 +49,17 @@ case "$*" in *kern-v*)
   cat "$HOME/kern-release/${{url##*/}}" > "$out"; exit 0 ;;
 esac
 cat <<'INSTALLER'
-mkdir -p "$HOME/.local/bin"
-cat > "$HOME/.local/bin/uv" <<'UV'
-{FAKE_UV}UV
-chmod +x "$HOME/.local/bin/uv"
-INSTALLER
+{INSTALLER}INSTALLER
 """
+# On Windows bootstrap.sh installs uv through PowerShell (astral.sh's install.ps1): the same fake.
+FAKE_POWERSHELL = f"""#!/bin/sh
+echo "powershell $*" >> "$HOME/calls"
+[ -f "$HOME/offline" ] && exit 6
+sh <<'INSTALLER'
+{INSTALLER}INSTALLER
+"""
+UV_INSTALL = ("powershell -NoProfile -ExecutionPolicy ByPass -c irm https://astral.sh/uv/install.ps1 | iex"
+              if WINDOWS else "curl -LsSf https://astral.sh/uv/install.sh")
 
 
 def fake_bin(base: Path, *, git: bool = True) -> Path:
@@ -65,8 +75,9 @@ def fake_bin(base: Path, *, git: bool = True) -> Path:
                                        newline="\n")
         else:
             (folder / tool).symlink_to(found)
-    (folder / "curl").write_text(FAKE_CURL, encoding="utf-8", newline="\n")
-    (folder / "curl").chmod(0o755)
+    for name, script in (("curl", FAKE_CURL), ("powershell", FAKE_POWERSHELL)):
+        (folder / name).write_text(script, encoding="utf-8", newline="\n")
+        (folder / name).chmod(0o755)
     if git:
         (folder / "git").write_text("#!/bin/sh\n", encoding="utf-8", newline="\n")
         (folder / "git").chmod(0o755)
@@ -103,14 +114,14 @@ def test_an_empty_home_gets_uv_python_and_the_modules_and_a_second_start_is_quie
     assert first.returncode == 0, first.stdout + first.stderr
     assert "installing uv into" in first.stdout and "installing Python 3.11" in first.stdout
     log = calls(home)
-    assert log[0] == "curl -LsSf https://astral.sh/uv/install.sh"
+    assert log[0] == UV_INSTALL
     assert "uv python install 3.11" in log
     sync = [line for line in log if line.startswith("uv run")]
     assert sync == [f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {sh(project)} sync"]
     (home / "calls").unlink()
     second = run(home, path, project)
     assert second.returncode == 0 and second.stdout == ""
-    assert not any(line.startswith(("curl", "uv python install")) for line in calls(home))
+    assert not any(line.startswith(("curl", "powershell", "uv python install")) for line in calls(home))
 
 
 def test_an_interrupted_first_start_finishes_when_run_again(machine):
