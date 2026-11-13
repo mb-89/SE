@@ -32,7 +32,7 @@ Commits carry no co-author lines: in VS Code, set `git.addAICoAuthor` to `off`
 **Everything else arrives by itself.** At the first start SE runs
 [scripts/bootstrap.sh](scripts/bootstrap.sh) (Claude Code runs it at every session start; it is quiet
 when nothing is missing): it installs `uv` into the user's home, Python 3.11 or newer through `uv`,
-and the project's [modules](#modules).
+and the project's [modules](#modules); in a session it fetches and starts [kern](#kern).
 
 The one tool it cannot install without admin rights is `git`; it then names the one line to run. An
 interrupted first start finishes when run again.
@@ -136,6 +136,41 @@ uv run python <se>/scripts/se_start.py refresh
 - What fails stays at the version in use, with the cause and the command to try again. An se
   checkout with local changes or its own commits is a development checkout and is left alone. Run
   twice, the second `refresh` moves nothing.
+
+### Kern
+
+Nobody starts kern by hand. kern is the core SE pins ([kern/README.md](kern/README.md)); while it
+is incubated in SE, `kern/release.toml` owns its version and where its release is published, as
+`kern-v<version>`. The plugin's hooks start it and post every session event to it:
+
+- **SessionStart**, [scripts/bootstrap.sh](scripts/bootstrap.sh) `--hook`: where
+  `~/.se/bin/kern-<version>` is on the machine, it runs `kern start` for the project, which returns
+  at once, and hands the core the session's start, which takes the session's lease.
+- **The first start of a version** reads the release's `SHA256SUMS` (one small read). Where it names
+  this platform's archive, the archive is fetched, checked against its line and unpacked in the
+  background, and the core then starts.
+  - Where no release matches, kern is built from SE's own `kern/` with `go` in the background, and
+    the greeting says so; without `go`, kern failed, and the greeting names both causes.
+  - The background half runs in its own process (`setsid` where there is one), so the hook's end
+    does not end it.
+- **Every other event** (SessionEnd, SubagentStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop
+  and SubagentStop) runs [scripts/se_hook.sh](scripts/se_hook.sh) `<event>`, which hands the host's
+  JSON to `kern hook <event>`.
+  - SessionEnd returns the session's lease. The Stop hooks run beside `stop-check`
+    ([Stop hook](#stop-hook)).
+  - It fails open: without kern's binary, or with no core answering within 500 ms, it prints
+    nothing and exits 0.
+- **The greeting** names kern's state under its first line: `kern <version>: running, pid <n>`,
+  `starting: <why>`, or `failed: <cause>`.
+
+| measured on 13 Nov in a Claude Code cloud container, Linux amd64, 5 runs | wall time |
+|---|---|
+| SessionStart, `bootstrap.sh --hook` to the greeting, kern on the machine (without kern: 140 to 184 ms) | 191 to 269 ms |
+| the first start of a version with no release yet: the `SHA256SUMS` read, then the greeting | 571 ms |
+| a hook through `se_hook.sh`, the core running, by event (PostToolUse with a GitHub tool's answer) | 9.2 to 14.5 ms |
+| a hook through `se_hook.sh`, no core running | 7.8 to 10.6 ms |
+| a hook through `se_hook.sh`, no kern on the machine | 3.7 to 4.8 ms |
+| `kern hook` alone, no core running; the core running | 6.0 to 6.6 ms; 7.0 to 7.8 ms |
 
 ## Documentation
 
