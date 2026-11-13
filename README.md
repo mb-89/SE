@@ -549,7 +549,8 @@ A person never waits on a silent command. The budgets are declared once, in
   shape the output), `Reading the remote: git fetch origin`.
 
 Progress lines go to stderr, so what a command prints on stdout, JSON or a description, stays as it
-is.
+is. `queue` reads its listings, and each candidate's blockers and branch, at once while the checkout
+syncs, so it waits on GitHub about three times per run rather than once per call.
 
 ### Machine-local `~/.se/local.toml`
 

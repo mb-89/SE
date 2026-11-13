@@ -16,9 +16,11 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import tomllib
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -656,6 +658,7 @@ GH_ENVIRONMENT = {"GH_PROMPT_DISABLED": "1"}
 # GitHub's refusal of a call for its primary or secondary rate limit, as gh reports it.
 RATE_LIMITED = re.compile(r"rate limit|HTTP 429|abuse detection", re.IGNORECASE)
 _signed_in_gh: set[str] = set()
+_signing_in = threading.Lock()
 
 
 def gh_executable() -> str:
@@ -668,6 +671,14 @@ def gh_executable() -> str:
             "the project's AGENTS.md names, or, where the host has no gh (Claude's cloud), do this "
             f"step by hand as the se checkout's {WITHOUT_GH} says"
         )
+    with _signing_in:  # concurrent first calls check once
+        signed_in(executable)
+    return executable
+
+
+def signed_in(executable: str) -> None:
+    """Refuse a `gh` that `gh auth status` finds not signed in; a passed check holds for the
+    process."""
     if executable not in _signed_in_gh:
         feedback.reading("GitHub", ["gh", "auth", "status"])
         status = subprocess.run(
@@ -683,7 +694,6 @@ def gh_executable() -> str:
                 f"this step by hand as the se checkout's {WITHOUT_GH} says"
             )
         _signed_in_gh.add(executable)
-    return executable
 
 
 def gh_usable() -> bool:
@@ -3039,35 +3049,47 @@ def branch_exists(root: Path, branch: str) -> bool:
     return bool(remote.stdout.strip())
 
 
+def concurrently(*calls: Callable[[], object]) -> list[object]:
+    """The results of `calls`, in their order, made at the same time: reads that wait on GitHub
+    wait once, not once each. The first exception raised is raised."""
+    if len(calls) < 2:
+        return [call() for call in calls]
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
+        futures = [pool.submit(call) for call in calls]
+        return [future.result() for future in futures]
+
+
 def ready_issues(
     root: Path, repo: str, all_repos: bool = False, allow_existing_branch: bool = False
 ) -> list[dict[str, object]]:
+    """The startable work issues: open, `work` and `ready`, not held, unblocked, with no branch
+    yet and no file ownership an issue in progress holds. The two listings are read at once,
+    then each candidate's blockers and branch at once."""
     labels = repository_label_arguments(root, all_repos)
-    arguments = [
-        "issue", "list", "--state", "open", "--label", "work", "--label", "ready",
-        "--json", "number,title,body,labels", "--limit", "200", *labels, *repo_arguments(repo),
-    ]
-    candidates = json.loads(run_gh(root, arguments))
-    active = json.loads(run_gh(root, [
-        "issue", "list", "--state", "open", "--label", "in-progress",
-        "--json", "number,title,body,labels", "--limit", "200", *labels, *repo_arguments(repo),
-    ]))
+    candidates, active = (json.loads(listing) for listing in concurrently(
+        lambda: run_gh(root, [
+            "issue", "list", "--state", "open", "--label", "work", "--label", "ready",
+            "--json", "number,title,body,labels", "--limit", "200", *labels, *repo_arguments(repo),
+        ]),
+        lambda: run_gh(root, [
+            "issue", "list", "--state", "open", "--label", "in-progress",
+            "--json", "number,title,body,labels", "--limit", "200", *labels, *repo_arguments(repo),
+        ]),
+    ))
     active_ownership = set().union(*(issue_ownership(item) for item in active))
-    ready: list[dict[str, object]] = []
-    for candidate in candidates:
-        if issue_labels(candidate) & NOT_STARTABLE_LABELS:
-            continue
-        number = int(candidate["number"])
-        detail = issue_api(root, repo, f"issues/{number}")
-        blockers = int(
-            (detail.get("issue_dependencies_summary") or {}).get("blocked_by", 0)
-        )
-        branch = str(candidate["title"])
-        if blockers == 0 and (allow_existing_branch or not branch_exists(root, branch)) and not (
-            issue_ownership(candidate) & active_ownership
-        ):
-            ready.append(candidate)
-    return ready
+    startable = [candidate for candidate in candidates
+                 if not issue_labels(candidate) & NOT_STARTABLE_LABELS
+                 and not issue_ownership(candidate) & active_ownership]
+
+    def ready(candidate: dict[str, object]) -> bool:
+        detail = issue_api(root, repo, f"issues/{int(candidate['number'])}")
+        blockers = int((detail.get("issue_dependencies_summary") or {}).get("blocked_by", 0))
+        return blockers == 0 and (allow_existing_branch
+                                  or not branch_exists(root, str(candidate["title"])))
+
+    verdicts = concurrently(*(lambda candidate=candidate: ready(candidate)
+                              for candidate in startable))
+    return [candidate for candidate, verdict in zip(startable, verdicts) if verdict]
 
 
 def capacity(root: Path, repo: str | None, all_repos: bool = False) -> int | None:
@@ -3114,18 +3136,21 @@ def delivered_pull_requests(root: Path, repo: str) -> list[dict[str, object]]:
 def queue(
     root: Path, repo: str, all_repos: bool = False
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], int | None]:
-    sync(root)
+    """The integrator's queue: the delivered pull requests, the escalations, the startable work
+    issues and the capacity, read at once while the checkout syncs (within the interactive budget,
+    feedback.py)."""
     labels = repository_label_arguments(root, all_repos)
-    escalations = json.loads(run_gh(root, [
-        "issue", "list", "--state", "open", "--label", "escalated",
-        "--json", "number,title,url", "--limit", "200", *labels, *repo_arguments(repo),
-    ]))
-    return (
-        delivered_pull_requests(root, repo),
-        escalations,
-        ready_issues(root, repo, all_repos),
-        capacity(root, repo, all_repos),
+    _, escalations, delivered, ready, slots = concurrently(
+        lambda: sync(root),
+        lambda: json.loads(run_gh(root, [
+            "issue", "list", "--state", "open", "--label", "escalated",
+            "--json", "number,title,url", "--limit", "200", *labels, *repo_arguments(repo),
+        ])),
+        lambda: delivered_pull_requests(root, repo),
+        lambda: ready_issues(root, repo, all_repos),
+        lambda: capacity(root, repo, all_repos),
     )
+    return delivered, escalations, ready, slots
 
 
 def quoted(text: str) -> str:
@@ -6678,8 +6703,7 @@ def run_capacity(root: Path, args: argparse.Namespace) -> int:
                   "field report), escalations and startable work issues", *TRACKER_QUERY)
 def run_queue(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
-    ready = ready_issues(root, repo, args.all_repos)
-    delivered, escalations, _, slots = queue(root, repo, args.all_repos)
+    delivered, escalations, ready, slots = queue(root, repo, args.all_repos)
     for pull in delivered:
         print(f"delivered PR #{pull['number']} {pull['title']} {pull['url']}")
     for escalation in escalations:

@@ -114,3 +114,103 @@ def test_a_remote_read_by_git_is_announced_and_a_local_one_is_not(tmp_path, monk
     work_tickets.run_git(tmp_path, "ls-remote", "--heads", "origin", "feat/x")
     assert capsys.readouterr().err == "Reading the remote: git ls-remote --heads origin feat/x\n"
 
+
+# Requirements 3 and 4: the interactive commands against a door that answers slowly.
+
+FAKE_GH = '''\
+import json, os, sys, time
+time.sleep(float(os.environ["FAKE_GH_DELAY"]))
+a = sys.argv[1:]
+if a[:2] == ["issue", "list"]:
+    labels = [a[i + 1] for i, x in enumerate(a) if x == "--label"]
+    print(json.dumps([{"number": n, "title": f"feat/candidate-{n}", "body": "",
+                       "labels": [{"name": "work"}, {"name": "ready"}]} for n in range(1, 6)]
+                     if "ready" in labels else []))
+elif a[:2] == ["pr", "list"]:
+    print("[]")
+elif a[:1] == ["api"]:
+    print(json.dumps({"issue_dependencies_summary": {"blocked_by": 0}}))
+elif a[:2] == ["issue", "view"]:
+    print(json.dumps({"number": 5, "title": "feat/x", "url": "https://github.com/owner/repo/issues/5",
+                      "body": "## Requirements\\n\\n1. one\\n", "updatedAt": "", "labels": [],
+                      "comments": []}))
+'''
+
+
+def git(*arguments: str) -> None:
+    subprocess.run(["git", *arguments], check=True, capture_output=True)
+
+
+@pytest.fixture(scope="module")
+def slow_door(tmp_path_factory) -> dict:
+    """A checkout with an origin, and a `gh` on PATH that answers like GitHub, slowly."""
+    base = tmp_path_factory.mktemp("slow-door")
+    bin_dir = base / "bin"
+    bin_dir.mkdir()
+    script = bin_dir / "fake_gh.py"
+    script.write_text(FAKE_GH, encoding="utf-8")
+    if sys.platform == "win32":
+        (bin_dir / "gh.cmd").write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
+    else:
+        gh = bin_dir / "gh"
+        gh.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
+        gh.chmod(0o755)
+    origin, checkout = base / "origin.git", base / "checkout"
+    git("init", "-q", "--bare", "-b", "main", str(origin))
+    git("clone", "-q", str(origin), str(checkout))
+    identity = ("-c", "user.name=alice", "-c", "user.email=alice@example.com")
+    git("-C", str(checkout), *identity, "commit", "-q", "--allow-empty", "-m", "start")
+    git("-C", str(checkout), "push", "-q", "origin", "HEAD:main")
+    environment = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                   "SE_METRICS": str(base / "metrics.jsonl"), "HOME": str(base),
+                   "USERPROFILE": str(base), "GITHUB_ACTIONS": ""}
+    return {"checkout": checkout, "env": environment, "metrics": base / "metrics.jsonl"}
+
+
+def interactive(checkout: Path) -> dict[str, list[str]]:
+    work = [sys.executable, str(SCRIPTS / "work_tickets.py")]
+    return {
+        "work_tickets.py status": [*work, "status", "--worktree", str(checkout)],
+        "work_tickets.py queue": [*work, "queue", "--worktree", str(checkout),
+                                  "--repo", "github.com/owner/repo"],
+        "work_tickets.py intake": [*work, "intake", "--worktree", str(checkout), "--issue", "5",
+                                   "--repo", "github.com/owner/repo"],
+        "work_tickets.py metrics": [*work, "metrics"],
+        "se_start.py status": [sys.executable, str(SCRIPTS / "se_start.py"),
+                               "--root", str(checkout), "status", "--offline"],
+    }
+
+
+def first_line_seconds(argv: list[str], environment: dict[str, str]) -> tuple[float, str]:
+    """The seconds until `argv` shows its first line (stdout or stderr), and the line; the
+    process is stopped then."""
+    started = time.perf_counter()
+    process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               stdin=subprocess.DEVNULL, env=environment, text=True,
+                               encoding="utf-8", errors="replace")
+    found: list[tuple[float, str]] = []
+
+    def read() -> None:
+        line = process.stdout.readline()
+        found.append((time.perf_counter() - started, line))
+
+    reader = threading.Thread(target=read)
+    reader.start()
+    reader.join(timeout=10)
+    process.kill()
+    process.communicate()
+    assert found, f"no line within 10 s from {argv}"
+    return found[0]
+
+
+def test_queue_finishes_within_its_budget_against_a_door_of_half_a_second(slow_door):
+    environment = {**slow_door["env"], "FAKE_GH_DELAY": "0.5"}
+    slow_door["metrics"].unlink(missing_ok=True)
+    result = subprocess.run(interactive(slow_door["checkout"])["work_tickets.py queue"],
+                            capture_output=True, text=True, env=environment, check=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("ready #") == 5
+    line = json.loads(slow_door["metrics"].read_text(encoding="utf-8").splitlines()[-1])
+    assert line["command"] == "work_tickets.py queue" and line["gh_calls"] == 10
+    assert line["wall_seconds"] < line["budget_seconds"] == feedback.INTERACTIVE_SECONDS
+    assert metrics.overruns(line) == []
