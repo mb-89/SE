@@ -27,6 +27,21 @@ command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts
 component = "review"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "review"]
 
+[instances.retrospective]
+component = "retrospective"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "retrospective"]
+
+[instances.overhaul]
+component = "overhaul"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "overhaul"]
+
+[instances.render]
+component = "render"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "render"]
+
+[instances.scaffold]
+component = "scaffold"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "scaffold"]
 # kern's GitHub component, and SE's fleet, retro and origin reading it (components/README.md), all
 # compiled into the `se` binary. The config is SE's own checkout's: the fleet's lease hours, the
 # repository name and the integration branch; the retro's due-after count and tracker.

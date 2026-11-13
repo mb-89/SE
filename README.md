@@ -186,21 +186,25 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
 [scripts/se_components.py](scripts/se_components.py) owns how.
 
 - **Declared:** each command group of a script is one component, `components/<group>/`:
-  `work_tickets.py`'s tickets, issues, delivery and integration, and `review.py`'s review.
+  `work_tickets.py`'s tickets, issues, delivery and integration, `review.py`'s review, `retro.py`'s
+  retrospective (`retro` is SE's Go retro-due component), `overhaul.py`'s overhaul, render, the
+  pages `timeline.py` and `deck.py` build, and `se.py`'s scaffold.
   - Its `component.toml` is what `work_tickets.py docs` writes from the script's argparse parser
     (for `work_tickets.py`, built from its command registry), and its `__init__.py` answers each
     declared command with the script's own code.
   - A script joins by naming its groups (`COMPONENTS`), its read-only commands
     (`INTERACTIVE_COMMANDS`) and its `make_parser`, and by its name in `se_components.py`
-    `SCRIPTS`.
+    `SCRIPTS`. A script without subcommands (`timeline.py`) is one command, and two scripts share
+    a component where the second names the first one's group (deck.py, timeline.py's render).
   - The [command reference](#work-commands) renders from these declarations as kern's reader reads
     them.
 - **Placed:** `wiring.toml` places each in a process of its own, beside SE's Go components in the
   `se` binary, so the core the hooks start in SE's checkout lists them all: `se status --json` names
   the instances and those attached.
 - **Routed:** a command a person waits on that only reads (its class `interactive`: `status`,
-  `config`, `ready`, `capacity`, `queue`, `fleet-check` and `metrics`) goes through kern's
-  `call.<command>` where kern serves the checkout the command runs in with the same script.
+  `config`, `ready`, `capacity`, `queue`, `fleet-check`, `metrics` and `overhaul.py facts`) goes
+  through kern's `call.<command>` where kern serves the checkout the command runs in with the same
+  script.
   - Everywhere else, and for every command that writes, the command runs directly, as it did
     before components. A call that fails on the way runs directly too: the command only reads.
   - `SE_KERN=off` keeps every command direct (the suite and each component's own process set it);
@@ -345,7 +349,7 @@ from the project root. Where it fails, push restores `se.toml`, commits nothing 
 Every integration lands on the integration branch through a squash pull request, which se's `main`
 requires: its ruleset allows no direct push, no force push and no deletion, keeps the history
 linear, merges pull requests by squash only and requires the check `check`
-([AGENTS.md "Public safety"](AGENTS.md#public-safety)). `work_tickets.py integrate <pull request>`
+([AGENTS.md "Public safety"](AGENTS.md#public-safety)). `work_tickets.py integrate`
 does all of it:
 
 1. It merges the work branch into origin's newest integration branch on `land/<branch>` (the
@@ -735,8 +739,8 @@ written, so a cloud integrator's costs outlive its container: [`retro.py collect
 reads it back. A hand-off's `integrate --read-back` refuses a description that lacks it
 ([Landing on main](#landing-on-main)).
 
-`work_tickets.py metrics [--since <YYYY-MM-DD>]` prints the top spenders by total wall time and by
-GitHub calls, and every overrun of a budget a line declares:
+`work_tickets.py metrics` prints the top spenders by total wall time and by GitHub calls since a day
+(`--since`), and every overrun of a budget a line declares:
 
 ```text
 Metrics: 4 runs since 2026-11-10 in ~/.se/metrics.jsonl
@@ -851,14 +855,10 @@ uv run python <se>/scripts/se_modules.py path <name>
 
 ## New application
 
-```sh
-uv run python <se>/scripts/se.py new app <name> --path <dir>
-```
-
-It creates an application on kern, the core SE builds on ([docs/go-core.md "A bare application,
-and `se new app`"](docs/go-core.md#a-bare-application-and-se-new-app)), in the new or empty folder
-`<dir>`: kern's template at SE's kern pin, the name filled in, and git's first commit on `main` as
-the [project identity](#project-settings).
+`se.py new app` ([its usage](#scaffold)) creates an application on kern, the core SE builds on
+([docs/go-core.md "A bare application, and `se new app`"](docs/go-core.md#a-bare-application-and-se-new-app)),
+in the new or empty folder its `--path` names: kern's template at SE's kern pin, the name filled in,
+and git's first commit on `main` as the [project identity](#project-settings).
 
 - **The pin:** while kern is incubated, `kern/release.toml`'s version and its tag `kern-v<version>`,
   read by `se_modules.py`'s `kern_pin`. A version not tagged yet comes from SE's `HEAD`, which the
@@ -878,11 +878,7 @@ the [project identity](#project-settings).
 
 ## Ad hoc components
 
-```sh
-uv run python <se>/scripts/se.py component add <name>
-```
-
-It scaffolds an ad hoc component in the checkout: a Python component over NATS under the ignored
+`se.py component add` ([its usage](#scaffold)) scaffolds an ad hoc component in the checkout: a Python component over NATS under the ignored
 `.se/components/<name>/` (its `component.toml` and `__init__.py`), placed in the ad hoc wiring
 overlay `.se/wiring.toml` that the core reads after `wiring.toml`. Restart the core to run it, about
 30 ms; it is never tracked.
@@ -901,7 +897,11 @@ deliveries and integrations. Each command's `--help` names its arguments in full
 The reference below renders from kern's catalog of SE's commands, the declarations of its
 components ([Commands as components](#commands-as-components)), which `uv run python
 scripts/work_tickets.py docs` writes from each script's parser (`work_tickets.py`'s command
-registry, `review.py`'s parser); change a command there.
+registry, the argparse parser of `review.py`, `retro.py`, `overhaul.py`, `timeline.py`, `deck.py`
+and `se.py`); change a command there.
+
+Every SE command is listed there alone: the sections after it name a command and say what it does,
+its usage being the reference's.
 
 <!-- generated by `work_tickets.py docs`: begin -->
 #### Tickets
@@ -1162,11 +1162,78 @@ review.py file --report FILE [--pull FILE] [--issue FILE] [--worktree WORKTREE] 
                pull_request
     check a review report and post it as one comment on the pull request
 ```
+
+#### Retro
+
+`components/retrospective`: A retro: collect writes its draft from the work since the last one, file
+checks the judged draft and closes the retro issue with its report.
+
+```text
+retro.py collect [--since DATE | --retro ISSUE] [--out FILE] [--json] [--answers DIR]
+                 [--worktree WORKTREE] [--repo REPO]
+                 retro
+    read a retro's window from GitHub and write its draft
+
+retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro
+    check a judged retro draft and close the retro issue with its report
+```
+
+#### Overhaul
+
+`components/overhaul`: An overhaul: new files its issue, read writes its draft, file checks the
+judged draft and closes the issue with its report, and facts lists a checkout's pruning facts.
+
+```text
+overhaul.py facts [--repo REPO] [--json]
+    list the pruning facts of a checkout
+
+overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul
+    check a judged overhaul draft and close the overhaul issue with its report
+
+overhaul.py new [--worktree WORKTREE] [--repo REPO]
+    file the overhaul issue through work_tickets.py file
+
+overhaul.py read [--out FILE] [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]
+                 overhaul
+    write an overhaul's draft
+```
+
+#### Render
+
+`components/render`: The pages SE renders: timeline.py builds the Timeline from GitHub, deck.py
+builds a deck of decisions, serves it and reads its answers.
+
+```text
+deck.py answers [--record FOLDER] [--destination DESTINATION] answers
+    print what the answers ask the agent to act on
+
+deck.py build --destination DESTINATION folder
+    build a folder of decision notes into one deck
+
+deck.py serve [--wait] [--timeout S] artifact
+    serve a deck locally and print the answers it is sent
+
+timeline.py --destination DESTINATION [--snapshot SNAPSHOT] [--save-snapshot SAVE_SNAPSHOT]
+            [--config CONFIG]
+    Build the Timeline: one static HTML page of the repositories in se.toml `[timeline]`.
+```
+
+#### Scaffold
+
+`components/scaffold`: What SE scaffolds: a new application on kern, and an ad hoc component in a
+checkout.
+
+```text
+se.py component add [--root ROOT] name
+    scaffold an ad hoc component under the ignored .se/components/
+
+se.py new app --path PATH name
+    create an application on kern from kern's template at SE's kern pin
+```
 <!-- generated by `work_tickets.py docs`: end -->
 
 `scripts/review.py` holds the review commands, which load `work_tickets.py` for its GitHub door.
-`uv run python scripts/review.py brief <pull request> [--claims] [--json]` prints what a cold
-reviewer starts from:
+`review.py brief` prints what a cold reviewer of a pull request starts from:
 
 - the work issue the pull request names, with its comments;
 - the diff against its base at the pull request's head commit, which it names;
@@ -1178,9 +1245,8 @@ worker's own account misleads a reviewer most. `--claims` adds them under a head
 them claims to check, never evidence. Without gh it prints its GitHub steps as a plan and reads
 the answers from files ([Without gh](src/skills/work-model/SKILL.md#without-gh)).
 
-`uv run python scripts/review.py file <pull request> --report <file>` keeps a reviewer's findings
-out of the chat and out of the queue: it posts the review as one comment on the reviewed pull
-request and files no issue
+`review.py file` keeps a reviewer's findings out of the chat and out of the queue: it posts the
+review as one comment on the reviewed pull request and files no issue
 ([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 It reads the review report as JSON:
 
@@ -1219,8 +1285,7 @@ prints its reads as a plan, then, given the answers with `--pull <file> --issue 
 writes.
 
 `scripts/retro.py` holds the retro commands, which load `work_tickets.py` for its GitHub door.
-`uv run python scripts/retro.py collect <retro issue> [--since DATE | --retro ISSUE] [--out FILE]
-[--json]` is a retro's mechanical half.
+`retro.py collect` is a retro's mechanical half.
 
 Its window is every work issue closed since the last closed retro issue (titled
 `docs/retro-...` or labelled `retro`) closed. Where none has, it starts when the oldest open retro
@@ -1255,8 +1320,8 @@ Without gh it prints the GitHub steps whose
 answers are still missing, round by round, and reads the answers from the files the session saved
 into `--answers <dir>` ([Without gh](src/skills/work-model/SKILL.md#without-gh)).
 
-`uv run python scripts/retro.py file <retro issue> --draft FILE` files a judged retro, the draft
-committed as the retro doc on the integration branch. The judge fills the draft's block:
+`retro.py file` files a judged retro, the draft committed as the retro doc on the integration
+branch. The judge fills the draft's block:
 
 - `findings`, each with `title` (five words or more), `body`, `class`, `home` (the file it
   changes), `controversial` with its `why`, and optionally `check` (a rule check);
@@ -1286,12 +1351,12 @@ numbered parts in order, never cut. Without gh it prints the comments and the cl
 `scripts/overhaul.py` holds the overhaul commands, which ask, rarely, whether the design is still
 right. SE starts one and runs it as its issue says, `read`, the judgment, then `file`.
 
-`uv run python scripts/overhaul.py new` files the overhaul issue, `docs/overhaul-<yyyymmdd>`
+`overhaul.py new` files the overhaul issue, `docs/overhaul-<yyyymmdd>`
 labelled `discovery` beside the work labels, with the body of
 [the overhaul template](.github/ISSUE_TEMPLATE/overhaul.md), through `work_tickets.py file`'s
 filing path (`file --label discovery`): once, so an open overhaul answers a second `new`.
 
-`uv run python scripts/overhaul.py read <overhaul issue> [--out FILE] [--json]` writes the draft:
+`overhaul.py read` writes the draft:
 
 - every live rule of the rule book with what checks it, read from its implementations: a test (it
   names the tests or the suite), judgment ("by judgment"), a check (it links a script, or names
@@ -1308,8 +1373,7 @@ It ends in a JSON block under `<!-- se:overhaul-yaml -->`, which the next overha
 gh it prints its reads round by round and takes the answers from `--answers <dir>`, as `retro.py
 collect` does.
 
-`uv run python scripts/overhaul.py file <overhaul issue> --draft FILE` files a judged overhaul. The
-judge fills the draft's block:
+`overhaul.py file` files a judged overhaul. The judge fills the draft's block:
 
 - `verdicts`, one per rule: `rule`, `strays` (`none`, `slightly`, `far`) and `how`;
 - `looked_at`, every part answered (`outside`, `consistency`, `rules`, `retro`, `speed`,
@@ -1332,9 +1396,8 @@ finding is
 - `decision`, for the owner's decision list; a rule change (its place is the rule book, or its
   rule is `new`) is always a decision.
 
-`uv run python scripts/overhaul.py facts [--json] [--repo PATH]` is an overhaul's pruning facts,
-read from the checkout (default: the current directory). It only reads, uses the standard library
-alone and judges nothing: each fact is a candidate the overhaul judges by the rule book's
+`overhaul.py facts` is an overhaul's pruning facts, read from the checkout (default: the current
+directory). It only reads, uses the standard library alone and judges nothing: each fact is a candidate the overhaul judges by the rule book's
 [des-015](src/skills/work-model/references/rules.md#des-015-the-less-code-the-less-to-maintain)
 and its neighbours. It lists:
 
