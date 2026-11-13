@@ -362,6 +362,9 @@ does all of it:
    integration branch moved while it waited, it merges nothing: integrate again.
 5. It reads the merge back: the pull request merged at that commit, which is origin's integration
    branch, on the base it tested and with the tree its checks passed.
+   - Where origin's work branch holds commits the landing did not take, pushed after step 1 read
+     it, it names each and closes nothing: the worker updates its report, and `integrate` lands
+     them again, as a re-integration.
 6. It closes the work pull request with a line naming the landing one, closes the work issue and
    cleans up.
 

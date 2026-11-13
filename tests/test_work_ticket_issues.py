@@ -2894,6 +2894,34 @@ def test_integrate_read_back_checks_the_landing_through_git_and_hands_off_the_cl
     assert github.calls == []
 
 
+def test_integrate_read_back_names_commits_pushed_after_the_landing_and_closes_nothing(
+        main_checkout, monkeypatch, github, capsys):
+    """A worker pushes after integrate read its branch: the squash merge lands the tested tip,
+    and the read-back names each commit origin's branch holds beyond it and closes nothing, so
+    the late commit is never left out silently."""
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    worker = main_checkout.parent / "worker"
+    (worker / "worker.txt").write_text("late\n", encoding="utf-8")
+    git_ok("-C", str(worker), "commit", "-qam", "Pushed after the report")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    late = subprocess.run(["git", "-C", str(worker), "rev-parse", "--short=7", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    commit = session_squash(main_checkout, "refs/heads/land/feature/worker")
+    capsys.readouterr()
+
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 1
+
+    captured = capsys.readouterr()
+    assert squashed_onto_origin(main_checkout, commit)
+    assert (f"Branch feature/worker on origin has 1 commit(s) the landing {commit[:12]} did not "
+            f"take:\n- {late} Pushed after the report\n") in captured.err
+    assert "integrate 7 again" in captured.err and "nothing was closed" in captured.err
+    assert "GitHub plan: close out #5" not in captured.out
+    assert worker.is_dir()  # the worktree and the branch stay for the re-integration
+    assert (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()
+
+
 @pytest.mark.parametrize("landing, message", [
     (None, "is still .*the squash merge has not landed"),
     ("other tree", "its tree is not the tree of"),
