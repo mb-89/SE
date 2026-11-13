@@ -100,9 +100,17 @@ def door_backend(item: pytest.Item) -> git_door.Backend:
     return git_door.RealGit() if name in REAL_GIT else RefusedGit(item.nodeid)
 
 
+def door_variable(item: pytest.Item) -> str:
+    """What the door's variable tells the child processes `item` starts (scripts/git_door.py
+    `from_environment`): real git for a file in REAL_GIT, otherwise refused, so a child reaches
+    git only through the fake its test hands it (`shared_fake_git`)."""
+    return "real" if isinstance(door_backend(item), git_door.RealGit) else "refused"
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem):
-    with git_door.use(door_backend(item)):
+    with git_door.use(door_backend(item)), pytest.MonkeyPatch.context() as patch:
+        patch.setenv(git_door.VARIABLE, door_variable(item))
         yield
 
 
@@ -112,6 +120,17 @@ def fake_git_door() -> Iterator[fake_git.FakeGit]:
     tests/test_git_door.py); what the test and the code under test run reaches no real git."""
     with git_door.use(fake_git.FakeGit()) as fake:
         yield fake
+
+
+@pytest.fixture
+def shared_fake_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[fake_git.StateFile]:
+    """The fake for this test and every child process it starts: its state in a file that the
+    door's variable names (`SE_GIT_DOOR=fake:<file>`, read by scripts/git_door.py and kern's
+    kern/git alike), so a script run as a process or a kern binary reaches the same fake."""
+    state = fake_git.StateFile(tmp_path / "git-door.json")
+    monkeypatch.setenv(git_door.VARIABLE, f"fake:{state.path}")
+    with git_door.use(state):
+        yield state
 
 
 @pytest.fixture(scope="session")
@@ -134,9 +153,14 @@ def obs() -> Path:
                 pytest.fail(f"{lock} is still held after 600 s; remove it if no suite runs")
             time.sleep(0.2)
     try:
-        directory = build_docs.obs_dir()
+        with pytest.MonkeyPatch.context() as patch:
+            # Bringing SE's own checkout's obs module to its pin is the suite's setup, not a test:
+            # it fetches the real module, through real git.
+            patch.setenv(git_door.VARIABLE, "real")
+            directory = build_docs.obs_dir()
         subprocess.run(["uv", "sync", "--quiet", "--project", str(directory)], cwd=ROOT, check=True,
                        env=build_docs.child_environment())
+        os.environ[build_docs.OBS_VARIABLE] = str(directory)  # the builds of the tests that take it
         return directory
     finally:
         os.rmdir(lock)

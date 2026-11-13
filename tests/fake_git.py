@@ -11,17 +11,22 @@ repository's config.
 
 from __future__ import annotations
 
+import base64
 import difflib
 import fnmatch
 import hashlib
 import io
+import json
 import os
 import re
 import shutil
 import subprocess
 import tarfile
+import time
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -797,9 +802,20 @@ class FakeGit:
         return "".join(out)
 
     def git_ls_files(self, call: Call) -> str:
+        """`ls-files [-z]`, the tracked files; `ls-files --others --exclude-standard [--full-name]
+        [-- <path>...]`, the files under the folder that git neither tracks nor ignores."""
         repository = self.find(call.where)
         end = "\0" if "-z" in call.args else "\n"
-        return "".join(f"{path}{end}" for path in sorted(repository.index))
+        if "--others" not in call.args and "-o" not in call.args:
+            return "".join(f"{path}{end}" for path in sorted(repository.index))
+        prefix = call.where.resolve().relative_to(repository.path).as_posix().removeprefix(".")
+        specs = [a for a in call.args if not a.startswith("-")] or ["."]
+        scopes = [(repository.path / prefix / spec).resolve().relative_to(repository.path).as_posix() for spec in specs]
+        found = sorted(name for name in self.on_disk(repository) if name not in repository.index
+                       and any(scope == "." or name == scope or name.startswith(scope + "/") for scope in scopes))
+        if prefix and "--full-name" not in call.args:
+            found = [name.removeprefix(prefix + "/") for name in found]
+        return "".join(f"{name}{end}" for name in found)
 
     def git_status(self, call: Call) -> str:
         """`status --porcelain`: the working tree's changes against the index and HEAD."""
@@ -1102,3 +1118,135 @@ class Call:
 
 def _bytes(data: str | bytes) -> bytes:
     return data if isinstance(data, bytes) else data.encode("utf-8")
+
+
+# The state file: the fake shared with child processes (scripts/git_door.py's SE_GIT_DOOR)
+
+STATE_FORMAT = "se-git-door-state/1"
+
+
+def _blob(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
+def _place(path: Path, folder: Path) -> str:
+    """`path` as the state file names it: relative to the file's folder where it lies inside it,
+    so a state and its working trees move together; else absolute. Slash-separated either way."""
+    return path.relative_to(folder).as_posix() if path.is_relative_to(folder) else path.as_posix()
+
+
+def _path(place: str, folder: Path) -> Path:
+    path = Path(place)
+    return (path if path.is_absolute() else folder / path).resolve()
+
+
+def to_state(fake: FakeGit, folder: Path) -> dict:
+    """The fake as the state file holds it (kern/git/gitfake reads the same format)."""
+    folder = folder.resolve()
+    repositories = []
+    for path, repository in sorted(fake.repositories.items()):
+        entry = {"path": _place(path, folder), "bare": repository.bare, "head": repository.head,
+                 "index": {name: _blob(data) for name, data in sorted(repository.index.items())},
+                 "conflicts": list(repository.conflicts)}
+        if repository.main is not None:
+            entry["main"] = _place(repository.main.path, folder)
+        else:
+            entry["refs"], entry["config"] = dict(sorted(repository.refs.items())), dict(sorted(repository.config.items()))
+        repositories.append(entry)
+    commits = {sha: {"tree": commit.tree, "parents": list(commit.parents), "message": commit.message,
+                     "author": list(commit.author), "committer": list(commit.committer),
+                     "author_date": commit.author_date.isoformat(),
+                     "committer_date": commit.committer_date.isoformat()}
+               for sha, commit in fake.commits.items()}  # insertion order: a new commit's id counts them
+    return {"format": STATE_FORMAT, "repositories": repositories,
+            "trees": {tree: {name: _blob(data) for name, data in sorted(files.items())}
+                      for tree, files in sorted(fake.trees.items())},
+            "commits": commits,
+            "declining": {_place(path, folder): message for path, message in sorted(fake.declining.items())},
+            "calls": fake.calls}
+
+
+def from_state(state: dict, folder: Path) -> FakeGit:
+    """The fake a state file holds; a file of another format is refused, naming both."""
+    if state.get("format") != STATE_FORMAT:
+        raise ValueError(f"git door state is {state.get('format')!r}, not {STATE_FORMAT!r}")
+    folder, fake = folder.resolve(), FakeGit()
+    fake.trees = {tree: {name: base64.b64decode(data) for name, data in files.items()}
+                  for tree, files in state["trees"].items()}
+    for sha, entry in state["commits"].items():
+        fake.commits[sha] = Commit(entry["tree"], tuple(entry["parents"]), entry["message"],
+                                   tuple(entry["author"]), tuple(entry["committer"]),
+                                   datetime.fromisoformat(entry["author_date"]),
+                                   datetime.fromisoformat(entry["committer_date"]))
+    linked = []
+    for entry in state["repositories"]:
+        path = _path(entry["path"], folder)
+        repository = Repository(path, entry["bare"], head=entry["head"],
+                                refs=dict(entry.get("refs", {})), config=dict(entry.get("config", {})),
+                                index={name: base64.b64decode(data) for name, data in entry["index"].items()},
+                                conflicts=list(entry["conflicts"]))
+        fake.repositories[path] = repository
+        if "main" in entry:
+            linked.append((repository, _path(entry["main"], folder)))
+    for repository, main in linked:
+        repository.main = fake.repositories[main]
+        repository.refs, repository.config = repository.main.refs, repository.main.config
+    fake.declining = {_path(place, folder): message for place, message in state["declining"].items()}
+    fake.calls = [list(call) for call in state.get("calls", [])]
+    return fake
+
+
+class StateFile:
+    """The fake behind a state file, for this process and every child that the door's variable
+    (`SE_GIT_DOOR=fake:<file>`) points at it: each command loads the state, runs and writes it
+    back, under a lock, so a test, a script it starts and a kern binary see one git."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path).resolve()
+        self.lock = self.path.with_name(self.path.name + ".lock")
+        if not self.path.exists():
+            self.save(FakeGit())
+
+    def load(self) -> FakeGit:
+        return from_state(json.loads(self.path.read_text(encoding="utf-8")), self.path.parent)
+
+    def save(self, fake: FakeGit) -> None:
+        temporary = self.path.with_name(self.path.name + f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(to_state(fake, self.path.parent), indent=1), encoding="utf-8")
+        os.replace(temporary, self.path)
+
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                self.lock.mkdir()
+                break
+            except FileExistsError:
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"{self.lock} is still held after 60 s")
+                time.sleep(0.005)
+        try:
+            yield
+        finally:
+            self.lock.rmdir()
+
+    @contextmanager
+    def edit(self) -> Iterator[FakeGit]:
+        """The fake to read or change directly (a declining remote), written back after."""
+        with self.locked():
+            fake = self.load()
+            yield fake
+            self.save(fake)
+
+    @property
+    def calls(self) -> list[list[str]]:
+        with self.locked():
+            return self.load().calls
+
+    def run(self, argv: list[str], **options) -> subprocess.CompletedProcess[bytes]:
+        with self.locked():
+            fake = self.load()
+            done = fake.run(argv, **options)
+            self.save(fake)
+            return done

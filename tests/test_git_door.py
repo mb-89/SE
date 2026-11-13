@@ -6,7 +6,11 @@ identity, so a runner's bare git config cannot change what it sees (rule book de
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +21,7 @@ import git_door
 import quiet_git
 import work_tickets  # scripts/ is on the path (tests/conftest.py)
 
+ROOT = Path(__file__).resolve().parents[1]
 SHA = re.compile(r"[0-9a-f]{40}")
 IDENTITY = ("alice", "alice@example.com")
 RUNNER_VARIABLES = ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME",
@@ -34,9 +39,17 @@ def isolated_git(home: Path) -> git_door.RealGit:
                              **{name: None for name in RUNNER_VARIABLES}})
 
 
-@pytest.fixture(params=["fake", "real"])
+@pytest.fixture(params=["fake", "state", "real"])
 def door(request, tmp_path: Path):
-    backend = fake_git.FakeGit() if request.param == "fake" else isolated_git(tmp_path / "home")
+    """The door's backend for one contract case: the fake in memory, the fake behind a state file
+    as the door's variable names it (what a child process gets), or real git."""
+    if request.param == "fake":
+        backend = fake_git.FakeGit()
+    elif request.param == "state":
+        backend = git_door.from_environment({git_door.VARIABLE: f"fake:{tmp_path / 'git-door.json'}"})
+        assert isinstance(backend, fake_git.StateFile)
+    else:
+        backend = isolated_git(tmp_path / "home")
     with git_door.use(backend):
         yield request.param
 
@@ -259,6 +272,14 @@ def test_ls_files_status_and_archive_read_the_tracked_files(door, tmp_path: Path
     (root / "a.txt").write_text("changed\n", encoding="utf-8")
     (root / "new.txt").write_text("new\n", encoding="utf-8")
     assert git_door.run("status", "--porcelain", root=root).stdout.splitlines() == [" M a.txt", "?? new.txt"]
+    (root / "kern" / "t" / "new.go").write_text("package t\n", encoding="utf-8")
+    (root / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    (root / "kern" / "out.log").write_text("log\n", encoding="utf-8")
+    others = ("ls-files", "--others", "--exclude-standard")
+    assert git(root, *others).splitlines() == [".gitignore", "kern/t/new.go", "new.txt"]
+    assert git(root / "kern", *others).splitlines() == ["t/new.go"]
+    assert git(root / "kern", *others, "--full-name", "--", "t").splitlines() == ["kern/t/new.go"]
+    assert git(root, *others, "--", "kern/x.go") == ""
     archive = git_door.run("archive", "--format=tar", first, "kern", root=root, binary=True).stdout
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         files = {member.name: tar.extractfile(member).read() for member in tar.getmembers() if member.isfile()}
@@ -509,6 +530,9 @@ def test_push_deletes_a_branch_under_a_lease_and_a_declining_remote_keeps_it(doo
     hook.chmod(0o755)
     if isinstance(git_door.BACKEND, fake_git.FakeGit):
         git_door.BACKEND.declining[origin.resolve()] = "deletion refused"
+    elif isinstance(git_door.BACKEND, fake_git.StateFile):
+        with git_door.BACKEND.edit() as fake:
+            fake.declining[origin.resolve()] = "deletion refused"
     declined = git_door.run("push", "origin", ":refs/heads/kept", root=root)
     assert declined.returncode != 0 and "pre-receive hook declined" in declined.stderr
     assert git(origin, "rev-parse", "refs/heads/kept") == first
@@ -557,3 +581,82 @@ def test_commit_tree_for_each_ref_and_plain_worktree_list(door, tmp_path: Path) 
     lines = git(root, "worktree", "list").splitlines()
     assert len(lines) == 2 and Path(lines[1].split()[0]).resolve() == (tmp_path / "worker").resolve()
     assert lines[1].split()[1] == second[:len(lines[1].split()[1])] and lines[1].endswith("[worker]")
+
+
+# The door's variable: one fake for a test and the processes it starts
+
+STATE_TESTDATA = ROOT / "kern" / "git" / "gitfake" / "testdata" / "state"
+STATE_ANSWERS = [  # what kern's door asks of a state file, in the repository `repo`
+    ["for-each-ref", "--format=%(refname)%09%(objectname)", "refs/"],
+    ["ls-files", "--others", "--exclude-standard"],
+    ["rev-parse", "HEAD"],
+    ["config", "--get", "remote.origin.url"],
+]
+
+
+def build_state(folder: Path) -> fake_git.StateFile:
+    """The testdata state: a repository with two commits, a tag, a remote branch and a file it
+    does not track, with fixed identities and dates, so the Python fake writes it byte for byte."""
+    state = fake_git.StateFile(folder / "git-door.json")
+    env = {**git_door.identity_environment(IDENTITY), "GIT_AUTHOR_DATE": "2026-01-02T03:04:05+00:00",
+           "GIT_COMMITTER_DATE": "2026-01-02T03:04:05+00:00"}
+    with git_door.use(state):
+        root = folder / "repo"
+        git_door.run("init", "-q", "-b", "main", str(root))
+        for name, text in {"a.txt": "a\n", "dir/b.txt": "b\n"}.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(text, encoding="utf-8", newline="\n")
+            git(root, "add", "-A")
+            assert git_door.run("commit", "-q", "-m", f"add {name}", root=root, env=env).returncode == 0
+        git(root, "tag", "v1")
+        git(root, "remote", "add", "origin", "https://example.com/alice/repo.git")
+        git(root, "update-ref", "refs/remotes/origin/main", "HEAD~1")
+        (root / "notes.txt").write_text("not tracked\n", encoding="utf-8", newline="\n")
+    return state
+
+
+def state_answers(folder: Path) -> list[dict]:
+    return [{"args": args, "out": git(folder / "repo", *args) + "\n"} for args in STATE_ANSWERS]
+
+
+def state_json(path: Path) -> dict:
+    state = json.loads(path.read_text(encoding="utf-8"))
+    state.pop("calls", None)
+    return state
+
+
+def test_the_state_file_is_the_format_kern_reads(tmp_path: Path) -> None:
+    """kern/git/gitfake reads the state file the Python fake writes: the testdata state is what
+    the Python fake writes for build_state, and both fakes answer answers.json from it (the Go side
+    is kern/git/gitfake/state_test.go)."""
+    state = build_state(tmp_path)
+    with git_door.use(state):
+        answers = state_answers(tmp_path)
+    remedy = f"rewrite {STATE_TESTDATA.relative_to(ROOT).as_posix()} from build_state ({tmp_path})"
+    assert state_json(state.path) == state_json(STATE_TESTDATA / "git-door.json"), remedy
+    assert sorted(p.relative_to(tmp_path).as_posix() for p in (tmp_path / "repo").rglob("*")
+                  if p.is_file() and ".git" not in p.parts) == \
+        sorted(p.relative_to(STATE_TESTDATA).as_posix() for p in (STATE_TESTDATA / "repo").rglob("*") if p.is_file())
+    assert answers == json.loads((STATE_TESTDATA / "answers.json").read_text(encoding="utf-8")), remedy
+
+
+def test_a_child_process_reaches_the_fake_its_test_names_and_is_refused_without_it(tmp_path: Path) -> None:
+    state = fake_git.StateFile(tmp_path / "git-door.json")
+    root = tmp_path / "project"
+    child = ("import sys, git_door; done = git_door.run(*sys.argv[1:]); "
+             "sys.stdout.write(done.stdout); sys.exit(done.returncode)")
+
+    def run_child(variable: str, *arguments: str) -> subprocess.CompletedProcess[str]:
+        env = {**os.environ, git_door.VARIABLE: variable, "PYTHONPATH": str(ROOT / "scripts")}
+        return subprocess.run([sys.executable, "-c", child, *arguments], env=env, capture_output=True,
+                              text=True, check=False)
+
+    assert run_child(f"fake:{state.path}", "init", "-q", "-b", "main", str(root)).returncode == 0
+    with git_door.use(state):
+        assert git(root, "rev-parse", "--abbrev-ref", "HEAD") == "main", "the child's init reached the test's fake"
+        git(root, "config", "user.name", "alice")
+    assert run_child(f"fake:{state.path}", "-C", str(root), "config", "user.name").stdout == "alice\n"
+    refused = run_child("refused", "-C", str(root), "status")
+    assert refused.returncode == 1 and f"git -C {root} status" in refused.stderr and "SE_GIT_DOOR" in refused.stderr
+    unknown = run_child("other", "status")
+    assert unknown.returncode == 1 and "none of real, refused or fake" in unknown.stderr

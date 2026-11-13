@@ -25,8 +25,15 @@ CORE_CONFIG = {
 }
 
 
+# The obs module's directory, already at its pin: obs_dir returns it without syncing again (the
+# suite's `obs` fixture sets it once it has synced, so a test's builds run no git).
+OBS_VARIABLE = "SE_OBS_DIR"
+
+
 def obs_dir() -> Path:
     """Bring the obs module to its pin in se.toml and return the directory it is used from."""
+    if os.environ.get(OBS_VARIABLE):
+        return Path(os.environ[OBS_VARIABLE])
     for command in ("sync", "path"):
         result = subprocess.run([sys.executable, str(MODULES), command, "obs"], cwd=ROOT,
                                 capture_output=True, text=True)

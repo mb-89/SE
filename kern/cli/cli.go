@@ -30,6 +30,9 @@ import (
 	"strings"
 	"time"
 
+	// The reader of SE_GIT_DOOR=fake:<state file>, so a test that starts a
+	// kern binary reaches the fake it hands it (package git).
+	_ "github.com/mb-89/kern/git/gitfake"
 	"github.com/mb-89/kern/host"
 	"github.com/mb-89/kern/index"
 )
