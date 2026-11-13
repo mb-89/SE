@@ -669,6 +669,7 @@ def gh_executable() -> str:
             f"step by hand as the se checkout's {WITHOUT_GH} says"
         )
     if executable not in _signed_in_gh:
+        feedback.reading("GitHub", ["gh", "auth", "status"])
         status = subprocess.run(
             [executable, "auth", "status"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -694,7 +695,9 @@ def gh_usable() -> bool:
 
 
 def run_gh(root: Path, arguments: list[str]) -> str:
+    """One call to GitHub through gh, announced before it is made (feedback.reading)."""
     executable = gh_executable()
+    feedback.reading("GitHub", ["gh", *arguments])
     result = subprocess.run(
         [executable, *arguments],
         cwd=root,
@@ -899,6 +902,7 @@ def sibling(name: str):
 
 
 metrics = sibling("metrics")
+feedback = sibling("feedback")
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
@@ -1714,9 +1718,11 @@ def refresh(root: Path, number: int | None, repo: str | None) -> dict[str, objec
         if repo is None:
             raise QueueError(
                 "No repository: pass --repo [HOST/]OWNER/REPO or add a git remote origin")
+    feedback.phase(f"read work issue #{number}")
     issue = fetch_issue(root, number, repo)
     if previous is not None and previous["number"] != number:
         previous = None
+    feedback.phase("compare it with the last read")
     changes = issue_changes(previous, issue)
     save_snapshot(root, issue)
     return changes
@@ -2286,8 +2292,13 @@ def failure_detail(result: subprocess.CompletedProcess[str]) -> str:
     return result.stderr.strip() or f"exit code {result.returncode}"
 
 
+REMOTE_GIT = {"fetch", "ls-remote", "pull"}  # git commands that read a remote, announced
+
+
 def run_git(root: Path, *arguments: str,
             env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    if arguments and arguments[0] in REMOTE_GIT:
+        feedback.reading("the remote", ["git", *arguments])
     return subprocess.run(
         ["git", "-C", str(root), *arguments],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, env=env,
@@ -4164,8 +4175,10 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS) -> str:
     budget = suite_budget(root)
     tier_of = tier_function(root, budget.tier) if budget.tier else None
     if budget.setup:
+        feedback.phase(f"suite setup: {' '.join(budget.setup)}")
         run_suite_setup(root, budget.setup)
     commit = clean_commit(root)
+    feedback.phase(f"complete suite: {' '.join(budget.command)} (limit {budget.limit_seconds:g} s)")
     result = time_suite(root, with_durations(budget.command, slowest_count))
     seconds, output, parts = result.seconds, result.output, result.parts
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=budget.limit_seconds)
@@ -4263,6 +4276,7 @@ def compare_suites(root: Path, ref: str, runs: int = COMPARE_RUNS) -> str:
         budgets = {label: suite_budget(checkout) for label, checkout in states}
         for label, checkout in states:
             if budgets[label].setup:
+                feedback.phase(f"suite setup of {label}")
                 run_suite_setup(checkout, budgets[label].setup)
 
         def timed(label: str, checkout: Path) -> SuiteRun:
@@ -4271,10 +4285,12 @@ def compare_suites(root: Path, ref: str, runs: int = COMPARE_RUNS) -> str:
             return result
 
         for label, checkout in states:  # warm-up: caches, environments, bytecode; not counted
+            feedback.phase(f"untimed warm-up run of {label}")
             timed(label, checkout)
         results: dict[str, list[SuiteRun]] = {label: [] for label, _ in states}
-        for _ in range(runs):
+        for run in range(1, runs + 1):
             for label, checkout in states:
+                feedback.phase(f"timed run {run}/{runs} of {label}")
                 results[label].append(timed(label, checkout))
     print(f"Suite compare: HEAD against {described}, {runs} timed runs each, interleaved, "
           "after one untimed warm-up run of each")
@@ -5050,6 +5066,7 @@ def integrate(
             f"work_tickets.py integrate: {root} has no origin remote to land on; add it with "
             "git remote add origin <url>"
         )
+    feedback.phase(f"read pull request #{pull_number} and its field report")
     if handing_off:
         pull, report, work_issue, work_number = handed_pull_request(
             root, pull_number, remote, pr_description, issue_body, head_branch)
@@ -5059,6 +5076,7 @@ def integrate(
     branch = str(pull.get("headRefName", ""))
     if not branch:
         raise QueueError(f"Pull request #{pull_number} has no head branch")
+    feedback.phase(f"guard {branch} against its field report")
     guard(root, branch, report)
 
     target = integration_branch(root)
@@ -5067,6 +5085,7 @@ def integrate(
             f"work_tickets.py integrate: {root} is not on the integration branch {target}; "
             f"run git -C {root} switch {target}, or set project.integration_branch in se.toml"
         )
+    feedback.phase(f"sync {target}")
     sync(root)
     base = checked_git(root, "rev-parse", "HEAD").strip()
     if base != remote_head(root, target):
@@ -5087,6 +5106,7 @@ def integrate(
     )
     message = "\n\n".join((kind, *((trailer,) if trailer else ())))
     landing = f"{LANDING_PREFIX}{branch}"
+    feedback.phase(f"merge {branch} on {landing}")
     checked_git(root, "switch", "-q", "-C", landing, base)
     merged = run_git(root, "merge", "--no-ff", "-m", title, "-m", message, branch_head(root, branch))
     if merged.returncode != 0:
@@ -5105,13 +5125,18 @@ def integrate(
     try:
         suite_result = run_suite(root)
         if build_command:
+            feedback.phase(f"output regeneration: {build_command}")
             run_project_command(root, build_command, "Output regeneration")
         if check_commands and not has_public_mirror:
+            feedback.phase("project checks")
             run_project_checks(root, check_commands, check_temporary_working_directory)
         if public_check_enabled(root):
+            feedback.phase("public check")
             run_public_check(root, base)
+        feedback.phase("release")
         tag = release(root, landing, f"refs/remotes/origin/{target}")
         landed = checked_git(root, "rev-parse", "HEAD").strip()
+        feedback.phase(f"push {landing}")
         push_gate(root, landing)
         guard_pushed_tree(root, landing)
         git_push(root, ["--force", "origin", f"{landing}:refs/heads/{landing}"])
@@ -5142,8 +5167,10 @@ def integrate(
                   f"these GitHub steps with its GitHub tools (kept in {path}):")
             print(plan.text())
             return None
+        feedback.phase("landing plan: the landing pull request, its check, the squash merge")
         door = GitHub(root, remote)
         given = run_plan(plan, landing_actions(root, door, landing, target, base))
+        feedback.phase("read back the landed commit")
         commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
     except QueueError as error:
         abandon_landing(root, target, landing)
@@ -5163,6 +5190,7 @@ def read_back_integration(root: Path, branch: str, landing_pull: int, check_run:
             "first, which writes it")
     state = json.loads(path.read_text(encoding="utf-8"))
     metrics.note(issue=state["work_number"])
+    feedback.phase(f"read back the landing of {branch}")
     commit = landing_read_back(root, state["target"], state["base"], state["landed"])
     short = finish_integration(root, state, commit, pull_url(state["remote"], landing_pull),
                                check_run, None)
@@ -5181,6 +5209,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     pull_number, work_number = int(state["pull_number"]), int(state["work_number"])
     check_commands = state.get("check_commands")
     temporary = bool(state.get("check_temporary_working_directory"))
+    feedback.phase(f"close out: {target} at the landed commit, the release tag, the mirrors, "
+                   "the work issue")
     checked_git(root, "switch", "-q", target)
     checked_git(root, "merge", "-q", "--ff-only", commit)
     run_git(root, "branch", "-D", landing)
@@ -6431,7 +6461,7 @@ def iso_day(text: str) -> str:
 @command("metrics", "print what the commands cost, from the line every run of a command "
                     "appends (README Metrics): top spenders by total wall time and by GitHub "
                     "calls, and each overrun of a declared budget (the suite's [tests] "
-                    "limit_seconds in se.toml)",
+                    "limit_seconds in se.toml, an interactive command's budget in feedback.py)",
          arg("--since", type=iso_day, metavar="DATE",
              help="only runs that started on or after DATE (YYYY-MM-DD)"),
          arg("--file", type=Path,

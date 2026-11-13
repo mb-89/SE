@@ -239,7 +239,7 @@ def test_status_answers_from_a_fresh_cache_without_the_network(setup):
     start = setup["clock"].now
     rep = report(setup)
     assert setup["remotes"].calls == [] and setup["world"].spawn == []
-    assert setup["clock"].now - start < se_start.BUDGET
+    assert setup["clock"].now - start < se_start.feedback.budget("se_start.py status")
     assert by_name(rep)["lib"].due == (1, 4, 1)
 
 
@@ -249,7 +249,7 @@ def test_a_stale_cache_answers_at_once_and_checks_in_the_background(setup):
     setup["clock"].now += se_start.MAX_AGE + 1
     start = setup["clock"].now
     rep = report(setup)
-    assert setup["clock"].now - start < se_start.BUDGET and setup["remotes"].calls == []
+    assert setup["clock"].now - start < se_start.feedback.budget("se_start.py status") and setup["remotes"].calls == []
     assert [argv[-1] for argv in setup["world"].spawn] == ["check"]
     assert by_name(rep)["lib"].due == (1, 4, 1)  # the last check's answer meanwhile
     report(setup)  # a second start while the check runs starts no second one
@@ -345,7 +345,7 @@ def test_status_reads_the_seeded_cache_within_its_budget(setup):
     seed(setup, DUE)
     started = time.perf_counter()
     lines = se_start.greeting(report(setup), setup["se"])
-    assert time.perf_counter() - started < se_start.BUDGET
+    assert time.perf_counter() - started < se_start.feedback.budget("se_start.py status")
     assert len(work_lines(lines)) == 2 and setup["world"].work == []
 
 
@@ -428,7 +428,7 @@ def repos(tmp_path, isolated_git):
     (v1.0.0, v1.1.0, v2.0.0) and tool (v1.0.0 only); a project locked at lib 1.0.0 and tool 1.0.0."""
     scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
                for name in ("se_start.py", "se_modules.py", "public_check.py",
-                             "metrics.py", "public-check-terms.toml")}
+                             "metrics.py", "feedback.py", "public-check-terms.toml")}
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
     git(upstream, "init", "-q", "-b", "main")

@@ -30,7 +30,6 @@ CACHE_DEFAULT = Path("~/.se/start-check.json")
 CACHE_ENV = "SE_START_CACHE"
 MAX_AGE = 3600  # seconds a cached update check stays fresh
 RUNNING_FOR = 120  # seconds a started background check counts as running
-BUDGET = 1.0  # seconds status may take: it is interactive
 PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
 CHECK_REMEDY = "run it by hand to see the cause: uv run python {se}/scripts/se_start.py check"
 
@@ -49,6 +48,7 @@ def _load(name: str):
 se_modules = _load("se_modules")
 public_check = _load("public_check")
 metrics = _load("metrics")
+feedback = _load("feedback")
 ModuleError = se_modules.ModuleError
 Version = tuple[int, int, int]
 
@@ -62,6 +62,7 @@ class RemoteError(Exception):
 
 def git_tags(url: str) -> list[Version]:
     """The `vMAJOR.MINOR.PATCH` tags of a remote, in one call that fetches nothing."""
+    feedback.reading("the remote", ["git", "ls-remote", "--tags", "--refs", url])
     result = subprocess.run(
         ["git", "ls-remote", "--tags", "--refs", url],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -769,7 +770,7 @@ def main(argv: list[str] | None = None, world: World | None = None) -> int:
 
 
 def run(args: argparse.Namespace, world: World | None) -> int:
-    """Run the command `args` selected; `status` notes its interactive budget in its metrics."""
+    """Run the command `args` selected."""
     world = world or World()
     root = find_project(args.root)
     cache_path = (args.cache or default_cache()).expanduser()
@@ -781,7 +782,6 @@ def run(args: argparse.Namespace, world: World | None) -> int:
         report = check(SE_ROOT, root, args.local, cache_path, world)
         print("\n".join(full(report, SE_ROOT)))
         return 1 if report.errors else 0
-    metrics.note(budget_seconds=BUDGET)
     report = status(SE_ROOT, root, args.local, cache_path, world, args.offline)
     if args.hook:
         print(hook_output(greeting(report, SE_ROOT), args.note, SE_ROOT))

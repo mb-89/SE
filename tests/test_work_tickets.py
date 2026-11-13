@@ -1790,7 +1790,7 @@ def test_a_command_appends_one_metrics_line_with_its_github_calls(tmp_path, monk
     assert metrics_lines(path) == [{
         "command": "work_tickets.py metrics", "start": "2026-11-10T08:00:00Z",
         "wall_seconds": 65.0, "gh_calls": 2, "gh_refusals": 1, "gh_wait_seconds": 60.0,
-        "exit_code": 0,
+        "exit_code": 0, "budget_seconds": 5.0,  # metrics is interactive (feedback.py)
     }]
 
 
