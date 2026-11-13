@@ -11,12 +11,16 @@ repository's config.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
+import io
 import os
 import subprocess
+import tarfile
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 ZERO_IDENTITY = "Author identity unknown\n\n*** Please tell me who you are.\n"
@@ -35,6 +39,8 @@ class Commit:
     message: str
     author: tuple[str, str]
     committer: tuple[str, str]
+    author_date: datetime
+    committer_date: datetime
 
 
 @dataclass
@@ -180,7 +186,8 @@ class FakeGit:
                     message: str) -> str:
         author = self.identity(call, repository, "AUTHOR")
         committer = self.identity(call, repository, "COMMITTER")
-        sha = self.store_commit(Commit(tree, parents, message.strip() + "\n", author, committer))
+        sha = self.store_commit(Commit(tree, parents, message.strip() + "\n", author, committer,
+                                       date(call, "AUTHOR"), date(call, "COMMITTER")))
         if repository.head.startswith("refs/"):
             repository.refs[repository.head] = sha
         else:
@@ -204,7 +211,8 @@ class FakeGit:
         args = call.args
         bare = "--bare" in args
         branch = args[args.index("-b") + 1] if "-b" in args else "main"
-        path = (call.where / [a for a in args if not a.startswith("-") and a != branch][-1]).resolve()
+        named = [a for a in args if not a.startswith("-") and a != branch]
+        path = (call.where / named[-1] if named else call.where).resolve()
         path.mkdir(parents=True, exist_ok=True)
         repository = Repository(path, bare, head=f"refs/heads/{branch}")
         repository.git_dir.mkdir(exist_ok=True)
@@ -224,6 +232,9 @@ class FakeGit:
 
     def git_remote(self, call: Call) -> str:
         repository = self.find(call.where)
+        if not call.args:
+            return "".join(f"{key.split('.')[1]}\n" for key in repository.config
+                           if key.startswith("remote.") and key.endswith(".url"))
         verb, name, *url = call.args
         if verb == "add":
             repository.config[f"remote.{name}.url"] = url[0]
@@ -243,8 +254,14 @@ class FakeGit:
         return ""
 
     def git_commit(self, call: Call) -> str:
+        """`commit [-q] [-a] [--allow-empty] -m <message>`, short flags combined as git takes them (`-qam`)."""
         repository = self.find(call.where)
-        message = call.args[call.args.index("-m") + 1]
+        flags = "".join(a[1:] for a in call.args if a.startswith("-") and not a.startswith("--"))
+        message = next(call.args[i + 1] for i, a in enumerate(call.args)
+                       if a.startswith("-") and not a.startswith("--") and a.endswith("m"))
+        if "a" in flags:  # every tracked file as it is now; new files stay untracked
+            repository.index = {path: (repository.path / path).read_bytes() for path in repository.index
+                                if (repository.path / path).is_file()}
         head = self.head_commit(repository)
         tree = self.store_tree(repository.index)
         if head is not None and self.commits[head].tree == tree and "--allow-empty" not in call.args:
@@ -276,6 +293,12 @@ class FakeGit:
         if short:
             sha = sha[:int(short.partition("=")[2] or 7)]
         return sha + "\n"
+
+    def git_branch(self, call: Call) -> str:
+        repository = self.find(call.where)
+        if call.args != ["--show-current"]:
+            raise Refusal(129, f"fake git: no `branch {' '.join(call.args)}`")
+        return repository.head.removeprefix("refs/heads/") + "\n" if repository.head.startswith("refs/") else ""
 
     def git_update_ref(self, call: Call) -> str:
         repository = self.find(call.where)
@@ -368,12 +391,182 @@ class FakeGit:
         return files[path]
 
     def git_log(self, call: Call) -> str:
+        """`log [--first-parent] [--name-only] [-<n>|-n <n>|--max-count=<n>] --format=<f> [<rev>]`."""
         repository = self.find(call.where)
-        form = next(a.partition("=")[2] for a in call.args if a.startswith("--format="))
-        commit = self.commits[self.commit_of(repository, "HEAD")]
-        return (form.replace("%an", commit.author[0]).replace("%ae", commit.author[1])
-                .replace("%cn", commit.committer[0]).replace("%ce", commit.committer[1])
-                .replace("%s", commit.message.splitlines()[0])) + "\n"
+        args, limit, revs = list(call.args), None, []
+        form = next(a.split("=", 1)[1] for a in args if a.startswith(("--format=", "--pretty=")))
+        form = form.removeprefix("format:").removeprefix("tformat:")
+        for index, argument in enumerate(args):
+            if argument.startswith("--max-count="):
+                limit = int(argument.partition("=")[2])
+            elif argument == "-n":
+                limit = int(args[index + 1])
+            elif argument[1:].isdigit() and argument.startswith("-"):
+                limit = int(argument[1:])
+            elif not argument.startswith("-") and (index == 0 or args[index - 1] != "-n"):
+                revs.append(argument)
+        rev = self.resolve(repository, revs[0] if revs else "HEAD")
+        if "--first-parent" in args:
+            line = self.first_parents(rev)
+        else:
+            reachable = self.ancestors(rev)
+            line = [sha for sha in reversed(self.commits) if sha in reachable]
+        out = []
+        for sha in line[:limit]:
+            out.append(self.formatted(sha, form) + "\n")
+            if "--name-only" in args:
+                out.append("\n" + "".join(f"{path}\n" for path in self.changed(sha)))
+        return "".join(out)
+
+    def formatted(self, sha: str, form: str) -> str:
+        commit = self.commits[sha]
+        fields = {"H": sha, "h": sha[:7], "T": commit.tree, "P": " ".join(commit.parents),
+                  "an": commit.author[0], "ae": commit.author[1],
+                  "cn": commit.committer[0], "ce": commit.committer[1],
+                  "aI": commit.author_date.isoformat(), "cI": commit.committer_date.isoformat(),
+                  "at": str(int(commit.author_date.timestamp())),
+                  "ct": str(int(commit.committer_date.timestamp())),
+                  "s": commit.message.splitlines()[0], "B": commit.message,
+                  "x00": "\0", "x09": "\t", "n": "\n"}
+        out, index = [], 0
+        while index < len(form):
+            if form[index] == "%":
+                key = next((k for k in sorted(fields, key=len, reverse=True) if form.startswith(k, index + 1)), None)
+                if key is None:
+                    raise Refusal(129, f"fake git: no log placeholder at {form[index:]!r}")
+                out.append(fields[key])
+                index += 1 + len(key)
+            else:
+                out.append(form[index])
+                index += 1
+        return "".join(out)
+
+    def changed(self, sha: str) -> list[str]:
+        """The paths commit `sha` changes against its first parent."""
+        commit = self.commits[sha]
+        new = self.trees[commit.tree]
+        old = self.trees[self.commits[commit.parents[0]].tree] if commit.parents else {}
+        return sorted(path for path in set(old) | set(new) if old.get(path) != new.get(path))
+
+    def git_cat_file(self, call: Call) -> str:
+        repository = self.find(call.where)
+        if call.args[0] != "-e":
+            raise Refusal(129, f"fake git: no `cat-file {call.args[0]}`")
+        try:
+            self.resolve(repository, call.args[1])
+        except (Refusal, KeyError):
+            raise Refusal(1, "")
+        return ""
+
+    def git_merge_base(self, call: Call) -> str:
+        repository = self.find(call.where)
+        ours, theirs = (self.resolve(repository, rev) for rev in call.args[:2])
+        common = self.ancestors(theirs)
+        base = next((sha for sha in self.first_parents(ours) if sha in common), None)
+        if base is None:
+            raise Refusal(1, "")
+        return base + "\n"
+
+    def git_diff(self, call: Call) -> str:
+        """`diff <a>..<b>`: git's unified diff of the two commits' files."""
+        repository = self.find(call.where)
+        spec = [a for a in call.args if not a.startswith("-")][0]
+        old_rev, _, new_rev = spec.partition("..")
+        old, new = (self.trees[self.commits[self.resolve(repository, rev)].tree] for rev in (old_rev, new_rev))
+        out = []
+        for path in sorted(set(old) | set(new)):
+            if old.get(path) == new.get(path):
+                continue
+            before = old.get(path, b"").decode("utf-8", "replace").splitlines(keepends=True)
+            after = new.get(path, b"").decode("utf-8", "replace").splitlines(keepends=True)
+            out.append(f"diff --git a/{path} b/{path}\n")
+            if path not in old:
+                out.append("new file mode 100644\n")
+            elif path not in new:
+                out.append("deleted file mode 100644\n")
+            out.extend(difflib.unified_diff(before, after, "/dev/null" if path not in old else f"a/{path}",
+                                            "/dev/null" if path not in new else f"b/{path}"))
+        return "".join(out)
+
+    def git_ls_files(self, call: Call) -> str:
+        repository = self.find(call.where)
+        end = "\0" if "-z" in call.args else "\n"
+        return "".join(f"{path}{end}" for path in sorted(repository.index))
+
+    def git_status(self, call: Call) -> str:
+        """`status --porcelain`: the working tree's changes against the index and HEAD."""
+        repository = self.find(call.where)
+        root = repository.path
+        head = self.head_commit(repository)
+        committed = self.trees[self.commits[head].tree] if head else {}
+        present = {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(root.rglob("*"))
+                   if path.is_file() and ".git" not in path.relative_to(root).parts}
+        out = []
+        for path in sorted(set(committed) | set(repository.index) | set(present)):
+            staged, work = repository.index.get(path), present.get(path)
+            if path not in repository.index and path not in committed:
+                out.append(f"?? {path}\n")
+                continue
+            x = " " if staged == committed.get(path) else "A" if path not in committed else \
+                "D" if staged is None else "M"
+            y = " " if work == staged else "D" if work is None else "M"
+            if x + y != "  ":
+                out.append(f"{x}{y} {path}\n")
+        return "".join(out)
+
+    def git_archive(self, call: Call) -> bytes:
+        """`archive --format=tar <rev> [<path>...]`: the commit's files as a tar."""
+        repository = self.find(call.where)
+        rev, *paths = [a for a in call.args if not a.startswith("-")]
+        files = self.trees[self.commits[self.resolve(repository, rev)].tree]
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as tar:
+            for path in sorted(files):
+                if paths and not any(path == p or path.startswith(p.rstrip("/") + "/") for p in paths):
+                    continue
+                member = tarfile.TarInfo(path)
+                member.size, member.mode = len(files[path]), 0o644
+                tar.addfile(member, io.BytesIO(files[path]))
+        return buffer.getvalue()
+
+    def git_clone(self, call: Call) -> str:
+        """`clone [-b <branch>] [--depth <n>] [--no-local] <source> <destination>`: origin's branches
+        as remote-tracking refs, its tags, and the branch (`-b`, else origin's HEAD) checked out."""
+        args, branch, positional = list(call.args), None, []
+        index = 0
+        while index < len(args):
+            argument = args[index]
+            if argument in ("-b", "--branch", "--depth"):
+                branch = args[index + 1] if argument != "--depth" else branch
+                index += 2
+                continue
+            if not argument.startswith("-"):
+                positional.append(argument)
+            index += 1
+        source, destination = positional
+        try:
+            origin = self.remote(Repository(Path(), False), str(call.where / source)
+                                 if not source.startswith("file:") else source)
+        except Refusal:
+            raise Refusal(128, f"fatal: repository '{source}' does not exist")
+        path = (call.where / destination).resolve()
+        path.mkdir(parents=True, exist_ok=True)
+        head = f"refs/heads/{branch}" if branch else origin.head
+        if branch and head not in origin.refs:
+            raise Refusal(128, f"fatal: Remote branch {branch} not found in upstream origin")
+        repository = Repository(path, False, head=head)
+        repository.git_dir.mkdir(exist_ok=True)
+        repository.config["remote.origin.url"] = str(origin.path)
+        self.repositories[path] = repository
+        for ref, sha in origin.refs.items():
+            if ref.startswith("refs/heads/"):
+                repository.refs[f"refs/remotes/origin/{ref.removeprefix('refs/heads/')}"] = sha
+            elif ref.startswith("refs/tags/"):
+                repository.refs[ref] = sha
+        if head in origin.refs:
+            repository.refs[head] = origin.refs[head]
+            self.check_out(repository, self.commits[origin.refs[head]].tree)
+        return ""
 
     def git_ls_remote(self, call: Call) -> str:
         url = [a for a in call.args if not a.startswith("-")][0]
@@ -400,6 +593,8 @@ class FakeGit:
                 raise Refusal(1, f"To {name}\n ! [rejected]        {source} -> {short} (non-fast-forward)\n"
                                  f"error: failed to push some refs to '{name}'")
             remote.refs[destination] = sha
+            if f"remote.{name}.url" in repository.config and destination.startswith("refs/heads/"):
+                repository.refs[f"refs/remotes/{name}/{destination.removeprefix('refs/heads/')}"] = sha
         return ""
 
     def git_fetch(self, call: Call) -> str:
@@ -413,11 +608,20 @@ class FakeGit:
                 elif ref.startswith("refs/tags/"):
                     repository.refs[ref] = sha
         for spec in specs:
-            source, _, destination = spec.partition(":")
+            source, _, destination = spec.removeprefix("+").partition(":")
             if source not in remote.refs:
                 raise Refusal(128, f"fatal: couldn't find remote ref {source}")
             repository.refs[destination or source] = remote.refs[source]
         return ""
+
+
+def date(call: Call, role: str) -> datetime:
+    """The commit's author or committer date: GIT_<role>_DATE (ISO 8601), else now."""
+    given = call.env.get(f"GIT_{role}_DATE")
+    if not given:
+        return datetime.now(timezone.utc).astimezone().replace(microsecond=0)
+    when = datetime.fromisoformat(given.replace("Z", "+00:00"))
+    return when if when.tzinfo else when.astimezone()
 
 
 @dataclass(frozen=True)
