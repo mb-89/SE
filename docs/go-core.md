@@ -422,6 +422,15 @@ declaration hash. `retro.py collect` reads the log: a component used in three or
 since the last retro is a promotion candidate in the retro's facts, which SE files as work. The
 overhaul reads the components' call times against their budgets and names the port candidates.
 
+**Scripts are counted too.** On a shell tool's PostToolUse the core reads the command and counts
+each run of a script git neither tracks nor ignores, or one in a scratch place, into the same log:
+`at`, `session`, `script` (its path) and `hash` (its content's sha256), never its arguments or
+output. Only a script named by its path, run directly or by an interpreter, counts; `git`,
+`uv run pytest` and SE's own tracked scripts never do (kern/host/scripts.go owns the parsing).
+
+`retro.py collect` lists the scripts run three or more times in the window beside the components,
+the most-run first, with their runs and sessions: the scripts that deserve to become components.
+
 ## The core's repository
 
 The core gets a repository of its own; creating it is the owner's step, since no session here can.

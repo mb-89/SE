@@ -428,13 +428,14 @@ class Collected:
     runs: list[dict] = field(default_factory=list)  # the window's metrics lines, each run once
     run_sources: dict[str, int] = field(default_factory=dict)  # lines read per source
     adhoc: list[dict] = field(default_factory=list)  # the ad hoc components to promote (se_usage)
+    scripts: list[dict] = field(default_factory=list)  # the most-run ad hoc scripts (se_usage)
 
     def data(self) -> dict:
         return {"version": BLOCK_VERSION, "window": asdict(self.window), "sizes": self.sizes,
                 "issues": [asdict(item) for item in self.issues],
                 "rule_checks": [{**asdict(check), "kept": check.kept} for check in self.checks],
                 "metrics": {**self.run_sources, "runs": len(self.runs)},
-                "adhoc": self.adhoc,
+                "adhoc": self.adhoc, "scripts": self.scripts,
                 "previous": self.previous, **{name: [] for name in JUDGMENT}}
 
 
@@ -695,13 +696,16 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
              "escalated": sum(item.escalations > 0 for item in closed)}
     # The ad hoc components to promote: those the use log (se_usage) shows used in enough sessions
     # in this window, by the window's own `in_window` on each use's time.
-    adhoc = se_usage.candidates(se_usage.read(root), read.in_window)
+    uses = se_usage.read(root)
+    adhoc = se_usage.candidates(uses, read.in_window)
+    scripts = se_usage.script_candidates(uses, read.in_window)
     return Collected(
         Window(number, read.since, read.since_retro,
                now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), read.start),
         sizes, closed, list(checks.values()),
         {"retro": last.number, "sizes": previous.get("sizes"), "findings": scored}
-        if previous else None, runs, {"landings": len(landed_runs), "local": len(local)}, adhoc)
+        if previous else None, runs, {"landings": len(landed_runs), "local": len(local)}, adhoc,
+        scripts)
 
 
 def scored_findings(previous: dict | None, retro: int, window: list[Issue],
@@ -800,6 +804,16 @@ def draft(found: Collected) -> str:
                   "| component | sessions | uses | path |", "|---|---|---|---|"]
         lines += [f"| {c['component']} | {c['sessions']} | {c['uses']} | `{c['path']}` |"
                   for c in found.adhoc]
+    else:
+        lines.append("None.")
+    lines += ["", "## Ad hoc scripts to promote", ""]
+    if found.scripts:
+        lines += [f"Run {se_usage.PROMOTE_RUNS} or more times in the window (since "
+                  f"{found.window.since or 'the start of the history'}), the most-run "
+                  "first; promote each that earns it to a tracked component (docs/go-core.md).", "",
+                  "| script | runs | sessions | hash |", "|---|---|---|---|"]
+        lines += [f"| `{s['script']}` | {s['runs']} | {s['sessions']} | `{s['hash'][:12]}` |"
+                  for s in found.scripts]
     else:
         lines.append("None.")
     lines += ["", "## Retro sections of the field reports"]

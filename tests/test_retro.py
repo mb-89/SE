@@ -789,7 +789,35 @@ def test_an_ad_hoc_component_used_in_enough_sessions_is_a_promotion_candidate(ch
     assert "once" not in text.split("## Ad hoc components to promote", 1)[1].split("##", 1)[0]
 
 
+def test_the_most_run_ad_hoc_scripts_are_promotion_candidates_beside_the_components(checkout):
+    """Requirement 2 (issue #1047): the scripts the use log shows run PROMOTE_RUNS or more times in
+    the window are listed, by path and hash, the most-run first, with their counts and the window;
+    a script run fewer times, or a run before the window, is not."""
+    for _ in range(4):
+        se_usage.record_run(checkout, "probe.py", "a" * 64, session="s1", at="2026-11-05T00:00:00Z")
+    for session in ("s1", "s2", "s2"):
+        se_usage.record_run(checkout, "<scratchpad>/fix.sh", "b" * 64, session=session,
+                            at="2026-11-06T00:00:00Z")
+    se_usage.record_run(checkout, "rare.py", "c" * 64, session="s1", at="2026-11-06T00:00:00Z")
+    for _ in range(5):  # before the window (the last retro closed 2026-11-01)
+        se_usage.record_run(checkout, "old.py", "d" * 64, session="s1", at="2026-10-01T00:00:00Z")
+    se_usage.record(checkout, "probe", session="s1", at="2026-11-05T00:00:00Z")
+
+    found = collected(checkout)
+
+    assert [(s["script"], s["runs"], s["sessions"]) for s in found.scripts] == [
+        ("probe.py", 4, 1), ("<scratchpad>/fix.sh", 3, 2)]
+    assert found.data()["scripts"] == found.scripts
+    assert found.adhoc == []  # a script's run is no component's use
+    text = retro.draft(found)
+    section = text.split("## Ad hoc scripts to promote", 1)[1].split("\n## ", 1)[0]
+    assert f"since {found.window.since}" in section
+    assert "| `probe.py` | 4 | 1 | `aaaaaaaaaaaa` |" in section
+    assert "rare.py" not in section and "old.py" not in section
+
+
 def test_no_ad_hoc_use_leaves_the_draft_section_empty(checkout):
     found = collected(checkout)
-    assert found.adhoc == []
+    assert found.adhoc == [] and found.scripts == []
     assert "## Ad hoc components to promote\n\nNone." in retro.draft(found)
+    assert "## Ad hoc scripts to promote\n\nNone." in retro.draft(found)
