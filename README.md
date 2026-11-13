@@ -480,6 +480,7 @@ tier = "tests.tiers:tier" # optional
 over_limit = "fail" # optional, or "warn"
 
 [tests.beside.kern] # optional, one table per suite in another toolchain
+setup = ["go", "test", "-run", "^$", "./..."] # optional
 command = ["go", "test", "./..."]
 directory = "kern"
 target_seconds = 30
@@ -504,6 +505,9 @@ limit_seconds = 60
   ([kern/README.md](kern/README.md#tests)). Its `command` runs in `directory` (relative to the
   root, default `.`) after the complete suite, wherever the suite runs: `integrate`,
   `work_tickets.py suite` and CI's `check`.
+  - Its `setup`, optional, runs first in the same folder, outside its budget, as the suite's
+    does: for a Go suite, `go test -run '^$' ./...` builds every test binary, so a cold build
+    (kern's took 35.1 s once on CI) never counts as test time. A failing setup refuses the run, and the suite beside does not run.
 
 The two budgets are apart, and neither spends the other's time:
 

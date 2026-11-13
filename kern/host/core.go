@@ -30,6 +30,8 @@ const (
 	Beat = 5 * time.Second
 	// checkEvery is how often the core looks whether it ends.
 	checkEvery = time.Second
+	// HangUp is how long a stop waits for its asker to hang up before the bus goes.
+	HangUp = time.Second
 )
 
 // The core's own names and commands on the bus.
@@ -220,6 +222,10 @@ func (c *Core) answer() error {
 		{StopSubject, func(m *nats.Msg) {
 			c.event()
 			c.reply(m, map[string]any{"pid": c.pid})
+			// The asker hangs up once it has the answer; one that stays on delays the stop by HangUp at most.
+			if m.Reply != "" {
+				c.bus.Unheard(m.Reply, HangUp)
+			}
 			c.Stop("asked to stop")
 		}},
 		{bus.Get + ">", c.get},
