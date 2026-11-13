@@ -259,12 +259,11 @@ def test_the_quiet_helper_creates_and_clones_quiet_repositories(tmp_path: Path) 
 # tests/fake_git.py is its fake, and tests/test_git_door.py holds both to one contract. A git subprocess
 # anywhere else fails: a command list that starts with "git" (not one announced with `.reading`), a
 # command string that does, or Go's exec.Command of "git".
-GIT_DOOR = ("scripts/git_door.py", "tests/fake_git.py")
+GIT_DOOR = ("scripts/git_door.py", "tests/fake_git.py", "kern/git/git.go")  # the last, kern's Go door
 GIT_SCANNED = ("scripts", "tests", "components", "kern")
 GO_GIT = re.compile(r'exec\.Command(?:Context)?\((?:\w+, )?"git"')
 SUBPROCESS_CALLS = {"run", "Popen", "check_output", "check_call", "call"}
 TO_THE_FAKE = "real git in temporary repositories; the migration moves it to the fake"
-KERN_DOOR = "kern's Go git calls; the migration builds kern's Go git door with a fake held to the contract"
 # Today's git subprocesses outside the door, each with how many its file holds and why it may. The list
 # may only shrink: a file with more fails, and one with fewer fails until its count is lowered.
 GIT_ALLOWED: dict[str, tuple[int, str]] = {
@@ -273,11 +272,6 @@ GIT_ALLOWED: dict[str, tuple[int, str]] = {
     "tests/test_releases.py": (7, TO_THE_FAKE),
     "tests/test_rewrite_history.py": (1, TO_THE_FAKE),
     "tests/test_start_refresh.py": (1, TO_THE_FAKE),
-    "components/origin/origin.go": (1, KERN_DOOR),
-    "components/origin/origin_test.go": (1, KERN_DOOR),
-    "kern/host/scripts.go": (1, KERN_DOOR),
-    "kern/host/scripts_test.go": (1, KERN_DOOR),
-    "kern/tools/release/main.go": (1, KERN_DOOR),
 }
 
 
