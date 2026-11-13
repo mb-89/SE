@@ -638,6 +638,10 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - `intake`: `intake --issue-body <file> --comments-file <file>`, the issue (`issue_read`,
     method `get`) and its comments (method `get_comments`) as the tools answered them; it writes
     the tickets, the snapshot and both read records as `intake --issue` does.
+    - The first `move --to held` after it reads the issue again: `move --issue-body <file>`, the
+      issue as the tools answer it then. An `updated_at` later than intake's with a changed body
+      refuses the hold until `intake` has read the new answer; with the body unchanged it passes,
+      naming the update. A body edited after the session started is caught before any work.
   - `refresh`: read the issue and its comments; apply what changed to the tickets; record the
     comments read with `comments-read --count <n> --newest <id>` and the body read with
     `body-read --body-file <file>`, from what the GitHub tools read.

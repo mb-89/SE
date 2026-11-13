@@ -761,7 +761,7 @@ work_tickets.py init --worktree WORKTREE
 work_tickets.py create --worktree WORKTREE --id ID --title TITLE [--acceptance ACCEPTANCE]
     create a ticket in todo
 
-work_tickets.py move --worktree WORKTREE --id ID --to {todo,held,done}
+work_tickets.py move --worktree WORKTREE --id ID --to {todo,held,done} [--issue-body FILE]
     move a ticket between states
 
 work_tickets.py status --worktree WORKTREE [--json] [--integration-target INTEGRATION_TARGET]
