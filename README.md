@@ -183,6 +183,8 @@ no Go components. The plugin's hooks start the binary and post every session eve
 | measured on 13 Nov in a Claude Code cloud container, Linux amd64, 5 runs | wall time |
 |---|---|
 | SessionStart, `bootstrap.sh --hook` to the greeting, kern on the machine, 10 runs (before kern: 180 to 234 ms); the pin's read through `uv` is about 150 ms of it | 336 to 410 ms |
+| the same with the [refresh at start](#start-and-refresh), SE up to date: one read of SE's tags from GitHub, the core running, 6 runs (without the read: 393 to 463 ms) | 0.98 to 1.44 s |
+| the refresh at start moving a shallow clone one release behind (5.47.3 to 5.47.4, from GitHub), trial start included, `start_refresh` alone | 1.84 s |
 | the first start of a version, its release fetched (kern-v0.1.0): the hook; the core running, 3 runs | 657 to 715 ms; 1.21 to 1.38 s |
 | the first start of a version with no release: the hook; the core running, Go's build cache warm, 3 runs | 524 to 667 ms; 1.40 to 1.52 s |
 | a hook through `se_hook.sh`, the core running, by event (PostToolUse with a GitHub tool's answer) | 10.0 to 15.5 ms |
