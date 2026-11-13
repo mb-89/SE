@@ -366,8 +366,9 @@ backends, chosen at start:
   answers the request and runs the command's continuation.
 
 Every GitHub tool answer the session receives, a plan's or not, lands in the snapshot
-(`github/issues/<n>`, `github/pulls/<n>`, `github/comments/<n>`) with the time it was read, so the
-next command reads it from the core instead of asking for a file. The core hands the agent the next
+(`github/issues/<key>`, `github/pulls/<key>`, `github/checks/<key>`, `github/comments/<key>`) or
+the list (`github/issue-lists/<key>`, `github/pull-lists/<key>`, every page), with the time it was
+read, so the next command reads it from the core instead of asking for a file. The core hands the agent the next
 outbox step as context on the hook that follows each tool call, and `<app> github next` prints it.
 
 ### Measured against today's `integrate` hand-off
