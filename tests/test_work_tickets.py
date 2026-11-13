@@ -2074,13 +2074,15 @@ def test_route_routes_nothing_while_paused(worktree, monkeypatch, capsys):
 BUDGET_SUITE = 'print("0.20s call     tests/test_fast.py::test_quick")\nprint("3 passed")\n'
 
 
-def budget_suite(root: Path, monkeypatch, seconds: float, ci: float | None) -> list[int]:
-    """A suite in se.toml `[tests]` (limit 120 s) that a fake clock times at `seconds`, and CI's
-    last suite time on main faked as `ci` (None: unknown); returns a list that counts CI reads."""
+def budget_suite(root: Path, monkeypatch, seconds: float, ci: float | None,
+                 extra: str = "") -> list[int]:
+    """A suite in se.toml `[tests]` (limit 120 s, plus the `extra` lines) that a fake clock times
+    at `seconds`, and CI's last suite time on main faked as `ci` (None: unknown); returns a list
+    that counts CI reads."""
     (root / "suite.py").write_text(BUDGET_SUITE, encoding="utf-8")
     (root / "se.toml").write_text(
         f"[tests]\ncommand = {json.dumps([sys.executable, 'suite.py'])}\n"
-        "target_seconds = 60\nlimit_seconds = 120\n", encoding="utf-8")
+        f"target_seconds = 60\nlimit_seconds = 120\n{extra}", encoding="utf-8")
     readings = iter([0.0, seconds])
     monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
     reads: list[int] = []
@@ -2147,6 +2149,29 @@ def test_a_ci_suite_over_the_limit_fails_check_with_its_time_and_slowest_tests(
     assert reads == []  # the reference reads no other time
 
 
+@pytest.mark.parametrize("reference", [True, False], ids=["ci", "local"])
+def test_an_overrun_only_warns_where_the_project_declares_warn_only(
+        worktree, monkeypatch, capsys, reference):
+    if reference:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    budget_suite(worktree, monkeypatch, 130.0, 118.0, 'over_limit = "warn"\n')
+
+    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 0
+
+    captured = capsys.readouterr()
+    assert "warning: the complete suite took 130.0 s" in captured.err
+    assert ('over its limit of 120 s; [tests] over_limit = "warn" in se.toml, so the overrun '
+            "is not refused") in captured.err
+    assert "Suite: 3 passed; 130.0 s (target 60 s, limit 120 s)" in captured.out
+
+
+def test_over_limit_takes_fail_or_warn_only(worktree, monkeypatch, capsys):
+    budget_suite(worktree, monkeypatch, 40.0, None, 'over_limit = "ignore"\n')
+
+    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 1
+    assert 'over_limit must be "fail" (the default) or "warn"' in capsys.readouterr().err
+
+
 def test_a_ci_suite_within_the_limit_reports_its_time_as_a_notice(worktree, monkeypatch, capsys):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     budget_suite(worktree, monkeypatch, 40.0, None)
@@ -2163,6 +2188,93 @@ def test_a_local_suite_within_the_limit_reads_ci_only_for_integrate(worktree, mo
     monkeypatch.setattr(work_tickets, "clock", iter([0.0, 40.0]).__next__)
     work_tickets.run_suite(worktree, read_ci=True)
     assert reads == [1]
+
+
+def record_two_shards(root: Path, monkeypatch, fast: float, slow: float) -> Path:
+    """Two shards, `fast` and `slow`, recorded by suite-shard as a fake clock times them."""
+    records = root / "shards"
+    for name, seconds in (("fast", fast), ("slow", slow)):
+        monkeypatch.setattr(work_tickets, "clock", iter([0.0, seconds]).__next__)
+        assert work_tickets.main(["suite-shard", "--worktree", str(root), "--name", name,
+                                  "--record", str(records), "--",
+                                  sys.executable, "-c", "print('shard ran')"]) == 0
+    return records
+
+
+def test_a_sharded_suite_reports_its_slowest_shard_as_ci_s_suite_time(
+        worktree, monkeypatch, capsys):
+    budget_suite(worktree, monkeypatch, 0.0, None)
+    records = record_two_shards(worktree, monkeypatch, 20.0, 55.5)
+    assert json.loads((records / "slow.json").read_text(encoding="utf-8")) == {
+        "shard": "slow", "seconds": 55.5, "exit_code": 0}
+
+    assert work_tickets.main(["suite-time", "--worktree", str(worktree), "--shards", str(records),
+                              "--expect", "2"]) == 0
+
+    out = capsys.readouterr().out
+    assert "  fast: 20.0 s, exit code 0\n  slow: 55.5 s, exit code 0" in out
+    assert ("::notice title=se suite time::Suite time: 55.5 s (limit 120 s; slowest of 2 shards: "
+            "slow)") in out
+
+
+def test_the_shards_notice_round_trips_through_ci_suite_time(
+        worktree, tmp_path, monkeypatch, capsys):
+    read_ci = work_tickets.ci_suite_time  # the real one, reading the fake check run below
+    budget_suite(worktree, monkeypatch, 0.0, None)
+    records = record_two_shards(worktree, monkeypatch, 20.0, 55.5)
+    work_tickets.main(["suite-time", "--worktree", str(worktree), "--shards", str(records)])
+    notice, = (line for line in capsys.readouterr().out.splitlines() if line.startswith("::notice"))
+    title, message = re.fullmatch(r"::notice title=(.*?)::(.*)", notice).groups()
+    root = quiet_git.init(tmp_path / "repo", "-b", "main")
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=a", "-c", "user.email=a@example.com",
+                    "commit", "-q", "--allow-empty", "-m", "one"], check=True)
+    subprocess.run(["git", "-C", str(root), "remote", "add", "origin",
+                    "https://github.com/example/repo.git"], check=True)
+    subprocess.run(["git", "-C", str(root), "update-ref", "refs/remotes/origin/main", "HEAD"],
+                   check=True)
+
+    def github_read(repo, path):
+        if path.startswith("commits/"):
+            return {"check_runs": [{"id": 3, "status": "completed", "html_url": "u"}]}
+        return [{"title": title, "message": message}]
+
+    monkeypatch.setattr(work_tickets, "github_read", github_read)
+    found, _ = read_ci(root)
+    assert found is not None and found.seconds == 55.5
+
+
+@pytest.mark.parametrize("warn_only", [False, True], ids=["fail", "warn"])
+def test_a_sharded_overrun_fails_unless_the_project_declares_warn_only(
+        worktree, monkeypatch, capsys, warn_only):
+    budget_suite(worktree, monkeypatch, 0.0, None, 'over_limit = "warn"\n' if warn_only else "")
+    records = record_two_shards(worktree, monkeypatch, 20.0, 130.0)
+
+    code = work_tickets.main(["suite-time", "--worktree", str(worktree), "--shards", str(records)])
+
+    error = capsys.readouterr().err
+    if warn_only:
+        assert code == 0 and '[tests] over_limit = "warn" in se.toml' in error
+    else:
+        assert code == work_tickets.SUITE_OVER_LIMIT_EXIT_CODE
+        assert "took 130.0 s, the slowest of 2 shards (slow)" in error
+        assert "over its limit ([tests] limit_seconds in se.toml)" in error
+
+
+def test_a_failed_or_missing_shard_fails_the_suite_time(worktree, monkeypatch, capsys):
+    budget_suite(worktree, monkeypatch, 0.0, None)
+    records = record_two_shards(worktree, monkeypatch, 20.0, 30.0)
+    arguments = ["suite-time", "--worktree", str(worktree), "--shards", str(records)]
+
+    assert work_tickets.main([*arguments, "--expect", "3"]) == 1
+    assert "2 shard records in" in capsys.readouterr().err
+    monkeypatch.setattr(work_tickets, "clock", iter([0.0, 5.0]).__next__)
+    assert work_tickets.main(["suite-shard", "--worktree", str(worktree), "--name", "red",
+                              "--record", str(records), "--", sys.executable, "-c",
+                              "raise SystemExit(4)"]) == 4
+    assert work_tickets.main(arguments) == 1
+    captured = capsys.readouterr()
+    assert "Suite time: 30.0 s" in captured.out  # the time is reported all the same
+    assert "suite-time: shard red failed" in captured.err
 
 
 def test_ci_suite_time_reads_the_notice_of_the_newest_completed_check_on_main(
