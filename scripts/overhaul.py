@@ -37,7 +37,6 @@ import io
 import json
 import keyword
 import re
-import subprocess
 import sys
 import time
 import tokenize
@@ -47,6 +46,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+import git_door
 # A duplicate block is at least WINDOW lines alike, MEANINGFUL of them with MIN_CHARS characters
 # or more; a block written more than COMMON times is an idiom, not a copy. Near-duplicate
 # functions have MIN_TOKENS tokens or more and share NEAR_ALIKE percent of their SHINGLE-token
@@ -94,8 +94,7 @@ class Facts:
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", check=False)
+    result = git_door.run(*arguments, root=root)
     if result.returncode != 0:
         raise ValueError(f"git {' '.join(arguments)} failed in {root}: {result.stderr.strip()}")
     return result.stdout

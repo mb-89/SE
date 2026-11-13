@@ -49,6 +49,7 @@ def _load(name: str):
     return module
 
 
+git_door = _load("git_door")
 se_modules = _load("se_modules")
 public_check = _load("public_check")
 metrics = _load("metrics")
@@ -69,11 +70,7 @@ class RemoteError(Exception):
 def git_tags(url: str, timeout: float = 60) -> list[Version]:
     """The `vMAJOR.MINOR.PATCH` tags of a remote, in one call that fetches nothing."""
     feedback.reading("the remote", ["git", "ls-remote", "--tags", "--refs", url])
-    result = subprocess.run(
-        ["git", "ls-remote", "--tags", "--refs", url],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=timeout,
-    )
+    result = git_door.run("ls-remote", "--tags", "--refs", url, no_prompt=True, timeout=timeout)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().splitlines()
         raise RemoteError(f"cannot reach {url}: {detail[-1] if detail else 'git ls-remote failed'}")
@@ -112,8 +109,7 @@ def _project(root: Path) -> dict:
 def _origin(se_root: Path) -> str | None:
     if not (se_root / ".git").exists():
         return None
-    result = subprocess.run(["git", "-C", str(se_root), "remote", "get-url", "origin"],
-                            capture_output=True, text=True, check=False)
+    result = git_door.run("remote", "get-url", "origin", root=se_root)
     return result.stdout.strip() or None if result.returncode == 0 else None
 
 
@@ -689,11 +685,10 @@ def _starts(se: Path, root: Path | None, version: Version) -> None:
 
 def _fetch_tag(repo: Path, tag: str, timeout: float | None) -> None:
     """One fetch of the tag from origin; in a shallow clone it brings only the commits it lacks."""
-    argv = ["git", "-C", str(repo), "fetch", "--quiet", "origin", f"refs/tags/{tag}:refs/tags/{tag}"]
     feedback.reading("the remote", ["git", "fetch", "origin", f"refs/tags/{tag}"])
     try:
-        result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=timeout)
+        result = git_door.run("fetch", "--quiet", "origin", f"refs/tags/{tag}:refs/tags/{tag}", root=repo,
+                              no_prompt=True, timeout=timeout)
     except subprocess.TimeoutExpired as error:
         raise RefreshError(f"fetching {tag} took over {timeout:g} s") from error
     if result.returncode != 0:
@@ -875,8 +870,7 @@ def _development(se_root: Path) -> bool:
         return True
     if _git(se_root, "rev-parse", "--abbrev-ref", "HEAD") not in ("HEAD", se_modules.TRACKED_BRANCH):
         return True
-    own = subprocess.run(["git", "-C", str(se_root), "rev-list", "--count", "HEAD", "--not", "--remotes", "--tags"],
-                         capture_output=True, text=True, check=False)
+    own = git_door.run("rev-list", "--count", "HEAD", "--not", "--remotes", "--tags", root=se_root)
     return own.returncode != 0 or own.stdout.strip() != "0"
 
 
