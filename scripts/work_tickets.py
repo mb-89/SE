@@ -2460,6 +2460,20 @@ def late_commits(root: Path, report_body: str, head: str) -> list[str]:
     ).splitlines()
 
 
+def left_out(root: Path, branch: str, landed: str) -> list[str]:
+    """The commits origin's `branch` holds that the landing `landed` did not take, as
+    `<short> <subject>`: those pushed after integrate read the branch, and not on origin's
+    integration branch either. A merge carries none of its own; a branch gone from origin, none."""
+    fetched = run_git(root, "fetch", "-q", "origin",
+                      f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+    if fetched.returncode != 0:
+        return []
+    return checked_git(
+        root, "log", "--no-merges", "--format=%h %s", f"refs/remotes/origin/{branch}",
+        f"^{landed}", f"^refs/remotes/origin/{integration_branch(root)}",
+    ).splitlines()
+
+
 def check_branch_tip(root: Path, report_body: str, branch: str, head: str,
                      included: str | None) -> list[str]:
     """Refuse where `branch` at `head` has commits past the field report's Branch tip, unless the
@@ -4258,9 +4272,15 @@ def beside_suites(root: Path, tables: object) -> tuple[BesideSuite, ...]:
         where = f"[tests.beside.{name}] in {root / 'se.toml'}"
         unknown = sorted(set(table) - {"command", "directory", "target_seconds", "limit_seconds",
                                        "setup"})
-        if unknown:
+        if unknown and suite_is_reference():
             raise QueueError(f"{where}: no key {', '.join(unknown)}: a suite beside holds command, "
                              "directory, target_seconds, limit_seconds and setup; fix it")
+        if unknown:
+            # integrate runs the integration branch's scripts on the merged tree, so a key the
+            # branch adds and uses lands in one integration: CI's check judges it.
+            print(f"warning: {where}: no key {', '.join(unknown)}, which these scripts do not "
+                  f"know; ignored here. CI's {CHECK_NAME} runs the merged tree's scripts and "
+                  "refuses a key they do not know either", file=sys.stderr)
         command = table.get("command")
         if not is_argument_array(command):
             raise QueueError(f"{where} must declare command, the suite as a non-empty argument "
@@ -6077,6 +6097,16 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         if mirror.public:
             guard_public_push(root, mirror)
         git_push(root, [mirror.remote, f"{target}:{mirror.branch}"])
+    branch, landed = str(state["branch"]), str(state["landed"])
+    unlanded = left_out(root, branch, landed)
+    if unlanded:
+        raise QueueError(
+            f"Branch {branch} on origin has {len(unlanded)} commit(s) the landing {commit[:12]} "
+            "did not take:\n" + "\n".join(f"- {line}" for line in unlanded) + "\n"
+            f"They were pushed after integrate read the branch. The landing stands; nothing was "
+            f"closed: pull request #{pull_number}, work issue #{work_number}, the branch and its "
+            f"worktree stay. The worker updates its field report in place (deliver), then "
+            f"integrate {pull_number} again lands them")
     short = run_git(root, "rev-parse", "--short", commit).stdout.strip()
     suite_result = state["suite"]
     print(f"Suite: {suite_result}")
@@ -6115,7 +6145,6 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     if points:
         print(f"#{work_number} stays open for the review's open points; start a worker on it for "
               f"them: {'; '.join(points)}")
-    branch, landed = str(state["branch"]), str(state["landed"])
     try:
         remove_worker_worktree(root, branch, landed)
         print("Cleanup: worker worktree removed")
