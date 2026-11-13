@@ -553,8 +553,15 @@ def kern_line(se_root: Path, root: Path, kern: Kern, ask: Callable[[Path, Path],
         return [f"{name}: running, pid {answer.get('health', {}).get('pid')}"]
     if state == "starting":
         return [f"{name}: starting"]
+    log = root / ".se" / ".runtime" / "core.log"
+    died = (answer or {}).get("died")
+    if died:
+        # The core ended at its start: the first lines it said, which kern's status names (kern's
+        # host.ReadDied); the next hook tells the session the same once.
+        return [f"{name}: failed: the core ended at its start; it said:",
+                *(f"  {line}" for line in str(died).splitlines()), f"  (all of it in {log})"]
     cause = "its status does not answer" if answer is None else "not running after its start"
-    return [f"{name}: failed: {cause}; see {root / '.se' / '.runtime' / 'core.log'}"]
+    return [f"{name}: failed: {cause}; see {log}"]
 
 
 def _spawn_detached(argv: list[str]) -> None:

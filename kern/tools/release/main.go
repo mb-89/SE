@@ -4,24 +4,31 @@
 //
 //	go run ./tools/release plan  [--repository OWNER/NAME]   print version=, tag=, repository= and download=
 //	go run ./tools/release build --out DIR                   build the six archives and SHA256SUMS into DIR
+//	go run ./tools/release guard [--dir DIR]                 refuse a change to the binary's inputs since its released tag
 //
 // plan refuses when --repository is given and the download URL names another
-// repository, so a moved URL never publishes into the old one. Run from kern/.
-// Exit codes: 0 done, 2 a usage, settings or build error.
+// repository, so a moved URL never publishes into the old one. guard refuses
+// where the tag release.toml names is cut already and a file the binary is
+// built from changed since it, so a binary input never changes without the
+// version (Guard). Run from kern/.
+// Exit codes: 0 done, 1 guard refused, 2 a usage, settings or build error.
 package main
 
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -225,14 +232,155 @@ func Build(r Release, dir, out string, log io.Writer) ([]string, error) {
 	return names, Sums(out, names)
 }
 
+// Inputs answers the files, by their path in the repository as git writes it,
+// that the binary in dir is built from: every non-standard package its package
+// imports, the package itself among them (each package's files but its tests,
+// its embedded files) and the go.mod and go.sum of each module those packages
+// come from, kern's through the application's replace among them. A file
+// listed is an input; a package folder is too, so a file added or deleted in
+// one counts.
+func Inputs(r Release, dir string) (folders, files map[string]bool, err error) {
+	prefix, err := git(dir, "rev-parse", "--show-prefix")
+	if err != nil {
+		return nil, nil, err
+	}
+	main, err := goList(dir, "-m")
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(main) != 1 {
+		return nil, nil, fmt.Errorf("go list -m in %s answers %d main modules", dir, len(main))
+	}
+	// A path in the repository: go list's absolute path made relative to the
+	// main module's folder, as go list writes both, then under dir's prefix.
+	inRepo := func(p string) (string, bool) {
+		rel, err := filepath.Rel(main[0].Dir, p)
+		if err != nil {
+			return "", false
+		}
+		full := path.Clean(path.Join(strings.TrimSpace(prefix), filepath.ToSlash(rel)))
+		return full, full != ".." && !strings.HasPrefix(full, "../")
+	}
+	pkgs, err := goList(dir, "-deps", r.Package)
+	if err != nil {
+		return nil, nil, err
+	}
+	folders, files = map[string]bool{}, map[string]bool{}
+	for _, p := range pkgs {
+		if p.Standard {
+			continue
+		}
+		if f, ok := inRepo(p.Dir); ok {
+			folders[f] = true
+			for _, name := range append(append([]string{}, p.GoFiles...), p.EmbedFiles...) {
+				files[path.Join(f, filepath.ToSlash(name))] = true
+			}
+		}
+		if p.Module != nil && p.Module.Dir != "" {
+			if m, ok := inRepo(p.Module.Dir); ok {
+				files[path.Join(m, "go.mod")], files[path.Join(m, "go.sum")] = true, true
+			}
+		}
+	}
+	return folders, files, nil
+}
+
+// Input says whether a changed file, by its path in the repository, is one of
+// the binary's inputs: a file listed, or any file in a package folder but its
+// tests and its prose.
+func Input(folders, files map[string]bool, name string) bool {
+	if files[name] {
+		return true
+	}
+	if !folders[path.Dir(name)] {
+		return false
+	}
+	return !strings.HasSuffix(name, "_test.go") && !strings.HasSuffix(name, ".md")
+}
+
+// Guard answers what refuses the checkout at dir: where the tag release.toml
+// names exists, every input of the binary that differs between that tag and
+// the working tree, files git does not track yet among them. A tag not cut
+// yet refuses nothing: the push to main that carries the new version cuts it
+// (kern-release.yml). The answer is empty where the released binary is the
+// one the checkout builds.
+func Guard(r Release, dir string) (released bool, changed []string, err error) {
+	if _, err := git(dir, "rev-parse", "-q", "--verify", "refs/tags/"+r.Tag+"^{commit}"); err != nil {
+		return false, nil, nil
+	}
+	folders, files, err := Inputs(r, dir)
+	if err != nil {
+		return true, nil, err
+	}
+	out, err := git(dir, "diff", "--name-only", "--no-renames", r.Tag, "--")
+	if err != nil {
+		return true, nil, err
+	}
+	// Files not added yet count too, so a run before the commit sees them.
+	untracked, err := git(dir, "ls-files", "--others", "--exclude-standard", "--full-name")
+	if err != nil {
+		return true, nil, err
+	}
+	for _, name := range strings.Split(strings.TrimSpace(out+"\n"+untracked), "\n") {
+		if name != "" && Input(folders, files, name) {
+			changed = append(changed, name)
+		}
+	}
+	return true, changed, nil
+}
+
+// listed is the part of go list's JSON the guard reads.
+type listed struct {
+	Dir        string
+	Standard   bool
+	GoFiles    []string
+	EmbedFiles []string
+	Module     *struct{ Dir string }
+}
+
+func goList(dir string, args ...string) ([]listed, error) {
+	cmd := exec.Command("go", append([]string{"list", "-json"}, args...)...)
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("go list %s in %s: %v: %s", strings.Join(args, " "), dir, err, strings.TrimSpace(stderr.String()))
+	}
+	var all []listed
+	for d := json.NewDecoder(bytes.NewReader(out)); d.More(); {
+		var p listed
+		if err := d.Decode(&p); err != nil {
+			return nil, fmt.Errorf("go list %s in %s: %w", strings.Join(args, " "), dir, err)
+		}
+		all = append(all, p)
+	}
+	return all, nil
+}
+
+func git(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git %s in %s: %v: %s", strings.Join(args, " "), dir, err, strings.TrimSpace(stderr.String()))
+	}
+	return string(out), nil
+}
+
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
-const usage = "usage: release plan [--dir DIR] [--repository OWNER/NAME] | release build [--dir DIR] --out DIR"
+const usage = "usage: release plan [--dir DIR] [--repository OWNER/NAME] | release build [--dir DIR] --out DIR | release guard [--dir DIR]..."
 
 func run(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || (args[0] != "plan" && args[0] != "build") {
+	if len(args) == 0 || (args[0] != "plan" && args[0] != "build" && args[0] != "guard") {
 		fmt.Fprintln(stderr, usage)
 		return 2
+	}
+	if args[0] == "guard" {
+		return guard(args[1:], stdout, stderr)
 	}
 	fs := flag.NewFlagSet("release "+args[0], flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -275,4 +423,55 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "release: %s, %d archives and SHA256SUMS in %s\n", r.Tag, len(names), *out)
 		return 0
 	}
+}
+
+// dirs is a flag given once per folder.
+type dirs []string
+
+func (d *dirs) String() string     { return strings.Join(*d, ",") }
+func (d *dirs) Set(v string) error { *d = append(*d, v); return nil }
+
+// guard runs Guard for each folder named, kern/ (the working directory) where
+// none is: SE's se.toml [tests.beside.release-guard] names kern's and SE's own.
+func guard(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("release guard", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var folders dirs
+	fs.Var(&folders, "dir", "a folder holding release.toml and the binary's package; once per binary, the working directory by default")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if len(folders) == 0 {
+		folders = dirs{"."}
+	}
+	code := 0
+	for _, dir := range folders {
+		data, err := os.ReadFile(filepath.Join(dir, Settings))
+		if err != nil {
+			fmt.Fprintf(stderr, "release guard: %v\n", err)
+			return 2
+		}
+		r, err := Read(data)
+		if err != nil {
+			fmt.Fprintf(stderr, "release guard: %v\n", err)
+			return 2
+		}
+		released, changed, err := Guard(r, dir)
+		switch {
+		case err != nil:
+			fmt.Fprintf(stderr, "release guard: %v\n", err)
+			return 2
+		case !released:
+			fmt.Fprintf(stdout, "release guard: %s %s is not cut yet; the push to main that carries it cuts %s\n", r.Binary, r.Version, r.Tag)
+		case len(changed) == 0:
+			fmt.Fprintf(stdout, "release guard: %s %s: the checkout builds the binary %s holds\n", r.Binary, r.Version, r.Tag)
+		default:
+			prefix, _ := git(dir, "rev-parse", "--show-prefix")
+			fmt.Fprintf(stderr, "release guard: %s is cut, and %d of the %s binary's inputs changed since: %s; "+
+				"raise version in %s, so the landing cuts a release that holds them\n",
+				r.Tag, len(changed), r.Binary, strings.Join(changed, ", "), path.Join(strings.TrimSpace(prefix), Settings))
+			code = 1
+		}
+	}
+	return code
 }
