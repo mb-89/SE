@@ -469,7 +469,8 @@ whole run's, the `suite` step of `check`. For a sharded suite, whose shards run 
 parallel jobs, it is the slowest shard's: that is the time `check` waits for, while the shards' sum
 would count work nobody waits for.
 
-A sharded project records it with SE's two actions, at the se ref it pins, and copies nothing:
+A sharded project records it with SE's two actions, at the se ref it pins (the module command's
+`update se` moves the ref with the pin, [Modules](#modules)), and copies nothing:
 
 ```yaml
 jobs:
@@ -714,6 +715,11 @@ uv run python <se>/scripts/se_modules.py path <name>
   does not commit; commit the new pin with the commit list.
   - A `version` range moves to its highest matching tag in `se.lock` instead (`--to` is refused
     there; change the range).
+  - It also moves each call of the module's actions in `.github/workflows/`, `uses:
+    <owner>/<repo>/.github/actions/<name>@<ref>` with `<owner>/<repo>` its url's last two path
+    segments, to the new pin: its highest `v<x.y.z>` tag, else its commit. So the actions (SE's
+    [shard actions](#test-budget)) run the version `se.lock` pins; a reusable workflow stays at
+    its major tag.
 - `path`: prints the directory a module is used from (its `path` included), for tools that load it.
 - `--root <dir>` names the repository (default: the nearest ancestor with `se.toml`); `--local <file>`
   reads another machine-local file than `~/.se/local.toml`.

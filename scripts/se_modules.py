@@ -515,6 +515,56 @@ def set_pin(root: Path, name: str, sha: str) -> None:
         raise ModuleError(f"{manifest}: rewriting the pin of {name} failed")
 
 
+# The actions a module ships, as a workflow calls them: `uses: <owner>/<repo>/.github/actions/<name>@<ref>`.
+ACTION_USES = re.compile(r"(\buses:\s*['\"]?)([\w.-]+)/([\w.-]+)(/\.github/actions/[\w./-]+)@([\w./-]+)")
+WORKFLOWS = Path(".github") / "workflows"
+
+
+def repository_of(url: str) -> tuple[str, str] | None:
+    """The `<owner>/<repo>` a workflow names the module's repository by: its url's last two path
+    segments, without `.git`."""
+    parts = [part for part in re.split(r"[/:\\]", url.rstrip("/")) if part]
+    if len(parts) < 2:
+        return None
+    return parts[-2].lower(), re.sub(r"\.git$", "", parts[-1]).lower()
+
+
+def action_ref(clone: Path, commit: str) -> str:
+    """The ref a workflow calls the module's actions at: the highest `vMAJOR.MINOR.PATCH` tag on
+    `commit`, else the commit itself."""
+    tags = [version for tag in git(clone, "tag", "--points-at", commit, "--list", "v*").splitlines()
+            if (version := parse_version(tag[1:])) is not None]
+    return f"v{version_text(max(tags))}" if tags else commit
+
+
+def move_action_refs(root: Path, module: Module, clone: Path, commit: str) -> list[str]:
+    """Rewrite each workflow's call of the module's actions to the ref of its pin `commit`, so the
+    actions run the module at the version se.lock or se.toml pins; one report line per file."""
+    repository = repository_of(module.url)
+    directory = root / WORKFLOWS
+    if repository is None or not directory.is_dir():
+        return []
+    ref = action_ref(clone, commit)
+    report = []
+    for path in sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")]):
+        text = path.read_bytes().decode("utf-8")
+        moved = 0
+
+        def follow(match: re.Match) -> str:
+            nonlocal moved
+            if (match[2].lower(), match[3].lower()) != repository or match[5] == ref:
+                return match[0]
+            moved += 1
+            return f"{match[1]}{match[2]}/{match[3]}{match[4]}@{ref}"
+
+        rewritten = ACTION_USES.sub(follow, text)
+        if moved:
+            path.write_bytes(rewritten.encode("utf-8"))
+            report.append(f"  {path.relative_to(root).as_posix()}: {_plural(moved, 'action call')} "
+                          f"moved to @{ref}")
+    return report
+
+
 def resolve_target(source: Source, to: str | None) -> str:
     clone = source.checkout
     candidates = [f"refs/remotes/origin/{TRACKED_BRANCH}"] if to is None else [f"refs/remotes/origin/{to}", f"refs/tags/{to}", to]
@@ -528,7 +578,8 @@ def resolve_target(source: Source, to: str | None) -> str:
 
 def update_module(root: Path, module: Module, local: LocalConfig, to: str | None) -> list[str]:
     """Move the pin to the newest `main` commit (or to `to`), or a range's lock to its highest
-    admitted tag; report the commits between and sync."""
+    admitted tag; report the commits between, move the workflows' calls of its actions to the new
+    pin (move_action_refs) and sync."""
     pinned = pinned_source(root, module, local)
     if module.version is not None:
         if to is not None:
@@ -563,6 +614,7 @@ def update_module(root: Path, module: Module, local: LocalConfig, to: str | None
             report.append(f"  previous pin {old[:7]} is not in {pinned.url}; range unknown")
         if module.version is None:
             set_pin(root, module.name, new)
+    report.extend(move_action_refs(root, module, pinned.checkout, new))
     moved = Module(module.name, module.url, new, module.path, module.version)
     report.append(sync_module(resolve(root, moved, local)))
     return report
