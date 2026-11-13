@@ -443,6 +443,36 @@ def test_guard_accepts_the_whole_sentence_with_a_path_quoted_across_lines(worktr
     assert approved.returncode == 0, approved.stderr
 
 
+def test_guard_leaves_out_a_regenerated_command_reference(worktree: Path) -> None:
+    stale = (f"# Guide\n\nThis sentence stays.\n\n{work_tickets.REFERENCE_BEGIN}\n"
+             "```text\nwork_tickets.py gone\n    A command that is gone.\n```\n"
+             f"{work_tickets.REFERENCE_END}\n\nThis sentence is removed.\n")
+    repository, guide = authored_repository(
+        worktree.parent / "generated-reference-case", "regenerate-reference", stale,
+    )
+    guide.write_text(
+        work_tickets.with_command_reference(stale).replace("This sentence is removed.\n", ""),
+        encoding="utf-8",
+    )
+    assert git(repository, "commit", "-am", "regenerate the command reference").returncode == 0
+
+    assert work_tickets.deleted_authored_sentences(repository, "regenerate-reference") == [
+        "docs/guide.md: This sentence is removed.",
+    ]
+
+
+def test_guard_leaves_out_a_file_the_build_generates_whole(worktree: Path) -> None:
+    se_plugin = work_tickets.sibling("se_plugin")
+    repository, guide = authored_repository(
+        worktree.parent / "generated-file-case", "remove-generated-file",
+        "---\nname: guide\n---\n" + se_plugin.notice("src/guide.md") + "\nA generated sentence.\n",
+    )
+    guide.unlink()
+    assert git(repository, "commit", "-am", "remove the generated file").returncode == 0
+
+    assert work_tickets.deleted_authored_sentences(repository, "remove-generated-file") == []
+
+
 def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
     repository, guide = authored_repository(
         worktree.parent / "rewrapped-content-case", "rewrap-prose",
