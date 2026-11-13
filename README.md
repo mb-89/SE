@@ -174,6 +174,7 @@ kern and post every session event to it:
 | a hook through `se_hook.sh`, no core running | 8.8 to 11.3 ms |
 | a hook through `se_hook.sh`, no binary named | 4.2 to 5.5 ms |
 | `kern hook` alone, no core running; the core running | 6.0 to 6.6 ms; 7.0 to 7.8 ms |
+| for comparison, a Python start that does nothing: `python3 -c pass`; `uv run --no-project python -c pass` | 13 to 19 ms; 39 to 72 ms |
 
 ### Commands as components
 
