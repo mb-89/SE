@@ -41,3 +41,18 @@ repositories = ["mb-89/SE", "mb-89/obs"]
 [outside]
 "github.com/mb-89/SE" = 690
 "github.com/mb-89/obs" = 459
+
+# The outside skills each role relies on, `<plugin>@<marketplace>:<skill>`: se_plugin.py build
+# preloads them into that agent and the start greeting names one the session lacks (AGENTS.md
+# "Agents and skills"). SE's agents rely on none outside SE today.
+[roles.se]
+skills = []
+
+[roles.integrator]
+skills = []
+
+[roles.reviewer]
+skills = []
+
+[roles.worker]
+skills = []

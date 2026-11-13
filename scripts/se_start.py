@@ -31,6 +31,8 @@ CACHE_ENV = "SE_START_CACHE"
 MAX_AGE = 3600  # seconds a cached update check stays fresh
 RUNNING_FOR = 120  # seconds a started background check counts as running
 PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
+CLOUD_ENV = "CLAUDE_CODE_REMOTE"  # "true" in a Claude Code cloud session
+CLOUD_PLUGINS = "README \"Claude Code cloud\""
 CHECK_REMEDY = "run it by hand to see the cause: uv run python {se}/scripts/se_start.py check"
 
 
@@ -49,6 +51,7 @@ se_modules = _load("se_modules")
 public_check = _load("public_check")
 metrics = _load("metrics")
 feedback = _load("feedback")
+se_plugin = _load("se_plugin")
 ModuleError = se_modules.ModuleError
 Version = tuple[int, int, int]
 
@@ -139,6 +142,8 @@ class Local:
     counts: Counts
     items: list[Item]
     errors: list[str] = field(default_factory=list)
+    lacking: list[tuple["se_plugin.RoleSkill", tuple[str, ...]]] = field(default_factory=list)
+    skills_error: str = ""  # se.toml [roles] could not be read
 
 
 def read_local(se_root: Path, root: Path | None, local_config: Path | None) -> Local:
@@ -158,7 +163,45 @@ def read_local(se_root: Path, root: Path | None, local_config: Path | None) -> L
                 items.append(_module_item(root, module, local, locked))
         except ModuleError as error:
             errors.append(f"modules of {root / se_modules.MANIFEST}: {error}")
-    return Local(se_version, str(_project(se_root).get("docs_url", "")), counts(se_root), items, errors)
+    try:
+        missing, skills_error = lacking(se_root), ""
+    except se_plugin.SourceError as error:
+        missing, skills_error = [], str(error)
+    return Local(se_version, str(_project(se_root).get("docs_url", "")), counts(se_root), items, errors,
+                 missing, skills_error)
+
+
+def _claude_dir() -> Path:
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()
+
+
+def installed_plugins() -> set[str]:
+    """The plugins this session has, as `<plugin>@<marketplace>`: those Claude Code's record of the
+    installed plugins names, and a plugin cloned into its skills folder (`<plugin>@skills-dir`, as
+    the cloud's SE is)."""
+    try:
+        data = json.loads(plugin_registry().read_text(encoding="utf-8"))
+        names = set(data.get("plugins", {})) if isinstance(data, dict) else set()
+    except (OSError, ValueError, AttributeError, TypeError):
+        names = set()
+    skills = _claude_dir() / "skills"
+    if skills.is_dir():
+        names |= {f"{path.parent.parent.name}@skills-dir"
+                  for path in skills.glob("*/.claude-plugin/plugin.json")}
+    return names
+
+
+def lacking(se_root: Path) -> list[tuple["se_plugin.RoleSkill", tuple[str, ...]]]:
+    """Each skill of SE's `[roles]` list whose plugin this session lacks, with the roles that rely
+    on it."""
+    have = installed_plugins()
+    present = {name.partition("@")[0] for name in have if name.endswith("@skills-dir")}
+    found: dict["se_plugin.RoleSkill", list[str]] = {}
+    for role, skills in se_plugin.roles(se_root).items():
+        for skill in skills:
+            if f"{skill.plugin}@{skill.marketplace}" not in have and skill.plugin not in present:
+                found.setdefault(skill, []).append(role)
+    return [(skill, tuple(roles)) for skill, roles in found.items()]
 
 
 def _plugin_repository(se_root: Path) -> str | None:
@@ -367,7 +410,22 @@ def greeting(report: Report, se_root: Path) -> list[str]:
     if due:
         lines.append(f"Refresh: {refresh_command(se_root)}")
     lines += _check_lines(report, se_root)
-    return lines + work_lines(report, se_root)
+    return lines + skill_lines(report.local) + work_lines(report, se_root)
+
+
+def skill_lines(local: Local) -> list[str]:
+    """One line naming each listed skill the session lacks, with the roles that rely on it and the
+    command that installs its plugin; in the cloud, that the environment provides plugins."""
+    if local.skills_error:
+        return [f"Skills check not done: {local.skills_error}"]
+    if not local.lacking:
+        return []
+    named = "; ".join(f"{skill.name} ({', '.join(roles)})" for skill, roles in local.lacking)
+    if os.environ.get(CLOUD_ENV, "").lower() == "true":
+        return [f"Missing for SE's agents: {named}. This cloud session lacks them; the cloud "
+                f"environment provides plugins ({CLOUD_PLUGINS})"]
+    installs = list(dict.fromkeys(skill.install for skill, _ in local.lacking))
+    return [f"Missing for SE's agents: {named}. Install: {' && '.join(installs)}"]
 
 
 def work_lines(report: Report, se_root: Path) -> list[str]:
@@ -440,7 +498,7 @@ def full(report: Report, se_root: Path) -> list[str]:
         lines.append(f"{item.name}: in use {use}; latest {_v(state.latest)}; {verdict}")
     if any(s.due for s in report.states):
         lines.append(f"Refresh: {refresh_command(se_root)}")
-    return lines + _check_lines(report, se_root) + work_lines(report, se_root)
+    return lines + _check_lines(report, se_root) + skill_lines(report.local) + work_lines(report, se_root)
 
 
 def _plural(count: int, word: str) -> str:
@@ -575,7 +633,7 @@ def refresh_se(se_root: Path, root: Path | None, version: Version) -> str:
 
 def plugin_registry() -> Path:
     """Claude Code's record of the installed plugins, which `claude plugin update` rewrites."""
-    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser() / "plugins" / "installed_plugins.json"
+    return _claude_dir() / "plugins" / "installed_plugins.json"
 
 
 def _installed(world: World) -> list[dict]:

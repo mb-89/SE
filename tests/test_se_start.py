@@ -428,7 +428,7 @@ def repos(tmp_path, isolated_git):
     (v1.0.0, v1.1.0, v2.0.0) and tool (v1.0.0 only); a project locked at lib 1.0.0 and tool 1.0.0."""
     scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
                for name in ("se_start.py", "se_modules.py", "public_check.py",
-                             "metrics.py", "feedback.py", "public-check-terms.toml")}
+                             "metrics.py", "feedback.py", "se_plugin.py", "public-check-terms.toml")}
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
     git(upstream, "init", "-q", "-b", "main")
@@ -632,3 +632,81 @@ def test_without_gh_the_se_agent_runs_the_fleet_checks_plan_at_its_first_turn():
     greeting = text[text.index("- **Greeting**"):text.index("- **Turn-start check**")]
     assert "Without gh (the cloud) it names neither: at your first turn run" in greeting
     assert "`work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints" in greeting
+
+
+# The outside skills SE's agents rely on (se.toml [roles]): the greeting names one the session lacks.
+
+PLUGIN_DEV = "plugin-dev@claude-plugins-official:plugin-structure"
+
+
+@pytest.fixture
+def claude_home(tmp_path, monkeypatch):
+    """An empty Claude Code configuration folder on a local machine."""
+    home = tmp_path / "claude-home"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    monkeypatch.delenv(se_start.CLOUD_ENV, raising=False)
+    return home
+
+
+def with_roles(s, roles: str):
+    (s["se"] / "se.toml").write_text((s["se"] / "se.toml").read_text(encoding="utf-8") + roles,
+                                     encoding="utf-8")
+
+
+def skill_line(s) -> list[str]:
+    return [line for line in se_start.greeting(report(s), s["se"]) if "SE's agents" in line
+            or line.startswith("Skills check")]
+
+
+def test_a_listed_skill_the_session_lacks_is_named_in_one_line_with_its_install(setup, claude_home):
+    with_roles(setup, f'[roles.worker]\nskills = ["{PLUGIN_DEV}"]\n[roles.reviewer]\nskills = ["{PLUGIN_DEV}",'
+                      ' "example-skills@anthropic-agent-skills:skill-creator"]\n')
+    assert skill_line(setup) == [
+        "Missing for SE's agents: plugin-dev:plugin-structure (worker, reviewer); "
+        "example-skills:skill-creator (reviewer). Install: claude plugin install "
+        "plugin-dev@claude-plugins-official && claude plugin install example-skills@anthropic-agent-skills"]
+
+
+def test_an_installed_or_skills_folder_plugin_is_not_named(setup, claude_home):
+    with_roles(setup, f'[roles.worker]\nskills = ["{PLUGIN_DEV}", "tools@team:lint"]\n')
+    write(claude_home / "plugins" / "installed_plugins.json",
+          json.dumps({"version": 2, "plugins": {"plugin-dev@claude-plugins-official": [{}]}}))
+    write(claude_home / "skills" / "tools" / ".claude-plugin" / "plugin.json", "{}")
+    assert skill_line(setup) == []
+
+
+def test_a_plugin_from_another_marketplace_does_not_count(setup, claude_home):
+    with_roles(setup, f'[roles.worker]\nskills = ["{PLUGIN_DEV}"]\n')
+    write(claude_home / "plugins" / "installed_plugins.json",
+          json.dumps({"version": 2, "plugins": {"plugin-dev@elsewhere": [{}]}}))
+    assert len(skill_line(setup)) == 1
+
+
+def test_in_the_cloud_the_line_says_the_environment_provides_plugins(setup, claude_home, monkeypatch):
+    monkeypatch.setenv(se_start.CLOUD_ENV, "true")
+    with_roles(setup, f'[roles.worker]\nskills = ["{PLUGIN_DEV}"]\n')
+    assert skill_line(setup) == [
+        "Missing for SE's agents: plugin-dev:plugin-structure (worker). This cloud session lacks them; "
+        "the cloud environment provides plugins (README \"Claude Code cloud\")"]
+
+
+def test_a_bad_roles_list_is_named_and_the_greeting_still_appears(setup, claude_home):
+    with_roles(setup, '[roles.worker]\nskills = ["plugin-dev"]\n')
+    lines = se_start.greeting(report(setup), setup["se"])
+    assert lines[0].startswith("SE 1.2.0 started")
+    assert skill_line(setup) == [f"Skills check not done: {setup['se'] / 'se.toml'}: [roles.worker] skills "
+                                 "entry 'plugin-dev' is not `<plugin>@<marketplace>:<skill>`"]
+
+
+def test_the_round_trip_list_then_build_then_the_greeting_names_the_missing_item(tmp_path, claude_home):
+    se = tmp_path / "se"
+    shutil.copytree(ROOT / "src", se / "src")
+    manifest = (ROOT / "se.toml").read_text(encoding="utf-8").split("\n[roles.", 1)[0]
+    write(se / "se.toml", manifest + f'\n[roles.worker]\nskills = ["{PLUGIN_DEV}"]\n')
+    se_start.se_plugin.build(se)
+    worker = (se / "agents" / "worker.md").read_text(encoding="utf-8")
+    assert "\nskills: plugin-dev:plugin-structure\n" in worker.split("\n---\n", 1)[0] + "\n"
+    rep = se_start.status(se, None, tmp_path / "local.toml", tmp_path / "cache.json",
+                          se_start.World(clock=Clock(), spawn=Spawns(), work=Work()), offline=True)
+    assert ("Missing for SE's agents: plugin-dev:plugin-structure (worker). Install: claude plugin "
+            "install plugin-dev@claude-plugins-official") in se_start.greeting(rep, se)
