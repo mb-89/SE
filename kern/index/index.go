@@ -66,6 +66,7 @@ type nameInfo struct {
 	inst    string // the instance that writes it
 	line    int
 	typ     reflect.Type
+	shape   string
 	builtin any
 	family  bool
 }
@@ -102,6 +103,10 @@ type Index struct {
 	subs    map[string]map[int]func(Value)
 	nextSub int
 	catalog Catalog
+	// onRun tells a declared instance's process to run its derivations; runs
+	// are the instances a commit's wave left to their processes.
+	onRun func(instance string, revision uint64)
+	runs  map[string]bool
 }
 
 var (
@@ -188,7 +193,7 @@ func (ix *Index) Commit(instance string, writes ...Write) error {
 	case !in.enabled:
 		return fmt.Errorf("index: instance %s is switched off (wiring line %d)", instance, in.offLine)
 	}
-	if err := in.comp.CheckWrites(writes); err != nil {
+	if err := in.comp.checkWrites(writes, in.comp.Declared()); err != nil {
 		return fmt.Errorf("index: instance %s: %w", instance, err)
 	}
 	return ix.apply(in, writes)
@@ -215,6 +220,7 @@ func (ix *Index) Call(command string, args ...string) (Result, error) {
 		if r.Text != "" {
 			done.Text = strings.TrimPrefix(done.Text+"\n"+r.Text, "\n")
 		}
+		done.Lines = append(done.Lines, r.Lines...)
 		done.Writes = append(done.Writes, r.Writes...)
 		if err := ix.apply(in, r.Writes); err != nil {
 			return done, err
@@ -265,8 +271,10 @@ func (ix *Index) apply(in *instance, writes []Write) error {
 	}
 	ix.mu.Lock()
 	changed := map[string]bool{}
+	ix.runs = map[string]bool{}
 	ix.commit(in, writes, changed)
 	err := ix.settle(changed, false)
+	runs, onRun, rev := sortedRuns(ix.runs), ix.onRun, ix.snap.rev
 	type push struct {
 		fn func(Value)
 		v  Value
@@ -286,6 +294,11 @@ func (ix *Index) apply(in *instance, writes []Write) error {
 	ix.mu.Unlock()
 	for _, p := range pushes {
 		p.fn(p.v)
+	}
+	if onRun != nil {
+		for _, inst := range runs {
+			onRun(inst, rev)
+		}
 	}
 	return err
 }
@@ -327,6 +340,13 @@ func (ix *Index) settle(changed map[string]bool, all bool) error {
 			continue
 		}
 		for _, port := range in.comp.Derivations() {
+			if in.comp.Declared() {
+				// Its own process runs it, told after the commit, and commits what it answers.
+				if !all && len(in.runs(port, changed, all, ix.snap)) > 0 && ix.runs != nil {
+					ix.runs[in.name] = true
+				}
+				continue
+			}
 			for _, key := range in.runs(port, changed, all, ix.snap) {
 				v, err := in.comp.Derive(port, in.reader(ix.snap, key))
 				if err != nil {

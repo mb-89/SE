@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -197,11 +198,62 @@ func (b *Bus) Close() {
 	b.server.WaitForShutdown()
 }
 
-// Subject is a name's subject tokens: fleet/findings rides as fleet.findings.
-func Subject(name string) string { return strings.ReplaceAll(name, "/", ".") }
+// Token is one subject token for a word that may hold what a NATS token may
+// not: a command name with a space, a family key with a dot. Every byte but
+// letters, digits, dashes and underscores rides percent-encoded, so "tally
+// note" rides as tally%20note and v1.2 as v1%2E2; a plain word rides as it is.
+// The Python peer encodes the same way (contract/subjects.json holds both to it).
+func Token(word string) string {
+	var b strings.Builder
+	for i := 0; i < len(word); i++ {
+		c := word[i]
+		switch {
+		case c == '-', c == '_', c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
+}
+
+// Word is the word a token stands for; a token that is no encoding of one answers itself.
+func Word(token string) string {
+	if !strings.Contains(token, "%") {
+		return token
+	}
+	var b strings.Builder
+	for i := 0; i < len(token); i++ {
+		if token[i] == '%' && i+2 < len(token) {
+			if n, err := strconv.ParseUint(token[i+1:i+3], 16, 8); err == nil {
+				b.WriteByte(byte(n))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(token[i])
+	}
+	return b.String()
+}
+
+// Subject is a name's subject tokens, one token per segment: fleet/findings
+// rides as fleet.findings, and session/v1.2/events as session.v1%2E2.events.
+func Subject(name string) string {
+	segs := strings.Split(name, "/")
+	for i, s := range segs {
+		segs[i] = Token(s)
+	}
+	return strings.Join(segs, ".")
+}
 
 // Name is the name a subject's tokens stand for: fleet.findings is fleet/findings.
-func Name(subject string) string { return strings.ReplaceAll(subject, ".", "/") }
+func Name(subject string) string {
+	toks := strings.Split(subject, ".")
+	for i, t := range toks {
+		toks[i] = Word(t)
+	}
+	return strings.Join(toks, "/")
+}
 
 // Inbox is the prefix of a user's reply subjects. It is one token, so no
 // user's inbox lies inside another's, nested instances included.
