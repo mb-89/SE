@@ -141,11 +141,13 @@ uv run python <se>/scripts/se_start.py refresh
 
 Nobody starts kern by hand. kern is the core SE pins ([kern/README.md](kern/README.md)); while it
 is incubated in SE, `kern/release.toml` owns its version and where its release is published, as
-`kern-v<version>`. The plugin's hooks start it and post every session event to it:
+`kern-v<version>`, and `scripts/se_modules.py kern-pin` is its one reader. The plugin's hooks start
+kern and post every session event to it:
 
 - **SessionStart**, [scripts/bootstrap.sh](scripts/bootstrap.sh) `--hook`: where
   `~/.se/bin/kern-<version>` is on the machine, it runs `kern start` for the project, which returns
-  at once, and hands the core the session's start, which takes the session's lease.
+  at once, and hands the core the session's start, which takes the session's lease. It names the
+  binary in `<project>/.se/.runtime/kern.path` for the later hooks.
 - **The first start of a version** reads the release's `SHA256SUMS` (one small read). Where it names
   this platform's archive, the archive is fetched, checked against its line and unpacked in the
   background, and the core then starts.
@@ -155,7 +157,7 @@ is incubated in SE, `kern/release.toml` owns its version and where its release i
     does not end it.
 - **Every other event** (SessionEnd, SubagentStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop
   and SubagentStop) runs [scripts/se_hook.sh](scripts/se_hook.sh) `<event>`, which hands the host's
-  JSON to `kern hook <event>`.
+  JSON to the named binary's `kern hook <event>`.
   - SessionEnd returns the session's lease. The Stop hooks run beside `stop-check`
     ([Stop hook](#stop-hook)).
   - It fails open: without kern's binary, or with no core answering within 500 ms, it prints
@@ -165,12 +167,12 @@ is incubated in SE, `kern/release.toml` owns its version and where its release i
 
 | measured on 13 Nov in a Claude Code cloud container, Linux amd64, 5 runs | wall time |
 |---|---|
-| SessionStart, `bootstrap.sh --hook` to the greeting, kern on the machine, 10 runs (before kern: 162 to 227 ms) | 180 to 250 ms |
-| the first start of a version, its release fetched (kern-v0.1.0): the hook; the core running | 525 to 631 ms; 1.11 to 1.21 s, 3 runs |
-| the first start of a version with no release: the hook; the core running, Go's build cache warm | 367 to 466 ms; 1.09 to 1.29 s |
-| a hook through `se_hook.sh`, the core running, by event (PostToolUse with a GitHub tool's answer) | 9.2 to 14.5 ms |
-| a hook through `se_hook.sh`, no core running | 7.8 to 10.6 ms |
-| a hook through `se_hook.sh`, no kern on the machine | 3.7 to 4.8 ms |
+| SessionStart, `bootstrap.sh --hook` to the greeting, kern on the machine, 10 runs (before kern: 180 to 234 ms); the pin's read through `uv` is about 150 ms of it | 336 to 410 ms |
+| the first start of a version, its release fetched (kern-v0.1.0): the hook; the core running, 3 runs | 657 to 715 ms; 1.21 to 1.38 s |
+| the first start of a version with no release: the hook; the core running, Go's build cache warm, 3 runs | 524 to 667 ms; 1.40 to 1.52 s |
+| a hook through `se_hook.sh`, the core running, by event (PostToolUse with a GitHub tool's answer) | 10.0 to 15.5 ms |
+| a hook through `se_hook.sh`, no core running | 8.8 to 11.3 ms |
+| a hook through `se_hook.sh`, no binary named | 4.2 to 5.5 ms |
 | `kern hook` alone, no core running; the core running | 6.0 to 6.6 ms; 7.0 to 7.8 ms |
 
 ### Commands as components
@@ -505,6 +507,7 @@ tier = "tests.tiers:tier" # optional
 over_limit = "fail" # optional, or "warn"
 
 [tests.beside.kern] # optional, one table per suite in another toolchain
+setup = ["go", "test", "-run", "^$", "./..."] # optional
 command = ["go", "test", "./..."]
 directory = "kern"
 target_seconds = 30
@@ -529,6 +532,9 @@ limit_seconds = 60
   ([kern/README.md](kern/README.md#tests)). Its `command` runs in `directory` (relative to the
   root, default `.`) after the complete suite, wherever the suite runs: `integrate`,
   `work_tickets.py suite` and CI's `check`.
+  - Its `setup`, optional, runs first in the same folder, outside its budget, as the suite's
+    does: for a Go suite, `go test -run '^$' ./...` builds every test binary, so a cold build
+    (kern's took 35.1 s once on CI) never counts as test time. A failing setup refuses the run, and the suite beside does not run.
 
 The two budgets are apart, and neither spends the other's time:
 

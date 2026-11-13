@@ -144,3 +144,15 @@ def test_the_pin_is_kerns_release_version_and_its_tag(tmp_path: Path) -> None:
         se_modules.kern_pin(tmp_path)
     with pytest.raises(se_modules.ModuleError, match="incubates no kern"):
         se_modules.kern_pin(tmp_path / "none")
+
+
+def test_kern_pin_prints_the_version_and_where_its_release_is_published(tmp_path, capsys):
+    """bootstrap.sh reads the pin through this one reader (README "Kern")."""
+    (tmp_path / "kern").mkdir()
+    (tmp_path / "kern" / "release.toml").write_text(
+        'version = "1.2.3"\ndownload = "https://example.com/releases/download/kern-v{version}"\n', encoding="utf-8")
+    assert se_modules.main(["--root", str(tmp_path), "kern-pin"]) == 0
+    assert capsys.readouterr().out == "1.2.3 https://example.com/releases/download/kern-v1.2.3\n"
+    (tmp_path / "kern" / "release.toml").write_text('version = "1.2.3"\n', encoding="utf-8")
+    assert se_modules.main(["--root", str(tmp_path), "kern-pin"]) == 1
+    assert "download names no URL" in capsys.readouterr().err
