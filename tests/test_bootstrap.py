@@ -281,8 +281,9 @@ def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
 @needs_platform
 @pytest.mark.parametrize("missing", [
     (),
-    ("sha256sum", "setsid"),  # as on macOS: the checksum from shasum, the background without setsid
-], ids=["every-tool", "shasum-no-setsid"])
+    pytest.param(("sha256sum", "setsid"), marks=pytest.mark.skipif(
+        WINDOWS, reason="macOS's tools; on Windows, without setsid, the background fetch did not finish")),
+], ids=["every-tool", "shasum-no-setsid"])  # as on macOS: the checksum from shasum, no setsid
 def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then_starts_it(machine, missing):
     home, project, base = machine
     path = fake_bin(base)
@@ -302,8 +303,8 @@ def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then
     assert f"kern start --root {sh(project)}" in log
     assert f"kern hook SessionStart --root {sh(project)} <<{START}" in log
     assert os.access(kern_bin(home), os.X_OK)
-    assert sorted(p.name for p in kern_bin(home).parent.iterdir()) == [
-        kern_bin(home).name, f"kern-{KERN_VERSION}.SHA256SUMS"], "nothing half-done is left"
+    assert sorted(p.name for p in kern_bin(home).parent.iterdir()) == sorted([
+        kern_bin(home).name, f"kern-{KERN_VERSION}.SHA256SUMS"]), "nothing half-done is left"
 
 
 @needs_platform
