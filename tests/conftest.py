@@ -56,6 +56,9 @@ def local_machine() -> Iterator[None]:
 STILL_ON_REAL_GIT = "runs real git until its piece of the move to the fake lands"
 REAL_GIT: dict[str, str] = {
     "tests/test_git_door.py": "the door's contract, held against real git",
+    # Found by the refusal of child processes: `se new app` reads SE's own checkout, kern's template
+    # at its real pin tag, as test_references.py and test_repository.py read it (piece 6's kind).
+    "tests/beside_new_app.py": "reads SE's own checkout: kern's template at its real pin",
     "tests/test_public_check.py": STILL_ON_REAL_GIT,
     "tests/test_push_guard.py": STILL_ON_REAL_GIT,
     "tests/test_quiet_git.py": STILL_ON_REAL_GIT,
