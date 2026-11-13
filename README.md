@@ -141,20 +141,21 @@ uv run python <se>/scripts/se_start.py refresh
 
 ### Kern
 
-Nobody starts kern by hand. kern is the core SE pins ([kern/README.md](kern/README.md)); while it
-is incubated in SE, `kern/release.toml` owns its version and where its release is published, as
-`kern-v<version>`, and `scripts/se_modules.py kern-pin` is its one reader. The plugin's hooks start
-kern and post every session event to it:
+Nobody starts the core by hand. SE builds its own binary, `se`: kern's core with SE's Go components,
+released as `se-v<version>` that `components/release.toml` owns. `scripts/se_modules.py app-binary`
+is bootstrap's one reader of the binary to run — SE's `se`, or the bare kern for an application with
+no Go components. The plugin's hooks start the binary and post every session event to it:
 
 - **SessionStart**, [scripts/bootstrap.sh](scripts/bootstrap.sh) `--hook`: where
-  `~/.se/bin/kern-<version>` is on the machine, it runs `kern start` for the project, which returns
-  at once, and hands the core the session's start, which takes the session's lease. It names the
-  binary in `<project>/.se/.runtime/kern.path` for the later hooks.
+  `~/.se/bin/<name>-<version>` is on the machine, it runs `<name> start` for the project, which
+  returns at once, and hands the core the session's start, which takes the session's lease. It names
+  the binary in `<project>/.se/.runtime/kern.path` for the later hooks.
 - **The first start of a version** reads the release's `SHA256SUMS` (one small read). Where it names
   this platform's archive, the archive is fetched, checked against its line and unpacked in the
   background, and the core then starts.
-  - Where no release matches, kern is built from SE's own `kern/` with `go` in the background, and
-    the greeting says so; without `go`, kern failed, and the greeting names both causes.
+  - Where no release matches, the binary is built from its folder (SE's `components/`, kern's own
+    `kern/`) with `go` in the background, and the greeting says so; without `go` it failed, and the
+    greeting names both causes.
   - The background half runs in its own process (`setsid` where there is one), so the hook's end
     does not end it.
 - **Every other event** (SessionEnd, SubagentStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop
@@ -164,8 +165,8 @@ kern and post every session event to it:
     component's `stop-check`, and else by `stop-check` directly ([Stop hook](#stop-hook)).
   - It fails open: without kern's binary, or with no core answering within 500 ms, it prints
     nothing and exits 0.
-- **The greeting** names kern's state under its first line: `kern <version>: running, pid <n>`,
-  `starting: <why>`, or `failed: <cause>`.
+- **The greeting** names the binary's state under its first line: `<name> <version>: running, pid
+  <n>` (`se <version>` for SE), `starting: <why>`, or `failed: <cause>`.
 
 | measured on 13 Nov in a Claude Code cloud container, Linux amd64, 5 runs | wall time |
 |---|---|
@@ -189,8 +190,9 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
     `__init__.py` answers each declared command with the script's own code.
   - The [command reference](#work-commands) renders from these declarations as kern's reader reads
     them.
-- **Placed:** `wiring.toml` places each in a process of its own, so the core the hooks start in SE's
-  checkout lists them: `kern status --json` names the instances and those attached.
+- **Placed:** `wiring.toml` places each in a process of its own, beside SE's Go components in the
+  `se` binary, so the core the hooks start in SE's checkout lists them all: `se status --json` names
+  the instances and those attached.
 - **Routed:** a command a person waits on that only reads (its class `interactive`: `status`,
   `config`, `ready`, `capacity`, `queue`, `fleet-check` and `metrics`) goes through kern's
   `call.<command>` where kern serves the checkout the command runs in with the same script.
@@ -855,6 +857,11 @@ the [project identity](#project-settings).
 - **What it holds:** the template's ([kern/template/README.md](kern/template/README.md)): its wiring,
   where `enabled = false` switches a component off, CI through kern's battery, the `[tests]` budget
   and the `[modules.kern]` pin.
+- **Its own binary:** a bare application runs the bare kern. To build its own (the core plus its Go
+  components), it adds a `release.toml` naming its `binary`, `package` and download, `[binary]
+  release = "release.toml"` in `se.toml`, and a release workflow calling kern's reusable
+  `kern-release.yml` with its folder — the way SE builds `se` (`components/release.toml`,
+  `se-release.yml`).
 - **GitHub stays the owner's:** the last line names the owner's step, creating the repository with
   its ruleset and the first push. The command does nothing on GitHub.
 
