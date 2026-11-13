@@ -26,11 +26,16 @@ class FakeGitHub:
     def __init__(self) -> None:
         self.items: dict[int, dict] = {}
         self.requests: list[str] = []
+        self.failures: list[int] = []  # the statuses of the next requests, before any answer
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802 - http.server's name
                 fake.requests.append(self.path)
+                if fake.failures:
+                    self.send_response(fake.failures.pop(0))
+                    self.end_headers()
+                    return
                 prefix = f"/repos/{REPO}/issues/"
                 number = self.path.removeprefix(prefix)
                 if self.headers.get("Authorization") != f"Bearer {TOKEN}":
@@ -167,6 +172,28 @@ def test_a_refused_token_is_a_setup_error_not_a_verdict(
         github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     code, out = run(github, tmp_path, "Refs #8", token="wrong", capsys=capsys)
     assert code == 2 and "::error::pr-issues: GET issue #8: HTTP 401" in out
+
+
+def test_a_single_server_error_is_read_again_once_and_the_rule_judges(
+        github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pr_issues, "RETRY_SECONDS", 0)
+    github.issue(8, "work")
+    github.failures = [502]
+    code, out = run(github, tmp_path, "Refs #8", capsys=capsys)
+    assert code == 0 and len(github.requests) == 2
+    assert "::warning::pr-issues: GET issue #8: HTTP 502; reading it once more" in out
+
+
+def test_a_second_server_error_fails_the_check_as_a_setup_error(
+        github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pr_issues, "RETRY_SECONDS", 0)
+    github.issue(8, "work")
+    github.failures = [503, 502]
+    code, out = run(github, tmp_path, "Refs #8", capsys=capsys)
+    assert code == 2 and len(github.requests) == 2
+    assert "::error::pr-issues: GET issue #8: HTTP 502" in out
 
 
 def test_the_check_job_runs_the_rule_on_pull_requests_with_the_actions_token() -> None:
