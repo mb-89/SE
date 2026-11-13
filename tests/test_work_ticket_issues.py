@@ -2819,6 +2819,13 @@ class SessionSteps:
     def __call__(self, tool: str, input_: dict, note: str, wait: str) -> object:
         self.asked.append((tool, input_))
         method = input_.get("method")
+        if tool == "pull_request_read" and method == "get" and input_["pullNumber"] == 7:
+            head = self.github.git("rev-parse", "refs/heads/feature/worker")
+            return {"number": 7, "body": reported_at(head), "html_url": "https://git.example/owner/repo/pull/7",
+                    "head": {"ref": "feature/worker", "sha": head}}
+        if tool == "issue_read" and method == "get" and input_["issue_number"] == 5 and len(self.asked) < 3:
+            return {"number": 5, "title": "feature/worker", "state": "open",
+                    "html_url": "https://git.example/owner/tracker/issues/5", "body": reported_at(self.github.git("rev-parse", "refs/heads/feature/worker"))}
         if tool == "list_issues":
             return {"issues": [], "totalCount": 0}
         if tool == "list_pull_requests":
@@ -2857,7 +2864,7 @@ def test_integrate_runs_its_plan_and_close_out_as_one_call_through_kerns_relay(
     component's Stepped sets it), each GitHub step of its landing plan and close-out is one
     github.step the session answers: no plan is handed off, no answer is retyped into a file, no
     read-back follows, and the landing is read back through git within the same call."""
-    head, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    head, _ = handed_off_worker(main_checkout, monkeypatch, github)
     base = origin_main(main_checkout)
     waits: list[float] = []
     monkeypatch.setattr(work_tickets, "wait", waits.append)
@@ -2868,9 +2875,12 @@ def test_integrate_runs_its_plan_and_close_out_as_one_call_through_kerns_relay(
     se_relay = work_tickets.sibling("se_relay")
 
     with se_relay.stepping(session):
-        assert run(main_checkout, *arguments) == 0
+        assert run(main_checkout, "integrate", "7") == 0  # no file: the reads are steps too
 
     tools = [(tool, input_.get("method")) for tool, input_ in session.asked]
+    assert tools[:2] == [("pull_request_read", "get"), ("issue_read", "get")]  # PR #7, issue #5
+    session.asked = session.asked[2:]
+    tools = tools[2:]
     assert tools == [
         ("list_issues", None),  # the pause search on the tracker
         ("list_pull_requests", None), ("create_pull_request", None),

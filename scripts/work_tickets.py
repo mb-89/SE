@@ -5907,6 +5907,8 @@ def integrate(
         )
     feedback.phase(f"read pull request #{pull_number} and its field report")
     relay = relay_for(root) if handing_off and pr_description is None else None
+    if handing_off and pr_description is None and (stepped := relay_door(root, remote)):
+        relay = StepReads(root, stepped)  # one call through kern: the reads are steps too
     if handing_off and relay is not None:
         pull, report, work_issue, work_number = relay_pull_request(relay, root, pull_number, remote)
     elif handing_off:
@@ -6440,6 +6442,25 @@ class RelayDoor(Workflows):
         if isinstance(data, dict):
             return str(data.get("logs_content") or data.get("content") or data.get("logs") or "")
         return str(data or "")
+
+
+class StepReads:
+    """kern relay's reads (se_relay.Relay.answer_file) asked as github.step through the relay
+    door, where a command runs as one call: the tool's answer is written to the file a command
+    reads, no snapshot needed beforehand."""
+
+    def __init__(self, root: Path, door: RelayDoor) -> None:
+        self.root, self.door = root, door
+
+    def answer_file(self, family: str, owner: str, repo: str, number: int, what: str) -> Path:
+        relay = sibling("se_relay")
+        tool, method, number_arg = relay.FAMILIES[family]
+        data = self.door.step(tool, {"method": method, "owner": owner, "repo": repo,
+                                     number_arg: number}, f"read the {what}", "")
+        path = self.root / relay.ANSWERS / f"{family}-{relay.key(owner, repo, number)}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        return path
 
 
 def relay_door(root: Path, repo: str) -> RelayDoor | None:
