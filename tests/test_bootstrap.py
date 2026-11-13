@@ -13,6 +13,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "bootstrap.sh"
+KERN_VERSION = tomllib.loads((ROOT / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
+KERN_BASE = f"https://github.com/mb-89/SE/releases/download/kern-v{KERN_VERSION}"
 TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch", "uname", "tail", "tar",
          "gzip", "sha256sum", "setsid", "mv", "rm")
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bootstrap.sh runs in bash")
@@ -22,6 +24,7 @@ pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bootstrap.
 FAKE_UV = """#!/bin/sh
 echo "uv $*" >> "$HOME/calls"
 case "$*" in *se_start.py*) [ -f "$HOME/status-fails" ] && exit 1; echo '{"greeting": 1}'; exit 0 ;; esac
+case "$*" in *"se_modules.py --root "*" kern-pin"*) cat "$HOME/kern-pin" 2>/dev/null; exit 0 ;; esac
 case "$1 $2" in
   "python find") [ -f "$HOME/python" ] ;;
   "python install") touch "$HOME/python" ;;
@@ -79,6 +82,7 @@ def machine(tmp_path):
     project = tmp_path / "project"
     home.mkdir()
     project.mkdir()
+    (home / "kern-pin").write_text(f"{KERN_VERSION} {KERN_BASE}\n", encoding="utf-8")  # se_modules.py kern-pin
     (project / "se.toml").write_text('[modules.obs]\nurl = "https://example.com/obs.git"\nref = "%s"\n' % ("0" * 40),
                                      encoding="utf-8")
     return home, project, tmp_path
@@ -165,8 +169,6 @@ def test_the_hook_falls_back_to_plain_lines_when_the_greeting_cannot_run(machine
     assert failing.stdout.startswith("se bootstrap: installing uv into ")
 
 
-KERN_VERSION = tomllib.loads((ROOT / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
-KERN_BASE = f"https://github.com/mb-89/SE/releases/download/kern-v{KERN_VERSION}"
 PLATFORM = {"Linux": "linux", "Darwin": "darwin"}.get(platform.system(), "") + "-" + {
     "x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower(), "")
 # A fake kern: logs each call with its stdin; `start` fails while $HOME/kern-fails exists.
@@ -230,7 +232,10 @@ def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(
     log = [line for line in calls(home) if line.startswith("kern ")]
     assert log == [f"kern start --root {project}", f"kern hook SessionStart --root {project} <<{START}"]
     assert greeting_call(home).endswith(f"--kern-bin {kern_bin(home)}")
-    assert not any(line.startswith("curl") for line in log), "a kern already here needs no network"
+    assert not any(line.startswith("curl") for line in calls(home)), "a kern already here needs no network"
+    assert f"uv run --no-project --python >=3.11 python {SCRIPT.parent}/se_modules.py --root {ROOT} kern-pin" in calls(home)
+    # Every later hook finds the binary where the start named it (scripts/se_hook.sh).
+    assert (project / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8") == f"{kern_bin(home)}\n"
 
 
 def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
@@ -319,3 +324,14 @@ def test_bootstrap_outside_a_session_leaves_kern_alone(machine):
     (home / "calls").unlink()
     assert run(home, path, project).returncode == 0
     assert not any("kern" in line for line in calls(home))
+
+
+def test_without_a_pin_kern_is_left_alone(machine):
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    (home / "kern-pin").unlink()  # se_modules.py kern-pin answers nothing
+    (home / "calls").unlink()
+    assert run(home, path, project, "--hook", stdin=START).returncode == 0
+    assert "--kern" not in greeting_call(home)
+    assert not any(line.startswith(("curl", "kern ")) for line in calls(home))
