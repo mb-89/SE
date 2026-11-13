@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "kern" / "python"))
 
+import review  # noqa: E402
 import se_components  # noqa: E402
 import work_tickets  # noqa: E402
 from kern import KernError, runner  # noqa: E402
@@ -26,7 +27,7 @@ GROUPS = se_components.component_names()
 def test_every_command_is_declared_once_and_the_wiring_places_every_group() -> None:
     declared = [name for d in se_components.catalog(ROOT, GROUPS) for name in d.commands]
     leaves = [" ".join(("work_tickets.py", *words)) for words, _ in work_tickets.leaf_commands()]
-    assert sorted(declared) == sorted(leaves)
+    assert sorted(declared) == sorted(leaves + ["review.py brief", "review.py file"])
     wiring = (ROOT / "wiring.toml").read_text(encoding="utf-8")
     for group in GROUPS:
         assert f'[instances.{group}]\ncomponent = "{group}"\n' in wiring
@@ -99,6 +100,12 @@ def test_each_group_answers_its_commands_with_the_scripts_code(components, tmp_p
     assert components["integration"].run("work_tickets.py docs", "--check") == (
         "README.md: the command reference is up to date")
 
+    # review: review.py's own code, its refusal of a report that does not exist.
+    with pytest.raises(KernError, match=r"\Aexit code 1\n") as refused:
+        components["review"].run("review.py file", cwd, "5", "--report", "missing.json",
+                                 "--repo", "github.com/alice/example")
+    assert "review.py: " in json.loads(str(refused.value).split("\n", 1)[1])["stderr"]
+
 
 def test_a_component_refuses_a_command_its_script_does_not_run(tmp_path) -> None:
     folder = tmp_path / "stray"
@@ -138,6 +145,8 @@ def test_a_command_runs_directly_where_kern_does_not_serve_it(tmp_path, monkeypa
     assert se_components.routed(script, ["status"], [], True) is None
     monkeypatch.setenv(se_components.SWITCH, "on")
     assert se_components.routed(script, ["status"], [], True) == 1
+    # review.py runs directly too, and its commands are batch: never routed.
+    assert se_components.routed(ROOT / "scripts" / "review.py", ["brief"], [], False) is None
     # A command that writes is never routed; SE_KERN=off routes nothing.
     assert se_components.routed(script, ["init"], [], False) is None
     monkeypatch.setenv(se_components.SWITCH, "off")

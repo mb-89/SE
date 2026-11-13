@@ -15,3 +15,7 @@ command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts
 [instances.integration]
 component = "integration"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "integration"]
+
+[instances.review]
+component = "review"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "review"]

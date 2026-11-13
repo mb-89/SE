@@ -63,7 +63,7 @@ CONNECT_WAIT = 0.5
 REFERENCE_WIDTH = 100
 #: The scripts whose commands are components, in the README's order: each defines make_parser,
 #: COMPONENTS and INTERACTIVE_COMMANDS.
-SCRIPTS = ("work_tickets",)
+SCRIPTS = ("work_tickets", "review")
 #: Who writes the declarations (work_tickets.py's `docs` and `format`).
 GENERATOR = "`work_tickets.py docs`"
 EXIT_ERROR = re.compile(r"\Aexit code (\d+)\n?")

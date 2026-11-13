@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-GROUPS = ["delivery", "integration", "issues", "tickets"]
+GROUPS = ["delivery", "integration", "issues", "review", "tickets"]
 
 
 def run(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
