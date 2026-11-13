@@ -869,14 +869,15 @@ def refresh(se_root: Path, root: Path | None, local_config: Path | None, cache_p
 
 
 def _development(se_root: Path) -> bool:
-    """A checkout someone works in: local changes, or commits on its branch its upstream lacks."""
+    """A checkout someone works in: local changes, a branch other than main, or commits that no
+    remote branch and no tag holds. A clone a refresh moved to a tag is none of these."""
     if se_modules.is_dirty(se_root):
         return True
-    if _git(se_root, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD":
-        return False
-    ahead = subprocess.run(["git", "-C", str(se_root), "rev-list", "--count", "@{upstream}..HEAD"],
-                           capture_output=True, text=True, check=False)
-    return ahead.returncode == 0 and ahead.stdout.strip() not in ("", "0")
+    if _git(se_root, "rev-parse", "--abbrev-ref", "HEAD") not in ("HEAD", se_modules.TRACKED_BRANCH):
+        return True
+    own = subprocess.run(["git", "-C", str(se_root), "rev-list", "--count", "HEAD", "--not", "--remotes", "--tags"],
+                         capture_output=True, text=True, check=False)
+    return own.returncode != 0 or own.stdout.strip() != "0"
 
 
 def start_refresh(se_root: Path, root: Path | None, local_config: Path | None,

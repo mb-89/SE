@@ -591,6 +591,10 @@ def test_start_refresh_moves_se_to_the_latest_release_of_its_major(repos):
     assert se_modules.checkout_version(repos["se"]) == (1, 1, 0)
     assert se_modules.read_lock(repos["project"])["lib"][0] == "1.0.0", "the modules wait for refresh"
     assert se_start.start_refresh(repos["se"], repos["project"], repos["config"]) == ("", False)
+    # Moved to the tag, the clone is ahead of its stale origin/main, and still moves at a later start.
+    release(repos["upstream"], "1.2.0", says="1.2.0")
+    line, moved = se_start.start_refresh(repos["se"], repos["project"], repos["config"])
+    assert moved and line.startswith("SE: 1.1.0 -> 1.2.0, refreshed at this start"), line
 
 
 def test_start_refresh_fails_open_with_one_line(repos):
@@ -614,6 +618,9 @@ def test_start_refresh_leaves_a_development_checkout_and_the_sessions_own_tree(r
     assert se_start.start_refresh(repos["se"], repos["project"], repos["config"]) == ("", False)  # changes
     git(repos["se"], "commit", "-q", "-m", "mine")
     assert se_start.start_refresh(repos["se"], repos["project"], repos["config"]) == ("", False)  # own commit
+    git(repos["se"], "reset", "-q", "--hard", "v1.0.0")
+    git(repos["se"], "checkout", "-q", "-b", "feature")
+    assert se_start.start_refresh(repos["se"], repos["project"], repos["config"]) == ("", False)  # its branch
     assert se_modules.checkout_version(repos["se"]) == (1, 0, 0)
 
 
