@@ -7,7 +7,7 @@
 #   uv       installed into the user's home (~/.local/bin) from astral.sh when missing
 #   Python   3.11 or newer, installed by uv into the user's home when missing
 #   modules  the current project's se.toml modules, synced by se_modules.py
-#   kern     in --hook mode: the core SE pins (kern/release.toml), fetched for this platform into
+#   kern     in --hook mode: the core SE pins (se_modules.py kern-pin), fetched for this platform into
 #            ~/.se/bin/kern-<version> in the background (or built from kern/ where no release
 #            matches), started detached for the project, and handed the session's start
 # Exit code 0 when everything is in place, 1 when a step needs the person: the line on stdout says
@@ -57,13 +57,6 @@ need() {
 }
 
 # kern (README "Kern"): only for a session, in --hook mode.
-kern_value() { # the value of `<key> = "..."` in kern/release.toml
-  local line value=""
-  while IFS= read -r line; do
-    case $line in "$1 = \""*) value="${line#"$1" = \"}" && value="${value%%\"*}" ;; esac
-  done 2>/dev/null <"$se_root/kern/release.toml"
-  printf '%s' "$value"
-}
 kern_platform() { # <os>-<arch> as kern's release names them, or nothing
   local os arch
   case "$(uname -s 2>/dev/null)" in
@@ -93,15 +86,19 @@ kern_background() { # <mode> <bin> <args>...
   ${detach[@]+"${detach[@]}"} bash "$se_root/scripts/bootstrap.sh" "$@" </dev/null >/dev/null 2>&1 &
 }
 kern_step() {
-  local version base platform exe=kern asset bin sums cause start
-  version="$(kern_value version)"
-  base="$(kern_value download)"
-  [ -n "$version" ] || return 0
-  base="${base//\{version\}/$version}"
+  local pin version base platform exe=kern asset bin sums cause start
+  # The pin's one reader is se_modules.py (kern_pin): "<version> <download base>".
+  pin="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" \
+    --root "$se_root" kern-pin 2>/dev/null)" || return 0
+  version="${pin%% *}"
+  base="${pin#* }"
+  [ -n "$version" ] && [ "$base" != "$pin" ] || return 0
   platform="$(kern_platform)"
   case "$platform" in windows-*) exe=kern.exe ;; esac
   bin="$HOME/.se/bin/kern-$version${exe#kern}"
   mkdir -p "$HOME/.se/bin" "$project/.se/.runtime" 2>/dev/null
+  # Where every later hook finds the binary (scripts/se_hook.sh), once it is in place.
+  printf '%s\n' "$bin" >"$project/.se/.runtime/kern.path"
   start="$project/.se/.runtime/kern-session-start.json"
   printf '%s' "$payload" >"$start"
   if [ -x "$bin" ]; then
