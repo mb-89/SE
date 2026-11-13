@@ -557,6 +557,94 @@ def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_req
     assert pushed == ["rewrite-prose"] and unlisted in posted[0]
 
 
+GUIDE = "First line.\nMiddle line one.\nMiddle line two.\nLast line.\n"
+
+
+def behind_main_repository(case: Path, main_text: str, branch_text: str) -> tuple[Path, Path]:
+    """A clone on the branch `behind-main` that wrote docs/guide.md (first `GUIDE`) as
+    `branch_text`, while main on origin has since landed it as `main_text`; its field report names
+    the first line as removed."""
+    case.mkdir()
+    origin = case / "origin.git"
+    quiet_git.init(origin, "--bare", "-b", "main")
+    repository, guide = authored_repository(
+        case / "clone", "behind-main", GUIDE,
+    )
+    assert git(repository, "remote", "add", "origin", str(origin)).returncode == 0
+    assert git(repository, "push", "-q", "origin", "main").returncode == 0
+    guide.write_text(branch_text, encoding="utf-8")
+    assert git(repository, "commit", "-qam", "branch change").returncode == 0
+    landed = case / "landed"
+    quiet_git.clone(origin, landed)
+    assert git(landed, "config", "user.name", "Guard test").returncode == 0
+    assert git(landed, "config", "user.email", "guard-test@example.invalid").returncode == 0
+    (landed / "docs" / "guide.md").write_text(main_text, encoding="utf-8")
+    assert git(landed, "commit", "-qam", "another landing").returncode == 0
+    assert git(landed, "push", "-q", "origin", "main").returncode == 0
+    report = repository / ".se" / "work" / "field-report.md"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        "<!-- se:field-report -->\n**Work issue:** #1\n## Removed behaviour, deleted or weakened "
+        "tests, and authored prose\n\n- `docs/guide.md: First line.`\n<!-- se:field-report:end -->\n",
+        encoding="utf-8",
+    )
+    return repository, landed
+
+
+def stub_delivery_outside_git(monkeypatch: pytest.MonkeyPatch, pushed: list[str]) -> None:
+    """deliver's GitHub side and its template gate stubbed out; its git side stays real."""
+    issue = {"number": 1, "title": "behind-main", "url": "https://git.example/o/r/issues/1",
+             "body": "## Acceptance\n\n- [ ] A test.\n"}
+    monkeypatch.setattr(work_tickets, "required_snapshot", lambda root: issue)
+    monkeypatch.setattr(work_tickets, "check_issue_read", lambda *args: None)
+    monkeypatch.setattr(work_tickets, "field_report_problems", lambda report, body: [])
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/o/r")
+    monkeypatch.setattr(work_tickets, "push", lambda root, branch: pushed.append(
+        git(root, "rev-parse", "HEAD").stdout.strip()))
+    monkeypatch.setattr(work_tickets, "open_pull_request_number", lambda *args: None)
+    monkeypatch.setattr(work_tickets, "run_gh_with_body",
+                        lambda root, arguments, body: "https://git.example/o/r/pull/9")
+
+
+def test_deliver_merges_current_main_first_so_a_stale_branch_passes_the_guard(
+    worktree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    repository, landed = behind_main_repository(
+        worktree.parent / "behind-main-case",
+        GUIDE.replace("Last line.", "Last line, as main landed it."),
+        GUIDE.replace("First line.", "First, reworded."),
+    )
+    pushed: list[str] = []
+    stub_delivery_outside_git(monkeypatch, pushed)
+    main_head = git(landed, "rev-parse", "HEAD").stdout.strip()
+
+    assert work_tickets.deliver(repository) == 9
+    assert len(pushed) == 1
+    assert git(repository, "merge-base", "--is-ancestor", main_head, pushed[0]).returncode == 0
+    assert "Merged origin/main" in capsys.readouterr().out
+
+
+def test_deliver_stops_on_a_conflicting_merge_naming_its_files(
+    worktree: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, _ = behind_main_repository(
+        worktree.parent / "conflict-case",
+        GUIDE.replace("First line.", "First, as main landed it."),
+        GUIDE.replace("First line.", "First, as the branch wrote it."),
+    )
+    pushed: list[str] = []
+    stub_delivery_outside_git(monkeypatch, pushed)
+    tip = git(repository, "rev-parse", "HEAD").stdout.strip()
+
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.deliver(repository)
+    message = str(refused.value)
+    assert "docs/guide.md" in message and "work_tickets.py sync" in message
+    assert pushed == []
+    assert git(repository, "rev-parse", "HEAD").stdout.strip() == tip
+    assert git(repository, "status", "--porcelain", "--untracked-files=no").stdout == ""
+
+
 def test_queue_lifecycle_requires_checklist_and_evidence(worktree: Path) -> None:
     initialize(worktree)
     initialize(worktree)
