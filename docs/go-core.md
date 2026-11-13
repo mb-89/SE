@@ -468,6 +468,18 @@ it. The move is one work issue, once the repository exists:
 `go.mod` also requires it; `se_modules.py` reads the version from `go.mod` where the module says
 `go = true`, so the pin has one owner.
 
+While kern is incubated, SE pins it by `kern/release.toml`'s `version`, which
+`se_modules.kern_pin` reads; `[modules.kern]` replaces it with the move. Every session hook runs
+`scripts/se_hook.sh <event>`, which execs that kern: bash builtins up to one exec, not Python,
+whose interpreter start alone costs about twice kern's whole hook, and through `uv` six to ten
+times (README [Kern](../README.md#kern) owns the measurements).
+
+**When kern is released.** A push to `main` that changes `release.toml`'s `version` cuts the
+release ([kern/README.md "Release"](../kern/README.md#release)); nothing else does. A change under
+`kern/`, its template's included, reaches sessions and new applications (`se new app` takes the
+template at the pin) only with the next release, so the pull request that needs it out bumps
+`version`.
+
 ### Switching components on and off
 
 The application's `wiring.toml` names its instances; a shared component runs only where an

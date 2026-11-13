@@ -1152,7 +1152,8 @@ def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> 
     steps = ["public_check.py --rev", "scripts/se_plugin.py check", "scripts/work_tickets.py docs --check",
              "scripts/work_tickets.py field-report --check", "scripts/work_tickets.py suite --worktree ."]
     assert [workflow.index(step) for step in steps] == sorted(workflow.index(step) for step in steps)
-    assert "pytest" not in workflow, "the suite runs through work_tickets.py suite, within its budget"
+    check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", workflow)[1]
+    assert "pytest" not in check, "the suite runs through work_tickets.py suite, within its budget"
 
 
 def field_report_script() -> str:

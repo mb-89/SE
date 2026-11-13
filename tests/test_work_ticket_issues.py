@@ -2894,6 +2894,34 @@ def test_integrate_read_back_checks_the_landing_through_git_and_hands_off_the_cl
     assert github.calls == []
 
 
+def test_integrate_read_back_names_commits_pushed_after_the_landing_and_closes_nothing(
+        main_checkout, monkeypatch, github, capsys):
+    """A worker pushes after integrate read its branch: the squash merge lands the tested tip,
+    and the read-back names each commit origin's branch holds beyond it and closes nothing, so
+    the late commit is never left out silently."""
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    worker = main_checkout.parent / "worker"
+    (worker / "worker.txt").write_text("late\n", encoding="utf-8")
+    git_ok("-C", str(worker), "commit", "-qam", "Pushed after the report")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    late = subprocess.run(["git", "-C", str(worker), "rev-parse", "--short=7", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    commit = session_squash(main_checkout, "refs/heads/land/feature/worker")
+    capsys.readouterr()
+
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 1
+
+    captured = capsys.readouterr()
+    assert squashed_onto_origin(main_checkout, commit)
+    assert (f"Branch feature/worker on origin has 1 commit(s) the landing {commit[:12]} did not "
+            f"take:\n- {late} Pushed after the report\n") in captured.err
+    assert "integrate 7 again" in captured.err and "nothing was closed" in captured.err
+    assert "GitHub plan: close out #5" not in captured.out
+    assert worker.is_dir()  # the worktree and the branch stay for the re-integration
+    assert (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()
+
+
 @pytest.mark.parametrize("landing, message", [
     (None, "is still .*the squash merge has not landed"),
     ("other tree", "its tree is not the tree of"),
@@ -3473,10 +3501,29 @@ def test_a_failing_setup_beside_refuses_and_its_suite_does_not_run(worktree, mon
      r"target_seconds must not exceed limit_seconds"),
     ('[tests.beside]\nkern = ["go"]\n', r"must hold one table per suite"),
 ])
-def test_suite_budget_refuses_a_malformed_suite_beside(worktree, table, refusal):
+def test_suite_budget_refuses_a_malformed_suite_beside(worktree, monkeypatch, table, refusal):
+    monkeypatch.setattr(work_tickets, "suite_is_reference", lambda: True)  # CI's check
     (worktree / "se.toml").write_text(f'[tests]\ncommand = ["pytest"]\n{table}', encoding="utf-8")
     with pytest.raises(work_tickets.QueueError, match=refusal):
         work_tickets.suite_budget(worktree)
+
+
+def test_a_key_these_scripts_do_not_know_beside_warns_off_ci_and_the_suite_runs(
+        worktree, monkeypatch, capsys):
+    """A branch that adds a key to [tests.beside.<name>] and uses it lands in one integration:
+    integrate runs the integration branch's scripts, which do not know the key yet, so off CI it
+    warns and is ignored; CI's check runs the merged tree's scripts and refuses a key they lack."""
+    beside_suite(worktree, monkeypatch, [5.0, 2.0])
+    with (worktree / "se.toml").open("a", encoding="utf-8") as config:
+        config.write('warm = ["go", "build"]\n')
+
+    assert run(worktree, "suite") == 0
+    captured = capsys.readouterr()
+    assert ("warning: [tests.beside.kern] in " in captured.err
+            and "se.toml: no key warm, which these scripts do not know; ignored here. CI's check "
+                "runs the merged tree's scripts and refuses a key they do not know either"
+            in captured.err)
+    assert "kern passed in 2.0 s" in captured.out
 
 
 def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budget():

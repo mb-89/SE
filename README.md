@@ -176,6 +176,7 @@ kern and post every session event to it:
 | a hook through `se_hook.sh`, no core running | 8.8 to 11.3 ms |
 | a hook through `se_hook.sh`, no binary named | 4.2 to 5.5 ms |
 | `kern hook` alone, no core running; the core running | 6.0 to 6.6 ms; 7.0 to 7.8 ms |
+| for comparison, a Python start that does nothing: `python3 -c pass`; `uv run --no-project python -c pass` | 13 to 19 ms; 39 to 72 ms |
 
 ### Commands as components
 
@@ -368,6 +369,9 @@ does all of it:
    integration branch moved while it waited, it merges nothing: integrate again.
 5. It reads the merge back: the pull request merged at that commit, which is origin's integration
    branch, on the base it tested and with the tree its checks passed.
+   - Where origin's work branch holds commits the landing did not take, pushed after step 1 read
+     it, it names each and closes nothing: the worker updates its report, and `integrate` lands
+     them again, as a re-integration.
 6. It closes the work pull request with a line naming the landing one, closes the work issue and
    cleans up.
 
@@ -562,6 +566,9 @@ limit_seconds = 60
   - Its `setup`, optional, runs first in the same folder, outside its budget, as the suite's
     does: for a Go suite, `go test -run '^$' ./...` builds every test binary, so a cold build
     (kern's took 35.1 s once on CI) never counts as test time. A failing setup refuses the run, and the suite beside does not run.
+  - A key the running scripts do not know is refused on the reference run (CI's `check`, which
+    runs the merged tree's scripts) and elsewhere warns and is ignored. `integrate` runs the
+    integration branch's scripts, so a branch can add a key and use it in one landing.
 
 The two budgets are apart, and neither spends the other's time:
 

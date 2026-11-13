@@ -41,8 +41,9 @@
     `tests/test_kern.py` for kern's, `tests/test_pr_issues.py` for the issue rule's).
 - kern, the Go core under `kern/`: `cd kern && go vet ./... && go test ./...`. Its tests are
   declared beside the suite, `se.toml` `[tests.beside.kern]`, so the complete suite runs them too;
-  the `check` job vets kern in its own step, and runs its vet and tests on Windows through the job
-  `kern-windows` ([kern/README.md "Tests"](kern/README.md#tests)).
+  the `check` job vets kern in its own step, and runs its vet and tests, with the tests of SE's
+  start and hook scripts, on Windows and macOS through the job `kern-platforms`
+  ([kern/README.md "Tests"](kern/README.md#tests)).
 - SE's Go components under `components/`: `cd components && go vet ./... && go test ./...`, declared
   beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet
   and retro components to the Python paths ([components/README.md](components/README.md#tests)).
