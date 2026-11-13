@@ -23,6 +23,13 @@
 # the hook's JSON (scripts/se_start.py status --hook), carrying the lines said on the way and kern's
 # state. The hook's JSON on stdin is the session's start, which kern is handed.
 set -u
+# uv's deprecated UV_NATIVE_TLS, which cloud environments set, becomes UV_SYSTEM_CERTS for all this
+# runs, the core and the components it places with `uv run` among them: core.log stays free of
+# uv's deprecation notice (as scripts/build_docs.py does for the docs build).
+if [ -n "${UV_NATIVE_TLS:-}" ]; then
+  export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-$UV_NATIVE_TLS}"
+  unset UV_NATIVE_TLS
+fi
 
 # --kern-fetch and --kern-build: the background half of kern's first start of a version (below).
 case "${1:-}" in

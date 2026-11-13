@@ -311,6 +311,25 @@ def test_the_session_finds_se_on_its_path_by_a_stable_name(machine):
     assert os.access(stable, os.X_OK)
 
 
+def test_the_core_starts_without_uvs_deprecated_tls_variable(machine):
+    """core.log holds no deprecation notice of uv's: the core, and every component it places with
+    `uv run`, starts with UV_NATIVE_TLS turned into UV_SYSTEM_CERTS."""
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    kern_bin(home).parent.mkdir(parents=True)
+    kern_bin(home).write_text(FAKE_KERN.replace(
+        'echo "kern $*$input" >> "$HOME/calls"',
+        'echo "kern $*$input native=${UV_NATIVE_TLS-unset} system=${UV_SYSTEM_CERTS-unset}" >> "$HOME/calls"'),
+        encoding="utf-8", newline="\n")
+    kern_bin(home).chmod(0o755)
+    (home / "calls").unlink()
+    env = {"HOME": sh(home), "PATH": sh(path), "CLAUDE_PROJECT_DIR": sh(project), "UV_NATIVE_TLS": "1"}
+    subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, input=START, check=True, capture_output=True,
+                   text=True, timeout=60)
+    assert f"kern start --root {sh(project)} native=unset system=1" in calls(home), calls(home)
+
+
 def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
     home, project, base = machine
     path = fake_bin(base)
