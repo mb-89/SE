@@ -486,7 +486,10 @@ battery starts the bare core, and a `check.yml` that calls the core's reusable `
 
 `se new app <name> --path <dir>` copies the core's `template/` at its pin, fills in the name,
 initializes git with the project identity and makes the first commit. Creating the GitHub
-repository, its ruleset and its first push stay the owner's steps, which SE names as one line. A
+repository, its ruleset and its first push stay the owner's steps, which SE names as one line.
+While kern is incubated, no module `github.com/mb-89/kern` can be fetched, so the application
+carries kern's source at the pin in `kern/` and its `go.mod` replaces the module by it; the move
+drops both (README [New application](../README.md#new-application)). A
 new application then gets components by adding instances, CI from the reusable workflow, and its
 test budget from `se.toml [tests]`, in the same shape as SE's.
 
