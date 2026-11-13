@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
+import shutil
 from pathlib import Path
 
 import pytest
 
+import git_door
 import overhaul
 import quiet_git
 
@@ -99,14 +100,15 @@ Run `uv run python scripts/app.py ship` to ship; `documented` is the library's i
 
 def git(root: Path, *arguments: str, when: str = "2026-01-01T00:00:00Z") -> None:
     environment = {**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
-    subprocess.run(["git", "-C", str(root), "-c", "user.name=alice", "-c", "user.email=alice@example.com",
-                    *arguments], check=True, capture_output=True, env=environment)
+    done = git_door.run("-c", "user.name=alice", "-c", "user.email=alice@example.com", *arguments,
+                        root=root, env=environment)
+    assert done.returncode == 0, done.stderr
 
 
-@pytest.fixture(scope="module")
-def checkout(tmp_path_factory) -> Path:
-    """The fixture checkout, built once: facts only reads it."""
-    root = tmp_path_factory.mktemp("checkout")
+@pytest.fixture
+def checkout(tmp_path: Path, fake_git_door) -> Path:
+    """The fixture checkout, in the fake git."""
+    root = tmp_path / "checkout"
     quiet_git.init(root)
     (root / "se.toml").write_text('[project]\nauthored_content = ["README.md"]\n', encoding="utf-8")
     (root / "scripts").mkdir()
@@ -153,9 +155,7 @@ def test_facts_measure_sizes_lengths_and_the_untouched_and_change_nothing(checko
     assert [(item["what"], item["parameters"]) for item in found["long_parameters"][:2]] == [
         ("used", 3), ("used_again", 3)]
     assert found["untouched"][0] == {"at": "scripts/lib.py", "last": "2026-01-01"}
-    status = subprocess.run(["git", "-C", str(checkout), "status", "--porcelain"], capture_output=True,
-                            text=True, check=True).stdout
-    assert status == ""
+    assert git_door.run("status", "--porcelain", root=checkout).stdout == ""
 
 
 def cpu_seconds() -> float:
@@ -164,12 +164,25 @@ def cpu_seconds() -> float:
     return now.user + now.system + now.children_user + now.children_system
 
 
-def test_facts_on_se_answer_within_the_budget(capsys):
+# What of se facts reads: its code, its tests and its authored content.
+SE_PARTS = ("scripts", "tests", "src", "docs", "README.md", "AGENTS.md", "se.toml")
+
+
+def test_facts_on_se_answer_within_the_budget(capsys, tmp_path: Path, fake_git_door):
     """The promise is facts' own work on SE in 10 s, judged by CPU time: facts reads no network,
     and a loaded runner stretches the wall clock (10.7 s here with 16 busy processes on 4 cores,
-    for 2.5 s of work), not the work."""
+    for 2.5 s of work), not the work. SE's files are committed once in the fake git."""
+    root = tmp_path / "se"
+    quiet_git.init(root)
+    for part in SE_PARTS:
+        if (ROOT / part).is_dir():
+            shutil.copytree(ROOT / part, root / part, ignore=shutil.ignore_patterns("__pycache__"))
+        else:
+            shutil.copy2(ROOT / part, root / part)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "se")
     started = cpu_seconds()
-    found = facts(ROOT, capsys)
+    found = facts(root, capsys)
     assert cpu_seconds() - started < 10
     assert {row["script"] for row in found["sizes"]} >= {"scripts/work_tickets.py"}
 
