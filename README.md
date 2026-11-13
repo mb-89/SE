@@ -472,7 +472,9 @@ limit_seconds = 60
 The two budgets are apart, and neither spends the other's time:
 
 - Each run prints and reports both times, `Suite: <result>; <time> (target, limit); kern passed in
-  <time> (target, limit)`, and the metrics line notes `beside_seconds` beside `suite_seconds`.
+  <time> (target, limit)`, and the metrics line notes `beside_seconds` beside `suite_seconds`;
+  `work_tickets.py metrics` flags a suite beside over its limit as it does the suite
+  ([Metrics](#metrics)).
 - A failing suite beside refuses the run as a failing suite does, with its output. A suite beside
   over its target warns. Over its limit, only the reference run refuses it; elsewhere it warns, as
   it has no CI reading of its own; `over_limit = "warn"` holds for it too.
@@ -759,7 +761,7 @@ work_tickets.py init --worktree WORKTREE
 work_tickets.py create --worktree WORKTREE --id ID --title TITLE [--acceptance ACCEPTANCE]
     create a ticket in todo
 
-work_tickets.py move --worktree WORKTREE --id ID --to {todo,held,done}
+work_tickets.py move --worktree WORKTREE --id ID --to {todo,held,done} [--issue-body FILE]
     move a ticket between states
 
 work_tickets.py status --worktree WORKTREE [--json] [--integration-target INTEGRATION_TARGET]

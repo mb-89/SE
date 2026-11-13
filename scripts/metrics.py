@@ -211,13 +211,20 @@ def _number(line: dict, key: str) -> float:
 
 def overruns(line: dict) -> list[str]:
     """What `line` spent over a budget it declares: its wall time over `budget_seconds`, its
-    suite over `suite_limit_seconds` (se.toml `[tests]`)."""
+    suite over `suite_limit_seconds` (se.toml `[tests]`), and each suite beside over its limit,
+    `beside_seconds` over `beside_limit_seconds` (`[tests.beside.<name>]`)."""
     found = []
     for spent, budget, what in (("wall_seconds", "budget_seconds", "wall time"),
                                 ("suite_seconds", "suite_limit_seconds", "suite")):
         if line.get(budget) is not None and _number(line, spent) > _number(line, budget):
             found.append(f"{what} {_number(line, spent):.1f} s over its budget "
                          f"{_number(line, budget):g} s")
+    spent, limits = line.get("beside_seconds"), line.get("beside_limit_seconds")
+    if isinstance(spent, dict) and isinstance(limits, dict):
+        for name in sorted(spent):
+            if limits.get(name) is not None and _number(spent, name) > _number(limits, name):
+                found.append(f"suite {name} {_number(spent, name):.1f} s over its budget "
+                             f"{_number(limits, name):g} s")
     return found
 
 

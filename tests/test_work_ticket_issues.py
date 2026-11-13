@@ -320,12 +320,53 @@ def test_intake_and_draft_from_the_github_tools_answers_match_the_gh_read(
     expected, found = queue_and_draft(by_gh), queue_and_draft(by_files)
     snapshot = json.loads(expected.pop("issue.json"))
     assert found.pop("issue.json", None) is None
+    # The one file only the cloud path writes: the first hold reads the issue again against it.
+    assert json.loads(found.pop("reread-before-hold.json")) == {"updatedAt": "2026-11-04T10:00:00Z"}
     assert found == expected  # the same tickets, read records, evidence index and draft
     assert "[Discovery evidence index]" in found["draft.md"]
     assert run(by_files, "intake", "--issue-body", str(issue_file),
                "--comments-file", str(comments_file)) == 0
     assert json.loads((by_files / ".se" / "work" / "issue.json").read_text(encoding="utf-8")) \
         == snapshot
+
+
+def test_the_first_hold_after_an_intake_from_files_reads_the_issue_again(tmp_path, gh, capsys):
+    issue_file, comments_file = tool_answers(tmp_path, "tool")
+    worktree = tmp_path / "by-tool"
+    worktree.mkdir()
+    (worktree / "se.toml").write_text(IDENTITY, encoding="utf-8")
+    assert run(worktree, "intake", "--issue-body", str(issue_file),
+               "--comments-file", str(comments_file)) == 0
+    first, second = sorted(path.stem for path in (worktree / ".se" / "work" / "todo").iterdir())[:2]
+    capsys.readouterr()
+
+    assert run(worktree, "move", "--id", first, "--to", "held") == 1
+    assert "read the work issue again with your GitHub tools" in capsys.readouterr().err
+
+    def answer(name: str, **changes: object) -> Path:
+        path = tmp_path / name
+        path.write_text(json.dumps({**json.loads(issue_file.read_text(encoding="utf-8")),
+                                    **changes}), encoding="utf-8")
+        return path
+
+    edited = answer("edited.json", updated_at="2026-11-04T12:00:00Z", body=BODY + "\nEdited.\n")
+    assert run(worktree, "move", "--id", first, "--to", "held", "--issue-body", str(edited)) == 1
+    err = capsys.readouterr().err
+    assert "was updated at 2026-11-04T12:00:00Z, after intake read it (2026-11-04T10:00:00Z)" in err
+    assert "its body changed" in err and "intake --issue-body" in err
+    assert (worktree / ".se" / "work" / "todo" / f"{first}.md").is_file()
+
+    assert run(worktree, "intake", "--issue-body", str(edited),
+               "--comments-file", str(comments_file)) == 0
+    relabelled = answer("relabelled.json", updated_at="2026-11-04T13:00:00Z",
+                        body=BODY + "\nEdited.\n", labels=["work", "in-progress"])
+    capsys.readouterr()
+    assert run(worktree, "move", "--id", first, "--to", "held",
+               "--issue-body", str(relabelled)) == 0
+    out = capsys.readouterr().out
+    assert "updated at 2026-11-04T13:00:00Z, after intake read it; its body is unchanged" in out
+    assert run(worktree, "move", "--id", second, "--to", "held") == 0  # read once, at the first
+    assert gh.calls == []
 
 
 def test_intake_from_files_refuses_unread_comments_and_an_answer_that_is_no_issue(
