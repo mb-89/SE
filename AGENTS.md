@@ -32,7 +32,8 @@
   - A change to Markdown the docs build publishes (`docs.md` and every note it lists) also runs
     `tests/test_docs.py`, whose build fails on obs's lints, a paragraph over five lines among them.
 - kern, the Go core under `kern/`: `cd kern && go vet ./... && go test ./...`, which the `check`
-  job runs in its own steps after the suite ([kern/README.md "Tests"](kern/README.md#tests)).
+  job runs in its own steps after the suite, and on Windows through the job `kern-windows`
+  ([kern/README.md "Tests"](kern/README.md#tests)).
 - Complete: `uv run pytest -q`, declared with its time budget in `se.toml` `[tests]`; `integrate` runs
   it against that budget, and `work_tickets.py suite --worktree <checkout>` runs it the same way.
 - Repository hygiene: `tests/test_repository.py` fails on a tracked binary file, a tracked file over

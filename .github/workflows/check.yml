@@ -1,9 +1,10 @@
 # SE's CI, the one check main's ruleset requires by its name `check` (AGENTS.md "Public safety"):
 # on every pull request and every push to the integration branch, every check the integration runs:
 # the public check's commit gate, the generated layouts, the README's command reference, a pull
-# request's field report and the complete suite within its budget; on a pull request also the
-# work model's issue rule. The job passes only when all pass, so a push or pull request the hooks
-# did not see still fails here.
+# request's field report and the complete suite within its budget, kern's tests on Linux and,
+# through the job kern-windows, on Windows; on a pull request also the work model's issue rule.
+# The job passes only when all pass, so a push or pull request the hooks did not see still fails
+# here.
 name: check
 
 on:
@@ -17,7 +18,28 @@ permissions:
   issues: read
 
 jobs:
+  # kern's contract suite on Windows (kern/README.md "Tests"): the detached start, the standing
+  # file and the stop differ there. `check` needs it and fails unless it passed, so the one
+  # required check covers it; the Python suite and its budget stay on Linux.
+  kern-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: kern/go.mod
+          cache-dependency-path: kern/go.sum
+      - name: kern vets
+        working-directory: kern
+        run: go vet ./...
+      - name: kern's tests pass, its contract suite among them
+        working-directory: kern
+        run: go test ./...
   check:
+    needs: kern-windows
+    # It runs whatever kern-windows answered, and its last step fails unless that passed: a
+    # required check that is skipped would count as passed.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
@@ -109,3 +131,11 @@ jobs:
       - name: kern's tests pass
         working-directory: kern
         run: time go test ./...
+      - name: kern's contract suite passed on Windows
+        env:
+          WINDOWS: ${{ needs.kern-windows.result }}
+        run: |
+          if [ "$WINDOWS" != success ]; then
+            echo "::error::kern-windows answered $WINDOWS: kern's tests on Windows (the job kern-windows of this run) must pass"
+            exit 1
+          fi
