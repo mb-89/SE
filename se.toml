@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.35.1"
+version = "5.35.2"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -27,9 +27,11 @@ command = ["uv", "run", "pytest", "-q"]
 target_seconds = 60
 limit_seconds = 120
 
-# kern's Go tests (kern/README.md "Tests"), run after the suite with their own time and budget:
-# a cold build of kern with NATS compiles in about 19 to 23 s (docs/go-core.md "Measurements").
+# kern's Go tests (kern/README.md "Tests"), run after the suite with their own time and budget.
+# A cold build of kern with NATS compiles in about 19 to 23 s (docs/go-core.md "Measurements"), its
+# test binaries once 35.1 s on CI: setup builds them first, outside the budget, which judges the tests.
 [tests.beside.kern]
+setup = ["go", "test", "-run", "^$", "./..."]
 command = ["go", "test", "./..."]
 directory = "kern"
 target_seconds = 30
