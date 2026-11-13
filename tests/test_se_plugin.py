@@ -136,14 +136,16 @@ def test_the_plugin_manifests_install_the_whole_checkout_and_bootstrap_it(checko
 
 
 def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
+    """README "Stop hook": one hook per stop, se_hook.sh, which kern's delivery component answers
+    and else stop-check as its own process."""
     plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     for event in ("Stop", "SubagentStop"):
         [entry] = plugin["hooks"][event]
-        hook, kern = entry["hooks"]
+        [hook] = entry["hooks"]
         assert hook["type"] == "command"
-        assert '"${CLAUDE_PLUGIN_ROOT}/scripts/work_tickets.py" stop-check' in hook["command"]
-        assert hook["command"].endswith("|| true")  # a hook that cannot run lets the turn end
-        assert kern["command"] == f'bash "${{CLAUDE_PLUGIN_ROOT}}/scripts/se_hook.sh" {event} || true'
+        assert hook["command"] == f'bash "${{CLAUDE_PLUGIN_ROOT}}/scripts/se_hook.sh" {event} || true'
+    fallback = (ROOT / "scripts" / "se_hook.sh").read_text(encoding="utf-8")
+    assert '"$here/work_tickets.py" stop-check' in fallback
 
 
 def test_every_session_event_but_the_start_posts_to_kern_and_fails_open(checkout):

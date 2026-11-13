@@ -1613,6 +1613,7 @@ def stop_checkout(case_root: Path, monkeypatch, *, queue: bool = True) -> Path:
         (root / ".se" / "work").mkdir(parents=True)
         (root / ".se" / "work" / "body-read.json").write_text('{"sha256": "0"}\n', encoding="utf-8")
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: False)
+    monkeypatch.setattr(work_tickets, "_stop_gh_unusable_at", [])
     return root
 
 
@@ -1646,6 +1647,7 @@ def fake_pull_requests(monkeypatch, root: Path, body: str | None) -> list[list[s
         raise AssertionError(arguments)
 
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "_stop_gh_unusable_at", [])
     monkeypatch.setattr(work_tickets, "run_gh", gh)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda _: "git.example/owner/repo")
     return calls
@@ -1752,6 +1754,33 @@ def subagent_transcript(path: Path, prompt: str, *commands: str) -> Path:
                 for command in commands]
     path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
     return path
+
+
+def test_stop_check_judges_the_hook_kern_hands_it_as_the_one_on_stdin(
+        tmp_path, monkeypatch, capsys):
+    root = stop_checkout(tmp_path, monkeypatch)
+    fake_pull_requests(monkeypatch, root, None)
+    payload = {"hook_event_name": "Stop", "cwd": str(root), "stop_hook_active": False}
+    monkeypatch.setattr(sys, "stdin", __import__("io").StringIO(""))
+    assert work_tickets.main(["stop-check", "--hook", json.dumps(payload)]) == 0
+    from_kern = json.loads(capsys.readouterr().out)
+    (root / ".se" / "work" / work_tickets.STOP_COUNT).unlink()
+    assert from_kern == stop_hook(root, monkeypatch, capsys)
+    assert from_kern["decision"] == "block"
+
+
+def test_stop_check_holds_an_unusable_gh_a_while_and_a_usable_one_for_the_process(monkeypatch):
+    asked: list[bool] = []
+    usable = [False]
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: asked.append(True) or usable[0])
+    monkeypatch.setattr(work_tickets, "_stop_gh_unusable_at", [])
+    clock = [1000.0]
+    monkeypatch.setattr(work_tickets.time, "monotonic", lambda: clock[0])
+    assert (work_tickets.stop_gh_usable(), work_tickets.stop_gh_usable()) == (False, False)
+    assert len(asked) == 1
+    usable[0] = True
+    clock[0] += work_tickets.STOP_GH_UNUSABLE_FOR
+    assert work_tickets.stop_gh_usable() and len(asked) == 2
 
 
 def test_stop_check_judges_a_worker_sub_agent_in_the_worktree_its_prompt_names(
