@@ -4,13 +4,13 @@ fake door (gh) or, without gh, from the answer files the session saved from the 
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
 
 import review
 import work_tickets
+import git_door
 import quiet_git
 
 REPO = "github.com/owner/repo"
@@ -21,8 +21,7 @@ RULE_BOOK = "# Rule book\n\n## gen: everything we do\n\n```text\n# not a heading
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True,
-                            check=False)
+    result = git_door.run(*arguments, root=root)
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
 
@@ -37,13 +36,12 @@ def commit(root: Path, path: str, text: str) -> str:
 
 def build_checkout(tmp_path: Path) -> None:
     """A bare origin with main (the rule book) and the delivered branch feat/x, and a reviewer's
-    clone of main only, without hooks."""
+    clone of main only."""
     origin, work, root = tmp_path / "origin.git", tmp_path / "work", tmp_path / "main"
     quiet_git.init(origin, "--bare", "-b", "main")
     quiet_git.clone(origin, work)
     git(work, "config", "user.name", "alice")
     git(work, "config", "user.email", "alice@example.com")
-    git(work, "config", "core.hooksPath", str(tmp_path / "no-hooks"))
     commit(work, review.RULE_BOOK, RULE_BOOK)
     git(work, "push", "-q", "origin", "main")
     git(work, "switch", "-q", "-c", "feat/x")
@@ -53,8 +51,8 @@ def build_checkout(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def checkout(tmp_path: Path, repositories) -> Path:
-    repositories(build_checkout, tmp_path)
+def checkout(tmp_path: Path, fake_git_door) -> Path:
+    build_checkout(tmp_path)
     return tmp_path / "main"
 
 

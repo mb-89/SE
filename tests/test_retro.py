@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,6 +14,7 @@ import retro
 import se_component
 import se_usage
 import work_tickets
+import git_door
 import quiet_git
 
 REPO = "github.com/owner/repo"
@@ -28,20 +28,18 @@ COMMITS = (("Initial", "2026-01-01T00:00:00+00:00"),
 
 
 def git(root: Path, *arguments: str, env: dict[str, str] | None = None) -> str:
-    result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True,
-                            check=False, env=env)
+    result = git_door.run(*arguments, root=root, env=env)
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
 
 
 def build_checkout(tmp_path: Path) -> None:
-    """A bare origin whose main holds COMMITS, and a clone of it, without hooks."""
+    """A bare origin whose main holds COMMITS, and a clone of it."""
     origin, work, root = tmp_path / "origin.git", tmp_path / "work", tmp_path / "main"
     quiet_git.init(origin, "--bare", "-b", "main")
     quiet_git.clone(origin, work)
     git(work, "config", "user.name", "alice")
     git(work, "config", "user.email", "alice@example.com")
-    git(work, "config", "core.hooksPath", str(tmp_path / "no-hooks"))
     for index, (subject, date) in enumerate(COMMITS):
         (work / "file.txt").write_text(f"{index}\n", encoding="utf-8")
         git(work, "add", "-A")
@@ -52,8 +50,8 @@ def build_checkout(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def checkout(tmp_path: Path, repositories) -> Path:
-    repositories(build_checkout, tmp_path)
+def checkout(tmp_path: Path, fake_git_door) -> Path:
+    build_checkout(tmp_path)
     return tmp_path / "main"
 
 
@@ -84,8 +82,7 @@ def commit_doc(checkout: Path, text: str, name: str = "docs/retro-30.md") -> Pat
     doc = checkout / name
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.write_text(text, encoding="utf-8")
-    for setting in (("user.name", "alice"), ("user.email", "alice@example.com"),
-                    ("core.hooksPath", str(checkout.parent / "no-hooks"))):
+    for setting in (("user.name", "alice"), ("user.email", "alice@example.com")):
         git(checkout, "config", *setting)
     git(checkout, "add", name)
     git(checkout, "commit", "-q", "-m", f"Land {name}")
