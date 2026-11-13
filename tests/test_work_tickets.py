@@ -2077,7 +2077,7 @@ BUDGET_SUITE = 'print("0.20s call     tests/test_fast.py::test_quick")\nprint("3
 def budget_suite(root: Path, monkeypatch, seconds: float, ci: float | None,
                  extra: str = "") -> list[int]:
     """A suite in se.toml `[tests]` (limit 120 s, plus the `extra` lines) that a fake clock times
-    at `seconds`, and CI's last suite time on main faked as `ci` (None: unknown); returns a list
+    at `seconds`, and CI's suite time on main faked as `ci` (None: unknown); returns a list
     that counts CI reads."""
     (root / "suite.py").write_text(BUDGET_SUITE, encoding="utf-8")
     (root / "se.toml").write_text(
@@ -2108,7 +2108,7 @@ def test_a_slow_local_suite_with_a_fast_ci_time_passes_with_a_warning_and_notes_
     captured = capsys.readouterr()
     assert "warning: the complete suite took 130.0 s here (" in captured.err
     assert re.search(r"here \((load [\d./]+ \(1/5/15 min\) on|\d+ CPUs, load average)", captured.err)
-    assert "CI's last suite time on main is 45.0 s (commit aaaaaaaaaaaa" in captured.err
+    assert "CI's suite time on main is 45.0 s, from its last run (commit aaaaaaaaaaaa" in captured.err
     assert "CI's check on the landing pull request judges the budget" in captured.err
     assert "Suite: 3 passed; 130.0 s (target 60 s, limit 120 s)" in captured.out
     line, = metrics_lines(path)
@@ -2126,10 +2126,10 @@ def test_a_local_overrun_with_ci_close_to_the_limit_or_unknown_refuses(
     assert "Complete suite passed (3 passed) but took 130.0 s here (" in error
     assert "over its limit of 120 s" in error and "test_quick" in error
     if ci is None:
-        assert "CI's last suite time is unknown: no completed check run" in error
+        assert "CI's suite time is unknown: no completed check run" in error
         assert "so this run decides" in error
     else:
-        assert f"CI's last suite time on main is {ci:.1f} s" in error
+        assert f"CI's suite time on main is {ci:.1f} s" in error
         assert "within 10% of the limit" in error
 
 
@@ -2306,9 +2306,47 @@ def test_ci_suite_time_reads_the_notice_of_the_newest_completed_check_on_main(
 
     found, reason = work_tickets.ci_suite_time(root)
 
-    assert (found, reason) == (work_tickets.CiSuiteTime(48.5, parent, "https://github.com/run/7"), "")
+    assert (found, reason) == (
+        work_tickets.CiSuiteTime(48.5, parent, "https://github.com/run/7", (48.5,)), "")
     assert paths == [f"commits/{tip}/check-runs?check_name=check",
                      f"commits/{parent}/check-runs?check_name=check", "check-runs/7/annotations"]
     notes[7] = []
     assert work_tickets.ci_suite_time(root) == (None, (
         "no completed check run on the last 2 commits of origin/main reports a suite time"))
+
+
+def test_ci_suite_time_is_the_median_of_the_last_runs_so_one_slow_runner_does_not_count(
+        tmp_path, monkeypatch):
+    root = quiet_git.init(tmp_path / "repo", "-b", "main")
+    for name in ("one", "two", "three", "four"):
+        subprocess.run(["git", "-C", str(root), "-c", "user.name=a", "-c", "user.email=a@example.com",
+                        "commit", "-q", "--allow-empty", "-m", name], check=True)
+    subprocess.run(["git", "-C", str(root), "remote", "add", "origin",
+                    "https://github.com/example/repo.git"], check=True)
+    subprocess.run(["git", "-C", str(root), "update-ref", "refs/remotes/origin/main", "HEAD"],
+                   check=True)
+    commits = subprocess.run(["git", "-C", str(root), "rev-list", "HEAD"], capture_output=True,
+                             text=True, check=True).stdout.split()
+    times = dict(zip(commits, [35.7, 39.2, 72.4, 30.0]))  # newest first; the oldest is not read
+    paths: list[str] = []
+
+    def github_read(repo, path):
+        paths.append(path)
+        if path.startswith("commits/"):
+            commit = path.split("/")[1]
+            return {"check_runs": [{"id": commits.index(commit), "status": "completed",
+                                    "html_url": f"https://github.com/run/{commit[:4]}"}]}
+        seconds = times[commits[int(path.split("/")[1])]]
+        return [{"title": "se suite time", "message": f"Suite time: {seconds} s (limit 120 s)"}]
+
+    monkeypatch.setattr(work_tickets, "github_read", github_read)
+
+    found, reason = work_tickets.ci_suite_time(root)
+
+    assert reason == ""
+    assert found == work_tickets.CiSuiteTime(
+        39.2, commits[1], f"https://github.com/run/{commits[1][:4]}", (35.7, 39.2, 72.4))
+    assert not any(commits[3] in path for path in paths)  # three runs read, no more requests
+    assert work_tickets.ci_suite_text(found, "main") == (
+        f"CI's suite time on main is 39.2 s, the median of its last 3 runs (35.7, 39.2, 72.4 s; "
+        f"median commit {commits[1][:12]}, https://github.com/run/{commits[1][:4]})")

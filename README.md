@@ -504,9 +504,12 @@ jobs:
   of skipping it.
 
 Every other run (`integrate`, a worker's `suite`) runs the complete suite too. Over the limit it
-reads CI's last suite time on the integration branch, from the `check` runs of its last five
-first-parent commits, through github.com's API without an account (so `suite` needs no `gh`; a
-private repository's time reads as unknown).
+reads CI's suite time on the integration branch through github.com's API without an account (so
+`suite` needs no `gh`; a private repository's time reads as unknown).
+
+The time it reads is the median of the last three `check` runs that report one, the newest on
+each of the last five first-parent commits, so one slow runner does not count; the run names the
+times it took the median of.
 
 - Under 90% of the limit: it warns with the time, the host's load and CI's time, and passes; the
   landing pull request's `check` judges the budget.
@@ -581,8 +584,9 @@ GitHub's limits can be named instead of guessed. `scripts/metrics.py` owns the l
 - GitHub through the door: `gh_calls` (every `gh` call and every push attempt), `gh_refusals` (a
   call GitHub refused for its rate limit, a push it refused transiently) and `gh_wait_seconds`
   (the waits on GitHub: a push retry, a poll of `check` or of a workflow run).
-- CI's last suite time on the integration branch, `ci_suite_seconds`, where it was read
-  ([Test budget](#test-budget)); `integrate` always reads it, so its line holds both times.
+- CI's suite time on the integration branch, `ci_suite_seconds`, the median of its last runs,
+  where it was read ([Test budget](#test-budget)); `integrate` always reads it, so its line holds
+  both times.
 - What a command notes itself: the suite's `suite_seconds` and its `suite_limit_seconds` (`[tests]`
   `limit_seconds`) from `suite` and `integrate`, the `issue` `integrate` landed, and
   `budget_seconds` from an interactive command, its budget from
