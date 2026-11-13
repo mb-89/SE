@@ -332,10 +332,10 @@ def test_retro_starts_the_window_where_that_retro_closed(checkout):
     assert found.previous == {"retro": 4, "sizes": {"closed": 2}, "findings": []}
     with pytest.raises(work_tickets.QueueError, match="--retro 11: #11 is no closed retro issue"):
         collected(checkout, given, retro=11)
-    parsed = retro.parser().parse_args(["collect", "30", "--retro", "4"])
+    parsed = retro.make_parser().parse_args(["collect", "30", "--retro", "4"])
     assert (parsed.since_retro, parsed.since) == (4, None)
     with pytest.raises(SystemExit):
-        retro.parser().parse_args(["collect", "30", "--retro", "4", "--since", "2026-11-01"])
+        retro.make_parser().parse_args(["collect", "30", "--retro", "4", "--since", "2026-11-01"])
 
 
 def test_the_landed_count_is_the_collects_and_reads_only_the_lists(checkout):
@@ -562,7 +562,7 @@ def test_file_refuses_an_incomplete_judgment_and_writes_nothing(checkout, tmp_pa
     draft.write_text(judged_draft(checkout, **changes), encoding="utf-8")
 
     with pytest.raises(work_tickets.QueueError) as raised:
-        retro.run_file(retro.parser().parse_args(["file", "30", "--draft", str(draft), "--repo",
+        retro.run_file(retro.make_parser().parse_args(["file", "30", "--draft", str(draft), "--repo",
                                                   REPO, "--worktree", str(checkout)]))
     assert "The judgment of retro #30 is not complete, so nothing was written" in str(raised.value)
     assert refusal in str(raised.value)
@@ -693,7 +693,7 @@ def test_file_refuses_a_draft_main_does_not_hold_and_writes_nothing(checkout, tm
         refusal = "does not hold the draft docs/retro-30.md as it stands"
 
     with pytest.raises(work_tickets.QueueError, match=refusal):
-        retro.run_file(retro.parser().parse_args(["file", "30", "--draft", str(draft), "--repo",
+        retro.run_file(retro.make_parser().parse_args(["file", "30", "--draft", str(draft), "--repo",
                                                   REPO, "--worktree", str(checkout)]))
     assert writes == []
 
