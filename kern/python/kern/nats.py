@@ -21,6 +21,9 @@ from urllib.parse import urlparse
 
 from .subjects import inbox
 
+#: Where a caller gives up a call it asked (the core's AbandonSubject), and how long it waits there.
+ABANDON, ABANDON_WAIT = "call.core.abandon", 2.0
+
 
 class NatsError(Exception):
     """The server refused something, or the connection is gone."""
@@ -105,8 +108,11 @@ class Peer:
         head = f"PUB {subject} {reply} {len(data)}\r\n" if reply else f"PUB {subject} {len(data)}\r\n"
         self._send(head.encode() + data + b"\r\n")
 
-    def request(self, subject: str, data: bytes | str | dict | list = b"", timeout: float = 10.0) -> Msg:
-        """Publish with a reply subject in this peer's inbox and wait for the one answer."""
+    def request(self, subject: str, data: bytes | str | dict | list = b"", timeout: float = 10.0,
+                give_up: bool = False) -> Msg:
+        """Publish with a reply subject in this peer's inbox and wait for the one answer. With
+        ``give_up``, a ``call.<command>`` this peer stops waiting for, by its timeout or an
+        interrupt, is given up (:meth:`abandon`)."""
         reply = f"{self._inbox}.{next(self._next)}"
         got: tuple[threading.Event, list[Msg]] = (threading.Event(), [])
         self._waiting[reply] = got
@@ -117,14 +123,29 @@ class Peer:
                     raise NatsError(f"the bus closed before {subject} answered")
                 raise NatsError(f"{subject} answers nothing within {timeout} s")
             return got[1][0]
+        except BaseException:
+            if give_up and not got[1]:
+                self.abandon(reply)
+            raise
         finally:
             self._waiting.pop(reply, None)
+
+    def abandon(self, reply: str) -> bool:
+        """Give up the call this peer asked with the reply subject ``reply``, on ``call.core.abandon``:
+        the core ends it and tells the component, so nothing waits on it there (docs/go-core.md "A
+        call given up"). Whether a call of it still ran; False where the core cannot be asked."""
+        try:
+            a = self.request(ABANDON, {"call": reply}, ABANDON_WAIT).json() or {}
+        except (NatsError, OSError, ValueError):
+            return False
+        return bool(a.get("abandoned"))
 
     def call(self, subject: str, body: dict, on_progress: Handler, idle: float = 60.0) -> Msg:
         """Ask a streaming call, ``call.<command>``: name a progress subject in this peer's inbox in
         the body, hand each progress message (``{"line"}`` or ``{"beat"}``) to on_progress as it
         comes, and wait for the one answer as long as the core says anything within ``idle``
-        seconds (docs/go-core.md "Progress and long calls")."""
+        seconds (docs/go-core.md "Progress and long calls"). A call it stops waiting for, by that
+        silence or an interrupt, it gives up (:meth:`abandon`)."""
         n = next(self._next)
         reply, progress = f"{self._inbox}.{n}", f"{self._inbox}.p{n}"
         got: tuple[threading.Event, list[Msg]] = (threading.Event(), [])
@@ -146,6 +167,10 @@ class Peer:
             if not got[1]:
                 raise NatsError(f"the bus closed before {subject} answered")
             return got[1][0]
+        except BaseException:
+            if not got[1]:
+                self.abandon(reply)
+            raise
         finally:
             self._waiting.pop(reply, None)
             self._progress.pop(progress, None)

@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,6 +41,9 @@ const (
 	HealthSubject = bus.Get + "core.health"
 	// StopSubject stops the core; it answers the core's pid first.
 	StopSubject = bus.Call + "core.stop"
+	// AbandonSubject gives up a call its asker runs, {"call": <its reply
+	// subject>}; it answers whether one ran (docs/go-core.md "A call given up").
+	AbandonSubject = bus.Call + "core.abandon"
 )
 
 // SessionEnd is the hook event that returns a session's lease.
@@ -96,6 +100,8 @@ type Core struct {
 	procs      []*placement
 	prev       map[string]uint64
 	reason     string
+	// calls are the running calls, by reply subject, and how each is given up.
+	calls map[string]context.CancelCauseFunc
 
 	done     chan struct{}
 	stopOnce sync.Once
@@ -151,7 +157,7 @@ func Serve(o Options) (*Core, error) {
 		o: o, ix: ix, pid: os.Getpid(), start: o.Clock.Now(), comps: comps,
 		declared: map[string]*index.Component{}, attached: map[string]chan struct{}{},
 		writer: map[string]string{}, types: map[string]map[string]reflect.Type{}, placed: map[string]bool{},
-		sessions: map[string]time.Time{}, beats: map[string]time.Time{}, prev: map[string]uint64{},
+		sessions: map[string]time.Time{}, beats: map[string]time.Time{}, prev: map[string]uint64{}, calls: map[string]context.CancelCauseFunc{},
 		done: make(chan struct{}), ended: make(chan struct{}), hooks: map[string]index.CommandInfo{},
 	}
 	for _, h := range o.Wiring.Hooks {

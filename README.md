@@ -207,6 +207,10 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
   script.
   - Everywhere else, and for every command that writes, the command runs directly, as it did
     before components. A call that fails on the way runs directly too: the command only reads.
+  - A call kern has not answered within 60 s (`CALL_WAIT`), as one waiting behind calls in
+    another directory, is given up and runs directly. The component's process serves the calls
+    waiting for its one working directory in arrival order, and drops a call given up while it
+    waits ([docs/go-core.md "A call given up"](docs/go-core.md#a-call-given-up)).
   - `SE_KERN=off` keeps every command direct (the suite and each component's own process set it);
     `SE_KERN=on` refuses to fall back.
 - **Tested** against kern's Python fake core (`tests/test_se_components.py`), and once against the

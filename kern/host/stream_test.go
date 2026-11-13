@@ -2,6 +2,8 @@ package host_test
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -124,5 +126,182 @@ func TestAProgressSubjectOutsideTheCallersInboxIsRefused(t *testing.T) {
 	ask(t, client, bus.Call+bus.Token("long run"), map[string]any{"args": []string{"y"}}, &plain)
 	if plain.Error != "" || plain.Text != "let go y" {
 		t.Fatalf("a call without progress answers %+v", plain)
+	}
+}
+
+// A caller gives up its own call on call.core.abandon, naming it by its reply
+// subject: the call answers its error at once, naming why, while a call of
+// the same command beside it runs to its end. A call in another inbox is
+// refused, and one that no longer runs answers that none was given up.
+func TestACallerGivesUpItsOwnCallAndTheCallBesideItRunsOn(t *testing.T) {
+	t.Parallel()
+	w, comps, release := slowWiring(t)
+	c := served(t, host.Options{Clock: newClock(), Wiring: w, Components: comps})
+	client := as(t, c, bus.Client)
+	inbox := bus.Inbox(bus.Client) + ".case"
+	heard := make(chan *nats.Msg, 16)
+	for _, reply := range []string{inbox + ".a", inbox + ".b"} {
+		if _, err := client.ChanSubscribe(reply, heard); err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(map[string]any{"args": []string{reply[len(reply)-1:]}})
+		if err := client.PublishRequest(bus.Call+bus.Token("long run"), reply, body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var refused host.Abandoned
+	ask(t, client, host.AbandonSubject, host.Abandon{Call: "_INBOX.other.a"}, &refused)
+	if refused.Abandoned || !strings.Contains(refused.Error, "outside the asker's inbox") {
+		t.Fatalf("giving up a call in another inbox answers %+v, and wants it refused", refused)
+	}
+	var given host.Abandoned
+	ask(t, client, host.AbandonSubject, host.Abandon{Call: inbox + ".a"}, &given)
+	if !given.Abandoned || given.Error != "" {
+		t.Fatalf("giving up the running call answers %+v", given)
+	}
+	answer := func() (string, host.CallAnswer) {
+		t.Helper()
+		select {
+		case m := <-heard:
+			var a host.CallAnswer
+			if err := json.Unmarshal(m.Data, &a); err != nil {
+				t.Fatal(err)
+			}
+			return m.Subject, a
+		case <-time.After(wait):
+			t.Fatal("no call answers")
+		}
+		return "", host.CallAnswer{}
+	}
+	subject, a := answer()
+	if subject != inbox+".a" || !strings.Contains(a.Error, "the call is given up: its caller gave it up") {
+		t.Fatalf("%s answers %+v first, and wants the given-up call's error, before its verb lets go", subject, a)
+	}
+	close(release)
+	subject, a = answer()
+	if subject != inbox+".b" || a.Error != "" || a.Text != "let go b" {
+		t.Fatalf("%s answers %+v, and wants the call beside it to run to its end", subject, a)
+	}
+	var gone host.Abandoned
+	ask(t, client, host.AbandonSubject, host.Abandon{Call: inbox + ".b"}, &gone)
+	if gone.Abandoned || gone.Error != "" {
+		t.Fatalf("giving up a call that ended answers %+v, and wants none given up", gone)
+	}
+}
+
+// heldDeclaration is a declared component whose command asks the desk once
+// and answers in its continuation; the case plays its process.
+const heldDeclaration = `name = "held"
+contract = 1
+help = "Holds a call while the desk answers."
+
+[commands."held on"]
+usage = "held on NAME"
+summary = "Ask the desk, then answer."
+group = "Fixtures"
+help = "Asks the desk for NAME, and answers the desk's answer."
+class = "batch"
+
+[requests.ask]
+type = "string"
+answer = "string"
+help = "The question to the desk."
+`
+
+// A call to a declared component that its caller gives up while the request
+// of its first step waits: the core tells the process on the command's
+// cmd.<i>.<command>, without a reply, {"call", "stop"}, naming the call and
+// why, so the continuation the process holds for it ends.
+func TestTheCoreTellsTheProcessOnItsStopWordThatACallIsGivenUp(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, "components", "held")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, index.DeclarationFile), []byte(heldDeclaration), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	desk := index.Declare("desk", "Answers questions.", index.IO(),
+		index.Verb("answer", "Answers once the case lets it go.", func(q string) (string, error) {
+			<-release
+			return "yes " + q, nil
+		}))
+	w, err := index.ParseWiring([]byte(`
+[instances.desk]
+component = "desk"
+
+[instances.held]
+component = "held"
+
+[wires]
+"held.ask" = "desk.answer"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := served(t, host.Options{Root: root, Clock: newClock(), Wiring: w, Components: []*index.Component{desk}})
+	proc := as(t, c, "held")
+	steps := make(chan *nats.Msg, 8)
+	if _, err := proc.ChanSubscribe(bus.Cmd+"held.>", steps); err != nil {
+		t.Fatal(err)
+	}
+	var attached map[string]any
+	ask(t, proc, bus.Commit+"held", map[string]any{"attach": host.Attach{Contract: host.Contract, Hash: index.Hash([]byte(heldDeclaration))}}, &attached)
+	if attached["accepted"] != true {
+		t.Fatalf("the attach answers %v", attached)
+	}
+	client := as(t, c, bus.Client)
+	reply := bus.Inbox(bus.Client) + ".held"
+	answered := make(chan *nats.Msg, 1)
+	if _, err := client.ChanSubscribe(reply, answered); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.PublishRequest(bus.Call+bus.Token("held on"), reply, []byte(`{"args":["a"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	next := func() *nats.Msg {
+		t.Helper()
+		select {
+		case m := <-steps:
+			return m
+		case <-time.After(wait):
+			t.Fatal("the process hears nothing on cmd.held.>")
+		}
+		return nil
+	}
+	first := next()
+	var s index.Step
+	if err := json.Unmarshal(first.Data, &s); err != nil || s.Step != 1 || first.Reply == "" {
+		t.Fatalf("the first step reads %s, reply %q", first.Data, first.Reply)
+	}
+	data, _ := json.Marshal(index.Answer{Requests: []index.WireAsk{{Port: "ask", Value: json.RawMessage(`"a"`)}}, Then: true})
+	if err := first.Respond(data); err != nil {
+		t.Fatal(err)
+	}
+	var given host.Abandoned
+	ask(t, client, host.AbandonSubject, host.Abandon{Call: reply}, &given)
+	if !given.Abandoned {
+		t.Fatalf("giving up the running call answers %+v", given)
+	}
+	stop := next()
+	var word host.StopWord
+	if err := json.Unmarshal(stop.Data, &word); err != nil {
+		t.Fatal(err)
+	}
+	if stop.Reply != "" || stop.Subject != bus.Cmd+"held."+bus.Token("held on") || word.Call != s.Call ||
+		!strings.Contains(word.Stop, "its caller gave it up") {
+		t.Fatalf("the process hears %s %s (reply %q), and wants the stop word of call %s", stop.Subject, stop.Data, stop.Reply, s.Call)
+	}
+	select {
+	case m := <-answered:
+		var a host.CallAnswer
+		if err := json.Unmarshal(m.Data, &a); err != nil || !strings.Contains(a.Error, "given up") {
+			t.Fatalf("the given-up call answers %s", m.Data)
+		}
+	case <-time.After(wait):
+		t.Fatal("the given-up call answers nothing")
 	}
 }
