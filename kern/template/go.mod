@@ -21,5 +21,5 @@ require (
 )
 
 // While kern is incubated in SE, the template builds against the kern beside it;
-// `se new app` replaces this line with the pin (README.md "The pin").
+// `se new app` replaces this line by kern's source at the pin (README.md "The pin").
 replace github.com/mb-89/kern => ../
