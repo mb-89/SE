@@ -174,6 +174,12 @@ def test_worker_commit_rule_names_its_groupings_and_has_one_owner():
     assert owners == ["src/agents/worker.md"]
 
 
+def test_work_issue_template_says_how_to_name_a_design_owner_not_yet_written():
+    template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
+    section = template.split("## Design owner", 1)[1].split("## Requirements", 1)[0]
+    assert 'write "none yet: create it at <path>", so the worker knows to create it there' in section
+
+
 def test_work_issue_template_assigns_shared_root_file_owners():
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
     assert "pyproject.toml" in template
@@ -410,7 +416,7 @@ def test_the_decision_skill_outputs_the_answered_artifact_and_names_no_storage()
 
 def without_gh_section() -> str:
     text = WORK_MODEL.read_text(encoding="utf-8")
-    return text.split("### Without gh", 1)[1].split("\n## ", 1)[0]
+    return text.split("### Without gh", 1)[1].split(" ## ", 1)[0]
 
 
 def commands_that_need_no_gh() -> set[str]:
@@ -680,7 +686,7 @@ POINTERS = {AGENTS / "se.md": "(../skills/work-model/SKILL.md#escalation-ladder)
 
 def test_the_decision_skill_names_the_nine_checklist_items():
     text = DECISION.read_text(encoding="utf-8")
-    checklist = text.split("## The checklist", 1)[1].split("\n## ", 1)[0]
+    checklist = text.split("## The checklist", 1)[1].split(" ## ", 1)[0]
     items = re.findall(r"^\d+\. \*\*(.+?):\*\*", checklist, re.MULTILINE)
     assert items == list(CHECKLIST)
 
