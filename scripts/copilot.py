@@ -12,7 +12,9 @@ version range, keeping an existing pin; ignores `.se/` in git; and runs `se_modu
 
 `self-test` installs this SE, as a plugin install copies it, beside an empty project folder that is
 not SE, and checks there what needs no Copilot: the generated layout, the hook registrations, the
-MCP door's launcher, the door's handshake and one tool call; and, where a Copilot CLI is at hand,
+MCP door's launcher, and the door started as Copilot starts a plugin's server (in the plugin folder,
+its parent in the project), once with COPILOT_SESSION_CWD and once without, each with its handshake
+and one status call that must name the project; and, where a Copilot CLI is at hand,
 what that CLI reads of the plugin without signing in. It cleans up after itself. Exit code 0 every
 check passed, 1 one failed.
 
@@ -231,10 +233,68 @@ def check_hooks(plugin: Path, report: Report) -> None:
                    + ", fail-open, SE_HOOK_HOST=copilot")
 
 
-class Door:
-    """The MCP door as a host spawns it: the plugin manifest's command, in the project folder."""
+# The door's parent as Copilot is one: a process in the project folder (the session's working
+# directory) that starts the plugin's server in the plugin folder and waits for it. The launcher reads
+# its parent's working directory on Linux and macOS (scripts/se_mcp.sh).
+PARENT = "import subprocess, sys; sys.exit(subprocess.call(sys.argv[2:], cwd=sys.argv[1]))"
+# What a Copilot session's environment may carry that a run of the door must not inherit: each run
+# sets only what it needs.
+DROPPED = ("CLAUDE_PROJECT_DIR", "SE_SESSION_CWD", "PLUGIN_ROOT")
+SESSION_CWD = "COPILOT_SESSION_CWD"
+ROOT_IN = re.compile(r"\b(?:running|runs) in (?P<root>.+?)(?:, |$)")
 
-    def __init__(self, command: list[str], cwd: Path, env: dict[str, str]) -> None:
+
+def clean_env(env: dict[str, str]) -> dict[str, str]:
+    """`env` without CLAUDE_PROJECT_DIR, SE_SESSION_CWD, PLUGIN_ROOT and every COPILOT_* variable."""
+    return {key: value for key, value in env.items()
+            if key not in DROPPED and not key.startswith("COPILOT_")}
+
+
+def door_env(server: dict, plugin: Path, base: dict[str, str], session_cwd: Path | None) -> dict[str, str]:
+    """The door's environment as Copilot gives it: `base`, PLUGIN_ROOT the plugin folder,
+    COPILOT_SESSION_CWD where the run names one, and the manifest's `env` with each `${NAME}`
+    expanded from those; an entry whose variable is unset is left out."""
+    env = {**base, "PLUGIN_ROOT": str(plugin)}
+    if session_cwd is not None:
+        env[SESSION_CWD] = str(session_cwd)
+    for key, value in server.get("env", {}).items():
+        names = re.findall(r"\$\{(\w+)\}", value)
+        if all(name in env for name in names):
+            env[key] = re.sub(r"\$\{(\w+)\}", lambda match: env[match[1]], value)
+    return env
+
+
+def _folder(text: str) -> str:
+    """A folder as a comparable string: resolved, Git Bash's `/c/...` read as `C:/...` on Windows,
+    case folded where the platform folds it."""
+    if os.name == "nt":
+        drive = re.match(r"^/([A-Za-z])(/.*)?$", text)
+        if drive:
+            text = f"{drive[1]}:{drive[2] or '/'}"
+    return os.path.normcase(str(Path(text).resolve()))
+
+
+def root_verdict(text: str, project: Path) -> tuple[str, str]:
+    """The outcome of one `status` answer: `passed` where it says the core runs in the project,
+    `noted` naming the root it got where it names another folder (docs/copilot.md, the open point),
+    `failed` otherwise."""
+    first = text.splitlines()[0] if text else ""
+    found = ROOT_IN.search(first)
+    if found is None:
+        return "failed", first or "no answer"
+    if _folder(found["root"]) != _folder(str(project)):
+        return "noted", (f"the door serves {found['root']}, not the project {project}: the open point "
+                         f"(docs/copilot.md); {first}")
+    return ("passed" if first.startswith("se: running") else "failed"), first
+
+
+class Door:
+    """The MCP door as Copilot spawns a plugin's server: its command in the plugin folder, started by
+    a parent process in the project folder."""
+
+    def __init__(self, command: list[str], cwd: Path, env: dict[str, str], parent_cwd: Path | None = None) -> None:
+        if parent_cwd is not None:
+            command, cwd = [sys.executable, "-c", PARENT, str(cwd), *command], parent_cwd
         self.process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                         text=True, encoding="utf-8", bufsize=1)
@@ -278,18 +338,37 @@ def _text(result: dict) -> str:
     return " ".join(part.get("text", "") for part in result.get("content", []) if isinstance(part, dict))
 
 
-def check_door(plugin: Path, project: Path, env: dict[str, str], report: Report) -> None:
-    """The launcher, the door's handshake, its tool list and one call of `status`."""
+RUNS = ((f"status-with-{SESSION_CWD}", True), ("status-from-parent-cwd", False))
+
+
+def check_door(plugin: Path, project: Path, env: dict[str, str], report: Report) -> list[str]:
+    """The launcher, then the door started as Copilot starts a plugin's server, once with
+    COPILOT_SESSION_CWD naming the project and once without: its handshake, its tool list and one
+    call of `status` each, which passes only where it names the project. Answers the roots the
+    status calls named, for the cores to stop."""
     server = _json_file(plugin / se_plugin.COPILOT_MANIFEST)["mcpServers"][se_plugin.MCP_SERVER]
     command = [server["command"]] + [arg.replace(se_plugin.COPILOT_PLUGIN_ROOT, plugin.as_posix())
                                      for arg in server["args"]]
     launcher = plugin / se_plugin.LAUNCHER
     if not launcher.is_file():
         report.add("failed", "launcher", f"{se_plugin.LAUNCHER} is not in the plugin")
-        return
+        return []
     report.add("passed", "launcher", f"the manifest runs `{' '.join(server['args'])}` with "
-               f"{se_plugin.COPILOT_PLUGIN_ROOT} = the plugin folder, in the project folder")
-    door = Door(command, project, env)
+               f"{se_plugin.COPILOT_PLUGIN_ROOT} = the plugin folder, in the plugin folder, its parent "
+               "in the project folder")
+    roots = []
+    for number, (check, with_cwd) in enumerate(RUNS):
+        run_env = door_env(server, plugin, env, project if with_cwd else None)
+        root = run_door(Door(command, plugin, run_env, parent_cwd=project), project, check, report,
+                        quiet=number > 0)
+        if root:
+            roots.append(root)
+    return roots
+
+
+def run_door(door: Door, project: Path, check: str, report: Report, quiet: bool) -> str | None:
+    """One run of the door: the handshake and tool list (reported unless `quiet`, failures always)
+    and one `status` call, judged by root_verdict. Answers the root it named."""
     try:
         started = time.monotonic()
         hello = door.send("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
@@ -298,16 +377,18 @@ def check_door(plugin: Path, project: Path, env: dict[str, str], report: Report)
         result = hello.get("result", {})
         instructions = result.get("instructions", "")
         if "error" in hello or instructions.startswith("not-installed"):
-            report.add("failed", "handshake", instructions or json.dumps(hello.get("error")))
-            return
-        report.add("passed", "handshake", f"initialize answered in {time.monotonic() - started:.2f} s, "
-                   f"protocol {result.get('protocolVersion')}, server {result.get('serverInfo', {}).get('name')} "
-                   f"{result.get('serverInfo', {}).get('version')}")
+            report.add("failed", "handshake", f"{check}: {instructions or json.dumps(hello.get('error'))}")
+            return None
+        if not quiet:
+            report.add("passed", "handshake", f"initialize answered in {time.monotonic() - started:.2f} s, "
+                       f"protocol {result.get('protocolVersion')}, server "
+                       f"{result.get('serverInfo', {}).get('name')} {result.get('serverInfo', {}).get('version')}")
         tools = [tool.get("name") for tool in door.send("tools/list").get("result", {}).get("tools", [])]
         if "status" not in tools:
-            report.add("failed", "tools", f"tools/list has no status: {tools}")
-            return
-        report.add("passed", "tools", "tools/list: " + ", ".join(sorted(tools)))
+            report.add("failed", "tools", f"{check}: tools/list has no status: {tools}")
+            return None
+        if not quiet:
+            report.add("passed", "tools", "tools/list: " + ", ".join(sorted(tools)))
         deadline = time.monotonic() + CALL_SECONDS
         while True:
             answer = door.send("tools/call", {"name": "status", "arguments": {}}).get("result", {})
@@ -315,13 +396,13 @@ def check_door(plugin: Path, project: Path, env: dict[str, str], report: Report)
             if not text.startswith("starting") or time.monotonic() > deadline:
                 break
             time.sleep(1)
-        first = text.splitlines()[0] if text else json.dumps(answer)
-        if answer.get("isError") or not first.startswith("se: running"):
-            report.add("failed", "status", first)
-        else:
-            report.add("passed", "status", first)
+        outcome, detail = root_verdict(text or json.dumps(answer), project)
+        report.add(outcome, check, detail)
+        found = ROOT_IN.search(text.splitlines()[0] if text else "")
+        return found["root"] if found else None
     except (TimeoutError, OSError, ValueError) as error:
-        report.add("failed", "handshake", str(error))
+        report.add("failed", "handshake", f"{check}: {error}")
+        return None
     finally:
         door.close()
 
@@ -362,8 +443,9 @@ def check_cli(cli: str | None, plugin: Path, project: Path, env: dict[str, str],
                f"{server.get('command')} {' '.join(server.get('args', []))}, cwd {server.get('cwd', '(none)')}")
     if server.get("cwd") == se_plugin.COPILOT_PLUGIN_ROOT and "." in server.get("args", []):
         report.add("noted", "mcp-root", f"the CLI starts a plugin's server in {se_plugin.COPILOT_PLUGIN_ROOT}, "
-                   "so `--root .` names the plugin folder, not the project: a Copilot run decides "
-                   "(docs/copilot.md, \"Monday checklist\")")
+                   "so `--root .` names the plugin folder and the launcher picks the project (the "
+                   "status lines above): a signed-in Copilot run confirms it (docs/copilot.md, "
+                   "\"Monday checklist\")")
 
 
 def _binary(build: bool, workdir: Path) -> tuple[Path | None, str]:
@@ -388,7 +470,8 @@ def self_test(build: bool = False, cli: str | None = None, keep: bool = False) -
     report = Report([])
     work = Path(tempfile.mkdtemp(prefix="se-copilot-self-test-"))
     plugin, project, home = work / "plugin" / "se", work / "project", work / "home"
-    binary = None
+    binary, roots = None, []
+    base = clean_env(dict(os.environ))
     try:
         shutil.copytree(ROOT, plugin, ignore=NOT_COPIED)
         project.mkdir()
@@ -405,14 +488,14 @@ def self_test(build: bool = False, cli: str | None = None, keep: bool = False) -
             report.add("failed", "binary", source)
         else:
             report.add("passed", "binary", source)
-            env = {**os.environ, "SE_MCP_BIN": str(binary)}
-            check_door(plugin, project, env, report)
+            roots = check_door(plugin, project, {**base, "SE_MCP_BIN": str(binary)}, report)
         check_cli(cli or shutil.which("copilot"), plugin, project,
-                  {**os.environ, "HOME": str(home), "USERPROFILE": str(home)}, report)
+                  {**base, "HOME": str(home), "USERPROFILE": str(home)}, report)
     finally:
         if binary is not None:
-            subprocess.run([str(binary), "stop", "--root", str(project)], capture_output=True, check=False,
-                           timeout=60)
+            for root in dict.fromkeys([str(project), *roots]):
+                subprocess.run([str(binary), "stop", "--root", root], capture_output=True, check=False,
+                               timeout=60)
         if keep:
             print(f"kept {work}")
         else:

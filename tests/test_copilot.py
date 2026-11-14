@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -108,6 +109,54 @@ def test_the_self_tests_static_checks_pass_on_this_checkout() -> None:
     report = copilot.Report([])
     copilot.check_hooks(ROOT, report)
     assert report.lines and report.lines[0].startswith("passed hooks:"), report.lines
+
+
+def test_the_self_test_passes_on_no_session_variable_of_its_own() -> None:
+    env = {"PATH": "/bin", "CLAUDE_PROJECT_DIR": "/a", "COPILOT_SESSION_CWD": "/b", "COPILOT_X": "1",
+           "SE_SESSION_CWD": "/c", "PLUGIN_ROOT": "/d", "CLAUDE_PLUGIN_ROOT": "/e"}
+    assert copilot.clean_env(env) == {"PATH": "/bin", "CLAUDE_PLUGIN_ROOT": "/e"}
+
+
+def test_the_doors_environment_is_the_one_copilot_gives_a_plugins_server(tmp_path: Path) -> None:
+    server = {"env": {"SE_SESSION_CWD": "${COPILOT_SESSION_CWD}"}}
+    plugin, project = tmp_path / "plugin", tmp_path / "project"
+    assert copilot.door_env(server, plugin, {"PATH": "/bin"}, project) == {
+        "PATH": "/bin", "PLUGIN_ROOT": str(plugin), "COPILOT_SESSION_CWD": str(project),
+        "SE_SESSION_CWD": str(project)}
+    assert copilot.door_env(server, plugin, {"PATH": "/bin"}, None) == {"PATH": "/bin", "PLUGIN_ROOT": str(plugin)}
+
+
+def test_a_status_passes_only_where_it_names_the_project(tmp_path: Path) -> None:
+    project, plugin = tmp_path / "project", tmp_path / "plugin"
+    project.mkdir()
+    plugin.mkdir()
+    running = f"se: running in {project}, pid 1, 1 session(s), 2 instance(s), 0 placed"
+    assert copilot.root_verdict(running + "\nmore", project) == ("passed", running)
+    outcome, detail = copilot.root_verdict(f"se: running in {plugin}, pid 1, 1 session(s)", project)
+    assert outcome == "noted" and f"serves {plugin}," in detail and "open point" in detail
+    outcome, detail = copilot.root_verdict(f"no-checkout: se mcp runs in {plugin}, which is no checkout", project)
+    assert outcome == "noted" and f"serves {plugin}," in detail
+    assert copilot.root_verdict("not-installed: se 1 is not in place", project)[0] == "failed"
+    assert copilot.root_verdict("", project) == ("failed", "no answer")
+
+
+def test_the_door_starts_in_the_plugin_folder_under_a_parent_in_the_project(tmp_path: Path) -> None:
+    plugin, project = tmp_path / "plugin", tmp_path / "project"
+    plugin.mkdir()
+    project.mkdir()
+    script = ("import os, sys, json; sys.stdin.readline(); "
+              "print(json.dumps({'id': 1, 'cwd': os.getcwd(), 'parent': os.getppid()}), flush=True)")
+    door = copilot.Door([sys.executable, "-c", script], plugin, dict(os.environ), parent_cwd=project)
+    try:
+        answer = door.send("ping")
+    finally:
+        door.close()
+    assert Path(answer["cwd"]).resolve() == plugin.resolve()
+    assert answer["parent"] == door.process.pid
+
+
+def test_the_self_test_starts_the_door_once_with_the_session_variable_and_once_without() -> None:
+    assert copilot.RUNS == (("status-with-COPILOT_SESSION_CWD", True), ("status-from-parent-cwd", False))
 
 
 def test_the_self_test_runs_beside_the_suite_with_its_own_budget() -> None:

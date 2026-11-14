@@ -233,6 +233,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: uv run pytest -q tests/test_public_check.py -k powershell
+      # scripts/bash.ps1, the hand-off to Git's bash, started from PowerShell, not from Git's bash, as a
+      # PowerShell hook line starts it: only Windows has PowerShell, so only this leg runs it.
+      - name: The hand-off from PowerShell to Git's bash
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: uv run pytest -q tests/test_windows_entry.py
   # The queue bound of kern-platforms (README "Platform legs and their queue"): a leg still waiting
   # for a runner after 20 minutes is reported as never run, not as a test failure, and the run is
   # cancelled; check-rerun.yml re-runs a first attempt so cancelled once.
