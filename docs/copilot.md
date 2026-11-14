@@ -140,7 +140,8 @@ you should see.
    scripts/public_check.py --repo .` passes over it.
 
 Claude Code's spawn of the door through a root `.mcp.json` (#1122) is no Copilot point and not on
-this list: no such file is committed.
+this list: no such file is committed. The cloud agent's point (#1121) is in the next section, with
+its own "Expect", as trying it is optional.
 
 ## Cloud agent, optional and untested
 
@@ -148,7 +149,8 @@ The docs disagree on whether Copilot's cloud agent loads plugins; they agree on 
 MCP servers from and that its runner needs `se` and `uv`. Nothing is generated for it.
 
 - **Try it**: on github.com, assign an issue of SE's repository to Copilot, or start a task in its
-  **Agents** tab, and pick `se`.
+  **Agents** tab, and pick `se`. Expect the session to open with SE's greeting, its agents and
+  skills loaded from `.github/` (#1121).
 - **The door**: in the repository's **Settings**, Copilot, cloud agent, MCP configuration, paste
   `{"mcpServers": {"se": {"type": "local", "command": "bash", "args": ["scripts/se_mcp.sh",
   "--root", "."], "tools": ["*"]}}}`; an agent file's `mcp-servers` takes the same entry.
